@@ -96,6 +96,10 @@ async fn main() -> std::io::Result<()> {
                 );
                 let r = execute_step(&mut bot, step.id).await;
                 println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
+                if r.message.contains("disconnect") {
+                    println!("connection lost — stopping");
+                    break;
+                }
             }
             None => {
                 idle += 1;
