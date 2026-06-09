@@ -6,7 +6,6 @@ use std::collections::HashSet;
 
 use rustcraft::bot::Bot;
 
-use crate::bot_utils::LOG_TYPES;
 use crate::types::{failure, success, StepResult};
 
 pub fn count_logs(bot: &Bot) -> i32 {
@@ -20,7 +19,7 @@ fn is_log_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
 /// Nearest reachable log near the BOT (raw chunk scan — finds trunks occluded by
 /// their own leaves, no line-of-sight needed). Scans a radius around the bot's
 /// current position so we only ever target logs we actually walked up to.
-fn find_trunk_raw(bot: &Bot) -> Option<(i32, i32, i32)> {
+fn find_trunk_raw(bot: &Bot, blacklist: &HashSet<(i32, i32, i32)>) -> Option<(i32, i32, i32)> {
     let p = bot.entity.position;
     let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
     let mut best: Option<(i32, i32, i32)> = None;
@@ -29,6 +28,9 @@ fn find_trunk_raw(bot: &Bot) -> Option<(i32, i32, i32)> {
         for dz in -4..=4 {
             for dy in -2..=4 {
                 let (x, y, z) = (bx + dx, by + dy, bz + dz);
+                if blacklist.contains(&(x, y, z)) {
+                    continue;
+                }
                 if is_log_at(bot, x, y, z) {
                     // Nearest log, but never chase logs below us (that sinks the
                     // bot into pits) — heavily penalize lower Y.
@@ -179,7 +181,7 @@ async fn dig_out(bot: &mut Bot<'_>, dir_attempt: i32) {
         bot.set_control_state("jump", true);
         bot.wait_ticks(6).await.ok();
         bot.clear_control_states();
-        if find_trunk_raw(bot).is_some() {
+        if find_trunk_raw(bot, &HashSet::new()).is_some() {
             break;
         }
     }
@@ -202,7 +204,7 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32) -> std::io::Result<()> {
         if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
             break;
         }
-        if find_trunk_raw(bot).is_some() {
+        if find_trunk_raw(bot, &HashSet::new()).is_some() {
             break; // walked into a reachable tree
         }
     }
@@ -213,6 +215,7 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32) -> std::io::Result<()> {
 pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
     bot.wait_ticks(4).await.ok();
     let mut blacklist: HashSet<(i32, i32)> = HashSet::new();
+    let mut trunk_bl: HashSet<(i32, i32, i32)> = HashSet::new();
     let mut attempts = 0;
     let mut consecutive_fail = 0;
 
@@ -227,6 +230,7 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             println!("    wood: stuck — digging out + exploring");
             consecutive_fail = 0;
             blacklist.clear();
+            trunk_bl.clear();
             // Tunnel out of any pit/wall, then walk to fresh terrain.
             dig_out(bot, attempts).await;
             let _ = explore(bot, attempts * 2).await;
@@ -254,7 +258,7 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         let p0 = bot.entity.position;
         // Only walk if there's no reachable log right here (skip the slow
         // goto_near when we're already next to a tree we can chop).
-        let arr = if find_trunk_raw(bot).is_some() {
+        let arr = if find_trunk_raw(bot, &trunk_bl).is_some() {
             true
         } else {
             println!("    wood: log ({x},{y},{z}) d={:.0} — walking", ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt());
@@ -267,24 +271,23 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         println!(
             "    wood: arrived={arr} at ({:.0},{:.0},{:.0}) moved={:.0} trunk={:?}",
             p1.x, p1.y, p1.z, ((p1.x - p0.x).powi(2) + (p1.z - p0.z).powi(2)).sqrt(),
-            find_trunk_raw(bot)
+            find_trunk_raw(bot, &trunk_bl)
         );
 
         // Tunnel into the tree toward the nearest log, digging whatever is in the
         // way (leaves + logs) and stepping forward, collecting after each log.
         let column_before = count_logs(bot);
         let mut idle = 0;
+        let mut cur_trunk: Option<(i32, i32, i32)> = None;
         for _ in 0..28 {
-            let Some((tx, ty, tz)) = find_trunk_raw(bot) else { break };
+            let Some((tx, ty, tz)) = find_trunk_raw(bot, &trunk_bl) else { break };
+            cur_trunk = Some((tx, ty, tz));
             let before = count_logs(bot);
             match bot.dig_toward(tx, ty, tz).await {
                 Ok(true) => {
-                    // Broke a log — go pick up its drop.
                     collect_at(bot, tx, tz).await;
                 }
                 Ok(false) => {
-                    // Cleared a leaf (or out of reach) — step toward the log to
-                    // tunnel in; jump to climb the stump when the log is above us.
                     let above = ty as f64 > bot.entity.position.y + 0.5;
                     bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 + 0.5, tz as f64 + 0.5));
                     bot.set_control_state("forward", true);
@@ -300,7 +303,11 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             } else {
                 idle += 1;
                 if idle > 5 {
-                    break; // no progress tunnelling — give up this tree
+                    // Give up this log; blacklist it so we don't loop on it.
+                    if let Some(t) = cur_trunk {
+                        trunk_bl.insert(t);
+                    }
+                    break;
                 }
             }
             if count_logs(bot) >= target {
@@ -310,9 +317,11 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
 
         if count_logs(bot) <= column_before {
             blacklist.insert((x, z)); // got nothing from this column
-            if !arr {
-                consecutive_fail += 1; // couldn't even reach it — likely a barrier
+            if let Some(t) = cur_trunk {
+                trunk_bl.insert(t); // and the specific log we couldn't break
             }
+            consecutive_fail += 1; // made no progress — count it even if "arrived"
+            let _ = arr;
         } else {
             consecutive_fail = 0;
         }
