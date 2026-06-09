@@ -122,13 +122,56 @@ async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
     bot.wait_ticks(4).await.ok();
 }
 
+/// Tunnel out of a wedged spot: dig a 2-high path forward plus the block above
+/// (so the bot can step up), walking + jumping. Frees the bot from pits/ravines
+/// and lets it climb walls it can't jump. Works by hand on dirt/stone (slow).
+async fn dig_out(bot: &mut Bot<'_>, dir_attempt: i32) {
+    let yaw = dir_attempt as f64 * 1.6;
+    let fx = (-yaw.sin()).round() as i32;
+    let fz = yaw.cos().round() as i32;
+    for _ in 0..8 {
+        let p = bot.entity.position;
+        let (px, py, pz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        for (dx, dy, dz) in [(fx, 0, fz), (fx, 1, fz), (fx, 2, fz)] {
+            let (bx, by, bz) = (px + dx, py + dy, pz + dz);
+            if bot.block_state_at(bx, by, bz) != 0 {
+                if bot.dig_toward(bx, by, bz).await.is_err() {
+                    return;
+                }
+            }
+        }
+        bot.look(yaw, 0.0);
+        bot.set_control_state("forward", true);
+        bot.set_control_state("jump", true);
+        bot.wait_ticks(6).await.ok();
+        bot.clear_control_states();
+        if find_trunk_raw(bot).is_some() {
+            break;
+        }
+    }
+}
+
+/// Walk a long way in a committed direction (sprinting, jumping obstacles) to
+/// leave a hostile area and load new terrain. Stops early if a reachable trunk
+/// shows up underfoot.
 async fn explore(bot: &mut Bot<'_>, attempt: i32) -> std::io::Result<()> {
-    let angle = attempt as f64 * 0.95;
-    bot.look(angle, 0.0);
-    bot.set_control_state("forward", true);
-    bot.set_control_state("sprint", true);
-    bot.set_control_state("jump", true);
-    bot.wait_ticks(40).await?;
+    let angle = attempt as f64 * 1.3; // rotate direction across calls
+    for _ in 0..90 {
+        bot.look(angle, 0.0);
+        bot.set_control_state("forward", true);
+        bot.set_control_state("sprint", true);
+        // Jump to clear lips; dig/auto-step handles the rest.
+        bot.set_control_state("jump", true);
+        if in_liquid(bot) {
+            escape_water(bot).await;
+        }
+        if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
+            break;
+        }
+        if find_trunk_raw(bot).is_some() {
+            break; // walked into a reachable tree
+        }
+    }
     bot.clear_control_states();
     Ok(())
 }
@@ -147,9 +190,11 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         // Break out of stuck regions: after several failed approaches, stop
         // retrying across-barrier trees and explore in a fresh direction.
         if consecutive_fail >= 3 {
-            println!("    wood: stuck — exploring to escape");
+            println!("    wood: stuck — digging out + exploring");
             consecutive_fail = 0;
             blacklist.clear();
+            // Tunnel out of any pit/wall, then walk to fresh terrain.
+            dig_out(bot, attempts).await;
             let _ = explore(bot, attempts * 2).await;
             continue;
         }
@@ -199,9 +244,11 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
                 }
                 Ok(false) => {
                     // Cleared a leaf (or out of reach) — step toward the log to
-                    // tunnel in and get within range.
+                    // tunnel in; jump to climb the stump when the log is above us.
+                    let above = ty as f64 > bot.entity.position.y + 0.5;
                     bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 + 0.5, tz as f64 + 0.5));
                     bot.set_control_state("forward", true);
+                    bot.set_control_state("jump", above);
                     bot.wait_ticks(4).await.ok();
                     bot.clear_control_states();
                 }
