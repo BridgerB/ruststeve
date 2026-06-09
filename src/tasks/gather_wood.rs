@@ -252,10 +252,16 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         // Walk to the tree's COLUMN (horizontal goal — descends to the valley
         // floor if the tree is below us). The trunk base becomes reachable there.
         let p0 = bot.entity.position;
-        println!("    wood: log ({x},{y},{z}) d={:.0} — walking", ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt());
-        let arr = match bot.goto_near(x, y, z, 3.0).await {
-            Ok(a) => a,
-            Err(_) => break,
+        // Only walk if there's no reachable log right here (skip the slow
+        // goto_near when we're already next to a tree we can chop).
+        let arr = if find_trunk_raw(bot).is_some() {
+            true
+        } else {
+            println!("    wood: log ({x},{y},{z}) d={:.0} — walking", ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt());
+            match bot.goto_near(x, y, z, 3.0).await {
+                Ok(a) => a,
+                Err(_) => break,
+            }
         };
         let p1 = bot.entity.position;
         println!(
