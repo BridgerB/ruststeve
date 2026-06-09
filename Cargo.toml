@@ -1,0 +1,14 @@
+[package]
+name = "ruststeve"
+version = "0.1.0"
+edition = "2021"
+license = "Unlicense"
+description = "Ender Dragon speedrun bot — Rust port of steve, built on rustcraft"
+
+[dependencies]
+rustcraft = { path = "../rustcraft" }
+tokio = { version = "1", features = ["full"] }
+
+[[bin]]
+name = "ruststeve"
+path = "src/main.rs"

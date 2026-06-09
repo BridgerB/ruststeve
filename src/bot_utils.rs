@@ -1,0 +1,125 @@
+//! Action helpers built on rustcraft's bot — item counting, log finding,
+//! generic crafting, and crafting-table placement. Port of the slice of steve's
+//! `lib/bot-utils.ts` the early phases use.
+
+use rustcraft::bot::{Bot, Face};
+
+use crate::types::{failure, success, StepResult};
+
+pub const LOG_TYPES: &[&str] = &[
+    "oak_log", "birch_log", "spruce_log", "jungle_log", "acacia_log", "dark_oak_log",
+    "mangrove_log", "cherry_log", "pale_oak_log",
+];
+
+/// Total count of an item by name in the inventory.
+pub fn count_items(bot: &Bot, name: &str) -> i32 {
+    bot.inventory.slots.iter().flatten().filter(|i| i.name == name).map(|i| i.count).sum()
+}
+
+/// Find the nearest log block (any species), searching out in rings.
+pub fn find_closest_log(bot: &Bot) -> Option<(String, (i32, i32, i32))> {
+    let p = bot.entity.position;
+    for radius in [16, 32, 48, 64] {
+        let mut best: Option<(String, (i32, i32, i32))> = None;
+        let mut best_d = f64::MAX;
+        for &log in LOG_TYPES {
+            for (x, y, z) in bot.find_blocks(log, radius, 16) {
+                let d = (x as f64 - p.x).powi(2) + (z as f64 - p.z).powi(2) + (y as f64 - p.y).powi(2);
+                if d < best_d {
+                    best_d = d;
+                    best = Some((log.to_string(), (x, y, z)));
+                }
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+    }
+    None
+}
+
+/// Ensure `name` is in the held hotbar slot (moving it there if needed).
+pub async fn select_item(bot: &mut Bot<'_>, name: &str) -> std::io::Result<bool> {
+    let pos = bot.inventory.slots.iter().position(|s| s.as_ref().map(|i| i.name.as_str()) == Some(name));
+    let Some(idx) = pos else { return Ok(false) };
+    if (36..45).contains(&idx) {
+        bot.set_held_slot((idx - 36) as i32).await?;
+    } else {
+        bot.move_slot_item(idx as i32, 36).await?;
+        bot.set_held_slot(0).await?;
+    }
+    Ok(true)
+}
+
+/// Craft `count` of an item by name. `table` is the position of an open-able
+/// crafting table for 3x3 recipes (None → 2x2 inventory grid).
+pub async fn craft_item(
+    bot: &mut Bot<'_>,
+    name: &str,
+    count: i32,
+    table: Option<(i32, i32, i32)>,
+) -> StepResult {
+    let Some(def) = bot.registry.items_by_name.get(name) else {
+        return failure(format!("unknown item {name}"));
+    };
+    let id = def.id;
+    let recipes = bot.recipes_for(id, Some(1), table.is_some());
+    let Some(recipe) = recipes.into_iter().next() else {
+        return failure(format!("no recipe for {name}"));
+    };
+    if recipe.requires_table && table.is_none() {
+        return failure(format!("{name} needs a crafting table"));
+    }
+
+    if let Some((tx, ty, tz)) = table {
+        let _ = bot.goto(tx, ty, tz).await;
+        if bot.current_window.is_none() {
+            let _ = bot.open_block(tx, ty, tz, Face::Top).await;
+        }
+    }
+
+    let result = bot.craft(&recipe, count, table.is_some()).await;
+    if table.is_some() {
+        let _ = bot.close_window().await;
+    }
+    match result {
+        Ok(()) => success(format!("crafted {count}x {name}")),
+        Err(e) => failure(format!("craft {name}: {e}")),
+    }
+}
+
+/// Find an existing crafting table nearby, or place one from inventory.
+/// Returns its position (the bot will be near it).
+pub async fn get_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32, i32, i32)>> {
+    if let Some(pos) = bot.find_block("crafting_table", 24) {
+        bot.goto(pos.0, pos.1, pos.2).await?;
+        return Ok(Some(pos));
+    }
+    if count_items(bot, "crafting_table") == 0 {
+        return Ok(None);
+    }
+    place_crafting_table(bot).await
+}
+
+/// Place a crafting table on an air block next to the bot with solid ground.
+async fn place_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32, i32, i32)>> {
+    if !select_item(bot, "crafting_table").await? {
+        return Ok(None);
+    }
+    let p = bot.entity.position;
+    let (fx, fy, fz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let (tx, ty, tz) = (fx + dx, fy, fz + dz);
+        if bot.block_state_at(tx, ty, tz) == 0 && bot.block_state_at(tx, ty - 1, tz) != 0 {
+            bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
+            bot.wait_ticks(2).await?;
+            // Place against the top face of the ground block below the target.
+            bot.place_block(tx, ty - 1, tz, Face::Top).await?;
+            bot.wait_ticks(6).await?;
+            if bot.block_at(tx, ty, tz).map(|b| b.name == "crafting_table").unwrap_or(false) {
+                return Ok(Some((tx, ty, tz)));
+            }
+        }
+    }
+    Ok(None)
+}
