@@ -157,7 +157,15 @@ fn placeable_count(bot: &Bot) -> i32 {
 /// material when we have none.
 async fn dig_for_blocks(bot: &mut Bot<'_>) {
     let want = 4;
-    for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (1, 1, 0), (0, 1, 1)] {
+    // Prefer the FLOOR blocks beside the bot (dy=-1) — in an open basin the
+    // feet-level neighbours are air. Digging a neighbouring floor block yields
+    // dirt and leaves the bot standing on its own block.
+    let offsets = [
+        (1, -1, 0), (-1, -1, 0), (0, -1, 1), (0, -1, -1),
+        (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1),
+        (1, 1, 0), (0, 1, 1),
+    ];
+    for (dx, dy, dz) in offsets {
         if placeable_count(bot) >= want {
             break;
         }
