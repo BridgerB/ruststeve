@@ -42,20 +42,32 @@ fn find_trunk_raw(bot: &Bot) -> Option<(i32, i32, i32)> {
     best
 }
 
-/// Nearest log within `radius`, skipping blacklisted (x,z) columns.
+/// Nearest log near the bot's OWN level, by raw chunk scan (no line-of-sight, so
+/// it finds reachable trunk bases — not just visible treetops). Scans a wide
+/// horizontal radius but a narrow vertical band so we only target logs the bot
+/// can actually walk to. Skips blacklisted (x,z) columns; prefers near + level.
 fn find_log(bot: &Bot, radius: i32, blacklist: &HashSet<(i32, i32)>) -> Option<(i32, i32, i32)> {
     let p = bot.entity.position;
+    let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
     let mut best = None;
     let mut best_d = f64::MAX;
-    for &log in LOG_TYPES {
-        for (x, y, z) in bot.find_blocks(log, radius, 24) {
-            if blacklist.contains(&(x, z)) {
+    for dx in -radius..=radius {
+        for dz in -radius..=radius {
+            if blacklist.contains(&(bx + dx, bz + dz)) {
                 continue;
             }
-            let d = (x as f64 - p.x).powi(2) + (z as f64 - p.z).powi(2) + (y as f64 - p.y).powi(2);
-            if d < best_d {
-                best_d = d;
-                best = Some((x, y, z));
+            for dy in -5..=5 {
+                let (x, y, z) = (bx + dx, by + dy, bz + dz);
+                if is_log_at(bot, x, y, z) {
+                    // Weight vertical distance heavily — strongly prefer same-level
+                    // logs (reachable) over higher/lower ones.
+                    let d = (dx * dx + dz * dz) as f64 + 8.0 * (dy.abs() as f64);
+                    if d < best_d {
+                        best_d = d;
+                        best = Some((x, y, z));
+                    }
+                    break; // one log per column is enough to mark the tree
+                }
             }
         }
     }
@@ -209,9 +221,9 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             continue;
         }
 
-        // Find a tree (rings out to 64), else explore for new chunks.
+        // Find a reachable log near the bot's level (raw scan), else explore.
         let mut found = None;
-        for r in [16, 32, 48, 64] {
+        for r in [10, 20, 32] {
             found = find_log(bot, r, &blacklist);
             if found.is_some() {
                 break;
@@ -228,8 +240,8 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         // Walk to the tree's COLUMN (horizontal goal — descends to the valley
         // floor if the tree is below us). The trunk base becomes reachable there.
         let p0 = bot.entity.position;
-        println!("    wood: tree ({x},{y},{z}) d={:.0} — walking", ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt());
-        let arr = match bot.goto_xz(x, z, 3.0).await {
+        println!("    wood: log ({x},{y},{z}) d={:.0} — walking", ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt());
+        let arr = match bot.goto_near(x, y, z, 3.0).await {
             Ok(a) => a,
             Err(_) => break,
         };
