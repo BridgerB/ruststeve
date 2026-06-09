@@ -216,18 +216,9 @@ async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
         }
         if rose {
             // Place a block where our feet just were (against the top of the
-            // block below). Keep holding jump until the SERVER confirms the
-            // block exists, so we never land on an unconfirmed block (which the
-            // server reads as flying and kicks).
+            // block below), then drop onto it.
             let _ = bot.place_block(fx, floor_y - 1, fz, rustcraft::bot::Face::Top).await;
-            for _ in 0..12 {
-                if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
-                    break;
-                }
-                if bot.block_state_at(fx, floor_y, fz) != 0 {
-                    break; // server confirmed the block
-                }
-            }
+            bot.wait_ticks(1).await.ok();
         }
         bot.set_control_state("jump", false);
         for _ in 0..16 {
