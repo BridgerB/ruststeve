@@ -32,7 +32,7 @@ fn env(key: &str, default: &str) -> String {
 async fn main() -> std::io::Result<()> {
     let host = env("MC_HOST", "localhost");
     let port: u16 = env("MC_PORT", "25565").parse().unwrap_or(25565);
-    let username = env("MC_USERNAME", "Steve");
+    let username = env("MC_USERNAME", "ruststeve-001");
     let data_dir = env("STEVE_DATA", "../rustcraft/data");
 
     let registry = create_registry(&data_dir, "26.1.2").unwrap_or_else(|_| {
