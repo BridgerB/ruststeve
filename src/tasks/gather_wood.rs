@@ -215,9 +215,7 @@ async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
     bot.entity.position.y >= start_y + height as f64 - 1.5
 }
 
-/// Tunnel out of a wedged spot: dig a 2-high path forward plus the block above
-/// (so the bot can step up), walking + jumping. Frees the bot from pits/ravines
-/// and lets it climb walls it can't jump. Works by hand on dirt/stone (slow).
+#[allow(dead_code)]
 async fn dig_out(bot: &mut Bot<'_>, dir_attempt: i32) {
     let yaw = dir_attempt as f64 * 1.6;
     let fx = (-yaw.sin()).round() as i32;
@@ -294,12 +292,12 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         // Break out of stuck regions: after several failed approaches, stop
         // retrying across-barrier trees and explore in a fresh direction.
         if consecutive_fail >= 3 {
-            println!("    wood: stuck — digging out + exploring");
+            println!("    wood: stuck — pillaring out of the basin + exploring");
             consecutive_fail = 0;
             blacklist.clear();
             trunk_bl.clear();
-            // Tunnel out of any pit/wall, then walk to fresh terrain.
-            dig_out(bot, attempts).await;
+            // Rise above low terrain to reach trees on the rim, then explore.
+            pillar_up(bot, 4).await;
             let _ = explore(bot, attempts * 2).await;
             continue;
         }
