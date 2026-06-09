@@ -81,6 +81,23 @@ fn in_liquid(bot: &Bot) -> bool {
         .unwrap_or(false)
 }
 
+/// Any lava within `r` blocks (horizontally, ±1 vertically) of the bot — used to
+/// stop the raw (non-pathfinder) walks from blindly stepping into a lava pool.
+fn lava_near(bot: &Bot, r: i32) -> bool {
+    let p = bot.entity.position;
+    let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    for dx in -r..=r {
+        for dy in -1..=1 {
+            for dz in -r..=r {
+                if bot.block_at(bx + dx, by + dy, bz + dz).map(|b| b.name.contains("lava")).unwrap_or(false) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 async fn escape_water(bot: &mut Bot<'_>) {
     for _ in 0..40 {
         if !in_liquid(bot) && bot.entity.on_ground {
@@ -102,7 +119,7 @@ async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
     let item_type = bot.registry.entities_by_name.get("item").map(|d| d.id);
     let logs0 = count_logs(bot);
     for _ in 0..20 {
-        if count_logs(bot) > logs0 {
+        if count_logs(bot) > logs0 || lava_near(bot, 2) {
             break;
         }
         let bp = bot.entity.position;
@@ -142,7 +159,11 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
         match bot.dig_toward(tx, ty, tz).await {
             Ok(true) => collect_at(bot, tx, tz).await,
             Ok(false) => {
-                // cleared a leaf / out of reach — step toward the log
+                // cleared a leaf / out of reach — step toward the log (unless
+                // that would walk us into lava).
+                if lava_near(bot, 2) {
+                    break;
+                }
                 let above = ty as f64 > bot.entity.position.y + 0.5;
                 bot.look_at(vec3(tx as f64 + 0.5, ty as f64 + 0.5, tz as f64 + 0.5));
                 bot.set_control_state("forward", true);
@@ -174,6 +195,10 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32, ticks: u32) {
     let angle = attempt as f64 * 1.7;
     let empty = HashSet::new();
     for i in 0..ticks {
+        // Never walk toward lava — stop and let the next attempt pick a new way.
+        if lava_near(bot, 3) {
+            break;
+        }
         bot.look(angle, 0.0);
         bot.set_control_state("forward", true);
         bot.set_control_state("sprint", true);
