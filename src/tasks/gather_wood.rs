@@ -13,6 +13,30 @@ pub fn count_logs(bot: &Bot) -> i32 {
     bot.inventory.slots.iter().flatten().filter(|i| i.name.ends_with("_log")).map(|i| i.count).sum()
 }
 
+fn is_log_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    bot.block_at(x, y, z).map(|b| b.name.ends_with("_log")).unwrap_or(false)
+}
+
+/// Lowest log block in the 5x5 columns around (cx,cz), scanning raw chunk data
+/// (no line-of-sight needed — finds trunks occluded by their own leaves) within
+/// a Y window around the bot. Returns the block the bot can stand near + mine.
+fn find_trunk_raw(bot: &Bot, cx: i32, cz: i32) -> Option<(i32, i32, i32)> {
+    let by = bot.entity.position.y.floor() as i32;
+    let mut best: Option<(i32, i32, i32)> = None;
+    for dx in -2..=2 {
+        for dz in -2..=2 {
+            for y in (by - 4)..=(by + 8) {
+                if is_log_at(bot, cx + dx, y, cz + dz)
+                    && best.map(|(_, by2, _)| y < by2).unwrap_or(true)
+                {
+                    best = Some((cx + dx, y, cz + dz));
+                }
+            }
+        }
+    }
+    best
+}
+
 /// Nearest log within `radius`, skipping blacklisted (x,z) columns.
 fn find_log(bot: &Bot, radius: i32, blacklist: &HashSet<(i32, i32)>) -> Option<(i32, i32, i32)> {
     let p = bot.entity.position;
@@ -57,12 +81,27 @@ async fn escape_water(bot: &mut Bot<'_>) {
     bot.clear_control_states();
 }
 
-/// Step toward a just-dug block for ~1.5s to walk over the dropped item.
+/// Walk to the nearest dropped item entity (falling back to the dug block) to
+/// pick it up. Item entities are tracked from add_entity packets.
 async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
+    let item_type = bot.registry.entities_by_name.get("item").map(|d| d.id);
     let logs0 = count_logs(bot);
-    for _ in 0..30 {
-        let p = bot.entity.position;
-        bot.look_at(rustcraft::vec3::vec3(x as f64 + 0.5, p.y - 0.5, z as f64 + 0.5));
+    for _ in 0..40 {
+        // nearest item entity within ~8 blocks, else the dug block
+        let bp = bot.entity.position;
+        let mut target = rustcraft::vec3::vec3(x as f64 + 0.5, bp.y, z as f64 + 0.5);
+        let mut best = f64::MAX;
+        for e in bot.entities.values() {
+            if item_type.is_some() && e.entity_type != item_type {
+                continue;
+            }
+            let d = e.position.distance(bp);
+            if d < best && d < 8.0 {
+                best = d;
+                target = e.position;
+            }
+        }
+        bot.look_at(rustcraft::vec3::vec3(target.x, bp.y - 0.5, target.z));
         bot.set_control_state("forward", true);
         match bot.drive_tick().await {
             Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_) => break,
@@ -91,11 +130,21 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
     bot.wait_ticks(4).await.ok();
     let mut blacklist: HashSet<(i32, i32)> = HashSet::new();
     let mut attempts = 0;
+    let mut consecutive_fail = 0;
 
-    while count_logs(bot) < target && attempts < 40 {
+    while count_logs(bot) < target && attempts < 50 {
         attempts += 1;
         if in_liquid(bot) {
             escape_water(bot).await;
+        }
+        // Break out of stuck regions: after several failed approaches, stop
+        // retrying across-barrier trees and explore in a fresh direction.
+        if consecutive_fail >= 3 {
+            println!("    wood: stuck — exploring to escape");
+            consecutive_fail = 0;
+            blacklist.clear();
+            let _ = explore(bot, attempts * 2).await;
+            continue;
         }
 
         // Find a tree (rings out to 64), else explore for new chunks.
@@ -123,26 +172,19 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             Err(_) => break,
         };
         let p1 = bot.entity.position;
-        let near = find_log(bot, 5, &HashSet::new());
         println!(
-            "    wood: arrived={arr} at ({:.0},{:.0},{:.0}) moved={:.0} reachLog={:?}",
-            p1.x, p1.y, p1.z, ((p1.x - p0.x).powi(2) + (p1.z - p0.z).powi(2)).sqrt(), near
+            "    wood: arrived={arr} at ({:.0},{:.0},{:.0}) moved={:.0} trunk={:?}",
+            p1.x, p1.y, p1.z, ((p1.x - p0.x).powi(2) + (p1.z - p0.z).powi(2)).sqrt(),
+            find_trunk_raw(bot, x, z)
         );
 
         // Mine reachable logs in this column, bottom-up, until none in reach or a
         // dig yields nothing (occluded/too far → give up on this tree).
         let column_before = count_logs(bot);
-        for _ in 0..8 {
-            // lowest log within range (trunk base first)
-            let mut best: Option<(i32, i32, i32)> = None;
-            for &log in LOG_TYPES {
-                for (lx, ly, lz) in bot.find_blocks(log, 6, 24) {
-                    if best.map(|(_, by2, _)| ly < by2).unwrap_or(true) {
-                        best = Some((lx, ly, lz));
-                    }
-                }
-            }
-            let Some((tx, ty, tz)) = best else { break };
+        for _ in 0..10 {
+            // Lowest trunk log near this column via raw chunk data (sees through
+            // the tree's own leaf occlusion).
+            let Some((tx, ty, tz)) = find_trunk_raw(bot, x, z) else { break };
 
             // Get adjacent to this specific log (clear LOS) before digging.
             let _ = bot.goto_near(tx, ty, tz, 2.5).await;
@@ -164,6 +206,11 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
 
         if count_logs(bot) <= column_before {
             blacklist.insert((x, z)); // got nothing from this column
+            if !arr {
+                consecutive_fail += 1; // couldn't even reach it — likely a barrier
+            }
+        } else {
+            consecutive_fail = 0;
         }
     }
 
