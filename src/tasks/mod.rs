@@ -2,3 +2,4 @@
 
 pub mod craft;
 pub mod gather_wood;
+pub mod mining;

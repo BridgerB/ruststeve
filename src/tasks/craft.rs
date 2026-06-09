@@ -48,3 +48,17 @@ pub async fn craft_wooden_pickaxe(bot: &mut Bot<'_>) -> StepResult {
         _ => failure("need a crafting table"),
     }
 }
+
+pub async fn craft_stone_pickaxe(bot: &mut Bot<'_>) -> StepResult {
+    // Ensure sticks first (2x2, no table).
+    if crate::bot_utils::count_items(bot, "stick") < 2 {
+        let r = craft_item(bot, "stick", 1, None).await;
+        if !r.success {
+            return r;
+        }
+    }
+    match get_crafting_table(bot).await {
+        Ok(Some(table)) => craft_item(bot, "stone_pickaxe", 1, Some(table)).await,
+        _ => failure("need a crafting table"),
+    }
+}

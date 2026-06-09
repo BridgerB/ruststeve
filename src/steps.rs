@@ -43,6 +43,20 @@ pub const STEPS: &[Step] = &[
         can_execute: |s| s.inventory.planks >= 3 && s.inventory.sticks >= 2,
         is_complete: |s| s.equipment.pickaxe_tier().rank() >= 1,
     },
+    Step {
+        id: "mine_stone",
+        name: "Mine Cobblestone",
+        priority: 6,
+        can_execute: |s| s.equipment.pickaxe_tier().rank() >= 1,
+        is_complete: |s| s.inventory.cobblestone >= 16,
+    },
+    Step {
+        id: "craft_stone_pickaxe",
+        name: "Craft Stone Pickaxe",
+        priority: 7,
+        can_execute: |s| s.inventory.cobblestone >= 3 && s.inventory.sticks >= 2,
+        is_complete: |s| s.equipment.pickaxe_tier().rank() >= 2,
+    },
 ];
 
 /// First step that can run and isn't already complete.
@@ -63,6 +77,8 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str) -> StepResult {
         "craft_crafting_table" => tasks::craft::craft_crafting_table(bot).await,
         "craft_sticks" => tasks::craft::craft_sticks(bot).await,
         "craft_wooden_pickaxe" => tasks::craft::craft_wooden_pickaxe(bot).await,
+        "mine_stone" => tasks::mining::mine_stone(bot, 16).await,
+        "craft_stone_pickaxe" => tasks::craft::craft_stone_pickaxe(bot).await,
         other => failure(format!("no executor for step {other}")),
     }
 }

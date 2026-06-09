@@ -16,6 +16,44 @@ pub fn count_items(bot: &Bot, name: &str) -> i32 {
     bot.inventory.slots.iter().flatten().filter(|i| i.name == name).map(|i| i.count).sum()
 }
 
+/// Total inventory item count (any item).
+pub fn total_count(bot: &Bot) -> i32 {
+    bot.inventory.slots.iter().flatten().map(|i| i.count).sum()
+}
+
+/// Walk to the nearest dropped item entity (falling back to the dug block) to
+/// pick it up. Stops early once total inventory count grows. ~2s budget.
+pub async fn collect_drops(bot: &mut Bot<'_>, fx: i32, fz: i32) {
+    let item_type = bot.registry.entities_by_name.get("item").map(|d| d.id);
+    let before = total_count(bot);
+    for _ in 0..40 {
+        let bp = bot.entity.position;
+        let mut target = rustcraft::vec3::vec3(fx as f64 + 0.5, bp.y, fz as f64 + 0.5);
+        let mut best = f64::MAX;
+        for e in bot.entities.values() {
+            if item_type.is_some() && e.entity_type != item_type {
+                continue;
+            }
+            let d = e.position.distance(bp);
+            if d < best && d < 10.0 {
+                best = d;
+                target = e.position;
+            }
+        }
+        bot.look_at(rustcraft::vec3::vec3(target.x, bp.y - 0.5, target.z));
+        bot.set_control_state("forward", true);
+        match bot.drive_tick().await {
+            Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_) => break,
+            _ => {}
+        }
+        if total_count(bot) > before {
+            break;
+        }
+    }
+    bot.clear_control_states();
+    bot.wait_ticks(4).await.ok();
+}
+
 /// Find the nearest log block (any species), searching out in rings.
 pub fn find_closest_log(bot: &Bot) -> Option<(String, (i32, i32, i32))> {
     let p = bot.entity.position;
