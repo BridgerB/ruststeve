@@ -220,28 +220,12 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
     bot.wait_ticks(4).await.ok();
     let mut blacklist: HashSet<(i32, i32)> = HashSet::new();
     let mut attempts = 0;
-    let mut anchor = {
-        let p = bot.entity.position;
-        (p.x.floor() as i32, p.z.floor() as i32)
-    };
-    let mut stuck = 0;
+    let mut failed_trees = 0; // consecutive trees we couldn't get a log from
 
     while count_logs(bot) < target && attempts < 60 {
         attempts += 1;
         if in_liquid(bot) {
             escape_water(bot).await;
-        }
-
-        // Track real movement.
-        let pos = {
-            let p = bot.entity.position;
-            (p.x.floor() as i32, p.z.floor() as i32)
-        };
-        if ((pos.0 - anchor.0).pow(2) + (pos.1 - anchor.1).pow(2)) >= 36 {
-            anchor = pos;
-            stuck = 0;
-        } else {
-            stuck += 1;
         }
 
         // Find the nearest reachable log.
@@ -253,16 +237,13 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             }
         }
 
-        // Nothing nearby, or stuck in place too long → walk to fresh terrain.
-        if found.is_none() || stuck >= 4 {
-            println!("    wood: exploring (stuck={stuck})");
+        // No tree nearby, or we've struck out on several nearby trees → this area
+        // has only unreachable (elevated/cliff) trees; walk far to fresh terrain.
+        if found.is_none() || failed_trees >= 4 {
+            println!("    wood: leaving this area — exploring for accessible trees");
             blacklist.clear();
-            explore(bot, attempts, 120).await;
-            anchor = {
-                let p = bot.entity.position;
-                (p.x.floor() as i32, p.z.floor() as i32)
-            };
-            stuck = 0;
+            explore(bot, attempts, 200).await;
+            failed_trees = 0;
             continue;
         }
 
@@ -270,13 +251,18 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         let p0 = bot.entity.position;
         let d = ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt();
         println!("    wood: tree ({x},{y},{z}) d={d:.0} — walking");
-        let _ = bot.goto_near(x, y, z, 3.0).await;
+        let arrived = bot.goto_near(x, y, z, 3.0).await.unwrap_or(false);
 
         let gained = chop(bot, target).await;
         if gained > 0 {
             println!("    wood: {} logs", count_logs(bot));
+            failed_trees = 0;
         } else {
             blacklist.insert((x, z)); // couldn't get a log here — skip this tree
+            // Only count it against the area if we couldn't even reach it.
+            if !arrived {
+                failed_trees += 1;
+            }
         }
     }
 
