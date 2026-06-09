@@ -1,3 +1,7 @@
+// The state/step model carries fields (sword, furnace, vitals, priority) used by
+// later speedrun phases that aren't ported yet; allow them until then.
+#![allow(dead_code)]
+
 //! ruststeve — Ender Dragon speedrun bot, built on rustcraft. Single-bot tick
 //! loop: sync state → pick the next incomplete step → execute it. Port of the
 //! single-bot core of steve's `main.ts`.
