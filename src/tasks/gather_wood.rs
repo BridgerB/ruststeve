@@ -153,19 +153,23 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
     let start = count_logs(bot);
     let mut trunk_bl: HashSet<(i32, i32, i32)> = HashSet::new();
     let mut idle = 0;
-    for _ in 0..30 {
+    // Up to 50 dig/step actions: tunnelling through leaves/dirt to an occluded
+    // trunk takes several, so judge progress by getting CLOSER, not per-tick logs.
+    for _ in 0..50 {
         let Some((tx, ty, tz)) = find_trunk_raw(bot, &trunk_bl) else { break };
+        let center = vec3(tx as f64 + 0.5, ty as f64 + 0.5, tz as f64 + 0.5);
         let before = count_logs(bot);
+        let dist_before = bot.entity.position.distance(center);
         match bot.dig_toward(tx, ty, tz).await {
             Ok(true) => collect_at(bot, tx, tz).await,
             Ok(false) => {
-                // cleared a leaf / out of reach — step toward the log (unless
-                // that would walk us into lava).
+                // cleared an occluding block / out of reach — step toward the log
+                // to close the gap (unless that would walk us into lava).
                 if lava_near(bot, 2) {
                     break;
                 }
                 let above = ty as f64 > bot.entity.position.y + 0.5;
-                bot.look_at(vec3(tx as f64 + 0.5, ty as f64 + 0.5, tz as f64 + 0.5));
+                bot.look_at(center);
                 bot.set_control_state("forward", true);
                 bot.set_control_state("jump", above);
                 bot.wait_ticks(4).await.ok();
@@ -173,12 +177,13 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
             }
             Err(_) => break,
         }
-        if count_logs(bot) > before {
+        // Progress = broke a log OR moved closer to the trunk.
+        if count_logs(bot) > before || bot.entity.position.distance(center) < dist_before - 0.2 {
             idle = 0;
         } else {
             idle += 1;
-            if idle > 4 {
-                trunk_bl.insert((tx, ty, tz));
+            if idle > 6 {
+                trunk_bl.insert((tx, ty, tz)); // can't make progress on this log
                 idle = 0;
             }
         }
@@ -252,6 +257,11 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         let d = ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt();
         println!("    wood: tree ({x},{y},{z}) d={d:.0} — walking");
         let arrived = bot.goto_near(x, y, z, 3.0).await.unwrap_or(false);
+        {
+            let p = bot.entity.position;
+            let tr = find_trunk_raw(bot, &HashSet::new());
+            println!("    wood: arrived={arrived} at ({:.0},{:.0},{:.0}) reachTrunk={tr:?}", p.x, p.y, p.z);
+        }
 
         let gained = chop(bot, target).await;
         if gained > 0 {
