@@ -129,12 +129,22 @@ async fn dig_out(bot: &mut Bot<'_>, dir_attempt: i32) {
     let yaw = dir_attempt as f64 * 1.6;
     let fx = (-yaw.sin()).round() as i32;
     let fz = yaw.cos().round() as i32;
-    for _ in 0..8 {
+    for _ in 0..6 {
         let p = bot.entity.position;
         let (px, py, pz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         for (dx, dy, dz) in [(fx, 0, fz), (fx, 1, fz), (fx, 2, fz)] {
             let (bx, by, bz) = (px + dx, py + dy, pz + dz);
-            if bot.block_state_at(bx, by, bz) != 0 {
+            // Only hand-dig soft blocks (dirt/sand/leaves/etc.) — never grind
+            // stone by hand (minutes per block, no pickaxe yet).
+            let soft = bot
+                .block_at(bx, by, bz)
+                .map(|b| {
+                    let n = &b.name;
+                    n.contains("dirt") || n.contains("grass") || n.contains("sand") || n.contains("gravel")
+                        || n.contains("leaves") || n.contains("snow") || n.contains("mud") || n.contains("clay")
+                })
+                .unwrap_or(false);
+            if soft {
                 if bot.dig_toward(bx, by, bz).await.is_err() {
                     return;
                 }
