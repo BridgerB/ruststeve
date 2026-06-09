@@ -148,6 +148,42 @@ async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
     }
 }
 
+const PLACEABLE: &[&str] = &[
+    "dirt", "cobblestone", "cobbled_deepslate", "oak_planks", "spruce_planks", "birch_planks",
+    "oak_log", "birch_log", "spruce_log", "jungle_log", "acacia_log", "dark_oak_log",
+];
+
+/// Pillar straight up `height` blocks by placing a block under the bot each jump
+/// (classic tower-up) so it can reach logs on higher ground. Uses any placeable
+/// block in the inventory. Returns true if it climbed most of the way.
+async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
+    let mut have = false;
+    for name in PLACEABLE {
+        if crate::bot_utils::select_item(bot, name).await.unwrap_or(false) {
+            have = true;
+            break;
+        }
+    }
+    if !have {
+        return false;
+    }
+    let start_y = bot.entity.position.y;
+    for _ in 0..height {
+        let p = bot.entity.position;
+        bot.look_at(rustcraft::vec3::vec3(p.x, p.y - 1.0, p.z)); // look down
+        bot.set_control_state("jump", true);
+        bot.wait_ticks(2).await.ok(); // rise off the ground
+        let fy = bot.entity.position.y.floor() as i32;
+        let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
+        let _ = bot.place_block(fx, fy - 1, fz, rustcraft::bot::Face::Top).await;
+        bot.wait_ticks(4).await.ok(); // land on the new block
+        bot.set_control_state("jump", false);
+        bot.wait_ticks(2).await.ok();
+    }
+    bot.clear_control_states();
+    bot.entity.position.y >= start_y + height as f64 - 1.5
+}
+
 /// Tunnel out of a wedged spot: dig a 2-high path forward plus the block above
 /// (so the bot can step up), walking + jumping. Frees the bot from pits/ravines
 /// and lets it climb walls it can't jump. Works by hand on dirt/stone (slow).
@@ -273,6 +309,16 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             p1.x, p1.y, p1.z, ((p1.x - p0.x).powi(2) + (p1.z - p0.z).powi(2)).sqrt(),
             find_trunk_raw(bot, &trunk_bl)
         );
+
+        // If the log is up on higher ground and we couldn't reach it, pillar up
+        // to its level so the trunk comes into reach.
+        if find_trunk_raw(bot, &trunk_bl).is_none() {
+            let need = y - bot.entity.position.y.floor() as i32;
+            if need >= 2 {
+                println!("    wood: pillaring up {need} to reach the log");
+                pillar_up(bot, need.min(6)).await;
+            }
+        }
 
         // Tunnel into the tree toward the nearest log, digging whatever is in the
         // way (leaves + logs) and stepping forward, collecting after each log.
