@@ -156,7 +156,38 @@ const PLACEABLE: &[&str] = &[
 /// Pillar straight up `height` blocks by placing a block under the bot each jump
 /// (classic tower-up) so it can reach logs on higher ground. Uses any placeable
 /// block in the inventory. Returns true if it climbed most of the way.
+/// Count placeable blocks the bot is holding.
+fn placeable_count(bot: &Bot) -> i32 {
+    PLACEABLE.iter().map(|n| crate::bot_utils::count_items(bot, n)).sum()
+}
+
+/// Hand-dig a few soft blocks around the bot (basin walls) to get pillar
+/// material when we have none.
+async fn dig_for_blocks(bot: &mut Bot<'_>) {
+    let want = 4;
+    for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (1, 1, 0), (0, 1, 1)] {
+        if placeable_count(bot) >= want {
+            break;
+        }
+        let p = bot.entity.position;
+        let (bx, by, bz) = (p.x.floor() as i32 + dx, p.y.floor() as i32 + dy, p.z.floor() as i32 + dz);
+        let soft = bot
+            .block_at(bx, by, bz)
+            .map(|b| {
+                let n = &b.name;
+                n.contains("dirt") || n.contains("grass") || n.contains("sand") || n.contains("gravel")
+            })
+            .unwrap_or(false);
+        if soft && bot.dig(bx, by, bz).await.is_ok() {
+            collect_at(bot, bx, bz).await;
+        }
+    }
+}
+
 async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
+    if placeable_count(bot) < 2 {
+        dig_for_blocks(bot).await;
+    }
     let mut have = false;
     for name in PLACEABLE {
         if crate::bot_utils::select_item(bot, name).await.unwrap_or(false) {
@@ -310,11 +341,13 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             find_trunk_raw(bot, &trunk_bl)
         );
 
-        // If the log is up on higher ground and we couldn't reach it, pillar up
-        // to its level so the trunk comes into reach.
+        // If the log is up on higher ground roughly above us and we couldn't
+        // reach it, pillar up to its level so the trunk comes into reach.
         if find_trunk_raw(bot, &trunk_bl).is_none() {
-            let need = y - bot.entity.position.y.floor() as i32;
-            if need >= 2 {
+            let bp = bot.entity.position;
+            let need = y - bp.y.floor() as i32;
+            let horiz = ((x as f64 - bp.x).powi(2) + (z as f64 - bp.z).powi(2)).sqrt();
+            if need >= 2 && horiz <= 6.0 {
                 println!("    wood: pillaring up {need} to reach the log");
                 pillar_up(bot, need.min(6)).await;
             }
