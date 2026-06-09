@@ -268,33 +268,52 @@ async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
     bot.entity.position.y >= overall_start + 1.0
 }
 
-#[allow(dead_code)]
-async fn dig_out(bot: &mut Bot<'_>, dir_attempt: i32) {
-    let yaw = dir_attempt as f64 * 1.6;
-    let fx = (-yaw.sin()).round() as i32;
-    let fz = yaw.cos().round() as i32;
-    for _ in 0..6 {
+fn is_soft(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    bot.block_at(x, y, z)
+        .map(|b| {
+            let n = &b.name;
+            n.contains("dirt") || n.contains("grass") || n.contains("sand") || n.contains("gravel")
+                || n.contains("leaves") || n.contains("snow") || n.contains("mud") || n.contains("clay")
+        })
+        .unwrap_or(false)
+}
+
+/// Tunnel toward (tx,tz) through soft terrain (dirt/grass barriers between us and
+/// a tree): dig the 2-high cell ahead, step in, repeat. Stops when a reachable
+/// log appears or a non-soft block blocks the way. This is how the bot gets past
+/// a dirt hill it can't climb (jumping doesn't work when wedged).
+async fn tunnel_toward(bot: &mut Bot<'_>, tx: i32, tz: i32, steps: i32) {
+    for _ in 0..steps {
         let p = bot.entity.position;
         let (px, py, pz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-        for (dx, dy, dz) in [(fx, 0, fz), (fx, 1, fz), (fx, 2, fz)] {
-            let (bx, by, bz) = (px + dx, py + dy, pz + dz);
-            // Only hand-dig soft blocks (dirt/sand/leaves/etc.) — never grind
-            // stone by hand (minutes per block, no pickaxe yet).
-            let soft = bot
-                .block_at(bx, by, bz)
-                .map(|b| {
-                    let n = &b.name;
-                    n.contains("dirt") || n.contains("grass") || n.contains("sand") || n.contains("gravel")
-                        || n.contains("leaves") || n.contains("snow") || n.contains("mud") || n.contains("clay")
-                })
-                .unwrap_or(false);
-            if soft {
-                if bot.dig_toward(bx, by, bz).await.is_err() {
-                    return;
+        let (dx, dz) = (tx as f64 - p.x, tz as f64 - p.z);
+        let (fx, fz) = if dx.abs() >= dz.abs() {
+            (dx.signum() as i32, 0)
+        } else {
+            (0, dz.signum() as i32)
+        };
+        if fx == 0 && fz == 0 {
+            break;
+        }
+        // Clear the 2-high cell ahead (and the block above, to allow stepping up).
+        let mut blocked_hard = false;
+        for (ax, ay, az) in [(fx, 0, fz), (fx, 1, fz), (fx, 2, fz)] {
+            let (bx, by, bz) = (px + ax, py + ay, pz + az);
+            if bot.block_state_at(bx, by, bz) != 0 {
+                if is_soft(bot, bx, by, bz) {
+                    if bot.dig(bx, by, bz).await.is_err() {
+                        return;
+                    }
+                } else if ay <= 1 {
+                    blocked_hard = true; // stone/etc at body height — can't tunnel here
                 }
             }
         }
-        bot.look(yaw, 0.0);
+        if blocked_hard {
+            break;
+        }
+        // Walk into the cleared cell.
+        bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, p.y, tz as f64 + 0.5));
         bot.set_control_state("forward", true);
         bot.set_control_state("jump", true);
         bot.wait_ticks(6).await.ok();
@@ -365,27 +384,30 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             stuck_attempts += 1;
         }
         if stuck_attempts >= 3 {
-            println!("    wood: FULLY STUCK at {pos:?} — pillar over barrier + long walk away");
             stuck_attempts = 0;
             consecutive_fail = 0;
             blacklist.clear();
             trunk_bl.clear();
-            pillar_up(bot, 3).await; // get on top of whatever's blocking us
-            // Commit to a direction and walk a long way to escape the dead end.
-            let angle = attempts as f64 * 2.0;
-            for _ in 0..150 {
-                bot.look(angle, 0.0);
-                bot.set_control_state("forward", true);
-                bot.set_control_state("sprint", true);
-                bot.set_control_state("jump", true);
-                if in_liquid(bot) {
-                    escape_water(bot).await;
+            // Wedged against a barrier — tunnel straight through it toward the
+            // nearest tree (jumping doesn't work when clipped into terrain).
+            let nearest = find_log(bot, 40, &HashSet::new());
+            if let Some((tx, _ty, tz)) = nearest {
+                println!("    wood: FULLY STUCK at {pos:?} — tunneling toward tree ({tx},{tz})");
+                tunnel_toward(bot, tx, tz, 14).await;
+            } else {
+                println!("    wood: FULLY STUCK at {pos:?} — long walk to new terrain");
+                let angle = attempts as f64 * 2.0;
+                for _ in 0..150 {
+                    bot.look(angle, 0.0);
+                    bot.set_control_state("forward", true);
+                    bot.set_control_state("sprint", true);
+                    bot.set_control_state("jump", true);
+                    if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
+                        break;
+                    }
                 }
-                if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
-                    break;
-                }
+                bot.clear_control_states();
             }
-            bot.clear_control_states();
             anchor = {
                 let p = bot.entity.position;
                 (p.x.floor() as i32, p.z.floor() as i32)
