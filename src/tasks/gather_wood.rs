@@ -198,21 +198,51 @@ async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
     if !have {
         return false;
     }
-    let start_y = bot.entity.position.y;
+    let overall_start = bot.entity.position.y;
     for _ in 0..height {
-        let p = bot.entity.position;
-        bot.look_at(rustcraft::vec3::vec3(p.x, p.y - 1.0, p.z)); // look down
+        if placeable_count(bot) == 0 {
+            break;
+        }
+        let start_y = bot.entity.position.y;
+        let floor_y = start_y.floor() as i32;
+        let fx = bot.entity.position.x.floor() as i32;
+        let fz = bot.entity.position.z.floor() as i32;
+        // Look straight down at the block we're standing on.
+        bot.look_at(rustcraft::vec3::vec3(fx as f64 + 0.5, (floor_y - 1) as f64 + 0.5, fz as f64 + 0.5));
         bot.set_control_state("jump", true);
-        bot.wait_ticks(2).await.ok(); // rise off the ground
-        let fy = bot.entity.position.y.floor() as i32;
-        let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
-        let _ = bot.place_block(fx, fy - 1, fz, rustcraft::bot::Face::Top).await;
-        bot.wait_ticks(4).await.ok(); // land on the new block
+        // Wait until we've actually risen a full block (so the new block won't
+        // intersect us and the server accepts the placement).
+        let mut rose = false;
+        for _ in 0..14 {
+            if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
+                break;
+            }
+            if bot.entity.position.y >= start_y + 1.0 {
+                rose = true;
+                break;
+            }
+        }
+        if rose {
+            // Place a block where our feet just were (against the top of the
+            // block below), then drop onto it.
+            let _ = bot.place_block(fx, floor_y - 1, fz, rustcraft::bot::Face::Top).await;
+        }
         bot.set_control_state("jump", false);
-        bot.wait_ticks(2).await.ok();
+        for _ in 0..16 {
+            if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
+                break;
+            }
+            if bot.entity.on_ground {
+                break;
+            }
+        }
+        // If we failed to gain height this step, stop trying.
+        if bot.entity.position.y < start_y + 0.5 {
+            break;
+        }
     }
     bot.clear_control_states();
-    bot.entity.position.y >= start_y + height as f64 - 1.5
+    bot.entity.position.y >= overall_start + 1.0
 }
 
 #[allow(dead_code)]
