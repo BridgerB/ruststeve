@@ -24,13 +24,16 @@ fn find_trunk_raw(bot: &Bot) -> Option<(i32, i32, i32)> {
     let p = bot.entity.position;
     let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
     let mut best: Option<(i32, i32, i32)> = None;
-    let mut best_key = (i32::MAX, f64::MAX); // prefer lower Y, then nearer
+    let mut best_key = f64::MAX;
     for dx in -4..=4 {
         for dz in -4..=4 {
-            for dy in -4..=4 {
+            for dy in -2..=4 {
                 let (x, y, z) = (bx + dx, by + dy, bz + dz);
                 if is_log_at(bot, x, y, z) {
-                    let key = (y, (dx * dx + dz * dz) as f64);
+                    // Nearest log, but never chase logs below us (that sinks the
+                    // bot into pits) — heavily penalize lower Y.
+                    let below = if dy < 0 { 20.0 * (-dy) as f64 } else { 0.0 };
+                    let key = (dx * dx + dy * dy + dz * dz) as f64 + below;
                     if key < best_key {
                         best_key = key;
                         best = Some((x, y, z));
@@ -98,40 +101,49 @@ async fn escape_water(bot: &mut Bot<'_>) {
     bot.clear_control_states();
 }
 
-/// Walk to the nearest dropped item entity (falling back to the dug block) to
-/// pick it up. Item entities are tracked from add_entity packets.
+/// Collect the log dropped near the dug block. Pathfinds (drop-limited, so the
+/// bot doesn't sink into pits chasing items) to the item entity nearest the dug
+/// block, then waits for auto-pickup. Item entities are tracked from add_entity.
 async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
     let item_type = bot.registry.entities_by_name.get("item").map(|d| d.id);
     let logs0 = count_logs(bot);
-    let drop = rustcraft::vec3::vec3(x as f64 + 0.5, 0.0, z as f64 + 0.5);
-    for _ in 0..40 {
-        let bp = bot.entity.position;
-        // Target the item entity nearest the DUG BLOCK (the fresh drop), not the
-        // globally nearest item — busy servers have many unrelated drops.
-        let mut target = rustcraft::vec3::vec3(x as f64 + 0.5, bp.y, z as f64 + 0.5);
-        let mut best = 6.0; // within 6 blocks (xz) of the dug block
+    for _ in 0..4 {
+        if count_logs(bot) > logs0 {
+            return;
+        }
+        // Item entity nearest the dug block (the fresh drop).
+        let mut target: Option<(i32, i32, i32)> = None;
+        let mut best = 6.0;
         for e in bot.entities.values() {
             if item_type.is_some() && e.entity_type != item_type {
                 continue;
             }
-            let dxz = ((e.position.x - drop.x).powi(2) + (e.position.z - drop.z).powi(2)).sqrt();
+            let dxz = ((e.position.x - (x as f64 + 0.5)).powi(2) + (e.position.z - (z as f64 + 0.5)).powi(2)).sqrt();
             if dxz < best {
                 best = dxz;
-                target = e.position;
+                target = Some((e.position.x.floor() as i32, e.position.y.floor() as i32, e.position.z.floor() as i32));
             }
         }
-        bot.look_at(rustcraft::vec3::vec3(target.x, bp.y - 0.5, target.z));
-        bot.set_control_state("forward", true);
-        match bot.drive_tick().await {
-            Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_) => break,
-            _ => {}
-        }
-        if count_logs(bot) > logs0 {
+        let (tx, ty, tz) = target.unwrap_or((x, bot.entity.position.y.floor() as i32, z));
+        // Pathfind next to it (won't descend into pits), then a short raw step
+        // onto it to trigger the 1-block pickup.
+        if bot.goto_near(tx, ty, tz, 1.5).await.is_err() {
             break;
         }
+        for _ in 0..8 {
+            let bp = bot.entity.position;
+            bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, bp.y - 0.5, tz as f64 + 0.5));
+            bot.set_control_state("forward", true);
+            if bot.drive_tick().await.map(|s| matches!(s, rustcraft::bot::DriveStep::Disconnected)).unwrap_or(true) {
+                break;
+            }
+            if count_logs(bot) > logs0 {
+                break;
+            }
+        }
+        bot.clear_control_states();
+        bot.wait_ticks(4).await.ok();
     }
-    bot.clear_control_states();
-    bot.wait_ticks(4).await.ok();
 }
 
 /// Tunnel out of a wedged spot: dig a 2-high path forward plus the block above
