@@ -109,12 +109,15 @@ async fn escape_water(bot: &mut Bot<'_>) {
 async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
     let item_type = bot.registry.entities_by_name.get("item").map(|d| d.id);
     let logs0 = count_logs(bot);
-    for _ in 0..4 {
+    // Brief raw walk toward the nearest item near the dug block (fast — the drop
+    // is right where we just chopped). Re-aims each tick at the live item.
+    for _ in 0..22 {
         if count_logs(bot) > logs0 {
-            return;
+            break;
         }
-        // Item entity nearest the dug block (the fresh drop).
-        let mut target: Option<(i32, i32, i32)> = None;
+        let bp = bot.entity.position;
+        let mut tx = x as f64 + 0.5;
+        let mut tz = z as f64 + 0.5;
         let mut best = 6.0;
         for e in bot.entities.values() {
             if item_type.is_some() && e.entity_type != item_type {
@@ -123,29 +126,18 @@ async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
             let dxz = ((e.position.x - (x as f64 + 0.5)).powi(2) + (e.position.z - (z as f64 + 0.5)).powi(2)).sqrt();
             if dxz < best {
                 best = dxz;
-                target = Some((e.position.x.floor() as i32, e.position.y.floor() as i32, e.position.z.floor() as i32));
+                tx = e.position.x;
+                tz = e.position.z;
             }
         }
-        let (tx, ty, tz) = target.unwrap_or((x, bot.entity.position.y.floor() as i32, z));
-        // Pathfind next to it (won't descend into pits), then a short raw step
-        // onto it to trigger the 1-block pickup.
-        if bot.goto_near(tx, ty, tz, 1.5).await.is_err() {
+        bot.look_at(rustcraft::vec3::vec3(tx, bp.y - 0.5, tz));
+        bot.set_control_state("forward", true);
+        if bot.drive_tick().await.map(|s| matches!(s, rustcraft::bot::DriveStep::Disconnected)).unwrap_or(true) {
             break;
         }
-        for _ in 0..8 {
-            let bp = bot.entity.position;
-            bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, bp.y - 0.5, tz as f64 + 0.5));
-            bot.set_control_state("forward", true);
-            if bot.drive_tick().await.map(|s| matches!(s, rustcraft::bot::DriveStep::Disconnected)).unwrap_or(true) {
-                break;
-            }
-            if count_logs(bot) > logs0 {
-                break;
-            }
-        }
-        bot.clear_control_states();
-        bot.wait_ticks(4).await.ok();
     }
+    bot.clear_control_states();
+    bot.wait_ticks(3).await.ok();
 }
 
 const PLACEABLE: &[&str] = &[
