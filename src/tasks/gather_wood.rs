@@ -156,30 +156,39 @@ fn placeable_count(bot: &Bot) -> i32 {
 /// Hand-dig a few soft blocks around the bot (basin walls) to get pillar
 /// material when we have none.
 async fn dig_for_blocks(bot: &mut Bot<'_>) {
-    let want = 4;
-    // Prefer the FLOOR blocks beside the bot (dy=-1) — in an open basin the
-    // feet-level neighbours are air. Digging a neighbouring floor block yields
-    // dirt and leaves the bot standing on its own block.
+    let want = 5;
+    // Dig WALL blocks at feet/head level beside the bot (never the floor — that
+    // sinks us into a hole). On a hillside there's a dirt wall to harvest; on a
+    // fully-open flat basin there's nothing, and the caller will explore instead.
     let offsets = [
-        (1, -1, 0), (-1, -1, 0), (0, -1, 1), (0, -1, -1),
         (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1),
-        (1, 1, 0), (0, 1, 1),
+        (1, 1, 0), (-1, 1, 0), (0, 1, 1), (0, 1, -1),
     ];
-    for (dx, dy, dz) in offsets {
+    for _ in 0..3 {
         if placeable_count(bot) >= want {
             break;
         }
-        let p = bot.entity.position;
-        let (bx, by, bz) = (p.x.floor() as i32 + dx, p.y.floor() as i32 + dy, p.z.floor() as i32 + dz);
-        let soft = bot
-            .block_at(bx, by, bz)
-            .map(|b| {
-                let n = &b.name;
-                n.contains("dirt") || n.contains("grass") || n.contains("sand") || n.contains("gravel")
-            })
-            .unwrap_or(false);
-        if soft && bot.dig(bx, by, bz).await.is_ok() {
-            collect_at(bot, bx, bz).await;
+        let mut dug = false;
+        for (dx, dy, dz) in offsets {
+            if placeable_count(bot) >= want {
+                break;
+            }
+            let p = bot.entity.position;
+            let (bx, by, bz) = (p.x.floor() as i32 + dx, p.y.floor() as i32 + dy, p.z.floor() as i32 + dz);
+            let soft = bot
+                .block_at(bx, by, bz)
+                .map(|b| {
+                    let n = &b.name;
+                    n.contains("dirt") || n.contains("grass") || n.contains("sand") || n.contains("gravel")
+                })
+                .unwrap_or(false);
+            if soft && bot.dig(bx, by, bz).await.is_ok() {
+                collect_at(bot, bx, bz).await;
+                dug = true;
+            }
+        }
+        if !dug {
+            break;
         }
     }
 }
@@ -195,6 +204,7 @@ async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
             break;
         }
     }
+    println!("    pillar: blocks={} have={have} y={:.0}", placeable_count(bot), bot.entity.position.y);
     if !have {
         return false;
     }
@@ -239,10 +249,12 @@ async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
         }
         // If we failed to gain height this step, stop trying.
         if bot.entity.position.y < start_y + 0.5 {
+            println!("    pillar: step failed (rose={rose} y={:.1})", bot.entity.position.y);
             break;
         }
     }
     bot.clear_control_states();
+    println!("    pillar: done y={:.0}", bot.entity.position.y);
     bot.entity.position.y >= overall_start + 1.0
 }
 
