@@ -213,6 +213,16 @@ async fn pillar_up(bot: &mut Bot<'_>, height: i32) -> bool {
         if placeable_count(bot) == 0 {
             break;
         }
+        // Settle onto solid ground first — a jump only fires when on_ground.
+        bot.clear_control_states();
+        for _ in 0..20 {
+            if bot.entity.on_ground {
+                break;
+            }
+            if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
+                break;
+            }
+        }
         let start_y = bot.entity.position.y;
         let floor_y = start_y.floor() as i32;
         let fx = bot.entity.position.x.floor() as i32;
@@ -326,21 +336,70 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
     let mut trunk_bl: HashSet<(i32, i32, i32)> = HashSet::new();
     let mut attempts = 0;
     let mut consecutive_fail = 0;
+    // Track whether the bot is actually getting anywhere.
+    let mut anchor = {
+        let p = bot.entity.position;
+        (p.x.floor() as i32, p.z.floor() as i32)
+    };
+    let mut stuck_attempts = 0;
 
-    while count_logs(bot) < target && attempts < 50 {
+    while count_logs(bot) < target && attempts < 60 {
         attempts += 1;
         if in_liquid(bot) {
             escape_water(bot).await;
         }
-        // Break out of stuck regions: after several failed approaches, stop
-        // retrying across-barrier trees and explore in a fresh direction.
-        if consecutive_fail >= 3 {
-            println!("    wood: stuck — pillaring out of the basin + exploring");
+
+        // Real "fully stuck" detection: if the bot hasn't physically moved away
+        // from its anchor over the last few attempts, stop retrying unreachable
+        // trees — pillar up over whatever's blocking us and walk far in a fresh
+        // direction to leave the area entirely.
+        let pos = {
+            let p = bot.entity.position;
+            (p.x.floor() as i32, p.z.floor() as i32)
+        };
+        let moved_far = ((pos.0 - anchor.0).pow(2) + (pos.1 - anchor.1).pow(2)) as f64 >= 36.0; // 6 blocks
+        if moved_far {
+            anchor = pos;
+            stuck_attempts = 0;
+        } else {
+            stuck_attempts += 1;
+        }
+        if stuck_attempts >= 3 {
+            println!("    wood: FULLY STUCK at {pos:?} — pillar over barrier + long walk away");
+            stuck_attempts = 0;
             consecutive_fail = 0;
             blacklist.clear();
             trunk_bl.clear();
-            // Rise above low terrain to reach trees on the rim, then explore.
-            pillar_up(bot, 4).await;
+            pillar_up(bot, 3).await; // get on top of whatever's blocking us
+            // Commit to a direction and walk a long way to escape the dead end.
+            let angle = attempts as f64 * 2.0;
+            for _ in 0..150 {
+                bot.look(angle, 0.0);
+                bot.set_control_state("forward", true);
+                bot.set_control_state("sprint", true);
+                bot.set_control_state("jump", true);
+                if in_liquid(bot) {
+                    escape_water(bot).await;
+                }
+                if matches!(bot.drive_tick().await, Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_)) {
+                    break;
+                }
+            }
+            bot.clear_control_states();
+            anchor = {
+                let p = bot.entity.position;
+                (p.x.floor() as i32, p.z.floor() as i32)
+            };
+            continue;
+        }
+
+        // Softer stuck: after a few failed approaches, pillar + short explore.
+        if consecutive_fail >= 3 {
+            println!("    wood: stuck — pillaring + exploring");
+            consecutive_fail = 0;
+            blacklist.clear();
+            trunk_bl.clear();
+            pillar_up(bot, 3).await;
             let _ = explore(bot, attempts * 2).await;
             continue;
         }
