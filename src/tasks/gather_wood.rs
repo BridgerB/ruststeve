@@ -293,7 +293,7 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
                 idle = 0;
             } else {
                 idle += 1;
-                if idle > 10 {
+                if idle > 5 {
                     break; // no progress tunnelling — give up this tree
                 }
             }
