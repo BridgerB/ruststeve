@@ -33,7 +33,8 @@ fn find_trunk_raw(bot: &Bot, blacklist: &HashSet<(i32, i32, i32)>) -> Option<(i3
                     continue;
                 }
                 if is_log_at(bot, x, y, z) {
-                    let below = if dy < 0 { 8.0 * (-dy) as f64 } else { 0.0 };
+                    // Nearest log (slight bias against logs far below to avoid pits).
+                    let below = if dy < -1 { 4.0 * (-dy - 1) as f64 } else { 0.0 };
                     let key = (dx * dx + dy * dy + dz * dz) as f64 + below;
                     if key < best_key {
                         best_key = key;
@@ -257,12 +258,6 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         let d = ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt();
         println!("    wood: tree ({x},{y},{z}) d={d:.0} — walking");
         let arrived = bot.goto_near(x, y, z, 3.0).await.unwrap_or(false);
-        {
-            let p = bot.entity.position;
-            let tr = find_trunk_raw(bot, &HashSet::new());
-            println!("    wood: arrived={arrived} at ({:.0},{:.0},{:.0}) reachTrunk={tr:?}", p.x, p.y, p.z);
-        }
-
         let gained = chop(bot, target).await;
         if gained > 0 {
             println!("    wood: {} logs", count_logs(bot));
