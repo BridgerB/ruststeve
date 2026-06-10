@@ -119,6 +119,14 @@ pub async fn craft_item(
     let result = bot.craft(&recipe, count, table.is_some()).await;
     if table.is_some() {
         let _ = bot.close_window().await;
+        // Let the server's post-close inventory update arrive so the crafted item
+        // is reflected locally (otherwise the result looks lost and we re-craft).
+        bot.wait_ticks(6).await.ok();
+    }
+    // Equip the result if it's a pickaxe — moves it to the hotbar (a stable slot)
+    // and confirms it actually landed in the inventory.
+    if name.ends_with("_pickaxe") {
+        let _ = select_item(bot, name).await;
     }
     if std::env::var("CRAFT_DEBUG").is_ok() {
         let inv: Vec<String> = bot.inventory.slots.iter().flatten().filter(|i| i.count > 0).map(|i| format!("{}x{}", i.count, i.name)).collect();
