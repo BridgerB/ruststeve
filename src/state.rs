@@ -61,6 +61,14 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
             inv.diamonds += c;
         } else if n == "crafting_table" {
             inv.crafting_tables += c;
+        } else if n == "bucket" {
+            inv.buckets += c;
+        } else if n == "water_bucket" {
+            inv.water_buckets += c;
+        } else if n == "flint" {
+            inv.flint += c;
+        } else if n == "flint_and_steel" {
+            inv.flint_and_steel += c;
         }
         if FOODS.contains(&n) {
             inv.food += c;

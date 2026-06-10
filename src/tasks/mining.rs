@@ -77,6 +77,158 @@ async fn dig_down(bot: &mut Bot<'_>) -> bool {
     true
 }
 
+// ── Ore mining (coal / iron) ───────────────────────────────────────────────
+
+/// Does block `name` match the requested ore family?
+fn ore_block_matches(name: &str, ore: &str) -> bool {
+    match ore {
+        "coal" => name == "coal_ore" || name == "deepslate_coal_ore",
+        "iron" => name == "iron_ore" || name == "deepslate_iron_ore",
+        "gold" => name == "gold_ore" || name == "deepslate_gold_ore",
+        _ => false,
+    }
+}
+
+/// How much of the ore's RESOURCE the bot has (what the step counts).
+fn count_ore_resource(bot: &Bot, ore: &str) -> i32 {
+    let c = |name: &str| -> i32 {
+        bot.inventory.slots.iter().flatten().filter(|i| i.name == name).map(|i| i.count).sum()
+    };
+    match ore {
+        "coal" => c("coal"),
+        "iron" => c("raw_iron") + c("iron_ingot"),
+        _ => 0,
+    }
+}
+
+/// Nearest matching ore block in the loaded world within `r` (the chunk data
+/// holds hidden ores, so the pathfinder can tunnel to them).
+fn find_ore(bot: &Bot, ore: &str, r: i32) -> Option<(i32, i32, i32)> {
+    let p = bot.entity.position;
+    let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    let mut best = None;
+    let mut best_d = f64::MAX;
+    for dx in -r..=r {
+        for dy in -r..=r {
+            for dz in -r..=r {
+                let (x, y, z) = (bx + dx, by + dy, bz + dz);
+                if bot.block_at(x, y, z).map(|b| ore_block_matches(&b.name, ore)).unwrap_or(false) {
+                    let d = (dx * dx + dy * dy + dz * dz) as f64;
+                    if d < best_d {
+                        best_d = d;
+                        best = Some((x, y, z));
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Mine `target` of an ore resource. Finds ore in the loaded chunks and lets the
+/// pathfinder dig through stone to it; descends to find more when none is near.
+pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
+    for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {
+        if select_item(bot, tier).await.unwrap_or(false) {
+            break;
+        }
+    }
+    bot.movement.blocks_cant_break.clear();
+
+    let deadline = Instant::now() + Duration::from_secs(240);
+    let mut no_progress = 0;
+    while count_ore_resource(bot, ore) < target && Instant::now() < deadline {
+        if let Some((tx, ty, tz)) = find_ore(bot, ore, 28) {
+            let _ = bot.goto_near(tx, ty, tz, 2.0).await;
+            let before = count_ore_resource(bot, ore);
+            // Mine the ore and any ore neighbours (vein).
+            for (dx, dy, dz) in [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
+                let (x, y, z) = (tx + dx, ty + dy, tz + dz);
+                if bot.block_at(x, y, z).map(|b| ore_block_matches(&b.name, ore)).unwrap_or(false) {
+                    let _ = bot.dig_toward(x, y, z).await;
+                    collect_drops(bot, x, z).await;
+                }
+            }
+            if count_ore_resource(bot, ore) > before {
+                println!("    ore: {} {ore}", count_ore_resource(bot, ore));
+                no_progress = 0;
+            } else {
+                no_progress += 1;
+            }
+        } else {
+            // No ore visible nearby — descend toward ore-bearing depths.
+            if !dig_down(bot).await {
+                break;
+            }
+        }
+        if no_progress > 8 {
+            no_progress = 0;
+            if !dig_down(bot).await {
+                break;
+            }
+        }
+    }
+
+    let n = count_ore_resource(bot, ore);
+    if n >= target {
+        success(format!("mined {n}/{target} {ore}"))
+    } else {
+        failure(format!("mined {n}/{target} {ore}"))
+    }
+}
+
+/// Mine gravel until we have `target` flint (gravel drops flint ~10%).
+pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32) -> StepResult {
+    bot.movement.blocks_cant_break.clear();
+    let count = |bot: &Bot| -> i32 {
+        bot.inventory.slots.iter().flatten().filter(|i| i.name == "flint").map(|i| i.count).sum()
+    };
+    let find_gravel = |bot: &Bot| -> Option<(i32, i32, i32)> {
+        let p = bot.entity.position;
+        let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        let mut best = None;
+        let mut best_d = f64::MAX;
+        for dx in -20..=20 {
+            for dy in -12..=6 {
+                for dz in -20..=20 {
+                    let (x, y, z) = (bx + dx, by + dy, bz + dz);
+                    if bot.block_at(x, y, z).map(|b| b.name == "gravel").unwrap_or(false) {
+                        let d = (dx * dx + dy * dy + dz * dz) as f64;
+                        if d < best_d {
+                            best_d = d;
+                            best = Some((x, y, z));
+                        }
+                    }
+                }
+            }
+        }
+        best
+    };
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut blacklist = std::collections::HashSet::new();
+    while count(bot) < target && Instant::now() < deadline {
+        match find_gravel(bot) {
+            Some(pos) if !blacklist.contains(&pos) => {
+                let _ = bot.goto_near(pos.0, pos.1, pos.2, 2.0).await;
+                let _ = bot.dig_toward(pos.0, pos.1, pos.2).await;
+                collect_drops(bot, pos.0, pos.2).await;
+                blacklist.insert(pos);
+            }
+            _ => {
+                if !dig_down(bot).await {
+                    break;
+                }
+            }
+        }
+    }
+    let n = count(bot);
+    if n >= target {
+        success(format!("got {n} flint"))
+    } else {
+        failure(format!("only {n} flint"))
+    }
+}
+
 pub async fn mine_stone(bot: &mut Bot<'_>, target: i32) -> StepResult {
     // Equip the best available pickaxe.
     for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {

@@ -62,3 +62,50 @@ pub async fn craft_stone_pickaxe(bot: &mut Bot<'_>) -> StepResult {
         _ => failure("need a crafting table"),
     }
 }
+
+/// Craft a tool/item at a (placed/found) table after ensuring N sticks.
+async fn craft_at_table(bot: &mut Bot<'_>, item: &str, sticks_needed: i32) -> StepResult {
+    if sticks_needed > 0 && crate::bot_utils::count_items(bot, "stick") < sticks_needed {
+        let _ = craft_item(bot, "stick", 1, None).await;
+    }
+    match get_crafting_table(bot).await {
+        Ok(Some(table)) => craft_item(bot, item, 1, Some(table)).await,
+        _ => failure("need a crafting table"),
+    }
+}
+
+pub async fn craft_stone_sword(bot: &mut Bot<'_>) -> StepResult {
+    craft_at_table(bot, "stone_sword", 1).await
+}
+
+pub async fn craft_furnace(bot: &mut Bot<'_>) -> StepResult {
+    craft_at_table(bot, "furnace", 0).await
+}
+
+pub async fn craft_iron_pickaxe(bot: &mut Bot<'_>) -> StepResult {
+    craft_at_table(bot, "iron_pickaxe", 2).await
+}
+
+pub async fn craft_buckets(bot: &mut Bot<'_>, count: i32) -> StepResult {
+    // Each bucket is 3 iron. Craft one at a time up to `count` while iron lasts.
+    while crate::bot_utils::count_items(bot, "bucket") + crate::bot_utils::count_items(bot, "water_bucket") < count
+        && crate::bot_utils::count_items(bot, "iron_ingot") >= 3
+    {
+        let r = craft_at_table(bot, "bucket", 0).await;
+        if !r.success {
+            return r;
+        }
+    }
+    success(format!("have {} buckets", crate::bot_utils::count_items(bot, "bucket")))
+}
+
+pub async fn get_flint_and_steel(bot: &mut Bot<'_>) -> StepResult {
+    // Need flint (from gravel) + 1 iron.
+    if crate::bot_utils::count_items(bot, "flint") < 1 {
+        let _ = crate::tasks::mining::mine_gravel_for_flint(bot, 1).await;
+        if crate::bot_utils::count_items(bot, "flint") < 1 {
+            return failure("could not get flint from gravel");
+        }
+    }
+    craft_at_table(bot, "flint_and_steel", 0).await
+}

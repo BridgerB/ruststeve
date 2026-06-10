@@ -13,6 +13,10 @@ pub struct Inventory {
     pub diamonds: i32,
     pub food: i32,
     pub crafting_tables: i32,
+    pub buckets: i32,
+    pub water_buckets: i32,
+    pub flint: i32,
+    pub flint_and_steel: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
