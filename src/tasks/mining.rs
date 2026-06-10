@@ -84,6 +84,9 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32) -> StepResult {
             break;
         }
     }
+    // Now that we hold a pickaxe, allow the pathfinder to break stone again
+    // (it's blocked by default so wood-gathering doesn't wedge on stone).
+    bot.movement.blocks_cant_break.clear();
 
     let deadline = Instant::now() + Duration::from_secs(100);
     let mut no_progress = 0;
