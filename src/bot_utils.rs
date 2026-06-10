@@ -114,6 +114,9 @@ pub async fn craft_item(
         if bot.current_window.is_none() {
             let _ = bot.open_block(tx, ty, tz, Face::Top).await;
         }
+        // Wait for the server to send the table window's contents before crafting,
+        // else we craft against a half-populated window and the result desyncs.
+        bot.wait_ticks(6).await.ok();
     }
 
     let result = bot.craft(&recipe, count, table.is_some()).await;
