@@ -147,6 +147,18 @@ async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
     bot.wait_ticks(3).await.ok();
 }
 
+/// Would stepping one block in cardinal (fx,fz) drop the bot more than 1 block?
+/// Used to stop the raw walks from striding off a cliff into a pit they can't
+/// climb back out of (the pathfinder already avoids this; raw walking doesn't).
+fn drop_ahead(bot: &Bot, fx: i32, fz: i32) -> bool {
+    let p = bot.entity.position;
+    let (px, py, pz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    // Solid at feet-1 (flat) or feet-2 (1-block step down) ahead = safe.
+    let f1 = bot.block_state_at(px + fx, py - 1, pz + fz) != 0;
+    let f2 = bot.block_state_at(px + fx, py - 2, pz + fz) != 0;
+    !(f1 || f2)
+}
+
 fn is_soft(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
     bot.block_at(x, y, z)
         .map(|b| {
@@ -180,6 +192,10 @@ async fn approach_raw(bot: &mut Bot<'_>, tx: i32, ty: i32, tz: i32, max_ticks: u
         } else {
             (0, dz.signum() as i32)
         };
+        // Don't stride off a cliff into a pit we can't climb back out of.
+        if drop_ahead(bot, fx, fz) {
+            break;
+        }
         // Clear headroom to climb (head-forward, above-forward, above our head),
         // but keep the feet-forward block as a step. Stone at body height = stop.
         let mut hard = false;
@@ -263,8 +279,9 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32, ticks: u32) {
     let angle = attempt as f64 * 1.7;
     let empty = HashSet::new();
     for i in 0..ticks {
-        // Never walk toward lava — stop and let the next attempt pick a new way.
-        if lava_near(bot, 3) {
+        // Never walk toward lava, or off a cliff into an inescapable pit.
+        let (fx, fz) = (-(angle.sin()).round() as i32, -(angle.cos()).round() as i32);
+        if lava_near(bot, 3) || drop_ahead(bot, fx, fz) {
             break;
         }
         bot.look(angle, 0.0);
@@ -330,7 +347,12 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
                 approach_raw(bot, x, y, z, 40).await;
             }
         }
-        let reached = find_trunk_raw(bot, &HashSet::new()).is_some();
+        let tr = find_trunk_raw(bot, &HashSet::new());
+        let reached = tr.is_some();
+        {
+            let p = bot.entity.position;
+            println!("    wood: at ({:.0},{:.0},{:.0}) reached={reached} trunk={tr:?}", p.x, p.y, p.z);
+        }
         let gained = chop(bot, target).await;
         if gained > 0 {
             println!("    wood: {} logs", count_logs(bot));
