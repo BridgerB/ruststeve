@@ -309,35 +309,40 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
 /// tree-accessible terrain. Uses the pathfinder (which routes AROUND unbreakable
 /// stone) to a far waypoint in a rotating direction — a raw walk just wedges on
 /// the stone walls here. Re-scans for reachable logs along the way.
-async fn explore(bot: &mut Bot<'_>, attempt: i32, home: (i32, i32)) {
+async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32)) {
     let empty: HashSet<(i32, i32)> = HashSet::new();
-    // Commit to a long march in a rotating compass direction FROM WHERE WE ARE
-    // (not home) so successive calls cover fresh ground — a treeless spawn needs
-    // us to actually travel away, not bounce back to the same barren start.
-    let angle = attempt as f64 * 1.7;
+    // Commit to a heading (rotating only SLOWLY across calls) and travel far via
+    // short ~16-block hops chained FROM THE CURRENT POSITION — short hops path
+    // reliably even over hills, and chaining them covers real ground instead of
+    // timing out on one distant waypoint and bouncing in place.
+    let angle = attempt as f64 * 0.5;
     let p = bot.entity.position;
-    let (sx, sz) = (p.x.floor() as i32, p.z.floor() as i32);
-    // Every 4th try, snap back toward home first (escape a dead-end basin).
-    if attempt % 4 == 0 {
-        let _ = bot.goto_xz(home.0, home.1, 6.0).await;
-    }
-    println!("    wood: exploring from ({sx},{sz}) dir={angle:.2}");
-    for hop in 1..=5 {
-        let dist = 30.0 * hop as f64;
-        let tx = sx + (angle.cos() * dist) as i32;
-        let tz = sz + (angle.sin() * dist) as i32;
-        let reached = bot.goto_xz(tx, tz, 8.0).await.unwrap_or(false);
+    println!("    wood: exploring from ({:.0},{:.0}) dir={angle:.2}", p.x, p.z);
+    let mut blocked_hops = 0;
+    for hop in 1..=8 {
+        let p = bot.entity.position;
+        // Fan the heading slightly per hop so a single obstacle doesn't fully stop us.
+        let a = angle + (hop as f64 * 0.15);
+        let tx = p.x.floor() as i32 + (a.cos() * 16.0) as i32;
+        let tz = p.z.floor() as i32 + (a.sin() * 16.0) as i32;
+        let reached = bot.goto_xz(tx, tz, 4.0).await.unwrap_or(false);
         if in_liquid(bot) {
             escape_water(bot).await;
         }
-        let np = bot.entity.position;
         if find_log(bot, 28, &empty).is_some() {
+            let np = bot.entity.position;
             println!("    wood: found trees near ({:.0},{:.0})", np.x, np.z);
             return;
         }
         if !reached {
-            println!("    wood: hop {hop} blocked at ({:.0},{:.0}) — rotating", np.x, np.z);
-            return; // path blocked this way; next call rotates the angle
+            blocked_hops += 1;
+            if blocked_hops >= 3 {
+                let np = bot.entity.position;
+                println!("    wood: stuck exploring at ({:.0},{:.0}) — rotating", np.x, np.z);
+                return; // genuinely wedged this way; next call rotates more
+            }
+        } else {
+            blocked_hops = 0;
         }
     }
 }
