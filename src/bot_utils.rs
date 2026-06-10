@@ -133,8 +133,14 @@ pub async fn get_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i3
         bot.goto(pos.0, pos.1, pos.2).await?;
         return Ok(Some(pos));
     }
+    // No table in the world — craft one on demand if we don't have the item
+    // (the step machine may have skipped the dedicated craft-table step).
     if count_items(bot, "crafting_table") == 0 {
-        return Ok(None);
+        let _ = craft_item(bot, "crafting_table", 1, None).await;
+        if count_items(bot, "crafting_table") == 0 {
+            println!("    table: could not craft a crafting_table");
+            return Ok(None);
+        }
     }
     place_crafting_table(bot).await
 }

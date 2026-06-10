@@ -71,6 +71,29 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
+    // Optional: teleport to a starting position (like steve's MCP spawnBot) so
+    // the bot can be dropped at a real forest instead of a hazard spawn. Needs op.
+    // MC_TP="x y z".
+    if let Ok(tp) = std::env::var("MC_TP") {
+        let parts: Vec<&str> = tp.split_whitespace().collect();
+        if parts.len() == 3 {
+            println!("teleporting to {tp} …");
+            let me = bot.username().to_string();
+            bot.run_command(&format!("tp {} {} {} {}", me, parts[0], parts[1], parts[2])).await.ok();
+            for _ in 0..60 {
+                bot.drive_tick().await.ok();
+            }
+            // reload chunks at the new location
+            let mut c = 0;
+            while c < 8 {
+                if let Ok(Some(BotEvent::ChunkLoad(..))) = bot.next_event().await {
+                    c += 1;
+                }
+            }
+            println!("now at {:?}", bot.entity.position);
+        }
+    }
+
     println!("world ready — starting speedrun loop");
     let mut idle = 0;
     loop {
