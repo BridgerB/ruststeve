@@ -58,16 +58,21 @@ fn find_stone(bot: &Bot, r: i32) -> Option<(i32, i32, i32)> {
 /// if it can't (lava below, or the dig failed).
 async fn dig_down(bot: &mut Bot<'_>) -> bool {
     let p = bot.entity.position;
-    let (x, y, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-    let below = (x, y - 1, z);
+    let x = p.x.floor() as i32;
+    let z = p.z.floor() as i32;
+    // The block the bot is STANDING ON. Using floor(y)-1 is wrong when physics
+    // jitter dips position.y just under the integer (e.g. 53.92 → floor-1 digs the
+    // block one too low, leaving the real support intact). floor(y-0.5) is robust.
+    let y = (p.y - 0.5).floor() as i32;
+    let below = (x, y, z);
     if bot.block_at(below.0, below.1, below.2).map(|b| b.name.contains("lava")).unwrap_or(false) {
         return false;
     }
-    if y - 1 <= bot.game.min_y + 4 {
+    if y <= bot.game.min_y + 4 {
         return false;
     }
     if bot.block_state_at(below.0, below.1, below.2) == 0 {
-        bot.wait_ticks(8).await.ok();
+        bot.wait_ticks(8).await.ok(); // already open — just let physics drop us
         return true;
     }
     if bot.dig(below.0, below.1, below.2).await.is_err() {
