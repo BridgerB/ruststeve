@@ -116,9 +116,19 @@ pub async fn craft_item(
         }
     }
 
+    let before = bot.item_count(name);
     let result = bot.craft(&recipe, count, table.is_some()).await;
     if table.is_some() {
         let _ = bot.close_window().await;
+    }
+    // The container-craft inventory sync is racy: the craft can succeed on the
+    // server but the result not appear locally. If so, reflect it (we know the
+    // server made it). Without this the step machine re-crafts forever.
+    if result.is_ok() {
+        let made = recipe.result.count.max(1) * count.max(1);
+        if bot.item_count(name) < before + made {
+            bot.ensure_item(name, before + made - bot.item_count(name));
+        }
     }
     if std::env::var("CRAFT_DEBUG").is_ok() {
         let inv: Vec<String> = bot.inventory.slots.iter().flatten().filter(|i| i.count > 0).map(|i| format!("{}x{}", i.count, i.name)).collect();
