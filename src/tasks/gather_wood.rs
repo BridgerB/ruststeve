@@ -309,14 +309,55 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
 /// tree-accessible terrain. Uses the pathfinder (which routes AROUND unbreakable
 /// stone) to a far waypoint in a rotating direction — a raw walk just wedges on
 /// the stone walls here. Re-scans for reachable logs along the way.
+/// Surface height at (x,z): the topmost solid block (skipping leaves/logs).
+fn surface_height(bot: &Bot, x: i32, z: i32) -> i32 {
+    for y in (bot.game.min_y + 1..=160).rev() {
+        if bot.block_state_at(x, y, z) != 0 {
+            let skip = bot
+                .block_at(x, y, z)
+                .map(|b| b.name.ends_with("_leaves") || b.name.ends_with("_log"))
+                .unwrap_or(false);
+            if !skip {
+                return y;
+            }
+        }
+    }
+    bot.game.min_y
+}
+
+/// Compass angle (radians) toward the lowest surrounding terrain — used to climb
+/// DOWN off a mountain toward valley forests. None if nothing is clearly lower.
+fn downhill_angle(bot: &Bot) -> Option<f64> {
+    let p = bot.entity.position;
+    let (bx, bz) = (p.x.floor() as i32, p.z.floor() as i32);
+    let here = p.y as i32;
+    let mut best: Option<f64> = None;
+    let mut best_h = here - 2; // require a meaningful descent
+    for i in 0..8 {
+        let a = i as f64 * std::f64::consts::FRAC_PI_4;
+        let h = surface_height(bot, bx + (a.cos() * 14.0) as i32, bz + (a.sin() * 14.0) as i32);
+        if h < best_h {
+            best_h = h;
+            best = Some(a);
+        }
+    }
+    best
+}
+
 async fn explore(bot: &mut Bot<'_>, attempt: i32, home: (i32, i32), blacklist: &HashSet<(i32, i32)>) {
     // Commit to a heading (rotating only SLOWLY across calls) and travel far via
     // short ~16-block hops chained FROM THE CURRENT POSITION — short hops path
     // reliably even over hills, and chaining them covers real ground instead of
     // timing out on one distant waypoint and bouncing in place.
-    let angle = attempt as f64 * 0.5;
     let p = bot.entity.position;
-    println!("    wood: exploring from ({:.0},{:.0}) dir={angle:.2}", p.x, p.z);
+    // On a mountain (high up), head DOWNHILL toward valley forests instead of
+    // wandering uphill onto stone peaks we can't traverse without a pickaxe.
+    let angle = if p.y > 74.0 {
+        downhill_angle(bot).unwrap_or(attempt as f64 * 0.5)
+    } else {
+        attempt as f64 * 0.5
+    };
+    println!("    wood: exploring from ({:.0},{:.0},{:.0}) dir={angle:.2}", p.x, p.y, p.z);
     let mut blocked_hops = 0;
     for hop in 1..=8 {
         let p = bot.entity.position;
