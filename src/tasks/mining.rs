@@ -139,21 +139,35 @@ async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
         return false;
     }
     let (nx, nz) = (x + dx, z + dz);
-    for (cx, cy, cz) in [(nx, y + 1, nz), (nx, y, nz), (nx, y - 1, nz)] {
+    for (cx, cy, cz) in [(nx, y + 1, nz), (nx, y, nz), (nx, y - 1, nz), (nx, y - 2, nz)] {
         if bot.block_at(cx, cy, cz).map(|b| b.name.contains("lava")).unwrap_or(false) {
             return false;
         }
     }
+    // Open a 2-high niche ahead and the step below it, so there's a 1-drop forward.
     let _ = bot.dig(nx, y + 1, nz).await; // head clearance ahead
     let _ = bot.dig(nx, y, nz).await; // feet ahead
     let _ = bot.dig(nx, y - 1, nz).await; // the step down
-    bot.look_at(rustcraft::vec3::vec3(nx as f64 + 0.5, (y - 1) as f64, nz as f64 + 0.5));
-    bot.set_control_state("forward", true);
-    for _ in 0..8 {
-        bot.drive_tick().await.ok();
+    // Move onto the step. The pathfinder handles the 1-block forward drop; fall
+    // back to a raw walk if it can't compute a path for such a short hop.
+    let moved = bot.goto_near(nx, y - 1, nz, 0.7).await.unwrap_or(false);
+    if !moved {
+        bot.look_at(rustcraft::vec3::vec3(nx as f64 + 0.5, (y - 1) as f64, nz as f64 + 0.5));
+        bot.set_control_state("forward", true);
+        for _ in 0..10 {
+            bot.drive_tick().await.ok();
+        }
+        bot.clear_control_states();
     }
-    bot.clear_control_states();
-    (bot.entity.position.y as i32) < y
+    let descended = (bot.entity.position.y as i32) < y;
+    if std::env::var("MINE_DEBUG").is_ok() {
+        eprintln!(
+            "descend dir=({dx},{dz}) from y={y} -> y={} dug({nx},{},{nz}) moved={moved} ok={descended}",
+            bot.entity.position.y as i32,
+            y - 1
+        );
+    }
+    descended
 }
 
 /// Strip-tunnel forward ~6 blocks in direction (dx,dz); the pathfinder breaks
@@ -187,12 +201,17 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
         // 1) If we're well above ore depth, just descend a staircase — don't waste
         //    time chasing unreachable ore in steep high terrain (a mountain spawn).
         if by > depth + 2 {
+            // Prefer a climbable staircase; if it can't make progress, fall back to
+            // straight dig-down (reliable) so we always reach ore depth.
             if !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
-                dir += 1; // blocked (lava/bedrock) — turn
+                dir += 1;
+                if !dig_down(bot).await {
+                    dir += 1; // both blocked (lava/bedrock) — turn and retry
+                }
             }
             idle += 1;
             if idle % 10 == 0 {
-                println!("    ore: descending to mine {ore} — y={by}");
+                println!("    ore: descending to mine {ore} — y={}", bot.entity.position.y as i32);
             }
             continue;
         }
