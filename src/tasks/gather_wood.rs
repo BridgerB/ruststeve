@@ -311,27 +311,33 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
 /// the stone walls here. Re-scans for reachable logs along the way.
 async fn explore(bot: &mut Bot<'_>, attempt: i32, home: (i32, i32)) {
     let empty: HashSet<(i32, i32)> = HashSet::new();
-    // First RETREAT toward home (the spawn we walked in from — definitely
-    // reachable), to break out of a one-way descent into a basin we can't climb
-    // back out of by chasing trees deeper in.
-    let _ = bot.goto_xz(home.0, home.1, 4.0).await;
-    if find_log(bot, 16, &empty).is_some() {
-        return;
+    // Commit to a long march in a rotating compass direction FROM WHERE WE ARE
+    // (not home) so successive calls cover fresh ground — a treeless spawn needs
+    // us to actually travel away, not bounce back to the same barren start.
+    let angle = attempt as f64 * 1.7;
+    let p = bot.entity.position;
+    let (sx, sz) = (p.x.floor() as i32, p.z.floor() as i32);
+    // Every 4th try, snap back toward home first (escape a dead-end basin).
+    if attempt % 4 == 0 {
+        let _ = bot.goto_xz(home.0, home.1, 6.0).await;
     }
-    // Then fan out from home in a rotating direction to find accessible forest.
-    let angle = attempt as f64 * 1.3;
-    let hx = home.0 as f64;
-    let hz = home.1 as f64;
-    for hop in 1..=3 {
+    println!("    wood: exploring from ({sx},{sz}) dir={angle:.2}");
+    for hop in 1..=5 {
         let dist = 30.0 * hop as f64;
-        let tx = (hx + angle.cos() * dist) as i32;
-        let tz = (hz + angle.sin() * dist) as i32;
-        let _ = bot.goto_xz(tx, tz, 6.0).await;
+        let tx = sx + (angle.cos() * dist) as i32;
+        let tz = sz + (angle.sin() * dist) as i32;
+        let reached = bot.goto_xz(tx, tz, 8.0).await.unwrap_or(false);
         if in_liquid(bot) {
             escape_water(bot).await;
         }
-        if find_log(bot, 16, &empty).is_some() {
+        let np = bot.entity.position;
+        if find_log(bot, 28, &empty).is_some() {
+            println!("    wood: found trees near ({:.0},{:.0})", np.x, np.z);
             return;
+        }
+        if !reached {
+            println!("    wood: hop {hop} blocked at ({:.0},{:.0}) — rotating", np.x, np.z);
+            return; // path blocked this way; next call rotates the angle
         }
     }
 }
