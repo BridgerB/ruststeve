@@ -59,9 +59,13 @@ pub const STEPS: &[Step] = &[
     },
 ];
 
-/// First step that can run and isn't already complete.
+/// The FURTHEST-along step that can run and isn't complete. Picking the last
+/// (not first) runnable step keeps the bot driving toward the goal: once it has
+/// the materials to craft the pickaxe it does that, instead of re-running an
+/// earlier gather/craft step that looks "incomplete" only because a later step
+/// consumed its (consumable) output — which otherwise loops forever.
 pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
-    STEPS.iter().find(|s| (s.can_execute)(state) && !(s.is_complete)(state))
+    STEPS.iter().filter(|s| (s.can_execute)(state) && !(s.is_complete)(state)).next_back()
 }
 
 /// How many steps are complete (progress reporting).
