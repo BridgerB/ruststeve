@@ -309,7 +309,7 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
 /// tree-accessible terrain. Uses the pathfinder (which routes AROUND unbreakable
 /// stone) to a far waypoint in a rotating direction — a raw walk just wedges on
 /// the stone walls here. Re-scans for reachable logs along the way.
-async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32), blacklist: &HashSet<(i32, i32)>) {
+async fn explore(bot: &mut Bot<'_>, attempt: i32, home: (i32, i32), blacklist: &HashSet<(i32, i32)>) {
     // Commit to a heading (rotating only SLOWLY across calls) and travel far via
     // short ~16-block hops chained FROM THE CURRENT POSITION — short hops path
     // reliably even over hills, and chaining them covers real ground instead of
@@ -340,21 +340,14 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32), blacklist: 
                 let liq = in_liquid(bot);
                 let below = bot.block_at(np.x.floor() as i32, np.y.floor() as i32 - 1, np.z.floor() as i32).map(|b| b.name.clone()).unwrap_or_default();
                 println!(
-                    "    wood: wedged at ({:.0},{:.0},{:.0}) liquid={liq} below={below} — carving escape",
+                    "    wood: wedged at ({:.0},{:.0},{:.0}) liquid={liq} below={below} — retreating home",
                     np.x, np.y, np.z
                 );
-                // Stuck (e.g. marooned on a stone peak: can't drop off, can't dig
-                // stone while gathering). Temporarily let the pathfinder cut through
-                // stone and take bigger drops to carve a route off, then restore.
-                let saved_break = std::mem::take(&mut bot.movement.blocks_cant_break);
-                let saved_drop = bot.movement.max_drop_down;
-                bot.movement.max_drop_down = 4;
-                let tx = np.x.floor() as i32 + (a.cos() * 20.0) as i32;
-                let tz = np.z.floor() as i32 + (a.sin() * 20.0) as i32;
-                let _ = bot.goto_xz(tx, tz, 6.0).await;
-                bot.movement.blocks_cant_break = saved_break;
-                bot.movement.max_drop_down = saved_drop;
-                return; // next call rotates the heading
+                // Stuck (e.g. walked into a stone bowl we can't climb out of without
+                // a pickaxe). Retreat toward home — the path we arrived by is, by
+                // definition, traversable — then the next call rotates the heading.
+                let _ = bot.goto_xz(home.0, home.1, 6.0).await;
+                return;
             }
         } else {
             blocked_hops = 0;
@@ -422,20 +415,6 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
                 let _ = bot.goto_near(x, y, z, 3.0).await;
                 approach_raw(bot, x, y, z, 40).await;
             }
-        }
-        // Tree on an elevated ledge the raw walk couldn't climb? Retry the
-        // pathfinder with digging + bigger drops + 1x1 towers so it can carve a
-        // route up to it (then restore the gather config).
-        if find_trunk_raw(bot, &HashSet::new()).is_none() {
-            let saved_break = std::mem::take(&mut bot.movement.blocks_cant_break);
-            let saved_drop = bot.movement.max_drop_down;
-            let saved_tower = bot.movement.allow_1by1_towers;
-            bot.movement.max_drop_down = 3;
-            bot.movement.allow_1by1_towers = true;
-            let _ = bot.goto_near(x, y, z, 2.5).await;
-            bot.movement.blocks_cant_break = saved_break;
-            bot.movement.max_drop_down = saved_drop;
-            bot.movement.allow_1by1_towers = saved_tower;
         }
         let tr = find_trunk_raw(bot, &HashSet::new());
         let reached = tr.is_some();
