@@ -120,6 +120,11 @@ pub async fn craft_item(
     if table.is_some() {
         let _ = bot.close_window().await;
     }
+    if std::env::var("CRAFT_DEBUG").is_ok() {
+        let inv: Vec<String> = bot.inventory.slots.iter().flatten().filter(|i| i.count > 0).map(|i| format!("{}x{}", i.count, i.name)).collect();
+        let win = bot.current_window.as_ref().map(|w| w.slots.iter().flatten().filter(|i| i.count > 0).map(|i| format!("{}x{}", i.count, i.name)).collect::<Vec<_>>());
+        eprintln!("CRAFT {name}: result={result:?} inv={inv:?} win={win:?}");
+    }
     match result {
         Ok(()) => success(format!("crafted {count}x {name}")),
         Err(e) => failure(format!("craft {name}: {e}")),
