@@ -309,21 +309,27 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
 /// tree-accessible terrain. Uses the pathfinder (which routes AROUND unbreakable
 /// stone) to a far waypoint in a rotating direction — a raw walk just wedges on
 /// the stone walls here. Re-scans for reachable logs along the way.
-async fn explore(bot: &mut Bot<'_>, attempt: i32, _ticks: u32) {
+async fn explore(bot: &mut Bot<'_>, attempt: i32, home: (i32, i32)) {
     let empty: HashSet<(i32, i32)> = HashSet::new();
-    // Rotate direction across calls so successive explores fan out.
+    // First RETREAT toward home (the spawn we walked in from — definitely
+    // reachable), to break out of a one-way descent into a basin we can't climb
+    // back out of by chasing trees deeper in.
+    let _ = bot.goto_xz(home.0, home.1, 4.0).await;
+    if find_log(bot, 16, &empty).is_some() {
+        return;
+    }
+    // Then fan out from home in a rotating direction to find accessible forest.
     let angle = attempt as f64 * 1.3;
-    let p = bot.entity.position;
-    // Three hops of ~30 blocks → ~90 blocks of committed travel out of the area.
+    let hx = home.0 as f64;
+    let hz = home.1 as f64;
     for hop in 1..=3 {
         let dist = 30.0 * hop as f64;
-        let tx = (p.x + angle.cos() * dist) as i32;
-        let tz = (p.z + angle.sin() * dist) as i32;
+        let tx = (hx + angle.cos() * dist) as i32;
+        let tz = (hz + angle.sin() * dist) as i32;
         let _ = bot.goto_xz(tx, tz, 6.0).await;
         if in_liquid(bot) {
             escape_water(bot).await;
         }
-        // Found a log within reach of the new spot? Stop and let the caller chop.
         if find_log(bot, 16, &empty).is_some() {
             return;
         }
@@ -332,6 +338,12 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32, _ticks: u32) {
 
 pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
     bot.wait_ticks(4).await.ok();
+    // Remember where we started — a reachable anchor to retreat to when a basin
+    // chase dead-ends.
+    let home = {
+        let p = bot.entity.position;
+        (p.x.floor() as i32, p.z.floor() as i32)
+    };
     let mut blacklist: HashSet<(i32, i32)> = HashSet::new();
     let mut attempts = 0;
     let mut failed_trees = 0; // consecutive trees we couldn't get a log from
@@ -356,7 +368,7 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         if found.is_none() || failed_trees >= 4 {
             println!("    wood: leaving this area — exploring for accessible trees");
             blacklist.clear();
-            explore(bot, attempts, 200).await;
+            explore(bot, attempts, home).await;
             failed_trees = 0;
             continue;
         }
