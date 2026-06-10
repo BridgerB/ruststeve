@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use rustcraft::bot::{Bot, DriveStep};
 use rustcraft::vec3::vec3;
 
-use crate::bot_utils::{collect_drops, count_items, select_item};
+use crate::bot_utils::{collect_drops, select_item};
 use crate::types::{failure, success, StepResult};
 
 const ANIMALS: &[&str] = &["cow", "pig", "sheep", "chicken", "rabbit"];

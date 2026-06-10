@@ -101,9 +101,129 @@ fn count_ore_resource(bot: &Bot, ore: &str) -> i32 {
     }
 }
 
-/// Nearest matching ore block in the loaded world within `r` (the chunk data
-/// holds hidden ores, so the pathfinder can tunnel to them).
-fn find_ore(bot: &Bot, ore: &str, r: i32) -> Option<(i32, i32, i32)> {
+/// Mine reachable ore + its connected vein. Returns how many resource units the
+/// bot gained (0 if it couldn't actually get to the ore).
+async fn mine_vein(bot: &mut Bot<'_>, ore: &str, tx: i32, ty: i32, tz: i32) -> i32 {
+    let before = count_ore_resource(bot, ore);
+    // Walk into reach (the pathfinder digs a horizontal/diagonal path to it).
+    let _ = bot.goto_near(tx, ty, tz, 1.8).await;
+    // Mine the ore and any directly-touching ore (a vein), finishing with
+    // dig_toward which carves through the last block or two of stone.
+    let mut frontier = vec![(tx, ty, tz)];
+    let mut seen = std::collections::HashSet::new();
+    while let Some((x, y, z)) = frontier.pop() {
+        if !seen.insert((x, y, z)) {
+            continue;
+        }
+        if !bot.block_at(x, y, z).map(|b| ore_block_matches(&b.name, ore)).unwrap_or(false) {
+            continue;
+        }
+        let _ = bot.dig_toward(x, y, z).await;
+        collect_drops(bot, x, z).await;
+        if bot.block_state_at(x, y, z) == 0 {
+            for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
+                frontier.push((x + dx, y + dy, z + dz));
+            }
+        }
+    }
+    count_ore_resource(bot, ore) - before
+}
+
+/// Dig one descending stair-step in direction (dx,dz): opens head+feet+floor so
+/// the bot drops one level AND leaves a 1-high step it can later walk back up.
+/// Returns false if blocked (lava/bedrock) — caller should turn.
+async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
+    let p = bot.entity.position;
+    let (x, y, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    if y - 2 <= bot.game.min_y + 4 {
+        return false;
+    }
+    let (nx, nz) = (x + dx, z + dz);
+    for (cx, cy, cz) in [(nx, y + 1, nz), (nx, y, nz), (nx, y - 1, nz)] {
+        if bot.block_at(cx, cy, cz).map(|b| b.name.contains("lava")).unwrap_or(false) {
+            return false;
+        }
+    }
+    let _ = bot.dig(nx, y + 1, nz).await; // head clearance ahead
+    let _ = bot.dig(nx, y, nz).await; // feet ahead
+    let _ = bot.dig(nx, y - 1, nz).await; // the step down
+    bot.look_at(rustcraft::vec3::vec3(nx as f64 + 0.5, (y - 1) as f64, nz as f64 + 0.5));
+    bot.set_control_state("forward", true);
+    for _ in 0..8 {
+        bot.drive_tick().await.ok();
+    }
+    bot.clear_control_states();
+    (bot.entity.position.y as i32) < y
+}
+
+/// Strip-tunnel forward ~6 blocks in direction (dx,dz); the pathfinder breaks
+/// stone since blocks_cant_break is cleared. Returns whether it advanced.
+async fn strip_tunnel(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
+    let p = bot.entity.position;
+    let (tx, tz) = (p.x.floor() as i32 + dx * 6, p.z.floor() as i32 + dz * 6);
+    bot.goto_xz(tx, tz, 1.0).await.unwrap_or(false)
+}
+
+/// Mine `target` of an ore resource. Strategy: descend a staircase to ore depth,
+/// then strip-tunnel, mining any reachable ore (and its vein) found nearby. The
+/// loaded chunk data holds hidden ores so we can beeline toward them.
+pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
+    for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {
+        if select_item(bot, tier).await.unwrap_or(false) {
+            break;
+        }
+    }
+    bot.movement.blocks_cant_break.clear();
+    // Productive depths: iron peaks low, coal is everywhere — go reasonably deep.
+    let depth = if ore == "iron" { 35 } else { 50 };
+    let dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut blacklist: std::collections::HashSet<(i32, i32, i32)> = std::collections::HashSet::new();
+    let mut dir = 0usize;
+    let mut idle = 0;
+    while count_ore_resource(bot, ore) < target && Instant::now() < deadline {
+        let by = bot.entity.position.y as i32;
+        // 1) Grab any reachable ore nearby (skip ones we've already failed on).
+        let found = find_ore_excluding(bot, ore, 12, &blacklist);
+        if let Some((tx, ty, tz)) = found {
+            let gained = mine_vein(bot, ore, tx, ty, tz).await;
+            if gained > 0 {
+                println!("    ore: {} {ore} (y={})", count_ore_resource(bot, ore), bot.entity.position.y as i32);
+                idle = 0;
+                continue;
+            }
+            blacklist.insert((tx, ty, tz)); // couldn't reach it — don't retry
+        }
+        // 2) No reachable ore — descend toward depth, then strip-tunnel.
+        idle += 1;
+        if by > depth {
+            if !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
+                dir += 1; // blocked — turn
+            }
+        } else if !strip_tunnel(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
+            dir += 1;
+        }
+        if idle % 12 == 0 {
+            println!("    ore: searching {ore} — y={by} have={}", count_ore_resource(bot, ore));
+        }
+    }
+
+    let n = count_ore_resource(bot, ore);
+    if n >= target {
+        success(format!("mined {n}/{target} {ore}"))
+    } else {
+        failure(format!("mined {n}/{target} {ore}"))
+    }
+}
+
+/// find_ore but skipping blacklisted positions.
+fn find_ore_excluding(
+    bot: &Bot,
+    ore: &str,
+    r: i32,
+    blacklist: &std::collections::HashSet<(i32, i32, i32)>,
+) -> Option<(i32, i32, i32)> {
     let p = bot.entity.position;
     let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
     let mut best = None;
@@ -112,6 +232,9 @@ fn find_ore(bot: &Bot, ore: &str, r: i32) -> Option<(i32, i32, i32)> {
         for dy in -r..=r {
             for dz in -r..=r {
                 let (x, y, z) = (bx + dx, by + dy, bz + dz);
+                if blacklist.contains(&(x, y, z)) {
+                    continue;
+                }
                 if bot.block_at(x, y, z).map(|b| ore_block_matches(&b.name, ore)).unwrap_or(false) {
                     let d = (dx * dx + dy * dy + dz * dz) as f64;
                     if d < best_d {
@@ -123,58 +246,6 @@ fn find_ore(bot: &Bot, ore: &str, r: i32) -> Option<(i32, i32, i32)> {
         }
     }
     best
-}
-
-/// Mine `target` of an ore resource. Finds ore in the loaded chunks and lets the
-/// pathfinder dig through stone to it; descends to find more when none is near.
-pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
-    for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {
-        if select_item(bot, tier).await.unwrap_or(false) {
-            break;
-        }
-    }
-    bot.movement.blocks_cant_break.clear();
-
-    let deadline = Instant::now() + Duration::from_secs(240);
-    let mut no_progress = 0;
-    while count_ore_resource(bot, ore) < target && Instant::now() < deadline {
-        if let Some((tx, ty, tz)) = find_ore(bot, ore, 28) {
-            let _ = bot.goto_near(tx, ty, tz, 2.0).await;
-            let before = count_ore_resource(bot, ore);
-            // Mine the ore and any ore neighbours (vein).
-            for (dx, dy, dz) in [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
-                let (x, y, z) = (tx + dx, ty + dy, tz + dz);
-                if bot.block_at(x, y, z).map(|b| ore_block_matches(&b.name, ore)).unwrap_or(false) {
-                    let _ = bot.dig_toward(x, y, z).await;
-                    collect_drops(bot, x, z).await;
-                }
-            }
-            if count_ore_resource(bot, ore) > before {
-                println!("    ore: {} {ore}", count_ore_resource(bot, ore));
-                no_progress = 0;
-            } else {
-                no_progress += 1;
-            }
-        } else {
-            // No ore visible nearby — descend toward ore-bearing depths.
-            if !dig_down(bot).await {
-                break;
-            }
-        }
-        if no_progress > 8 {
-            no_progress = 0;
-            if !dig_down(bot).await {
-                break;
-            }
-        }
-    }
-
-    let n = count_ore_resource(bot, ore);
-    if n >= target {
-        success(format!("mined {n}/{target} {ore}"))
-    } else {
-        failure(format!("mined {n}/{target} {ore}"))
-    }
 }
 
 /// Mine gravel until we have `target` flint (gravel drops flint ~10%).
