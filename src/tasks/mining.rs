@@ -201,9 +201,20 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
         // 1) If we're well above ore depth, just descend a staircase — don't waste
         //    time chasing unreachable ore in steep high terrain (a mountain spawn).
         if by > depth + 2 {
+            let p = bot.entity.position;
+            let (fx, fy, fz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+            let below = bot.block_at(fx, fy - 1, fz).map(|b| b.name.clone()).unwrap_or_default();
+            let below_state = bot.block_state_at(fx, fy - 1, fz);
             // Descend fast via straight dig-down (reliable); if it's blocked (lava
             // below), cut a sideways stair-step to move over and keep going down.
-            if !dig_down(bot).await && !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
+            let dug = dig_down(bot).await;
+            if std::env::var("MINE_DEBUG").is_ok() {
+                eprintln!(
+                    "descent pos=({:.2},{:.2},{:.2}) below={below}({below_state}) dug={dug} -> y={:.2}",
+                    p.x, p.y, p.z, bot.entity.position.y
+                );
+            }
+            if !dug && !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
                 dir += 1;
                 strip_tunnel(bot, dirs[dir % 4].0, dirs[dir % 4].1).await;
             }
