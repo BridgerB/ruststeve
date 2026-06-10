@@ -184,7 +184,19 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
     let mut idle = 0;
     while count_ore_resource(bot, ore) < target && Instant::now() < deadline {
         let by = bot.entity.position.y as i32;
-        // 1) Grab any reachable ore nearby (skip ones we've already failed on).
+        // 1) If we're well above ore depth, just descend a staircase — don't waste
+        //    time chasing unreachable ore in steep high terrain (a mountain spawn).
+        if by > depth + 2 {
+            if !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
+                dir += 1; // blocked (lava/bedrock) — turn
+            }
+            idle += 1;
+            if idle % 10 == 0 {
+                println!("    ore: descending to mine {ore} — y={by}");
+            }
+            continue;
+        }
+        // 2) At depth — grab any reachable ore nearby (skip failed ones).
         let found = find_ore_excluding(bot, ore, 12, &blacklist);
         if let Some((tx, ty, tz)) = found {
             let gained = mine_vein(bot, ore, tx, ty, tz).await;
@@ -195,13 +207,9 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
             }
             blacklist.insert((tx, ty, tz)); // couldn't reach it — don't retry
         }
-        // 2) No reachable ore — descend toward depth, then strip-tunnel.
+        // 3) No reachable ore here — strip-tunnel to expose more.
         idle += 1;
-        if by > depth {
-            if !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
-                dir += 1; // blocked — turn
-            }
-        } else if !strip_tunnel(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
+        if !strip_tunnel(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
             dir += 1;
         }
         if idle % 12 == 0 {
