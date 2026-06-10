@@ -225,25 +225,57 @@ async fn approach_raw(bot: &mut Bot<'_>, tx: i32, ty: i32, tz: i32, max_ticks: u
     bot.clear_control_states();
 }
 
-/// Chop the tree the bot is standing at: repeatedly dig the nearest in-reach log
-/// (clearing occluding leaves via dig_toward) and collect the drop, until no log
-/// is reachable. Returns how many logs were gained.
+/// Walk to and pick up every dropped item within range (after felling a tree).
+async fn collect_all(bot: &mut Bot<'_>) {
+    let item_type = bot.registry.entities_by_name.get("item").map(|d| d.id);
+    for _ in 0..40 {
+        let bp = bot.entity.position;
+        // nearest item drop within 10 blocks
+        let mut best: Option<(f64, f64, f64, f64)> = None;
+        for e in bot.entities.values() {
+            if item_type.is_some() && e.entity_type != item_type {
+                continue;
+            }
+            let d = ((e.position.x - bp.x).powi(2) + (e.position.z - bp.z).powi(2)).sqrt();
+            if d < 10.0 && best.as_ref().map(|b| d < b.3).unwrap_or(true) {
+                best = Some((e.position.x, e.position.y, e.position.z, d));
+            }
+        }
+        let Some((ix, iy, iz, d)) = best else { break };
+        if d < 0.6 {
+            bot.wait_ticks(2).await.ok();
+            continue;
+        }
+        if lava_near(bot, 2) {
+            break;
+        }
+        bot.look_at(vec3(ix, iy, iz));
+        bot.set_control_state("forward", true);
+        if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
+            break;
+        }
+    }
+    bot.clear_control_states();
+    bot.wait_ticks(4).await.ok();
+}
+
+/// Fell the tree the bot is standing at: break EVERY reachable trunk log (block
+/// prediction turns each to air, so `find_trunk_raw` walks up the trunk), without
+/// wandering off to collect between cuts, then collect all the drops at the end.
+/// Returns how many logs were gained.
 async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
     let start = count_logs(bot);
     let mut trunk_bl: HashSet<(i32, i32, i32)> = HashSet::new();
     let mut idle = 0;
-    // Up to 50 dig/step actions: tunnelling through leaves/dirt to an occluded
-    // trunk takes several, so judge progress by getting CLOSER, not per-tick logs.
-    for _ in 0..50 {
+    for _ in 0..60 {
         let Some((tx, ty, tz)) = find_trunk_raw(bot, &trunk_bl) else { break };
         let center = vec3(tx as f64 + 0.5, ty as f64 + 0.5, tz as f64 + 0.5);
-        let before = count_logs(bot);
         let dist_before = bot.entity.position.distance(center);
+        let mut progress = false;
         match bot.dig_toward(tx, ty, tz).await {
-            Ok(true) => collect_at(bot, tx, tz).await,
+            Ok(true) => progress = true, // broke the log (now air via prediction)
             Ok(false) => {
-                // cleared an occluding block / out of reach — step toward the log
-                // to close the gap (unless that would walk us into lava).
+                // cleared an occluder / out of reach — step toward the log.
                 if lava_near(bot, 2) {
                     break;
                 }
@@ -253,23 +285,23 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
                 bot.set_control_state("jump", above);
                 bot.wait_ticks(4).await.ok();
                 bot.clear_control_states();
+                progress = bot.entity.position.distance(center) < dist_before - 0.2;
             }
             Err(_) => break,
         }
-        // Progress = broke a log OR moved closer to the trunk.
-        if count_logs(bot) > before || bot.entity.position.distance(center) < dist_before - 0.2 {
+        if progress {
             idle = 0;
         } else {
             idle += 1;
             if idle > 6 {
-                trunk_bl.insert((tx, ty, tz)); // can't make progress on this log
+                trunk_bl.insert((tx, ty, tz)); // can't reach this log
                 idle = 0;
             }
         }
-        if count_logs(bot) >= target {
-            break;
-        }
     }
+    // Pick up everything the felled tree dropped.
+    let _ = target;
+    collect_all(bot).await;
     count_logs(bot) - start
 }
 
