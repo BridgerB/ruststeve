@@ -375,7 +375,9 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         // trees we can't actually chop) → leave and find accessible terrain.
         if found.is_none() || failed_trees >= 4 || stuck >= 5 {
             println!("    wood: leaving this area — exploring for accessible trees");
-            blacklist.clear();
+            // Do NOT clear the blacklist — keeping the unreachable trees (e.g. on a
+            // steep hill) blacklisted is what stops us re-targeting the same one
+            // forever. Old far-away entries are harmless (out of find_log range).
             explore(bot, attempts, home).await;
             failed_trees = 0;
             stuck = 0;
