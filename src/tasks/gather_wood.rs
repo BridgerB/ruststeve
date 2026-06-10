@@ -338,7 +338,12 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32)) {
             blocked_hops += 1;
             if blocked_hops >= 3 {
                 let np = bot.entity.position;
-                println!("    wood: stuck exploring at ({:.0},{:.0}) — rotating", np.x, np.z);
+                let liq = in_liquid(bot);
+                let below = bot.block_at(np.x.floor() as i32, np.y.floor() as i32 - 1, np.z.floor() as i32).map(|b| b.name.clone()).unwrap_or_default();
+                println!(
+                    "    wood: stuck exploring at ({:.0},{:.0},{:.0}) liquid={liq} below={below} — rotating",
+                    np.x, np.y, np.z
+                );
                 return; // genuinely wedged this way; next call rotates more
             }
         } else {
