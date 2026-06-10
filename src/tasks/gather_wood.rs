@@ -423,6 +423,20 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
                 approach_raw(bot, x, y, z, 40).await;
             }
         }
+        // Tree on an elevated ledge the raw walk couldn't climb? Retry the
+        // pathfinder with digging + bigger drops + 1x1 towers so it can carve a
+        // route up to it (then restore the gather config).
+        if find_trunk_raw(bot, &HashSet::new()).is_none() {
+            let saved_break = std::mem::take(&mut bot.movement.blocks_cant_break);
+            let saved_drop = bot.movement.max_drop_down;
+            let saved_tower = bot.movement.allow_1by1_towers;
+            bot.movement.max_drop_down = 3;
+            bot.movement.allow_1by1_towers = true;
+            let _ = bot.goto_near(x, y, z, 2.5).await;
+            bot.movement.blocks_cant_break = saved_break;
+            bot.movement.max_drop_down = saved_drop;
+            bot.movement.allow_1by1_towers = saved_tower;
+        }
         let tr = find_trunk_raw(bot, &HashSet::new());
         let reached = tr.is_some();
         {
