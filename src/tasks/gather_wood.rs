@@ -341,10 +341,21 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32)) {
                 let liq = in_liquid(bot);
                 let below = bot.block_at(np.x.floor() as i32, np.y.floor() as i32 - 1, np.z.floor() as i32).map(|b| b.name.clone()).unwrap_or_default();
                 println!(
-                    "    wood: stuck exploring at ({:.0},{:.0},{:.0}) liquid={liq} below={below} — rotating",
+                    "    wood: wedged at ({:.0},{:.0},{:.0}) liquid={liq} below={below} — carving escape",
                     np.x, np.y, np.z
                 );
-                return; // genuinely wedged this way; next call rotates more
+                // Stuck (e.g. marooned on a stone peak: can't drop off, can't dig
+                // stone while gathering). Temporarily let the pathfinder cut through
+                // stone and take bigger drops to carve a route off, then restore.
+                let saved_break = std::mem::take(&mut bot.movement.blocks_cant_break);
+                let saved_drop = bot.movement.max_drop_down;
+                bot.movement.max_drop_down = 4;
+                let tx = np.x.floor() as i32 + (a.cos() * 20.0) as i32;
+                let tz = np.z.floor() as i32 + (a.sin() * 20.0) as i32;
+                let _ = bot.goto_xz(tx, tz, 6.0).await;
+                bot.movement.blocks_cant_break = saved_break;
+                bot.movement.max_drop_down = saved_drop;
+                return; // next call rotates the heading
             }
         } else {
             blocked_hops = 0;
