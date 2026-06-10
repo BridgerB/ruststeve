@@ -147,6 +147,68 @@ async fn collect_at(bot: &mut Bot<'_>, x: i32, z: i32) {
     bot.wait_ticks(3).await.ok();
 }
 
+fn is_soft(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    bot.block_at(x, y, z)
+        .map(|b| {
+            let n = &b.name;
+            n.contains("dirt") || n.contains("grass") || n.contains("sand") || n.contains("gravel")
+                || n.contains("leaves") || n.contains("snow") || n.contains("mud") || n.contains("clay")
+                || n.contains("podzol") || n.contains("moss") || n.contains("rooted")
+        })
+        .unwrap_or(false)
+}
+
+/// Steve-style raw approach: when the pathfinder stalls short of a tree, walk
+/// straight at it, carving STAIRS UP the slope (clear headroom ahead + above our
+/// head, keep the feet-level block ahead as the step) and jumping to climb. This
+/// brute-forces up a grassy mountainside to an elevated trunk. Stops when a log
+/// is in chopping reach, near a stone wall it can't hand-dig, or near lava.
+async fn approach_raw(bot: &mut Bot<'_>, tx: i32, ty: i32, tz: i32, max_ticks: u32) {
+    let empty = HashSet::new();
+    for _ in 0..max_ticks {
+        if find_trunk_raw(bot, &empty).is_some() || lava_near(bot, 3) {
+            break;
+        }
+        let p = bot.entity.position;
+        let (px, py, pz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        let (dx, dz) = (tx as f64 - p.x, tz as f64 - p.z);
+        if (dx * dx + dz * dz).sqrt() < 1.6 {
+            break;
+        }
+        let (fx, fz) = if dx.abs() >= dz.abs() {
+            (dx.signum() as i32, 0)
+        } else {
+            (0, dz.signum() as i32)
+        };
+        // Clear headroom to climb (head-forward, above-forward, above our head),
+        // but keep the feet-forward block as a step. Stone at body height = stop.
+        let mut hard = false;
+        for (ax, ay, az) in [(fx, 1, fz), (fx, 2, fz), (0, 2, 0)] {
+            let (bx, by, bz) = (px + ax, py + ay, pz + az);
+            if bot.block_state_at(bx, by, bz) != 0 {
+                if is_soft(bot, bx, by, bz) {
+                    if bot.dig(bx, by, bz).await.is_err() {
+                        return;
+                    }
+                } else if ay <= 1 {
+                    hard = true;
+                }
+            }
+        }
+        if hard {
+            break;
+        }
+        bot.look_at(vec3(tx as f64 + 0.5, ty as f64 + 0.5, tz as f64 + 0.5));
+        bot.set_control_state("forward", true);
+        bot.set_control_state("sprint", true);
+        bot.set_control_state("jump", true);
+        if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
+            break;
+        }
+    }
+    bot.clear_control_states();
+}
+
 /// Chop the tree the bot is standing at: repeatedly dig the nearest in-reach log
 /// (clearing occluding leaves via dig_toward) and collect the drop, until no log
 /// is reachable. Returns how many logs were gained.
@@ -258,14 +320,25 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
         let d = ((x as f64 - p0.x).powi(2) + (z as f64 - p0.z).powi(2)).sqrt();
         println!("    wood: tree ({x},{y},{z}) d={d:.0} — walking");
         let arrived = bot.goto_near(x, y, z, 3.0).await.unwrap_or(false);
+        // If the pathfinder stalled short of the tree (no trunk in chopping
+        // reach yet), brute-force toward it — carve up the slope like steve's
+        // raw-walk fallback — then try once more if still short.
+        if find_trunk_raw(bot, &HashSet::new()).is_none() {
+            approach_raw(bot, x, y, z, 60).await;
+            if find_trunk_raw(bot, &HashSet::new()).is_none() {
+                let _ = bot.goto_near(x, y, z, 3.0).await;
+                approach_raw(bot, x, y, z, 40).await;
+            }
+        }
+        let reached = find_trunk_raw(bot, &HashSet::new()).is_some();
         let gained = chop(bot, target).await;
         if gained > 0 {
             println!("    wood: {} logs", count_logs(bot));
             failed_trees = 0;
         } else {
             blacklist.insert((x, z)); // couldn't get a log here — skip this tree
-            // Only count it against the area if we couldn't even reach it.
-            if !arrived {
+            // Only count it against the area if we never got within reach.
+            if !arrived && !reached {
                 failed_trees += 1;
             }
         }
