@@ -201,16 +201,14 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
         // 1) If we're well above ore depth, just descend a staircase — don't waste
         //    time chasing unreachable ore in steep high terrain (a mountain spawn).
         if by > depth + 2 {
-            // Prefer a climbable staircase; if it can't make progress, fall back to
-            // straight dig-down (reliable) so we always reach ore depth.
-            if !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
+            // Descend fast via straight dig-down (reliable); if it's blocked (lava
+            // below), cut a sideways stair-step to move over and keep going down.
+            if !dig_down(bot).await && !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
                 dir += 1;
-                if !dig_down(bot).await {
-                    dir += 1; // both blocked (lava/bedrock) — turn and retry
-                }
+                strip_tunnel(bot, dirs[dir % 4].0, dirs[dir % 4].1).await;
             }
             idle += 1;
-            if idle % 10 == 0 {
+            if idle % 8 == 0 {
                 println!("    ore: descending to mine {ore} — y={}", bot.entity.position.y as i32);
             }
             continue;
