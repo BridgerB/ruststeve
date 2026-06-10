@@ -305,32 +305,29 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
     count_logs(bot) - start
 }
 
-/// Sprint-walk a long way in a committed direction to leave a dead-end area and
-/// load fresh terrain. Stops early if a reachable log turns up.
-async fn explore(bot: &mut Bot<'_>, attempt: i32, ticks: u32) {
-    let angle = attempt as f64 * 1.7;
-    let empty = HashSet::new();
-    for i in 0..ticks {
-        // Never walk toward lava, or off a cliff into an inescapable pit.
-        let (fx, fz) = (-(angle.sin()).round() as i32, -(angle.cos()).round() as i32);
-        if lava_near(bot, 3) || drop_ahead(bot, fx, fz) {
-            break;
-        }
-        bot.look(angle, 0.0);
-        bot.set_control_state("forward", true);
-        bot.set_control_state("sprint", true);
-        bot.set_control_state("jump", true);
+/// March a long way to leave a dead-end (stone-hill) area and reach fresh,
+/// tree-accessible terrain. Uses the pathfinder (which routes AROUND unbreakable
+/// stone) to a far waypoint in a rotating direction — a raw walk just wedges on
+/// the stone walls here. Re-scans for reachable logs along the way.
+async fn explore(bot: &mut Bot<'_>, attempt: i32, _ticks: u32) {
+    let empty: HashSet<(i32, i32)> = HashSet::new();
+    // Rotate direction across calls so successive explores fan out.
+    let angle = attempt as f64 * 1.3;
+    let p = bot.entity.position;
+    // Three hops of ~30 blocks → ~90 blocks of committed travel out of the area.
+    for hop in 1..=3 {
+        let dist = 30.0 * hop as f64;
+        let tx = (p.x + angle.cos() * dist) as i32;
+        let tz = (p.z + angle.sin() * dist) as i32;
+        let _ = bot.goto_xz(tx, tz, 6.0).await;
         if in_liquid(bot) {
             escape_water(bot).await;
         }
-        if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
-            break;
-        }
-        if i % 10 == 0 && find_trunk_raw(bot, &empty).is_some() {
-            break;
+        // Found a log within reach of the new spot? Stop and let the caller chop.
+        if find_log(bot, 16, &empty).is_some() {
+            return;
         }
     }
-    bot.clear_control_states();
 }
 
 pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
