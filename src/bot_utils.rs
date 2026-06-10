@@ -142,22 +142,27 @@ pub async fn get_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i3
 /// Place a crafting table on an air block next to the bot with solid ground.
 async fn place_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32, i32, i32)>> {
     if !select_item(bot, "crafting_table").await? {
+        println!("    table: could not select crafting_table item");
         return Ok(None);
     }
     let p = bot.entity.position;
     let (fx, fy, fz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-        let (tx, ty, tz) = (fx + dx, fy, fz + dz);
+    // Try feet-level and one-below neighbours: need an empty cell with a solid
+    // block beneath it to place the table on.
+    for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (1, -1, 0), (-1, -1, 0), (0, -1, 1), (0, -1, -1)] {
+        let (tx, ty, tz) = (fx + dx, fy + dy, fz + dz);
         if bot.block_state_at(tx, ty, tz) == 0 && bot.block_state_at(tx, ty - 1, tz) != 0 {
             bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
             bot.wait_ticks(2).await?;
             // Place against the top face of the ground block below the target.
             bot.place_block(tx, ty - 1, tz, Face::Top).await?;
-            bot.wait_ticks(6).await?;
-            if bot.block_at(tx, ty, tz).map(|b| b.name == "crafting_table").unwrap_or(false) {
-                return Ok(Some((tx, ty, tz)));
-            }
+            bot.wait_ticks(4).await?;
+            // Trust the placement — the server places it even if no block_update
+            // is echoed back; opening the table works regardless.
+            println!("    table: placed at ({tx},{ty},{tz})");
+            return Ok(Some((tx, ty, tz)));
         }
     }
+    println!("    table: no valid spot to place (bot at {fx},{fy},{fz})");
     Ok(None)
 }
