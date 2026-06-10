@@ -347,6 +347,8 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
     let mut blacklist: HashSet<(i32, i32)> = HashSet::new();
     let mut attempts = 0;
     let mut failed_trees = 0; // consecutive trees we couldn't get a log from
+    let mut anchor = home; // last spot we made real progress (moved/chopped) from
+    let mut stuck = 0; // attempts with no real movement
 
     while count_logs(bot) < target && attempts < 60 {
         attempts += 1;
@@ -363,13 +365,18 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             }
         }
 
-        // No tree nearby, or we've struck out on several nearby trees → this area
-        // has only unreachable (elevated/cliff) trees; walk far to fresh terrain.
-        if found.is_none() || failed_trees >= 4 {
+        // Nothing nearby, struck out on several trees, or wedged in place (reaching
+        // trees we can't actually chop) → leave and find accessible terrain.
+        if found.is_none() || failed_trees >= 4 || stuck >= 5 {
             println!("    wood: leaving this area — exploring for accessible trees");
             blacklist.clear();
             explore(bot, attempts, home).await;
             failed_trees = 0;
+            stuck = 0;
+            anchor = {
+                let p = bot.entity.position;
+                (p.x.floor() as i32, p.z.floor() as i32)
+            };
             continue;
         }
 
@@ -395,14 +402,30 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             println!("    wood: at ({:.0},{:.0},{:.0}) reached={reached} trunk={tr:?}", p.x, p.y, p.z);
         }
         let gained = chop(bot, target).await;
+        // Track real movement so we notice being wedged even when "reached".
+        let now = {
+            let p = bot.entity.position;
+            (p.x.floor() as i32, p.z.floor() as i32)
+        };
+        let moved_far = ((now.0 - anchor.0).pow(2) + (now.1 - anchor.1).pow(2)) >= 36;
         if gained > 0 {
             println!("    wood: {} logs", count_logs(bot));
             failed_trees = 0;
+            stuck = 0;
+            anchor = now;
         } else {
-            blacklist.insert((x, z)); // couldn't get a log here — skip this tree
-            // Only count it against the area if we never got within reach.
-            if !arrived && !reached {
-                failed_trees += 1;
+            // Couldn't get a log here — skip this tree AND the trunk we reached.
+            blacklist.insert((x, z));
+            if let Some((tx, _, tz)) = tr {
+                blacklist.insert((tx, tz));
+            }
+            failed_trees += 1;
+            let _ = (arrived, reached);
+            if moved_far {
+                stuck = 0;
+                anchor = now;
+            } else {
+                stuck += 1;
             }
         }
     }
