@@ -309,8 +309,7 @@ async fn chop(bot: &mut Bot<'_>, target: i32) -> i32 {
 /// tree-accessible terrain. Uses the pathfinder (which routes AROUND unbreakable
 /// stone) to a far waypoint in a rotating direction — a raw walk just wedges on
 /// the stone walls here. Re-scans for reachable logs along the way.
-async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32)) {
-    let empty: HashSet<(i32, i32)> = HashSet::new();
+async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32), blacklist: &HashSet<(i32, i32)>) {
     // Commit to a heading (rotating only SLOWLY across calls) and travel far via
     // short ~16-block hops chained FROM THE CURRENT POSITION — short hops path
     // reliably even over hills, and chaining them covers real ground instead of
@@ -329,7 +328,7 @@ async fn explore(bot: &mut Bot<'_>, attempt: i32, _home: (i32, i32)) {
         if in_liquid(bot) {
             escape_water(bot).await;
         }
-        if find_log(bot, 28, &empty).is_some() {
+        if find_log(bot, 28, blacklist).is_some() {
             let np = bot.entity.position;
             println!("    wood: found trees near ({:.0},{:.0})", np.x, np.z);
             return;
@@ -399,7 +398,7 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32) -> StepResult {
             // Do NOT clear the blacklist — keeping the unreachable trees (e.g. on a
             // steep hill) blacklisted is what stops us re-targeting the same one
             // forever. Old far-away entries are harmless (out of find_log range).
-            explore(bot, attempts, home).await;
+            explore(bot, attempts, home, &blacklist).await;
             failed_trees = 0;
             stuck = 0;
             anchor = {
