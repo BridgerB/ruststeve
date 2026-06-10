@@ -168,9 +168,28 @@ async fn place_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32,
             // Place against the top face of the ground block below the target.
             bot.place_block(tx, ty - 1, tz, Face::Top).await?;
             bot.wait_ticks(4).await?;
-            // Trust the placement — the server places it even if no block_update
-            // is echoed back; opening the table works regardless.
+            select_item(bot, "crafting_table").await?;
             println!("    table: placed at ({tx},{ty},{tz})");
+            return Ok(Some((tx, ty, tz)));
+        }
+    }
+    // No open spot (e.g. mining in a tunnel) — DIG a side niche at feet level so a
+    // cell opens up with solid ground below it, then place the table there.
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let (tx, ty, tz) = (fx + dx, fy, fz + dz);
+        if bot.block_state_at(tx, ty - 1, tz) != 0 {
+            if bot.block_state_at(tx, ty, tz) != 0 && bot.dig(tx, ty, tz).await.is_err() {
+                continue;
+            }
+            if bot.block_state_at(tx, ty, tz) != 0 {
+                continue; // couldn't break it (e.g. bedrock)
+            }
+            bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
+            bot.wait_ticks(2).await?;
+            bot.place_block(tx, ty - 1, tz, Face::Top).await?;
+            bot.wait_ticks(4).await?;
+            select_item(bot, "crafting_table").await?;
+            println!("    table: dug a niche + placed at ({tx},{ty},{tz})");
             return Ok(Some((tx, ty, tz)));
         }
     }
