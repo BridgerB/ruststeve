@@ -534,21 +534,22 @@ async fn cast_obsidian_at(
         // steep down-ray hits the +Z cup wall's top and drops the lava on the bot's own
         // block. Descend to the right level (digging only the throwaway scaffold above
         // the cup, never the cup walls) before pouring.
-        while feet_y(bot) > pos.1 + 1 {
-            let p = bot.entity.position;
-            let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
-            let below = (fx, feet_y(bot) - 1, fz);
-            // Only dig non-cup scaffold to drop down; if the block below is a cup/bowl
-            // wall we need, step aside instead.
-            if name_at(bot, below.0, below.1, below.2) == "obsidian" {
-                break;
-            }
-            dig_at(bot, below.0, below.1, below.2).await;
-            bot.wait_ticks(6).await.ok();
-            if feet_y(bot) > pos.1 + 1 {
-                break; // didn't drop — avoid an infinite loop
+        // Drop to EXACTLY feet pos.y+1 — the +Z cup-wall top. The bot stands on the +Z
+        // wall at (pos.0, pos.1, pos.2+1); when a previous block left debris one block up
+        // (at pos.y+1 on that same cell) the bot perches on it at feet pos.y+2, and from
+        // there the down-ray overshoots the cup and the pour misses (cup stays air). The
+        // generic footprint descend chases the bot's floating cell and misses this exact
+        // column, so clear it explicitly — everything ABOVE the +Z wall on the stand cell,
+        // never the wall itself (pos.1) or the cup walls (z = pos.2-1/pos.2).
+        for dy in [3, 2, 1] {
+            let c = (pos.0, pos.1 + dy, pos.2 + 1);
+            let n = name_at(bot, c.0, c.1, c.2);
+            if is_solid(&n) && n != "obsidian" {
+                dig_at(bot, c.0, c.1, c.2).await;
+                bot.wait_ticks(4).await.ok();
             }
         }
+        descend_to_y(bot, pos.1 + 1).await;
         if feet_y(bot) < pos.1 + 1 {
             pillar_up(bot, pos.1 + 1).await;
         }
@@ -559,17 +560,25 @@ async fn cast_obsidian_at(
         // tenths off-centre) sends the lava onto the +Z wall instead of into the cup,
         // and a miss damages the bot + floods. So centre HARD and, if still not dead-on,
         // skip this attempt rather than pour a likely miss.
+        // Stand at the NORTH edge of the +Z wall (close to the cup), not its centre. The
+        // pour ray drops through the bot's own stand cell before reaching the cup; from
+        // the cell centre (z = stand_z+0.5) it only clears the +Z wall's top face by
+        // ~0.4 block, so a 0.01 jitter makes it clip the wall top and dump the lava at the
+        // bot's feet (cup stays air — exactly how the 2nd block kept failing). Sitting at
+        // the cup-side edge (+0.3) lets the ray exit this cell almost immediately, high up,
+        // clearing the wall top by ~0.8 block — robust to jitter.
+        let pour_z = stand_z as f64 + 0.3;
         bot.set_control_state("sneak", true);
         for _ in 0..3 {
-            walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.06, 60).await;
+            walk_to_xz(bot, pos.0 as f64 + 0.5, pour_z, 0.06, 60).await;
             let p = bot.entity.position;
-            if (p.x - (pos.0 as f64 + 0.5)).abs() < 0.12 && (p.z - (stand_z as f64 + 0.5)).abs() < 0.12 {
+            if (p.x - (pos.0 as f64 + 0.5)).abs() < 0.12 && (p.z - pour_z).abs() < 0.12 {
                 break;
             }
         }
         bot.wait_ticks(4).await.ok();
         let p = bot.entity.position;
-        let centered = (p.x - (pos.0 as f64 + 0.5)).abs() < 0.15 && (p.z - (stand_z as f64 + 0.5)).abs() < 0.15;
+        let centered = (p.x - (pos.0 as f64 + 0.5)).abs() < 0.15 && (p.z - pour_z).abs() < 0.18;
         cast_debug(&format!(
             "cast {pos:?} a{_attempt}: pre-lava feet={} bot=({:.2},{:.2}) centered={centered}",
             feet_y(bot), p.x, p.z
@@ -897,6 +906,13 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         let p2 = (bx + 1, by, bz - 2);
         cast_debug(&format!("CAST_TWO casting {p1:?} then {p2:?} from ({bx},{by},{bz})"));
         let ok2 = cast_obsidian_at(bot, p2, by, pool).await;
+        // Full reset: walk far to clean ground and settle so the 2nd block is
+        // approached as fresh as the 1st (the 2nd always failed from the cluttered
+        // post-cast state regardless of order/adjacency — testing if a clean reset
+        // is what makes block 1 reliable).
+        let _ = bot.goto_near(bx, by, bz + 8, 1.0).await;
+        descend_to_y(bot, by).await;
+        bot.wait_ticks(10).await.ok();
         let ok1 = cast_obsidian_at(bot, p1, by, pool).await;
         return if ok1 && ok2 {
             success("CAST_TWO ok — both blocks obsidian")
