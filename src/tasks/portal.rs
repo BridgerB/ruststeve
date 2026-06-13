@@ -485,12 +485,27 @@ async fn cast_obsidian_at(
             continue; // never pour lava into a leaky cup
         }
 
-        // 4. Pour LAVA into the cup.
+        // 4. Pour LAVA into the cup. A bucket pour is a raycast (use_item), so the aim
+        //    matters: the straight-down aim lands it in the cup in the open, but in a
+        //    cluttered frame (the previous block's walls beside this one) it can deflect
+        //    and miss. A pour empties the bucket whether or not it landed right, so we
+        //    can only pour ONCE per attempt — vary the aim by attempt number, and the
+        //    outer 3-attempt loop refills the lava between tries.
         walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.2, 40).await;
         select_item(bot, "lava_bucket").await.ok();
-        reliable_use(bot, vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5)).await;
+        let lava_aim = match _attempt {
+            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5), // straight down
+            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 - 0.1), // toward the N wall
+            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.8, pos.2 as f64 + 0.5), // higher into the cup
+        };
+        reliable_use(bot, lava_aim).await;
         bot.wait_ticks(8).await.ok();
         cast_debug(&format!("cast {pos:?} a{_attempt}: after_lava cup_block={}", name_at(bot, pos.0, pos.1, pos.2)));
+        // If the lava missed the cup, this attempt is wasted — bail to the next
+        // attempt (which refills the lava) rather than pouring water onto nothing.
+        if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
+            continue;
+        }
 
         // 5. Pour WATER into the block directly ABOVE the lava → obsidian.
         //    Packet-sniffing showed the bucket raycast falls THROUGH the open air block
