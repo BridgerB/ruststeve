@@ -52,18 +52,18 @@ declare -a SURF
 for i in $(seq 0 $((N-1))); do SURF[$i]=74; done
 while read -r tag i y; do [ "$tag" = SURF ] && SURF[$i]=$y; done <<< "$SURF_OUT"
 
-echo "[race] phase 2: launching $N bots (hold ${HOLD}s, goal iron_pickaxe)"
+echo "[race] phase 2: launching $N bots (hold ${HOLD}s, goal nether)"
 for i in $(seq 0 $((N-1))); do
   : > "$DIR/race-$i.log"
   # CRAFT_DEBUG uses is_ok() (empty still counts as set), so only EXPORT it for
   # the lead bot — verbose craft choreography on race-00, clean logs elsewhere.
   if [ "$i" -eq 0 ]; then
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
-      RACE_HOLD=$HOLD RACE_GOAL=iron_pickaxe CRAFT_DEBUG=1 \
+      RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   else
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
-      RACE_HOLD=$HOLD RACE_GOAL=iron_pickaxe \
+      RACE_HOLD=$HOLD RACE_GOAL=nether \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   fi
   PIDS+=($!)

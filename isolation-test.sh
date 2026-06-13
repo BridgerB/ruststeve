@@ -68,7 +68,19 @@ setup_prereqs() {
     get_flint_and_steel) g="'clear $name' 'give $name minecraft:iron_pickaxe' 'give $name minecraft:iron_ingot 2'"
                          # gravel pile to mine flint from
                          rcon "'fill $((x+3)) $Y $((z-2)) $((x+6)) $((Y+2)) $((z+2)) minecraft:gravel'" >/dev/null;;
-    build_nether_portal|enter_nether)
+    enter_nether)
+                         # Give a PRE-BUILT, LIT nether portal 3 north of the bot so the
+                         # test isolates the walk-in (building+lighting is covered by the
+                         # build_nether_portal test). 4-wide x 5-tall X-axis frame; interior
+                         # filled with portal blocks. Bottom obsidian at floor level (Y).
+                         g="'clear $name' 'give $name minecraft:iron_pickaxe'"
+                         local pz=$((z-3))
+                         rcon "'fill $x $Y $pz $((x+3)) $Y $pz minecraft:obsidian'" \
+                              "'fill $x $((Y+4)) $pz $((x+3)) $((Y+4)) $pz minecraft:obsidian'" \
+                              "'fill $x $((Y+1)) $pz $x $((Y+3)) $pz minecraft:obsidian'" \
+                              "'fill $((x+3)) $((Y+1)) $pz $((x+3)) $((Y+3)) $pz minecraft:obsidian'" \
+                              "'fill $((x+1)) $((Y+1)) $pz $((x+2)) $((Y+3)) $pz minecraft:nether_portal[axis=x]'" >/dev/null;;
+    build_nether_portal)
                          g="'clear $name' 'give $name minecraft:iron_pickaxe' \
                             'give $name minecraft:water_bucket' 'give $name minecraft:bucket' \
                             'give $name minecraft:flint_and_steel' 'give $name minecraft:cobblestone 128'"
