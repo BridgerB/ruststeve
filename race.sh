@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 10-bot race to a natural iron pickaxe. Bots are spaced 50 blocks apart heading
-# south (+Z) from (0,0): race-00 at z=0, race-01 at z=50, … race-09 at z=450.
-# First bot to craft an iron pickaxe wins; otherwise the race ends after 60 min.
+# 5-bot race from spawn to the NETHER (build + light an obsidian-cast portal and
+# step through). Bots are spaced 100 blocks apart heading south (+Z) from (0,0):
+# race-00 at z=0, race-01 at z=100, … race-04 at z=400. First bot to reach the
+# nether wins; otherwise the race ends after RACE_SECONDS (2h). Dead bots are
+# relaunched mid-race and resume their server-side inventory.
 set -u
 
 HOST=144.24.32.76
@@ -11,7 +13,7 @@ DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/../rustcraft/data
 N=5
-RACE_SECONDS=3600
+RACE_SECONDS=7200
 HOLD=45
 
 NAMES=(); LANES=()
@@ -52,11 +54,10 @@ declare -a SURF
 for i in $(seq 0 $((N-1))); do SURF[$i]=74; done
 while read -r tag i y; do [ "$tag" = SURF ] && SURF[$i]=$y; done <<< "$SURF_OUT"
 
-echo "[race] phase 2: launching $N bots (hold ${HOLD}s, goal nether)"
-for i in $(seq 0 $((N-1))); do
-  : > "$DIR/race-$i.log"
-  # CRAFT_DEBUG uses is_ok() (empty still counts as set), so only EXPORT it for
-  # the lead bot — verbose craft choreography on race-00, clean logs elsewhere.
+# Launch one bot process for lane i (verbose CRAFT_DEBUG only on the lead bot).
+# Appends to its log (so a restart's output accumulates) and records the PID by index.
+launch_bot() {
+  local i=$1
   if [ "$i" -eq 0 ]; then
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
       RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
@@ -66,7 +67,13 @@ for i in $(seq 0 $((N-1))); do
       RACE_HOLD=$HOLD RACE_GOAL=nether \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   fi
-  PIDS+=($!)
+  PIDS[$i]=$!
+}
+
+echo "[race] phase 2: launching $N bots (hold ${HOLD}s, goal nether)"
+for i in $(seq 0 $((N-1))); do
+  : > "$DIR/race-$i.log"
+  launch_bot "$i"
   sleep 1
 done
 
@@ -101,10 +108,24 @@ while [ $SECONDS -lt $RACE_SECONDS ]; do
     fi
   done
   [ -n "$WINNER" ] && break
-  # all bots dead/exited?
+  # Relaunch any bot whose process exited (a server-load disconnect makes the bot
+  # exit cleanly via the `?` on wait_ticks). The server PERSISTS the player's
+  # inventory across reconnects, so a relaunched bot resumes its progress rather
+  # than starting over — re-op + re-tp into its lane (NO clear) and it picks up
+  # where it left off. This keeps a 2-hour race populated despite disconnects.
   alive=0
-  for p in "${PIDS[@]}"; do kill -0 "$p" 2>/dev/null && alive=$((alive+1)); done
-  if [ "$alive" -eq 0 ]; then echo "[race] all bots exited"; break; fi
+  for i in $(seq 0 $((N-1))); do
+    if kill -0 "${PIDS[i]}" 2>/dev/null; then
+      alive=$((alive+1))
+    else
+      echo "[race] lane $i (${NAMES[i]}) exited — relaunching (resumes server-side inventory)"
+      launch_bot "$i"
+      for t in $(seq 1 20); do grep -q 'holding' "$DIR/race-$i.log" 2>/dev/null && break; sleep 2; done
+      y=$(( ${SURF[i]} + 1 ))
+      $SSH "$MCRCON \"op ${NAMES[i]}\" \"tp ${NAMES[i]} 0 $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} 0 $y ${LANES[i]}\"" >/dev/null 2>&1
+      alive=$((alive+1))
+    fi
+  done
   # status line every loop
   printf '[race t=%ds] alive=%d' "$SECONDS" "$alive"
   for i in $(seq 0 $((N-1))); do
@@ -116,10 +137,10 @@ while [ $SECONDS -lt $RACE_SECONDS ]; do
 done
 
 if [ -n "$WINNER" ]; then
-  echo "[race] WINNER: ${NAMES[$WINNER]} (lane z=${LANES[$WINNER]}) crafted an iron pickaxe at t=${SECONDS}s"
-  $SSH "$MCRCON \"say RACE OVER — ${NAMES[$WINNER]} wins with an iron pickaxe!\"" >/dev/null 2>&1
+  echo "[race] WINNER: ${NAMES[$WINNER]} (lane z=${LANES[$WINNER]}) reached the NETHER at t=${SECONDS}s"
+  $SSH "$MCRCON \"say RACE OVER — ${NAMES[$WINNER]} reached the NETHER first!\"" >/dev/null 2>&1
 else
   echo "[race] no winner within ${RACE_SECONDS}s"
-  $SSH "$MCRCON \"say RACE OVER — no iron pickaxe in time.\"" >/dev/null 2>&1
+  $SSH "$MCRCON \"say RACE OVER — no bot reached the nether in time.\"" >/dev/null 2>&1
 fi
 echo "[race] done"
