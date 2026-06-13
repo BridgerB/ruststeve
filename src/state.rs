@@ -91,10 +91,17 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
     };
 
     let p = bot.entity.position;
+    // A lit portal exists if a nether_portal block is nearby (the cast-and-light step
+    // succeeded). Cheap line-of-sight-bounded search.
+    let portal_built = bot.find_block("nether_portal", 16).is_some();
     GameState {
         inventory: inv,
         equipment,
-        world: WorldState { dimension: bot.game.dimension.clone(), dragon_dead: false },
+        world: WorldState {
+            dimension: bot.game.dimension.clone(),
+            dragon_dead: false,
+            portal_built,
+        },
         health: bot.health,
         food: bot.food,
         position: (p.x, p.y, p.z),

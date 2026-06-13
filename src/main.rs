@@ -123,6 +123,56 @@ async fn main() -> std::io::Result<()> {
         println!("hold done — at {:?}", bot.entity.position);
     }
 
+    // ── ISOLATION TEST MODE ──────────────────────────────────────────────────
+    // STEVE_TEST=<step_id>: run ONLY that step (its prerequisites are given by the
+    // test harness via RCON before the run) until the step's is_complete check
+    // passes (PASS) or STEVE_TEST_SECS elapses (FAIL), then print a machine-readable
+    // TEST RESULT line and exit. Lets any task be validated in isolation — no full
+    // gather→…→goal chain needed to test one step.
+    if let Ok(step_id) = std::env::var("STEVE_TEST") {
+        let secs: u64 =
+            std::env::var("STEVE_TEST_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(180);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        let Some(step) = steps::STEPS.iter().find(|s| s.id == step_id) else {
+            println!("TEST RESULT: FAIL {step_id} (unknown step)");
+            return Ok(());
+        };
+        let mut attempts = 0;
+        loop {
+            bot.wait_ticks(6).await?;
+            let state = sync_from_bot(&bot);
+            if (step.is_complete)(&state) {
+                println!("TEST RESULT: PASS {step_id} (after {attempts} attempts)");
+                bot.run_command(&format!("say TEST PASS {step_id}")).await.ok();
+                return Ok(());
+            }
+            if std::time::Instant::now() > deadline {
+                println!("TEST RESULT: FAIL {step_id} (timeout, {attempts} attempts)");
+                return Ok(());
+            }
+            if !state.alive {
+                println!("[test {step_id}] died — respawning");
+                bot.respawn().await.ok();
+                bot.wait_ticks(40).await.ok();
+                continue;
+            }
+            if survival::handle_survival(&mut bot, &mut memory).await {
+                continue;
+            }
+            attempts += 1;
+            println!("[test {step_id}] attempt {attempts}");
+            let r = steps::execute_step(&mut bot, &step_id, &mut memory).await;
+            println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
+            if r.message.contains("Broken pipe")
+                || r.message.contains("os error 32")
+                || r.message.contains("disconnect")
+            {
+                println!("TEST RESULT: FAIL {step_id} (connection lost)");
+                return Ok(());
+            }
+        }
+    }
+
     println!("world ready — starting speedrun loop");
     let mut idle = 0;
     loop {
@@ -159,6 +209,7 @@ async fn main() -> std::io::Result<()> {
         // Race finish line: stop as soon as we reach the goal tool.
         if let Ok(goal) = std::env::var("RACE_GOAL") {
             let reached = match goal.as_str() {
+                "nether" => state.world.in_nether(),
                 "iron_pickaxe" => state.equipment.pickaxe_tier().rank() >= 3,
                 "stone_pickaxe" => state.equipment.pickaxe_tier().rank() >= 2,
                 "wooden_pickaxe" => state.equipment.pickaxe_tier().rank() >= 1,

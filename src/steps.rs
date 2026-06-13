@@ -92,17 +92,16 @@ pub const STEPS: &[Step] = &[
         name: "Mine Iron Ore",
         priority: 11,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 2,
-        // 4 = 3 for the pickaxe + 1 buffer. Mining the old 11 meant ~3x the time in
-        // a hostile mineshaft with a wearing stone pickaxe — the single biggest source
-        // of leaders dying/breaking just short of the goal.
-        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 4,
+        // NETHER goal needs a lot of iron: pickaxe(3) + 2 buckets(6) + flint&steel(1)
+        // = 10, +1 buffer. Mine it in one trip rather than re-descending repeatedly.
+        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 11,
     },
     Step {
         id: "smelt_iron",
         name: "Smelt Iron",
         priority: 12,
         can_execute: |s| s.equipment.has_furnace && s.inventory.coal >= 1 && s.inventory.iron_ore >= 1,
-        is_complete: |s| s.inventory.iron_ingots >= 3,
+        is_complete: |s| s.inventory.iron_ingots >= 11,
     },
     Step {
         id: "craft_iron_pickaxe",
@@ -114,6 +113,8 @@ pub const STEPS: &[Step] = &[
     // === NETHER PREP === (all gated behind the iron pickaxe so the bot finishes
     // the iron-pickaxe chain FIRST — otherwise the furthest-step picker jumps to
     // these and never crafts the pickaxe it already has the iron for).
+    // Portal needs 2 buckets total: one stays WATER (to pour over the lava), one
+    // stays EMPTY (the bot fills it with lava from the pool, refilling each cast).
     Step {
         id: "craft_bucket",
         name: "Craft Buckets",
@@ -125,24 +126,45 @@ pub const STEPS: &[Step] = &[
         id: "get_water_buckets",
         name: "Fill Water Buckets",
         priority: 15,
+        // Fill ONE bucket with water — leave the other empty for lava.
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.buckets >= 1,
-        is_complete: |s| s.inventory.water_buckets >= 2,
-    },
-    Step {
-        id: "gather_food",
-        name: "Gather Food",
-        priority: 16,
-        can_execute: |s| {
-            s.equipment.pickaxe_tier().rank() >= 3 && s.equipment.sword.map(|t| t.rank()).unwrap_or(0) >= 1
-        },
-        is_complete: |s| s.inventory.food >= 5,
+        is_complete: |s| s.inventory.water_buckets >= 1 && s.inventory.buckets >= 1,
     },
     Step {
         id: "get_flint_and_steel",
         name: "Get Flint and Steel",
-        priority: 17,
+        priority: 16,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.iron_ingots >= 1,
         is_complete: |s| s.inventory.flint_and_steel >= 1,
+    },
+    // Casting 10 obsidian needs a big stack of throwaway scaffold/mould blocks
+    // (cups, pillars). ~40 cobble gives margin over the ~30 the cast consumes.
+    Step {
+        id: "gather_build_blocks",
+        name: "Gather Build Blocks",
+        priority: 17,
+        can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3,
+        is_complete: |s| s.inventory.cobblestone >= 40,
+    },
+    Step {
+        id: "build_nether_portal",
+        name: "Build Nether Portal",
+        priority: 18,
+        can_execute: |s| {
+            s.world.in_overworld()
+                && s.inventory.water_buckets >= 1
+                && s.inventory.buckets >= 1
+                && s.inventory.flint_and_steel >= 1
+                && s.inventory.cobblestone >= 30
+        },
+        is_complete: |s| s.world.portal_built,
+    },
+    Step {
+        id: "enter_nether",
+        name: "Enter Nether",
+        priority: 19,
+        can_execute: |s| s.world.portal_built && s.world.in_overworld(),
+        is_complete: |s| s.world.in_nether(),
     },
 ];
 
@@ -194,13 +216,16 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_stone_sword" => tasks::craft::craft_stone_sword(bot, mem).await,
         "craft_furnace" => tasks::craft::craft_furnace(bot, mem).await,
         "mine_coal" => tasks::mining::mine_ore(bot, "coal", 3, mem).await,
-        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 4, mem).await,
-        "smelt_iron" => tasks::smelt::smelt_iron(bot, 4).await,
+        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 11, mem).await,
+        "smelt_iron" => tasks::smelt::smelt_iron(bot, 11).await,
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
         "craft_bucket" => tasks::craft::craft_buckets(bot, 2, mem).await,
-        "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 2, mem).await,
-        "gather_food" => tasks::food::gather_food(bot, 5).await,
+        // Fill ONE water bucket (keep the second bucket empty for lava).
+        "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 1, mem).await,
         "get_flint_and_steel" => tasks::craft::get_flint_and_steel(bot, mem).await,
+        "gather_build_blocks" => tasks::mining::mine_stone(bot, 40, mem).await,
+        "build_nether_portal" => tasks::portal::build_nether_portal(bot, mem).await,
+        "enter_nether" => tasks::portal::enter_nether(bot).await,
         other => failure(format!("no executor for step {other}")),
     }
 }

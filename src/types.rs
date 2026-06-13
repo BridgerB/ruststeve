@@ -59,6 +59,19 @@ impl Equipment {
 pub struct WorldState {
     pub dimension: String,
     pub dragon_dead: bool,
+    /// A lit nether_portal block exists nearby (the frame is cast AND ignited).
+    pub portal_built: bool,
+}
+
+impl WorldState {
+    /// True while the bot is still in the overworld (dimension name has no "nether"
+    /// /"end"). The dimension string is the raw identifier, e.g. "minecraft:overworld".
+    pub fn in_overworld(&self) -> bool {
+        !self.dimension.contains("nether") && !self.dimension.contains("the_end")
+    }
+    pub fn in_nether(&self) -> bool {
+        self.dimension.contains("nether")
+    }
 }
 
 #[derive(Debug, Clone, Default)]
