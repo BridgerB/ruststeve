@@ -344,6 +344,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
     let deadline = Instant::now() + Duration::from_secs(300);
     let mut iters = 0u32;
     let mut stuck = 0u32;
+    let mut desc_fail = 0u32; // consecutive failures to descend (drives escalating relocation)
     let mut last_count = count_ore_resource(bot, ore);
     let mut last_pos = {
         let p = bot.entity.position;
@@ -423,12 +424,23 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
                     }
                 }
             }
-            if !descended {
-                let (dx, dz) = DIRS[(iters as usize / 3) % 4];
-                strip_tunnel(bot, dx, dz).await;
+            if descended {
+                desc_fail = 0;
+            } else {
+                // Couldn't get down here — every direction is blocked (commonly a
+                // watery surface patch, where dig_down/descend_step refuse liquid).
+                // RELOCATE to find dry ground, walking FURTHER the longer we've been
+                // stuck (a 6-block hop won't clear a whole pond), rotating direction
+                // to sweep outward. This is what un-wedges a bot pinned at the surface.
+                desc_fail += 1;
+                let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
+                let dist = 6 + (desc_fail.min(8) as i32) * 4; // 6 → up to ~38 blocks
+                let p = bot.entity.position;
+                let (tx, tz) = (p.x.floor() as i32 + dx * dist, p.z.floor() as i32 + dz * dist);
+                let _ = bot.goto_xz(tx, tz, 2.0).await;
             }
             if iters % 8 == 0 {
-                println!("    ore: descending toward {ore} — y={}", bot.entity.position.y as i32);
+                println!("    ore: descending toward {ore} — y={} (relocate#{desc_fail})", bot.entity.position.y as i32);
             }
         } else {
             // At depth — tunnel south to load + expose fresh terrain.
