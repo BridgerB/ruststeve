@@ -6,8 +6,17 @@ use crate::bot_utils::{craft_item, get_crafting_table};
 use crate::memory::WorldMemory;
 use crate::types::{failure, success, StepResult};
 
-/// Turn each log stack into planks (1 log → 4 planks, 2x2 grid).
-pub async fn craft_planks(bot: &mut Bot<'_>) -> StepResult {
+/// Turn each log stack into planks (1 log → 4 planks).
+///
+/// Crafts AT THE TABLE when one is available. The 2x2 inventory-grid craft mutates
+/// the player inventory (window 0) via client-side prediction that the server NEVER
+/// rolls back when it drops the craft under load — so a dropped 2x2 craft leaves
+/// PHANTOM planks (the bot thinks it has 58, the server made 0), and every later
+/// table craft that reads server truth then fails "missing ingredient" forever. A
+/// table craft re-syncs the inventory to server truth on open (see open_block), so
+/// it can't phantom. Only the pre-table bootstrap falls back to 2x2 — and that's
+/// validated downstream by confirmed table PLACEMENT (a phantom can't place a block).
+pub async fn craft_planks(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResult {
     let logs: Vec<(String, i32)> = bot
         .inventory
         .slots
@@ -19,12 +28,14 @@ pub async fn craft_planks(bot: &mut Bot<'_>) -> StepResult {
     if logs.is_empty() {
         return failure("no logs in inventory");
     }
+    // Prefer a table (reliable); None only if we can't get one yet (bootstrap).
+    let table = get_crafting_table(bot, mem).await.ok().flatten();
     for (log, count) in logs {
         let planks = log.replace("_log", "_planks");
-        let r = craft_item(bot, &planks, count.min(8), None).await;
+        let r = craft_item(bot, &planks, count.min(8), table).await;
         if !r.success {
             // Fall back to oak_planks recipe family if species lookup missed.
-            let _ = craft_item(bot, "oak_planks", count.min(8), None).await;
+            let _ = craft_item(bot, "oak_planks", count.min(8), table).await;
         }
     }
     success("crafted planks from logs")
@@ -34,13 +45,15 @@ pub async fn craft_crafting_table(bot: &mut Bot<'_>) -> StepResult {
     craft_item(bot, "crafting_table", 1, None).await
 }
 
-pub async fn craft_sticks(bot: &mut Bot<'_>) -> StepResult {
-    // Two batches → 8 sticks, enough for the early tools.
-    let r = craft_item(bot, "stick", 1, None).await;
+pub async fn craft_sticks(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResult {
+    // Two batches → 8 sticks. Use the table when available (the 2x2 grid phantoms
+    // sticks the same way it phantoms planks — see craft_planks).
+    let table = get_crafting_table(bot, mem).await.ok().flatten();
+    let r = craft_item(bot, "stick", 1, table).await;
     if !r.success {
         return r;
     }
-    craft_item(bot, "stick", 1, None).await
+    craft_item(bot, "stick", 1, table).await
 }
 
 pub async fn craft_wooden_pickaxe(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResult {

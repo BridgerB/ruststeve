@@ -179,9 +179,9 @@ pub fn progress(state: &GameState) -> (usize, usize) {
 pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) -> StepResult {
     match id {
         "gather_wood" => tasks::gather_wood::gather_wood(bot, 5, mem).await,
-        "craft_planks" => tasks::craft::craft_planks(bot).await,
+        "craft_planks" => tasks::craft::craft_planks(bot, mem).await,
         "craft_crafting_table" => tasks::craft::craft_crafting_table(bot).await,
-        "craft_sticks" => tasks::craft::craft_sticks(bot).await,
+        "craft_sticks" => tasks::craft::craft_sticks(bot, mem).await,
         "craft_wooden_pickaxe" => tasks::craft::craft_wooden_pickaxe(bot, mem).await,
         "mine_stone" => tasks::mining::mine_stone(bot, 16, mem).await,
         "craft_stone_pickaxe" => tasks::craft::craft_stone_pickaxe(bot, mem).await,
