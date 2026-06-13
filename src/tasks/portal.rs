@@ -373,7 +373,7 @@ async fn cast_obsidian_at(
         cast_debug(&format!("cast {pos:?} ENTER bot=({:.1},{:.1},{:.1})", p.x, p.y, p.z));
     }
 
-    for _attempt in 0..3 {
+    for _attempt in 0..5 {
         // 1. Top up both buckets first (fill walks to the pool).
         // Refill lava from the KNOWN pool — navigate back to it first so the local
         // scan in fill_bucket always sees it (scanning from wherever the previous
@@ -430,6 +430,44 @@ async fn cast_obsidian_at(
             count_items(bot, "lava_bucket"),
             count_items(bot, "water_bucket")
         ));
+
+        // 2b. CLEAN UP any stray lava left near the cup by a previous attempt's missed
+        //     pour (it floods the area and blocks rebuilding the cup / the water). Let
+        //     it settle, then scoop every lava source in a region around the target with
+        //     the empty bucket — sources pick up and dissolve the flowing parts. Skip
+        //     the lava already correctly in the cup.
+        let stray_lava: bool = (-1..=1).any(|dx| {
+            (0..=2).any(|dy| {
+                (-1..=2).any(|dz| {
+                    !(dx == 0 && dy == 0 && dz == 0)
+                        && name_at(bot, pos.0 + dx, pos.1 + dy, pos.2 + dz).contains("lava")
+                })
+            })
+        });
+        if stray_lava {
+            bot.wait_ticks(20).await.ok();
+            select_item(bot, "bucket").await.ok();
+            for _ in 0..10 {
+                let mut target = None;
+                'find: for dy in [1, 2, 0] {
+                    for dx in -1..=1 {
+                        for dz in -1..=2 {
+                            if dx == 0 && dy == 0 && dz == 0 {
+                                continue; // leave the cup's own lava
+                            }
+                            let l = (pos.0 + dx, pos.1 + dy, pos.2 + dz);
+                            if name_at(bot, l.0, l.1, l.2).contains("lava") {
+                                target = Some(l);
+                                break 'find;
+                            }
+                        }
+                    }
+                }
+                let Some(l) = target else { break };
+                reliable_use(bot, vec3(l.0 as f64 + 0.5, l.1 as f64 + 0.5, l.2 as f64 + 0.5)).await;
+            }
+            cast_debug(&format!("cast {pos:?} a{_attempt}: cleaned stray lava"));
+        }
 
         // 3. Cup walls (E, W, N, below). The +Z wall is the pillar we stand on.
         let mut cup_ok = true;
