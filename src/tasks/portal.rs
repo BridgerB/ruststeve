@@ -491,7 +491,12 @@ async fn cast_obsidian_at(
         //    and miss. A pour empties the bucket whether or not it landed right, so we
         //    can only pour ONCE per attempt — vary the aim by attempt number, and the
         //    outer 3-attempt loop refills the lava between tries.
-        walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.2, 40).await;
+        // Precisely re-center on the pour cell and SETTLE before pouring — a missed
+        // pour floods unscoopable flowing lava into the water-target block, so landing
+        // it first try matters. Sneak so the tight walk can't slip off the 1-wide pillar.
+        bot.set_control_state("sneak", true);
+        walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.12, 50).await;
+        bot.wait_ticks(4).await.ok();
         select_item(bot, "lava_bucket").await.ok();
         // Aim at the N cup wall's inner (south) face FIRST — sniffing showed the
         // straight-down pour lands the lava at the bot's own stand block when the
