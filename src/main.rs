@@ -194,7 +194,18 @@ async fn main() -> std::io::Result<()> {
                 let r = execute_step(&mut bot, step.id, &mut memory).await;
                 memory.log("step", step.id, &format!("{} {}", if r.success { "ok" } else { "fail" }, r.message));
                 println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
-                if r.message.contains("disconnect") {
+                // Connection lost (e.g. the server restarted out from under us): a
+                // step that failed on a dead socket reports "Broken pipe"/os error 32,
+                // which the craft path CATCHES — so without this the bot zombie-loops
+                // forever on a dead connection (seen: 7877 broken-pipe craft failures)
+                // and the race orchestrator never sees it exit to start a fresh round.
+                // Bail so race-loop respawns us against the live server.
+                let m = &r.message;
+                if m.contains("disconnect")
+                    || m.contains("Broken pipe")
+                    || m.contains("os error 32")
+                    || m.contains("Connection reset")
+                {
                     println!("connection lost — stopping");
                     break;
                 }
