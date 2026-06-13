@@ -134,7 +134,14 @@ fn lava_near(bot: &Bot, r: i32) -> bool {
 }
 
 async fn escape_water(bot: &mut Bot<'_>) {
-    for _ in 0..40 {
+    // First the survival-grade escape: if a solid block caps the water column above
+    // the head (a flooded hollow the bot roamed into), DIG straight up — a plain
+    // swim just bonks the ceiling and the bot drowns. This is the same logic the
+    // survival reflex uses, but reached here too because gather_wood's long walk
+    // loops don't yield to the reflex often enough.
+    crate::bot_utils::leave_water(bot, 60).await;
+    // Then a few sprint-swim ticks to climb up out of the water and onto land.
+    for _ in 0..20 {
         if !in_liquid(bot) && bot.entity.on_ground {
             break;
         }
