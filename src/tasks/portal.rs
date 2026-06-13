@@ -210,7 +210,7 @@ async fn pillar_up(bot: &mut Bot<'_>, target_y: i32) -> bool {
         if feet_y(bot) >= target_y {
             break;
         }
-        walk_to_xz(bot, cell_x as f64 + 0.5, cell_z as f64 + 0.5, 0.2, 18).await;
+        walk_to_xz(bot, cell_x as f64 + 0.5, cell_z as f64 + 0.5, 0.1, 24).await;
         bot.set_control_state("sneak", true);
         let f = feet_y(bot);
         // Clear the climb path two/three blocks up so a stray block doesn't block the jump.
