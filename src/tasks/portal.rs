@@ -697,7 +697,10 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     frame.push(at(2, 4));
 
     mem.log("cast", "portal_start", &format!("{bx},{by},{bz}"));
-    build_backing(bot, bx, by, bz).await;
+    // NOTE: build_backing (a pre-built -Z wall) is intentionally skipped — it disrupted
+    // the per-block positioning that casts cleanly in isolation, and each cup builds its
+    // own -Z wall via ensure_solid anyway. Re-enable only if cup -Z walls prove flaky.
+    let _ = build_backing; // keep referenced (avoid dead-code warning)
 
     let mut cast = 0;
     // Bottom row first (its water bowl occupies an inner-fill cell), then inner fill,
