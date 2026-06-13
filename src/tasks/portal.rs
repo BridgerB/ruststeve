@@ -555,10 +555,28 @@ async fn cast_obsidian_at(
         // Precisely re-center on the pour cell and SETTLE before pouring — a missed
         // pour floods unscoopable flowing lava into the water-target block, so landing
         // it first try matters. Sneak so the tight walk can't slip off the 1-wide pillar.
+        // The pour geometry is razor-thin — a ~2° look difference (i.e. the bot a few
+        // tenths off-centre) sends the lava onto the +Z wall instead of into the cup,
+        // and a miss damages the bot + floods. So centre HARD and, if still not dead-on,
+        // skip this attempt rather than pour a likely miss.
         bot.set_control_state("sneak", true);
-        walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.12, 50).await;
+        for _ in 0..3 {
+            walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.06, 60).await;
+            let p = bot.entity.position;
+            if (p.x - (pos.0 as f64 + 0.5)).abs() < 0.12 && (p.z - (stand_z as f64 + 0.5)).abs() < 0.12 {
+                break;
+            }
+        }
         bot.wait_ticks(4).await.ok();
-        cast_debug(&format!("cast {pos:?} a{_attempt}: pre-lava feet={} (want {})", feet_y(bot), pos.1 + 1));
+        let p = bot.entity.position;
+        let centered = (p.x - (pos.0 as f64 + 0.5)).abs() < 0.15 && (p.z - (stand_z as f64 + 0.5)).abs() < 0.15;
+        cast_debug(&format!(
+            "cast {pos:?} a{_attempt}: pre-lava feet={} bot=({:.2},{:.2}) centered={centered}",
+            feet_y(bot), p.x, p.z
+        ));
+        if !centered {
+            continue; // don't pour from off-centre — it'll miss, damage us, and flood
+        }
         select_item(bot, "lava_bucket").await.ok();
         // Aim STRAIGHT DOWN into the open cup. Sniffing showed the N-wall aim hits the
         // wall's TOP face and drops the lava ABOVE the cup (y+1), while the straight-down
