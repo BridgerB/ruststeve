@@ -593,12 +593,16 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
     //    anchored the east column INSIDE the lava. The bot stands east and refills
     //    its lava bucket by walking west across the cleared gap.
     bot.set_control_state("sneak", false);
-    let stand = (lava.0 + 6, lava.1, lava.2);
+    let stand = (lava.0 + 6, lava.1 + 1, lava.2);
     let _ = bot.goto_near(stand.0, stand.1, stand.2, 1.0).await;
+    walk_to_xz(bot, stand.0 as f64 + 0.5, stand.2 as f64 + 0.5, 0.4, 40).await;
 
+    // Anchor at the bot's FOOT level (one above the lava surface) so the bottom
+    // obsidian row is free-standing air and the chamber clear never digs the FLOOR
+    // (by-1) — digging it then re-laying cobble burned the whole cobble stock.
     let bx = stand.0;
-    let by = lava.1;
-    let bz = lava.2;
+    let by = bot.entity.position.y.floor() as i32;
+    let bz = stand.2;
 
     // 3. Clear a flat chamber + solid floor spanning the lava→frame gap and the
     //    frame box. Never dig lava or a block touching it (would flood/kill).

@@ -30,9 +30,11 @@ rcon() { $SSH "$MCRCON $*" 2>&1; }
 # top to stand on, and open air above.
 build_arena() {
   local x=$1 z=$2
+  # Keep each fill under Minecraft's 32768-block limit (else it silently no-ops and
+  # the bot finds natural cave terrain). 21x25x21=11025 and 21x12x21=5292 are safe.
   rcon \
-    "'fill $((x-15)) 30 $((z-15)) $((x+15)) $((Y-1)) $((z+15)) minecraft:stone'" \
-    "'fill $((x-15)) $Y $((z-15)) $((x+15)) $((Y+10)) $((z+15)) minecraft:air'" >/dev/null
+    "'fill $((x-10)) 45 $((z-10)) $((x+10)) $((Y-1)) $((z+10)) minecraft:stone'" \
+    "'fill $((x-10)) $Y $((z-10)) $((x+10)) $((Y+10)) $((z+10)) minecraft:air'" >/dev/null
 }
 
 # Give items + place world features for STEP at lane (name,x,z). Add a case per step.
@@ -66,7 +68,7 @@ setup_prereqs() {
     build_nether_portal|enter_nether)
                          g="'clear $name' 'give $name minecraft:iron_pickaxe' \
                             'give $name minecraft:water_bucket' 'give $name minecraft:bucket' \
-                            'give $name minecraft:flint_and_steel' 'give $name minecraft:cobblestone 64'"
+                            'give $name minecraft:flint_and_steel' 'give $name minecraft:cobblestone 128'"
                          # exposed contained lava pool 6 east (set into the floor, air above)
                          rcon "'fill $((x+5)) $((Y-1)) $((z-2)) $((x+8)) $((Y-1)) $((z+2)) minecraft:lava'" >/dev/null;;
   esac
