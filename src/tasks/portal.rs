@@ -578,18 +578,16 @@ async fn cast_obsidian_at(
             continue; // don't pour from off-centre — it'll miss, damage us, and flood
         }
         select_item(bot, "lava_bucket").await.ok();
-        // Aim STRAIGHT DOWN into the open cup. Sniffing showed the N-wall aim hits the
-        // wall's TOP face and drops the lava ABOVE the cup (y+1), while the straight-down
-        // aim into the open top reliably fills the cup when the bot is centered — which
-        // the tightened pillar/pre-pour centering now ensures. Vary the depth slightly
-        // by attempt as a hedge against jitter.
-        // Aim LOW (at the cup floor, pos.y-0.x) so the steep ray clearly dips INTO the
-        // open cup instead of skimming over its top onto the bot's own stand block —
-        // that skim is why block 2 (whose adjacency shifts the geometry a hair) missed.
+        // Aim straight down into the open cup, but at the bot's OWN x (not the fixed cup
+        // centre): the pour is so geometry-sensitive that a 0.04-block x drift sends the
+        // lava onto the wall. Aiming at the bot's actual x makes the look yaw≈0 (dead
+        // north) so the ray drops into the bot's own cell — which the hard-centering put
+        // over the cup — independent of the small x offset. Vary pour depth by attempt.
+        let bx_aim = bot.entity.position.x;
         let lava_aim = match _attempt {
-            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5),
-            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.0, pos.2 as f64 + 0.4),
-            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.4, pos.2 as f64 + 0.6),
+            0 => vec3(bx_aim, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5),
+            1 => vec3(bx_aim, pos.1 as f64 + 0.0, pos.2 as f64 + 0.4),
+            _ => vec3(bx_aim, pos.1 as f64 + 0.4, pos.2 as f64 + 0.6),
         };
         reliable_use(bot, lava_aim).await;
         bot.wait_ticks(8).await.ok();
