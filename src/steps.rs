@@ -82,21 +82,27 @@ pub const STEPS: &[Step] = &[
         name: "Mine Coal",
         priority: 10,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 2,
-        is_complete: |s| s.inventory.coal >= 10,
+        // The race goal is the IRON PICKAXE (3 ingots). Smelting 4 iron needs <1 coal
+        // as fuel, so only a small amount is needed — keep it low so the bot doesn't
+        // spend long underground (death/pickaxe-break risk) mining coal it won't use.
+        is_complete: |s| s.inventory.coal >= 3,
     },
     Step {
         id: "mine_iron",
         name: "Mine Iron Ore",
         priority: 11,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 2,
-        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 11,
+        // 4 = 3 for the pickaxe + 1 buffer. Mining the old 11 meant ~3x the time in
+        // a hostile mineshaft with a wearing stone pickaxe — the single biggest source
+        // of leaders dying/breaking just short of the goal.
+        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 4,
     },
     Step {
         id: "smelt_iron",
         name: "Smelt Iron",
         priority: 12,
         can_execute: |s| s.equipment.has_furnace && s.inventory.coal >= 1 && s.inventory.iron_ore >= 1,
-        is_complete: |s| s.inventory.iron_ingots >= 11,
+        is_complete: |s| s.inventory.iron_ingots >= 3,
     },
     Step {
         id: "craft_iron_pickaxe",
@@ -187,9 +193,9 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_stone_pickaxe" => tasks::craft::craft_stone_pickaxe(bot, mem).await,
         "craft_stone_sword" => tasks::craft::craft_stone_sword(bot, mem).await,
         "craft_furnace" => tasks::craft::craft_furnace(bot, mem).await,
-        "mine_coal" => tasks::mining::mine_ore(bot, "coal", 10, mem).await,
-        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 11, mem).await,
-        "smelt_iron" => tasks::smelt::smelt_iron(bot, 11).await,
+        "mine_coal" => tasks::mining::mine_ore(bot, "coal", 3, mem).await,
+        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 4, mem).await,
+        "smelt_iron" => tasks::smelt::smelt_iron(bot, 4).await,
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
         "craft_bucket" => tasks::craft::craft_buckets(bot, 2, mem).await,
         "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 2, mem).await,
