@@ -896,8 +896,8 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         let p1 = (bx, by, bz - 2);
         let p2 = (bx + 1, by, bz - 2);
         cast_debug(&format!("CAST_TWO casting {p1:?} then {p2:?} from ({bx},{by},{bz})"));
-        let ok1 = cast_obsidian_at(bot, p1, by, pool).await;
         let ok2 = cast_obsidian_at(bot, p2, by, pool).await;
+        let ok1 = cast_obsidian_at(bot, p1, by, pool).await;
         return if ok1 && ok2 {
             success("CAST_TWO ok — both blocks obsidian")
         } else {
