@@ -541,10 +541,13 @@ async fn cast_obsidian_at(
         // aim into the open top reliably fills the cup when the bot is centered — which
         // the tightened pillar/pre-pour centering now ensures. Vary the depth slightly
         // by attempt as a hedge against jitter.
+        // Aim LOW (at the cup floor, pos.y-0.x) so the steep ray clearly dips INTO the
+        // open cup instead of skimming over its top onto the bot's own stand block —
+        // that skim is why block 2 (whose adjacency shifts the geometry a hair) missed.
         let lava_aim = match _attempt {
-            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5),
-            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.0, pos.2 as f64 + 0.5),
-            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.4, pos.2 as f64 + 0.4),
+            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 - 0.4, pos.2 as f64 + 0.4),
+            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 - 0.2, pos.2 as f64 + 0.5),
+            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 - 0.6, pos.2 as f64 + 0.3),
         };
         reliable_use(bot, lava_aim).await;
         bot.wait_ticks(8).await.ok();
