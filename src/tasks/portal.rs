@@ -529,12 +529,36 @@ async fn cast_obsidian_at(
         //    and miss. A pour empties the bucket whether or not it landed right, so we
         //    can only pour ONCE per attempt — vary the aim by attempt number, and the
         //    outer 3-attempt loop refills the lava between tries.
+        // CRITICAL: pour from EXACTLY feet pos.y+1. Coming off the previous block's
+        // pillar the bot is often a block too HIGH (feet pos.y+2), and from there the
+        // steep down-ray hits the +Z cup wall's top and drops the lava on the bot's own
+        // block. Descend to the right level (digging only the throwaway scaffold above
+        // the cup, never the cup walls) before pouring.
+        while feet_y(bot) > pos.1 + 1 {
+            let p = bot.entity.position;
+            let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
+            let below = (fx, feet_y(bot) - 1, fz);
+            // Only dig non-cup scaffold to drop down; if the block below is a cup/bowl
+            // wall we need, step aside instead.
+            if name_at(bot, below.0, below.1, below.2) == "obsidian" {
+                break;
+            }
+            dig_at(bot, below.0, below.1, below.2).await;
+            bot.wait_ticks(6).await.ok();
+            if feet_y(bot) > pos.1 + 1 {
+                break; // didn't drop — avoid an infinite loop
+            }
+        }
+        if feet_y(bot) < pos.1 + 1 {
+            pillar_up(bot, pos.1 + 1).await;
+        }
         // Precisely re-center on the pour cell and SETTLE before pouring — a missed
         // pour floods unscoopable flowing lava into the water-target block, so landing
         // it first try matters. Sneak so the tight walk can't slip off the 1-wide pillar.
         bot.set_control_state("sneak", true);
         walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.12, 50).await;
         bot.wait_ticks(4).await.ok();
+        cast_debug(&format!("cast {pos:?} a{_attempt}: pre-lava feet={} (want {})", feet_y(bot), pos.1 + 1));
         select_item(bot, "lava_bucket").await.ok();
         // Aim STRAIGHT DOWN into the open cup. Sniffing showed the N-wall aim hits the
         // wall's TOP face and drops the lava ABOVE the cup (y+1), while the straight-down
