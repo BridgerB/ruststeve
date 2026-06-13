@@ -30,11 +30,12 @@ rcon() { $SSH "$MCRCON $*" 2>&1; }
 # top to stand on, and open air above.
 build_arena() {
   local x=$1 z=$2
-  # Keep each fill under Minecraft's 32768-block limit (else it silently no-ops and
-  # the bot finds natural cave terrain). 21x25x21=11025 and 21x12x21=5292 are safe.
+  # Wide enough EAST (+X) to cover the lava pool AND where the portal frame anchors
+  # (~lava+6), so leftover obsidian/cobble/lava from prior runs is wiped — a stale
+  # 10-obsidian frame makes the bot skip prepare and fail. 36x25x21=18900 < 32768.
   rcon \
-    "'fill $((x-10)) 45 $((z-10)) $((x+10)) $((Y-1)) $((z+10)) minecraft:stone'" \
-    "'fill $((x-10)) $Y $((z-10)) $((x+10)) $((Y+10)) $((z+10)) minecraft:air'" >/dev/null
+    "'fill $((x-10)) 45 $((z-10)) $((x+25)) $((Y-1)) $((z+10)) minecraft:stone'" \
+    "'fill $((x-10)) $Y $((z-10)) $((x+25)) $((Y+12)) $((z+10)) minecraft:air'" >/dev/null
 }
 
 # Give items + place world features for STEP at lane (name,x,z). Add a case per step.
@@ -73,8 +74,8 @@ setup_prereqs() {
                          # and put lava one block lower (y68) so the bot's sightline
                          # clears the floor and actually SEES it (flush-with-floor lava
                          # is invisible — the LOS grazes the floor stone).
-                         rcon "'fill $((x+5)) $((Y-1)) $((z-3)) $((x+10)) $Y $((z+3)) minecraft:air'" \
-                              "'fill $((x+5)) $((Y-2)) $((z-3)) $((x+10)) $((Y-2)) $((z+3)) minecraft:lava'" >/dev/null;;
+                         rcon "'fill $((x+4)) $((Y-1)) $((z-5)) $((x+14)) $Y $((z+5)) minecraft:air'" \
+                              "'fill $((x+4)) $((Y-2)) $((z-5)) $((x+14)) $((Y-2)) $((z+5)) minecraft:lava'" >/dev/null;;
   esac
   # Table-based crafts need a table reachable (they route through get_crafting_table,
   # which can't make one without planks). Place one next to the bot.
