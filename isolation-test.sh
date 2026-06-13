@@ -60,9 +60,11 @@ setup_prereqs() {
     craft_iron_pickaxe)  g="'clear $name' 'give $name minecraft:iron_ingot 3' 'give $name minecraft:stick 8'";;
     craft_bucket)        g="'clear $name' 'give $name minecraft:iron_pickaxe' 'give $name minecraft:iron_ingot 6'";;
     get_water_buckets)   g="'clear $name' 'give $name minecraft:iron_pickaxe' 'give $name minecraft:bucket 2'"
-                         # a contained water pool 3 east
-                         rcon "'fill $((x+4)) $Y $((z-1)) $((x+6)) $((Y+1)) $((z+1)) minecraft:stone'" \
-                              "'fill $((x+5)) $Y $z $((x+5)) $Y $z minecraft:water'" >/dev/null;;
+                         # an OPEN surface pool: water recessed into the floor (Y-1) with
+                         # air above, so the surface finder (needs air over the source) and
+                         # line-of-sight both work. A sealed box (stone directly above the
+                         # water) hides it — the bot reported "no water found nearby".
+                         rcon "'fill $((x+4)) $((Y-1)) $((z-1)) $((x+6)) $((Y-1)) $((z+1)) minecraft:water'" >/dev/null;;
     get_flint_and_steel) g="'clear $name' 'give $name minecraft:iron_pickaxe' 'give $name minecraft:iron_ingot 2'"
                          # gravel pile to mine flint from
                          rcon "'fill $((x+3)) $Y $((z-2)) $((x+6)) $((Y+2)) $((z+2)) minecraft:gravel'" >/dev/null;;
