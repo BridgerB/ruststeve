@@ -1,0 +1,13 @@
+# Rust build artifacts
+/target/
+
+# Per-bot SQLite world memory (created at runtime)
+.memory-*.db
+.memory-*.db-wal
+.memory-*.db-shm
+
+# Run logs (races, isolation tests, single-bot harnesses)
+*.log
+
+# Runtime state
+.bot-serial
