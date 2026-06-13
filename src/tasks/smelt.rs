@@ -72,6 +72,26 @@ async fn load_slot(bot: &mut Bot<'_>, name: &str, slot: i32) -> bool {
     false
 }
 
+/// Count an item in the OPEN window's inventory section only (excludes furnace
+/// slots 0-2). While a furnace window is open the live inventory lives in the
+/// window — `bot.inventory` is stale until the window closes — so the smelt loop
+/// must count HERE or it never sees the ingots it pulled out (count stays 0) and
+/// always burns the full 220s deadline instead of finishing when the iron is done.
+fn win_inv_count(bot: &Bot, name: &str) -> i32 {
+    if let Some(w) = bot.current_window.as_ref() {
+        let end = w.inventory_end.min(w.slots.len());
+        if w.inventory_start <= end {
+            return w.slots[w.inventory_start..end]
+                .iter()
+                .flatten()
+                .filter(|i| i.name == name)
+                .map(|i| i.count)
+                .sum();
+        }
+    }
+    count_items(bot, name)
+}
+
 /// True if the open furnace `slot` is empty.
 fn slot_empty(bot: &Bot, slot: i32) -> bool {
     bot.current_window
@@ -98,7 +118,7 @@ pub async fn smelt_iron(bot: &mut Bot<'_>, target: i32) -> StepResult {
     }
 
     let deadline = Instant::now() + Duration::from_secs(220);
-    while count_items(bot, "iron_ingot") < target && Instant::now() < deadline {
+    while win_inv_count(bot, "iron_ingot") < target && Instant::now() < deadline {
         bot.wait_ticks(20).await.ok(); // ~1s
 
         // Take any finished ingots from the output (slot 2) into inventory.
@@ -107,16 +127,16 @@ pub async fn smelt_iron(bot: &mut Bot<'_>, target: i32) -> StepResult {
             bot.wait_ticks(2).await.ok();
         }
         // Keep ore/fuel topped up.
-        if slot_empty(bot, 0) && count_items(bot, "raw_iron") > 0 {
+        if slot_empty(bot, 0) && win_inv_count(bot, "raw_iron") > 0 {
             load_slot(bot, "raw_iron", 0).await;
         }
-        if slot_empty(bot, 1) && (count_items(bot, "coal") > 0 || count_items(bot, "charcoal") > 0) {
+        if slot_empty(bot, 1) && (win_inv_count(bot, "coal") > 0 || win_inv_count(bot, "charcoal") > 0) {
             if !load_slot(bot, "coal", 1).await {
                 load_slot(bot, "charcoal", 1).await;
             }
         }
         // Done when nothing left to smelt.
-        if slot_empty(bot, 0) && count_items(bot, "raw_iron") == 0 {
+        if slot_empty(bot, 0) && win_inv_count(bot, "raw_iron") == 0 {
             // one more grace tick to let the last ingot finish
             bot.wait_ticks(20).await.ok();
             if !slot_empty(bot, 2) {
