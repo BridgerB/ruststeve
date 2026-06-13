@@ -592,9 +592,19 @@ async fn cast_obsidian_at(
         reliable_use(bot, lava_aim).await;
         bot.wait_ticks(8).await.ok();
         cast_debug(&format!("cast {pos:?} a{_attempt}: after_lava cup_block={}", name_at(bot, pos.0, pos.1, pos.2)));
-        // If the lava missed the cup, this attempt is wasted — bail to the next
-        // attempt (which refills the lava) rather than pouring water onto nothing.
+        // If the lava missed the cup, this attempt is wasted AND the misplaced lava is
+        // likely at the bot's own feet — ESCAPE it (sprint-jump back south) before it
+        // burns us, then bail to the next attempt (which refills + re-centers).
         if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
+            bot.set_control_state("sneak", false);
+            bot.look_at(vec3(pos.0 as f64 + 0.5, pos.1 as f64, stand_z as f64 + 4.0));
+            bot.set_control_state("forward", true);
+            bot.set_control_state("sprint", true);
+            bot.set_control_state("jump", true);
+            for _ in 0..12 {
+                bot.drive_tick().await.ok();
+            }
+            bot.clear_control_states();
             continue;
         }
 
