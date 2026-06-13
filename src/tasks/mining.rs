@@ -2,12 +2,25 @@
 //! there's none in reach. Port of the core of steve's `tasks/mining` (surface +
 //! dig-down; deep-ore strip mining comes later).
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use rustcraft::bot::Bot;
 
-use crate::bot_utils::{collect_drops, select_item};
+use crate::bot_utils::{can_reach, collect_drops, select_item};
+use crate::memory::{PoiKind, PoiStatus, WorldMemory};
 use crate::types::{failure, success, StepResult};
+
+/// Remember where we entered the underground — the surface spot a mining run
+/// starts from, so the bot can navigate back up to it later.
+fn record_descent(bot: &Bot, mem: &mut WorldMemory) {
+    let p = bot.entity.position;
+    mem.record(
+        PoiKind::DescentPoint,
+        (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32),
+        PoiStatus::Available,
+    );
+}
 
 /// Cobblestone (incl. deepslate) count — the drops from mining stone.
 fn count_cobble(bot: &Bot) -> i32 {
@@ -65,7 +78,22 @@ async fn dig_down(bot: &mut Bot<'_>) -> bool {
     // block one too low, leaving the real support intact). floor(y-0.5) is robust.
     let y = (p.y - 0.5).floor() as i32;
     let below = (x, y, z);
-    if bot.block_at(below.0, below.1, below.2).map(|b| b.name.contains("lava")).unwrap_or(false) {
+    // Death-AVOIDANCE: never break a block that is liquid, sits directly above
+    // liquid, or has liquid beside it (which would flood the hole). Refusing here
+    // makes the caller tunnel AROUND aquifers/lava instead of dropping into them.
+    if is_liquid_at(bot, x, y, z)
+        || is_liquid_at(bot, x, y - 1, z)
+        || [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| is_liquid_at(bot, x + dx, y, z + dz))
+    {
+        return false;
+    }
+    // Fall-avoidance: don't dig the floor out over a deep drop (open cavern /
+    // ravine) — a 4+ block fall hurts and can strand the bot. The controlled
+    // `descend_step` is how we go down; here we refuse the plunge.
+    if bot.block_state_at(x, y - 1, z) == 0
+        && bot.block_state_at(x, y - 2, z) == 0
+        && bot.block_state_at(x, y - 3, z) == 0
+    {
         return false;
     }
     if y <= bot.game.min_y + 4 {
@@ -75,11 +103,43 @@ async fn dig_down(bot: &mut Bot<'_>) -> bool {
         bot.wait_ticks(8).await.ok(); // already open — just let physics drop us
         return true;
     }
+    let y_before = bot.entity.position.y;
     if bot.dig(below.0, below.1, below.2).await.is_err() {
         return false;
     }
     bot.wait_ticks(8).await.ok(); // fall into the hole
-    true
+    // Only report success if we ACTUALLY descended. Digging stone with no (or the
+    // wrong) tool doesn't client-predict the break, so the block stays solid and
+    // the bot never falls — returning true there spins forever on the same block.
+    bot.entity.position.y < y_before - 0.5
+}
+
+/// Is there liquid (water or lava) at (x, y, z)?
+fn is_liquid_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    bot.block_at(x, y, z)
+        .map(|b| b.name.contains("water") || b.name.contains("lava"))
+        .unwrap_or(false)
+}
+
+/// Holding a pickaxe right now?
+fn held_is_pickaxe(bot: &Bot) -> bool {
+    bot.held_item().map(|i| i.name.ends_with("_pickaxe")).unwrap_or(false)
+}
+
+/// Make sure a pickaxe is in hand; re-equips the best one if the current broke
+/// (durability management). False if the bot has no pickaxe at all — the caller
+/// should bail so the step machine crafts a replacement instead of mining
+/// bare-handed (which on stone yields nothing).
+async fn ensure_pickaxe(bot: &mut Bot<'_>) -> bool {
+    if held_is_pickaxe(bot) {
+        return true;
+    }
+    for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {
+        if select_item(bot, tier).await.unwrap_or(false) {
+            return true;
+        }
+    }
+    false
 }
 
 // ── Ore mining (coal / iron) ───────────────────────────────────────────────
@@ -145,8 +205,8 @@ async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
     }
     let (nx, nz) = (x + dx, z + dz);
     for (cx, cy, cz) in [(nx, y + 1, nz), (nx, y, nz), (nx, y - 1, nz), (nx, y - 2, nz)] {
-        if bot.block_at(cx, cy, cz).map(|b| b.name.contains("lava")).unwrap_or(false) {
-            return false;
+        if is_liquid_at(bot, cx, cy, cz) {
+            return false; // don't stair-step into water or lava
         }
     }
     // Open a 2-high niche ahead and the step below it, so there's a 1-drop forward.
@@ -183,74 +243,190 @@ async fn strip_tunnel(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
     bot.goto_xz(tx, tz, 1.0).await.unwrap_or(false)
 }
 
-/// Mine `target` of an ore resource. Strategy: descend a staircase to ore depth,
-/// then strip-tunnel, mining any reachable ore (and its vein) found nearby. The
-/// loaded chunk data holds hidden ores so we can beeline toward them.
-pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
+/// Classify an ore block name into a memory kind + the pickaxe tier it needs.
+fn ore_kind_tier(name: &str) -> Option<(PoiKind, i32)> {
+    if name.contains("iron_ore") {
+        Some((PoiKind::IronOre, 2))
+    } else if name.contains("coal_ore") {
+        Some((PoiKind::CoalOre, 1))
+    } else if name.contains("copper_ore") {
+        Some((PoiKind::CopperOre, 2))
+    } else if name.contains("gold_ore") {
+        Some((PoiKind::GoldOre, 3))
+    } else if name.contains("diamond_ore") {
+        Some((PoiKind::DiamondOre, 3))
+    } else if name.contains("redstone_ore") {
+        Some((PoiKind::RedstoneOre, 3))
+    } else if name.contains("lapis_ore") {
+        Some((PoiKind::LapisOre, 2))
+    } else {
+        None
+    }
+}
+
+/// State id → (memory kind, required tier) for every ore block, so observation
+/// can classify by raw state id with no per-block allocation.
+fn ore_states(bot: &Bot) -> HashMap<u32, (PoiKind, i32)> {
+    let mut m = HashMap::new();
+    for b in &bot.registry.blocks_array {
+        if let Some((kind, tier)) = ore_kind_tier(&b.name) {
+            for s in b.min_state_id..=b.max_state_id {
+                m.insert(s, (kind, tier));
+            }
+        }
+    }
+    m
+}
+
+/// Best pickaxe tier in the inventory (0 none … 4 diamond/netherite).
+fn pickaxe_tier_rank(bot: &Bot) -> i32 {
+    let mut best = 0;
+    for it in bot.inventory.slots.iter().flatten() {
+        let r = match it.name.as_str() {
+            "wooden_pickaxe" | "golden_pickaxe" => 1,
+            "stone_pickaxe" => 2,
+            "iron_pickaxe" => 3,
+            "diamond_pickaxe" | "netherite_pickaxe" => 4,
+            _ => 0,
+        };
+        best = best.max(r);
+    }
+    best
+}
+
+/// Record every ore the bot can currently see (through stone, via chunk data) in
+/// a box around it — this is the bot's "I noticed ore over there" memory.
+fn observe_blocks(bot: &Bot, mem: &mut WorldMemory, ores: &HashMap<u32, (PoiKind, i32)>) {
+    let p = bot.entity.position;
+    let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    const R: i32 = 10;
+    let mut seen = 0;
+    for dx in -R..=R {
+        for dy in -R..=R {
+            for dz in -R..=R {
+                let s = bot.block_state_at(bx + dx, by + dy, bz + dz);
+                if let Some(&(kind, tier)) = ores.get(&s) {
+                    mem.observe(kind, (bx + dx, by + dy, bz + dz), PoiStatus::NeedsTool(tier));
+                    seen += 1;
+                }
+            }
+        }
+    }
+    if seen > 0 {
+        mem.log("observe", "ores", &format!("{seen} ore blocks near ({bx},{by},{bz})"));
+    }
+}
+
+/// Mine `target` of an ore resource. The bot's memory is the index: it OBSERVES
+/// ores it sees into SQLite, then QUERIES the DB for the nearest usable one and
+/// goes mines it. Only when the DB has nothing does it explore — searching SOUTH
+/// (descending to ore depth, then tunnelling +Z to load fresh terrain) in a loop
+/// until ore turns up, recording everything it finds along the way.
+pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut WorldMemory) -> StepResult {
+    record_descent(bot, mem);
+    mem.log("mine_ore", "begin", &format!("{ore} target={target}"));
     for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {
         if select_item(bot, tier).await.unwrap_or(false) {
             break;
         }
     }
     bot.movement.blocks_cant_break.clear();
+    let ores = ore_states(bot);
+    let kind = match ore {
+        "coal" => PoiKind::CoalOre,
+        "gold" => PoiKind::GoldOre,
+        "diamond" => PoiKind::DiamondOre,
+        _ => PoiKind::IronOre,
+    };
     // Productive depths: iron peaks low, coal is everywhere — go reasonably deep.
     let depth = if ore == "iron" { 35 } else { 50 };
-    let dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
     let deadline = Instant::now() + Duration::from_secs(300);
-    let mut blacklist: std::collections::HashSet<(i32, i32, i32)> = std::collections::HashSet::new();
-    let mut dir = 0usize;
-    let mut idle = 0;
+    let mut iters = 0u32;
+    let mut stuck = 0u32;
+    let mut last_count = count_ore_resource(bot, ore);
+    let mut last_pos = {
+        let p = bot.entity.position;
+        (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
+    };
     while count_ore_resource(bot, ore) < target && Instant::now() < deadline {
-        let by = bot.entity.position.y as i32;
-        // 1) If we're well above ore depth, just descend a staircase — don't waste
-        //    time chasing unreachable ore in steep high terrain (a mountain spawn).
-        if by > depth + 2 {
+        iters += 1;
+        // Progress / stuck tracking (vs the previous iteration).
+        let now_count = count_ore_resource(bot, ore);
+        let now_pos = {
             let p = bot.entity.position;
-            let (fx, fy, fz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-            let below = bot.block_at(fx, fy - 1, fz).map(|b| b.name.clone()).unwrap_or_default();
-            let below_state = bot.block_state_at(fx, fy - 1, fz);
-            // Descend fast via straight dig-down (reliable); if it's blocked (lava
-            // below), cut a sideways stair-step to move over and keep going down.
-            let dug = dig_down(bot).await;
-            if std::env::var("MINE_DEBUG").is_ok() {
-                eprintln!(
-                    "descent pos=({:.2},{:.2},{:.2}) below={below}({below_state}) dug={dug} -> y={:.2}",
-                    p.x, p.y, p.z, bot.entity.position.y
-                );
+            (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
+        };
+        if now_count > last_count || now_pos != last_pos {
+            stuck = 0;
+        } else {
+            stuck += 1;
+        }
+        last_count = now_count;
+        last_pos = now_pos;
+        if stuck > 30 {
+            mem.log("mine_ore", "stuck", &format!("y={} have={}", now_pos.1, now_count));
+            println!("    ore: stuck — bailing");
+            break;
+        }
+        // Durability: re-equip a pickaxe if the held one broke; bail to re-craft
+        // if we have none at all.
+        if !ensure_pickaxe(bot).await {
+            mem.log("mine_ore", "no_pickaxe", "bailing to re-craft");
+            break;
+        }
+        // Notice ores around us (cheap, throttled) and write them to memory.
+        if iters % 4 == 1 {
+            observe_blocks(bot, mem, &ores);
+        }
+        let from = {
+            let p = bot.entity.position;
+            (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
+        };
+        let tier = pickaxe_tier_rank(bot);
+
+        // 1) Ask the DB where the ore is. If it knows one, go mine it.
+        if let Some(tpos) = mem.nearest(&[kind], from, tier).map(|p| p.pos) {
+            if !can_reach(bot, tpos.0, tpos.1, tpos.2, 2.0) {
+                mem.mark(tpos, PoiStatus::Unreachable);
+                mem.log("mine_ore", "unreachable", &format!("{ore} {tpos:?}"));
+                continue;
             }
-            if !dug && !descend_step(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
-                dir += 1;
-                strip_tunnel(bot, dirs[dir % 4].0, dirs[dir % 4].1).await;
-            }
-            idle += 1;
-            if idle % 8 == 0 {
-                println!("    ore: descending to mine {ore} — y={}", bot.entity.position.y as i32);
+            mem.log("mine_ore", "target", &format!("{ore} {tpos:?}"));
+            let gained = mine_vein(bot, ore, tpos.0, tpos.1, tpos.2).await;
+            observe_blocks(bot, mem, &ores); // mined blocks are air now
+            if gained > 0 {
+                mem.mark(tpos, PoiStatus::Gone);
+                println!("    ore: {} {ore} (y={})", count_ore_resource(bot, ore), bot.entity.position.y as i32);
+                mem.log("mine_ore", "mined", &format!("+{gained} {ore} total={}", count_ore_resource(bot, ore)));
+            } else {
+                mem.mark(tpos, PoiStatus::Unreachable);
             }
             continue;
         }
-        // 2) At depth — grab any reachable ore nearby (skip failed ones).
-        let found = find_ore_excluding(bot, ore, 12, &blacklist);
-        if let Some((tx, ty, tz)) = found {
-            let gained = mine_vein(bot, ore, tx, ty, tz).await;
-            if gained > 0 {
-                println!("    ore: {} {ore} (y={})", count_ore_resource(bot, ore), bot.entity.position.y as i32);
-                idle = 0;
-                continue;
+
+        // 2) DB has nothing → search SOUTH until ore turns up.
+        let by = bot.entity.position.y as i32;
+        if by > depth + 2 {
+            // Get down to ore depth first.
+            if !dig_down(bot).await && !descend_step(bot, 0, 1).await {
+                strip_tunnel(bot, 0, 1).await;
             }
-            blacklist.insert((tx, ty, tz)); // couldn't reach it — don't retry
-        }
-        // 3) No reachable ore here — strip-tunnel to expose more.
-        idle += 1;
-        if !strip_tunnel(bot, dirs[dir % 4].0, dirs[dir % 4].1).await {
-            dir += 1;
-        }
-        if idle % 12 == 0 {
-            println!("    ore: searching {ore} — y={by} have={}", count_ore_resource(bot, ore));
+            if iters % 8 == 0 {
+                println!("    ore: descending toward {ore} — y={}", bot.entity.position.y as i32);
+            }
+        } else {
+            // At depth — tunnel south to load + expose fresh terrain.
+            let moved = strip_tunnel(bot, 0, 1).await;
+            mem.log("mine_ore", "search_south", &format!("y={by} moved={moved}"));
+            if iters % 8 == 0 {
+                println!("    ore: searching south for {ore} — y={by} have={}", count_ore_resource(bot, ore));
+            }
         }
     }
 
     let n = count_ore_resource(bot, ore);
+    mem.log("mine_ore", "end", &format!("{n}/{target} {ore}"));
     if n >= target {
         success(format!("mined {n}/{target} {ore}"))
     } else {
@@ -258,39 +434,9 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32) -> StepResult {
     }
 }
 
-/// find_ore but skipping blacklisted positions.
-fn find_ore_excluding(
-    bot: &Bot,
-    ore: &str,
-    r: i32,
-    blacklist: &std::collections::HashSet<(i32, i32, i32)>,
-) -> Option<(i32, i32, i32)> {
-    let p = bot.entity.position;
-    let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-    let mut best = None;
-    let mut best_d = f64::MAX;
-    for dx in -r..=r {
-        for dy in -r..=r {
-            for dz in -r..=r {
-                let (x, y, z) = (bx + dx, by + dy, bz + dz);
-                if blacklist.contains(&(x, y, z)) {
-                    continue;
-                }
-                if bot.block_at(x, y, z).map(|b| ore_block_matches(&b.name, ore)).unwrap_or(false) {
-                    let d = (dx * dx + dy * dy + dz * dz) as f64;
-                    if d < best_d {
-                        best_d = d;
-                        best = Some((x, y, z));
-                    }
-                }
-            }
-        }
-    }
-    best
-}
-
 /// Mine gravel until we have `target` flint (gravel drops flint ~10%).
-pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32) -> StepResult {
+pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
+    record_descent(bot, mem);
     bot.movement.blocks_cant_break.clear();
     let count = |bot: &Bot| -> i32 {
         bot.inventory.slots.iter().flatten().filter(|i| i.name == "flint").map(|i| i.count).sum()
@@ -341,7 +487,8 @@ pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32) -> StepResult
     }
 }
 
-pub async fn mine_stone(bot: &mut Bot<'_>, target: i32) -> StepResult {
+pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
+    record_descent(bot, mem);
     // Equip the best available pickaxe.
     for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {
         if select_item(bot, tier).await.unwrap_or(false) {
@@ -351,17 +498,39 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32) -> StepResult {
     // Now that we hold a pickaxe, allow the pathfinder to break stone again
     // (it's blocked by default so wood-gathering doesn't wedge on stone).
     bot.movement.blocks_cant_break.clear();
+    let dbg = std::env::var("MINE_DEBUG").is_ok();
+    if dbg {
+        let p = bot.entity.position;
+        eprintln!("MINE_STONE start: held={:?} at ({:.1},{:.1},{:.1})", bot.held_item().map(|i| i.name.clone()), p.x, p.y, p.z);
+    }
 
     let deadline = Instant::now() + Duration::from_secs(100);
     let mut no_progress = 0;
     while count_cobble(bot) < target && Instant::now() < deadline {
+        // Durability: re-equip a pickaxe if the held one broke; bail to re-craft
+        // if we have none (don't mine stone bare-handed — it drops nothing).
+        if !ensure_pickaxe(bot).await {
+            println!("    stone: no pickaxe — stopping to re-craft");
+            break;
+        }
+        // Stuck: bail after a long no-progress streak instead of grinding the
+        // whole deadline against a wall.
+        if no_progress > 25 {
+            println!("    stone: stuck (no cobble progress) — bailing");
+            break;
+        }
         if let Some((tx, ty, tz)) = find_stone(bot, 4) {
             let _ = bot.goto_near(tx, ty, tz, 2.5).await;
             let before = count_cobble(bot);
+            let held = bot.held_item().map(|i| i.name.clone());
+            let bname = bot.block_at(tx, ty, tz).map(|b| b.name.clone());
             if bot.dig(tx, ty, tz).await.is_err() {
                 break;
             }
             collect_drops(bot, tx, tz).await;
+            if dbg {
+                eprintln!("MINE_STONE dig ({tx},{ty},{tz}) block={bname:?} held={held:?} cobble {before}->{}", count_cobble(bot));
+            }
             if count_cobble(bot) > before {
                 println!("    stone: {} cobblestone", count_cobble(bot));
                 no_progress = 0;

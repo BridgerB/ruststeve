@@ -2,9 +2,62 @@
 //! generic crafting, and crafting-table placement. Port of the slice of steve's
 //! `lib/bot-utils.ts` the early phases use.
 
-use rustcraft::bot::{Bot, Face};
+use rustcraft::bot::{Bot, DriveStep, Face};
+use rustcraft::path::{get_path_to, GoalNear, PathStatus};
 
+use crate::memory::{PoiKind, PoiStatus, WorldMemory};
 use crate::types::{failure, success, StepResult};
+
+/// Is the bot's head submerged in water (i.e. it's drowning if it stays)?
+pub fn head_in_water(bot: &Bot) -> bool {
+    let p = bot.entity.position;
+    let (x, hy, z) = (p.x.floor() as i32, (p.y + 1.0).floor() as i32, p.z.floor() as i32);
+    bot.block_at(x, hy, z).map(|b| b.name.contains("water")).unwrap_or(false)
+}
+
+/// Swim up/out to air before doing anything else. Returns true once the head is
+/// no longer underwater. Used so the bot LEAVES water first instead of mining
+/// while submerged (which drowns it) — mining underwater is only a last resort
+/// when this can't surface it (boxed in).
+pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
+    for _ in 0..ticks {
+        if !head_in_water(bot) {
+            break;
+        }
+        bot.set_control_state("jump", true); // swim up
+        bot.set_control_state("forward", true); // drift toward an edge
+        if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
+            break;
+        }
+    }
+    bot.clear_control_states();
+    !head_in_water(bot)
+}
+
+/// Pre-compute a route to within `range` of (x, y, z). True only if the
+/// pathfinder can actually reach it — so callers never journey toward something
+/// they can't get to.
+pub fn can_reach(bot: &Bot, x: i32, y: i32, z: i32, range: f64) -> bool {
+    let start = (
+        bot.entity.position.x.floor() as i32,
+        bot.entity.position.y.floor() as i32,
+        bot.entity.position.z.floor() as i32,
+    );
+    let goal = GoalNear::new(x as f64, y as f64, z as f64, range);
+    // BOUNDED: a short timeout + capped search radius. This is a synchronous,
+    // CPU-bound A* that blocks the bot's async loop (and thus its keep-alive
+    // responses) while it runs — an unbounded 3s version got bots kicked for
+    // "Timed out" when many ran at once. Reachable-but-near targets resolve fast.
+    let res = get_path_to(
+        &bot.world,
+        start,
+        &goal,
+        bot.movement.clone(),
+        80.0,
+        std::time::Duration::from_millis(800),
+    );
+    res.status == PathStatus::Success
+}
 
 pub const LOG_TYPES: &[&str] = &[
     "oak_log", "birch_log", "spruce_log", "jungle_log", "acacia_log", "dark_oak_log",
@@ -76,17 +129,33 @@ pub fn find_closest_log(bot: &Bot) -> Option<(String, (i32, i32, i32))> {
     None
 }
 
-/// Ensure `name` is in the held hotbar slot (moving it there if needed).
+/// Equip `name` to the hand, VALIDATED against the server. The optimistic swap
+/// can be silently rejected under load (held hand stays empty), so we do the
+/// swap, wait for the server's authoritative inventory update to land, then
+/// confirm we actually hold it — re-doing the swap until the SERVER agrees.
+/// Returns false only if the item isn't in the inventory at all.
 pub async fn select_item(bot: &mut Bot<'_>, name: &str) -> std::io::Result<bool> {
-    let pos = bot.inventory.slots.iter().position(|s| s.as_ref().map(|i| i.name.as_str()) == Some(name));
-    let Some(idx) = pos else { return Ok(false) };
-    if (36..45).contains(&idx) {
-        bot.set_held_slot((idx - 36) as i32).await?;
-    } else {
-        bot.move_slot_item(idx as i32, 36).await?;
-        bot.set_held_slot(0).await?;
+    for _ in 0..5 {
+        // Server-confirmed already holding it? Done.
+        if bot.held_item().map(|i| i.name == name).unwrap_or(false) {
+            return Ok(true);
+        }
+        let Some(idx) =
+            bot.inventory.slots.iter().position(|s| s.as_ref().map(|i| i.name.as_str()) == Some(name))
+        else {
+            return Ok(false); // not in inventory — honest false, no item to equip
+        };
+        if (36..45).contains(&idx) {
+            bot.set_held_slot((idx - 36) as i32).await?;
+        } else {
+            bot.click_window(idx as i32, 0, 2).await?; // atomic hotbar swap (mode 2)
+            bot.set_held_slot(0).await?;
+        }
+        // Let the SERVER's authoritative inventory arrive (a rejected swap is
+        // reverted here), then the loop re-checks the real held item.
+        bot.wait_ticks(8).await.ok();
     }
-    Ok(true)
+    Ok(bot.held_item().map(|i| i.name == name).unwrap_or(false))
 }
 
 /// Craft `count` of an item by name. `table` is the position of an open-able
@@ -121,13 +190,22 @@ pub async fn craft_item(
     if table.is_some() {
         let _ = bot.close_window().await;
     }
-    // The container-craft inventory sync is racy: the craft can succeed on the
-    // server but the result not appear locally. If so, reflect it (we know the
-    // server made it). Without this the step machine re-crafts forever.
+    // The container-craft inventory sync is racy. DON'T fabricate the result
+    // locally — a phantom item the server never made gets "used" later (e.g. a
+    // pickaxe the bot can't actually equip), churning forever. Instead wait for
+    // the server's authoritative inventory update to arrive, then judge success
+    // from the REAL count below.
     if result.is_ok() {
         let made = recipe.result.count.max(1) * count.max(1);
-        if bot.item_count(name) < before + made {
-            bot.ensure_item(name, before + made - bot.item_count(name));
+        // Poll for the server's authoritative result. Break the INSTANT it appears.
+        // ~1.5s window: long enough for a real (if late) confirmation, short enough
+        // that a DROPPED craft (the server never processed it — common under load)
+        // is detected fast so the step machine can retry quickly instead of waiting.
+        for _ in 0..8 {
+            if bot.item_count(name) >= before + made {
+                break;
+            }
+            bot.wait_ticks(4).await.ok();
         }
     }
     if std::env::var("CRAFT_DEBUG").is_ok() {
@@ -136,20 +214,48 @@ pub async fn craft_item(
         eprintln!("CRAFT {name}: result={result:?} inv={inv:?} win={win:?}");
     }
     match result {
-        Ok(()) => success(format!("crafted {count}x {name}")),
+        // Only call it a success if the item ACTUALLY appeared in our (server-
+        // synced) inventory — never trust the click going through alone.
+        Ok(()) if bot.item_count(name) > before => {
+            success(format!("crafted {name} (have {})", bot.item_count(name)))
+        }
+        Ok(()) => failure(format!("craft {name}: result never appeared (server didn't make it)")),
         Err(e) => failure(format!("craft {name}: {e}")),
     }
 }
 
 /// Find an existing crafting table nearby, or place one from inventory.
 /// Returns its position (the bot will be near it).
-pub async fn get_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32, i32, i32)>> {
+pub async fn get_crafting_table(
+    bot: &mut Bot<'_>,
+    mem: &mut WorldMemory,
+) -> std::io::Result<Option<(i32, i32, i32)>> {
+    let bpos = {
+        let p = bot.entity.position;
+        (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
+    };
+    // 1. A table we remember placing/seeing — walk back and reuse it instead of
+    //    wasting a plank crafting + placing a fresh one.
+    let remembered = mem.nearest(&[PoiKind::CraftingTable], bpos, 99).map(|p| p.pos);
+    if let Some(tpos) = remembered {
+        let _ = bot.goto(tpos.0, tpos.1, tpos.2).await;
+        if bot.block_at(tpos.0, tpos.1, tpos.2).map(|b| b.name == "crafting_table").unwrap_or(false) {
+            println!("    table: reusing remembered table at {tpos:?}");
+            return Ok(Some(tpos));
+        }
+        // Loaded but no longer a table → it's gone; forget it. (Unloaded/unreachable
+        // → leave it remembered and just place a new one for now.)
+        if bot.block_at(tpos.0, tpos.1, tpos.2).is_some() {
+            mem.mark(tpos, PoiStatus::Gone);
+        }
+    }
+    // 2. An existing table in the loaded world — record it for next time.
     if let Some(pos) = bot.find_block("crafting_table", 24) {
         bot.goto(pos.0, pos.1, pos.2).await?;
+        mem.record(PoiKind::CraftingTable, pos, PoiStatus::Available);
         return Ok(Some(pos));
     }
-    // No table in the world — craft one on demand if we don't have the item
-    // (the step machine may have skipped the dedicated craft-table step).
+    // 3. None around — craft one on demand if we don't have the item, then place it.
     if count_items(bot, "crafting_table") == 0 {
         let _ = craft_item(bot, "crafting_table", 1, None).await;
         if count_items(bot, "crafting_table") == 0 {
@@ -157,13 +263,36 @@ pub async fn get_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i3
             return Ok(None);
         }
     }
-    place_crafting_table(bot).await
+    place_crafting_table(bot, mem).await
+}
+
+/// Place a crafting table at (tx,ty,tz) (against the top of the block below) and
+/// VALIDATE it against the server: equip is confirmed first, then after placing
+/// we wait for the server's block update and check the block is REALLY there —
+/// the optimistic placement is reverted by the server on rejection, so this only
+/// returns true when the table genuinely exists server-side.
+async fn place_table_confirmed(bot: &mut Bot<'_>, tx: i32, ty: i32, tz: i32) -> std::io::Result<bool> {
+    if !select_item(bot, "crafting_table").await? {
+        return Ok(false); // couldn't confirm the item in hand — don't bother placing
+    }
+    bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
+    bot.wait_ticks(2).await?;
+    bot.place_block(tx, ty - 1, tz, Face::Top).await?;
+    // Give the server time to confirm OR revert the optimistic placement (~1s) —
+    // too short and we'd either trust a placement the server is about to revert,
+    // or false-negative a real one and place a duplicate.
+    bot.wait_ticks(20).await?;
+    Ok(bot.block_at(tx, ty, tz).map(|b| b.name == "crafting_table").unwrap_or(false))
 }
 
 /// Place a crafting table on an air block next to the bot with solid ground.
-async fn place_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32, i32, i32)>> {
+/// Only returns a position once the server CONFIRMS the table is really there.
+async fn place_crafting_table(
+    bot: &mut Bot<'_>,
+    mem: &mut WorldMemory,
+) -> std::io::Result<Option<(i32, i32, i32)>> {
     if !select_item(bot, "crafting_table").await? {
-        println!("    table: could not select crafting_table item");
+        println!("    table: could not equip crafting_table (server didn't confirm it in hand)");
         return Ok(None);
     }
     let p = bot.entity.position;
@@ -173,14 +302,12 @@ async fn place_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32,
     for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (1, -1, 0), (-1, -1, 0), (0, -1, 1), (0, -1, -1)] {
         let (tx, ty, tz) = (fx + dx, fy + dy, fz + dz);
         if bot.block_state_at(tx, ty, tz) == 0 && bot.block_state_at(tx, ty - 1, tz) != 0 {
-            bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
-            bot.wait_ticks(2).await?;
-            // Place against the top face of the ground block below the target.
-            bot.place_block(tx, ty - 1, tz, Face::Top).await?;
-            bot.wait_ticks(4).await?;
-            select_item(bot, "crafting_table").await?;
-            println!("    table: placed at ({tx},{ty},{tz})");
-            return Ok(Some((tx, ty, tz)));
+            if place_table_confirmed(bot, tx, ty, tz).await? {
+                println!("    table: placed + server-confirmed at ({tx},{ty},{tz})");
+                mem.record(PoiKind::CraftingTable, (tx, ty, tz), PoiStatus::Available);
+                return Ok(Some((tx, ty, tz)));
+            }
+            println!("    table: placement at ({tx},{ty},{tz}) NOT confirmed — trying elsewhere");
         }
     }
     // No open spot (e.g. mining in a tunnel) — DIG a side niche at feet level so a
@@ -194,15 +321,13 @@ async fn place_crafting_table(bot: &mut Bot<'_>) -> std::io::Result<Option<(i32,
             if bot.block_state_at(tx, ty, tz) != 0 {
                 continue; // couldn't break it (e.g. bedrock)
             }
-            bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
-            bot.wait_ticks(2).await?;
-            bot.place_block(tx, ty - 1, tz, Face::Top).await?;
-            bot.wait_ticks(4).await?;
-            select_item(bot, "crafting_table").await?;
-            println!("    table: dug a niche + placed at ({tx},{ty},{tz})");
-            return Ok(Some((tx, ty, tz)));
+            if place_table_confirmed(bot, tx, ty, tz).await? {
+                println!("    table: dug a niche + confirmed at ({tx},{ty},{tz})");
+                mem.record(PoiKind::CraftingTable, (tx, ty, tz), PoiStatus::Available);
+                return Ok(Some((tx, ty, tz)));
+            }
         }
     }
-    println!("    table: no valid spot to place (bot at {fx},{fy},{fz})");
+    println!("    table: could not place a server-confirmed table (bot at {fx},{fy},{fz})");
     Ok(None)
 }

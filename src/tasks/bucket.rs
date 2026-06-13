@@ -6,6 +6,7 @@ use rustcraft::bot::Bot;
 use rustcraft::vec3::vec3;
 
 use crate::bot_utils::{count_items, select_item};
+use crate::memory::{PoiKind, PoiStatus, WorldMemory};
 use crate::types::{failure, success, StepResult};
 
 /// Nearest water source, preferring one with air above (a surface pool).
@@ -17,7 +18,7 @@ fn find_water(bot: &Bot) -> Option<(i32, i32, i32)> {
     surface.or_else(|| bot.find_block("water", 32))
 }
 
-pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32) -> StepResult {
+pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
     let deadline = Instant::now() + Duration::from_secs(120);
     while count_items(bot, "water_bucket") < target && Instant::now() < deadline {
         if count_items(bot, "bucket") == 0 {
@@ -26,6 +27,8 @@ pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32) -> StepResult {
         let Some((wx, wy, wz)) = find_water(bot) else {
             return failure("no water found nearby");
         };
+        // Remember the water (coarsely — one entry per body, not per block).
+        mem.record(PoiKind::Water, (wx, wy, wz), PoiStatus::Available);
         // Stand next to (not in) the water and face it.
         let _ = bot.goto_near(wx, wy, wz, 2.0).await;
         if !select_item(bot, "bucket").await.unwrap_or(false) {

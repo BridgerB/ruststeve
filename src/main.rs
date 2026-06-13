@@ -10,17 +10,21 @@
 //! `../rustcraft/data`). Run: `cargo run`.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use rustcraft::bot::{Bot, BotEvent};
 use rustcraft::protocol::ClientOptions;
 use rustcraft::registry::{create_registry, BlockCollisionShapes, Registry};
 
 mod bot_utils;
+mod memory;
 mod state;
 mod steps;
+mod survival;
 mod tasks;
 mod types;
 
+use memory::WorldMemory;
 use state::{is_dragon_dead, sync_from_bot};
 use steps::{execute_step, get_next_step, progress};
 
@@ -44,6 +48,12 @@ async fn main() -> std::io::Result<()> {
     });
     println!("registry: {} blocks, {} items", registry.blocks_array.len(), registry.items_array.len());
 
+    // Persistent world memory (SQLite), per bot so racing bots don't share a db.
+    let mem_path = std::path::PathBuf::from(format!(".memory-{username}.db"));
+    let mut memory = WorldMemory::open(&mem_path);
+    println!("memory: {} POIs remembered (db {})", memory.len(), mem_path.display());
+    memory.log("session", "start", &format!("{host}:{port} as {username}"));
+
     println!("connecting to {host}:{port} as {username}…");
     let options = ClientOptions { host, port, username, access_token: None, uuid: None };
     let mut bot = Bot::connect(options, &registry).await?;
@@ -58,6 +68,13 @@ async fn main() -> std::io::Result<()> {
                 if chunks >= 12 {
                     break;
                 }
+            }
+            Some(BotEvent::Death) => {
+                // Joined dead (e.g. suffocating at an underground logout spot) —
+                // respawn (sends us to world spawn) so chunks + a live Spawn arrive.
+                println!("died on join — respawning");
+                memory.log("session", "respawn", "dead on join");
+                bot.respawn().await.ok();
             }
             Some(BotEvent::Kicked(r)) => {
                 println!("kicked: {r}");
@@ -94,6 +111,18 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
+    // Race positioning: hold here (alive, idle) so the orchestrator can teleport
+    // us into our lane before we start gathering. RACE_HOLD=seconds.
+    if let Ok(hold) = std::env::var("RACE_HOLD") {
+        let secs: u64 = hold.parse().unwrap_or(0);
+        println!("holding {secs}s for race positioning…");
+        let until = Instant::now() + Duration::from_secs(secs);
+        while Instant::now() < until {
+            bot.drive_tick().await.ok();
+        }
+        println!("hold done — at {:?}", bot.entity.position);
+    }
+
     println!("world ready — starting speedrun loop");
     let mut idle = 0;
     loop {
@@ -107,6 +136,42 @@ async fn main() -> std::io::Result<()> {
             break;
         }
 
+        // Died mid-run (drowned/lava/fall) — respawn (to our lane, if a per-player
+        // spawnpoint was set) and retry instead of idling out of the race.
+        if !state.alive {
+            println!("died at {:?} — respawning", state.position);
+            memory.log(
+                "session",
+                "death",
+                &format!("{:.0},{:.0},{:.0}", state.position.0, state.position.1, state.position.2),
+            );
+            bot.respawn().await.ok();
+            bot.wait_ticks(40).await.ok(); // let respawn + chunks settle
+            continue;
+        }
+
+        // Survival reflexes run ABOVE the goal: if a hazard fired, handle it and
+        // re-evaluate before doing any task this cycle.
+        if survival::handle_survival(&mut bot, &mut memory).await {
+            continue;
+        }
+
+        // Race finish line: stop as soon as we reach the goal tool.
+        if let Ok(goal) = std::env::var("RACE_GOAL") {
+            let reached = match goal.as_str() {
+                "iron_pickaxe" => state.equipment.pickaxe_tier().rank() >= 3,
+                "stone_pickaxe" => state.equipment.pickaxe_tier().rank() >= 2,
+                "wooden_pickaxe" => state.equipment.pickaxe_tier().rank() >= 1,
+                _ => false,
+            };
+            if reached {
+                println!("RACE GOAL REACHED: {goal}");
+                memory.log("race", "win", &goal);
+                bot.run_command(&format!("say I reached {goal} — race done!")).await.ok();
+                break;
+            }
+        }
+
         match get_next_step(&state) {
             Some(step) => {
                 idle = 0;
@@ -117,7 +182,17 @@ async fn main() -> std::io::Result<()> {
                     state.inventory.logs, state.inventory.planks, state.inventory.sticks,
                     state.equipment.pickaxe_tier(),
                 );
-                let r = execute_step(&mut bot, step.id).await;
+                memory.log(
+                    "step",
+                    step.id,
+                    &format!(
+                        "start {}/{} logs={} planks={} sticks={} cobble={} pick={:?} y={:.0}",
+                        done, total, state.inventory.logs, state.inventory.planks, state.inventory.sticks,
+                        state.inventory.cobblestone, state.equipment.pickaxe_tier(), state.position.1,
+                    ),
+                );
+                let r = execute_step(&mut bot, step.id, &mut memory).await;
+                memory.log("step", step.id, &format!("{} {}", if r.success { "ok" } else { "fail" }, r.message));
                 println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
                 if r.message.contains("disconnect") {
                     println!("connection lost — stopping");

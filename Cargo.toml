@@ -8,6 +8,7 @@ description = "Ender Dragon speedrun bot — Rust port of steve, built on rustcr
 [dependencies]
 rustcraft = { path = "../rustcraft" }
 tokio = { version = "1", features = ["full"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [[bin]]
 name = "ruststeve"
