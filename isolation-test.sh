@@ -73,8 +73,8 @@ setup_prereqs() {
                          # and put lava one block lower (y68) so the bot's sightline
                          # clears the floor and actually SEES it (flush-with-floor lava
                          # is invisible — the LOS grazes the floor stone).
-                         rcon "'fill $((x+5)) $((Y-1)) $((z-2)) $((x+8)) $Y $((z+2)) minecraft:air'" \
-                              "'fill $((x+5)) $((Y-2)) $((z-2)) $((x+8)) $((Y-2)) $((z+2)) minecraft:lava'" >/dev/null;;
+                         rcon "'fill $((x+5)) $((Y-1)) $((z-3)) $((x+10)) $Y $((z+3)) minecraft:air'" \
+                              "'fill $((x+5)) $((Y-2)) $((z-3)) $((x+10)) $((Y-2)) $((z+3)) minecraft:lava'" >/dev/null;;
   esac
   # Table-based crafts need a table reachable (they route through get_crafting_table,
   # which can't make one without planks). Place one next to the bot.

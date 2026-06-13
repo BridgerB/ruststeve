@@ -18,7 +18,7 @@ use crate::types::{failure, success, StepResult};
 // ── block classification ────────────────────────────────────────────────────
 
 /// Debug log for the cast (to stderr → the bot log) when CRAFT_DEBUG is set.
-fn cdbg(msg: &str) {
+fn cast_debug(msg: &str) {
     if std::env::var("CRAFT_DEBUG").is_ok() {
         eprintln!("    CAST {msg}");
     }
@@ -263,7 +263,7 @@ fn find_fluid(bot: &Bot, fluid: &str, max_dist: i32) -> Option<(i32, i32, i32)> 
 
 /// Stand beside a fluid source and fill an empty bucket from it.
 async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
-    cdbg(&format!(
+    cast_debug(&format!(
         "fill {fluid}: ENTER empty_buckets={} {fluid}_buckets={}",
         count_items(bot, "bucket"),
         count_items(bot, &format!("{fluid}_bucket"))
@@ -308,7 +308,7 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         Some(c) => c,
         None => {
             if fluid == "lava" {
-                cdbg(&format!(
+                cast_debug(&format!(
                     "fill lava: NO edge source with a stand spot ({} {fluid} blocks seen)",
                     bot.find_exposed_blocks(fluid, 16, 64).len()
                 ));
@@ -320,27 +320,37 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
             (s, (s.0 as f64 + 0.5, (s.1 + 1) as f64, s.2 as f64 + 0.5))
         }
     };
-    let _ = bot.goto_near(stand.0 as i32, stand.1 as i32, stand.2 as i32, 1.0).await;
-    walk_to_xz(bot, stand.0, stand.2, 0.4, 40).await;
-    let p = bot.entity.position;
-    let off = (p.x - stand.0).abs() + (p.z - stand.2).abs();
-    cdbg(&format!(
-        "fill {fluid}: src={src:?} stand=({:.1},{:.1}) bot=({:.1},{:.1},{:.1}) off={off:.2}",
-        stand.0, stand.2, p.x, p.y, p.z
-    ));
-    if !select_item(bot, "bucket").await.unwrap_or(false) {
-        cdbg(&format!("fill {fluid}: no empty bucket equipped"));
-        return false;
-    }
-    for i in 0..6 {
-        let dy = if i % 2 == 0 { 0.5 } else { 0.1 };
-        reliable_use(bot, vec3(src.0 as f64 + 0.5, src.1 as f64 + dy, src.2 as f64 + 0.5)).await;
-        if count_items(bot, &format!("{fluid}_bucket")) > 0 {
-            cdbg(&format!("fill {fluid}: OK on try {i}"));
-            return true;
+    let filled_bucket_name = format!("{fluid}_bucket");
+    // Up to 3 re-approach rounds: navigate to the stand spot, then try scooping any
+    // reachable source block (the located one OR a neighbour) from a couple of aim
+    // heights. Being a block off the exact stand spot is fine — the source is well
+    // within reach; we just need the look to actually land on lava.
+    for round in 0..3 {
+        let _ = bot.goto_near(stand.0 as i32, stand.1 as i32, stand.2 as i32, 1.0).await;
+        walk_to_xz(bot, stand.0, stand.2, 0.4, 50).await;
+        if !select_item(bot, "bucket").await.unwrap_or(false) {
+            return false;
+        }
+        // Candidate source blocks: the located one + its horizontal neighbours that
+        // are actually this fluid (so a slightly-off bot still has a target it sees).
+        let mut targets = vec![src];
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let t = (src.0 + dx, src.1, src.2 + dz);
+            if is_lava(&name_at(bot, t.0, t.1, t.2)) || name_at(bot, t.0, t.1, t.2).contains(fluid) {
+                targets.push(t);
+            }
+        }
+        for t in &targets {
+            for dy in [0.6_f64, 0.2, 0.9] {
+                reliable_use(bot, vec3(t.0 as f64 + 0.5, t.1 as f64 + dy, t.2 as f64 + 0.5)).await;
+                if count_items(bot, &filled_bucket_name) > 0 {
+                    cast_debug(&format!("fill {fluid}: OK (round {round})"));
+                    return true;
+                }
+            }
         }
     }
-    cdbg(&format!("fill {fluid}: 6 tries failed (off={off:.2})"));
+    cast_debug(&format!("fill {fluid}: all rounds failed"));
     false
 }
 
@@ -360,7 +370,7 @@ async fn cast_obsidian_at(
     let above = (pos.0, pos.1 + 1, pos.2);
     {
         let p = bot.entity.position;
-        cdbg(&format!("cast {pos:?} ENTER bot=({:.1},{:.1},{:.1})", p.x, p.y, p.z));
+        cast_debug(&format!("cast {pos:?} ENTER bot=({:.1},{:.1},{:.1})", p.x, p.y, p.z));
     }
 
     for _attempt in 0..3 {
@@ -385,7 +395,7 @@ async fn cast_obsidian_at(
         //    pillar away), THEN navigate to the stand spot and re-descend. Retry a few
         //    times before giving up — the cluttered frame makes a single try unreliable.
         bot.set_control_state("sneak", false);
-        let off_now = |bot: &Bot| {
+        let dist_from_stand = |bot: &Bot| {
             (bot.entity.position.x - (pos.0 as f64 + 0.5)).abs()
                 + (bot.entity.position.z - (stand_z as f64 + 0.5)).abs()
         };
@@ -394,7 +404,7 @@ async fn cast_obsidian_at(
             let _ = bot.goto_near(pos.0, base_y, stand_z, 1.0).await;
             descend_to_y(bot, base_y).await;
             walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.4, 60).await;
-            if off_now(bot) <= 1.2 && feet_y(bot) <= base_y + 1 {
+            if dist_from_stand(bot) <= 1.2 && feet_y(bot) <= base_y + 1 {
                 break;
             }
             // Stage from a clear spot behind the working line, then re-approach.
@@ -402,20 +412,20 @@ async fn cast_obsidian_at(
             descend_to_y(bot, base_y).await;
             if try_pos == 2 {
                 let p = bot.entity.position;
-                cdbg(&format!("cast {pos:?} a{_attempt}: POS FAIL off={:.2} feet={} bot=({:.1},{:.1},{:.1})", off_now(bot), feet_y(bot), p.x, p.y, p.z));
+                cast_debug(&format!("cast {pos:?} a{_attempt}: POS FAIL off={:.2} feet={} bot=({:.1},{:.1},{:.1})", dist_from_stand(bot), feet_y(bot), p.x, p.y, p.z));
             }
         }
-        if off_now(bot) > 1.4 {
+        if dist_from_stand(bot) > 1.4 {
             bot.set_control_state("sneak", false);
             return false;
         }
         if feet_y(bot) < pos.1 && !pillar_up(bot, pos.1).await {
-            cdbg(&format!("cast {pos:?} a{_attempt}: pillar1 FAIL feet={}", feet_y(bot)));
+            cast_debug(&format!("cast {pos:?} a{_attempt}: pillar1 FAIL feet={}", feet_y(bot)));
             continue;
         }
-        cdbg(&format!(
+        cast_debug(&format!(
             "cast {pos:?} a{_attempt}: positioned off={:.2} feet={} lava_b={} water_b={}",
-            off_now(bot),
+            dist_from_stand(bot),
             feet_y(bot),
             count_items(bot, "lava_bucket"),
             count_items(bot, "water_bucket")
@@ -470,7 +480,7 @@ async fn cast_obsidian_at(
         }
         walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.3, 30).await;
         let cup: String = walls.iter().map(|w| if solid_at(bot, w.0, w.1, w.2) { 'S' } else { '_' }).collect();
-        cdbg(&format!("cast {pos:?} a{_attempt}: cup={cup} feet={}", feet_y(bot)));
+        cast_debug(&format!("cast {pos:?} a{_attempt}: cup={cup} feet={}", feet_y(bot)));
         if walls.iter().any(|w| !solid_at(bot, w.0, w.1, w.2)) {
             continue; // never pour lava into a leaky cup
         }
@@ -480,7 +490,7 @@ async fn cast_obsidian_at(
         select_item(bot, "lava_bucket").await.ok();
         reliable_use(bot, vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5)).await;
         bot.wait_ticks(8).await.ok();
-        cdbg(&format!("cast {pos:?} a{_attempt}: after_lava cup_block={}", name_at(bot, pos.0, pos.1, pos.2)));
+        cast_debug(&format!("cast {pos:?} a{_attempt}: after_lava cup_block={}", name_at(bot, pos.0, pos.1, pos.2)));
 
         // 5. Pour WATER into the block directly ABOVE the lava → obsidian.
         //    Packet-sniffing showed the bucket raycast falls THROUGH the open air block
@@ -497,7 +507,7 @@ async fn cast_obsidian_at(
         select_item(bot, "water_bucket").await.ok();
         reliable_use(bot, vec3(splash.0 as f64 + 0.5, splash.1 as f64 + 0.5, splash.2 as f64 + 0.9)).await;
         bot.wait_ticks(6).await.ok();
-        cdbg(&format!(
+        cast_debug(&format!(
             "cast {pos:?} a{_attempt}: after_water cup={} above={} splash={} wbkt={}",
             name_at(bot, pos.0, pos.1, pos.2),
             name_at(bot, above.0, above.1, above.2),
@@ -549,7 +559,7 @@ async fn cast_obsidian_at(
                 }
             }
         }
-        cdbg(&format!(
+        cast_debug(&format!(
             "cast {pos:?} a{_attempt}: done made={made} cup={} wbkt={}",
             name_at(bot, pos.0, pos.1, pos.2),
             count_items(bot, "water_bucket")
@@ -624,7 +634,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     let mut lava = find_fluid(bot, "lava", 16);
     {
         let p = bot.entity.position;
-        cdbg(&format!("prepare: at ({:.0},{:.0},{:.0}) lava={lava:?}", p.x, p.y, p.z));
+        cast_debug(&format!("prepare: at ({:.0},{:.0},{:.0}) lava={lava:?}", p.x, p.y, p.z));
     }
     if lava.is_none() {
         for _ in 0..8 {
@@ -721,7 +731,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         let p = bot.entity.position;
         let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         let pos = (bx, by, bz - 2);
-        cdbg(&format!("CAST_ONE casting {pos:?} from ({bx},{by},{bz})"));
+        cast_debug(&format!("CAST_ONE casting {pos:?} from ({bx},{by},{bz})"));
         let ok = cast_obsidian_at(bot, pos, by, None).await;
         return if ok {
             success(format!("CAST_ONE ok — obsidian at {pos:?}"))
@@ -771,23 +781,37 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     // own -Z wall via ensure_solid anyway. Re-enable only if cup -Z walls prove flaky.
     let _ = build_backing; // keep referenced (avoid dead-code warning)
 
-    let mut cast = 0;
-    // Bottom row first (its water bowl occupies an inner-fill cell), then inner fill,
-    // then the rest bottom-up.
-    for &pos in frame.iter().filter(|p| p.1 == by) {
-        if cast_obsidian_at(bot, pos, by, lava_pool).await {
-            cast += 1;
-        } else {
-            return failure(format!("cast {cast}/10 — stuck at {},{},{}", pos.0, pos.1, pos.2));
+    // Cast the whole frame in ONE call, RETRYING missing blocks across passes until
+    // all 10 are obsidian or a budget elapses — never return on a single block fail
+    // (that restarts the step, and the consumed lava re-anchors the frame elsewhere so
+    // earlier obsidian is orphaned). Already-obsidian blocks are skipped by
+    // cast_obsidian_at, so passes accumulate progress. Bottom row before the inner
+    // fill (the bottom bowls occupy inner-fill cells); inner fill before the upper rows.
+    let frame_deadline = Instant::now() + Duration::from_secs(360);
+    let is_obsidian_at = |bot: &Bot, p: (i32, i32, i32)| name_at(bot, p.0, p.1, p.2) == "obsidian";
+    let bottom: Vec<(i32, i32, i32)> = frame.iter().copied().filter(|p| p.1 == by).collect();
+    let upper: Vec<(i32, i32, i32)> = frame.iter().copied().filter(|p| p.1 > by).collect();
+    let mut inner_filled = false;
+    while frame.iter().filter(|p| is_obsidian_at(bot, **p)).count() < 10 && Instant::now() < frame_deadline {
+        for &pos in &bottom {
+            if !is_obsidian_at(bot, pos) && Instant::now() < frame_deadline {
+                cast_obsidian_at(bot, pos, by, lava_pool).await;
+            }
         }
-    }
-    build_inner_fill(bot, bx, by, bz).await;
-    for &pos in frame.iter().filter(|p| p.1 > by) {
-        if cast_obsidian_at(bot, pos, by, lava_pool).await {
-            cast += 1;
-        } else {
-            return failure(format!("cast {cast}/10 — stuck at {},{},{}", pos.0, pos.1, pos.2));
+        if !inner_filled && bottom.iter().all(|&p| is_obsidian_at(bot, p)) {
+            build_inner_fill(bot, bx, by, bz).await;
+            inner_filled = true;
         }
+        if inner_filled {
+            for &pos in &upper {
+                if !is_obsidian_at(bot, pos) && Instant::now() < frame_deadline {
+                    cast_obsidian_at(bot, pos, by, lava_pool).await;
+                }
+            }
+        }
+        let done = frame.iter().filter(|p| is_obsidian_at(bot, **p)).count();
+        mem.log("cast", "frame_pass", &format!("{done}/10 obsidian"));
+        cast_debug(&format!("frame pass: {done}/10 obsidian"));
     }
 
     // Open the 2x3 interior + the +Z approach (never dig obsidian).
