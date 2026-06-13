@@ -536,14 +536,15 @@ async fn cast_obsidian_at(
         walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.12, 50).await;
         bot.wait_ticks(4).await.ok();
         select_item(bot, "lava_bucket").await.ok();
-        // Aim at the N cup wall's inner (south) face FIRST — sniffing showed the
-        // straight-down pour lands the lava at the bot's own stand block when the
-        // pillaring drifts a block; clicking a wall face drops the lava into the cup
-        // in front of it regardless of small drift (the same trick the water uses).
+        // Aim STRAIGHT DOWN into the open cup. Sniffing showed the N-wall aim hits the
+        // wall's TOP face and drops the lava ABOVE the cup (y+1), while the straight-down
+        // aim into the open top reliably fills the cup when the bot is centered — which
+        // the tightened pillar/pre-pour centering now ensures. Vary the depth slightly
+        // by attempt as a hedge against jitter.
         let lava_aim = match _attempt {
-            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 - 0.1), // N wall face → cup
-            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5), // straight down
-            _ => vec3(pos.0 as f64 - 0.1, pos.1 as f64 + 0.5, pos.2 as f64 + 0.5), // W wall face → cup
+            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5),
+            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.0, pos.2 as f64 + 0.5),
+            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.4, pos.2 as f64 + 0.4),
         };
         reliable_use(bot, lava_aim).await;
         bot.wait_ticks(8).await.ok();
@@ -835,13 +836,19 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     if std::env::var("CAST_ONE").is_ok() {
         let p = bot.entity.position;
         let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-        let pos = (bx, by, bz - 2);
-        cast_debug(&format!("CAST_ONE casting {pos:?} from ({bx},{by},{bz})"));
-        let ok = cast_obsidian_at(bot, pos, by, None).await;
-        return if ok {
-            success(format!("CAST_ONE ok — obsidian at {pos:?}"))
+        // Cast TWO ADJACENT blocks (bx, then bx+1) — block 1 always works; this isolates
+        // the cross-block block-2 transition (the persistent blocker) for fast sniffing.
+        // A lava pool placed east of the cast site is the refill source (CAST_ONE_POOL).
+        let pool = std::env::var("CAST_ONE_POOL").ok().map(|_| (bx + 6, by - 1, bz - 2));
+        let p1 = (bx, by, bz - 2);
+        let p2 = (bx + 1, by, bz - 2);
+        cast_debug(&format!("CAST_TWO casting {p1:?} then {p2:?} from ({bx},{by},{bz})"));
+        let ok1 = cast_obsidian_at(bot, p1, by, pool).await;
+        let ok2 = cast_obsidian_at(bot, p2, by, pool).await;
+        return if ok1 && ok2 {
+            success("CAST_TWO ok — both blocks obsidian")
         } else {
-            failure(format!("CAST_ONE failed at {pos:?}"))
+            failure(format!("CAST_TWO: block1={ok1} block2={ok2}"))
         };
     }
     // Already cast?

@@ -21,10 +21,11 @@ $SSH "$MCRCON 'forceload remove all' 'forceload add 280 280 340 340'" >/dev/null
 $SSH "$MCRCON \
   'fill 290 $((Y-1)) 290 330 $((Y-1)) 330 minecraft:stone' \
   'fill 290 $Y 290 330 $((Y+8)) 330 minecraft:air' \
+  'fill $((X+5)) $((Y-1)) $((Z-4)) $((X+9)) $((Y-1)) $((Z-1)) minecraft:lava' \
   'gamerule doFireTick false' " >/dev/null 2>&1
 
-echo "[cast-one] launch (CAST_ONE)"
-CAST_ONE=1 CAST_SNIFF=1 MC_HOST=$HOST MC_PORT=25565 MC_USERNAME=$NAME STEVE_DATA="$DATA" \
+echo "[cast-one] launch (CAST_TWO + sniff)"
+CAST_ONE=1 CAST_ONE_POOL=1 CAST_SNIFF=1 MC_HOST=$HOST MC_PORT=25565 MC_USERNAME=$NAME STEVE_DATA="$DATA" \
   RACE_HOLD=30 RACE_GOAL=nether CRAFT_DEBUG=1 \
   "$BIN" >> "$DIR/ptest.log" 2>&1 &
 echo "[cast-one] pid $!"
