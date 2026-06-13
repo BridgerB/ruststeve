@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use rustcraft::bot::Bot;
 
-use crate::bot_utils::{can_reach, collect_drops, select_item};
+use crate::bot_utils::{collect_drops, select_item};
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};
 use crate::types::{failure, success, StepResult};
 
@@ -385,13 +385,12 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         };
         let tier = pickaxe_tier_rank(bot);
 
-        // 1) Ask the DB where the ore is. If it knows one, go mine it.
+        // 1) Ask the DB where the ore is. If it knows one, go mine it. NO can_reach
+        // pre-check: ore is embedded in stone, and mine_vein DIGS through stone to
+        // reach it — a walk-only reachability test wrongly rejects diggable ore (it
+        // marked 14 perfectly-mineable irons "unreachable"). Let mine_vein try; only
+        // if it actually gains nothing do we give up on that spot.
         if let Some(tpos) = mem.nearest(&[kind], from, tier).map(|p| p.pos) {
-            if !can_reach(bot, tpos.0, tpos.1, tpos.2, 2.0) {
-                mem.mark(tpos, PoiStatus::Unreachable);
-                mem.log("mine_ore", "unreachable", &format!("{ore} {tpos:?}"));
-                continue;
-            }
             mem.log("mine_ore", "target", &format!("{ore} {tpos:?}"));
             let gained = mine_vein(bot, ore, tpos.0, tpos.1, tpos.2).await;
             observe_blocks(bot, mem, &ores); // mined blocks are air now
