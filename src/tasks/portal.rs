@@ -529,13 +529,6 @@ async fn cast_obsidian_at(
         //    and miss. A pour empties the bucket whether or not it landed right, so we
         //    can only pour ONCE per attempt — vary the aim by attempt number, and the
         //    outer 3-attempt loop refills the lava between tries.
-        // Pour from feet pos.y+2 (one above the cup wall the bot stands on), not pos.y+1:
-        // at pos.y+1 the steep down-ray hits the TOP of the +Z cup wall right under the
-        // bot and drops the lava onto it; from a block higher the ray clears that wall
-        // and dips into the open cup. (Water still pours from pos.y+1 afterwards.)
-        if feet_y(bot) < pos.1 + 2 && !pillar_up(bot, pos.1 + 2).await {
-            continue;
-        }
         // Precisely re-center on the pour cell and SETTLE before pouring — a missed
         // pour floods unscoopable flowing lava into the water-target block, so landing
         // it first try matters. Sneak so the tight walk can't slip off the 1-wide pillar.
@@ -552,9 +545,9 @@ async fn cast_obsidian_at(
         // open cup instead of skimming over its top onto the bot's own stand block —
         // that skim is why block 2 (whose adjacency shifts the geometry a hair) missed.
         let lava_aim = match _attempt {
-            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 - 0.4, pos.2 as f64 + 0.4),
-            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 - 0.2, pos.2 as f64 + 0.5),
-            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 - 0.6, pos.2 as f64 + 0.3),
+            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5),
+            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.0, pos.2 as f64 + 0.4),
+            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.4, pos.2 as f64 + 0.6),
         };
         reliable_use(bot, lava_aim).await;
         bot.wait_ticks(8).await.ok();
