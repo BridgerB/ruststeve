@@ -243,7 +243,7 @@ async fn pillar_up(bot: &mut Bot<'_>, target_y: i32) -> bool {
 
 /// Nearest visible fluid source, preferring one with air directly above.
 fn find_fluid(bot: &Bot, fluid: &str, max_dist: i32) -> Option<(i32, i32, i32)> {
-    let positions = bot.find_blocks(fluid, max_dist, 64);
+    let positions = bot.find_exposed_blocks(fluid, max_dist, 64);
     if positions.is_empty() {
         return None;
     }
@@ -269,7 +269,13 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
     // Find an EDGE source (open surface + a solid horizontal neighbour to stand on),
     // not just the nearest — the centre of a pool has only fluid neighbours, so the
     // bot would have nowhere safe to stand. find_blocks returns nearest-first.
-    let candidates = bot.find_blocks(fluid, 24, 64);
+    // Settle first + retry: a just-dug chamber's block updates can leave the local
+    // world momentarily missing the pool we located a moment ago.
+    let mut candidates = bot.find_exposed_blocks(fluid, 24, 64);
+    if candidates.is_empty() {
+        bot.wait_ticks(10).await.ok();
+        candidates = bot.find_exposed_blocks(fluid, 24, 64);
+    }
     let mut chosen: Option<((i32, i32, i32), (f64, f64, f64))> = None;
     for src in candidates {
         if !is_air(&name_at(bot, src.0, src.1 + 1, src.2)) {
@@ -295,6 +301,10 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         Some(c) => c,
         None => {
             if fluid == "lava" {
+                cdbg(&format!(
+                    "fill lava: NO edge source with a stand spot ({} {fluid} blocks seen)",
+                    bot.find_exposed_blocks(fluid, 24, 64).len()
+                ));
                 return false;
             }
             let Some(s) = find_fluid(bot, fluid, 24) else {
@@ -305,16 +315,25 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
     };
     let _ = bot.goto_near(stand.0 as i32, stand.1 as i32, stand.2 as i32, 1.0).await;
     walk_to_xz(bot, stand.0, stand.2, 0.4, 40).await;
+    let p = bot.entity.position;
+    let off = (p.x - stand.0).abs() + (p.z - stand.2).abs();
+    cdbg(&format!(
+        "fill {fluid}: src={src:?} stand=({:.1},{:.1}) bot=({:.1},{:.1},{:.1}) off={off:.2}",
+        stand.0, stand.2, p.x, p.y, p.z
+    ));
     if !select_item(bot, "bucket").await.unwrap_or(false) {
+        cdbg(&format!("fill {fluid}: no empty bucket equipped"));
         return false;
     }
     for i in 0..6 {
         let dy = if i % 2 == 0 { 0.5 } else { 0.1 };
         reliable_use(bot, vec3(src.0 as f64 + 0.5, src.1 as f64 + dy, src.2 as f64 + 0.5)).await;
         if count_items(bot, &format!("{fluid}_bucket")) > 0 {
+            cdbg(&format!("fill {fluid}: OK on try {i}"));
             return true;
         }
     }
+    cdbg(&format!("fill {fluid}: 6 tries failed (off={off:.2})"));
     false
 }
 
@@ -566,8 +585,20 @@ async fn build_inner_fill(bot: &mut Bot<'_>, bx: i32, by: i32, bz: i32) {
 async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
     let deadline = Instant::now() + Duration::from_secs(360);
 
+    // Let any pending block updates settle so the bot's local world is current
+    // before we scan for lava (an RCON-placed / freshly-revealed pool may not be in
+    // the world yet on the very first tick).
+    bot.wait_ticks(10).await.ok();
     // 1. Locate visible lava; if none, dig down toward cave-lava depth and retry.
     let mut lava = find_fluid(bot, "lava", 30);
+    {
+        let p = bot.entity.position;
+        cdbg(&format!(
+            "prepare: at ({:.0},{:.0},{:.0}) lava={lava:?} exposed_lava_seen={}",
+            p.x, p.y, p.z,
+            bot.find_exposed_blocks("lava", 30, 64).len()
+        ));
+    }
     if lava.is_none() {
         for _ in 0..8 {
             if Instant::now() > deadline {
