@@ -263,6 +263,11 @@ fn find_fluid(bot: &Bot, fluid: &str, max_dist: i32) -> Option<(i32, i32, i32)> 
 
 /// Stand beside a fluid source and fill an empty bucket from it.
 async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
+    cdbg(&format!(
+        "fill {fluid}: ENTER empty_buckets={} {fluid}_buckets={}",
+        count_items(bot, "bucket"),
+        count_items(bot, &format!("{fluid}_bucket"))
+    ));
     if count_items(bot, "bucket") < 1 {
         return false;
     }
@@ -277,22 +282,24 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         candidates = bot.find_exposed_blocks(fluid, 16, 64);
     }
     let mut chosen: Option<((i32, i32, i32), (f64, f64, f64))> = None;
-    for src in candidates {
+    'src: for src in candidates {
         if !is_air(&name_at(bot, src.0, src.1 + 1, src.2)) {
             continue; // need an open surface to scoop
         }
-        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            let (sx, sy, sz) = (src.0 + dx, src.1, src.2 + dz);
-            if solid_at(bot, sx, sy, sz)
-                && is_air(&name_at(bot, sx, sy + 1, sz))
-                && is_air(&name_at(bot, sx, sy + 2, sz))
-            {
-                chosen = Some((src, (sx as f64 + 0.5, (sy + 1) as f64, sz as f64 + 0.5)));
-                break;
+        // A spot to STAND ON within reach of the source, checking both the source's
+        // own level (lava flush with the floor) AND one level up (a recessed pit —
+        // the bot stands on the floor BESIDE the pit and scoops down). 8 directions.
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            for sb_y in [src.1, src.1 + 1] {
+                let (sx, sy, sz) = (src.0 + dx, sb_y, src.2 + dz);
+                if solid_at(bot, sx, sy, sz)
+                    && is_air(&name_at(bot, sx, sy + 1, sz))
+                    && is_air(&name_at(bot, sx, sy + 2, sz))
+                {
+                    chosen = Some((src, (sx as f64 + 0.5, (sy + 1) as f64, sz as f64 + 0.5)));
+                    break 'src;
+                }
             }
-        }
-        if chosen.is_some() {
-            break;
         }
     }
     // Water doesn't burn, so as a last resort scoop it from directly above; never do
@@ -340,7 +347,12 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
 // ── cast one obsidian block ───────────────────────────────────────────────────
 
 /// Cast one obsidian block at `pos`: enclosed cup + lava, sealed bowl + water above.
-async fn cast_obsidian_at(bot: &mut Bot<'_>, pos: (i32, i32, i32), base_y: i32) -> bool {
+async fn cast_obsidian_at(
+    bot: &mut Bot<'_>,
+    pos: (i32, i32, i32),
+    base_y: i32,
+    lava_pool: Option<(i32, i32, i32)>,
+) -> bool {
     if name_at(bot, pos.0, pos.1, pos.2) == "obsidian" {
         return true;
     }
@@ -353,6 +365,14 @@ async fn cast_obsidian_at(bot: &mut Bot<'_>, pos: (i32, i32, i32), base_y: i32) 
 
     for _attempt in 0..3 {
         // 1. Top up both buckets first (fill walks to the pool).
+        // Refill lava from the KNOWN pool — navigate back to it first so the local
+        // scan in fill_bucket always sees it (scanning from wherever the previous
+        // block left the bot is what kept failing).
+        if count_items(bot, "lava_bucket") < 1 {
+            if let Some(pool) = lava_pool {
+                let _ = bot.goto_near(pool.0, pool.1 + 1, pool.2, 2.0).await;
+            }
+        }
         if count_items(bot, "lava_bucket") < 1 && !fill_bucket(bot, "lava").await {
             return false;
         }
@@ -582,7 +602,7 @@ async fn build_inner_fill(bot: &mut Bot<'_>, bx: i32, by: i32, bz: i32) {
 
 /// Find a lava pool and clear a flat 6x6x5 casting chamber beside it; fill a lava
 /// bucket from the pool (refilled each cast).
-async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
+async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(i32, i32, i32)> {
     let deadline = Instant::now() + Duration::from_secs(360);
 
     // Let any pending block updates settle so the bot's local world is current
@@ -613,7 +633,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
         }
     }
     let Some(lava) = lava else {
-        return false;
+        return None;
     };
     mem.log("cast", "lava", &format!("{},{},{}", lava.0, lava.1, lava.2));
 
@@ -640,11 +660,14 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
             .iter()
             .any(|&(ax, ay, az)| is_lava(&name_at(bot, c.0 + ax, c.1 + ay, c.2 + az)))
     };
+    // Clear just the frame box + the front working line (the bot stands at z+1 to
+    // cast). Travel to/from the lava is left to the pathfinder, so we don't clear the
+    // whole gap — a big clear is hundreds of slow per-cell ops that time the step out.
     for y in 0..=6 {
-        for x in -7..=5 {
-            for z in -2..=5 {
+        for x in -1..=4 {
+            for z in -2..=2 {
                 if Instant::now() > deadline {
-                    return false;
+                    return None;
                 }
                 let c = (bx + x, by + y, bz + z);
                 let n = name_at(bot, c.0, c.1, c.2);
@@ -654,9 +677,9 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
             }
         }
     }
-    // Solid floor across the whole gap+frame so the bot never falls walking to refill.
-    for x in -7..=5 {
-        for z in -2..=5 {
+    // Solid floor under the frame + front line so the bot has footing to cast from.
+    for x in -1..=4 {
+        for z in -1..=2 {
             let f = (bx + x, by - 1, bz + z);
             if !solid_at(bot, f.0, f.1, f.2) && !lava_touching(bot, f) {
                 ensure_solid(bot, f, 0).await;
@@ -671,7 +694,13 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
     // Return to the frame anchor (precisely) so build_nether_portal anchors there.
     let _ = bot.goto_near(bx, by, bz, 1.0).await;
     walk_to_xz(bot, bx as f64 + 0.5, bz as f64 + 0.5, 0.4, 40).await;
-    count_items(bot, "lava_bucket") >= 1
+    // Return the pool location so casts can navigate BACK to it to refill lava
+    // (re-scanning from wherever a cast left the bot is what wedged the descend-loop).
+    if count_items(bot, "lava_bucket") >= 1 {
+        Some(lava)
+    } else {
+        None
+    }
 }
 
 /// Build + light a 4x5 (10-obsidian, no-corner) nether portal by casting.
@@ -684,7 +713,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         let pos = (bx, by, bz - 2);
         cdbg(&format!("CAST_ONE casting {pos:?} from ({bx},{by},{bz})"));
-        let ok = cast_obsidian_at(bot, pos, by).await;
+        let ok = cast_obsidian_at(bot, pos, by, None).await;
         return if ok {
             success(format!("CAST_ONE ok — obsidian at {pos:?}"))
         } else {
@@ -692,13 +721,15 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         };
     }
     // Already cast?
+    let mut lava_pool: Option<(i32, i32, i32)> = None;
     if bot.find_blocks("obsidian", 8, 12).len() >= 10 {
         // fall through to lighting if not lit
     } else {
         if count_items(bot, "cobblestone") + count_items(bot, "dirt") < 30 {
             return failure("need ~30 cobble/dirt to scaffold the cast");
         }
-        if !prepare_cast_site(bot, mem).await {
+        lava_pool = prepare_cast_site(bot, mem).await;
+        if lava_pool.is_none() {
             return failure("no lava pool found / lava bucket not filled");
         }
         if count_items(bot, "lava_bucket") < 1 {
@@ -735,7 +766,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     // Bottom row first (its water bowl occupies an inner-fill cell), then inner fill,
     // then the rest bottom-up.
     for &pos in frame.iter().filter(|p| p.1 == by) {
-        if cast_obsidian_at(bot, pos, by).await {
+        if cast_obsidian_at(bot, pos, by, lava_pool).await {
             cast += 1;
         } else {
             return failure(format!("cast {cast}/10 — stuck at {},{},{}", pos.0, pos.1, pos.2));
@@ -743,7 +774,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     }
     build_inner_fill(bot, bx, by, bz).await;
     for &pos in frame.iter().filter(|p| p.1 > by) {
-        if cast_obsidian_at(bot, pos, by).await {
+        if cast_obsidian_at(bot, pos, by, lava_pool).await {
             cast += 1;
         } else {
             return failure(format!("cast {cast}/10 — stuck at {},{},{}", pos.0, pos.1, pos.2));
