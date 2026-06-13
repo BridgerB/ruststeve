@@ -407,9 +407,25 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         // 2) DB has nothing → search SOUTH until ore turns up.
         let by = bot.entity.position.y as i32;
         if by > depth + 2 {
-            // Get down to ore depth first.
-            if !dig_down(bot).await && !descend_step(bot, 0, 1).await {
-                strip_tunnel(bot, 0, 1).await;
+            // Get down to ore depth. dig_down (straight) first; if it refuses
+            // (liquid/fall-avoidance), try a stair-step in EACH of the 4 compass
+            // directions — a watery lane blocks only some directions, so trying all
+            // of them finds a dry way down instead of wedging on the one (south) that
+            // happens to be water. If every direction refuses, relocate by strip-
+            // tunnelling in a ROTATING direction to reach dry ground, then retry.
+            const DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+            let mut descended = dig_down(bot).await;
+            if !descended {
+                for &(dx, dz) in &DIRS {
+                    if descend_step(bot, dx, dz).await {
+                        descended = true;
+                        break;
+                    }
+                }
+            }
+            if !descended {
+                let (dx, dz) = DIRS[(iters as usize / 3) % 4];
+                strip_tunnel(bot, dx, dz).await;
             }
             if iters % 8 == 0 {
                 println!("    ore: descending toward {ore} — y={}", bot.entity.position.y as i32);
