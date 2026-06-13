@@ -100,9 +100,17 @@ for i in $(seq 0 $((N-1))); do build_arena $((BASEX+i*50)) "$BASEZ"; done
 echo "[itest] launching bots in STEVE_TEST mode"
 for i in $(seq 0 $((N-1))); do
   : > "$DIR/itest-$i.log"
-  STEVE_TEST="$STEP" STEVE_TEST_SECS="$SECS" CRAFT_DEBUG=1 \
-    MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" RACE_HOLD=30 \
-    "$BIN" >> "$DIR/itest-$i.log" 2>&1 &
+  # CAST_SNIFF uses is_ok() (empty still counts), so only EXPORT it for bot 0 when
+  # ITEST_SNIFF is set in the environment.
+  if [ "$i" -eq 0 ] && [ -n "${ITEST_SNIFF:-}" ]; then
+    STEVE_TEST="$STEP" STEVE_TEST_SECS="$SECS" CRAFT_DEBUG=1 CAST_SNIFF=1 \
+      MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" RACE_HOLD=30 \
+      "$BIN" >> "$DIR/itest-$i.log" 2>&1 &
+  else
+    STEVE_TEST="$STEP" STEVE_TEST_SECS="$SECS" CRAFT_DEBUG=1 \
+      MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" RACE_HOLD=30 \
+      "$BIN" >> "$DIR/itest-$i.log" 2>&1 &
+  fi
   sleep 1
 done
 for t in $(seq 1 25); do

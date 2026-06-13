@@ -493,10 +493,14 @@ async fn cast_obsidian_at(
         //    outer 3-attempt loop refills the lava between tries.
         walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.2, 40).await;
         select_item(bot, "lava_bucket").await.ok();
+        // Aim at the N cup wall's inner (south) face FIRST — sniffing showed the
+        // straight-down pour lands the lava at the bot's own stand block when the
+        // pillaring drifts a block; clicking a wall face drops the lava into the cup
+        // in front of it regardless of small drift (the same trick the water uses).
         let lava_aim = match _attempt {
-            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5), // straight down
-            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 - 0.1), // toward the N wall
-            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.8, pos.2 as f64 + 0.5), // higher into the cup
+            0 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 - 0.1), // N wall face → cup
+            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5), // straight down
+            _ => vec3(pos.0 as f64 - 0.1, pos.1 as f64 + 0.5, pos.2 as f64 + 0.5), // W wall face → cup
         };
         reliable_use(bot, lava_aim).await;
         bot.wait_ticks(8).await.ok();
