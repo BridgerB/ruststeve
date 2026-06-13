@@ -374,6 +374,23 @@ async fn cast_obsidian_at(
     }
 
     for _attempt in 0..5 {
+        // 0. Reconcile buckets. Casting needs ONE empty/lava bucket (to carry lava) and
+        //    ONE water bucket. The racy reclaim can scoop the placed water while the bot
+        //    still holds its original water bucket, leaving it with 2 water + 0 empty —
+        //    from which it can never scoop lava again (the deadlock that strands the bot
+        //    re-running fill_lava with empty=0 forever). Keep at most ONE water bucket:
+        //    dump the extras (pour south, away from the cup) to free buckets for lava.
+        while count_items(bot, "water_bucket") > 1 {
+            select_item(bot, "water_bucket").await.ok();
+            bot.look_at(vec3(pos.0 as f64 + 0.5, pos.1 as f64, stand_z as f64 + 3.0));
+            bot.wait_ticks(4).await.ok();
+            let before = count_items(bot, "water_bucket");
+            bot.activate_item().await.ok(); // pour water out -> empty bucket
+            bot.wait_ticks(6).await.ok();
+            if count_items(bot, "water_bucket") >= before {
+                break; // didn't pour (no aim/space) — avoid an infinite loop
+            }
+        }
         // 1. Top up both buckets first (fill walks to the pool).
         // Refill lava from the KNOWN pool — navigate back to it first so the local
         // scan in fill_bucket always sees it (scanning from wherever the previous
@@ -602,8 +619,11 @@ async fn cast_obsidian_at(
         bot.wait_ticks(8).await.ok();
         cast_debug(&format!("cast {pos:?} a{_attempt}: after_lava cup_block={}", name_at(bot, pos.0, pos.1, pos.2)));
         // If the lava missed the cup, this attempt is wasted AND the misplaced lava is
-        // likely at the bot's own feet — ESCAPE it (sprint-jump back south) before it
-        // burns us, then bail to the next attempt (which refills + re-centers).
+        // likely at the bot's own feet (the +Z wall top) — ESCAPE it (sprint-jump back
+        // south) before it burns us, then SCOOP the misplaced source so it doesn't flood
+        // the work area across retries (an uncleaned flood is what eventually traps the
+        // bot and deadlocks its buckets). The escape recovers the empty bucket; scooping
+        // the stray source refills it to lava, ready for the next attempt.
         if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
             bot.set_control_state("sneak", false);
             bot.look_at(vec3(pos.0 as f64 + 0.5, pos.1 as f64, stand_z as f64 + 4.0));
@@ -614,6 +634,31 @@ async fn cast_obsidian_at(
                 bot.drive_tick().await.ok();
             }
             bot.clear_control_states();
+            // Scoop every stray lava source around the cup top (not the pool) so the next
+            // attempt starts from a clean, un-flooded site.
+            bot.wait_ticks(20).await.ok();
+            if count_items(bot, "bucket") > 0 {
+                select_item(bot, "bucket").await.ok();
+                for _ in 0..6 {
+                    let mut stray = None;
+                    'scan: for dy in [1, 2, 0] {
+                        for dx in -1..=1 {
+                            for dz in -1..=2 {
+                                let l = (pos.0 + dx, pos.1 + dy, pos.2 + dz);
+                                if name_at(bot, l.0, l.1, l.2).contains("lava") {
+                                    stray = Some(l);
+                                    break 'scan;
+                                }
+                            }
+                        }
+                    }
+                    let Some(l) = stray else { break };
+                    reliable_use(bot, vec3(l.0 as f64 + 0.5, l.1 as f64 + 0.5, l.2 as f64 + 0.5)).await;
+                    if count_items(bot, "lava_bucket") > 0 {
+                        break; // recovered a lava bucket; the rest will re-flow/settle
+                    }
+                }
+            }
             continue;
         }
 
