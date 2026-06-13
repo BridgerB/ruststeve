@@ -20,15 +20,34 @@ pub fn head_in_water(bot: &Bot) -> bool {
 /// while submerged (which drowns it) — mining underwater is only a last resort
 /// when this can't surface it (boxed in).
 pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
-    for _ in 0..ticks {
+    let mut t = 0;
+    while t < ticks {
         if !head_in_water(bot) {
             break;
+        }
+        // If a SOLID block caps the column above our head we can swim-jump forever
+        // and never rise (this is how the bot drowns: it dug a staircase down, water
+        // flooded in, and "surfacing" just bonks the ceiling). Break through upward
+        // first, THEN swim up. Dig is multi-tick, so do it before the swim ticks.
+        let p = bot.entity.position;
+        let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
+        let above = (p.y + 2.0).floor() as i32; // block directly above the head
+        let capped = bot
+            .block_at(x, above, z)
+            .map(|b| b.name != "air" && !b.name.contains("water") && b.name != "void_air" && b.name != "cave_air")
+            .unwrap_or(false);
+        if capped {
+            bot.clear_control_states();
+            let _ = bot.dig(x, above, z).await; // open an escape straight up
+            t += 4;
+            continue;
         }
         bot.set_control_state("jump", true); // swim up
         bot.set_control_state("forward", true); // drift toward an edge
         if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
             break;
         }
+        t += 1;
     }
     bot.clear_control_states();
     !head_in_water(bot)
