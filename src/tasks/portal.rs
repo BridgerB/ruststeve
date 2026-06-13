@@ -511,6 +511,22 @@ async fn cast_obsidian_at(
             continue;
         }
 
+        // 4b. A missed earlier lava pour can flood lava into the cup's `above` block
+        //     (pos.y+1) — exactly where the water must go. Scoop any stray lava there
+        //     with the empty bucket: it clears the block AND refills the lava bucket
+        //     for the next block. Try a few times (the flood may be flowing lava that
+        //     settles into a source).
+        if name_at(bot, above.0, above.1, above.2).contains("lava") {
+            select_item(bot, "bucket").await.ok();
+            for _ in 0..4 {
+                if !name_at(bot, above.0, above.1, above.2).contains("lava") {
+                    break;
+                }
+                reliable_use(bot, vec3(above.0 as f64 + 0.5, above.1 as f64 + 0.5, above.2 as f64 + 0.5)).await;
+            }
+            cast_debug(&format!("cast {pos:?} a{_attempt}: cleared above-lava -> {}", name_at(bot, above.0, above.1, above.2)));
+        }
+
         // 5. Pour WATER into the block directly ABOVE the lava → obsidian.
         //    Packet-sniffing showed the bucket raycast falls THROUGH the open air block
         //    above the lava and places water down IN the cup (replacing the lava) —

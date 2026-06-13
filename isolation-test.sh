@@ -70,12 +70,12 @@ setup_prereqs() {
                          g="'clear $name' 'give $name minecraft:iron_pickaxe' \
                             'give $name minecraft:water_bucket' 'give $name minecraft:bucket' \
                             'give $name minecraft:flint_and_steel' 'give $name minecraft:cobblestone 128'"
-                         # RECESSED lava pit 6 east: carve the floor open (air y69-70)
-                         # and put lava one block lower (y68) so the bot's sightline
-                         # clears the floor and actually SEES it (flush-with-floor lava
-                         # is invisible — the LOS grazes the floor stone).
-                         rcon "'fill $((x+4)) $((Y-1)) $((z-5)) $((x+14)) $Y $((z+5)) minecraft:air'" \
-                              "'fill $((x+4)) $((Y-2)) $((z-5)) $((x+14)) $((Y-2)) $((z+5)) minecraft:lava'" >/dev/null;;
+                         # FLUSH lava lake at floor level (y69), east of the bot. The
+                         # exposed finder locates it without line-of-sight, and being at
+                         # floor level the bot scoops it from foot level beside it (a
+                         # recessed pit made the down-scoop miss). Contained by the
+                         # surrounding floor stone; open top (y70 air).
+                         rcon "'fill $((x+4)) $((Y-1)) $((z-5)) $((x+14)) $((Y-1)) $((z+5)) minecraft:lava'" >/dev/null;;
   esac
   # Table-based crafts need a table reachable (they route through get_crafting_table,
   # which can't make one without planks). Place one next to the bot.
