@@ -529,6 +529,13 @@ async fn cast_obsidian_at(
         //    and miss. A pour empties the bucket whether or not it landed right, so we
         //    can only pour ONCE per attempt — vary the aim by attempt number, and the
         //    outer 3-attempt loop refills the lava between tries.
+        // Pour from feet pos.y+2 (one above the cup wall the bot stands on), not pos.y+1:
+        // at pos.y+1 the steep down-ray hits the TOP of the +Z cup wall right under the
+        // bot and drops the lava onto it; from a block higher the ray clears that wall
+        // and dips into the open cup. (Water still pours from pos.y+1 afterwards.)
+        if feet_y(bot) < pos.1 + 2 && !pillar_up(bot, pos.1 + 2).await {
+            continue;
+        }
         // Precisely re-center on the pour cell and SETTLE before pouring — a missed
         // pour floods unscoopable flowing lava into the water-target block, so landing
         // it first try matters. Sneak so the tight walk can't slip off the 1-wide pillar.
