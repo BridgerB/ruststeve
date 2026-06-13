@@ -180,27 +180,32 @@ pub async fn craft_item(
 
     if let Some((tx, ty, tz)) = table {
         let _ = bot.goto(tx, ty, tz).await;
-        if bot.current_window.is_none() {
-            let _ = bot.open_block(tx, ty, tz, Face::Top).await;
-        }
     }
 
     let before = bot.item_count(name);
-    let result = bot.craft(&recipe, count, table.is_some()).await;
-    if table.is_some() {
-        let _ = bot.close_window().await;
-    }
-    // The container-craft inventory sync is racy. DON'T fabricate the result
-    // locally — a phantom item the server never made gets "used" later (e.g. a
-    // pickaxe the bot can't actually equip), churning forever. Instead wait for
-    // the server's authoritative inventory update to arrive, then judge success
-    // from the REAL count below.
-    if result.is_ok() {
-        let made = recipe.result.count.max(1) * count.max(1);
-        // Poll for the server's authoritative result. Break the INSTANT it appears.
-        // ~1.5s window: long enough for a real (if late) confirmation, short enough
-        // that a DROPPED craft (the server never processed it — common under load)
-        // is detected fast so the step machine can retry quickly instead of waiting.
+    let made = recipe.result.count.max(1) * count.max(1);
+    // The container-craft is dropped ~half the time under server load. DON'T
+    // fabricate the result — instead retry the craft IN PLACE (re-open the table
+    // each attempt) and only count it done when the item REALLY appears in the
+    // server-synced inventory. Fail-fast confirmation per attempt so a dropped
+    // craft retries in ~1.5s instead of waiting on a slow step-machine re-run.
+    let mut result: std::io::Result<()> = Ok(());
+    for _ in 0..3 {
+        if bot.item_count(name) >= before + made {
+            break; // appeared (possibly late from a previous attempt) — don't re-craft
+        }
+        if table.is_some() && bot.current_window.is_none() {
+            if let Some((tx, ty, tz)) = table {
+                let _ = bot.open_block(tx, ty, tz, Face::Top).await;
+            }
+        }
+        result = bot.craft(&recipe, count, table.is_some()).await;
+        if table.is_some() {
+            let _ = bot.close_window().await;
+        }
+        if result.is_err() {
+            break;
+        }
         for _ in 0..8 {
             if bot.item_count(name) >= before + made {
                 break;
