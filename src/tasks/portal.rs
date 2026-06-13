@@ -380,33 +380,42 @@ async fn cast_obsidian_at(
             return false;
         }
 
-        // 2. Position at the floor spot in front of the cup, then pillar up to cup level.
+        // 2. Position at the floor spot in front of the cup. The previous block left
+        //    the bot up on its pour-pillar, so DESCEND to base level first (dig the
+        //    pillar away), THEN navigate to the stand spot and re-descend. Retry a few
+        //    times before giving up — the cluttered frame makes a single try unreliable.
         bot.set_control_state("sneak", false);
-        let _ = bot.goto_near(pos.0, base_y, stand_z, 1.0).await;
-        descend_to_y(bot, base_y).await;
-        walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.6, 60).await;
-        let off = (bot.entity.position.x - (pos.0 as f64 + 0.5)).abs()
-            + (bot.entity.position.z - (stand_z as f64 + 0.5)).abs();
-        if off > 1.2 {
-            // One clean recovery via a staging spot behind, then give up the block.
+        let off_now = |bot: &Bot| {
+            (bot.entity.position.x - (pos.0 as f64 + 0.5)).abs()
+                + (bot.entity.position.z - (stand_z as f64 + 0.5)).abs()
+        };
+        descend_to_y(bot, base_y).await; // off the previous pour-pillar
+        for try_pos in 0..3 {
+            let _ = bot.goto_near(pos.0, base_y, stand_z, 1.0).await;
+            descend_to_y(bot, base_y).await;
+            walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.4, 60).await;
+            if off_now(bot) <= 1.2 && feet_y(bot) <= base_y + 1 {
+                break;
+            }
+            // Stage from a clear spot behind the working line, then re-approach.
             let _ = bot.goto_near(pos.0, base_y, stand_z + 3, 1.0).await;
             descend_to_y(bot, base_y).await;
-            walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.6, 60).await;
-            let off2 = (bot.entity.position.x - (pos.0 as f64 + 0.5)).abs()
-                + (bot.entity.position.z - (stand_z as f64 + 0.5)).abs();
-            if off2 > 1.2 {
+            if try_pos == 2 {
                 let p = bot.entity.position;
-                cdbg(&format!("cast {pos:?} a{_attempt}: POS FAIL off2={off2:.2} bot=({:.1},{:.1},{:.1})", p.x, p.y, p.z));
-                bot.set_control_state("sneak", false);
-                return false;
+                cdbg(&format!("cast {pos:?} a{_attempt}: POS FAIL off={:.2} feet={} bot=({:.1},{:.1},{:.1})", off_now(bot), feet_y(bot), p.x, p.y, p.z));
             }
+        }
+        if off_now(bot) > 1.4 {
+            bot.set_control_state("sneak", false);
+            return false;
         }
         if feet_y(bot) < pos.1 && !pillar_up(bot, pos.1).await {
             cdbg(&format!("cast {pos:?} a{_attempt}: pillar1 FAIL feet={}", feet_y(bot)));
             continue;
         }
         cdbg(&format!(
-            "cast {pos:?} a{_attempt}: positioned off={off:.2} feet={} lava_b={} water_b={}",
+            "cast {pos:?} a{_attempt}: positioned off={:.2} feet={} lava_b={} water_b={}",
+            off_now(bot),
             feet_y(bot),
             count_items(bot, "lava_bucket"),
             count_items(bot, "water_bucket")
