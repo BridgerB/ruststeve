@@ -1013,7 +1013,13 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     // earlier obsidian is orphaned). Already-obsidian blocks are skipped by
     // cast_obsidian_at, so passes accumulate progress. Bottom row before the inner
     // fill (the bottom bowls occupy inner-fill cells); inner fill before the upper rows.
-    let frame_deadline = Instant::now() + Duration::from_secs(360);
+    // Budget the WHOLE frame in one call so it never returns mid-build — a return
+    // restarts the step, which re-prepares and re-anchors the frame at a fresh lava pool,
+    // orphaning the obsidian already cast. The ~50%-per-attempt adjacent-block pour means
+    // a block can take several attempts, so 10 blocks needs a generous budget. Overridable
+    // via PORTAL_BUDGET_SECS for tests.
+    let budget_secs = std::env::var("PORTAL_BUDGET_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(900);
+    let frame_deadline = Instant::now() + Duration::from_secs(budget_secs);
     let is_obsidian_at = |bot: &Bot, p: (i32, i32, i32)| name_at(bot, p.0, p.1, p.2) == "obsidian";
     let bottom: Vec<(i32, i32, i32)> = frame.iter().copied().filter(|p| p.1 == by).collect();
     let upper: Vec<(i32, i32, i32)> = frame.iter().copied().filter(|p| p.1 > by).collect();
