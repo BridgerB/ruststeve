@@ -516,20 +516,38 @@ async fn cast_obsidian_at(
             continue;
         }
 
-        // 4b. A missed earlier lava pour can flood lava into the cup's `above` block
-        //     (pos.y+1) — exactly where the water must go. Scoop any stray lava there
-        //     with the empty bucket: it clears the block AND refills the lava bucket
-        //     for the next block. Try a few times (the flood may be flowing lava that
-        //     settles into a source).
+        // 4b. A missed lava pour floods FLOWING lava into the cup's `above` block
+        //     (pos.y+1) — where the water must go — and flowing lava can't be scooped.
+        //     But the flood's SOURCE block (wherever the bucket dropped it) is a real
+        //     source that IS scoopable, and removing it makes the whole flow vanish.
+        //     Let it settle, then scoop every lava block in a small region around the
+        //     cup's top until `above` is clear (the source picks up, refilling lava).
         if name_at(bot, above.0, above.1, above.2).contains("lava") {
+            bot.wait_ticks(20).await.ok(); // let the flow settle so sources are stable
             select_item(bot, "bucket").await.ok();
-            for _ in 0..4 {
+            'clear: for _ in 0..8 {
                 if !name_at(bot, above.0, above.1, above.2).contains("lava") {
                     break;
                 }
-                reliable_use(bot, vec3(above.0 as f64 + 0.5, above.1 as f64 + 0.5, above.2 as f64 + 0.5)).await;
+                for dy in [1, 2] {
+                    for dx in -1..=1 {
+                        for dz in -1..=1 {
+                            let l = (pos.0 + dx, pos.1 + dy, pos.2 + dz);
+                            if name_at(bot, l.0, l.1, l.2).contains("lava") {
+                                reliable_use(bot, vec3(l.0 as f64 + 0.5, l.1 as f64 + 0.5, l.2 as f64 + 0.5)).await;
+                                if !name_at(bot, above.0, above.1, above.2).contains("lava") {
+                                    break 'clear;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             cast_debug(&format!("cast {pos:?} a{_attempt}: cleared above-lava -> {}", name_at(bot, above.0, above.1, above.2)));
+            // If the cup itself lost its lava during cleanup, this attempt is spent.
+            if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
+                continue;
+            }
         }
 
         // 5. Pour WATER into the block directly ABOVE the lava → obsidian.
