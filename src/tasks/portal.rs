@@ -271,10 +271,10 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
     // bot would have nowhere safe to stand. find_blocks returns nearest-first.
     // Settle first + retry: a just-dug chamber's block updates can leave the local
     // world momentarily missing the pool we located a moment ago.
-    let mut candidates = bot.find_exposed_blocks(fluid, 24, 64);
+    let mut candidates = bot.find_exposed_blocks(fluid, 16, 64);
     if candidates.is_empty() {
         bot.wait_ticks(10).await.ok();
-        candidates = bot.find_exposed_blocks(fluid, 24, 64);
+        candidates = bot.find_exposed_blocks(fluid, 16, 64);
     }
     let mut chosen: Option<((i32, i32, i32), (f64, f64, f64))> = None;
     for src in candidates {
@@ -303,11 +303,11 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
             if fluid == "lava" {
                 cdbg(&format!(
                     "fill lava: NO edge source with a stand spot ({} {fluid} blocks seen)",
-                    bot.find_exposed_blocks(fluid, 24, 64).len()
+                    bot.find_exposed_blocks(fluid, 16, 64).len()
                 ));
                 return false;
             }
-            let Some(s) = find_fluid(bot, fluid, 24) else {
+            let Some(s) = find_fluid(bot, fluid, 16) else {
                 return false;
             };
             (s, (s.0 as f64 + 0.5, (s.1 + 1) as f64, s.2 as f64 + 0.5))
@@ -590,14 +590,12 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
     // the world yet on the very first tick).
     bot.wait_ticks(10).await.ok();
     // 1. Locate visible lava; if none, dig down toward cave-lava depth and retry.
-    let mut lava = find_fluid(bot, "lava", 30);
+    // Keep the radius modest — a 30-block exposed scan is ~226k synchronous block
+    // lookups that block the network loop past the keep-alive timeout (→ kick).
+    let mut lava = find_fluid(bot, "lava", 16);
     {
         let p = bot.entity.position;
-        cdbg(&format!(
-            "prepare: at ({:.0},{:.0},{:.0}) lava={lava:?} exposed_lava_seen={}",
-            p.x, p.y, p.z,
-            bot.find_exposed_blocks("lava", 30, 64).len()
-        ));
+        cdbg(&format!("prepare: at ({:.0},{:.0},{:.0}) lava={lava:?}", p.x, p.y, p.z));
     }
     if lava.is_none() {
         for _ in 0..8 {
@@ -608,7 +606,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
                 // Descend toward y~12 using the ore-miner's dig-down behaviour.
                 let _ = crate::tasks::mining::mine_ore(bot, "iron", 9999, mem).await; // descends + mines; bails at deadline
             }
-            lava = find_fluid(bot, "lava", 30);
+            lava = find_fluid(bot, "lava", 16);
             if lava.is_some() {
                 break;
             }
