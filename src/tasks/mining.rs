@@ -546,8 +546,13 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -
         eprintln!("MINE_STONE start: held={:?} at ({:.1},{:.1},{:.1})", bot.held_item().map(|i| i.name.clone()), p.x, p.y, p.z);
     }
 
-    let deadline = Instant::now() + Duration::from_secs(100);
+    let deadline = Instant::now() + Duration::from_secs(120);
     let mut no_progress = 0;
+    // When digging down is blocked (liquid/cliff/sand-over-water below) we tunnel
+    // sideways to a diggable spot instead of bailing — a bot at a bad lane spot used
+    // to mine 0/16 cobblestone for the entire race, looping `dig_down → break → retry`.
+    let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+    let mut dir = 0usize;
     while count_cobble(bot) < target && Instant::now() < deadline {
         // Durability: re-equip a pickaxe if the held one broke; bail to re-craft
         // if we have none (don't mine stone bare-handed — it drops nothing).
@@ -561,7 +566,7 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -
             println!("    stone: stuck (no cobble progress) — bailing");
             break;
         }
-        if let Some((tx, ty, tz)) = find_stone(bot, 4) {
+        if let Some((tx, ty, tz)) = find_stone(bot, 6) {
             let _ = bot.goto_near(tx, ty, tz, 2.5).await;
             let before = count_cobble(bot);
             let held = bot.held_item().map(|i| i.name.clone());
@@ -578,14 +583,20 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -
                 no_progress = 0;
             } else {
                 no_progress += 1;
+                // Reached but unminable (encased / can't path) — go down, else tunnel.
                 if no_progress > 4 && !dig_down(bot).await {
-                    break;
+                    let (dx, dz) = dirs[dir % dirs.len()];
+                    dir += 1;
+                    strip_tunnel(bot, dx, dz).await;
                 }
             }
         } else {
-            // No stone in reach — dig down toward the stone layer.
+            // No stone in reach — dig down toward the stone layer; if that's blocked
+            // (liquid/cliff below), tunnel sideways to fresh, diggable ground.
             if !dig_down(bot).await {
-                break;
+                let (dx, dz) = dirs[dir % dirs.len()];
+                dir += 1;
+                strip_tunnel(bot, dx, dz).await;
             }
         }
     }
