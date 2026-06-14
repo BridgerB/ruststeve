@@ -19,13 +19,25 @@ fn find_water(bot: &Bot) -> Option<(i32, i32, i32)> {
 }
 
 pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_secs(240);
+    // Roam headings used when no water is in range — a dry forest can be far from any
+    // river/lake, so we travel to look instead of failing outright (the old behavior,
+    // which stranded a portal-ready bot with everything but water).
+    let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)];
+    let mut dir = 0usize;
     while count_items(bot, "water_bucket") < target && Instant::now() < deadline {
         if count_items(bot, "bucket") == 0 {
             break; // no empty buckets left to fill
         }
         let Some((wx, wy, wz)) = find_water(bot) else {
-            return failure("no water found nearby");
+            // None in scan range — head ~24 blocks in a rotating direction and re-scan.
+            bot.movement.blocks_cant_break.clear();
+            let p = bot.entity.position;
+            let (dx, dz) = dirs[dir % dirs.len()];
+            dir += 1;
+            let (tx, tz) = (p.x.floor() as i32 + dx * 24, p.z.floor() as i32 + dz * 24);
+            let _ = bot.goto_xz(tx, tz, 3.0).await;
+            continue;
         };
         // Remember the water (coarsely — one entry per body, not per block).
         mem.record(PoiKind::Water, (wx, wy, wz), PoiStatus::Available);
