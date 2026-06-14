@@ -58,10 +58,29 @@ declare -a SURF
 for i in $(seq 0 $((N-1))); do SURF[$i]=74; done
 while read -r tag i y; do [ "$tag" = SURF ] && SURF[$i]=$y; done <<< "$SURF_OUT"
 
+# Phase 1.5 — CRITICAL: clear any stale ghost connection for each name and set its
+# spawnpoint to the lane BEFORE launching. Two bugs this fixes:
+#   1. A lingering ghost with the same name makes the fresh login a duplicate, and the
+#      server kicks one of them (BrokenPipe) — the "keeps joining then leaving" churn.
+#   2. Without a pre-set spawnpoint the bot spawns at its OLD persistent spawnpoint
+#      (often a treeless/deforested spot), starts gathering there, finds no logs, and
+#      burns out on long-range pathfinding. Spawning AT the forest lane fixes it.
+echo "[race] phase 1.5: clear ghosts + set lane spawnpoints (spawn AT the forest)"
+PRE=""
+for i in $(seq 0 $((N-1))); do
+  y=$(( ${SURF[i]} + 1 ))
+  PRE+=" \"kick ${NAMES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\""
+done
+$SSH "$MCRCON $PRE" >/dev/null 2>&1
+sleep 6   # let the server fully drop the kicked ghosts before fresh logins
+
 # Launch one bot process for lane i (verbose CRAFT_DEBUG only on the lead bot).
 # Appends to its log (so a restart's output accumulates) and records the PID by index.
+# Kicks any lingering ghost of this name first so the fresh login is never a duplicate.
 launch_bot() {
   local i=$1
+  $SSH "$MCRCON \"kick ${NAMES[i]}\"" >/dev/null 2>&1
+  sleep 2
   if [ "$i" -eq 0 ]; then
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
       RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
