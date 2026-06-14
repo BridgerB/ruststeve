@@ -12,7 +12,7 @@ MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/../rustcraft/data
-N=5
+N=3
 RACE_SECONDS=7200
 HOLD=45
 
