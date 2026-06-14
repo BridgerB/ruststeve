@@ -12,7 +12,7 @@ MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/../rustcraft/data
-N=3
+N=1
 RACE_SECONDS=7200
 HOLD=45
 
@@ -97,7 +97,7 @@ echo "[race] phase 2: launching $N bots (hold ${HOLD}s, goal nether)"
 for i in $(seq 0 $((N-1))); do
   : > "$DIR/race-$i.log"
   launch_bot "$i"
-  sleep 1
+  sleep 2
 done
 
 echo "[race] phase 3: waiting for bots to hold, then teleporting into lanes"

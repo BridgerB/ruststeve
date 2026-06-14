@@ -85,9 +85,9 @@ while true; do
     echo 'small{color:#8b949e}'
     echo '</style></head><body>'
     echo '<h1>🏁 ruststeve &mdash; race to the Nether</h1>'
-    echo "<div class=sub>elapsed ${tstr} &nbsp;&bull;&nbsp; alive ${alive}/3 &nbsp;&bull;&nbsp; <span class=win>${winner}</span></div>"
+    echo "<div class=sub>elapsed ${tstr} &nbsp;&bull;&nbsp; alive ${alive}/1 &nbsp;&bull;&nbsp; <span class=win>${winner}</span></div>"
     # --- per-bot header info (current step / pick / idle) ---
-    for i in $(seq 0 2); do
+    for i in $(seq 0 0); do
       log="$DIR/race-$i.log"
       line=$(grep -E '^\[minecraft:' "$log" 2>/dev/null | tail -1)
       B_STEP[$i]=$(echo "$line" | grep -oE '→ [A-Za-z ]+\(' | sed 's/[→(]//g; s/ *$//')
@@ -102,14 +102,14 @@ while true; do
     echo '<table>'
     # bots across the TOP
     echo '<tr><th class=steplabel>Step</th>'
-    for i in $(seq 0 2); do
+    for i in $(seq 0 0); do
       idletag=""; case "${B_HCLS[$i]}" in *idle*) idletag=" <small>(idle)</small>";; esac
       printf '<th class="%s">race-%02d<br><small>z=%d</small>%s</th>' "${B_HCLS[$i]}" "$i" "$((300+80*i))" "$idletag"
     done
     echo '</tr>'
     # current step per bot
     echo '<tr><td class=steplabel>Now doing</td>'
-    for i in $(seq 0 2); do
+    for i in $(seq 0 0); do
       printf '<td class=cur>%s <small>%s</small></td>' "${B_STEP[$i]:-&mdash;}" "${B_PICK[$i]:+(${B_PICK[$i]})}"
     done
     echo '</tr>'
@@ -118,7 +118,7 @@ while true; do
     for p in "${MS_PAT[@]}"; do
       goalcls=""; [ "$idx" -eq "$GOAL_IDX" ] && goalcls=" goal"
       printf '<tr><td class="steplabel%s"><img class=ic src="%s/%s.png">%s</td>' "$goalcls" "$ICON_BASE" "${MS_ICON[$idx]}" "${MS_NAMES[$idx]}"
-      for i in $(seq 0 2); do
+      for i in $(seq 0 0); do
         log="$DIR/race-$i.log"
         if grep -qE "$p" "$log" 2>/dev/null; then
           rt=$(awk -v i="$i" -v m="$idx" '$1==i && $2==m {print $3; exit}' "$STATE" 2>/dev/null)
