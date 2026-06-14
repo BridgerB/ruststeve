@@ -22,7 +22,7 @@ HOLD=45
 BASEX=680
 NAMES=(); LANES=()
 for i in $(seq 0 $((N-1))); do
-  NAMES+=("$(printf 'race-%02d' "$i")")
+  NAMES+=("$(printf 'rust-race-%03d' "$((i+1))")")
   LANES+=($((350 + 90 * i)))
 done
 
