@@ -12,8 +12,8 @@ MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/../rustcraft/data
-N=1
-RACE_SECONDS=7200
+N=4
+RACE_SECONDS=3600
 HOLD=45
 
 # Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
@@ -23,7 +23,7 @@ BASEX=680
 NAMES=(); LANES=()
 for i in $(seq 0 $((N-1))); do
   NAMES+=("$(printf 'race-%02d' "$i")")
-  LANES+=($((350 + 120 * i)))
+  LANES+=($((350 + 90 * i)))
 done
 
 cd "$DIR" || exit 1
@@ -53,8 +53,8 @@ sleep 3
 
 SURF_OUT=$($SSH bash -s <<'REMOTE'
 M="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon -H localhost -P 25575 -p minecraft-test-rcon"
-for i in $(seq 0 2); do
-  z=$((350 + 120 * i)); surf=74
+for i in $(seq 0 3); do
+  z=$((350 + 90 * i)); surf=74
   for y in $(seq 120 -1 55); do
     out=$($M "execute unless block 680 $y $z minecraft:air unless block 680 $y $z #minecraft:leaves unless block 680 $y $z #minecraft:logs unless block 680 $y $z minecraft:water run difficulty" 2>/dev/null)
     case "$out" in *ifficulty*) surf=$y; break;; esac
