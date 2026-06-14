@@ -16,10 +16,14 @@ N=5
 RACE_SECONDS=7200
 HOLD=45
 
+# Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
+# x=0 origin was treeless, so bots gathered 0 logs forever. Each lane is a fixed x
+# with z spread 80 apart (z=300,380,…) north of the Steve-bot spawn (~z700).
+BASEX=705
 NAMES=(); LANES=()
 for i in $(seq 0 $((N-1))); do
   NAMES+=("$(printf 'race-%02d' "$i")")
-  LANES+=($((100 * i)))
+  LANES+=($((300 + 80 * i)))
 done
 
 cd "$DIR" || exit 1
@@ -34,15 +38,15 @@ trap cleanup EXIT
 
 echo "[race] phase 1: op bots, forceload + probe lane surfaces"
 OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
-$SSH "$MCRCON $OPS \"forceload add -16 -16 16 470\"" >/dev/null 2>&1
+$SSH "$MCRCON $OPS \"forceload add 685 280 725 640\"" >/dev/null 2>&1
 sleep 3
 
 SURF_OUT=$($SSH bash -s <<'REMOTE'
 M="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon -H localhost -P 25575 -p minecraft-test-rcon"
 for i in $(seq 0 4); do
-  z=$((100 * i)); surf=74
+  z=$((300 + 80 * i)); surf=74
   for y in $(seq 120 -1 55); do
-    out=$($M "execute unless block 0 $y $z minecraft:air unless block 0 $y $z #minecraft:leaves unless block 0 $y $z #minecraft:logs unless block 0 $y $z minecraft:water run difficulty" 2>/dev/null)
+    out=$($M "execute unless block 705 $y $z minecraft:air unless block 705 $y $z #minecraft:leaves unless block 705 $y $z #minecraft:logs unless block 705 $y $z minecraft:water run difficulty" 2>/dev/null)
     case "$out" in *ifficulty*) surf=$y; break;; esac
   done
   echo "SURF $i $surf"
@@ -91,7 +95,7 @@ for i in $(seq 0 $((N-1))); do
   # teleport into the lane, set the per-player spawnpoint there (so a death
   # respawns into the lane), and CLEAR the inventory so every bot starts the
   # race from scratch (race-NN players keep items between runs otherwise).
-  TP+=" \"tp ${NAMES[i]} 0 $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} 0 $y ${LANES[i]}\" \"clear ${NAMES[i]}\""
+  TP+=" \"tp ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"clear ${NAMES[i]}\""
 done
 $SSH "$MCRCON $TP" >/dev/null 2>&1; sleep 2
 $SSH "$MCRCON $TP" >/dev/null 2>&1
@@ -122,7 +126,7 @@ while [ $SECONDS -lt $RACE_SECONDS ]; do
       launch_bot "$i"
       for t in $(seq 1 20); do grep -q 'holding' "$DIR/race-$i.log" 2>/dev/null && break; sleep 2; done
       y=$(( ${SURF[i]} + 1 ))
-      $SSH "$MCRCON \"op ${NAMES[i]}\" \"tp ${NAMES[i]} 0 $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} 0 $y ${LANES[i]}\"" >/dev/null 2>&1
+      $SSH "$MCRCON \"op ${NAMES[i]}\" \"tp ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\"" >/dev/null 2>&1
       alive=$((alive+1))
     fi
   done
