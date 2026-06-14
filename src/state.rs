@@ -5,25 +5,25 @@ use rustcraft::bot::Bot;
 
 use crate::types::{Equipment, GameState, Inventory, Tier, WorldState};
 
-/// Pickaxe tier from an item name.
-pub fn pickaxe_tier(name: &str) -> Tier {
-    match name {
-        "wooden_pickaxe" => Tier::Wood,
-        "stone_pickaxe" => Tier::Stone,
-        "iron_pickaxe" | "golden_pickaxe" => Tier::Iron,
-        "diamond_pickaxe" | "netherite_pickaxe" => Tier::Diamond,
+/// Tier of a tool's MATERIAL prefix (the part before `_pickaxe`/`_sword`). Pickaxes
+/// and swords share this exact mapping, so both tier fns just strip their suffix.
+fn material_tier(material: &str) -> Tier {
+    match material {
+        "wooden" => Tier::Wood,
+        "stone" => Tier::Stone,
+        "iron" | "golden" => Tier::Iron,
+        "diamond" | "netherite" => Tier::Diamond,
         _ => Tier::None,
     }
 }
 
+/// Pickaxe tier from an item name.
+pub fn pickaxe_tier(name: &str) -> Tier {
+    name.strip_suffix("_pickaxe").map_or(Tier::None, material_tier)
+}
+
 fn sword_tier(name: &str) -> Tier {
-    match name {
-        "wooden_sword" => Tier::Wood,
-        "stone_sword" => Tier::Stone,
-        "iron_sword" | "golden_sword" => Tier::Iron,
-        "diamond_sword" | "netherite_sword" => Tier::Diamond,
-        _ => Tier::None,
-    }
+    name.strip_suffix("_sword").map_or(Tier::None, material_tier)
 }
 
 const FOODS: &[&str] = &[
