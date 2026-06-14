@@ -489,21 +489,36 @@ pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32, mem: &mut Wor
         }
         best
     };
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_secs(240);
     let mut blacklist = std::collections::HashSet::new();
+    // Forest/plains SURFACE has almost no gravel — it's common underground (and near
+    // water). The old code dug straight down and gave up (`break`) the instant a
+    // liquid/cavern blocked the shaft, so a bot with everything-but-flint could spin
+    // for many minutes. Instead: get below the surface band, then STRIP-MINE
+    // horizontally — rotating heading whenever a tunnel/dig is blocked — so we keep
+    // exposing fresh walls until a gravel pocket turns up. Never give up early.
+    const STRIP_BELOW: i32 = 58;
+    let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+    let mut dir = 0usize;
     while count(bot) < target && Instant::now() < deadline {
-        match find_gravel(bot) {
-            Some(pos) if !blacklist.contains(&pos) => {
-                let _ = bot.goto_near(pos.0, pos.1, pos.2, 2.0).await;
-                let _ = bot.dig_toward(pos.0, pos.1, pos.2).await;
-                collect_drops(bot, pos.0, pos.2).await;
-                blacklist.insert(pos);
-            }
-            _ => {
-                if !dig_down(bot).await {
-                    break;
-                }
-            }
+        if let Some(pos) = find_gravel(bot).filter(|p| !blacklist.contains(p)) {
+            let _ = bot.goto_near(pos.0, pos.1, pos.2, 2.0).await;
+            let _ = bot.dig_toward(pos.0, pos.1, pos.2).await;
+            collect_drops(bot, pos.0, pos.2).await;
+            blacklist.insert(pos);
+            continue;
+        }
+        // Nothing in view: descend toward the gravel band, else tunnel sideways.
+        let feet = (bot.entity.position.y - 0.5).floor() as i32;
+        let (dx, dz) = dirs[dir % dirs.len()];
+        let moved = if feet > STRIP_BELOW {
+            dig_down(bot).await || strip_tunnel(bot, dx, dz).await
+        } else {
+            strip_tunnel(bot, dx, dz).await || dig_down(bot).await
+        };
+        if !moved {
+            dir += 1; // wedged (liquid/edge) — turn and try a fresh heading
+            bot.wait_ticks(2).await.ok();
         }
     }
     let n = count(bot);
