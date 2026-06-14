@@ -13,7 +13,7 @@ DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/../rustcraft/data
 N=4
-RACE_SECONDS=3600
+RACE_SECONDS=7200
 HOLD=45
 
 # Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
