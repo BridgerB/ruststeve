@@ -13,7 +13,7 @@ pub const STEPS: &[Step] = &[
         id: "gather_wood",
         name: "Gather Wood",
         priority: 1,
-        can_execute: |s| s.world.dimension == "overworld" && s.alive,
+        can_execute: |s| s.world.in_overworld() && s.alive,
         is_complete: |s| s.inventory.logs >= 5 || s.inventory.planks >= 12,
     },
     Step {
