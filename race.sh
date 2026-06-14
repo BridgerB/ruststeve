@@ -27,14 +27,24 @@ for i in $(seq 0 $((N-1))); do
 done
 
 cd "$DIR" || exit 1
+
+# SINGLE-INSTANCE GUARD. A prior race.sh orphaned by `kill -9` on its parent keeps
+# running its relaunch loop and fights this run — duplicate logins + operator kicks,
+# the "joins then leaves" churn. So before anything, kill every OTHER race.sh, any
+# race-loop.sh, and ALL bot processes.
+for pid in $(pgrep -f 'race-loop.sh'); do kill -9 "$pid" 2>/dev/null; done
+for pid in $(pgrep -f 'bash .*race.sh'); do [ "$pid" != "$$" ] && kill -9 "$pid" 2>/dev/null; done
+pkill -9 -f 'target/release/ruststeve' 2>/dev/null
+sleep 2
+
 PIDS=()
 cleanup() {
   echo "[race] cleanup — killing bots"
-  for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
-  pkill -f 'target/release/ruststeve' 2>/dev/null
+  for p in "${PIDS[@]:-}"; do kill -9 "$p" 2>/dev/null; done
+  pkill -9 -f 'target/release/ruststeve' 2>/dev/null
   $SSH "$MCRCON 'forceload remove all'" >/dev/null 2>&1
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 echo "[race] phase 1: op bots, forceload + probe lane surfaces"
 OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
