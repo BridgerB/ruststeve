@@ -46,9 +46,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "[race] phase 1: op bots, forceload + probe lane surfaces"
+echo "[race] phase 1: op bots, forceload, keep_inventory + probe lane surfaces"
 OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
-$SSH "$MCRCON $OPS \"forceload add 685 280 725 640\"" >/dev/null 2>&1
+# NOTE: in this 26.1.2 snapshot the gamerule is snake_case `keep_inventory` (camelCase
+# `keepInventory` is rejected). Re-apply it here because another project on the same box
+# wipes the world on its restarts, which resets the rule to false. (A datapack/world
+# default would make it survive wipes — do that if the wipe-flicker keeps biting.)
+$SSH "$MCRCON $OPS \"forceload add 685 280 725 640\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
 sleep 3
 
 SURF_OUT=$($SSH bash -s <<'REMOTE'
