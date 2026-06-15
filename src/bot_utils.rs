@@ -93,6 +93,49 @@ pub fn total_count(bot: &Bot) -> i32 {
     bot.inventory.slots.iter().flatten().map(|i| i.count).sum()
 }
 
+/// Worthless clutter a speedrun bot picks up while mining/chopping. Hoarding these
+/// (plus over-mined cobble) fills the inventory, and a near-full inventory makes
+/// CRAFTS silently fail — the result slot has nowhere to go. Dropping them keeps
+/// crafting reliable. NOT junk: cobblestone (capped, used for tools+furnace), planks,
+/// sticks, coal, iron, raw_iron, gravel+flint (flint&steel), tools, buckets, table.
+const JUNK_ITEMS: &[&str] = &[
+    "dirt", "coarse_dirt", "rooted_dirt", "mud", "clay_ball",
+    "granite", "diorite", "andesite", "tuff", "calcite", "deepslate", "cobbled_deepslate",
+    "leaf_litter", "oak_sapling", "birch_sapling", "spruce_sapling",
+    "oak_leaves", "birch_leaves", "spruce_leaves", "azalea_leaves",
+    "short_grass", "tall_grass", "fern", "dead_bush", "seeds", "wheat_seeds",
+    "oak_button", "birch_button", "spruce_button", "stone_button",
+    "raw_copper", "copper_ore",
+];
+
+/// Drop junk + excess cobblestone so the inventory keeps room for craft results.
+/// Whole-stack drops (button 1 + mode 4). Keeps ≤64 cobblestone and ≤16 sticks.
+pub async fn tidy_inventory(bot: &mut Bot<'_>) {
+    let mut drop_slots: Vec<i32> = Vec::new();
+    let mut cobble = 0i32;
+    let mut sticks = 0i32;
+    for (i, slot) in bot.inventory.slots.iter().enumerate() {
+        let Some(it) = slot else { continue };
+        let name = it.name.as_str();
+        if name == "cobblestone" {
+            cobble += it.count;
+            if cobble > 64 {
+                drop_slots.push(i as i32);
+            }
+        } else if name == "stick" {
+            sticks += it.count;
+            if sticks > 16 {
+                drop_slots.push(i as i32);
+            }
+        } else if JUNK_ITEMS.contains(&name) {
+            drop_slots.push(i as i32);
+        }
+    }
+    for s in drop_slots {
+        let _ = bot.click_window(s, 1, 4).await; // button 1 + mode 4 = drop whole stack
+    }
+}
+
 /// Walk to the nearest dropped item entity (falling back to the dug block) to
 /// pick it up. Stops early once total inventory count grows. ~2s budget.
 pub async fn collect_drops(bot: &mut Bot<'_>, fx: i32, fz: i32) {
@@ -199,6 +242,12 @@ pub async fn craft_item(
 
     if let Some((tx, ty, tz)) = table {
         let _ = bot.goto(tx, ty, tz).await;
+    }
+
+    // A near-full inventory makes the craft result silently fail to appear (no slot
+    // for it). Drop accumulated junk/excess cobble first when crowded.
+    if bot.inventory.slots.iter().flatten().count() >= 28 {
+        tidy_inventory(bot).await;
     }
 
     let before = bot.item_count(name);
