@@ -2,8 +2,8 @@
 //! generic crafting, and crafting-table placement. Port of the slice of steve's
 //! `lib/bot-utils.ts` the early phases use.
 
-use rustcraft::bot::{Bot, DriveStep, Face};
-use rustcraft::path::{get_path_to, GoalNear, PathStatus};
+use crate::bot::{Bot, DriveStep, Face};
+use crate::path::{get_path_to, GoalNear, PathStatus};
 
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};
 use crate::types::{failure, success, StepResult};
@@ -119,7 +119,9 @@ pub async fn tidy_inventory(bot: &mut Bot<'_>) {
         let name = it.name.as_str();
         if name == "cobblestone" {
             cobble += it.count;
-            if cobble > 64 {
+            // Generous cap — keep well more than enough for furnace (8) + tools, so a
+            // craft is never starved of cobble; only dump genuine hoarding.
+            if cobble > 128 {
                 drop_slots.push(i as i32);
             }
         } else if name == "stick" {
@@ -143,7 +145,7 @@ pub async fn collect_drops(bot: &mut Bot<'_>, fx: i32, fz: i32) {
     let before = total_count(bot);
     for _ in 0..40 {
         let bp = bot.entity.position;
-        let mut target = rustcraft::vec3::vec3(fx as f64 + 0.5, bp.y, fz as f64 + 0.5);
+        let mut target = crate::vec3::vec3(fx as f64 + 0.5, bp.y, fz as f64 + 0.5);
         let mut best = f64::MAX;
         for e in bot.entities.values() {
             if item_type.is_some() && e.entity_type != item_type {
@@ -155,10 +157,10 @@ pub async fn collect_drops(bot: &mut Bot<'_>, fx: i32, fz: i32) {
                 target = e.position;
             }
         }
-        bot.look_at(rustcraft::vec3::vec3(target.x, bp.y - 0.5, target.z));
+        bot.look_at(crate::vec3::vec3(target.x, bp.y - 0.5, target.z));
         bot.set_control_state("forward", true);
         match bot.drive_tick().await {
-            Ok(rustcraft::bot::DriveStep::Disconnected) | Err(_) => break,
+            Ok(crate::bot::DriveStep::Disconnected) | Err(_) => break,
             _ => {}
         }
         if total_count(bot) > before {
@@ -244,11 +246,12 @@ pub async fn craft_item(
         let _ = bot.goto(tx, ty, tz).await;
     }
 
-    // A near-full inventory makes the craft result silently fail to appear (no slot
-    // for it). Drop accumulated junk/excess cobble first when crowded.
-    if bot.inventory.slots.iter().flatten().count() >= 28 {
-        tidy_inventory(bot).await;
-    }
+    // Drop accumulated junk (dirt/granite/raw_copper/leaf_litter…) + excess cobble
+    // before EVERY craft. A cluttered, fragmented inventory bloats the window state the
+    // server has to keep in sync, and under load that desync is what makes the craft
+    // result silently never appear. Keeping the inventory lean keeps crafting reliable.
+    // (Cheap no-op when there's nothing to drop.)
+    tidy_inventory(bot).await;
 
     let before = bot.item_count(name);
     let made = recipe.result.count.max(1) * count.max(1);
@@ -348,7 +351,7 @@ async fn place_table_confirmed(bot: &mut Bot<'_>, tx: i32, ty: i32, tz: i32) -> 
     if !select_item(bot, "crafting_table").await? {
         return Ok(false); // couldn't confirm the item in hand — don't bother placing
     }
-    bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
+    bot.look_at(crate::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
     bot.wait_ticks(2).await?;
     bot.place_block(tx, ty - 1, tz, Face::Top).await?;
     // Give the server time to confirm OR revert the optimistic placement (~1s) —
