@@ -156,20 +156,24 @@ impl<'a> Bot<'a> {
             let (inv_start, inv_end) = self.active_inventory_range();
             self.put_selected_item_range(inv_start, inv_end, original_source.unwrap_or(0)).await?;
 
-            // Wait for the server to compute and send the crafting result into
-            // slot 0 before taking it (else we'd grab an empty slot).
-            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
-            while self.active_slot(0).is_none() && std::time::Instant::now() < deadline {
+            // Wait for slot 0 to hold the INTENDED result, driving the network so the
+            // server's result update actually lands in our local view. Poll for the EXACT
+            // item (not merely "non-empty") with a generous timeout: under load the result
+            // packet can arrive late, or slot 0 can briefly show a stale/wrong value before
+            // the right one — the old 2000ms "non-empty" check timed out or accepted the
+            // wrong thing and reported "result never appeared" while the bot held all the
+            // ingredients. A successful craft still breaks out the instant it matches.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(4500);
+            let mut result_ok = false;
+            while std::time::Instant::now() < deadline {
+                if self.active_slot(0).map(|it| it.type_id == recipe.result.id).unwrap_or(false) {
+                    result_ok = true;
+                    break;
+                }
                 if matches!(self.drive_tick().await?, super::DriveStep::Disconnected) {
                     return Ok(());
                 }
             }
-
-            // VERIFY the result is the item we intended before collecting it. Under load
-            // the grid can desync and the table computes a DIFFERENT recipe (a stray
-            // plank → a button); collecting that hoards junk while the real item never
-            // appears, looping forever. Take slot 0 only when it matches recipe.result.
-            let result_ok = self.active_slot(0).map(|it| it.type_id == recipe.result.id).unwrap_or(false);
             if result_ok {
                 self.put_away(0).await?; // collect the intended result
             }
