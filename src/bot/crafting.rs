@@ -1,0 +1,258 @@
+//! Crafting — recipe lookup and execution via window clicks. Port of
+//! typecraft's `bot/crafting.ts`. Supports the 2x2 inventory grid and (with an
+//! open crafting table) the 3x3 grid.
+
+use crate::recipe::{find_recipes, Recipe, RecipeItem};
+use crate::window::Window;
+
+use super::Bot;
+
+/// Whether an item type satisfies a recipe ingredient (tag-aware).
+fn ingredient_matches(type_id: i32, ingredient: &RecipeItem) -> bool {
+    type_id == ingredient.id
+        || ingredient.choices.as_ref().map(|c| c.contains(&type_id)).unwrap_or(false)
+}
+
+/// Find a slot in `window` holding any item that satisfies `ingredient`.
+fn find_ingredient_slot(window: &Window, ingredient: &RecipeItem) -> Option<usize> {
+    let mut ids = vec![ingredient.id];
+    if let Some(choices) = &ingredient.choices {
+        ids.extend(choices.iter().copied());
+    }
+    for id in ids {
+        for (i, slot) in window.slots.iter().enumerate() {
+            if let Some(item) = slot {
+                if item.type_id == id
+                    && (ingredient.metadata.is_none() || Some(item.metadata) == ingredient.metadata)
+                {
+                    return Some(i);
+                }
+            }
+        }
+    }
+    None
+}
+
+impl<'a> Bot<'a> {
+    /// Recipes producing `item_type`, optionally filtered by whether a crafting
+    /// table is available and a minimum result count.
+    pub fn recipes_for(&self, item_type: i32, min_result_count: Option<i32>, crafting_table: bool) -> Vec<Recipe> {
+        find_recipes(self.registry, item_type, None)
+            .into_iter()
+            .filter(|r| {
+                if let Some(min) = min_result_count {
+                    if r.result.count < min {
+                        return false;
+                    }
+                }
+                if !crafting_table && r.requires_table {
+                    return false;
+                }
+                true
+            })
+            .collect()
+    }
+
+    /// Craft `times` of a recipe. `crafting_table` must be `true` (and a table
+    /// window open) for 3x3 recipes; 2x2 recipes use the player inventory grid.
+    pub async fn craft(&mut self, recipe: &Recipe, times: i32, crafting_table: bool) -> std::io::Result<()> {
+        if recipe.requires_table && !crafting_table {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "recipe requires a crafting table"));
+        }
+        let (w, h) = if crafting_table { (3usize, 3usize) } else { (2usize, 2usize) };
+        let slot = |x: usize, y: usize| -> i32 { (1 + x + w * y) as i32 };
+
+        for _ in 0..times.max(1) {
+            // Start each craft with an EMPTY cursor. A previous op (e.g. the stick
+            // pre-craft before a pickaxe) can leave a stray stack selected, and the
+            // first grid click would then dump it into the table — the server reads the
+            // stray plank as a *button* recipe and the real item never appears (we saw
+            // bots loop forever crafting buttons under load). Deposit any held stack back
+            // into the inventory before touching the grid.
+            if self.window_selected().is_some() {
+                let (inv_start, inv_end) = self.active_inventory_range();
+                self.put_selected_item_range(inv_start, inv_end, inv_start as i32).await?;
+            }
+            // Clear any items left in the crafting GRID by a prior corrupt attempt so we
+            // start from an empty grid — a single stray item changes which recipe the
+            // table matches (a lone plank → button instead of the intended item).
+            for s in 1..=(w * h) as i32 {
+                if self.active_slot(s as usize).is_some() {
+                    self.put_away(s).await?;
+                }
+            }
+            // Determine which slots the recipe leaves unused (for shapeless placement).
+            let mut unused: Vec<i32> = Vec::new();
+            if let Some(shape) = &recipe.in_shape {
+                for y in 0..h {
+                    if let Some(row) = shape.get(y) {
+                        for x in 0..row.len() {
+                            if row[x].id == -1 {
+                                unused.push(slot(x, y));
+                            }
+                        }
+                        for x in row.len()..w {
+                            unused.push(slot(x, y));
+                        }
+                    } else {
+                        for x in 0..w {
+                            unused.push(slot(x, y));
+                        }
+                    }
+                }
+            } else {
+                for y in 0..h {
+                    for x in 0..w {
+                        unused.push(slot(x, y));
+                    }
+                }
+            }
+
+            let mut original_source: Option<i32> = None;
+            // Slot of the stack currently on the cursor. Before grabbing a DIFFERENT
+            // ingredient we must put this one back — otherwise its leftovers get
+            // dumped into the new ingredient's slot, corrupting the grid (the table
+            // then sees a stray single plank = a button recipe, not a pickaxe).
+            let mut held_source: Option<i32> = None;
+
+            // Place shaped ingredients (verified grab each, so a desynced window can't
+            // poison the grid with the wrong item).
+            if let Some(shape) = &recipe.in_shape {
+                for y in 0..shape.len() {
+                    let row = &shape[y];
+                    for x in 0..row.len() {
+                        let ingredient = &row[x];
+                        if ingredient.id == -1 {
+                            continue;
+                        }
+                        self.ensure_holding(ingredient, &mut held_source).await?;
+                        if original_source.is_none() {
+                            original_source = held_source;
+                        }
+                        self.click_window(slot(x, y), 1, 0).await?; // right-click: drop one
+                    }
+                }
+            }
+
+            // Place shapeless ingredients into unused slots.
+            if let Some(ingredients) = &recipe.ingredients {
+                for ingredient in ingredients {
+                    let dest = unused.pop().ok_or_else(|| {
+                        std::io::Error::new(std::io::ErrorKind::Other, "no free crafting slots")
+                    })?;
+                    self.ensure_holding(ingredient, &mut held_source).await?;
+                    if original_source.is_none() {
+                        original_source = held_source;
+                    }
+                    self.click_window(dest, 1, 0).await?;
+                }
+            }
+            // Return the last-held stack to its own source before taking the result.
+            if let Some(hs) = held_source.take() {
+                self.click_window(hs, 0, 0).await?;
+            }
+
+            // Return any leftover held item, then take the result + clear the grid.
+            let (inv_start, inv_end) = self.active_inventory_range();
+            self.put_selected_item_range(inv_start, inv_end, original_source.unwrap_or(0)).await?;
+
+            // Wait for the server to compute and send the crafting result into
+            // slot 0 before taking it (else we'd grab an empty slot).
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+            while self.active_slot(0).is_none() && std::time::Instant::now() < deadline {
+                if matches!(self.drive_tick().await?, super::DriveStep::Disconnected) {
+                    return Ok(());
+                }
+            }
+
+            // VERIFY the result is the item we intended before collecting it. Under load
+            // the grid can desync and the table computes a DIFFERENT recipe (a stray
+            // plank → a button); collecting that hoards junk while the real item never
+            // appears, looping forever. Take slot 0 only when it matches recipe.result.
+            let result_ok = self.active_slot(0).map(|it| it.type_id == recipe.result.id).unwrap_or(false);
+            if result_ok {
+                self.put_away(0).await?; // collect the intended result
+            }
+            // Return the GRID ingredients to the inventory. Emptying the grid makes the
+            // server recompute the result slot to empty, so a WRONG result is discarded
+            // (not collected) and the grid is clean for the next attempt.
+            for s in 1..=(w * h) as i32 {
+                if self.active_slot(s as usize).is_some() {
+                    self.put_away(s).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Grab `ingredient` onto the cursor, VERIFYING the cursor actually holds it
+    /// afterward. Under load the local window desyncs from the server, so a single
+    /// find+grab can land the wrong slot — then a stray item poisons the grid and the
+    /// table computes e.g. a button instead of the intended recipe. `click_window`'s ack
+    /// re-syncs the window from the server, so we re-find and re-grab from the corrected
+    /// state up to a few times. Already holding the right ingredient (placing the 2nd of
+    /// a stack) is a no-op. `held_source` tracks the slot to return the held stack to.
+    async fn ensure_holding(
+        &mut self,
+        ingredient: &RecipeItem,
+        held_source: &mut Option<i32>,
+    ) -> std::io::Result<()> {
+        if self.window_selected().map(|t| ingredient_matches(t, ingredient)).unwrap_or(false) {
+            return Ok(());
+        }
+        for _ in 0..8 {
+            if let Some(hs) = held_source.take() {
+                self.click_window(hs, 0, 0).await?;
+            }
+            let src = match self
+                .active_window_ref()
+                .and_then(|win| find_ingredient_slot(win, ingredient))
+            {
+                Some(s) => s as i32,
+                None => {
+                    // Ingredient not visible in the (possibly stale) window. Under load an
+                    // earlier placement desyncs the local view, so the last ingredient
+                    // (e.g. the stick) looks absent and the craft used to fail outright
+                    // ("missing crafting ingredient", 1000s of times). Let pending server
+                    // updates land, then look again — only give up after all retries.
+                    self.wait_for_inventory_ack(std::time::Duration::from_millis(700)).await?;
+                    continue;
+                }
+            };
+            self.click_window(src, 0, 0).await?;
+            *held_source = Some(src);
+            if self.window_selected().map(|t| ingredient_matches(t, ingredient)).unwrap_or(false) {
+                return Ok(());
+            }
+        }
+        Err(missing(ingredient))
+    }
+
+    // ── small accessors used by craft (avoid borrow tangles) ──
+
+    pub fn window_selected(&self) -> Option<i32> {
+        let w = self.current_window.as_ref().unwrap_or(&self.inventory);
+        w.selected_item.as_ref().map(|i| i.type_id)
+    }
+
+    fn active_window_ref(&self) -> Option<&Window> {
+        Some(self.current_window.as_ref().unwrap_or(&self.inventory))
+    }
+
+    fn active_inventory_range(&self) -> (usize, usize) {
+        let w = self.current_window.as_ref().unwrap_or(&self.inventory);
+        (w.inventory_start, w.inventory_end)
+    }
+
+    fn active_slot(&self, i: usize) -> Option<&crate::item::Item> {
+        let w = self.current_window.as_ref().unwrap_or(&self.inventory);
+        w.slots.get(i).and_then(|s| s.as_ref())
+    }
+}
+
+fn missing(ingredient: &RecipeItem) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("missing crafting ingredient id={}", ingredient.id),
+    )
+}
