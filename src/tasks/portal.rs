@@ -8,8 +8,8 @@
 
 use std::time::{Duration, Instant};
 
-use rustcraft::bot::{Bot, DriveStep, Face};
-use rustcraft::vec3::{vec3, Vec3};
+use crate::bot::{Bot, DriveStep, Face};
+use crate::vec3::{vec3, Vec3};
 
 use crate::bot_utils::{count_items, select_item};
 use crate::memory::WorldMemory;
@@ -841,15 +841,28 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         cast_debug(&format!("prepare: at ({:.0},{:.0},{:.0}) lava={lava:?}", p.x, p.y, p.z));
     }
     if lava.is_none() {
-        for _ in 0..8 {
+        // Find a lava pool. Digging DOWN toward lava is REFUSED by dig_down's death-
+        // avoidance, so a bot deep from iron-mining can never reach the lava layer that
+        // way (it spun "no lava pool found" for 70 min). Instead SWEEP HORIZONTALLY in a
+        // rotating heading to expose fresh cave walls — lava lakes have an air-topped
+        // surface that find_fluid catches. (Only descend when still up near the surface.)
+        bot.movement.blocks_cant_break.clear();
+        let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)];
+        let mut dir = 0usize;
+        for _ in 0..28 {
             if Instant::now() > deadline {
                 break;
             }
-            if feet_y(bot) > 13 {
-                // Descend toward y~12 using the ore-miner's dig-down behaviour.
-                let _ = crate::tasks::mining::mine_ore(bot, "iron", 9999, mem).await; // descends + mines; bails at deadline
+            if feet_y(bot) > 24 {
+                descend_to_y(bot, 18).await; // get down to the lava-rich band first
+            } else {
+                let (dx, dz) = dirs[dir % dirs.len()];
+                dir += 1;
+                let p = bot.entity.position;
+                let (tx, tz) = (p.x.floor() as i32 + dx * 8, p.z.floor() as i32 + dz * 8);
+                let _ = bot.goto_xz(tx, tz, 2.0).await;
             }
-            lava = find_fluid(bot, "lava", 16);
+            lava = find_fluid(bot, "lava", 18);
             if lava.is_some() {
                 break;
             }
