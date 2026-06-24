@@ -6,7 +6,7 @@
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::item::{items_equal, to_notch, Item};
+use crate::item::{to_notch, Item};
 use crate::protocol::PValue;
 use crate::window::{Click, Window};
 
@@ -44,20 +44,17 @@ impl<'a> Bot<'a> {
         let window = self.active_window();
         let window_id = window.id;
         let state_id = window.state_id;
-        let old: Vec<Option<Item>> = window.slots.clone();
         window.accept_click(registry, Click { mode, mouse_button, slot }, 0);
-
-        let mut changed = Vec::new();
-        for i in 0..window.slots.len() {
-            if !items_equal(old[i].as_ref(), window.slots[i].as_ref(), true, true) {
-                changed.push(PValue::compound(vec![
-                    ("location", PValue::num(i as f64)),
-                    ("item", to_notch(registry, window.slots[i].as_ref())),
-                ]));
-            }
-        }
         let cursor = to_notch(registry, window.selected_item.as_ref());
 
+        // Send EMPTY changedSlots so the server ALWAYS sees a prediction mismatch and
+        // replies with a full, AUTHORITATIVE container_set_content. The optimistic local
+        // prediction desyncs from the server under sustained load — crafting then reads
+        // the wrong slots and cascades into missing-ingredient / result-never-appeared
+        // failures. Forcing a server resync after EVERY click keeps the window
+        // server-authoritative; the ack wait returns the instant that resync lands (and
+        // because a resync now always comes, correct-prediction clicks no longer burn the
+        // full timeout waiting for nothing).
         self.client
             .write(
                 "container_click",
@@ -67,13 +64,13 @@ impl<'a> Bot<'a> {
                     ("slot", PValue::num(slot as f64)),
                     ("mouseButton", PValue::num(mouse_button as f64)),
                     ("mode", PValue::num(mode as f64)),
-                    ("changedSlots", PValue::List(changed)),
+                    ("changedSlots", PValue::List(Vec::new())),
                     ("cursorItem", cursor),
                 ]),
             )
             .await?;
 
-        self.wait_for_inventory_ack(Duration::from_millis(1000)).await
+        self.wait_for_inventory_ack(Duration::from_millis(2000)).await
     }
 
     /// Drive the loop until the server sends a slot/content update (or timeout).
