@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use rustcraft::bot::Bot;
+use crate::bot::Bot;
 
 use crate::bot_utils::{collect_drops, select_item};
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};
@@ -217,7 +217,7 @@ async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
     // back to a raw walk if it can't compute a path for such a short hop.
     let moved = bot.goto_near(nx, y - 1, nz, 0.7).await.unwrap_or(false);
     if !moved {
-        bot.look_at(rustcraft::vec3::vec3(nx as f64 + 0.5, (y - 1) as f64, nz as f64 + 0.5));
+        bot.look_at(crate::vec3::vec3(nx as f64 + 0.5, (y - 1) as f64, nz as f64 + 0.5));
         bot.set_control_state("forward", true);
         for _ in 0..10 {
             bot.drive_tick().await.ok();
@@ -379,6 +379,13 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         // Notice ores around us (cheap, throttled) and write them to memory.
         if iters % 4 == 1 {
             observe_blocks(bot, mem, &ores);
+            // Remember exposed lava we pass while deep. The portal cast needs a lava
+            // pool, and we're already at lava depth here — recording it now lets
+            // prepare_cast_site navigate straight to it instead of blind-searching
+            // (which stranded portal-ready bots for an hour with everything else done).
+            for (lx, ly, lz) in bot.find_exposed_blocks("lava", 12, 4) {
+                mem.record(PoiKind::Lava, (lx, ly, lz), PoiStatus::Available);
+            }
         }
         let from = {
             let p = bot.entity.position;

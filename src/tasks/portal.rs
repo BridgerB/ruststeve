@@ -12,7 +12,7 @@ use crate::bot::{Bot, DriveStep, Face};
 use crate::vec3::{vec3, Vec3};
 
 use crate::bot_utils::{count_items, select_item};
-use crate::memory::WorldMemory;
+use crate::memory::{PoiKind, WorldMemory};
 use crate::types::{failure, success, StepResult};
 
 // ── block classification ────────────────────────────────────────────────────
@@ -841,10 +841,24 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         cast_debug(&format!("prepare: at ({:.0},{:.0},{:.0}) lava={lava:?}", p.x, p.y, p.z));
     }
     if lava.is_none() {
-        // Find a lava pool. Digging DOWN toward lava is REFUSED by dig_down's death-
-        // avoidance, so a bot deep from iron-mining can never reach the lava layer that
-        // way (it spun "no lava pool found" for 70 min). Instead SWEEP HORIZONTALLY in a
-        // rotating heading to expose fresh cave walls — lava lakes have an air-topped
+        // First, reuse any lava the bot remembered while iron-mining (it was AT lava
+        // depth then, and find_exposed_blocks logged what it passed). Navigate to the
+        // nearest remembered pool and rescan — this is the reliable path: the bot
+        // already found lava once, just go back to it.
+        let p = bot.entity.position;
+        let from = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        if let Some(poi) = mem.nearest(&[PoiKind::Lava], from, 4) {
+            cast_debug(&format!("prepare: heading to remembered lava {:?}", poi.pos));
+            bot.movement.blocks_cant_break.clear();
+            let _ = bot.goto_near(poi.pos.0, poi.pos.1, poi.pos.2, 3.0).await;
+            lava = find_fluid(bot, "lava", 16);
+        }
+    }
+    if lava.is_none() {
+        // No remembered lava in reach. Digging DOWN toward lava is REFUSED by dig_down's
+        // death-avoidance, so a bot deep from iron-mining can never reach the lava layer
+        // that way (it spun "no lava pool found" for 70 min). Instead SWEEP HORIZONTALLY
+        // in a rotating heading to expose fresh cave walls — lava lakes have an air-topped
         // surface that find_fluid catches. (Only descend when still up near the surface.)
         bot.movement.blocks_cant_break.clear();
         let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)];
