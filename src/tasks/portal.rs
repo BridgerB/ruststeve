@@ -13,6 +13,7 @@ use crate::vec3::{vec3, Vec3};
 
 use crate::bot_utils::{count_items, select_item};
 use crate::memory::{PoiKind, WorldMemory};
+use crate::tasks::mining::{descend_step, dig_down, strip_tunnel};
 use crate::types::{failure, success, StepResult};
 
 // ── block classification ────────────────────────────────────────────────────
@@ -49,6 +50,25 @@ fn is_lava(n: &str) -> bool {
 
 fn solid_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
     is_solid(&name_at(bot, x, y, z))
+}
+
+/// Is there ANY lava block (exposed or sealed) within `r` of the bot? Cheap raw scan
+/// used to STOP descending before the bot blunders into a lava lake — dig_down and
+/// descend_step avoid lava, but the relocate goto_xz will happily path a bot straight
+/// through one at depth (with blocks_cant_break cleared). Near lava, scoop; don't walk.
+fn raw_lava_near(bot: &Bot, r: i32) -> bool {
+    let p = bot.entity.position;
+    let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    for dx in -r..=r {
+        for dy in -r..=r {
+            for dz in -r..=r {
+                if is_lava(&name_at(bot, bx + dx, by + dy, bz + dz)) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn feet_y(bot: &Bot) -> i32 {
@@ -190,12 +210,28 @@ async fn descend_to_y(bot: &mut Bot<'_>, target_y: i32) {
                 }
             }
         }
+        let mut dug = 0;
         for (cx, cz) in cells {
             let n = name_at(bot, cx, f - 1, cz);
-            if is_solid(&n) && n != "obsidian" {
-                dig_at(bot, cx, f - 1, cz).await;
+            if !is_solid(&n) || n == "obsidian" {
+                continue;
             }
+            // Lava-safety: never dig a floor block that drops us onto/into lava, nor one
+            // with lava beside it (it floods the hole). If lava is this close we've
+            // reached the lava layer — leave it be so the caller's find_fluid can scoop
+            // the now-nearby exposed source instead of the bot drowning in it.
+            let lava_below = is_lava(&name_at(bot, cx, f - 2, cz));
+            let lava_beside = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dz)| is_lava(&name_at(bot, cx + dx, f - 1, cz + dz)));
+            if lava_below || lava_beside {
+                cast_debug(&format!("DESC y={f} ({cx},{cz}) LAVA-STOP below2={}", name_at(bot, cx, f - 2, cz)));
+                continue;
+            }
+            dig_at(bot, cx, f - 1, cz).await;
+            dug += 1;
         }
+        cast_debug(&format!("DESC y={f} dug={dug}"));
         bot.wait_ticks(8).await.ok();
     }
 }
@@ -886,28 +922,57 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         }
     }
     if lava.is_none() {
-        // No remembered lava in reach. Digging DOWN toward lava is REFUSED by dig_down's
-        // death-avoidance, so a bot deep from iron-mining can never reach the lava layer
-        // that way (it spun "no lava pool found" for 70 min). Instead SWEEP HORIZONTALLY
-        // in a rotating heading to expose fresh cave walls — lava lakes have an air-topped
-        // surface that find_fluid catches. (Only descend when still up near the surface.)
+        // No remembered lava in reach. Reach the DEEP lava zone (y≈-40..-54, where big
+        // EXPOSED lava lakes live) using the ore-miner's PROVEN relocating descent — the
+        // same machinery that reliably tunnels down through mixed stone/cave/aquifer
+        // terrain to find iron. A hand-rolled straight dig-down stalls the instant it
+        // meets an open cave or aquifer (it only digs solid), so it never gets deep. This
+        // one relocates: dig_down straight, else stair-step in all 4 dirs, else strip-
+        // tunnel to fresh ground. At depth, strip-tunnel to expose cavern walls. find_fluid
+        // then locks onto an air-topped lava surface. (dig_down still avoids lava, so we
+        // never dive in — we descend PAST the shallow pockets to the deep lakes.)
         bot.movement.blocks_cant_break.clear();
-        let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)];
-        let mut dir = 0usize;
-        for _ in 0..28 {
+        const DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+        let mut desc_fail = 0u32;
+        for _ in 0..80 {
             if Instant::now() > deadline {
                 break;
             }
-            if feet_y(bot) > 24 {
-                descend_to_y(bot, 18).await; // get down to the lava-rich band first
-            } else {
-                let (dx, dz) = dirs[dir % dirs.len()];
-                dir += 1;
-                let p = bot.entity.position;
-                let (tx, tz) = (p.x.floor() as i32 + dx * 8, p.z.floor() as i32 + dz * 8);
-                let _ = bot.goto_xz(tx, tz, 2.0).await;
+            // Reached the lava zone? Stop and scoop the exposed pool — never dig or
+            // relocate further into it (walking into it at y-1 is what killed the bot).
+            if raw_lava_near(bot, 10) {
+                lava = find_fluid(bot, "lava", 24);
+                break;
             }
-            lava = find_fluid(bot, "lava", 18);
+            if feet_y(bot) > -45 {
+                let mut descended = dig_down(bot).await;
+                if !descended {
+                    for &(dx, dz) in &DIRS {
+                        if descend_step(bot, dx, dz).await {
+                            descended = true;
+                            break;
+                        }
+                    }
+                }
+                if descended {
+                    desc_fail = 0;
+                } else if raw_lava_near(bot, 10) {
+                    // Descent blocked BY lava — grab it, don't relocate straight into it.
+                    lava = find_fluid(bot, "lava", 24);
+                    break;
+                } else {
+                    desc_fail += 1;
+                    let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
+                    let dist = 6 + (desc_fail.min(8) as i32) * 4;
+                    let p = bot.entity.position;
+                    let _ = bot
+                        .goto_xz(p.x.floor() as i32 + dx * dist, p.z.floor() as i32 + dz * dist, 2.0)
+                        .await;
+                }
+            } else {
+                strip_tunnel(bot, 0, 1).await; // at depth — expose fresh cavern walls
+            }
+            lava = find_fluid(bot, "lava", 20);
             if lava.is_some() {
                 break;
             }

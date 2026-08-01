@@ -79,7 +79,7 @@ fn find_stone(bot: &Bot, r: i32) -> Option<(i32, i32, i32)> {
 
 /// Mine the block under the bot's feet so it descends one level. Returns false
 /// if it can't (lava below, or the dig failed).
-async fn dig_down(bot: &mut Bot<'_>) -> bool {
+pub(crate) async fn dig_down(bot: &mut Bot<'_>) -> bool {
     let p = bot.entity.position;
     let x = p.x.floor() as i32;
     let z = p.z.floor() as i32;
@@ -207,7 +207,7 @@ async fn mine_vein(bot: &mut Bot<'_>, ore: &str, tx: i32, ty: i32, tz: i32) -> i
 /// Dig one descending stair-step in direction (dx,dz): opens head+feet+floor so
 /// the bot drops one level AND leaves a 1-high step it can later walk back up.
 /// Returns false if blocked (lava/bedrock) — caller should turn.
-async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
+pub(crate) async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
     let p = bot.entity.position;
     let (x, y, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
     if y - 2 <= bot.game.min_y + 4 {
@@ -247,7 +247,7 @@ async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
 
 /// Strip-tunnel forward ~6 blocks in direction (dx,dz); the pathfinder breaks
 /// stone since blocks_cant_break is cleared. Returns whether it advanced.
-async fn strip_tunnel(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
+pub(crate) async fn strip_tunnel(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
     let p = bot.entity.position;
     let (tx, tz) = (p.x.floor() as i32 + dx * 6, p.z.floor() as i32 + dz * 6);
     bot.goto_xz(tx, tz, 1.0).await.unwrap_or(false)
