@@ -35,42 +35,6 @@ pub struct World<'a> {
     generator: Option<Box<dyn FnMut(i32, i32) -> ChunkColumn + 'a>>,
     saving_queue: HashSet<(i32, i32)>,
     events: Vec<WorldEvent>,
-    /// Positions of "interesting" blocks (gravel, lava, ores) keyed by block id,
-    /// maintained incrementally on chunk load/unload/block-update. Lets tasks find the
-    /// nearest one at ANY range with an O(k) lookup instead of scanning millions of
-    /// blocks per search — a big synchronous scan froze the single async loop and got
-    /// the bot kicked ("Timed out"). This just organizes the chunk data the bot already
-    /// has; it is not X-ray for ore (ore-finding still goes through observe_blocks).
-    block_index: HashMap<i32, Vec<(i32, i32, i32)>>,
-    /// state id -> block id, only for the indexed block types (built once from registry).
-    indexed_states: HashMap<u32, i32>,
-}
-
-/// Block types worth indexing — resources tasks hunt for. Kept small so the index
-/// stays cheap; add a name to make it findable at any range via `nearest_indexed`.
-const INDEXED_BLOCKS: &[&str] = &[
-    "gravel",
-    "lava",
-    "coal_ore",
-    "deepslate_coal_ore",
-    "iron_ore",
-    "deepslate_iron_ore",
-    "gold_ore",
-    "deepslate_gold_ore",
-    "diamond_ore",
-    "deepslate_diamond_ore",
-];
-
-fn build_indexed_states(registry: &Registry) -> HashMap<u32, i32> {
-    let mut m = HashMap::new();
-    for name in INDEXED_BLOCKS {
-        if let Some(def) = registry.blocks_by_name.get(*name) {
-            for s in def.min_state_id..=def.max_state_id {
-                m.insert(s, def.id);
-            }
-        }
-    }
-    m
 }
 
 fn to_chunk(c: f64) -> i32 {
@@ -110,8 +74,6 @@ impl<'a> World<'a> {
             generator: None,
             saving_queue: HashSet::new(),
             events: Vec::new(),
-            block_index: HashMap::new(),
-            indexed_states: build_indexed_states(registry),
         }
     }
 
@@ -169,86 +131,9 @@ impl<'a> World<'a> {
     }
 
     pub fn set_column(&mut self, chunk_x: i32, chunk_z: i32, column: ChunkColumn) {
-        if self.columns.contains_key(&(chunk_x, chunk_z)) {
-            self.deindex_column(chunk_x, chunk_z); // replacing a reload — drop stale entries
-        }
-        self.index_column(chunk_x, chunk_z, &column);
         self.columns.insert((chunk_x, chunk_z), column);
         self.events
             .push(WorldEvent::ChunkColumnLoad(chunk_x, chunk_z));
-    }
-
-    /// Scan a column's non-empty sections for indexed block types and record their
-    /// world positions. Runs once per chunk load; empty (all-air) sections are skipped.
-    fn index_column(&mut self, cx: i32, cz: i32, column: &ChunkColumn) {
-        if self.indexed_states.is_empty() {
-            return;
-        }
-        for (si, section) in column.sections.iter().enumerate() {
-            if section.is_empty() {
-                continue;
-            }
-            let base_y = column.min_y + (si as i32) * 16;
-            for ly in 0usize..16 {
-                for lz in 0usize..16 {
-                    for lx in 0usize..16 {
-                        let s = section.get_block(lx, ly, lz);
-                        if let Some(&bid) = self.indexed_states.get(&s) {
-                            self.block_index.entry(bid).or_default().push((
-                                cx * 16 + lx as i32,
-                                base_y + ly as i32,
-                                cz * 16 + lz as i32,
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Drop all indexed positions inside chunk (cx, cz) — on unload/reload.
-    fn deindex_column(&mut self, cx: i32, cz: i32) {
-        for positions in self.block_index.values_mut() {
-            positions.retain(|&(x, _, z)| (x >> 4) != cx || (z >> 4) != cz);
-        }
-    }
-
-    /// Keep the index current when a single block changes (mine/place/fluid flow).
-    fn index_update(&mut self, wp: (i32, i32, i32), old_state: u32, new_state: u32) {
-        if old_state == new_state {
-            return;
-        }
-        if let Some(&bid) = self.indexed_states.get(&old_state) {
-            if let Some(v) = self.block_index.get_mut(&bid) {
-                if let Some(i) = v.iter().position(|&p| p == wp) {
-                    v.swap_remove(i);
-                }
-            }
-        }
-        if let Some(&bid) = self.indexed_states.get(&new_state) {
-            self.block_index.entry(bid).or_default().push(wp);
-        }
-    }
-
-    /// Nearest indexed block of `block_id` to `from` within `max_dist` — O(k), any range.
-    pub fn nearest_indexed(
-        &self,
-        block_id: i32,
-        from: (i32, i32, i32),
-        max_dist: i32,
-    ) -> Option<(i32, i32, i32)> {
-        let positions = self.block_index.get(&block_id)?;
-        let md2 = (max_dist as i64) * (max_dist as i64);
-        positions
-            .iter()
-            .copied()
-            .filter_map(|p| {
-                let (dx, dy, dz) = ((p.0 - from.0) as i64, (p.1 - from.1) as i64, (p.2 - from.2) as i64);
-                let d = dx * dx + dy * dy + dz * dz;
-                (d <= md2).then_some((d, p))
-            })
-            .min_by_key(|(d, _)| *d)
-            .map(|(_, p)| p)
     }
 
     /// Save (if a provider is queued) and unload a column.
@@ -264,7 +149,6 @@ impl<'a> World<'a> {
             }
             self.saving_queue.remove(&key);
         }
-        self.deindex_column(chunk_x, chunk_z);
         self.columns.remove(&key);
         self.events
             .push(WorldEvent::ChunkColumnUnload(chunk_x, chunk_z));
@@ -293,7 +177,6 @@ impl<'a> World<'a> {
             }
             None => return,
         };
-        self.index_update((pos.x.floor() as i32, y, pos.z.floor() as i32), old, state_id);
         self.queue_save(cx, cz);
         self.events.push(WorldEvent::BlockUpdate {
             pos,
@@ -330,7 +213,6 @@ impl<'a> World<'a> {
             }
             None => return,
         };
-        self.index_update((pos.x.floor() as i32, y, pos.z.floor() as i32), old, new);
         self.queue_save(cx, cz);
         self.events.push(WorldEvent::BlockUpdate {
             pos,

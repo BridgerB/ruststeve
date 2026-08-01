@@ -489,7 +489,7 @@ pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32, mem: &mut Wor
     // strip-mines blind for many minutes (seen: 0 gravel in 13 min). Search a MUCH wider
     // radius with the efficient block index so we lock onto the nearest gravel blob and
     // walk to it instead of tunnelling past it.
-    let find_gravel = |bot: &Bot| -> Option<(i32, i32, i32)> { bot.find_indexed("gravel", 128) };
+    let find_gravel = |bot: &Bot| -> Option<(i32, i32, i32)> { bot.find_block("gravel", 40) };
     let deadline = Instant::now() + Duration::from_secs(240);
     let mut blacklist = std::collections::HashSet::new();
     // Forest/plains SURFACE has almost no gravel — it's common underground (and near
