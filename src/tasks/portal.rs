@@ -12,7 +12,7 @@ use crate::bot::{Bot, DriveStep, Face};
 use crate::vec3::{vec3, Vec3};
 
 use crate::bot_utils::{count_items, select_item};
-use crate::memory::{PoiKind, WorldMemory};
+use crate::memory::{PoiKind, PoiStatus, WorldMemory};
 use crate::tasks::mining::{descend_step, dig_down, strip_tunnel};
 use crate::types::{failure, success, StepResult};
 
@@ -982,6 +982,11 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         return None;
     };
     mem.log("cast", "lava", &format!("{},{},{}", lava.0, lava.1, lava.2));
+    // Remember the pool so retries navigate STRAIGHT back (memory-first path above)
+    // instead of re-descending from the surface each time — the descent eats most of
+    // the 360s deadline, so without this a bot that runs out of time mid-clear starts
+    // over from scratch and never accumulates enough time at the lava to finish the cast.
+    mem.record(PoiKind::Lava, lava, PoiStatus::Available);
 
     // 2. Anchor the frame a fixed gap past the EAST edge of the WHOLE pool (scan +X
     //    from the found source until the lava ends), so the frame — which extends +X —
