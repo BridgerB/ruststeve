@@ -897,6 +897,16 @@ impl<'a> Bot<'a> {
         self.find_blocks(name, max_distance, 1).into_iter().next()
     }
 
+    /// Nearest indexed resource block (gravel/lava/ore) via the world's block index —
+    /// O(k) at ANY range, no giant synchronous scan (which would freeze the async loop
+    /// and get the bot kicked). Only INDEXED_BLOCKS types return a hit; others → None.
+    pub fn find_indexed(&self, name: &str, max_distance: i32) -> Option<(i32, i32, i32)> {
+        let id = self.registry.blocks_by_name.get(name)?.id;
+        let p = self.entity.position;
+        let from = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        self.world.nearest_indexed(id, from, max_distance)
+    }
+
     /// Like `find_blocks` but requires only an EXPOSED face (an air/transparent
     /// neighbour), not strict line-of-sight. Lava/water at or below floor level is
     /// invisible to the LOS raycast from a standing bot (the sightline grazes the
