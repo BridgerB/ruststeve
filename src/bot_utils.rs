@@ -377,6 +377,27 @@ pub async fn get_crafting_table(
     }
     // 3. None around — craft one on demand if we don't have the item, then place it.
     if count_items(bot, "crafting_table") == 0 {
+        // A table costs 4 planks. A bot deep in the iron phase often has 0 planks but
+        // still holds LOGS (it spent its planks on sticks/pickaxes) — without converting
+        // them it can't craft a table and loops "need a crafting table" forever while
+        // sitting on wood (whole race stalls here). Convert a log to planks first.
+        let planks: i32 = bot
+            .inventory
+            .slots
+            .iter()
+            .flatten()
+            .filter(|i| i.name.ends_with("_planks"))
+            .map(|i| i.count)
+            .sum();
+        if planks < 4 {
+            for log in LOG_TYPES {
+                if count_items(bot, log) > 0 {
+                    let plank_name = log.replace("_log", "_planks");
+                    let _ = craft_item(bot, &plank_name, 4, None, mem).await;
+                    break;
+                }
+            }
+        }
         let _ = craft_item(bot, "crafting_table", 1, None, mem).await;
         if count_items(bot, "crafting_table") == 0 {
             println!("    table: could not craft a crafting_table");
