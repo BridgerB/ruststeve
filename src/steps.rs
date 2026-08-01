@@ -195,6 +195,21 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
             }
         }
     }
+    // WOOD RECOVERY: completely out of wood (no logs, no planks, no table item) while
+    // still in the tool phase (no iron pickaxe yet) means the bot can't craft the table
+    // its next step needs — the furthest-step picker would otherwise stick on that
+    // table-craft and loop "need a crafting table" forever (a lost bot per race). Go
+    // gather wood first; harmless if a placed table is nearby (the bot needs wood for
+    // sticks anyway), and it self-clears the moment logs come in.
+    if state.inventory.logs == 0
+        && state.inventory.planks == 0
+        && state.inventory.crafting_tables == 0
+        && state.equipment.pickaxe_tier().rank() < 3
+    {
+        if let Some(step) = STEPS.iter().find(|st| st.id == "gather_wood") {
+            return Some(step);
+        }
+    }
     STEPS.iter().filter(|s| (s.can_execute)(state) && !(s.is_complete)(state)).next_back()
 }
 
