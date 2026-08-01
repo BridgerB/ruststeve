@@ -903,6 +903,17 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     // Keep the radius modest — a 30-block exposed scan is ~226k synchronous block
     // lookups that block the network loop past the keep-alive timeout (→ kick).
     let mut lava = find_fluid(bot, "lava", 16);
+    // Block index: jump straight to the nearest lava ANYWHERE in the loaded chunks
+    // (deep lakes at y<0 included) — an instant O(k) lookup at any range, no blind
+    // descent — then rescan for an exposed face to actually scoop from.
+    if lava.is_none() {
+        if let Some(idx) = bot.find_indexed("lava", 200) {
+            bot.movement.blocks_cant_break.clear();
+            let _ = bot.goto_near(idx.0, idx.1, idx.2, 3.0).await;
+            lava = find_fluid(bot, "lava", 24);
+            cast_debug(&format!("prepare: indexed lava {idx:?} -> after nav lava={lava:?}"));
+        }
+    }
     {
         let p = bot.entity.position;
         cast_debug(&format!("prepare: at ({:.0},{:.0},{:.0}) lava={lava:?}", p.x, p.y, p.z));
