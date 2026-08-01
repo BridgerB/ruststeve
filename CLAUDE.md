@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An Ender-Dragon speedrun bot — a **Rust port of `steve`** (the TypeScript speedrun bot), built on the `rustcraft` SDK (`../rustcraft`, a path dependency). It ports the **single-bot core of steve's `main.ts`**; steve's multi-bot/MCP orchestration is out of scope here.
+An Ender-Dragon speedrun bot — a **Rust port of `steve`** (the TypeScript speedrun bot), with a built-in Minecraft SDK (the `bot`/`world`/`protocol`/… modules, formerly the separate `rustcraft` crate, now flattened into this one crate). It ports the **single-bot core of steve's `main.ts`**; steve's multi-bot/MCP orchestration is out of scope here.
 
 A single binary: connect → wait for spawn + chunks → run a tick loop until the dragon is dead.
 
@@ -13,17 +13,17 @@ A single binary: connect → wait for spawn + chunks → run a tick loop until t
 ```bash
 cargo run                    # connect and run the speedrun loop
 cargo build
-cargo test                   # (rustcraft holds the test suite; this crate is thin)
+cargo test                   # 172 SDK tests + the bot, all one crate now
 
 # Config via env vars (see main.rs):
 MC_HOST=<host> MC_PORT=25565 MC_USERNAME=ruststeve-001 cargo run
-STEVE_DATA=../rustcraft/data            # registry dir (default shown)
+STEVE_DATA=data                          # registry dir (default shown)
 MC_TP="x y z"                            # teleport to a real forest on spawn (needs op); steve's spawnBot equivalent
 CRAFT_DEBUG=1                            # dump inventory/window state around each craft
 MINE_DEBUG=1                            # log descent/dig-down decisions
 ```
 
-**The registry must exist.** `STEVE_DATA` points at rustcraft's generated `data/` (run `cargo run --bin datagen` in `../rustcraft` first). Without it the bot starts with an empty registry and resolves no block/item names — it will spawn but can't do anything useful.
+**The registry must exist.** `STEVE_DATA` points at rustcraft's generated `data/` (run `cargo run --bin datagen` first). Without it the bot starts with an empty registry and resolves no block/item names — it will spawn but can't do anything useful.
 
 This is offline-mode only (no auth wired up): `ClientOptions { access_token: None, uuid: None }`. The server must allow offline players, and `MC_TP` / RCON ops need the bot to be op'd.
 
@@ -46,7 +46,7 @@ The loop in `main.rs` is **sync state → pick the next incomplete step → exec
 
 ### State of the port
 
-Only the **overworld/early phases** are ported (through flint-and-steel). `#![allow(dead_code)]` in `main.rs` covers `GameState`/`Step` fields (sword, furnace, vitals, priority) reserved for later phases. `is_dragon_dead` always returns false (`WorldState::dragon_dead` is never set), so the Nether and End phases — and thus the victory path — are **not yet implemented**. Extending the run means adding ordered steps + task modules following the patterns above.
+The full **overworld→nether pipeline** is ported (19 steps, through `enter_nether`): gather wood → planks → table → sticks → wooden pick → mine stone → stone pick/sword → furnace → coal → iron → smelt → iron pick → buckets → water → flint & steel → gather build blocks → build nether portal (obsidian cast) → enter nether. The portal is built by casting obsidian (lava cup + water bowl, no diamond pickaxe) and lit with flint & steel. `is_dragon_dead` always returns false (`WorldState::dragon_dead` is never set), so the Nether and End *combat* phases — and thus the victory path — are **not yet implemented**. Extending the run means adding ordered steps + task modules following the patterns above.
 
 ## Code style
 

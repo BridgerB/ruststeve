@@ -4,8 +4,8 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use rustcraft::bot::{Bot, DriveStep};
-use rustcraft::vec3::vec3;
+use crate::bot::{Bot, DriveStep};
+use crate::vec3::vec3;
 
 use crate::bot_utils::{collect_drops, select_item};
 use crate::types::{failure, success, StepResult};

@@ -2,7 +2,7 @@
 //! satisfied by `is_complete`; `execute_step` dispatches by id. Port of steve's
 //! `steps.ts` (early phases).
 
-use rustcraft::bot::Bot;
+use crate::bot::Bot;
 
 use crate::memory::WorldMemory;
 use crate::tasks;

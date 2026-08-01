@@ -64,6 +64,16 @@ fn find_stone(bot: &Bot, r: i32) -> Option<(i32, i32, i32)> {
             }
         }
     }
+    if std::env::var("MINE_DEBUG").is_ok() && best.is_none() {
+        // Report what blocks ARE below the bot (up to 6 down) so we know why
+        // stone isn't found — chunks may not be loaded at depth.
+        let mut below: Vec<String> = Vec::new();
+        for dy in 0..6 {
+            let n = bot.block_at(bx, by - dy, bz).map(|b| b.name).unwrap_or_else(|| "?".into());
+            below.push(format!("y={}={}", by - dy, n));
+        }
+        eprintln!("MINE find_stone: NONE at ({bx},{by},{bz}) below=[{}]", below.join(", "));
+    }
     best
 }
 
@@ -574,6 +584,15 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -
             break;
         }
         if let Some((tx, ty, tz)) = find_stone(bot, 6) {
+            // If the stone is far below us, dig DOWN to it first so we reach the
+            // same level and can collect drops. Mining remotely from the surface
+            // loses every drop (the item falls 5+ blocks into the hole). But don't
+            // `continue` — fall through to the dig so no_progress advances even
+            // if dig_down fails (otherwise the loop burns 25 iterations in seconds).
+            let feet = bot.entity.position.y.floor() as i32;
+            if ty < feet - 2 {
+                dig_down(bot).await;
+            }
             let _ = bot.goto_near(tx, ty, tz, 2.5).await;
             let before = count_cobble(bot);
             let held = bot.held_item().map(|i| i.name.clone());

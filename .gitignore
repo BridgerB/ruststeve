@@ -11,3 +11,8 @@
 
 # Runtime state
 .bot-serial
+/data
+/datagen/work
+
+# macOS
+.DS_Store

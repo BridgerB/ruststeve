@@ -8,7 +8,7 @@ SSH="ssh -o ConnectTimeout=15 bridger@$HOST"
 MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon -H localhost -P 25575 -p minecraft-test-rcon"
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
-DATA=$DIR/../rustcraft/data
+DATA=$DIR/data
 NAME=ptest
 X=305; Y=70; Z=305   # bot stands here; floor at Y-1
 

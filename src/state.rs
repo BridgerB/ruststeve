@@ -1,7 +1,7 @@
 //! Derive [`GameState`] from a live bot — count inventory items, detect
 //! equipment tiers, read world/vitals. Port of steve's `state.ts`.
 
-use rustcraft::bot::Bot;
+use crate::bot::Bot;
 
 use crate::types::{Equipment, GameState, Inventory, Tier, WorldState};
 
@@ -93,7 +93,7 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
     let p = bot.entity.position;
     // A lit portal exists if a nether_portal block is nearby (the cast-and-light step
     // succeeded). Cheap line-of-sight-bounded search.
-    let portal_built = bot.find_block("nether_portal", 16).is_some();
+    let portal_built = !bot.find_exposed_blocks("nether_portal", 32, 1).is_empty();
     GameState {
         inventory: inv,
         equipment,

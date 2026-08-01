@@ -11,9 +11,9 @@ SSH="ssh -o ConnectTimeout=15 bridger@$HOST"
 MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon -H localhost -P 25575 -p minecraft-test-rcon"
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
-DATA=$DIR/../rustcraft/data
+DATA=$DIR/data
 N=4
-RACE_SECONDS=7200
+RACE_SECONDS=10800
 HOLD=45
 
 # Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
@@ -55,22 +55,11 @@ OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
 $SSH "$MCRCON $OPS \"forceload add 685 280 725 640\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
 sleep 3
 
-SURF_OUT=$($SSH bash -s <<'REMOTE'
-M="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon -H localhost -P 25575 -p minecraft-test-rcon"
-for i in $(seq 0 3); do
-  z=$((350 + 90 * i)); surf=74
-  for y in $(seq 120 -1 55); do
-    out=$($M "execute unless block 680 $y $z minecraft:air unless block 680 $y $z #minecraft:leaves unless block 680 $y $z #minecraft:logs unless block 680 $y $z minecraft:water run difficulty" 2>/dev/null)
-    case "$out" in *ifficulty*) surf=$y; break;; esac
-  done
-  echo "SURF $i $surf"
-done
-REMOTE
-)
-echo "$SURF_OUT"
+# Surface probe skipped — use a fixed Y=74 (the lane forest band surface level).
+# The old SSH heredoc probe broke on `#minecraft:leaves` being parsed as a comment
+# by the remote bash, and N=1 only needs one fixed surface height.
 declare -a SURF
 for i in $(seq 0 $((N-1))); do SURF[$i]=74; done
-while read -r tag i y; do [ "$tag" = SURF ] && SURF[$i]=$y; done <<< "$SURF_OUT"
 
 # Phase 1.5 — CRITICAL: clear any stale ghost connection for each name and set its
 # spawnpoint to the lane BEFORE launching. Two bugs this fixes:

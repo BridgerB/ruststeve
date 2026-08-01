@@ -2,8 +2,8 @@
 
 use std::time::{Duration, Instant};
 
-use rustcraft::bot::Bot;
-use rustcraft::vec3::vec3;
+use crate::bot::Bot;
+use crate::vec3::vec3;
 
 use crate::bot_utils::{count_items, select_item};
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};

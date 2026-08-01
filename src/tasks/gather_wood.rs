@@ -6,8 +6,8 @@
 
 use std::collections::HashSet;
 
-use rustcraft::bot::{Bot, DriveStep};
-use rustcraft::vec3::vec3;
+use crate::bot::{Bot, DriveStep};
+use crate::vec3::vec3;
 
 use crate::bot_utils::can_reach;
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};

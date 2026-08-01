@@ -157,8 +157,23 @@ pub async fn collect_drops(bot: &mut Bot<'_>, fx: i32, fz: i32) {
                 target = e.position;
             }
         }
-        bot.look_at(crate::vec3::vec3(target.x, bp.y - 0.5, target.z));
+        // Walk toward the item on XZ but also look DOWN toward it (items dropped
+        // below the bot — e.g. stone mined underground — need the bot to descend).
+        bot.look_at(crate::vec3::vec3(target.x, target.y - 0.5, target.z));
         bot.set_control_state("forward", true);
+        // If the item is below us, dig down to reach it.
+        if target.y < bp.y - 1.0 {
+            let f = bp.y.floor() as i32;
+            let cell = ((bp.x + 0.3).floor() as i32, (bp.z + 0.3).floor() as i32);
+            for (dx, dz) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+                let (cx, cz) = (cell.0 + dx, cell.1 + dz);
+                let n = bot.block_at(cx, f - 1, cz).map(|b| b.name.clone()).unwrap_or_default();
+                if !n.is_empty() && n != "air" && !n.contains("water") && !n.contains("lava") {
+                    bot.dig(cx, f - 1, cz).await.ok();
+                    break;
+                }
+            }
+        }
         match bot.drive_tick().await {
             Ok(crate::bot::DriveStep::Disconnected) | Err(_) => break,
             _ => {}
@@ -267,7 +282,31 @@ pub async fn craft_item(
         }
         if table.is_some() && bot.current_window.is_none() {
             if let Some((tx, ty, tz)) = table {
-                let _ = bot.open_block(tx, ty, tz, Face::Top).await;
+                // Walk closer and re-approach: open_block fails silently when the
+                // bot is too far or not facing the table (the #1 cause of the
+                // "missing crafting ingredient" loop — the 3×3 recipe runs against
+                // the 2×2 inventory grid). Retry the approach a few times.
+                let _ = bot.goto_near(tx, ty, tz, 2.0).await;
+                let mut opened = false;
+                for _ in 0..3 {
+                    if bot.open_block(tx, ty, tz, Face::Top).await.unwrap_or(false) {
+                        opened = true;
+                        break;
+                    }
+                    // Re-navigate: the bot may have drifted or the path dropped
+                    // it a block away from the table.
+                    let _ = bot.goto_near(tx, ty, tz, 1.5).await;
+                    bot.wait_ticks(5).await.ok();
+                }
+                if !opened {
+                    // The table is unreachable / won't open — bail so the step
+                    // machine re-runs get_crafting_table (which places a fresh one).
+                    result = Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "crafting table would not open",
+                    ));
+                    break;
+                }
             }
         }
         result = bot.craft(&recipe, count, table.is_some()).await;

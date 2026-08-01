@@ -696,26 +696,57 @@ async fn cast_obsidian_at(
             }
         }
 
-        // 5. Pour WATER into the block directly ABOVE the lava → obsidian.
-        //    Packet-sniffing showed the bucket raycast falls THROUGH the open air block
-        //    above the lava and places water down IN the cup (replacing the lava) —
-        //    because nothing solid sits at (pos.y+1) to place against. So first build a
-        //    "splash wall" just NORTH of the target at pos.y+1, then aim the water
-        //    use_item at THAT wall: the ray hits its near face and the bucket drops the
-        //    water source in the block in front of it — exactly above the lava. (Stay
-        //    at feet pos.y+1; use_item, not use_item_on, is the only thing that pours a
-        //    bucket.)
-        let splash = (pos.0, pos.1 + 1, pos.2 - 1); // wall north of `above`, same level
-        ensure_solid(bot, splash, 0).await;
-        walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.3, 30).await;
+        // 5. Seal the water bowl and pour water from pos.y+2 (port of steve's TS cast).
+        //    The bowl is the 1-block space at pos.y+1 (= `above`); its 4 walls
+        //    (E,W,N,+Z) must ALL be solid so the poured water sits as a STILL source
+        //    and flows down onto the lava → obsidian, never spreading. The +Z wall is
+        //    the block the bot stands on; pillar to pos.y+2 so that wall exists, then
+        //    build/verify E,W,N, gate-check all 4, and pour from up high.
+        if feet_y(bot) < pos.1 + 2 && !pillar_up(bot, pos.1 + 2).await {
+            cast_debug(&format!("cast {pos:?} a{_attempt}: bowl pillar FAIL feet={}", feet_y(bot)));
+            continue;
+        }
+        walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.2, 30).await;
+        let bowl_walls = [
+            (pos.0 + 1, pos.1 + 1, pos.2),
+            (pos.0 - 1, pos.1 + 1, pos.2),
+            (pos.0, pos.1 + 1, pos.2 - 1),
+            (pos.0, pos.1 + 1, pos.2 + 1), // +Z = the bot's standing block
+        ];
+        for w in bowl_walls {
+            if !solid_at(bot, w.0, w.1, w.2) {
+                ensure_solid(bot, w, 0).await;
+            }
+        }
+        walk_to_xz(bot, pos.0 as f64 + 0.5, stand_z as f64 + 0.5, 0.2, 30).await;
+        let bowl: String = bowl_walls.iter().map(|w| if solid_at(bot, w.0, w.1, w.2) { 'S' } else { '_' }).collect();
+        cast_debug(&format!("cast {pos:?} a{_attempt}: bowl={bowl} feet={}", feet_y(bot)));
+        if bowl_walls.iter().any(|w| !solid_at(bot, w.0, w.1, w.2)) {
+            continue; // never pour water into a leaky bowl — it spreads and shoves the bot
+        }
+        // If lava overflowed into `above` during the pour, scoop it out so the water
+        // has air to sit in. The cup's lava is at pos.y; `above` (pos.y+1) must be air
+        // for the water source to form and convert the lava below.
+        if name_at(bot, above.0, above.1, above.2).contains("lava") {
+            select_item(bot, "bucket").await.ok();
+            reliable_use(bot, vec3(above.0 as f64 + 0.5, above.1 as f64 + 0.5, above.2 as f64 + 0.5)).await;
+            bot.wait_ticks(8).await.ok();
+            cast_debug(&format!("cast {pos:?} a{_attempt}: scooped above-lava -> {}", name_at(bot, above.0, above.1, above.2)));
+            // Scooping may have taken the cup's lava too — bail if so.
+            if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
+                continue;
+            }
+        }
+        // Pour water into the sealed bowl, aimed at the far (-Z) side so it sits as
+        // a still source above the lava and converts it → obsidian.
+        bot.set_control_state("sneak", true);
         select_item(bot, "water_bucket").await.ok();
-        reliable_use(bot, vec3(splash.0 as f64 + 0.5, splash.1 as f64 + 0.5, splash.2 as f64 + 0.9)).await;
+        reliable_use(bot, vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 1.5, pos.2 as f64 + 0.15)).await;
         bot.wait_ticks(6).await.ok();
         cast_debug(&format!(
-            "cast {pos:?} a{_attempt}: after_water cup={} above={} splash={} wbkt={}",
+            "cast {pos:?} a{_attempt}: after_water cup={} above={} wbkt={}",
             name_at(bot, pos.0, pos.1, pos.2),
             name_at(bot, above.0, above.1, above.2),
-            name_at(bot, splash.0, splash.1, splash.2),
             count_items(bot, "water_bucket"),
         ));
 

@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use rustcraft::bot::{Bot, Face};
+use crate::bot::{Bot, Face};
 
 use crate::bot_utils::{count_items, select_item};
 use crate::types::{failure, success, StepResult};
@@ -41,7 +41,7 @@ async fn get_furnace(bot: &mut Bot<'_>) -> Option<(i32, i32, i32)> {
             if bot.block_state_at(tx, ty, tz) != 0 {
                 continue;
             }
-            bot.look_at(rustcraft::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
+            bot.look_at(crate::vec3::vec3(tx as f64 + 0.5, ty as f64 - 0.5, tz as f64 + 0.5));
             bot.wait_ticks(2).await.ok();
             bot.place_block(tx, ty - 1, tz, Face::Top).await.ok();
             bot.wait_ticks(4).await.ok();

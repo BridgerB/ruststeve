@@ -8,7 +8,7 @@
 //! Order = priority. Add new reflexes in the right slot; the first one whose
 //! condition holds wins and the rest don't run this cycle.
 
-use rustcraft::bot::{Bot, DriveStep};
+use crate::bot::{Bot, DriveStep};
 
 use crate::bot_utils::{head_in_water, leave_water};
 use crate::memory::WorldMemory;

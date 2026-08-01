@@ -1,6 +1,6 @@
 //! Crafting tasks. Port of steve's `tasks/craft` (early-phase subset).
 
-use rustcraft::bot::Bot;
+use crate::bot::Bot;
 
 use crate::bot_utils::{craft_item, get_crafting_table};
 use crate::memory::WorldMemory;

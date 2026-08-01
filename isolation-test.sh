@@ -19,7 +19,7 @@ SSH="ssh -o ConnectTimeout=15 bridger@$HOST"
 MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon -H localhost -P 25575 -p minecraft-test-rcon"
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
-DATA=$DIR/../rustcraft/data
+DATA=$DIR/data
 Y=70                     # bot stands here; arenas are at a fixed Y so terrain is irrelevant
 BASEX=400; BASEZ=400     # lane 0 origin; lane i is 50 east
 cd "$DIR" || exit 1
