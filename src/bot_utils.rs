@@ -244,6 +244,7 @@ pub async fn craft_item(
     name: &str,
     count: i32,
     table: Option<(i32, i32, i32)>,
+    mem: &mut WorldMemory,
 ) -> StepResult {
     let Some(def) = bot.registry.items_by_name.get(name) else {
         return failure(format!("unknown item {name}"));
@@ -299,8 +300,12 @@ pub async fn craft_item(
                     bot.wait_ticks(5).await.ok();
                 }
                 if !opened {
-                    // The table is unreachable / won't open — bail so the step
-                    // machine re-runs get_crafting_table (which places a fresh one).
+                    // The table won't open (commonly on a ledge/over a hole the bot
+                    // mined itself — the block still EXISTS so get_crafting_table happily
+                    // hands it back, and the bot loops "would not open" forever, ~1 bot
+                    // lost per race). FORGET it so get_crafting_table places a fresh,
+                    // reachable one next tick.
+                    mem.mark((tx, ty, tz), PoiStatus::Gone);
                     result = Err(std::io::Error::new(
                         std::io::ErrorKind::NotFound,
                         "crafting table would not open",
@@ -372,7 +377,7 @@ pub async fn get_crafting_table(
     }
     // 3. None around — craft one on demand if we don't have the item, then place it.
     if count_items(bot, "crafting_table") == 0 {
-        let _ = craft_item(bot, "crafting_table", 1, None).await;
+        let _ = craft_item(bot, "crafting_table", 1, None, mem).await;
         if count_items(bot, "crafting_table") == 0 {
             println!("    table: could not craft a crafting_table");
             return Ok(None);

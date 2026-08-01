@@ -208,7 +208,7 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
     match id {
         "gather_wood" => tasks::gather_wood::gather_wood(bot, 5, mem).await,
         "craft_planks" => tasks::craft::craft_planks(bot, mem).await,
-        "craft_crafting_table" => tasks::craft::craft_crafting_table(bot).await,
+        "craft_crafting_table" => tasks::craft::craft_crafting_table(bot, mem).await,
         "craft_sticks" => tasks::craft::craft_sticks(bot, mem).await,
         "craft_wooden_pickaxe" => tasks::craft::craft_wooden_pickaxe(bot, mem).await,
         "mine_stone" => tasks::mining::mine_stone(bot, 16, mem).await,

@@ -32,33 +32,33 @@ pub async fn craft_planks(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResul
     let table = get_crafting_table(bot, mem).await.ok().flatten();
     for (log, count) in logs {
         let planks = log.replace("_log", "_planks");
-        let r = craft_item(bot, &planks, count.min(8), table).await;
+        let r = craft_item(bot, &planks, count.min(8), table, mem).await;
         if !r.success {
             // Fall back to oak_planks recipe family if species lookup missed.
-            let _ = craft_item(bot, "oak_planks", count.min(8), table).await;
+            let _ = craft_item(bot, "oak_planks", count.min(8), table, mem).await;
         }
     }
     success("crafted planks from logs")
 }
 
-pub async fn craft_crafting_table(bot: &mut Bot<'_>) -> StepResult {
-    craft_item(bot, "crafting_table", 1, None).await
+pub async fn craft_crafting_table(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResult {
+    craft_item(bot, "crafting_table", 1, None, mem).await
 }
 
 pub async fn craft_sticks(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResult {
     // Two batches → 8 sticks. Use the table when available (the 2x2 grid phantoms
     // sticks the same way it phantoms planks — see craft_planks).
     let table = get_crafting_table(bot, mem).await.ok().flatten();
-    let r = craft_item(bot, "stick", 1, table).await;
+    let r = craft_item(bot, "stick", 1, table, mem).await;
     if !r.success {
         return r;
     }
-    craft_item(bot, "stick", 1, table).await
+    craft_item(bot, "stick", 1, table, mem).await
 }
 
 pub async fn craft_wooden_pickaxe(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResult {
     match get_crafting_table(bot, mem).await {
-        Ok(Some(table)) => craft_item(bot, "wooden_pickaxe", 1, Some(table)).await,
+        Ok(Some(table)) => craft_item(bot, "wooden_pickaxe", 1, Some(table), mem).await,
         _ => failure("need a crafting table"),
     }
 }
@@ -66,13 +66,13 @@ pub async fn craft_wooden_pickaxe(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> S
 pub async fn craft_stone_pickaxe(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResult {
     // Ensure sticks first (2x2, no table).
     if crate::bot_utils::count_items(bot, "stick") < 2 {
-        let r = craft_item(bot, "stick", 1, None).await;
+        let r = craft_item(bot, "stick", 1, None, mem).await;
         if !r.success {
             return r;
         }
     }
     match get_crafting_table(bot, mem).await {
-        Ok(Some(table)) => craft_item(bot, "stone_pickaxe", 1, Some(table)).await,
+        Ok(Some(table)) => craft_item(bot, "stone_pickaxe", 1, Some(table), mem).await,
         _ => failure("need a crafting table"),
     }
 }
@@ -85,10 +85,10 @@ async fn craft_at_table(
     mem: &mut WorldMemory,
 ) -> StepResult {
     if sticks_needed > 0 && crate::bot_utils::count_items(bot, "stick") < sticks_needed {
-        let _ = craft_item(bot, "stick", 1, None).await;
+        let _ = craft_item(bot, "stick", 1, None, mem).await;
     }
     match get_crafting_table(bot, mem).await {
-        Ok(Some(table)) => craft_item(bot, item, 1, Some(table)).await,
+        Ok(Some(table)) => craft_item(bot, item, 1, Some(table), mem).await,
         _ => failure("need a crafting table"),
     }
 }
