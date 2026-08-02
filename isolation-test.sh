@@ -84,11 +84,10 @@ setup_prereqs() {
                          g="'clear $name' 'give $name minecraft:iron_pickaxe' \
                             'give $name minecraft:water_bucket' 'give $name minecraft:bucket' \
                             'give $name minecraft:flint_and_steel' 'give $name minecraft:cobblestone 128'"
-                         # FLUSH lava lake at floor level (y69), east of the bot. The
-                         # exposed finder locates it without line-of-sight, and being at
-                         # floor level the bot scoops it from foot level beside it (a
-                         # recessed pit made the down-scoop miss). Contained by the
-                         # surrounding floor stone; open top (y70 air).
+                         # FLUSH lava lake at floor level, east of the bot (foot-level
+                         # beside-scoop). The recessed-pit variant validated the down-scoop
+                         # works once the bot gets close (hdist~1); this stays flush as the
+                         # baseline cast test.
                          rcon "'fill $((x+4)) $((Y-1)) $((z-5)) $((x+14)) $((Y-1)) $((z+5)) minecraft:lava'" >/dev/null;;
   esac
   # Table-based crafts need a table reachable (they route through get_crafting_table,
