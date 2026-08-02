@@ -87,19 +87,32 @@ pub(crate) async fn dig_down(bot: &mut Bot<'_>) -> bool {
     // jitter dips position.y just under the integer (e.g. 53.92 → floor-1 digs the
     // block one too low, leaving the real support intact). floor(y-0.5) is robust.
     let y = (p.y - 0.5).floor() as i32;
-    let below = (x, y, z);
-    // Death-AVOIDANCE: never break a block that is liquid, sits directly above
-    // liquid, or has liquid beside it (which would flood the hole). Refusing here
-    // makes the caller tunnel AROUND aquifers/lava instead of dropping into them.
-    if is_liquid_at(bot, x, y, z)
-        || is_liquid_at(bot, x, y - 1, z)
-        || [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| is_liquid_at(bot, x + dx, y, z + dz))
-    {
-        return false;
+    // Support cells: the bot's 0.6-wide bounding box can STRADDLE up to 4 cells. Digging
+    // only floor(x),floor(z) leaves an adjacent sub-cell holding the bot up → it never
+    // falls and the caller loops "y->y via dig_down" forever (this capped every descent).
+    // Dig every cell under the footprint so support is actually removed.
+    let mut cells: Vec<(i32, i32)> = Vec::new();
+    for dx in [-0.3, 0.3] {
+        for dz in [-0.3, 0.3] {
+            let c = ((p.x + dx).floor() as i32, (p.z + dz).floor() as i32);
+            if !cells.contains(&c) {
+                cells.push(c);
+            }
+        }
     }
-    // Fall-avoidance: don't dig the floor out over a deep drop (open cavern /
-    // ravine) — a 4+ block fall hurts and can strand the bot. The controlled
-    // `descend_step` is how we go down; here we refuse the plunge.
+    // Death-AVOIDANCE: never break a block that is liquid, sits directly above liquid, or
+    // has liquid beside it — for ANY support cell (flooding/lava kills). Refusing makes the
+    // caller tunnel AROUND aquifers/lava (or punch through water) instead of dropping in.
+    for &(cx, cz) in &cells {
+        if is_liquid_at(bot, cx, y, cz)
+            || is_liquid_at(bot, cx, y - 1, cz)
+            || [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| is_liquid_at(bot, cx + dx, y, cz + dz))
+        {
+            return false;
+        }
+    }
+    // Fall-avoidance: don't dig the floor out over a deep drop (open cavern / ravine) — a
+    // 4+ block fall hurts. The controlled descend_step / drop_into_cavern handle those.
     if bot.block_state_at(x, y - 1, z) == 0
         && bot.block_state_at(x, y - 2, z) == 0
         && bot.block_state_at(x, y - 3, z) == 0
@@ -109,18 +122,20 @@ pub(crate) async fn dig_down(bot: &mut Bot<'_>) -> bool {
     if y <= bot.game.min_y + 4 {
         return false;
     }
-    if bot.block_state_at(below.0, below.1, below.2) == 0 {
-        bot.wait_ticks(8).await.ok(); // already open — just let physics drop us
-        return true;
-    }
     let y_before = bot.entity.position.y;
-    if bot.dig(below.0, below.1, below.2).await.is_err() {
-        return false;
+    let mut dug_any = false;
+    for &(cx, cz) in &cells {
+        if bot.block_state_at(cx, y, cz) != 0 {
+            if bot.dig(cx, y, cz).await.is_err() {
+                continue;
+            }
+            dug_any = true;
+        }
     }
+    let _ = dug_any;
     bot.wait_ticks(8).await.ok(); // fall into the hole
-    // Only report success if we ACTUALLY descended. Digging stone with no (or the
-    // wrong) tool doesn't client-predict the break, so the block stays solid and
-    // the bot never falls — returning true there spins forever on the same block.
+    // Only report success if we ACTUALLY descended. Digging stone with no (or the wrong)
+    // tool doesn't break the block, so the bot never falls — returning true there spins.
     bot.entity.position.y < y_before - 0.5
 }
 
