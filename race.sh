@@ -12,7 +12,7 @@ MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/data
-N=5
+N=2
 RACE_SECONDS=10800
 HOLD=45
 
@@ -86,11 +86,11 @@ launch_bot() {
   sleep 2
   if [ "$i" -eq 0 ]; then
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
-      RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 RUST_VIEW=1 RUST_VIEW_ASSETS="/Users/bridger/Developer/mc/upstream/ruststeve/viewer/static/assets.json" \
+      RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   else
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
-      RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 RUST_VIEW=1 RUST_VIEW_ASSETS="/Users/bridger/Developer/mc/upstream/ruststeve/viewer/static/assets.json" \
+      RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   fi
   PIDS[$i]=$!

@@ -12,10 +12,10 @@ use crate::types::{failure, success, StepResult};
 /// Nearest water source, preferring one with air above (a surface pool).
 fn find_water(bot: &Bot) -> Option<(i32, i32, i32)> {
     let surface = bot
-        .find_blocks("water", 32, 24)
+        .find_blocks("water", 48, 24)
         .into_iter()
         .find(|&(x, y, z)| bot.block_state_at(x, y + 1, z) == 0);
-    surface.or_else(|| bot.find_block("water", 32))
+    surface.or_else(|| bot.find_block("water", 48))
 }
 
 pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
@@ -30,13 +30,20 @@ pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32, mem: &mut WorldM
             break; // no empty buckets left to fill
         }
         let Some((wx, wy, wz)) = find_water(bot) else {
-            // None in scan range — head ~24 blocks in a rotating direction and re-scan.
+            // None in scan range — travel to look. COMMIT to each heading for several long
+            // hops (not a zigzag) so a bot in a big dry area actually escapes it instead of
+            // wandering in place; rotate only after a few hops in one direction.
             bot.movement.blocks_cant_break.clear();
-            let p = bot.entity.position;
             let (dx, dz) = dirs[dir % dirs.len()];
+            for _ in 0..3 {
+                if Instant::now() > deadline || find_water(bot).is_some() {
+                    break;
+                }
+                let p = bot.entity.position;
+                let (tx, tz) = (p.x.floor() as i32 + dx * 48, p.z.floor() as i32 + dz * 48);
+                let _ = bot.goto_xz(tx, tz, 3.0).await;
+            }
             dir += 1;
-            let (tx, tz) = (p.x.floor() as i32 + dx * 24, p.z.floor() as i32 + dz * 24);
-            let _ = bot.goto_xz(tx, tz, 3.0).await;
             continue;
         };
         // Remember the water (coarsely — one entry per body, not per block).
