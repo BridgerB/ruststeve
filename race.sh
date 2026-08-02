@@ -19,7 +19,7 @@ HOLD=45
 # Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
 # x=0 origin was treeless, so bots gathered 0 logs forever. Each lane is a fixed x
 # with z spread 80 apart (z=300,380,…) north of the Steve-bot spawn (~z700).
-BASEX=680
+BASEX=900
 NAMES=(); LANES=()
 for i in $(seq 0 $((N-1))); do
   NAMES+=("$(printf 'rust-race-%03d' "$((i+1))")")
@@ -42,7 +42,7 @@ cleanup() {
   echo "[race] cleanup — killing bots"
   for p in "${PIDS[@]:-}"; do kill -9 "$p" 2>/dev/null; done
   pkill -9 -f 'target/release/ruststeve' 2>/dev/null
-  $SSH "$MCRCON 'forceload remove 680 280 725 730'" >/dev/null 2>&1
+  $SSH "$MCRCON 'forceload remove 880 280 950 460'" >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
 
@@ -52,7 +52,7 @@ OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
 # `keepInventory` is rejected). Re-apply it here because another project on the same box
 # wipes the world on its restarts, which resets the rule to false. (A datapack/world
 # default would make it survive wipes — do that if the wipe-flicker keeps biting.)
-$SSH "$MCRCON $OPS \"forceload add 680 280 725 730\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
+$SSH "$MCRCON $OPS \"forceload add 880 280 950 460\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
 sleep 3
 
 # Surface probe skipped — use a fixed Y=74 (the lane forest band surface level).

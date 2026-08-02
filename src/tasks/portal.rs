@@ -256,7 +256,7 @@ async fn descend_to_y(bot: &mut Bot<'_>, target_y: i32) {
 /// inside the single build_nether_portal call, so survival can't surface the bot mid-punch.
 /// Bounded (≤6 blocks) + returns whether it actually descended, so the caller falls back to
 /// relocation when there's nothing to punch.
-async fn punch_through_water(bot: &mut Bot<'_>) -> bool {
+pub(crate) async fn punch_through_water(bot: &mut Bot<'_>) -> bool {
     let start_y = bot.entity.position.y;
     let x = bot.entity.position.x.floor() as i32;
     let z = bot.entity.position.z.floor() as i32;
@@ -303,7 +303,7 @@ async fn punch_through_water(bot: &mut Bot<'_>) -> bool {
 /// lakes live, but dig_down refuses to plunge (fall-avoidance) so the descent stalls on the
 /// cave roof. Digs at most a 3-block floor cap, then only drops when the landing is within a
 /// survivable fall and there's NO lava in the shaft or at the landing. Returns whether it descended.
-async fn drop_into_cavern(bot: &mut Bot<'_>) -> bool {
+pub(crate) async fn drop_into_cavern(bot: &mut Bot<'_>) -> bool {
     let start_y = bot.entity.position.y;
     let x = bot.entity.position.x.floor() as i32;
     let z = bot.entity.position.z.floor() as i32;

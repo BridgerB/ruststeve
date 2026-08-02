@@ -441,6 +441,14 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
                     }
                 }
             }
+            // Aquifer/cavern handling (same as the portal descent): dig_down/descend_step
+            // refuse ALL liquid, so a WATER pocket at ore depth stalls the descent into a
+            // relocate loop and it bails at 'stuck>30' with barely any iron. Punch through
+            // water, or drop into a cave, before relocating.
+            if !descended {
+                descended = crate::tasks::portal::punch_through_water(bot).await
+                    || crate::tasks::portal::drop_into_cavern(bot).await;
+            }
             if descended {
                 desc_fail = 0;
             } else {
