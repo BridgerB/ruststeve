@@ -39,3 +39,4 @@ pub mod steps;
 pub mod survival;
 pub mod tasks;
 pub mod types;
+pub mod viewer;

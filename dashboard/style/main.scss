@@ -1,0 +1,75 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #0d1117;
+  color: #e6edf3;
+  font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.muted { color: #8b949e; margin: 0 0 16px; }
+.err { color: #ff7b72; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 14px;
+}
+.card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 12px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.bot-name { font-weight: 700; font-size: 15px; }
+.phase { color: #0d1117; font-weight: 700; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+.step { color: #d2a8ff; margin-bottom: 8px; }
+.frac { color: #8b949e; }
+.stats { display: flex; flex-wrap: wrap; gap: 10px; color: #8b949e; font-size: 12px; margin-bottom: 10px; }
+.stats .deaths { color: #ff7b72; }
+.ms-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+}
+.ms {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 3px 2px;
+  text-align: center;
+  min-height: 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.ms .ms-name { font-size: 8px; color: #6e7681; line-height: 1.1; }
+.ms .ms-time { font-size: 9px; color: #484f58; }
+.ms.hit { background: #12331f; border-color: #2ea043; }
+.ms.hit .ms-name { color: #7ee787; }
+.ms.hit .ms-time { color: #3fb950; }
+.ms.goal { border-color: #bc8cff; }
+.ms.goal .ms-name { color: #d2a8ff; }
+.log { margin-top: 10px; }
+.log summary { cursor: pointer; color: #8b949e; font-size: 12px; }
+.log pre { background: #0d1117; border-radius: 6px; padding: 8px; font-size: 10px; color: #8b949e; overflow-x: auto; white-space: pre-wrap; }
+.map {
+  display: grid;
+  gap: 0;
+  margin: 8px 0;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  overflow: hidden;
+  width: fit-content;
+}
+.map > div { width: 4px; height: 4px; }
+.map-empty { color: #6e7681; font-size: 11px; margin: 8px 0; padding: 20px 0; text-align: center; }
+.v3d {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: #000;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  margin: 8px 0;
+}

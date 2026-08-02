@@ -140,7 +140,7 @@ fn held_is_pickaxe(bot: &Bot) -> bool {
 /// (durability management). False if the bot has no pickaxe at all — the caller
 /// should bail so the step machine crafts a replacement instead of mining
 /// bare-handed (which on stone yields nothing).
-async fn ensure_pickaxe(bot: &mut Bot<'_>) -> bool {
+pub(crate) async fn ensure_pickaxe(bot: &mut Bot<'_>) -> bool {
     if held_is_pickaxe(bot) {
         return true;
     }
@@ -482,6 +482,11 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
 pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
     record_descent(bot, mem);
     bot.movement.blocks_cant_break.clear();
+    // Strip-mining to reach gravel digs stone via dig_down/strip_tunnel (bot.dig, whatever's
+    // in hand). After the bucket/water steps the bot holds a bucket, not a pickaxe, so it
+    // can't break stone and never reaches the gravel — the same bare-handed stall the portal
+    // descent hit. Equip a pickaxe first.
+    ensure_pickaxe(bot).await;
     let count = |bot: &Bot| -> i32 {
         bot.inventory.slots.iter().flatten().filter(|i| i.name == "flint").map(|i| i.count).sum()
     };

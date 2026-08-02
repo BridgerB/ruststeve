@@ -13,7 +13,7 @@ use crate::vec3::{vec3, Vec3};
 
 use crate::bot_utils::{count_items, select_item};
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};
-use crate::tasks::mining::{descend_step, dig_down, strip_tunnel};
+use crate::tasks::mining::{descend_step, dig_down, ensure_pickaxe, strip_tunnel};
 use crate::types::{failure, success, StepResult};
 
 // ── block classification ────────────────────────────────────────────────────
@@ -236,6 +236,100 @@ async fn descend_to_y(bot: &mut Bot<'_>, target_y: i32) {
     }
 }
 
+/// Punch straight DOWN through a water aquifer (dig_down/descend_step both refuse all
+/// liquid, so a water pocket otherwise stalls the lava-search into endless relocation and
+/// the bot never reaches the deep lava). This digs the solid floor beneath the water column
+/// and lets the bot sink through — LAVA is still refused (fatal), only water is punched. Runs
+/// inside the single build_nether_portal call, so survival can't surface the bot mid-punch.
+/// Bounded (≤6 blocks) + returns whether it actually descended, so the caller falls back to
+/// relocation when there's nothing to punch.
+async fn punch_through_water(bot: &mut Bot<'_>) -> bool {
+    let start_y = bot.entity.position.y;
+    let x = bot.entity.position.x.floor() as i32;
+    let z = bot.entity.position.z.floor() as i32;
+    let fy = (bot.entity.position.y - 0.5).floor() as i32;
+    // Only engage when WATER is genuinely what's blocking the descent (that's why dig_down
+    // refused). If it's dry, leave it to the normal descent/relocate path.
+    let water_here = name_at(bot, x, fy, z).contains("water")
+        || name_at(bot, x, fy - 1, z).contains("water")
+        || [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|&(dx, dz)| name_at(bot, x + dx, fy, z + dz).contains("water"));
+    if !water_here {
+        return false;
+    }
+    for _ in 0..6 {
+        let feet = (bot.entity.position.y - 0.5).floor() as i32;
+        if feet <= bot.game.min_y + 4 {
+            break;
+        }
+        let target = feet - 1;
+        // Never dig toward lava — below, two-below, or beside the target floor block.
+        let lava_adj = is_lava(&name_at(bot, x, target, z))
+            || is_lava(&name_at(bot, x, target - 1, z))
+            || [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dz)| is_lava(&name_at(bot, x + dx, target, z + dz)));
+        if lava_adj {
+            break;
+        }
+        let below = name_at(bot, x, target, z);
+        if is_solid(&below) && below != "obsidian" {
+            dig_at(bot, x, target, z).await;
+        }
+        // Sink into the opened space. Water gravity is weak, so look down and give it a few
+        // ticks to settle before digging the next floor block.
+        let p = bot.entity.position;
+        bot.look_at(vec3(p.x, p.y - 3.0, p.z));
+        bot.wait_ticks(10).await.ok();
+    }
+    bot.entity.position.y < start_y - 0.9
+}
+
+/// Drop through a thin solid floor into an open CAVERN below — caves are where exposed lava
+/// lakes live, but dig_down refuses to plunge (fall-avoidance) so the descent stalls on the
+/// cave roof. Digs at most a 3-block floor cap, then only drops when the landing is within a
+/// survivable fall and there's NO lava in the shaft or at the landing. Returns whether it descended.
+async fn drop_into_cavern(bot: &mut Bot<'_>) -> bool {
+    let start_y = bot.entity.position.y;
+    let x = bot.entity.position.x.floor() as i32;
+    let z = bot.entity.position.z.floor() as i32;
+    let feet = (bot.entity.position.y - 0.5).floor() as i32;
+    // Dig through at most a 3-block floor cap to reach a cave opening.
+    let mut cap = 0;
+    let mut y = feet - 1;
+    while cap < 3 && is_solid(&name_at(bot, x, y, z)) {
+        if is_lava(&name_at(bot, x, y, z)) {
+            return false;
+        }
+        cap += 1;
+        y -= 1;
+    }
+    if is_solid(&name_at(bot, x, y, z)) {
+        return false; // no cavern within 3 blocks — not our case, leave to relocate
+    }
+    // Fall through the air column to the landing; bail on lava or an unsurvivable depth.
+    while y > bot.game.min_y + 2 && !is_solid(&name_at(bot, x, y, z)) {
+        if is_lava(&name_at(bot, x, y, z)) {
+            return false;
+        }
+        y -= 1;
+    }
+    let landing = y + 1; // top face of the cave floor we'd land on
+    if feet - landing > 6 {
+        return false; // fall too far to survive
+    }
+    // Open the floor cap and let physics drop the bot into the cave.
+    for dy in 1..=cap {
+        let n = name_at(bot, x, feet - dy, z);
+        if is_solid(&n) && n != "obsidian" {
+            dig_at(bot, x, feet - dy, z).await;
+        }
+    }
+    bot.wait_ticks(16).await.ok();
+    bot.entity.position.y < start_y - 1.0
+}
+
 /// Raise the bot's feet to `target_y` by sneaking, looking down, and placing a
 /// block underneath each jump. Sneaking stops it walking off the 1-wide pillar.
 async fn pillar_up(bot: &mut Bot<'_>, target_y: i32) -> bool {
@@ -312,10 +406,13 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
     // bot would have nowhere safe to stand. find_blocks returns nearest-first.
     // Settle first + retry: a just-dug chamber's block updates can leave the local
     // world momentarily missing the pool we located a moment ago.
-    let mut candidates = bot.find_exposed_blocks(fluid, 16, 64);
+    // Wide + high cap: standing at a big pool's edge, the nearest blocks are all interior
+    // lava (fluid-only neighbours, no stand spot); the scoopable rim blocks are farther down
+    // the nearest-first list, so a small cap (64) never reaches them. Match prepare's range.
+    let mut candidates = bot.find_exposed_blocks(fluid, 24, 256);
     if candidates.is_empty() {
         bot.wait_ticks(10).await.ok();
-        candidates = bot.find_exposed_blocks(fluid, 16, 64);
+        candidates = bot.find_exposed_blocks(fluid, 24, 256);
     }
     let mut chosen: Option<((i32, i32, i32), (f64, f64, f64))> = None;
     'src: for src in candidates {
@@ -346,7 +443,7 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
             if fluid == "lava" {
                 cast_debug(&format!(
                     "fill lava: NO edge source with a stand spot ({} {fluid} blocks seen)",
-                    bot.find_exposed_blocks(fluid, 16, 64).len()
+                    bot.find_exposed_blocks(fluid, 24, 256).len()
                 ));
                 return false;
             }
@@ -945,17 +1042,40 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 break;
             }
             if feet_y(bot) > -45 {
+                // The descent digs via bot.dig directly, which uses whatever's in hand — and
+                // the portal phase holds buckets/flint, so hard stone (andesite/granite) can't
+                // be broken bare-handed and the descent stalls. Keep a pickaxe equipped.
+                ensure_pickaxe(bot).await;
+                let fy = feet_y(bot);
+                let (px, pz) = (bot.entity.position.x.floor() as i32, bot.entity.position.z.floor() as i32);
+                let below = name_at(bot, px, fy - 1, pz);
+                let below2 = name_at(bot, px, fy - 2, pz);
                 let mut descended = dig_down(bot).await;
+                let mut how = if descended { "dig_down" } else { "-" };
                 if !descended {
                     for &(dx, dz) in &DIRS {
                         if descend_step(bot, dx, dz).await {
                             descended = true;
+                            how = "step";
                             break;
                         }
                     }
                 }
+                // Aquifer punch-through: when a water pocket (not lava) is what stalled the
+                // descent, dig down THROUGH it rather than relocating forever.
+                if !descended && !raw_lava_near(bot, 10) && punch_through_water(bot).await {
+                    descended = true;
+                    how = "punch";
+                }
+                // Cavern drop: a solid floor over an open cave blocks dig_down (fall-avoidance),
+                // but caves are exactly where exposed lava lives — drop in when it's survivable.
+                if !descended && !raw_lava_near(bot, 10) && drop_into_cavern(bot).await {
+                    descended = true;
+                    how = "cavern";
+                }
                 if descended {
                     desc_fail = 0;
+                    cast_debug(&format!("desc y={fy}->{} via {how} (below={below})", feet_y(bot)));
                 } else if raw_lava_near(bot, 10) {
                     // Descent blocked BY lava — grab it, don't relocate straight into it.
                     lava = find_fluid(bot, "lava", 24);
@@ -965,6 +1085,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
                     let dist = 6 + (desc_fail.min(8) as i32) * 4;
                     let p = bot.entity.position;
+                    cast_debug(&format!("desc y={fy} STUCK below={below} below2={below2} → relocate#{desc_fail} ({dx},{dz})x{dist}"));
                     let _ = bot
                         .goto_xz(p.x.floor() as i32 + dx * dist, p.z.floor() as i32 + dz * dist, 2.0)
                         .await;
@@ -987,6 +1108,19 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     // the 360s deadline, so without this a bot that runs out of time mid-clear starts
     // over from scratch and never accumulates enough time at the lava to finish the cast.
     mem.record(PoiKind::Lava, lava, PoiStatus::Available);
+
+    // Get ADJACENT to the pool before anchoring. The descent spots lava from up to 24
+    // blocks away (often 15+), and the edge-scan + stand-spot logic below only works when
+    // the bot is actually at the pool — otherwise the frame anchors next to lava the bot
+    // can't reach and the scoop finds "0 lava blocks". blocks_cant_break is already cleared,
+    // so the pathfinder tunnels there (can_dig); liquid_cost keeps it out of the lava itself.
+    bot.movement.blocks_cant_break.clear();
+    let _ = bot.goto_near(lava.0, lava.1, lava.2, 3.0).await;
+    {
+        let p = bot.entity.position;
+        let dist = ((lava.0 as f64 - p.x).powi(2) + (lava.2 as f64 - p.z).powi(2)).sqrt();
+        cast_debug(&format!("prepare: approached lava, now {dist:.0} away at ({:.0},{:.0},{:.0})", p.x, p.y, p.z));
+    }
 
     // 2. Anchor the frame a fixed gap past the EAST edge of the WHOLE pool (scan +X
     //    from the found source until the lava ends), so the frame — which extends +X —
@@ -1048,6 +1182,16 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     }
 
     // 4. Top up a lava bucket from the pool.
+    {
+        let p = bot.entity.position;
+        cast_debug(&format!(
+            "prepare pre-fill: bot=({:.0},{:.0},{:.0}) lava=({},{},{}) exp16={} exp24={} exp32={}",
+            p.x, p.y, p.z, lava.0, lava.1, lava.2,
+            bot.find_exposed_blocks("lava", 16, 64).len(),
+            bot.find_exposed_blocks("lava", 24, 64).len(),
+            bot.find_exposed_blocks("lava", 32, 64).len()
+        ));
+    }
     if count_items(bot, "lava_bucket") < 1 && count_items(bot, "bucket") >= 1 {
         fill_bucket(bot, "lava").await;
     }

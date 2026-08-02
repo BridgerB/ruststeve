@@ -144,6 +144,10 @@ pub struct Bot<'a> {
     physics: Option<PhysicsEngine>,
     should_physics: bool,
     last_tick: Instant,
+    /// Throttle for the optional top-down world snapshot (RUST_VIEW dashboard feed).
+    view_last: Instant,
+    /// Shared snapshot fed to the live 3D-viewer SSE server (Some only under RUST_VIEW).
+    pub viewer: Option<crate::viewer::ViewerHandle>,
     /// When the server last teleported/corrected our position. Digs wait for this
     /// to be stale (position agreed) before mining, else they're out-of-reach.
     last_teleport: Instant,
@@ -214,6 +218,26 @@ impl<'a> Bot<'a> {
             physics: None,
             should_physics: false,
             last_tick: Instant::now(),
+            view_last: Instant::now(),
+            viewer: {
+                if std::env::var("RUST_VIEW").is_ok() {
+                    let handle: crate::viewer::ViewerHandle =
+                        std::sync::Arc::new(std::sync::Mutex::new(crate::viewer::ViewerShared {
+                            version: registry.version.minecraft_version.clone(),
+                            min_y: -64,
+                            height: 384,
+                            time: 1000,
+                            ..Default::default()
+                        }));
+                    let port = crate::viewer::port_for(&options.username);
+                    let assets = std::env::var("RUST_VIEW_ASSETS")
+                        .unwrap_or_else(|_| "viewer/static/assets.json".into());
+                    crate::viewer::spawn_server(port, handle.clone(), assets);
+                    Some(handle)
+                } else {
+                    None
+                }
+            },
             last_teleport: Instant::now(),
             last_sent: None,
             sequence: 0,
@@ -238,6 +262,15 @@ impl<'a> Bot<'a> {
     /// Advance one step: handle a packet if one arrives before the 50 ms physics
     /// deadline, otherwise run a physics tick.
     pub async fn drive_tick(&mut self) -> std::io::Result<DriveStep> {
+        // Optional top-down world snapshot for the dashboard (throttled ~2s; skipped
+        // while a container window is open so it never perturbs the timing-sensitive
+        // craft/inventory sync — a heavy per-tick scan is what regressed craft before).
+        if self.view_last.elapsed() >= std::time::Duration::from_secs(2) {
+            self.view_last = Instant::now();
+            if self.current_window.is_none() && self.viewer.is_some() {
+                self.update_viewer();
+            }
+        }
         let elapsed = self.last_tick.elapsed();
         if elapsed >= TICK {
             self.physics_tick().await?;
@@ -850,6 +883,110 @@ impl<'a> Bot<'a> {
             return None;
         }
         Some(state_id_to_block(self.registry, state))
+    }
+
+    /// Fill the live-3D-viewer snapshot: update pose/time, and dump a bounded number
+    /// of newly-loaded near chunks into the shared buffer for the SSE server to stream.
+    /// Bounded work per call (≤12 columns) + the 2s throttle keep it off the craft path.
+    fn update_viewer(&mut self) {
+        let Some(handle) = self.viewer.clone() else {
+            return;
+        };
+        let p = self.entity.position;
+        let (bcx, bcz) = ((p.x.floor() as i32) >> 4, (p.z.floor() as i32) >> 4);
+        const R: i32 = 6;
+        // Which near columns are loaded in the world but not yet dumped into the snapshot?
+        let missing: Vec<(i32, i32)> = {
+            let shared = handle.lock().unwrap();
+            let mut out = Vec::new();
+            for cx in (bcx - R)..=(bcx + R) {
+                for cz in (bcz - R)..=(bcz + R) {
+                    if !shared.chunks.contains_key(&(cx, cz)) {
+                        out.push((cx, cz));
+                    }
+                }
+            }
+            out
+        };
+        // Dump at most a handful per call (dumping a full column is non-trivial work;
+        // this spreads the view-distance fill over several ticks like a chunk-load queue).
+        let dumps: Vec<((i32, i32), Vec<u8>)> = missing
+            .into_iter()
+            .filter_map(|(cx, cz)| {
+                self.world
+                    .get_loaded_column(cx, cz)
+                    .map(|col| ((cx, cz), col.dump(true)))
+            })
+            .take(12)
+            .collect();
+        let mut shared = handle.lock().unwrap();
+        shared.pose = (p.x, p.y, p.z, self.entity.yaw, self.entity.pitch);
+        shared.min_y = self.game.min_y;
+        shared.height = self.game.height;
+        shared.time = self.time.time_of_day;
+        if !dumps.is_empty() {
+            for (key, bytes) in dumps {
+                shared.chunks.insert(key, bytes);
+            }
+            shared.seq += 1;
+        }
+    }
+
+    /// Write a top-down terrain slice around the bot to /tmp/rust-view-<name>.txt for the
+    /// dashboard: for each column near the bot, the topmost solid block's category char.
+    /// Cheap (early-exits on the first solid block per column), gated by RUST_VIEW.
+    #[allow(dead_code)]
+    fn export_view(&self) {
+        let p = self.entity.position;
+        let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        const R: i32 = 20;
+        let cat = |name: &str| -> char {
+            if name.contains("water") {
+                '~'
+            } else if name.contains("lava") {
+                '!'
+            } else if name.ends_with("_log") || name.ends_with("_wood") {
+                'T'
+            } else if name.ends_with("_leaves") || name.contains("grass") || name.contains("flower") || name.contains("fern") {
+                'g'
+            } else if name.ends_with("_ore") {
+                'o'
+            } else if name == "sand" || name.contains("sandstone") {
+                'S'
+            } else if name == "gravel" {
+                'v'
+            } else if name == "obsidian" {
+                'X'
+            } else if name.contains("portal") {
+                'P'
+            } else if name == "crafting_table" || name == "furnace" {
+                'C'
+            } else if name == "dirt" || name == "coarse_dirt" {
+                'd'
+            } else {
+                '.' // stone/deepslate/other solid
+            }
+        };
+        let mut out = String::with_capacity(((2 * R + 1) * (2 * R + 2)) as usize + 64);
+        out.push_str(&format!("{} {} {} {} {:.0}\n", self.username(), bx, by, bz, self.entity.yaw));
+        for dz in -R..=R {
+            for dx in -R..=R {
+                let mut ch = ' ';
+                for y in (by - 12..=by + 8).rev() {
+                    if let Some(b) = self.block_at(bx + dx, y, bz + dz) {
+                        let n = b.name;
+                        if n == "air" || n == "cave_air" || n == "void_air" {
+                            continue;
+                        }
+                        ch = cat(&n);
+                        break;
+                    }
+                }
+                out.push(ch);
+            }
+            out.push('\n');
+        }
+        let _ = std::fs::write(format!("/tmp/rust-view-{}.txt", self.username()), out);
     }
 
     /// Find up to `count` blocks matching `name` within `max_distance`,

@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf8">
+<style>
+  html, body { margin: 0; background: #0b0f14; height: 100%; }
+  #c { width: 100vw; height: 100vh; display: block; }
+  #log { position: fixed; top: 4px; left: 6px; color: #4ade80; font: 12px/1.4 monospace; white-space: pre; text-shadow: 0 0 3px #000; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="log"></div>
+<script type="module">
+  import { mountViewer } from '/viewer.js';
+  const logEl = document.getElementById('log');
+  const log = (m) => { logEl.textContent += m + '\n'; };
+  const port = new URLSearchParams(location.search).get('port') || '4600';
+  log('mounting viewer → http://localhost:' + port);
+  try {
+    let chunks = 0;
+    mountViewer(document.getElementById('c'), 'http://localhost:' + port, {
+      workerUrl: '/worker.js',
+      onPose: (p) => { logEl.dataset.pose = `pose y=${p.y.toFixed(1)} yaw=${p.yaw.toFixed(2)}`; },
+    });
+    log('mountViewer ok');
+    // Surface chunk count by peeking at the EventSource ourselves (diagnostic only).
+    const es = new EventSource('http://localhost:' + port);
+    es.onmessage = (e) => {
+      const t = JSON.parse(e.data).type;
+      if (t === 'chunk') { chunks++; if (chunks % 10 === 0 || chunks < 5) log('chunks: ' + chunks); }
+      if (t === 'init' || t === 'assets') log('got ' + t);
+    };
+    setInterval(() => { logEl.firstChild && (logEl.textContent = logEl.textContent.split('\n').slice(0,8).join('\n') + '\n' + (logEl.dataset.pose||'') + '\nchunks=' + chunks); }, 1000);
+  } catch (e) {
+    log('ERROR: ' + e.message);
+  }
+</script>
+</body>
+</html>

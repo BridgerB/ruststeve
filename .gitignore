@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+# Leptos dashboard build output (cargo + wasm + generated site)
+/dashboard/target/
 
 # Per-bot SQLite world memory (created at runtime)
 .memory-*.db
