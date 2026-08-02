@@ -495,6 +495,15 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         if targets.is_empty() {
             targets.push(src);
         }
+        {
+            let p = bot.entity.position;
+            let d = ((src.0 as f64 - p.x).powi(2) + (src.2 as f64 - p.z).powi(2)).sqrt();
+            let lvl = bot.block_at(src.0, src.1, src.2).and_then(|b| b.properties.get("level").cloned());
+            cast_debug(&format!(
+                "fill try r{round}: src={src:?}({}) lvl={lvl:?} targets={} bot=({:.1},{:.1},{:.1}) hdist={d:.1}",
+                name_at(bot, src.0, src.1, src.2), targets.len(), p.x, p.y, p.z
+            ));
+        }
         for t in &targets {
             for dy in [0.6_f64, 0.2, 0.9] {
                 reliable_use(bot, vec3(t.0 as f64 + 0.5, t.1 as f64 + dy, t.2 as f64 + 0.5)).await;
