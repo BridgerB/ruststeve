@@ -25,6 +25,17 @@ pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32, mem: &mut WorldM
     // which stranded a portal-ready bot with everything but water).
     let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)];
     let mut dir = 0usize;
+    // Memory-first: a bot that wandered far (e.g. during a portal lava-descent) loses the
+    // water source it filled from earlier. If none is in scan range, navigate BACK to a
+    // remembered water body before roaming — this un-stalls the 'filled 0/1' refill loop.
+    if find_water(bot).is_none() {
+        let p = bot.entity.position;
+        let from = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        if let Some(poi) = mem.nearest(&[PoiKind::Water], from, 128) {
+            bot.movement.blocks_cant_break.clear();
+            let _ = bot.goto_near(poi.pos.0, poi.pos.1, poi.pos.2, 3.0).await;
+        }
+    }
     while count_items(bot, "water_bucket") < target && Instant::now() < deadline {
         if count_items(bot, "bucket") == 0 {
             break; // no empty buckets left to fill

@@ -1021,7 +1021,7 @@ async fn build_inner_fill(bot: &mut Bot<'_>, bx: i32, by: i32, bz: i32) {
 /// Find a lava pool and clear a flat 6x6x5 casting chamber beside it; fill a lava
 /// bucket from the pool (refilled each cast).
 async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(i32, i32, i32)> {
-    let deadline = Instant::now() + Duration::from_secs(360);
+    let deadline = Instant::now() + Duration::from_secs(600);
 
     // Let any pending block updates settle so the bot's local world is current
     // before we scan for lava (an RCON-placed / freshly-revealed pool may not be in
@@ -1062,7 +1062,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         bot.movement.blocks_cant_break.clear();
         const DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
         let mut desc_fail = 0u32;
-        for _ in 0..80 {
+        for _ in 0..240 {
             if Instant::now() > deadline {
                 break;
             }
