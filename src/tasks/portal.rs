@@ -1122,6 +1122,15 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         cast_debug(&format!("prepare: approached lava, now {dist:.0} away at ({:.0},{:.0},{:.0})", p.x, p.y, p.z));
     }
 
+    // Scoop the lava bucket NOW, while we're right next to the exposed pool. The anchor +
+    // chamber-clear below moves the bot away and is slow (180-cell dig loop) — it was eating
+    // the deadline before the scoop, so the bot reached the lava but never filled the bucket.
+    // Getting the (critical, order-sensitive) lava_bucket here first is what unblocks the cast.
+    if count_items(bot, "lava_bucket") < 1 && count_items(bot, "bucket") >= 1 {
+        fill_bucket(bot, "lava").await;
+        cast_debug(&format!("prepare: early scoop → lava_buckets={}", count_items(bot, "lava_bucket")));
+    }
+
     // 2. Anchor the frame a fixed gap past the EAST edge of the WHOLE pool (scan +X
     //    from the found source until the lava ends), so the frame — which extends +X —
     //    never overlaps the pool. A fixed +6 lands inside a wide pool; the bot would
