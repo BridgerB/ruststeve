@@ -265,7 +265,7 @@ impl<'a> Bot<'a> {
         // Optional top-down world snapshot for the dashboard (throttled ~2s; skipped
         // while a container window is open so it never perturbs the timing-sensitive
         // craft/inventory sync — a heavy per-tick scan is what regressed craft before).
-        if self.view_last.elapsed() >= std::time::Duration::from_secs(2) {
+        if self.view_last.elapsed() >= std::time::Duration::from_secs(4) {
             self.view_last = Instant::now();
             if self.current_window.is_none() && self.viewer.is_some() {
                 self.update_viewer();
@@ -917,7 +917,7 @@ impl<'a> Bot<'a> {
                     .get_loaded_column(cx, cz)
                     .map(|col| ((cx, cz), col.dump(true)))
             })
-            .take(12)
+            .take(4)
             .collect();
         let mut shared = handle.lock().unwrap();
         shared.pose = (p.x, p.y, p.z, self.entity.yaw, self.entity.pitch);
