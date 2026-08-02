@@ -48,6 +48,19 @@ fn is_lava(n: &str) -> bool {
     n == "lava" || n == "flowing_lava"
 }
 
+/// Is (x,y,z) a SOURCE fluid block (level=0)? Only source blocks can be picked up with a
+/// bucket — flowing fluid (level 1-8) scoops nothing. The lava-search finds cave-edge lava
+/// that's frequently FLOWING, so the scoop failed ("all rounds failed") even at 1 block away;
+/// targeting source blocks fixes it. Missing/empty level is treated as source (still a lake).
+fn is_fluid_source(bot: &Bot, x: i32, y: i32, z: i32, fluid: &str) -> bool {
+    bot.block_at(x, y, z)
+        .map(|b| {
+            (b.name == fluid || b.name.contains(fluid))
+                && b.properties.get("level").map(|l| l == "0").unwrap_or(true)
+        })
+        .unwrap_or(false)
+}
+
 fn solid_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
     is_solid(&name_at(bot, x, y, z))
 }
@@ -414,6 +427,9 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         bot.wait_ticks(10).await.ok();
         candidates = bot.find_exposed_blocks(fluid, 24, 256);
     }
+    // Only SOURCE blocks (level=0) can be bucketed — flowing edges scoop nothing. Try
+    // source blocks first (stable sort keeps nearest-first within each group).
+    candidates.sort_by_key(|&(x, y, z)| u8::from(!is_fluid_source(bot, x, y, z, fluid)));
     let mut chosen: Option<((i32, i32, i32), (f64, f64, f64))> = None;
     'src: for src in candidates {
         if !is_air(&name_at(bot, src.0, src.1 + 1, src.2)) {
@@ -466,12 +482,18 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         }
         // Candidate source blocks: the located one + its horizontal neighbours that
         // are actually this fluid (so a slightly-off bot still has a target it sees).
-        let mut targets = vec![src];
-        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            let t = (src.0 + dx, src.1, src.2 + dz);
-            if is_lava(&name_at(bot, t.0, t.1, t.2)) || name_at(bot, t.0, t.1, t.2).contains(fluid) {
+        // Target SOURCE blocks (level=0) — the located one and any source neighbour, at
+        // the source level and one below (source lava often sits a level down from what the
+        // exposed scan reported). Flowing blocks are skipped; fall back to src if none found.
+        let mut targets: Vec<(i32, i32, i32)> = Vec::new();
+        for (dx, dy, dz) in [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0)] {
+            let t = (src.0 + dx, src.1 + dy, src.2 + dz);
+            if is_fluid_source(bot, t.0, t.1, t.2, fluid) {
                 targets.push(t);
             }
+        }
+        if targets.is_empty() {
+            targets.push(src);
         }
         for t in &targets {
             for dy in [0.6_f64, 0.2, 0.9] {
