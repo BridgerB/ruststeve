@@ -66,6 +66,10 @@ Run `GYM=random` **4 bots at a time** (`rust-gym-001..004`, e.g. `GYM_TRIALS=12`
 - **Failing (focus):** `mine_iron` (was 0/2, both timed out), `get_flint_and_steel` 0/2, `mine_coal` 0/1, `craft_stone_pickaxe` 0/1 (small sample).
 - **mine_iron root cause:** not a hang — `mine_ore` has its own 300s deadline; the gym pass wanted **11 iron** (the full race amount) in a 200s budget, unrealistic in one cold spawn. FIXED: gym `mine_iron` tests the CAPABILITY (`raw_iron+iron_ingot ≥ 3`, steve's bar) with a 250s budget. Re-run to see the TRUE reach-and-mine-iron rate; if still low, THEN it's a descent bug (reproduce with `MINE_DEBUG=1` at a failing x,y,z).
 
+## mine_iron: descent-limited (~25%), mining works when down
+
+MINE_DEBUG proof: when the bot reaches ore depth (y~40-50) it mines iron cleanly (11-13 in 77-180s). ~75% of trials STALL on the surface→ore-depth descent and time out (oscillate y73↔75, descend_step `moved=false`). This is the SAME descent used by reach_lava/the portal — fixing it lifts mine_iron, mine_coal, AND reach_lava together. Fail-fast ore approach (8s goto_near_timeout) fixed the POI-cycling burn but not the descent. NEXT: capture descent-FAIL traces (run mine_iron with MINE_DEBUG on all 4 workers) to see WHY dig_down/descend_step refuse on the failing surface terrain (cave fall-avoidance? aquifer? slope/tree oscillation?), then harden the descent. Data-quality note: recorded gym coords can be stale (position-sync lag makes setup_trial's "didn't move" retry misfire); fix by pumping until position syncs near the tp target.
+
 ## Current status
 
 - **Gym built + wired** (`21db39e` core, `5ce109b` dashboard, hard-timeout fix pending commit): `GYM`/`GYM=report` + `/gym` dashboard; verified `craft_planks` + `gather_wood` pass on real random terrain and record.
