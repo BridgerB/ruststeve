@@ -226,8 +226,23 @@ pub async fn run(
                 continue;
             }
             attempts += 1;
-            let r = crate::steps::execute_step(bot, step.step_id, memory).await;
-            last_msg = r.message;
+            // HARD timeout around the task: the deadline check above only fires BETWEEN
+            // attempts, so a task that hangs internally (e.g. gather_wood pathfinding to
+            // an unreachable tree) would wedge the whole batch forever. Abort at the
+            // remaining budget and record a FAIL instead. Next trial's setup resets state.
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(
+                remaining,
+                crate::steps::execute_step(bot, step.step_id, memory),
+            )
+            .await
+            {
+                Ok(r) => last_msg = r.message,
+                Err(_) => {
+                    last_msg = format!("gym timeout — task hung ({attempts} attempts)");
+                    break;
+                }
+            }
             if last_msg.contains("Broken pipe") || last_msg.contains("os error 32") || last_msg.contains("disconnect") {
                 last_msg = format!("connection lost: {last_msg}");
                 break;

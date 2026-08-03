@@ -51,9 +51,15 @@ Portal / lava chain (from the race-loop session, all committed):
 - `9340769` predict the lava scoop when the source vanishes (no sync echo) + per-attempt scoop diagnostics.
 - `d436619` `dig_down` beside-check is LAVA-only, not water — water-beside wedged descent in wet biomes (217 relocates on surface grass).
 
+## Gym-infra fixes (the harness itself)
+
+- Hard per-attempt timeout around `execute_step` (`tokio::time::timeout`): the deadline was only checked BETWEEN attempts, so a task hanging internally (gather_wood pathfinding to an unreachable tree at 4623,5308) wedged the whole batch for 20+ min. Now it aborts at the remaining budget and records a FAIL. (This also means every batch completes — good data.)
+- `setup_trial` retries spreadplayers once if the bot didn't move (first trial after connect sometimes lands the command before the player is teleportable).
+
 ## Current status
 
-- **Gym built** (`21db39e`): registry + `data/gym.db` store + `GYM`/`GYM=report` modes; verified `craft_planks` passes across random terrain and records.
-- **Next:** wire the Leptos dashboard to `gym.db`; then run the first real batches — start with `reach_lava` (our frontier) and the mining family, drive pass% up, then the `to_nether` capstone.
-- **Add later:** `cast_light_enter` gym step (teleport onto a prepared lava lake / arena to isolate cast+light+enter from lava-finding).
-- **Current blocker:** none in the gym harness itself; begin data-gathering. (Portal chain fixes above are unvalidated across *wide* terrain variance — the gym's job now.)
+- **Gym built + wired** (`21db39e` core, `5ce109b` dashboard, hard-timeout fix pending commit): `GYM`/`GYM=report` + `/gym` dashboard; verified `craft_planks` + `gather_wood` pass on real random terrain and record.
+- **First finding:** gather_wood HANGS on some terrain (not just fails) — an unbounded internal loop; the gym hard-timeout is the safety net, but `gather_wood`'s task loop should self-bound (investigate from the FAIL coords). steve's gym had gather_wood ~65%, so expect a terrain long tail.
+- **Next:** re-run `gather_wood x5` (now completes via hard timeout) → read pass%; then descend the chain (mine_stone → … → reach_lava → to_nether). Reproduce each failure at its recorded x,y,z.
+- **Add later:** `cast_light_enter` gym step (teleport onto a prepared lava arena to isolate cast+light+enter from lava-finding).
+- **Blocker:** none in the harness now; data-gathering underway.
