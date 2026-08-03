@@ -84,6 +84,25 @@ fn raw_lava_near(bot: &Bot, r: i32) -> bool {
     false
 }
 
+/// Is there a scoopable SOURCE lava block (level=0) within `r` of the bot? The descent
+/// settles to scoop only when this is true — a shallow FLOWING pocket (a cave spill with
+/// zero sources, seen live: "0 sources, 131 lava blocks") is unscoopable, so the bot must
+/// descend PAST it to the deep source lakes instead of getting stuck trying to fill there.
+fn source_lava_near(bot: &Bot, r: i32) -> bool {
+    let p = bot.entity.position;
+    let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    for dx in -r..=r {
+        for dy in -r..=r {
+            for dz in -r..=r {
+                if is_fluid_source(bot, bx + dx, by + dy, bz + dz, "lava") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn feet_y(bot: &Bot) -> i32 {
     bot.entity.position.y.floor() as i32
 }
@@ -1135,7 +1154,10 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     // 1. Locate visible lava; if none, dig down toward cave-lava depth and retry.
     // Keep the radius modest — a 30-block exposed scan is ~226k synchronous block
     // lookups that block the network loop past the keep-alive timeout (→ kick).
-    let mut lava = find_fluid(bot, "lava", 16);
+    // Only accept lava with a SCOOPABLE source in reach — a flowing-only pocket looks like
+    // lava to find_fluid but scoops nothing, and settling on it skips the descent that
+    // would reach a real source lake.
+    let mut lava = find_fluid(bot, "lava", 16).filter(|_| source_lava_near(bot, 12));
     {
         let p = bot.entity.position;
         cast_debug(&format!("prepare: at ({:.0},{:.0},{:.0}) lava={lava:?}", p.x, p.y, p.z));
@@ -1151,7 +1173,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             cast_debug(&format!("prepare: heading to remembered lava {:?}", poi.pos));
             bot.movement.blocks_cant_break.clear();
             let _ = bot.goto_near(poi.pos.0, poi.pos.1, poi.pos.2, 3.0).await;
-            lava = find_fluid(bot, "lava", 16);
+            lava = find_fluid(bot, "lava", 16).filter(|_| source_lava_near(bot, 12));
         }
     }
     if lava.is_none() {
@@ -1171,9 +1193,10 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             if Instant::now() > deadline {
                 break;
             }
-            // Reached the lava zone? Stop and scoop the exposed pool — never dig or
-            // relocate further into it (walking into it at y-1 is what killed the bot).
-            if raw_lava_near(bot, 10) {
+            // Reached a SCOOPABLE lava lake (a source is near)? Stop and scoop — never dig
+            // or relocate further into it (walking into it at y-1 is what killed the bot).
+            // A flowing-only pocket (no source) is skipped here so the descent continues.
+            if source_lava_near(bot, 10) {
                 lava = find_fluid(bot, "lava", 24);
                 break;
             }
@@ -1212,8 +1235,8 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 if descended {
                     desc_fail = 0;
                     cast_debug(&format!("desc y={fy}->{} via {how} (below={below})", feet_y(bot)));
-                } else if raw_lava_near(bot, 10) {
-                    // Descent blocked BY lava — grab it, don't relocate straight into it.
+                } else if source_lava_near(bot, 10) {
+                    // Descent blocked by a SCOOPABLE lake — grab it, don't dig into it.
                     lava = find_fluid(bot, "lava", 24);
                     break;
                 } else {
@@ -1229,8 +1252,10 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             } else {
                 strip_tunnel(bot, 0, 1).await; // at depth — expose fresh cavern walls
             }
-            lava = find_fluid(bot, "lava", 20);
-            if lava.is_some() {
+            // Settle only on a SCOOPABLE lake (a source in reach); flowing-only lava is
+            // skipped so the descent keeps heading for the deep source lakes.
+            if source_lava_near(bot, 12) {
+                lava = find_fluid(bot, "lava", 24);
                 break;
             }
         }
