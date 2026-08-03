@@ -294,6 +294,16 @@ async fn run_one_trial(
             break;
         }
     }
+    // Final pass re-check: a task can ACHIEVE the goal and then hang/timeout on a later
+    // sub-step (e.g. craft_planks makes 16 planks in the bootstrap, then hangs on the slow
+    // table-craft). The loop breaks via the timeout path without re-checking, recording a
+    // false FAIL. Re-check the real inventory before recording so a met goal counts.
+    if !pass {
+        pass = passes(step, bot, &sync_from_bot(bot));
+        if pass {
+            last_msg = format!("goal met (post-timeout re-check); {last_msg}");
+        }
+    }
     let dur = t0.elapsed().as_millis() as i64;
     store.record(step.slug, pass, dur, gx, gy, gz, step.prereq, &last_msg);
     println!(
