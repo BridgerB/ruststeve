@@ -8,6 +8,10 @@ Build and **perfect a gym** — each speedrun sub-task run in isolation across *
 
 **DONE when:** every gym slug (esp. the terrain-hard ones) sits at a high pass-rate across random terrain — including `reach_lava`, `cast_light_enter` (once added), and the `to_nether` capstone (`pass = dimension == minecraft:the_nether`) — AND a chained `race.sh` run logs `entered the nether` for a raw `rust-race-*` bot. Target each slug **≥ ~90%** before moving on.
 
+## ▶ CURRENT DIRECTION (2026-08-03): RACE STOPPED — drive the GYM to green
+
+User: "full stop the race. change loop to working on the gym until you get all chain in the gym working right." Race is fully stopped (0 procs, bots kicked). NEW LOOP = perfect every step in the chain via the gym: sweep `GYM=random` (3–4 bots), `GYM=report`, focus ONLY on the failing/low-pass slugs, reproduce at a recorded x,y,z, fix the task code, re-run that slug, repeat — until the whole chain (incl. reach_lava + the portal cast at a deep sea + to_nether) is reliably green. The deep-sea cast fix (`50848c2`: lay a cobble platform + descent survival guard) is IN the binary — the gym's reach_lava/to_nether will test it across random terrain. Keep total online ≤8 (external p31/p32 probe bots share the box). Portal steps (reach_lava/to_nether) are expensive (600–900s) — run them in dedicated focused batches, not the random sweep.
+
 ## The gym (all Rust, no bash)
 
 - Run trials: `GYM=<slug> GYM_TRIALS=<n> MC_HOST=144.24.32.76 MC_USERNAME=rust-gym-001 STEVE_DATA=data RCON_HOST=localhost RCON_PORT=25575 RCON_PASS=minecraft-test-rcon ./target/release/ruststeve`
