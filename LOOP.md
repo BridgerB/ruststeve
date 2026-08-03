@@ -96,7 +96,13 @@ In the chained race (improved binary), race-2 reached Build Portal, descended ~1
 
 **THE FINAL BLOCKER = deep-sea cast is LETHAL.** Casting the 10-obsidian frame next to a lava OCEAN, re-scooping per block, the bot ends up below the surface and burns. Same class the earlier race sessions fought. FIX (careful — cast is load-bearing): keep the bot STRICTLY above the lava surface during drop-to-level/scoop/re-scoop (never step onto a cell whose floor is lava; the drop should stop at surface+1 and the scoop stand must be solid, not the lava rim); AND/OR cast at a SHALLOW surface lava pool (the gym's reach_lava 001 scooped a y52 surface pool cleanly and safely) instead of the deep sea — bias find_fluid/prepare toward shallow exposed lava over the deep sea. Secondary: the post-death 'crafting table would not open' desync regresses a portal-ready bot all the way back — a bot that still HOLDS the portal kit (lava_bucket+water_bucket+flint+cobble) should resume Build Portal, not re-mine iron (Build Portal can_execute / step ordering).
 
-## Current status — THE CAST WORKS; frame-completion is the last gap
+## ✅ CAST FULLY VALIDATED (2026-08-03) — `TEST RESULT: PASS build_nether_portal`
+
+The flat flush-lava isolation arena (`STEVE_TEST=build_nether_portal`, `CRAFT_DEBUG=1`, x400/z2400, manual scoped-forceload setup — NOT `isolation-test.sh`, whose line-104 `forceload remove all` is banned) proved the full cast end-to-end: **all 10 obsidian placed, frame lit — "ok — nether portal cast & lit at 418,70,2400"**. The three fixes chain: `cf67491` (scoop-safe walk → no death) → `3f6f4b8` (chamber-clear 210→48 → prepare completes) → `ff3cb8f` (re-scoop NEAREST lava → bot stays at the frame, builds all 10 blocks instead of stranding at block 1). Slow (~60s/block, re-scoop-per-block navigation) but reliable; a race's Build Portal has the retry budget the gym's single-shot doesn't. **→ Next: chain a race on this binary; the cast is no longer the blocker.**
+
+**Manual cast-isolation recipe (reuse to re-validate any cast change):** `pkill -f target/release/ruststeve`; RCON `forceload add 380 2380 430 2420` (scoped); launch `MC_USERNAME=rust-gym-001 STEVE_TEST=build_nether_portal STEVE_TEST_SECS=300 RACE_HOLD=35 CRAFT_DEBUG=1` detached; wait for `holding`; RCON `op`+`tp 400 70 2400`+`spawnpoint`+`fill 390 45 2390 425 69 2410 stone`+`fill 390 70 2390 425 82 2410 air`+`fill 404 69 2395 414 69 2405 lava`+`clear`+give `iron_pickaxe water_bucket bucket flint_and_steel cobblestone 128`; poll `/tmp/castiso-001.log` for `TEST RESULT`.
+
+## (superseded) Current status — THE CAST WORKS; frame-completion is the last gap
 
 - **Portal cast breakthrough (2026-08-03):** two fixes turned the cast from "loops forever, made=0" into "casts obsidian":
   1. `cf67491` — the deep-sea scoop no longer walks into lava (deaths=0).
