@@ -275,6 +275,13 @@ async fn setup_trial(
     // Random center well away from spawn/race lanes.
     let cx = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
     let cz = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
+    // A DEAD bot can't be teleported by spreadplayers — it stays put, so several
+    // trials in a row "run" at the same corpse spot ("0 attempts" timeouts, seen live
+    // at 4822,5254 x3). Respawn first so every trial gets a fresh random location.
+    if !sync_from_bot(bot).alive {
+        bot.respawn().await.ok();
+        bot.wait_ticks(40).await.ok();
+    }
     let before = bot.entity.position;
 
     let _ = rcon.command(&format!("gamemode survival {name}")).await;

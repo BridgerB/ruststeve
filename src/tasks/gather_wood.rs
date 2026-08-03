@@ -329,8 +329,13 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) 
     };
     let mut sweeps = 0u32; // consecutive explore sweeps with no wood found
     let mut cycles = 0; // total walk-and-chop cycles (safety bound)
+    // Wall-clock bound: cycles<200 alone let a bad spot (always a DISTANT unreachable
+    // log in view → sweeps keeps resetting) run ~20 min of slow move_toward/goto. Return
+    // failure at the budget so the caller (race loop / gym) retries fresh instead of
+    // wedging. A genuine forest finishes in well under this.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(100);
 
-    while count_logs(bot) < target && cycles < 200 {
+    while count_logs(bot) < target && cycles < 200 && std::time::Instant::now() < deadline {
         cycles += 1;
         // Pump the network every cycle so keep-alive is always answered even
         // between the synchronous scan / pathfinding work below (otherwise the
