@@ -390,6 +390,10 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
     // couple of easy irons. After a few dry veins, stop chasing sightings and DESCEND to
     // denser/deeper ore instead.
     let mut dry_veins = 0u32;
+    // Consecutive "wedged" relocations (can't tunnel/descend from the current spot). We
+    // relocate to fresh ground instead of bailing the whole step on the first wedge —
+    // only give up after several relocations gain nothing.
+    let mut wedge_relocates = 0u32;
     let mut last_count = count_ore_resource(bot, ore);
     let mut last_pos = {
         let p = bot.entity.position;
@@ -411,9 +415,26 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         last_count = now_count;
         last_pos = now_pos;
         if stuck > 30 {
-            mem.log("mine_ore", "stuck", &format!("y={} have={}", now_pos.1, now_count));
-            println!("    ore: stuck — bailing");
-            break;
+            // Wedged — can't tunnel or descend from here (a liquid pocket, a dead-end, or
+            // deepslate the strip-tunnel keeps refusing). Don't fail the whole step: RELOCATE
+            // to fresh ground (walking further each time) and retry. mine_coal failed exactly
+            // here — "y=37 have=0 → stuck — bailing" — with coal a few relocations away.
+            wedge_relocates += 1;
+            if wedge_relocates > 6 {
+                mem.log("mine_ore", "stuck", &format!("y={} have={} bailed after {wedge_relocates}", now_pos.1, now_count));
+                println!("    ore: stuck — bailing after {wedge_relocates} relocates");
+                break;
+            }
+            let (dx, dz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(wedge_relocates as usize) % 4];
+            let dist = 16 + wedge_relocates as i32 * 8;
+            let p = bot.entity.position;
+            let (tx, tz) = (p.x.floor() as i32 + dx * dist, p.z.floor() as i32 + dz * dist);
+            mem.log("mine_ore", "wedged", &format!("y={} relocate#{wedge_relocates} to {tx},{tz}", now_pos.1));
+            println!("    ore: wedged — relocating #{wedge_relocates} to {tx},{tz}");
+            bot.movement.blocks_cant_break.clear();
+            let _ = bot.goto_xz(tx, tz, 3.0).await;
+            stuck = 0;
+            continue;
         }
         // Durability: re-equip a pickaxe if the held one broke; bail to re-craft
         // if we have none at all.
