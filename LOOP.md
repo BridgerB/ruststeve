@@ -75,6 +75,12 @@ MINE_DEBUG proof: when the bot reaches ore depth (y~40-50) it mines iron cleanly
 - **mine_iron 25% → 37%** across fixes: fail-fast ore approach (8s), dry-veins-then-descend, and the big one — **teleport-sync (5bee3b8)**: MINE_DEBUG confirmed the descent was digging a STALE local world (coords far from the trial spot); now it operates on the right terrain. Remaining fails: mine 1-2 iron then stall reaching the 3rd (long tail). mine_iron is the HARDEST step (steve 2%); 37% + improving is acceptable for now — the race accumulates iron over repeated runs.
 - **Key realization:** the stale-world hang affected EVERY slug, so re-measure the whole pipeline on the sync-fixed binary before over-grinding one step. Cadence: sweep → focus → sweep.
 
+## Portal chain (nether-critical) — reach_lava WORKS, cast is the last gap
+
+- **reach_lava = 50% (2/4)** across random terrain. Worker 001 textbook trace: descend y68→64 → "approached lava" → "dropped to scoop level y=53 (surface 52)" (drop-to-source+1) → "fill lava: OK" → lava_buckets=1. The descent→exposed-source→drop→SCOOP chain WORKS on random terrain (pass-recheck c6205d3 correctly catches the transient bucket). NOTE: reach_lava's `lava_bucket>=1` pass is fragile (casting empties the bucket); the pass-recheck saves it, but rely on 'fill lava: OK' / 'entered the nether' as the real signals.
+- **LAST GAP = the CAST**: after scooping, build_nether_portal starts the frame ('pool east_edge=.. anchor x=..') then STALLS (no cast progress for the rest of the 600s). Passed in the flush-lava ISOLATION arena, but stalls when lava is a REAL remote source (bot must re-navigate to the source per obsidian, ~10 scoops). To reach the nether across terrain, the cast loop (tasks/portal.rs cast_obsidian_at / build frame / re-scoop-per-block) must complete without stalling. NEXT: run to_nether w/ CAST debug, read WHERE the cast stalls (first obsidian? re-scoop nav? interior clear? ignite?), fix, re-run.
+- Only 001 has CAST debug (CRAFT_DEBUG); 002-004 blank traces = no debug, not no-progress.
+
 ## Current status
 
 - **Gym built + wired** (`21db39e` core, `5ce109b` dashboard, hard-timeout fix pending commit): `GYM`/`GYM=report` + `/gym` dashboard; verified `craft_planks` + `gather_wood` pass on real random terrain and record.
