@@ -1402,12 +1402,14 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             .iter()
             .any(|&(ax, ay, az)| is_lava(&name_at(bot, c.0 + ax, c.1 + ay, c.2 + az)))
     };
-    // Clear just the frame box + the front working line (the bot stands at z+1 to
-    // cast). Travel to/from the lava is left to the pathfinder, so we don't clear the
-    // whole gap — a big clear is hundreds of slow per-cell ops that time the step out.
-    for y in 0..=6 {
-        for x in -1..=4 {
-            for z in -2..=2 {
+    // Clear the frame box + one working row behind it (the bot stands at z+1 to cast).
+    // KEEP THIS SMALL: at the deep lava sea the box is DEEPSLATE (~2-4s/dig), and the old
+    // 210-cell clear (x=-1..4, y=0..6, z=-2..2) could not finish inside the 600s deadline —
+    // prepare timed out → returned None → build_nether_portal looped re-scooping forever
+    // (made=0, never cast). Frame is x=0..3, y=0..4; cast from z=0..1. 4×6×2=48 cells.
+    for y in 0..=5 {
+        for x in 0..=3 {
+            for z in 0..=1 {
                 if Instant::now() > deadline {
                     return None;
                 }
@@ -1420,8 +1422,8 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         }
     }
     // Solid floor under the frame + front line so the bot has footing to cast from.
-    for x in -1..=4 {
-        for z in -1..=2 {
+    for x in 0..=3 {
+        for z in 0..=1 {
             let f = (bx + x, by - 1, bz + z);
             if !solid_at(bot, f.0, f.1, f.2) && !lava_touching(bot, f) {
                 ensure_solid(bot, f, 0).await;
