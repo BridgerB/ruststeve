@@ -475,44 +475,81 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
     // Only SOURCE blocks (level=0) can be bucketed — flowing edges scoop nothing. Try
     // source blocks first (stable sort keeps nearest-first within each group).
     candidates.sort_by_key(|&(x, y, z)| u8::from(!is_fluid_source(bot, x, y, z, fluid)));
-    let mut chosen: Option<((i32, i32, i32), (f64, f64, f64))> = None;
-    'src: for src in candidates {
+    let dirs8 = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
+    // Classify stand options against SOURCE blocks only (flowing scoops nothing). A FLUSH
+    // stand puts the feet ONE block above the source — a shallow look that scoops reliably.
+    // A RECESSED stand (feet TWO above) makes the look too steep and misses (observed live:
+    // bot at y=-37 over a y=-39 source failed all rounds). So prefer, in order: a natural
+    // flush stand; PLACING a cobble to build a flush stand; recessed only as a last resort.
+    let mut flush: Option<((i32, i32, i32), (f64, f64, f64))> = None;
+    // (source, block-to-place-at, stand)
+    let mut place: Option<((i32, i32, i32), (i32, i32, i32), (f64, f64, f64))> = None;
+    let mut recessed: Option<((i32, i32, i32), (f64, f64, f64))> = None;
+    for src in candidates {
+        if !is_fluid_source(bot, src.0, src.1, src.2, fluid) {
+            continue; // only ever anchor the scoop on a real source block
+        }
         if !is_air(&name_at(bot, src.0, src.1 + 1, src.2)) {
             continue; // need an open surface to scoop
         }
-        // A spot to STAND ON within reach of the source, checking both the source's
-        // own level (lava flush with the floor) AND one level up (a recessed pit —
-        // the bot stands on the floor BESIDE the pit and scoops down). 8 directions.
-        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
-            for sb_y in [src.1, src.1 + 1] {
-                let (sx, sy, sz) = (src.0 + dx, sb_y, src.2 + dz);
-                if solid_at(bot, sx, sy, sz)
-                    && is_air(&name_at(bot, sx, sy + 1, sz))
-                    && is_air(&name_at(bot, sx, sy + 2, sz))
-                {
-                    chosen = Some((src, (sx as f64 + 0.5, (sy + 1) as f64, sz as f64 + 0.5)));
-                    break 'src;
-                }
+        for (dx, dz) in dirs8 {
+            let (sx, sz) = (src.0 + dx, src.2 + dz);
+            if flush.is_none()
+                && solid_at(bot, sx, src.1, sz)
+                && is_air(&name_at(bot, sx, src.1 + 1, sz))
+                && is_air(&name_at(bot, sx, src.1 + 2, sz))
+            {
+                flush = Some((src, (sx as f64 + 0.5, (src.1 + 1) as f64, sz as f64 + 0.5)));
             }
+            // Placeable flush: an air gap at source level with a solid base to place a
+            // cobble against — build the flush stand the terrain didn't provide (lava only;
+            // water is easy to scoop and shouldn't waste blocks near it).
+            if place.is_none()
+                && fluid == "lava"
+                && is_air(&name_at(bot, sx, src.1, sz))
+                && solid_at(bot, sx, src.1 - 1, sz)
+                && is_air(&name_at(bot, sx, src.1 + 1, sz))
+                && is_air(&name_at(bot, sx, src.1 + 2, sz))
+            {
+                place = Some((src, (sx, src.1, sz), (sx as f64 + 0.5, (src.1 + 1) as f64, sz as f64 + 0.5)));
+            }
+            if recessed.is_none()
+                && solid_at(bot, sx, src.1 + 1, sz)
+                && is_air(&name_at(bot, sx, src.1 + 2, sz))
+                && is_air(&name_at(bot, sx, src.1 + 3, sz))
+            {
+                recessed = Some((src, (sx as f64 + 0.5, (src.1 + 2) as f64, sz as f64 + 0.5)));
+            }
+        }
+        if flush.is_some() {
+            break; // best option found — nearest-first, so stop here
         }
     }
-    // Water doesn't burn, so as a last resort scoop it from directly above; never do
-    // that for lava.
-    let (src, stand) = match chosen {
-        Some(c) => c,
-        None => {
-            if fluid == "lava" {
-                cast_debug(&format!(
-                    "fill lava: NO edge source with a stand spot ({} {fluid} blocks seen)",
-                    bot.find_exposed_blocks(fluid, 24, 256).len()
-                ));
-                return false;
-            }
-            let Some(s) = find_fluid(bot, fluid, 16) else {
-                return false;
-            };
-            (s, (s.0 as f64 + 0.5, (s.1 + 1) as f64, s.2 as f64 + 0.5))
+    // Resolve the preference. Water doesn't burn, so as a last resort scoop it from
+    // directly above; never do that for lava.
+    let (src, stand) = if let Some(f) = flush {
+        f
+    } else if let Some((src, block, stand)) = place {
+        cast_debug(&format!("fill {fluid}: placing flush stand at {block:?}"));
+        let _ = bot.goto_near(block.0, block.1, block.2, 2.0).await;
+        if select_item(bot, build_block(bot)).await.unwrap_or(false) {
+            let _ = bot.place_block(block.0, block.1 - 1, block.2, Face::Top).await;
+            bot.wait_ticks(3).await.ok();
         }
+        (src, stand)
+    } else if let Some(r) = recessed {
+        r
+    } else if fluid == "lava" {
+        cast_debug(&format!(
+            "fill lava: NO source with a stand spot ({} {fluid} blocks seen)",
+            bot.find_exposed_blocks(fluid, 24, 256).len()
+        ));
+        return false;
+    } else {
+        let Some(s) = find_fluid(bot, fluid, 16) else {
+            return false;
+        };
+        (s, (s.0 as f64 + 0.5, (s.1 + 1) as f64, s.2 as f64 + 0.5))
     };
     let filled_bucket_name = format!("{fluid}_bucket");
     // Up to 3 re-approach rounds: navigate to the stand spot, then try scooping any
