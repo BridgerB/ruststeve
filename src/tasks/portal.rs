@@ -1352,6 +1352,14 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             if feet_y(bot) <= target_feet || Instant::now() > deadline {
                 break;
             }
+            // SURVIVAL: bail the moment health drops descending toward the lava — a race bot
+            // died here (health hit 0 dropping into a lava sea) BEFORE reaching fill_bucket's
+            // guard. Climb back out and abandon this site alive with the kit rather than burn.
+            if bot.health < 12.0 {
+                cast_debug(&format!("prepare: ABORT descent low health={:.0} — climbing out", bot.health));
+                climb_out_of_pit(bot).await;
+                return None;
+            }
             ensure_pickaxe(bot).await;
             bot.movement.blocks_cant_break.clear();
             let _ = bot.goto_near(lava.0, feet_y(bot), lava.2, 2.0).await; // stay above the source
@@ -1382,21 +1390,55 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         cast_debug(&format!("prepare: early scoop → lava_buckets={}", count_items(bot, "lava_bucket")));
     }
 
-    // 2. Anchor the frame a fixed gap past the EAST edge of the WHOLE pool (scan +X
-    //    from the found source until the lava ends), so the frame — which extends +X —
-    //    never overlaps the pool. A fixed +6 lands inside a wide pool; the bot would
-    //    fall onto the lava. The bot stands east on solid ground and refills by walking
-    //    west to the pool.
+    // 2. Anchor the frame on a solid COBBLE PLATFORM we lay right where we scooped.
+    //    The old logic anchored +4 EAST of the pool's edge; over a wide lava SEA that
+    //    lands ACROSS the lava — the bot died trying to cross to it, or the far frame was
+    //    unreachable (scoop OK on its island, then dead at the cross-sea anchor). A
+    //    self-laid platform beside the scoop spot guarantees solid footing for the frame
+    //    and the cast on ANY terrain (small pool or deep sea). We hold ~128 cobble.
     bot.set_control_state("sneak", false);
-    let mut east_edge = lava.0;
-    while east_edge < lava.0 + 24
-        && (is_lava(&name_at(bot, east_edge + 1, lava.1, lava.2))
-            || is_lava(&name_at(bot, east_edge + 1, lava.1 + 1, lava.2)))
-    {
-        east_edge += 1;
+    let feet0 = feet_y(bot);
+    let px = bot.entity.position.x.floor() as i32;
+    let pz = bot.entity.position.z.floor() as i32;
+    // Frame extends +X and the bot casts from z+1, so lay a floor for x=bx-1..bx+4,
+    // z=bz-1..bz+1 at foot level. Anchor one block +X of the bot so it stands on the slab.
+    let bx = px + 1;
+    let by = feet0;
+    let bz = pz;
+    let plat_y = by - 1;
+    cast_debug(&format!("prepare: laying cast platform at anchor ({bx},{by},{bz}) over lava"));
+    // Multi-pass flood-fill: a cell only becomes placeable once an orthogonal neighbour is
+    // solid, so repeat until nothing new is placed. Stand on the already-solid slab (nearest
+    // filled cell / the scoop block) so place_cobble is always in reach.
+    for _pass in 0..40 {
+        if Instant::now() > deadline {
+            return None;
+        }
+        let mut missing = false;
+        // Generous footprint: the frame is x=bx..bx+3 and the bot climbs cast-pillars and
+        // re-scoops between blocks, drifting a block or two off the frame line. A tight slab
+        // let it step off the +z edge into the sea mid-cast (fell in at z=bz+1.6). Give a
+        // 2-block margin all round so it always has footing.
+        for x in -2..=5 {
+            for z in -2..=2 {
+                let c = (bx + x, plat_y, bz + z);
+                if solid_at(bot, c.0, c.1, c.2) {
+                    continue;
+                }
+                // Stand back toward the bot's solid origin (never out over open lava).
+                let stand_x = (bx + x - 1).max(px);
+                let stand_z = (bz + z).clamp(bz - 1, bz + 1);
+                let _ = bot.goto_near(stand_x, plat_y + 1, stand_z, 1.5).await;
+                if !ensure_solid(bot, c, 0).await {
+                    missing = true;
+                }
+            }
+        }
+        if !missing {
+            break;
+        }
     }
-    let stand = (east_edge + 4, lava.1 + 2, lava.2); // +2: surface, one above the lava
-    cast_debug(&format!("prepare: pool east_edge={east_edge}, anchor x={}", stand.0));
+    let stand = (bx, by, bz);
     let _ = bot.goto_near(stand.0, stand.1, stand.2, 1.0).await;
     walk_to_xz(bot, stand.0 as f64 + 0.5, stand.2 as f64 + 0.5, 0.4, 40).await;
 
