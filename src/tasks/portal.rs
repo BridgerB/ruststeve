@@ -485,12 +485,18 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
     // (source, block-to-place-at, stand)
     let mut place: Option<((i32, i32, i32), (i32, i32, i32), (f64, f64, f64))> = None;
     let mut recessed: Option<((i32, i32, i32), (f64, f64, f64))> = None;
+    let mut any_source: Option<(i32, i32, i32)> = None; // nearest source w/ air above (pillar fallback)
+    let mut source_count = 0u32;
     for src in candidates {
         if !is_fluid_source(bot, src.0, src.1, src.2, fluid) {
             continue; // only ever anchor the scoop on a real source block
         }
         if !is_air(&name_at(bot, src.0, src.1 + 1, src.2)) {
             continue; // need an open surface to scoop
+        }
+        source_count += 1;
+        if any_source.is_none() {
+            any_source = Some(src);
         }
         for (dx, dz) in dirs8 {
             let (sx, sz) = (src.0 + dx, src.2 + dz);
@@ -539,9 +545,26 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         (src, stand)
     } else if let Some(r) = recessed {
         r
+    } else if let (Some(s), "lava") = (any_source, fluid) {
+        // Terrain gave no stand spot beside a source (a pool over a cave, all-lava rims).
+        // Build one: stand at a non-lava neighbour column and pillar up so our feet sit
+        // one block above the source, then scoop down at a shallow angle.
+        cast_debug(&format!("fill lava: no stand — pillaring to source {s:?} ({source_count} sources)"));
+        let (nx, nz) = dirs8
+            .iter()
+            .map(|(dx, dz)| (s.0 + dx, s.2 + dz))
+            .find(|&(nx, nz)| {
+                !is_lava(&name_at(bot, nx, s.1, nz)) && !is_lava(&name_at(bot, nx, s.1 - 1, nz))
+            })
+            .unwrap_or((s.0, s.2));
+        bot.movement.blocks_cant_break.clear();
+        let _ = bot.goto_near(nx, s.1, nz, 2.0).await;
+        pillar_up(bot, s.1 + 1).await;
+        bot.set_control_state("sneak", false);
+        (s, (nx as f64 + 0.5, (s.1 + 1) as f64, nz as f64 + 0.5))
     } else if fluid == "lava" {
         cast_debug(&format!(
-            "fill lava: NO source with a stand spot ({} {fluid} blocks seen)",
+            "fill lava: NO scoopable source ({source_count} sources, {} lava blocks seen)",
             bot.find_exposed_blocks(fluid, 24, 256).len()
         ));
         return false;
