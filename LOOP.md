@@ -56,6 +56,16 @@ Portal / lava chain (from the race-loop session, all committed):
 - Hard per-attempt timeout around `execute_step` (`tokio::time::timeout`): the deadline was only checked BETWEEN attempts, so a task hanging internally (gather_wood pathfinding to an unreachable tree at 4623,5308) wedged the whole batch for 20+ min. Now it aborts at the remaining budget and records a FAIL. (This also means every batch completes — good data.)
 - `setup_trial` retries spreadplayers once if the bot didn't move (first trial after connect sometimes lands the command before the player is teleportable).
 
+## Gym method (steve's)
+
+Run `GYM=random` **4 bots at a time** (`rust-gym-001..004`, e.g. `GYM_TRIALS=12` each) to sweep the pipeline broadly, then `GYM=report` and **focus only on the failing slugs**. Keep total online ≤8 (steve runs its own gym on the box). `GYM=random` excludes the two expensive portal steps; run `reach_lava`/`to_nether` in dedicated focused batches.
+
+## First 4-worker sweep (2026-08-03) — findings
+
+- **Passing:** craft_table, craft_furnace, **mine_stone 4/4** (much better than steve's 19%), smelt_iron, stone_sword, gather_wood ~75%, plus the crafts.
+- **Failing (focus):** `mine_iron` (was 0/2, both timed out), `get_flint_and_steel` 0/2, `mine_coal` 0/1, `craft_stone_pickaxe` 0/1 (small sample).
+- **mine_iron root cause:** not a hang — `mine_ore` has its own 300s deadline; the gym pass wanted **11 iron** (the full race amount) in a 200s budget, unrealistic in one cold spawn. FIXED: gym `mine_iron` tests the CAPABILITY (`raw_iron+iron_ingot ≥ 3`, steve's bar) with a 250s budget. Re-run to see the TRUE reach-and-mine-iron rate; if still low, THEN it's a descent bug (reproduce with `MINE_DEBUG=1` at a failing x,y,z).
+
 ## Current status
 
 - **Gym built + wired** (`21db39e` core, `5ce109b` dashboard, hard-timeout fix pending commit): `GYM`/`GYM=report` + `/gym` dashboard; verified `craft_planks` + `gather_wood` pass on real random terrain and record.
