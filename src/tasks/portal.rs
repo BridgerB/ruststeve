@@ -210,6 +210,24 @@ async fn walk_to_xz(bot: &mut Bot<'_>, tx: f64, tz: f64, target_dist: f64, max_t
             break;
         }
         let (px, py, pz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        // LAVA-SAFETY: this is a RAW control-state walk (no pathfinding), so unlike goto*
+        // it will happily stride into lava. Re-scooping from the deep lava sea, that walked
+        // portal bots straight into the ocean and killed them (died at y=-58, surface -55,
+        // before casting a single obsidian). Stop before stepping onto a cell that IS lava
+        // or whose floor is lava (a fall-in). The scoop stand-spot is solid ground ADJACENT
+        // to the lava, so we still reach it — we just never overshoot into the sea.
+        let sx = if tx > p.x + 0.3 { 1 } else if tx < p.x - 0.3 { -1 } else { 0 };
+        let sz = if tz > p.z + 0.3 { 1 } else if tz < p.z - 0.3 { -1 } else { 0 };
+        let lava_cell = |bot: &Bot, dx: i32, dz: i32| {
+            name_at(bot, px + dx, py, pz + dz).contains("lava")
+                || name_at(bot, px + dx, py - 1, pz + dz).contains("lava")
+        };
+        let lava_ahead = (sx != 0 && lava_cell(bot, sx, 0))
+            || (sz != 0 && lava_cell(bot, 0, sz))
+            || (sx != 0 && sz != 0 && lava_cell(bot, sx, sz));
+        if lava_ahead {
+            break; // don't walk into / over the lava sea
+        }
         let in_water = name_at(bot, px, py, pz).contains("water")
             || name_at(bot, px, py + 1, pz).contains("water");
         let stuck = d > prev - 0.05;
