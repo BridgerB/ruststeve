@@ -1286,6 +1286,40 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         cast_debug(&format!("prepare: approached lava, now {dist:.0} away at ({:.0},{:.0},{:.0})", p.x, p.y, p.z));
     }
 
+    // Drop to the lava's LEVEL if perched above it. The descent settles as soon as an
+    // exposed source is merely NEAR (within source_lava_near's radius), which over a deep
+    // lava sea leaves the bot on the overburden ~10 blocks up — out of the ~4.5-block
+    // bucket reach (seen live: bot at y=-45 directly over a y=-55 source, "all rounds
+    // failed"). Re-approach the source column and dig down toward one block above the
+    // surface; dig_down refuses to dig INTO lava, so it stops flush at feet = surface+1.
+    {
+        const LVL_DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+        let target_level = lava.1 + 1;
+        for _ in 0..24 {
+            if feet_y(bot) <= target_level + 1 || Instant::now() > deadline {
+                break;
+            }
+            ensure_pickaxe(bot).await;
+            bot.movement.blocks_cant_break.clear();
+            let _ = bot.goto_near(lava.0, feet_y(bot), lava.2, 2.0).await; // stay above the source
+            let before = feet_y(bot);
+            let mut moved = dig_down(bot).await;
+            if !moved {
+                for &(dx, dz) in &LVL_DIRS {
+                    if descend_step(bot, dx, dz).await {
+                        moved = true;
+                        break;
+                    }
+                }
+            }
+            if !moved || feet_y(bot) >= before {
+                break; // can't get lower (lava directly below, or wedged) — scoop from here
+            }
+        }
+        let p = bot.entity.position;
+        cast_debug(&format!("prepare: dropped to scoop level y={:.0} (lava surface {})", p.y, lava.1));
+    }
+
     // Scoop the lava bucket NOW, while we're right next to the exposed pool. The anchor +
     // chamber-clear below moves the bot away and is slow (180-cell dig loop) — it was eating
     // the deadline before the scoop, so the bot reached the lava but never filled the bucket.
