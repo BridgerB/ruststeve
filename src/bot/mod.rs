@@ -1433,6 +1433,21 @@ impl<'a> Bot<'a> {
         self.goto_goal(&goal, Duration::from_secs(18)).await
     }
 
+    /// Like `goto_near` but with a custom time budget — use a short one for fail-fast
+    /// reaches (e.g. approaching a possibly-unreachable embedded ore) so the caller
+    /// doesn't burn the default 18s per attempt cycling many candidates.
+    pub async fn goto_near_timeout(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        range: f64,
+        timeout: Duration,
+    ) -> std::io::Result<bool> {
+        let goal = GoalNear::new(x as f64, y as f64, z as f64, range);
+        self.goto_goal(&goal, timeout).await
+    }
+
     /// Walk to within `range` blocks horizontally of (x,z) — at any reachable Y.
     /// Use for descending to something (e.g. a tree column in a valley).
     pub async fn goto_xz(&mut self, x: i32, z: i32, range: f64) -> std::io::Result<bool> {

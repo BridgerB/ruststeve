@@ -203,8 +203,11 @@ fn count_ore_resource(bot: &Bot, ore: &str) -> i32 {
 /// bot gained (0 if it couldn't actually get to the ore).
 async fn mine_vein(bot: &mut Bot<'_>, ore: &str, tx: i32, ty: i32, tz: i32) -> i32 {
     let before = count_ore_resource(bot, ore);
-    // Walk into reach (the pathfinder digs a horizontal/diagonal path to it).
-    let _ = bot.goto_near(tx, ty, tz, 1.8).await;
+    // Walk into reach (the pathfinder digs a horizontal/diagonal path to it). Fail-fast
+    // (8s, not the default 18s): a bot at ore depth often has MANY exposed-but-unreachable
+    // iron POIs in memory, and 18s each cycled the whole 250s budget mining nothing. If
+    // the walk falls short, dig_toward below still carves toward the ore from here.
+    let _ = bot.goto_near_timeout(tx, ty, tz, 1.8, Duration::from_secs(8)).await;
     // Mine the ore and any directly-touching ore (a vein), finishing with
     // dig_toward which carves through the last block or two of stone.
     let mut frontier = vec![(tx, ty, tz)];
