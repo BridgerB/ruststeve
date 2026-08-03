@@ -374,8 +374,11 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         "diamond" => PoiKind::DiamondOre,
         _ => PoiKind::IronOre,
     };
-    // Productive depths: iron peaks low, coal is everywhere — go reasonably deep.
-    let depth = if ore == "iron" { 35 } else { 50 };
+    // Productive depths: iron's underground triangle peaks at y16 (dense y0..y32),
+    // so y35 sits on the sparse upper slope — race bots stalled there with 0 iron.
+    // Drop to y15 (the peak, still fast-mining stone above the deepslate transition)
+    // where iron is abundant. Coal is everywhere — a moderate depth is fine.
+    let depth = if ore == "iron" { 15 } else { 50 };
 
     let deadline = Instant::now() + Duration::from_secs(300);
     let mut iters = 0u32;
@@ -508,11 +511,21 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
                 println!("    ore: descending toward {ore} — y={} (relocate#{desc_fail})", bot.entity.position.y as i32);
             }
         } else {
-            // At depth — tunnel south to load + expose fresh terrain.
-            let moved = strip_tunnel(bot, 0, 1).await;
-            mem.log("mine_ore", "search_south", &format!("y={by} moved={moved}"));
+            // At depth — tunnel to load + expose fresh terrain. ROTATE the heading in a
+            // box-spiral (S→E→N→W, ~4 strips ≈ 24 blocks per leg) instead of one infinite
+            // south corridor. Passive ore-sighting only records ore within radius R of the
+            // tunnel, so a single direction misses iron a few blocks to the side — the
+            // race's iron bottleneck (race-0 stalled 55min at 0 iron tunneling south).
+            // Four radiating corridors expose ~4× the terrain and find iron far faster.
+            const TDIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+            let (dx, dz) = TDIRS[((iters / 4) % 4) as usize];
+            let moved = strip_tunnel(bot, dx, dz).await;
+            mem.log("mine_ore", "search", &format!("y={by} dir=({dx},{dz}) moved={moved}"));
             if iters % 8 == 0 {
-                println!("    ore: searching south for {ore} — y={by} have={}", count_ore_resource(bot, ore));
+                println!(
+                    "    ore: searching for {ore} — y={by} dir=({dx},{dz}) have={}",
+                    count_ore_resource(bot, ore)
+                );
             }
         }
     }
