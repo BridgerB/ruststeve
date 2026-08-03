@@ -381,6 +381,12 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
     let mut iters = 0u32;
     let mut stuck = 0u32;
     let mut desc_fail = 0u32; // consecutive failures to descend (drives escalating relocation)
+    // Consecutive mine_vein attempts that gained nothing (unreachable ore). At a shallow
+    // depth the bot can SEE many exposed irons through walls it can't reach; cycling them
+    // (goto drifts its position, so stuck>30 never fires) burned the whole budget after a
+    // couple of easy irons. After a few dry veins, stop chasing sightings and DESCEND to
+    // denser/deeper ore instead.
+    let mut dry_veins = 0u32;
     let mut last_count = count_ore_resource(bot, ore);
     let mut last_pos = {
         let p = bot.entity.position;
@@ -434,18 +440,25 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         // reach it — a walk-only reachability test wrongly rejects diggable ore (it
         // marked 14 perfectly-mineable irons "unreachable"). Let mine_vein try; only
         // if it actually gains nothing do we give up on that spot.
-        if let Some(tpos) = mem.nearest(&[kind], from, tier).map(|p| p.pos) {
-            mem.log("mine_ore", "target", &format!("{ore} {tpos:?}"));
-            let gained = mine_vein(bot, ore, tpos.0, tpos.1, tpos.2).await;
-            observe_blocks(bot, mem, &ores); // mined blocks are air now
-            if gained > 0 {
-                mem.mark(tpos, PoiStatus::Gone);
-                println!("    ore: {} {ore} (y={})", count_ore_resource(bot, ore), bot.entity.position.y as i32);
-                mem.log("mine_ore", "mined", &format!("+{gained} {ore} total={}", count_ore_resource(bot, ore)));
-            } else {
-                mem.mark(tpos, PoiStatus::Unreachable);
+        // Chase remembered ore — but only while dry_veins is low. Once several sightings
+        // in a row proved unreachable, fall through to the descent below to change depth
+        // instead of grinding the same shallow cluster.
+        if dry_veins < 4 {
+            if let Some(tpos) = mem.nearest(&[kind], from, tier).map(|p| p.pos) {
+                mem.log("mine_ore", "target", &format!("{ore} {tpos:?}"));
+                let gained = mine_vein(bot, ore, tpos.0, tpos.1, tpos.2).await;
+                observe_blocks(bot, mem, &ores); // mined blocks are air now
+                if gained > 0 {
+                    mem.mark(tpos, PoiStatus::Gone);
+                    dry_veins = 0;
+                    println!("    ore: {} {ore} (y={})", count_ore_resource(bot, ore), bot.entity.position.y as i32);
+                    mem.log("mine_ore", "mined", &format!("+{gained} {ore} total={}", count_ore_resource(bot, ore)));
+                } else {
+                    mem.mark(tpos, PoiStatus::Unreachable);
+                    dry_veins += 1;
+                }
+                continue;
             }
-            continue;
         }
 
         // 2) DB has nothing → search SOUTH until ore turns up.
@@ -477,6 +490,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
             }
             if descended {
                 desc_fail = 0;
+                dry_veins = 0; // new depth — allow chasing sightings again
             } else {
                 // Couldn't get down here — every direction is blocked (commonly a
                 // watery surface patch, where dig_down/descend_step refuse liquid).
