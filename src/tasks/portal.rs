@@ -84,17 +84,20 @@ fn raw_lava_near(bot: &Bot, r: i32) -> bool {
     false
 }
 
-/// Is there a scoopable SOURCE lava block (level=0) within `r` of the bot? The descent
-/// settles to scoop only when this is true — a shallow FLOWING pocket (a cave spill with
-/// zero sources, seen live: "0 sources, 131 lava blocks") is unscoopable, so the bot must
-/// descend PAST it to the deep source lakes instead of getting stuck trying to fill there.
+/// Is there a SCOOPABLE source lava block within `r` of the bot — a level=0 block with AIR
+/// directly above it? The descent settles to scoop only when this is true. The air-above
+/// test is what fill_bucket also requires: a lava body's submerged interior is level=0 too,
+/// but capped by lava (not scoopable), so matching only exposed sources here keeps the
+/// descent from settling on a flowing pocket / lava lake it can't actually fill from
+/// (seen live: "0 sources, 131 lava blocks" at y=-12 where interior sources exist).
 fn source_lava_near(bot: &Bot, r: i32) -> bool {
     let p = bot.entity.position;
     let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
     for dx in -r..=r {
         for dy in -r..=r {
             for dz in -r..=r {
-                if is_fluid_source(bot, bx + dx, by + dy, bz + dz, "lava") {
+                let (x, y, z) = (bx + dx, by + dy, bz + dz);
+                if is_fluid_source(bot, x, y, z, "lava") && is_air(&name_at(bot, x, y + 1, z)) {
                     return true;
                 }
             }
