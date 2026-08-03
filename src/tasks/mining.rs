@@ -100,14 +100,16 @@ pub(crate) async fn dig_down(bot: &mut Bot<'_>) -> bool {
             }
         }
     }
-    // Death-AVOIDANCE: never break a block that is liquid, sits directly above liquid, or
-    // has liquid beside it — for ANY support cell (flooding/lava kills). Refusing makes the
-    // caller tunnel AROUND aquifers/lava (or punch through water) instead of dropping in.
+    // Death-AVOIDANCE: never break a support cell that IS liquid or sits directly above
+    // liquid (flooding into the shaft / dropping into lava). For a liquid BESIDE the cell,
+    // only LAVA disqualifies — water beside is harmless (the bot punches through water and
+    // a wet shaft is survivable), and refusing on water-beside WEDGED the descent in wet
+    // biomes (217 relocates on surface grass with water beside every cell, never digging).
     for &(cx, cz) in &cells {
-        if is_liquid_at(bot, cx, y, cz)
-            || is_liquid_at(bot, cx, y - 1, cz)
-            || [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| is_liquid_at(bot, cx + dx, y, cz + dz))
-        {
+        let lava_beside = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|&(dx, dz)| is_lava_at(bot, cx + dx, y, cz + dz));
+        if is_liquid_at(bot, cx, y, cz) || is_liquid_at(bot, cx, y - 1, cz) || lava_beside {
             return false;
         }
     }
@@ -144,6 +146,12 @@ fn is_liquid_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
     bot.block_at(x, y, z)
         .map(|b| b.name.contains("water") || b.name.contains("lava"))
         .unwrap_or(false)
+}
+
+/// Is there lava at (x, y, z)? Used for the descent's beside-check — only lava beside a
+/// support cell disqualifies digging it (water beside is fine).
+fn is_lava_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    bot.block_at(x, y, z).map(|b| b.name.contains("lava")).unwrap_or(false)
 }
 
 /// Holding a pickaxe right now?
