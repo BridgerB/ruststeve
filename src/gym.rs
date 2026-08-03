@@ -345,7 +345,7 @@ async fn setup_trial(
                     .command(&format!("spreadplayers {cx} {cz} 0 24 false {name}"))
                     .await
                     .unwrap_or_default();
-                pump_teleport(bot).await;
+                pump_teleport(bot, cx, cz).await;
                 let p = bot.entity.position;
                 let moved = ((p.x - before.x).powi(2) + (p.z - before.z).powi(2)).sqrt();
                 if moved > 50.0 {
@@ -362,19 +362,40 @@ async fn setup_trial(
 }
 
 /// Pump network events after a teleport so chunks load and position is current.
-async fn pump_teleport(bot: &mut Bot<'_>) {
-    for _ in 0..40 {
-        bot.drive_tick().await.ok();
-    }
-    let mut c = 0;
-    while c < 6 {
-        match bot.next_event().await {
-            Ok(Some(crate::bot::BotEvent::ChunkLoad(..))) => c += 1,
-            Ok(Some(_)) => {}
-            _ => break,
+async fn pump_teleport(bot: &mut Bot<'_>, cx: i32, cz: i32) {
+    // WAIT for the teleport to actually take AND the destination terrain to load. A fixed
+    // pump was too short: tasks started on a STALE/empty local world (block queries at the
+    // bot's real position returned nothing), so the descent dug air/wrong cells and hung the
+    // whole budget (seen live: descend_step operating on coords far from the trial spot).
+    // Loop until the bot is near (cx,cz) AND solid terrain is loaded around it, or 12s.
+    let start = Instant::now();
+    loop {
+        for _ in 0..15 {
+            bot.drive_tick().await.ok();
+        }
+        let p = bot.entity.position;
+        let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        let near = (bx - cx).abs() < 48 && (bz - cz).abs() < 48;
+        let mut terrain = false;
+        'scan: for dx in -1..=1 {
+            for dz in -1..=1 {
+                for dy in -5..=1 {
+                    if bot.block_state_at(bx + dx, by + dy, bz + dz) != 0 {
+                        terrain = true;
+                        break 'scan;
+                    }
+                }
+            }
+        }
+        if near && terrain {
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(12) {
+            break;
         }
     }
-    for _ in 0..20 {
+    // Settle (land from the spreadplayers drop) before the task reads the world.
+    for _ in 0..10 {
         bot.drive_tick().await.ok();
     }
 }
