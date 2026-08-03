@@ -275,4 +275,13 @@ impl WorldMemory {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Wipe all remembered POIs (keeps the event log). The gym reuses one bot across
+    /// trials at DIFFERENT random locations, so POIs from a previous trial (a table /
+    /// ore thousands of blocks away) mislead the next one — get_crafting_table would
+    /// walk 18s toward a far remembered table, mine_ore would chase far ore. Clear
+    /// between trials so each starts with a clean slate.
+    pub fn clear_pois(&self) {
+        let _ = self.conn.execute("DELETE FROM pois", []);
+    }
 }
