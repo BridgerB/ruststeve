@@ -620,6 +620,17 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
     // heights. Being a block off the exact stand spot is fine — the source is well
     // within reach; we just need the look to actually land on lava.
     for round in 0..3 {
+        // SURVIVAL: at a deep lava SEA the stand can end up on/over the lava (no solid rim
+        // to stand on), and the bot takes fire damage while repeatedly failing to scoop —
+        // it burned to death at y-54 casting, losing its whole portal kit and regressing to
+        // Mine Iron. If health is low, bail UP off the lava with the kit intact rather than
+        // die: pillar a few blocks up, then abort this fill so the step retries alive.
+        if bot.health < 8.0 {
+            cast_debug(&format!("fill lava: ABORT low health={:.0} — retreating up", bot.health));
+            pillar_up(bot, feet_y(bot) + 4).await;
+            bot.set_control_state("sneak", false);
+            return false;
+        }
         let _ = bot.goto_near(stand.0 as i32, stand.1 as i32, stand.2 as i32, 1.0).await;
         walk_to_xz(bot, stand.0, stand.2, 0.4, 50).await;
         if !select_item(bot, "bucket").await.unwrap_or(false) {
