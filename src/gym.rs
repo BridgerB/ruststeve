@@ -1,0 +1,323 @@
+//! GYM — run each speedrun sub-task in isolation across RANDOM real terrain and
+//! record pass/duration/xyz to `data/gym.db`, so we can measure how each step
+//! performs across the world and perfect the terrain-hard ones BEFORE chaining
+//! them in a full race. Port of steve's gym (`src/lib/steve/gym/*`), extended
+//! THROUGH the portal → nether (steve's gym stops at flint-and-steel).
+//!
+//! Everything is Rust: `GYM=<slug> GYM_TRIALS=<n>` loops N trials on ONE connected
+//! bot (self-RCON `clear`/`give`/`spreadplayers` each trial, self-record), and
+//! `GYM=report` prints the per-slug pass table from `gym.db`. No shell harness.
+//!
+//! RCON reaches the shared server over the SSH tunnel to `localhost:25575`
+//! (`ssh -fN -L 25575:127.0.0.1:25575 bridger@144.24.32.76`). Never wipes the
+//! world; forceloads are scoped to each trial's chunk and removed after.
+
+use std::time::{Duration, Instant};
+
+use rusqlite::{params, Connection};
+
+use crate::bot::Bot;
+use crate::bot_utils::count_items;
+use crate::memory::WorldMemory;
+use crate::rcon::{RconClient, RconOptions};
+use crate::state::sync_from_bot;
+use crate::types::GameState;
+
+/// How a gym trial positions the bot before running the step.
+#[derive(Clone, Copy)]
+pub enum GymSetup {
+    /// Random surface teleport (`spreadplayers` in 0..10k) — the terrain-variance test.
+    RandomSurface,
+}
+
+pub struct GymStep {
+    pub slug: &'static str,
+    pub label: &'static str,
+    pub order: i32,
+    /// Items to `give` before the run (RCON `give` args, e.g. `"oak_log 8"`).
+    pub prereq: &'static [&'static str],
+    /// Pipeline step to execute each attempt (dispatched via `steps::execute_step`).
+    pub step_id: &'static str,
+    pub timeout_secs: u64,
+    /// Pass check on the live bot; `None` → the `step_id`'s own `is_complete`.
+    pub custom_pass: Option<fn(&Bot, &GameState) -> bool>,
+    pub setup: GymSetup,
+}
+
+fn passes(step: &GymStep, bot: &Bot, s: &GameState) -> bool {
+    if let Some(f) = step.custom_pass {
+        return f(bot, s);
+    }
+    crate::steps::STEPS
+        .iter()
+        .find(|st| st.id == step.step_id)
+        .map(|st| (st.is_complete)(s))
+        .unwrap_or(false)
+}
+
+/// The gym registry — the 19-step pipeline plus the portal→nether coverage. Prereqs
+/// mirror `isolation-test.sh::setup_prereqs` / steve's `gym/registry.ts`: what the bot
+/// would hold ENTERING that step. Random-terrain teleport is what exposes the
+/// terrain-dependent failures a clean arena hides.
+pub static GYM_STEPS: &[GymStep] = &[
+    GymStep { slug: "gather_wood", label: "Gather Wood", order: 1, prereq: &[], step_id: "gather_wood", timeout_secs: 120, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_planks", label: "Craft Planks", order: 2, prereq: &["oak_log 8"], step_id: "craft_planks", timeout_secs: 30, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_crafting_table", label: "Craft Table", order: 3, prereq: &["oak_planks 8"], step_id: "craft_crafting_table", timeout_secs: 30, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_sticks", label: "Craft Sticks", order: 4, prereq: &["oak_planks 8"], step_id: "craft_sticks", timeout_secs: 30, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_wooden_pickaxe", label: "Craft Wooden Pickaxe", order: 5, prereq: &["oak_planks 8", "stick 8", "crafting_table 1"], step_id: "craft_wooden_pickaxe", timeout_secs: 45, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "mine_stone", label: "Mine Cobblestone", order: 6, prereq: &["wooden_pickaxe 1"], step_id: "mine_stone", timeout_secs: 150, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_stone_pickaxe", label: "Craft Stone Pickaxe", order: 7, prereq: &["cobblestone 8", "stick 8", "crafting_table 1"], step_id: "craft_stone_pickaxe", timeout_secs: 45, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_stone_sword", label: "Craft Stone Sword", order: 8, prereq: &["cobblestone 4", "stick 4", "crafting_table 1"], step_id: "craft_stone_sword", timeout_secs: 45, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_furnace", label: "Craft Furnace", order: 9, prereq: &["cobblestone 16", "crafting_table 1"], step_id: "craft_furnace", timeout_secs: 45, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "mine_coal", label: "Mine Coal", order: 10, prereq: &["stone_pickaxe 1"], step_id: "mine_coal", timeout_secs: 150, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "mine_iron", label: "Mine Iron Ore", order: 11, prereq: &["stone_pickaxe 1"], step_id: "mine_iron", timeout_secs: 200, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "smelt_iron", label: "Smelt Iron", order: 12, prereq: &["raw_iron 11", "coal 8", "furnace 1"], step_id: "smelt_iron", timeout_secs: 150, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_iron_pickaxe", label: "Craft Iron Pickaxe", order: 13, prereq: &["iron_ingot 3", "stick 2", "crafting_table 1"], step_id: "craft_iron_pickaxe", timeout_secs: 45, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_bucket", label: "Craft Buckets", order: 14, prereq: &["iron_ingot 6", "crafting_table 1"], step_id: "craft_bucket", timeout_secs: 45, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "get_water_buckets", label: "Fill Water Buckets", order: 15, prereq: &["bucket 2"], step_id: "get_water_buckets", timeout_secs: 90, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "get_flint_and_steel", label: "Get Flint and Steel", order: 16, prereq: &["iron_ingot 2", "crafting_table 1"], step_id: "get_flint_and_steel", timeout_secs: 150, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "gather_build_blocks", label: "Gather Build Blocks", order: 17, prereq: &["stone_pickaxe 1"], step_id: "gather_build_blocks", timeout_secs: 120, custom_pass: None, setup: GymSetup::RandomSurface },
+    // ── portal → nether (steve's gym lacks these) ──────────────────────────────
+    // reach_lava: the terrain-hard descent→exposed-source→drop-to-source+1→scoop.
+    // Runs the portal step but passes the moment a lava bucket is filled.
+    GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1), setup: GymSetup::RandomSurface },
+    // Capstone: full portal kit, random terrain, pass = we're in the Nether.
+    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 900, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+];
+
+fn env(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+// ── results store (data/gym.db) — mirrors memory.rs's rusqlite pattern ──────────
+
+pub struct GymStore {
+    conn: Connection,
+}
+
+impl GymStore {
+    pub fn open() -> Self {
+        let _ = std::fs::create_dir_all("data");
+        let conn = Connection::open("data/gym.db").expect("open gym db");
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             CREATE TABLE IF NOT EXISTS gym_runs(
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 ts INTEGER NOT NULL,
+                 slug TEXT NOT NULL,
+                 pass INTEGER NOT NULL,
+                 duration_ms INTEGER NOT NULL,
+                 x INTEGER, y INTEGER, z INTEGER,
+                 prereq TEXT, message TEXT
+             );
+             CREATE INDEX IF NOT EXISTS gym_runs_slug_ts ON gym_runs(slug, ts);",
+        )
+        .expect("init gym schema");
+        GymStore { conn }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record(
+        &self,
+        slug: &str,
+        pass: bool,
+        duration_ms: i64,
+        x: i32,
+        y: i32,
+        z: i32,
+        prereq: &[&str],
+        message: &str,
+    ) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let msg: String = message.chars().take(400).collect();
+        let _ = self.conn.execute(
+            "INSERT INTO gym_runs(ts, slug, pass, duration_ms, x, y, z, prereq, message)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![now, slug, pass as i32, duration_ms, x, y, z, prereq.join(", "), msg],
+        );
+    }
+}
+
+/// Print the per-slug pass table (the CLI companion to the dashboard).
+pub fn report() {
+    let store = GymStore::open();
+    let mut stmt = store
+        .conn
+        .prepare(
+            "SELECT slug, COUNT(*), CAST(ROUND(100.0*SUM(pass)/COUNT(*)) AS INT),
+                    CAST(ROUND(AVG(duration_ms)/1000.0) AS INT)
+             FROM gym_runs GROUP BY slug ORDER BY 3 ASC",
+        )
+        .expect("prepare report");
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })
+        .expect("query report");
+    println!("\n=== GYM report (lowest pass% first) ===");
+    println!("{:<24} {:>5} {:>6} {:>7}", "slug", "runs", "pass%", "avg_s");
+    for row in rows.flatten() {
+        let (slug, runs, pct, avg_s) = row;
+        println!("{slug:<24} {runs:>5} {pct:>5}% {avg_s:>6}s");
+    }
+    println!();
+}
+
+// ── the runner ──────────────────────────────────────────────────────────────
+
+/// Run `trials` gym trials of `slug` on this bot, recording each to `gym.db`.
+pub async fn run(
+    bot: &mut Bot<'_>,
+    memory: &mut WorldMemory,
+    slug: &str,
+    trials: u32,
+) -> std::io::Result<()> {
+    let Some(step) = GYM_STEPS.iter().find(|s| s.slug == slug) else {
+        println!("GYM: unknown slug '{slug}'. Known: {}", GYM_STEPS.iter().map(|s| s.slug).collect::<Vec<_>>().join(", "));
+        return Ok(());
+    };
+    let mut rcon = RconClient::connect(RconOptions {
+        host: env("RCON_HOST", "localhost"),
+        port: env("RCON_PORT", "25575").parse().unwrap_or(25575),
+        password: env("RCON_PASS", "minecraft-test-rcon"),
+        ..Default::default()
+    })
+    .await
+    .map_err(|e| std::io::Error::other(format!("gym RCON connect failed: {e} (is the tunnel to 25575 up?)")))?;
+
+    let name = bot.username().to_string();
+    let _ = rcon.command(&format!("op {name}")).await; // so respawn/tp behave; harmless if already op
+    let store = GymStore::open();
+
+    for trial in 0..trials {
+        let (gx, gy, gz, cx, cz) = setup_trial(bot, &mut rcon, &name, step).await;
+        println!("[gym:{}] trial {}/{} @ {gx},{gy},{gz} — running (timeout {}s)", step.slug, trial + 1, trials, step.timeout_secs);
+
+        let t0 = Instant::now();
+        let deadline = t0 + Duration::from_secs(step.timeout_secs);
+        let mut pass = false;
+        let mut last_msg = String::new();
+        let mut attempts = 0u32;
+        loop {
+            bot.wait_ticks(6).await.ok();
+            let s = sync_from_bot(bot);
+            if passes(step, bot, &s) {
+                pass = true;
+                break;
+            }
+            if Instant::now() > deadline {
+                last_msg = format!("gym timeout ({attempts} attempts)");
+                break;
+            }
+            if !s.alive {
+                bot.respawn().await.ok();
+                bot.wait_ticks(40).await.ok();
+                continue;
+            }
+            if crate::survival::handle_survival(bot, memory).await {
+                continue;
+            }
+            attempts += 1;
+            let r = crate::steps::execute_step(bot, step.step_id, memory).await;
+            last_msg = r.message;
+            if last_msg.contains("Broken pipe") || last_msg.contains("os error 32") || last_msg.contains("disconnect") {
+                last_msg = format!("connection lost: {last_msg}");
+                break;
+            }
+        }
+        let dur = t0.elapsed().as_millis() as i64;
+        store.record(step.slug, pass, dur, gx, gy, gz, step.prereq, &last_msg);
+        println!(
+            "[gym:{}] {} {:.1}s @{gx},{gy},{gz} — {last_msg}",
+            step.slug,
+            if pass { "PASS" } else { "FAIL" },
+            dur as f64 / 1000.0
+        );
+        // Release this trial's chunks (scoped — never `forceload remove all`, which
+        // would nuke the other project's chunks on the shared box).
+        clear_forceload(&mut rcon, cx, cz).await;
+    }
+    Ok(())
+}
+
+/// Reset the bot to a clean survival state, grant the step's prerequisites, and
+/// random-teleport it to a real surface spot. Returns the resulting landing
+/// `(gx,gy,gz)` plus the forceload center `(cx,cz)` so the caller can release it.
+async fn setup_trial(
+    bot: &mut Bot<'_>,
+    rcon: &mut RconClient,
+    name: &str,
+    step: &GymStep,
+) -> (i32, i32, i32, i32, i32) {
+    // Random center well away from spawn/race lanes.
+    let cx = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
+    let cz = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
+    let before = bot.entity.position;
+
+    let _ = rcon.command(&format!("gamemode survival {name}")).await;
+    let _ = rcon.command(&format!("clear {name}")).await;
+    for item in step.prereq {
+        let _ = rcon.command(&format!("give {name} {item}")).await;
+    }
+    // Keep the trial's chunks resident so the task can act immediately; scoped +
+    // removed after (never a world-wide forceload).
+    let _ = rcon.command(&format!("forceload add {} {} {} {}", cx - 24, cz - 24, cx + 24, cz + 24)).await;
+
+    // spreadplayers drops the bot on the top solid block near (cx,cz): no fall
+    // damage, loads the chunks itself, real terrain. Retry once — the very first
+    // trial after connect sometimes lands the command before the player is
+    // teleportable, leaving the bot at spawn (bad terrain-variance data).
+    match step.setup {
+        GymSetup::RandomSurface => {
+            for attempt in 0..2 {
+                let resp = rcon
+                    .command(&format!("spreadplayers {cx} {cz} 0 24 false {name}"))
+                    .await
+                    .unwrap_or_default();
+                pump_teleport(bot).await;
+                let p = bot.entity.position;
+                let moved = ((p.x - before.x).powi(2) + (p.z - before.z).powi(2)).sqrt();
+                if moved > 50.0 {
+                    break;
+                }
+                if attempt == 0 {
+                    println!("[gym] spreadplayers didn't move the bot (resp: {}), retrying", resp.trim());
+                }
+            }
+        }
+    }
+    let p = bot.entity.position;
+    (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, cx, cz)
+}
+
+/// Pump network events after a teleport so chunks load and position is current.
+async fn pump_teleport(bot: &mut Bot<'_>) {
+    for _ in 0..40 {
+        bot.drive_tick().await.ok();
+    }
+    let mut c = 0;
+    while c < 6 {
+        match bot.next_event().await {
+            Ok(Some(crate::bot::BotEvent::ChunkLoad(..))) => c += 1,
+            Ok(Some(_)) => {}
+            _ => break,
+        }
+    }
+    for _ in 0..20 {
+        bot.drive_tick().await.ok();
+    }
+}
+
+/// Remove a trial's forceload (best-effort; called by the runner between trials via
+/// the next setup's re-add, but exposed for explicit cleanup).
+pub async fn clear_forceload(rcon: &mut RconClient, cx: i32, cz: i32) {
+    let _ = rcon.command(&format!("forceload remove {} {} {} {}", cx - 24, cz - 24, cx + 24, cz + 24)).await;
+}

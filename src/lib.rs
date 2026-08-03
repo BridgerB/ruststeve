@@ -33,6 +33,7 @@ pub use vec3::Vec3;
 // ── speedrun bot ──
 pub mod app;
 pub mod bot_utils;
+pub mod gym;
 pub mod memory;
 pub mod state;
 pub mod steps;

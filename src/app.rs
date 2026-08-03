@@ -25,6 +25,12 @@ fn env(key: &str, default: &str) -> String {
 }
 
 pub async fn run() -> std::io::Result<()> {
+    // GYM=report: print the per-slug pass table from data/gym.db and exit (no bot).
+    if std::env::var("GYM").as_deref() == Ok("report") {
+        crate::gym::report();
+        return Ok(());
+    }
+
     let host = env("MC_HOST", "localhost");
     let port: u16 = env("MC_PORT", "25565").parse().unwrap_or(25565);
     let username = env("MC_USERNAME", "ruststeve-001");
@@ -112,6 +118,16 @@ pub async fn run() -> std::io::Result<()> {
             bot.drive_tick().await.ok();
         }
         println!("hold done — at {:?}", bot.entity.position);
+    }
+
+    // ── GYM MODE ─────────────────────────────────────────────────────────────
+    // GYM=<slug> [GYM_TRIALS=n]: run one gym exercise across N random-terrain trials,
+    // recording pass/duration/xyz to data/gym.db. Self-RCONs the teleport + prereqs.
+    if let Ok(slug) = std::env::var("GYM") {
+        let trials: u32 =
+            std::env::var("GYM_TRIALS").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
+        crate::gym::run(&mut bot, &mut memory, &slug, trials).await?;
+        return Ok(());
     }
 
     // ── ISOLATION TEST MODE ──────────────────────────────────────────────────
