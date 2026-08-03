@@ -87,6 +87,12 @@ The gym validated every component across random terrain: crafts ~100%, water/sme
 
 **Future gym/race speedups (if the race stalls at the cast):** anchor the frame CLOSER to the lava (fewer re-scoop walks); shrink/skip the 180-cell chamber clear; cache the lava source so per-block re-scoop navigates straight back. These would speed both gym and race but touch the load-bearing cast — do carefully.
 
+## RACE RESULT: raw bot SCOOPS deep-sea lava, then DIES casting → the last blocker
+
+In the chained race (improved binary), race-2 reached Build Portal, descended ~120 blocks to the deep lava sea, and SCOOPED lava ('dropped to scoop level y=-52 (surface -55)' → 'fill lava: OK' → lava_buckets=1) — a RAW bot completing the hardest capability in a race. Then it **'died at (933.7,-58,543.3)'** — it fell INTO the lava sea (y-58 is BELOW the -55 surface) during the cast/scoop re-nav. keep_inventory saved items, but on respawn it hit the intermittent **'crafting table would not open'** desync and the step machine regressed it to Mine Iron Ore.
+
+**THE FINAL BLOCKER = deep-sea cast is LETHAL.** Casting the 10-obsidian frame next to a lava OCEAN, re-scooping per block, the bot ends up below the surface and burns. Same class the earlier race sessions fought. FIX (careful — cast is load-bearing): keep the bot STRICTLY above the lava surface during drop-to-level/scoop/re-scoop (never step onto a cell whose floor is lava; the drop should stop at surface+1 and the scoop stand must be solid, not the lava rim); AND/OR cast at a SHALLOW surface lava pool (the gym's reach_lava 001 scooped a y52 surface pool cleanly and safely) instead of the deep sea — bias find_fluid/prepare toward shallow exposed lava over the deep sea. Secondary: the post-death 'crafting table would not open' desync regresses a portal-ready bot all the way back — a bot that still HOLDS the portal kit (lava_bucket+water_bucket+flint+cobble) should resume Build Portal, not re-mine iron (Build Portal can_execute / step ordering).
+
 ## Current status
 
 - **Gym built + wired** (`21db39e` core, `5ce109b` dashboard, hard-timeout fix pending commit): `GYM`/`GYM=report` + `/gym` dashboard; verified `craft_planks` + `gather_wood` pass on real random terrain and record.
