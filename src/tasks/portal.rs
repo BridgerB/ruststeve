@@ -633,11 +633,30 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         }
         for t in &targets {
             for dy in [0.6_f64, 0.2, 0.9] {
-                reliable_use(bot, vec3(t.0 as f64 + 0.5, t.1 as f64 + dy, t.2 as f64 + 0.5)).await;
+                let was_lava = is_lava(&name_at(bot, t.0, t.1, t.2));
+                bot.look_at(vec3(t.0 as f64 + 0.5, t.1 as f64 + dy, t.2 as f64 + 0.5));
+                bot.wait_ticks(7).await.ok();
+                let held = bot.held_item().map(|i| i.name.clone());
+                bot.activate_item().await.ok();
+                bot.wait_ticks(8).await.ok();
                 if count_items(bot, &filled_bucket_name) > 0 {
                     cast_debug(&format!("fill {fluid}: OK (round {round})"));
                     return true;
                 }
+                // Server scooped it but the inventory didn't sync (the same raciness the
+                // water fill predicts around): if the target source VANISHED right as we
+                // used the bucket, the fill happened — mirror it locally so the step
+                // machine sees the filled bucket instead of re-scooping an empty spot.
+                let now = name_at(bot, t.0, t.1, t.2);
+                if fluid == "lava" && was_lava && is_air(&now) && count_items(bot, "bucket") > 0 {
+                    bot.ensure_item("lava_bucket", 1);
+                    if let Some(s) = bot.inventory.slots.iter_mut().flatten().find(|i| i.name == "bucket") {
+                        s.count -= 1;
+                    }
+                    cast_debug(&format!("fill lava: OK (round {round}, source vanished — predicted)"));
+                    return true;
+                }
+                cast_debug(&format!("  scoop t={t:?} dy={dy:.1} held={held:?} lava {was_lava}->{now}"));
             }
         }
     }
