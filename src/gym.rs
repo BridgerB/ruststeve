@@ -198,69 +198,107 @@ pub async fn run(
     let store = GymStore::open();
 
     for trial in 0..trials {
-        let (gx, gy, gz, cx, cz) = setup_trial(bot, &mut rcon, &name, step).await;
-        println!("[gym:{}] trial {}/{} @ {gx},{gy},{gz} — running (timeout {}s)", step.slug, trial + 1, trials, step.timeout_secs);
+        println!("[gym] === {} trial {}/{} ===", step.slug, trial + 1, trials);
+        run_one_trial(bot, memory, &mut rcon, &store, step).await;
+    }
+    Ok(())
+}
 
-        let t0 = Instant::now();
-        let deadline = t0 + Duration::from_secs(step.timeout_secs);
-        let mut pass = false;
-        let mut last_msg = String::new();
-        let mut attempts = 0u32;
-        loop {
-            bot.wait_ticks(6).await.ok();
-            let s = sync_from_bot(bot);
-            if passes(step, bot, &s) {
-                pass = true;
-                break;
-            }
-            if Instant::now() > deadline {
-                last_msg = format!("gym timeout ({attempts} attempts)");
-                break;
-            }
-            if !s.alive {
-                bot.respawn().await.ok();
-                bot.wait_ticks(40).await.ok();
-                continue;
-            }
-            if crate::survival::handle_survival(bot, memory).await {
-                continue;
-            }
-            attempts += 1;
-            // HARD timeout around the task: the deadline check above only fires BETWEEN
-            // attempts, so a task that hangs internally (e.g. gather_wood pathfinding to
-            // an unreachable tree) would wedge the whole batch forever. Abort at the
-            // remaining budget and record a FAIL instead. Next trial's setup resets state.
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            match tokio::time::timeout(
-                remaining,
-                crate::steps::execute_step(bot, step.step_id, memory),
-            )
-            .await
-            {
-                Ok(r) => last_msg = r.message,
-                Err(_) => {
-                    last_msg = format!("gym timeout — task hung ({attempts} attempts)");
-                    break;
-                }
-            }
-            if last_msg.contains("Broken pipe") || last_msg.contains("os error 32") || last_msg.contains("disconnect") {
-                last_msg = format!("connection lost: {last_msg}");
+/// Steve's "run random for a while" sweep: each trial picks a RANDOM pipeline step.
+/// Launch several of these as separate bots (`rust-gym-001..004`) for 4-at-a-time
+/// coverage, run for a while, then `GYM=report` and FOCUS on the low-pass slugs.
+/// Excludes the two expensive portal steps (`reach_lava` 600s / `to_nether` 900s) —
+/// run those in dedicated focused batches so the sweep stays fast and broad.
+pub async fn run_random(
+    bot: &mut Bot<'_>,
+    memory: &mut WorldMemory,
+    trials: u32,
+) -> std::io::Result<()> {
+    let mut rcon = RconClient::connect(RconOptions {
+        host: env("RCON_HOST", "localhost"),
+        port: env("RCON_PORT", "25575").parse().unwrap_or(25575),
+        password: env("RCON_PASS", "minecraft-test-rcon"),
+        ..Default::default()
+    })
+    .await
+    .map_err(|e| std::io::Error::other(format!("gym RCON connect failed: {e} (tunnel to 25575 up?)")))?;
+    let name = bot.username().to_string();
+    let _ = rcon.command(&format!("op {name}")).await;
+    let store = GymStore::open();
+    let pool: Vec<&GymStep> = GYM_STEPS.iter().filter(|s| s.timeout_secs <= 200).collect();
+    for trial in 0..trials {
+        let step = pool[rand::Rng::gen_range(&mut rand::thread_rng(), 0..pool.len())];
+        println!("[gym] === random trial {}/{}: {} ===", trial + 1, trials, step.slug);
+        run_one_trial(bot, memory, &mut rcon, &store, step).await;
+    }
+    Ok(())
+}
+
+/// One gym trial: setup (clear/give/random-tp) → run the step to pass/timeout →
+/// record to gym.db → release the forceload.
+async fn run_one_trial(
+    bot: &mut Bot<'_>,
+    memory: &mut WorldMemory,
+    rcon: &mut RconClient,
+    store: &GymStore,
+    step: &GymStep,
+) {
+    let name = bot.username().to_string();
+    let (gx, gy, gz, cx, cz) = setup_trial(bot, rcon, &name, step).await;
+    println!("[gym:{}] @ {gx},{gy},{gz} — running (timeout {}s)", step.slug, step.timeout_secs);
+
+    let t0 = Instant::now();
+    let deadline = t0 + Duration::from_secs(step.timeout_secs);
+    let mut pass = false;
+    let mut last_msg = String::new();
+    let mut attempts = 0u32;
+    loop {
+        bot.wait_ticks(6).await.ok();
+        let s = sync_from_bot(bot);
+        if passes(step, bot, &s) {
+            pass = true;
+            break;
+        }
+        if Instant::now() > deadline {
+            last_msg = format!("gym timeout ({attempts} attempts)");
+            break;
+        }
+        if !s.alive {
+            bot.respawn().await.ok();
+            bot.wait_ticks(40).await.ok();
+            continue;
+        }
+        if crate::survival::handle_survival(bot, memory).await {
+            continue;
+        }
+        attempts += 1;
+        // HARD timeout around the task: the deadline check above only fires BETWEEN
+        // attempts, so a task that hangs internally would wedge the batch. Abort at
+        // the remaining budget and record a FAIL. Next trial's setup resets state.
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match tokio::time::timeout(remaining, crate::steps::execute_step(bot, step.step_id, memory)).await {
+            Ok(r) => last_msg = r.message,
+            Err(_) => {
+                last_msg = format!("gym timeout — task hung ({attempts} attempts)");
                 break;
             }
         }
-        let dur = t0.elapsed().as_millis() as i64;
-        store.record(step.slug, pass, dur, gx, gy, gz, step.prereq, &last_msg);
-        println!(
-            "[gym:{}] {} {:.1}s @{gx},{gy},{gz} — {last_msg}",
-            step.slug,
-            if pass { "PASS" } else { "FAIL" },
-            dur as f64 / 1000.0
-        );
-        // Release this trial's chunks (scoped — never `forceload remove all`, which
-        // would nuke the other project's chunks on the shared box).
-        clear_forceload(&mut rcon, cx, cz).await;
+        if last_msg.contains("Broken pipe") || last_msg.contains("os error 32") || last_msg.contains("disconnect") {
+            last_msg = format!("connection lost: {last_msg}");
+            break;
+        }
     }
-    Ok(())
+    let dur = t0.elapsed().as_millis() as i64;
+    store.record(step.slug, pass, dur, gx, gy, gz, step.prereq, &last_msg);
+    println!(
+        "[gym:{}] {} {:.1}s @{gx},{gy},{gz} — {last_msg}",
+        step.slug,
+        if pass { "PASS" } else { "FAIL" },
+        dur as f64 / 1000.0
+    );
+    // Release this trial's chunks (scoped — never `forceload remove all`, which would
+    // nuke the other project's chunks on the shared box).
+    clear_forceload(rcon, cx, cz).await;
 }
 
 /// Reset the bot to a clean survival state, grant the step's prerequisites, and

@@ -126,7 +126,13 @@ pub async fn run() -> std::io::Result<()> {
     if let Ok(slug) = std::env::var("GYM") {
         let trials: u32 =
             std::env::var("GYM_TRIALS").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
-        crate::gym::run(&mut bot, &mut memory, &slug, trials).await?;
+        if slug == "random" {
+            // Steve's sweep: pick a random pipeline step each trial. Launch several
+            // bots (rust-gym-001..004) for 4-at-a-time coverage.
+            crate::gym::run_random(&mut bot, &mut memory, trials).await?;
+        } else {
+            crate::gym::run(&mut bot, &mut memory, &slug, trials).await?;
+        }
         return Ok(());
     }
 
