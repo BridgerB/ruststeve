@@ -533,6 +533,12 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
     let n = count_ore_resource(bot, ore);
     mem.log("mine_ore", "end", &format!("{n}/{target} {ore}"));
     if n >= target {
+        // Surface before returning. The bot is dozens of blocks down its mine shaft
+        // (iron mining ran to y-34); the NEXT steps — gather wood, water, food — are
+        // SURFACE tasks that roam in place forever from down here (the lead race bot
+        // stalled at Gather Wood at y-34 with 14 iron, oscillating 5 blocks from a
+        // buried home). Climb out now, while we still hold the cobble we just mined.
+        crate::tasks::portal::climb_out_of_pit(bot).await;
         success(format!("mined {n}/{target} {ore}"))
     } else {
         failure(format!("mined {n}/{target} {ore}"))

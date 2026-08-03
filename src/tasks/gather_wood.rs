@@ -322,6 +322,12 @@ async fn move_toward(bot: &mut Bot<'_>, tx: i32, tz: i32) {
 pub async fn gather_wood(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
     bot.wait_ticks(4).await.ok();
     mem.log("gather_wood", "begin", &format!("target={target} have={}", count_logs(bot)));
+    // Safety net: if we're deep underground (e.g. surfaced from an iron-mine tunnel and
+    // regressed here for more wood before dying), trees are unreachable by horizontal
+    // roaming — goto_xz fails every hop and we oscillate a few blocks from a buried
+    // home, failing the 100s budget forever. Climb to daylight FIRST (bounded; a no-op
+    // when already at the surface, which is the common case after mine_ore surfaces us).
+    crate::tasks::portal::climb_out_of_pit(bot).await;
     let logs = log_state_ids(bot);
     let home = {
         let p = bot.entity.position;
