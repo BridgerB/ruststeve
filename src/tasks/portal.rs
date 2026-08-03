@@ -1313,9 +1313,13 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     // surface; dig_down refuses to dig INTO lava, so it stops flush at feet = surface+1.
     {
         const LVL_DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
-        let target_level = lava.1 + 1;
+        // Land the FEET one block above the source cell (lava.1) — a flush scoop. Live
+        // proof this matters: from feet=lava.1+2 (two above) the bucket never fills
+        // ('lava true->lava' every attempt); from one above it scoops (as the isolation
+        // lake does). Earlier this stopped a block too high (target_level+1).
+        let target_feet = lava.1 + 1;
         for _ in 0..24 {
-            if feet_y(bot) <= target_level + 1 || Instant::now() > deadline {
+            if feet_y(bot) <= target_feet || Instant::now() > deadline {
                 break;
             }
             ensure_pickaxe(bot).await;
