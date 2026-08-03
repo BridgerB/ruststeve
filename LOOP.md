@@ -50,6 +50,9 @@ Portal / lava chain (from the race-loop session, all committed):
 - `70719cf` drop the feet to ONE block above the source (two-above never fills: `lava true->lava`).
 - `9340769` predict the lava scoop when the source vanishes (no sync echo) + per-attempt scoop diagnostics.
 - `d436619` `dig_down` beside-check is LAVA-only, not water — water-beside wedged descent in wet biomes (217 relocates on surface grass).
+- `cf67491` `walk_to_xz` refuses to step onto a lava cell (or a cell whose floor is lava) during the raw scoop walk — the deep-sea scoop no longer walks the bot into the lava and burns it (VALIDATED: gym scooped y-54, deaths=0).
+- `3f6f4b8` `prepare_cast_site` chamber-clear shrunk 210→48 cells (only what the frame needs). The 210-deepslate clear timed out prepare's 600s deadline → returned None → the cast step looped re-scooping forever, never casting (made=0). After: **prepare completes, the bot casts its first obsidian** (VALIDATED: gym-002 prefill=1, scoop=1, made=1, at a shallow y106 surface lava lake).
+- (near-scoop, pending commit) `cast_obsidian_at` re-scoops the NEAREST lava first (the frame anchors ~4 blocks off the pool edge, so the edge is right there); the far remembered `lava_pool` is only a fallback. Going to the far pool first stranded the bot on the wrong side of a wide lava lake — it cast block 1, walked west to re-scoop, then couldn't path back east across the lava to cast block 2 (stuck at x4524, frame at x4541, 17 away). Validating via to_nether (cast5).
 
 ## Gym-infra fixes (the harness itself)
 
@@ -93,10 +96,12 @@ In the chained race (improved binary), race-2 reached Build Portal, descended ~1
 
 **THE FINAL BLOCKER = deep-sea cast is LETHAL.** Casting the 10-obsidian frame next to a lava OCEAN, re-scooping per block, the bot ends up below the surface and burns. Same class the earlier race sessions fought. FIX (careful — cast is load-bearing): keep the bot STRICTLY above the lava surface during drop-to-level/scoop/re-scoop (never step onto a cell whose floor is lava; the drop should stop at surface+1 and the scoop stand must be solid, not the lava rim); AND/OR cast at a SHALLOW surface lava pool (the gym's reach_lava 001 scooped a y52 surface pool cleanly and safely) instead of the deep sea — bias find_fluid/prepare toward shallow exposed lava over the deep sea. Secondary: the post-death 'crafting table would not open' desync regresses a portal-ready bot all the way back — a bot that still HOLDS the portal kit (lava_bucket+water_bucket+flint+cobble) should resume Build Portal, not re-mine iron (Build Portal can_execute / step ordering).
 
-## Current status
+## Current status — THE CAST WORKS; frame-completion is the last gap
 
-- **Gym built + wired** (`21db39e` core, `5ce109b` dashboard, hard-timeout fix pending commit): `GYM`/`GYM=report` + `/gym` dashboard; verified `craft_planks` + `gather_wood` pass on real random terrain and record.
-- **First finding:** gather_wood HANGS on some terrain (not just fails) — an unbounded internal loop; the gym hard-timeout is the safety net, but `gather_wood`'s task loop should self-bound (investigate from the FAIL coords). steve's gym had gather_wood ~65%, so expect a terrain long tail.
-- **Next:** re-run `gather_wood x5` (now completes via hard timeout) → read pass%; then descend the chain (mine_stone → … → reach_lava → to_nether). Reproduce each failure at its recorded x,y,z.
-- **Add later:** `cast_light_enter` gym step (teleport onto a prepared lava arena to isolate cast+light+enter from lava-finding).
+- **Portal cast breakthrough (2026-08-03):** two fixes turned the cast from "loops forever, made=0" into "casts obsidian":
+  1. `cf67491` — the deep-sea scoop no longer walks into lava (deaths=0).
+  2. `3f6f4b8` — chamber-clear 210→48 cells; prepare now COMPLETES → the bot **casts its first obsidian** (gym-002: prefill=1, scoop=1, made=1, at a y106 surface lava lake).
+- **Last gap = completing the 10-obsidian frame.** gym-002 cast block 1, then re-scooped from the FAR remembered pool (walked west across a wide lake), and couldn't path back east to cast block 2 (stuck x4524, frame x4541, 17 away, "CAST cast … ENTER" repeating). Near-scoop fix (pending commit): re-scoop the NEAREST lava first so the bot stays at the frame; far pool is fallback only.
+- **VALIDATING NOW:** to_nether gym x3 detached (`/tmp/gym-cast5-00N.log`) on the near-scoop binary. Success signal = `made=` climbs past 1 toward 10 → frame build → `entered the nether`. Check: `for i in 001 002 003; do echo gym-$i made=$(grep -c made=true /tmp/gym-cast5-$i.log) prefill=$(grep -c 'prepare pre-fill' /tmp/gym-cast5-$i.log) nether=$(grep -c 'entered the nether' /tmp/gym-cast5-$i.log); done`.
+- **If made climbs then stalls again:** read `cast_obsidian_at` (portal.rs ~688) — the block-to-block transition (positioning at each successive frame block, interior clear, ignite, walk-in). If it reaches the nether → RESTART `./race.sh` on the full-fix binary (also improve `mine_ore`: only searches SOUTH, the race's coal/iron bottleneck to even reach the portal).
 - **Blocker:** none in the harness now; data-gathering underway.

@@ -719,17 +719,18 @@ async fn cast_obsidian_at(
                 break; // didn't pour (no aim/space) — avoid an infinite loop
             }
         }
-        // 1. Top up both buckets first (fill walks to the pool).
-        // Refill lava from the KNOWN pool — navigate back to it first so the local
-        // scan in fill_bucket always sees it (scanning from wherever the previous
-        // block left the bot is what kept failing).
-        if count_items(bot, "lava_bucket") < 1 {
+        // 1. Refill lava. Scoop the NEAREST lava FIRST: the frame anchors ~4 blocks off the
+        //    pool's edge, so the edge is right here — this keeps the bot AT the frame. Only
+        //    walk to the remembered far pool as a FALLBACK. Going to the far pool first
+        //    stranded the bot on the wrong side of a wide lava lake, unable to path back
+        //    across to the frame (cast block 2 at (4541) from (4524), 17 away, lava between).
+        if count_items(bot, "lava_bucket") < 1 && !fill_bucket(bot, "lava").await {
             if let Some(pool) = lava_pool {
                 let _ = bot.goto_near(pool.0, pool.1 + 1, pool.2, 2.0).await;
             }
-        }
-        if count_items(bot, "lava_bucket") < 1 && !fill_bucket(bot, "lava").await {
-            return false;
+            if count_items(bot, "lava_bucket") < 1 && !fill_bucket(bot, "lava").await {
+                return false;
+            }
         }
         if count_items(bot, "water_bucket") < 1 && !fill_bucket(bot, "water").await {
             return false;
