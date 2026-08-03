@@ -29,6 +29,11 @@ pub async fn fill_water_buckets(bot: &mut Bot<'_>, target: i32, mem: &mut WorldM
     // water source it filled from earlier. If none is in scan range, navigate BACK to a
     // remembered water body before roaming — this un-stalls the 'filled 0/1' refill loop.
     if find_water(bot).is_none() {
+        // Surface first. After mining iron the bot is stranded at the bottom of a deep
+        // 1-wide shaft; the pathfinder can't climb out, so roaming/goto for water just
+        // spins in place. Pillar back up to daylight before looking for water.
+        bot.movement.blocks_cant_break.clear();
+        crate::tasks::portal::climb_out_of_pit(bot).await;
         let p = bot.entity.position;
         let from = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         if let Some(poi) = mem.nearest(&[PoiKind::Water], from, 128) {

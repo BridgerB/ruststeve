@@ -382,6 +382,51 @@ async fn pillar_up(bot: &mut Bot<'_>, target_y: i32) -> bool {
     // Leave sneak ON — caller clears it once the block is poured.
 }
 
+/// The terrain surface height AROUND the bot (not its own column — that may be the
+/// open mining shaft it's standing at the bottom of). Scans a few neighbour columns
+/// downward from the sky and returns the highest solid top found, or None if the
+/// bot is on/near the surface already.
+fn surrounding_surface_y(bot: &Bot) -> Option<i32> {
+    let p = bot.entity.position;
+    let (cx, cz) = (p.x.floor() as i32, p.z.floor() as i32);
+    let mut best: Option<i32> = None;
+    for (dx, dz) in [(3, 0), (-3, 0), (0, 3), (0, -3), (3, 3), (-3, -3)] {
+        for y in (feet_y(bot) + 1..=200).rev() {
+            if solid_at(bot, cx + dx, y, cz + dz) {
+                best = Some(best.map_or(y, |b| b.max(y)));
+                break;
+            }
+        }
+    }
+    best
+}
+
+/// Climb out of a deep mining shaft back to daylight. After mining iron a bot ends
+/// up dozens of blocks down at the bottom of a 1-wide shaft; the A* pathfinder can't
+/// scaffold up it, so surface-needing tasks (water) roam in place forever. Pillar up
+/// the open shaft to the surrounding terrain height so those tasks start from grass.
+/// No-op (returns true) when the bot is already at/near the surface.
+pub(crate) async fn climb_out_of_pit(bot: &mut Bot<'_>) -> bool {
+    let Some(surface) = surrounding_surface_y(bot) else {
+        return true; // already at the surface (nothing solid overhead nearby)
+    };
+    if feet_y(bot) >= surface - 2 {
+        return true;
+    }
+    let target = surface + 1;
+    // pillar_up caps at 24 blocks/call; loop until we reach the target or stall.
+    for _ in 0..4 {
+        let before = feet_y(bot);
+        pillar_up(bot, target).await;
+        bot.set_control_state("sneak", false);
+        let now = feet_y(bot);
+        if now >= surface - 1 || now <= before {
+            break;
+        }
+    }
+    feet_y(bot) >= surface - 2
+}
+
 // ── fluids ──────────────────────────────────────────────────────────────────
 
 /// Nearest visible fluid source, preferring one with air directly above.
