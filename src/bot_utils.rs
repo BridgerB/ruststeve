@@ -134,7 +134,26 @@ pub async fn tidy_inventory(bot: &mut Bot<'_>) {
         }
     }
     for s in drop_slots {
-        let _ = bot.click_window(s, 1, 4).await; // button 1 + mode 4 = drop whole stack
+        // Drop the WHOLE stack. Button-1 (drop-stack) mode-4 was NOT clearing the slot
+        // in practice — junk like raw_copper/cobbled_deepslate persisted across every
+        // craft (a lead race bot sat on 24 copper + 47 deepslate and its planks/table/
+        // furnace crafts silently no-op'd from the bloated window, stalling the whole
+        // run at Craft Furnace). Drop item-by-item with button 0 — the same primitive
+        // `Bot::toss` uses successfully — re-reading the slot until it's empty.
+        for _ in 0..64 {
+            let occupied = bot
+                .inventory
+                .slots
+                .get(s as usize)
+                .and_then(|x| x.as_ref())
+                .map(|it| it.count > 0)
+                .unwrap_or(false);
+            if !occupied {
+                break;
+            }
+            let _ = bot.click_window(s, 0, 4).await; // button 0 + mode 4 = drop one
+            bot.wait_ticks(1).await.ok();
+        }
     }
 }
 
