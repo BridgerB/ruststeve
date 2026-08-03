@@ -81,6 +81,12 @@ MINE_DEBUG proof: when the bot reaches ore depth (y~40-50) it mines iron cleanly
 - **LAST GAP = the CAST**: after scooping, build_nether_portal starts the frame ('pool east_edge=.. anchor x=..') then STALLS (no cast progress for the rest of the 600s). Passed in the flush-lava ISOLATION arena, but stalls when lava is a REAL remote source (bot must re-navigate to the source per obsidian, ~10 scoops). To reach the nether across terrain, the cast loop (tasks/portal.rs cast_obsidian_at / build frame / re-scoop-per-block) must complete without stalling. NEXT: run to_nether w/ CAST debug, read WHERE the cast stalls (first obsidian? re-scoop nav? interior clear? ignite?), fix, re-run.
 - Only 001 has CAST debug (CRAFT_DEBUG); 002-004 blank traces = no debug, not no-progress.
 
+## Verdict: components validated; portal is WORKS-BUT-SLOW → chain a race
+
+The gym validated every component across random terrain: crafts ~100%, water/smelt 100%, mine_stone 75% / coal 50% / iron 37% (race accumulates), and the **descent→exposed-source→drop-to-source+1→scoop chain works** (reach_lava 50% in ONE 600s shot). The portal CAST is not broken — it's SLOW: after scooping, the frame anchors ~8 blocks from the lava, then the chamber-clear (180-cell dig) + 10-obsidian cast (re-scoop from the offset source each block) can't finish in the gym's single-shot budget (reach_lava 001 scooped then ran out at 600s; to_nether from a y94 spawn spent 900s just descending deep deepslate to find lava). **In a RACE, Build Portal retries over hours** — the budget the gym lacks. So the right test now is chaining a raw race with the improved binary (which carries the gym's task-code fixes: fail-fast ore, dry-veins-descend, plus the earlier portal fixes).
+
+**Future gym/race speedups (if the race stalls at the cast):** anchor the frame CLOSER to the lava (fewer re-scoop walks); shrink/skip the 180-cell chamber clear; cache the lava source so per-block re-scoop navigates straight back. These would speed both gym and race but touch the load-bearing cast — do carefully.
+
 ## Current status
 
 - **Gym built + wired** (`21db39e` core, `5ce109b` dashboard, hard-timeout fix pending commit): `GYM`/`GYM=report` + `/gym` dashboard; verified `craft_planks` + `gather_wood` pass on real random terrain and record.
