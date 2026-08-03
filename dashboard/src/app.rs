@@ -204,6 +204,55 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
     }
 }
 
+// ── gym: per-step pass-rate across random terrain (data/gym.db) ──────────────
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GymRow {
+    pub slug: String,
+    pub runs: i64,
+    pub pass_pct: i64,
+    pub avg_s: i64,
+    /// A recent failing (x,y,z) to reproduce, e.g. "6855,92,8896".
+    pub last_fail_xyz: String,
+}
+
+#[server(GetGym, "/api")]
+pub async fn get_gym() -> Result<Vec<GymRow>, ServerFnError> {
+    const DB: &str = "/Users/bridger/Developer/mc/upstream/ruststeve/data/gym.db";
+    let conn = rusqlite::Connection::open(DB).map_err(|e| ServerFnError::new(e.to_string()))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT slug, COUNT(*), CAST(ROUND(100.0*SUM(pass)/COUNT(*)) AS INT),
+                    CAST(ROUND(AVG(duration_ms)/1000.0) AS INT)
+             FROM gym_runs GROUP BY slug ORDER BY 3 ASC, slug ASC",
+        )
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    let base: Vec<GymRow> = stmt
+        .query_map([], |r| {
+            Ok(GymRow {
+                slug: r.get(0)?,
+                runs: r.get(1)?,
+                pass_pct: r.get(2)?,
+                avg_s: r.get(3)?,
+                last_fail_xyz: String::new(),
+            })
+        })
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .filter_map(Result::ok)
+        .collect();
+    let mut out = Vec::new();
+    for mut g in base {
+        if let Ok((x, y, z)) = conn.query_row(
+            "SELECT x,y,z FROM gym_runs WHERE slug=?1 AND pass=0 ORDER BY ts DESC LIMIT 1",
+            [&g.slug],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+        ) {
+            g.last_fail_xyz = format!("{x},{y},{z}");
+        }
+        out.push(g);
+    }
+    Ok(out)
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
@@ -214,9 +263,61 @@ pub fn App() -> impl IntoView {
             <main>
                 <Routes fallback=|| "Page not found.".into_view()>
                     <Route path=StaticSegment("") view=HomePage/>
+                    <Route path=StaticSegment("gym") view=GymPage/>
                 </Routes>
             </main>
         </Router>
+    }
+}
+
+#[component]
+fn GymPage() -> impl IntoView {
+    let rows: RwSignal<Vec<GymRow>> = RwSignal::new(Vec::new());
+    Effect::new(move |_| {
+        let poll = move || {
+            leptos::task::spawn_local(async move {
+                if let Ok(r) = get_gym().await {
+                    rows.set(r);
+                }
+            });
+        };
+        poll();
+        set_interval(poll, std::time::Duration::from_secs(5));
+    });
+    view! {
+        <div class="wrap">
+            <h1>"🏋️ ruststeve — gym (pass-rate across random terrain)"</h1>
+            <p class="muted">"Lowest pass% first = the next thing to perfect. Reproduce a failure by teleporting to its coords."</p>
+            <a href="/" class="muted">"← race dashboard"</a>
+            <table class="gym">
+                <thead>
+                    <tr><th>"step"</th><th>"pass"</th><th>"runs"</th><th>"avg"</th><th>"last fail @"</th></tr>
+                </thead>
+                <tbody>
+                    <For
+                        each=move || rows.get()
+                        key=|r| r.slug.clone()
+                        children=move |r| {
+                            let pct = r.pass_pct;
+                            let hue = (pct as f64 * 1.2) as i64; // 0=red → 120=green
+                            let bar = format!("width:{pct}%;background:hsl({hue},70%,45%)");
+                            view! {
+                                <tr>
+                                    <td class="gym-slug">{r.slug.clone()}</td>
+                                    <td class="gym-bar-cell">
+                                        <div class="gym-bar" style=bar></div>
+                                        <span class="gym-pct">{format!("{pct}%")}</span>
+                                    </td>
+                                    <td>{r.runs}</td>
+                                    <td>{format!("{}s", r.avg_s)}</td>
+                                    <td class="gym-xyz">{r.last_fail_xyz.clone()}</td>
+                                </tr>
+                            }
+                        }
+                    />
+                </tbody>
+            </table>
+        </div>
     }
 }
 
@@ -252,6 +353,7 @@ fn HomePage() -> impl IntoView {
     view! {
         <div class="wrap">
             <h1>"🏁 ruststeve — race to the Nether"</h1>
+            <a href="/gym" class="muted">"🏋️ gym (per-step pass-rate) →"</a>
             <p class="muted">{move || {
                 let (elapsed, running) = meta.get();
                 let n = bots.with(|b| b.len());

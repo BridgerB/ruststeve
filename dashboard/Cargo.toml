@@ -16,6 +16,7 @@ leptos_meta = { version = "0.8.0" }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
 wasm-bindgen = { version = "0.2.106", optional = true }
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 
 [features]
 hydrate = [
@@ -27,6 +28,7 @@ ssr = [
     "dep:axum",
     "dep:tokio",
     "dep:leptos_axum",
+    "dep:rusqlite",
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",
