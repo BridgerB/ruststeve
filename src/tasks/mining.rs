@@ -116,7 +116,7 @@ pub(crate) async fn dig_down(bot: &mut Bot<'_>) -> bool {
         // portal to drop to base + open the interior after casting) was digging THROUGH a
         // frame block, dropping the count from 10/10 to <10 → 'only 9/10 present' → the whole
         // cast restarted forever. Refuse; the caller's descend_step steps aside instead.
-        if name_at(bot, cx, y, cz) == "obsidian" {
+        if bot.block_at(cx, y, cz).map(|b| b.name == "obsidian").unwrap_or(false) {
             return false;
         }
     }
