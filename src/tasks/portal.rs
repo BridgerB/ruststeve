@@ -1252,7 +1252,11 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 lava = find_fluid(bot, "lava", 24);
                 break;
             }
-            if feet_y(bot) > -45 {
+            if feet_y(bot) > -54 {
+                // Descend to the lava-sea level (~y-54), NOT -45: the big deep lava lakes sit
+                // at y-54..-58, so a -45 floor left the bot tunnelling horizontally ABOVE the
+                // lava forever ("lava=None" bailing 786x). source_lava_near breaks the loop as
+                // soon as a scoopable source comes into reach on the way down.
                 // The descent digs via bot.dig directly, which uses whatever's in hand — and
                 // the portal phase holds buckets/flint, so hard stone (andesite/granite) can't
                 // be broken bare-handed and the descent stalls. Keep a pickaxe equipped.
