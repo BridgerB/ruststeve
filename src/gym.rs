@@ -257,7 +257,7 @@ async fn run_one_trial(
     if matches!(step.slug, "reach_lava" | "to_nether") {
         memory.record(
             crate::memory::PoiKind::Lava,
-            (gx + 4, gy - 1, gz),
+            (gx + 6, gy - 1, gz),
             crate::memory::PoiStatus::Available,
         );
     }
@@ -419,14 +419,14 @@ async fn setup_trial(
         // box, lay a solid stone floor, then a stone-CONTAINED lava source pool in it (won't
         // drain). The bot walks east onto the pad and scoops the flush pool.
         let _ = rcon // clear air (the pad's open space)
-            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx, by, bz - 3, bx + 9, by + 5, bz + 3))
+            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx, by, bz - 5, bx + 12, by + 5, bz + 5))
             .await;
         let _ = rcon // 2-DEEP solid stone base+walls — a 1-deep floor let the pool DRAIN through
-            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 2, bz - 3, bx + 9, by - 1, bz + 3))
-            .await; // (drained lava reads as flowing → "0 sources, 10 lava blocks seen")
-        let _ = rcon // contained lava source pool in the top layer, 3 east
-            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 3, by - 1, bz - 1, bx + 5, by - 1, bz + 1))
+            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 2, bz - 5, bx + 12, by - 1, bz + 5))
             .await;
+        let _ = rcon // BIG contained lava source pool (7x7=49 sources) — a 3x3 depleted after 2
+            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 3, by - 1, bz - 3, bx + 9, by - 1, bz + 3))
+            .await; // scoops (neighbours flow → "0 sources"); the full cast needs ~10 re-scoops
         bot.wait_ticks(20).await.ok();
     }
     let p = bot.entity.position;
