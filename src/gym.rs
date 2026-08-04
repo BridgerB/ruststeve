@@ -395,10 +395,10 @@ async fn setup_trial(
         let _ = rcon // clear air (the pad's open space)
             .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx, by, bz - 3, bx + 9, by + 5, bz + 3))
             .await;
-        let _ = rcon // flat stone floor + walls (containment)
-            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 1, bz - 3, bx + 9, by - 1, bz + 3))
-            .await;
-        let _ = rcon // contained lava source pool in the floor, 3 east
+        let _ = rcon // 2-DEEP solid stone base+walls — a 1-deep floor let the pool DRAIN through
+            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 2, bz - 3, bx + 9, by - 1, bz + 3))
+            .await; // (drained lava reads as flowing → "0 sources, 10 lava blocks seen")
+        let _ = rcon // contained lava source pool in the top layer, 3 east
             .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 3, by - 1, bz - 1, bx + 5, by - 1, bz + 1))
             .await;
         bot.wait_ticks(20).await.ok();
