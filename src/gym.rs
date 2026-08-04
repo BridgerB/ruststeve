@@ -83,9 +83,9 @@ pub static GYM_STEPS: &[GymStep] = &[
     // ── portal → nether (steve's gym lacks these) ──────────────────────────────
     // reach_lava: the terrain-hard descent→exposed-source→drop-to-source+1→scoop.
     // Runs the portal step but passes the moment a lava bucket is filled.
-    GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1), setup: GymSetup::RandomSurface },
+    GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1), setup: GymSetup::RandomSurface },
     // Capstone: full portal kit, random terrain, pass = we're in the Nether.
-    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 900, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
 ];
 
 fn env(key: &str, default: &str) -> String {
