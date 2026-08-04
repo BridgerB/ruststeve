@@ -492,7 +492,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         // never reaching depth y15 → mine_iron timed out at 0 iron), STOP insisting on the
         // deep target and SEARCH at the current depth. Iron's triangle runs y-24..56, so
         // it exists up here too — better to mine what's reachable than descend forever.
-        if by > depth + 2 && desc_fail < 5 {
+        if by > depth + 2 && (desc_fail < 5 || by > 55) {
             // Get down to ore depth. dig_down (straight) first; if it refuses
             // (liquid/fall-avoidance), try a stair-step in EACH of the 4 compass
             // directions — a watery lane blocks only some directions, so trying all

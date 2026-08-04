@@ -332,7 +332,16 @@ async fn setup_trial(
     // A DEAD bot can't be teleported by spreadplayers — it stays put, so several
     // trials in a row "run" at the same corpse spot ("0 attempts" timeouts, seen live
     // at 4822,5254 x3). Respawn first so every trial gets a fresh random location.
-    if !sync_from_bot(bot).alive {
+    // Respawn if dead OR fallen into the VOID. A trial's descent (or a physics glitch)
+    // can drop the bot below the world; it then falls forever (seen at y=-11,192,350) and
+    // every subsequent trial instant-fails at that phantom spot (5000+ wasted attempts).
+    // If it's voided but still "alive", kill it first so respawn returns it to the surface.
+    let alive = sync_from_bot(bot).alive;
+    if !alive || bot.entity.position.y < -200.0 {
+        if alive {
+            let _ = rcon.command(&format!("kill {name}")).await;
+            bot.wait_ticks(15).await.ok();
+        }
         bot.respawn().await.ok();
         bot.wait_ticks(40).await.ok();
     }
