@@ -8,6 +8,10 @@ Build and **perfect a gym** — each speedrun sub-task run in isolation across *
 
 **DONE when:** every gym slug (esp. the terrain-hard ones) sits at a high pass-rate across random terrain — including `reach_lava`, `cast_light_enter` (once added), and the `to_nether` capstone (`pass = dimension == minecraft:the_nether`) — AND a chained `race.sh` run logs `entered the nether` for a raw `rust-race-*` bot. Target each slug **≥ ~90%** before moving on.
 
+## to_nether — cast completing (2026-08-04)
+
+After the enter fix + bigger pool, to_nether SCOOPS repeatedly + casts obsidian — but stalled at 3/10 on 'pillar1 FAIL' (couldn't pillar up to the upper frame row): the platform builder + cast cups + pillars EXHAUSTED the 64-cobble prereq. FIX 7c15a42: 200 cobble for reach_lava/to_nether. Now should cast all 10 → light → enter → PASS. Running to_nether x5.
+
 ## to_nether — all pieces in place (2026-08-04)
 
 Removed to_nether blockers in order: blind descent → seed lava (b19f59b); terrain-flaky seed → flat pad + 2-deep base + memory-POI + settle (c99f197); COULD NEVER ENTER (build only lit, enter_nether is separate) → gym runs enter_nether after portal_built (e7eee54); 3x3 pool DEPLETED after 2 scoops → 7x7=49-source pool (90401f9). Now: to_nether finds the seed → casts the full 10-obsidian frame (pool lasts) → lights → enters → in_nether → PASS. Running to_nether x5 on 90401f9. If it enters the_nether even once → FULL CHAIN GREEN → report + stop.
