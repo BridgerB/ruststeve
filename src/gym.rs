@@ -396,6 +396,15 @@ async fn setup_trial(
     // an exposed surface lava pool a few blocks from the bot so the CAST (the portal step's
     // actual work: scoop → platform → 10-obsidian frame → light → enter) is what's exercised.
     if matches!(step.slug, "reach_lava" | "to_nether") {
+        // Settle on the ground FIRST — reading position mid-fall from the teleport put the
+        // seed at the wrong Y (floating/buried → the bot navigated to a phantom POI, found no
+        // lava, descended blind, and died). Wait until on_ground before reading feet position.
+        for _ in 0..40 {
+            if bot.entity.on_ground && bot.entity.velocity.length() < 0.08 {
+                break;
+            }
+            bot.drive_tick().await.ok();
+        }
         let p = bot.entity.position;
         let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         // Build a FLAT PAD beside the bot so the pool is exposed + reachable on ANY terrain
