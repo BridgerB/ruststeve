@@ -388,15 +388,19 @@ async fn setup_trial(
     if matches!(step.slug, "reach_lava" | "to_nether") {
         let p = bot.entity.position;
         let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-        // Recessed pool (feet-1) with air above + a stone rim, 4 east — an OPEN, scoopable
-        // source find_fluid/source_lava_near accept (matches get_water_buckets' water setup).
-        let _ = rcon
-            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx + 3, by - 2, bz - 2, bx + 8, by - 1, bz + 2))
+        // Build a clean, EXPOSED surface pool right next to the bot: stone base + rim, a
+        // cleared air column above (so find_fluid sees the top face on any terrain), and a
+        // lava source pool 3 east at foot level. Matches get_water_buckets' recessed pool.
+        let _ = rcon // solid base/rim so the pool doesn't drain and there's a stand
+            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx + 1, by - 2, bz - 2, bx + 6, by - 1, bz + 2))
             .await;
-        let _ = rcon
-            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 4, by - 1, bz - 1, bx + 7, by - 1, bz + 1))
+        let _ = rcon // clear the air above the pool so the lava top is exposed
+            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx + 2, by, bz - 1, bx + 5, by + 3, bz + 1))
             .await;
-        bot.wait_ticks(10).await.ok();
+        let _ = rcon // the lava source pool, foot level (feet sit at by, so by-1 is scoopable-flush)
+            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 3, by - 1, bz - 1, bx + 5, by - 1, bz + 1))
+            .await;
+        bot.wait_ticks(20).await.ok();
     }
     let p = bot.entity.position;
     (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, cx, cz)
