@@ -299,6 +299,13 @@ async fn run_one_trial(
                 break;
             }
         }
+        // to_nether's step is build_nether_portal, which only builds+LIGHTS the portal
+        // ("nether portal cast & lit") — it never walks in. The pass is in_nether, so we must
+        // also run the separate enter_nether step once the portal exists, or it can NEVER pass.
+        if step.slug == "to_nether" && sync_from_bot(bot).world.portal_built {
+            let rem = deadline.saturating_duration_since(Instant::now());
+            let _ = tokio::time::timeout(rem, crate::steps::execute_step(bot, "enter_nether", memory)).await;
+        }
         if last_msg.contains("Broken pipe") || last_msg.contains("os error 32") || last_msg.contains("disconnect") {
             last_msg = format!("connection lost: {last_msg}");
             break;
