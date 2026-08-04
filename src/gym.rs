@@ -379,6 +379,25 @@ async fn setup_trial(
             }
         }
     }
+    // Portal steps (reach_lava/to_nether) run WITHOUT the mining phase that, in a real run,
+    // leaves exposed lava in the bot's memory (mine_ore records find_exposed_blocks). Without
+    // it, the trial is dominated by a blind ~120-block descent to the deep sea — that tests
+    // MINING's job, not the portal's, and never passes. Match the real post-mining state: drop
+    // an exposed surface lava pool a few blocks from the bot so the CAST (the portal step's
+    // actual work: scoop → platform → 10-obsidian frame → light → enter) is what's exercised.
+    if matches!(step.slug, "reach_lava" | "to_nether") {
+        let p = bot.entity.position;
+        let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        // Recessed pool (feet-1) with air above + a stone rim, 4 east — an OPEN, scoopable
+        // source find_fluid/source_lava_near accept (matches get_water_buckets' water setup).
+        let _ = rcon
+            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx + 3, by - 2, bz - 2, bx + 8, by - 1, bz + 2))
+            .await;
+        let _ = rcon
+            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 4, by - 1, bz - 1, bx + 7, by - 1, bz + 1))
+            .await;
+        bot.wait_ticks(10).await.ok();
+    }
     let p = bot.entity.position;
     (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, cx, cz)
 }
