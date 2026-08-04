@@ -251,6 +251,16 @@ async fn run_one_trial(
     // table/ore across the map) would send tasks walking 18s toward nothing. Fresh slate.
     memory.clear_pois();
     let (gx, gy, gz, cx, cz) = setup_trial(bot, rcon, &name, step).await;
+    // Portal steps: record the SEEDED lava pool in memory so prepare_cast_site's memory-first
+    // path walks straight to it (as it would in a real run after mining recorded exposed lava),
+    // instead of a racy find_fluid scan that missed it and triggered a blind deep descent.
+    if matches!(step.slug, "reach_lava" | "to_nether") {
+        memory.record(
+            crate::memory::PoiKind::Lava,
+            (gx + 4, gy - 1, gz),
+            crate::memory::PoiStatus::Available,
+        );
+    }
     println!("[gym:{}] @ {gx},{gy},{gz} — running (timeout {}s)", step.slug, step.timeout_secs);
 
     let t0 = Instant::now();
