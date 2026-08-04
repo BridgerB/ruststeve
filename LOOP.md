@@ -8,6 +8,10 @@ Build and **perfect a gym** — each speedrun sub-task run in isolation across *
 
 **DONE when:** every gym slug (esp. the terrain-hard ones) sits at a high pass-rate across random terrain — including `reach_lava`, `cast_light_enter` (once added), and the `to_nether` capstone (`pass = dimension == minecraft:the_nether`) — AND a chained `race.sh` run logs `entered the nether` for a raw `rust-race-*` bot. Target each slug **≥ ~90%** before moving on.
 
+## to_nether — all pieces in place (2026-08-04)
+
+Removed to_nether blockers in order: blind descent → seed lava (b19f59b); terrain-flaky seed → flat pad + 2-deep base + memory-POI + settle (c99f197); COULD NEVER ENTER (build only lit, enter_nether is separate) → gym runs enter_nether after portal_built (e7eee54); 3x3 pool DEPLETED after 2 scoops → 7x7=49-source pool (90401f9). Now: to_nether finds the seed → casts the full 10-obsidian frame (pool lasts) → lights → enters → in_nether → PASS. Running to_nether x5 on 90401f9. If it enters the_nether even once → FULL CHAIN GREEN → report + stop.
+
 ## 🔑 to_nether COULD NEVER ENTER — enter_nether fix (2026-08-04)
 
 THE real to_nether blocker (not just the seed): its pass is in_nether, but step_id=build_nether_portal only builds+LIGHTS ('nether portal cast & lit') and returns — it never walks in (enter_nether is a SEPARATE step). So to_nether was structurally unable to pass. FIX `e7eee54`: after portal_built, the gym runs enter_nether → bot walks through → in_nether → pass. Combined with the seed found ~60% of trials (reach_lava scoops 3/5), to_nether should now PASS on good trials. Running to_nether x5 on e7eee54. If it enters the_nether even once → FULL CHAIN PROVEN → report + stop.
