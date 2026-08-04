@@ -487,7 +487,12 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
 
         // 2) DB has nothing → search SOUTH until ore turns up.
         let by = bot.entity.position.y as i32;
-        if by > depth + 2 {
+        // If the descent keeps stalling (can't get below ~y55 — a cave/aquifer/deepslate
+        // layer the dig_down won't punch, so relocate just walks uphill and it oscillates,
+        // never reaching depth y15 → mine_iron timed out at 0 iron), STOP insisting on the
+        // deep target and SEARCH at the current depth. Iron's triangle runs y-24..56, so
+        // it exists up here too — better to mine what's reachable than descend forever.
+        if by > depth + 2 && desc_fail < 5 {
             // Get down to ore depth. dig_down (straight) first; if it refuses
             // (liquid/fall-avoidance), try a stair-step in EACH of the 4 compass
             // directions — a watery lane blocks only some directions, so trying all
