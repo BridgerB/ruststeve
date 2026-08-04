@@ -112,6 +112,13 @@ pub(crate) async fn dig_down(bot: &mut Bot<'_>) -> bool {
         if is_liquid_at(bot, cx, y, cz) || is_liquid_at(bot, cx, y - 1, cz) || lava_beside {
             return false;
         }
+        // NEVER dig obsidian — it's the nether-portal frame. descend_to_y (used by the
+        // portal to drop to base + open the interior after casting) was digging THROUGH a
+        // frame block, dropping the count from 10/10 to <10 → 'only 9/10 present' → the whole
+        // cast restarted forever. Refuse; the caller's descend_step steps aside instead.
+        if name_at(bot, cx, y, cz) == "obsidian" {
+            return false;
+        }
     }
     // Fall-avoidance: don't dig the floor out over a deep drop (open cavern / ravine) — a
     // 4+ block fall hurts. The controlled descend_step / drop_into_cavern handle those.
