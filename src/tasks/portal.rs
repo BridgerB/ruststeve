@@ -1295,6 +1295,18 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     // Descent blocked by a SCOOPABLE lake — grab it, don't dig into it.
                     lava = find_fluid(bot, "lava", 24);
                     break;
+                } else if desc_fail >= 3
+                    && raw_lava_near(bot, 6)
+                    && find_fluid(bot, "lava", 24).is_some()
+                {
+                    // WEDGED right next to lava: dig_down refuses (lava-beside death-avoidance)
+                    // so it spun relocate#1..8 in circles at y-52 without ever scooping the lava
+                    // it was standing next to (source_lava_near too strict to fire). There's an
+                    // exposed lava block in reach — break out and let fill_bucket (which scans
+                    // wide, picks a real source, and places a stand) do the scoop.
+                    cast_debug("desc: wedged at lava — breaking to scoop");
+                    lava = find_fluid(bot, "lava", 24);
+                    break;
                 } else {
                     desc_fail += 1;
                     let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
