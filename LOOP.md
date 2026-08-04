@@ -8,6 +8,10 @@ Build and **perfect a gym** — each speedrun sub-task run in isolation across *
 
 **DONE when:** every gym slug (esp. the terrain-hard ones) sits at a high pass-rate across random terrain — including `reach_lava`, `cast_light_enter` (once added), and the `to_nether` capstone (`pass = dimension == minecraft:the_nether`) — AND a chained `race.sh` run logs `entered the nether` for a raw `rust-race-*` bot. Target each slug **≥ ~90%** before moving on.
 
+## ✅ to_nether CASTING (2026-08-03) — memory-seeded lava works
+
+Seeding chain (all needed): b19f59b seed a surface pool → c590032 flat pad (hilly spawns buried it) → bf10c34 2-deep stone base (1-deep drained → flowing, '0 sources/10 lava') → 3c64b5b RECORD the seed as a Lava POI so prepare's memory-first path navigates to it (racy find_fluid missed it → blind descent). RESULT: to_nether now 'fill lava: OK' + 'laying cast platform over lava' — the full deep-sea-cast path (scoop→platform→frame→light→enter) runs on the seeded pool. Watching for 'nether portal cast & lit' → 'entered the nether' = to_nether PASS = FULL CHAIN PROVEN. (reach_lava still flaky finding the seed — to_nether subsumes it; if to_nether reaches nether, the portal capability is validated.) reach_lava pass also accepts placed-obsidian (it scoops THEN casts, consuming the bucket before the check).
+
 ## ✅ PORTAL GYM UNBLOCKED — seed lava = test the cast (2026-08-03)
 
 `b19f59b`: setup_trial now seeds an EXPOSED surface lava pool (stone base+rim, cleared air above, lava source 3 east) for reach_lava/to_nether — matching the real post-mining memory state. IMMEDIATE RESULT: 'prepare: lava=Some(...)' → 'fill lava: OK' — the bot finds + scoops right away, so the trial exercises the CAST (scoop→platform→frame→light→enter) not the blind ~120-block descent (mining's job, which was making it 0/16). Validating reach_lava x4 + to_nether x3 on b19f59b — expect reach_lava to PASS and to_nether to reach the_nether. This is the fix that makes the portal gym reflect reality.
