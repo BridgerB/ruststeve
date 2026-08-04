@@ -1298,7 +1298,12 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 } else {
                     desc_fail += 1;
                     let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
-                    let dist = 6 + (desc_fail.min(8) as i32) * 4;
+                    // SHORT relocate hops: over cave-riddled deepslate dig_down deterministically
+                    // refuses (fall-avoidance) at many cells, so relocates are frequent — a big
+                    // 6..38-block hop each time walked 10-40s and burned the budget (to_nether:
+                    // 237 relocates → only reached y-12). A 2-block hop still finds a diggable
+                    // neighbouring cell but costs a fraction of the walk.
+                    let dist = 2 + (desc_fail.min(4) as i32);
                     let p = bot.entity.position;
                     cast_debug(&format!("desc y={fy} STUCK below={below} below2={below2} → relocate#{desc_fail} ({dx},{dz})x{dist}"));
                     let _ = bot
