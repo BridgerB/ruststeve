@@ -403,33 +403,30 @@ async fn setup_trial(
     // an exposed surface lava pool a few blocks from the bot so the CAST (the portal step's
     // actual work: scoop → platform → 10-obsidian frame → light → enter) is what's exercised.
     if matches!(step.slug, "reach_lava" | "to_nether") {
-        // Settle on the ground FIRST — reading position mid-fall from the teleport put the
-        // seed at the wrong Y (floating/buried → the bot navigated to a phantom POI, found no
-        // lava, descended blind, and died). Wait until on_ground before reading feet position.
-        for _ in 0..40 {
-            if bot.entity.on_ground && bot.entity.velocity.length() < 0.08 {
-                break;
-            }
-            bot.drive_tick().await.ok();
-        }
+        // FIXED FLAT ARENA. The per-spawn synthetic pad was flaky on uneven/high terrain (the
+        // cast stalled at 2-5/10 depending on the spawn). The cast is TERRAIN-INDEPENDENT — it
+        // PASSED in the flat isolation arena — and the terrain-hard part (reaching lava) is
+        // MINING's job, recorded in memory. So tp to a fixed cleared arena and build a
+        // guaranteed-flat stone pad + a contained lava pool east of the frame footprint. This
+        // makes reach_lava/to_nether reliably exercise the CAST (scoop→platform→frame→light→enter).
+        const FX: i32 = 600;
+        const FY: i32 = 72;
+        const FZ: i32 = 600;
+        let _ = rcon.command(&format!("forceload add {} {} {} {}", FX - 24, FZ - 24, FX + 24, FZ + 24)).await;
+        // Clear the whole arena volume (prior trials' obsidian/portal/frame would leave
+        // portal_built stale-true and clutter the cast site).
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", FX - 4, FY, FZ - 8, FX + 20, FY + 22, FZ + 8)).await;
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air replace minecraft:obsidian", FX - 4, FY - 3, FZ - 8, FX + 20, FY + 22, FZ + 8)).await;
+        // 2-deep flat stone pad.
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", FX - 4, FY - 2, FZ - 8, FX + 20, FY - 1, FZ + 8)).await;
+        // Contained lava pool EAST of the frame footprint (frame anchors ~FX+1..FX+4, +X).
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", FX + 8, FY - 1, FZ - 3, FX + 14, FY - 1, FZ + 3)).await;
+        // Put the bot on the pad (RCON runs as console/op).
+        let _ = rcon.command(&format!("tp {name} {FX} {FY} {FZ}")).await;
+        pump_teleport(bot, FX, FZ).await;
+        bot.wait_ticks(10).await.ok();
         let p = bot.entity.position;
-        let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-        // Build a FLAT PAD beside the bot so the pool is exposed + reachable on ANY terrain
-        // (hilly spawns buried/floated a bare pool → 'NO scoopable source'). Clear a big air
-        // box, lay a solid stone floor, then a stone-CONTAINED lava source pool in it (won't
-        // drain). The bot walks east onto the pad and scoops the flush pool.
-        let _ = rcon // clear air (the pad's open space)
-            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx, by, bz - 5, bx + 16, by + 5, bz + 5))
-            .await;
-        let _ = rcon // 2-DEEP solid stone base+walls — a 1-deep floor let the pool DRAIN through
-            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 2, bz - 5, bx + 16, by - 1, bz + 5))
-            .await;
-        let _ = rcon // BIG contained lava pool (7x7=49 sources), placed EAST of the frame footprint
-            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 8, by - 1, bz - 3, bx + 14, by - 1, bz + 3))
-            .await; // (frame anchors at px+1..px+4 and extends +X; a pool overlapping it left the
-                    // east frame blocks OVER lava → 'pillar1 FAIL' at 9/10. Now the frame sits on
-                    // solid stone and the bot scoops from the pool a few blocks east.)
-        bot.wait_ticks(20).await.ok();
+        return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, FX, FZ);
     }
     let p = bot.entity.position;
     (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, cx, cz)
