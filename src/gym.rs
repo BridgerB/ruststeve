@@ -257,7 +257,7 @@ async fn run_one_trial(
     if matches!(step.slug, "reach_lava" | "to_nether") {
         memory.record(
             crate::memory::PoiKind::Lava,
-            (gx + 6, gy - 1, gz),
+            (gx + 11, gy - 1, gz),
             crate::memory::PoiStatus::Available,
         );
     }
@@ -419,14 +419,16 @@ async fn setup_trial(
         // box, lay a solid stone floor, then a stone-CONTAINED lava source pool in it (won't
         // drain). The bot walks east onto the pad and scoops the flush pool.
         let _ = rcon // clear air (the pad's open space)
-            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx, by, bz - 5, bx + 12, by + 5, bz + 5))
+            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx, by, bz - 5, bx + 16, by + 5, bz + 5))
             .await;
         let _ = rcon // 2-DEEP solid stone base+walls — a 1-deep floor let the pool DRAIN through
-            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 2, bz - 5, bx + 12, by - 1, bz + 5))
+            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 2, bz - 5, bx + 16, by - 1, bz + 5))
             .await;
-        let _ = rcon // BIG contained lava source pool (7x7=49 sources) — a 3x3 depleted after 2
-            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 3, by - 1, bz - 3, bx + 9, by - 1, bz + 3))
-            .await; // scoops (neighbours flow → "0 sources"); the full cast needs ~10 re-scoops
+        let _ = rcon // BIG contained lava pool (7x7=49 sources), placed EAST of the frame footprint
+            .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 8, by - 1, bz - 3, bx + 14, by - 1, bz + 3))
+            .await; // (frame anchors at px+1..px+4 and extends +X; a pool overlapping it left the
+                    // east frame blocks OVER lava → 'pillar1 FAIL' at 9/10. Now the frame sits on
+                    // solid stone and the bot scoops from the pool a few blocks east.)
         bot.wait_ticks(20).await.ok();
     }
     let p = bot.entity.position;
