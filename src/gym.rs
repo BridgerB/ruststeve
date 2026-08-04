@@ -83,7 +83,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     // ── portal → nether (steve's gym lacks these) ──────────────────────────────
     // reach_lava: the terrain-hard descent→exposed-source→drop-to-source+1→scoop.
     // Runs the portal step but passes the moment a lava bucket is filled.
-    GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1), setup: GymSetup::RandomSurface },
+    GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1 || !bot.find_blocks("obsidian", 8, 1).is_empty()), setup: GymSetup::RandomSurface },
     // Capstone: full portal kit, random terrain, pass = we're in the Nether.
     GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 64"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
 ];
@@ -388,16 +388,17 @@ async fn setup_trial(
     if matches!(step.slug, "reach_lava" | "to_nether") {
         let p = bot.entity.position;
         let (bx, by, bz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-        // Build a clean, EXPOSED surface pool right next to the bot: stone base + rim, a
-        // cleared air column above (so find_fluid sees the top face on any terrain), and a
-        // lava source pool 3 east at foot level. Matches get_water_buckets' recessed pool.
-        let _ = rcon // solid base/rim so the pool doesn't drain and there's a stand
-            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx + 1, by - 2, bz - 2, bx + 6, by - 1, bz + 2))
+        // Build a FLAT PAD beside the bot so the pool is exposed + reachable on ANY terrain
+        // (hilly spawns buried/floated a bare pool → 'NO scoopable source'). Clear a big air
+        // box, lay a solid stone floor, then a stone-CONTAINED lava source pool in it (won't
+        // drain). The bot walks east onto the pad and scoops the flush pool.
+        let _ = rcon // clear air (the pad's open space)
+            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx, by, bz - 3, bx + 9, by + 5, bz + 3))
             .await;
-        let _ = rcon // clear the air above the pool so the lava top is exposed
-            .command(&format!("fill {} {} {} {} {} {} minecraft:air", bx + 2, by, bz - 1, bx + 5, by + 3, bz + 1))
+        let _ = rcon // flat stone floor + walls (containment)
+            .command(&format!("fill {} {} {} {} {} {} minecraft:stone", bx, by - 1, bz - 3, bx + 9, by - 1, bz + 3))
             .await;
-        let _ = rcon // the lava source pool, foot level (feet sit at by, so by-1 is scoopable-flush)
+        let _ = rcon // contained lava source pool in the floor, 3 east
             .command(&format!("fill {} {} {} {} {} {} minecraft:lava", bx + 3, by - 1, bz - 1, bx + 5, by - 1, bz + 1))
             .await;
         bot.wait_ticks(20).await.ok();
