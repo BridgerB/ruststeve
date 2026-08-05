@@ -98,6 +98,14 @@ impl ChunkSection {
         max_bits_per_block: u32,
         no_array_length: bool,
     ) -> (ChunkSection, usize) {
+        // Defensive: if a prior section over-read (a malformed/edge-case palette on certain
+        // chunks), `offset` can sit at or past the buffer end; reading the 2-byte counts here
+        // then panics with "index out of bounds" and takes the whole bot down. Rather than crash
+        // on one bad chunk (seen on some overworld chunks near world spawn), return an empty
+        // section and stop consuming — the column keeps the sections it parsed and the bot lives.
+        if offset + 4 > buffer.len() {
+            return (ChunkSection::new(GLOBAL_BITS_PER_BLOCK, 0), buffer.len());
+        }
         let solid_block_count = i16::from_be_bytes([buffer[offset], buffer[offset + 1]]) as i32;
         offset += 2;
         let fluid_count = i16::from_be_bytes([buffer[offset], buffer[offset + 1]]);

@@ -83,9 +83,9 @@ pub static GYM_STEPS: &[GymStep] = &[
     // ── portal → nether (steve's gym lacks these) ──────────────────────────────
     // reach_lava: the terrain-hard descent→exposed-source→drop-to-source+1→scoop.
     // Runs the portal step but passes the moment a lava bucket is filled.
-    GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 200"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1 || !bot.find_blocks("obsidian", 8, 1).is_empty()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1 || !bot.find_blocks("obsidian", 8, 1).is_empty()), setup: GymSetup::RandomSurface },
     // Capstone: full portal kit, random terrain, pass = we're in the Nether.
-    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 200"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
 ];
 
 fn env(key: &str, default: &str) -> String {
@@ -423,32 +423,36 @@ async fn setup_trial(
         // MINING's job, recorded in memory. So tp to a fixed cleared arena and build a
         // guaranteed-flat stone pad + a contained lava pool east of the frame footprint. This
         // makes reach_lava/to_nether reliably exercise the CAST (scoop→platform→frame→light→enter).
-        const FX: i32 = 600;
-        const FY: i32 = 72;
-        const FZ: i32 = 600;
-        let _ = rcon.command(&format!("forceload add {} {} {} {}", FX - 24, FZ - 24, FX + 24, FZ + 24)).await;
+        // Arena origin — configurable via GYM_ARENA_X/GYM_ARENA_Z so PARALLEL gym bots each run
+        // in their own arena (each ~48 wide; space them ≥64 apart, e.g. 600/700/800/900). This
+        // lets several bots measure the to_nether pass-rate concurrently — one 15-min trial at a
+        // time is far too slow to iterate on reliability. Default 600 keeps single-bot behaviour.
+        let fx: i32 = std::env::var("GYM_ARENA_X").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+        let fy: i32 = 72;
+        let fz: i32 = std::env::var("GYM_ARENA_Z").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+        let _ = rcon.command(&format!("forceload add {} {} {} {}", fx - 24, fz - 24, fx + 24, fz + 24)).await;
         // Clear the whole arena volume (prior trials' obsidian/portal/frame would leave
         // portal_built stale-true and clutter the cast site).
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", FX - 4, FY, FZ - 8, FX + 20, FY + 22, FZ + 8)).await;
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air replace minecraft:obsidian", FX - 4, FY - 3, FZ - 8, FX + 20, FY + 22, FZ + 8)).await;
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - 4, fy, fz - 8, fx + 20, fy + 22, fz + 8)).await;
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air replace minecraft:obsidian", fx - 4, fy - 3, fz - 8, fx + 20, fy + 22, fz + 8)).await;
         // 2-deep flat stone pad.
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", FX - 4, FY - 2, FZ - 8, FX + 20, FY - 1, FZ + 8)).await;
-        // FLUSH 11x11 lava lake at floor level (FY-1), EAST of the bot at (FX,FY,FZ) — the EXACT
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 4, fy - 2, fz - 8, fx + 20, fy - 1, fz + 8)).await;
+        // FLUSH 11x11 lava lake at floor level (fy-1), EAST of the bot at (fx,fy,fz) — the EXACT
         // arena isolation-test.sh's build_nether_portal uses, which reaches 10/10+lit reliably.
         // The bot stands 4 blocks west of the lake edge on solid stone; prepare_cast_site
         // approaches to "2 away" (stays on stone), scoops the edge, and anchors the frame there.
         // Earlier gym divergences broke this: a small 7-wide pool with a CENTRE POI made the bot
         // stand IN lava and die; a too-wide lake made the frame anchor over lava (POS FAIL).
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", FX + 4, FY - 1, FZ - 7, FX + 14, FY - 1, FZ + 7)).await;
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", fx + 4, fy - 1, fz - 7, fx + 14, fy - 1, fz + 7)).await;
         // Put the bot on the pad (RCON runs as console/op) and set its spawnpoint HERE, so a
         // mishap-death (lava tick) respawns it back in the arena instead of world spawn (where
         // there's no lava → "NO scoopable" for the rest of the trial). Matches isolation line 137.
-        let _ = rcon.command(&format!("tp {name} {FX} {FY} {FZ}")).await;
-        let _ = rcon.command(&format!("spawnpoint {name} {FX} {FY} {FZ}")).await;
-        pump_teleport(bot, FX, FZ).await;
+        let _ = rcon.command(&format!("tp {name} {fx} {fy} {fz}")).await;
+        let _ = rcon.command(&format!("spawnpoint {name} {fx} {fy} {fz}")).await;
+        pump_teleport(bot, fx, fz).await;
         bot.wait_ticks(10).await.ok();
         let p = bot.entity.position;
-        return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, FX, FZ);
+        return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
     }
     let p = bot.entity.position;
     (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, cx, cz)

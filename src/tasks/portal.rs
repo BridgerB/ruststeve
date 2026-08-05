@@ -181,6 +181,38 @@ async fn place_cobble(bot: &mut Bot<'_>, pos: (i32, i32, i32)) -> bool {
     false
 }
 
+/// Eat cooked food when hurt and safe. The portal build takes lava nicks the bot can't otherwise
+/// recover from — it has no other eat path, and natural regen only fires at foodLevel>=18, which a
+/// long build drains below. Eating keeps food topped up so regen stays active, turning a nick into
+/// a survivable event instead of a slow slide to death. Only eats when health is low AND no lava is
+/// adjacent (never mid-hazard). activate_item sets the server-side active item; the server ticks
+/// the use to completion, so a plain activate + wait finishes the meal.
+async fn eat_if_hurt(bot: &mut Bot<'_>) {
+    if bot.health >= 17.0 || raw_lava_near(bot, 3) {
+        return;
+    }
+    const FOODS: [&str; 6] = ["cooked_beef", "cooked_porkchop", "cooked_mutton", "cooked_chicken", "bread", "cooked_rabbit"];
+    let Some(food) = FOODS.iter().find(|f| count_items(bot, f) > 0) else {
+        return;
+    };
+    if !select_item(bot, food).await.unwrap_or(false) {
+        return;
+    }
+    let before = bot.health;
+    for _ in 0..4 {
+        if bot.health >= 18.0 {
+            break;
+        }
+        // Look flat/away so activate doesn't interact with a block face; then hold the use.
+        let p = bot.entity.position;
+        bot.look_at(vec3(p.x, p.y + 1.0, p.z + 3.0));
+        bot.wait_ticks(2).await.ok();
+        bot.activate_item().await.ok();
+        bot.wait_ticks(40).await.ok();
+    }
+    cast_debug(&format!("eat: health {before:.0}->{:.0}", bot.health));
+}
+
 /// Place a block at `pos`, building a foundation straight down when it floats in
 /// air with no neighbour to place against.
 async fn ensure_solid(bot: &mut Bot<'_>, pos: (i32, i32, i32), depth: i32) -> bool {
@@ -590,13 +622,19 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         // Build one: stand at a non-lava neighbour column and pillar up so our feet sit
         // one block above the source, then scoop down at a shallow angle.
         cast_debug(&format!("fill lava: no stand — pillaring to source {s:?} ({source_count} sources)"));
-        let (nx, nz) = dirs8
-            .iter()
-            .map(|(dx, dz)| (s.0 + dx, s.2 + dz))
-            .find(|&(nx, nz)| {
-                !is_lava(&name_at(bot, nx, s.1, nz)) && !is_lava(&name_at(bot, nx, s.1 - 1, nz))
-            })
-            .unwrap_or((s.0, s.2));
+        // Require a neighbour with a SOLID floor to stand ON (feet at s.1+1). The old
+        // `.unwrap_or((s.0, s.2))` fell back to the SOURCE's own column when every neighbour was
+        // lava — pillaring the bot directly onto the lava source (20→0 hp). If no safe neighbour
+        // exists (interior source, all-lava rim), refuse this fill rather than stand on lava; the
+        // caller retries / navigates to the remembered pool, and a rim source is used next.
+        let Some((nx, nz)) = dirs8.iter().map(|(dx, dz)| (s.0 + dx, s.2 + dz)).find(|&(nx, nz)| {
+            !is_lava(&name_at(bot, nx, s.1, nz))
+                && !is_lava(&name_at(bot, nx, s.1 - 1, nz))
+                && solid_at(bot, nx, s.1 - 1, nz)
+        }) else {
+            cast_debug(&format!("fill lava: no SAFE stand for {s:?} — refuse (won't pillar onto source)"));
+            return false;
+        };
         bot.movement.blocks_cant_break.clear();
         let _ = bot.goto_near(nx, s.1, nz, 2.0).await;
         pillar_up(bot, s.1 + 1).await;
@@ -663,6 +701,20 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         }
         for t in &targets {
             for dy in [0.6_f64, 0.2, 0.9] {
+                // FOOTING guard (health-independent, checked BEFORE every activate): never scoop
+                // while standing on lava. A receding rim / flowing-lava backfill can park the bot
+                // on a source; the health bail below only fires AFTER the nick lands (too late —
+                // 20→0 in ~1s). Bail the moment the block under our feet is lava, before damage.
+                {
+                    let p = bot.entity.position;
+                    let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
+                    if is_lava(&name_at(bot, fx, feet_y(bot) - 1, fz)) {
+                        cast_debug(&format!("fill {fluid}: FOOTING on lava at ({:.1},{:.1},{:.1}) — retreat, no scoop", p.x, p.y, p.z));
+                        pillar_up(bot, feet_y(bot) + 3).await;
+                        bot.set_control_state("sneak", false);
+                        return false;
+                    }
+                }
                 // Bail the INSTANT health drops — a receding-rim scoop can leave the bot standing
                 // on a lava column, cooking it 20→0 in ~1s, FASTER than the once-per-round guard
                 // above (that's how it died in-limbo at 8/10). Bail at <14 (only ~6 dmg taken) so
@@ -980,29 +1032,22 @@ async fn cast_obsidian_at(
             }
         }
         select_item(bot, "lava_bucket").await.ok();
-        // Pour lava by PLACING it on the cup FLOOR's top face — deterministic: a lava bucket
-        // used on a block face fills the adjacent cell, so place_block(floor, Top) lands lava
-        // EXACTLY in the cup cell `pos`, independent of yaw/x-drift. The old free-aim raycast
-        // missed ~half the time (after_lava cup_block=air) and spilled STRAY flowing lava around
-        // the frame — that stray lava is what killed the bot (it fell off a tall cast pillar into
-        // a stray pool, hp 20→0). Deterministic placement removes the miss → no stray → no death.
-        if solid_at(bot, pos.0, pos.1 - 1, pos.2) {
-            bot.look_at(vec3(pos.0 as f64 + 0.5, (pos.1 - 1) as f64 + 0.6, pos.2 as f64 + 0.5));
-            bot.wait_ticks(4).await.ok();
-            let _ = bot.place_block(pos.0, pos.1 - 1, pos.2, Face::Top).await;
-            bot.wait_ticks(8).await.ok();
-        }
-        // Fallback to the aim-based pour ONLY if placement didn't take (floor missing / blocked).
-        if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
-            let bx_aim = bot.entity.position.x;
-            let lava_aim = match _attempt {
-                0 => vec3(bx_aim, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5),
-                1 => vec3(bx_aim, pos.1 as f64 + 0.0, pos.2 as f64 + 0.4),
-                _ => vec3(bx_aim, pos.1 as f64 + 0.4, pos.2 as f64 + 0.6),
-            };
-            reliable_use(bot, lava_aim).await;
-            bot.wait_ticks(8).await.ok();
-        }
+        // Pour lava with a raycast (use_item / activate_item) — a bucket places its fluid via the
+        // server POV raycast, NOT use_item_on, so place_block on a face is a no-op for buckets.
+        // Aim STRAIGHT DOWN into the cup FLOOR's top-centre by default: the bot stands on the +Z
+        // wall above the cup, so a steep down-look drops lava through the opening onto the floor.
+        // But the geometry is finicky per block (cluttered neighbour walls, the +Z wall top can
+        // clip the ray) — some blocks miss a fixed aim every time. VARY the aim across the 5
+        // attempts so a stubborn block finds a shot that lands, instead of spilling stray lava 5x.
+        let lava_aim = match _attempt {
+            0 => vec3(pos.0 as f64 + 0.5, (pos.1 - 1) as f64 + 1.0, pos.2 as f64 + 0.5),
+            1 => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 + 0.5),
+            2 => vec3(pos.0 as f64 + 0.5, (pos.1 - 1) as f64 + 1.0, pos.2 as f64 + 0.35),
+            3 => vec3(pos.0 as f64 + 0.5, (pos.1 - 1) as f64 + 1.0, pos.2 as f64 + 0.7),
+            _ => vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.4),
+        };
+        reliable_use(bot, lava_aim).await;
+        bot.wait_ticks(8).await.ok();
         cast_debug(&format!("cast {pos:?} a{_attempt}: after_lava cup_block={}", name_at(bot, pos.0, pos.1, pos.2)));
         // If the lava missed the cup, this attempt is wasted AND the misplaced lava is
         // likely at the bot's own feet (the +Z wall top) — ESCAPE it (sprint-jump back
@@ -1042,6 +1087,25 @@ async fn cast_obsidian_at(
                     reliable_use(bot, vec3(l.0 as f64 + 0.5, l.1 as f64 + 0.5, l.2 as f64 + 0.5)).await;
                     if count_items(bot, "lava_bucket") > 0 {
                         break; // recovered a lava bucket; the rest will re-flow/settle
+                    }
+                }
+            }
+            // NEUTRALIZE any remaining stray lava around the cup + stand lane with COBBLE. The
+            // single empty bucket scoops only ONE source, but a stubborn miss can spawn several
+            // (and refill both buckets), leaving a spreading pool on the stone the bot later steps
+            // into and dies to. A block placed into a lava cell replaces it — no empty bucket
+            // needed — so cap the stray. Skip the cup cell/floor (they're not lava on a miss) and
+            // don't touch the lake (east, far from the frame). Cover the +Z stand/approach side.
+            // dx -2..=1 (not +2): never cobble the lava LAKE, which sits ~2 east of the right
+            // column — stray from a miss lands at the bot's feet and flows west/south onto the
+            // stone, so the west + stand side is the danger zone.
+            for dy in [0, 1, 2, 3] {
+                for dx in -2..=1 {
+                    for dz in -1..=4 {
+                        let l = (pos.0 + dx, pos.1 + dy, pos.2 + dz);
+                        if name_at(bot, l.0, l.1, l.2).contains("lava") {
+                            place_cobble(bot, l).await;
+                        }
                     }
                 }
             }
@@ -1704,6 +1768,9 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
             cast_debug(&format!("build: DIED at ({:.1},{:.1},{:.1}) with {done}/10 — bail to respawn", p.x, p.y, p.z));
             return failure("died during portal build");
         }
+        // Recover from lava nicks between blocks: if hurt and clear of lava, eat to restore health
+        // so the NEXT nick doesn't tip us into unrecoverable death (the bot has no other regen).
+        eat_if_hurt(bot).await;
         for &pos in &bottom {
             if !is_obsidian_at(bot, pos) && Instant::now() < frame_deadline {
                 cast_obsidian_at(bot, pos, by, lava_pool).await;
