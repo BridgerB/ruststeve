@@ -427,6 +427,18 @@ impl<'a> Bot<'a> {
                     .and_then(PValue::as_str)
                 {
                     self.game.dimension = dim.to_string();
+                    // Update world height for the NEW dimension so chunk parsing reads the right
+                    // number of 16-block sections. The overworld is 384 tall (24 sections); the
+                    // nether and end are 256 (16 sections). Without this, entering the nether kept
+                    // the overworld's 24-section count and the parser ran off the end of the
+                    // (shorter) nether chunk buffer → panic at chunk_section.rs (index == len).
+                    let (min_y, height) = if dim.contains("nether") || dim.contains("the_end") {
+                        (0, 256)
+                    } else {
+                        (-64, 384)
+                    };
+                    self.game.min_y = min_y;
+                    self.game.height = height;
                 }
                 return Ok(Some(BotEvent::Login));
             }

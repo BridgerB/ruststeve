@@ -255,9 +255,15 @@ async fn run_one_trial(
     // path walks straight to it (as it would in a real run after mining recorded exposed lava),
     // instead of a racy find_fluid scan that missed it and triggered a blind deep descent.
     if matches!(step.slug, "reach_lava" | "to_nether") {
+        // WEST EDGE of the lake (lake is gx+4..gx+14). This is a pure SAFETY NET: with the
+        // adjacent flush lake, prepare_cast_site's find_fluid finds it on the first scan and
+        // never consults memory (exactly like isolation, which seeds no POI). Only if that
+        // first scan races empty does the memory-first path use this — and it must point at the
+        // lake EDGE so the bot approaches from stone and anchors the frame at the edge, NOT
+        // mid-lake (a centre POI made the bot stand IN lava and die).
         memory.record(
             crate::memory::PoiKind::Lava,
-            (gx + 11, gy - 1, gz),
+            (gx + 4, gy - 1, gz),
             crate::memory::PoiStatus::Available,
         );
     }
@@ -282,6 +288,14 @@ async fn run_one_trial(
         if !s.alive {
             bot.respawn().await.ok();
             bot.wait_ticks(40).await.ok();
+            // Fixed-arena steps: a mid-build death respawns at WORLD SPAWN (no bed), stranding the
+            // bot thousands of blocks from the arena+lava so it can never recover — it burns the
+            // rest of the budget building futile frames on bare terrain. RCON-tp it back onto the
+            // arena pad so the retry has lava in reach.
+            if matches!(step.slug, "reach_lava" | "to_nether") {
+                let _ = rcon.command(&format!("tp {name} {gx} {gy} {gz}")).await;
+                pump_teleport(bot, gx, gz).await;
+            }
             continue;
         }
         if crate::survival::handle_survival(bot, memory).await {
@@ -419,10 +433,18 @@ async fn setup_trial(
         let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air replace minecraft:obsidian", FX - 4, FY - 3, FZ - 8, FX + 20, FY + 22, FZ + 8)).await;
         // 2-deep flat stone pad.
         let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", FX - 4, FY - 2, FZ - 8, FX + 20, FY - 1, FZ + 8)).await;
-        // Contained lava pool EAST of the frame footprint (frame anchors ~FX+1..FX+4, +X).
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", FX + 8, FY - 1, FZ - 3, FX + 14, FY - 1, FZ + 3)).await;
-        // Put the bot on the pad (RCON runs as console/op).
+        // FLUSH 11x11 lava lake at floor level (FY-1), EAST of the bot at (FX,FY,FZ) — the EXACT
+        // arena isolation-test.sh's build_nether_portal uses, which reaches 10/10+lit reliably.
+        // The bot stands 4 blocks west of the lake edge on solid stone; prepare_cast_site
+        // approaches to "2 away" (stays on stone), scoops the edge, and anchors the frame there.
+        // Earlier gym divergences broke this: a small 7-wide pool with a CENTRE POI made the bot
+        // stand IN lava and die; a too-wide lake made the frame anchor over lava (POS FAIL).
+        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", FX + 4, FY - 1, FZ - 7, FX + 14, FY - 1, FZ + 7)).await;
+        // Put the bot on the pad (RCON runs as console/op) and set its spawnpoint HERE, so a
+        // mishap-death (lava tick) respawns it back in the arena instead of world spawn (where
+        // there's no lava → "NO scoopable" for the rest of the trial). Matches isolation line 137.
         let _ = rcon.command(&format!("tp {name} {FX} {FY} {FZ}")).await;
+        let _ = rcon.command(&format!("spawnpoint {name} {FX} {FY} {FZ}")).await;
         pump_teleport(bot, FX, FZ).await;
         bot.wait_ticks(10).await.ok();
         let p = bot.entity.position;
