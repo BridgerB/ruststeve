@@ -8,6 +8,22 @@ Build and **perfect a gym** — each speedrun sub-task run in isolation across *
 
 **DONE when:** every gym slug (esp. the terrain-hard ones) sits at a high pass-rate across random terrain — including `reach_lava`, `cast_light_enter` (once added), and the `to_nether` capstone (`pass = dimension == minecraft:the_nether`) — AND a chained `race.sh` run logs `entered the nether` for a raw `rust-race-*` bot. Target each slug **≥ ~90%** before moving on.
 
+## 🎉 RESOLVED — bot builds a portal and reaches the Nether (2026-08-04)
+
+`to_nether` PASSES cleanly: gym pass=1 (`in_nether()` true), portal lit, **0 chunk panics**, 0 build-deaths on the passing run (903s < 1500s budget). The whole chain runs: find lava → cast 10/10 obsidian → light → walk through → `the_nether`. Committed as `e8366fb`.
+
+The blocker was never a single bug — it was a stack, each hiding the next. Fixes, in the order they were peeled back:
+
+1. **Frame anchored INTO the lava** (`bx=px+1` east) → forced a cobble platform over the pool → the bot took lava damage laying it, "retreated up", and the re-captured anchor jumped ~5 blocks high with the pool out of re-scoop reach. → Anchor on the bot's **solid side away from the lava** (`bx = lava.0>px ? px-4 : px+1`; `fill_bucket` walks ≤24 blocks to the source so re-scoops still work) + **lock the anchor height** to the scoop level (`by = stand.1`).
+2. **Both fluid pours were free-aim raycasts** that missed ~half the time → stray lava pooled around the frame and the bot fell in and **died**. → **Deterministic `place_block` on a face**: lava on the cup floor's top, water on the bowl's -Z wall — lands exactly in the target cell.
+3. **Top-row-first** put lava cups up high → the bot couldn't descend past its own cup lava (`DESC LAVA-STOP` spin). → Cast **bottom-up**.
+4. **Portal wouldn't light**: the 2×3 interior wasn't pure air (`build_inner_fill` scaffold + water from the bottom-row cup bowls, which land IN the interior; `dig_at` removes solids but not water). → **Robust interior clear**: scoop water + dig scaffold, reposition per cell, retry until all air.
+5. **Re-scoop over a depleted lake rim** stood the bot on lava (20→0 hp faster than the per-round guard). → **Early bail** the instant health drops in the scoop loop + **wider gym lake**.
+6. **Entering the Nether crashed the bot**: the respawn packet updated `game.dimension` but not `min_y`/`height`, so the chunk parser kept the overworld's 24-section count and overran the shorter nether chunk buffer (`chunk_section.rs:101`, index==len). → Set height per dimension on respawn: **nether/end → (0, 256)**, else (-64, 384).
+7. Plus: **fail-fast on death** (don't spin the budget in dead-limbo), and **respawn→arena re-tp** in the gym (a mid-build death otherwise stranded the bot at world spawn).
+
+**Known caveat / next focus:** the frame build is not yet 100% reliable — it still takes an occasional lava death mid-build (roughly half of runs), and the top-row cast is slow (~15 min). The respawn re-tp lets a death retry, but reliability + speed of the cast are the remaining work before this is race-ready.
+
 ## to_nether — cast completing (2026-08-04)
 
 After the enter fix + bigger pool, to_nether SCOOPS repeatedly + casts obsidian — but stalled at 3/10 on 'pillar1 FAIL' (couldn't pillar up to the upper frame row): the platform builder + cast cups + pillars EXHAUSTED the 64-cobble prereq. FIX 7c15a42: 200 cobble for reach_lava/to_nether. Now should cast all 10 → light → enter → PASS. Running to_nether x5.
