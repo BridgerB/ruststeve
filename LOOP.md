@@ -8,6 +8,15 @@ Build and **perfect a gym** — each speedrun sub-task run in isolation across *
 
 **DONE when:** every gym slug (esp. the terrain-hard ones) sits at a high pass-rate across random terrain — including `reach_lava`, `cast_light_enter` (once added), and the `to_nether` capstone (`pass = dimension == minecraft:the_nether`) — AND a chained `race.sh` run logs `entered the nether` for a raw `rust-race-*` bot. Target each slug **≥ ~90%** before moving on.
 
+## 🔧 Build reliability hardened 33% → ~71% (2026-08-04)
+
+After the chain first reached the Nether, the frame build was only ~50% reliable — an occasional lava death mid-build. A multi-agent idea sprint (4 angles: stray-lava, re-scoop safety, speed/fall, defense-in-depth) + a measured loop drove it up. Committed as `fab10bd`. Measured across **parallel-arena** gym runs (a `GYM_ARENA_X/Z` env lets several bots run in separate arenas — otherwise a 15-min-per-trial pass-rate loop is untenable):
+
+- **Round 1 → 1/3 (33%):** footing guard (never scoop while standing on lava) + refuse-scoop-on-source (the `.unwrap_or((s.0,s.2))` pillared the bot onto the lava source) + `eat_if_hurt` (the bot had no regen path, so a lava nick trended to death — now eats cooked_beef between blocks, observed 6→20) + straight-down lava aim. Big finding: **`place_block` with a bucket is a no-op** (buckets pour via the `use_item` POV raycast), so the aim pour was always the real pour.
+- **Round 2 → 5/7 (~71%):** **varied pour aim** across the 5 attempts (a single fixed aim misses some blocks *every* time — cluttered neighbour walls deflect the ray — so 5 aim vectors let a stubborn block find a landing shot) + **cobble-neutralize stray lava** after a miss (the one empty bucket can only scoop one source; a block placed into a lava cell replaces it, no bucket needed, so a miss can't leave a fatal pool).
+
+**Residual (next focus):** ~1 bot in 3 still dies via ratchet-too-high (cast pillar creeps up to y89) or re-scoop-into-lake. The root fixes are agent C's stable 2-wide top-row stand platform and constraining `fill_bucket` to scoop only from the lake's west edge. Plus a separate parser bug: `chunk_section`/`palette_container` overruns on some world-spawn chunks (guarded the section read; palette read still needs a fix).
+
 ## 🎉 RESOLVED — bot builds a portal and reaches the Nether (2026-08-04)
 
 `to_nether` PASSES cleanly: gym pass=1 (`in_nether()` true), portal lit, **0 chunk panics**, 0 build-deaths on the passing run (903s < 1500s budget). The whole chain runs: find lava → cast 10/10 obsidian → light → walk through → `the_nether`. Committed as `e8366fb`.
