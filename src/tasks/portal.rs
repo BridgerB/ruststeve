@@ -110,13 +110,23 @@ fn feet_y(bot: &Bot) -> i32 {
     bot.entity.position.y.floor() as i32
 }
 
-/// The cheap throwaway block we scaffold/mould with (cobble preferred, then dirt).
+/// The cheap throwaway block we scaffold/mould with. cobbled_deepslate counts: the
+/// cast happens at lava depth (y≈-50) where mined stone is DEEPSLATE → cobbled_deepslate,
+/// not cobblestone. Ignoring it stranded portal-ready bots looping "need ~30 cobble"
+/// with a full stack of deepslate cobble the step gate (which counts both) let through.
 fn build_block(bot: &Bot) -> &'static str {
     if count_items(bot, "cobblestone") > 0 {
         "cobblestone"
+    } else if count_items(bot, "cobbled_deepslate") > 0 {
+        "cobbled_deepslate"
     } else {
         "dirt"
     }
+}
+
+/// Total throwaway scaffold blocks on hand (cobble of either kind + dirt).
+fn scaffold_count(bot: &Bot) -> i32 {
+    count_items(bot, "cobblestone") + count_items(bot, "cobbled_deepslate") + count_items(bot, "dirt")
 }
 
 /// The face on the reference block `ref = pos + d` that points back toward `pos`
@@ -188,10 +198,24 @@ async fn place_cobble(bot: &mut Bot<'_>, pos: (i32, i32, i32)) -> bool {
 /// adjacent (never mid-hazard). activate_item sets the server-side active item; the server ticks
 /// the use to completion, so a plain activate + wait finishes the meal.
 async fn eat_if_hurt(bot: &mut Bot<'_>) {
-    if bot.health >= 17.0 || raw_lava_near(bot, 3) {
+    if bot.health >= 17.0 {
         return;
     }
-    const FOODS: [&str; 6] = ["cooked_beef", "cooked_porkchop", "cooked_mutton", "cooked_chicken", "bread", "cooked_rabbit"];
+    // Normally don't stop to eat next to lava (mid-hazard). BUT the whole cast happens
+    // within 3 of lava, so the old blanket `raw_lava_near` guard meant the bot NEVER ate
+    // during the cast → hunger drained → natural regen (foodLevel>=18) switched off → a
+    // lava nick that regen would have shrugged off instead slid to 0 (the reproduce stalled
+    // at 9/10 stuck "health 0->0"). So near lava, still eat when CRITICALLY low to keep
+    // regen alive; only skip the near-lava eat at moderate health.
+    if raw_lava_near(bot, 3) && bot.health >= 10.0 {
+        return;
+    }
+    // Prefer cooked, but a RACE bot doesn't cook mid-build — accept raw meat too (raw still
+    // tops up hunger enough for natural regen). Ordered cooked-first so it eats the better food.
+    const FOODS: [&str; 12] = [
+        "cooked_beef", "cooked_porkchop", "cooked_mutton", "cooked_chicken", "cooked_rabbit", "bread",
+        "beef", "porkchop", "mutton", "chicken", "rabbit", "cooked_cod",
+    ];
     let Some(food) = FOODS.iter().find(|f| count_items(bot, f) > 0) else {
         return;
     };
@@ -665,9 +689,30 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
         // die: pillar a few blocks up, then abort this fill so the step retries alive.
         if bot.health < 8.0 {
             let p = bot.entity.position;
-            cast_debug(&format!("fill lava: ABORT low health={:.0} at ({:.1},{:.1},{:.1}) below={} — retreating up", bot.health, p.x, p.y, p.z, name_at(bot, p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32)));
-            pillar_up(bot, feet_y(bot) + 4).await;
+            cast_debug(&format!("fill lava: ABORT low health={:.0} at ({:.1},{:.1},{:.1}) below={} — retreat + heal", bot.health, p.x, p.y, p.z, name_at(bot, p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32)));
+            // Retreat CLEAR of the lava, then HEAL before returning. The old code just pillared
+            // 4 up and returned, so the step re-dived at ~0 hp and burned again — casting 0
+            // obsidian across dozens of retries (the bot ate 18x but FIRE, not hunger, was the
+            // killer: it keeps burning on solid ground after a lava nick, and eat_if_hurt won't
+            // even eat within 3 of lava). Pillar clear so the fire burns out (a few seconds off
+            // the lava) and eating is allowed, then top health back up so the NEXT cast approach
+            // starts survivable instead of at death's door.
+            pillar_up(bot, feet_y(bot) + 6).await;
             bot.set_control_state("sneak", false);
+            for &(dx, dz) in &[(1, 0), (0, 1), (-1, 0), (0, -1)] {
+                if !raw_lava_near(bot, 3) {
+                    break;
+                }
+                let q = bot.entity.position;
+                let _ = bot.goto_xz(q.x.floor() as i32 + dx * 4, q.z.floor() as i32 + dz * 4, 2.0).await;
+            }
+            for _ in 0..8 {
+                if bot.health >= 16.0 {
+                    break;
+                }
+                eat_if_hurt(bot).await;
+                bot.wait_ticks(20).await.ok();
+            }
             return false;
         }
         let _ = bot.goto_near(stand.0 as i32, stand.1 as i32, stand.2 as i32, 1.0).await;
@@ -721,9 +766,28 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
                 // it retreats ALIVE with the kit; the caller re-scoops from a fresh, safer approach.
                 if bot.health < 14.0 {
                     let p = bot.entity.position;
-                    cast_debug(&format!("fill lava: EARLY BAIL hp={:.0} at ({:.1},{:.1},{:.1}) below={} — retreat", bot.health, p.x, p.y, p.z, name_at(bot, p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32)));
-                    pillar_up(bot, feet_y(bot) + 3).await;
+                    cast_debug(&format!("fill lava: EARLY BAIL hp={:.0} at ({:.1},{:.1},{:.1}) below={} — retreat + heal", bot.health, p.x, p.y, p.z, name_at(bot, p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32)));
+                    // Retreat CLEAR of the lava + HEAL, not just pillar 3 and return: the old
+                    // code re-approached still hurt (and often still on fire) → took more damage
+                    // → bailed again, never recovering (0/10 across attempts). Get off the lava
+                    // column so fire burns out and eating is allowed, then top health back up so
+                    // the next scoop/cast starts survivable. Same recovery as the <8 abort.
+                    pillar_up(bot, feet_y(bot) + 6).await;
                     bot.set_control_state("sneak", false);
+                    for &(dx, dz) in &[(1, 0), (0, 1), (-1, 0), (0, -1)] {
+                        if !raw_lava_near(bot, 3) {
+                            break;
+                        }
+                        let q = bot.entity.position;
+                        let _ = bot.goto_xz(q.x.floor() as i32 + dx * 4, q.z.floor() as i32 + dz * 4, 2.0).await;
+                    }
+                    for _ in 0..8 {
+                        if bot.health >= 16.0 {
+                            break;
+                        }
+                        eat_if_hurt(bot).await;
+                        bot.wait_ticks(20).await.ok();
+                    }
                     return false;
                 }
                 let was_lava = is_lava(&name_at(bot, t.0, t.1, t.2));
@@ -793,6 +857,16 @@ async fn cast_obsidian_at(
             if count_items(bot, "water_bucket") >= before {
                 break; // didn't pour (no aim/space) — avoid an infinite loop
             }
+        }
+        // Descend to BASE level before refilling lava. On an upper/top-row block the bot ENTERs
+        // high (up on the previous block's pour-pillar); refilling from there drives fill_bucket
+        // DOWN into the lava sea to reach the only source (at base level) and it burns to death —
+        // the deep-sea 9/10 wall: casting the top row it logged "FOOTING on lava"/"below=lava" and
+        // died at y64 in the sea. Get to base FIRST so the scoop is from a safe stand beside the
+        // sea; step 2 then pillars up WITH the lava bucket to cast. (On solid ground base==lava
+        // level so this is a no-op; it only matters over an open sea where the frame rises above.)
+        if count_items(bot, "lava_bucket") < 1 && feet_y(bot) > base_y {
+            descend_to_y(bot, base_y).await;
         }
         // 1. Refill lava. Scoop the NEAREST lava FIRST: the frame anchors ~4 blocks off the
         //    pool's edge, so the edge is right here — this keeps the bot AT the frame. Only
@@ -1057,14 +1131,19 @@ async fn cast_obsidian_at(
         // the stray source refills it to lava, ready for the next attempt.
         if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
             bot.set_control_state("sneak", false);
-            bot.look_at(vec3(pos.0 as f64 + 0.5, pos.1 as f64, stand_z as f64 + 4.0));
-            bot.set_control_state("forward", true);
-            bot.set_control_state("sprint", true);
-            bot.set_control_state("jump", true);
-            for _ in 0..12 {
-                bot.drive_tick().await.ok();
+            // Escape the misplaced lava but STAY ON THE PLATFORM. The old sprint-jump SOUTH
+            // (stand_z+4) overshot the 8x5 cast platform (only bz-2..bz+2) straight into the
+            // open lava sea and caught fire — THE reason deep-sea casts stalled ~1-3/10 while
+            // solid-ground (where south is solid) reached 10/10. Instead retreat WEST across the
+            // platform's wide side (bx-2..bx+5) one VERIFIED-solid step at a time, so we move off
+            // the misplaced-lava cup without ever stepping into the sea.
+            for back in 1..=3 {
+                let tx = pos.0 - back;
+                if !solid_at(bot, tx, pos.1 - 1, stand_z) {
+                    break; // platform edge — don't step into lava
+                }
+                let _ = bot.goto_near(tx, pos.1, stand_z, 0.6).await;
             }
-            bot.clear_control_states();
             // Scoop every stray lava source around the cup top (not the pool) so the next
             // attempt starts from a clean, un-flooded site.
             bot.wait_ticks(20).await.ok();
@@ -1351,6 +1430,15 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             bot.movement.blocks_cant_break.clear();
             let _ = bot.goto_near(poi.pos.0, poi.pos.1, poi.pos.2, 3.0).await;
             lava = find_fluid(bot, "lava", 16).filter(|_| source_lava_near(bot, 12));
+            // Dry on arrival — a single exposed block since covered, or no scoopable source
+            // at the recorded spot. Retire it (Gone) so the next attempt doesn't re-chase the
+            // SAME dead coord: without this the bot loops navigating to one stale POI forever
+            // (observed 4x on 888,-16,400) instead of falling through to the deep-descent that
+            // reliably reaches a real lake. `observe` preserves Gone, so it won't resurrect.
+            if lava.is_none() {
+                cast_debug(&format!("prepare: remembered lava {:?} dry on arrival → Gone", poi.pos));
+                mem.mark(poi.pos, PoiStatus::Gone);
+            }
         }
     }
     if lava.is_none() {
@@ -1413,6 +1501,29 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     descended = true;
                     how = "cavern";
                 }
+                // SAFE MANUAL PUNCH-DOWN. On real terrain the target lava sits at y8-16 under
+                // dozens of blocks of solid stone with no cave. dig_down's long-range lava
+                // avoidance then refuses to dig even PLAIN STONE (it senses the buried lava far
+                // below), wedging the bot in a dead zone — too far above the lava for the
+                // "break to scoop" escape (needs lava within 6), too close for dig_down — so it
+                // relocated in 2-block hops forever at y48 ("below=stone below2=stone" x12+).
+                // When the two blocks directly below are SOLID and NON-lava and no lava is
+                // within 3, punching straight down one block is plainly safe. Re-checked every
+                // iteration, so the instant lava comes within 3 this stops and the scoop escape
+                // fires. dig_at itself no-ops on lava, a further guard against diving in.
+                if !descended
+                    && is_solid(&below)
+                    && !is_lava(&below)
+                    && !is_lava(&below2)
+                    && !raw_lava_near(bot, 3)
+                {
+                    dig_at(bot, px, fy - 1, pz).await;
+                    bot.wait_ticks(4).await.ok(); // let the bot drop into the hole
+                    if feet_y(bot) < fy {
+                        descended = true;
+                        how = "manual";
+                    }
+                }
                 if descended {
                     desc_fail = 0;
                     cast_debug(&format!("desc y={fy}->{} via {how} (below={below})", feet_y(bot)));
@@ -1435,12 +1546,19 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 } else {
                     desc_fail += 1;
                     let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
-                    // SHORT relocate hops: over cave-riddled deepslate dig_down deterministically
-                    // refuses (fall-avoidance) at many cells, so relocates are frequent — a big
-                    // 6..38-block hop each time walked 10-40s and burned the budget (to_nether:
-                    // 237 relocates → only reached y-12). A 2-block hop still finds a diggable
-                    // neighbouring cell but costs a fraction of the walk.
-                    let dist = 2 + (desc_fail.min(4) as i32);
+                    // Hop size depends on WHAT wedged us. Over cave-riddled deepslate (solid
+                    // below) dig_down refuses at many cells, so a SHORT 2-6 hop finds a diggable
+                    // neighbour cheaply (a big hop burned the budget: 237 relocates → only y-12).
+                    // But over a WATER BODY / open gap (below is air or water) a 2-6 hop never
+                    // leaves the water — the bot wedged forever at y49 "below=air below2=water",
+                    // relocating in place on a cave lake it couldn't dig through or walk off. There,
+                    // walk FAR to reach diggable land, escalating like the ore range-relocate.
+                    let over_liquid = is_air(&below) || below.contains("water") || below2.contains("water");
+                    let dist = if over_liquid {
+                        12 + (desc_fail.min(8) as i32) * 6 // 12 → up to ~60 blocks, off the water
+                    } else {
+                        2 + (desc_fail.min(4) as i32) // deepslate cave: a nearby diggable cell
+                    };
                     let p = bot.entity.position;
                     cast_debug(&format!("desc y={fy} STUCK below={below} below2={below2} → relocate#{desc_fail} ({dx},{dz})x{dist}"));
                     let _ = bot
@@ -1505,6 +1623,18 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 cast_debug(&format!("prepare: ABORT descent low health={:.0} — climbing out", bot.health));
                 climb_out_of_pit(bot).await;
                 return None;
+            }
+            // STOP the instant lava is directly below the feet — that IS the flush scoop
+            // level (feet one above the lava surface). Descending further submerges the bot:
+            // it died at y-57 over a y-55 surface (2 blocks INTO the lava). dig_down refuses
+            // lava, but descend_step / a multi-block fall can still drop the feet into the
+            // column, so guard here regardless of which primitive moved us.
+            {
+                let fy = feet_y(bot);
+                let (fx, fz) = (bot.entity.position.x.floor() as i32, bot.entity.position.z.floor() as i32);
+                if is_lava(&name_at(bot, fx, fy - 1, fz)) || is_lava(&name_at(bot, fx, fy, fz)) {
+                    break;
+                }
             }
             ensure_pickaxe(bot).await;
             bot.movement.blocks_cant_break.clear();
@@ -1699,7 +1829,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     if bot.find_blocks("obsidian", 8, 12).len() >= 10 {
         // fall through to lighting if not lit
     } else {
-        if count_items(bot, "cobblestone") + count_items(bot, "dirt") < 30 {
+        if scaffold_count(bot) < 30 {
             return failure("need ~30 cobble/dirt to scaffold the cast");
         }
         lava_pool = prepare_cast_site(bot, mem).await;
@@ -1758,6 +1888,41 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     let mut upper: Vec<(i32, i32, i32)> = frame.iter().copied().filter(|p| p.1 > by).collect();
     upper.sort_by_key(|p| p.1); // lowest y first (columns bottom-up), top row last
     let mut inner_filled = false;
+    // HEAL TO FULL before the 10-block cast. A deep-sea gym reproduce cast obsidian cleanly at
+    // hp=20 (0 deaths) — the cast WORKS at full health. But a RACE bot arrives here DAMAGED from
+    // the ~100-block descent to the lava sea and burns to 0 mid-cast (ABORT health=0 after eating
+    // 18x). Start the cast from full health so it has the headroom. eat_if_hurt skips near lava,
+    // but the platform IS near lava, so eat DIRECTLY — the bot is on solid cobble (won't fall in)
+    // and food only tops hunger, so a short regen wait after each meal climbs health. Bounded.
+    {
+        const FOODS: [&str; 9] = [
+            "cooked_beef", "cooked_porkchop", "cooked_mutton", "cooked_chicken", "cooked_rabbit",
+            "bread", "beef", "porkchop", "mutton",
+        ];
+        for _ in 0..12 {
+            if bot.health >= 18.0 || Instant::now() > frame_deadline {
+                break;
+            }
+            let Some(food) = FOODS.iter().find(|f| count_items(bot, f) > 0) else {
+                break; // no food — nothing to do
+            };
+            if !select_item(bot, food).await.unwrap_or(false) {
+                break;
+            }
+            let p = bot.entity.position;
+            bot.look_at(vec3(p.x, p.y + 1.0, p.z + 3.0));
+            bot.wait_ticks(2).await.ok();
+            bot.activate_item().await.ok();
+            bot.wait_ticks(30).await.ok(); // let natural regen (foodLevel>=18) tick health up
+        }
+        cast_debug(&format!("cast: pre-frame heal → hp={:.0}", bot.health));
+    }
+    // Track obsidian progress across passes so a wedged cast site can't busy-spin: when the
+    // stand spot is unreachable/obstructed, cast_obsidian_at fails INSTANTLY (its goto/walk/
+    // descend calls no-op), so this while would loop ~400x/sec placing nothing and fill the
+    // log until the deadline. See the no-progress guard at the end of the loop body.
+    let mut last_done = 0usize;
+    let mut stalled_passes = 0u32;
     while frame.iter().filter(|p| is_obsidian_at(bot, **p)).count() < 10 && Instant::now() < frame_deadline {
         // Fail-fast on death: if the bot fell in lava and died, health sticks at 0 (dead-limbo,
         // no regen) and every fill_bucket aborts — spinning the whole 900s budget for nothing.
@@ -1773,7 +1938,8 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         eat_if_hurt(bot).await;
         for &pos in &bottom {
             if !is_obsidian_at(bot, pos) && Instant::now() < frame_deadline {
-                cast_obsidian_at(bot, pos, by, lava_pool).await;
+                eat_if_hurt(bot).await; // heal before EACH block, not once per pass — fire
+                cast_obsidian_at(bot, pos, by, lava_pool).await; // accumulates across the 10 casts
             }
         }
         if !inner_filled && bottom.iter().all(|&p| is_obsidian_at(bot, p)) {
@@ -1783,6 +1949,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         if inner_filled {
             for &pos in &upper {
                 if !is_obsidian_at(bot, pos) && Instant::now() < frame_deadline {
+                    eat_if_hurt(bot).await; // per-block heal (see bottom loop)
                     cast_obsidian_at(bot, pos, by, lava_pool).await;
                 }
             }
@@ -1790,6 +1957,32 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         let done = frame.iter().filter(|p| is_obsidian_at(bot, **p)).count();
         mem.log("cast", "frame_pass", &format!("{done}/10 obsidian"));
         cast_debug(&format!("frame pass: {done}/10 obsidian"));
+        // No-progress guard: a pass that placed no new obsidian means the site is wedged
+        // (unreachable stand spot). Yield a beat so we can't busy-spin, and after several
+        // dead passes bail with failure so the step machine respawns/re-sites the cast
+        // instead of burning the whole portal budget spinning on one bad spot.
+        if done <= last_done {
+            stalled_passes += 1;
+            bot.wait_ticks(10).await.ok();
+            if stalled_passes >= 6 {
+                cast_debug(&format!("cast: STALLED {done}/10 for {stalled_passes} passes — retire lava + bail to re-site"));
+                // The lava this site used is unsuitable for a cast — e.g. a high surface
+                // lavafall/lake (remembered lava at y80, but the bot stands/casts at y74-75,
+                // BELOW the lava surface): the frame ends up submerged, so poured lava merges
+                // into the open lake instead of forming a contained cup → 0/10 forever, and
+                // prepare kept re-selecting the SAME bad pool → same submerged anchor. Retire
+                // it (Gone) so the next prepare picks DIFFERENT lava — typically the deep
+                // lakes (y≈-54) that the GYM_DEEPSEA fixes cast reliably. observe won't
+                // resurrect Gone, so this bad surface pool stays retired.
+                if let Some(lp) = lava_pool {
+                    mem.mark(lp, PoiStatus::Gone);
+                }
+                return failure(format!("cast stalled at {done}/10 obsidian"));
+            }
+        } else {
+            stalled_passes = 0;
+            last_done = done;
+        }
     }
 
     // Open the 2x3 interior + the +Z approach — it MUST be pure air or the portal won't light.

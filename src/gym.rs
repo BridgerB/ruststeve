@@ -435,6 +435,23 @@ async fn setup_trial(
         // portal_built stale-true and clutter the cast site).
         let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - 4, fy, fz - 8, fx + 20, fy + 22, fz + 8)).await;
         let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air replace minecraft:obsidian", fx - 4, fy - 3, fz - 8, fx + 20, fy + 22, fz + 8)).await;
+        // DEEP-SEA VARIANT (GYM_DEEPSEA=1): reproduce the RACE's cast-over-lava fire so a fix
+        // can be VALIDATED. The default flat-pad seed below is solid ground beside a contained
+        // lake (→ 9-10/10, and the frame anchors AWAY from lava so it never platforms over it),
+        // which is why the gym passes while the race gets ~1/10. Here a deep lava sea (fy-1..fy-5)
+        // fills the arena with only a small 3x3 solid spawn island; the 4-wide frame footprint
+        // extends OVER the lava, forcing the bot to platform over it and take fire — exactly the
+        // real deep sea. If a fix makes to_nether pass HERE, it should fix the race.
+        if std::env::var("GYM_DEEPSEA").is_ok() {
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", fx - 7, fy - 5, fz - 7, fx + 15, fy - 1, fz + 7)).await;
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 1, fy - 2, fz - 1, fx + 1, fy - 1, fz + 1)).await;
+            let _ = rcon.command(&format!("tp {name} {fx} {fy} {fz}")).await;
+            let _ = rcon.command(&format!("spawnpoint {name} {fx} {fy} {fz}")).await;
+            pump_teleport(bot, fx, fz).await;
+            bot.wait_ticks(10).await.ok();
+            let p = bot.entity.position;
+            return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
+        }
         // 2-deep flat stone pad.
         let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 4, fy - 2, fz - 8, fx + 20, fy - 1, fz + 8)).await;
         // FLUSH 11x11 lava lake at floor level (fy-1), EAST of the bot at (fx,fy,fz) — the EXACT

@@ -35,6 +35,7 @@ pub mod app;
 pub mod bot_utils;
 pub mod gym;
 pub mod memory;
+pub mod sniff;
 pub mod state;
 pub mod steps;
 pub mod survival;

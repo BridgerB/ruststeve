@@ -12,8 +12,8 @@ MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/data
-N=3
-RACE_SECONDS=10800
+N=1
+RACE_SECONDS=21600
 HOLD=45
 
 # Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
@@ -117,7 +117,11 @@ for i in $(seq 0 $((N-1))); do
   # teleport into the lane, set the per-player spawnpoint there (so a death
   # respawns into the lane), and CLEAR the inventory so every bot starts the
   # race from scratch (race-NN players keep items between runs otherwise).
-  TP+=" \"tp ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"clear ${NAMES[i]}\""
+  # NO clear: a fresh launch after a timeout should RESUME the bot's server-side
+  # inventory (keep_inventory), not wipe hours of progress back to wood. Set
+  # RACE_CLEAR=1 to force a truly-fresh-from-wood start.
+  CLEARCMD=""; [ "${RACE_CLEAR:-0}" = "1" ] && CLEARCMD=" \"clear ${NAMES[i]}\""
+  TP+=" \"tp ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\"$CLEARCMD"
 done
 $SSH "$MCRCON $TP" >/dev/null 2>&1; sleep 2
 $SSH "$MCRCON $TP" >/dev/null 2>&1

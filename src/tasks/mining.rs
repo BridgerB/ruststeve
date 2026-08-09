@@ -282,8 +282,13 @@ pub(crate) async fn descend_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
 /// stone since blocks_cant_break is cleared. Returns whether it advanced.
 pub(crate) async fn strip_tunnel(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
     let p = bot.entity.position;
+    let cy = p.y.floor() as i32;
     let (tx, tz) = (p.x.floor() as i32 + dx * 6, p.z.floor() as i32 + dz * 6);
-    bot.goto_xz(tx, tz, 1.0).await.unwrap_or(false)
+    // Target the CURRENT y (a LEVEL corridor), not a free-y goto — goto_xz dives into any cave on
+    // the way and SINKS the bot below the ore band (the iron search fell to y-9..-34 in the
+    // iron-empty deepslate and thrashed there, climbing out and re-sinking dozens of times). A
+    // y-pinned goto keeps the tunnel horizontal so it exposes ore in the walls without descending.
+    bot.goto_near(tx, cy, tz, 1.0).await.unwrap_or(false)
 }
 
 /// Classify an ore block name into a memory kind + the pickaxe tier it needs.
@@ -401,6 +406,14 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
     // relocate to fresh ground instead of bailing the whole step on the first wedge —
     // only give up after several relocations gain nothing.
     let mut wedge_relocates = 0u32;
+    // Iterations since the ore count last INCREASED, and how many long-range jumps we've made.
+    // The at-depth box-spiral strip search (S→E→N→W, 4 legs) has ~zero NET displacement — it
+    // re-explores the same ~24-block box and, once the local ore is mined out, tunnels forever
+    // finding nothing (race bots stalled 30+ min at 9/12 iron, oscillating y11↔y-45). When no
+    // new ore turns up for a while, JUMP far to fresh terrain instead of re-combing the box.
+    let mut gain_iters = 0u32;
+    let mut range_relocates = 0u32;
+    let mut best_count = count_ore_resource(bot, ore);
     let mut last_count = count_ore_resource(bot, ore);
     let mut last_pos = {
         let p = bot.entity.position;
@@ -421,6 +434,28 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         }
         last_count = now_count;
         last_pos = now_pos;
+        if now_count > best_count {
+            best_count = now_count;
+            gain_iters = 0;
+        } else {
+            gain_iters += 1;
+        }
+        // OVERSHOOT RECOVERY (iron especially): iron is dense y0..32 and VANISHES in the
+        // deepslate void below y0. Two things sink the bot down there — chasing a remembered
+        // ore POI that sits ABOVE it (mine_vein can't climb back up, gains 0, marks it
+        // unreachable, dry_veins descends further) and cave-drops while strip-tunnelling — and
+        // once below the ore it descends FOREVER chasing unreachable-above sightings (race bots
+        // stalled at y-30 with 0-2 iron). Climb back out of the void so the descent restarts in
+        // the productive band and mine_vein can reach the seen ore by digging DOWN to it again.
+        if ore == "iron" && (bot.entity.position.y as i32) < 0 {
+            let cur_y = bot.entity.position.y as i32;
+            mem.log("mine_ore", "overshoot", &format!("y={cur_y} — climbing out of the iron-empty deepslate void"));
+            println!("    ore: overshot to y={cur_y} (no iron in the deepslate void) — climbing back to the iron band");
+            crate::tasks::portal::climb_out_of_pit(bot).await;
+            desc_fail = 0;
+            dry_veins = 0;
+            continue;
+        }
         if stuck > 30 {
             // Wedged — can't tunnel or descend from here (a liquid pocket, a dead-end, or
             // deepslate the strip-tunnel keeps refusing). Don't fail the whole step: RELOCATE
@@ -550,6 +585,23 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
             // tunnel, so a single direction misses iron a few blocks to the side — the
             // race's iron bottleneck (race-0 stalled 55min at 0 iron tunneling south).
             // Four radiating corridors expose ~4× the terrain and find iron far faster.
+            // No new ore for many iterations → the local box is mined out. The box-spiral's
+            // net displacement is ~0, so it never leaves on its own — JUMP far to fresh
+            // terrain (further each jump, rotating heading). Landing on the surface makes the
+            // next iter's descent branch re-dig down to the iron band at the new location.
+            if gain_iters > 24 {
+                range_relocates += 1;
+                let (rdx, rdz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(range_relocates as usize) % 4];
+                let dist = 48 + range_relocates.min(6) as i32 * 24; // 48 → up to ~192 blocks
+                let p = bot.entity.position;
+                let (tx, tz) = (p.x.floor() as i32 + rdx * dist, p.z.floor() as i32 + rdz * dist);
+                mem.log("mine_ore", "range", &format!("no gain {gain_iters} iters — jump#{range_relocates} to {tx},{tz}"));
+                println!("    ore: local {ore} mined out — ranging to fresh terrain #{range_relocates} ({tx},{tz})");
+                bot.movement.blocks_cant_break.clear();
+                let _ = bot.goto_xz(tx, tz, 4.0).await;
+                gain_iters = 0;
+                continue;
+            }
             const TDIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
             let (dx, dz) = TDIRS[((iters / 4) % 4) as usize];
             let moved = strip_tunnel(bot, dx, dz).await;

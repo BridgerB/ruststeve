@@ -145,6 +145,14 @@ pub fn read_palette_container(
     config: PaletteConfig,
     no_array_length: bool,
 ) -> (PaletteContainer, usize) {
+    // Truncated / over-consumed buffer: some world chunks parse short (an earlier section
+    // read consumed too much, or the section count over-reads), leaving offset AT the end.
+    // Indexing buffer[offset] then panics (`index out of bounds: len==index`) and drops the
+    // whole connection → bot reconnect loop. Return a safe all-air container instead — an
+    // occasionally-incomplete chunk beats a crash. Mirrors the chunk_section.rs read guard.
+    if offset >= buffer.len() {
+        return (PaletteContainer::single(0, config), offset);
+    }
     let bits_per_block = buffer[offset];
     offset += 1;
 

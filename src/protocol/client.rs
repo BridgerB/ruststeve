@@ -46,6 +46,8 @@ pub struct Client {
     pub uuid: String,
     pub protocol_version: i64,
     access_token: Option<String>,
+    /// Optional packet capture (both directions), enabled by the `SNIFF` env var.
+    sniff: Option<crate::sniff::Sniffer>,
 }
 
 const OFFLINE_UUID: &str = "00000000-0000-0000-0000-000000000000";
@@ -73,6 +75,7 @@ impl Client {
             uuid: String::new(),
             protocol_version: super::protocol_version(),
             access_token: None,
+            sniff: crate::sniff::Sniffer::from_env(username),
         };
         client.set_state(ProtocolState::Handshaking);
         Ok(client)
@@ -104,6 +107,9 @@ impl Client {
         let data = codec
             .write(name, &params)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
+        if let Some(sniff) = &self.sniff {
+            sniff.record("out", name, data.len(), &params);
+        }
         let compressed = if self.compression_threshold >= 0 {
             compress_packet(&data, self.compression_threshold as usize)
         } else {
@@ -131,6 +137,9 @@ impl Client {
                 };
                 if let Some(codec) = &self.read_codec {
                     if let Ok(packet) = codec.read(&data) {
+                        if let Some(sniff) = &self.sniff {
+                            sniff.record("in", &packet.0, data.len(), &packet.1);
+                        }
                         return Ok(Some(packet));
                     }
                 }

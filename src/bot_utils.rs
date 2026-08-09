@@ -15,6 +15,40 @@ pub fn head_in_water(bot: &Bot) -> bool {
     bot.block_at(x, hy, z).map(|b| b.name.contains("water")).unwrap_or(false)
 }
 
+/// Nearest horizontal direction toward an exit from open water: a column (within
+/// `r`) whose head-height block is AIR — the bank/shallows. typecraft water has NO
+/// swim-buoyancy (jump gives no lift; only a wall-collision impulse raises the bot),
+/// so in an OPEN lake driving `forward` in an arbitrary heading swims DEEPER and the
+/// bot drowns ("underwater — surfacing" spammed 7+ times → died at y55-61). Facing
+/// the nearest air column first makes the swim go toward the bank, where the rising
+/// floor + wall-collision lift carry it out. Returns (dx,dz) to face, or None if
+/// fully enclosed by water (then the cap-dig / forward fallback handles it).
+fn water_exit_dir(bot: &Bot, r: i32) -> Option<(f64, f64)> {
+    let p = bot.entity.position;
+    let (bx, hy, bz) = (p.x.floor() as i32, (p.y + 1.0).floor() as i32, p.z.floor() as i32);
+    let mut best: Option<((i32, i32), i32)> = None;
+    for dx in -r..=r {
+        for dz in -r..=r {
+            if dx == 0 && dz == 0 {
+                continue;
+            }
+            let (x, z) = (bx + dx, bz + dz);
+            let head_air = bot
+                .block_at(x, hy, z)
+                .map(|b| b.name == "air" || b.name == "cave_air")
+                .unwrap_or(false);
+            if !head_air {
+                continue;
+            }
+            let d2 = dx * dx + dz * dz;
+            if best.map_or(true, |(_, bd)| d2 < bd) {
+                best = Some(((dx, dz), d2));
+            }
+        }
+    }
+    best.map(|((dx, dz), _)| (dx as f64, dz as f64))
+}
+
 /// Swim up/out to air before doing anything else. Returns true once the head is
 /// no longer underwater. Used so the bot LEAVES water first instead of mining
 /// while submerged (which drowns it) — mining underwater is only a last resort
@@ -42,8 +76,14 @@ pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
             t += 4;
             continue;
         }
-        bot.set_control_state("jump", true); // swim up
-        bot.set_control_state("forward", true); // drift toward an edge
+        // Face the nearest bank before swimming so `forward` heads TOWARD the exit,
+        // not deeper into an open lake (no buoyancy means we only get out at an edge).
+        if let Some((dx, dz)) = water_exit_dir(bot, 5) {
+            let p = bot.entity.position;
+            bot.look_at(crate::vec3::vec3(p.x + dx, p.y, p.z + dz));
+        }
+        bot.set_control_state("jump", true); // swim up (+ wall-collision lift at the bank)
+        bot.set_control_state("forward", true); // drift toward the edge
         if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
             break;
         }

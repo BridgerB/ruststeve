@@ -51,6 +51,8 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
             inv.sticks += c;
         } else if n == "cobblestone" || n == "cobbled_deepslate" {
             inv.cobblestone += c;
+        } else if n == "dirt" {
+            inv.dirt += c;
         } else if n == "coal" || n == "charcoal" {
             inv.coal += c;
         } else if n == "raw_iron" || n == "iron_ore" || n == "deepslate_iron_ore" {
@@ -91,9 +93,12 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
     };
 
     let p = bot.entity.position;
-    // A lit portal exists if a nether_portal block is nearby (the cast-and-light step
-    // succeeded). Cheap line-of-sight-bounded search.
-    let portal_built = !bot.find_exposed_blocks("nether_portal", 32, 1).is_empty();
+    // A lit portal exists if a nether_portal block is CLOSE (the cast-and-light step just ran —
+    // the bot stands adjacent to the frame it lit). Radius 8, not 32: a 32-block radius detected
+    // OTHER projects' portals (steve races here too) and made a fresh bot think it was already
+    // done → it skipped the whole pipeline to enter_nether, which then couldn't reach that distant
+    // portal → the bot looped the final step forever. 8 blocks ≈ only the bot's own just-lit portal.
+    let portal_built = !bot.find_exposed_blocks("nether_portal", 8, 1).is_empty();
     GameState {
         inventory: inv,
         equipment,

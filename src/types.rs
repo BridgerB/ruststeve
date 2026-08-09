@@ -7,6 +7,9 @@ pub struct Inventory {
     pub planks: i32,
     pub sticks: i32,
     pub cobblestone: i32,
+    /// Dirt on hand. Tracked separately from cobblestone (which feeds stone-tool
+    /// crafting, where dirt is invalid) — dirt only counts as portal *scaffold*.
+    pub dirt: i32,
     pub coal: i32,
     pub iron_ore: i32,
     pub iron_ingots: i32,

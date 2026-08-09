@@ -85,7 +85,10 @@ pub const STEPS: &[Step] = &[
         // The race goal is the IRON PICKAXE (3 ingots). Smelting 4 iron needs <1 coal
         // as fuel, so only a small amount is needed — keep it low so the bot doesn't
         // spend long underground (death/pickaxe-break risk) mining coal it won't use.
-        is_complete: |s| s.inventory.coal >= 3,
+        // 2, not 3: 1 coal smelts 8 items, so 2 coal already smelts all ~13 raw iron
+        // (buckets + iron pick + flint&steel). Requiring a 3rd stalled a race bot 30+ min
+        // strip-searching coal-poor terrain for a coal it never needed.
+        is_complete: |s| s.inventory.coal >= 2,
     },
     Step {
         id: "mine_iron",
@@ -94,7 +97,7 @@ pub const STEPS: &[Step] = &[
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 2,
         // NETHER goal needs a lot of iron: pickaxe(3) + 2 buckets(6) + flint&steel(1)
         // = 10, +1 buffer. Mine it in one trip rather than re-descending repeatedly.
-        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 11,
+        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 12,
     },
     Step {
         id: "smelt_iron",
@@ -138,13 +141,18 @@ pub const STEPS: &[Step] = &[
         is_complete: |s| s.inventory.flint_and_steel >= 1,
     },
     // Casting 10 obsidian needs a big stack of throwaway scaffold/mould blocks
-    // (cups, pillars). ~40 cobble gives margin over the ~30 the cast consumes.
+    // (cups, pillars). ~40 gives margin over the ~30 the cast consumes. Count dirt
+    // alongside cobblestone (which already folds in cobbled_deepslate): the cast's
+    // build_block/scaffold_count accept cobble/deepslate/dirt interchangeably, so
+    // demanding 40 *cobblestone* specifically wedged the bot in stone-poor terrain
+    // (gravel/diorite/dripstone) — it mined forever, stuck at 12/40 cobble while
+    // holding 36 dirt (48 usable scaffold, more than the cast needs).
     Step {
         id: "gather_build_blocks",
         name: "Gather Build Blocks",
         priority: 17,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3,
-        is_complete: |s| s.inventory.cobblestone >= 40,
+        is_complete: |s| s.inventory.cobblestone + s.inventory.dirt >= 40,
     },
     Step {
         id: "build_nether_portal",
@@ -230,8 +238,8 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_stone_pickaxe" => tasks::craft::craft_stone_pickaxe(bot, mem).await,
         "craft_stone_sword" => tasks::craft::craft_stone_sword(bot, mem).await,
         "craft_furnace" => tasks::craft::craft_furnace(bot, mem).await,
-        "mine_coal" => tasks::mining::mine_ore(bot, "coal", 3, mem).await,
-        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 11, mem).await,
+        "mine_coal" => tasks::mining::mine_ore(bot, "coal", 2, mem).await,
+        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 12, mem).await,
         "smelt_iron" => tasks::smelt::smelt_iron(bot, 11).await,
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
         "craft_bucket" => tasks::craft::craft_buckets(bot, 2, mem).await,

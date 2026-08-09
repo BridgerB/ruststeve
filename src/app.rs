@@ -187,7 +187,38 @@ pub async fn run() -> std::io::Result<()> {
     }
 
     println!("world ready — starting speedrun loop");
+
+    // Anchor our own respawn point at this safe surface spot. A death mid-cast at the
+    // deep lava (y≈-57) otherwise respawns at world-spawn / underground (y-43), where the
+    // bot gets stuck re-gathering wood it can't find below ground. race.sh sets a lane
+    // spawnpoint over RCON on relaunch — but when the server is restarting RCON is DOWN,
+    // so that set silently fails and the bot runs with NO spawnpoint (observed: SpawnXYZ
+    // empty, 75 deaths, manual tp resets). Setting it here goes over the GAME connection
+    // (the bot is op'd), so it holds even when RCON is down. Guard on surface height so we
+    // never anchor the spawnpoint underground (e.g. if world-ready fires after a deep
+    // reconnect); if we're below ground, leave whatever spawnpoint exists.
+    {
+        let p = bot.entity.position;
+        // Surface here is ~y55-75; the deep-lava cast deaths are at y<0. A y>=45 gate anchors
+        // a surface/shallow spawnpoint the bot can recover from and never one at the lava.
+        if p.y >= 45.0 {
+            let me = bot.username().to_string();
+            bot.run_command(&format!(
+                "spawnpoint {} {} {} {}",
+                me,
+                p.x.floor() as i32,
+                p.y.floor() as i32,
+                p.z.floor() as i32
+            ))
+            .await
+            .ok();
+            println!("set own spawnpoint at ({:.0},{:.0},{:.0})", p.x, p.y, p.z);
+        }
+    }
+
     let mut idle = 0;
+    let mut last_fail_msg = String::new();
+    let mut same_fail = 0u32;
     loop {
         // Let packets settle so inventory/position are current.
         bot.wait_ticks(6).await?;
@@ -272,6 +303,28 @@ pub async fn run() -> std::io::Result<()> {
                 {
                     println!("connection lost — stopping");
                     break;
+                }
+                // Stuck-guard: a step failing with the SAME message repeatedly is wedged with
+                // ZERO progress. Two cases this catches: (1) a HALF-OPEN connection — the bot
+                // was dropped from the world but the socket stays alive, so wait_ticks doesn't
+                // error and find_block sees an empty local world → enter_nether spins "no portal
+                // found to enter" forever offline (race.sh won't relaunch a live proc); (2) a
+                // task that can't advance at this spot (mine "fail — mined 2/12 iron" frozen on
+                // bad terrain). A step that IS progressing changes its message ("2/12"→"3/12"),
+                // so identical repeats == no progress. Bail so race.sh relaunches us fresh (new
+                // connection re-loads chunks → the built+lit portal is findable; new tp → new
+                // terrain). Non-connection stalls never self-recovered before → whole race lost.
+                if r.success {
+                    same_fail = 0;
+                } else if r.message == last_fail_msg {
+                    same_fail += 1;
+                    if same_fail >= 20 {
+                        println!("stuck — same failure x{same_fail} ({m}) — stopping for a fresh relaunch");
+                        break;
+                    }
+                } else {
+                    same_fail = 0;
+                    last_fail_msg = r.message.clone();
                 }
             }
             None => {
