@@ -365,11 +365,82 @@ fn observe_blocks(bot: &Bot, mem: &mut WorldMemory, ores: &HashMap<u32, (PoiKind
     }
 }
 
+/// One mining action. Chosen purely from a snapshot of state by `decide_mine_move`;
+/// the loop below only senses (fills a `MineObs`) and acts (performs the move). All
+/// the "where should I be, what should I do next" logic lives in that one pure
+/// function instead of being smeared across interleaved branches + IO — so it reads
+/// top-to-bottom as a priority ladder and can be reasoned about (and unit-tested)
+/// without a live bot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MineMove {
+    /// Iron, but we've sunk into the ore-empty deepslate void (y<0) — climb back up.
+    ClimbFromVoid,
+    /// Wedged (no gain / no movement for a while) — relocate to fresh ground, or bail.
+    Relocate,
+    /// The memory index knows a reachable vein — go dig it out.
+    MineVein((i32, i32, i32)),
+    /// Above the productive band — descend toward ore depth.
+    Descend,
+    /// At depth but this box is mined out — jump far to fresh terrain.
+    RangeJump,
+    /// At depth with ore still to find — strip-tunnel one leg to expose new stone.
+    StripTunnel((i32, i32)),
+}
+
+/// A plain snapshot of everything the decision needs — no bot, no IO, no `await`.
+struct MineObs {
+    is_iron: bool,
+    y: i32,
+    depth: i32,
+    stuck: u32,
+    desc_fail: u32,
+    dry_veins: u32,
+    gain_iters: u32,
+    nearest_ore: Option<(i32, i32, i32)>,
+    strip_dir: (i32, i32),
+}
+
+/// The miner's brain: the whole priority ladder as one pure function of the snapshot.
+/// Given "this is my state", it yields "this is my next move" — deterministically,
+/// with no side effects and no dependence on wall-clock time.
+fn decide_mine_move(o: &MineObs) -> MineMove {
+    // 1. Fell through the iron band into the void — there is nothing to mine below y0.
+    if o.is_iron && o.y < 0 {
+        return MineMove::ClimbFromVoid;
+    }
+    // 2. Wedged in place — can't tunnel or descend from here.
+    if o.stuck > 30 {
+        return MineMove::Relocate;
+    }
+    // 3. We remember a reachable vein and haven't struck out chasing sightings too many
+    //    times in a row — go mine it. (Past a few dry veins, fall through to change depth.)
+    if o.dry_veins < 4 {
+        if let Some(p) = o.nearest_ore {
+            return MineMove::MineVein(p);
+        }
+    }
+    // 4. Above the productive band (and either descending is still working, or we're high
+    //    enough that pushing down beats searching here) — descend toward ore depth.
+    if o.y > o.depth + 2 && (o.desc_fail < 5 || o.y > 55) {
+        return MineMove::Descend;
+    }
+    // 5. At depth and nothing new for a while — this box is mined out; jump far.
+    if o.gain_iters > 24 {
+        return MineMove::RangeJump;
+    }
+    // 6. At depth with ore left to find — expose fresh stone.
+    MineMove::StripTunnel(o.strip_dir)
+}
+
 /// Mine `target` of an ore resource. The bot's memory is the index: it OBSERVES
 /// ores it sees into SQLite, then QUERIES the DB for the nearest usable one and
 /// goes mines it. Only when the DB has nothing does it explore — searching SOUTH
 /// (descending to ore depth, then tunnelling +Z to load fresh terrain) in a loop
 /// until ore turns up, recording everything it finds along the way.
+///
+/// The loop is `sense → decide (pure) → act`: it snapshots state into a `MineObs`,
+/// asks `decide_mine_move` for the one derived move, and performs it. No branch
+/// picks the move; the pure function does.
 pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut WorldMemory) -> StepResult {
     record_descent(bot, mem);
     mem.log("mine_ore", "begin", &format!("{ore} target={target}"));
@@ -420,14 +491,20 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         let p = bot.entity.position;
         (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
     };
+    // Rotating headings (S→E→N→W) reused by both the descent's dry-ground sweep and the
+    // at-depth strip search.
+    const DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
     while count_ore_resource(bot, ore) < target && Instant::now() < deadline {
         iters += 1;
-        // Progress / stuck tracking (vs the previous iteration).
+
+        // ---- SENSE: fold this tick's world into the running counters ----
         let now_count = count_ore_resource(bot, ore);
         let now_pos = {
             let p = bot.entity.position;
             (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
         };
+        // "stuck" = no ore gained AND no movement since last tick; "gain_iters" = ticks
+        // since the ore count last rose (the box is mined out once this runs high).
         if now_count > last_count || now_pos != last_pos {
             stuck = 0;
         } else {
@@ -441,92 +518,84 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         } else {
             gain_iters += 1;
         }
-        // OVERSHOOT RECOVERY (iron especially): iron is dense y0..32 and VANISHES in the
-        // deepslate void below y0. Two things sink the bot down there — chasing a remembered
-        // ore POI that sits ABOVE it (mine_vein can't climb back up, gains 0, marks it
-        // unreachable, dry_veins descends further) and cave-drops while strip-tunnelling — and
-        // once below the ore it descends FOREVER chasing unreachable-above sightings (race bots
-        // stalled at y-30 with 0-2 iron). Climb back out of the void so the descent restarts in
-        // the productive band and mine_vein can reach the seen ore by digging DOWN to it again.
-        if ore == "iron" && (bot.entity.position.y as i32) < 0 {
-            let cur_y = bot.entity.position.y as i32;
-            overshoots += 1;
-            mem.log("mine_ore", "overshoot", &format!("y={cur_y} — climbing out of the iron-empty deepslate void"));
-            println!("    ore: overshot to y={cur_y} (no iron in the deepslate void) — climbing back to the iron band");
-            crate::tasks::portal::climb_out_of_pit(bot).await;
-            // Repeated overshoots mean this column funnels straight through the iron band
-            // into the void (a cave/aquifer under it) — climbing out then re-descending the
-            // SAME spot just re-overshoots (a race bot logged 443 of these). Every few
-            // overshoots, jump to fresh terrain so the next descent is a NEW column.
-            if overshoots % 3 == 0 {
-                range_relocates += 1;
-                let (rdx, rdz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(range_relocates as usize) % 4];
-                let dist = 48 + range_relocates.min(6) as i32 * 24;
-                let p = bot.entity.position;
-                let (tx, tz) = (p.x.floor() as i32 + rdx * dist, p.z.floor() as i32 + rdz * dist);
-                println!("    ore: repeated overshoot — ranging to fresh terrain ({tx},{tz})");
-                bot.movement.blocks_cant_break.clear();
-                let _ = bot.goto_xz(tx, tz, 4.0).await;
-            }
-            desc_fail = 0;
-            dry_veins = 0;
-            continue;
-        }
-        if stuck > 30 {
-            // Wedged — can't tunnel or descend from here (a liquid pocket, a dead-end, or
-            // deepslate the strip-tunnel keeps refusing). Don't fail the whole step: RELOCATE
-            // to fresh ground (walking further each time) and retry. mine_coal failed exactly
-            // here — "y=37 have=0 → stuck — bailing" — with coal a few relocations away.
-            wedge_relocates += 1;
-            if wedge_relocates > 6 {
-                mem.log("mine_ore", "stuck", &format!("y={} have={} bailed after {wedge_relocates}", now_pos.1, now_count));
-                println!("    ore: stuck — bailing after {wedge_relocates} relocates");
-                break;
-            }
-            let (dx, dz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(wedge_relocates as usize) % 4];
-            let dist = 16 + wedge_relocates as i32 * 8;
-            let p = bot.entity.position;
-            let (tx, tz) = (p.x.floor() as i32 + dx * dist, p.z.floor() as i32 + dz * dist);
-            mem.log("mine_ore", "wedged", &format!("y={} relocate#{wedge_relocates} to {tx},{tz}", now_pos.1));
-            println!("    ore: wedged — relocating #{wedge_relocates} to {tx},{tz}");
-            bot.movement.blocks_cant_break.clear();
-            let _ = bot.goto_xz(tx, tz, 3.0).await;
-            stuck = 0;
-            continue;
-        }
-        // Durability: re-equip a pickaxe if the held one broke; bail to re-craft
-        // if we have none at all.
+        // Durability: re-equip a pickaxe if the held one broke; bail to re-craft if none.
         if !ensure_pickaxe(bot).await {
             mem.log("mine_ore", "no_pickaxe", "bailing to re-craft");
             break;
         }
-        // Notice ores around us (cheap, throttled) and write them to memory.
+        // Notice ores + exposed lava around us (cheap, throttled) into memory — the index
+        // decide reads below. Recording lava now lets the later portal cast navigate
+        // straight to a pool instead of blind-searching.
         if iters % 4 == 1 {
             observe_blocks(bot, mem, &ores);
-            // Remember exposed lava we pass while deep. The portal cast needs a lava
-            // pool, and we're already at lava depth here — recording it now lets
-            // prepare_cast_site navigate straight to it instead of blind-searching
-            // (which stranded portal-ready bots for an hour with everything else done).
             for (lx, ly, lz) in bot.find_exposed_blocks("lava", 12, 4) {
                 mem.record(PoiKind::Lava, (lx, ly, lz), PoiStatus::Available);
             }
         }
-        let from = {
-            let p = bot.entity.position;
-            (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
-        };
-        let tier = pickaxe_tier_rank(bot);
 
-        // 1) Ask the DB where the ore is. If it knows one, go mine it. NO can_reach
-        // pre-check: ore is embedded in stone, and mine_vein DIGS through stone to
-        // reach it — a walk-only reachability test wrongly rejects diggable ore (it
-        // marked 14 perfectly-mineable irons "unreachable"). Let mine_vein try; only
-        // if it actually gains nothing do we give up on that spot.
-        // Chase remembered ore — but only while dry_veins is low. Once several sightings
-        // in a row proved unreachable, fall through to the descent below to change depth
-        // instead of grinding the same shallow cluster.
-        if dry_veins < 4 {
-            if let Some(tpos) = mem.nearest(&[kind], from, tier).map(|p| p.pos) {
+        // ---- DECIDE: one pure move from the snapshot ----
+        let from = now_pos;
+        let tier = pickaxe_tier_rank(bot);
+        // Consult the ore index only while we haven't struck out chasing sightings — a
+        // `None` routes decide to Descend/StripTunnel instead of grinding the same cluster.
+        // (No can-reach pre-check: mine_vein DIGS through stone to embedded ore, and a
+        // walk-only test wrongly rejected 14 perfectly-mineable irons.)
+        let nearest_ore = if dry_veins < 4 {
+            mem.nearest(&[kind], from, tier).map(|p| p.pos)
+        } else {
+            None
+        };
+        let obs = MineObs {
+            is_iron: ore == "iron",
+            y: from.1,
+            depth,
+            stuck,
+            desc_fail,
+            dry_veins,
+            gain_iters,
+            nearest_ore,
+            strip_dir: DIRS[((iters / 4) % 4) as usize],
+        };
+
+        // ---- ACT: the only place with side effects ----
+        match decide_mine_move(&obs) {
+            MineMove::ClimbFromVoid => {
+                overshoots += 1;
+                mem.log("mine_ore", "overshoot", &format!("y={} — climbing out of the iron-empty deepslate void", from.1));
+                println!("    ore: overshot to y={} (no iron in the deepslate void) — climbing back to the iron band", from.1);
+                crate::tasks::portal::climb_out_of_pit(bot).await;
+                // Repeated overshoots mean this column funnels through the band into the void
+                // — re-descending the same spot just re-overshoots. Every few, jump away so
+                // the next descent is a NEW column.
+                if overshoots % 3 == 0 {
+                    range_relocates += 1;
+                    let (rdx, rdz) = DIRS[(range_relocates as usize) % 4];
+                    let dist = 48 + range_relocates.min(6) as i32 * 24;
+                    let (tx, tz) = (from.0 + rdx * dist, from.2 + rdz * dist);
+                    println!("    ore: repeated overshoot — ranging to fresh terrain ({tx},{tz})");
+                    bot.movement.blocks_cant_break.clear();
+                    let _ = bot.goto_xz(tx, tz, 4.0).await;
+                }
+                desc_fail = 0;
+                dry_veins = 0;
+            }
+            MineMove::Relocate => {
+                wedge_relocates += 1;
+                if wedge_relocates > 6 {
+                    mem.log("mine_ore", "stuck", &format!("y={} have={} bailed after {wedge_relocates}", from.1, now_count));
+                    println!("    ore: stuck — bailing after {wedge_relocates} relocates");
+                    break;
+                }
+                let (dx, dz) = DIRS[(wedge_relocates as usize) % 4];
+                let dist = 16 + wedge_relocates as i32 * 8;
+                let (tx, tz) = (from.0 + dx * dist, from.2 + dz * dist);
+                mem.log("mine_ore", "wedged", &format!("y={} relocate#{wedge_relocates} to {tx},{tz}", from.1));
+                println!("    ore: wedged — relocating #{wedge_relocates} to {tx},{tz}");
+                bot.movement.blocks_cant_break.clear();
+                let _ = bot.goto_xz(tx, tz, 3.0).await;
+                stuck = 0;
+            }
+            MineMove::MineVein(tpos) => {
                 mem.log("mine_ore", "target", &format!("{ore} {tpos:?}"));
                 let gained = mine_vein(bot, ore, tpos.0, tpos.1, tpos.2).await;
                 observe_blocks(bot, mem, &ores); // mined blocks are air now
@@ -539,94 +608,56 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
                     mem.mark(tpos, PoiStatus::Unreachable);
                     dry_veins += 1;
                 }
-                continue;
             }
-        }
-
-        // 2) DB has nothing → search SOUTH until ore turns up.
-        let by = bot.entity.position.y as i32;
-        // If the descent keeps stalling (can't get below ~y55 — a cave/aquifer/deepslate
-        // layer the dig_down won't punch, so relocate just walks uphill and it oscillates,
-        // never reaching depth y15 → mine_iron timed out at 0 iron), STOP insisting on the
-        // deep target and SEARCH at the current depth. Iron's triangle runs y-24..56, so
-        // it exists up here too — better to mine what's reachable than descend forever.
-        if by > depth + 2 && (desc_fail < 5 || by > 55) {
-            // Get down to ore depth. dig_down (straight) first; if it refuses
-            // (liquid/fall-avoidance), try a stair-step in EACH of the 4 compass
-            // directions — a watery lane blocks only some directions, so trying all
-            // of them finds a dry way down instead of wedging on the one (south) that
-            // happens to be water. If every direction refuses, relocate by strip-
-            // tunnelling in a ROTATING direction to reach dry ground, then retry.
-            const DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
-            let mut descended = dig_down(bot).await;
-            if !descended {
-                for &(dx, dz) in &DIRS {
-                    if descend_step(bot, dx, dz).await {
-                        descended = true;
-                        break;
+            MineMove::Descend => {
+                // dig_down (straight) first; if it refuses (liquid/fall-avoidance), stair-step
+                // in each compass direction — a watery lane blocks only some. Then try punching
+                // through water / dropping into a cave. If all refuse, relocate to dry ground,
+                // walking further the longer we've been stuck (a short hop won't clear a pond).
+                let mut descended = dig_down(bot).await;
+                if !descended {
+                    for &(dx, dz) in &DIRS {
+                        if descend_step(bot, dx, dz).await {
+                            descended = true;
+                            break;
+                        }
                     }
                 }
+                if !descended {
+                    descended = crate::tasks::portal::punch_through_water(bot).await
+                        || crate::tasks::portal::drop_into_cavern(bot).await;
+                }
+                if descended {
+                    desc_fail = 0;
+                    dry_veins = 0; // new depth — allow chasing sightings again
+                } else {
+                    desc_fail += 1;
+                    let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
+                    let dist = 6 + (desc_fail.min(8) as i32) * 4; // 6 → up to ~38 blocks
+                    let (tx, tz) = (from.0 + dx * dist, from.2 + dz * dist);
+                    let _ = bot.goto_xz(tx, tz, 2.0).await;
+                }
+                if iters % 8 == 0 {
+                    println!("    ore: descending toward {ore} — y={} (relocate#{desc_fail})", bot.entity.position.y as i32);
+                }
             }
-            // Aquifer/cavern handling (same as the portal descent): dig_down/descend_step
-            // refuse ALL liquid, so a WATER pocket at ore depth stalls the descent into a
-            // relocate loop and it bails at 'stuck>30' with barely any iron. Punch through
-            // water, or drop into a cave, before relocating.
-            if !descended {
-                descended = crate::tasks::portal::punch_through_water(bot).await
-                    || crate::tasks::portal::drop_into_cavern(bot).await;
-            }
-            if descended {
-                desc_fail = 0;
-                dry_veins = 0; // new depth — allow chasing sightings again
-            } else {
-                // Couldn't get down here — every direction is blocked (commonly a
-                // watery surface patch, where dig_down/descend_step refuse liquid).
-                // RELOCATE to find dry ground, walking FURTHER the longer we've been
-                // stuck (a 6-block hop won't clear a whole pond), rotating direction
-                // to sweep outward. This is what un-wedges a bot pinned at the surface.
-                desc_fail += 1;
-                let (dx, dz) = DIRS[(desc_fail as usize / 2) % 4];
-                let dist = 6 + (desc_fail.min(8) as i32) * 4; // 6 → up to ~38 blocks
-                let p = bot.entity.position;
-                let (tx, tz) = (p.x.floor() as i32 + dx * dist, p.z.floor() as i32 + dz * dist);
-                let _ = bot.goto_xz(tx, tz, 2.0).await;
-            }
-            if iters % 8 == 0 {
-                println!("    ore: descending toward {ore} — y={} (relocate#{desc_fail})", bot.entity.position.y as i32);
-            }
-        } else {
-            // At depth — tunnel to load + expose fresh terrain. ROTATE the heading in a
-            // box-spiral (S→E→N→W, ~4 strips ≈ 24 blocks per leg) instead of one infinite
-            // south corridor. Passive ore-sighting only records ore within radius R of the
-            // tunnel, so a single direction misses iron a few blocks to the side — the
-            // race's iron bottleneck (race-0 stalled 55min at 0 iron tunneling south).
-            // Four radiating corridors expose ~4× the terrain and find iron far faster.
-            // No new ore for many iterations → the local box is mined out. The box-spiral's
-            // net displacement is ~0, so it never leaves on its own — JUMP far to fresh
-            // terrain (further each jump, rotating heading). Landing on the surface makes the
-            // next iter's descent branch re-dig down to the iron band at the new location.
-            if gain_iters > 24 {
+            MineMove::RangeJump => {
                 range_relocates += 1;
-                let (rdx, rdz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(range_relocates as usize) % 4];
+                let (rdx, rdz) = DIRS[(range_relocates as usize) % 4];
                 let dist = 48 + range_relocates.min(6) as i32 * 24; // 48 → up to ~192 blocks
-                let p = bot.entity.position;
-                let (tx, tz) = (p.x.floor() as i32 + rdx * dist, p.z.floor() as i32 + rdz * dist);
+                let (tx, tz) = (from.0 + rdx * dist, from.2 + rdz * dist);
                 mem.log("mine_ore", "range", &format!("no gain {gain_iters} iters — jump#{range_relocates} to {tx},{tz}"));
                 println!("    ore: local {ore} mined out — ranging to fresh terrain #{range_relocates} ({tx},{tz})");
                 bot.movement.blocks_cant_break.clear();
                 let _ = bot.goto_xz(tx, tz, 4.0).await;
                 gain_iters = 0;
-                continue;
             }
-            const TDIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
-            let (dx, dz) = TDIRS[((iters / 4) % 4) as usize];
-            let moved = strip_tunnel(bot, dx, dz).await;
-            mem.log("mine_ore", "search", &format!("y={by} dir=({dx},{dz}) moved={moved}"));
-            if iters % 8 == 0 {
-                println!(
-                    "    ore: searching for {ore} — y={by} dir=({dx},{dz}) have={}",
-                    count_ore_resource(bot, ore)
-                );
+            MineMove::StripTunnel((dx, dz)) => {
+                let moved = strip_tunnel(bot, dx, dz).await;
+                mem.log("mine_ore", "search", &format!("y={} dir=({dx},{dz}) moved={moved}", from.1));
+                if iters % 8 == 0 {
+                    println!("    ore: searching for {ore} — y={} dir=({dx},{dz}) have={}", from.1, count_ore_resource(bot, ore));
+                }
             }
         }
     }
@@ -789,5 +820,90 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -
         success(format!("mined {n}/{target} cobblestone"))
     } else {
         failure(format!("mined {n}/{target} cobblestone"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decide_mine_move, MineMove, MineObs};
+
+    // A baseline "at depth, ore left to find, nothing wrong" observation. Each test
+    // perturbs ONE field to prove the pure decision reacts to exactly that part of state.
+    fn base() -> MineObs {
+        MineObs {
+            is_iron: true,
+            y: 15,
+            depth: 15,
+            stuck: 0,
+            desc_fail: 0,
+            dry_veins: 0,
+            gain_iters: 0,
+            nearest_ore: None,
+            strip_dir: (0, 1),
+        }
+    }
+
+    #[test]
+    fn void_is_climbed_before_anything_else() {
+        let o = MineObs { y: -5, nearest_ore: Some((1, 2, 3)), stuck: 99, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::ClimbFromVoid);
+    }
+
+    #[test]
+    fn void_only_applies_to_iron() {
+        // Coal at y-5 is fine — no void climb, it just keeps searching at depth.
+        let o = MineObs { is_iron: false, y: -5, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::StripTunnel((0, 1)));
+    }
+
+    #[test]
+    fn wedged_relocates() {
+        let o = MineObs { stuck: 31, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::Relocate);
+    }
+
+    #[test]
+    fn known_reachable_vein_is_mined() {
+        let o = MineObs { nearest_ore: Some((4, 5, 6)), ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::MineVein((4, 5, 6)));
+    }
+
+    #[test]
+    fn too_many_dry_veins_stops_chasing_sightings() {
+        // Even with a sighting, past the dry-vein limit we change depth instead of grinding.
+        let o = MineObs { nearest_ore: Some((4, 5, 6)), dry_veins: 4, y: 60, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::Descend);
+    }
+
+    #[test]
+    fn above_the_band_descends() {
+        let o = MineObs { y: 60, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::Descend);
+    }
+
+    #[test]
+    fn stalled_descent_high_up_still_pushes_down() {
+        // desc_fail high but still above y55 → keep descending (don't settle too shallow).
+        let o = MineObs { y: 70, desc_fail: 9, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::Descend);
+    }
+
+    #[test]
+    fn stalled_descent_near_band_searches_here() {
+        // desc_fail high and only just above the band → stop insisting on depth, search here.
+        let o = MineObs { y: 40, depth: 15, desc_fail: 9, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::StripTunnel((0, 1)));
+    }
+
+    #[test]
+    fn mined_out_box_jumps_far() {
+        let o = MineObs { gain_iters: 25, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::RangeJump);
+    }
+
+    #[test]
+    fn otherwise_strip_tunnels_the_current_heading() {
+        let o = MineObs { strip_dir: (1, 0), ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::StripTunnel((1, 0)));
     }
 }
