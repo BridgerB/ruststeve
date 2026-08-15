@@ -130,16 +130,17 @@ $SSH "$MCRCON $TP" >/dev/null 2>&1
 echo "[race] bots positioned + spawnpoints set; lanes z=0..450"
 
 echo "[race] phase 4: racing (max ${RACE_SECONDS}s)"
-# Reset the dashboard's per-milestone timing state so a NEW race doesn't inherit the
-# previous run's recorded times (stale first-match rows, including 0:00 entries left
-# from a race whose dashboard started before /tmp/race-start existed → T=now-now=0).
-rm -f /tmp/race-ms-times.tsv /tmp/race-ms-lastT
-date +%s > /tmp/race-start   # exact wall-clock race start (for the dashboard's milestone times)
+# Fresh telemetry DB for this race — it is the source of truth for the dashboard and the
+# post-run report. Delete before any bot attaches (no bot holds the WAL yet at phase 4).
+rm -f "$DIR"/data/race.db "$DIR"/data/race.db-wal "$DIR"/data/race.db-shm 2>/dev/null
+date +%s > /tmp/race-start   # wall-clock race start (dashboard reads it for elapsed)
 SECONDS=0
 WINNER=""
 while [ $SECONDS -lt $RACE_SECONDS ]; do
+  # Winner = a bot that logged a `win` event into data/race.db (no more stdout grep).
   for i in $(seq 0 $((N-1))); do
-    if grep -q 'RACE GOAL REACHED' "$DIR/race-$i.log" 2>/dev/null; then
+    won=$(sqlite3 "$DIR/data/race.db" "SELECT 1 FROM events WHERE category='win' AND bot='${NAMES[i]}' LIMIT 1" 2>/dev/null)
+    if [ -n "$won" ]; then
       WINNER=$i; break
     fi
   done
