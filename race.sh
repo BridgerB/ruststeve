@@ -12,8 +12,8 @@ MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/data
-N=1
-RACE_SECONDS=21600
+N=${N:-1}
+RACE_SECONDS=${RACE_SECONDS:-21600}
 HOLD=45
 
 # Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
@@ -42,7 +42,7 @@ cleanup() {
   echo "[race] cleanup — killing bots"
   for p in "${PIDS[@]:-}"; do kill -9 "$p" 2>/dev/null; done
   pkill -9 -f 'target/release/ruststeve' 2>/dev/null
-  $SSH "$MCRCON 'forceload remove 880 280 950 460'" >/dev/null 2>&1
+  $SSH "$MCRCON 'forceload remove 880 280 950 660'" >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
 
@@ -52,7 +52,7 @@ OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
 # `keepInventory` is rejected). Re-apply it here because another project on the same box
 # wipes the world on its restarts, which resets the rule to false. (A datapack/world
 # default would make it survive wipes — do that if the wipe-flicker keeps biting.)
-$SSH "$MCRCON $OPS \"forceload add 880 280 950 460\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
+$SSH "$MCRCON $OPS \"forceload add 880 280 950 660\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
 sleep 3
 
 # Surface probe skipped — use a fixed Y=74 (the lane forest band surface level).
@@ -87,10 +87,12 @@ launch_bot() {
   if [ "$i" -eq 0 ]; then
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
       RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
+      RUST_VIEW=1 RUST_VIEW_ASSETS="$DIR/viewer/static/assets.json" \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   else
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
       RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
+      RUST_VIEW=1 RUST_VIEW_ASSETS="$DIR/viewer/static/assets.json" \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   fi
   PIDS[$i]=$!
