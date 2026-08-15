@@ -304,7 +304,21 @@ pub async fn run() -> std::io::Result<()> {
                         state.inventory.cobblestone, state.equipment.pickaxe_tier(), state.position.1,
                     ),
                 );
-                let r = execute_step(&mut bot, step.id, &mut memory).await;
+                // Bound every step in wall-clock: no task may hang the bot. A movement/dig
+                // await can wedge indefinitely on nasty terrain (the gym saw mine_iron freeze
+                // over water — "underwater — surfacing" then no progress to timeout); in a race
+                // that freezes the bot forever, because the stuck-guard below only fires when a
+                // step RETURNS. Force a return so the loop re-derives from fresh state. The
+                // budget covers each step's own deadline plus slack; the portal cast legitimately
+                // runs up to ~900s, everything else settles well under 300s.
+                let budget = match step.id {
+                    "build_nether_portal" => Duration::from_secs(960),
+                    _ => Duration::from_secs(330),
+                };
+                let r = match tokio::time::timeout(budget, execute_step(&mut bot, step.id, &mut memory)).await {
+                    Ok(r) => r,
+                    Err(_) => crate::types::failure(format!("{} exceeded {}s — re-deriving", step.id, budget.as_secs())),
+                };
                 memory.log("step", step.id, &format!("{} {}", if r.success { "ok" } else { "fail" }, r.message));
                 println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
                 // Connection lost (e.g. the server restarted out from under us): a
