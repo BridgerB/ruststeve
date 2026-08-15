@@ -30,6 +30,11 @@ pub async fn run() -> std::io::Result<()> {
         crate::gym::report();
         return Ok(());
     }
+    // RACE_REPORT=1: print the post-run analysis from data/race.db and exit (no bot).
+    if std::env::var("RACE_REPORT").is_ok() {
+        crate::telemetry::report();
+        return Ok(());
+    }
 
     let host = env("MC_HOST", "localhost");
     let port: u16 = env("MC_PORT", "25565").parse().unwrap_or(25565);
@@ -49,6 +54,11 @@ pub async fn run() -> std::io::Result<()> {
     let mem_path = std::path::PathBuf::from(format!(".memory-{username}.db"));
     let mut memory = WorldMemory::open(&mem_path);
     println!("memory: {} POIs remembered (db {})", memory.len(), mem_path.display());
+    // On the race path (RACE_GOAL/RACE_DB set), route telemetry into the shared, queryable
+    // data/race.db. Gym/isolation never set these, so their per-bot events stay as-is.
+    if std::env::var("RACE_GOAL").is_ok() || std::env::var("RACE_DB").is_ok() {
+        memory.attach_race_log(&username);
+    }
     memory.log("session", "start", &format!("{host}:{port} as {username}"));
 
     println!("connecting to {host}:{port} as {username}…");
@@ -225,6 +235,10 @@ pub async fn run() -> std::io::Result<()> {
         // Let packets settle so inventory/position are current.
         bot.wait_ticks(6).await?;
         let state = sync_from_bot(&bot);
+        // Telemetry: throttled state snapshot into data/race.db (no-op off the race path).
+        let next = get_next_step(&state);
+        let (done, total) = progress(&state);
+        memory.race_tick(&state, next.map(|s| s.id), next.map(|s| s.name), done as i32, total as i32);
 
         if is_dragon_dead(&state) {
             println!("VICTORY — the Ender Dragon is dead!");
@@ -236,11 +250,7 @@ pub async fn run() -> std::io::Result<()> {
         // spawnpoint was set) and retry instead of idling out of the race.
         if !state.alive {
             println!("died at {:?} — respawning", state.position);
-            memory.log(
-                "session",
-                "death",
-                &format!("{:.0},{:.0},{:.0}", state.position.0, state.position.1, state.position.2),
-            );
+            memory.race_death(&state);
             // Respawn-loop guard: if we keep dying at the EXACT SAME spot, respawn isn't
             // escaping it — a hazardous spawnpoint or a respawn that lands right back in
             // lava/suffocation (rust-race-004 logged 563 deaths at one identical coord).
@@ -251,6 +261,7 @@ pub async fn run() -> std::io::Result<()> {
                 same_death += 1;
                 if same_death >= 5 {
                     println!("respawn loop — died {same_death}x at {dp:?}, stopping for a fresh relaunch");
+                    memory.race_bail("respawn_bail", &state, &format!("{same_death}x at {dp:?}"));
                     break;
                 }
             } else {
@@ -279,16 +290,15 @@ pub async fn run() -> std::io::Result<()> {
             };
             if reached {
                 println!("RACE GOAL REACHED: {goal}");
-                memory.log("race", "win", &goal);
+                memory.race_win(&goal);
                 bot.run_command(&format!("say I reached {goal} — race done!")).await.ok();
                 break;
             }
         }
 
-        match get_next_step(&state) {
+        match next {
             Some(step) => {
                 idle = 0;
-                let (done, total) = progress(&state);
                 println!(
                     "[{}] → {} ({done}/{total}) | logs={} planks={} sticks={} pick={:?}",
                     state.world.dimension, step.name,
@@ -319,7 +329,7 @@ pub async fn run() -> std::io::Result<()> {
                     Ok(r) => r,
                     Err(_) => crate::types::failure(format!("{} exceeded {}s — re-deriving", step.id, budget.as_secs())),
                 };
-                memory.log("step", step.id, &format!("{} {}", if r.success { "ok" } else { "fail" }, r.message));
+                memory.race_step_result(step.id, r.success, &r.message);
                 println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
                 // Connection lost (e.g. the server restarted out from under us): a
                 // step that failed on a dead socket reports "Broken pipe"/os error 32,
@@ -352,6 +362,7 @@ pub async fn run() -> std::io::Result<()> {
                     same_fail += 1;
                     if same_fail >= 20 {
                         println!("stuck — same failure x{same_fail} ({m}) — stopping for a fresh relaunch");
+                        memory.race_bail("stuck_bail", &state, &format!("{m} x{same_fail}"));
                         break;
                     }
                 } else {
