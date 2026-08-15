@@ -15,6 +15,14 @@ pub fn head_in_water(bot: &Bot) -> bool {
     bot.block_at(x, hy, z).map(|b| b.name.contains("water")).unwrap_or(false)
 }
 
+/// Are the bot's feet in water? Together with `head_in_water`, "fully out" means the
+/// bot has actually left the pool, not just bobbed its head to the surface for a tick.
+pub fn feet_in_water(bot: &Bot) -> bool {
+    let p = bot.entity.position;
+    let (x, fy, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    bot.block_at(x, fy, z).map(|b| b.name.contains("water")).unwrap_or(false)
+}
+
 /// Nearest horizontal direction toward an exit from open water: a column (within
 /// `r`) whose head-height block is AIR — the bank/shallows. typecraft water has NO
 /// swim-buoyancy (jump gives no lift; only a wall-collision impulse raises the bot),
@@ -53,44 +61,159 @@ fn water_exit_dir(bot: &Bot, r: i32) -> Option<(f64, f64)> {
 /// no longer underwater. Used so the bot LEAVES water first instead of mining
 /// while submerged (which drowns it) — mining underwater is only a last resort
 /// when this can't surface it (boxed in).
+/// Is `name` a block you can stand on / place against (not air, water, lava, or a
+/// non-solid air variant)?
+fn is_standable(name: &str) -> bool {
+    !name.is_empty()
+        && name != "air"
+        && name != "cave_air"
+        && name != "void_air"
+        && !name.contains("water")
+        && !name.contains("lava")
+}
+
+/// One pillar cycle from a solid footing: jump and place a throwaway block beneath the
+/// feet so the bot rises a block. Returns false only when there's nothing to build with.
+async fn pillar_step(bot: &mut Bot<'_>, t: &mut u32) -> bool {
+    let block = ["cobblestone", "cobbled_deepslate", "dirt", "netherrack", "stone", "andesite", "diorite", "granite", "tuff", "deepslate"]
+        .into_iter()
+        .find(|b| count_items(bot, b) > 0);
+    let Some(block) = block else { return false };
+    if !select_item(bot, block).await.unwrap_or(false) {
+        return false;
+    }
+    let cx = bot.entity.position.x.floor() as i32;
+    let cz = bot.entity.position.z.floor() as i32;
+    let fy = bot.entity.position.y.floor() as i32;
+    bot.look_at(crate::vec3::vec3(cx as f64 + 0.5, (fy - 2) as f64, cz as f64 + 0.5));
+    bot.set_control_state("jump", true);
+    bot.wait_ticks(6).await.ok();
+    // Place on top of our footing (the block one below the feet) → a new block at feet level
+    // that we fall onto, one higher.
+    if bot.block_at(cx, fy - 1, cz).map(|b| is_standable(&b.name)).unwrap_or(false) {
+        let _ = bot.place_block(cx, fy - 1, cz, Face::Top).await;
+    }
+    bot.wait_ticks(5).await.ok();
+    bot.set_control_state("jump", false);
+    bot.wait_ticks(3).await.ok();
+    *t += 14;
+    true
+}
+
+/// Leave a body of water. The bot is buoyant — it floats to the surface on its own — so
+/// the escape is to swim to the nearest LAND and climb out, not to rise in place (a jump
+/// gives no lift once at the surface). Head toward the closest air-headed column, found
+/// with a progressively wider scan (a 5-block scan misses a lake edge), commit that heading
+/// for several ticks (sustained `forward` reaches the edge; the rising floor / wall carries
+/// the bot up), and if pressed against a vertical bank without rising, DIG a foothold into
+/// it and step up — a guaranteed exit from any walled pool. Returns true once fully out
+/// (neither head nor feet submerged).
 pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
     let mut t = 0;
+    let mut best_y = bot.entity.position.y;
+    let mut no_rise = 0u32;
     while t < ticks {
-        if !head_in_water(bot) {
-            break;
+        if !head_in_water(bot) && !feet_in_water(bot) {
+            bot.clear_control_states();
+            return true;
         }
-        // If a SOLID block caps the column above our head we can swim-jump forever
-        // and never rise (this is how the bot drowns: it dug a staircase down, water
-        // flooded in, and "surfacing" just bonks the ceiling). Break through upward
-        // first, THEN swim up. Dig is multi-tick, so do it before the swim ticks.
+        // Solid ceiling overhead → dig straight up through it (a flooded stairwell's roof, or
+        // a cap we've pillared up into: we bob under it and drown otherwise). Check the head
+        // block itself AND the one above — digging the LOWEST solid opens the way up.
         let p = bot.entity.position;
         let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
-        let above = (p.y + 2.0).floor() as i32; // block directly above the head
-        let capped = bot
-            .block_at(x, above, z)
-            .map(|b| b.name != "air" && !b.name.contains("water") && b.name != "void_air" && b.name != "cave_air")
-            .unwrap_or(false);
-        if capped {
-            bot.clear_control_states();
-            let _ = bot.dig(x, above, z).await; // open an escape straight up
-            t += 4;
+        let feet_y = p.y.floor() as i32;
+        let mut dug_cap = false;
+        for cap_y in [feet_y + 1, feet_y + 2] {
+            if bot.block_at(x, cap_y, z).map(|b| is_standable(&b.name)).unwrap_or(false) {
+                bot.clear_control_states();
+                let _ = bot.dig(x, cap_y, z).await;
+                t += 4;
+                dug_cap = true;
+                break;
+            }
+        }
+        if dug_cap {
             continue;
         }
-        // Face the nearest bank before swimming so `forward` heads TOWARD the exit,
-        // not deeper into an open lake (no buoyancy means we only get out at an edge).
-        if let Some((dx, dz)) = water_exit_dir(bot, 5) {
+
+        if head_in_water(bot) {
+            // PHASE 1 — submerged and can't swim up (jump gives no lift mid-water). Rise by
+            // PILLARING: when resting on a solid (the floor), jump and place a block beneath
+            // the feet; when not yet on the floor, settle down onto it first (buoyancy only
+            // lifts a block or two, so from depth we must build our way up). Look up so any
+            // shallow buoyancy is captured too.
             let p = bot.entity.position;
-            bot.look_at(crate::vec3::vec3(p.x + dx, p.y, p.z + dz));
+            bot.look_at(crate::vec3::vec3(p.x, p.y + 3.0, p.z));
+            if bot.entity.on_ground {
+                if !pillar_step(bot, &mut t).await {
+                    // Nothing to pillar with — hold jump and hope for a shallow float, then
+                    // the surface phase can take over.
+                    bot.set_control_state("jump", true);
+                    for _ in 0..6 {
+                        let _ = bot.drive_tick().await;
+                        t += 1;
+                    }
+                    bot.clear_control_states();
+                }
+            } else {
+                // Settle onto the floor (or catch a shallow buoyant rise to the surface).
+                bot.set_control_state("jump", true);
+                for _ in 0..6 {
+                    if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
+                        bot.clear_control_states();
+                        return false;
+                    }
+                    t += 1;
+                }
+                bot.clear_control_states();
+            }
+        } else {
+            // PHASE 2 — at the surface (head out, feet still in water). Swim to the nearest
+            // bank and climb out. Face the closest air-headed column (progressively wider —
+            // a 5-block scan misses a lake edge), committed for several ticks.
+            let dir = water_exit_dir(bot, 6)
+                .or_else(|| water_exit_dir(bot, 14))
+                .or_else(|| water_exit_dir(bot, 24))
+                .or_else(|| water_exit_dir(bot, 40));
+            let (dx, dz) = dir.unwrap_or((1.0, 0.0));
+            let p = bot.entity.position;
+            bot.look_at(crate::vec3::vec3(p.x + dx * 4.0, p.y + 0.3, p.z + dz * 4.0));
+            bot.set_control_state("jump", true);
+            bot.set_control_state("forward", true);
+            for _ in 0..8 {
+                if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
+                    bot.clear_control_states();
+                    return !head_in_water(bot) && !feet_in_water(bot);
+                }
+                t += 1;
+            }
+            bot.clear_control_states();
+            // Pressed against a vertical bank without climbing → carve a stair INTO it (dig
+            // ahead at head then foot height) so the bot can move up and over. Guarantees an
+            // exit where swim-climb stalls, and cheap (a couple of blocks).
+            let p = bot.entity.position;
+            if p.y > best_y + 0.3 {
+                best_y = p.y;
+                no_rise = 0;
+            } else if {
+                no_rise += 1;
+                no_rise >= 3
+            } {
+                let (ax, az) = ((p.x + dx * 0.8).floor() as i32, (p.z + dz * 0.8).floor() as i32);
+                let ay = p.y.floor() as i32;
+                for dy in [1, 0] {
+                    if bot.block_at(ax, ay + dy, az).map(|b| is_standable(&b.name)).unwrap_or(false) {
+                        let _ = bot.dig(ax, ay + dy, az).await;
+                        t += 4;
+                    }
+                }
+                no_rise = 0;
+            }
         }
-        bot.set_control_state("jump", true); // swim up (+ wall-collision lift at the bank)
-        bot.set_control_state("forward", true); // drift toward the edge
-        if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
-            break;
-        }
-        t += 1;
     }
     bot.clear_control_states();
-    !head_in_water(bot)
+    !head_in_water(bot) && !feet_in_water(bot)
 }
 
 /// Pre-compute a route to within `range` of (x, y, z). True only if the

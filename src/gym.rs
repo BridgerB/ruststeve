@@ -28,6 +28,10 @@ use crate::types::GameState;
 pub enum GymSetup {
     /// Random surface teleport (`spreadplayers` in 0..10k) — the terrain-variance test.
     RandomSurface,
+    /// A controlled water pool in a fixed arena — the water-escape test. Geometry via env:
+    /// WATER_HALF (pool half-width → bank distance), WATER_DEPTH, WATER_SUBMERGE (start depth
+    /// below the surface), WATER_CAP=1 (solid ceiling over the bot). Drops the bot submerged.
+    WaterPool,
 }
 
 pub struct GymStep {
@@ -60,6 +64,10 @@ fn passes(step: &GymStep, bot: &Bot, s: &GameState) -> bool {
 /// would hold ENTERING that step. Random-terrain teleport is what exposes the
 /// terrain-dependent failures a clean arena hides.
 pub static GYM_STEPS: &[GymStep] = &[
+    // Water escape — not a pipeline step; a focused drill for `leave_water`. Seeded via
+    // WaterPool (WATER_HALF/DEPTH/SUBMERGE/CAP). Pass = fully out of water (neither head nor
+    // feet submerged). Given cobblestone so the escape can pillar up out of open water.
+    GymStep { slug: "leave_water", label: "Leave Water", order: 0, prereq: &["cobblestone 64"], step_id: "leave_water", timeout_secs: 90, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot) && !crate::bot_utils::feet_in_water(bot)), setup: GymSetup::WaterPool },
     GymStep { slug: "gather_wood", label: "Gather Wood", order: 1, prereq: &[], step_id: "gather_wood", timeout_secs: 120, custom_pass: None, setup: GymSetup::RandomSurface },
     GymStep { slug: "craft_planks", label: "Craft Planks", order: 2, prereq: &["oak_log 8"], step_id: "craft_planks", timeout_secs: 60, custom_pass: None, setup: GymSetup::RandomSurface },
     GymStep { slug: "craft_crafting_table", label: "Craft Table", order: 3, prereq: &["oak_planks 8"], step_id: "craft_crafting_table", timeout_secs: 60, custom_pass: None, setup: GymSetup::RandomSurface },
@@ -298,6 +306,15 @@ async fn run_one_trial(
             }
             continue;
         }
+        // Water-escape drill: drive `leave_water` directly (the unit under test) rather than
+        // through the survival preempt, so we measure IT. The loop's top pass-check (fully out
+        // of water) ends the trial; the 90s timeout bounds a failure.
+        if step.slug == "leave_water" {
+            attempts += 1;
+            crate::bot_utils::leave_water(bot, 40).await;
+            last_msg = format!("escaping — head_in_water={} feet_in_water={} y={:.0}", crate::bot_utils::head_in_water(bot), crate::bot_utils::feet_in_water(bot), bot.entity.position.y);
+            continue;
+        }
         if crate::survival::handle_survival(bot, memory).await {
             continue;
         }
@@ -408,6 +425,36 @@ async fn setup_trial(
                     println!("[gym] spreadplayers didn't move the bot (resp: {}), retrying", resp.trim());
                 }
             }
+        }
+        GymSetup::WaterPool => {
+            // A contained water pool in a fixed arena, geometry from env — reproducible so we
+            // can iterate leave_water against pond/lake/ocean/capped deterministically instead
+            // of waiting for a random ocean spawn.
+            let fx: i32 = std::env::var("GYM_ARENA_X").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+            let fz: i32 = std::env::var("GYM_ARENA_Z").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+            let fy: i32 = 72; // water surface level
+            let half: i32 = std::env::var("WATER_HALF").ok().and_then(|s| s.parse().ok()).unwrap_or(12);
+            let depth: i32 = std::env::var("WATER_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(6);
+            let submerge: i32 = std::env::var("WATER_SUBMERGE").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
+            let cap = std::env::var("WATER_CAP").is_ok();
+            let _ = rcon.command(&format!("forceload add {} {} {} {}", fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4)).await;
+            // Clear the column above (leftover blocks/pillars from a prior trial), then a solid
+            // stone shell, then carve the water pool inside it (open surface at fy).
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - half - 2, fy + 1, fz - half - 2, fx + half + 2, fy + 24, fz + half + 2)).await;
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - half - 1, fy - depth - 1, fz - half - 1, fx + half + 1, fy, fz + half + 1)).await;
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:water", fx - half, fy - depth, fz - half, fx + half, fy, fz + half)).await;
+            if cap {
+                // A solid ceiling one block above the surface — the "dug a staircase, water
+                // flooded in, capped above" case where the bot must dig up to escape.
+                let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - half, fy + 1, fz - half, fx + half, fy + 1, fz + half)).await;
+            }
+            let gy = fy - submerge;
+            let _ = rcon.command(&format!("tp {name} {fx} {gy} {fz}")).await;
+            let _ = rcon.command(&format!("spawnpoint {name} {fx} {} {fz}", fy + 2)).await;
+            pump_teleport(bot, fx, fz).await;
+            bot.wait_ticks(10).await.ok();
+            let p = bot.entity.position;
+            return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
         }
     }
     // Portal steps (reach_lava/to_nether) run WITHOUT the mining phase that, in a real run,
