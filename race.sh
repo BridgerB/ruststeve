@@ -130,6 +130,10 @@ $SSH "$MCRCON $TP" >/dev/null 2>&1
 echo "[race] bots positioned + spawnpoints set; lanes z=0..450"
 
 echo "[race] phase 4: racing (max ${RACE_SECONDS}s)"
+# Reset the dashboard's per-milestone timing state so a NEW race doesn't inherit the
+# previous run's recorded times (stale first-match rows, including 0:00 entries left
+# from a race whose dashboard started before /tmp/race-start existed → T=now-now=0).
+rm -f /tmp/race-ms-times.tsv /tmp/race-ms-lastT
 date +%s > /tmp/race-start   # exact wall-clock race start (for the dashboard's milestone times)
 SECONDS=0
 WINNER=""

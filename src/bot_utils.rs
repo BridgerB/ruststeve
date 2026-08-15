@@ -449,6 +449,15 @@ pub async fn get_crafting_table(
             .map(|i| i.count)
             .sum();
         if planks < 4 {
+            // No wood AT ALL — the bot spent every log and plank and is now stranded
+            // needing a table it can't build (rust-race-002 looped "need a crafting table"
+            // 1884x on zero wood and lost the whole race). Go cut a couple of logs first,
+            // THEN convert to planks. This is the wood-reserve recovery: any table-craft
+            // can top up wood instead of dead-ending.
+            if !LOG_TYPES.iter().any(|l| count_items(bot, l) > 0) {
+                println!("    table: out of wood — gathering a little before crafting a table");
+                let _ = crate::tasks::gather_wood::gather_wood(bot, 2, mem).await;
+            }
             for log in LOG_TYPES {
                 if count_items(bot, log) > 0 {
                     let plank_name = log.replace("_log", "_planks");

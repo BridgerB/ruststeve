@@ -413,6 +413,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
     // new ore turns up for a while, JUMP far to fresh terrain instead of re-combing the box.
     let mut gain_iters = 0u32;
     let mut range_relocates = 0u32;
+    let mut overshoots = 0u32;
     let mut best_count = count_ore_resource(bot, ore);
     let mut last_count = count_ore_resource(bot, ore);
     let mut last_pos = {
@@ -449,9 +450,24 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
         // the productive band and mine_vein can reach the seen ore by digging DOWN to it again.
         if ore == "iron" && (bot.entity.position.y as i32) < 0 {
             let cur_y = bot.entity.position.y as i32;
+            overshoots += 1;
             mem.log("mine_ore", "overshoot", &format!("y={cur_y} — climbing out of the iron-empty deepslate void"));
             println!("    ore: overshot to y={cur_y} (no iron in the deepslate void) — climbing back to the iron band");
             crate::tasks::portal::climb_out_of_pit(bot).await;
+            // Repeated overshoots mean this column funnels straight through the iron band
+            // into the void (a cave/aquifer under it) — climbing out then re-descending the
+            // SAME spot just re-overshoots (a race bot logged 443 of these). Every few
+            // overshoots, jump to fresh terrain so the next descent is a NEW column.
+            if overshoots % 3 == 0 {
+                range_relocates += 1;
+                let (rdx, rdz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(range_relocates as usize) % 4];
+                let dist = 48 + range_relocates.min(6) as i32 * 24;
+                let p = bot.entity.position;
+                let (tx, tz) = (p.x.floor() as i32 + rdx * dist, p.z.floor() as i32 + rdz * dist);
+                println!("    ore: repeated overshoot — ranging to fresh terrain ({tx},{tz})");
+                bot.movement.blocks_cant_break.clear();
+                let _ = bot.goto_xz(tx, tz, 4.0).await;
+            }
             desc_fail = 0;
             dry_veins = 0;
             continue;

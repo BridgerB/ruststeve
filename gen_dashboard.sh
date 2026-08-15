@@ -122,7 +122,11 @@ while true; do
         log="$DIR/race-$i.log"
         if grep -qE "$p" "$log" 2>/dev/null; then
           rt=$(awk -v i="$i" -v m="$idx" '$1==i && $2==m {print $3; exit}' "$STATE" 2>/dev/null)
-          if [ -z "$rt" ]; then rt=$T; printf '%s %s %s\n' "$i" "$idx" "$T" >> "$STATE"; fi
+          # Record the first-reached time once. Skip while T==0 (dashboard started before
+          # /tmp/race-start existed) so a bogus 0:00 never gets latched in as the record.
+          if [ -z "$rt" ]; then
+            if [ "$T" -gt 0 ]; then rt=$T; printf '%s %s %s\n' "$i" "$idx" "$T" >> "$STATE"; else rt=0; fi
+          fi
           printf '<td class="ok%s">%d:%02d</td>' "$goalcls" "$((rt/60))" "$((rt%60))"
         else
           printf '<td class="no%s">&#10007;</td>' "$goalcls"

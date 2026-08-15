@@ -219,6 +219,8 @@ pub async fn run() -> std::io::Result<()> {
     let mut idle = 0;
     let mut last_fail_msg = String::new();
     let mut same_fail = 0u32;
+    let mut last_death: Option<(i32, i32, i32)> = None;
+    let mut same_death = 0u32;
     loop {
         // Let packets settle so inventory/position are current.
         bot.wait_ticks(6).await?;
@@ -239,6 +241,22 @@ pub async fn run() -> std::io::Result<()> {
                 "death",
                 &format!("{:.0},{:.0},{:.0}", state.position.0, state.position.1, state.position.2),
             );
+            // Respawn-loop guard: if we keep dying at the EXACT SAME spot, respawn isn't
+            // escaping it — a hazardous spawnpoint or a respawn that lands right back in
+            // lava/suffocation (rust-race-004 logged 563 deaths at one identical coord).
+            // Bail after a few so race.sh relaunches us fresh (new connection + re-tp to
+            // the lane + a fresh surface spawnpoint) instead of spinning the whole race.
+            let dp = (state.position.0 as i32, state.position.1 as i32, state.position.2 as i32);
+            if last_death == Some(dp) {
+                same_death += 1;
+                if same_death >= 5 {
+                    println!("respawn loop — died {same_death}x at {dp:?}, stopping for a fresh relaunch");
+                    break;
+                }
+            } else {
+                same_death = 0;
+                last_death = Some(dp);
+            }
             bot.respawn().await.ok();
             bot.wait_ticks(40).await.ok(); // let respawn + chunks settle
             continue;
