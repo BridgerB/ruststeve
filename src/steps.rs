@@ -14,7 +14,12 @@ pub const STEPS: &[Step] = &[
         name: "Gather Wood",
         priority: 1,
         can_execute: |s| s.world.in_overworld() && s.alive,
-        is_complete: |s| s.inventory.logs >= 5 || s.inventory.planks >= 12,
+        // Keep a WOOD RESERVE. A full spawn→nether run spends ~11 planks (table + wooden
+        // pick + all the sticks); with only a 12-plank target a container desync that eats
+        // planks (or a re-placed table) dropped the bot to 0 wood mid-run and the recovery
+        // above sent it back to Gather Wood (~15 min lost, seen in the race). A slightly
+        // bigger buffer avoids that round trip; ~1 extra log up front is far cheaper.
+        is_complete: |s| s.inventory.logs >= 6 || s.inventory.planks >= 16,
     },
     Step {
         id: "craft_planks",
@@ -229,7 +234,7 @@ pub fn progress(state: &GameState) -> (usize, usize) {
 
 pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) -> StepResult {
     match id {
-        "gather_wood" => tasks::gather_wood::gather_wood(bot, 5, mem).await,
+        "gather_wood" => tasks::gather_wood::gather_wood(bot, 6, mem).await,
         "craft_planks" => tasks::craft::craft_planks(bot, mem).await,
         "craft_crafting_table" => tasks::craft::craft_crafting_table(bot, mem).await,
         "craft_sticks" => tasks::craft::craft_sticks(bot, mem).await,

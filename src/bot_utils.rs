@@ -521,7 +521,17 @@ pub async fn craft_item(
         Ok(()) if bot.item_count(name) > before => {
             success(format!("crafted {name} (have {})", bot.item_count(name)))
         }
-        Ok(()) => failure(format!("craft {name}: result never appeared (server didn't make it)")),
+        Ok(()) => {
+            // The server never produced the result — the window desynced (a stale/ghost
+            // container under load). Retire this table so the NEXT attempt/relaunch places a
+            // FRESH one instead of reusing the wedged POI forever (one bot looped this 433x on
+            // the same remembered table). Without this, mode-A never invalidates anything, so
+            // the per-bot memory keeps sending it back to the dead container.
+            if let Some(tpos) = table {
+                mem.mark(tpos, PoiStatus::Gone);
+            }
+            failure(format!("craft {name}: result never appeared (server didn't make it)"))
+        }
         Err(e) => failure(format!("craft {name}: {e}")),
     }
 }

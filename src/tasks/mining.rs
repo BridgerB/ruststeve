@@ -155,6 +155,18 @@ fn is_liquid_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
         .unwrap_or(false)
 }
 
+fn is_water_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    bot.block_at(x, y, z).map(|b| b.name.contains("water")).unwrap_or(false)
+}
+
+/// The bot is standing in a real water BODY (a >=3-deep water column at its feet), not a
+/// thin aquifer it could just punch through. Descending here only fights the survival
+/// surfacing reflex forever — the miner should leave the water and mine on land instead.
+fn over_deep_water(bot: &Bot, feet: (i32, i32, i32)) -> bool {
+    let (x, y, z) = feet;
+    (is_water_at(bot, x, y, z) || is_water_at(bot, x, y - 1, z)) && is_water_at(bot, x, y - 2, z)
+}
+
 /// Is there lava at (x, y, z)? Used for the descent's beside-check — only lava beside a
 /// support cell disqualifies digging it (water beside is fine).
 fn is_lava_at(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
@@ -398,6 +410,8 @@ struct MineObs {
     gain_iters: u32,
     nearest_ore: Option<(i32, i32, i32)>,
     strip_dir: (i32, i32),
+    /// Standing in a real water body — descending here is futile (survival just surfaces us).
+    over_water: bool,
 }
 
 /// The miner's brain: the whole priority ladder as one pure function of the snapshot.
@@ -418,6 +432,12 @@ fn decide_mine_move(o: &MineObs) -> MineMove {
         if let Some(p) = o.nearest_ore {
             return MineMove::MineVein(p);
         }
+    }
+    // 3b. Standing in a water body — do NOT descend into it (that just oscillates against the
+    //     survival surfacing reflex; a race bot burned ~2h + 238 surfacings this way). Range-
+    //     relocate to dry land and mine there instead.
+    if o.over_water {
+        return MineMove::RangeJump;
     }
     // 4. Above the productive band (and either descending is still working, or we're high
     //    enough that pushing down beats searching here) — descend toward ore depth.
@@ -555,6 +575,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
             gain_iters,
             nearest_ore,
             strip_dir: DIRS[((iters / 4) % 4) as usize],
+            over_water: over_deep_water(bot, from),
         };
 
         // ---- ACT: the only place with side effects ----
@@ -840,7 +861,22 @@ mod tests {
             gain_iters: 0,
             nearest_ore: None,
             strip_dir: (0, 1),
+            over_water: false,
         }
+    }
+
+    #[test]
+    fn over_water_relocates_instead_of_descending() {
+        // Above the band AND in a water body → range-relocate to land, not Descend.
+        let o = MineObs { y: 60, over_water: true, ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::RangeJump);
+    }
+
+    #[test]
+    fn over_water_still_mines_a_reachable_vein_first() {
+        // A vein right here beats fleeing the water.
+        let o = MineObs { over_water: true, nearest_ore: Some((1, 2, 3)), ..base() };
+        assert_eq!(decide_mine_move(&o), MineMove::MineVein((1, 2, 3)));
     }
 
     #[test]

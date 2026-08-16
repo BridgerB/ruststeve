@@ -227,7 +227,9 @@ pub async fn run() -> std::io::Result<()> {
     }
 
     let mut idle = 0;
-    let mut last_fail_msg = String::new();
+    // Stuck-guard state: the last (done, inventory-sum, pickaxe-rank) seen on a failing step.
+    // We bail when failures pile up with NO change to this — see the guard below.
+    let mut last_prog_sig: (usize, i32, i32) = (usize::MAX, -1, -1);
     let mut same_fail = 0u32;
     let mut last_death: Option<(i32, i32, i32)> = None;
     let mut same_death = 0u32;
@@ -346,28 +348,30 @@ pub async fn run() -> std::io::Result<()> {
                     println!("connection lost — stopping");
                     break;
                 }
-                // Stuck-guard: a step failing with the SAME message repeatedly is wedged with
-                // ZERO progress. Two cases this catches: (1) a HALF-OPEN connection — the bot
-                // was dropped from the world but the socket stays alive, so wait_ticks doesn't
-                // error and find_block sees an empty local world → enter_nether spins "no portal
-                // found to enter" forever offline (race.sh won't relaunch a live proc); (2) a
-                // task that can't advance at this spot (mine "fail — mined 2/12 iron" frozen on
-                // bad terrain). A step that IS progressing changes its message ("2/12"→"3/12"),
-                // so identical repeats == no progress. Bail so race.sh relaunches us fresh (new
-                // connection re-loads chunks → the built+lit portal is findable; new tp → new
-                // terrain). Non-connection stalls never self-recovered before → whole race lost.
-                if r.success {
+                // Stuck-guard: bail when a step keeps failing with NO PROGRESS. "Progress" =
+                // the completed-step count OR the inventory OR the pickaxe tier changed since
+                // the last failure. Keying on progress (not identical message text) is what
+                // catches a bot that ALTERNATES failure messages with nothing changing — a
+                // flaky container ping-ponging "result never appeared"/"would not open" (008's
+                // 433-loop), a half-open connection spinning "no portal found" offline, or a
+                // stalled cast — while still letting a slowly-advancing step continue (mine_iron
+                // "2/12"→"5/12" bumps the inventory sum, so it resets). Bailing relaunches fresh
+                // (new connection reloads chunks / a fresh table / new terrain).
+                let iv = &state.inventory;
+                let inv_sum = iv.logs + iv.planks + iv.sticks + iv.cobblestone + iv.dirt
+                    + iv.coal + iv.iron_ore + iv.iron_ingots + iv.diamonds + iv.food
+                    + iv.crafting_tables + iv.buckets + iv.water_buckets + iv.flint + iv.flint_and_steel;
+                let prog_sig = (done, inv_sum, state.equipment.pickaxe_tier().rank());
+                if r.success || prog_sig != last_prog_sig {
                     same_fail = 0;
-                } else if r.message == last_fail_msg {
+                    last_prog_sig = prog_sig;
+                } else {
                     same_fail += 1;
                     if same_fail >= 20 {
-                        println!("stuck — same failure x{same_fail} ({m}) — stopping for a fresh relaunch");
+                        println!("stuck — {same_fail} failures with no progress ({m}) — stopping for a fresh relaunch");
                         memory.race_bail("stuck_bail", &state, &format!("{m} x{same_fail}"));
                         break;
                     }
-                } else {
-                    same_fail = 0;
-                    last_fail_msg = r.message.clone();
                 }
             }
             None => {

@@ -37,12 +37,18 @@ for pid in $(pgrep -f 'bash .*race.sh'); do [ "$pid" != "$$" ] && kill -9 "$pid"
 pkill -9 -f 'target/release/ruststeve' 2>/dev/null
 sleep 2
 
+# Fresh telemetry DB for this race — the source of truth for the dashboard + report. Reset
+# HERE, after the old bots are killed and BEFORE any new bot opens it (a bot attaches on
+# startup in phase 2; deleting the file after that would unlink it out from under the bots'
+# open handles → they'd write to a ghost inode and readers would see an empty DB).
+rm -f "$DIR"/data/race.db "$DIR"/data/race.db-wal "$DIR"/data/race.db-shm 2>/dev/null
+
 PIDS=()
 cleanup() {
   echo "[race] cleanup — killing bots"
   for p in "${PIDS[@]:-}"; do kill -9 "$p" 2>/dev/null; done
   pkill -9 -f 'target/release/ruststeve' 2>/dev/null
-  $SSH "$MCRCON 'forceload remove 880 280 950 660'" >/dev/null 2>&1
+  $SSH "$MCRCON 'forceload remove 880 280 960 1010'" >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
 
@@ -52,7 +58,7 @@ OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
 # `keepInventory` is rejected). Re-apply it here because another project on the same box
 # wipes the world on its restarts, which resets the rule to false. (A datapack/world
 # default would make it survive wipes — do that if the wipe-flicker keeps biting.)
-$SSH "$MCRCON $OPS \"forceload add 880 280 950 660\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
+$SSH "$MCRCON $OPS \"forceload add 880 280 960 1010\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
 sleep 3
 
 # Surface probe skipped — use a fixed Y=74 (the lane forest band surface level).
@@ -130,9 +136,6 @@ $SSH "$MCRCON $TP" >/dev/null 2>&1
 echo "[race] bots positioned + spawnpoints set; lanes z=0..450"
 
 echo "[race] phase 4: racing (max ${RACE_SECONDS}s)"
-# Fresh telemetry DB for this race — it is the source of truth for the dashboard and the
-# post-run report. Delete before any bot attaches (no bot holds the WAL yet at phase 4).
-rm -f "$DIR"/data/race.db "$DIR"/data/race.db-wal "$DIR"/data/race.db-shm 2>/dev/null
 date +%s > /tmp/race-start   # wall-clock race start (dashboard reads it for elapsed)
 SECONDS=0
 WINNER=""
