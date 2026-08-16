@@ -1923,6 +1923,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     // log until the deadline. See the no-progress guard at the end of the loop body.
     let mut last_done = 0usize;
     let mut stalled_passes = 0u32;
+    let mut last_gain = Instant::now();
     while frame.iter().filter(|p| is_obsidian_at(bot, **p)).count() < 10 && Instant::now() < frame_deadline {
         // Fail-fast on death: if the bot fell in lava and died, health sticks at 0 (dead-limbo,
         // no regen) and every fill_bucket aborts — spinning the whole 900s budget for nothing.
@@ -1957,31 +1958,32 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         let done = frame.iter().filter(|p| is_obsidian_at(bot, **p)).count();
         mem.log("cast", "frame_pass", &format!("{done}/10 obsidian"));
         cast_debug(&format!("frame pass: {done}/10 obsidian"));
-        // No-progress guard: a pass that placed no new obsidian means the site is wedged
-        // (unreachable stand spot). Yield a beat so we can't busy-spin, and after several
-        // dead passes bail with failure so the step machine respawns/re-sites the cast
-        // instead of burning the whole portal budget spinning on one bad spot.
-        if done <= last_done {
+        // No-progress guard. Track both a dead-PASS count (catches a fast busy-spin) AND
+        // WALL-CLOCK time since the last obsidian (catches a SLOW grind). The pass-count guard
+        // alone was too weak: when cast_obsidian_at grinds for minutes per pass, 6 dead passes
+        // can exceed the external step budget, so the harness killed the step mid-cast (×7 in
+        // the race) before this ever bailed cleanly. Bailing on 150s-without-a-new-obsidian
+        // fires regardless of pass speed → we retire the bad lava and try a different site fast
+        // instead of burning the whole budget on one uncastable (e.g. rim-less deep sea) pool.
+        if done > last_done {
+            last_done = done;
+            stalled_passes = 0;
+            last_gain = Instant::now();
+        } else {
             stalled_passes += 1;
             bot.wait_ticks(10).await.ok();
-            if stalled_passes >= 6 {
-                cast_debug(&format!("cast: STALLED {done}/10 for {stalled_passes} passes — retire lava + bail to re-site"));
-                // The lava this site used is unsuitable for a cast — e.g. a high surface
-                // lavafall/lake (remembered lava at y80, but the bot stands/casts at y74-75,
-                // BELOW the lava surface): the frame ends up submerged, so poured lava merges
-                // into the open lake instead of forming a contained cup → 0/10 forever, and
-                // prepare kept re-selecting the SAME bad pool → same submerged anchor. Retire
-                // it (Gone) so the next prepare picks DIFFERENT lava — typically the deep
-                // lakes (y≈-54) that the GYM_DEEPSEA fixes cast reliably. observe won't
-                // resurrect Gone, so this bad surface pool stays retired.
-                if let Some(lp) = lava_pool {
-                    mem.mark(lp, PoiStatus::Gone);
-                }
-                return failure(format!("cast stalled at {done}/10 obsidian"));
+        }
+        if stalled_passes >= 6 || last_gain.elapsed() > Duration::from_secs(150) {
+            cast_debug(&format!(
+                "cast: STALLED {done}/10 ({stalled_passes} dead passes, {}s since gain) — retire lava + re-site",
+                last_gain.elapsed().as_secs()
+            ));
+            // Retire the lava POI (Gone) so the next prepare picks DIFFERENT lava — a rim-less
+            // deep sea or a submerged high lavafall can't be cast; observe won't resurrect Gone.
+            if let Some(lp) = lava_pool {
+                mem.mark(lp, PoiStatus::Gone);
             }
-        } else {
-            stalled_passes = 0;
-            last_done = done;
+            return failure(format!("cast stalled at {done}/10 obsidian"));
         }
     }
 

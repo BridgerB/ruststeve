@@ -324,7 +324,11 @@ pub async fn run() -> std::io::Result<()> {
                 // budget covers each step's own deadline plus slack; the portal cast legitimately
                 // runs up to ~900s, everything else settles well under 300s.
                 let budget = match step.id {
-                    "build_nether_portal" => Duration::from_secs(960),
+                    // The portal step does the ~100-block descent to lava (prepare, ~600s) AND
+                    // the 10-block cast (~900s) in one call; 960s killed it mid-cast (×7 in the
+                    // race). Give it room for both. A bad/uncastable site no longer wastes this —
+                    // the cast's 150s wall-clock stall-bail retires the lava and re-sites fast.
+                    "build_nether_portal" => Duration::from_secs(1800),
                     _ => Duration::from_secs(330),
                 };
                 let r = match tokio::time::timeout(budget, execute_step(&mut bot, step.id, &mut memory)).await {
