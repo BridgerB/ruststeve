@@ -1973,7 +1973,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
             stalled_passes += 1;
             bot.wait_ticks(10).await.ok();
         }
-        if stalled_passes >= 6 || last_gain.elapsed() > Duration::from_secs(150) {
+        if stalled_passes >= 6 || last_gain.elapsed() > Duration::from_secs(240) {
             cast_debug(&format!(
                 "cast: STALLED {done}/10 ({stalled_passes} dead passes, {}s since gain) — retire lava + re-site",
                 last_gain.elapsed().as_secs()
