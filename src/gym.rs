@@ -94,6 +94,11 @@ pub static GYM_STEPS: &[GymStep] = &[
     GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1 || !bot.find_blocks("obsidian", 8, 1).is_empty()), setup: GymSetup::RandomSurface },
     // Capstone: full portal kit, random terrain, pass = we're in the Nether.
     GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    // The FOCUSED portal drill: spawn fully kitted on REAL random terrain (spreadplayers,
+    // ~0..10k) — NOT the seeded arena — and build + light + ENTER a portal on whatever lava
+    // the world offers. This is exactly the race's failing case (bots arrive at Build Portal
+    // fully supplied, then can't cast over the deep sea). Pass = in the nether.
+    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "flint_and_steel 1", "cobblestone 128", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1200, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
 ];
 
 fn env(key: &str, default: &str) -> String {
@@ -333,7 +338,7 @@ async fn run_one_trial(
         // to_nether's step is build_nether_portal, which only builds+LIGHTS the portal
         // ("nether portal cast & lit") — it never walks in. The pass is in_nether, so we must
         // also run the separate enter_nether step once the portal exists, or it can NEVER pass.
-        if step.slug == "to_nether" && sync_from_bot(bot).world.portal_built {
+        if (step.slug == "to_nether" || step.slug == "portal") && sync_from_bot(bot).world.portal_built {
             let rem = deadline.saturating_duration_since(Instant::now());
             let _ = tokio::time::timeout(rem, crate::steps::execute_step(bot, "enter_nether", memory)).await;
         }
@@ -425,6 +430,13 @@ async fn setup_trial(
                     println!("[gym] spreadplayers didn't move the bot (resp: {}), retrying", resp.trim());
                 }
             }
+            // Anchor the spawnpoint at the landing spot so a mid-task death (e.g. a lava nick
+            // during the portal cast) respawns the bot right here, not at world-spawn thousands
+            // of blocks away where it can never recover — mirrors the race's lane spawnpoint.
+            let p = bot.entity.position;
+            let _ = rcon
+                .command(&format!("spawnpoint {name} {} {} {}", p.x.floor() as i32, p.y.floor() as i32 + 1, p.z.floor() as i32))
+                .await;
         }
         GymSetup::WaterPool => {
             // A contained water pool in a fixed arena, geometry from env — reproducible so we
