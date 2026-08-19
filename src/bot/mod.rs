@@ -262,12 +262,16 @@ impl<'a> Bot<'a> {
     /// Advance one step: handle a packet if one arrives before the 50 ms physics
     /// deadline, otherwise run a physics tick.
     pub async fn drive_tick(&mut self) -> std::io::Result<DriveStep> {
-        // Optional top-down world snapshot for the dashboard (throttled ~2s; skipped
-        // while a container window is open so it never perturbs the timing-sensitive
-        // craft/inventory sync — a heavy per-tick scan is what regressed craft before).
-        if self.view_last.elapsed() >= std::time::Duration::from_secs(4) {
-            self.view_last = Instant::now();
-            if self.current_window.is_none() && self.viewer.is_some() {
+        // Live-3D-viewer feed for the dashboard. POSE is written EVERY tick (cheap — 5 floats
+        // under a lock) so the streamed camera is smooth; the EXPENSIVE chunk-dump stays throttled
+        // and skipped while a container window is open (a heavy per-tick scan regressed craft
+        // timing before). Updating pose only every few seconds made the feed a slideshow.
+        if self.viewer.is_some() {
+            self.update_viewer_pose();
+            if self.current_window.is_none()
+                && self.view_last.elapsed() >= std::time::Duration::from_secs(1)
+            {
+                self.view_last = Instant::now();
                 self.update_viewer();
             }
         }
@@ -897,9 +901,23 @@ impl<'a> Bot<'a> {
         Some(state_id_to_block(self.registry, state))
     }
 
+    /// Cheap per-tick pose/time update for the live viewer — just writes the camera pose
+    /// under the shared lock (no world scan), so the streamed feed stays smooth at tick rate.
+    fn update_viewer_pose(&self) {
+        let Some(handle) = &self.viewer else {
+            return;
+        };
+        let p = self.entity.position;
+        let mut shared = handle.lock().unwrap();
+        shared.pose = (p.x, p.y, p.z, self.entity.yaw, self.entity.pitch);
+        shared.min_y = self.game.min_y;
+        shared.height = self.game.height;
+        shared.time = self.time.time_of_day;
+    }
+
     /// Fill the live-3D-viewer snapshot: update pose/time, and dump a bounded number
     /// of newly-loaded near chunks into the shared buffer for the SSE server to stream.
-    /// Bounded work per call (≤12 columns) + the 2s throttle keep it off the craft path.
+    /// Bounded work per call (≤4 columns) + the throttle keep it off the craft path.
     fn update_viewer(&mut self) {
         let Some(handle) = self.viewer.clone() else {
             return;

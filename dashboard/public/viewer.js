@@ -334499,10 +334499,25 @@ function mountViewer(canvas, wsUrl, opts = {}) {
       if (viewer) resizeViewer(viewer, w, h);
     }
   };
+  let __poseTarget = null, __poseCur = null;
+  const __lerpAng = (a, b, t) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * t; };
+  const __animatePose = () => {
+    if (!closed) requestAnimationFrame(__animatePose);
+    if (!viewer || !__poseTarget) return;
+    if (!__poseCur) __poseCur = { x: __poseTarget.x, y: __poseTarget.y, z: __poseTarget.z, yaw: __poseTarget.yaw, pitch: __poseTarget.pitch };
+    const t = 0.4;
+    __poseCur.x += (__poseTarget.x - __poseCur.x) * t;
+    __poseCur.y += (__poseTarget.y - __poseCur.y) * t;
+    __poseCur.z += (__poseTarget.z - __poseCur.z) * t;
+    __poseCur.yaw = __lerpAng(__poseCur.yaw, __poseTarget.yaw, t);
+    __poseCur.pitch += (__poseTarget.pitch - __poseCur.pitch) * t;
+    setViewerCamera(viewer, vec3(__poseCur.x, __poseCur.y, __poseCur.z), __poseCur.yaw, __poseCur.pitch);
+  };
+  requestAnimationFrame(__animatePose);
   const processMessage = (msg) => {
     if (!viewer) return;
     if (msg.type === "position") {
-      setViewerCamera(viewer, vec3(msg.x, msg.y, msg.z), msg.yaw, msg.pitch);
+      __poseTarget = { x: msg.x, y: msg.y, z: msg.z, yaw: msg.yaw, pitch: msg.pitch };
       opts.onPose?.({ x: msg.x, y: msg.y, z: msg.z, yaw: msg.yaw, pitch: msg.pitch });
     } else if (msg.type === "chunk") {
       const raw = Buffer.from(msg.buf, "base64");
