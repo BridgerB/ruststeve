@@ -229,7 +229,7 @@ pub async fn run() -> std::io::Result<()> {
     let mut idle = 0;
     // Stuck-guard state: the last (done, inventory-sum, pickaxe-rank) seen on a failing step.
     // We bail when failures pile up with NO change to this — see the guard below.
-    let mut last_prog_sig: (usize, i32, i32) = (usize::MAX, -1, -1);
+    let mut last_prog_sig: (usize, i32, i32, i32) = (usize::MAX, -1, -1, -1);
     let mut same_fail = 0u32;
     let mut last_death: Option<(i32, i32, i32)> = None;
     let mut same_death = 0u32;
@@ -365,7 +365,12 @@ pub async fn run() -> std::io::Result<()> {
                 let inv_sum = iv.logs + iv.planks + iv.sticks + iv.cobblestone + iv.dirt
                     + iv.coal + iv.iron_ore + iv.iron_ingots + iv.diamonds + iv.food
                     + iv.crafting_tables + iv.buckets + iv.water_buckets + iv.flint + iv.flint_and_steel;
-                let prog_sig = (done, inv_sum, state.equipment.pickaxe_tier().rank());
+                // Fold in the portal frame's obsidian count: placed obsidian lives in the WORLD, not
+                // the inventory, so a slowly-advancing cast (2/10→3/10) otherwise looks like "no
+                // progress" and trips the stuck-bail → relaunch → re-hunt lava → orphaned frame. This
+                // makes each obsidian reset the fail counter, so the frame can grind over many step
+                // re-derives (it persists in-world) without ever relaunching.
+                let prog_sig = (done, inv_sum, state.equipment.pickaxe_tier().rank(), crate::tasks::portal::frame_obsidian_count(&bot));
                 if r.success || prog_sig != last_prog_sig {
                     same_fail = 0;
                     last_prog_sig = prog_sig;

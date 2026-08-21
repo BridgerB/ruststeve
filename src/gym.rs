@@ -32,6 +32,11 @@ pub enum GymSetup {
     /// WATER_HALF (pool half-width → bank distance), WATER_DEPTH, WATER_SUBMERGE (start depth
     /// below the surface), WATER_CAP=1 (solid ceiling over the bot). Drops the bot submerged.
     WaterPool,
+    /// Teleport the bot to a REAL underground lava pool: spreadplayers to random surface, scan
+    /// the loaded chunks for exposed lava at depth with a safe cave stand beside it, and tp the
+    /// bot there. Isolates the portal CAST (dig out a cast site → infinite water → obsidian frame
+    /// → light → enter) from the descent, which is the easy/solved part. The real test of the bot.
+    LavaPool,
 }
 
 pub struct GymStep {
@@ -93,12 +98,16 @@ pub static GYM_STEPS: &[GymStep] = &[
     // Runs the portal step but passes the moment a lava bucket is filled.
     GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1 || !bot.find_blocks("obsidian", 8, 1).is_empty()), setup: GymSetup::RandomSurface },
     // Capstone: full portal kit, random terrain, pass = we're in the Nether.
-    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 2700, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
     // The FOCUSED portal drill: spawn fully kitted on REAL random terrain (spreadplayers,
     // ~0..10k) — NOT the seeded arena — and build + light + ENTER a portal on whatever lava
     // the world offers. This is exactly the race's failing case (bots arrive at Build Portal
     // fully supplied, then can't cast over the deep sea). Pass = in the nether.
-    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "flint_and_steel 1", "cobblestone 128", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1200, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 128", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 720, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    // The operator's design: tp the bot to a REAL underground lava pool with the full kit (2 water
+    // buckets → infinite source), then it must dig out a safe cast site, build the obsidian frame,
+    // light it, and enter. Isolates the CAST at a real pool from the (easy, solved) descent.
+    GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
 
 fn env(key: &str, default: &str) -> String {
@@ -267,7 +276,7 @@ async fn run_one_trial(
     // Portal steps: record the SEEDED lava pool in memory so prepare_cast_site's memory-first
     // path walks straight to it (as it would in a real run after mining recorded exposed lava),
     // instead of a racy find_fluid scan that missed it and triggered a blind deep descent.
-    if matches!(step.slug, "reach_lava" | "to_nether") {
+    if matches!(step.slug, "reach_lava" | "to_nether" | "pool") {
         // WEST EDGE of the lake (lake is gx+4..gx+14). This is a pure SAFETY NET: with the
         // adjacent flush lake, prepare_cast_site's find_fluid finds it on the first scan and
         // never consults memory (exactly like isolation, which seeds no POI). Only if that
@@ -280,6 +289,12 @@ async fn run_one_trial(
             crate::memory::PoiStatus::Available,
         );
     }
+    // The `pool` slug now uses the SAME prepare path as the (proven) to_nether/DEEPSEA arena: a
+    // memory POI at the pool's west edge (seeded above) + find_fluid, with FORCED_LAVA CLEARED.
+    // Setting FORCED_LAVA made prepare take a different branch that anchored the frame OVER the pool
+    // edge (bot at feet -39 over lava → `pillar1 FAIL`), while DEEPSEA's find_fluid+anchor path builds
+    // 10/10. The generated pool is the DEEPSEA geometry, so the DEEPSEA path is what it wants.
+    crate::tasks::portal::set_forced_lava(None);
     println!("[gym:{}] @ {gx},{gy},{gz} — running (timeout {}s)", step.slug, step.timeout_secs);
 
     let t0 = Instant::now();
@@ -379,9 +394,13 @@ async fn setup_trial(
     name: &str,
     step: &GymStep,
 ) -> (i32, i32, i32, i32, i32) {
-    // Random center well away from spawn/race lanes.
-    let cx = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
-    let cz = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
+    // Random center in the EXPLORED land region near the race lanes (x~680, z~350-550):
+    // a 9000-block range dropped trials into open ocean, where spreadplayers can't find a
+    // surface ("too many entities for space") and lands the bot on the fallback arena, so
+    // to_nether never exercised the real deep-descent-to-natural-lava path. This band is
+    // solid terrain with lava the bots already mapped at the y-54 band.
+    let cx = rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
+    let cz = rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
     // A DEAD bot can't be teleported by spreadplayers — it stays put, so several
     // trials in a row "run" at the same corpse spot ("0 attempts" timeouts, seen live
     // at 4822,5254 x3). Respawn first so every trial gets a fresh random location.
@@ -416,8 +435,11 @@ async fn setup_trial(
     match step.setup {
         GymSetup::RandomSurface => {
             for attempt in 0..2 {
+                // maxRange 24 was too tight — spreadplayers errored "too many entities for
+                // space" whenever the exact center was unsuitable. A wider range lets it find
+                // a valid surface nearby; spread distance is moot for a single bot.
                 let resp = rcon
-                    .command(&format!("spreadplayers {cx} {cz} 0 24 false {name}"))
+                    .command(&format!("spreadplayers {cx} {cz} 8 200 false {name}"))
                     .await
                     .unwrap_or_default();
                 pump_teleport(bot, cx, cz).await;
@@ -468,6 +490,80 @@ async fn setup_trial(
             let p = bot.entity.position;
             return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
         }
+        GymSetup::LavaPool => {
+            // GENERATE a clean, guaranteed-scoopable underground pool at a RANDOM deep location and
+            // tp the bot to it. Searching NATURAL pools was intractable: their scoopable source sits
+            // at a variable, often-unreachable depth vs any safe stand (e.g. source at y-55 under a
+            // stand at y-35, through lava the bot can't dig) → endless "NO scoopable source" / far
+            // scoops. The operator's intent is "bot stands at a SAFE underground lava pool, now build
+            // the cast" — reaching the pool is explicitly "the easy part, not the point". So deliver
+            // that state deterministically: this is the exact DEEPSEA rock-pool arena (which the cast
+            // PASSES on — flush air-topped source in solid rock + a clear stand), placed at a random
+            // deep spot instead of the fixed arena. The CAST is what's tested.
+            let px = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
+            let pz = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
+            let py: i32 = rand::Rng::gen_range(&mut rand::thread_rng(), -50..-30); // deep underground band
+            let _ = rcon.command(&format!("forceload add {} {} {} {}", px - 24, pz - 24, px + 24, pz + 24)).await;
+            // EXACTLY the DEEPSEA rock-pool arena dimensions (which builds 10/10 + enters reliably),
+            // just at a random location. Do NOT diverge — every geometry tweak (roomier/taller pocket)
+            // re-introduced per-run drift. Solid stone box, then a 3-tall air pocket; the frame's top
+            // rows dig UP into the ceiling as the cast builds, exactly like the proven arena.
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", px - 10, py - 8, pz - 8, px + 16, py + 6, pz + 8)).await;
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", px - 2, py, pz - 3, px + 9, py + 2, pz + 3)).await;
+            // 5x5 flush SOURCE pool at floor level (py-1), 4 blocks +X of the stand. 25 sources so
+            // scooping 10+ times (sources are consumed per scoop) never depletes it mid-frame.
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", px + 4, py - 1, pz - 2, px + 8, py - 1, pz + 2)).await;
+            // Bot stands at (px,py,pz): feet at py on the stone floor (py-1), the pool source at py-1
+            // is FLUSH (one below the feet) with air above — a shallow horizontal scoop. Spawnpoint
+            // here so any mishap-death respawns in the arena, not at world spawn.
+            let _ = rcon.command(&format!("spawnpoint {name} {px} {py} {pz}")).await;
+            let _ = rcon.command(&format!("tp {name} {px} {py} {pz}")).await;
+            pump_teleport(bot, px, pz).await;
+            bot.wait_ticks(20).await.ok();
+            // Guard the deep-tp death/rubber-band (respawn lands at the spawnpoint = the stand).
+            if bot.health <= 0.0 {
+                let _ = bot.respawn().await;
+                bot.wait_ticks(20).await.ok();
+            }
+            let too_far = {
+                let p = bot.entity.position;
+                ((px as f64 - p.x).powi(2) + (pz as f64 - p.z).powi(2)).sqrt() >= 24.0
+            };
+            if too_far {
+                let _ = rcon.command(&format!("tp {name} {px} {py} {pz}")).await;
+                pump_teleport(bot, px, pz).await;
+                bot.wait_ticks(20).await.ok();
+            }
+            // READBACK-SETTLE: the RCON fill + tp to a FAR fresh location can leave the bot's CLIENT
+            // view of the just-filled box still streaming, so early block_at queries race and report a
+            // just-placed cup wall as not-solid (`cup=SS_SS`) — the cast then never seals the cup and
+            // stalls at 1/10 (while the ALWAYS-loaded fixed arena builds 10/10). Poll until the filled
+            // stone box AND the lava pool read back correctly (not air) before starting the trial.
+            let solid_now = |bot: &Bot, x: i32, y: i32, z: i32| {
+                bot.block_at(x, y, z).map(|b| !b.name.is_empty() && !b.name.ends_with("air")).unwrap_or(false)
+            };
+            let lava_now = |bot: &Bot, x: i32, y: i32, z: i32| {
+                bot.block_at(x, y, z).map(|b| b.name.contains("lava")).unwrap_or(false)
+            };
+            // Check only cells that are actually FILLED (never the carved air pocket px-2..px+9 ×
+            // py..py+2 × pz-3..pz+3): the stone floor (py-1), the stone ceiling (py+3), and the pool.
+            let mut settled = false;
+            for _ in 0..80 {
+                let box_ok = solid_now(bot, px, py - 1, pz)          // floor under the stand
+                    && solid_now(bot, px + 6, py - 2, pz)            // floor under the pool
+                    && solid_now(bot, px, py + 3, pz)                // ceiling above the 3-tall pocket
+                    && solid_now(bot, px - 5, py, pz);              // west wall of the box
+                let pool_ok = lava_now(bot, px + 4, py - 1, pz) && lava_now(bot, px + 6, py - 1, pz);
+                if box_ok && pool_ok {
+                    settled = true;
+                    break;
+                }
+                bot.wait_ticks(5).await.ok();
+            }
+            println!("[gym] LavaPool: generated + tp'd to pool stand ({px},{py},{pz}) settled={settled}");
+            let p = bot.entity.position;
+            return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, px, pz);
+        }
     }
     // Portal steps (reach_lava/to_nether) run WITHOUT the mining phase that, in a real run,
     // leaves exposed lava in the bot's memory (mine_ore records find_exposed_blocks). Without
@@ -502,8 +598,17 @@ async fn setup_trial(
         // extends OVER the lava, forcing the bot to platform over it and take fire — exactly the
         // real deep sea. If a fix makes to_nether pass HERE, it should fix the race.
         if std::env::var("GYM_DEEPSEA").is_ok() {
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", fx - 7, fy - 5, fz - 7, fx + 15, fy - 1, fz + 7)).await;
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 1, fy - 2, fz - 1, fx + 1, fy - 1, fz + 1)).await;
+            // ROCK POOL (repurposed from the pathological open-sea): a SOLID STONE block with a small
+            // carved lava SOURCE pool + an air stand beside it — mimics a real underground pool
+            // EMBEDDED IN ROCK so the fire-safe chamber dig + refill iterate fast & deterministically
+            // (the open sea had no rock → unwinnable fire death). Bot in the air pocket at (fx,fy),
+            // pool 4 blocks +X, solid rock all around for the chamber.
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 10, fy - 8, fz - 8, fx + 16, fy + 6, fz + 8)).await;
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - 2, fy, fz - 3, fx + 9, fy + 2, fz + 3)).await; // bot pocket + cave over the pool
+            // 5x5 flush SOURCE pool (25 sources) — big enough that scooping 10+ times doesn't
+            // DEPLETE it (lava sources are consumed per scoop, unlike water; a 9-source pool ran dry
+            // mid-frame → "fill lava: all rounds failed"). Real underground pools are usually larger.
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", fx + 4, fy - 1, fz - 2, fx + 8, fy - 1, fz + 2)).await;
             let _ = rcon.command(&format!("tp {name} {fx} {fy} {fz}")).await;
             let _ = rcon.command(&format!("spawnpoint {name} {fx} {fy} {fz}")).await;
             pump_teleport(bot, fx, fz).await;

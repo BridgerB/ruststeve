@@ -100,16 +100,19 @@ pub const STEPS: &[Step] = &[
         name: "Mine Iron Ore",
         priority: 11,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 2,
-        // NETHER goal needs a lot of iron: pickaxe(3) + 2 buckets(6) + flint&steel(1)
-        // = 10, +1 buffer. Mine it in one trip rather than re-descending repeatedly.
-        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 12,
+        // NETHER goal needs a lot of iron: pickaxe(3) + 3 buckets(9) + flint&steel(1)
+        // = 13, +2 buffer. The 3rd bucket is load-bearing: on natural terrain the bot
+        // deep-descends to a lava lake and scoops early (empty→lava), so it must reach
+        // the cast still holding 1 EMPTY + 1 WATER bucket — 2 total (the old target) left
+        // it with 0 empty after the scoop and the cast bailed "need a water/empty bucket".
+        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 15,
     },
     Step {
         id: "smelt_iron",
         name: "Smelt Iron",
         priority: 12,
         can_execute: |s| s.equipment.has_furnace && s.inventory.coal >= 1 && s.inventory.iron_ore >= 1,
-        is_complete: |s| s.inventory.iron_ingots >= 11,
+        is_complete: |s| s.inventory.iron_ingots >= 14,
     },
     Step {
         id: "craft_iron_pickaxe",
@@ -121,22 +124,27 @@ pub const STEPS: &[Step] = &[
     // === NETHER PREP === (all gated behind the iron pickaxe so the bot finishes
     // the iron-pickaxe chain FIRST — otherwise the furthest-step picker jumps to
     // these and never crafts the pickaxe it already has the iron for).
-    // Portal needs 2 buckets total: one stays WATER (to pour over the lava), one
-    // stays EMPTY (the bot fills it with lava from the pool, refilling each cast).
+    // Portal needs 3 buckets total (matches the passing gym prereq): one stays WATER
+    // (poured over the lava cup), and TWO stay EMPTY — the natural-terrain cast scoops
+    // lava early during the deep descent (empty→lava), so it must still hold 1 empty +
+    // 1 water when it reaches the frame. 2 buckets left it with 0 empty after the scoop.
     Step {
         id: "craft_bucket",
         name: "Craft Buckets",
         priority: 14,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.iron_ingots >= 3,
-        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 2,
+        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 3,
     },
     Step {
         id: "get_water_buckets",
         name: "Fill Water Buckets",
         priority: 15,
-        // Fill ONE bucket with water — leave the other empty for lava.
+        // Fill ONE bucket with water. Completion is ONLY water>=1 — the fill task consumes
+        // an empty bucket, so requiring buckets>=2 here deadlocked (filling water can never
+        // RAISE the empty count, so a bot with 1 empty+1 water re-ran this forever). The
+        // 2-empty requirement lives in craft_bucket (sum>=3) + the portal gate (buckets>=2).
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.buckets >= 1,
-        is_complete: |s| s.inventory.water_buckets >= 1 && s.inventory.buckets >= 1,
+        is_complete: |s| s.inventory.water_buckets >= 1,
     },
     Step {
         id: "get_flint_and_steel",
@@ -166,7 +174,7 @@ pub const STEPS: &[Step] = &[
         can_execute: |s| {
             s.world.in_overworld()
                 && s.inventory.water_buckets >= 1
-                && s.inventory.buckets >= 1
+                && s.inventory.buckets >= 2
                 && s.inventory.flint_and_steel >= 1
                 && s.inventory.cobblestone >= 30
         },
@@ -244,10 +252,16 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_stone_sword" => tasks::craft::craft_stone_sword(bot, mem).await,
         "craft_furnace" => tasks::craft::craft_furnace(bot, mem).await,
         "mine_coal" => tasks::mining::mine_ore(bot, "coal", 2, mem).await,
-        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 12, mem).await,
-        "smelt_iron" => tasks::smelt::smelt_iron(bot, 11).await,
+        // Keep this in lock-step with mine_iron's is_complete target (15): if the task
+        // mines fewer than is_complete wants, the step never completes and re-runs forever.
+        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 15, mem).await,
+        // Target 14 must match smelt_iron's is_complete (14) — a lower task target would
+        // "succeed" below the step threshold and re-run forever.
+        "smelt_iron" => tasks::smelt::smelt_iron(bot, 14, mem).await,
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
-        "craft_bucket" => tasks::craft::craft_buckets(bot, 2, mem).await,
+        // Count 3 must match craft_bucket's is_complete (buckets+water>=3) — a lower count
+        // stops the task below the step threshold and re-runs "have N buckets" forever.
+        "craft_bucket" => tasks::craft::craft_buckets(bot, 3, mem).await,
         // Fill ONE water bucket (keep the second bucket empty for lava).
         "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 1, mem).await,
         "get_flint_and_steel" => tasks::craft::get_flint_and_steel(bot, mem).await,
