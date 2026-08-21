@@ -66,6 +66,23 @@ pub struct Fleet {
 
 const DIR: &str = "/Users/bridger/Developer/mc/upstream/ruststeve";
 
+/// Open a data DB the RIGHT way for a live dashboard reader: the race bots write it in WAL mode
+/// and auto-checkpoint the (multi-MB) WAL constantly. A plain read-WRITE `Connection::open` then
+/// intermittently loses the race to a checkpoint's lock → `SQLITE_BUSY` → the reports queries
+/// silently fell through to `unwrap_or(0)` / `unwrap_or_default()` and the page showed "no data"
+/// even though the tables are full. READ_ONLY never conflicts with a writer/checkpoint in WAL, and
+/// a busy_timeout waits out any transient lock instead of erroring. `name` is e.g. "race.db".
+#[cfg(feature = "ssr")]
+fn open_db(name: &str) -> rusqlite::Result<rusqlite::Connection> {
+    use rusqlite::OpenFlags;
+    let conn = rusqlite::Connection::open_with_flags(
+        format!("{DIR}/data/{name}"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    Ok(conn)
+}
+
 fn now_s() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -133,7 +150,7 @@ pub async fn get_fleet() -> Result<Fleet, ServerFnError> {
 
     // 2. Enrich each with the latest telemetry tick (race bots write data/race.db).
     let now = now_s();
-    let race = rusqlite::Connection::open(format!("{DIR}/data/race.db")).ok();
+    let race = open_db("race.db").ok();
     let mut bots = Vec::new();
     for (name, kind) in running {
         let mut b = Bot {
@@ -185,7 +202,7 @@ pub async fn get_fleet() -> Result<Fleet, ServerFnError> {
     // the shared box listens on localhost:25565) rather than looking for a LOCAL server.jar.
     let server_up = std::net::TcpStream::connect_timeout(
         &"127.0.0.1:25565".parse().unwrap(),
-        std::time::Duration::from_millis(400),
+        std::time::Duration::from_millis(2500),
     )
     .is_ok();
 
@@ -205,7 +222,7 @@ pub struct GymRow {
 
 #[server(GetGym, "/api")]
 pub async fn get_gym() -> Result<Vec<GymRow>, ServerFnError> {
-    let conn = rusqlite::Connection::open(format!("{DIR}/data/gym.db"))
+    let conn = open_db("gym.db")
         .map_err(|e| ServerFnError::new(e.to_string()))?;
     let mut stmt = conn
         .prepare(
@@ -273,7 +290,7 @@ pub struct FlowBot {
 #[server(GetFlow, "/api")]
 pub async fn get_flow() -> Result<Vec<FlowBot>, ServerFnError> {
     let now = now_s();
-    let race = rusqlite::Connection::open(format!("{DIR}/data/race.db")).ok();
+    let race = open_db("race.db").ok();
     let mut out = Vec::new();
     for (name, kind) in running_bots() {
         if kind == "gym" {
@@ -332,7 +349,7 @@ pub struct TimelineEntry {
 #[server(GetTimeline, "/api")]
 pub async fn get_timeline(bot: String) -> Result<Vec<TimelineEntry>, ServerFnError> {
     let now = now_s();
-    let conn = rusqlite::Connection::open(format!("{DIR}/data/race.db"))
+    let conn = open_db("race.db")
         .map_err(|e| ServerFnError::new(e.to_string()))?;
     let mut out = Vec::new();
     if let Ok(mut s) = conn.prepare(
@@ -377,7 +394,7 @@ pub struct MapData {
 #[server(GetMap, "/api")]
 pub async fn get_map() -> Result<MapData, ServerFnError> {
     // Live bot positions from the latest overworld race tick.
-    let race = rusqlite::Connection::open(format!("{DIR}/data/race.db")).ok();
+    let race = open_db("race.db").ok();
     let mut bots = Vec::new();
     for (name, kind) in running_bots() {
         let mut mb = MapBot { name: name.clone(), kind, ..Default::default() };
@@ -455,7 +472,7 @@ pub struct Reports {
 pub async fn get_reports() -> Result<Reports, ServerFnError> {
     // Await the gym query FIRST so no (non-Send) rusqlite handle is held across it.
     let gym = get_gym().await.unwrap_or_default();
-    let conn = rusqlite::Connection::open(format!("{DIR}/data/race.db"))
+    let conn = open_db("race.db")
         .map_err(|e| ServerFnError::new(e.to_string()))?;
     let bars = |sql: &str| -> Vec<Bar> {
         conn.prepare(sql)
@@ -513,7 +530,7 @@ pub struct GymDetail {
 
 #[server(GetGymSlug, "/api")]
 pub async fn get_gym_slug(slug: String) -> Result<GymDetail, ServerFnError> {
-    let conn = rusqlite::Connection::open(format!("{DIR}/data/gym.db"))
+    let conn = open_db("gym.db")
         .map_err(|e| ServerFnError::new(e.to_string()))?;
     let (runs, passes, avg_s): (i64, i64, i64) = conn
         .query_row(
@@ -702,7 +719,7 @@ pub struct WorldInfo {
 pub async fn world_status() -> Result<WorldInfo, ServerFnError> {
     let up = std::net::TcpStream::connect_timeout(
         &"127.0.0.1:25565".parse().unwrap(),
-        std::time::Duration::from_millis(500),
+        std::time::Duration::from_millis(2500),
     )
     .is_ok();
     let mut info = WorldInfo { up, version: "26.1.2".into(), max_players: 100, ..Default::default() };
@@ -795,7 +812,7 @@ pub fn App() -> impl IntoView {
 pub async fn ping() -> Result<bool, ServerFnError> {
     Ok(std::net::TcpStream::connect_timeout(
         &"127.0.0.1:25565".parse().unwrap(),
-        std::time::Duration::from_millis(400),
+        std::time::Duration::from_millis(2500),
     )
     .is_ok())
 }
