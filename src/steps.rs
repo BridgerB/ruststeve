@@ -187,6 +187,22 @@ pub const STEPS: &[Step] = &[
         can_execute: |s| s.world.portal_built && s.world.in_overworld(),
         is_complete: |s| s.world.in_nether(),
     },
+    // ── post-nether: fortress → blaze spawner → blaze rod ──────────────────────
+    Step {
+        id: "find_fortress",
+        name: "Find Nether Fortress",
+        priority: 20,
+        can_execute: |s| s.world.in_nether() || std::env::var("ARENA_TEST").is_ok(),
+        is_complete: |s| s.world.fortress_found,
+    },
+    Step {
+        id: "kill_blaze",
+        name: "Kill a Blaze",
+        priority: 21,
+        // Need a real sword (equipment.sword is always Some(..); gate on the tier rank).
+        can_execute: |s| s.world.fortress_found && s.equipment.sword_tier().rank() >= 1,
+        is_complete: |s| s.inventory.blaze_rods >= 1,
+    },
 ];
 
 /// The FURTHEST-along step that can run and isn't complete. Picking the last
@@ -195,6 +211,12 @@ pub const STEPS: &[Step] = &[
 /// earlier gather/craft step that looks "incomplete" only because a later step
 /// consumed its (consumable) output — which otherwise loops forever.
 pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
+    // The pickaxe/wood recovery guards below are OVERWORLD tool-phase logic — a bot in the
+    // nether (post-nether combat phase) has a combat kit with no pickaxe/wood on purpose, and
+    // must NOT be dragged back to "gather wood"/"craft pickaxe" (there are no trees in the
+    // nether — it'd wander forever). Skip both recoveries once in the nether; the normal
+    // furthest-runnable picker then advances find_fortress → kill_blaze.
+    if state.world.in_overworld() && std::env::var("ARENA_TEST").is_err() {
     // PICKAXE RECOVERY (highest priority): if we have no pickaxe but the materials
     // to make one, go back UP the chain and re-craft it before anything else.
     // Never proceed to mine by hand — only WOOD is gathered by hand. A bot whose
@@ -231,6 +253,7 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
             return Some(step);
         }
     }
+    } // end overworld-only recovery guards
     STEPS.iter().filter(|s| (s.can_execute)(state) && !(s.is_complete)(state)).next_back()
 }
 
@@ -268,6 +291,8 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "gather_build_blocks" => tasks::mining::mine_stone(bot, 40, mem).await,
         "build_nether_portal" => tasks::portal::build_nether_portal(bot, mem).await,
         "enter_nether" => tasks::portal::enter_nether(bot).await,
+        "find_fortress" => tasks::nether::find_fortress(bot, mem).await,
+        "kill_blaze" => tasks::nether::kill_blaze(bot, mem, 1).await,
         other => failure(format!("no executor for step {other}")),
     }
 }

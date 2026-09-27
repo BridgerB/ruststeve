@@ -1589,7 +1589,7 @@ async fn cast_obsidian_at(
                 })
             });
             if water_near && select_item(bot, "bucket").await.unwrap_or(false) {
-                'clear_water: for _ in 0..4 {
+                for _ in 0..4 {
                     let mut waters = Vec::new();
                     for dy in [0_i32, 1, 2, -1] {
                         for dx in -3..=3 {

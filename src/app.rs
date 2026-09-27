@@ -118,6 +118,45 @@ pub async fn run() -> std::io::Result<()> {
         }
     }
 
+    // NETHER_START="x y z": drop the bot straight into the nether onto a launch pad (the
+    // post-nether combat harness). The old launch-then-RCON-tp path RACED the bot's startup —
+    // the bot spawned at a stale/high spawnpoint and started wandering before the tp landed.
+    // Doing it here (bot is op'd, over the game connection) is deterministic: cross-dimension
+    // tp + anchor the spawnpoint at the pad so deaths respawn back at the fight, not overworld.
+    if let Ok(ns) = std::env::var("NETHER_START") {
+        let parts: Vec<&str> = ns.split_whitespace().collect();
+        if parts.len() == 3 {
+            let me = bot.username().to_string();
+            println!("nether-start: tp into the nether at {ns} …");
+            bot.run_command(&format!("execute in minecraft:the_nether run tp {} {} {} {}", me, parts[0], parts[1], parts[2])).await.ok();
+            bot.run_command(&format!("execute in minecraft:the_nether run spawnpoint {} {} {} {}", me, parts[0], parts[1], parts[2])).await.ok();
+            // The cross-dimension tp streams the nether chunks with a DELAY — right after it the
+            // bot's world is still empty (block_at = air), so if the step loop starts now it flails
+            // in a void world and wanders off. WAIT until the world is actually populated under the
+            // bot (a solid block below its feet) or ~20s, driving the tick loop to ingest chunks.
+            let tx: i32 = parts[0].parse().unwrap_or(0);
+            let tz: i32 = parts[2].parse().unwrap_or(0);
+            let ty: i32 = parts[1].parse().unwrap_or(64);
+            let loaded_deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                bot.drive_tick().await.ok();
+                let feet_solid = bot
+                    .block_at(tx, ty - 1, tz)
+                    .map(|b| b.name != "air" && b.name != "cave_air" && b.name != "void_air")
+                    .unwrap_or(false);
+                if feet_solid || Instant::now() > loaded_deadline {
+                    break;
+                }
+            }
+            // Re-center: the desync during loading may have slid the bot off the target; put it back.
+            bot.run_command(&format!("execute in minecraft:the_nether run tp {} {} {} {}", me, parts[0], parts[1], parts[2])).await.ok();
+            for _ in 0..20 {
+                bot.drive_tick().await.ok();
+            }
+            println!("nether-start: now at {:?} dim={} feet={:?}", bot.entity.position, bot.game.dimension, bot.block_at(tx, ty - 1, tz).map(|b| b.name));
+        }
+    }
+
     // Race positioning: hold here (alive, idle) so the orchestrator can teleport
     // us into our lane before we start gathering. RACE_HOLD=seconds.
     if let Ok(hold) = std::env::var("RACE_HOLD") {
@@ -211,7 +250,9 @@ pub async fn run() -> std::io::Result<()> {
         let p = bot.entity.position;
         // Surface here is ~y55-75; the deep-lava cast deaths are at y<0. A y>=45 gate anchors
         // a surface/shallow spawnpoint the bot can recover from and never one at the lava.
-        if p.y >= 45.0 {
+        // Skip when NETHER_START set it already (it anchored the nether pad; re-anchoring here
+        // in whatever dimension we're in would clobber it).
+        if p.y >= 45.0 && std::env::var("NETHER_START").is_err() {
             let me = bot.username().to_string();
             bot.run_command(&format!(
                 "spawnpoint {} {} {} {}",
@@ -285,6 +326,7 @@ pub async fn run() -> std::io::Result<()> {
         if let Ok(goal) = std::env::var("RACE_GOAL") {
             let reached = match goal.as_str() {
                 "nether" => state.world.in_nether(),
+                "blaze" => state.inventory.blaze_rods >= 1,
                 "iron_pickaxe" => state.equipment.pickaxe_tier().rank() >= 3,
                 "stone_pickaxe" => state.equipment.pickaxe_tier().rank() >= 2,
                 "wooden_pickaxe" => state.equipment.pickaxe_tier().rank() >= 1,
@@ -329,6 +371,10 @@ pub async fn run() -> std::io::Result<()> {
                     // race). Give it room for both. A bad/uncastable site no longer wastes this —
                     // the cast's 150s wall-clock stall-bail retires the lava and re-sites fast.
                     "build_nether_portal" => Duration::from_secs(1800),
+                    // Wandering to a fortress and camping the spawner are long by nature; the
+                    // tasks self-time-box (45s / 150s) and return so the loop re-derives, but give
+                    // the outer watchdog headroom so a single sweep/fight isn't cut short.
+                    "find_fortress" | "kill_blaze" => Duration::from_secs(300),
                     _ => Duration::from_secs(330),
                 };
                 let r = match tokio::time::timeout(budget, execute_step(&mut bot, step.id, &mut memory)).await {

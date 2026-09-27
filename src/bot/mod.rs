@@ -320,6 +320,28 @@ impl<'a> Bot<'a> {
         Ok(())
     }
 
+    /// Drive the loop for AT LEAST `ms` of real wall-clock time, pumping packets so
+    /// world/entity state stays fresh. Unlike [`wait_ticks`], an incoming-packet flood
+    /// can't collapse the delay: `wait_ticks(14)` returned in <2ms during combat (the
+    /// packet backlog satisfied 14 "ticks" instantly), so the bot dumped 40 swings in
+    /// 66ms — all but the first landed inside a mob's 10-tick (0.5s) hurt-invulnerability
+    /// and dealt zero damage. Combat pacing needs a guaranteed real interval, so this
+    /// floors on the clock: it keeps driving (draining packets, ignoring transient drive
+    /// errors) until `ms` has actually elapsed, then returns.
+    pub async fn wait_real_ms(&mut self, ms: u64) -> std::io::Result<()> {
+        let deadline = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, self.drive_tick()).await {
+                Err(_) => break,                                  // real deadline reached — the floor
+                Ok(Ok(DriveStep::Disconnected)) => return Ok(()), // connection gone: stop early
+                Ok(Ok(_)) => {}                                   // tick/packet handled: keep going
+                Ok(Err(_)) => tokio::time::sleep(Duration::from_millis(5)).await, // transient: don't spin
+            }
+        }
+        Ok(())
+    }
+
     // ── Physics tick ──
 
     async fn physics_tick(&mut self) -> std::io::Result<()> {
@@ -1192,22 +1214,26 @@ impl<'a> Bot<'a> {
         self.client.write("swing", PValue::compound(vec![("hand", PValue::num(0.0))])).await
     }
 
-    /// Melee-attack an entity (left-click). Faces it, swings, sends interact.
+    /// Melee-attack an entity (left-click): face it, swing the arm, send the `attack` packet.
     pub async fn attack(&mut self, entity_id: i32) -> std::io::Result<()> {
         if let Some(e) = self.entities.get(&entity_id) {
             let c = e.position;
             self.look_at(vec3(c.x, c.y + 0.7, c.z));
         }
+        // Sync our current position+look to the server BEFORE attacking. send_position otherwise
+        // fires only on the next physics tick — AFTER the attack packet — so the server evaluates
+        // the attack's reach/angle against a STALE pose and rejects it. `last_sent` is left
+        // unchanged so the physics tick still re-sends.
+        let saved = self.last_sent.take();
+        let _ = self.send_position().await;
+        self.last_sent = saved;
         self.swing_arm().await?;
+        // 775 (26.1.2) split attacking into a dedicated `attack` packet (0x01) — just the target
+        // entity id. The old `interact` packet (0x1a) is now right-click ONLY, so sending an
+        // interact-with-mouse=1 was a no-op right-click on the mob (decoded fine, dealt no damage;
+        // and without a `hand` it even failed to decode → kicked us). See minecraft-data pc/26.1.
         self.client
-            .write(
-                "interact",
-                PValue::compound(vec![
-                    ("target", PValue::num(entity_id as f64)),
-                    ("mouse", PValue::num(1.0)), // 1 = attack
-                    ("sneaking", PValue::Bool(false)),
-                ]),
-            )
+            .write("attack", PValue::compound(vec![("entityId", PValue::num(entity_id as f64))]))
             .await
     }
 

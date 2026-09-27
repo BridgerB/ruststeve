@@ -99,9 +99,14 @@ impl Sniffer {
 /// Names worth a full param dump (the craft/scoop/inventory interaction surface).
 /// Everything else stores just name+size — plenty to see ordering and timing.
 fn is_interaction(name: &str) -> bool {
-    const KEYS: [&str; 12] = [
+    const KEYS: [&str; 21] = [
         "container", "set_slot", "set_content", "carried", "click", "use_item",
         "block_change", "block_update", "acknowledge", "ping", "pong", "transaction",
+        // combat debugging: the attack packet, arm swing, our position updates, and the server's
+        // damage/hurt/knockback responses (so we can see if a hit registers) + entity add/remove
+        // (to check the attacked id is the real, live blaze — not a stale/ghost or wrong entity).
+        "interact", "swing", "move_player", "player_position", "hurt", "damage", "entity_event",
+        "add_entity", "remove_entities",
     ];
     let lname = name.to_lowercase();
     KEYS.iter().any(|k| lname.contains(k))
