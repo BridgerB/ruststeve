@@ -98,7 +98,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     // Runs the portal step but passes the moment a lava bucket is filled.
     GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1 || !bot.find_blocks("obsidian", 8, 1).is_empty()), setup: GymSetup::RandomSurface },
     // Capstone: full portal kit, random terrain, pass = we're in the Nether.
-    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 2", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 2700, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 12", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 2700, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
     // The FOCUSED portal drill: spawn fully kitted on REAL random terrain (spreadplayers,
     // ~0..10k) — NOT the seeded arena — and build + light + ENTER a portal on whatever lava
     // the world offers. This is exactly the race's failing case (bots arrive at Build Portal
@@ -604,7 +604,16 @@ async fn setup_trial(
             // (the open sea had no rock → unwinnable fire death). Bot in the air pocket at (fx,fy),
             // pool 4 blocks +X, solid rock all around for the chamber.
             let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 10, fy - 8, fz - 8, fx + 16, fy + 6, fz + 8)).await;
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - 2, fy, fz - 3, fx + 9, fy + 2, fz + 3)).await; // bot pocket + cave over the pool
+            // Air pocket is intentionally 3-TALL + TIGHT in z (fz-3..fz+3): the cast DIGS UP into the
+            // stone ceiling as it builds the upper frame rows, and the tight +Z wall CONSTRAINS the bot
+            // to the frame stand so it can't drift (widening it to fz+7 let the bot wander to z=602.6 →
+            // `centered=false` even on the bottom row). This is the documented working DEEPSEA geometry
+            // (memory 18bl passed 10/10+enter). Do NOT widen/heighten it — that oscillates the failure.
+            // +Z extent must include the cast's STAGING cell (stand_z+3 ≈ fz+4) or the bot stages IN
+            // the stone wall and suffocates/POS-FAILs (`z=604.2, off=2.99` at fz+3). fz+5 fits staging
+            // with 1 cell margin — NOT wider (fz+7 let it drift off the stand → centered=false). This
+            // is the sweet spot between "tight = suffocate at staging" and "wide = drift, no center".
+            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - 2, fy, fz - 3, fx + 9, fy + 2, fz + 5)).await; // bot pocket + cave over the pool
             // 5x5 flush SOURCE pool (25 sources) — big enough that scooping 10+ times doesn't
             // DEPLETE it (lava sources are consumed per scoop, unlike water; a 9-source pool ran dry
             // mid-frame → "fill lava: all rounds failed"). Real underground pools are usually larger.

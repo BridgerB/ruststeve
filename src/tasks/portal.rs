@@ -982,6 +982,12 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
                 // use_item embeds the current rotation, so re-looking here guarantees the steep
                 // downward pitch is what gets sent.
                 bot.look_at(look_pt);
+                // ★ HOLD THE EMPTY BUCKET before scooping. The cap/floor placement earlier in this
+                // loop (place_cobble) leaves COBBLESTONE selected, so activate_item "scoops" with
+                // cobble and the lava stays lava (live: `held=cobblestone lava true->lava`, 0 fills
+                // across every bot on the deep band — the whole 2026-09 nether wall after the
+                // bucket-count fix). select_item is a no-op if the bucket is already held.
+                let _ = select_item(bot, "bucket").await;
                 let held = bot.held_item().map(|i| i.name.clone());
                 let (sent_yaw, sent_pitch) = (bot.entity.yaw.to_degrees(), bot.entity.pitch.to_degrees());
                 let eye = bot.entity.position;
@@ -2542,16 +2548,34 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         // Fill MULTIPLE lava buckets while at this close, safe source. As the bot builds the
         // frame it drifts and the next source lands 5-8 blocks away — past the ~4.5 fluid
         // raytrace, so re-scoops "all rounds failed" and the frame stalled at 1-2 obsidian.
-        // Front-load lava here but KEEP 2 empty buckets (stop at bucket>=3, was >=2). The later
-        // get_water_buckets step consumes ONE empty for the water bucket, so stopping at 1 empty left
-        // ZERO for the cast's cup water-clear → the adjacent-cup water flood couldn't be scooped and
-        // the bottom row deadlocked (`cleared cup water → water`, `lava_at=[]` forever). Keeping 2
-        // here leaves 1 empty after the water fill — enough to scoop the flood between cups.
-        while count_items(bot, "lava_bucket") < 4 && count_items(bot, "bucket") >= 3 {
+        // Front-load lava here, KEEPING 1 empty bucket in reserve (stop at bucket>=2). ★ The bot
+        // ARRIVES at prepare with 2 empty + 1 water (race: get_water already ran; gym: prereq
+        // `bucket 2`), so gating this loop at bucket>=3 (a regression — it was >=2) meant it NEVER
+        // scooped a single lava with the standard provisioning → fill_bucket was never called,
+        // `early scoop → lava_buckets=0` forever, no cast, no nether (whole 2026-09 wall). With >=2
+        // a 2-empty bot scoops exactly 1 lava (→ 1 empty + 1 lava + 1 water), enough to cast; a
+        // pour returns the empty bucket anyway, so 1 reserve covers the cup water-clear between cups.
+        // FRONT-LOAD UP TO 10 lava (was 4): casting the full frame needs 10 lava pours (1 obsidian
+        // each), but after block 1 the bot drifts and the source pool ends up 5-6 blocks away —
+        // past the ~4.5 scoop raytrace AND unreachable by goto_near through the frame it just built
+        // — so mid-frame refills fail and the frame freezes at 1/10 (the 2026-09 wall). Scooping all
+        // 10 NOW, while standing at the reachable pool with a full bucket kit, lets the whole frame
+        // cast with zero refills. Keeps 1 empty in reserve (bucket>=2).
+        // Tolerate TRANSIENT scoop misses: a single failed fill (a flowing edge, a settle race)
+        // used to `break` the front-load at 1 lava even with 24 sources left in a 5x5 pool. Retry
+        // — fill_bucket re-locates the nearest source each call — and only give up after several
+        // CONSECUTIVE misses (source truly exhausted / unreachable).
+        let mut misses = 0;
+        while count_items(bot, "lava_bucket") < 10 && count_items(bot, "bucket") >= 2 {
             let before = count_items(bot, "lava_bucket");
             fill_bucket(bot, "lava").await;
-            if count_items(bot, "lava_bucket") <= before {
-                break; // source depleted / no scoop this pass — stop topping up
+            if count_items(bot, "lava_bucket") > before {
+                misses = 0;
+            } else {
+                misses += 1;
+                if misses >= 5 {
+                    break;
+                }
             }
         }
         cast_debug(&format!("prepare: early scoop → lava_buckets={}", count_items(bot, "lava_bucket")));
@@ -2884,6 +2908,22 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         } else {
             failure(format!("CAST_TWO: block1={ok1} block2={ok2}"))
         };
+    }
+    // DISPLACEMENT RECOVERY: an uncaught lava death respawns the bot at WORLD SPAWN (a deep frame's
+    // spawnpoint is rejected by the server as unsafe), thousands of blocks from a partial frame. On
+    // the step's re-run, prepare_cast_site would then re-hunt lava at world spawn and ORPHAN the
+    // N/10 frame (live: `POS FAIL off=5919`, frame stuck at 4/10 forever). If a frame anchor persists
+    // and we're far from it, tp straight back (the bot is op'd) so the frame RESUMES instead of
+    // starting over. Copy the Option out first (drop the mutex guard before awaiting).
+    let anchor_now = *FRAME_ANCHOR.lock().unwrap();
+    if let Some((ax, ay, az)) = anchor_now {
+        let p = bot.entity.position;
+        let d = ((ax as f64 - p.x).powi(2) + (az as f64 - p.z).powi(2)).sqrt();
+        if d > 16.0 {
+            cast_debug(&format!("build: displaced {d:.0} from frame anchor — tp back to resume"));
+            let _ = bot.run_command(&format!("tp @s {ax} {} {az}", ay + 1)).await;
+            bot.wait_ticks(10).await.ok();
+        }
     }
     // Already cast?
     let mut lava_pool: Option<(i32, i32, i32)> = None;
