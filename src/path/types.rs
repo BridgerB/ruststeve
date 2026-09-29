@@ -94,6 +94,11 @@ pub struct MovementsConfig {
     pub max_drop_down: i32,
     pub infinite_liquid_dropdown_distance: bool,
     pub blocks_cant_break: std::collections::HashSet<i32>,
+    /// Blocks the pathfinder must NEVER dig through, regardless of `blocks_cant_break` (which
+    /// tasks routinely `clear()` once a pick is in hand). Obsidian/bedrock: an iron pick CAN break
+    /// obsidian (250s) and the flat `dig_cost` doesn't know that — a bot pathed straight through
+    /// its own portal frame and un-cast a top-row cell ((899,-50,585) obsidian → air).
+    pub blocks_never_break: std::collections::HashSet<i32>,
     pub blocks_to_avoid: std::collections::HashSet<i32>,
     pub scaffolding_blocks: Vec<i32>,
 }
@@ -114,6 +119,7 @@ impl Default for MovementsConfig {
             max_drop_down: 4,
             infinite_liquid_dropdown_distance: true,
             blocks_cant_break: std::collections::HashSet::new(),
+            blocks_never_break: std::collections::HashSet::new(),
             blocks_to_avoid: std::collections::HashSet::new(),
             scaffolding_blocks: Vec::new(),
         }

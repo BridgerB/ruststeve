@@ -188,6 +188,15 @@ impl<'a> Bot<'a> {
                 cant_break.insert(def.id);
             }
         }
+        // Permanent no-dig set: survives every `blocks_cant_break.clear()`. Obsidian is the bot's
+        // own portal frame (an iron pick CAN break it in 250s and the pathfinder's flat dig cost
+        // would happily route through it); bedrock is unbreakable.
+        let never_break: std::collections::HashSet<i32> = registry
+            .blocks_by_name
+            .iter()
+            .filter(|(name, _)| name.contains("obsidian") || name.as_str() == "bedrock")
+            .map(|(_, def)| def.id)
+            .collect();
         Ok(Bot {
             inventory: crate::window::create_window_from_type(registry, 0, -1, Some("minecraft:inventory"), "Inventory", None)
                 .unwrap_or_else(|| Window::new(0, "minecraft:inventory", "", 46, 9, 44, 0, true)),
@@ -214,7 +223,7 @@ impl<'a> Bot<'a> {
             held_slot: 0,
             control_state: ControlState::default(),
             physics_enabled: true,
-            movement: MovementsConfig { liquid_cost: 100.0, max_drop_down: 1, blocks_cant_break: cant_break, ..MovementsConfig::default() }, // low drop + don't path through unbreakable stone
+            movement: MovementsConfig { liquid_cost: 100.0, max_drop_down: 1, blocks_cant_break: cant_break, blocks_never_break: never_break, ..MovementsConfig::default() }, // low drop + don't path through unbreakable stone
             physics: None,
             should_physics: false,
             last_tick: Instant::now(),
@@ -1212,6 +1221,19 @@ impl<'a> Bot<'a> {
 
     pub async fn swing_arm(&mut self) -> std::io::Result<()> {
         self.client.write("swing", PValue::compound(vec![("hand", PValue::num(0.0))])).await
+    }
+
+    /// Force the current position + LOOK to the server right now. `look_at` only updates the
+    /// local rotation; the position packet that carries it goes out on the NEXT physics tick —
+    /// after any use/place packet sent in between — so the server raycasts a STALE rotation.
+    /// That is exactly why a bucket pour aimed into a cup landed on the bot's own feet (the
+    /// server still held the pre-look pitch). Same trick `attack` uses for reach checks.
+    /// `last_sent` is restored so the physics tick still re-sends normally.
+    pub async fn sync_look(&mut self) -> std::io::Result<()> {
+        let saved = self.last_sent.take();
+        let r = self.send_position().await;
+        self.last_sent = saved;
+        r
     }
 
     /// Melee-attack an entity (left-click): face it, swing the arm, send the `attack` packet.

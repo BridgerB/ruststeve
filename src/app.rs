@@ -370,7 +370,10 @@ pub async fn run() -> std::io::Result<()> {
                     // the 10-block cast (~900s) in one call; 960s killed it mid-cast (×7 in the
                     // race). Give it room for both. A bad/uncastable site no longer wastes this —
                     // the cast's 150s wall-clock stall-bail retires the lava and re-sites fast.
-                    "build_nether_portal" => Duration::from_secs(1800),
+                    // Descent (~600s) + the NATURAL 10-block cast (now up to 2700s — slower than the
+                    // gym because each block fire-caps + refills from the sea). 3600s covers both so
+                    // the outer watchdog doesn't kill a legit slow cast mid-frame (which orphans it).
+                    "build_nether_portal" => Duration::from_secs(3600),
                     // Wandering to a fortress and camping the spawner are long by nature; the
                     // tasks self-time-box (45s / 150s) and return so the loop re-derives, but give
                     // the outer watchdog headroom so a single sweep/fight isn't cut short.

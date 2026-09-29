@@ -166,7 +166,10 @@ impl<'a> Movements<'a> {
         if block.safe || block.liquid {
             return 0.0;
         }
-        if !self.config.can_dig || self.config.blocks_cant_break.contains(&block.id) {
+        if !self.config.can_dig
+            || self.config.blocks_cant_break.contains(&block.id)
+            || self.config.blocks_never_break.contains(&block.id)
+        {
             return -1.0;
         }
         if self.config.dont_create_flow {

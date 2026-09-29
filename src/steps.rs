@@ -19,7 +19,10 @@ pub const STEPS: &[Step] = &[
         // planks (or a re-placed table) dropped the bot to 0 wood mid-run and the recovery
         // above sent it back to Gather Wood (~15 min lost, seen in the race). A slightly
         // bigger buffer avoids that round trip; ~1 extra log up front is far cheaper.
-        is_complete: |s| s.inventory.logs >= 6 || s.inventory.planks >= 16,
+        // 10 logs (was 6): the natural portal cast breaks pickaxes repeatedly (deepslate descent +
+        // chamber + lane digging) and each recraft eats wood; the 8/10 leader ran wood AND cobble to
+        // zero, could craft no pickaxe of any tier, and regressed from the frame to Gather Wood.
+        is_complete: |s| s.inventory.logs >= 10 || s.inventory.planks >= 28,
     },
     Step {
         id: "craft_planks",
@@ -105,14 +108,21 @@ pub const STEPS: &[Step] = &[
         // deep-descends to a lava lake and scoops early (empty→lava), so it must reach
         // the cast still holding 1 EMPTY + 1 WATER bucket — 2 total (the old target) left
         // it with 0 empty after the scoop and the cast bailed "need a water/empty bucket".
-        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 15,
+        // 22 (was 15): the natural descent+cast BREAKS the iron pickaxe, and the depth recovery can
+        // only recraft IRON if >=3 ingots survive to the frame. With 15 (pick 3 + buckets 3 + f&s 1
+        // + spend) the bot arrived with <3, recrafted a STONE pick, couldn't run gather_build_blocks
+        // (iron-gated), and abandoned its 7/10 frame to re-mine iron from scratch (~30 min). Spare
+        // ingots turn that into an on-the-spot iron recraft.
+        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 22,
     },
     Step {
         id: "smelt_iron",
         name: "Smelt Iron",
         priority: 12,
         can_execute: |s| s.equipment.has_furnace && s.inventory.coal >= 1 && s.inventory.iron_ore >= 1,
-        is_complete: |s| s.inventory.iron_ingots >= 14,
+        // 21 (was 14): must track mine_iron's 22 so ~3 spare ingots reach the frame for an iron
+        // pickaxe recraft at depth (see mine_iron).
+        is_complete: |s| s.inventory.iron_ingots >= 21,
     },
     Step {
         id: "craft_iron_pickaxe",
@@ -165,7 +175,10 @@ pub const STEPS: &[Step] = &[
         name: "Gather Build Blocks",
         priority: 17,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3,
-        is_complete: |s| s.inventory.cobblestone + s.inventory.dirt >= 40,
+        // 72 (was 40): the natural cast now CONSUMES cobble beyond scaffolding — fire-safe caps on the
+        // open lava field, lane floors over the sea, stray-lava caps — and stone-pickaxe recrafts each
+        // take 3. The 8/10 leader drained it to zero (then wood too) and lost its pickaxe entirely.
+        is_complete: |s| s.inventory.cobblestone + s.inventory.dirt >= 72,
     },
     Step {
         id: "build_nether_portal",
@@ -229,8 +242,18 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
             Some("craft_stone_pickaxe")
         } else if state.inventory.planks >= 3 && sticks >= 2 {
             Some("craft_wooden_pickaxe")
+        } else if sticks < 2 && state.inventory.planks >= 2 {
+            // Out of sticks but HAVE planks: make sticks (2x2, no table) so the pickaxe
+            // recovery above can fire next tick. Without this, an iron pickaxe that BREAKS
+            // mid-descent (deep at y-18 with planks but 0 sticks) fell through to "gather
+            // wood" — but there are no trees at depth, so the bot hand-mined deepslate
+            // forever and never reached lava. Rebuild the tool from carried wood instead.
+            Some("craft_sticks")
+        } else if sticks < 2 && state.inventory.planks < 2 && state.inventory.logs >= 1 {
+            // Have logs but no planks — make planks first, then sticks, then the pickaxe.
+            Some("craft_planks")
         } else {
-            None // lack materials — fall through (gather wood/planks/sticks first)
+            None // genuinely out of wood — fall through (gather wood at surface)
         };
         if let Some(id) = recover {
             if let Some(step) = STEPS.iter().find(|st| st.id == id) {
@@ -277,10 +300,10 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "mine_coal" => tasks::mining::mine_ore(bot, "coal", 2, mem).await,
         // Keep this in lock-step with mine_iron's is_complete target (15): if the task
         // mines fewer than is_complete wants, the step never completes and re-runs forever.
-        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 15, mem).await,
+        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 22, mem).await,
         // Target 14 must match smelt_iron's is_complete (14) — a lower task target would
         // "succeed" below the step threshold and re-run forever.
-        "smelt_iron" => tasks::smelt::smelt_iron(bot, 14, mem).await,
+        "smelt_iron" => tasks::smelt::smelt_iron(bot, 21, mem).await,
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
         // Count 3 must match craft_bucket's is_complete (buckets+water>=3) — a lower count
         // stops the task below the step threshold and re-runs "have N buckets" forever.
@@ -288,7 +311,9 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         // Fill ONE water bucket (keep the second bucket empty for lava).
         "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 1, mem).await,
         "get_flint_and_steel" => tasks::craft::get_flint_and_steel(bot, mem).await,
-        "gather_build_blocks" => tasks::mining::mine_stone(bot, 40, mem).await,
+        // Must match gather_build_blocks' is_complete (72) — a lower task target "succeeds" below
+        // the step threshold and re-runs forever.
+        "gather_build_blocks" => tasks::mining::mine_stone(bot, 72, mem).await,
         "build_nether_portal" => tasks::portal::build_nether_portal(bot, mem).await,
         "enter_nether" => tasks::portal::enter_nether(bot).await,
         "find_fortress" => tasks::nether::find_fortress(bot, mem).await,

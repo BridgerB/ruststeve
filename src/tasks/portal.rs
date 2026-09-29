@@ -160,6 +160,10 @@ async fn dig_at(bot: &mut Bot<'_>, x: i32, y: i32, z: i32) {
     if is_air(&n) || n == "obsidian" || n.contains("lava") {
         return;
     }
+    // Dig with a PICKAXE, not whatever bucket is in hand: a bare-hand cobble dig takes 10s and
+    // `bot.dig` only reflects sub-4s breaks locally, so the water-lid clear at (910,-52,464)
+    // "failed" (local view stale) and cost a whole attempt cycle before the next pass saw air.
+    let _ = ensure_pickaxe(bot).await;
     bot.look_at(vec3(x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5));
     bot.wait_ticks(2).await.ok();
     let _ = bot.dig(x, y, z).await;
@@ -536,7 +540,18 @@ pub(crate) async fn climb_out_of_pit(bot: &mut Bot<'_>) -> bool {
 
 /// Nearest visible fluid source, preferring one with air directly above.
 fn find_fluid(bot: &Bot, fluid: &str, max_dist: i32) -> Option<(i32, i32, i32)> {
-    let positions = bot.find_exposed_blocks(fluid, max_dist, 64);
+    let mut positions = bot.find_exposed_blocks(fluid, max_dist, 64);
+    // Never treat the FRAME'S OWN CUPS as a pool. A stale pour leaves lava sitting in a frame cell;
+    // on resume, prepare picked it as "the lava" (live: `lava=Some((901,-51,585))` = the top-right
+    // column cup), anchored a bogus cast-site chamber 3 blocks off the real frame at (895,-50,585),
+    // and the bot died/left. The cast handles a lava-filled cup itself (skip pour → water → obsidian),
+    // so the pool-finder must simply skip the frame plane whenever a frame anchor exists.
+    if fluid == "lava" {
+        let anchor = *FRAME_ANCHOR.lock().unwrap();
+        if let Some((bx, by, bz)) = anchor {
+            positions.retain(|&(x, y, z)| !(z == bz && (bx..=bx + 3).contains(&x) && (by..=by + 4).contains(&y)));
+        }
+    }
     if positions.is_empty() {
         return None;
     }
@@ -1022,6 +1037,228 @@ async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
 // ── cast one obsidian block ───────────────────────────────────────────────────
 
 /// Cast one obsidian block at `pos`: enclosed cup + lava, sealed bowl + water above.
+/// Cast a frame cell whose cell ABOVE is already obsidian (a "lid") — the top opening is gone, so
+/// pour through a +Z SIDE opening instead. Geometry (cup = `pos`, +Z = toward the bot):
+///
+///   z=pos.2   cup (air → lava → obsidian), walls E/W/-Z/floor solid, lid above (obsidian)
+///   z=pos.2+1 OPENING (air) at cup level, floor + E/W solid so the lava/water can't spread
+///   z=pos.2+2 STAND block at cup level; bot stands on it at feet pos.1+1
+///
+/// From eye (pos.1+2.62, z≈pos.2+2.5) the ray to the cup's floor-centre passes UNDER the lid
+/// (enters the cup's +Z face at y≈pos.1+0.6-0.9), so the lava source lands IN the cup. It flows
+/// one block into the opening (flowing, harmless — below and in front of the bot, walled in).
+/// Then water aimed at the opening's floor is placed INTO the opening (flowing lava is
+/// replaceable); it touches the cup source → obsidian, and the water source is scooped back.
+/// `use_item` carries yaw/pitch in-packet on 775, so the aim pour is authoritative.
+async fn cast_lidded_from_side(bot: &mut Bot<'_>, pos: (i32, i32, i32), attempt: usize) -> bool {
+    let opening = (pos.0, pos.1, pos.2 + 1);
+    let stand_block = (pos.0, pos.1, pos.2 + 2);
+    let feet_want = pos.1 + 1;
+    let (sx, sz) = (pos.0 as f64 + 0.5, pos.2 as f64 + 2.5);
+    let cup = |bot: &Bot| name_at(bot, pos.0, pos.1, pos.2);
+    cast_debug(&format!("cast {pos:?} a{attempt}: LIDDED (above=obsidian) → side cast via {opening:?} from {stand_block:?}"));
+
+    // Containment: cup walls + the opening's floor/E/W + the stand block.
+    for w in [
+        (pos.0 + 1, pos.1, pos.2),
+        (pos.0 - 1, pos.1, pos.2),
+        (pos.0, pos.1, pos.2 - 1),
+        (pos.0, pos.1 - 1, pos.2),
+        (pos.0, pos.1 - 1, pos.2 + 1),
+        (pos.0 + 1, pos.1, pos.2 + 1),
+        (pos.0 - 1, pos.1, pos.2 + 1),
+        stand_block,
+    ] {
+        if !solid_at(bot, w.0, w.1, w.2) && !ensure_solid(bot, w, 0).await {
+            cast_debug(&format!("cast {pos:?} a{attempt}: side-cast wall FAIL at {w:?}"));
+            return false;
+        }
+    }
+    // Clear the ray path + the bot's body: the opening, the two cells above it, the two body cells
+    // over the stand block. Never obsidian (can't dig it anyway).
+    for c in [
+        opening,
+        (pos.0, pos.1 + 1, pos.2 + 1),
+        (pos.0, pos.1 + 2, pos.2 + 1),
+        (pos.0, pos.1 + 1, pos.2 + 2),
+        (pos.0, pos.1 + 2, pos.2 + 2),
+    ] {
+        let n = name_at(bot, c.0, c.1, c.2);
+        if is_solid(&n) && n != "obsidian" {
+            dig_at(bot, c.0, c.1, c.2).await;
+            bot.wait_ticks(3).await.ok();
+        }
+    }
+    // Stand on the stand block at feet pos.1+1, centred.
+    let _ = bot.goto_near(pos.0, feet_want, pos.2 + 2, 1.0).await;
+    walk_to_xz(bot, sx, sz, 0.25, 40).await;
+    descend_to_y(bot, feet_want).await;
+    if feet_y(bot) < feet_want {
+        pillar_up(bot, feet_want).await;
+    }
+    walk_to_xz(bot, sx, sz, 0.25, 40).await;
+    bot.set_control_state("sneak", true);
+    bot.wait_ticks(4).await.ok();
+    let p = bot.entity.position;
+    let ok = feet_y(bot) == feet_want && (p.x - sx).abs() < 0.30 && (p.z - sz).abs() < 0.35;
+    cast_debug(&format!("cast {pos:?} a{attempt}: side-cast stance feet={} bot=({:.2},{:.2}) ok={ok}", feet_y(bot), p.x, p.z));
+    if !ok {
+        return false;
+    }
+    let region = |bot: &Bot, what: &str| -> Vec<(i32, i32, i32)> {
+        let mut v = Vec::new();
+        for dx in -1..=1 {
+            for dy in -1..=2 {
+                for dz in -1..=3 {
+                    if name_at(bot, pos.0 + dx, pos.1 + dy, pos.2 + dz).contains(what) {
+                        v.push((pos.0 + dx, pos.1 + dy, pos.2 + dz));
+                    }
+                }
+            }
+        }
+        v
+    };
+
+    // LAVA into the cup (skip if a previous try already left a source there).
+    if !cup(bot).contains("lava") {
+        if !is_air(&cup(bot)) {
+            dig_at(bot, pos.0, pos.1, pos.2).await;
+            bot.wait_ticks(4).await.ok();
+            if !is_air(&cup(bot)) {
+                cast_debug(&format!("cast {pos:?} a{attempt}: side-cast cup centre solid ({}) — skip", cup(bot)));
+                return false;
+            }
+        }
+        if !select_item(bot, "lava_bucket").await.unwrap_or(false) {
+            return false;
+        }
+        let aim = vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.1, pos.2 as f64 + 0.5);
+        bot.look_at(aim);
+        bot.wait_ticks(3).await.ok();
+        bot.look_at(aim);
+        let _ = bot.sync_look().await;
+        bot.activate_item().await.ok();
+        bot.wait_ticks(8).await.ok();
+        let llocs = region(bot, "lava");
+        cast_debug(&format!("cast {pos:?} a{attempt}: side-cast lava_at={llocs:?} cup={}", cup(bot)));
+        // Safety: if it somehow landed on the bot, scoop it straight back up.
+        let p = bot.entity.position;
+        let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
+        if is_lava(&name_at(bot, fx, feet_y(bot), fz)) && select_item(bot, "bucket").await.unwrap_or(false) {
+            let down = vec3(p.x, p.y - 0.5, p.z);
+            bot.look_at(down);
+            bot.wait_ticks(1).await.ok();
+            bot.look_at(down);
+            bot.activate_item().await.ok();
+            bot.wait_ticks(4).await.ok();
+            cast_debug(&format!("cast {pos:?} a{attempt}: side-cast FEET-LAVA scooped back (feet now {})", name_at(bot, fx, feet_y(bot), fz)));
+        }
+        if !cup(bot).contains("lava") {
+            // Missed: recover any stray source so the retry has its lava back.
+            if select_item(bot, "bucket").await.unwrap_or(false) {
+                for l in region(bot, "lava") {
+                    if count_items(bot, "bucket") < 1 {
+                        break;
+                    }
+                    reliable_use(bot, vec3(l.0 as f64 + 0.5, l.1 as f64 + 0.5, l.2 as f64 + 0.5)).await;
+                }
+            }
+            return false;
+        }
+    }
+
+    // WATER into the opening — adjacent to the cup's lava source → obsidian.
+    if !select_item(bot, "water_bucket").await.unwrap_or(false) {
+        return false;
+    }
+    let waim = vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.1, pos.2 as f64 + 1.5);
+    bot.look_at(waim);
+    bot.wait_ticks(3).await.ok();
+    bot.look_at(waim);
+    let _ = bot.sync_look().await;
+    bot.activate_item().await.ok();
+    bot.wait_ticks(10).await.ok();
+    let mut made = cup(bot) == "obsidian";
+    for _ in 0..10 {
+        if made {
+            break;
+        }
+        bot.wait_ticks(5).await.ok();
+        made = cup(bot) == "obsidian";
+    }
+    cast_debug(&format!(
+        "cast {pos:?} a{attempt}: side-cast water_at={:?} cup={} made={made}",
+        region(bot, "water"),
+        cup(bot)
+    ));
+    // Reclaim the water source (it's walled into the opening) so the bucket is reusable.
+    if select_item(bot, "bucket").await.unwrap_or(false) {
+        for _ in 0..3 {
+            if count_items(bot, "water_bucket") >= 1 {
+                break;
+            }
+            let waters = region(bot, "water");
+            if waters.is_empty() {
+                break;
+            }
+            for w in waters {
+                reliable_use(bot, vec3(w.0 as f64 + 0.5, w.1 as f64 + 0.5, w.2 as f64 + 0.5)).await;
+                if count_items(bot, "water_bucket") >= 1 {
+                    break;
+                }
+            }
+        }
+    }
+    cast_debug(&format!("cast {pos:?} a{attempt}: side-cast done made={made} wbkt={}", count_items(bot, "water_bucket")));
+    made
+}
+
+/// A lava SOURCE left in the cup with the +Z stand cell (pos.0,pos.1,pos.2+1) still OPEN flows into
+/// that cell — and the bot's next move is to stand in it at feet pos.1 ("positioned … → DEAD", twice
+/// at (901,-51,585); RCON: cup=lava, stand cell=lava). Called at cast ENTER and at the start of
+/// every attempt. First choice: SEAL the cup by placing the +Z wall from range (flowing lava is
+/// replaceable; the bot stands on that wall for the pours anyway, so the cup lava is kept for the
+/// water retry). Fallback: scoop the cup source back into a bucket (the flow vanishes with it).
+async fn secure_open_cup(bot: &mut Bot<'_>, pos: (i32, i32, i32), stand_z: i32) {
+    if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") || solid_at(bot, pos.0, pos.1, stand_z) {
+        return;
+    }
+    // Approach on the +Z side, OUT of the stand cell and its flow.
+    let _ = bot.goto_near(pos.0, pos.1 + 1, stand_z + 2, 1.5).await;
+    if ensure_solid(bot, (pos.0, pos.1, stand_z), 0).await {
+        bot.wait_ticks(8).await.ok(); // let the cut-off flow drain
+        cast_debug(&format!(
+            "cast {pos:?}: OPEN-CUP sealed (+Z wall placed) → stand={} stand+1={}",
+            name_at(bot, pos.0, pos.1, stand_z),
+            name_at(bot, pos.0, pos.1 + 1, stand_z)
+        ));
+        return;
+    }
+    if count_items(bot, "bucket") < 1 && count_items(bot, "water_bucket") >= 1 {
+        // Free a bucket: dump a water bucket away from the frame (south).
+        select_item(bot, "water_bucket").await.ok();
+        bot.look_at(vec3(pos.0 as f64 + 0.5, pos.1 as f64, stand_z as f64 + 3.0));
+        bot.wait_ticks(4).await.ok();
+        bot.activate_item().await.ok();
+        bot.wait_ticks(6).await.ok();
+    }
+    if select_item(bot, "bucket").await.unwrap_or(false) {
+        for _ in 0..3 {
+            if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
+                break;
+            }
+            reliable_use(bot, vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 + 0.5)).await;
+        }
+        bot.wait_ticks(10).await.ok(); // let the flow drain
+        cast_debug(&format!(
+            "cast {pos:?}: OPEN-CUP lava scooped from range → cup={} stand={} lava_b={}",
+            name_at(bot, pos.0, pos.1, pos.2),
+            name_at(bot, pos.0, pos.1, stand_z),
+            count_items(bot, "lava_bucket")
+        ));
+    }
+}
+
 async fn cast_obsidian_at(
     bot: &mut Bot<'_>,
     pos: (i32, i32, i32),
@@ -1037,6 +1274,13 @@ async fn cast_obsidian_at(
         let p = bot.entity.position;
         cast_debug(&format!("cast {pos:?} ENTER bot=({:.1},{:.1},{:.1}) hp={:.0}", p.x, p.y, p.z, bot.health));
     }
+    // OPEN-CUP LAVA before positioning. A previous try can leave a lava SOURCE in the cup with the
+    // +Z stand cell (pos.0,pos.1,pos.2+1) still open (that wall is only built when the bot pillars
+    // up later) — the source flows INTO the stand cell, and the bot's first move is to walk into it
+    // at feet pos.1: "positioned … feet=-51 → cleaned stray lava → DEAD", twice at (901,-51,585),
+    // RCON: cup=lava, stand cell=lava. Scoop the cup source back FROM RANGE first (the flow vanishes
+    // with it, and the lava goes back into a bucket for the re-pour).
+    secure_open_cup(bot, pos, stand_z).await;
     // WATER SWEEP before positioning. The PREVIOUS bottom-row block's water pour, if not fully
     // reclaimed, is a SOURCE whose flow both floods this cup AND physically SHOVES the bot off the
     // frame plane while it tries to stand (`!! underwater — surfacing`, then `POS FAIL off=3-5`, the
@@ -1092,6 +1336,8 @@ async fn cast_obsidian_at(
             bot.set_control_state("sneak", false);
             return false;
         }
+        // A failed water try leaves the cup as LAVA; never approach it again with the +Z open.
+        secure_open_cup(bot, pos, stand_z).await;
         // 0. Reconcile buckets. Casting needs ONE empty/lava bucket (to carry lava) and
         //    ONE water bucket. The racy reclaim can scoop the placed water while the bot
         //    still holds its original water bucket, leaving it with 2 water + 0 empty —
@@ -1224,6 +1470,21 @@ async fn cast_obsidian_at(
             return false;
         }
 
+        // LIDDED CUP → SIDE CAST. If the frame cell directly above this one is already obsidian
+        // (an earlier pass skipped this failing cell and cast the one above it), the standard
+        // stance is hopeless: the pour ray from feet pos.1+1 enters the cup column at y≈pos.1+1.3,
+        // hits the obsidian lid's +Z face and drops the lava on the bot's own feet — every
+        // attempt, every aim (a0-a4 `lava_at=[(x,pos.1+1,stand_z)]`, RCON-confirmed lids at
+        // (898,-52,585) and (908,-52,464)). Cast it through a +Z side opening instead.
+        if name_at(bot, above.0, above.1, above.2) == "obsidian" {
+            let made = cast_lidded_from_side(bot, pos, _attempt).await;
+            bot.set_control_state("sneak", false);
+            if made {
+                return true;
+            }
+            continue;
+        }
+
         // 2. Position at the floor spot in front of the cup. The previous block left
         //    the bot up on its pour-pillar, so DESCEND to base level first (dig the
         //    pillar away), THEN navigate to the stand spot and re-descend. Retry a few
@@ -1314,8 +1575,15 @@ async fn cast_obsidian_at(
             // Standing one higher (on the wall) clears the blockage; it's also where the lava pour
             // wants the feet (pos.1+1). On the FIRST cell (no wall yet) the bot just falls to base_y,
             // which is fine — the accept check allows feet up to base_y+1.
-            let stand_feet = base_y + 1;
-            descend_to_y(bot, base_y).await; // off any previous pour-pillar first
+            // CUP HOLDS LAVA (a previous try poured but the water failed): the +Z cup wall at
+            // (pos.0,pos.1,stand_z) is the bottom of the stand pillar. Descending to base digs the
+            // pillar away — INCLUDING that wall — and the cup's lava pours onto the bot at cup level
+            // ("positioned feet=pos.1 → DESC LAVA-STOP → pillar1 FAIL → DEAD": 004 at (901,-51,585)
+            // twice, 002 at (911,-52,464)). With lava in the cup, stand ON the wall (feet pos.1+1)
+            // and never descend below it; only an air cup repositions from base.
+            let cup_has_lava = name_at(bot, pos.0, pos.1, pos.2).contains("lava");
+            let stand_feet = if cup_has_lava { pos.1 + 1 } else { base_y + 1 };
+            descend_to_y(bot, if cup_has_lava { pos.1 + 1 } else { base_y }).await; // off any previous pour-pillar first
             for try_pos in 0..3 {
                 let _ = bot.goto_near(pos.0, stand_feet, stand_z, 1.0).await;
                 if feet_y(bot) < stand_feet {
@@ -1341,21 +1609,31 @@ async fn cast_obsidian_at(
                 // the stand (z stuck ~4 off → POS FAIL off=3.77 forever, frame frozen at 1/10). Dig the
                 // stand cell + the approach cells behind it (feet+head), never obsidian/lava, so the
                 // walk-in has a clear path. Progressive: closer cells clear as the bot advances.
-                for dz in 0..=3 {
-                    let cz = stand_z + dz;
-                    // FLOOR first: lay a solid non-lava floor to walk in on. On the natural lava band
-                    // the stand floor (stand_feet-1) is often a gap or lava, so the bot can't cross to
-                    // the stand and stalls ~1.7 off at the last solid cell (POS FAIL, frame frozen at
-                    // 1/10). Cobble it (also caps any lava there). Never overwrite obsidian.
-                    let floor = name_at(bot, pos.0, stand_feet - 1, cz);
-                    if (is_air(&floor) || is_lava(&floor)) && count_items(bot, &build_block(bot)) > 0 {
-                        place_cobble(bot, (pos.0, stand_feet - 1, cz)).await;
-                    }
-                    // LANE: clear feet+head so the walk-in has headroom (never obsidian/lava).
-                    for dy in [stand_feet, stand_feet + 1] {
-                        let b = name_at(bot, pos.0, dy, cz);
-                        if is_solid(&b) && b != "obsidian" && !is_lava(&b) {
-                            dig_at(bot, pos.0, dy, cz).await;
+                // Span the lane in X from where the bot STANDS to the target stand — not just the
+                // target's own column. Both natural leaders froze on the LEFT column (x=bx): after
+                // casting on the right side the bot sits at x≈bx+2.5, and the cells BETWEEN it and
+                // the x=bx stand along the lane were never dug (only x=pos.0 was), so goto/walk
+                // couldn't cross and every attempt was `POS FAIL off=2.2-3.2` at bx+2.5 (frames stuck
+                // at 7-8/10 on (898,-53,585) and (908,-51/-53,464)). Clamp to ±4 of the target.
+                let bot_x = bot.entity.position.x.floor() as i32;
+                let (x0, x1) = (bot_x.min(pos.0).max(pos.0 - 4), bot_x.max(pos.0).min(pos.0 + 4));
+                for lx in x0..=x1 {
+                    for dz in 0..=3 {
+                        let cz = stand_z + dz;
+                        // FLOOR first: lay a solid non-lava floor to walk in on. On the natural lava band
+                        // the stand floor (stand_feet-1) is often a gap or lava, so the bot can't cross to
+                        // the stand and stalls ~1.7 off at the last solid cell (POS FAIL, frame frozen at
+                        // 1/10). Cobble it (also caps any lava there). Never overwrite obsidian.
+                        let floor = name_at(bot, lx, stand_feet - 1, cz);
+                        if (is_air(&floor) || is_lava(&floor)) && count_items(bot, &build_block(bot)) > 0 {
+                            place_cobble(bot, (lx, stand_feet - 1, cz)).await;
+                        }
+                        // LANE: clear feet+head so the walk-in has headroom (never obsidian/lava).
+                        for dy in [stand_feet, stand_feet + 1] {
+                            let b = name_at(bot, lx, dy, cz);
+                            if is_solid(&b) && b != "obsidian" && !is_lava(&b) {
+                                dig_at(bot, lx, dy, cz).await;
+                            }
                         }
                     }
                 }
@@ -1580,6 +1858,28 @@ async fn cast_obsidian_at(
         if !centered {
             continue; // don't pour from off-centre — it'll miss, damage us, and flood
         }
+        // HEIGHT GATE — the pour must be made from feet == pos.1+1 (one above the cup). `centered`
+        // only checks x/z, so at feet == pos.1+2 (one too high, seen on natural terrain after the
+        // stand column shifted) it poured anyway and the down-aim struck the lip/feet cell instead
+        // of the cup: `lava_at=[(876,-53,299)] cup_block=air` → the lava landed ON THE BOT'S OWN
+        // FEET and it died standing in it (repeat deaths at 6/10). Never pour from too high: try to
+        // drop one block (dig under the feet if it's plain solid) and retry, otherwise skip the pour.
+        {
+            let want = pos.1 + 1;
+            let feet = feet_y(bot);
+            // Only when a lava POUR is still needed: with lava already in the cup the water step
+            // wants feet pos.1+2 anyway, and gating here spun 004 at 9/10 ("TOO HIGH" x6 → STALLED).
+            if feet > want && !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
+                let (fx, fz) = (bot.entity.position.x.floor() as i32, bot.entity.position.z.floor() as i32);
+                let below = name_at(bot, fx, feet - 1, fz);
+                if is_solid(&below) && below != "obsidian" && !is_lava(&below) {
+                    dig_at(bot, fx, feet - 1, fz).await;
+                    bot.wait_ticks(6).await.ok();
+                }
+                cast_debug(&format!("cast {pos:?} a{_attempt}: TOO HIGH to pour (feet={feet} want={want}) — dropped, retry"));
+                continue;
+            }
+        }
         // CLEAR WATER flooding the cup — this must run FIRST (before the centre dig below), and it
         // must scoop the water SOURCE, not the cup cell. The PREVIOUS bottom-row block's water pour
         // spreads into this x-adjacent cup (bottom cups share an edge); the cup reads water so the
@@ -1642,6 +1942,28 @@ async fn cast_obsidian_at(
                 }
             }
         }
+        // LID CHECK right before the pour. The pour ray from feet pos.1+1 passes through the cell
+        // ABOVE the cup (pos.1+1) before dropping into it; if that cell is solid the ray hits it and
+        // the lava lands on the bot's own feet (bottom cell (899,-54,585): above = interior scaffold
+        // COBBLE, `lava_at=[(899,-53,586)…]` + flood + 2 deaths). Clear it; if it won't clear
+        // (obsidian, or the dig failed), cast through the side opening instead of pouring blind.
+        {
+            let n = name_at(bot, above.0, above.1, above.2);
+            if is_solid(&n) && n != "obsidian" {
+                dig_at(bot, above.0, above.1, above.2).await;
+                bot.wait_ticks(4).await.ok();
+            }
+            let n = name_at(bot, above.0, above.1, above.2);
+            if is_solid(&n) {
+                cast_debug(&format!("cast {pos:?} a{_attempt}: cup LIDDED by {n} at {above:?} — side cast"));
+                let made = cast_lidded_from_side(bot, pos, _attempt).await;
+                bot.set_control_state("sneak", false);
+                if made {
+                    return true;
+                }
+                continue;
+            }
+        }
         select_item(bot, "lava_bucket").await.ok();
         // Place lava DETERMINISTICALLY against the -Z cup wall's +Z face, EXACTLY like the water
         // bowl does below — lava lands as a source in the cup cell (pos) regardless of aim. The old
@@ -1655,8 +1977,21 @@ async fn cast_obsidian_at(
             // (buckets place along it) intercepted on the +Z cup-wall TOP, dropping lava at the bot's
             // feet cell (pos.1+1, stand_z) — `lava_at=[(x,pos.1+1,stand_z)]`, cup stayed air. Aiming at
             // the cup's own centre-floor clears the +Z wall lip and lands the source in the cup.
-            bot.look_at(vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5));
+            let cup_aim = vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.2, pos.2 as f64 + 0.5);
+            bot.look_at(cup_aim);
             bot.wait_ticks(3).await.ok();
+            // RE-ASSERT the look IMMEDIATELY before the place (same bug class as the scoop fix): the
+            // 3-tick settle lets the movement-facing tick reset pitch, so the bucket — which places
+            // along the LOOK RAY — fired with a stale/steeper look and dropped lava on the +Z wall top
+            // under the bot's own feet (`lava_at=[(901,-50,586)] cup_block=air`, frame stuck at 8/10
+            // at the correct feet height). Re-looking here guarantees the into-cup ray is what's sent.
+            bot.look_at(cup_aim);
+            // FORCE the look to the server before the place. `look_at` is local-only; the packet
+            // carrying it goes out on the NEXT physics tick — after the place packet — so the
+            // server raycast the STALE pre-look pitch. On the side columns that stale ray hit the
+            // block under the bot and dropped the lava on its own feet at the CORRECT height, every
+            // attempt (a0-a4), even with the re-assert above. Same fix `attack()` uses.
+            let _ = bot.sync_look().await;
             let _ = bot.place_block(lava_ref.0, lava_ref.1, lava_ref.2, Face::South).await;
             bot.wait_ticks(6).await.ok();
         }
@@ -1702,6 +2037,32 @@ async fn cast_obsidian_at(
         // bot and deadlocks its buckets). The escape recovers the empty bucket; scooping
         // the stray source refills it to lava, ready for the next attempt.
         if !name_at(bot, pos.0, pos.1, pos.2).contains("lava") {
+            // FEET-LAVA FIRST. On the side COLUMNS the miss drops the source INTO the bot's own
+            // standing cell — `lava_at=[(898,-52,586)]` = (pos.0, pos.1+1, stand_z) at the CORRECT
+            // height with the look re-asserted — and the west-retreat below is too slow, and off the
+            // frame's west edge has no solid step, so the bot burned to death before it moved
+            // ("cast: DEAD — respawning", both leaders, both side columns). Scoop the fluid straight
+            // back up FIRST: a bucket picks up the source you stand in by looking down. That kills
+            // the fire in one tick AND recovers the lava for the retry's varied aims.
+            {
+                let p = bot.entity.position;
+                let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
+                let fy = feet_y(bot);
+                if is_lava(&name_at(bot, fx, fy, fz)) && count_items(bot, "bucket") >= 1 {
+                    let _ = select_item(bot, "bucket").await;
+                    let down = vec3(p.x, p.y - 0.5, p.z);
+                    bot.look_at(down);
+                    bot.wait_ticks(1).await.ok();
+                    bot.look_at(down);
+                    bot.activate_item().await.ok();
+                    bot.wait_ticks(4).await.ok();
+                    cast_debug(&format!(
+                        "cast {pos:?} a{_attempt}: FEET-LAVA scooped back up (feet now {}, lava_b={})",
+                        name_at(bot, fx, fy, fz),
+                        count_items(bot, "lava_bucket")
+                    ));
+                }
+            }
             bot.set_control_state("sneak", false);
             // Escape the misplaced lava but STAY ON THE PLATFORM. The old sprint-jump SOUTH
             // (stand_z+4) overshot the 8x5 cast platform (only bz-2..bz+2) straight into the
@@ -1851,6 +2212,27 @@ async fn cast_obsidian_at(
         cast_debug(&format!("cast {pos:?} a{_attempt}: bowl={bowl} feet={}", feet_y(bot)));
         if bowl_walls.iter().any(|w| !solid_at(bot, w.0, w.1, w.2)) {
             continue; // never pour water into a leaky bowl — it spreads and shoves the bot
+        }
+        // WATER LID. The lower-row water ray (from feet pos.1+2, aimed at the bowl's -Z base)
+        // crosses the bowl's +Z plane at y≈pos.1+2.5 and drops into the bowl from ABOVE — so the
+        // cell over the bowl, (pos.0,pos.1+2,pos.2), must be AIR. Neighbouring casts fill it with
+        // cobble (a top-row cell's E/W bowl wall, or the interior scaffold over a bottom cup): the
+        // ray then hits that cobble's +Z face and the water lands on the bot's own stand — bowl
+        // stays air, cup stays lava, frame stalls (RCON: (901,-49,585) and (910,-52,464) cobble
+        // over lava cups; `water_at=[stand cells…] cup=lava` on both leaders). Clear it first.
+        if !top_row {
+            let over = (pos.0, pos.1 + 2, pos.2);
+            let n = name_at(bot, over.0, over.1, over.2);
+            if is_solid(&n) && n != "obsidian" {
+                dig_at(bot, over.0, over.1, over.2).await;
+                bot.wait_ticks(4).await.ok();
+            }
+            let n = name_at(bot, over.0, over.1, over.2);
+            if is_solid(&n) {
+                cast_debug(&format!("cast {pos:?} a{_attempt}: bowl LIDDED by {n} at {over:?} — water can't enter, skip"));
+                bot.set_control_state("sneak", false);
+                continue;
+            }
         }
         // If lava overflowed into `above` during the pour, scoop it out so the water
         // has air to sit in. The cup's lava is at pos.y; `above` (pos.y+1) must be air
@@ -2169,6 +2551,35 @@ pub fn frame_obsidian_count(bot: &Bot) -> i32 {
     cells.iter().filter(|(x, y, z)| name_at(bot, *x, *y, *z) == "obsidian").count() as i32
 }
 
+/// A SAFE respawn/tp stand near the frame anchor: solid non-lava floor at `by`, air for the body at
+/// `by+1..by+2`. A FIXED lane offset (bz+2) was lethal on frames whose +Z side sits over the lava
+/// sea — the tp landed the bot on AIR and it fell to the y-55 sea (died twice at 7/10 at the very
+/// tp cell). Scan the working area (lane first, then -Z) and pick a VERIFIED cell; the bottom-row
+/// obsidian itself qualifies once cast. Fall back to the lane only if nothing qualifies.
+fn safe_stand_near_frame(bot: &Bot, bx: i32, by: i32, bz: i32) -> (i32, i32, i32) {
+    // Scan SEVERAL feet heights, HIGHEST first (further from the sea): a frame whose whole y=by ring
+    // is over lava had no qualifying cell, so the fixed-offset fallback fired and the bot tp'd into
+    // the sea at that exact cell repeatedly (rust-race-002, died 2x at (909.5,-53,466.5) = the
+    // fallback). The frame's own scaffold top / cast obsidian (solid, never lava) is a guaranteed
+    // safe stand once the bottom row exists — this finds it.
+    for feet in [by + 4, by + 3, by + 2, by + 1, by] {
+        for dz in [2, 1, 3, 0, -1, -2, -3] {
+            for dx in -1..=4 {
+                let (x, z) = (bx + dx, bz + dz);
+                let floor = name_at(bot, x, feet - 1, z);
+                if is_solid(&floor)
+                    && !is_lava(&floor)
+                    && is_air(&name_at(bot, x, feet, z))
+                    && is_air(&name_at(bot, x, feet + 1, z))
+                {
+                    return (x, feet, z);
+                }
+            }
+        }
+    }
+    (bx + 1, by + 1, bz + 2)
+}
+
 /// Respawn, then TP back to the frame. A death otherwise dumps the bot at WORLD SPAWN (surface):
 /// the frame's `spawnpoint` at a deep, lava-adjacent cell is rejected by the server as an unsafe
 /// respawn point, so every death forces a ~100-block RE-DESCENT to the band — the tax that caps the
@@ -2180,7 +2591,12 @@ async fn respawn_at_frame(bot: &mut Bot<'_>) {
     bot.wait_ticks(5).await.ok();
     let anchor = *FRAME_ANCHOR.lock().unwrap(); // copy the Option, drop the guard before awaiting
     if let Some((bx, by, bz)) = anchor {
-        let _ = bot.run_command(&format!("tp @s {bx} {} {bz}", by + 1)).await;
+        // Land on the WORKING LANE (+Z of the frame, cobble-floored by the cast), NOT the anchor
+        // cell: the anchor is the frame's bottom-left cup, which after casting holds lava / sits at
+        // the sea edge — tp-ing onto it dropped the bot straight into fire (live: died twice at the
+        // same (898.5,-53.9,585.5) right after each tp-back → a death loop at 4/10).
+        let (sx, sy, sz) = safe_stand_near_frame(bot, bx, by, bz);
+        let _ = bot.run_command(&format!("tp @s {sx} {sy} {sz}")).await;
         bot.wait_ticks(5).await.ok();
     }
 }
@@ -2538,6 +2954,42 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         }
         let p = bot.entity.position;
         cast_debug(&format!("prepare: dropped to scoop level y={:.0} (lava surface {})", p.y, lava.1));
+    }
+
+    // FIRE-SAFE the OPEN natural lava field before scooping. On the deep band the bot hits a big
+    // exposed sea (exp16=64) and BURNS TO DEATH scooping/healing beside it (`pre-frame heal → hp=0`,
+    // 0 lava) — the gym's tiny enclosed pool never had this. Cap the exposed lava SURFACE around the
+    // scoop source with cobble, leaving only the source + its immediate ring open, so the bot scoops
+    // from a mostly-sealed pool (like the gym) instead of a fire field. Nearest-first (kills the
+    // closest fire first); health-bail so capping doesn't itself cook the bot.
+    if count_items(bot, "lava_bucket") < 1 {
+        let (sx, sy, sz) = lava;
+        let mut ring: Vec<(i32, i32)> = Vec::new();
+        for dx in -3i32..=3 {
+            for dz in -3i32..=3 {
+                if dx.abs() <= 1 && dz.abs() <= 1 {
+                    continue; // keep the source + its 4 scoop neighbours open
+                }
+                ring.push((dx, dz));
+            }
+        }
+        ring.sort_by_key(|&(dx, dz)| dx * dx + dz * dz); // closest fire first
+        let mut capped = 0;
+        for (dx, dz) in ring {
+            if bot.health < 10.0 {
+                break; // don't burn while fireproofing
+            }
+            let bb = build_block(bot);
+            if count_items(bot, &bb) < 1 {
+                break;
+            }
+            let (cx, cz) = (sx + dx, sz + dz);
+            if is_lava(&name_at(bot, cx, sy, cz)) && is_air(&name_at(bot, cx, sy + 1, cz)) {
+                place_cobble(bot, (cx, sy, cz)).await;
+                capped += 1;
+            }
+        }
+        cast_debug(&format!("prepare: fire-safe capped {capped} exposed lava around source {lava:?}"));
     }
 
     // Scoop the lava bucket NOW, while we're right next to the exposed pool. The anchor +
@@ -2915,14 +3367,46 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     // N/10 frame (live: `POS FAIL off=5919`, frame stuck at 4/10 forever). If a frame anchor persists
     // and we're far from it, tp straight back (the bot is op'd) so the frame RESUMES instead of
     // starting over. Copy the Option out first (drop the mutex guard before awaiting).
-    let anchor_now = *FRAME_ANCHOR.lock().unwrap();
+    // Load the anchor from DISK if the in-memory one is empty — i.e. a FRESH process right after a
+    // relaunch. Without this the check saw None, skipped, and prepare re-hunted lava at the SPAWN
+    // lane (live: 004 prepared at 864,668, dug a chamber, and died there) — orphaning its 8/10
+    // frame for a whole attempt until the later anchor-reuse finally loaded the file.
+    let mut anchor_now = *FRAME_ANCHOR.lock().unwrap();
+    if anchor_now.is_none() {
+        anchor_now = load_frame_anchor();
+        if anchor_now.is_some() {
+            *FRAME_ANCHOR.lock().unwrap() = anchor_now;
+        }
+    }
     if let Some((ax, ay, az)) = anchor_now {
         let p = bot.entity.position;
         let d = ((ax as f64 - p.x).powi(2) + (az as f64 - p.z).powi(2)).sqrt();
         if d > 16.0 {
             cast_debug(&format!("build: displaced {d:.0} from frame anchor — tp back to resume"));
-            let _ = bot.run_command(&format!("tp @s {ax} {} {az}", ay + 1)).await;
+            // Same as respawn_at_frame: land on a VERIFIED safe stand, not the (lava-cup) anchor cell.
+            let (sx, sy, sz) = safe_stand_near_frame(bot, ax, ay, az);
+            let _ = bot.run_command(&format!("tp @s {sx} {sy} {sz}")).await;
             bot.wait_ticks(10).await.ok();
+        }
+        // SWEEP STRAY LAVA at the frame on resume. A pour-miss from an earlier attempt can leave a
+        // lava SOURCE on the lane (live: (901,-50,586)) — it burns the bot, and worse, find_fluid
+        // then picks it as "the pool" and anchors the cast-site chamber right there (895,-49,583),
+        // 3 blocks off the real frame. Cap exposed lava in the lane + margins; SKIP the frame plane
+        // (dz=0) so a stale cup is left to the cast's own cup logic rather than sealed with cobble.
+        let mut swept = 0;
+        for dx in -1..=4 {
+            for dy in 0..=5 {
+                for dz in [-1, 1, 2, 3] {
+                    let (x, y, z) = (ax + dx, ay + dy, az + dz);
+                    if is_lava(&name_at(bot, x, y, z)) && count_items(bot, &build_block(bot)) > 0 {
+                        place_cobble(bot, (x, y, z)).await;
+                        swept += 1;
+                    }
+                }
+            }
+        }
+        if swept > 0 {
+            cast_debug(&format!("build: swept {swept} stray lava around the frame before resuming"));
         }
     }
     // Already cast?
@@ -3033,7 +3517,12 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     // orphaning the obsidian already cast. The ~50%-per-attempt adjacent-block pour means
     // a block can take several attempts, so 10 blocks needs a generous budget. Overridable
     // via PORTAL_BUDGET_SECS for tests.
-    let budget_secs = std::env::var("PORTAL_BUDGET_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(900);
+    // 2700s (was 900): the NATURAL cast is far slower than the gym's — each block costs a
+    // fire-safe cobble cap + a mid-frame refill-from-sea + repositioning (~3-4 min/block vs the
+    // gym's ~80s), so 900s only reached 4/10 then timed out, and a mid-build return re-anchors the
+    // frame elsewhere → the obsidian is ORPHANED (no accumulation). Give one call time to cast all
+    // 10 in a single anchored pass. (The gym front-loads 10 lava so it stays fast within 900s.)
+    let budget_secs = std::env::var("PORTAL_BUDGET_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(2700);
     let frame_deadline = Instant::now() + Duration::from_secs(budget_secs);
     let is_obsidian_at = |bot: &Bot, p: (i32, i32, i32)| name_at(bot, p.0, p.1, p.2) == "obsidian";
     let bottom: Vec<(i32, i32, i32)> = frame.iter().copied().filter(|p| p.1 == by).collect();
@@ -3127,6 +3616,18 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
             }
             for &pos in &upper {
                 if !is_obsidian_at(bot, pos) && Instant::now() < frame_deadline {
+                    // COLUMNS STRICTLY BOTTOM-UP. When a column cell's cast fails this pass, the loop
+                    // used to move straight on to the cell ABOVE it and cast that — which puts an
+                    // obsidian LID over the missing cell's cup. A lidded cup can never be poured
+                    // from the standard stance (the look-ray hits the lid and drops the lava on the
+                    // bot's own feet: a0-a4 all `lava_at=[(x,pos.1+1,stand_z)]`, RCON confirmed
+                    // (898,-52,585)/(908,-52,464) obsidian over air cups). Skip a cell while the
+                    // frame cell directly below it is still missing; the pass retries the low one.
+                    let below = (pos.0, pos.1 - 1, pos.2);
+                    if frame.contains(&below) && !is_obsidian_at(bot, below) {
+                        cast_debug(&format!("cast {pos:?}: SKIP — frame cell below {below:?} not cast yet (no lids)"));
+                        continue;
+                    }
                     eat_if_hurt(bot).await; // per-block heal (see bottom loop)
                     cast_obsidian_at(bot, pos, by, lava_pool).await;
                 }
