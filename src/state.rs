@@ -71,6 +71,8 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
             inv.flint += c;
         } else if n == "flint_and_steel" {
             inv.flint_and_steel += c;
+        } else if n == "blaze_rod" {
+            inv.blaze_rods += c;
         }
         if FOODS.contains(&n) {
             inv.food += c;
@@ -99,6 +101,33 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
     // done → it skipped the whole pipeline to enter_nether, which then couldn't reach that distant
     // portal → the bot looped the final step forever. 8 blocks ≈ only the bot's own just-lit portal.
     let portal_built = !bot.find_exposed_blocks("nether_portal", 8, 1).is_empty();
+    // Fortress reached = nether brick visible nearby (a fortress is almost entirely nether
+    // brick). Only scan in the nether — no bricks exist overworld, and the 64-radius scan
+    // isn't free. Stays true while the bot fights at the fortress; flips off only if it
+    // wanders far away (fine — kill_blaze keeps it there).
+    // ARENA_TEST: validate the blaze-combat pipeline in the OVERWORLD (a nether_brick arena),
+    // where world chunks load reliably — the cross-dimension command-tp into the nether streams
+    // chunks too slowly (bot's world stays empty ~20s+), which is a separate SDK issue.
+    let in_nether = bot.game.dimension.contains("nether") || std::env::var("ARENA_TEST").is_ok();
+    // Fortress reached = nether brick nearby. Use a direct block_at scan, NOT find_block —
+    // find_block needs line-of-sight to an EXPOSED block (anti-X-ray) and returns None for the
+    // floor the bot stands on (confirmed live). A small radius each tick is plenty + cheap.
+    let fortress_found = in_nether && {
+        let p = bot.entity.position;
+        let (ox, oy, oz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        let mut near = false;
+        'scan: for dx in -5..=5 {
+            for dy in -3..=3 {
+                for dz in -5..=5 {
+                    if bot.block_at(ox + dx, oy + dy, oz + dz).map(|b| b.name.contains("nether_brick")).unwrap_or(false) {
+                        near = true;
+                        break 'scan;
+                    }
+                }
+            }
+        }
+        near
+    };
     GameState {
         inventory: inv,
         equipment,
@@ -106,6 +135,7 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
             dimension: bot.game.dimension.clone(),
             dragon_dead: false,
             portal_built,
+            fortress_found,
         },
         health: bot.health,
         food: bot.food,

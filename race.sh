@@ -12,8 +12,8 @@ MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon
 DIR=/Users/bridger/Developer/mc/upstream/ruststeve
 BIN=$DIR/target/release/ruststeve
 DATA=$DIR/data
-N=1
-RACE_SECONDS=21600
+N=${N:-1}
+RACE_SECONDS=${RACE_SECONDS:-21600}
 HOLD=45
 
 # Lanes sit in the FORESTED band near the natural world spawn (x≈705) — the old
@@ -37,12 +37,18 @@ for pid in $(pgrep -f 'bash .*race.sh'); do [ "$pid" != "$$" ] && kill -9 "$pid"
 pkill -9 -f 'target/release/ruststeve' 2>/dev/null
 sleep 2
 
+# Fresh telemetry DB for this race — the source of truth for the dashboard + report. Reset
+# HERE, after the old bots are killed and BEFORE any new bot opens it (a bot attaches on
+# startup in phase 2; deleting the file after that would unlink it out from under the bots'
+# open handles → they'd write to a ghost inode and readers would see an empty DB).
+rm -f "$DIR"/data/race.db "$DIR"/data/race.db-wal "$DIR"/data/race.db-shm 2>/dev/null
+
 PIDS=()
 cleanup() {
   echo "[race] cleanup — killing bots"
   for p in "${PIDS[@]:-}"; do kill -9 "$p" 2>/dev/null; done
   pkill -9 -f 'target/release/ruststeve' 2>/dev/null
-  $SSH "$MCRCON 'forceload remove 880 280 950 460'" >/dev/null 2>&1
+  $SSH "$MCRCON 'forceload remove 880 280 960 1010'" >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
 
@@ -52,7 +58,7 @@ OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
 # `keepInventory` is rejected). Re-apply it here because another project on the same box
 # wipes the world on its restarts, which resets the rule to false. (A datapack/world
 # default would make it survive wipes — do that if the wipe-flicker keeps biting.)
-$SSH "$MCRCON $OPS \"forceload add 880 280 950 460\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
+$SSH "$MCRCON $OPS \"forceload add 880 280 960 1010\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
 sleep 3
 
 # Surface probe skipped — use a fixed Y=74 (the lane forest band surface level).
@@ -87,10 +93,12 @@ launch_bot() {
   if [ "$i" -eq 0 ]; then
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
       RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
+      RUST_VIEW=1 RUST_VIEW_ASSETS="$DIR/viewer/static/assets.json" \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   else
     MC_HOST=$HOST MC_PORT=25565 MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
       RACE_HOLD=$HOLD RACE_GOAL=nether CRAFT_DEBUG=1 \
+      RUST_VIEW=1 RUST_VIEW_ASSETS="$DIR/viewer/static/assets.json" \
       "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   fi
   PIDS[$i]=$!
@@ -128,12 +136,14 @@ $SSH "$MCRCON $TP" >/dev/null 2>&1
 echo "[race] bots positioned + spawnpoints set; lanes z=0..450"
 
 echo "[race] phase 4: racing (max ${RACE_SECONDS}s)"
-date +%s > /tmp/race-start   # exact wall-clock race start (for the dashboard's milestone times)
+date +%s > /tmp/race-start   # wall-clock race start (dashboard reads it for elapsed)
 SECONDS=0
 WINNER=""
 while [ $SECONDS -lt $RACE_SECONDS ]; do
+  # Winner = a bot that logged a `win` event into data/race.db (no more stdout grep).
   for i in $(seq 0 $((N-1))); do
-    if grep -q 'RACE GOAL REACHED' "$DIR/race-$i.log" 2>/dev/null; then
+    won=$(sqlite3 "$DIR/data/race.db" "SELECT 1 FROM events WHERE category='win' AND bot='${NAMES[i]}' LIMIT 1" 2>/dev/null)
+    if [ -n "$won" ]; then
       WINNER=$i; break
     fi
   done

@@ -125,6 +125,10 @@ pub struct Poi {
 pub struct WorldMemory {
     conn: Connection,
     tick: i64,
+    /// Attached only on the race path (`attach_race_log`). When present, diagnostic
+    /// `log()` calls and the per-tick snapshot route into the shared `data/race.db`
+    /// instead of this per-bot `events` table. `None` for gym/isolation runs.
+    race: Option<crate::telemetry::RaceLog>,
 }
 
 impl WorldMemory {
@@ -149,7 +153,14 @@ impl WorldMemory {
         let tick = conn
             .query_row("SELECT COALESCE(MAX(t), 0) FROM events", [], |r| r.get(0))
             .unwrap_or(0);
-        WorldMemory { conn, tick }
+        WorldMemory { conn, tick, race: None }
+    }
+
+    /// Attach the shared race telemetry DB (`data/race.db`), tagged with `bot`. Called
+    /// once at race startup. After this, `log()` and the `race_*` snapshot helpers write
+    /// there (queryable, wall-clock) instead of this per-bot `events` table.
+    pub fn attach_race_log(&mut self, bot: &str) {
+        self.race = Some(crate::telemetry::RaceLog::open(bot));
     }
 
     /// Storage key. Large connected volumes (water/lava) snap to a coarse grid so
@@ -252,14 +263,52 @@ impl WorldMemory {
             .ok()
     }
 
-    /// Append a diagnostic event (category/event/detail), the way steve logs to
-    /// SQLite. `t` is a monotonic counter.
+    /// Append a diagnostic event (category/event/detail). On the race path this routes
+    /// into the shared `data/race.db` `counters` table (upsert-and-count, so a spammy
+    /// event becomes one row + a count); otherwise it appends to this per-bot `events`
+    /// table keyed by the monotonic `tick`. Every existing `mem.log(...)` call site flows
+    /// through here unchanged.
     pub fn log(&mut self, category: &str, event: &str, detail: &str) {
+        if let Some(race) = &mut self.race {
+            race.count(category, event, "", detail);
+            return;
+        }
         self.tick += 1;
         let _ = self.conn.execute(
             "INSERT INTO events(t,category,event,detail) VALUES(?1,?2,?3,?4)",
             params![self.tick, category, event, detail],
         );
+    }
+
+    /// Per-tick state snapshot into the race DB (no-op when no race log is attached).
+    pub fn race_tick(&mut self, s: &crate::types::GameState, step_id: Option<&str>, step_name: Option<&str>, done: i32, total: i32) {
+        if let Some(race) = &mut self.race {
+            race.tick(s, step_id, step_name, done, total);
+        }
+    }
+
+    pub fn race_death(&mut self, s: &crate::types::GameState) {
+        if let Some(race) = &mut self.race {
+            race.death(s);
+        }
+    }
+
+    pub fn race_step_result(&mut self, step_id: &str, success: bool, message: &str) {
+        if let Some(race) = &mut self.race {
+            race.step_result(step_id, success, message);
+        }
+    }
+
+    pub fn race_win(&mut self, goal: &str) {
+        if let Some(race) = &mut self.race {
+            race.win(goal);
+        }
+    }
+
+    pub fn race_bail(&mut self, kind: &str, s: &crate::types::GameState, detail: &str) {
+        if let Some(race) = &mut self.race {
+            race.bail(kind, s, detail);
+        }
     }
 
     pub fn count(&self, kind: PoiKind) -> i64 {

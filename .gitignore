@@ -13,6 +13,7 @@
 
 # Runtime state
 .bot-serial
+.frame-*.txt
 /data
 /datagen/work
 

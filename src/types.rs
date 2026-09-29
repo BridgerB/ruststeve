@@ -20,6 +20,9 @@ pub struct Inventory {
     pub water_buckets: i32,
     pub flint: i32,
     pub flint_and_steel: i32,
+    /// Blaze rods — the post-nether milestone resource (dropped by blazes at a
+    /// fortress spawner). Reaching >=1 is the "kill a blaze" finish line.
+    pub blaze_rods: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +59,12 @@ impl Equipment {
     pub fn pickaxe_tier(&self) -> Tier {
         self.pickaxe.unwrap_or(Tier::None)
     }
+    /// Sword material tier (None if unarmed). `sword` is always `Some(..)` after a
+    /// sync (it holds the best tier found, defaulting to `Tier::None`), so gate combat
+    /// on the RANK, not `is_some()` — `is_some()` is true even with no sword.
+    pub fn sword_tier(&self) -> Tier {
+        self.sword.unwrap_or(Tier::None)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -64,6 +73,9 @@ pub struct WorldState {
     pub dragon_dead: bool,
     /// A lit nether_portal block exists nearby (the frame is cast AND ignited).
     pub portal_built: bool,
+    /// Nether-brick (fortress signature) is visible nearby — the bot has reached a
+    /// fortress. Derived off the world each tick, so it stays true while fighting there.
+    pub fortress_found: bool,
 }
 
 impl WorldState {

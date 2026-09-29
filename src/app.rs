@@ -30,6 +30,11 @@ pub async fn run() -> std::io::Result<()> {
         crate::gym::report();
         return Ok(());
     }
+    // RACE_REPORT=1: print the post-run analysis from data/race.db and exit (no bot).
+    if std::env::var("RACE_REPORT").is_ok() {
+        crate::telemetry::report();
+        return Ok(());
+    }
 
     let host = env("MC_HOST", "localhost");
     let port: u16 = env("MC_PORT", "25565").parse().unwrap_or(25565);
@@ -49,6 +54,11 @@ pub async fn run() -> std::io::Result<()> {
     let mem_path = std::path::PathBuf::from(format!(".memory-{username}.db"));
     let mut memory = WorldMemory::open(&mem_path);
     println!("memory: {} POIs remembered (db {})", memory.len(), mem_path.display());
+    // On the race path (RACE_GOAL/RACE_DB set), route telemetry into the shared, queryable
+    // data/race.db. Gym/isolation never set these, so their per-bot events stay as-is.
+    if std::env::var("RACE_GOAL").is_ok() || std::env::var("RACE_DB").is_ok() {
+        memory.attach_race_log(&username);
+    }
     memory.log("session", "start", &format!("{host}:{port} as {username}"));
 
     println!("connecting to {host}:{port} as {username}…");
@@ -105,6 +115,45 @@ pub async fn run() -> std::io::Result<()> {
                 }
             }
             println!("now at {:?}", bot.entity.position);
+        }
+    }
+
+    // NETHER_START="x y z": drop the bot straight into the nether onto a launch pad (the
+    // post-nether combat harness). The old launch-then-RCON-tp path RACED the bot's startup —
+    // the bot spawned at a stale/high spawnpoint and started wandering before the tp landed.
+    // Doing it here (bot is op'd, over the game connection) is deterministic: cross-dimension
+    // tp + anchor the spawnpoint at the pad so deaths respawn back at the fight, not overworld.
+    if let Ok(ns) = std::env::var("NETHER_START") {
+        let parts: Vec<&str> = ns.split_whitespace().collect();
+        if parts.len() == 3 {
+            let me = bot.username().to_string();
+            println!("nether-start: tp into the nether at {ns} …");
+            bot.run_command(&format!("execute in minecraft:the_nether run tp {} {} {} {}", me, parts[0], parts[1], parts[2])).await.ok();
+            bot.run_command(&format!("execute in minecraft:the_nether run spawnpoint {} {} {} {}", me, parts[0], parts[1], parts[2])).await.ok();
+            // The cross-dimension tp streams the nether chunks with a DELAY — right after it the
+            // bot's world is still empty (block_at = air), so if the step loop starts now it flails
+            // in a void world and wanders off. WAIT until the world is actually populated under the
+            // bot (a solid block below its feet) or ~20s, driving the tick loop to ingest chunks.
+            let tx: i32 = parts[0].parse().unwrap_or(0);
+            let tz: i32 = parts[2].parse().unwrap_or(0);
+            let ty: i32 = parts[1].parse().unwrap_or(64);
+            let loaded_deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                bot.drive_tick().await.ok();
+                let feet_solid = bot
+                    .block_at(tx, ty - 1, tz)
+                    .map(|b| b.name != "air" && b.name != "cave_air" && b.name != "void_air")
+                    .unwrap_or(false);
+                if feet_solid || Instant::now() > loaded_deadline {
+                    break;
+                }
+            }
+            // Re-center: the desync during loading may have slid the bot off the target; put it back.
+            bot.run_command(&format!("execute in minecraft:the_nether run tp {} {} {} {}", me, parts[0], parts[1], parts[2])).await.ok();
+            for _ in 0..20 {
+                bot.drive_tick().await.ok();
+            }
+            println!("nether-start: now at {:?} dim={} feet={:?}", bot.entity.position, bot.game.dimension, bot.block_at(tx, ty - 1, tz).map(|b| b.name));
         }
     }
 
@@ -201,7 +250,9 @@ pub async fn run() -> std::io::Result<()> {
         let p = bot.entity.position;
         // Surface here is ~y55-75; the deep-lava cast deaths are at y<0. A y>=45 gate anchors
         // a surface/shallow spawnpoint the bot can recover from and never one at the lava.
-        if p.y >= 45.0 {
+        // Skip when NETHER_START set it already (it anchored the nether pad; re-anchoring here
+        // in whatever dimension we're in would clobber it).
+        if p.y >= 45.0 && std::env::var("NETHER_START").is_err() {
             let me = bot.username().to_string();
             bot.run_command(&format!(
                 "spawnpoint {} {} {} {}",
@@ -217,12 +268,20 @@ pub async fn run() -> std::io::Result<()> {
     }
 
     let mut idle = 0;
-    let mut last_fail_msg = String::new();
+    // Stuck-guard state: the last (done, inventory-sum, pickaxe-rank) seen on a failing step.
+    // We bail when failures pile up with NO change to this — see the guard below.
+    let mut last_prog_sig: (usize, i32, i32, i32) = (usize::MAX, -1, -1, -1);
     let mut same_fail = 0u32;
+    let mut last_death: Option<(i32, i32, i32)> = None;
+    let mut same_death = 0u32;
     loop {
         // Let packets settle so inventory/position are current.
         bot.wait_ticks(6).await?;
         let state = sync_from_bot(&bot);
+        // Telemetry: throttled state snapshot into data/race.db (no-op off the race path).
+        let next = get_next_step(&state);
+        let (done, total) = progress(&state);
+        memory.race_tick(&state, next.map(|s| s.id), next.map(|s| s.name), done as i32, total as i32);
 
         if is_dragon_dead(&state) {
             println!("VICTORY — the Ender Dragon is dead!");
@@ -234,11 +293,24 @@ pub async fn run() -> std::io::Result<()> {
         // spawnpoint was set) and retry instead of idling out of the race.
         if !state.alive {
             println!("died at {:?} — respawning", state.position);
-            memory.log(
-                "session",
-                "death",
-                &format!("{:.0},{:.0},{:.0}", state.position.0, state.position.1, state.position.2),
-            );
+            memory.race_death(&state);
+            // Respawn-loop guard: if we keep dying at the EXACT SAME spot, respawn isn't
+            // escaping it — a hazardous spawnpoint or a respawn that lands right back in
+            // lava/suffocation (rust-race-004 logged 563 deaths at one identical coord).
+            // Bail after a few so race.sh relaunches us fresh (new connection + re-tp to
+            // the lane + a fresh surface spawnpoint) instead of spinning the whole race.
+            let dp = (state.position.0 as i32, state.position.1 as i32, state.position.2 as i32);
+            if last_death == Some(dp) {
+                same_death += 1;
+                if same_death >= 5 {
+                    println!("respawn loop — died {same_death}x at {dp:?}, stopping for a fresh relaunch");
+                    memory.race_bail("respawn_bail", &state, &format!("{same_death}x at {dp:?}"));
+                    break;
+                }
+            } else {
+                same_death = 0;
+                last_death = Some(dp);
+            }
             bot.respawn().await.ok();
             bot.wait_ticks(40).await.ok(); // let respawn + chunks settle
             continue;
@@ -254,6 +326,7 @@ pub async fn run() -> std::io::Result<()> {
         if let Ok(goal) = std::env::var("RACE_GOAL") {
             let reached = match goal.as_str() {
                 "nether" => state.world.in_nether(),
+                "blaze" => state.inventory.blaze_rods >= 1,
                 "iron_pickaxe" => state.equipment.pickaxe_tier().rank() >= 3,
                 "stone_pickaxe" => state.equipment.pickaxe_tier().rank() >= 2,
                 "wooden_pickaxe" => state.equipment.pickaxe_tier().rank() >= 1,
@@ -261,16 +334,15 @@ pub async fn run() -> std::io::Result<()> {
             };
             if reached {
                 println!("RACE GOAL REACHED: {goal}");
-                memory.log("race", "win", &goal);
+                memory.race_win(&goal);
                 bot.run_command(&format!("say I reached {goal} — race done!")).await.ok();
                 break;
             }
         }
 
-        match get_next_step(&state) {
+        match next {
             Some(step) => {
                 idle = 0;
-                let (done, total) = progress(&state);
                 println!(
                     "[{}] → {} ({done}/{total}) | logs={} planks={} sticks={} pick={:?}",
                     state.world.dimension, step.name,
@@ -286,8 +358,33 @@ pub async fn run() -> std::io::Result<()> {
                         state.inventory.cobblestone, state.equipment.pickaxe_tier(), state.position.1,
                     ),
                 );
-                let r = execute_step(&mut bot, step.id, &mut memory).await;
-                memory.log("step", step.id, &format!("{} {}", if r.success { "ok" } else { "fail" }, r.message));
+                // Bound every step in wall-clock: no task may hang the bot. A movement/dig
+                // await can wedge indefinitely on nasty terrain (the gym saw mine_iron freeze
+                // over water — "underwater — surfacing" then no progress to timeout); in a race
+                // that freezes the bot forever, because the stuck-guard below only fires when a
+                // step RETURNS. Force a return so the loop re-derives from fresh state. The
+                // budget covers each step's own deadline plus slack; the portal cast legitimately
+                // runs up to ~900s, everything else settles well under 300s.
+                let budget = match step.id {
+                    // The portal step does the ~100-block descent to lava (prepare, ~600s) AND
+                    // the 10-block cast (~900s) in one call; 960s killed it mid-cast (×7 in the
+                    // race). Give it room for both. A bad/uncastable site no longer wastes this —
+                    // the cast's 150s wall-clock stall-bail retires the lava and re-sites fast.
+                    // Descent (~600s) + the NATURAL 10-block cast (now up to 2700s — slower than the
+                    // gym because each block fire-caps + refills from the sea). 3600s covers both so
+                    // the outer watchdog doesn't kill a legit slow cast mid-frame (which orphans it).
+                    "build_nether_portal" => Duration::from_secs(3600),
+                    // Wandering to a fortress and camping the spawner are long by nature; the
+                    // tasks self-time-box (45s / 150s) and return so the loop re-derives, but give
+                    // the outer watchdog headroom so a single sweep/fight isn't cut short.
+                    "find_fortress" | "kill_blaze" => Duration::from_secs(300),
+                    _ => Duration::from_secs(330),
+                };
+                let r = match tokio::time::timeout(budget, execute_step(&mut bot, step.id, &mut memory)).await {
+                    Ok(r) => r,
+                    Err(_) => crate::types::failure(format!("{} exceeded {}s — re-deriving", step.id, budget.as_secs())),
+                };
+                memory.race_step_result(step.id, r.success, &r.message);
                 println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
                 // Connection lost (e.g. the server restarted out from under us): a
                 // step that failed on a dead socket reports "Broken pipe"/os error 32,
@@ -304,27 +401,35 @@ pub async fn run() -> std::io::Result<()> {
                     println!("connection lost — stopping");
                     break;
                 }
-                // Stuck-guard: a step failing with the SAME message repeatedly is wedged with
-                // ZERO progress. Two cases this catches: (1) a HALF-OPEN connection — the bot
-                // was dropped from the world but the socket stays alive, so wait_ticks doesn't
-                // error and find_block sees an empty local world → enter_nether spins "no portal
-                // found to enter" forever offline (race.sh won't relaunch a live proc); (2) a
-                // task that can't advance at this spot (mine "fail — mined 2/12 iron" frozen on
-                // bad terrain). A step that IS progressing changes its message ("2/12"→"3/12"),
-                // so identical repeats == no progress. Bail so race.sh relaunches us fresh (new
-                // connection re-loads chunks → the built+lit portal is findable; new tp → new
-                // terrain). Non-connection stalls never self-recovered before → whole race lost.
-                if r.success {
+                // Stuck-guard: bail when a step keeps failing with NO PROGRESS. "Progress" =
+                // the completed-step count OR the inventory OR the pickaxe tier changed since
+                // the last failure. Keying on progress (not identical message text) is what
+                // catches a bot that ALTERNATES failure messages with nothing changing — a
+                // flaky container ping-ponging "result never appeared"/"would not open" (008's
+                // 433-loop), a half-open connection spinning "no portal found" offline, or a
+                // stalled cast — while still letting a slowly-advancing step continue (mine_iron
+                // "2/12"→"5/12" bumps the inventory sum, so it resets). Bailing relaunches fresh
+                // (new connection reloads chunks / a fresh table / new terrain).
+                let iv = &state.inventory;
+                let inv_sum = iv.logs + iv.planks + iv.sticks + iv.cobblestone + iv.dirt
+                    + iv.coal + iv.iron_ore + iv.iron_ingots + iv.diamonds + iv.food
+                    + iv.crafting_tables + iv.buckets + iv.water_buckets + iv.flint + iv.flint_and_steel;
+                // Fold in the portal frame's obsidian count: placed obsidian lives in the WORLD, not
+                // the inventory, so a slowly-advancing cast (2/10→3/10) otherwise looks like "no
+                // progress" and trips the stuck-bail → relaunch → re-hunt lava → orphaned frame. This
+                // makes each obsidian reset the fail counter, so the frame can grind over many step
+                // re-derives (it persists in-world) without ever relaunching.
+                let prog_sig = (done, inv_sum, state.equipment.pickaxe_tier().rank(), crate::tasks::portal::frame_obsidian_count(&bot));
+                if r.success || prog_sig != last_prog_sig {
                     same_fail = 0;
-                } else if r.message == last_fail_msg {
+                    last_prog_sig = prog_sig;
+                } else {
                     same_fail += 1;
                     if same_fail >= 20 {
-                        println!("stuck — same failure x{same_fail} ({m}) — stopping for a fresh relaunch");
+                        println!("stuck — {same_fail} failures with no progress ({m}) — stopping for a fresh relaunch");
+                        memory.race_bail("stuck_bail", &state, &format!("{m} x{same_fail}"));
                         break;
                     }
-                } else {
-                    same_fail = 0;
-                    last_fail_msg = r.message.clone();
                 }
             }
             None => {

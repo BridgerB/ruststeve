@@ -14,7 +14,15 @@ pub const STEPS: &[Step] = &[
         name: "Gather Wood",
         priority: 1,
         can_execute: |s| s.world.in_overworld() && s.alive,
-        is_complete: |s| s.inventory.logs >= 5 || s.inventory.planks >= 12,
+        // Keep a WOOD RESERVE. A full spawn→nether run spends ~11 planks (table + wooden
+        // pick + all the sticks); with only a 12-plank target a container desync that eats
+        // planks (or a re-placed table) dropped the bot to 0 wood mid-run and the recovery
+        // above sent it back to Gather Wood (~15 min lost, seen in the race). A slightly
+        // bigger buffer avoids that round trip; ~1 extra log up front is far cheaper.
+        // 10 logs (was 6): the natural portal cast breaks pickaxes repeatedly (deepslate descent +
+        // chamber + lane digging) and each recraft eats wood; the 8/10 leader ran wood AND cobble to
+        // zero, could craft no pickaxe of any tier, and regressed from the frame to Gather Wood.
+        is_complete: |s| s.inventory.logs >= 10 || s.inventory.planks >= 28,
     },
     Step {
         id: "craft_planks",
@@ -95,16 +103,26 @@ pub const STEPS: &[Step] = &[
         name: "Mine Iron Ore",
         priority: 11,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 2,
-        // NETHER goal needs a lot of iron: pickaxe(3) + 2 buckets(6) + flint&steel(1)
-        // = 10, +1 buffer. Mine it in one trip rather than re-descending repeatedly.
-        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 12,
+        // NETHER goal needs a lot of iron: pickaxe(3) + 3 buckets(9) + flint&steel(1)
+        // = 13, +2 buffer. The 3rd bucket is load-bearing: on natural terrain the bot
+        // deep-descends to a lava lake and scoops early (empty→lava), so it must reach
+        // the cast still holding 1 EMPTY + 1 WATER bucket — 2 total (the old target) left
+        // it with 0 empty after the scoop and the cast bailed "need a water/empty bucket".
+        // 22 (was 15): the natural descent+cast BREAKS the iron pickaxe, and the depth recovery can
+        // only recraft IRON if >=3 ingots survive to the frame. With 15 (pick 3 + buckets 3 + f&s 1
+        // + spend) the bot arrived with <3, recrafted a STONE pick, couldn't run gather_build_blocks
+        // (iron-gated), and abandoned its 7/10 frame to re-mine iron from scratch (~30 min). Spare
+        // ingots turn that into an on-the-spot iron recraft.
+        is_complete: |s| s.inventory.iron_ore + s.inventory.iron_ingots >= 22,
     },
     Step {
         id: "smelt_iron",
         name: "Smelt Iron",
         priority: 12,
         can_execute: |s| s.equipment.has_furnace && s.inventory.coal >= 1 && s.inventory.iron_ore >= 1,
-        is_complete: |s| s.inventory.iron_ingots >= 11,
+        // 21 (was 14): must track mine_iron's 22 so ~3 spare ingots reach the frame for an iron
+        // pickaxe recraft at depth (see mine_iron).
+        is_complete: |s| s.inventory.iron_ingots >= 21,
     },
     Step {
         id: "craft_iron_pickaxe",
@@ -116,22 +134,27 @@ pub const STEPS: &[Step] = &[
     // === NETHER PREP === (all gated behind the iron pickaxe so the bot finishes
     // the iron-pickaxe chain FIRST — otherwise the furthest-step picker jumps to
     // these and never crafts the pickaxe it already has the iron for).
-    // Portal needs 2 buckets total: one stays WATER (to pour over the lava), one
-    // stays EMPTY (the bot fills it with lava from the pool, refilling each cast).
+    // Portal needs 3 buckets total (matches the passing gym prereq): one stays WATER
+    // (poured over the lava cup), and TWO stay EMPTY — the natural-terrain cast scoops
+    // lava early during the deep descent (empty→lava), so it must still hold 1 empty +
+    // 1 water when it reaches the frame. 2 buckets left it with 0 empty after the scoop.
     Step {
         id: "craft_bucket",
         name: "Craft Buckets",
         priority: 14,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.iron_ingots >= 3,
-        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 2,
+        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 3,
     },
     Step {
         id: "get_water_buckets",
         name: "Fill Water Buckets",
         priority: 15,
-        // Fill ONE bucket with water — leave the other empty for lava.
+        // Fill ONE bucket with water. Completion is ONLY water>=1 — the fill task consumes
+        // an empty bucket, so requiring buckets>=2 here deadlocked (filling water can never
+        // RAISE the empty count, so a bot with 1 empty+1 water re-ran this forever). The
+        // 2-empty requirement lives in craft_bucket (sum>=3) + the portal gate (buckets>=2).
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.buckets >= 1,
-        is_complete: |s| s.inventory.water_buckets >= 1 && s.inventory.buckets >= 1,
+        is_complete: |s| s.inventory.water_buckets >= 1,
     },
     Step {
         id: "get_flint_and_steel",
@@ -152,7 +175,10 @@ pub const STEPS: &[Step] = &[
         name: "Gather Build Blocks",
         priority: 17,
         can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3,
-        is_complete: |s| s.inventory.cobblestone + s.inventory.dirt >= 40,
+        // 72 (was 40): the natural cast now CONSUMES cobble beyond scaffolding — fire-safe caps on the
+        // open lava field, lane floors over the sea, stray-lava caps — and stone-pickaxe recrafts each
+        // take 3. The 8/10 leader drained it to zero (then wood too) and lost its pickaxe entirely.
+        is_complete: |s| s.inventory.cobblestone + s.inventory.dirt >= 72,
     },
     Step {
         id: "build_nether_portal",
@@ -161,7 +187,7 @@ pub const STEPS: &[Step] = &[
         can_execute: |s| {
             s.world.in_overworld()
                 && s.inventory.water_buckets >= 1
-                && s.inventory.buckets >= 1
+                && s.inventory.buckets >= 2
                 && s.inventory.flint_and_steel >= 1
                 && s.inventory.cobblestone >= 30
         },
@@ -174,6 +200,22 @@ pub const STEPS: &[Step] = &[
         can_execute: |s| s.world.portal_built && s.world.in_overworld(),
         is_complete: |s| s.world.in_nether(),
     },
+    // ── post-nether: fortress → blaze spawner → blaze rod ──────────────────────
+    Step {
+        id: "find_fortress",
+        name: "Find Nether Fortress",
+        priority: 20,
+        can_execute: |s| s.world.in_nether() || std::env::var("ARENA_TEST").is_ok(),
+        is_complete: |s| s.world.fortress_found,
+    },
+    Step {
+        id: "kill_blaze",
+        name: "Kill a Blaze",
+        priority: 21,
+        // Need a real sword (equipment.sword is always Some(..); gate on the tier rank).
+        can_execute: |s| s.world.fortress_found && s.equipment.sword_tier().rank() >= 1,
+        is_complete: |s| s.inventory.blaze_rods >= 1,
+    },
 ];
 
 /// The FURTHEST-along step that can run and isn't complete. Picking the last
@@ -182,6 +224,12 @@ pub const STEPS: &[Step] = &[
 /// earlier gather/craft step that looks "incomplete" only because a later step
 /// consumed its (consumable) output — which otherwise loops forever.
 pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
+    // The pickaxe/wood recovery guards below are OVERWORLD tool-phase logic — a bot in the
+    // nether (post-nether combat phase) has a combat kit with no pickaxe/wood on purpose, and
+    // must NOT be dragged back to "gather wood"/"craft pickaxe" (there are no trees in the
+    // nether — it'd wander forever). Skip both recoveries once in the nether; the normal
+    // furthest-runnable picker then advances find_fortress → kill_blaze.
+    if state.world.in_overworld() && std::env::var("ARENA_TEST").is_err() {
     // PICKAXE RECOVERY (highest priority): if we have no pickaxe but the materials
     // to make one, go back UP the chain and re-craft it before anything else.
     // Never proceed to mine by hand — only WOOD is gathered by hand. A bot whose
@@ -194,8 +242,18 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
             Some("craft_stone_pickaxe")
         } else if state.inventory.planks >= 3 && sticks >= 2 {
             Some("craft_wooden_pickaxe")
+        } else if sticks < 2 && state.inventory.planks >= 2 {
+            // Out of sticks but HAVE planks: make sticks (2x2, no table) so the pickaxe
+            // recovery above can fire next tick. Without this, an iron pickaxe that BREAKS
+            // mid-descent (deep at y-18 with planks but 0 sticks) fell through to "gather
+            // wood" — but there are no trees at depth, so the bot hand-mined deepslate
+            // forever and never reached lava. Rebuild the tool from carried wood instead.
+            Some("craft_sticks")
+        } else if sticks < 2 && state.inventory.planks < 2 && state.inventory.logs >= 1 {
+            // Have logs but no planks — make planks first, then sticks, then the pickaxe.
+            Some("craft_planks")
         } else {
-            None // lack materials — fall through (gather wood/planks/sticks first)
+            None // genuinely out of wood — fall through (gather wood at surface)
         };
         if let Some(id) = recover {
             if let Some(step) = STEPS.iter().find(|st| st.id == id) {
@@ -218,6 +276,7 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
             return Some(step);
         }
     }
+    } // end overworld-only recovery guards
     STEPS.iter().filter(|s| (s.can_execute)(state) && !(s.is_complete)(state)).next_back()
 }
 
@@ -229,7 +288,7 @@ pub fn progress(state: &GameState) -> (usize, usize) {
 
 pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) -> StepResult {
     match id {
-        "gather_wood" => tasks::gather_wood::gather_wood(bot, 5, mem).await,
+        "gather_wood" => tasks::gather_wood::gather_wood(bot, 6, mem).await,
         "craft_planks" => tasks::craft::craft_planks(bot, mem).await,
         "craft_crafting_table" => tasks::craft::craft_crafting_table(bot, mem).await,
         "craft_sticks" => tasks::craft::craft_sticks(bot, mem).await,
@@ -239,16 +298,26 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_stone_sword" => tasks::craft::craft_stone_sword(bot, mem).await,
         "craft_furnace" => tasks::craft::craft_furnace(bot, mem).await,
         "mine_coal" => tasks::mining::mine_ore(bot, "coal", 2, mem).await,
-        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 12, mem).await,
-        "smelt_iron" => tasks::smelt::smelt_iron(bot, 11).await,
+        // Keep this in lock-step with mine_iron's is_complete target (15): if the task
+        // mines fewer than is_complete wants, the step never completes and re-runs forever.
+        "mine_iron" => tasks::mining::mine_ore(bot, "iron", 22, mem).await,
+        // Target 14 must match smelt_iron's is_complete (14) — a lower task target would
+        // "succeed" below the step threshold and re-run forever.
+        "smelt_iron" => tasks::smelt::smelt_iron(bot, 21, mem).await,
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
-        "craft_bucket" => tasks::craft::craft_buckets(bot, 2, mem).await,
+        // Count 3 must match craft_bucket's is_complete (buckets+water>=3) — a lower count
+        // stops the task below the step threshold and re-runs "have N buckets" forever.
+        "craft_bucket" => tasks::craft::craft_buckets(bot, 3, mem).await,
         // Fill ONE water bucket (keep the second bucket empty for lava).
         "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 1, mem).await,
         "get_flint_and_steel" => tasks::craft::get_flint_and_steel(bot, mem).await,
-        "gather_build_blocks" => tasks::mining::mine_stone(bot, 40, mem).await,
+        // Must match gather_build_blocks' is_complete (72) — a lower task target "succeeds" below
+        // the step threshold and re-runs forever.
+        "gather_build_blocks" => tasks::mining::mine_stone(bot, 72, mem).await,
         "build_nether_portal" => tasks::portal::build_nether_portal(bot, mem).await,
         "enter_nether" => tasks::portal::enter_nether(bot).await,
+        "find_fortress" => tasks::nether::find_fortress(bot, mem).await,
+        "kill_blaze" => tasks::nether::kill_blaze(bot, mem, 1).await,
         other => failure(format!("no executor for step {other}")),
     }
 }

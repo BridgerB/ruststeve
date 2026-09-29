@@ -132,12 +132,16 @@ async fn serve_connection(
         sent.insert(key);
     }
 
-    // Live loop: pose every ~300ms; stream chunks that appeared since we last looked.
+    // Live loop: stream POSE at ~30 Hz so the camera is smooth (the bot refreshes pose every
+    // tick). Chunk-scan + time are far cheaper to send occasionally, so only every ~1s.
+    let mut i: u32 = 0;
     loop {
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(33)).await;
+        i = i.wrapping_add(1);
+        let slow = i % 30 == 0; // ~1s: chunks + time
         let (pose, time, new_chunks) = {
             let s = shared.lock().unwrap();
-            let new_chunks: Vec<((i32, i32), Vec<u8>)> = if s.seq != last_seq {
+            let new_chunks: Vec<((i32, i32), Vec<u8>)> = if slow && s.seq != last_seq {
                 s.chunks
                     .iter()
                     .filter(|(k, _)| !sent.contains(*k))
@@ -146,11 +150,15 @@ async fn serve_connection(
             } else {
                 Vec::new()
             };
-            last_seq = s.seq;
+            if slow {
+                last_seq = s.seq;
+            }
             (s.pose, s.time, new_chunks)
         };
         send_event(&mut stream, &pose_msg(pose)).await?;
-        send_event(&mut stream, &format!(r#"{{"type":"time","time":{time}}}"#)).await?;
+        if slow {
+            send_event(&mut stream, &format!(r#"{{"type":"time","time":{time}}}"#)).await?;
+        }
         for (key, bytes) in new_chunks {
             send_event(&mut stream, &chunk_msg(key, &bytes)).await?;
             sent.insert(key);

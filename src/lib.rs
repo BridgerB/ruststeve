@@ -40,5 +40,6 @@ pub mod state;
 pub mod steps;
 pub mod survival;
 pub mod tasks;
+pub mod telemetry;
 pub mod types;
 pub mod viewer;

@@ -25,7 +25,7 @@ $SSH "$MCRCON \
   'gamerule doFireTick false' " >/dev/null 2>&1
 
 echo "[cast-one] launch (CAST_TWO + sniff)"
-CAST_ONE=1 CAST_ONE_POOL=1 CAST_SNIFF=1 MC_HOST=$HOST MC_PORT=25565 MC_USERNAME=$NAME STEVE_DATA="$DATA" \
+CAST_ONE=1 CAST_ONE_POOL=1 CAST_SNIFF=1 MC_HOST=localhost MC_PORT=25565 MC_USERNAME=$NAME STEVE_DATA="$DATA" \
   RACE_HOLD=30 RACE_GOAL=nether CRAFT_DEBUG=1 \
   "$BIN" >> "$DIR/ptest.log" 2>&1 &
 echo "[cast-one] pid $!"

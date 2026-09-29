@@ -5,5 +5,6 @@ pub mod craft;
 pub mod food;
 pub mod gather_wood;
 pub mod mining;
+pub mod nether;
 pub mod portal;
 pub mod smelt;

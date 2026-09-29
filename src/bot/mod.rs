@@ -188,6 +188,15 @@ impl<'a> Bot<'a> {
                 cant_break.insert(def.id);
             }
         }
+        // Permanent no-dig set: survives every `blocks_cant_break.clear()`. Obsidian is the bot's
+        // own portal frame (an iron pick CAN break it in 250s and the pathfinder's flat dig cost
+        // would happily route through it); bedrock is unbreakable.
+        let never_break: std::collections::HashSet<i32> = registry
+            .blocks_by_name
+            .iter()
+            .filter(|(name, _)| name.contains("obsidian") || name.as_str() == "bedrock")
+            .map(|(_, def)| def.id)
+            .collect();
         Ok(Bot {
             inventory: crate::window::create_window_from_type(registry, 0, -1, Some("minecraft:inventory"), "Inventory", None)
                 .unwrap_or_else(|| Window::new(0, "minecraft:inventory", "", 46, 9, 44, 0, true)),
@@ -214,7 +223,7 @@ impl<'a> Bot<'a> {
             held_slot: 0,
             control_state: ControlState::default(),
             physics_enabled: true,
-            movement: MovementsConfig { liquid_cost: 100.0, max_drop_down: 1, blocks_cant_break: cant_break, ..MovementsConfig::default() }, // low drop + don't path through unbreakable stone
+            movement: MovementsConfig { liquid_cost: 100.0, max_drop_down: 1, blocks_cant_break: cant_break, blocks_never_break: never_break, ..MovementsConfig::default() }, // low drop + don't path through unbreakable stone
             physics: None,
             should_physics: false,
             last_tick: Instant::now(),
@@ -262,12 +271,16 @@ impl<'a> Bot<'a> {
     /// Advance one step: handle a packet if one arrives before the 50 ms physics
     /// deadline, otherwise run a physics tick.
     pub async fn drive_tick(&mut self) -> std::io::Result<DriveStep> {
-        // Optional top-down world snapshot for the dashboard (throttled ~2s; skipped
-        // while a container window is open so it never perturbs the timing-sensitive
-        // craft/inventory sync — a heavy per-tick scan is what regressed craft before).
-        if self.view_last.elapsed() >= std::time::Duration::from_secs(4) {
-            self.view_last = Instant::now();
-            if self.current_window.is_none() && self.viewer.is_some() {
+        // Live-3D-viewer feed for the dashboard. POSE is written EVERY tick (cheap — 5 floats
+        // under a lock) so the streamed camera is smooth; the EXPENSIVE chunk-dump stays throttled
+        // and skipped while a container window is open (a heavy per-tick scan regressed craft
+        // timing before). Updating pose only every few seconds made the feed a slideshow.
+        if self.viewer.is_some() {
+            self.update_viewer_pose();
+            if self.current_window.is_none()
+                && self.view_last.elapsed() >= std::time::Duration::from_secs(1)
+            {
+                self.view_last = Instant::now();
                 self.update_viewer();
             }
         }
@@ -311,6 +324,28 @@ impl<'a> Bot<'a> {
                 DriveStep::Disconnected => return Ok(()),
                 DriveStep::Tick => ticks += 1,
                 _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Drive the loop for AT LEAST `ms` of real wall-clock time, pumping packets so
+    /// world/entity state stays fresh. Unlike [`wait_ticks`], an incoming-packet flood
+    /// can't collapse the delay: `wait_ticks(14)` returned in <2ms during combat (the
+    /// packet backlog satisfied 14 "ticks" instantly), so the bot dumped 40 swings in
+    /// 66ms — all but the first landed inside a mob's 10-tick (0.5s) hurt-invulnerability
+    /// and dealt zero damage. Combat pacing needs a guaranteed real interval, so this
+    /// floors on the clock: it keeps driving (draining packets, ignoring transient drive
+    /// errors) until `ms` has actually elapsed, then returns.
+    pub async fn wait_real_ms(&mut self, ms: u64) -> std::io::Result<()> {
+        let deadline = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, self.drive_tick()).await {
+                Err(_) => break,                                  // real deadline reached — the floor
+                Ok(Ok(DriveStep::Disconnected)) => return Ok(()), // connection gone: stop early
+                Ok(Ok(_)) => {}                                   // tick/packet handled: keep going
+                Ok(Err(_)) => tokio::time::sleep(Duration::from_millis(5)).await, // transient: don't spin
             }
         }
         Ok(())
@@ -897,9 +932,23 @@ impl<'a> Bot<'a> {
         Some(state_id_to_block(self.registry, state))
     }
 
+    /// Cheap per-tick pose/time update for the live viewer — just writes the camera pose
+    /// under the shared lock (no world scan), so the streamed feed stays smooth at tick rate.
+    fn update_viewer_pose(&self) {
+        let Some(handle) = &self.viewer else {
+            return;
+        };
+        let p = self.entity.position;
+        let mut shared = handle.lock().unwrap();
+        shared.pose = (p.x, p.y, p.z, self.entity.yaw, self.entity.pitch);
+        shared.min_y = self.game.min_y;
+        shared.height = self.game.height;
+        shared.time = self.time.time_of_day;
+    }
+
     /// Fill the live-3D-viewer snapshot: update pose/time, and dump a bounded number
     /// of newly-loaded near chunks into the shared buffer for the SSE server to stream.
-    /// Bounded work per call (≤12 columns) + the 2s throttle keep it off the craft path.
+    /// Bounded work per call (≤4 columns) + the throttle keep it off the craft path.
     fn update_viewer(&mut self) {
         let Some(handle) = self.viewer.clone() else {
             return;
@@ -1174,22 +1223,39 @@ impl<'a> Bot<'a> {
         self.client.write("swing", PValue::compound(vec![("hand", PValue::num(0.0))])).await
     }
 
-    /// Melee-attack an entity (left-click). Faces it, swings, sends interact.
+    /// Force the current position + LOOK to the server right now. `look_at` only updates the
+    /// local rotation; the position packet that carries it goes out on the NEXT physics tick —
+    /// after any use/place packet sent in between — so the server raycasts a STALE rotation.
+    /// That is exactly why a bucket pour aimed into a cup landed on the bot's own feet (the
+    /// server still held the pre-look pitch). Same trick `attack` uses for reach checks.
+    /// `last_sent` is restored so the physics tick still re-sends normally.
+    pub async fn sync_look(&mut self) -> std::io::Result<()> {
+        let saved = self.last_sent.take();
+        let r = self.send_position().await;
+        self.last_sent = saved;
+        r
+    }
+
+    /// Melee-attack an entity (left-click): face it, swing the arm, send the `attack` packet.
     pub async fn attack(&mut self, entity_id: i32) -> std::io::Result<()> {
         if let Some(e) = self.entities.get(&entity_id) {
             let c = e.position;
             self.look_at(vec3(c.x, c.y + 0.7, c.z));
         }
+        // Sync our current position+look to the server BEFORE attacking. send_position otherwise
+        // fires only on the next physics tick — AFTER the attack packet — so the server evaluates
+        // the attack's reach/angle against a STALE pose and rejects it. `last_sent` is left
+        // unchanged so the physics tick still re-sends.
+        let saved = self.last_sent.take();
+        let _ = self.send_position().await;
+        self.last_sent = saved;
         self.swing_arm().await?;
+        // 775 (26.1.2) split attacking into a dedicated `attack` packet (0x01) — just the target
+        // entity id. The old `interact` packet (0x1a) is now right-click ONLY, so sending an
+        // interact-with-mouse=1 was a no-op right-click on the mob (decoded fine, dealt no damage;
+        // and without a `hand` it even failed to decode → kicked us). See minecraft-data pc/26.1.
         self.client
-            .write(
-                "interact",
-                PValue::compound(vec![
-                    ("target", PValue::num(entity_id as f64)),
-                    ("mouse", PValue::num(1.0)), // 1 = attack
-                    ("sneaking", PValue::Bool(false)),
-                ]),
-            )
+            .write("attack", PValue::compound(vec![("entityId", PValue::num(entity_id as f64))]))
             .await
     }
 
