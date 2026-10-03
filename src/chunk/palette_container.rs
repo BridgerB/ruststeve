@@ -73,6 +73,17 @@ impl PaletteContainer {
         }
     }
 
+    /// Does any stored value satisfy `pred`? O(palette) for single/indirect containers (the
+    /// common case), a full scan only for direct ones — cheap enough to ask of every loaded
+    /// section (e.g. "is there nether brick anywhere in view?").
+    pub fn contains_where(&self, capacity: usize, pred: &dyn Fn(u32) -> bool) -> bool {
+        match self {
+            PaletteContainer::Single(c) => pred(c.value),
+            PaletteContainer::Indirect(c) => c.palette.iter().any(|&v| pred(v)),
+            PaletteContainer::Direct(c) => (0..capacity).any(|i| pred(c.data.get(i))),
+        }
+    }
+
     /// Set a value, upgrading the container in place if needed
     /// (single → indirect, indirect → direct).
     pub fn set(&mut self, index: usize, value: u32) {

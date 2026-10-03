@@ -71,11 +71,13 @@ pub async fn handle_survival(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
         return true;
     }
 
-    // 2. Head underwater — surface before we drown.
-    if head_in_water(bot) {
+    // 2. Head underwater — surface before we drown. Also on the tick driver's breath/water alarm
+    // (feet in water > 8 s): movement refuses to path while it is set, so this escape is the
+    // only thing that clears it — without it a wading bot would deadlock.
+    if head_in_water(bot) || bot.breath_alarm {
         throttled(&LAST_WATER, "    !! underwater — surfacing");
         mem.log("survival", "water", "surfacing");
-        leave_water(bot, 80).await;
+        leave_water(bot, 200).await; // real ticks (10 s): enough to swim to a bank
         return true;
     }
 

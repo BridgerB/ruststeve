@@ -26,6 +26,11 @@ use crate::types::GameState;
 /// How a gym trial positions the bot before running the step.
 #[derive(Clone, Copy)]
 pub enum GymSetup {
+    /// The surface at a fixed (x, z): a known terrain case (e.g. race i5's treeless start).
+    FixedSurface { x: i32, z: i32 },
+    /// A 1-wide × 2-tall × 6-long tunnel in solid stone at y 20 (the iron-band tunnels a race bot
+    /// crafts in). Placed in the batch's gym region; spawnpoint in the tunnel.
+    Tunnel,
     /// Random surface teleport (`spreadplayers` in 0..10k) — the terrain-variance test.
     RandomSurface,
     /// A controlled water pool in a fixed arena — the water-escape test. Geometry via env:
@@ -37,6 +42,11 @@ pub enum GymSetup {
     /// bot there. Isolates the portal CAST (dig out a cast site → infinite water → obsidian frame
     /// → light → enter) from the descent, which is the easy/solved part. The real test of the bot.
     LavaPool,
+    /// WATER GYM (cycle 2, Phase B): a stone-shelled pool built by RCON with per-slug geometry.
+    /// `submerge` = start depth below the surface (negative = standing on the cap above the pool),
+    /// `cap` = solid ceiling one above the surface. The slug runs a REAL step (not leave_water),
+    /// with the gym's pre-step survival bypassed, so only the tick-driver breath watchdog saves it.
+    Water { half: i32, depth: i32, submerge: i32, cap: bool, pocket: bool, buried: bool },
 }
 
 pub struct GymStep {
@@ -68,11 +78,31 @@ fn passes(step: &GymStep, bot: &Bot, s: &GameState) -> bool {
 /// mirror `isolation-test.sh::setup_prereqs` / steve's `gym/registry.ts`: what the bot
 /// would hold ENTERING that step. Random-terrain teleport is what exposes the
 /// terrain-dependent failures a clean arena hides.
+/// Set by RandomSurface setup when every placement candidate (±480) was water or lava; the trial
+/// then FAILs without running (an all-ocean region otherwise ran trials at sea).
+static SETUP_NO_LAND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+
 pub static GYM_STEPS: &[GymStep] = &[
     // Water escape — not a pipeline step; a focused drill for `leave_water`. Seeded via
     // WaterPool (WATER_HALF/DEPTH/SUBMERGE/CAP). Pass = fully out of water (neither head nor
     // feet submerged). Given cobblestone so the escape can pillar up out of open water.
     GymStep { slug: "leave_water", label: "Leave Water", order: 0, prereq: &["cobblestone 64"], step_id: "leave_water", timeout_secs: 90, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot) && !crate::bot_utils::feet_in_water(bot)), setup: GymSetup::WaterPool },
+    // Water gym — five scenarios; pass = out of water (head and feet) at the end, `deaths=N` in
+    // the gym.db message. Gate: 10/10 (each scenario ×2), zero drownings.
+    GymStep { slug: "water_lake", label: "Water: tp into a lake", order: 0, prereq: &["cobblestone 64", "stone_pickaxe 1"], step_id: "gather_wood", timeout_secs: 120, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot) && !crate::bot_utils::feet_in_water(bot)), setup: GymSetup::Water { half: 8, depth: 6, submerge: 3, cap: false, pocket: false, buried: false } },
+    GymStep { slug: "water_cave", label: "Water: flooded capped cave", order: 0, prereq: &["cobblestone 64", "stone_pickaxe 1"], step_id: "gather_wood", timeout_secs: 120, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot) && !crate::bot_utils::feet_in_water(bot)), setup: GymSetup::Water { half: 4, depth: 4, submerge: 2, cap: true, pocket: false, buried: false } },
+    GymStep { slug: "water_aquifer", label: "Water: dig down into an aquifer", order: 0, prereq: &["stone_pickaxe 1"], step_id: "mine_stone", timeout_secs: 150, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot) && !crate::bot_utils::feet_in_water(bot) && count_items(bot, "cobblestone") >= 6), setup: GymSetup::Water { half: 3, depth: 5, submerge: -2, cap: true, pocket: false, buried: false } },
+    GymStep { slug: "water_shore", label: "Water: gather wood from a lake surface", order: 0, prereq: &["cobblestone 64", "stone_pickaxe 1"], step_id: "gather_wood", timeout_secs: 120, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot) && !crate::bot_utils::feet_in_water(bot)), setup: GymSetup::Water { half: 8, depth: 4, submerge: 0, cap: false, pocket: false, buried: false } },
+    // Roofed aquifer, wood stage: a capped pool whose only air is a side pocket through a 2-tall
+    // opening at the pool FLOOR; no pickaxe, no blocks. Rising is the trap (race i4 06:09 drowning:
+    // the bot floated to a stone roof and hand-dug it underwater). Pass = head in air, alive.
+    GymStep { slug: "water_roofed", label: "Water: roofed aquifer, air pocket below-side", order: 0, prereq: &[], step_id: "gather_wood", timeout_secs: 90, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot)), setup: GymSetup::Water { half: 2, depth: 5, submerge: 2, cap: true, pocket: true, buried: false } },
+    // Portal DESCENT over an aquifer: the bot stands on the cap of a roofed 7×7×6 pool and runs the
+    // portal step, whose first act is digging down. Pass = below the pool (y < 60) with zero deaths,
+    // i.e. the shaft detoured through dry rock instead of sinking in (batch 1: y 30 drownings).
+    GymStep { slug: "water_descent", label: "Water: portal descent over an aquifer", order: 0, prereq: &["iron_pickaxe 2", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 128", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 300, custom_pass: Some(|bot, _| bot.entity.position.y < 60.0), setup: GymSetup::Water { half: 3, depth: 5, submerge: -2, cap: true, pocket: false, buried: true } },
+    GymStep { slug: "water_cave_iron", label: "Water: mine iron from a flooded cave", order: 0, prereq: &["cobblestone 64", "stone_pickaxe 1"], step_id: "mine_iron", timeout_secs: 150, custom_pass: Some(|bot, _| !crate::bot_utils::head_in_water(bot) && !crate::bot_utils::feet_in_water(bot)), setup: GymSetup::Water { half: 4, depth: 4, submerge: 1, cap: true, pocket: false, buried: false } },
     GymStep { slug: "gather_wood", label: "Gather Wood", order: 1, prereq: &[], step_id: "gather_wood", timeout_secs: 120, custom_pass: None, setup: GymSetup::RandomSurface },
     GymStep { slug: "craft_planks", label: "Craft Planks", order: 2, prereq: &["oak_log 8"], step_id: "craft_planks", timeout_secs: 60, custom_pass: None, setup: GymSetup::RandomSurface },
     GymStep { slug: "craft_crafting_table", label: "Craft Table", order: 3, prereq: &["oak_planks 8"], step_id: "craft_crafting_table", timeout_secs: 60, custom_pass: None, setup: GymSetup::RandomSurface },
@@ -88,7 +118,17 @@ pub static GYM_STEPS: &[GymStep] = &[
     // gym used 3. The race accumulates the rest via repeated step runs.
     GymStep { slug: "mine_iron", label: "Mine Iron Ore", order: 11, prereq: &["stone_pickaxe 1"], step_id: "mine_iron", timeout_secs: 320, custom_pass: Some(|bot, _| count_items(bot, "raw_iron") + count_items(bot, "iron_ingot") >= 3), setup: GymSetup::RandomSurface },
     GymStep { slug: "smelt_iron", label: "Smelt Iron", order: 12, prereq: &["raw_iron 11", "coal 8", "furnace 1"], step_id: "smelt_iron", timeout_secs: 150, custom_pass: None, setup: GymSetup::RandomSurface },
-    GymStep { slug: "craft_iron_pickaxe", label: "Craft Iron Pickaxe", order: 13, prereq: &["iron_ingot 3", "stick 2", "crafting_table 1"], step_id: "craft_iron_pickaxe", timeout_secs: 60, custom_pass: None, setup: GymSetup::RandomSurface },
+    GymStep { slug: "craft_iron_pickaxe", label: "Craft Iron Pickaxes (2)", order: 13, prereq: &["iron_ingot 6", "stick 4", "crafting_table 1"], step_id: "craft_iron_pickaxe", timeout_secs: 60, custom_pass: None, setup: GymSetup::RandomSurface },
+    // Table BOOTSTRAP from the race state: 3 spruce planks + spruce logs, no table, a step that needs
+    // one. Race i4 bot 2 (44 min) and race i5 bot 5 (1 h+) looped "need a crafting table" holding
+    // logs. Pass = an iron pickaxe crafted, which needs the table first.
+    GymStep { slug: "table_bootstrap", label: "Table bootstrap (race state)", order: 0, prereq: &["stone_sword 1", "cobblestone 64", "stone_sword 1", "cobblestone 64", "raw_iron 5", "coal 8", "spruce_log 9", "spruce_planks 3", "iron_pickaxe 1", "iron_ingot 15"], step_id: "craft_iron_pickaxe", timeout_secs: 120, custom_pass: Some(|bot, _| count_items(bot, "iron_pickaxe") >= 2), setup: GymSetup::RandomSurface },
+    // The deadlock case: 2 planks, so the step's stick craft leaves 0 and the table needs a full
+    // log→plank conversion. One failed 2×2 conversion deadlocked the old code (race i5 bot 5).
+    GymStep { slug: "table_bootstrap_short", label: "Table bootstrap, short on planks", order: 0, prereq: &["stone_sword 1", "cobblestone 64", "stone_sword 1", "cobblestone 64", "raw_iron 5", "coal 8", "spruce_log 9", "spruce_planks 2", "iron_pickaxe 1", "iron_ingot 15"], step_id: "craft_iron_pickaxe", timeout_secs: 120, custom_pass: Some(|bot, _| count_items(bot, "iron_pickaxe") >= 2), setup: GymSetup::Tunnel },
+    // Treeless LAND start: a desert at (23904, 3680) (race i5's "treeless" lanes turned out to be ocean;
+    // that was fixed in race-b placement). Pass = 6 logs.
+    GymStep { slug: "gather_wood_treeless", label: "Gather wood, treeless start", order: 0, prereq: &[], step_id: "gather_wood", timeout_secs: 600, custom_pass: Some(|bot, _| crate::tasks::gather_wood::count_logs(bot) >= 6), setup: GymSetup::FixedSurface { x: 23904, z: 3680 } },
     GymStep { slug: "craft_bucket", label: "Craft Buckets", order: 14, prereq: &["iron_ingot 6", "crafting_table 1"], step_id: "craft_bucket", timeout_secs: 60, custom_pass: None, setup: GymSetup::RandomSurface },
     GymStep { slug: "get_water_buckets", label: "Fill Water Buckets", order: 15, prereq: &["bucket 2"], step_id: "get_water_buckets", timeout_secs: 90, custom_pass: None, setup: GymSetup::RandomSurface },
     GymStep { slug: "get_flint_and_steel", label: "Get Flint and Steel", order: 16, prereq: &["iron_ingot 2", "crafting_table 1"], step_id: "get_flint_and_steel", timeout_secs: 260, custom_pass: None, setup: GymSetup::RandomSurface },
@@ -98,12 +138,12 @@ pub static GYM_STEPS: &[GymStep] = &[
     // Runs the portal step but passes the moment a lava bucket is filled.
     GymStep { slug: "reach_lava", label: "Reach + Scoop Lava", order: 18, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 800, custom_pass: Some(|bot, _| count_items(bot, "lava_bucket") >= 1 || !bot.find_blocks("obsidian", 8, 1).is_empty()), setup: GymSetup::RandomSurface },
     // Capstone: full portal kit, random terrain, pass = we're in the Nether.
-    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 12", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 2700, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "to_nether", label: "Portal → Nether (capstone)", order: 19, prereq: &["iron_pickaxe 1", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 200", "cooked_beef 8"], step_id: "build_nether_portal", timeout_secs: 2700, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
     // The FOCUSED portal drill: spawn fully kitted on REAL random terrain (spreadplayers,
     // ~0..10k) — NOT the seeded arena — and build + light + ENTER a portal on whatever lava
     // the world offers. This is exactly the race's failing case (bots arrive at Build Portal
     // fully supplied, then can't cast over the deep sea). Pass = in the nether.
-    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 128", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 720, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 3", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 256", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 2400, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
     // The operator's design: tp the bot to a REAL underground lava pool with the full kit (2 water
     // buckets → infinite source), then it must dig out a safe cast site, build the obsidian frame,
     // light it, and enter. Isolates the CAST at a real pool from the (easy, solved) descent.
@@ -138,7 +178,36 @@ impl GymStore {
              CREATE INDEX IF NOT EXISTS gym_runs_slug_ts ON gym_runs(slug, ts);",
         )
         .expect("init gym schema");
+        // Every launch is recorded: `start` writes outcome='running', `finish` the terminal outcome.
+        // A trial whose process is killed stays 'running' and the report counts it as a FAIL
+        // (cycle 1 lost ~10 killed trials from gym.db, inflating the pass rate).
+        let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN outcome TEXT", []);
         GymStore { conn }
+    }
+
+    pub fn start(&self, slug: &str, x: i32, y: i32, z: i32, prereq: &[&str]) -> i64 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let _ = self.conn.execute(
+            "INSERT INTO gym_runs(ts, slug, pass, duration_ms, x, y, z, prereq, message, outcome)
+             VALUES(?1,?2,0,0,?3,?4,?5,?6,'',  'running')",
+            params![now, slug, x, y, z, prereq.join(", ")],
+        );
+        self.conn.last_insert_rowid()
+    }
+
+    pub fn set_pos(&self, id: i64, x: i32, y: i32, z: i32) {
+        let _ = self.conn.execute("UPDATE gym_runs SET x=?2, y=?3, z=?4 WHERE id=?1", params![id, x, y, z]);
+    }
+
+    pub fn finish(&self, id: i64, pass: bool, duration_ms: i64, outcome: &str, message: &str) {
+        let msg: String = message.chars().take(400).collect();
+        let _ = self.conn.execute(
+            "UPDATE gym_runs SET pass=?2, duration_ms=?3, outcome=?4, message=?5 WHERE id=?1",
+            params![id, pass as i32, duration_ms, outcome, msg],
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -219,7 +288,7 @@ pub async fn run(
     .map_err(|e| std::io::Error::other(format!("gym RCON connect failed: {e} (is the tunnel to 25575 up?)")))?;
 
     let name = bot.username().to_string();
-    let _ = rcon.command(&format!("op {name}")).await; // so respawn/tp behave; harmless if already op
+    let _ = rcon_driving(bot, &mut rcon, &format!("op {name}")).await; // so respawn/tp behave; harmless if already op
     let store = GymStore::open();
 
     for trial in 0..trials {
@@ -248,7 +317,7 @@ pub async fn run_random(
     .await
     .map_err(|e| std::io::Error::other(format!("gym RCON connect failed: {e} (tunnel to 25575 up?)")))?;
     let name = bot.username().to_string();
-    let _ = rcon.command(&format!("op {name}")).await;
+    let _ = rcon_driving(bot, &mut rcon, &format!("op {name}")).await;
     let store = GymStore::open();
     let pool: Vec<&GymStep> = GYM_STEPS.iter().filter(|s| s.timeout_secs <= 200).collect();
     for trial in 0..trials {
@@ -272,6 +341,12 @@ async fn run_one_trial(
     // Each trial teleports far from the last — POIs from prior trials (a remembered
     // table/ore across the map) would send tasks walking 18s toward nothing. Fresh slate.
     memory.clear_pois();
+    // A stale persisted frame anchor from an earlier trial/run would make build_nether_portal
+    // "tp back to resume" a frame thousands of blocks away. Each trial is a fresh frame.
+    crate::tasks::portal::clear_frame_anchor();
+    // Start row BEFORE setup: a bot that dies or disconnects in setup still leaves a `running`
+    // row (counted as killed) — cycle-2 water batch 2 lost one launch that way.
+    let run_id = store.start(step.slug, 0, 0, 0, step.prereq);
     let (gx, gy, gz, cx, cz) = setup_trial(bot, rcon, &name, step).await;
     // Portal steps: record the SEEDED lava pool in memory so prepare_cast_site's memory-first
     // path walks straight to it (as it would in a real run after mining recorded exposed lava),
@@ -296,13 +371,24 @@ async fn run_one_trial(
     // 10/10. The generated pool is the DEEPSEA geometry, so the DEEPSEA path is what it wants.
     crate::tasks::portal::set_forced_lava(None);
     println!("[gym:{}] @ {gx},{gy},{gz} — running (timeout {}s)", step.slug, step.timeout_secs);
+    store.set_pos(run_id, gx, gy, gz);
+    let deaths0 = bot.deaths;
+    let deaths0_global = crate::bot::DEATH_COUNT.load(std::sync::atomic::Ordering::Relaxed);
 
     let t0 = Instant::now();
     let deadline = t0 + Duration::from_secs(step.timeout_secs);
     let mut pass = false;
     let mut last_msg = String::new();
     let mut attempts = 0u32;
+    // Setup found no land within ±480 (all-ocean region): FAIL the trial without running it.
+    let no_land = SETUP_NO_LAND.swap(false, std::sync::atomic::Ordering::Relaxed);
+    if no_land {
+        last_msg = "setup: no land within ±480 — trial skipped".into();
+    }
     loop {
+        if no_land {
+            break;
+        }
         bot.wait_ticks(6).await.ok();
         let s = sync_from_bot(bot);
         if passes(step, bot, &s) {
@@ -310,10 +396,17 @@ async fn run_one_trial(
             break;
         }
         if Instant::now() > deadline {
-            last_msg = format!("gym timeout ({attempts} attempts)");
+            last_msg = format!("gym timeout ({attempts} attempts) | last: {}", crate::tasks::portal::last_cast_line());
+            break;
+        }
+        // Between attempts too: a step that returns at once after each death never let the in-step
+        // watcher (1 s sleep) tick (batch 3 rust-gym-002: 234 deaths over 479 attempts).
+        if bot.deaths - deaths0 >= 5 {
+            last_msg = format!("death loop — {} deaths this trial | last: {}", bot.deaths - deaths0, crate::tasks::portal::last_cast_line());
             break;
         }
         if !s.alive {
+
             bot.respawn().await.ok();
             bot.wait_ticks(40).await.ok();
             // Fixed-arena steps: a mid-build death respawns at WORLD SPAWN (no bed), stranding the
@@ -321,7 +414,7 @@ async fn run_one_trial(
             // rest of the budget building futile frames on bare terrain. RCON-tp it back onto the
             // arena pad so the retry has lava in reach.
             if matches!(step.slug, "reach_lava" | "to_nether") {
-                let _ = rcon.command(&format!("tp {name} {gx} {gy} {gz}")).await;
+                let _ = rcon_driving(bot, rcon, &format!("tp {name} {gx} {gy} {gz}")).await;
                 pump_teleport(bot, gx, gz).await;
             }
             continue;
@@ -335,7 +428,11 @@ async fn run_one_trial(
             last_msg = format!("escaping — head_in_water={} feet_in_water={} y={:.0}", crate::bot_utils::head_in_water(bot), crate::bot_utils::feet_in_water(bot), bot.entity.position.y);
             continue;
         }
-        if crate::survival::handle_survival(bot, memory).await {
+        // Water slugs test the tick-driver breath watchdog, so the between-steps survival rescue
+        // (which would surface the bot before the step even starts) is bypassed for them.
+        // …except after a BREATH ALARM, which is exactly when the race's main loop would run it
+        // (the watchdog's jump can't beat a stone ceiling; the escalation's cap-dig must).
+        if (!step.slug.starts_with("water_") || bot.breath_alarm) && crate::survival::handle_survival(bot, memory).await {
             continue;
         }
         attempts += 1;
@@ -343,17 +440,35 @@ async fn run_one_trial(
         // attempts, so a task that hangs internally would wedge the batch. Abort at
         // the remaining budget and record a FAIL. Next trial's setup resets state.
         let remaining = deadline.saturating_duration_since(Instant::now());
-        match tokio::time::timeout(remaining, crate::steps::execute_step(bot, step.step_id, memory)).await {
-            Ok(r) => last_msg = r.message,
-            Err(_) => {
-                last_msg = format!("gym timeout — task hung ({attempts} attempts)");
+        // DEATH-LOOP guard: 5 deaths in a trial ends it as a FAIL. A step that respawns internally
+        // never returns, so the between-steps checks never ran: batch 2 rust-gym-003 died 31× in
+        // 7 min re-digging the same shaft into lava, and would have done so for its full 40 min.
+        let trial_d0 = crate::bot::DEATH_COUNT.load(std::sync::atomic::Ordering::Relaxed).min(deaths0_global);
+        let death_loop = async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if crate::bot::DEATH_COUNT.load(std::sync::atomic::Ordering::Relaxed) >= trial_d0 + 5 {
+                    break;
+                }
+            }
+        };
+        tokio::select! {
+            r = tokio::time::timeout(remaining, crate::steps::execute_step(bot, step.step_id, memory)) => match r {
+                Ok(r) => last_msg = r.message,
+                Err(_) => {
+                    last_msg = format!("gym timeout — task hung ({attempts} attempts) | last: {}", crate::tasks::portal::last_cast_line());
+                    break;
+                }
+            },
+            _ = death_loop => {
+                last_msg = format!("death loop — 5 deaths this trial | last: {}", crate::tasks::portal::last_cast_line());
                 break;
             }
         }
         // to_nether's step is build_nether_portal, which only builds+LIGHTS the portal
         // ("nether portal cast & lit") — it never walks in. The pass is in_nether, so we must
         // also run the separate enter_nether step once the portal exists, or it can NEVER pass.
-        if (step.slug == "to_nether" || step.slug == "portal") && sync_from_bot(bot).world.portal_built {
+        if matches!(step.slug, "to_nether" | "portal" | "pool") && sync_from_bot(bot).world.portal_built {
             let rem = deadline.saturating_duration_since(Instant::now());
             let _ = tokio::time::timeout(rem, crate::steps::execute_step(bot, "enter_nether", memory)).await;
         }
@@ -373,7 +488,16 @@ async fn run_one_trial(
         }
     }
     let dur = t0.elapsed().as_millis() as i64;
-    store.record(step.slug, pass, dur, gx, gy, gz, step.prereq, &last_msg);
+    let deaths = bot.deaths - deaths0;
+    // Water slugs gate on SURVIVAL: a drowning that respawned the bot onto dry land is not a
+    // pass (cycle-2 batch 4: water_cave "PASS 95.8 s — deaths=1").
+    let mut outcome = if pass { "pass" } else if last_msg.contains("timeout") { "timeout" } else { "fail" };
+    if pass && deaths > 0 && step.slug.starts_with("water_") {
+        pass = false;
+        outcome = "died";
+    }
+    last_msg = format!("deaths={deaths} | {last_msg}");
+    store.finish(run_id, pass, dur, outcome, &last_msg);
     println!(
         "[gym:{}] {} {:.1}s @{gx},{gy},{gz} — {last_msg}",
         step.slug,
@@ -399,8 +523,13 @@ async fn setup_trial(
     // surface ("too many entities for space") and lands the bot on the fallback arena, so
     // to_nether never exercised the real deep-descent-to-natural-lava path. This band is
     // solid terrain with lava the bots already mapped at the y-54 band.
-    let cx = rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
-    let cz = rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
+    // FRESH REGION per gym batch (cycle 2): GYM_REGION=n moves the square n×3000 on X and to
+    // z 3300..4400 so a batch never lands on frames/pads/holes an earlier batch left (the world
+    // is never wiped). GYM_REGION=0 (unset) keeps the cycle-1 square.
+    let region: i32 = env("GYM_REGION", "0").parse().unwrap_or(0);
+    let (ox, oz) = if region > 0 { (region * 3000, 3000) } else { (0, 0) };
+    let cx = ox + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
+    let cz = oz + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
     // A DEAD bot can't be teleported by spreadplayers — it stays put, so several
     // trials in a row "run" at the same corpse spot ("0 attempts" timeouts, seen live
     // at 4822,5254 x3). Respawn first so every trial gets a fresh random location.
@@ -411,7 +540,7 @@ async fn setup_trial(
     let alive = sync_from_bot(bot).alive;
     if !alive || bot.entity.position.y < -200.0 {
         if alive {
-            let _ = rcon.command(&format!("kill {name}")).await;
+            let _ = rcon_driving(bot, rcon, &format!("kill {name}")).await;
             bot.wait_ticks(15).await.ok();
         }
         bot.respawn().await.ok();
@@ -419,14 +548,14 @@ async fn setup_trial(
     }
     let before = bot.entity.position;
 
-    let _ = rcon.command(&format!("gamemode survival {name}")).await;
-    let _ = rcon.command(&format!("clear {name}")).await;
+    let _ = rcon_driving(bot, rcon, &format!("gamemode survival {name}")).await;
+    let _ = rcon_driving(bot, rcon, &format!("clear {name}")).await;
     for item in step.prereq {
-        let _ = rcon.command(&format!("give {name} {item}")).await;
+        let _ = rcon_driving(bot, rcon, &format!("give {name} {item}")).await;
     }
     // Keep the trial's chunks resident so the task can act immediately; scoped +
     // removed after (never a world-wide forceload).
-    let _ = rcon.command(&format!("forceload add {} {} {} {}", cx - 24, cz - 24, cx + 24, cz + 24)).await;
+    let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", cx - 24, cz - 24, cx + 24, cz + 24)).await;
 
     // spreadplayers drops the bot on the top solid block near (cx,cz): no fall
     // damage, loads the chunks itself, real terrain. Retry once — the very first
@@ -434,31 +563,72 @@ async fn setup_trial(
     // teleportable, leaving the bot at spawn (bad terrain-variance data).
     match step.setup {
         GymSetup::RandomSurface => {
-            for attempt in 0..2 {
-                // maxRange 24 was too tight — spreadplayers errored "too many entities for
-                // space" whenever the exact center was unsuitable. A wider range lets it find
-                // a valid surface nearby; spread distance is moot for a single bot.
-                let resp = rcon
-                    .command(&format!("spreadplayers {cx} {cz} 8 200 false {name}"))
-                    .await
-                    .unwrap_or_default();
-                pump_teleport(bot, cx, cz).await;
+            // NO spreadplayers: it reads terrain up to 200 blocks around and generates any missing chunk
+            // SYNCHRONOUSLY on the server thread. With every batch in a fresh, never-generated region and
+            // five bots setting up together, one tick passed 60 s and the watchdog crashed Server B
+            // (10:20:34 UTC, stack SpreadPlayersCommand.getSpawnY → ServerChunkCache.getChunk; batch 4
+            // lost every bot). The forceload above generates (cx,cz)'s chunks on worker threads: wait
+            // for them to load, then put the bot on the surface. A liquid surface (spreadplayers skipped
+            // those) shifts the spot 64 blocks and retries.
+            // Spiral of candidates 160 apart out to ±480: a straight 4×64 shift stayed inside one ocean
+            // (batch 4 region 36: every try "under water", two trials started at sea).
+            let offsets = [(0, 0), (160, 0), (0, 160), (-160, 0), (0, -160), (320, 0), (0, 320), (-320, 0), (0, -320), (480, 0), (0, 480), (-480, 0)];
+            SETUP_NO_LAND.store(true, std::sync::atomic::Ordering::Relaxed);
+            let mut fallback: Option<(i32, i32)> = None; // first candidate dry underfoot (shore allowed)
+            for (attempt, &(ox, oz)) in offsets.iter().enumerate() {
+                let (sx, sz) = (cx + ox, cz + oz);
+                if attempt > 0 {
+                    let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", sx - 8, sz - 8, sx + 8, sz + 8)).await;
+                }
+                for _ in 0..90 {
+                    if rcon_driving(bot, rcon, &format!("execute if loaded {sx} 0 {sz}")).await.contains("passed") {
+                        break;
+                    }
+                    bot.wait_ticks(20).await.ok();
+                }
+                let _ = rcon_driving(bot, rcon, &format!("execute positioned {sx} 0 {sz} positioned over motion_blocking_no_leaves run tp {name} ~ ~1 ~")).await;
+                pump_teleport(bot, sx, sz).await;
+                bot.wait_ticks(10).await.ok();
                 let p = bot.entity.position;
                 let moved = ((p.x - before.x).powi(2) + (p.z - before.z).powi(2)).sqrt();
-                if moved > 50.0 {
+                let under = bot.block_at(p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32).map(|b| b.name.to_string()).unwrap_or_default();
+                // No water within 3 blocks of the landing either: a beach cell passed the underfoot test
+                // and the trial began at the sea's edge (batch 6: two bots in water from t=8 s).
+                let (lx, ly, lz) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let shore = (-3..=3).any(|dx| {
+                    (-3..=3).any(|dz| (-1..=1).any(|dy| bot.block_at(lx + dx, ly + dy, lz + dz).is_some_and(|b| b.name.contains("water"))))
+                });
+                if moved > 50.0 && !under.contains("water") && !under.contains("lava") && !shore {
+                    SETUP_NO_LAND.store(false, std::sync::atomic::Ordering::Relaxed);
                     break;
                 }
-                if attempt == 0 {
-                    println!("[gym] spreadplayers didn't move the bot (resp: {}), retrying", resp.trim());
+                if fallback.is_none() && moved > 50.0 && !under.contains("water") && !under.contains("lava") {
+                    fallback = Some((sx, sz));
+                }
+                println!("[gym] surface placement at ({sx},{sz}) unusable (moved {moved:.0}, under {under}, shore {shore}) — shifting");
+            }
+            // No shore-free landing anywhere: use the first one that was at least dry underfoot rather than
+            // skip the trial. Batch 8 skipped two trials in a row; a river or pond within 3 blocks is common.
+            // Only real ocean (water underfoot at all 12) still skips.
+            if SETUP_NO_LAND.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Some((fx2, fz2)) = fallback {
+                    println!("[gym] no shore-free landing — using the first dry one at ({fx2},{fz2})");
+                    let _ = rcon_driving(bot, rcon, &format!("execute positioned {fx2} 0 {fz2} positioned over motion_blocking_no_leaves run tp {name} ~ ~1 ~")).await;
+                    pump_teleport(bot, fx2, fz2).await;
+                    bot.wait_ticks(10).await.ok();
+                    SETUP_NO_LAND.store(false, std::sync::atomic::Ordering::Relaxed);
                 }
             }
             // Anchor the spawnpoint at the landing spot so a mid-task death (e.g. a lava nick
             // during the portal cast) respawns the bot right here, not at world-spawn thousands
             // of blocks away where it can never recover — mirrors the race's lane spawnpoint.
+            // 3 blocks OFF the landing, on the surface: the portal descent digs its 1×1 shaft straight
+            // down from the landing, so a spawnpoint there sits over an open shaft. Batch 4 rust-gym-003
+            // respawned into its own shaft, fell 70 blocks (`desc y=56->48->37…` within a second) into
+            // the lava that had flowed into its bottom, five times (death-loop FAIL at 216 s).
             let p = bot.entity.position;
-            let _ = rcon
-                .command(&format!("spawnpoint {name} {} {} {}", p.x.floor() as i32, p.y.floor() as i32 + 1, p.z.floor() as i32))
-                .await;
+            let (spx, spz) = (p.x.floor() as i32 + 3, p.z.floor() as i32);
+            let _ = rcon_driving(bot, rcon, &format!("execute positioned {spx} 0 {spz} positioned over motion_blocking_no_leaves run spawnpoint {name} ~ ~ ~")).await;
         }
         GymSetup::WaterPool => {
             // A contained water pool in a fixed arena, geometry from env — reproducible so we
@@ -471,24 +641,103 @@ async fn setup_trial(
             let depth: i32 = std::env::var("WATER_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(6);
             let submerge: i32 = std::env::var("WATER_SUBMERGE").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
             let cap = std::env::var("WATER_CAP").is_ok();
-            let _ = rcon.command(&format!("forceload add {} {} {} {}", fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4)).await;
+            let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4)).await;
             // Clear the column above (leftover blocks/pillars from a prior trial), then a solid
             // stone shell, then carve the water pool inside it (open surface at fy).
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - half - 2, fy + 1, fz - half - 2, fx + half + 2, fy + 24, fz + half + 2)).await;
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - half - 1, fy - depth - 1, fz - half - 1, fx + half + 1, fy, fz + half + 1)).await;
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:water", fx - half, fy - depth, fz - half, fx + half, fy, fz + half)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", fx - half - 2, fy + 1, fz - half - 2, fx + half + 2, fy + 24, fz + half + 2)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - half - 1, fy - depth - 1, fz - half - 1, fx + half + 1, fy, fz + half + 1)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:water", fx - half, fy - depth, fz - half, fx + half, fy, fz + half)).await;
             if cap {
                 // A solid ceiling one block above the surface — the "dug a staircase, water
                 // flooded in, capped above" case where the bot must dig up to escape.
-                let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - half, fy + 1, fz - half, fx + half, fy + 1, fz + half)).await;
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - half, fy + 1, fz - half, fx + half, fy + 1, fz + half)).await;
             }
             let gy = fy - submerge;
-            let _ = rcon.command(&format!("tp {name} {fx} {gy} {fz}")).await;
-            let _ = rcon.command(&format!("spawnpoint {name} {fx} {} {fz}", fy + 2)).await;
+            let _ = rcon_driving(bot, rcon, &format!("tp {name} {fx} {gy} {fz}")).await;
+            let _ = rcon_driving(bot, rcon, &format!("spawnpoint {name} {fx} {} {fz}", fy + 2)).await;
             pump_teleport(bot, fx, fz).await;
             bot.wait_ticks(10).await.ok();
             let p = bot.entity.position;
             return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
+        }
+        GymSetup::Water { half, depth, submerge, cap, pocket, buried } => {
+            // FIXED arena region (WATER_REGION, default 4 = x 12600, known forested land), NOT the
+            // batch's fresh GYM_REGION: the arena is rebuilt by fill every trial, so it can't carry
+            // an earlier run's leftovers — only its SURROUNDINGS matter, and gather_wood needs trees
+            // there. Region 9 (x 27600) had none: the shore bot explored 80 blocks into natural
+            // water and timed out (batch 6: lake/cave/shore 0/3 vs 2/2 on region 7).
+            let region: i32 = env("WATER_REGION", "4").parse().unwrap_or(4);
+            // Bots in one batch share a region: offset each bot's arena by its number (rust-gym-00N)
+            // so five water bots don't build into the same pool.
+            let botn: i32 = name.trim_start_matches(|c: char| !c.is_ascii_digit()).parse().unwrap_or(0);
+            let fx = 600 + region * 3000;
+            let fz = 600 + if region > 0 { 3000 } else { 0 } + botn * 40;
+            let fy: i32 = 72;
+            let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", fx - half - 2, fy + 1, fz - half - 2, fx + half + 2, fy + 24, fz + half + 2)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - half - 1, fy - depth - 1, fz - half - 1, fx + half + 1, fy, fz + half + 1)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:water", fx - half, fy - depth, fz - half, fx + half, fy, fz + half)).await;
+            if cap {
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - half, fy + 1, fz - half, fx + half, fy + 1, fz + half)).await;
+            }
+            if pocket {
+                // Stone enclosure east of the pool, an air pocket inside it whose floor sits 2 below
+                // the pool floor, and a 2-tall opening through the shared wall at the pool floor.
+                // Water pours through and runs along the pocket floor; the air above it is the exit.
+                let (wx, floor_y) = (fx + half + 1, fy - depth);
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", wx, floor_y - 3, fz - 3, wx + 5, fy + 1, fz + 3)).await;
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", wx + 1, floor_y - 2, fz - 2, wx + 4, fy, fz + 2)).await;
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", wx, floor_y, fz, wx, floor_y + 1, fz)).await;
+            }
+            // BURIED: the pool sealed inside dry rock (a slab 7 thick over it and a 9-wide rock ring
+            // around it), with the bot in a short 1×1 shaft above the pool: the real geometry of a
+            // descent shaft heading into an aquifer. Rebuild the water after the rock fill.
+            let mut gy = fy - submerge;
+            if buried {
+                let r = half + 9;
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - r, fy - depth - 2, fz - r, fx + r, fy + 7, fz + r)).await;
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:water", fx - half, fy - depth, fz - half, fx + half, fy, fz + half)).await;
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", fx, fy + 4, fz, fx, fy + 8, fz)).await;
+                gy = fy + 4;
+            }
+            let _ = rcon_driving(bot, rcon, &format!("tp {name} {fx} {gy} {fz}")).await;
+            let (sx, sy) = if buried { (fx, fy + 4) } else { (fx + half + 3, fy + 2) }; // never inside the buried slab
+            let _ = rcon_driving(bot, rcon, &format!("spawnpoint {name} {sx} {sy} {fz}")).await;
+            pump_teleport(bot, fx, fz).await;
+            bot.wait_ticks(10).await.ok();
+            let p = bot.entity.position;
+            return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
+        }
+        GymSetup::FixedSurface { x, z } => {
+            let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", x - 16, z - 16, x + 16, z + 16)).await;
+            for _ in 0..90 {
+                if rcon_driving(bot, rcon, &format!("execute if loaded {x} 0 {z}")).await.contains("passed") {
+                    break;
+                }
+                bot.wait_ticks(20).await.ok();
+            }
+            let _ = rcon_driving(bot, rcon, &format!("execute positioned {x} 0 {z} positioned over motion_blocking_no_leaves run tp {name} ~ ~1 ~")).await;
+            pump_teleport(bot, x, z).await;
+            bot.wait_ticks(10).await.ok();
+            let _ = rcon_driving(bot, rcon, &format!("execute positioned {} 0 {z} positioned over motion_blocking_no_leaves run spawnpoint {name} ~ ~ ~", x + 3)).await;
+        }
+        GymSetup::Tunnel => {
+            // Race i5 bot 5 looped on the table craft at y 19–23 in its iron tunnels; the surface
+            // reproduction passed 5/5, so recreate the tunnel itself. The setup's forceload (±24 around
+            // cx, cz) is already in place; wait for it, then build.
+            let ty = 20;
+            for _ in 0..90 {
+                if rcon_driving(bot, rcon, &format!("execute if loaded {cx} 0 {cz}")).await.contains("passed") {
+                    break;
+                }
+                bot.wait_ticks(20).await.ok();
+            }
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", cx - 4, ty - 2, cz - 4, cx + 9, ty + 4, cz + 4)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", cx, ty, cz, cx + 5, ty + 1, cz)).await;
+            let _ = rcon_driving(bot, rcon, &format!("tp {name} {cx} {ty} {cz}")).await;
+            pump_teleport(bot, cx, cz).await;
+            bot.wait_ticks(10).await.ok();
+            let _ = rcon_driving(bot, rcon, &format!("spawnpoint {name} {} {ty} {cz}", cx + 2)).await;
         }
         GymSetup::LavaPool => {
             // GENERATE a clean, guaranteed-scoopable underground pool at a RANDOM deep location and
@@ -503,21 +752,21 @@ async fn setup_trial(
             let px = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
             let pz = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
             let py: i32 = rand::Rng::gen_range(&mut rand::thread_rng(), -50..-30); // deep underground band
-            let _ = rcon.command(&format!("forceload add {} {} {} {}", px - 24, pz - 24, px + 24, pz + 24)).await;
+            let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", px - 24, pz - 24, px + 24, pz + 24)).await;
             // EXACTLY the DEEPSEA rock-pool arena dimensions (which builds 10/10 + enters reliably),
             // just at a random location. Do NOT diverge — every geometry tweak (roomier/taller pocket)
             // re-introduced per-run drift. Solid stone box, then a 3-tall air pocket; the frame's top
             // rows dig UP into the ceiling as the cast builds, exactly like the proven arena.
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", px - 10, py - 8, pz - 8, px + 16, py + 6, pz + 8)).await;
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", px - 2, py, pz - 3, px + 9, py + 2, pz + 3)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", px - 10, py - 8, pz - 8, px + 16, py + 6, pz + 8)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", px - 2, py, pz - 3, px + 9, py + 2, pz + 3)).await;
             // 5x5 flush SOURCE pool at floor level (py-1), 4 blocks +X of the stand. 25 sources so
             // scooping 10+ times (sources are consumed per scoop) never depletes it mid-frame.
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", px + 4, py - 1, pz - 2, px + 8, py - 1, pz + 2)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:lava", px + 4, py - 1, pz - 2, px + 8, py - 1, pz + 2)).await;
             // Bot stands at (px,py,pz): feet at py on the stone floor (py-1), the pool source at py-1
             // is FLUSH (one below the feet) with air above — a shallow horizontal scoop. Spawnpoint
             // here so any mishap-death respawns in the arena, not at world spawn.
-            let _ = rcon.command(&format!("spawnpoint {name} {px} {py} {pz}")).await;
-            let _ = rcon.command(&format!("tp {name} {px} {py} {pz}")).await;
+            let _ = rcon_driving(bot, rcon, &format!("spawnpoint {name} {px} {py} {pz}")).await;
+            let _ = rcon_driving(bot, rcon, &format!("tp {name} {px} {py} {pz}")).await;
             pump_teleport(bot, px, pz).await;
             bot.wait_ticks(20).await.ok();
             // Guard the deep-tp death/rubber-band (respawn lands at the spawnpoint = the stand).
@@ -530,7 +779,7 @@ async fn setup_trial(
                 ((px as f64 - p.x).powi(2) + (pz as f64 - p.z).powi(2)).sqrt() >= 24.0
             };
             if too_far {
-                let _ = rcon.command(&format!("tp {name} {px} {py} {pz}")).await;
+                let _ = rcon_driving(bot, rcon, &format!("tp {name} {px} {py} {pz}")).await;
                 pump_teleport(bot, px, pz).await;
                 bot.wait_ticks(20).await.ok();
             }
@@ -585,11 +834,11 @@ async fn setup_trial(
         let fx: i32 = std::env::var("GYM_ARENA_X").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
         let fy: i32 = 72;
         let fz: i32 = std::env::var("GYM_ARENA_Z").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
-        let _ = rcon.command(&format!("forceload add {} {} {} {}", fx - 24, fz - 24, fx + 24, fz + 24)).await;
+        let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", fx - 24, fz - 24, fx + 24, fz + 24)).await;
         // Clear the whole arena volume (prior trials' obsidian/portal/frame would leave
         // portal_built stale-true and clutter the cast site).
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - 4, fy, fz - 8, fx + 20, fy + 22, fz + 8)).await;
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air replace minecraft:obsidian", fx - 4, fy - 3, fz - 8, fx + 20, fy + 22, fz + 8)).await;
+        let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", fx - 4, fy, fz - 8, fx + 20, fy + 22, fz + 8)).await;
+        let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air replace minecraft:obsidian", fx - 4, fy - 3, fz - 8, fx + 20, fy + 22, fz + 8)).await;
         // DEEP-SEA VARIANT (GYM_DEEPSEA=1): reproduce the RACE's cast-over-lava fire so a fix
         // can be VALIDATED. The default flat-pad seed below is solid ground beside a contained
         // lake (→ 9-10/10, and the frame anchors AWAY from lava so it never platforms over it),
@@ -603,7 +852,7 @@ async fn setup_trial(
             // EMBEDDED IN ROCK so the fire-safe chamber dig + refill iterate fast & deterministically
             // (the open sea had no rock → unwinnable fire death). Bot in the air pocket at (fx,fy),
             // pool 4 blocks +X, solid rock all around for the chamber.
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 10, fy - 8, fz - 8, fx + 16, fy + 6, fz + 8)).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - 10, fy - 8, fz - 8, fx + 16, fy + 6, fz + 8)).await;
             // Air pocket is intentionally 3-TALL + TIGHT in z (fz-3..fz+3): the cast DIGS UP into the
             // stone ceiling as it builds the upper frame rows, and the tight +Z wall CONSTRAINS the bot
             // to the frame stand so it can't drift (widening it to fz+7 let the bot wander to z=602.6 →
@@ -613,32 +862,32 @@ async fn setup_trial(
             // the stone wall and suffocates/POS-FAILs (`z=604.2, off=2.99` at fz+3). fz+5 fits staging
             // with 1 cell margin — NOT wider (fz+7 let it drift off the stand → centered=false). This
             // is the sweet spot between "tight = suffocate at staging" and "wide = drift, no center".
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:air", fx - 2, fy, fz - 3, fx + 9, fy + 2, fz + 5)).await; // bot pocket + cave over the pool
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", fx - 2, fy, fz - 3, fx + 9, fy + 2, fz + 5)).await; // bot pocket + cave over the pool
             // 5x5 flush SOURCE pool (25 sources) — big enough that scooping 10+ times doesn't
             // DEPLETE it (lava sources are consumed per scoop, unlike water; a 9-source pool ran dry
             // mid-frame → "fill lava: all rounds failed"). Real underground pools are usually larger.
-            let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", fx + 4, fy - 1, fz - 2, fx + 8, fy - 1, fz + 2)).await;
-            let _ = rcon.command(&format!("tp {name} {fx} {fy} {fz}")).await;
-            let _ = rcon.command(&format!("spawnpoint {name} {fx} {fy} {fz}")).await;
+            let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:lava", fx + 4, fy - 1, fz - 2, fx + 8, fy - 1, fz + 2)).await;
+            let _ = rcon_driving(bot, rcon, &format!("tp {name} {fx} {fy} {fz}")).await;
+            let _ = rcon_driving(bot, rcon, &format!("spawnpoint {name} {fx} {fy} {fz}")).await;
             pump_teleport(bot, fx, fz).await;
             bot.wait_ticks(10).await.ok();
             let p = bot.entity.position;
             return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
         }
         // 2-deep flat stone pad.
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:stone", fx - 4, fy - 2, fz - 8, fx + 20, fy - 1, fz + 8)).await;
+        let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - 4, fy - 2, fz - 8, fx + 20, fy - 1, fz + 8)).await;
         // FLUSH 11x11 lava lake at floor level (fy-1), EAST of the bot at (fx,fy,fz) — the EXACT
         // arena isolation-test.sh's build_nether_portal uses, which reaches 10/10+lit reliably.
         // The bot stands 4 blocks west of the lake edge on solid stone; prepare_cast_site
         // approaches to "2 away" (stays on stone), scoops the edge, and anchors the frame there.
         // Earlier gym divergences broke this: a small 7-wide pool with a CENTRE POI made the bot
         // stand IN lava and die; a too-wide lake made the frame anchor over lava (POS FAIL).
-        let _ = rcon.command(&format!("fill {} {} {} {} {} {} minecraft:lava", fx + 4, fy - 1, fz - 7, fx + 14, fy - 1, fz + 7)).await;
+        let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:lava", fx + 4, fy - 1, fz - 7, fx + 14, fy - 1, fz + 7)).await;
         // Put the bot on the pad (RCON runs as console/op) and set its spawnpoint HERE, so a
         // mishap-death (lava tick) respawns it back in the arena instead of world spawn (where
         // there's no lava → "NO scoopable" for the rest of the trial). Matches isolation line 137.
-        let _ = rcon.command(&format!("tp {name} {fx} {fy} {fz}")).await;
-        let _ = rcon.command(&format!("spawnpoint {name} {fx} {fy} {fz}")).await;
+        let _ = rcon_driving(bot, rcon, &format!("tp {name} {fx} {fy} {fz}")).await;
+        let _ = rcon_driving(bot, rcon, &format!("spawnpoint {name} {fx} {fy} {fz}")).await;
         pump_teleport(bot, fx, fz).await;
         bot.wait_ticks(10).await.ok();
         let p = bot.entity.position;
@@ -649,6 +898,31 @@ async fn setup_trial(
 }
 
 /// Pump network events after a teleport so chunks load and position is current.
+/// Run one RCON command while DRIVING the bot's connection. `spreadplayers` into a fresh region
+/// makes the server generate terrain and can take 40+ s; awaiting it bare starved the bot's
+/// keep-alive (cycle 2: `LOOP STALL 46756 ms` → `CONNECTION LOST` at trial start in region 92).
+async fn rcon_driving(bot: &mut Bot<'_>, rcon: &mut RconClient, cmd: &str) -> String {
+    use std::future::Future;
+    use std::task::Poll;
+    let fut = rcon.command(cmd);
+    tokio::pin!(fut);
+    loop {
+        // Poll the RCON future once without blocking; drive_tick always runs to completion
+        // (never cancelled mid-packet, unlike a select! branch).
+        let done = std::future::poll_fn(|cx| match fut.as_mut().poll(cx) {
+            Poll::Ready(v) => Poll::Ready(Some(v)),
+            Poll::Pending => Poll::Ready(None),
+        })
+        .await;
+        if let Some(r) = done {
+            return r.unwrap_or_default();
+        }
+        if matches!(bot.drive_tick().await, Ok(crate::bot::DriveStep::Disconnected) | Err(_)) {
+            return String::new();
+        }
+    }
+}
+
 async fn pump_teleport(bot: &mut Bot<'_>, cx: i32, cz: i32) {
     // WAIT for the teleport to actually take AND the destination terrain to load. A fixed
     // pump was too short: tasks started on a STALE/empty local world (block queries at the

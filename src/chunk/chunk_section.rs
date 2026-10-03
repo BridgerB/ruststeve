@@ -61,6 +61,12 @@ impl ChunkSection {
         self.solid_block_count == 0
     }
 
+    /// Any block state in this section satisfying `pred` (palette-level check, see
+    /// `PaletteContainer::contains_where`).
+    pub fn contains_where(&self, pred: &dyn Fn(u32) -> bool) -> bool {
+        !self.is_empty() && self.data.contains_where(BLOCK_SECTION_VOLUME, pred)
+    }
+
     /// Create a section from a local palette + BitArray (anvil loading).
     pub fn from_local_palette(palette: Vec<u32>, data: BitArray) -> Self {
         let container = if palette.len() == 1 {

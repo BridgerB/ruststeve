@@ -126,10 +126,14 @@ pub const STEPS: &[Step] = &[
     },
     Step {
         id: "craft_iron_pickaxe",
-        name: "Craft Iron Pickaxe",
+        name: "Craft Iron Pickaxes (2)",
         priority: 13,
-        can_execute: |s| s.inventory.iron_ingots >= 3 && s.inventory.sticks >= 2,
-        is_complete: |s| s.equipment.pickaxe_tier().rank() >= 3,
+        // TWO iron pickaxes: a natural portal run is ~550 digs (rust-gym-001 DIG_DEBUG: 551 in one
+        // trial) and an iron pick lasts 250 — with one, the cast finished by hand (10 s per stone
+        // dig, deepslate digs FAIL). The NETHER PREP gates below key on the COUNT so the furthest-step
+        // picker cannot skip the second craft. craft_at_table crafts sticks itself when short.
+        can_execute: |s| s.inventory.iron_ingots >= 3 && (s.inventory.sticks >= 2 || s.inventory.planks >= 2),
+        is_complete: |s| s.inventory.iron_pickaxes >= 2,
     },
     // === NETHER PREP === (all gated behind the iron pickaxe so the bot finishes
     // the iron-pickaxe chain FIRST — otherwise the furthest-step picker jumps to
@@ -142,7 +146,7 @@ pub const STEPS: &[Step] = &[
         id: "craft_bucket",
         name: "Craft Buckets",
         priority: 14,
-        can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.iron_ingots >= 3,
+        can_execute: |s| s.inventory.iron_pickaxes >= 2 && s.inventory.iron_ingots >= 3,
         is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 3,
     },
     Step {
@@ -153,14 +157,14 @@ pub const STEPS: &[Step] = &[
         // an empty bucket, so requiring buckets>=2 here deadlocked (filling water can never
         // RAISE the empty count, so a bot with 1 empty+1 water re-ran this forever). The
         // 2-empty requirement lives in craft_bucket (sum>=3) + the portal gate (buckets>=2).
-        can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.buckets >= 1,
+        can_execute: |s| s.inventory.iron_pickaxes >= 2 && s.inventory.buckets >= 1,
         is_complete: |s| s.inventory.water_buckets >= 1,
     },
     Step {
         id: "get_flint_and_steel",
         name: "Get Flint and Steel",
         priority: 16,
-        can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3 && s.inventory.iron_ingots >= 1,
+        can_execute: |s| s.inventory.iron_pickaxes >= 2 && s.inventory.iron_ingots >= 1,
         is_complete: |s| s.inventory.flint_and_steel >= 1,
     },
     // Casting 10 obsidian needs a big stack of throwaway scaffold/mould blocks
@@ -174,7 +178,7 @@ pub const STEPS: &[Step] = &[
         id: "gather_build_blocks",
         name: "Gather Build Blocks",
         priority: 17,
-        can_execute: |s| s.equipment.pickaxe_tier().rank() >= 3,
+        can_execute: |s| s.inventory.iron_pickaxes >= 2,
         // 72 (was 40): the natural cast now CONSUMES cobble beyond scaffolding — fire-safe caps on the
         // open lava field, lane floors over the sea, stray-lava caps — and stone-pickaxe recrafts each
         // take 3. The 8/10 leader drained it to zero (then wood too) and lost its pickaxe entirely.
@@ -215,6 +219,60 @@ pub const STEPS: &[Step] = &[
         // Need a real sword (equipment.sword is always Some(..); gate on the tier rank).
         can_execute: |s| s.world.fortress_found && s.equipment.sword_tier().rank() >= 1,
         is_complete: |s| s.inventory.blaze_rods >= 1,
+    },
+    // ── END-GAME SKELETON (bodies not implemented yet — see execute_step). These exist so the
+    // machine has states past kill_blaze: preconditions and the rate report can name them, and
+    // "furthest step reached" is honest about where a run actually ends. Gates use the real
+    // resource counts; the world flags they'd need (stronghold found, in the End, dragon dead)
+    // are added with their tasks.
+    Step {
+        id: "gather_blaze_rods",
+        name: "Gather 7 Blaze Rods",
+        priority: 22,
+        can_execute: |s| s.world.fortress_found && s.inventory.blaze_rods >= 1,
+        is_complete: |s| s.inventory.blaze_rods >= 7,
+    },
+    Step {
+        id: "get_pearls",
+        name: "Get 12 Ender Pearls",
+        priority: 23,
+        can_execute: |s| s.world.in_nether() && s.inventory.blaze_rods >= 7,
+        is_complete: |s| s.inventory.ender_pearls >= 12,
+    },
+    Step {
+        id: "craft_eyes",
+        name: "Craft 12 Eyes of Ender",
+        priority: 24,
+        can_execute: |s| s.inventory.blaze_rods >= 6 && s.inventory.ender_pearls >= 12 && s.equipment.has_crafting_table,
+        is_complete: |s| s.inventory.eyes_of_ender >= 12,
+    },
+    Step {
+        id: "find_stronghold",
+        name: "Find the Stronghold",
+        priority: 25,
+        can_execute: |s| s.world.in_overworld() && s.inventory.eyes_of_ender >= 12,
+        is_complete: |_| false, // needs world.stronghold_found (added with the task)
+    },
+    Step {
+        id: "enter_end",
+        name: "Enter the End",
+        priority: 26,
+        can_execute: |_| false, // needs world.end_portal_found
+        is_complete: |_| false, // needs world.in_end()
+    },
+    Step {
+        id: "kill_dragon",
+        name: "Kill the Ender Dragon",
+        priority: 27,
+        can_execute: |_| false, // needs world.in_end()
+        is_complete: |_| false, // needs world.dragon_dead
+    },
+    Step {
+        id: "exit_end",
+        name: "Exit the End",
+        priority: 28,
+        can_execute: |_| false, // needs world.dragon_dead
+        is_complete: |_| false,
     },
 ];
 
@@ -277,7 +335,43 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
         }
     }
     } // end overworld-only recovery guards
-    STEPS.iter().filter(|s| (s.can_execute)(state) && !(s.is_complete)(state)).next_back()
+    // DIMENSION-AWARE: in the nether only the post-portal steps (find_fortress onward) are
+    // runnable. The precondition drop-back below sent cycle-1's only nether bot (rust-race-004)
+    // back to `mine_iron` in the nether — overworld resource steps must never run there.
+    // RACE_MAX_PRIORITY caps the step chain (e.g. 13 = through the iron pickaxes): the Phase B
+    // surface race runs wood + iron with no portal descent.
+    let max_pri: i32 = std::env::var("RACE_MAX_PRIORITY").ok().and_then(|v| v.parse().ok()).unwrap_or(i32::MAX);
+    let dim_ok = |s: &&Step| (!state.world.in_nether() || s.priority >= 20) && s.priority <= max_pri;
+    let runnable = |s: &&Step| dim_ok(s) && (s.can_execute)(state) && !(s.is_complete)(state);
+    let best = STEPS.iter().filter(runnable).next_back();
+    // PRECONDITION DROP-BACK. `can_execute` gates on the step's INPUTS; it says nothing about
+    // the tools the step must HOLD to make progress. rust-race-003 sat in build_nether_portal
+    // with pick=None (it had a table item, so the wood recovery never fired) and "descended"
+    // by hand for hours. Every later gate has the same shape (no rods → can't craft eyes, no
+    // pearls → can't triangulate), so it's structural: if the furthest step's preconditions
+    // fail, drop back to the EARLIEST runnable incomplete step — the chain rebuilds the tool.
+    if let Some(b) = best {
+        if !preconditions_ok(b.id, state) {
+            if let Some(first) = STEPS.iter().filter(runnable).find(|s| s.id != b.id) {
+                return Some(first);
+            }
+        }
+    }
+    best
+}
+
+/// Tools/consumables a step must HOLD to make progress (vs `can_execute`'s inputs). A false
+/// here sends the machine back down the chain instead of letting the step spin.
+pub fn preconditions_ok(id: &str, s: &GameState) -> bool {
+    let pick = s.equipment.pickaxe_tier().rank();
+    match id {
+        "mine_stone" | "mine_coal" | "mine_iron" | "gather_build_blocks" | "get_water_buckets" | "get_flint_and_steel" => pick >= 1,
+        "build_nether_portal" => {
+            pick >= 1 && s.inventory.buckets + s.inventory.water_buckets >= 2 && s.inventory.flint_and_steel >= 1
+        }
+        "enter_nether" => s.world.portal_built,
+        _ => true,
+    }
 }
 
 /// How many steps are complete (progress reporting).
@@ -318,6 +412,10 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "enter_nether" => tasks::portal::enter_nether(bot).await,
         "find_fortress" => tasks::nether::find_fortress(bot, mem).await,
         "kill_blaze" => tasks::nether::kill_blaze(bot, mem, 1).await,
+        "gather_blaze_rods" => tasks::nether::kill_blaze(bot, mem, 7).await,
+        "get_pearls" | "craft_eyes" | "find_stronghold" | "enter_end" | "kill_dragon" | "exit_end" => {
+            failure(format!("step {id} not implemented yet (end-game skeleton)"))
+        }
         other => failure(format!("no executor for step {other}")),
     }
 }

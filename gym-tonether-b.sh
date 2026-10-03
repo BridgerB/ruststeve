@@ -1,26 +1,50 @@
 #!/usr/bin/env bash
-# Endurance rig on SERVER B: N kitted bots run GYM=to_nether (full natural cast →
-# ENTER the nether on random surface terrain; PASS = in_nether). Many bots × trials
-# across varied terrain = the proven path to getting a bot through (how race-011 did
-# it). Game port 25566 direct; RCON over the tunnel localhost:25576. No SNIFF (long
-# trials would bloat the db); CAST debug on for the cast logs. Never touches Server A.
+# Gym batch on SERVER B: N kitted bots run GYM=$SLUG for TRIALS trials each on random surface
+# terrain. Host-agnostic (Mac via SSH tunnels on localhost, or the OCI box directly).
+# Cycle 2 rules: every batch gets a FRESH region (GYM_REGION auto-increments, persisted in
+# data/gym-index) and every launch writes a gym.db row at start (`running`), so a killed trial
+# still counts. Never touches Server A.
 set -u
-N=${N:-6}
-TRIALS=${TRIALS:-4}
-SLUG=${SLUG:-to_nether}
-DIR=/Users/bridger/Developer/mc/upstream/ruststeve
-BIN=$DIR/target/release/ruststeve
+N=${N:-3}
+TRIALS=${TRIALS:-3}
+SLUG=${SLUG:-portal}
+DIR=${DIR:-$(cd "$(dirname "$0")" && pwd)}
+BIN=${BIN:-$DIR/target/release/ruststeve}  # override to run a gym build beside a live race
+MC_HOST=${MC_HOST:-localhost}
 cd "$DIR" || exit 1
 
-pkill -9 -f 'target/release/ruststeve' 2>/dev/null; sleep 1
+if [ -z "${GYM_REGION:-}" ]; then
+  prev=$(cat data/gym-index 2>/dev/null || echo 0)
+  GYM_REGION=$((prev + 1))
+fi
+echo "$GYM_REGION" > data/gym-index
+echo "gym batch: slug=${SLUGS:-$SLUG} N=$( [ -n "${SLUGS:-}" ] && echo "$SLUGS" | tr ',' '\n' | wc -l | tr -d ' ' || echo "$N") trials=$TRIALS region=$GYM_REGION (x+$((GYM_REGION*3000)), z 3300..4400) host=$MC_HOST"
+
+# Forceloads leak from every trial that is killed before its cleanup, and Server B loads every
+# forced chunk at startup: after a day of killed batches it crashed (watchdog: a tick > 60 s,
+# 01:16) and then sat at "Preparing spawn area 2%" for minutes. Server B is ruststeve's alone,
+# so each batch starts from zero forceloads. (A race running at the same time keeps its lanes
+# loaded through its players anyway.)
+perl -e 'alarm shift; exec @ARGV' 60 "$DIR/target/release/rcon" "forceload remove all" "execute in minecraft:the_nether run forceload remove all" >/dev/null 2>&1
+# Only the previous GYM batch's bots (pid file) — never a race running on the same host.
+[ -f gym.pids ] && while read -r p; do kill -9 "$p" 2>/dev/null; done < gym.pids
+: > gym.pids; sleep 1
+mkdir -p logs/archive
+# SLUGS="a,b,c" gives bot i its own slug (N defaults to the list length) — one batch covers a
+# whole scenario set (e.g. the five water slugs).
+IFS=',' read -r -a SLUG_LIST <<< "${SLUGS:-}"
+[ -n "${SLUGS:-}" ] && N=${#SLUG_LIST[@]}
 for i in $(seq 1 "$N"); do
   name=$(printf 'rust-gym-%03d' "$i")
-  rm -f ".memory-$name.db"* "gym-$name.log" 2>/dev/null
-  MC_HOST=144.24.32.76 MC_PORT=25566 MC_USERNAME="$name" STEVE_DATA="$DIR/data" \
-    RCON_HOST=localhost RCON_PORT=25576 \
+  [ -n "${SLUGS:-}" ] && SLUG=${SLUG_LIST[$((i-1))]}
+  [ -f "gym-$name.log" ] && mv "gym-$name.log" "logs/archive/gym-$name.$(date +%m%d-%H%M%S).log"
+  rm -f ".memory-$name.db" ".memory-$name.db-shm" ".memory-$name.db-wal" ".frame-$name.txt"
+  MC_HOST=$MC_HOST MC_PORT=25566 MC_USERNAME="$name" STEVE_DATA="$DIR/data" \
+    RCON_HOST=localhost RCON_PORT=25576 GYM_REGION=$GYM_REGION \
     GYM="$SLUG" GYM_TRIALS="$TRIALS" CRAFT_DEBUG=1 \
     "$BIN" > "gym-$name.log" 2>&1 &
+  echo "$!" >> gym.pids
   echo "launched $name pid $!"
   sleep 4
 done
-echo "all $N launched (slug=$SLUG trials=$TRIALS each) on Server B"
+echo "all $N launched"

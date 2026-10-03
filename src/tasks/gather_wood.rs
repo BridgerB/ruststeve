@@ -139,7 +139,7 @@ async fn escape_water(bot: &mut Bot<'_>) {
     // swim just bonks the ceiling and the bot drowns. This is the same logic the
     // survival reflex uses, but reached here too because gather_wood's long walk
     // loops don't yield to the reflex often enough.
-    crate::bot_utils::leave_water(bot, 60).await;
+    crate::bot_utils::leave_water(bot, 200).await; // real ticks (10 s)
     // Then a few sprint-swim ticks to climb up out of the water and onto land.
     for _ in 0..20 {
         if !in_liquid(bot) && bot.entity.on_ground {
@@ -261,23 +261,30 @@ async fn chop(bot: &mut Bot<'_>) -> i32 {
 /// Max blocks the bot will wander from where it started gathering before it
 /// turns back — a roam budget so it never marches off into ungenerated chunks
 /// and gets disconnected.
-const ROAM_LIMIT: f64 = 240.0;
+const ROAM_LIMIT: f64 = 600.0;
 
-/// Explore for fresh terrain when nothing's in view. ROTATES direction each
-/// sweep (south first — forests trend +Z here) instead of marching one fixed way
-/// off the map, and stays within a roam budget of `home`: once it's wandered too
-/// far it heads BACK toward home (known-traversable ground) rather than walking
-/// until the server kicks it. Short pathable hops; stops if a hop is blocked.
-async fn explore(bot: &mut Bot<'_>, sweep: u32, home: (i32, i32)) {
+/// Exploration state for the whole process, not per `gather_wood` call: sweeps so far and the first
+/// home. Each call used to restart at sweep 0 (south) and re-anchor home at the bot's position, and
+/// its 100 s deadline allows only 2–3 sweeps, so a treeless start random-walked within ~90 blocks
+/// forever (race i5: 2 of 5 bots never got wood, nearest forest 340 blocks away).
+static EXPLORE_SWEEPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static EXPLORE_HOME: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+
+/// Explore for fresh terrain when nothing's in view: hold one heading for 6 sweeps (~290 blocks,
+/// a long straight leg), then turn 45°, staying within a roam budget of the FIRST home. Past the
+/// budget it heads back toward home rather than walking until the server kicks it.
+async fn explore(bot: &mut Bot<'_>, _sweep: u32, _home: (i32, i32)) {
     let p = bot.entity.position;
     let (px, pz) = (p.x.floor() as i32, p.z.floor() as i32);
+    let home = *EXPLORE_HOME.lock().unwrap().get_or_insert((px, pz));
+    let sweep = EXPLORE_SWEEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dist_home = (((px - home.0) as f64).powi(2) + ((pz - home.1) as f64).powi(2)).sqrt();
     // 8 compass directions, SOUTH (+Z) first.
     let dirs = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)];
     let (dx, dz) = if dist_home > ROAM_LIMIT {
         ((home.0 - px).signum(), (home.1 - pz).signum()) // too far — head home
     } else {
-        dirs[(sweep as usize) % dirs.len()]
+        dirs[(sweep as usize / 6) % dirs.len()]
     };
     let what = if dist_home > ROAM_LIMIT { "returning toward home" } else { "exploring" };
     println!("    wood: {what} dir=({dx},{dz}) {dist_home:.0} from home");
@@ -341,7 +348,9 @@ pub async fn gather_wood(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) 
     // wedging. A genuine forest finishes in well under this.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(100);
 
-    while count_logs(bot) < target && cycles < 200 && std::time::Instant::now() < deadline {
+    // `!breath_alarm`: return to the main loop so its water escape runs (a capped-cave bot
+    // explored with raw movement for 120 s after its alarm — the step never ended).
+    while count_logs(bot) < target && cycles < 200 && std::time::Instant::now() < deadline && !bot.breath_alarm {
         cycles += 1;
         // Pump the network every cycle so keep-alive is always answered even
         // between the synchronous scan / pathfinding work below (otherwise the

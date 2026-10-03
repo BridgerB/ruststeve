@@ -176,6 +176,13 @@ impl<'a> Bot<'a> {
             }
             if result_ok {
                 self.put_away(0).await?; // collect the intended result
+            } else {
+                // Diagnostic only. The local view of slot 0 can miss a result the server DID deliver
+                // (table_bootstrap: "never appeared", then `4xspruce_planks` in the inventory), so this is
+                // not an error; callers verify by item counts. Race i5 bot 5's planks never rose at all,
+                // which this alone does not explain.
+                let grid: Vec<String> = (0..=(w * h)).map(|s| self.active_slot(s).map(|i| format!("{s}:{}x{}", i.count, i.name)).unwrap_or_default()).filter(|s| !s.is_empty()).collect();
+                eprintln!("CRAFT {}: result not seen in slot 0 (grid {:?})", recipe.result.id, grid);
             }
             // Return the GRID ingredients to the inventory. Emptying the grid makes the
             // server recompute the result slot to empty, so a WRONG result is discarded

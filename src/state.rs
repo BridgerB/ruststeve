@@ -73,6 +73,15 @@ pub fn sync_from_bot(bot: &Bot) -> GameState {
             inv.flint_and_steel += c;
         } else if n == "blaze_rod" {
             inv.blaze_rods += c;
+        } else if n == "ender_pearl" {
+            inv.ender_pearls += c;
+        } else if n == "blaze_powder" {
+            inv.blaze_powder += c;
+        } else if n == "ender_eye" {
+            inv.eyes_of_ender += c;
+        }
+        if n == "iron_pickaxe" {
+            inv.iron_pickaxes += c;
         }
         if FOODS.contains(&n) {
             inv.food += c;

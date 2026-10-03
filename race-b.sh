@@ -1,79 +1,124 @@
 #!/usr/bin/env bash
-# Server-B race (ruststeve's OWN box: 144.24.32.76:25566, RCON 25576, world
-# /var/lib/mc-b). Steve races on Server A (25565); we never touch it. Bots race
-# spawn → … → nether → fortress → a BLAZE ROD (RACE_GOAL=blaze). Lanes sit in the
-# x≈900 forest band (same seed as A, so identical terrain). Dead bots relaunch
-# mid-race and resume their server-side inventory. Default N=4, 4h.
+# Server-B race. Host-agnostic: runs on the Mac (game port + RCON through SSH tunnels on
+# localhost) or on the OCI box next to Server B (localhost directly). Steve races on Server A;
+# we never touch it.
+#
+# Measurement rules (cycle 2, docs/ruststeve-loop-cycle2.md):
+#  - every race runs in a FRESH region: lanes at x = 900 + RACE_INDEX*3000 (index persisted in
+#    data/race-index), never terrain an earlier race touched;
+#  - inventories are cleared at the start (RACE_CLEAR=1 default);
+#  - RCON goes through the repo's own `rcon` binary under a hard 60 s timeout with retries —
+#    no ssh, so a hung ssh can no longer stall the race (cycle 1 lost 45 min to one);
+#  - a relaunched bot is NOT teleported: it reconnects where it was and the step machine resumes;
+#  - a watchdog kills (→ relaunches) a bot whose last race.db tick is older than STALE_SECS;
+#  - race start, clears, relaunches and watchdog kills are written to race.db (`race_meta`).
 set -u
 
-HOST=144.24.32.76
-SSH="ssh -o ConnectTimeout=15 bridger@$HOST"
-# Server B RCON is 25576 (A is 25575). Same password.
-MCRCON="sudo /nix/store/4g0rhv7ahr8x14p3zvjk7a9y2dxq1pbg-mcrcon-0.7.2/bin/mcrcon -H localhost -P 25576 -p minecraft-test-rcon"
-PORT=25566
-DIR=/Users/bridger/Developer/mc/upstream/ruststeve
+DIR=${DIR:-$(cd "$(dirname "$0")" && pwd)}
 BIN=$DIR/target/release/ruststeve
+RCONBIN=$DIR/target/release/rcon
 DATA=$DIR/data
-N=${N:-4}
-RACE_SECONDS=${RACE_SECONDS:-14400}   # 4 hours
+DB=$DATA/race.db
+MC_HOST=${MC_HOST:-localhost}
+PORT=${PORT:-25566}
+export RCON_HOST=${RCON_HOST:-localhost} RCON_PORT=${RCON_PORT:-25576}
+N=${N:-5}
+RACE_SECONDS=${RACE_SECONDS:-14400}
 RACE_GOAL=${RACE_GOAL:-blaze}
+RACE_CLEAR=${RACE_CLEAR:-1}
+STALE_SECS=${STALE_SECS:-60}
+RUST_VIEW=${RUST_VIEW:-0}
 HOLD=45
 
-BASEX=900
+cd "$DIR" || exit 1
+
+# Fresh region: bump the persisted race index unless RACE_INDEX is given.
+if [ -z "${RACE_INDEX:-}" ]; then
+  prev=$(cat "$DATA/race-index" 2>/dev/null || echo 0)
+  RACE_INDEX=$((prev + 1))
+fi
+echo "$RACE_INDEX" > "$DATA/race-index"
+BASEX=$((900 + RACE_INDEX * 3000))
+RACE_ID="race-$(date +%Y%m%d-%H%M%S)-i$RACE_INDEX"
+
 NAMES=(); LANES=()
 for i in $(seq 0 $((N-1))); do
   NAMES+=("$(printf 'rust-race-%03d' "$((i+1))")")
   LANES+=($((350 + 90 * i)))
 done
 
-cd "$DIR" || exit 1
+# RCON with a hard timeout (perl alarm: portable to macOS and the box) and 3 tries.
+rc() {
+  local t
+  for t in 1 2 3; do
+    if perl -e 'alarm shift; exec @ARGV' 60 "$RCONBIN" "$@" >/dev/null 2>&1; then return 0; fi
+    sleep 2
+  done
+  echo "[race-b] rcon FAILED after 3 tries: $*"
+  return 1
+}
+# race.db meta row (the bots create the schema; create `events` defensively if they haven't yet).
+meta() {
+  local bot=$1 event=$2 detail=${3:-}
+  sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts_ms INTEGER NOT NULL, bot TEXT NOT NULL, category TEXT NOT NULL, event TEXT NOT NULL, step_id TEXT, detail TEXT, x INTEGER, y INTEGER, z INTEGER, health REAL, food REAL, n INTEGER);
+    INSERT INTO events(ts_ms,bot,category,event,detail) VALUES ($(date +%s)000,'$bot','race_meta','$event','$(echo "$detail" | tr "'" '"')');" 2>/dev/null
+}
 
-# SINGLE-INSTANCE GUARD — kill any orphaned race loops + all ruststeve bots first
-# (steve on server A is a TS process, not this binary, so it is never touched).
-for pid in $(pgrep -f 'race-loop.sh'); do kill -9 "$pid" 2>/dev/null; done
+# SINGLE-INSTANCE GUARD — kill orphaned race loops + the previous RACE's bots (by pid file, so a
+# gym batch running beside the race on the same host is never touched).
 for pid in $(pgrep -f 'bash .*race-b.sh'); do [ "$pid" != "$$" ] && kill -9 "$pid" 2>/dev/null; done
-pkill -9 -f 'target/release/ruststeve' 2>/dev/null
+[ -f "$DIR/race.pids" ] && while read -r p; do kill -9 "$p" 2>/dev/null; done < "$DIR/race.pids"
+: > "$DIR/race.pids"
 sleep 2
 
-# Fresh telemetry DB for this race (source of truth for the dashboard + report).
-rm -f "$DIR"/data/race.db "$DIR"/data/race.db-wal "$DIR"/data/race.db-shm 2>/dev/null
+# Fresh telemetry DB for this race; the previous one is archived, never deleted.
+mkdir -p "$DATA/archive"
+if [ -f "$DB" ]; then
+  sqlite3 "$DB" ".backup '$DATA/archive/race-pre-$RACE_ID.db'" 2>/dev/null
+  rm -f "$DB" "$DB-wal" "$DB-shm"
+fi
 
 PIDS=()
 cleanup() {
   echo "[race-b] cleanup — killing bots"
   for p in "${PIDS[@]:-}"; do kill -9 "$p" 2>/dev/null; done
-  pkill -9 -f 'target/release/ruststeve' 2>/dev/null
-  $SSH "$MCRCON 'forceload remove 880 280 960 1010'" >/dev/null 2>&1
+  rc "forceload remove $((BASEX-20)) 280 $((BASEX+60)) $((LANES[N-1]+40))"
+  for c in "${EXTRA_FL[@]:-}"; do [ -n "$c" ] && rc "forceload remove $c"; done
 }
-trap cleanup EXIT INT TERM
+EXTRA_FL=()
+# INT/TERM must EXIT after cleanup: with a plain trap the loop kept running after `pkill` and
+# relaunched every bot the cleanup had just killed (smoke race, 2026-10-02 00:11).
+trap cleanup EXIT
+trap 'cleanup; trap - EXIT; exit 1' INT TERM
 
-echo "[race-b] phase 1: op bots, forceload, keep_inventory (server B / 25576)"
-OPS=""; for n in "${NAMES[@]}"; do OPS+=" \"op $n\""; done
-$SSH "$MCRCON $OPS \"forceload add 880 280 960 1010\" \"gamerule keep_inventory true\"" >/dev/null 2>&1
-sleep 3
+echo "[race-b] $RACE_ID: region x=$BASEX lanes z=${LANES[*]} clear=$RACE_CLEAR host=$MC_HOST:$PORT"
+echo "[race-b] phase 1: op bots, forceload the fresh region, keep_inventory"
+OPS=(); for n in "${NAMES[@]}"; do OPS+=("op $n"); done
+# Start from zero forceloads (leaked by killed gym trials; Server B loads every forced chunk at
+# startup and crashed on a > 60 s tick at 01:16 on 2026-10-02 with them piled up).
+rc "forceload remove all" "execute in minecraft:the_nether run forceload remove all"
+rc "${OPS[@]}" "forceload add $((BASEX-20)) 280 $((BASEX+60)) $((LANES[N-1]+40))" "gamerule keep_inventory true"
+sleep 5
 
-declare -a SURF
-for i in $(seq 0 $((N-1))); do SURF[$i]=74; done
-
-echo "[race-b] phase 1.5: clear ghosts + set lane spawnpoints"
-PRE=""
-for i in $(seq 0 $((N-1))); do
-  y=$(( ${SURF[i]} + 1 ))
-  PRE+=" \"kick ${NAMES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\""
-done
-$SSH "$MCRCON $PRE" >/dev/null 2>&1
-sleep 6
+echo "[race-b] phase 1.5: clear ghosts"
+for n in "${NAMES[@]}"; do rc "kick $n"; done
+sleep 4
 
 launch_bot() {
   local i=$1
-  $SSH "$MCRCON \"kick ${NAMES[i]}\"" >/dev/null 2>&1
-  sleep 2
-  MC_HOST=$HOST MC_PORT=$PORT MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
-    RACE_HOLD=$HOLD RACE_GOAL="$RACE_GOAL" CRAFT_DEBUG=1 \
-    RUST_VIEW=1 RUST_VIEW_ASSETS="$DIR/viewer/static/assets.json" \
+  # The bot enables the viewer when RUST_VIEW is SET at all (even "0"), so only pass it for 1.
+  local view=(); [ "$RUST_VIEW" = "1" ] && view=(RUST_VIEW=1)
+  env MC_HOST=$MC_HOST MC_PORT=$PORT MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
+    RCON_HOST=$RCON_HOST RCON_PORT=$RCON_PORT \
+    RACE_HOLD=$HOLD RACE_GOAL="$RACE_GOAL" CRAFT_DEBUG=1 ${view[@]+"${view[@]}"} \
     "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   PIDS[$i]=$!
+  echo "$!" >> "$DIR/race.pids"
+  LAUNCHED[$i]=$SECONDS
 }
+declare -a LAUNCHED
+# Seconds since the bot's tick loop last touched its heartbeat file (999 if missing).
+hb_age() { perl -e 'my $m=(stat shift)[9]; print defined $m ? time-$m : 999' "$DIR/.heartbeat-$1"; }
 
 echo "[race-b] phase 2: launching $N bots (hold ${HOLD}s, goal $RACE_GOAL)"
 for i in $(seq 0 $((N-1))); do
@@ -82,7 +127,7 @@ for i in $(seq 0 $((N-1))); do
   sleep 2
 done
 
-echo "[race-b] phase 3: waiting for bots to hold, then teleporting into lanes"
+echo "[race-b] phase 3: waiting for bots to hold, then placing them on the surface of their lanes"
 for t in $(seq 1 40); do
   ready=0
   for i in $(seq 0 $((N-1))); do grep -q 'holding' "$DIR/race-$i.log" 2>/dev/null && ready=$((ready+1)); done
@@ -90,53 +135,95 @@ for t in $(seq 1 40); do
   [ "$ready" -ge "$N" ] && break
   sleep 3
 done
-TP=""
+# A lane's surface must be LAND: a natural world spawn always is. Race i5 dropped two of five bots
+# on the open ocean ("over motion_blocking_no_leaves" is the sea surface there); they floated for
+# the whole 4 h, 0/28 steps. Try x offsets inside the forceloaded strip; keep BASEX if all are water.
+# Prints "x z" of the first land candidate (x offsets × z ±32, all inside the forceloaded strip).
+land_xz() {
+  local z0=$1 x z out
+  for z in $z0 $((z0+32)) $((z0-32)); do
+    for x in $BASEX $((BASEX+16)) $((BASEX+32)) $((BASEX+48)) $((BASEX-16)); do
+      out=$(perl -e 'alarm shift; exec @ARGV' 30 "$RCONBIN" "execute positioned $x 0 $z positioned over motion_blocking_no_leaves if block ~ ~-1 ~ minecraft:water" 2>/dev/null)
+      case "$out" in *passed*) continue ;; esac
+      echo "$x $z"; return
+    done
+  done
+  # Race i6: lanes 3-4 were water at all 15 strip candidates and spent 4 h at sea. Widen along x,
+  # outside the strip: forceload the one candidate chunk, wait for it to load (an unloaded column
+  # has no heightmap, and an empty test reply would read as "land"), test, and keep the chunk
+  # forced only if it is land. The main loop records kept chunks in EXTRA_FL for cleanup (this
+  # runs in a subshell, so it cannot set the array itself).
+  for x in $((BASEX+128)) $((BASEX-128)) $((BASEX+256)) $((BASEX-256)) $((BASEX+384)) $((BASEX-384)); do
+    rc "forceload add $x $z0" >/dev/null
+    local loaded=0
+    for _ in $(seq 1 20); do
+      out=$(perl -e 'alarm shift; exec @ARGV' 30 "$RCONBIN" "execute if loaded $x 0 $z0" 2>/dev/null)
+      case "$out" in *passed*) loaded=1; break ;; esac
+      sleep 1
+    done
+    if [ "$loaded" = "1" ]; then
+      out=$(perl -e 'alarm shift; exec @ARGV' 30 "$RCONBIN" "execute positioned $x 0 $z0 positioned over motion_blocking_no_leaves if block ~ ~-1 ~ minecraft:water" 2>/dev/null)
+      case "$out" in *failed*) echo "$x $z0"; return ;; esac
+    fi
+    rc "forceload remove $x $z0" >/dev/null
+  done
+  echo "[race-b] lane z=$z0: water at every candidate — keeping ($BASEX,$z0)" >&2
+  echo "$BASEX $z0"
+}
 for i in $(seq 0 $((N-1))); do
-  y=$(( ${SURF[i]} + 1 ))
-  CLEARCMD=""; [ "${RACE_CLEAR:-0}" = "1" ] && CLEARCMD=" \"clear ${NAMES[i]}\""
-  TP+=" \"tp ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\"$CLEARCMD"
+  n=${NAMES[i]}; z=${LANES[i]}
+  read -r lx lz < <(land_xz "$z")
+  [ "$lx $lz" != "$BASEX $z" ] && echo "[race-b] lane $i: ocean at ($BASEX,$z) — placed on land at ($lx,$lz)"
+  z=$lz
+  [ "$lx" -lt $((BASEX-20)) ] || [ "$lx" -gt $((BASEX+60)) ] && EXTRA_FL+=("$lx $lz")
+  # Surface of a fresh, forceloaded column (no hard-coded y: terrain differs per region).
+  PLACE=("execute positioned $lx 0 $z positioned over motion_blocking_no_leaves run tp $n ~ ~1 ~"
+         "execute positioned $lx 0 $z positioned over motion_blocking_no_leaves run spawnpoint $n ~ ~1 ~")
+  [ "$RACE_CLEAR" = "1" ] && PLACE+=("clear $n")
+  rc "${PLACE[@]}"; sleep 1; rc "${PLACE[@]}"
+  [ "$RACE_CLEAR" = "1" ] && meta "$n" clear "inventory cleared at race start"
 done
-$SSH "$MCRCON $TP" >/dev/null 2>&1; sleep 2
-$SSH "$MCRCON $TP" >/dev/null 2>&1
+meta race start "id=$RACE_ID index=$RACE_INDEX basex=$BASEX lanes=${LANES[*]} n=$N clear=$RACE_CLEAR host=$MC_HOST secs=$RACE_SECONDS"
 echo "[race-b] bots positioned + spawnpoints set"
 
 echo "[race-b] phase 4: racing (max ${RACE_SECONDS}s)"
-date +%s > /tmp/race-start
 SECONDS=0
-WINNER=""
+declare -a ANNOUNCED
 while [ $SECONDS -lt $RACE_SECONDS ]; do
+  now_ms=$(($(date +%s) * 1000))
   for i in $(seq 0 $((N-1))); do
-    won=$(sqlite3 "$DIR/data/race.db" "SELECT 1 FROM events WHERE category='win' AND bot='${NAMES[i]}' LIMIT 1" 2>/dev/null)
-    if [ -n "$won" ]; then WINNER=$i; break; fi
-  done
-  [ -n "$WINNER" ] && break
-  alive=0
-  for i in $(seq 0 $((N-1))); do
+    n=${NAMES[i]}
+    if [ -z "${ANNOUNCED[i]:-}" ] && [ -n "$(sqlite3 "$DB" "SELECT 1 FROM events WHERE category='win' AND bot='$n' LIMIT 1" 2>/dev/null)" ]; then
+      ANNOUNCED[$i]=1; echo "[race-b t=${SECONDS}s] $n reached goal '$RACE_GOAL' — continuing"
+    fi
     if kill -0 "${PIDS[i]}" 2>/dev/null; then
-      alive=$((alive+1))
+      # Watchdog: the process is alive but its TICK LOOP is not running (heartbeat file older
+      # than STALE_SECS) → kill; the next pass relaunches it. race.db ticks are per STEP and can
+      # be minutes apart, so they are not a liveness signal. 90 s grace after every launch
+      # covers the 45 s hold + connect.
+      age=$(hb_age "$n")
+      if [ $((SECONDS - ${LAUNCHED[i]:-0})) -gt 90 ] && [ "$age" -gt "$STALE_SECS" ]; then
+        echo "[race-b t=${SECONDS}s] watchdog: $n heartbeat ${age}s old — killing for relaunch"
+        meta "$n" watchdog_kill "heartbeat ${age}s old"
+        kill -9 "${PIDS[i]}" 2>/dev/null
+      fi
     else
-      echo "[race-b] lane $i (${NAMES[i]}) exited — relaunching (resumes server-side inventory)"
+      echo "[race-b t=${SECONDS}s] lane $i ($n) exited — relaunching in place (no tp)"
+      meta "$n" relaunch "process exited; resumes where it stands"
+      rc "op $n"
       launch_bot "$i"
-      for t in $(seq 1 20); do grep -q 'holding' "$DIR/race-$i.log" 2>/dev/null && break; sleep 2; done
-      y=$(( ${SURF[i]} + 1 ))
-      $SSH "$MCRCON \"op ${NAMES[i]}\" \"tp ${NAMES[i]} $BASEX $y ${LANES[i]}\" \"spawnpoint ${NAMES[i]} $BASEX $y ${LANES[i]}\"" >/dev/null 2>&1
-      alive=$((alive+1))
     fi
   done
-  printf '[race-b t=%ds] alive=%d' "$SECONDS" "$alive"
+  printf '[race-b t=%ds]' "$SECONDS"
   for i in $(seq 0 $((N-1))); do
-    pick=$(grep -oE 'pick=Some\([A-Za-z]+\)' "$DIR/race-$i.log" 2>/dev/null | tail -1)
-    printf ' %s:%s' "$(printf '%02d' "$i")" "${pick:-pick=None}"
+    st=$(sqlite3 "$DB" "SELECT step_id||'@'||y FROM ticks WHERE bot='${NAMES[i]}' ORDER BY ts_ms DESC LIMIT 1" 2>/dev/null)
+    printf ' %02d:%s' "$i" "${st:-?}"
   done
   echo
   sleep 20
 done
 
-if [ -n "$WINNER" ]; then
-  echo "[race-b] WINNER: ${NAMES[$WINNER]} reached goal '$RACE_GOAL' at t=${SECONDS}s"
-  $SSH "$MCRCON \"say RACE OVER — ${NAMES[$WINNER]} reached $RACE_GOAL first!\"" >/dev/null 2>&1
-else
-  echo "[race-b] no winner within ${RACE_SECONDS}s"
-  $SSH "$MCRCON \"say RACE OVER — no bot reached $RACE_GOAL in time.\"" >/dev/null 2>&1
-fi
-echo "[race-b] done"
+meta race end "id=$RACE_ID ran ${RACE_SECONDS}s"
+rc "say RACE OVER ($RACE_ID, ${RACE_SECONDS}s)"
+echo "[race-b] done — rate report:"
+"$DIR/scripts/rate-report.sh" "$DB" 2>/dev/null || true

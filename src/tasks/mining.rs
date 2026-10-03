@@ -191,6 +191,14 @@ pub(crate) async fn ensure_pickaxe(bot: &mut Bot<'_>) -> bool {
             return true;
         }
     }
+    // Loud, rate-limited: a natural portal run needs ~500 digs (551 in one rust-gym-001 trial) —
+    // two iron pickaxes — and without one every stone dig is ~10 s by hand (and deepslate fails).
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap();
+    if last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60)) {
+        *last = Some(std::time::Instant::now());
+        crate::tasks::portal::cast_debug("NO PICKAXE in inventory — digging by hand");
+    }
     false
 }
 
@@ -514,7 +522,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
     // Rotating headings (S→E→N→W) reused by both the descent's dry-ground sweep and the
     // at-depth strip search.
     const DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
-    while count_ore_resource(bot, ore) < target && Instant::now() < deadline {
+    while count_ore_resource(bot, ore) < target && Instant::now() < deadline && !bot.breath_alarm {
         iters += 1;
 
         // ---- SENSE: fold this tick's world into the running counters ----
@@ -726,7 +734,7 @@ pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32, mem: &mut Wor
     const STRIP_BELOW: i32 = 58;
     let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)];
     let mut dir = 0usize;
-    while count(bot) < target && Instant::now() < deadline {
+    while count(bot) < target && Instant::now() < deadline && !bot.breath_alarm {
         if let Some(pos) = find_gravel(bot).filter(|p| !blacklist.contains(p)) {
             let _ = bot.goto_near(pos.0, pos.1, pos.2, 2.0).await;
             let _ = bot.dig_toward(pos.0, pos.1, pos.2).await;
@@ -779,7 +787,7 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -
     // to mine 0/16 cobblestone for the entire race, looping `dig_down → break → retry`.
     let dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)];
     let mut dir = 0usize;
-    while count_cobble(bot) < target && Instant::now() < deadline {
+    while count_cobble(bot) < target && Instant::now() < deadline && !bot.breath_alarm {
         // Durability: re-equip a pickaxe if the held one broke; bail to re-craft
         // if we have none (don't mine stone bare-handed — it drops nothing).
         if !ensure_pickaxe(bot).await {

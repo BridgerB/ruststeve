@@ -28,6 +28,7 @@ pub async fn craft_planks(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResul
     if logs.is_empty() {
         return failure("no logs in inventory");
     }
+    let planks_before = bot.inventory.slots.iter().flatten().filter(|i| i.name.ends_with("_planks")).map(|i| i.count).sum::<i32>();
     // Prefer a table (reliable); None only if we can't get one yet (bootstrap).
     let table = get_crafting_table(bot, mem).await.ok().flatten();
     for (log, count) in logs {
@@ -37,6 +38,12 @@ pub async fn craft_planks(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> StepResul
             // Fall back to oak_planks recipe family if species lookup missed.
             let _ = craft_item(bot, "oak_planks", count.min(8), table, mem).await;
         }
+    }
+    // Report what actually happened: this returned success while every craft failed (cycle 2:
+    // the box was missing the recipe data and the race looped "crafted planks" at planks=0).
+    let planks_after = bot.inventory.slots.iter().flatten().filter(|i| i.name.ends_with("_planks")).map(|i| i.count).sum::<i32>();
+    if planks_after <= planks_before {
+        return failure(format!("no planks crafted (planks {planks_before} → {planks_after})"));
     }
     success("crafted planks from logs")
 }
