@@ -20,9 +20,15 @@ pub struct Inventory {
     pub water_buckets: i32,
     pub flint: i32,
     pub flint_and_steel: i32,
+    /// Iron pickaxes held (count, not tier): a natural portal run is ~550 digs = two iron picks.
+    pub iron_pickaxes: i32,
     /// Blaze rods — the post-nether milestone resource (dropped by blazes at a
     /// fortress spawner). Reaching >=1 is the "kill a blaze" finish line.
     pub blaze_rods: i32,
+    /// End-game consumables (skeleton steps after kill_blaze count these; see steps.rs).
+    pub ender_pearls: i32,
+    pub blaze_powder: i32,
+    pub eyes_of_ender: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

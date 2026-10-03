@@ -149,6 +149,16 @@ impl<'a> Movements<'a> {
         q
     }
 
+    /// Lava in or beside the body (feet or head) at (x, y, z), or under the feet. Drops check this at
+    /// the landing: walks already refuse lava-adjacent cells, but a drop only refused a lava landing,
+    /// so the path dropped the bot into a scooped-out hole ringed by lava (batch 3 rust-gym-005: a
+    /// refill goto ended at y −56 inside the pool, 4 deaths in a row → death-loop FAIL).
+    fn lava_around_body(&self, x: i32, y: i32, z: i32) -> bool {
+        (0..=1).any(|h| {
+            [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| self.query(x + dx, y + h, z + dz).lava)
+        }) || self.query(x, y - 1, z).lava
+    }
+
     /// 0 if safe, dig_cost if breakable (records break), -1 if impassable.
     fn safe_or_break(&self, x: i32, y: i32, z: i32, to_break: &mut Vec<(i32, i32, i32)>) -> f64 {
         let block = self.query(x, y, z);
@@ -222,6 +232,15 @@ impl<'a> Movements<'a> {
         let mut to_break = Vec::new();
         let mut cost = 1.0;
         if floor.liquid {
+            // DEEP water (the floor is water and so is the block under it) is not walkable: the
+            // bot can't swim with purpose, and pathing across lakes is how cycle-1 race bots
+            // drowned gathering wood. Shallow (one-block) water stays allowed at liquid_cost.
+            // Only when ENTERING from dry ground: a bot already swimming must still be able to
+            // path out across the lake (refusing that regressed water_shore 2/2 → 0/1).
+            let swimming_now = self.query(node.x, node.y - 1, node.z).liquid || self.query(node.x, node.y, node.z).liquid;
+            if !floor.lava && !swimming_now && self.query(nx, node.y - 2, nz).liquid {
+                return;
+            }
             cost *= self.config.liquid_cost;
         }
         let body = self.safe_or_break(nx, node.y, nz, &mut to_break);
@@ -284,7 +303,7 @@ impl<'a> Movements<'a> {
             let landing = self.query(nx, node.y + dy, nz);
             if landing.physical {
                 let land_y = node.y + dy + 1;
-                if land_y != node.y && !self.query(nx, land_y, nz).safe {
+                if (land_y != node.y && !self.query(nx, land_y, nz).safe) || self.lava_around_body(nx, land_y, nz) {
                     return;
                 }
                 self.push(
@@ -498,6 +517,9 @@ impl<'a> Movements<'a> {
             let landing = self.query(node.x, node.y + dy, node.z);
             if landing.physical {
                 let land_y = node.y + dy + 1;
+                if self.lava_around_body(node.x, land_y, node.z) {
+                    return;
+                }
                 self.push(
                     out,
                     node.x,

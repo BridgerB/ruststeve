@@ -17,6 +17,10 @@ path = "src/main.rs"
 name = "datagen"
 path = "src/bin/datagen.rs"
 
+[[bin]]
+name = "rcon"
+path = "src/bin/rcon.rs"
+
 [dependencies]
 # speedrun bot
 rusqlite = { version = "0.31", features = ["bundled"] }

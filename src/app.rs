@@ -274,10 +274,19 @@ pub async fn run() -> std::io::Result<()> {
     let mut same_fail = 0u32;
     let mut last_death: Option<(i32, i32, i32)> = None;
     let mut same_death = 0u32;
+    let mut deaths_recorded = 0u32;
+    let mut goal_reached = false;
     loop {
         // Let packets settle so inventory/position are current.
         bot.wait_ticks(6).await?;
         let state = sync_from_bot(&bot);
+        // DEATHS from the SDK counter (health-packet edge) — the single source. Steps and the
+        // survival escape respawn internally, so polling `alive` here missed deaths (the gym saw
+        // 0 while the server logged two drownings). Position = where the bot is now.
+        while deaths_recorded < bot.deaths {
+            memory.race_death(&state);
+            deaths_recorded += 1;
+        }
         // Telemetry: throttled state snapshot into data/race.db (no-op off the race path).
         let next = get_next_step(&state);
         let (done, total) = progress(&state);
@@ -293,7 +302,7 @@ pub async fn run() -> std::io::Result<()> {
         // spawnpoint was set) and retry instead of idling out of the race.
         if !state.alive {
             println!("died at {:?} — respawning", state.position);
-            memory.race_death(&state);
+            // (death recorded from the SDK counter at the top of the loop)
             // Respawn-loop guard: if we keep dying at the EXACT SAME spot, respawn isn't
             // escaping it — a hazardous spawnpoint or a respawn that lands right back in
             // lava/suffocation (rust-race-004 logged 563 deaths at one identical coord).
@@ -322,7 +331,10 @@ pub async fn run() -> std::io::Result<()> {
             continue;
         }
 
-        // Race finish line: stop as soon as we reach the goal tool.
+        // Race finish line: record the win ONCE, then KEEP RUNNING the step machine. Exiting here
+        // made the driver relaunch the bot back to its overworld lane — the one natural nether
+        // arrival was killed seconds later ("WINNER … cleanup — killing bots") and every step past
+        // the goal produced no data. RACE_STOP_ON_GOAL=1 restores the old stop-at-goal behaviour.
         if let Ok(goal) = std::env::var("RACE_GOAL") {
             let reached = match goal.as_str() {
                 "nether" => state.world.in_nether(),
@@ -332,11 +344,14 @@ pub async fn run() -> std::io::Result<()> {
                 "wooden_pickaxe" => state.equipment.pickaxe_tier().rank() >= 1,
                 _ => false,
             };
-            if reached {
+            if reached && !goal_reached {
+                goal_reached = true;
                 println!("RACE GOAL REACHED: {goal}");
                 memory.race_win(&goal);
-                bot.run_command(&format!("say I reached {goal} — race done!")).await.ok();
-                break;
+                bot.run_command(&format!("say I reached {goal}!")).await.ok();
+                if std::env::var("RACE_STOP_ON_GOAL").is_ok() {
+                    break;
+                }
             }
         }
 
@@ -385,6 +400,16 @@ pub async fn run() -> std::io::Result<()> {
                     Err(_) => crate::types::failure(format!("{} exceeded {}s — re-deriving", step.id, budget.as_secs())),
                 };
                 memory.race_step_result(step.id, r.success, &r.message);
+                // Breath watchdog accounting: every pre-emption (watchdog took jump) and alarm
+                // (still under after 6 s → movement aborted) goes to race.db for the rate report.
+                let pre = std::mem::take(&mut bot.breath_preempts);
+                if pre > 0 || bot.breath_alarm {
+                    let st = sync_from_bot(&bot);
+                    memory.race_event("breath", if bot.breath_alarm { "alarm" } else { "preempt" }, Some(step.id), "", &st, pre as i64);
+                }
+                // Cast-internal deaths are now counted by the SDK (see the top of the loop); drain
+                // the old counter so it doesn't grow.
+                let _ = crate::tasks::portal::take_cast_deaths();
                 println!("    {} — {}", if r.success { "ok" } else { "fail" }, r.message);
                 // Connection lost (e.g. the server restarted out from under us): a
                 // step that failed on a dead socket reports "Broken pipe"/os error 32,

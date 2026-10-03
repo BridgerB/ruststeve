@@ -407,9 +407,14 @@ impl PhysicsEngine {
 
         if entity.control.sneak && entity.on_ground {
             let step = 0.05;
+            // Vanilla `maybeBackOffFromEdge`: test the box moved by the step AND DOWN by the
+            // step height — "is there floor under where I'd land". Testing at the same height
+            // (the old code) finds no collision on any open floor, so a sneaking bot's movement
+            // was zeroed everywhere and it only ever moved by jumping.
+            let drop = -self.config.step_height;
             while dx != 0.0
                 && self
-                    .surrounding_bbs(world, self.player_bb(entity.pos).offset(dx, 0.0, 0.0))
+                    .surrounding_bbs(world, self.player_bb(entity.pos).offset(dx, drop, 0.0))
                     .is_empty()
             {
                 if (-step..step).contains(&dx) {
@@ -423,7 +428,7 @@ impl PhysicsEngine {
             }
             while dz != 0.0
                 && self
-                    .surrounding_bbs(world, self.player_bb(entity.pos).offset(0.0, 0.0, dz))
+                    .surrounding_bbs(world, self.player_bb(entity.pos).offset(0.0, drop, dz))
                     .is_empty()
             {
                 if (-step..step).contains(&dz) {
@@ -438,7 +443,7 @@ impl PhysicsEngine {
             while dx != 0.0
                 && dz != 0.0
                 && self
-                    .surrounding_bbs(world, self.player_bb(entity.pos).offset(dx, 0.0, dz))
+                    .surrounding_bbs(world, self.player_bb(entity.pos).offset(dx, drop, dz))
                     .is_empty()
             {
                 if (-step..step).contains(&dx) {
@@ -1089,6 +1094,11 @@ impl PhysicsEngine {
             state.jump_ticks = 0;
         }
         state.jump_queued = false;
+        // Vanilla LocalPlayer.aiStep: sneaking in water swims DOWN (goDownInWater, vy -= 0.04).
+        // Without it a bot can only sink at water-gravity pace and can't dive to an exit below.
+        if state.control.sneak && state.is_in_water && !state.control.jump {
+            state.vel.y -= 0.04;
+        }
 
         let mut strafe = (state.control.right as i32 - state.control.left as i32) as f64 * 0.98;
         let mut forward = (state.control.forward as i32 - state.control.back as i32) as f64 * 0.98;

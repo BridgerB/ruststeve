@@ -78,6 +78,10 @@ enum FollowOutcome {
     Reached,
     /// Stuck or blocked — the caller should recompute a path.
     NeedRepath,
+    /// Took damage while walking (lava/fire the local world didn't show) — abort the whole goto
+    /// so the caller's survival logic (retreat + heal) runs instead of the follower re-pathing
+    /// straight back into it.
+    Hurt,
     Disconnected,
 }
 
@@ -113,6 +117,10 @@ pub enum BotEvent {
     Kicked(String),
     Packet(String),
 }
+
+/// Process-wide mirror of `Bot::deaths` (one bot per process), readable while a task holds
+/// `&mut Bot`. The gym's death-loop guard watches it during a running step.
+pub static DEATH_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub struct Bot<'a> {
     pub client: Client,
@@ -156,6 +164,27 @@ pub struct Bot<'a> {
     spawned: bool,
     alive: bool,
     brand: String,
+    /// BREATH WATCHDOG (cycle 2). Survival reflexes only ran BETWEEN steps, so a bot whose head
+    /// went under mid-step (pathing to wood, digging into an aquifer) drowned inside the step —
+    /// 8 race drownings to 1 lava death in cycle 1. The tick driver now holds `jump` (the physics
+    /// gives +0.04/tick lift in water) once the head has been under for HOLD_JUMP_AFTER, unless a
+    /// step declares water work (`allow_underwater`); still under after ALARM_AFTER → `breath_alarm`
+    /// makes movement primitives return so the main loop's survival escape (cap-dig) runs.
+    pub allow_underwater: bool,
+    pub breath_alarm: bool,
+    /// Pre-emptions since the last drain (the main loop writes them to race.db).
+    pub breath_preempts: u32,
+    underwater_since: Option<Instant>,
+    /// True while the watchdog (not a task) is the one holding `jump` — released on surfacing.
+    watchdog_jump: bool,
+    heartbeat_last: Instant,
+    /// Deaths since connect, counted at the health-packet edge (see the update_health handler).
+    pub deaths: u32,
+    wet_since: Option<Instant>,
+    /// Set by the water escape (leave_water) so its digs run while `breath_alarm` blocks tasks'.
+    pub escaping: bool,
+    /// Set by the escape only while a route leg dives (jump released on purpose).
+    pub escape_diving: bool,
 }
 
 fn block_pos(x: i32, y: i32, z: i32) -> PValue {
@@ -164,6 +193,13 @@ fn block_pos(x: i32, y: i32, z: i32) -> PValue {
         ("y", PValue::num(y as f64)),
         ("z", PValue::num(z as f64)),
     ])
+}
+
+/// Last SDK entry point the bot went through — printed with LOOP STALL (stall hunt, 05:45:
+/// four stalls of 14.05/14.05/18.11/18.11 s after descent steps, none in A* or physics_tick).
+pub static STALL_SITE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("-");
+fn site(s: &'static str) {
+    *STALL_SITE.lock().unwrap() = s;
 }
 
 impl<'a> Bot<'a> {
@@ -227,6 +263,16 @@ impl<'a> Bot<'a> {
             physics: None,
             should_physics: false,
             last_tick: Instant::now(),
+            allow_underwater: false,
+            breath_alarm: false,
+            breath_preempts: 0,
+            underwater_since: None,
+            watchdog_jump: false,
+            heartbeat_last: Instant::now() - std::time::Duration::from_secs(60),
+            deaths: 0,
+            wet_since: None,
+            escaping: false,
+            escape_diving: false,
             view_last: Instant::now(),
             viewer: {
                 if std::env::var("RUST_VIEW").is_ok() {
@@ -285,8 +331,28 @@ impl<'a> Bot<'a> {
             }
         }
         let elapsed = self.last_tick.elapsed();
+        // STALL detector: the loop is supposed to come back here every ≤50 ms. rust-gym-001 was
+        // kicked with `disconnect.timeout` (no keep-alive answer for ~30 s) twice tonight with
+        // nothing in the log — some synchronous section blocked the loop. Print any gap > 3 s so
+        // the lines around it show which call it was.
+        if elapsed >= std::time::Duration::from_secs(3) {
+            eprintln!("[bot] LOOP STALL {} ms without driving the connection (last site: {})", elapsed.as_millis(), *STALL_SITE.lock().unwrap());
+        }
+        // HEARTBEAT for the race watchdog: race.db ticks are written once per STEP (minutes apart in
+        // a long walk), so a stale tick is not a hang — cycle-2's first smoke race false-killed a
+        // healthy bot 97 s into gather_wood. This file is touched every 10 s while the tick loop
+        // runs; race-b.sh kills only when it is older than STALE_SECS.
+        if self.heartbeat_last.elapsed() >= std::time::Duration::from_secs(10) {
+            self.heartbeat_last = Instant::now();
+            let _ = std::fs::write(format!(".heartbeat-{}", self.username()), b"");
+        }
         if elapsed >= TICK {
+            self.breath_watchdog();
+            let t_phys = Instant::now();
             self.physics_tick().await?;
+            if t_phys.elapsed() > std::time::Duration::from_millis(500) {
+                eprintln!("[bot] SLOW physics_tick {} ms at ({:.1},{:.1},{:.1})", t_phys.elapsed().as_millis(), self.entity.position.x, self.entity.position.y, self.entity.position.z);
+            }
             self.last_tick = Instant::now();
             return Ok(DriveStep::Tick);
         }
@@ -295,13 +361,92 @@ impl<'a> Bot<'a> {
                 Some(ev) => Ok(DriveStep::Event(ev)),
                 None => Ok(DriveStep::Handled),
             },
-            Ok(Ok(None)) => Ok(DriveStep::Disconnected),
+            Ok(Ok(None)) => {
+                // EXIT on a lost connection. Every wait/dig/goto helper treats Disconnected as
+                // "stop early, Ok(())", and the task code discards those results — so a dropped
+                // bot kept looping on its frozen local world at ~50 iterations/s: rust-gym-001 ran
+                // ~70 min as a ghost ("spreadplayers: No entity was found"), 116k `desc STUCK`
+                // lines and two fake 2400 s timeouts. The drivers (race-b.sh, the gym scripts)
+                // relaunch or record a dead process; a ghost looks alive to all of them.
+                eprintln!("[bot] CONNECTION LOST (server closed the stream) — exiting (code 3)");
+                std::process::exit(3);
+            }
             Ok(Err(e)) => Err(e),
             Err(_) => {
+                self.breath_watchdog();
                 self.physics_tick().await?;
                 self.last_tick = Instant::now();
                 Ok(DriveStep::Tick)
             }
+        }
+    }
+
+    /// Is the bot's head (eye block) in water right now?
+    pub fn head_submerged(&self) -> bool {
+        let p = self.entity.position;
+        let (x, hy, z) = (p.x.floor() as i32, (p.y + 1.62).floor() as i32, p.z.floor() as i32);
+        self.block_at(x, hy, z).map(|b| b.name.contains("water")).unwrap_or(false)
+    }
+
+    /// Per-tick breath guard, above every step (see the field docs). Holding jump is the only
+    /// action it takes itself; the escalation (`breath_alarm`) is acted on by the main loop.
+    fn breath_watchdog(&mut self) {
+        const HOLD_JUMP_AFTER: std::time::Duration = std::time::Duration::from_millis(1000);
+        const ALARM_AFTER: std::time::Duration = std::time::Duration::from_millis(6000);
+        // FEET in water too long (floating at the surface of a deep lake): the head is out, so
+        // the breath clock never runs — but the pathfinder now refuses deep water, so the step
+        // can't walk out either (cycle-2 water_lake trial 2: floated 120 s). Alarm after 8 s so
+        // the main loop's leave_water swims to the bank. 30 s, not 8: a normal swim across a lake takes
+        // well under that, and the pathfinder swims out better than leave_water when it can.
+        let p = self.entity.position;
+        // Wading (on the ground in a shallow layer) is not floating: it never drowns and the
+        // pathfinder walks out of it, so it must not start the 30 s clock or hold the alarm on.
+        let feet_wet = !self.entity.on_ground
+            && self
+                .block_at(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
+                .map(|b| b.name.contains("water"))
+                .unwrap_or(false);
+        if feet_wet && !self.allow_underwater {
+            let since = *self.wet_since.get_or_insert_with(Instant::now);
+            if since.elapsed() >= std::time::Duration::from_secs(30) && !self.breath_alarm {
+                self.breath_alarm = true;
+                eprintln!("[bot] WATER ALARM — feet in water {:.0}s at ({:.1},{:.1},{:.1})", since.elapsed().as_secs_f64(), p.x, p.y, p.z);
+            }
+        } else if !feet_wet {
+            self.wet_since = None;
+        }
+        if !self.head_submerged() {
+            if !feet_wet && self.wet_since.is_none() {
+                self.breath_alarm = false;
+            }
+            if self.underwater_since.take().is_some() {
+                // Head out: release the watchdog's jump. The alarm clears only once the feet are
+                // dry too (above) — a bot bobbing at a deep-lake surface still has to get out.
+                if self.watchdog_jump {
+                    self.control_state.jump = false;
+                    self.watchdog_jump = false;
+                }
+            }
+            return;
+        }
+        let since = *self.underwater_since.get_or_insert_with(Instant::now);
+        if self.allow_underwater {
+            return;
+        }
+        let under = since.elapsed();
+        // Yield only while an escape route leg DIVES (out of a roofed aquifer, race i4 06:09): a
+        // forced jump pins the bot against the roof. Not for the whole escape — its bank swim
+        // relies on this held jump to stay afloat (water_lake drowned when it yielded throughout).
+        if under >= HOLD_JUMP_AFTER && !self.escape_diving {
+            if !self.control_state.jump {
+                self.breath_preempts += 1;
+                self.watchdog_jump = true;
+            }
+            self.control_state.jump = true;
+        }
+        if under >= ALARM_AFTER && !self.breath_alarm {
+            self.breath_alarm = true;
+            eprintln!("[bot] BREATH ALARM — head under water {:.1}s at ({:.1},{:.1},{:.1})", under.as_secs_f64(), self.entity.position.x, self.entity.position.y, self.entity.position.z);
         }
     }
 
@@ -318,6 +463,7 @@ impl<'a> Bot<'a> {
 
     /// Drive the loop for `n` physics ticks (stops early on disconnect).
     pub async fn wait_ticks(&mut self, n: u32) -> std::io::Result<()> {
+        site("wait_ticks");
         let mut ticks = 0;
         while ticks < n {
             match self.drive_tick().await? {
@@ -359,6 +505,18 @@ impl<'a> Bot<'a> {
         }
         if self.physics.is_none() {
             self.physics = Some(PhysicsEngine::new(self.registry));
+        }
+        // No physics in an UNLOADED chunk (vanilla's client doesn't move the player there). With no
+        // blocks to collide with, gravity free-fell the bot through the floor into the void after a
+        // respawn teleport, and the server killed it below the world every ~7 s (batch 3 rust-gym-002:
+        // "fell out of the world", 234 deaths in one trial). Hold position until the column arrives.
+        {
+            let p = self.entity.position;
+            let (cx, cz) = ((p.x.floor() as i32).div_euclid(16), (p.z.floor() as i32).div_euclid(16));
+            if !self.world.columns.contains_key(&(cx, cz)) {
+                self.entity.velocity = crate::vec3::vec3(0.0, 0.0, 0.0);
+                return self.send_position().await;
+            }
         }
 
         let controls = PlayerControls {
@@ -461,6 +619,14 @@ impl<'a> Bot<'a> {
                     .and_then(|w| w.get("name"))
                     .and_then(PValue::as_str)
                 {
+                    // A DIMENSION CHANGE invalidates every loaded column: chunk keys are just (cx,cz),
+                    // so overworld columns (min_y -64) kept answering nether lookups until the server
+                    // happened to resend that chunk. Harness 09:00: rust-nether-001 reported fortress
+                    // brick at (4,-3,147) — RCON: nether_bricks at (4,61,147), exactly 64 higher.
+                    if self.game.dimension != dim {
+                        self.world.columns.clear();
+                        self.entities.clear();
+                    }
                     self.game.dimension = dim.to_string();
                     // Update world height for the NEW dimension so chunk parsing reads the right
                     // number of 16-block sections. The overworld is 384 tall (24 sections); the
@@ -596,7 +762,18 @@ impl<'a> Bot<'a> {
                 if let (Some(slot), Some(item)) =
                     (params.get("slotId").and_then(PValue::as_i32), params.get("contents"))
                 {
-                    let i = slot as usize;
+                    // `slotId` is a PLAYER-INVENTORY index (hotbar 0–8, main 9–35, armour 36–39
+                    // feet→head, offhand 40), not a window-0 index (result 0, 2×2 grid 1–4, armour 5–8,
+                    // main 9–35, hotbar 36–44, offhand 45). Writing it raw put hotbar items into the craft
+                    // result/grid slots and never updated the real hotbar slot, so crafted planks
+                    // "vanished" and the crafting-table loop held race bots for hours (i4 44 min, i5 3 h).
+                    let i = match slot {
+                        0..=8 => slot as usize + 36,
+                        9..=35 => slot as usize,
+                        36..=39 => (44 - slot) as usize, // 36 feet → 8, 39 head → 5
+                        40 => 45,
+                        _ => usize::MAX,
+                    };
                     if i < self.inventory.slots.len() {
                         self.inventory.slots[i] = from_notch(self.registry, item);
                     }
@@ -650,7 +827,13 @@ impl<'a> Bot<'a> {
                 }
             }
             "disconnect" => {
-                let reason = params.get("reason").and_then(PValue::as_str).unwrap_or("disconnected").to_string();
+                // The reason is an NBT text component on 1.20.3+; log it raw either way.
+                let reason = params
+                    .get("reason")
+                    .and_then(PValue::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{:?}", params.get("reason")));
+                eprintln!("[bot] KICKED by server: {reason}");
                 return Ok(Some(BotEvent::Kicked(reason)));
             }
             _ => return Ok(Some(BotEvent::Packet(name.to_string()))),
@@ -687,6 +870,12 @@ impl<'a> Bot<'a> {
             .and_then(PValue::as_str)
         {
             self.game.dimension = dim.to_string();
+            // Height for the LOGIN dimension too, not only on respawn: a bot that logs in already
+            // in the nether kept the overworld's min_y -64 and read every nether block 64 too low
+            // (harness 08:52: fortress brick "at (4,-3,147)", RCON: nether_bricks at (4,61,147)).
+            let (min_y, height) = if dim.contains("nether") || dim.contains("the_end") { (0, 256) } else { (-64, 384) };
+            self.game.min_y = min_y;
+            self.game.height = height;
         }
 
         let mut brand_data = Vec::new();
@@ -735,6 +924,14 @@ impl<'a> Bot<'a> {
             if flag("y") { p.y + g("y") } else { g("y") },
             if flag("z") { p.z + g("z") } else { g("z") },
         );
+        // Server position corrections were invisible: the water_cave_iron drowning (regression 3) sat
+        // frozen at one position for ~100 s with jump held, and nothing said whether the server was
+        // snapping it back. Log small corrections (respawns/tps are large and logged elsewhere).
+        let q = self.entity.position;
+        let moved = ((q.x - p.x).powi(2) + (q.y - p.y).powi(2) + (q.z - p.z).powi(2)).sqrt();
+        if moved < 4.0 {
+            eprintln!("    [pos] server correction ({:.2},{:.2},{:.2}) → ({:.2},{:.2},{:.2})", p.x, p.y, p.z, q.x, q.y, q.z);
+        }
         let yaw = from_notchian_yaw(g("yaw"));
         let pitch = from_notchian_pitch(g("pitch"));
         self.entity.yaw = if flag("yaw") { self.entity.yaw + yaw } else { yaw };
@@ -762,6 +959,11 @@ impl<'a> Bot<'a> {
         }
         if self.health <= 0.0 && self.alive {
             self.alive = false;
+            // Counted HERE (the protocol truth), not by callers polling `alive`: steps and the
+            // survival escape respawn internally, so the gym loop saw deaths=0 while the server
+            // logged `rust-gym-002 drowned` twice (cycle-2 water gym).
+            self.deaths += 1;
+            DEATH_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return Some(BotEvent::Death);
         }
         if self.health > 0.0 && !self.alive {
@@ -1100,6 +1302,129 @@ impl<'a> Bot<'a> {
     /// invisible to the LOS raycast from a standing bot (the sightline grazes the
     /// floor), yet it's a perfectly valid pour/fill target the bot can walk to. Use
     /// this for locating fluid pools — NOT for ore (that would be X-ray).
+    /// The nearest (horizontally) EXPOSED block with one of `names`, anywhere in the LOADED chunks
+    /// and within `y_range` (inclusive). Same honesty rule as `find_exposed_blocks` / `blockSeen`:
+    /// only blocks touching air count, so buried ore/lava stays invisible (no X-ray) — but the
+    /// search covers the whole view distance (±96 blocks at view-distance 6) instead of a small
+    /// radius. Cheap: a palette check per 16³ section (`ChunkSection::contains_where`) and a cell
+    /// scan only inside sections that hold one of the states.
+    /// LAVA SITING (cycle 2, Phase C): every lava SOURCE block (level 0 = the block's min state)
+    /// in the loaded chunks within `y_range`, bucketed into 4×4×4 cells; returns the nearest
+    /// (to the bot, horizontally) source that has at least `min_sources` sources within `radius`
+    /// blocks, with that count. No exposure test — the bot tunnels to it. This replaces the blind
+    /// fixed-heading tunnel (cycle 1: 300 blocks of probed-solid deepslate, three pickaxes).
+    pub fn find_lava_cluster(&self, y_range: (i32, i32), min_sources: usize, radius: i32, skip: &dyn Fn((i32, i32, i32)) -> bool) -> Option<((i32, i32, i32), usize)> {
+        let def = self.registry.blocks_by_name.get("lava")?;
+        let source = def.min_state_id;
+        let mut sources: Vec<(i32, i32, i32)> = Vec::new();
+        for (&(cx, cz), col) in self.world.columns.iter() {
+            for (si, sec) in col.sections.iter().enumerate() {
+                let y0 = col.min_y + si as i32 * 16;
+                if y0 + 15 < y_range.0 || y0 > y_range.1 || !sec.contains_where(&|s: u32| s == source) {
+                    continue;
+                }
+                for y in 0..16 {
+                    let wy = y0 + y as i32;
+                    if wy < y_range.0 || wy > y_range.1 {
+                        continue;
+                    }
+                    for z in 0..16 {
+                        for x in 0..16 {
+                            if sec.get_block(x, y, z) == source {
+                                sources.push((cx * 16 + x as i32, wy, cz * 16 + z as i32));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if sources.len() < min_sources {
+            return None;
+        }
+        // Bucket into 4-block cells so the radius count only visits nearby cells.
+        let mut grid: HashMap<(i32, i32, i32), Vec<(i32, i32, i32)>> = HashMap::new();
+        for &s in &sources {
+            grid.entry((s.0.div_euclid(4), s.1.div_euclid(4), s.2.div_euclid(4))).or_default().push(s);
+        }
+        let r2 = radius * radius;
+        let cr = radius / 4 + 1;
+        let p = self.entity.position;
+        let mut best: Option<((i32, i32, i32), usize, f64)> = None;
+        // Candidate centres: every source (dense lakes make this cheap enough; sources ≪ blocks).
+        for &c in &sources {
+            // A skipped source (a retired pool) still counts toward its neighbours' clusters but is
+            // never the target, so the nearest NON-retired cluster wins instead of none at all.
+            if skip(c) {
+                continue;
+            }
+            let d = ((c.0 as f64 + 0.5 - p.x).powi(2) + (c.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
+            if best.is_some_and(|(_, _, bd)| d >= bd) {
+                continue;
+            }
+            let (gx, gy, gz) = (c.0.div_euclid(4), c.1.div_euclid(4), c.2.div_euclid(4));
+            let mut n = 0usize;
+            for dx in -cr..=cr {
+                for dy in -cr..=cr {
+                    for dz in -cr..=cr {
+                        if let Some(v) = grid.get(&(gx + dx, gy + dy, gz + dz)) {
+                            n += v.iter().filter(|s| (s.0 - c.0).pow(2) + (s.1 - c.1).pow(2) + (s.2 - c.2).pow(2) <= r2).count();
+                        }
+                    }
+                }
+            }
+            if n >= min_sources {
+                best = Some((c, n, d));
+            }
+        }
+        best.map(|(c, n, _)| (c, n))
+    }
+
+    pub fn find_loaded_nearest(&self, names: &[&str], y_range: (i32, i32)) -> Option<(i32, i32, i32)> {
+        let ranges: Vec<(u32, u32)> = names
+            .iter()
+            .filter_map(|n| self.registry.blocks_by_name.get(*n))
+            .map(|d| (d.min_state_id, d.max_state_id))
+            .collect();
+        if ranges.is_empty() {
+            return None;
+        }
+        let pred = |s: u32| ranges.iter().any(|&(lo, hi)| s >= lo && s <= hi);
+        let p = self.entity.position;
+        let mut best: Option<((i32, i32, i32), f64)> = None;
+        for (&(cx, cz), col) in self.world.columns.iter() {
+            // A chunk whose centre is farther than the best hit (minus half a diagonal) can't win.
+            let cd = (((cx * 16 + 8) as f64 - p.x).powi(2) + ((cz * 16 + 8) as f64 - p.z).powi(2)).sqrt();
+            if best.is_some_and(|(_, bd)| cd - 12.0 > bd) {
+                continue;
+            }
+            for (si, sec) in col.sections.iter().enumerate() {
+                let y0 = col.min_y + si as i32 * 16;
+                if y0 + 15 < y_range.0 || y0 > y_range.1 || !sec.contains_where(&pred) {
+                    continue;
+                }
+                for y in 0..16 {
+                    let wy = y0 + y as i32;
+                    if wy < y_range.0 || wy > y_range.1 {
+                        continue;
+                    }
+                    for z in 0..16 {
+                        for x in 0..16 {
+                            if !pred(sec.get_block(x, y, z)) {
+                                continue;
+                            }
+                            let w = (cx * 16 + x as i32, wy, cz * 16 + z as i32);
+                            let d = ((w.0 as f64 + 0.5 - p.x).powi(2) + (w.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
+                            if best.is_none_or(|(_, bd)| d < bd) && self.is_exposed(w.0, w.1, w.2) {
+                                best = Some((w, d));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        best.map(|(w, _)| w)
+    }
+
     pub fn find_exposed_blocks(&self, name: &str, max_distance: i32, count: usize) -> Vec<(i32, i32, i32)> {
         let Some(def) = self.registry.blocks_by_name.get(name) else {
             return vec![];
@@ -1262,6 +1587,13 @@ impl<'a> Bot<'a> {
     /// Dig the block at (x,y,z): face it, send start, wait the break time while
     /// swinging, then send finish.
     pub async fn dig(&mut self, x: i32, y: i32, z: i32) -> std::io::Result<()> {
+        site("dig");
+        // Breath/water alarm: a task's own digging must stop too, or the step never returns —
+        // the water_aquifer bot mined 10 cobble from inside the flooded chamber after its alarm.
+        // The escape itself (leave_water) sets `escaping`, so its cap/bank digs still run.
+        if self.breath_alarm && !self.escaping {
+            return Ok(());
+        }
         let center = vec3(x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5);
         let face = self.dig_face(x, y, z);
         // Stop moving and let the server agree on where we are before digging.
@@ -1304,7 +1636,11 @@ impl<'a> Bot<'a> {
         // Mine for the computed break time (like the vanilla client), swinging
         // periodically and holding the look on the block, then send STOP. A small
         // margin covers rounding. Break early if the server turns it to air.
-        let mine_for = if time.is_zero() { Duration::ZERO } else { time + Duration::from_millis(150) };
+        // Hold the dig ~35% past the client-computed break time (+200 ms). The server tracks its
+        // own progress; a STOP that arrives before the server is done ABORTS the break (deepslate
+        // frame cells stayed solid through two dig attempts on natural terrain), while a late
+        // STOP is accepted. Breaking early via block_state_at==0 still exits as soon as it lands.
+        let mine_for = if time.is_zero() { Duration::ZERO } else { time.mul_f64(1.35) + Duration::from_millis(200) };
         let deadline = Instant::now() + mine_for;
         let start_state = self.block_state_at(x, y, z);
         while Instant::now() < deadline {
@@ -1367,8 +1703,9 @@ impl<'a> Bot<'a> {
             let p = self.entity.position;
             let dist = ((x as f64 + 0.5 - p.x).powi(2) + (y as f64 + 0.5 - p.y - 1.62).powi(2) + (z as f64 + 0.5 - p.z).powi(2)).sqrt();
             eprintln!(
-                "DIG ({x},{y},{z}) bot=({:.1},{:.1},{:.1}) eyeDist={dist:.1} see={} ground={} sinceTp={}ms preFinish={pre} broke={} dropsNear={drops}",
-                p.x, p.y, p.z, self.can_see_block(x, y, z), self.entity.on_ground, self.last_teleport.elapsed().as_millis(), self.block_state_at(x, y, z) == 0
+                "DIG ({x},{y},{z}) bot=({:.1},{:.1},{:.1}) eyeDist={dist:.1} see={} ground={} sinceTp={}ms preFinish={pre} broke={} dropsNear={drops} held={:?} time={}ms underwater={}",
+                p.x, p.y, p.z, self.can_see_block(x, y, z), self.entity.on_ground, self.last_teleport.elapsed().as_millis(), self.block_state_at(x, y, z) == 0,
+                self.held_item().map(|i| i.name.clone()), time.as_millis(), self.head_submerged()
             );
         }
         Ok(())
@@ -1430,19 +1767,38 @@ impl<'a> Bot<'a> {
             return Duration::ZERO;
         }
         let state = self.block_state_at(x, y, z);
-        let hardness = self.registry.blocks_by_state_id.get(&state).and_then(|d| d.hardness).unwrap_or(1.0);
+        let name = self.block_at(x, y, z).map(|b| b.name.clone()).unwrap_or_default();
+        // `data/blocks.json` carries a PLACEHOLDER hardness (datagen writes 1.0 for every solid
+        // block — the vanilla reports have no destroy time), so the computed break time was a
+        // third of the real one for deepslate and the dig STOP landed on the server's 70 %
+        // rejection threshold: natural deepslate cells/headroom failed their first dig about
+        // half the time (locally predicted air, then the server's block_update put the
+        // deepslate back). Use vanilla values by name; the registry is the fallback.
+        let hardness = block_hardness(&name)
+            .or_else(|| self.registry.blocks_by_state_id.get(&state).and_then(|d| d.hardness))
+            .unwrap_or(1.0);
         if hardness <= 0.0 {
             return Duration::ZERO;
         }
-        let name = self.block_at(x, y, z).map(|b| b.name.clone()).unwrap_or_default();
-        let speed = tool_speed(self.held_item().map(|i| i.name.as_str()), Some(name.clone()));
+        let tool = tool_speed(self.held_item().map(|i| i.name.as_str()), Some(name.clone()));
+        let mut speed = tool;
+        // Vanilla mining penalties the SDK was missing: eyes in water (no Aqua Affinity) ÷5, not
+        // on the ground ÷5. Without them an underwater/floating dig's STOP went out 5–25× early,
+        // the server rejected the break and the block came back — the capped-cave escape in the
+        // cycle-2 water gym dug its cap forever and drowned.
+        if self.head_submerged() {
+            speed /= 5.0;
+        }
+        if !self.entity.on_ground {
+            speed /= 5.0;
+        }
         // A block is "harvestable" (normal speed, /30) when it needs no specific
         // tool OR we hold the right one. Only tool-required blocks (stone/ores/
         // metal) are 5× slower by hand (/100). Wood/dirt/leaves/sand need no tool.
-        let needs_tool = name.contains("stone") || name.contains("ore") || name.contains("deepslate")
-            || name.contains("obsidian") || name.ends_with("_block") && (name.contains("iron") || name.contains("gold") || name.contains("diamond") || name.contains("copper") || name.contains("netherite"))
-            || name.contains("anvil") || name.contains("furnace") || name.contains("brick");
-        let can_harvest = !needs_tool || speed > 1.0;
+        let needs_tool = is_pickaxe_block(&name)
+            || name.ends_with("_block") && (name.contains("iron") || name.contains("gold") || name.contains("diamond") || name.contains("copper") || name.contains("netherite"))
+            || name.contains("anvil") || name.contains("furnace");
+        let can_harvest = !needs_tool || tool > 1.0; // the TOOL decides harvestability, not the penalized speed
         let damage = speed / hardness / if can_harvest { 30.0 } else { 100.0 };
         if damage >= 1.0 {
             return Duration::ZERO;
@@ -1453,6 +1809,7 @@ impl<'a> Bot<'a> {
 
     /// Place the held item against a block face.
     pub async fn place_block(&mut self, x: i32, y: i32, z: i32, face: Face) -> std::io::Result<()> {
+        site("place_block");
         self.sequence += 1;
         let seq = self.sequence;
         let held = self.held_item().map(|i| i.name.clone());
@@ -1487,7 +1844,17 @@ impl<'a> Bot<'a> {
             Face::East => (1, 0, 0),
         };
         let (px, py, pz) = (x + ox, y + oy, z + oz);
-        if self.block_state_at(px, py, pz) == 0 {
+        // Never predict a block INTO our own body: the server rejects that placement, but a local
+        // prediction would leave a GHOST block our physics collides with (the bot then can't walk
+        // west along a platform row it just "built" — 3 gym bots stuck a0 on every cell).
+        let p = self.entity.position;
+        let inside = (px as f64) < p.x + 0.3
+            && (px as f64 + 1.0) > p.x - 0.3
+            && (pz as f64) < p.z + 0.3
+            && (pz as f64 + 1.0) > p.z - 0.3
+            && (py as f64) < p.y + 1.8
+            && (py as f64 + 1.0) > p.y;
+        if !inside && self.block_state_at(px, py, pz) == 0 {
             let state = held.and_then(|n| {
                 let key = n.strip_prefix("minecraft:").unwrap_or(&n).to_string();
                 self.registry.blocks_by_name.get(&key).map(|b| b.default_state)
@@ -1542,6 +1909,14 @@ impl<'a> Bot<'a> {
     /// jumping, dropping), and re-path when stuck or the path runs out before the
     /// goal. Single-task port of typecraft's tick-driven pathfinder follower.
     pub async fn goto_goal(&mut self, goal: &dyn Goal, timeout: Duration) -> std::io::Result<bool> {
+        site("goto_goal");
+        // Breath alarm: refuse to path at all, so a step looping over targets (gather_wood tried
+        // 20+ logs, ~5 s each, for 120 s inside a capped flooded cave) fails fast and returns to
+        // the main loop, whose survival escape is what can actually get out.
+        if self.breath_alarm {
+            self.clear_control_states();
+            return Ok(false);
+        }
         let started = Instant::now();
         let mut retries = 0;
         loop {
@@ -1559,6 +1934,7 @@ impl<'a> Bot<'a> {
                 self.entity.position.y.floor() as i32,
                 self.entity.position.z.floor() as i32,
             );
+            let t_path = Instant::now();
             let result = get_path_to(
                 &self.world,
                 start,
@@ -1567,6 +1943,10 @@ impl<'a> Bot<'a> {
                 -1.0,
                 Duration::from_millis(2000),
             );
+            // Stall hunt: two 14.05 s LOOP STALLs right after a water descent step.
+            if t_path.elapsed() > Duration::from_millis(2500) {
+                eprintln!("[bot] SLOW A* {} ms from {start:?} status={:?} len={}", t_path.elapsed().as_millis(), result.status, result.path.len());
+            }
             if std::env::var("GOTO_DEBUG").is_ok() && retries == 0 {
                 let end = result.path.last().map(|m| (m.x, m.y, m.z));
                 eprintln!("GOTO from {start:?} status={:?} len={} end={end:?}", result.status, result.path.len());
@@ -1584,8 +1964,23 @@ impl<'a> Bot<'a> {
                 self.wait_ticks(4).await?;
                 continue;
             }
-            match self.follow_path(&result.path).await? {
+            let before_follow = self.entity.position;
+            let outcome = self.follow_path(&result.path).await?;
+            // ALWAYS drive at least one tick per iteration. When follow_path returns without
+            // moving (every waypoint already "reached"), this loop re-ran A* back to back with no
+            // packet pumping — each search up to its 2 s budget — and the server saw a frozen
+            // client: LOOP STALLs of 14.05 / 16.05 / 18.11 s (= 7 / 8 / 9 × 2 s, site follow_path)
+            // and two `disconnect.timeout` kicks.
+            self.wait_ticks(1).await?;
+            match outcome {
                 FollowOutcome::Reached => {
+                    // Reached the path's end without moving and the goal still isn't met → the
+                    // path is degenerate; another identical A* won't help.
+                    let moved = (self.entity.position.x - before_follow.x).abs() + (self.entity.position.z - before_follow.z).abs();
+                    if moved < 0.05 && !self.goal_reached(goal) {
+                        self.clear_control_states();
+                        return Ok(false);
+                    }
                     // Reached the path's end; loop re-checks the goal / re-paths.
                     retries += 1;
                     if retries > 12 {
@@ -1600,6 +1995,10 @@ impl<'a> Bot<'a> {
                         return Ok(self.goal_reached(goal));
                     }
                 }
+                FollowOutcome::Hurt => {
+                    self.clear_control_states();
+                    return Ok(false);
+                }
                 FollowOutcome::Disconnected => return Ok(false),
             }
         }
@@ -1608,6 +2007,7 @@ impl<'a> Bot<'a> {
     /// Follow a fixed path until it ends, the bot gets stuck, or it needs to
     /// place a block (unsupported → re-path). Digs `to_break` blocks in the way.
     async fn follow_path(&mut self, path: &[Move]) -> std::io::Result<FollowOutcome> {
+        site("follow_path");
         // Start at the waypoint nearest the bot (skip already-passed nodes).
         let p = self.entity.position;
         let mut idx = 0;
@@ -1629,7 +2029,17 @@ impl<'a> Bot<'a> {
         let mut stuck_ticks = 0u32;
         let debug = std::env::var("FOLLOW_DEBUG").is_ok();
         let mut dbgi = 0u32;
+        let hp0 = self.health;
         while idx < path.len() {
+            // Walking into lava/fire the local world didn't show (rust-gym-001 natural: died inside
+            // `approach source → goto_near`, hp 20 → 0 with no chance to bail): stop the instant
+            // health drops and hand control back — the callers all have retreat + heal logic.
+            if self.health <= 0.0 || self.health < hp0 - 2.5 || self.breath_alarm {
+                // breath_alarm: head under water > 6 s despite the watchdog's jump — return so the
+                // main loop's survival escape (leave_water, with cap-dig) takes over.
+                self.clear_control_states();
+                return Ok(FollowOutcome::Hurt);
+            }
             if debug && dbgi % 8 == 0 {
                 let pp = self.entity.position;
                 let n = &path[idx];
@@ -1738,6 +2148,115 @@ fn loc_xyz(loc: &PValue) -> (i32, i32, i32) {
     )
 }
 
+/// Vanilla block hardness (destroy time) by name. The generated registry has no real values (see
+/// `dig_time`), and a break time computed from the wrong hardness makes the server reject the dig.
+/// Exact names first, then families; `None` = unknown (caller falls back to the registry).
+pub fn block_hardness(name: &str) -> Option<f64> {
+    let exact = match name {
+        "bedrock" | "end_portal_frame" | "end_portal" | "nether_portal" | "barrier" | "command_block" => return Some(-1.0),
+        "obsidian" | "crying_obsidian" | "respawn_anchor" => 50.0,
+        "ancient_debris" => 30.0,
+        "netherite_block" => 50.0,
+        "ender_chest" => 22.5,
+        "spawner" | "iron_block" | "diamond_block" | "emerald_block" | "enchanting_table" => 5.0,
+        "cobbled_deepslate" | "polished_deepslate" | "deepslate_bricks" | "deepslate_tiles" | "chiseled_deepslate" | "furnace" | "blast_furnace" | "smoker" | "dispenser" | "dropper" | "iron_bars" | "lodestone" => 3.5,
+        "deepslate" | "end_stone" | "end_stone_bricks" | "gold_block" | "copper_block" | "nether_quartz_ore" | "nether_gold_ore" | "beacon" | "anvil" | "chipped_anvil" | "damaged_anvil" | "iron_trapdoor" | "brewing_stand" => 3.0,
+        "crafting_table" | "chest" | "trapped_chest" | "barrel" | "smithing_table" | "fletching_table" | "cartography_table" | "loom" | "jukebox" | "bookshelf" | "chiseled_bookshelf" | "lectern" => 2.5,
+        "cobblestone" | "mossy_cobblestone" | "cobblestone_stairs" | "cobblestone_slab" | "cobblestone_wall" | "bricks" | "nether_bricks" | "red_nether_bricks" | "nether_brick_fence" | "nether_brick_stairs" | "nether_brick_slab" | "nether_brick_wall" | "bone_block" | "basalt_slab" | "stone_slab" | "smooth_stone" | "smooth_stone_slab" | "stone_stairs" | "sandstone_stairs" | "mud_brick_wall" => 2.0,
+        "stone" | "granite" | "diorite" | "andesite" | "polished_granite" | "polished_diorite" | "polished_andesite" | "tuff" | "stone_bricks" | "mossy_stone_bricks" | "cracked_stone_bricks" | "chiseled_stone_bricks" | "blackstone" | "polished_blackstone" | "polished_blackstone_bricks" | "gilded_blackstone" | "dripstone_block" | "pointed_dripstone" | "amethyst_block" | "budding_amethyst" | "purpur_block" | "purpur_pillar" | "prismarine" | "dark_prismarine" | "prismarine_bricks" | "mud_bricks" | "infested_stone" | "smooth_sandstone" | "cut_sandstone" => 1.5,
+        "terracotta" | "smooth_basalt" | "basalt" | "polished_basalt" | "nether_bricks_slab" => 1.25,
+        "packed_mud" | "bamboo" | "bamboo_block" | "nether_wart_block" | "warped_wart_block" | "shroomlight" | "pumpkin" | "carved_pumpkin" | "jack_o_lantern" | "melon" | "dried_kelp_block" | "coral_block" => 1.0,
+        "sandstone" | "red_sandstone" | "chiseled_sandstone" | "quartz_block" | "smooth_quartz" | "quartz_pillar" | "chiseled_quartz_block" | "quartz_bricks" | "netherrack_slab" => 0.8,
+        "calcite" => 0.75,
+        "grass_block" | "gravel" | "clay" | "mycelium" | "podzol" | "dirt_path" | "rooted_dirt" | "sponge" | "wet_sponge" | "honeycomb_block" => 0.6,
+        "dirt" | "coarse_dirt" | "sand" | "red_sand" | "soul_sand" | "soul_soil" | "mud" | "muddy_mangrove_roots" | "magma_block" | "ice" | "packed_ice" | "blue_ice" | "hay_block" | "target" | "farmland" | "snow_block" | "powder_snow" | "sculk_catalyst" => 0.5,
+        "netherrack" | "cactus" | "chorus_plant" | "chorus_flower" | "ladder" => 0.4,
+        "glowstone" | "sea_lantern" | "glass" | "tinted_glass" | "glass_pane" | "redstone_lamp" => 0.3,
+        "snow" | "sculk" | "sculk_vein" | "sculk_sensor" | "sculk_shrieker" | "brown_mushroom_block" | "red_mushroom_block" | "mushroom_stem" | "cake" | "vine" | "glow_lichen" | "hanging_roots" => 0.2,
+        "moss_block" | "moss_carpet" | "azalea" | "flowering_azalea" | "big_dripleaf" | "small_dripleaf" | "nether_sprouts" | "sea_pickle" | "carpet" | "white_carpet" | "moss" => 0.1,
+        "torch" | "wall_torch" | "soul_torch" | "soul_wall_torch" | "redstone_torch" | "tnt" | "slime_block" | "honey_block" | "fire" | "soul_fire" | "scaffolding" | "redstone_wire" | "tripwire" | "tripwire_hook" | "lever" | "flower_pot" | "sugar_cane" | "kelp" | "kelp_plant" | "seagrass" | "tall_seagrass" | "lily_pad" | "crimson_fungus" | "warped_fungus" | "crimson_roots" | "warped_roots" | "twisting_vines" | "weeping_vines" | "twisting_vines_plant" | "weeping_vines_plant" | "cave_vines" | "cave_vines_plant" | "spore_blossom" | "cobweb_plant" => 0.0,
+        _ => f64::NAN,
+    };
+    if !exact.is_nan() {
+        return Some(exact);
+    }
+    // Families.
+    if name.ends_with("_ore") {
+        return Some(if name.starts_with("deepslate_") { 4.5 } else { 3.0 });
+    }
+    if name.ends_with("_log") || name.ends_with("_wood") || name.ends_with("_stem") || name.ends_with("_hyphae") || name.ends_with("_planks") || name.ends_with("_fence") || name.ends_with("_fence_gate") || name.ends_with("_stairs") || name.ends_with("_slab") || name.ends_with("_door") || name.ends_with("_trapdoor") || name.ends_with("_wall") || name == "mangrove_roots" {
+        return Some(2.0);
+    }
+    if name.ends_with("_leaves") || name.ends_with("_sapling") || name.ends_with("_propagule") {
+        return Some(0.2);
+    }
+    if name.ends_with("_wool") || name.ends_with("_glazed_terracotta") || name.ends_with("_bed") {
+        return Some(if name.ends_with("_bed") { 0.2 } else if name.ends_with("_wool") { 0.8 } else { 1.4 });
+    }
+    if name.ends_with("_terracotta") {
+        return Some(1.25);
+    }
+    if name.ends_with("_concrete") {
+        return Some(1.8);
+    }
+    if name.ends_with("_concrete_powder") {
+        return Some(0.5);
+    }
+    if name.ends_with("_coral") || name.ends_with("_coral_fan") || name.ends_with("_coral_wall_fan") || name.ends_with("_carpet") || name.ends_with("_candle") || name.contains("mushroom") && !name.ends_with("_block") {
+        return Some(0.0);
+    }
+    if name.ends_with("_coral_block") {
+        return Some(1.5);
+    }
+    if name.ends_with("_stained_glass") || name.ends_with("_stained_glass_pane") {
+        return Some(0.3);
+    }
+    if name.ends_with("_shulker_box") || name == "shulker_box" {
+        return Some(2.0);
+    }
+    if name.contains("copper") {
+        return Some(3.0);
+    }
+    if name.contains("amethyst") {
+        return Some(1.5);
+    }
+    if name.contains("sandstone") {
+        return Some(0.8);
+    }
+    if name.contains("basalt") {
+        return Some(1.25);
+    }
+    if name.contains("blackstone") || name.contains("stone_brick") || name.contains("prismarine") || name.contains("purpur") || name.contains("deepslate_") && !name.ends_with("_ore") {
+        return Some(if name.contains("deepslate_") { 3.5 } else { 1.5 });
+    }
+    if name.contains("nether_brick") || name.contains("cobblestone") || name.contains("brick") {
+        return Some(2.0);
+    }
+    if name.contains("stone") {
+        return Some(1.5);
+    }
+    if name.ends_with("_button") || name.ends_with("_pressure_plate") || name.ends_with("_sign") || name.ends_with("_hanging_sign") || name.ends_with("_banner") {
+        return Some(if name.ends_with("_sign") || name.ends_with("_hanging_sign") || name.ends_with("_banner") { 1.0 } else { 0.5 });
+    }
+    if name.contains("flower") || name.contains("grass") || name.contains("fern") || name.contains("bush") || name.contains("dandelion") || name.contains("poppy") || name.contains("tulip") || name.contains("orchid") || name.contains("allium") || name.contains("daisy") || name.contains("lilac") || name.contains("peony") || name.contains("rose") || name.contains("lily") || name.contains("wheat") || name.contains("carrots") || name.contains("potatoes") || name.contains("beetroots") || name.contains("nether_wart") || name.contains("sweet_berry") || name.contains("dead_bush") || name.contains("_root") || name.contains("seed") || name.contains("pitcher") || name.contains("torchflower") {
+        return Some(0.0);
+    }
+    None
+}
+
+/// Blocks mined with a pickaxe (and dropping nothing by hand). The old test was a substring check
+/// for stone/ore/brick/deepslate, which missed granite, diorite, andesite, tuff, calcite, basalt,
+/// blackstone, netherrack, obsidian… — those got the BARE-HAND break time, ~3× too long, so every
+/// dig held that long: 4 s per descent block in diorite vs 1.5 s in stone (rust-gym-003, timed).
+pub fn is_pickaxe_block(name: &str) -> bool {
+    const FAMILY: [&str; 24] = [
+        "stone", "_ore", "brick", "deepslate", "granite", "diorite", "andesite", "tuff", "calcite", "basalt",
+        "blackstone", "netherrack", "obsidian", "terracotta", "concrete", "prismarine", "purpur", "dripstone",
+        "sandstone", "quartz", "magma_block", "end_stone", "amethyst", "copper",
+    ];
+    FAMILY.iter().any(|f| name.contains(f)) && !name.contains("powder") && !name.ends_with("_button") && !name.contains("pressure_plate")
+}
+
 /// Coarse tool-speed multiplier (typecraft's fallback when material data is absent).
 fn tool_speed(tool: Option<&str>, block: Option<String>) -> f64 {
     let (Some(tool), Some(block)) = (tool, block) else {
@@ -1753,7 +2272,7 @@ fn tool_speed(tool: Option<&str>, block: Option<String>) -> f64 {
         _ => return 1.0,
     };
     let ttype = tool.rsplit('_').next().unwrap_or("");
-    let pick = block.contains("stone") || block.contains("ore") || block.contains("brick") || block.contains("deepslate");
+    let pick = is_pickaxe_block(&block);
     let axe = block.contains("log") || block.contains("planks") || block.contains("wood");
     let shovel = block.contains("dirt") || block.contains("sand") || block.contains("gravel") || block == "grass_block";
     match ttype {

@@ -7,4 +7,5 @@ pub mod gather_wood;
 pub mod mining;
 pub mod nether;
 pub mod portal;
+pub mod portal_mold;
 pub mod smelt;

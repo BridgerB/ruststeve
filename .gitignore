@@ -19,3 +19,8 @@
 
 # macOS
 .DS_Store
+
+# Run debris (race/gym launchers, bot heartbeats)
+*.out
+*.pids
+.heartbeat-*

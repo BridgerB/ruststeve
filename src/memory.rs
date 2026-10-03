@@ -311,6 +311,14 @@ impl WorldMemory {
         }
     }
 
+    /// Generic race.db event (category/event/step/detail at the bot's position, with a count).
+    pub fn race_event(&mut self, category: &str, event: &str, step_id: Option<&str>, detail: &str, s: &crate::types::GameState, n: i64) {
+        if let Some(race) = &mut self.race {
+            let pos = (s.position.0.floor() as i32, s.position.1.floor() as i32, s.position.2.floor() as i32);
+            race.event(category, event, step_id, detail, Some(pos), Some(s.health), Some(s.food), Some(n));
+        }
+    }
+
     pub fn count(&self, kind: PoiKind) -> i64 {
         self.conn
             .query_row("SELECT COUNT(*) FROM pois WHERE kind=?1", params![kind.as_str()], |r| r.get(0))

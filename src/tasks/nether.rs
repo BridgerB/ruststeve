@@ -4,9 +4,10 @@
 
 use std::time::{Duration, Instant};
 
-use crate::bot::{Bot, Face};
+use crate::bot::Bot;
 use crate::bot_utils::{collect_drops, count_items, select_item};
 use crate::memory::WorldMemory;
+use crate::tasks::portal::{dig_at, is_solid as is_solid_name, place_cobble, walk_to_xz};
 use crate::types::{failure, success, StepResult};
 use crate::vec3::{vec3, Vec3};
 
@@ -61,6 +62,18 @@ fn see_fortress(bot: &Bot, dist: i32) -> Option<(i32, i32, i32)> {
     None
 }
 
+/// The nearest block named in `names` anywhere in the LOADED chunks — no line of sight, every
+/// height, ±view-distance (96 blocks at Server B's view-distance 6). Cheap: a palette check per
+/// 16³ section first, a cell scan only inside sections that hold one of the states
+/// (docs/nether-design.md, Idea B — a 192-block-wide fortress search swath from inside a tunnel).
+pub(crate) fn loaded_block_nearest(bot: &Bot, names: &[&str]) -> Option<(i32, i32, i32)> {
+    // Exposed blocks only (a fortress has thousands; a spawner sits in open air) — same honesty
+    // rule as blockSeen, no X-ray through netherrack.
+    // Above the lava sea (y 31) only: harness run 3 picked fortress brick at (-180,16,240) — 15 blocks
+    // BELOW the sea surface — over a reachable fortress at y≈60.
+    bot.find_loaded_nearest(names, (32, 127))
+}
+
 /// Eat to recover health/hunger so natural regen stays on between hits. Minimal
 /// port of the portal cast's `eat_if_hurt` (blazes + nether fire chew health fast).
 async fn eat_if_hurt(bot: &mut Bot<'_>) {
@@ -110,9 +123,43 @@ pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepRes
     // Already see nether brick → NAVIGATE onto it (the pathfinder handles the rough nether
     // terrain the raw sprint can't). Being AT the fortress is what lets kill_blaze's spawner
     // scan reach the spawner; just spotting brick 60 blocks off isn't enough.
-    if let Some(pos) = see_fortress(bot, 64) {
+    if let Some(pos) = see_fortress(bot, 12) {
         let _ = bot.goto_near(pos.0, pos.1, pos.2, 3.0).await;
         return success(format!("reached fortress near {pos:?}"));
+    }
+
+    // The fortress may already sit in the LOADED chunks (±96 blocks, any height) with no line of
+    // sight — cliffs and netherrack hide it from `see_fortress`. Aim the sweep at it and navigate.
+    if let Some(pos) = see_fortress(bot, 64).or_else(|| loaded_block_nearest(bot, &FORTRESS_BLOCKS)) {
+        let p = bot.entity.position;
+        let d = horiz_dist(vec3(pos.0 as f64 + 0.5, pos.1 as f64, pos.2 as f64 + 0.5), p);
+        println!("    [dbg] fortress brick in loaded chunks at {pos:?} ({d:.0} blocks) — navigating");
+        *WANDER_DIR.lock().unwrap() = if pos.0 as f64 >= p.x { 1 } else { -1 };
+        // ENCLOSED approach while far: tunnel toward the brick (dominant axis each step) instead of a
+        // pathfinder walk over open terrain — harness 08:52: one bot fell from the open route into the
+        // lava sea at the SAME spot (-11.5,28,182) three times (ghast knockback over the sea).
+        let deadline = Instant::now() + Duration::from_secs(45);
+        let mut blocked = 0;
+        while Instant::now() < deadline {
+            let q = bot.entity.position;
+            let (ddx, ddz) = (pos.0 as f64 + 0.5 - q.x, pos.2 as f64 + 0.5 - q.z);
+            if (ddx * ddx + ddz * ddz).sqrt() <= 12.0 {
+                break;
+            }
+            let (sx, sz) = if ddx.abs() >= ddz.abs() { (ddx.signum() as i32, 0) } else { (0, ddz.signum() as i32) };
+            if nether_tunnel_step(bot, sx, sz).await {
+                blocked = 0;
+            } else {
+                blocked += 1;
+                if blocked >= 4 {
+                    break; // fall back to the pathfinder below
+                }
+            }
+        }
+        let _ = bot.goto_near(pos.0, pos.1, pos.2, 3.0).await;
+        if see_fortress(bot, 16).is_some() {
+            return success(format!("reached fortress near {pos:?}"));
+        }
     }
 
     // PATHFIND toward the known fortress region if the harness hinted it (FORTRESS_HINT="x y z").
@@ -130,50 +177,33 @@ pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepRes
         }
     }
 
+    // TUNNEL along ±X at the current height (docs/nether-design.md, Idea A) instead of sprinting
+    // across the surface: the sprint walked off ledges into the lava sea (harness run 2: 7 deaths in
+    // 90 s). Each step caps any lava touching the next 1×2 cells with cobble, fills a missing floor,
+    // digs, and steps in; the loaded-chunk scan (Idea B) watches a ±96-block swath the whole time.
     let deadline = Instant::now() + Duration::from_secs(45);
     let dir = { *WANDER_DIR.lock().unwrap() };
     let start = bot.entity.position;
-    bot.set_control_state("forward", true);
-    bot.set_control_state("sprint", true);
-
+    let mut stuck = 0;
     while Instant::now() < deadline {
-        // Reached the fortress? Navigate onto it (see note above).
-        if let Some(pos) = see_fortress(bot, 48) {
-            bot.set_control_state("forward", false);
-            bot.set_control_state("sprint", false);
-            let _ = bot.goto_near(pos.0, pos.1, pos.2, 3.0).await;
-            return success(format!("reached fortress near {pos:?}"));
+        if let Some(pos) = see_fortress(bot, 48).or_else(|| loaded_block_nearest(bot, &FORTRESS_BLOCKS)) {
+            // Never an open-route walk from here (the lava-sea falls): the next call approaches
+            // enclosed via the branch above.
+            return failure(format!("fortress in view at {pos:?} — enclosed approach next"));
         }
-        // Keep heading along X toward the sweep direction.
-        let p = bot.entity.position;
-        bot.look_at(vec3(p.x + dir as f64 * 64.0, p.y, p.z));
-
-        // Footing check: the cell we're about to step onto (one ahead in X, at foot level).
-        let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
-        let fy = feet_y(bot);
-        let ahead = (fx + dir, fy - 1, fz);
-        let ahead_name = name_at(bot, ahead.0, ahead.1, ahead.2);
-        let below_name = name_at(bot, fx, fy - 1, fz);
-
-        if is_lava(&below_name) {
-            // Standing over lava — do NOT sprint deeper in; bail so the step retries alive.
-            bot.set_control_state("forward", false);
-            bot.set_control_state("sprint", false);
-            return failure("wander hit lava underfoot — bailing");
+        if bot.health < 12.0 {
+            eat_if_hurt(bot).await;
         }
-        if (is_lava(&ahead_name) || is_air(&ahead_name)) && count_items(bot, "cobblestone") > 0 {
-            // Bridge the gap: pause, lay cobble on the ahead cell against our own floor, continue.
-            bot.set_control_state("forward", false);
-            if select_item(bot, "cobblestone").await.unwrap_or(false) {
-                let face = if dir > 0 { Face::East } else { Face::West };
-                let _ = bot.place_block(fx, fy - 1, fz, face).await; // places at (fx+dir, fy-1, fz)
-                bot.wait_ticks(3).await.ok();
+        let (fx, fy, fz) = (bot.entity.position.x.floor() as i32, feet_y(bot), bot.entity.position.z.floor() as i32);
+        if !nether_tunnel_step(bot, dir, 0).await {
+            stuck += 1;
+            if stuck >= 4 {
+                *WANDER_DIR.lock().unwrap() = -dir;
+                return failure(format!("nether tunnel stuck at ({fx},{fy},{fz}) dir={dir} — flipping"));
             }
-            bot.set_control_state("forward", true);
+        } else {
+            stuck = 0;
         }
-        bot.wait_ticks(20).await.ok(); // ~1s of travel between scans
-
-        // Swept far enough this direction with no luck → flip the sweep for next time.
         if horiz_dist(bot.entity.position, start) > 180.0 {
             *WANDER_DIR.lock().unwrap() = -dir;
             break;
@@ -185,6 +215,46 @@ pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepRes
         return success(format!("found fortress at {pos:?}"));
     }
     failure("no fortress found this sweep — will keep searching")
+}
+
+/// One 1×2 tunnel step in direction (dx,dz) at the current height: cap any lava touching the next
+/// two cells and their floor with cobble, fill a missing floor, dig, walk in. True if the bot moved.
+async fn nether_tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
+    if bot.health < 12.0 {
+        eat_if_hurt(bot).await;
+    }
+    let p0 = bot.entity.position;
+    let (fx, fy, fz) = (p0.x.floor() as i32, feet_y(bot), p0.z.floor() as i32);
+    let (ax, az) = (fx + dx, fz + dz);
+    let cells = [(ax, fy, az), (ax, fy + 1, az)];
+    for c in cells.iter().copied().chain(std::iter::once((ax, fy - 1, az))) {
+        for (ox, oy, oz) in [(dx, 0, dz), (0, 1, 0), (0, -1, 0), (dz, 0, dx), (-dz, 0, -dx)] {
+            let n = (c.0 + ox, c.1 + oy, c.2 + oz);
+            if is_lava(&name_at(bot, n.0, n.1, n.2)) && count_items(bot, "cobblestone") > 0 {
+                place_cobble(bot, n).await;
+            }
+        }
+    }
+    if !is_solid_name(&name_at(bot, ax, fy - 1, az)) && count_items(bot, "cobblestone") > 0 {
+        place_cobble(bot, (ax, fy - 1, az)).await;
+    }
+    for c in cells {
+        let n = name_at(bot, c.0, c.1, c.2);
+        if !is_air(&n) && !is_lava(&n) {
+            dig_at(bot, c.0, c.1, c.2).await;
+        }
+    }
+    walk_to_xz(bot, ax as f64 + 0.5, az as f64 + 0.5, 0.3, 30).await;
+    let p1 = bot.entity.position;
+    let moved = (p1.x - p0.x).abs() + (p1.z - p0.z).abs() >= 0.5;
+    if !moved {
+        // Why a step failed (harness run 5: a bot sat at (80.7,62,147.7) with an unfloored cave ahead).
+        println!(
+            "    [dbg] nether step ({dx},{dz}) blocked at ({fx},{fy},{fz}): ahead={} head={} floor={} cobble={}",
+            name_at(bot, ax, fy, az), name_at(bot, ax, fy + 1, az), name_at(bot, ax, fy - 1, az), count_items(bot, "cobblestone")
+        );
+    }
+    moved
 }
 
 /// Nearest LIVE blaze (id + position), skipping any in `skip` (ghosts/unreachable ones we've
@@ -223,7 +293,7 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
         eat_if_hurt(bot).await;
 
         // Low health: back off the spawner a few blocks and heal before re-engaging.
-        if bot.health < 6.0 {
+        if bot.health < 12.0 {
             bot.set_control_state("back", true);
             bot.wait_ticks(12).await.ok();
             bot.set_control_state("back", false);
@@ -241,6 +311,13 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
             let mut killed = false;
             let mut lost = 0;
             for _ in 0..40 {
+                // Break off mid-fight when hurt: the health check only ran BETWEEN engagements, and
+                // harness run 3 logged `engagement … end: hp=0 killed=true swings=8` — the blaze died
+                // and so did the bot (fireball impacts; fire resistance only stops the burn).
+                if bot.health < 10.0 {
+                    println!("    [dbg] hp {:.0} mid-fight — breaking off to heal", bot.health);
+                    break;
+                }
                 let Some(pos) = bot.entities.get(&id).map(|e| e.position) else {
                     killed = true;
                     break;
@@ -281,6 +358,20 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
                 // 66ms so all but one hit an i-frame and the blaze never died (sniffed + confirmed).
                 bot.wait_real_ms(650).await.ok();
             }
+            // Combat trace (harness run 2 died beside the spawner with fire resistance and no hp log).
+            {
+                let p = bot.entity.position;
+                let mut near: Vec<String> = bot
+                    .entities
+                    .values()
+                    .filter(|e| ((e.position.x - p.x).powi(2) + (e.position.y - p.y).powi(2) + (e.position.z - p.z).powi(2)).sqrt() < 16.0)
+                    .filter_map(|e| e.entity_type.and_then(|t| bot.registry.entities_by_id.get(&t)).map(|d| d.name.clone()))
+                    .filter(|n| n != "item" && n != "experience_orb" && n != "player")
+                    .collect();
+                near.sort();
+                near.dedup();
+                println!("    [dbg] engagement {id} end: hp={:.0} killed={killed} swings={in_reach_swings} near={near:?}", bot.health);
+            }
             if killed {
                 println!("    ✔ blaze {id} killed ({in_reach_swings} hits) — rods now {}", count_items(bot, "blaze_rod"));
             } else if in_reach_swings >= 25 {
@@ -294,10 +385,63 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
             continue;
         }
 
-        // No blaze in view — HOLD POSITION and wait for the spawner to produce more. Do NOT
-        // wander: raw-walking "to explore" marched the bot off the fortress ledge into the lava/
-        // void (died repeatedly, losing every fight). Standing still at the spawner is correct —
-        // blazes come to us.
+        // No blaze in view. If the spawner is known (loaded-chunk scan; fortress spawners are all
+        // blaze spawners) and we're not at it yet, PATHFIND there — the spawner is where blazes
+        // appear, camping elsewhere on the fortress waits forever.
+        if let Some(sp) = loaded_block_nearest(bot, &["spawner"]) {
+            let d = horiz_dist(vec3(sp.0 as f64 + 0.5, sp.1 as f64, sp.2 as f64 + 0.5), bot.entity.position);
+            if d > 6.0 {
+                println!("    [dbg] no blaze in view — spawner at {sp:?} ({d:.0} away), approaching");
+                let _ = bot.goto_near(sp.0, sp.1, sp.2, 4.0).await;
+                // Pathfinder couldn't route through the fortress (harness run 4: two bots re-logged
+                // "spawner … 50 / 91 away, approaching" for minutes without closing in) → dig toward
+                // it with the enclosed tunnel step (dominant axis per step), 10 steps per pass.
+                let q = bot.entity.position;
+                let (ddx, ddz) = (sp.0 as f64 + 0.5 - q.x, sp.2 as f64 + 0.5 - q.z);
+                if (ddx * ddx + ddz * ddz).sqrt() > 6.0 {
+                    for _ in 0..10 {
+                        let q = bot.entity.position;
+                        let (ddx, ddz) = (sp.0 as f64 + 0.5 - q.x, sp.2 as f64 + 0.5 - q.z);
+                        if (ddx * ddx + ddz * ddz).sqrt() <= 6.0 {
+                            break;
+                        }
+                        let (sx, sz) = if ddx.abs() >= ddz.abs() { (ddx.signum() as i32, 0) } else { (0, ddz.signum() as i32) };
+                        if !nether_tunnel_step(bot, sx, sz).await {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+        // No spawner in view either: EXPLORE ALONG THE FORTRESS — walk to the farthest loaded
+        // fortress brick within ~60 blocks, which loads new chunks further along the structure.
+        // Holding still at the first brick seen waited forever (harness 09:00: two bots idle at
+        // x≈4 while the spawner sat at x=129, beyond the 96-block view).
+        if loaded_block_nearest(bot, &["spawner"]).is_none() {
+            let p = bot.entity.position;
+            let far = bot
+                .find_blocks("nether_bricks", 64, 256)
+                .into_iter()
+                .filter(|b| {
+                    let d = ((b.0 as f64 + 0.5 - p.x).powi(2) + (b.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
+                    // Walkway height only: pillars run down into the lava sea (run 3 picked (57,29,177)).
+                    (30.0..=60.0).contains(&d) && (b.1 - p.y.floor() as i32).abs() <= 3
+                })
+                .max_by(|a, b| {
+                    let da = (a.0 as f64 - p.x).powi(2) + (a.2 as f64 - p.z).powi(2);
+                    let db = (b.0 as f64 - p.x).powi(2) + (b.2 as f64 - p.z).powi(2);
+                    da.total_cmp(&db)
+                });
+            if let Some(b) = far {
+                println!("    [dbg] no blaze, no spawner in view — exploring the fortress toward {b:?}");
+                let _ = bot.goto_near(b.0, b.1 + 1, b.2, 3.0).await;
+                continue;
+            }
+        }
+        // Otherwise HOLD POSITION and wait for the spawner to produce more. Do NOT wander:
+        // raw-walking "to explore" marched the bot off the fortress ledge into the lava/void (died
+        // repeatedly, losing every fight). Standing still at the spawner is correct — blazes come to us.
         bot.set_control_state("forward", false);
         bot.set_control_state("sprint", false);
         bot.wait_ticks(20).await.ok();

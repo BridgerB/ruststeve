@@ -2,7 +2,7 @@
 //! generic crafting, and crafting-table placement. Port of the slice of steve's
 //! `lib/bot-utils.ts` the early phases use.
 
-use crate::bot::{Bot, DriveStep, Face};
+use crate::bot::{Bot, Face};
 use crate::path::{get_path_to, GoalNear, PathStatus};
 
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};
@@ -11,7 +11,11 @@ use crate::types::{failure, success, StepResult};
 /// Is the bot's head submerged in water (i.e. it's drowning if it stays)?
 pub fn head_in_water(bot: &Bot) -> bool {
     let p = bot.entity.position;
-    let (x, hy, z) = (p.x.floor() as i32, (p.y + 1.0).floor() as i32, p.z.floor() as i32);
+    // EYE height (vanilla eye-in-fluid; the SDK watchdog's `head_submerged` uses the same), not feet+1.
+    // A bot bobbing at the sea surface floats at feet ≈ surface−1.03, so feet+1 is a water block while
+    // the eye is in air. Counting that as submerged looped `leave_water` for 3 h in race i5 (rust-race-001,
+    // mine_stone 0/16 ×167).
+    let (x, hy, z) = (p.x.floor() as i32, (p.y + 1.62).floor() as i32, p.z.floor() as i32);
     bot.block_at(x, hy, z).map(|b| b.name.contains("water")).unwrap_or(false)
 }
 
@@ -41,11 +45,17 @@ fn water_exit_dir(bot: &Bot, r: i32) -> Option<(f64, f64)> {
                 continue;
             }
             let (x, z) = (bx + dx, bz + dz);
-            let head_air = bot
-                .block_at(x, hy, z)
-                .map(|b| b.name == "air" || b.name == "cave_air")
-                .unwrap_or(false);
-            if !head_air {
+            // LAND within climbing reach: a solid top at feet or feet+1 level with air above it
+            // (the jump-out impulse lifts the bot onto it). The old "air at head height" test
+            // never matched a bank whose top is level with the water surface (head-height block
+            // = the rim itself), so it swam toward an arbitrary far column (cycle-2 water gym).
+            let fy = hy - 1;
+            let land = (fy..=fy + 1).any(|y| {
+                let top = bot.block_at(x, y, z).map(|b| is_standable(&b.name)).unwrap_or(false);
+                let above = name_at(bot, x, y + 1, z).is_some_and(|n| n == "air" || n == "cave_air");
+                top && above
+            });
+            if !land {
                 continue;
             }
             let d2 = dx * dx + dz * dz;
@@ -55,6 +65,132 @@ fn water_exit_dir(bot: &Bot, r: i32) -> Option<(f64, f64)> {
         }
     }
     best.map(|((dx, dz), _)| (dx as f64, dz as f64))
+}
+
+/// Block name with plain AIR reported as "air". `Bot::block_at` returns None for state 0, so a
+/// test like `block_at(..).map(|b| b.name == "air")` never sees air, only cave_air (the first
+/// `air_route` found no exit from a pool next to an open air pocket). None = chunk not loaded.
+fn name_at(bot: &Bot, x: i32, y: i32, z: i32) -> Option<String> {
+    match bot.world.get_block_state_id(crate::vec3::vec3(x as f64, y as f64, z as f64))? {
+        0 => Some("air".into()),
+        _ => bot.block_at(x, y, z).map(|b| b.name.to_string()),
+    }
+}
+
+/// Can a swimming body occupy this block (water, air, or soft underwater plants)?
+fn swimmable(name: &str) -> bool {
+    name == "air"
+        || name == "cave_air"
+        || name.contains("water")
+        || matches!(name, "seagrass" | "tall_seagrass" | "kelp" | "kelp_plant" | "bubble_column")
+}
+
+/// Shortest swim to BREATHABLE air from a submerged position: BFS over feet cells for a
+/// 2-tall body (feet + head both swimmable) through water, ending at the first cell whose head
+/// block is air. Returns the path of feet cells, start first; `None` if no air within `max_len`
+/// moves. In an open lake the route is straight up (what the jump did anyway); in a ROOFED
+/// aquifer it is the sideways/downward way into the neighbouring air pocket. Rising there is the
+/// trap: race i4 rust-race-003 (2026-10-02 06:09) floated up a water column to a stone roof, had
+/// no pickaxe, hand-dug the roof underwater and drowned — air was one block west and one down.
+pub fn air_route(bot: &Bot, max_len: usize) -> Option<Vec<(i32, i32, i32)>> {
+    let p = bot.entity.position;
+    let start = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+    let name = |x, y, z| name_at(bot, x, y, z);
+    let body_ok = |(x, y, z): (i32, i32, i32)| {
+        name(x, y, z).is_some_and(|n| swimmable(&n)) && name(x, y + 1, z).is_some_and(|n| swimmable(&n))
+    };
+    // Breathable = air at head height with no WATER directly above it. Air under water is physically
+    // impossible (water flows down into it), so it is a ghost: a cell the bot dug and predicted as air
+    // after the server refilled it. Race i6 rust-race-001 chased one (`col=[water, air, water, water,
+    // water]`, route → the "air" at y 49) until it drowned at y 47.
+    let breathable = |(x, y, z): (i32, i32, i32)| {
+        name(x, y + 1, z).is_some_and(|n| n == "air" || n == "cave_air") && !name(x, y + 2, z).is_some_and(|n| n.contains("water"))
+    };
+    // Cells beside a wall cost extra: a diving bot that drifts into a wall gets vanilla's 0.3
+    // hop-out impulse and is thrown back up (water_roofed: kicked at the same wall every dive).
+    // So prefer descending a free column and crossing at the bottom.
+    let hugs_wall = |(x, y, z): (i32, i32, i32)| {
+        [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|(dx, dz)| (0..=1).any(|dy| !name(x + dx, y + dy, z + dz).is_some_and(|n| swimmable(&n))))
+    };
+    use std::cmp::Reverse;
+    let mut prev: std::collections::HashMap<(i32, i32, i32), (i32, i32, i32)> = std::collections::HashMap::new();
+    let mut cost: std::collections::HashMap<(i32, i32, i32), u32> = std::collections::HashMap::new();
+    let mut heap = std::collections::BinaryHeap::from([Reverse((0u32, 0usize, start))]);
+    prev.insert(start, start);
+    cost.insert(start, 0);
+    while let Some(Reverse((c0, d, cell))) = heap.pop() {
+        if cost.get(&cell).is_some_and(|&c| c < c0) {
+            continue;
+        }
+        if breathable(cell) {
+            let mut path = vec![cell];
+            let mut c = cell;
+            while c != start {
+                c = prev[&c];
+                path.push(c);
+            }
+            path.reverse();
+            return Some(path);
+        }
+        if d >= max_len || cost.len() > 4000 {
+            continue;
+        }
+        let (x, y, z) = cell;
+        for n in [(x + 1, y, z), (x - 1, y, z), (x, y, z + 1), (x, y, z - 1), (x, y + 1, z), (x, y - 1, z)] {
+            if !body_ok(n) {
+                continue;
+            }
+            let c = c0 + 1 + if hugs_wall(n) && !breathable(n) { 3 } else { 0 };
+            if cost.get(&n).is_none_or(|&old| c < old) {
+                cost.insert(n, c);
+                prev.insert(n, cell);
+                heap.push(Reverse((c, d + 1, n)));
+            }
+        }
+    }
+    None
+}
+
+/// Swim one leg of an `air_route` toward `next` (a feet cell): face it, hold forward while it
+/// is horizontally away, jump only to rise (releasing jump lets the bot sink for a downward leg).
+async fn swim_toward(bot: &mut Bot<'_>, next: (i32, i32, i32), t: &mut u32) -> bool {
+    let (tx, ty, tz) = (next.0 as f64 + 0.5, next.1 as f64, next.2 as f64 + 0.5);
+    {
+        let (p, v) = (bot.entity.position, bot.entity.velocity);
+        eprintln!("    SWIM ({:.2},{:.2},{:.2}) v=({:.3},{:.3},{:.3}) ground={} → {:?}", p.x, p.y, p.z, v.x, v.y, v.z, bot.entity.on_ground, next);
+    }
+    for _ in 0..4 {
+        let p = bot.entity.position;
+        bot.look_at(crate::vec3::vec3(tx, ty + 0.9, tz));
+        // Loose centring: a 0.1 threshold pressed forward at 0.15 off-centre and water inertia coasted
+        // the bot into the wall (vanilla's 0.3 hop-out impulse then threw it back up). Wall-hugging
+        // is avoided in `air_route` instead.
+        // RISING needs the box INSIDE the column: half-width 0.3, so the centre must be within 0.2 of
+        // the column centre or the box overlaps the neighbour column and catches ITS ceiling. Verified
+        // by RCON on a live frozen bot (regression 4, rust-gym-003): server Pos y exactly 71.2 (head top
+        // 73.0), z 3721.299 → box overlapped z 3720 by 0.001, and (12598,73,3720) was solid, so the bot
+        // was jammed under the neighbour's ceiling with jump held until it drowned. Same at the cave_iron
+        // drowning (x 12604.28 → 0.02 into x 12603). Likely the chronic aquifer/cave timeouts too.
+        let rising = ty > p.y + 0.05;
+        let far = ((tx - p.x).powi(2) + (tz - p.z).powi(2)).sqrt() > if rising { 0.15 } else { 0.25 };
+        bot.clear_control_states();
+        bot.set_control_state("forward", far);
+        bot.set_control_state("jump", ty > p.y + 0.05);
+        bot.set_control_state("sneak", ty < p.y - 0.5);
+        bot.escape_diving = ty < p.y - 0.05;
+        // A real game tick: `drive_tick` returns per PACKET, so a 4-drive leg lasted milliseconds and
+        // the bot never left the roof it was pinned to (water_roofed batch 3: same position ×20).
+        if bot.wait_ticks(1).await.is_err() {
+            bot.escape_diving = false;
+            bot.clear_control_states();
+            return false;
+        }
+        *t += 1;
+    }
+    bot.escape_diving = false;
+    true
 }
 
 /// Swim up/out to air before doing anything else. Returns true once the head is
@@ -109,13 +245,71 @@ async fn pillar_step(bot: &mut Bot<'_>, t: &mut u32) -> bool {
 /// it and step up — a guaranteed exit from any walled pool. Returns true once fully out
 /// (neither head nor feet submerged).
 pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
+    // The escape's own digs (cap, bank stair) must run while the breath alarm blocks task digs.
+    bot.escaping = true;
+    let out = leave_water_inner(bot, ticks).await;
+    bot.escaping = false;
+    out
+}
+
+async fn leave_water_inner(bot: &mut Bot<'_>, ticks: u32) -> bool {
     let mut t = 0;
     let mut best_y = bot.entity.position.y;
     let mut no_rise = 0u32;
+    let mut hop_skips = 0u32; // hoppable-ledge stair digs skipped this escape
+    let mut stall_legs = 0u32; // consecutive air_route legs with no movement at all
+    {
+        // One line per escape: what the bot's OWN world view says (the server's can differ).
+        let p = bot.entity.position;
+        let (x, y, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        let col: Vec<String> = (-1..=3).map(|dy| name_at(bot, x, y + dy, z).unwrap_or("?".into())).collect();
+        let route = air_route(bot, 12).map(|r| format!("{} moves → {:?}", r.len() - 1, r.last().unwrap())).unwrap_or("none".into());
+        eprintln!("    ESCAPE at ({:.1},{:.1},{:.1}) head_in_water={} col[-1..+3]={:?} route={}", p.x, p.y, p.z, head_in_water(bot), col, route);
+    }
     while t < ticks {
-        if !head_in_water(bot) && !feet_in_water(bot) {
+        // Out = head in air and either dry feet or STANDING (a shallow flowing layer over a floor,
+        // e.g. the run-off in the air pocket an `air_route` leads to). Swimming on from there took
+        // the water_roofed bot back out through the opening into the roofed pool.
+        // Wading = on the ground AND solid directly below the feet. A bot standing in the 1×1 hole
+        // it dug through a cap has water below it, and must still climb onto the cap (water_cave).
+        let wading = bot.entity.on_ground && {
+            let p = bot.entity.position;
+            name_at(bot, p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32).is_some_and(|n| is_standable(&n))
+        };
+        if !head_in_water(bot) && (!feet_in_water(bot) || wading) {
             bot.clear_control_states();
             return true;
+        }
+        // A short swim to breathable air beats every other move: replan each leg (the body drifts),
+        // and only fall through to the cap dig / pillar when no air is within reach.
+        if head_in_water(bot) {
+            if let Some(path) = air_route(bot, 12) {
+                if path.len() > 1 {
+                    let before = bot.entity.position;
+                    if !swim_toward(bot, path[1], &mut t).await {
+                        return false;
+                    }
+                    // STALL is logged only. A place-then-dig re-sync of the route cell was tried and
+                    // reverted: in regression 4 the frozen bot logged no server corrections and stayed
+                    // frozen at (12598.53, 71.20, 3721.30) after the re-sync, so it isn't a server ghost.
+                    // The freeze is local (physics/collision); see CHANGES "frozen swim".
+                    let q = bot.entity.position;
+                    if ((q.x - before.x).powi(2) + (q.y - before.y).powi(2) + (q.z - before.z).powi(2)).sqrt() < 0.05 {
+                        stall_legs += 1;
+                    } else {
+                        stall_legs = 0;
+                    }
+                    if stall_legs == 10 {
+                        let (x, y, z) = (q.x.floor() as i32, q.y.floor() as i32, q.z.floor() as i32);
+                        let around: Vec<String> = [(0, -1, 0), (0, 0, 0), (0, 1, 0), (0, 2, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
+                            .iter()
+                            .map(|&(dx, dy, dz)| format!("{dx},{dy},{dz}={}", name_at(bot, x + dx, y + dy, z + dz).unwrap_or("?".into())))
+                            .collect();
+                        eprintln!("    ESCAPE stall — frozen 10 legs at ({:.3},{:.3},{:.3}) v={:?} ground={} jump={} around [{}]", q.x, q.y, q.z, bot.entity.velocity, bot.entity.on_ground, bot.control_state.jump, around.join(" "));
+                    }
+                    continue;
+                }
+            }
         }
         // Solid ceiling overhead → dig straight up through it (a flooded stairwell's roof, or
         // a cap we've pillared up into: we bob under it and drown otherwise). Check the head
@@ -126,7 +320,19 @@ pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
         let mut dug_cap = false;
         for cap_y in [feet_y + 1, feet_y + 2] {
             if bot.block_at(x, cap_y, z).map(|b| is_standable(&b.name)).unwrap_or(false) {
+                eprintln!("    ESCAPE cap dig ({x},{cap_y},{z}) = {:?}", bot.block_at(x, cap_y, z).map(|b| b.name.to_string()));
                 bot.clear_control_states();
+                // Best pickaxe in hand first: floating underwater digs are ~25× slower, so stone by
+                // hand is minutes (cycle-2 water_cave: never escaped a capped pool in 120 s).
+                // Verified: one cycle-2 trial dug the cap holding COBBLESTONE (the pillar step had
+                // selected it; ensure_pickaxe's switch hadn't landed) → 2+ min per dig, never broke.
+                for _ in 0..3 {
+                    let _ = crate::tasks::mining::ensure_pickaxe(bot).await;
+                    bot.wait_ticks(3).await.ok();
+                    if bot.held_item().map(|i| i.name.ends_with("_pickaxe")).unwrap_or(false) {
+                        break;
+                    }
+                }
                 let _ = bot.dig(x, cap_y, z).await;
                 t += 4;
                 dug_cap = true;
@@ -151,7 +357,7 @@ pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
                     // the surface phase can take over.
                     bot.set_control_state("jump", true);
                     for _ in 0..6 {
-                        let _ = bot.drive_tick().await;
+                        bot.wait_ticks(1).await.ok();
                         t += 1;
                     }
                     bot.clear_control_states();
@@ -160,7 +366,7 @@ pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
                 // Settle onto the floor (or catch a shallow buoyant rise to the surface).
                 bot.set_control_state("jump", true);
                 for _ in 0..6 {
-                    if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
+                    if bot.wait_ticks(1).await.is_err() {
                         bot.clear_control_states();
                         return false;
                     }
@@ -176,13 +382,23 @@ pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
                 .or_else(|| water_exit_dir(bot, 14))
                 .or_else(|| water_exit_dir(bot, 24))
                 .or_else(|| water_exit_dir(bot, 40));
-            let (dx, dz) = dir.unwrap_or((1.0, 0.0));
+            // UNIT vector: `water_exit_dir` returns a cell offset (e.g. (-7,0)), and the bank-stair dig
+            // below aims at `p + d*0.8`. Unnormalised it dug the lake rim 5.6 blocks away, floating, by
+            // hand: one dig blocked ~25 s (water_lake regression once `name_at` let the scan see air;
+            // until then it only ever returned None → the (1,0) fallback).
+            let (dx, dz) = dir
+                .map(|(x, z)| {
+                    let len = (x * x + z * z).sqrt();
+                    (x / len, z / len)
+                })
+                .unwrap_or((1.0, 0.0));
             let p = bot.entity.position;
+            eprintln!("    BANK ({:.2},{:.2},{:.2}) ground={} dir=({dx:.2},{dz:.2}) found={}", p.x, p.y, p.z, bot.entity.on_ground, dir.is_some());
             bot.look_at(crate::vec3::vec3(p.x + dx * 4.0, p.y + 0.3, p.z + dz * 4.0));
             bot.set_control_state("jump", true);
             bot.set_control_state("forward", true);
             for _ in 0..8 {
-                if bot.drive_tick().await.map(|s| matches!(s, DriveStep::Disconnected)).unwrap_or(true) {
+                if bot.wait_ticks(1).await.is_err() {
                     bot.clear_control_states();
                     return !head_in_water(bot) && !feet_in_water(bot);
                 }
@@ -202,6 +418,22 @@ pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
             } {
                 let (ax, az) = ((p.x + dx * 0.8).floor() as i32, (p.z + dz * 0.8).floor() as i32);
                 let ay = p.y.floor() as i32;
+                // A ledge ≤ 1 above the feet with air over it is a HOP, not a stair: digging it only
+                // widens the hole (water_cave: the bot dug the cap ledge it should climb onto, ~100 s
+                // out). Dig only a bank too tall to hop, and with the best pickaxe in hand.
+                let solid = |y: i32| name_at(bot, ax, y, az).is_some_and(|n| is_standable(&n));
+                // …but only 3 times: a bot pressed against the wall of its own flooded 1×1 shaft never
+                // got the hop impulse, and with the dig skipped it bobbed in place for 15+ min (batch 7
+                // rust-gym-005 at x 121351.3, BANK dir (−1,0) every cycle). Then dig it anyway.
+                // Only with a pickaxe: by hand the dig blocks for minutes (water_roofed, empty kit: 18 s →
+                // 90 s, "NO PICKAXE — digging by hand"). Without one, keep trying the hop.
+                let has_pick = bot.inventory.slots.iter().flatten().any(|i| i.name.ends_with("_pickaxe"));
+                if !(solid(ay + 1) && solid(ay + 2)) && (hop_skips < 3 || !has_pick) {
+                    hop_skips += 1;
+                    no_rise = 0;
+                    continue;
+                }
+                let _ = crate::tasks::mining::ensure_pickaxe(bot).await;
                 for dy in [1, 0] {
                     if bot.block_at(ax, ay + dy, az).map(|b| is_standable(&b.name)).unwrap_or(false) {
                         let _ = bot.dig(ax, ay + dy, az).await;
@@ -433,7 +665,21 @@ pub async fn craft_item(
     };
     let id = def.id;
     let recipes = bot.recipes_for(id, Some(1), table.is_some());
-    let Some(recipe) = recipes.into_iter().next() else {
+    // Pick the first recipe the inventory can actually pay for. `.next()` took whichever came
+    // first: in the cycle-2 surface race (dark-oak region) that was BAMBOO → stick, and all
+    // three bots failed `missing crafting ingredient id=270` ×20 holding 41 planks, then bailed.
+    let have = |rid: i32, choices: &Option<Vec<i32>>| -> i32 {
+        bot.inventory
+            .slots
+            .iter()
+            .flatten()
+            .filter(|i| i.type_id == rid || choices.as_ref().is_some_and(|c| c.contains(&i.type_id)))
+            .map(|i| i.count)
+            .sum()
+    };
+    let affordable = |r: &crate::recipe::Recipe| r.delta.iter().filter(|d| d.count < 0).all(|d| have(d.id, &d.choices) >= -d.count);
+    let pick = recipes.iter().position(|r| affordable(r)).unwrap_or(0);
+    let Some(recipe) = recipes.into_iter().nth(pick) else {
         return failure(format!("no recipe for {name}"));
     };
     if recipe.requires_table && table.is_none() {
@@ -591,12 +837,19 @@ pub async fn get_crafting_table(
                 println!("    table: out of wood — gathering a little before crafting a table");
                 let _ = crate::tasks::gather_wood::gather_wood(bot, 2, mem).await;
             }
-            for log in LOG_TYPES {
-                if count_items(bot, log) > 0 {
-                    let plank_name = log.replace("_log", "_planks");
-                    let _ = craft_item(bot, &plank_name, 4, None, mem).await;
+            // Convert until we REALLY hold 4 planks (re-counted after the inventory settles), up to 4
+            // tries. One conversion, once, deadlocked race i5 bot 5 for 182 min: the 2×2 log→plank
+            // craft often produces nothing (`CRAFT 37: result never appeared in slot 0`), the bot
+            // stayed one short of the table's 4 planks, and the step's stick craft spent 2 more each cycle.
+            for _ in 0..4 {
+                let have: i32 = bot.inventory.slots.iter().flatten().filter(|i| i.name.ends_with("_planks")).map(|i| i.count).sum();
+                if have >= 4 {
                     break;
                 }
+                let Some(log) = LOG_TYPES.iter().find(|l| count_items(bot, l) > 0) else { break };
+                let plank_name = log.replace("_log", "_planks");
+                let _ = craft_item(bot, &plank_name, 4, None, mem).await;
+                let _ = bot.wait_for_inventory_ack(std::time::Duration::from_millis(700)).await;
             }
         }
         let _ = craft_item(bot, "crafting_table", 1, None, mem).await;
