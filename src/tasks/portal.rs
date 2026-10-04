@@ -1441,6 +1441,9 @@ pub(crate) fn set_frame_anchor(a: (i32, i32, i32)) {
 
 pub(crate) fn clear_frame_anchor() {
     *FRAME_ANCHOR.lock().unwrap() = None;
+    // A deliberate release (portal lit, new gym trial) is not a re-site after death: without this
+    // the next frame's first call counted the previous frame's deaths (arm B, gym-005 trial 2).
+    HAD_ANCHOR.store(false, std::sync::atomic::Ordering::Relaxed);
     let _ = std::fs::remove_file(frame_anchor_path());
 }
 
