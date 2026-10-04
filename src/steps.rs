@@ -335,6 +335,31 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
             return Some(step);
         }
     }
+    // EARLY IRON PICKAXE (cycle 5, iron_from_surface): the furthest-runnable picker keeps a bot on
+    // mine_iron until the full 22-iron quota, because smelt_iron needs a furnace and craft_furnace
+    // sits below mine_iron. So every block of the quota was strip-mined with stone pickaxes that wore
+    // out and were re-crafted. Baseline 1/10: a bot with 7 raw iron at 1,200 s and no iron pickaxe.
+    // With 3+ iron and no iron pickaxe, make one first (furnace → coal → smelt → craft), then mine on.
+    if state.equipment.pickaxe_tier().rank() < 3 && state.inventory.iron_ore + state.inventory.iron_ingots >= 3 {
+        // smelt_iron places the furnace (has_furnace = furnace ITEM in inventory, so it reads false
+        // after the first smelt) and reuses a placed one within 24, or crafts its own.
+        let id = if state.inventory.iron_ingots >= 3 {
+            "craft_iron_pickaxe"
+        } else if state.inventory.coal < 1 {
+            "mine_coal"
+        } else if state.equipment.has_furnace {
+            "smelt_iron"
+        } else if state.inventory.cobblestone >= 8 {
+            "craft_furnace"
+        } else {
+            ""
+        };
+        if let Some(step) = STEPS.iter().find(|st| st.id == id) {
+            if (step.can_execute)(state) {
+                return Some(step);
+            }
+        }
+    }
     } // end overworld-only recovery guards
     // DIMENSION-AWARE: in the nether only the post-portal steps (find_fortress onward) are
     // runnable. The precondition drop-back below sent cycle-1's only nether bot (rust-race-004)
