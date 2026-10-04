@@ -53,7 +53,11 @@ fn water_exit_dir(bot: &Bot, r: i32) -> Option<(f64, f64)> {
             let land = (fy..=fy + 1).any(|y| {
                 let top = bot.block_at(x, y, z).map(|b| is_standable(&b.name)).unwrap_or(false);
                 let above = name_at(bot, x, y + 1, z).is_some_and(|n| n == "air" || n == "cave_air");
-                top && above
+                // Not floating on the water: a lily pad on the lake surface read as "land" 1–4 blocks
+                // off, so every escape swam to it and stalled there instead of the shore 28–50 blocks
+                // out (water_wall_i8: lily_pad at (25081,63,583); race i8 rust-race-002, 3 relaunches).
+                let afloat = name_at(bot, x, y - 1, z).is_some_and(|n| n == "water");
+                top && above && !afloat
             });
             if !land {
                 continue;
