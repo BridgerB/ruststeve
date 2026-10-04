@@ -78,6 +78,13 @@ fn step_for_attempt(step: &GymStep, bot: &Bot) -> &'static str {
     id
 }
 
+/// GYM_PARITY=1: run without the cycle-5 trial rules (same-failure 4× cut, respawn tp-back) so an arm
+/// built on this tree is measured under the same harness as an arm built on an older tree (6b-head).
+/// Respawns far from the landing are still counted.
+fn parity() -> bool {
+    std::env::var("GYM_PARITY").ok().as_deref() == Some("1")
+}
+
 fn passes(step: &GymStep, bot: &Bot, s: &GameState) -> bool {
     if let Some(f) = step.custom_pass {
         return f(bot, s);
@@ -487,7 +494,10 @@ async fn run_one_trial(
             // (Fixed-arena steps always went back to the pad; this generalises it.)
             let p = bot.entity.position;
             let d = ((p.x - gx as f64).powi(2) + (p.z - gz as f64).powi(2)).sqrt();
-            if d > 32.0 || matches!(step.slug, "reach_lava" | "to_nether") {
+            if d > 32.0 && parity() {
+                harness_events += 1;
+                println!("[gym:{}] HARNESS respawn {d:.0} blocks from the landing — parity mode, not moved", step.slug);
+            } else if d > 32.0 || matches!(step.slug, "reach_lava" | "to_nether") {
                 if d > 32.0 {
                     harness_events += 1;
                     println!("[gym:{}] HARNESS respawn {d:.0} blocks from the landing ({:.0},{:.0},{:.0}) — tp back", step.slug, p.x, p.y, p.z);
@@ -544,7 +554,7 @@ async fn run_one_trial(
                         same_fail = 0;
                     }
                     last_msg = r.message;
-                    if same_fail >= 4 {
+                    if same_fail >= 4 && !parity() {
                         last_msg = format!("same failure 4× in this trial: {last_msg}");
                         break;
                     }
