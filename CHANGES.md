@@ -1201,5 +1201,5 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Water, 3 of 5 (the dominant wall). rust-race-004 and -005 stood in water on gather_wood from ~10 min to the end, with 0 logs, ~14,600 breath pre-emption jumps each and 2–3 relaunches each; placement put them on land and gather_wood walked them into a lake. rust-race-001 ended swimming on craft_bucket after its relaunches.
   - Portal blind tunnel, 1 of 5: rust-race-003 reached build_nether_portal with 15 ingots but tunnelled ~2,500 blocks along y −60 ("no lava yet, tunnelling +Z") for its last ~2 h.
   - Tool loop at depth, 1 of 5: rust-race-002 alternated craft_planks / craft_sticks / build_nether_portal at y −53 for its last ~1.5 h (no wood at depth to remake a tool).
-- Race integrity: 9 relaunches (001 ×2, 003 ×1, 004 ×2, 005 ×3), 0 watchdog kills. Step cadence (race.db tick gaps): median 43–167 s per bot.
+- Race integrity: 8 relaunches (001 ×2, 003 ×1, 004 ×2, 005 ×3), 0 watchdog kills. Step cadence (race.db tick gaps): median 43–167 s per bot.
 - Harness: 2 `harness_respawn_far` events (001, 002) tp'd portal bots from their own spawnpoint near the mold back to the lane surface. Fixed in race-b.sh after the race (a far respawn must also be >32 from the last position before the death).
