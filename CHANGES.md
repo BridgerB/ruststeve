@@ -1211,3 +1211,7 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Stone pickaxes then wear out in strip mining and get re-crafted (slow).
   - One trial (rust-gym-004) looped `table: could not place a server-confirmed table` **1,944 times**: `place_crafting_table` took only state 0 as an empty cell, and cave_air is 15293, so in a carved cave no cell qualified.
 - **One build (2885487, target-table, BUILD race-table):** table placement accepts any *air, needs a non-fluid support, and retries once after a 3-block move; the A* search-time budget is gated off (`ASTAR_SEARCH_BUDGET`, default off), so the build differs from the baseline only by the table fix. 10 trials running (region 65).
+- **Correction to the failure anatomy:** `NO PICKAXE …` is a rate-limited (60 s) cast_debug line, so as a trial's last line it is stale, not the cause.
+  - The real cause: the furthest-runnable picker keeps the bot on mine_iron until the full 22-iron quota, because smelt needs a furnace and craft_furnace (priority 9) ranks below mine_iron (11). So no iron pickaxe is made until all 22 are mined with wearing stone pickaxes. Example: table-fix rust-gym-003 had 7 raw iron at 1,200 s and never smelted.
+  - The table-fix batch (0/3 so far, all this mode) was stopped (rows 828–832 aborted) and the build re-aimed.
+- **Build (b08ffcd, target-iron, BUILD race-iron):** with ≥3 iron and no iron pickaxe, the picker runs mine_coal → smelt_iron / craft_furnace → craft_iron_pickaxe first, then mining resumes; includes the table fix. 10 trials vs the 1/10 baseline.
