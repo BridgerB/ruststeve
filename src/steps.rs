@@ -340,7 +340,32 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
     // sits below mine_iron. So every block of the quota was strip-mined with stone pickaxes that wore
     // out and were re-crafted. Baseline 1/10: a bot with 7 raw iron at 1,200 s and no iron pickaxe.
     // With 3+ iron and no iron pickaxe, make one first (furnace → coal → smelt → craft), then mine on.
-    if state.equipment.pickaxe_tier().rank() < 3 && state.inventory.iron_ore + state.inventory.iron_ingots >= 3 {
+    // Bounded: if the rule has been choosing for 300 s without reaching 3 ingots (a craft that keeps
+    // failing: early-iron rust-gym-003 picked craft_furnace 420× on "missing crafting ingredient" while
+    // holding 64 cobblestone), it stands down for 600 s and the old order resumes.
+    static EARLY: std::sync::Mutex<Option<(std::time::Instant, Option<std::time::Instant>)>> = std::sync::Mutex::new(None);
+    let early_ok = {
+        let mut e = EARLY.lock().unwrap();
+        let now = std::time::Instant::now();
+        if state.equipment.pickaxe_tier().rank() >= 3 {
+            *e = None; // done: a later broken pickaxe starts a fresh 300 s window
+        }
+        match *e {
+            Some((_, Some(off))) if now.duration_since(off).as_secs() < 600 => false,
+            Some((_, Some(_))) => {
+                *e = None;
+                true
+            }
+            Some((start, None)) if now.duration_since(start).as_secs() > 300 && state.inventory.iron_ingots < 3 => {
+                *e = Some((start, Some(now)));
+                println!("early iron pickaxe: no ingots after 300 s — standing down for 600 s");
+                false
+            }
+            _ => true,
+        }
+    };
+    if early_ok && state.equipment.pickaxe_tier().rank() < 3 && state.inventory.iron_ore + state.inventory.iron_ingots >= 3 {
+        EARLY.lock().unwrap().get_or_insert((std::time::Instant::now(), None));
         // smelt_iron places the furnace (has_furnace = furnace ITEM in inventory, so it reads false
         // after the first smelt) and reuses a placed one within 24, or crafts its own.
         let id = if state.inventory.iron_ingots >= 3 {
