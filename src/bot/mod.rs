@@ -18,7 +18,7 @@ use crate::block::{state_id_to_block, BlockInfo};
 use crate::chunk::{ChunkColumn, ChunkColumnOptions, GLOBAL_BITS_PER_BIOME, GLOBAL_BITS_PER_BLOCK};
 use crate::entity::Entity;
 use crate::item::{from_notch, Item};
-use crate::path::{get_path_to, Goal, GoalNear, GoalNearXZ, Move, MovementsConfig, PathStatus};
+use crate::path::{AStar, Goal, GoalNear, GoalNearXZ, Move, Movements, MovementsConfig, PathResult, PathStatus};
 use crate::physics::{
     apply_player_state, create_player_state, PhysicsEngine, PhysicsWorld, PlayerControls,
     WorldPhysics,
@@ -172,6 +172,9 @@ pub struct Bot<'a> {
     /// makes movement primitives return so the main loop's survival escape (cap-dig) runs.
     pub allow_underwater: bool,
     pub breath_alarm: bool,
+    /// Explosions the server reported (`explode` packets) since connect: the only ground truth on the
+    /// client that a used bed went off, as opposed to being destroyed by a dragon part.
+    pub explosions: u32,
     /// Pre-emptions since the last drain (the main loop writes them to race.db).
     pub breath_preempts: u32,
     underwater_since: Option<Instant>,
@@ -265,6 +268,7 @@ impl<'a> Bot<'a> {
             last_tick: Instant::now(),
             allow_underwater: false,
             breath_alarm: false,
+            explosions: 0,
             breath_preempts: 0,
             underwater_since: None,
             watchdog_jump: false,
@@ -746,6 +750,9 @@ impl<'a> Bot<'a> {
                     return Ok(Some(BotEvent::BlockUpdate(x, y, z)));
                 }
             }
+            "explode" => {
+                self.explosions += 1;
+            }
             "set_held_slot" => {
                 if let Some(s) = params.get("slot").and_then(PValue::as_i32) {
                     self.held_slot = s;
@@ -804,8 +811,12 @@ impl<'a> Bot<'a> {
             "move_entity_pos" | "move_entity_pos_rot" => {
                 let id = params.get("entityId").and_then(PValue::as_i32).unwrap_or(0);
                 if let Some(e) = self.entities.get_mut(&id) {
-                    let g = |k: &str| params.get(k).and_then(PValue::as_f64).unwrap_or(0.0) / 4096.0;
-                    e.position = e.position.offset(g("dx"), g("dy"), g("dz"));
+                    // The schema names these dX/dY/dZ (protocol-schema.json packet_move_entity_pos). Reading
+                    // "dx" got nothing, so every relative move was applied as 0, and entities only updated
+                    // on rare absolute syncs. The cycle-4 dragon gym saw the dragon frozen at its first
+                    // sighting while the server had it 40 blocks away. Old keys kept as a fallback.
+                    let g = |k: &str, alt: &str| params.get(k).or_else(|| params.get(alt)).and_then(PValue::as_f64).unwrap_or(0.0) / 4096.0;
+                    e.position = e.position.offset(g("dX", "dx"), g("dY", "dy"), g("dZ", "dz"));
                 }
             }
             "entity_position_sync" | "teleport_entity" => {
@@ -1908,6 +1919,31 @@ impl<'a> Bot<'a> {
     /// Navigate to a goal: compute an A* path, follow it (digging obstacles,
     /// jumping, dropping), and re-path when stuck or the path runs out before the
     /// goal. Single-task port of typecraft's tick-driven pathfinder follower.
+    /// A* in 40 ms slices with one driven tick between slices, same 2 s total budget as before.
+    /// A single synchronous search froze the tick loop, and with it the breath watchdog, for up to
+    /// 2 s per call. Race i6 logged `LOOP STALL 4060 ms` right after each `moving toward …` goto,
+    /// and its breath alarm fired at 11.3 s against the 6 s rule. The search state lives in AStar;
+    /// Movements only borrows the world, so it is rebuilt per slice.
+    async fn plan_path(&mut self, start: (i32, i32, i32), goal: &dyn Goal, total: Duration) -> std::io::Result<PathResult> {
+        // Ticks now run while planning, so release the movement keys first: the old synchronous
+        // search froze the bot in place, and walking on stale keys for up to 2 s near lava is not
+        // safe. Sneak (edge safety) and the watchdog's jump are left as they are.
+        for k in ["forward", "back", "left", "right", "sprint"] {
+            self.set_control_state(k, false);
+        }
+        let mut astar = AStar::new(Move::start(start.0, start.1, start.2), goal, -1.0);
+        loop {
+            let r = {
+                let mv = Movements::new(&self.world, self.movement.clone());
+                astar.compute(goal, &mv, Duration::from_millis(40), total)
+            };
+            if r.status != PathStatus::Partial {
+                return Ok(r);
+            }
+            self.drive_tick().await?;
+        }
+    }
+
     pub async fn goto_goal(&mut self, goal: &dyn Goal, timeout: Duration) -> std::io::Result<bool> {
         site("goto_goal");
         // Breath alarm: refuse to path at all, so a step looping over targets (gather_wood tried
@@ -1935,14 +1971,7 @@ impl<'a> Bot<'a> {
                 self.entity.position.z.floor() as i32,
             );
             let t_path = Instant::now();
-            let result = get_path_to(
-                &self.world,
-                start,
-                goal,
-                self.movement.clone(),
-                -1.0,
-                Duration::from_millis(2000),
-            );
+            let result = self.plan_path(start, goal, Duration::from_millis(2000)).await?;
             // Stall hunt: two 14.05 s LOOP STALLs right after a water descent step.
             if t_path.elapsed() > Duration::from_millis(2500) {
                 eprintln!("[bot] SLOW A* {} ms from {start:?} status={:?} len={}", t_path.elapsed().as_millis(), result.status, result.path.len());
@@ -2059,6 +2088,18 @@ impl<'a> Bot<'a> {
             let dx = next.x as f64 + 0.5 - p.x;
             let dz = next.z as f64 + 0.5 - p.z;
             let dy = next.y as f64 - p.y;
+            // LIVE lava check against the current world, not the one A* planned on (lava flows; a
+            // slice-planned path can be seconds old): the waypoint's feet or floor cell is lava now →
+            // re-plan. And never sprint toward a waypoint with lava within 1 — sprint momentum carried
+            // bots off lake edges (6c+lsm8 rust-gym-004: walking west at −54, feet cell lava at −55).
+            let lava_at = |b: &Self, x: i32, y: i32, z: i32| {
+                b.registry.blocks_by_state_id.get(&b.block_state_at(x, y, z)).map(|bl| bl.name.contains("lava")).unwrap_or(false)
+            };
+            if lava_at(self, next.x, next.y, next.z) || lava_at(self, next.x, next.y - 1, next.z) {
+                self.clear_control_states();
+                return Ok(FollowOutcome::NeedRepath);
+            }
+            let lava_close = (-1..=1).any(|ox| (-1..=1).any(|oz| (-1..=0).any(|oy| lava_at(self, next.x + ox, next.y + oy, next.z + oz))));
 
             // Reached the waypoint only when at/above its level (dy <= 0.6) —
             // for an upward step this forces the bot to actually CLIMB before
@@ -2095,7 +2136,7 @@ impl<'a> Bot<'a> {
             let mz = next.z as f64 + 0.5 - p.z;
             self.look((-mx).atan2(-mz), 0.0);
             self.set_control_state("forward", true);
-            self.set_control_state("sprint", true);
+            self.set_control_state("sprint", !lava_close);
             // Jump to climb only when CLOSE to the up-step (so we walk up to it with
             // ground momentum and step onto it), or for parkour. Jumping while far
             // from the step just bounces in open air with no forward progress.
@@ -2131,6 +2172,25 @@ impl<'a> Bot<'a> {
         }
         self.clear_control_states();
         Ok(FollowOutcome::Reached)
+    }
+
+    /// Stop using the held item (player_action status 5): releases a drawn bow, firing the arrow along
+    /// the current look. Pair with `activate_item` to start the draw (≥ 20 ticks = full power).
+    pub async fn release_use_item(&mut self) -> std::io::Result<()> {
+        self.sequence += 1;
+        let seq = self.sequence;
+        // The look itself reaches the server with each tick's movement packet during the draw.
+        self.client
+            .write(
+                "player_action",
+                PValue::compound(vec![
+                    ("status", PValue::num(5.0)),
+                    ("location", block_pos(0, 0, 0)),
+                    ("face", PValue::num(0.0)),
+                    ("sequence", PValue::num(seq as f64)),
+                ]),
+            )
+            .await
     }
 
     pub async fn respawn(&mut self) -> std::io::Result<()> {

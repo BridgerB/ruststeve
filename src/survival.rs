@@ -34,7 +34,7 @@ static LAST_LAVA: AtomicI64 = AtomicI64::new(0);
 static LAST_WATER: AtomicI64 = AtomicI64::new(0);
 
 /// Is the bot standing in / submerged in lava?
-fn in_lava(bot: &Bot) -> bool {
+pub(crate) fn in_lava(bot: &Bot) -> bool {
     let p = bot.entity.position;
     let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
     let feet = p.y.floor() as i32;
@@ -46,7 +46,7 @@ fn in_lava(bot: &Bot) -> bool {
 
 /// Thrash up and out of lava (swim up + drive forward) — best-effort, every
 /// tick counts when you're burning.
-async fn escape_lava(bot: &mut Bot<'_>, ticks: u32) {
+pub(crate) async fn escape_lava(bot: &mut Bot<'_>, ticks: u32) {
     for _ in 0..ticks {
         if !in_lava(bot) && bot.entity.on_ground {
             break;
