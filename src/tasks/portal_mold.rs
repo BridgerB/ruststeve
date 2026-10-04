@@ -566,6 +566,19 @@ pub(crate) async fn settle_xz(bot: &mut Bot<'_>, tx: f64, tz: f64, tol: f64, max
         // place) never moves at all (3× `stance FAIL` at 1.2 blocks off). Straight legs stay on
         // the row the bot is already standing on.
         let (lx, lz) = if (tz - p.z).abs() > tol * 0.7 { (p.x, tz) } else { (tx, p.z) };
+        // Cycle 5 lava audit: this raw walk bypassed every lava rule (no pathfinder, not walk_to_xz),
+        // and the station centring runs beside the pool. Refuse a burst that would carry the bot
+        // into a cell with lava at its feet, floor or head (the sneak edge-backoff stops holes only).
+        {
+            let step = |d: f64| if d > 0.05 { 0.6 } else if d < -0.05 { -0.6 } else { 0.0 };
+            let (cx, cz) = (p.x.floor() as i32, p.z.floor() as i32);
+            let (nx, nz) = ((p.x + step(lx - p.x)).floor() as i32, (p.z + step(lz - p.z)).floor() as i32);
+            let fy = p.y.floor() as i32;
+            if (nx, nz) != (cx, cz) && (-1..=1).any(|dy| is_lava(&name_at(bot, nx, fy + dy, nz))) {
+                cast_debug(&format!("settle: refused a step into lava at ({nx},{fy},{nz})"));
+                break;
+            }
+        }
         bot.look_at(vec3(lx, p.y + 1.62, lz));
         // Far: 3-tick bursts (sneak speed needs a few ticks to build). Near: a single tick of
         // input then two ticks coasting — 3-tick bursts overshot a 0.2 target by ~0.4 every time

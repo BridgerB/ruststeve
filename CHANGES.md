@@ -1131,3 +1131,45 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
 - **Arm A (6b-head), regions 40 + 51 backfilled: 8/16 clean** (50% [28%, 72%]). 5 of its 16 trials had deaths (1, 3, 5, 3, 2: 14 deaths); one region-51 trial still running.
 - **Arm B (6c+lsm16), region 53: 1/3 clean, 0 deaths** (PASS 2287 s; FAIL timeout mid-mold; FAIL timeout at-depth). **compare.ts: P(B > A) = 0.322 → continue.**
   - Reading so far: equal-ish pass rate, B much safer (0 vs 14 deaths); both arms' failures are progress walls (at-depth time, pickaxe wear, pool exhaustion).
+
+# Cycle 5 (2026-10-04 01:40 UTC →), the race-funnel cycle: strategist's answer to the cycle-4 report
+
+## Phase 0: branch, log, gym rules, tick rate
+- Branch `feat/cycle5-race-funnel` from main (PR #3 merged). Orphaned cycle-4 monitor processes on the box killed (mine only; steve's gym untouched).
+- **Per-process event log (decision 5):**
+  - Each process writes `data/attempts/<run_id>-<bot>.jsonl` (one writer, one write per line); `data/attempts.jsonl` is now read-only.
+  - `scripts/ml/rows.ts` is the single reader (globs the directory plus the legacy file, counts unparseable lines).
+  - Test `two_writers_zero_unparseable`: 2 threads × 2,000 rows → 4,000 parse, 0 unparseable. 187/187 lib tests.
+- **compare.ts:**
+  - Any pass is the default metric (`--clean` for clean).
+  - No stop before 12 trials per arm, cap 18 (decision 2).
+  - `aborted` and `skipped` rows are excluded.
+- **funnel.ts:** `water` is its own skill. Correction to the cycle-4 report: the water gyms run `gather_wood`, so its "wood_stone_tools gym 7/10" row mixed water trials in.
+- **Aborted, never running:**
+  - The gym installs a SIGTERM handler that writes the trial in progress as `aborted` (gym.db + event row with reason) and exits.
+  - `gym-tonether-b.sh` stops a batch with SIGTERM, waits 10 s, then -9.
+  - Verified live: one water_shore bot, SIGTERM at 46 s → `[gym:water_shore] ABORTED after 46s (SIGTERM)`; gym.db row 741 `aborted`; matching event row in `data/attempts/gym-r55-water_shore-rust-gym-001.jsonl`.
+- **The same failure 4× in one trial** (digits ignored) ends it as failed with that reason.
+- **Respawn more than 32 blocks from the trial's landing:** tp back and count `harness_events` in the trial message (gym). The race-side check goes with the Phase 1 race-harness work.
+- **Tick-rate acceptance test: REJECTED by audit, not run.**
+  - The SDK's client tick is a fixed 50 ms (`const TICK`, `src/bot/mod.rs`), and the `ticking_state` / `ticking_step` packets in the schema are not handled. At `/tick rate 60` the world (lava flow, mob AI, drowning air loss) runs 3× faster while the bot simulates and acts at 20 Hz, so a pass rate measured there says nothing about tick 20.
+  - On top of that, ~50 timers on the water and portal paths are wall-clock: `Instant::now` in bot/mod.rs 23 (breath watchdog, stall timing), portal.rs 10, portal_mold.rs 7, gym.rs 6, learn.rs 3, bot_utils.rs 1; plus `tokio::time::timeout`/`sleep` caps and `wait_real_ms`.
+  - Making 60 valid needs (a) the client to follow `ticking_state` (tick length = 1000 / rate) and (b) every one of those timers converted to game ticks: a cross-cutting change that touches every arm's behaviour.
+  - Gyms stay at tick 20.
+
+## Phase 1: 6b-safe, race harness, audits
+- **6b-safe build** (decision 1, commit 06c0c04): the portal files are 6b's (41a8f55) except the cap verify wait (8 ticks). lava_safe_move moved to `src/tasks/lava_move.rs`, off the portal path (drill only). A mid-task stone pickaxe craft from carried cobble + sticks replaces the no-pickaxe abort (`mining.rs craft_stone_pickaxe_mid_task`, once per 60 s).
+- **Frame check fix** (dcd279c, allowed: a check, no change to pool choice/drops/scoops): "already cast" read `find_blocks("obsidian", 8) >= 10`, a radius count (steve's cycle-4 finding). Natural obsidian within 8 skipped prepare + cast, then frame_check on the anchor failed the same way every attempt. Now only the stored anchor's 10 cells count; a disagreeing radius count is logged. This was the only radius-count frame/re-site check in portal.rs and portal_mold.rs.
+- **Race harness:**
+  - (i) Placement (66a6d7a): `scripts/race-place.ts` forceloads a candidate column, waits for `execute if loaded`, rejects water/lava underfoot and shores (7×7 ring), spirals along the lane; race-b.sh uses it per bot and logs the placement.
+  - Respawn check in race-b.sh: a new death event for a bot → read its position; >32 blocks from the landing → tp back + `harness_respawn_far` meta event.
+  - (ii) Mold resume after death: the frame anchor is a static plus a per-bot file, so it survives the respawn and a relaunch; 6b already tps back to it when displaced >16. New counter `resite_after_death` (a death followed by a lost anchor), logged as a `cast` event; expected 0. Instrumentation only.
+  - (iii) Step attempts: one event row per attempt existed (cycle 4); timeout rows now carry `alternative: {index, takes}`, printed as `cut: …`. Portal: none (6b-safe freezes site choice).
+- **Audit, find_lava_cluster (report only, not fixed):** `bot/mod.rs find_lava_cluster` reads every lava SOURCE in the loaded sections with **no exposure test** (doc comment: "No exposure test — the bot tunnels to it"), so it reads blocks that are neither touching air nor visible. Path: `portal.rs` at-depth site search, called only when no exposed band-level lava is within 24 (`band_lava.is_none()`), every 10 s, `min_sources 100, radius 12`, y −58..floor−1. Dependence: race i6 (archive `race-pre-race-20261003-082924-i100.db`) logged 4 `site/cluster` events from 2 of 5 bots (rust-race-001 ×2, rust-race-003 ×2); race i5: 0. Gym: only the current gym-rust-gym-009.log shows it (4 lines, one trial); older gym logs are overwritten per batch, so the gym count is a lower bound (n ≥ 1 trial).
+- **6b-safe regressions** (region 56, gym.db 742–756, binary target-safe): water 11/13 pass (Wilson 95% 0.58–0.96), 0 deaths. Per slug: lake 2/2, shore 2/2, cave 0/2, cave_iron 2/2, roofed 2/2, descent 1/1, aquifer 2/2. Both fails are water_cave timeouts; water_cave before 6b-safe was 19/46, so in line, not a regression. lava_safe_move drill 2/2 at 10/10, 0 deaths.
+- **Check, lava rules on the paths they are meant for** (steve's cycle-4 finding):
+  - goto_near / goto_xz (about 35 portal-path sites) → A* rules (open-hole landing `path/movements.rs:156`, diagonal `:358`) plus the live waypoint re-check and no-sprint (`bot/mod.rs:2098/2139`, inside follow_path only).
+  - walk_to_xz (13 sites, including pillar_up's) → its own lava_cell check only.
+  - descend_to_y digs with its own LAVA-STOP; respawn_at_frame teleports.
+  - **settle_xz** (`portal_mold.rs`: cast_cell, assert_stance, station centring next to the pool; `portal.rs` build) was a raw sneak-walk with **no** lava check; only the sneak edge-backoff (holes, not lava on a floor). Fixed (allowed: refuse a single move): a burst into a cell with lava at feet, floor or head is refused and logged `settle: refused a step into lava`.
+  - No portal code sets sprint; no-sprint is enforced only inside goto, and raw walks inherit whatever the caller left (normally off: goto exits clear controls).
