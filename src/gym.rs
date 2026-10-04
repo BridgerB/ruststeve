@@ -68,6 +68,16 @@ pub struct GymStep {
     pub setup: GymSetup,
 }
 
+/// The step an attempt runs: the slug's own, or for `pipeline` slugs the step machine's choice.
+fn step_for_attempt(step: &GymStep, bot: &Bot) -> &'static str {
+    if step.step_id != "pipeline" {
+        return step.step_id;
+    }
+    let id = crate::steps::get_next_step(&sync_from_bot(bot)).map(|s| s.id).unwrap_or("gather_wood");
+    println!("[gym:{}] pipeline → {id}", step.slug);
+    id
+}
+
 fn passes(step: &GymStep, bot: &Bot, s: &GameState) -> bool {
     if let Some(f) = step.custom_pass {
         return f(bot, s);
@@ -162,6 +172,12 @@ pub static GYM_STEPS: &[GymStep] = &[
     // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
     GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
     GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
+    // Cycle 5 Phase 3: the race from "wood and stone tools done" to an iron pickaxe, through the real
+    // step machine (step_id "pipeline": each attempt runs get_next_step, as the race loop does). The
+    // kit is the median race state at the first post-tools step (i6 + i100 archives, 5 bots: stone
+    // pickaxe, ~12 logs, ~2 planks, 0 sticks, ~22 cobble, no sword/table/furnace/coal). Fresh terrain,
+    // POIs cleared. Pass = the SERVER's count of iron pickaxes on the bot (`clear … 0`), not the client.
+    GymStep { slug: "iron_from_surface", label: "Surface → iron pickaxe (step machine)", order: 0, prereq: &["stone_pickaxe 1", "oak_log 12", "oak_planks 2", "cobblestone 22"], step_id: "pipeline", timeout_secs: 1200, custom_pass: Some(|bot, _| count_items(bot, "iron_pickaxe") >= 1), setup: GymSetup::RandomSurface },
     GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
@@ -515,7 +531,7 @@ async fn run_one_trial(
             }
         };
         tokio::select! {
-            r = tokio::time::timeout(remaining, crate::steps::execute_step(bot, step.step_id, memory)) => match r {
+            r = tokio::time::timeout(remaining, crate::steps::execute_step(bot, step_for_attempt(step, bot), memory)) => match r {
                 Ok(r) => {
                     // The same failure four times in one trial ends it, failed, with that reason (steve
                     // lost a run to a 102-dispatch "pickaxe worn out" loop). Digits are ignored so a
@@ -570,6 +586,16 @@ async fn run_one_trial(
         let left = rcon_driving(bot, rcon, "execute in minecraft:the_end if entity @e[type=minecraft:end_crystal]").await;
         pass = left.contains("failed");
         last_msg = format!("server crystal check: {} | {last_msg}", if pass { "none left" } else { "crystals remain" });
+    }
+    // iron_from_surface: ground truth from the server (the client's inventory can lag or ghost).
+    if step.slug == "iron_from_surface" {
+        let truth = rcon_driving(bot, rcon, &format!("clear {name} minecraft:iron_pickaxe 0")).await;
+        let server_pass = truth.contains("Found");
+        if pass != server_pass {
+            last_msg = format!("client said {pass}, server said {server_pass} | {last_msg}");
+        }
+        pass = server_pass;
+        last_msg = format!("server iron_pickaxe check: {} | {last_msg}", truth.trim());
     }
     // Dragon slug: ground truth from the server, never the bot's own view (cycle 4 Part 3).
     if step.slug == "dragon" {
