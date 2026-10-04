@@ -147,7 +147,8 @@ pub const STEPS: &[Step] = &[
         name: "Craft Buckets",
         priority: 14,
         can_execute: |s| s.inventory.iron_pickaxes >= 2 && s.inventory.iron_ingots >= 3,
-        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 3,
+        // Cycle 4 decision 5: race kit = 5 buckets (22 iron covers 2 pickaxes, 5 buckets, flint and steel).
+        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 5,
     },
     Step {
         id: "get_water_buckets",
@@ -401,7 +402,7 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
         // Count 3 must match craft_bucket's is_complete (buckets+water>=3) — a lower count
         // stops the task below the step threshold and re-runs "have N buckets" forever.
-        "craft_bucket" => tasks::craft::craft_buckets(bot, 3, mem).await,
+        "craft_bucket" => tasks::craft::craft_buckets(bot, 5, mem).await,
         // Fill ONE water bucket (keep the second bucket empty for lava).
         "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 1, mem).await,
         "get_flint_and_steel" => tasks::craft::get_flint_and_steel(bot, mem).await,
@@ -410,6 +411,9 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "gather_build_blocks" => tasks::mining::mine_stone(bot, 72, mem).await,
         "build_nether_portal" => tasks::portal::build_nether_portal(bot, mem).await,
         "enter_nether" => tasks::portal::enter_nether(bot).await,
+        "lsm_drill" => tasks::portal::lsm_drill(bot).await,
+        "dragon" => tasks::end::dragon_beds(bot, mem).await,
+        "crystals" => tasks::end::crystals_bow(bot, mem).await,
         "find_fortress" => tasks::nether::find_fortress(bot, mem).await,
         "kill_blaze" => tasks::nether::kill_blaze(bot, mem, 1).await,
         "gather_blaze_rods" => tasks::nether::kill_blaze(bot, mem, 7).await,
