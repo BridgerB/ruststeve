@@ -35,7 +35,9 @@ Q "WITH start AS (SELECT bot, MIN(ts_ms) t0 FROM events WHERE category='session'
         mins AS (SELECT n.bot, (n.tn - s.t0)/60000.0 m FROM nether n JOIN start s ON s.bot=n.bot),
         ranked AS (SELECT m, ROW_NUMBER() OVER (ORDER BY m) rn, COUNT(*) OVER () cnt FROM mins)
    SELECT (SELECT COUNT(*) FROM nether) reached, (SELECT COUNT(*) FROM start) bots,
-          printf('%.0f%%', 100.0*(SELECT COUNT(*) FROM nether)/MAX(1,(SELECT COUNT(*) FROM start))) rate,
+          (SELECT CASE WHEN n = 0 THEN 'n/a' ELSE printf('%.0f%% [%.0f%%, %.0f%%]', 100.0*k/n,
+            100.0*MAX(0,((1.0*k/n + 3.8416/(2*n)) - 1.96*sqrt((1.0*k/n)*(1-1.0*k/n)/n + 3.8416/(4.0*n*n)))/(1 + 3.8416/n)),
+            100.0*MIN(1,((1.0*k/n + 3.8416/(2*n)) + 1.96*sqrt((1.0*k/n)*(1-1.0*k/n)/n + 3.8416/(4.0*n*n)))/(1 + 3.8416/n))) END FROM (SELECT (SELECT COUNT(*) FROM nether) k, (SELECT COUNT(*) FROM start) n)) rate_wilson95,
           (SELECT printf('%.1f', m) FROM ranked WHERE rn = (cnt+1)/2) median_min,
           (SELECT printf('%.1f', m) FROM ranked WHERE rn = MAX(1, CAST(0.9*cnt + 0.5 AS INT))) p90_min;"
 echo
@@ -62,3 +64,15 @@ echo
 echo "-- breath watchdog (cycle 2): pre-emptions and alarms per bot, deaths by cause marker"
 Q "SELECT bot, COALESCE(SUM(CASE WHEN event='preempt' THEN n END),0) preempt_jumps, SUM(event='alarm') alarms
    FROM events WHERE category='breath' GROUP BY bot ORDER BY bot;"
+echo
+echo "-- attempts (cycle 4 event log): per skill and step, pass rate with Wilson 95% interval"
+Q "SELECT skill, step_id, COUNT(*) attempts, SUM(outcome='ok') ok, SUM(outcome='timeout') timeouts, SUM(outcome='failed') failed,
+          SUM(COALESCE(deaths,0)) deaths, CASE WHEN COUNT(*) = 0 THEN 'n/a' ELSE printf('%.0f%% [%.0f%%, %.0f%%]', 100.0*SUM(outcome='ok')/COUNT(*),
+            100.0*MAX(0,((1.0*SUM(outcome='ok')/COUNT(*) + 3.8416/(2*COUNT(*))) - 1.96*sqrt((1.0*SUM(outcome='ok')/COUNT(*))*(1-1.0*SUM(outcome='ok')/COUNT(*))/COUNT(*) + 3.8416/(4.0*COUNT(*)*COUNT(*))))/(1 + 3.8416/COUNT(*))),
+            100.0*MIN(1,((1.0*SUM(outcome='ok')/COUNT(*) + 3.8416/(2*COUNT(*))) + 1.96*sqrt((1.0*SUM(outcome='ok')/COUNT(*))*(1-1.0*SUM(outcome='ok')/COUNT(*))/COUNT(*) + 3.8416/(4.0*COUNT(*)*COUNT(*))))/(1 + 3.8416/COUNT(*)))) END pass_wilson95,
+          printf('%.0f', AVG(CASE WHEN outcome='ok' THEN duration_s END)) mean_ok_s
+   FROM attempts GROUP BY skill, step_id ORDER BY MIN(ts_ms);"
+echo
+echo "-- stall abandons (cycle 4 Part 8): per bot and step, with the no-progress / budget reason"
+Q "SELECT bot, step_id, COUNT(*) n, substr(MAX(reason),1,60) reason, printf('%.1f', SUM(duration_s)/3600.0) attempt_hours
+   FROM attempts WHERE outcome='timeout' GROUP BY bot, step_id ORDER BY n DESC;"

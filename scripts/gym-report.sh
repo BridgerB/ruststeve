@@ -25,7 +25,11 @@ sqlite3 -header -column "$DB" "
   SELECT (SELECT COUNT(*) FROM r) AS trials,
          (SELECT COALESCE(SUM(pass),0) FROM r) AS passes,
          (SELECT COUNT(*) FROM r WHERE COALESCE(outcome,'')='running') AS killed,
-         printf('%.0f%%', 100.0*(SELECT COALESCE(SUM(pass),0) FROM r)/MAX(1,(SELECT COUNT(*) FROM r))) AS rate,
+         -- Wilson 95% interval, never a bare fraction (cycle 4, Part 5.1).
+         (SELECT CASE WHEN n = 0 THEN 'n/a' ELSE printf('%.0f%% [%.0f%%, %.0f%%]', 100.0*k/n,
+            100.0*MAX(0,((1.0*k/n + 3.8416/(2*n)) - 1.96*sqrt((1.0*k/n)*(1-1.0*k/n)/n + 3.8416/(4.0*n*n)))/(1 + 3.8416/n)),
+            100.0*MIN(1,((1.0*k/n + 3.8416/(2*n)) + 1.96*sqrt((1.0*k/n)*(1-1.0*k/n)/n + 3.8416/(4.0*n*n)))/(1 + 3.8416/n))) END
+          FROM (SELECT COALESCE(SUM(pass),0) AS k, COUNT(*) AS n FROM r)) AS rate_wilson95,
          (SELECT s FROM p WHERE rn = (n+1)/2) AS median_pass_s,
          (SELECT s FROM p WHERE rn = MAX(1, CAST(0.9*n + 0.999 AS INT))) AS p90_pass_s"
 echo

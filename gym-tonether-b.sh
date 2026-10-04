@@ -25,26 +25,34 @@ echo "gym batch: slug=${SLUGS:-$SLUG} N=$( [ -n "${SLUGS:-}" ] && echo "$SLUGS" 
 # 01:16) and then sat at "Preparing spawn area 2%" for minutes. Server B is ruststeve's alone,
 # so each batch starts from zero forceloads. (A race running at the same time keeps its lanes
 # loaded through its players anyway.)
-perl -e 'alarm shift; exec @ARGV' 60 "$DIR/target/release/rcon" "forceload remove all" "execute in minecraft:the_nether run forceload remove all" >/dev/null 2>&1
+# KEEP_FORCELOADS=1: a side batch (late-game gyms on bots 007+) must not clear a running batch's forceloads.
+[ "${KEEP_FORCELOADS:-0}" = "1" ] || perl -e 'alarm shift; exec @ARGV' 60 "$DIR/target/release/rcon" "forceload remove all" "execute in minecraft:the_nether run forceload remove all" >/dev/null 2>&1
 # Only the previous GYM batch's bots (pid file) — never a race running on the same host.
-[ -f gym.pids ] && while read -r p; do kill -9 "$p" 2>/dev/null; done < gym.pids
-: > gym.pids; sleep 1
+# PIDFILE: a side batch keeps its own pid file so it never kills the main batch (and vice versa).
+PIDFILE=${PIDFILE:-gym.pids}
+[ -f "$PIDFILE" ] && while read -r p; do kill -9 "$p" 2>/dev/null; done < "$PIDFILE"
+: > "$PIDFILE"; sleep 1
 mkdir -p logs/archive
+# Cycle 4 event log (src/learn.rs): every attempt row carries the build, the world seed and the run.
+BUILD=${BUILD:-dev}
+WORLD_SEED=$(perl -e 'alarm shift; exec @ARGV' 20 "$DIR/target/release/rcon" "seed" 2>/dev/null | grep -oE -- "-?[0-9]+" | head -1)
+echo "build=$BUILD seed=${WORLD_SEED:-?}"
 # SLUGS="a,b,c" gives bot i its own slug (N defaults to the list length) — one batch covers a
 # whole scenario set (e.g. the five water slugs).
 IFS=',' read -r -a SLUG_LIST <<< "${SLUGS:-}"
 [ -n "${SLUGS:-}" ] && N=${#SLUG_LIST[@]}
 for i in $(seq 1 "$N"); do
-  name=$(printf 'rust-gym-%03d' "$i")
+  name=$(printf 'rust-gym-%03d' "$((i + ${NAME_START:-1} - 1))")  # NAME_START: side batches use 007+
   [ -n "${SLUGS:-}" ] && SLUG=${SLUG_LIST[$((i-1))]}
   [ -f "gym-$name.log" ] && mv "gym-$name.log" "logs/archive/gym-$name.$(date +%m%d-%H%M%S).log"
   rm -f ".memory-$name.db" ".memory-$name.db-shm" ".memory-$name.db-wal" ".frame-$name.txt"
   MC_HOST=$MC_HOST MC_PORT=25566 MC_USERNAME="$name" STEVE_DATA="$DIR/data" \
     RCON_HOST=localhost RCON_PORT=25576 GYM_REGION=$GYM_REGION \
     GYM="$SLUG" GYM_TRIALS="$TRIALS" CRAFT_DEBUG=1 \
+    BUILD="$BUILD" WORLD_SEED="${WORLD_SEED:-}" GYM_RUN="gym-r$GYM_REGION-$SLUG" \
     "$BIN" > "gym-$name.log" 2>&1 &
-  echo "$!" >> gym.pids
+  echo "$!" >> "$PIDFILE"
   echo "launched $name pid $!"
-  sleep 4
+  sleep "${STAGGER:-4}"  # seconds between bot launches (raise on a fresh world)
 done
 echo "all $N launched"
