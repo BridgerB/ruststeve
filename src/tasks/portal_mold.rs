@@ -574,7 +574,7 @@ pub(crate) async fn settle_xz(bot: &mut Bot<'_>, tx: f64, tz: f64, tol: f64, max
             let (cx, cz) = (p.x.floor() as i32, p.z.floor() as i32);
             let (nx, nz) = ((p.x + step(lx - p.x)).floor() as i32, (p.z + step(lz - p.z)).floor() as i32);
             let fy = p.y.floor() as i32;
-            if (nx, nz) != (cx, cz) && (-1..=1).any(|dy| is_lava(&name_at(bot, nx, fy + dy, nz))) {
+            if crate::learn::safe_fixes() && (nx, nz) != (cx, cz) && (-1..=1).any(|dy| is_lava(&name_at(bot, nx, fy + dy, nz))) {
                 cast_debug(&format!("settle: refused a step into lava at ({nx},{fy},{nz})"));
                 break;
             }

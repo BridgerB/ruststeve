@@ -2095,11 +2095,12 @@ impl<'a> Bot<'a> {
             let lava_at = |b: &Self, x: i32, y: i32, z: i32| {
                 b.registry.blocks_by_state_id.get(&b.block_state_at(x, y, z)).map(|bl| bl.name.contains("lava")).unwrap_or(false)
             };
-            if lava_at(self, next.x, next.y, next.z) || lava_at(self, next.x, next.y - 1, next.z) {
+            let safe = crate::learn::safe_fixes();
+            if safe && (lava_at(self, next.x, next.y, next.z) || lava_at(self, next.x, next.y - 1, next.z)) {
                 self.clear_control_states();
                 return Ok(FollowOutcome::NeedRepath);
             }
-            let lava_close = (-1..=1).any(|ox| (-1..=1).any(|oz| (-1..=0).any(|oy| lava_at(self, next.x + ox, next.y + oy, next.z + oz))));
+            let lava_close = safe && (-1..=1).any(|ox| (-1..=1).any(|oz| (-1..=0).any(|oy| lava_at(self, next.x + ox, next.y + oy, next.z + oz))));
 
             // Reached the waypoint only when at/above its level (dy <= 0.6) —
             // for an upward step this forces the bot to actually CLIMB before

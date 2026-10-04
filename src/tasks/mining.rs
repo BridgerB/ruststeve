@@ -224,7 +224,7 @@ pub(crate) async fn ensure_pickaxe(bot: &mut Bot<'_>) -> bool {
     }
     // Cycle 5, decision 1: the last pickaxe broke mid-task (both arms wore out all three kit iron
     // pickaxes in hard sites, ~750 digs): craft a stone pickaxe from carried cobble and sticks.
-    if craft_stone_pickaxe_mid_task(bot).await && select_item(bot, "stone_pickaxe").await.unwrap_or(false) {
+    if crate::learn::safe_fixes() && craft_stone_pickaxe_mid_task(bot).await && select_item(bot, "stone_pickaxe").await.unwrap_or(false) {
         return true;
     }
     // Loud, rate-limited: a natural portal run needs ~500 digs (551 in one rust-gym-001 trial) —

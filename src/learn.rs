@@ -175,6 +175,15 @@ pub fn param_i32(name: &str, default: i32) -> i32 {
     param(name).and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+/// SAFE_FIXES=1 turns on 6b-safe's progress-neutral safety changes (decision 1): the open-hole landing
+/// and diagonal lava rules, the live lava re-check and no-sprint near lava, the 8-tick cap verify, the
+/// settle lava refusal, the mid-task stone pickaxe craft and the stored-mold frame check. Off = 6b-head
+/// behaviour on this tree, so a race can run 6b-head with the cycle-4/5 instrumentation and harness.
+pub fn safe_fixes() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SAFE_FIXES").ok().as_deref() == Some("1"))
+}
+
 /// Per-bot arms (cycle 5, decision 6): with `BOT_ARMS=1`, `buckets` and `cluster_min` are drawn ONCE per
 /// bot process (Thompson, from params.json arms, regardless of `enabled`), logged at startup, stamped on
 /// every event row, and credited on the attempts of the skills listed for them. Unset → empty, and

@@ -232,7 +232,7 @@ pub(crate) async fn place_cobble(bot: &mut Bot<'_>, pos: (i32, i32, i32)) -> boo
         // client-side at once, and a rejected placement is reverted by a block_update a few ticks
         // later, so a 3-tick re-read counted rejected caps as placed (6c+lsm13: a "capped" lava cell
         // the bot then stepped into). Never by an inventory count (the SDK doesn't decrement it).
-        bot.wait_ticks(8).await.ok();
+        bot.wait_ticks(if crate::learn::safe_fixes() { 8 } else { 3 }).await.ok();
         if solid_at(bot, pos.0, pos.1, pos.2) {
             return true;
         }
@@ -2565,7 +2565,8 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     if near_count >= 10 && anchored_present < 10 {
         cast_debug(&format!("build: {near_count} obsidian within 8 but the stored mold reads {anchored_present}/10 — not treated as cast"));
     }
-    if anchored_present >= 10 {
+    let cast_already = if crate::learn::safe_fixes() { anchored_present >= 10 } else { near_count >= 10 };
+    if cast_already {
         // Frame complete — fall through to lighting. KEEP the anchor: clearing it here made the
         // next lines anchor a brand-new frame at the bot's feet when lighting failed once
         // (gym-003: `frame_check 10/10` → `portal_start` one block over → a second mold). The
