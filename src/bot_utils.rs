@@ -885,9 +885,41 @@ async fn place_table_confirmed(bot: &mut Bot<'_>, tx: i32, ty: i32, tz: i32) -> 
     Ok(bot.block_at(tx, ty, tz).map(|b| b.name == "crafting_table").unwrap_or(false))
 }
 
+/// An empty cell a table can go into: any air (plain, cave_air, void_air). The old `state == 0`
+/// test rejected cave_air, so in a carved cave no neighbour qualified and the niche fallback tried to
+/// "dig" air; iron_from_surface baseline rust-gym-004 looped "could not place a server-confirmed
+/// table" 1,944 times in one 1,200 s trial (cycle 5).
+fn table_cell_empty(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    name_at(bot, x, y, z).is_some_and(|n| n.ends_with("air"))
+}
+
+/// A block a table can stand on: loaded, not air, not a fluid.
+fn table_support(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    name_at(bot, x, y, z).is_some_and(|n| !n.ends_with("air") && n != "water" && n != "lava")
+}
+
 /// Place a crafting table on an air block next to the bot with solid ground.
 /// Only returns a position once the server CONFIRMS the table is really there.
 async fn place_crafting_table(
+    bot: &mut Bot<'_>,
+    mem: &mut WorldMemory,
+) -> std::io::Result<Option<(i32, i32, i32)>> {
+    if let Some(p) = place_crafting_table_here(bot, mem).await? {
+        return Ok(Some(p));
+    }
+    // Nothing worked from here: step a few blocks to one side and try once more.
+    let p = bot.entity.position;
+    for (dx, dz) in [(3, 0), (-3, 0), (0, 3), (0, -3)] {
+        let (gx, gz) = (p.x.floor() as i32 + dx, p.z.floor() as i32 + dz);
+        if bot.goto_near(gx, p.y.floor() as i32, gz, 1.5).await.unwrap_or(false) {
+            println!("    table: moved to ({gx},{gz}) to retry the placement");
+            return place_crafting_table_here(bot, mem).await;
+        }
+    }
+    Ok(None)
+}
+
+async fn place_crafting_table_here(
     bot: &mut Bot<'_>,
     mem: &mut WorldMemory,
 ) -> std::io::Result<Option<(i32, i32, i32)>> {
@@ -901,7 +933,7 @@ async fn place_crafting_table(
     // block beneath it to place the table on.
     for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (1, -1, 0), (-1, -1, 0), (0, -1, 1), (0, -1, -1)] {
         let (tx, ty, tz) = (fx + dx, fy + dy, fz + dz);
-        if bot.block_state_at(tx, ty, tz) == 0 && bot.block_state_at(tx, ty - 1, tz) != 0 {
+        if table_cell_empty(bot, tx, ty, tz) && table_support(bot, tx, ty - 1, tz) {
             if place_table_confirmed(bot, tx, ty, tz).await? {
                 println!("    table: placed + server-confirmed at ({tx},{ty},{tz})");
                 mem.record(PoiKind::CraftingTable, (tx, ty, tz), PoiStatus::Available);
@@ -914,11 +946,11 @@ async fn place_crafting_table(
     // cell opens up with solid ground below it, then place the table there.
     for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
         let (tx, ty, tz) = (fx + dx, fy, fz + dz);
-        if bot.block_state_at(tx, ty - 1, tz) != 0 {
-            if bot.block_state_at(tx, ty, tz) != 0 && bot.dig(tx, ty, tz).await.is_err() {
+        if table_support(bot, tx, ty - 1, tz) {
+            if !table_cell_empty(bot, tx, ty, tz) && bot.dig(tx, ty, tz).await.is_err() {
                 continue;
             }
-            if bot.block_state_at(tx, ty, tz) != 0 {
+            if !table_cell_empty(bot, tx, ty, tz) {
                 continue; // couldn't break it (e.g. bedrock)
             }
             if place_table_confirmed(bot, tx, ty, tz).await? {
@@ -928,6 +960,10 @@ async fn place_crafting_table(
             }
         }
     }
-    println!("    table: could not place a server-confirmed table (bot at {fx},{fy},{fz})");
+    let around: Vec<String> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .iter()
+        .map(|&(dx, dz)| format!("{}/{}", name_at(bot, fx + dx, fy, fz + dz).unwrap_or_default(), name_at(bot, fx + dx, fy - 1, fz + dz).unwrap_or_default()))
+        .collect();
+    println!("    table: could not place a server-confirmed table (bot at {fx},{fy},{fz}; cell/below {around:?})");
     Ok(None)
 }
