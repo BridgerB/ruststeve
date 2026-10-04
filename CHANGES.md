@@ -1226,3 +1226,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Batch stopped once decided (rows 854–856 aborted).
 - **Region-69 concurrent arms:** 6b-head (bots 001–003) vs race-iron2 with `ASTAR_SEARCH_BUDGET=1` (bots 004–006), 4 trials each. The earlier A* batch's stop (2 deaths, walk to a dry remembered pool) stands; this is a fresh measurement under the same death rule.
 - **Harness gap found (shared-region arms):** row 867 (6b-head rust-gym-001, region 69) "passed" in 459 s with `mold cast incomplete at 0/10`: it walked into a portal another bot had lit nearby (the pass check is in_nether). It is excluded as contaminated. It is the only portal pass since row 795 whose message lacks `cast & lit`, so the region-62/68 comparisons are clean. Future concurrent arms: separate regions (as the cycle-5 Phase 1 arms did), or a pass check requiring the bot's own frame.
+- **Region-69 arms result:**
+  - Arm B (race-iron2 + `ASTAR_SEARCH_BUDGET=1`, bots 004–006): **4/7 any-pass, all clean**, deaths 6 (rust-gym-006 ×6 across trials).
+  - Arm B **stopped by clause (a)** at ~09:20 MDT: rust-gym-006 died twice in 2 min at one mold site (anchor (207664,-53,4000)). First during the layer-0 platform build (ended at y −58, hp 0); second during the stance moves after the respawn. Mold movement runs through the pathfinder, the path the A* change alters. Same pattern as the region-59 6b-safe stop. Rows 873/874/878 aborted.
+  - Arm A (6b-head) so far 3/7 (all clean), 1 contaminated row excluded.
+  - P(B > A) on any-pass = 0.69 (Beta(1,1) priors, 4/7 vs 3/7); below 12 per arm, so no decision by compare.ts. **Race i8 runs target-head** (decision 1, applied as for i7).
