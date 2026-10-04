@@ -1231,3 +1231,16 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Arm B **stopped by clause (a)** at ~09:20 MDT: rust-gym-006 died twice in 2 min at one mold site (anchor (207664,-53,4000)). First during the layer-0 platform build (ended at y −58, hp 0); second during the stance moves after the respawn. Mold movement runs through the pathfinder, the path the A* change alters. Same pattern as the region-59 6b-safe stop. Rows 873/874/878 aborted.
   - Arm A (6b-head) so far 3/7 (all clean), 1 contaminated row excluded.
   - P(B > A) on any-pass = 0.69 (Beta(1,1) priors, 4/7 vs 3/7); below 12 per arm, so no decision by compare.ts. **Race i8 runs target-head** (decision 1, applied as for i7).
+
+## Crystals slot (decision 4; moved from hour 20 to ~hour 14 because race i8 runs 13:40–17:40)
+- Build 4d91508 (target-crystal, BUILD cage1, bot 007, region 70, 3 trials): a crystal the bow gave up on gets one climb per trial.
+- **First trial, so far:**
+  - Of three given-up crystals, 2 had no iron bars (not caged; the bow had no arc) and 1 was caged (33 bars).
+  - The climb reached the tower top (feet 80 from ground 63, 16 obsidian) but **opened 0 bars**, and the water descent left the bot at feet 80.
+  - Cause from the geometry: the tower radius read r=1, but the cage ring is at radius 2. The pillar column (r+1 = 2) ran up inside the ring, and pillar_up dug the bars above its head by hand (no pickaxe in the kit), so none of the "side" bars counted.
+  - The next climb then started from the pillar top and mis-read the ground (y 82).
+- **Next build (not this cycle's slot; decision 4 allows one):**
+  - pillar at max(tower r, cage radius) + 1;
+  - add a pickaxe to the kit for the bars;
+  - take the ground from the start position before climbing;
+  - verify the water pour (`reliable_use` at the outer edge) actually placed water before stepping off.
