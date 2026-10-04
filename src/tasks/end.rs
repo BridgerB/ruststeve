@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::bot::{Bot, Face};
 use crate::bot_utils::{count_items, select_item};
 use crate::memory::WorldMemory;
-use crate::tasks::portal::{cast_debug, eat_if_hurt, feet_y, name_at, pillar_up_with, place_cobble, solid_at};
+use crate::tasks::portal::{cast_debug, eat_if_hurt, feet_y, name_at, place_cobble, solid_at};
 use crate::types::{failure, success, StepResult};
 use crate::vec3::vec3;
 
@@ -526,4 +526,45 @@ pub async fn crystals_bow(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepResu
         }
     }
     failure(format!("CRYSTALS budget spent: {kills} kills in {shots} shots, {} left", crystals(bot).len()))
+}
+
+/// `pillar_up` with a chosen block, for the End only (the dragon destroys any block outside its immune
+/// tag, cobble included, so the dragon pillar is obsidian). Kept here, not in portal.rs, so the portal
+/// module stays 6b plus the cycle-5 safety fixes.
+pub(crate) async fn pillar_up_with(bot: &mut Bot<'_>, target_y: i32, block: Option<&'static str>) -> bool {
+    bot.set_control_state("sneak", true);
+    let cell_x = bot.entity.position.x.floor() as i32;
+    let cell_z = bot.entity.position.z.floor() as i32;
+    for _ in 0..24 {
+        if feet_y(bot) >= target_y {
+            break;
+        }
+        crate::tasks::portal::walk_to_xz(bot, cell_x as f64 + 0.5, cell_z as f64 + 0.5, 0.1, 24).await;
+        bot.set_control_state("sneak", true);
+        let f = feet_y(bot);
+        // Clear the climb path two/three blocks up so a stray block doesn't block the jump.
+        for dy in [2, 3] {
+            let n = name_at(bot, cell_x, f + dy, cell_z);
+            if crate::tasks::portal::is_solid(&n) && n != "obsidian" {
+                crate::tasks::portal::dig_at(bot, cell_x, f + dy, cell_z).await;
+            }
+        }
+        let b = block.filter(|b| count_items(bot, b) > 0).unwrap_or_else(|| crate::tasks::portal::build_block(bot));
+        if !select_item(bot, b).await.unwrap_or(false) {
+            break;
+        }
+        bot.look_at(vec3(cell_x as f64 + 0.5, (f - 2) as f64, cell_z as f64 + 0.5));
+        bot.wait_ticks(3).await.ok();
+        bot.set_control_state("jump", true);
+        bot.wait_ticks(7).await.ok();
+        // Place on top of the block one below our feet (the pillar we stand on).
+        if solid_at(bot, cell_x, f - 1, cell_z) {
+            let _ = bot.place_block(cell_x, f - 1, cell_z, Face::Top).await;
+        }
+        bot.wait_ticks(5).await.ok();
+        bot.set_control_state("jump", false);
+        bot.wait_ticks(8).await.ok();
+    }
+    feet_y(bot) >= target_y
+    // Leave sneak ON — caller clears it once the block is poured.
 }

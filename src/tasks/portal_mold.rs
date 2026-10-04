@@ -302,11 +302,7 @@ async fn cast_cell(bot: &mut Bot<'_>, (bx, by, bz): (i32, i32, i32), (dx, dy): (
         return false;
     }
     cast_debug(&format!("{tag}: stance goto from {}", at(bot)));
-    // Through THE movement primitive (cycle 4 Part 7): a vetoed stance is a failed attempt; the caller re-plans.
-    if !crate::tasks::portal::lava_safe_move(bot, (x, y + 1, bz + 1), 0.3, Duration::from_secs(20), "stance").await {
-        cast_debug(&format!("{tag}: stance move vetoed or short {}", at(bot)));
-        return false;
-    }
+    let _ = bot.goto_near(x, y + 1, bz + 1, 1.5).await;
     cast_debug(&format!("{tag}: after goto {}", at(bot)));
     // settle_xz, not walk_to_xz: walk_to_xz jumps when stalled and hops off the 2-wide platform.
     // It was harmless only while its tick count was really a packet count (it barely moved). Since
@@ -640,9 +636,13 @@ async fn fill_pad(bot: &mut Bot<'_>, (bx, by, bz): (i32, i32, i32)) {
 /// 28 s, all `ok=false`). Cancelling can leave movement keys held, so clear them.
 async fn capped_goto(bot: &mut Bot<'_>, x: i32, y: i32, z: i32, r: f64) -> bool {
     let hp0 = bot.health;
-    // Every mold move goes through THE movement primitive (cycle 4 Part 7): pathfinder, post-condition,
-    // step back on a veto.
-    let ok = crate::tasks::portal::lava_safe_move(bot, (x, y, z), r, Duration::from_secs(8), "mold").await;
+    let ok = match tokio::time::timeout(Duration::from_secs(8), bot.goto_near(x, y, z, r)).await {
+        Ok(r) => r.unwrap_or(false),
+        Err(_) => {
+            bot.clear_control_states();
+            false
+        }
+    };
     // Hurt during a mold move: name the move. Batch 5 rust-gym-005 died between `layer 3: stair done`
     // and `platform done` (the return from a −54 station to the platform) with no line in between.
     if bot.health < hp0 {
@@ -782,44 +782,6 @@ fn station_ok(bot: &Bot, (s, (dx, dz)): Station) -> bool {
     is_solid(&floor) && !is_lava(&floor) && !falls && body_air && !lava_touch && open
 }
 
-/// The entrance E = S − d, where the bot stands to seal S before stepping on: a plain safe stand (solid
-/// non-lava, non-falling floor, open body, no lava touching it, no side other than S dropping into lava
-/// within 4). Walking straight onto an unsealed S was walking onto a cell beside a lava hole (6c+lsm6
-/// rust-gym-003: station walks vetoed for a second open side, then a walk started in lava; dead).
-fn entrance_ok(bot: &Bot, st: Station) -> bool {
-    entrance_of(bot, st).is_some()
-}
-
-/// The first safe entrance among S's three non-scoop neighbours: straight behind (S − d) first, then the
-/// two sides. Only S − d was allowed at first, and on a lake rim it often has lava beside it: 6c+lsm11
-/// rust-gym-003 retired pool after pool on `STATION none … (8 / 2 / 2 / 17 / 13 with targets but no
-/// safe entrance)` and timed out.
-fn entrance_of(bot: &Bot, ((sx, fy, sz), (dx, dz)): Station) -> Option<(i32, i32, i32)> {
-    [(-dx, -dz), (dz, dx), (-dz, -dx)]
-        .into_iter()
-        .map(|(ox, oz)| (sx + ox, sz + oz))
-        .find(|&(ex, ez)| entrance_cell_ok(bot, (sx, fy, sz), (ex, ez)))
-        .map(|(ex, ez)| (ex, fy, ez))
-}
-
-fn entrance_cell_ok(bot: &Bot, (sx, fy, sz): (i32, i32, i32), (ex, ez): (i32, i32)) -> bool {
-    let floor = name_at(bot, ex, fy - 1, ez);
-    if !is_solid(&floor) || is_lava(&floor) || floor.contains("gravel") || floor.contains("sand") {
-        return false;
-    }
-    if !is_air(&name_at(bot, ex, fy, ez)) || !is_air(&name_at(bot, ex, fy + 1, ez)) {
-        return false;
-    }
-    let lava_touch = DIRS4.iter().chain([(0, 0)].iter()).any(|&(ox, oz)| {
-        is_lava(&name_at(bot, ex + ox, fy, ez + oz)) || is_lava(&name_at(bot, ex + ox, fy + 1, ez + oz))
-    });
-    let side_drop = DIRS4.iter().filter(|&&(ox, oz)| (ex + ox, ez + oz) != (sx, sz)).any(|&(ox, oz)| {
-        let (cx, cz) = (ex + ox, ez + oz);
-        is_air(&name_at(bot, cx, fy, cz)) && !solid_at(bot, cx, fy - 1, cz) && (1..=4).any(|k| is_lava(&name_at(bot, cx, fy - k, cz)))
-    });
-    !lava_touch && !side_drop
-}
-
 /// Choose a station around the frame: a valid stand outside the mold footprint (pad + rim dx −2..=6,
 /// dz −2..=3, stair x up to bx+10) with the most targets, ties to the nearest to `near`.
 /// The window is the frame's own: ±16 around the anchor, feet by−3..=by+2. Batch 1 intersected a
@@ -856,7 +818,7 @@ fn pick_station(bot: &Bot, near: (i32, i32, i32), (bx, by, bz): (i32, i32, i32),
                 }
                 for &d in DIRS4.iter() {
                     let st = ((x, fy, z), d);
-                    if !station_ok(bot, st) || !entrance_ok(bot, st) {
+                    if !station_ok(bot, st) {
                         continue;
                     }
                     let n = station_targets(bot, st).len();
@@ -914,16 +876,6 @@ fn at_station(bot: &Bot, (sx, fy, sz): (i32, i32, i32)) -> bool {
 /// `want`: stop at this many lava buckets. `reserve`: always keep this many empty buckets.
 /// `footprint`: exclude the mold's footprint around `anchor` (false for prepare's early scoop, before any frame exists).
 pub(crate) async fn station_refill(bot: &mut Bot<'_>, anchor: (i32, i32, i32), lava_pool: Option<(i32, i32, i32)>, want: i32, reserve: i32, footprint: bool) -> bool {
-    let t0 = Instant::now();
-    let before = count_items(bot, "lava_bucket");
-    let ok = station_refill_inner(bot, anchor, lava_pool, want, reserve, footprint).await;
-    // Cycle 4 primitive row (learn.rs): one per refill call.
-    crate::learn::primitive_row(bot, "station_refill", "build_nether_portal", t0, if ok { "ok" } else { "failed" }, "",
-        serde_json::json!({ "lava_before": before, "lava_after": count_items(bot, "lava_bucket"), "want": want, "anchor": [anchor.0, anchor.1, anchor.2], "early_scoop": !footprint }));
-    ok
-}
-
-async fn station_refill_inner(bot: &mut Bot<'_>, anchor: (i32, i32, i32), lava_pool: Option<(i32, i32, i32)>, want: i32, reserve: i32, footprint: bool) -> bool {
     let before = count_items(bot, "lava_bucket");
     {
         let mut g = STATION.lock().unwrap();
@@ -961,7 +913,7 @@ async fn station_refill_inner(bot: &mut Bot<'_>, anchor: (i32, i32, i32), lava_p
                     // Why none: how many cells pass each filter in the window (batch 1: a stand that
                     // looked valid on an RCON probe beside open −55 sources was not picked).
                     let (bx, by, bz) = anchor;
-                    let (mut ok, mut lava_src, mut sample, mut no_entrance) = (0, 0, None, 0);
+                    let (mut ok, mut lava_src, mut sample) = (0, 0, None);
                     for fy in by - 3..=by + 2 {
                         for x in bx - 16..=bx + 16 {
                             for z in bz - 16..=bz + 16 {
@@ -971,9 +923,6 @@ async fn station_refill_inner(bot: &mut Bot<'_>, anchor: (i32, i32, i32), lava_p
                                 for &d in DIRS4.iter() {
                                     if station_ok(bot, ((x, fy, z), d)) {
                                         ok += 1;
-                                        if !station_targets(bot, ((x, fy, z), d)).is_empty() && !entrance_ok(bot, ((x, fy, z), d)) {
-                                            no_entrance += 1;
-                                        }
                                         if sample.is_none() && is_lava(&name_at(bot, x + d.0, fy - 1, z + d.1)) {
                                             sample = Some(((x, fy, z), d, name_at(bot, x + d.0, fy - 1, z + d.1)));
                                         }
@@ -983,7 +932,7 @@ async fn station_refill_inner(bot: &mut Bot<'_>, anchor: (i32, i32, i32), lava_p
                         }
                     }
                     cast_debug(&format!(
-                        "STATION none near {near:?} (exhausted {}) — refill fails, no improvised stand; window: {ok} stand/dir pairs pass station_ok ({no_entrance} with targets but no safe entrance), {lava_src} open sources one below an air cell, sample beside lava: {sample:?}",
+                        "STATION none near {near:?} (exhausted {}) — refill fails, no improvised stand; window: {ok} stand/dir pairs pass station_ok, {lava_src} open sources one below an air cell, sample beside lava: {sample:?}",
                         ex.len()
                     ));
                     return count_items(bot, "lava_bucket") > before;
@@ -1000,35 +949,26 @@ async fn station_refill_inner(bot: &mut Bot<'_>, anchor: (i32, i32, i32), lava_p
             // ~9 rock rows away never got reached under the 8 s cap; the dig line has rock under it).
             bot.movement.blocks_cant_break.clear();
             let t0 = Instant::now();
-            // Through THE movement primitive (cycle 4 Part 7): pathfinder, then the sneaking settle, then
-            // the chunk-data post-condition. The station's own scoop side d is the one open side over
-            // lava that is intended; every other hazard still vetoes the arrival.
-            // SEAL BEFORE STEPPING: walk to the entrance E = S − d (a plain safe stand, no open side
-            // allowed), seal S's holes from there, then the one-block sneaking settle onto S, checked by
-            // the post-condition with only S's scoop side open.
-            let e = entrance_of(bot, st).unwrap_or((s.0 - d.0, s.1, s.2 - d.1));
-            let ok_e = crate::tasks::portal::lava_safe_move(bot, e, 0.3, Duration::from_secs(30), "station_entrance").await;
-            let mut ok = false;
-            if ok_e {
-                seal_station(bot, st).await;
-                settle_xz(bot, s.0 as f64 + 0.5, s.2 as f64 + 0.5, 0.2, 80).await;
-                bot.set_control_state("sneak", false);
-                // The sneaking settle sometimes doesn't leave E at all (6c+lsm9 rust-gym-002: 1.6 s, still
-                // at E, mold ended 2/10). S is sealed now, so the one-block move through the primitive
-                // (no sprint near lava, live lava check, post-condition with O allowed) is safe.
-                if !at_station(bot, s) {
-                    let _ = crate::tasks::portal::lava_safe_move_ex(bot, s, 0.3, Duration::from_secs(8), "station_step", Some(d)).await;
-                }
-                let unsafe_s = crate::tasks::portal::lava_unsafe_here(bot, Some(d));
-                ok = at_station(bot, s) && unsafe_s.is_none();
-                if !ok && unsafe_s.is_some() {
-                    cast_debug(&format!("STATION {s:?} unsafe after sealing ({}) — back to the entrance", unsafe_s.unwrap_or_default()));
-                    settle_xz(bot, e.0 as f64 + 0.5, e.2 as f64 + 0.5, 0.2, 80).await;
-                    bot.set_control_state("sneak", false);
-                }
+            let reached = tokio::time::timeout(Duration::from_secs(30), bot.goto_near(s.0, s.1, s.2, 0.5)).await;
+            // Ground truth for batch 2's `could not reach` at 2 blocks, same y: what did the
+            // pathfinder actually return?
+            let outcome = match &reached {
+                Err(_) => "timeout 30 s".to_string(),
+                Ok(Ok(b)) => format!("ok={b}"),
+                Ok(Err(e)) => format!("err={e}"),
+            };
+            if reached.is_err() {
+                bot.clear_control_states();
             }
             let p = bot.entity.position;
-            cast_debug(&format!("STATION walk → {s:?} via entrance {e:?} (entrance ok={ok_e}): ok={ok} in {} ms, now ({:.1},{:.1},{:.1})", t0.elapsed().as_millis(), p.x, p.y, p.z));
+            cast_debug(&format!("STATION walk → {s:?}: {outcome} in {} ms, now ({:.1},{:.1},{:.1})", t0.elapsed().as_millis(), p.x, p.y, p.z));
+            let p = bot.entity.position;
+            let off = ((p.x - (s.0 as f64 + 0.5)).powi(2) + (p.z - (s.2 as f64 + 0.5)).powi(2)).sqrt();
+            if feet_y(bot) == s.1 && off <= 1.2 {
+                // 0.15 / 120: batch 1's 0.2 / 30 left a bot 0.5 off centre on the block edge.
+                settle_xz(bot, s.0 as f64 + 0.5, s.2 as f64 + 0.5, 0.15, 120).await;
+            }
+            bot.set_control_state("sneak", false);
         }
         if !at_station(bot, s) {
             let p = bot.entity.position;
@@ -1107,12 +1047,75 @@ async fn station_refill_inner(bot: &mut Bot<'_>, anchor: (i32, i32, i32), lava_p
 
 /// Refill lava buckets at the pool station (the last safe scoop stand), then come back to the pad.
 async fn refill_lava(bot: &mut Bot<'_>, lava_pool: Option<(i32, i32, i32)>, anchor: (i32, i32, i32)) {
-    // Sealed station only (cycle 4 Part 7 deleted the legacy re-planned stand, its repair and its
-    // 3-block walk caps; every refill death of cycle 3 was that path).
-    // `buckets` arm k → refill to k−1 lava (one bucket stays water); off → 2, the old refill size.
-    let want = crate::learn::param("buckets").and_then(|k| k.parse::<i32>().ok()).map(|k| k - 1).unwrap_or(2);
-    let ok = station_refill(bot, anchor, lava_pool, want, 0, true).await;
-    cast_debug(&format!("MOLD refill (station) ok={ok} → lava_b={} bucket={}", count_items(bot, "lava_bucket"), count_items(bot, "bucket")));
+    // Sealed station (cycle 3): every refill death of cycle 3 happened re-planning a stand beside a
+    // pool the scoops were reshaping. REFILL_LEGACY=1 keeps the old path for A/B comparison only.
+    if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") {
+        let ok = station_refill(bot, anchor, lava_pool, 2, 0, true).await;
+        cast_debug(&format!("MOLD refill (station) ok={ok} → lava_b={} bucket={}", count_items(bot, "lava_bucket"), count_items(bot, "bucket")));
+        return;
+    }
+    let by = anchor.1;
+    let mut safe = *SAFE_SCOOP_STAND.lock().unwrap();
+    // The remembered stand is where prepare's early scoop ENDED — a shore cell that the pad/rim
+    // build, a roof dig or the sea's own flow may have changed since. Walking blindly back to it
+    // killed rust-gym-003 (natural, 4/10): OK scoop → goto stand → next fill_bucket found the bot
+    // at hp 0 two blocks under the lava surface. Re-validate it against the world first: solid
+    // non-lava floor, air for the body, no lava touching the floor or feet ring. Otherwise let
+    // fill_bucket approach from where the bot is (it re-locates the nearest source itself).
+    if let Some(s) = safe {
+        let (sx, sy, sz) = (s.0.floor() as i32, s.1.floor() as i32, s.2.floor() as i32);
+        let floor = name_at(bot, sx, sy - 1, sz);
+        let body_clear = is_air(&name_at(bot, sx, sy, sz)) && is_air(&name_at(bot, sx, sy + 1, sz));
+        let lava_ring = (-1..=1).any(|dx| (-1..=1).any(|dz| is_lava(&name_at(bot, sx + dx, sy - 1, sz + dz)) || is_lava(&name_at(bot, sx + dx, sy, sz + dz))));
+        // A stand blocked ONLY by the mold's own blocks (pad, rim, stair or platform cobble built into
+        // the body cells) is still the place we scooped safely: dig it clear instead of abandoning it.
+        // Abandoning it is what killed batch 1. Every refill logged `INVALID … body_clear=false`, then
+        // improvised beside the pool: `FOOTING overlaps lava` at hp 1 (rust-gym-001 t=797 s), and a
+        // death after roof digs over the source (t=1350 s). Frame obsidian is never dug.
+        let body = [(sx, sy, sz), (sx, sy + 1, sz)];
+        let repairable = !body_clear
+            && is_solid(&floor)
+            && !is_lava(&floor)
+            && !lava_ring
+            && body.iter().all(|&(x, y, z)| name_at(bot, x, y, z) != "obsidian");
+        if repairable {
+            cast_debug(&format!("MOLD refill: safe stand ({sx},{sy},{sz}) blocked by our own blocks — clearing it"));
+            let _ = bot.goto_near(sx, sy, sz, 2.5).await;
+            for &(x, y, z) in body.iter().rev() {
+                if !is_air(&name_at(bot, x, y, z)) {
+                    dig_at(bot, x, y, z).await;
+                }
+            }
+        }
+        let body_clear = is_air(&name_at(bot, sx, sy, sz)) && is_air(&name_at(bot, sx, sy + 1, sz));
+        if !is_solid(&floor) || is_lava(&floor) || !body_clear || lava_ring {
+            cast_debug(&format!("MOLD refill: safe stand ({sx},{sy},{sz}) INVALID floor={floor} body_clear={body_clear} lava_ring={lava_ring} — approaching from here"));
+            safe = None;
+        }
+    }
+    for _ in 0..4 {
+        if count_items(bot, "bucket") < 1 || count_items(bot, "lava_bucket") >= 2 {
+            break;
+        }
+        if let Some(s) = safe {
+            let _ = bot.goto_near(s.0.floor() as i32, s.1.floor() as i32, s.2.floor() as i32, 1.5).await;
+            // Raw-walk only a short last stretch (≤ 3 blocks), as in fill_bucket's approach. With real
+            // ticks this walk carried the bot off the −51 platform toward the stand and down into the
+            // pool cavity: −51 → −55.6 within 5 s of `fill lava: ENTER`, hp 14 → 4 (batch A restart,
+            // rust-gym-001).
+            let q = bot.entity.position;
+            if ((s.0 - q.x).powi(2) + (s.2 - q.z).powi(2)).sqrt() <= 3.0 && (s.1 - q.y).abs() <= 1.5 {
+                walk_to_xz(bot, s.0, s.2, 0.4, 40).await;
+            }
+        } else if let Some(l) = lava_pool {
+            let _ = bot.goto_near(l.0, l.1 + 1, l.2, 2.0).await;
+            descend_to_y(bot, l.1 + 1).await;
+        }
+        fill_bucket(bot, "lava").await;
+        eat_if_hurt(bot).await;
+    }
+    cast_debug(&format!("MOLD refill → lava_b={} bucket={} (safe_stand={})", count_items(bot, "lava_bucket"), count_items(bot, "bucket"), safe.is_some()));
+    let _ = by;
 }
 
 fn lava_near(bot: &Bot, (bx, by, bz): (i32, i32, i32)) -> Vec<(i32, i32, i32)> {

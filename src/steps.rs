@@ -411,7 +411,7 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "gather_build_blocks" => tasks::mining::mine_stone(bot, 72, mem).await,
         "build_nether_portal" => tasks::portal::build_nether_portal(bot, mem).await,
         "enter_nether" => tasks::portal::enter_nether(bot).await,
-        "lsm_drill" => tasks::portal::lsm_drill(bot).await,
+        "lsm_drill" => tasks::lava_move::lsm_drill(bot).await,
         "dragon" => tasks::end::dragon_beds(bot, mem).await,
         "crystals" => tasks::end::crystals_bow(bot, mem).await,
         "find_fortress" => tasks::nether::find_fortress(bot, mem).await,

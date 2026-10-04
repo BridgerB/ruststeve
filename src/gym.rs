@@ -150,7 +150,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     // fully supplied, then can't cast over the deep sea). Pass = in the nether.
     // Kit held at 6b's for the 6b vs 6c+lsm2 comparison (a kit change would confound it). Phase 2 switches
     // it to the race kit (decision 5: iron_pickaxe 2, bucket 4, water_bucket 1) once the comparison decides.
-    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 3", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 256", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 2400, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 3", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 256", "cooked_beef 16", "stick 4", "crafting_table 1"], step_id: "build_nether_portal", timeout_secs: 2400, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
     // The operator's design: tp the bot to a REAL underground lava pool with the full kit (2 water
     // buckets → infinite source), then it must dig out a safe cast site, build the obsidian frame,
     // light it, and enter. Isolates the CAST at a real pool from the (easy, solved) descent.
@@ -162,7 +162,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
     GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
     GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
-    GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::portal::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
+    GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
 
@@ -399,8 +399,8 @@ async fn run_one_trial(
     let run_id = store.start(step.slug, 0, 0, 0, step.prereq);
     *CURRENT_TRIAL.lock().unwrap() = Some((run_id, step.slug, step.step_id, Instant::now()));
     crate::learn::gym_begin(step.step_id);
-    crate::tasks::portal::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
-    *crate::tasks::portal::DRILL_ANCHOR.lock().unwrap() = None;
+    crate::tasks::lava_move::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
+    *crate::tasks::lava_move::DRILL_ANCHOR.lock().unwrap() = None;
     *crate::tasks::end::CRYSTAL_MISSES.lock().unwrap() = None;
     let (gx, gy, gz, cx, cz) = setup_trial(bot, rcon, &name, step).await;
     // Portal steps: record the SEEDED lava pool in memory so prepare_cast_site's memory-first
