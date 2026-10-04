@@ -1244,3 +1244,4 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - add a pickaxe to the kit for the bars;
   - take the ground from the start position before climbing;
   - verify the water pour (`reliable_use` at the outer edge) actually placed water before stepping off.
+- **Region-69 arm A (6b-head) final:** 6/10 any-pass, all clean (row 867 contaminated, excluded; 1 skipped). Arm B (stopped): 4/7. P(B > A) = 0.45 (4/7 vs 6/10, Beta(1,1)) — no difference on portal once the A* search-time budget is on, unlike the wall-clock tree (1/15 vs 8/10).
