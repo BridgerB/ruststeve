@@ -15,7 +15,7 @@
 set -u
 
 DIR=${DIR:-$(cd "$(dirname "$0")" && pwd)}
-BIN=$DIR/target/release/ruststeve
+BIN=${BIN:-$DIR/target/release/ruststeve}  # override to race a specific build (cycle 5: target-head)
 RCONBIN=$DIR/target/release/rcon
 DATA=$DIR/data
 DB=$DATA/race.db
