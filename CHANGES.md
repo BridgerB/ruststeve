@@ -1245,3 +1245,9 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - take the ground from the start position before climbing;
   - verify the water pour (`reliable_use` at the outer edge) actually placed water before stepping off.
 - **Region-69 arm A (6b-head) final:** 6/10 any-pass, all clean (row 867 contaminated, excluded; 1 skipped). Arm B (stopped): 4/7. P(B > A) = 0.45 (4/7 vs 6/10, Beta(1,1)) — no difference on portal once the A* search-time budget is on, unlike the wall-clock tree (1/15 vs 8/10).
+- **Crystals slot result: 0/3** by the server check, 0 deaths. Bow kills per trial 3, 4, 4 of 10 (6–7 crystals left each time); the bow gave up on the rest after 8 misses each. Cage climbs:
+  - two towers registered as caged (33 bars each), three climbs reached the top;
+  - **1 bar opened in total**, and the bow still could not hit that crystal;
+  - the other given-up crystals showed no bars from where the bot stood, so they were unseen or uncaged, i.e. missed for another reason (no arc);
+  - one climb ran short of obsidian (15 left for a ~21-block tower).
+  - The v2 list above stands; also scan cages after walking near each tower, not from the start position.
