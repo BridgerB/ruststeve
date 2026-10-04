@@ -26,7 +26,6 @@ use crate::bot::Bot;
 use crate::bot_utils::count_items;
 use crate::types::GameState;
 
-const ATTEMPTS: &str = "data/attempts.jsonl";
 const PARAMS: &str = "data/params.json";
 
 pub fn now_ms() -> i64 {
@@ -324,12 +323,27 @@ pub fn context(bot: &Bot, s: &GameState, mem_ore: i64) -> Value {
 
 // ── rows ─────────────────────────────────────────────────────────────────────────────────────
 
-/// Append one row to attempts.jsonl (and race.db when attached by the caller).
+/// The per-process event file: `data/attempts/<run_id>-<bot>.jsonl`, one writer each. One shared
+/// file with many appending processes interleaved rows (cycle 4: 118 of 27,011 lines unparseable).
+/// `ATTEMPTS_DIR` overrides the directory (tests). The old `data/attempts.jsonl` stays read-only.
+fn attempts_path(row: &Value) -> std::path::PathBuf {
+    let dir = std::env::var("ATTEMPTS_DIR").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "data/attempts".to_string());
+    let clean = |s: &str| s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '+' { c } else { '_' }).collect::<String>();
+    let run = row.get("run_id").and_then(Value::as_str).unwrap_or("adhoc");
+    let bot = row.get("bot").and_then(Value::as_str).unwrap_or("bot");
+    std::path::Path::new(&dir).join(format!("{}-{}.jsonl", clean(run), clean(bot)))
+}
+
+/// Append one row to this process's event file (and race.db when attached by the caller). The row
+/// goes out as a single write of one line.
 pub fn write_row(row: &Value) {
     use std::io::Write;
-    let _ = std::fs::create_dir_all("data");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(ATTEMPTS) {
-        let _ = writeln!(f, "{row}");
+    let path = attempts_path(row);
+    if let Some(d) = path.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(format!("{row}\n").as_bytes());
     }
 }
 
@@ -534,6 +548,43 @@ pub fn gym_row(bot: &Bot, slug: &str, step_id: &str, start: Instant, outcome: &s
 
 #[cfg(test)]
 mod tests {
+    /// Decision 5 (cycle 5): two concurrent writers produce zero unparseable lines. Each process
+    /// (here: each thread with its own bot name) gets its own file; every line parses.
+    #[test]
+    fn two_writers_zero_unparseable() {
+        let dir = std::env::temp_dir().join(format!("attempts-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("ATTEMPTS_DIR", &dir);
+        let writers: Vec<_> = ["bot-a", "bot-b"]
+            .iter()
+            .map(|bot| {
+                let bot = bot.to_string();
+                std::thread::spawn(move || {
+                    for i in 0..2000 {
+                        super::write_row(&serde_json::json!({ "run_id": "test-run", "bot": bot, "i": i, "pad": "x".repeat(200) }));
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        std::env::remove_var("ATTEMPTS_DIR");
+        let (mut good, mut bad) = (0, 0);
+        for f in std::fs::read_dir(&dir).unwrap() {
+            for line in std::fs::read_to_string(f.unwrap().path()).unwrap().lines() {
+                if serde_json::from_str::<serde_json::Value>(line).is_ok() {
+                    good += 1;
+                } else {
+                    bad += 1;
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(bad, 0, "unparseable lines");
+        assert_eq!(good, 4000);
+    }
+
     /// Cross-implementation agreement with scripts/ml/bandit.ts: mean of 10,000 Beta(3,7) draws ≈ 0.3.
     #[test]
     fn beta_3_7_mean() {

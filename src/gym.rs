@@ -284,12 +284,45 @@ pub fn report() {
 // ── the runner ──────────────────────────────────────────────────────────────
 
 /// Run `trials` gym trials of `slug` on this bot, recording each to `gym.db`.
+/// The trial in progress: (gym.db row id, slug, step_id, start). The SIGTERM handler reads it so a
+/// trial I stop leaves an `aborted` row with a reason, never a `running` one (cycle 5: 111 of 208
+/// cycle-4 gym rows were left `running` by my own relaunches).
+static CURRENT_TRIAL: std::sync::Mutex<Option<(i64, &'static str, &'static str, Instant)>> = std::sync::Mutex::new(None);
+
+/// Install the SIGTERM handler once: record the current trial as `aborted` (gym.db + event log),
+/// then exit. The launchers stop a batch with SIGTERM, and use -9 only as a fallback.
+fn install_abort_handler() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tokio::spawn(async {
+            let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) else {
+                return;
+            };
+            sig.recv().await;
+            if let Some((id, slug, step_id, t0)) = CURRENT_TRIAL.lock().unwrap().take() {
+                let reason = "aborted: stopped by the operator (SIGTERM)";
+                GymStore::open().finish(id, false, t0.elapsed().as_millis() as i64, "aborted", reason);
+                let e = |k: &str| std::env::var(k).unwrap_or_default();
+                crate::learn::write_row(&serde_json::json!({
+                    "run_id": e("GYM_RUN"), "bot_impl": "rs", "build": e("BUILD"), "bot": e("MC_USERNAME"),
+                    "world_seed": e("WORLD_SEED").parse::<i64>().ok(), "skill": crate::learn::skill_of(step_id), "step_id": step_id,
+                    "source": "gym", "gym_slug": slug, "start_ms": crate::learn::now_ms() - t0.elapsed().as_millis() as i64,
+                    "duration_s": t0.elapsed().as_secs_f64(), "outcome": "aborted", "reason": reason, "deaths": 0, "gym_id": id,
+                }));
+                println!("[gym:{slug}] ABORTED after {:.0}s (SIGTERM) — row {id} recorded as aborted", t0.elapsed().as_secs_f64());
+            }
+            std::process::exit(0);
+        });
+    });
+}
+
 pub async fn run(
     bot: &mut Bot<'_>,
     memory: &mut WorldMemory,
     slug: &str,
     trials: u32,
 ) -> std::io::Result<()> {
+    install_abort_handler();
     let Some(step) = GYM_STEPS.iter().find(|s| s.slug == slug) else {
         println!("GYM: unknown slug '{slug}'. Known: {}", GYM_STEPS.iter().map(|s| s.slug).collect::<Vec<_>>().join(", "));
         return Ok(());
@@ -324,6 +357,7 @@ pub async fn run_random(
     memory: &mut WorldMemory,
     trials: u32,
 ) -> std::io::Result<()> {
+    install_abort_handler();
     let mut rcon = RconClient::connect(RconOptions {
         host: env("RCON_HOST", "localhost"),
         port: env("RCON_PORT", "25575").parse().unwrap_or(25575),
@@ -363,6 +397,7 @@ async fn run_one_trial(
     // Start row BEFORE setup: a bot that dies or disconnects in setup still leaves a `running`
     // row (counted as killed) — cycle-2 water batch 2 lost one launch that way.
     let run_id = store.start(step.slug, 0, 0, 0, step.prereq);
+    *CURRENT_TRIAL.lock().unwrap() = Some((run_id, step.slug, step.step_id, Instant::now()));
     crate::learn::gym_begin(step.step_id);
     crate::tasks::portal::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
     *crate::tasks::portal::DRILL_ANCHOR.lock().unwrap() = None;
@@ -400,6 +435,8 @@ async fn run_one_trial(
     let mut pass = false;
     let mut last_msg = String::new();
     let mut attempts = 0u32;
+    let mut harness_events = 0u32;
+    let (mut same_fail, mut last_fail_key) = (0u32, String::new());
     // Setup found no land within ±480 (all-ocean region): FAIL the trial without running it.
     let no_land = SETUP_NO_LAND.swap(false, std::sync::atomic::Ordering::Relaxed);
     if no_land {
@@ -426,14 +463,19 @@ async fn run_one_trial(
             break;
         }
         if !s.alive {
-
             bot.respawn().await.ok();
             bot.wait_ticks(40).await.ok();
-            // Fixed-arena steps: a mid-build death respawns at WORLD SPAWN (no bed), stranding the
-            // bot thousands of blocks from the arena+lava so it can never recover — it burns the
-            // rest of the budget building futile frames on bare terrain. RCON-tp it back onto the
-            // arena pad so the retry has lava in reach.
-            if matches!(step.slug, "reach_lava" | "to_nether") {
+            // Respawn must land within 32 blocks of the trial's landing. The spawnpoint isn't always
+            // honoured (steve saw the same on its server), and a bot respawned at world spawn burns
+            // the rest of the budget on foreign terrain. Otherwise tp back and count a harness event.
+            // (Fixed-arena steps always went back to the pad; this generalises it.)
+            let p = bot.entity.position;
+            let d = ((p.x - gx as f64).powi(2) + (p.z - gz as f64).powi(2)).sqrt();
+            if d > 32.0 || matches!(step.slug, "reach_lava" | "to_nether") {
+                if d > 32.0 {
+                    harness_events += 1;
+                    println!("[gym:{}] HARNESS respawn {d:.0} blocks from the landing ({:.0},{:.0},{:.0}) — tp back", step.slug, p.x, p.y, p.z);
+                }
                 let _ = rcon_driving(bot, rcon, &format!("tp {name} {gx} {gy} {gz}")).await;
                 pump_teleport(bot, gx, gz).await;
             }
@@ -474,7 +516,23 @@ async fn run_one_trial(
         };
         tokio::select! {
             r = tokio::time::timeout(remaining, crate::steps::execute_step(bot, step.step_id, memory)) => match r {
-                Ok(r) => last_msg = r.message,
+                Ok(r) => {
+                    // The same failure four times in one trial ends it, failed, with that reason (steve
+                    // lost a run to a 102-dispatch "pickaxe worn out" loop). Digits are ignored so a
+                    // counter or coordinate in the message doesn't make repeats look different.
+                    if !r.success {
+                        let key: String = r.message.chars().filter(|c| !c.is_ascii_digit()).collect();
+                        same_fail = if key == last_fail_key { same_fail + 1 } else { 1 };
+                        last_fail_key = key;
+                    } else {
+                        same_fail = 0;
+                    }
+                    last_msg = r.message;
+                    if same_fail >= 4 {
+                        last_msg = format!("same failure 4× in this trial: {last_msg}");
+                        break;
+                    }
+                }
                 Err(_) => {
                     last_msg = format!("gym timeout — task hung ({attempts} attempts) | last: {}", crate::tasks::portal::last_cast_line());
                     break;
@@ -528,7 +586,12 @@ async fn run_one_trial(
         pass = false;
         outcome = "died";
     }
+    if harness_events > 0 {
+        last_msg = format!("harness_events={harness_events} | {last_msg}");
+    }
     last_msg = format!("deaths={deaths} | {last_msg}");
+    // Finished normally: the abort handler must no longer claim this row.
+    *CURRENT_TRIAL.lock().unwrap() = None;
     store.finish(run_id, pass, dur, outcome, &last_msg);
     // A setup skip (no land, etc.) measures nothing about the bot: `skipped`, excluded by compare/funnel.
     let row_outcome = if last_msg.contains("trial skipped") { "skipped" } else { match outcome { "pass" => "ok", "timeout" => "timeout", "died" => "death", _ => "failed" } };
