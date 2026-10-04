@@ -34,6 +34,9 @@ pub struct AStar {
     /// 0.9 s of its 2 s, and paths the old synchronous search found came back Timeout (cycle 5:
     /// "MOLD slow goto … ok=false" timeouts, race-head 1/10 vs 6b-head 12/22 on the portal gym).
     spent: Duration,
+    /// Wall-clock start, for the old budget (the default until the search-time budget is measured: the
+    /// region-62 run of it was stopped by the death rule, cycle 5). `ASTAR_SEARCH_BUDGET=1` uses `spent`.
+    start_time: Instant,
     max_cost: f64,
 }
 
@@ -56,6 +59,7 @@ impl AStar {
             closed: HashSet::new(),
             best: 0,
             spent: Duration::ZERO,
+            start_time: Instant::now(),
             max_cost: if search_radius < 0.0 {
                 -1.0
             } else {
@@ -171,7 +175,8 @@ impl AStar {
             if tick_start.elapsed() > tick_timeout {
                 return self.result(PathStatus::Partial, self.best);
             }
-            if self.spent + tick_start.elapsed() > total_timeout {
+            let used = if search_budget() { self.spent + tick_start.elapsed() } else { self.start_time.elapsed() };
+            if used > total_timeout {
                 return self.result(PathStatus::Timeout, self.best);
             }
 
@@ -324,4 +329,9 @@ mod tests {
         assert_eq!(result.status, PathStatus::Success);
         assert_eq!(result.cost, 7.0); // 3 + 4 manhattan
     }
+}
+
+fn search_budget() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("ASTAR_SEARCH_BUDGET").ok().as_deref() == Some("1"))
 }
