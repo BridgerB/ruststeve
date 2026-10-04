@@ -1251,3 +1251,4 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - the other given-up crystals showed no bars from where the bot stood, so they were unseen or uncaged, i.e. missed for another reason (no arc);
   - one climb ran short of obsidian (15 left for a ~21-block tower).
   - The v2 list above stands; also scan cages after walking near each tower, not from the start position.
+- **6b-head water set (region 71 run, fixed arena):** 13/14 (Wilson 0.69–0.99), 0 deaths: lake 2/2, shore 2/2, cave 2/2, cave_iron 2/2, roofed 2/2, descent 2/2, aquifer 1/2. Same as 6b-safe's 12/14. **The water slugs do not separate the builds and do not reproduce race i7's water wall:** in i7 bots started on land, then gather_wood walked into a lake (3/5 bots), whereas these slugs start the bot in water. That wall needs its own slug: race placement plus gather_wood with a lake within the search radius.
