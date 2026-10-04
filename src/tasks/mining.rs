@@ -582,7 +582,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
             dry_veins,
             gain_iters,
             nearest_ore,
-            strip_dir: DIRS[((iters / 4) % 4) as usize],
+            strip_dir: DIRS[((iters / 4) as usize + crate::learn::alternatives("mine_iron") as usize) % 4], // + stall alternative (learn.rs)
             over_water: over_deep_water(bot, from),
         };
 
@@ -598,7 +598,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
                 // the next descent is a NEW column.
                 if overshoots % 3 == 0 {
                     range_relocates += 1;
-                    let (rdx, rdz) = DIRS[(range_relocates as usize) % 4];
+                    let (rdx, rdz) = DIRS[(range_relocates as usize + crate::learn::alternatives("mine_iron") as usize) % 4];
                     let dist = 48 + range_relocates.min(6) as i32 * 24;
                     let (tx, tz) = (from.0 + rdx * dist, from.2 + rdz * dist);
                     println!("    ore: repeated overshoot — ranging to fresh terrain ({tx},{tz})");
@@ -672,7 +672,7 @@ pub async fn mine_ore(bot: &mut Bot<'_>, ore: &str, target: i32, mem: &mut World
             }
             MineMove::RangeJump => {
                 range_relocates += 1;
-                let (rdx, rdz) = DIRS[(range_relocates as usize) % 4];
+                let (rdx, rdz) = DIRS[(range_relocates as usize + crate::learn::alternatives("mine_iron") as usize) % 4];
                 let dist = 48 + range_relocates.min(6) as i32 * 24; // 48 → up to ~192 blocks
                 let (tx, tz) = (from.0 + rdx * dist, from.2 + rdz * dist);
                 mem.log("mine_ore", "range", &format!("no gain {gain_iters} iters — jump#{range_relocates} to {tx},{tz}"));

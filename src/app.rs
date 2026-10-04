@@ -59,6 +59,7 @@ pub async fn run() -> std::io::Result<()> {
     if std::env::var("RACE_GOAL").is_ok() || std::env::var("RACE_DB").is_ok() {
         memory.attach_race_log(&username);
     }
+    crate::learn::close_orphan(memory.race_log());
     memory.log("session", "start", &format!("{host}:{port} as {username}"));
 
     println!("connecting to {host}:{port} as {username}…");
@@ -276,6 +277,8 @@ pub async fn run() -> std::io::Result<()> {
     let mut same_death = 0u32;
     let mut deaths_recorded = 0u32;
     let mut goal_reached = false;
+    // Cycle 4: one open step attempt (event row, budget, stall detector). See learn.rs.
+    let mut attempt: Option<crate::learn::Attempt> = None;
     loop {
         // Let packets settle so inventory/position are current.
         bot.wait_ticks(6).await?;
@@ -355,9 +358,22 @@ pub async fn run() -> std::io::Result<()> {
             }
         }
 
+        // A different step was chosen: close the open attempt (ok if its step is now complete).
+        if let Some(a) = attempt.take() {
+            if next.map(|s| s.id) != Some(a.step_id.as_str()) {
+                let done_now = crate::steps::STEPS.iter().find(|s| s.id == a.step_id).map(|s| (s.is_complete)(&state)).unwrap_or(false);
+                let (o, why) = if done_now { ("ok", String::new()) } else { ("failed", format!("left for {}", next.map(|s| s.id).unwrap_or("none"))) };
+                a.finish(&bot, o, &why, memory.race_log());
+            } else {
+                attempt = Some(a);
+            }
+        }
         match next {
             Some(step) => {
                 idle = 0;
+                if attempt.is_none() {
+                    attempt = Some(crate::learn::Attempt::start(&bot, step.id, &state, memory.count(crate::memory::PoiKind::IronOre)));
+                }
                 println!(
                     "[{}] → {} ({done}/{total}) | logs={} planks={} sticks={} pick={:?}",
                     state.world.dimension, step.name,
@@ -400,6 +416,17 @@ pub async fn run() -> std::io::Result<()> {
                     Err(_) => crate::types::failure(format!("{} exceeded {}s — re-deriving", step.id, budget.as_secs())),
                 };
                 memory.race_step_result(step.id, r.success, &r.message);
+                {
+                    let st = sync_from_bot(&bot);
+                    let verdict = attempt.as_mut().map(|a| a.observe(&bot, &st, r.success, &r.message));
+                    if let Some(crate::learn::Verdict::Stall(why)) = verdict {
+                        println!("    stall: {} — {why}; next attempt changes heading/site/band", step.id);
+                        memory.race_event("stall", step.id, Some(step.id), &why, &st, 1);
+                        if let Some(a) = attempt.take() {
+                            a.finish(&bot, "timeout", &why, memory.race_log());
+                        }
+                    }
+                }
                 // Breath watchdog accounting: every pre-emption (watchdog took jump) and alarm
                 // (still under after 6 s → movement aborted) goes to race.db for the rate report.
                 let pre = std::mem::take(&mut bot.breath_preempts);
@@ -469,6 +496,9 @@ pub async fn run() -> std::io::Result<()> {
                 }
             }
         }
+    }
+    if let Some(a) = attempt.take() {
+        a.finish(&bot, "failed", "process exiting (bail, goal stop or lost connection)", memory.race_log());
     }
     Ok(())
 }

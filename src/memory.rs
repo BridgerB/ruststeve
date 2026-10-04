@@ -299,6 +299,11 @@ impl WorldMemory {
         }
     }
 
+    /// The attached race log, if any (cycle-4 attempt rows mirror into it).
+    pub fn race_log(&mut self) -> Option<&mut crate::telemetry::RaceLog> {
+        self.race.as_mut()
+    }
+
     pub fn race_win(&mut self, goal: &str) {
         if let Some(race) = &mut self.race {
             race.win(goal);

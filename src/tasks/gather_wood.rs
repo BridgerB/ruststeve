@@ -284,7 +284,8 @@ async fn explore(bot: &mut Bot<'_>, _sweep: u32, _home: (i32, i32)) {
     let (dx, dz) = if dist_home > ROAM_LIMIT {
         ((home.0 - px).signum(), (home.1 - pz).signum()) // too far — head home
     } else {
-        dirs[(sweep as usize / 6) % dirs.len()]
+        // +2 (a 90° turn) per stalled attempt: the stall rule's alternative (learn.rs).
+        dirs[(sweep as usize / 6 + crate::learn::alternatives("gather_wood") as usize * 2) % dirs.len()]
     };
     let what = if dist_home > ROAM_LIMIT { "returning toward home" } else { "exploring" };
     println!("    wood: {what} dir=({dx},{dz}) {dist_home:.0} from home");

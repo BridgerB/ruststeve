@@ -132,6 +132,19 @@ impl RaceLog {
         }
     }
 
+    /// Mirror of one data/attempts.jsonl row (cycle 4 event log) for SQL queries.
+    pub fn attempt(&mut self, row: &serde_json::Value) {
+        let _ = self.conn.execute(
+            "INSERT INTO attempts(ts_ms,bot,run_id,build,skill,step_id,outcome,reason,duration_s,deaths,json)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            params![
+                now_ms(), self.bot, row["run_id"].as_str(), row["build"].as_str(), row["skill"].as_str(),
+                row["step_id"].as_str(), row["outcome"].as_str(), row["reason"].as_str(),
+                row["duration_s"].as_f64(), row["deaths"].as_i64(), row.to_string()
+            ],
+        );
+    }
+
     pub fn win(&mut self, goal: &str) {
         self.event("win", goal, None, "", None, None, None, None);
     }
@@ -171,6 +184,13 @@ CREATE TABLE IF NOT EXISTS events(
 );
 CREATE INDEX IF NOT EXISTS events_bot_ts ON events(bot, ts_ms);
 CREATE INDEX IF NOT EXISTS events_cat    ON events(category, event);
+
+CREATE TABLE IF NOT EXISTS attempts(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts_ms INTEGER NOT NULL, bot TEXT NOT NULL, run_id TEXT, build TEXT, skill TEXT, step_id TEXT,
+  outcome TEXT, reason TEXT, duration_s REAL, deaths INTEGER, json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attempts_skill ON attempts(skill, outcome);
 
 CREATE TABLE IF NOT EXISTS counters(
   bot TEXT NOT NULL, category TEXT NOT NULL, event TEXT NOT NULL, step_id TEXT NOT NULL DEFAULT '',
