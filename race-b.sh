@@ -228,8 +228,11 @@ while [ $SECONDS -lt $RACE_SECONDS ]; do
     if [ -z "${ANNOUNCED[i]:-}" ] && [ -n "$(sqlite3 "$DB" "SELECT 1 FROM events WHERE category='win' AND bot='$n' LIMIT 1" 2>/dev/null)" ]; then
       ANNOUNCED[$i]=1; echo "[race-b t=${SECONDS}s] $n reached goal '$RACE_GOAL' — continuing"
     fi
-    # Respawn check (cycle 5): after a death the bot must be back within 32 blocks of its landing (the
-    # spawnpoint is not always honoured; steve saw the same). If not, tp it back and log a harness event.
+    # Respawn check (cycle 5): the spawnpoint is not always honoured (steve saw the same). A bot that
+    # respawned within 32 blocks of its landing OR of its last recorded position (race.db tick before the
+    # death) is where it should be: bots move their own spawnpoint to their work (the portal sets it at the
+    # frame). Only a respawn far from both is a harness fault: tp to the landing and log it. Race i7 tp'd
+    # two portal bots off their molds by checking the landing alone.
     deaths=$(sqlite3 "$DB" "SELECT COUNT(*) FROM events WHERE category='death' AND bot='$n'" 2>/dev/null || echo 0)
     if [ "${deaths:-0}" -gt "${DEATHS_SEEN[i]:-0}" ]; then
       DEATHS_SEEN[$i]=$deaths
@@ -237,8 +240,11 @@ while [ $SECONDS -lt $RACE_SECONDS ]; do
       read -r px _ pz <<<"$pos"
       if [ -n "${px:-}" ]; then
         d=$(awk -v a="$px" -v b="$pz" -v c="${LANDX[i]}" -v e="${LANDZ[i]}" 'BEGIN { printf "%d", sqrt((a-c)^2 + (b-e)^2) }')
-        if [ "$d" -gt 32 ]; then
-          echo "[race-b t=${SECONDS}s] HARNESS $n respawned ${d} blocks from its landing — tp back"
+        last=$(sqlite3 "$DB" "SELECT x||' '||z FROM ticks WHERE bot='$n' AND ts_ms < (SELECT MAX(ts_ms) FROM events WHERE category='death' AND bot='$n') ORDER BY ts_ms DESC LIMIT 1" 2>/dev/null)
+        read -r lx2 lz2 <<<"$last"
+        dl=$(awk -v a="$px" -v b="$pz" -v c="${lx2:-${LANDX[i]}}" -v e="${lz2:-${LANDZ[i]}}" 'BEGIN { printf "%d", sqrt((a-c)^2 + (b-e)^2) }')
+        if [ "$d" -gt 32 ] && [ "$dl" -gt 32 ]; then
+          echo "[race-b t=${SECONDS}s] HARNESS $n respawned ${d} blocks from its landing and ${dl} from its last position — tp back"
           meta "$n" harness_respawn_far "death #$deaths: respawn ${d} blocks from landing (${LANDX[i]},${LANDZ[i]}); tp back"
           rc "execute positioned ${LANDX[i]} 0 ${LANDZ[i]} positioned over motion_blocking_no_leaves run tp $n ~ ~1 ~"
         fi
