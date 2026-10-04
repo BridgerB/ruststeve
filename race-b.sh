@@ -104,6 +104,10 @@ echo "[race-b] phase 1.5: clear ghosts"
 for n in "${NAMES[@]}"; do rc "kick $n"; done
 sleep 4
 
+# Cycle 4 event log (src/learn.rs): rows carry the race id, the build and the world seed.
+BUILD=${BUILD:-dev}
+WORLD_SEED=$(perl -e 'alarm shift; exec @ARGV' 20 "$RCONBIN" "seed" 2>/dev/null | grep -oE -- "-?[0-9]+" | head -1)
+echo "[race-b] build=$BUILD seed=${WORLD_SEED:-?}"
 launch_bot() {
   local i=$1
   # The bot enables the viewer when RUST_VIEW is SET at all (even "0"), so only pass it for 1.
@@ -111,6 +115,7 @@ launch_bot() {
   env MC_HOST=$MC_HOST MC_PORT=$PORT MC_USERNAME="${NAMES[i]}" STEVE_DATA="$DATA" \
     RCON_HOST=$RCON_HOST RCON_PORT=$RCON_PORT \
     RACE_HOLD=$HOLD RACE_GOAL="$RACE_GOAL" CRAFT_DEBUG=1 ${view[@]+"${view[@]}"} \
+    RACE_ID="$RACE_ID" BUILD="$BUILD" WORLD_SEED="${WORLD_SEED:-}" \
     "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   PIDS[$i]=$!
   echo "$!" >> "$DIR/race.pids"
@@ -123,6 +128,10 @@ hb_age() { perl -e 'my $m=(stat shift)[9]; print defined $m ? time-$m : 999' "$D
 echo "[race-b] phase 2: launching $N bots (hold ${HOLD}s, goal $RACE_GOAL)"
 for i in $(seq 0 $((N-1))); do
   : > "$DIR/race-$i.log"
+  # Fresh memory per RACE (never per relaunch): POIs from an earlier race are in another region or
+  # a deleted world. The smoke race of 2026-10-03 started with 298 iron sightings from race i6 in
+  # a world that no longer exists. A relaunch keeps memory: it resumes where it stood.
+  rm -f "$DIR/.memory-${NAMES[i]}.db" "$DIR/.memory-${NAMES[i]}.db-wal" "$DIR/.memory-${NAMES[i]}.db-shm" "$DIR/data/.attempt-${NAMES[i]}.json"
   launch_bot "$i"
   sleep 2
 done

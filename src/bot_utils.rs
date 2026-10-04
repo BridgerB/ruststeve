@@ -247,8 +247,13 @@ async fn pillar_step(bot: &mut Bot<'_>, t: &mut u32) -> bool {
 pub async fn leave_water(bot: &mut Bot<'_>, ticks: u32) -> bool {
     // The escape's own digs (cap, bank stair) must run while the breath alarm blocks task digs.
     bot.escaping = true;
+    let t0 = std::time::Instant::now();
+    let head0 = head_in_water(bot);
     let out = leave_water_inner(bot, ticks).await;
     bot.escaping = false;
+    // Cycle 4 primitive row (learn.rs): one per escape.
+    crate::learn::primitive_row(bot, "leave_water", "", t0, if out { "ok" } else { "failed" }, "",
+        serde_json::json!({ "head_in_water_at_start": head0, "ticks_budget": ticks, "health": bot.health }));
     out
 }
 

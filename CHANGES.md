@@ -718,3 +718,416 @@ Commits: not authorized by the user (the strategy agent recommended local commit
   - **Fixes (build 6c):**
     - The return to the anchor uses the sneaking, non-jumping `settle_xz` (now `pub(crate)`), with the pathfinder only when more than 1.5 away or on another level.
     - Prepare's "no lava after the early scoop → old `fill_bucket`" fallback is legacy-only. All three remaining lava `fill_bucket` calls now run only under `REFILL_LEGACY=1`.
+
+# Cycle 4 (2026-10-03 02:17 MDT → 10-04 02:17 MDT), the learning-system cycle: `docs/ruststeve-loop-cycle4.md`
+
+The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Commits are not authorised this cycle: tree uncommitted.
+
+## Phase 0a: close cycle 3, reset mc-b, disk, build
+- Cycle 3 ended early: the user stopped it about 07:40 UTC for a strategy call. Written: `docs/retrospective-2026-10-03.md` and `docs/briefing-2026-10-03.md`.
+- **mc-b reset (decision 1):** stopped `minecraft-b`, removed `/var/lib/mc-b/world` (2.8 G), started; `Done (15.6 s)` at 08:17:54 UTC. New seed **522995494**. `keep_inventory` re-set to true (it's per-world). `tick query`: 20 TPS, 2.1 ms average tick.
+- **Region indexes:** gym-index reset to 0. race-index set to 6, so the next race is named i7 (every region in the fresh world is new).
+- **Disk:** 15 G free after the reset (the rule is to stop launching below 5 G).
+- **Build 6c:** built on the box from `main` `41a8f55` (main and gym binaries, 08:14–08:15 UTC). It has never run a trial; treated as untested.
+
+## Phase 0b: event log, intervals, budgets and stalls, bandit (started 02:35 MDT)
+- **`src/learn.rs`:**
+  - **Attempt rows:** one per step attempt to `data/attempts.jsonl`, mirrored into race.db `attempts`. Plus gym trial rows, and primitive rows for `leave_water` and `station_refill`.
+  - **Progress ratchet per step:** logs, cobble, iron, coal or rods; for the portal, frame obsidian, then lava held, then depth.
+  - **Stall detector:** no progress for `stall_s` (180 s; 300 s for the portal and fortress), over budget (Part 3 budgets per step), or the same failure 4× → `timeout` row, and the step's alternative counter bumps. The counter turns the `gather_wood` heading 90°, offsets the `mine_ore` strip and range headings, and rotates the portal's blind at-depth tunnel heading (it was always +Z).
+  - **Killed processes:** a killed process's open attempt is checkpointed to `data/.attempt-<bot>.json` and closed as `failed` by the next launch.
+  - **Bandit:** `data/params.json` with a Thompson draw (Marsaglia–Tsang Beta) per enabled parameter at attempt start, and posterior updates at the end, under a lock file. All arms disabled until Phase 2.
+- **Scripts:** `scripts/ml/bandit.ts` (test|init|refit|show), `compare.ts` (Beta posteriors, P(B > A), 0.95/0.05 stop rule with a 30-trial cap, paired seeds), `funnel.ts` (Part 10.1 table). `rate-report.sh` and `gym-report.sh` print Wilson 95% intervals; rate-report also gets an attempts table and stall abandons.
+- **Cross-implementation check:** mean of 10,000 Beta(3,7) draws, TS 0.3007, Rust test passes (|mean − 0.3| < 0.02).
+- **Launchers:** race-b and gym-tonether-b pass `BUILD`, `WORLD_SEED` (RCON `seed`), and `RACE_ID` / `GYM_RUN` = `gym-r<region>-<slug>`.
+- `docs/events-schema.md`: the schema, outcome rules, and the exposure-only feature list with how each is sensed (audit: all exposure-only; `find_lava_cluster` is the known unexposed scan, not a feature).
+- **Limitation:** the stall check runs when a step call returns. `build_nether_portal` can hold one call for up to its 3600 s outer timeout, so its stall can't fire mid-call.
+- **Smoke race** (`race-20261003-082924-i100`, 2 bots, 20 min, region index 100, build `6c+learn`): both lanes placed on land. Attempt checkpoints written from the first step. rust-race-002 killed by hand at 08:33 UTC to test resume and orphan closing.
+- **Breath-alarm latency, mechanism found (race i6 logs):** bot 003 logged `LOOP STALL 4060 ms` three times, each right after `fill lava: … moving toward`, i.e. a `goto_near`. `goto_goal` ran `get_path_to` as one synchronous A* search with a 2000 ms budget, twice per goto. That froze the tick loop, and with it the breath watchdog (which runs inside `drive_tick`), for about 4 s. Race i6's 11.3 s alarm fits that.
+  - **Fix:** `Bot::plan_path` runs the same A* in 40 ms slices with one `drive_tick` between slices (2 s total budget unchanged; the search state lives in `AStar`, and `Movements` is rebuilt per slice). Movement keys are released before planning, because ticks now run while planning.
+  - **Open:** `can_reach` still runs a synchronous 800 ms search.
+  - A timing change, so the full water regression comes next (it also measures alarm latency).
+- **Smoke race check (rust-race-002 killed by hand):** race-b relaunched it at t=181 s "in place (no tp)", and the orphaned attempt closed as a `failed` row ("process ended (killed or relaunched) mid-attempt"). **Bug found by that row:** `ore_sightings_memory: 298`. race-b never cleared per-bot memory, so every race started with POIs from earlier races (other regions, and now a deleted world). **Fix:** race-b deletes `.memory-<bot>.db*` and the attempt checkpoint at race start (never on a relaunch).
+- **Server B crashed at 08:36:28 UTC (`A single server tick took 60.00 seconds`, watchdog).** It auto-restarted. The server thread was in `ServerChunkCache.getChunk`: synchronous chunk generation.
+  - Cause: the water regression's 7 bots each ran `forceload add` and then immediately `fill` their arenas at fixed coordinates (x 12600) on the fresh world. A `fill` on a chunk not yet loaded generates it synchronously on the server thread.
+  - Both smoke bots lost their connection and relaunched in place. The smoke race's integrity is affected from t≈380 s; recorded, not rerun.
+  - **Fix:** `wait_area_loaded` polls `execute if loaded` on the arena's corners and centre (≤ 90 s) after the forceload and before any fill, in the two water arena setups and LavaPool. The water batch was stopped; it relaunches on the fixed build after the smoke race.
+- **Smoke race result (gate: attempt rows for every step, intervals, killed bot resumes): met.**
+  - 16 attempt rows across 7 steps. Funnel: wood_stone_tools 10/14, 71% [45%, 88%]; iron 0/2, 0% [0%, 66%] (both stall timeouts, "no progress in 180 s").
+  - The 4 `failed` rows are the hand kill and the crash relaunches. Rate report prints Wilson intervals.
+  - The alarm ≤ 6.5 s part of the gate is measured in the water regression, relaunched on the load-wait build (gym region 2).
+  - race-index reset to 6 after the smoke race (which used index 100).
+- **Server B crashed a second time at 08:52:44 UTC (60 s tick), with the load-wait fix in place.**
+  - The fills ran after their areas loaded, so the fills weren't the blocker. The server thread was again in `getChunk` (caller truncated), draining queued RCON work until the watchdog fired.
+  - **Mechanism:** the water arenas are at fixed x 12600, far from spawn; on the fresh world nothing there is generated. Seven bots teleported in within seconds, each bringing its full view distance to generate: thousands of chunks on a 2-CPU box. A synchronous `getChunk` behind that queue waited past 60 s. The old world had these areas generated by earlier cycles, which is why it never crashed before.
+  - **Fix:** `scripts/pregen.ts` forceloads an area in 16-chunk batches, waits until each batch is loaded (async, no players), then releases it. Used before any batch or race in fresh terrain. The gym launcher's bot stagger is now `STAGGER` (default 4 s).
+  - The water arenas plus a view-distance margin (x 12424–12776, z 3464–4056, ~800 chunks) are pre-generating now. **Race i7's region gets the same before the race** (the same risk with 5 bots).
+- **`lava_safe_move` written** (portal.rs, with `lava_unsafe_here`). Call-site replacement and legacy deletion are in progress. Interpretation recorded: "no missing floor in the four side cells" = an open side that drops into lava within 4 blocks, not any drop (the mold platform's 2-wide stance has open sides by design). Line counts before Part 7: portal.rs 2789, portal_mold.rs 1174.
+
+## Phase 1: lava_safe_move, legacy deletion (started 03:00 MDT, ahead of plan)
+- **`lava_safe_move` / `lava_safe_move_ex` (portal.rs):**
+  - **Movement:** the pathfinder only beyond one block (capped), then the sneaking settle for reach ≤ 1.
+  - **Post-condition** from chunk data (`lava_unsafe_here`): solid, non-lava centre footing; no lava in the body's columns or the 3×3 ring at feet/head; no open side dropping into lava within 4.
+  - **On failure:** step back toward the start, a `vetoed` primitive row, return false.
+  - `_ex` takes one intended open side over lava. Only the sealed station (its scoop side) and the drill use it.
+- **Call sites through it:** prepare's approach goto; the return to the anchor; `tunnel_step`'s two detours (no floor, still solid after the dig, which used `strip_tunnel`) and its step into the dug cell; the station walk; the `cast_cell` stance (a veto is a failed attempt); `capped_goto`, which is under every `ensure_platform` / `timed_goto` / `timed_move` mold move.
+- **Deleted:**
+  - All three `REFILL_LEGACY` branches: `refill_lava`'s re-planned stand with repair and 3-block walk caps (73 lines), prepare's legacy `fill_bucket` early-scoop loop, and its 0-lava fallback.
+  - `fill_bucket`'s lava stand search, approach and per-site guards: **705 lines removed**, replaced by a 52-line water-only fill that moves through `lava_safe_move`. The mold's water fallback is its only caller.
+- **Line counts (Part 10.4):** `portal.rs` 2789 → **2256**; `portal_mold.rs` 1174 → **1095** (both include the new primitive and drill). 186/186 lib tests pass. The remaining raw `walk_to_xz` calls near lava: the tunnel step-back into the cell just dug, the station's hp step-back, and two descent-shaft centrings.
+- **Gym `SLUG=lava_safe_move`** (step `lsm_drill`, LavaPool arena): 10 moves alternating the four rims, each with the pool side as its intended open side. Pass = 10 arrivals with the post-condition true.
+- **Comparison baseline:** `scripts/ml/backfill-gym.ts` writes `gym.db` trials into attempts.jsonl as tagged backfill rows. 6b (ids 525–532) contributes 3/3 clean finished trials, i.e. 100% [44%, 100%]. The 5 rows left `running` by my stop are excluded as unmeasured (`--skip-running`). `compare.ts --clean` counts a pass with 0 deaths.
+- **pregen.ts abandoned for now:** after 336 chunks the batches stopped loading (2/16 and 12/16 after 120 s) with the server idle (load 0.12), so forceload isn't generating them and the cause is unknown. **Mitigation:** gym launches stagger 30 s (`STAGGER=30`) so each bot's view distance generates before the next arrives (both crashes needed 7 near-simultaneous arrivals).
+- **Water regression on 6c+lsm** (sliced A* timing change + the primitive in the descent tunnel), gym region 3, STAGGER=30, running.
+- **Water regression on 6c+lsm (region 3, STAGGER=30): 0 deaths in 14, 11 pass.** lake 2/2, shore 2/2, cave_iron 2/2, roofed 2/2, descent 2/2 (the primitive in the descent tunnel underwater), cave 1/2, aquifer 0/2. Both non-passes are non-lethal timeouts; aquifer is at baseline.
+  - **Breath alarm: 9 alarms, 8 at 6.0 s and 1 at 6.1 s** (race i6: 11.3 s). **Phase 0b alarm gate (≤ 6.5 s) met.** The sliced A* is accepted.
+  - Server B stayed up through 7 staggered arrivals (one 10.8 s lag warning, no crash).
+  - water_roofed trial 1 took 142 s (three escape loops), trial 2 took 19.5 s (the old time). BANK swims raw without pathfinding, so it's variance, not the timing change.
+  - One `LOOP STALL 3285 ms` during gym setup between trials (RCON fills), not during an escape.
+  - **Phase 0b gate: met** (rows for every step, intervals in both reports, killed bot resumes, alarm ≤ 6.5 s).
+- **`lava_safe_move` drill gate: met, 2/2 PASS (10/10 arrivals, post-condition true, 0 deaths, 14.2 s and 12.5 s)** at two random pool locations, gym region 5.
+  - A harness bug on the first launch: the drill isn't in the step list, so the gym's default pass (`is_complete`) never held and it re-ran the drill from wherever the bot stood (vetoes, correctly). Fixed with a `DRILL_OK` pass flag, reset per trial.
+- **Iron reproduction (`iron_repro`, FixedSurface at the smoke race's rust-race-001 lane 300900/350, fresh memory, stone pickaxe + 16 cobble, pass = 22 iron, 30 min).** Ground truth first: that bot's two smoke-race `mine_iron` stalls started with `ore_sightings_memory: 376`, phantom iron from race i6's deleted world (fixed in race-b). Trial 1 on clean memory: descended y 87 → 35, 2 iron at about 8 min. Restarted inside the combined batch below (the launcher kills the previous batch).
+- **Portal comparison launched (Phase 1):** build `6c+lsm` vs `6b` (3/3 clean, backfilled), `SLUGS=portal×5,iron_repro`, TRIALS=2, STAGGER=30. Decided by `compare.ts portal 6b 6c+lsm --clean --source gym` after each result; 30-trial cap.
+
+## Phase 2 (prepared locally while the comparison runs; deployed only after it decides)
+- **Bandit parameters read at their sites** (`learn::param`, off by default, so behaviour is unchanged until `params.json` enables them):
+  - `cluster_min` replaces the fixed 100 in at-depth siting.
+  - `buckets` (arms 3/4/5) is read as **kit size in use**: arm k caps lava held at k−1, one bucket staying water. Mold refill k−1 (off → 2, today's size); early scoop k−1 (off → 10, today's fill-all).
+  - Reading it as kit size reconciles decision 5 (craft 5) with Part 5.3's 3/4/5 arms.
+- **Decision 5:** `craft_bucket` target 3 → 5 (buckets + water). **The gym kit equals the race kit:** portal slug `iron_pickaxe 3 / bucket 5 / water 1` → `iron_pickaxe 2 / bucket 4 / water 1`.
+- Not deployed: the portal comparison is measuring build `6c+lsm`, and these change kit behaviour. Source snapshot of the compared build kept in the scratchpad.
+
+## Phase 3 started early, in the Phase 1 wait (late-game gyms on bots 007+, per Part 9)
+- **End probe (RCON) before writing the gym:** no exit fountain in the fresh world (end stone to y 62 at (0, 0), air above). The fountain and dragon generate when the dragon fight initialises, at the first player arrival.
+- **`GymSetup::EndDragon`:**
+  - Forceload the End centre and wait for it to load.
+  - `execute in the_end positioned 8 0 0 positioned over motion_blocking` tp and spawnpoint; wait for the dimension flip.
+  - Wait for the fountain's bedrock, then `kill @e[type=end_crystal]` (skill 12 precondition), and summon a dragon only if none exists.
+  - **Pass is ground truth:** RCON `execute in the_end if entity @e[type=ender_dragon]` failing, after the trial.
+- **`tasks/end.rs::dragon_beds` v1:**
+  - Stand on end stone east of the fountain at x 6.
+  - Wait for a perch (hd < 6 from the pillar, y < top + 6), then place a bed on a surface cell between bot and dragon within reach, and right-click it (beds explode in the End).
+  - Below 10 hp, retreat and eat.
+  - Log: `DRAGON` lines every 10 s with the dragon's position, and one per detonation with hp before and after.
+- **Gym slug `dragon`:** kit = 6 red beds, 32 obsidian, iron sword, 16 cooked beef, 128 cobble, water bucket; 600 s.
+- **Side-batch launcher options:** `PIDFILE` (own pid file), `NAME_START` (bots 007+) and `KEEP_FORCELOADS=1`, so a late-game batch never kills or unloads the main batch. Built into a separate `target-late` (it carries the Phase 2 source changes, which don't affect the End).
+- **Dragon gym launched:** bot 007, 3 trials, build `late1`, beside the portal comparison.
+- **Dragon gym, first failure log (Part 10.5), bot 007, trial 1:**
+  - **Setup:** EndDragon worked end to end. Bot in the End at (8, 62, 0); the exit fountain generated (pillar top y 65); crystals killed; dragon present. Server log: "Found that the dragon has not yet been killed in this world".
+  - **Attempt:** stand (6, 62, 0). At 173 s the dragon was first seen at (1.2, 66.0, −0.3), hd 1.2, "perched".
+  - **Detonations #1–#5 (173–181 s):** beds placed at (5,62,0), (4,61,0), (4,60,0), (5,59,0), (4,57,0), each used. Each later bed sat lower because each **explosion cratered the end stone**, and the bot fell into its crater (feet 62 → 57). Bot hp stayed 19–20 a block from each blast.
+  - **The bot's view of the dragon never changed:** exactly (1.15683, 65.99979, −0.25230) after every detonation.
+  - **Ground truth (RCON) after the beds ran out:** dragon at **(9.0, 77.5, −40.8)**, DragonPhase 2 (flying), **Health 136.7 / 200** (−63, most likely bed #1 at the real perch). Bot at (6.8, 57, 0.5), 20 hp. Dragon alive, trial failed.
+  - **Mechanisms:**
+    1. **SDK bug: `move_entity_pos` was read with "dx"/"dy"/"dz", but the schema says `dX`/`dY`/`dZ`.** Every relative entity move was applied as 0, so entities updated only on rare absolute syncs. It affects every tracked mob (combat targeting, `hostiles_seen`), not just the dragon. **Fixed** (fallback to the old keys).
+    2. The script kept "perching" on the stale position and spent all 6 beds in 8 s.
+    3. Out of beds, the step returned instantly and the gym re-called it about once a second (log spam). Now it waits 5 s.
+  - Next attempts (v1 script, live dragon tracking) on `target-late`.
+- **Dragon attempt 2 (late2, entity tracking fixed):** tracking works; the dragon's position now updates between readings ((1.5, 70.5) → (−4.3, 68.1) → (4.0, 66.0) → (1.3, 65.9)). It perched on the pillar top (hd 1.3, y 65.9). **New wall:** all 5 beds went off at y 52–56 at the bottom of the crater the explosions keep deepening, 10–14 blocks below the head. Bot hp 19–20 throughout. **v2 design:** pillar out of the crater to the pillar-top height (y ≈ 66), place a block, and detonate the bed on it within ~2 blocks of the head (the head sits several blocks out from the body, toward the bot).
+- **Portal comparison, first data:** rust-gym-001 `MOLD end 4/10`, no death.
+  - From the mold platform at y −52, every station walk to rim stands at −54, ~10 blocks away, returned `ok=false` after ~18.8 s (the pathfinder gave up) across 5 picks.
+  - Diagnostics: 375 stand/dir pairs pass, 17 open sources, 200 stands exhausted. Stations exist but aren't reachable from where the mold leaves the bot.
+  - This is refill-design step 4, never built: **a fixed cobble walkway between station and pad, laid once and walked every refill**. **Top portal wall for the next build.** Not changed mid-comparison (not a safety bug).
+- **Portal comparison stopped at 04:00 MDT, clause (a): a death on a path this build changed.**
+  - rust-gym-002 died twice (09:58:32 and :56 UTC) on the station walk through `lava_safe_move`. From the mold platform at y −53 the pathfinder planned a legal 1-block drop onto station S (18747, −54, 3658). The landing's momentum carried the bot into S's open scoop side O, with lava at (18746, −55, 3658).
+  - The post-condition vetoed correctly ("lava in a body column"), but only after the bot was in the lava; the step-back toward a start 3 blocks away and 2 up failed.
+  - No comparison trial had finished.
+  - **Fixes (build 6c+lsm2):**
+    1. Pathfinder `lava_around_body` also refuses a landing that has an **open lava hole beside it** (side cell not physical, lava directly below).
+    2. `lava_safe_move` never paths all the way onto an arrival target (reach ≤ 1): it stops ≥ 1.6 short and finishes with the sneaking settle (≤ 2.5 away on the target's level, 120 ticks).
+  - Path tests pass. The 6c+lsm rows stay in the log as their own build.
+  - The portal gym kit is held at 6b's for the comparison (a kit change would confound it); the race-kit switch stays in Phase 2.
+- **Dragon attempt 2 result:** FAIL 600.3 s, 0 deaths, **server dragon check: dragon alive**. 5 beds detonated at y 52–56 below a correctly tracked, perched dragon (the crater wall). Attempt 3 (v1) running.
+- **Dragon v2 written (not yet deployed; v1 finishes its 3 attempts first so the log stays one build):**
+  - Pillar up east of the fountain (x 6) to the perch height (top + 2).
+  - Bridge two blocks toward the pillar at top + 1, obsidian first (it survives blasts).
+  - On a real perch (hd ≤ 3 over the pillar, y ≤ top + 3), place the bed on the bridge end and use it; rebuild the bridge after each blast.
+  - Eat on the pillar below 10 hp.
+- **Setup-skipped gym trials** (e.g. `setup: no land within ±480 — trial skipped`, a random ocean spot in comparison 6c+lsm2) are excluded from `compare.ts` and `funnel.ts`, and written as outcome `skipped` from the next build. They measure nothing about the bot.
+- **Comparison 6c+lsm2 observation:** `lava_safe_move tunnel_step → (27457, 97, 3359): VETO (footing water under (27458, 96, 3359))`. The post-condition's "solid non-lava footing" vetoes a descent step over water, a progress cost with no lava hazard. **Queued for the next build:** footing vetoes only lava below, or air with lava within 4 below; water is not this primitive's hazard (leave_water owns it). Not changed mid-comparison (progress, not safety); watching whether it repeats or stalls a trial.
+- **Comparison 6c+lsm2: genuine lava vetoes.** A bot at y −56 had 3 `tunnel_step` moves vetoed for "lava in the body ring" (diagonal lava): the primitive working as designed, with no damage. **Design gap:** `tunnel_step`'s pre-check `lava_touch` looks only at the next cell's orthogonal neighbours, while the post-condition checks the 3×3 ring including diagonals. The tunnel keeps choosing diagonal-to-lava steps that are then vetoed. **Queued for the next build:** the pre-check uses the post-condition's ring (one definition of "near lava"). The stall detector bounds the cost meanwhile (300 s).
+- **Comparison 6c+lsm2, death: rust-gym-002, 10:16 UTC (lava), old path (the descent), so the batch runs on (decision 4).**
+  - The shaft fell through a chain of open caves: `below=air` six times, −5 → −10 → −17 → −22, then −27 → −32 → −39 → −49 → −56. The last drop landed in a lava lake (surface −55).
+  - `wet_column`'s lava look-ahead covers only 3 below the feet; the lava was 6 below the −49 drop start.
+  - The approach's `lava_safe_move` vetoed ("lava in a body column at (28424, −56, 3865)") after the bot was already in it, hp 17.
+  - **Queued for the next build:** before any descent drop through air, scan the fall column (≤ 24 down) to its landing; lava at the landing or beside it → detour, never drop.
+- **Dragon v1 closed after 3 attempts (Part 6 minimum), all FAIL with the dragon alive (server check), 0 bot deaths:** late1 t1 (stale entity position); late2 t1 and t2 (tracking fixed; beds crater-bound 10–18 blocks below the perch). **Dragon v2 deployed** (build `late3-v2`, bot 007, 3 trials).
+- **Dragon v2, first attempt (late3-v2): the bridge never placed.** The log said "on pillar at (6.5, 67.1, 0.5) want feet 67", then "could not rebuild bridge cell (5, 66, 0)" / "(4, 66, 0)" about once a second, and "bed did not place at (4, 67, 0) — air".
+  - **Ground truth (RCON):** the pillar is cobble at (6, 63..65, 0) and the bot stands at feet **66.0** on its top. (6, 66, 0) and both bridge cells are air.
+  - **Cause:** `pillar_up`'s final height check read 67 mid-jump, so the pillar stopped one block short. That left bridge cell (5, 66, 0) with no solid neighbour to place against.
+  - **Fix (build `late4-v2b`):**
+    - After `pillar_up`, wait to land and re-check, re-pillaring up to 3 times.
+    - The bridge is laid at the level of the block the bot actually stands on (feet − 1), so its first cell always has the pillar top as a neighbour.
+    - A failed bridge waits a second and logs at most every 10 s (the log spam stopped my monitor).
+  - Attempt killed and relaunched on late4-v2b (bot 007, 3 trials).
+- **Comparison 6c+lsm2, death: rust-gym-005, 10:18 UTC (lava), old path, so the batch runs on (decision 4).**
+  - After a `lava_safe_move` approach veto ("footing air", correct) and the "never scoop from below" retirement, prepare's **"heading to remembered lava"** walk, a plain `goto_near(poi, 3.0)` unchanged since 41a8f55, took the bot into lava. The bot died before the walk returned; next line `desc: DEAD mid-descent — respawning`.
+  - **Queued for the next build:** the remembered-lava walk goes through `lava_safe_move` (stop short, post-condition, step back), like the approach goto already does. It is the last un-wrapped goto toward lava in prepare.
+- **Dragon v2b works mechanically:** the bridge placed, and beds #1 (dragon hd 1.5, east) and #2 (dragon at x −2.6, **west**, ~7.6 from the bed) detonated at (5, 67, 0). Bot hp 20 → 20 both times. **Ground truth (RCON): dragon Health 94.7 / 200** (136.7 after v1). **Queued for the next dragon build:** gate on the dragon's distance from the bed cell (≤ ~4), not on hd from the fountain, so no bed goes off with the dragon perched on the far side.
+- **Comparison 6c+lsm2 stopped at 04:27 MDT by clause (a): rust-gym-002 died in lava at 10:25 UTC on a path this build changed.** `tunnel_step`'s new own-cell branch ("lava touches our own cell … after capping 0 — stepping back") fired about 20× in one second at (28427, −56, 3862) while the bot burned. Three causes:
+  1. Its capping skipped the bot's own column, so lava beside the bot's own cell was never capped.
+  2. The raw step-back toward the cell behind returned at once without moving.
+  3. The descent loop never yields to the survival reflexes, so `!! in lava — escaping` fired only after the step returned.
+  - 6c+lsm2 finished no comparison trial; its rows stay in the log as their own build.
+- **Build `6c+lsm3`** (the fix plus the queued cheap items; 186/186 lib tests):
+  1. `tunnel_step` checks `in_lava` first and runs `escape_lava` (now `pub(crate)` in survival.rs).
+  2. Own-cell branch: caps lava beside the bot's own cell and below its feet; steps to an open, floored, lava-free neighbour (back first, then the sides); always waits 10 ticks before returning.
+  3. **One definition of "near lava":** the tunnel's `lava_touch` trigger and its capping use the body ring with diagonals (`TOUCH`, 11 offsets), as the post-condition does.
+  4. Post-condition footing: vetoes lava underfoot, or air/water underfoot with lava 2–5 below. Water over no lava no longer vetoes.
+  5. Prepare's remembered-lava walk goes through `lava_safe_move` (rust-gym-005's death).
+  6. **Descent fall-column scan:** if the next dig opens a drop (air 2 below), follow the column to its landing (≤ 24); lava at the landing or in the 3×3 at landing..+2 → `detour_dry`, never drop (rust-gym-002's 10:16 death).
+  7. The gym.rs `skipped` outcome ships in this build.
+- Still queued: the refill walkway (design step 4).
+- **Batch 6c+lsm3 launched 04:33 MDT**, gym region 12: portal ×4, `lava_safe_move` drill (its post-condition changed), `iron_repro`; TRIALS=2, STAGGER=30. Compared against 6b with `compare.ts portal 6b 6c+lsm3 --clean --source gym`.
+- **Dragon late4-v2b trial 1 (killed at ~390 s for the next build):** 6 real bed detonations at (5, 67, 0), bot at 20 hp throughout. **Ground truth (RCON): dragon 136.7 → 48.4 / 200 (~15 per bed); 0 beds left on the bot; no bed at the cell.** The bot then logged detonations #7–#22 about once a second at an identical frozen dragon position. **Mechanism:** the client's inventory never dropped per placed bed, so `count_items(red_bed)` stayed ≥ 1 and a predicted bed at the cell passed the "placed" check. **Fixes (build `late5-v2c`):**
+  1. Spend at most the beds held at the start; count a detonation only when the bed is seen and then gone after the use (`bed still there after use` → wait 20 ticks).
+  2. Perch gate adds dragon ≤ 4.5 from the bed cell.
+  3. Gym setup resets the dragon to 200 hp (`data merge … {Health:200f}`) and clears x 4..8, y 63..80, z −1..1 (the previous pillar and bridge), so trials are comparable.
+  4. Dragon kit 6 → **10 beds**. At ~15 per bed, 6 can't kill a 200-hp dragon; Part 6 wants a first kill before economy.
+  - **Open SDK bug (not fixed):** inventory desync after placing a bed. The same desync may hit other placed items in races (cobble counts); to investigate with a `set_slot` trace.
+- **Batch 6c+lsm3, `lava_safe_move` drill trial 1: FAIL 400 s, 0 deaths. A regression from 6c+lsm2's stop-short change, which was never drill-tested** (the drill's 2/2 pass was on 6c+lsm).
+  - Moves 1–5 and 7 arrived. Moves 6, 8, 9 and 10 vetoed. Each was a 1-cell **diagonal** step around a pool corner: hd 1.4, under the 1.6 short-stop, so no pathfinding, only the straight sneaking settle.
+  - The settle stops at the pool corner's edge and never leaves its cell. The post-condition then ran from the old cell with the new target's allowed side and vetoed the target's own open side ("side (6007,4133) drops into lava 1 below").
+  - After that the bot sat at (6012, 4137). Re-runs of the drill anchor on the bot's current position, so later targets drifted off the arena (`arrived=false post=ok`).
+  - No damage. Progress cost only, so the batch runs on (decision 4); the portal bots are on the same primitive, so their station walks may lose progress the same way.
+  - **Fix (next build, compiled into `target-next`):** a reach ≤ 1 move that ends one diagonal cell from its target goes in an L through the orthogonal neighbour that is a safe stand (solid non-lava floor, open body cells), then settles onto the target.
+  - **Harness to-do:** anchor the drill on the arena's start, not on wherever the bot stands at a re-run.
+- **Dragon late5-v2c trial 1: FAIL 600 s, 0 detonations, 0 deaths.** The goto to x 6 ended at x 8, so the pillar went up at 8 and the bed cell sat at x 6. The new ≤ 4.5-from-bed perch gate never held for a dragon perched over the fountain (the last log showed it at hd 31.8, flying). Trial 2 pillared at x 7.4 (bed at x 5) and is running.
+  - **Fix (next dragon build):** the bridge runs from the pillar to x = 5 whatever x the pillar went up at (one cell minimum), with the bed on its last cell.
+- **Batch 6c+lsm3 stopped at 04:46 MDT by clause (a): rust-gym-001 died in lava at 10:45 UTC inside `lava_safe_move` (prepare's approach).**
+  - A `tunnel_step` no-floor detour, then the approach's pathfinder leg (reach 3, 5.6 s, drops −51 → −55), ended with lava in the bot's own cell at (36957, −55, 4118); hp 8.
+  - `follow_path` had already stopped on hurt. The post-condition vetoed correctly, but the step-back was a `goto_near` that can't path out of lava, and prepare kept running ("retiring pool") while survival's escape was blocked until the step returned.
+  - 6c+lsm3 results: 0 portal trials finished; drill 0/2 (the diagonal regression).
+- **Build `6c+lsm4`** = 6c+lsm3 plus:
+  1. **Veto in lava → escape first:** face the move's start cell, then `escape_lava`, then the step-back.
+  2. **L-route settle:** any reach ≤ 1 move that changes both x and z goes via the L whose two legs cross only safe stands (solid non-lava floor, open body cells), (tx, cz) first, else (cx, tz). The first L version (adjacent diagonals only, `next-lsm-L`) took the drill from 6/10 to 9/10; move 9 cut a flush pool corner from 2 cells off.
+  3. **Drill anchored** on the trial's arena start (`DRILL_ANCHOR`, reset per trial); a re-run walks home first.
+- **Gate before the portal batch:** `lava_safe_move` drill on 6c+lsm4, bot 008, 2 trials, region 15.
+- **Drill gate on 6c+lsm4: 6/10 per run.**
+  - The diagonal moves 6, 8, 9 and 10 still veto: the LavaPool arena's rim corners are **uncarved stone**, so neither L waypoint is open. The pre-6c+lsm2 full-pathfinder move passed by digging through the corner.
+  - (next-lsm-L's 9/10 was a region whose corners happened to be open.) No damage; killed after the first run.
+- **Build `6c+lsm5`:** when no open L exists for a one-cell diagonal, dig a corner waypoint's body cells, only where its floor is solid and non-lava and no lava touches the waypoint at feet..+2. Then take the L. Drill gate relaunched (bot 008, region 18).
+  - The region-17 launch was killed within seconds: `cp` hit "Text file busy", so it would have run the old binary under the new label. Process note: wait for the killed bot to exit, then `cmp` the binaries before launching.
+- **Dragon late6-v2d** (bridge to x = 4, gate bed_d ≤ 6): killed late5-v2c trial 2 after it sat with 0 detonations. The dragon was perched dead over the fountain (hd 1.0), 5.6 from the x-5 bed: my 4.5 gate was too strict. 3 trials, bot 007.
+- **Drill gate on 6c+lsm5: 2/2 PASS (396 s, 194 s), 0 deaths, but not reliable per run:** trial 1 took **24 drill runs for one clean 10/10**. Diagonal moves still vetoed on most runs, and some plain moves didn't arrive (`arrived=false post=ok`). The stop-short + sneaking-settle design is fragile: the settle can't dig, and it stalls at pool corners.
+- **Build `6c+lsm6`:** `lava_safe_move` paths **all the way** to the target again (6c+lsm: 10/10 twice), with the settle (+ L-route) as the finisher only. The momentum death the stop-short was added for (6c+lsm rust-gym-002, landing beside the station's open side) is covered by the pathfinder refusing drop landings beside an open lava hole, added in the same build. Drill gate: 3 trials, bot 008, region 19. Pass bar: each trial's first run 10/10 or close, not 1 in 24.
+- **Dragon late6-v2d trial 1: FAIL 600 s, 0 deaths, 4 real detonations for 10 beds.** Health after 2 beds was 182.9 / 200 (~8.5 per bed: body hits). Clusters of `bed did not place … air` (3–9 in a row) came right before each detonation, and the bot ended with 0 beds (RCON: 10 at the trial start).
+  - **Reading:** beds placed during the dragon's landing approach are destroyed by its body (it breaks non-immune blocks it touches outside the sitting phases), so the bed is consumed but never seen.
+  - **Build `late7-v2e`:** place only on a sitting dragon (moved < 0.3 over 10 ticks); wait 20 ticks after a failed placement and log the bed count. 3 trials, bot 007, region 20.
+- **Drill gate on 6c+lsm6: met, 3/3 PASS, each 10/10 on its first run (12.6 s, 13.1 s, 13.2 s), 0 deaths**, three regions. Pathing all the way, with the settle as the finisher, is accepted.
+- **Portal comparison relaunched on `6c+lsm6`** (05:20 MDT), gym region 21: portal ×5 + `iron_repro`, TRIALS=2, STAGGER=30. vs 6b by `compare.ts portal 6b 6c+lsm6 --clean --source gym`.
+- **Batch 6c+lsm6, death: rust-gym-001, 11:08:52 UTC (lava). Classified old path, so the batch runs on (decision 4); reasoning recorded because the new fall-column check is in the chain.**
+  - At −24 the old corner-dig fallback (`dug=1 fast=false`) opened into a cave: the bot dropped to −28, drifted off that ledge and was **already in free fall** at "−28→−33 below=air".
+  - The new fall-column check then fired correctly ("drop from y=−33 lands at Some(−55) in/beside lava"), but mid-air. `detour_dry` found "no floor ahead" every way, and the check re-ran 135 times in under a second, with no tick waited, while the bot fell into the lake (hp 8 at −57, dead).
+  - The check caused nothing; it ran too late.
+  - **Queued for the next build:**
+    1. The descent iteration waits for `on_ground` (≤ 40 ticks) before any check or dig; nothing runs mid-fall.
+    2. The fall-column scan covers the bot box's four corner columns, not only the centre column (the ledge drift).
+    3. A failed drop detour waits and counts; after 3 it returns a failure so the step re-plans, instead of hot-looping.
+    4. The corner-dig fallback runs the same fall-column scan before each corner dig. Its unscanned dig is what opened the cave.
+  - **Implemented locally as `6c+lsm7` (compiled into `target-next`, NOT deployed while 6c+lsm6 measures):**
+    - `drop_lands_hot()` helper.
+    - The descent waits up to 40 ticks to land (escaping lava if it lands in it).
+    - The fall-column check runs on the ground over the box's 4 corner columns.
+    - Drop detour fails: wait 10 ticks, and after 3 in a row return so the step re-plans.
+    - The corner-dig fallback skips any corner whose dig would drop beside lava.
+- **Batch 6c+lsm6, death 2: rust-gym-001, 11:11:51 UTC (lava), the same mechanism.** Respawn returns the bot to the top of the same shaft. It re-descended, hit the same "drop from −33 lands at −55" hot loop (#1…#149 in one second), and fell into the same lake. At −57 the new `tunnel_step` in-lava escape fired every second for 4 s and failed: `escape_lava` drives forward along whatever yaw the bot has. Old path (as death 1), so the batch runs on; this trial is already a fail with deaths.
+  - **Added to 6c+lsm7:** the tunnel's in-lava escape faces back along the tunnel (dug rock) first.
+  - **Also queued:** after a death in a shaft, mark that shaft column bad so the respawned bot starts a new shaft at least 8 blocks away; the same-shaft repeat is the cycle-2 "31 deaths in 7 min" pattern.
+- **Built into 6c+lsm7 (still `target-next`, not deployed):** a death mid-descent records the shaft-top column (`DEATH_SHAFTS`); a descent starting within 4 of one first walks 12 blocks away (direction rotates per death).
+- **Dragon late7-v2e trial 1: FAIL 600 s, 0 deaths.** The sitting gate worked: the dragon perched at 2 s and bed 1 was placed on the first try. It logged `bed still there after use` and then the bot was at feet 64, below the pillar top (blown or knocked off). It never climbed back: 52 × `could not rebuild bridge cell` in 594 s.
+  - **Build `late8-v2f`:** off the pillar (feet < bridge level + 1) → go back to the pillar column, settle, `pillar_up` to the stand height, then rebuild the bridge. Trial 2 of v2e killed; 3 trials on v2f, bot 007, region 22.
+- **Batch 6c+lsm6 stopped at 05:17 MDT by clause (a): rust-gym-003 died in lava at 11:15:59 UTC on the station walk** (`lava_safe_move_ex(…, Some(d))`, which 6c+lsm6 changed to path all the way).
+  - Walks to S vetoed for a second open side over lava (`side (63582,3709) drops into lava`, while the pick's open side was (1, 0)); one walk ended on the edge at y −54.5, the next started in a lava column.
+  - **Root cause:** `seal_station` runs only after the bot arrives on S, so every walk onto an unsealed S walks onto a cell beside a lava hole. The post-condition vetoes it, but only once the bot is there.
+  - 6c+lsm6 results: 0 portal trials finished, 3 deaths (two old-path, one on this path).
+- **Build `6c+lsm8`** = the 6c+lsm7 descent fixes plus **seal before stepping** (the refill design's intent):
+  - `pick_station` also requires the entrance E = S − d to be a plain safe stand (`entrance_ok`: solid non-lava non-falling floor, open body, no lava touching, no other side dropping into lava within 4).
+  - The station walk goes to E through `lava_safe_move` with **no** allowed open side, runs `seal_station` from E, then makes the one-block sneaking settle onto S, checked by `lava_unsafe_here(Some(d))`; unsafe → back to E, next station.
+  - 186/186 lib tests.
+- **Batch 6c+lsm8 launched 05:24 MDT**, region 23: portal ×4, `lava_safe_move` drill (regression), `iron_repro`; TRIALS=2, STAGGER=30.
+- **Dragon late8-v2f: the re-pillar works, but the pillar keeps disappearing:** "off the pillar" at 5, 34, 114 and 143 s, each time the dragon flew past (e.g. at (5.0, 72.0, −1.1)), with no bed placed. **Mechanism:** the dragon's body destroys every block not in its immune tag, cobble included; obsidian and end stone are immune.
+  - **Build `late9-v2g`:** `pillar_up_with(bot, y, Some("obsidian"))`, a block choice added to the shared `pillar_up`. Other callers are unchanged. The bridge was already obsidian-first.
+- **6c+lsm8 drill regression: PASS 10/10 on the first run (13.6 s).**
+- **Server B crashed at 11:21:33 UTC** (watchdog: one tick 60 s, auto-restarted 11:21:54). The tick was draining queued RCON/chunk work during 6 staggered gym arrivals **while my `cargo build` held both of the box's 2 CPUs for 60 s**. All bots exited on the disconnect.
+  - **Process fix:** builds on the box run `nice -n 19 … cargo build -j 1` while anything is running.
+  - Relaunched (no measurement lost; the trials were minutes old): dragon `late9-v2g` (bot 007, region 24) and portal batch `6c+lsm8` (region 25: portal ×5 + `iron_repro`).
+- **Dragon late9-v2g trial 1 (obsidian pillar):** 5 real detonations within the first ~10 s of a sitting dragon (hd 1.0); bot hp 19–20. **RCON: dragon 200 → 142.4 (~11.5 per bed); bot holds 5 beds.** The pillar held (no "off the pillar"). At ~11.5 per bed a kill needs ~17 beds. Next lever, decided after this trial's end: kit size vs aim (the head takes full blast damage, body parts much less; the head of a sitting dragon faces the nearest player).
+- **Batch 6c+lsm8 stopped at 05:33 MDT by clause (a): rust-gym-004 died in lava at 11:32:24 UTC on prepare's remembered-lava walk** (`lava_safe_move` reach 3 toward the lake's surface cell). The walk went west at −54 and ended with the bot's own feet cell lava at (76046, −55, 3600). Seal-before-stepping itself showed no hazard: the entrance walks ran, and `STATION could not reach` came from the sneaking settle onto S, a progress cost. 6c+lsm8: 0 portal trials finished.
+- **Build `6c+lsm9`:**
+  1. **SDK `follow_path` live lava check:** each tick, the next waypoint's feet or floor cell being lava in the *current* world → `NeedRepath` (A* plans on a world that can be seconds old; lava flows).
+  2. **No sprint toward a waypoint with lava within 1** (3×3 at the waypoint's floor and feet). The follower sprinted to every waypoint, carrying momentum off lake edges.
+  3. The remembered-lava walk stops 6 out, not 3; the rescan sees 16 and the approach closes the rest.
+  - Built niced (`nice -n 19 … -j 1`, 2 min 19 s, no server impact).
+- **Batch 6c+lsm9 launched 05:41 MDT**, region 27: portal ×4, drill, `iron_repro`; TRIALS=2, STAGGER=30. **Drill: PASS 10/10 (16.6 s), so the sprint and live-check changes don't regress the primitive.**
+- **Dragon: sniffed ground truth (`CAST_SNIFF=1`, late9-v2g trial 1: FAIL, 0 real beds).** Every `>use_item_on (4,66,0) face=Top held=red_bed` was answered by `block_update (4,67,0) -> air`: **the server rejected the bed**, with the dragon sitting at (0.2, 66.5, 0), hd 0.2, facing the bot. Reading: its neck/head parts overlap the bed's cells, and a block can't be placed into an entity. A few clicks got no answer at all during heavy chunk generation; the predicted bed then read as placed (`still there after use`).
+  - **Build `late10-v2h`:** try each bridge cell, far end first (x 4, then x 5, …), moving to the next on a rejection; judge placement after 10 ticks (the server's answer), not 3 (the client's prediction). Relaunched with the sniffer on (bot 007, 3 trials).
+- **Dragon late10-v2h trial 1: the rejection fallback works.** 4 real detonations at (4, 67, 0) in 7 s on a dragon sitting at hd 0.3; bot hp 19–20. **RCON: 200 → 142.8 after 4 beds (~14.3 per bed), 6 beds left**; the dragon then took off. At this rate 10 beds top out at about 143 damage, so no kill. **Queued:** dragon kit 10 → 16 beds (Part 6: first kill before economy).
+- **`iron_repro` PASS: 22/22 iron in 1077 s, 0 deaths** (6c+lsm9, FixedSurface 300900/350, clean memory). **Phase 1 iron reproduction answered:** on clean memory the smoke-race lane mines fine. The smoke-race stalls were the 376 phantom ore POIs from race i6's deleted world (fixed: race-b clears memory per race).
+- **6c+lsm9 drill: 2/2 PASS (16.6 s, 38.2 s).**
+- **6c+lsm9, rust-gym-002 mold 2/10 (progress wall, not safety):** the sealed-station entrance walk arrived, but the one-block sneaking settle E → S never moved (1.6 s, still at E). After the 5×5 exclusion, `STATION none` with 240 pairs passing `station_ok`; likely `entrance_ok` rejecting them, but that is uncounted.
+- **6c+lsm9, death: rust-gym-002, 11:56:20 UTC (lava), old path, so the batch runs on.** Prepare's legacy **"drop to scoop level"** (raw `goto_near` toward the source + `dig_down` toward its surface): `dropped to scoop level y=-57 (lava surface -59)` → hp 1 → `pre-scoop heal → hp=0`. The approach before it (the primitive) ended safely: `Ok(false)` at hp 20, 4 away.
+- **Queued as `6c+lsm10`** (compiled into `target-next`, not deployed mid-batch):
+  1. After sealing, a settle that didn't arrive finishes with `lava_safe_move_ex(S, 8 s, allow O)` (one block, S sealed, no sprint near lava, live lava check).
+  2. `STATION none` counts pairs with targets but no safe entrance.
+  3. **Deleted the drop-to-scoop-level block (111 lines):** the station picks its own stand level.
+- **Dragon late11-v2i (16 beds, once-per-perch sitting check, 900 s):** trial 1 opened with 4 detonations at (4, 67, 0) in 5 s at the first perch (hd 0.3), bot hp 19–20.
+- **6c+lsm9: first clean portal PASS of the cycle-4 builds: 1513 s, 0 deaths, portal cast (`MOLD end 10/10`) and lit at (82189, −54, 4239).** compare.ts: 6b 3/3 vs 6c+lsm9 1/1, P(B > A) = 0.335 → continue.
+- **Dragon late11-v2i trial 1, sniffed: 16 beds gone (RCON: 0 left) for 6 real detonations; dragon 200 → 130.7.**
+  - Sniff: at 2 s and 4 s the server **placed** the bed (`block_update (4,67,0) -> red_bed`) and removed it within 10 ticks, unused (`-> air`). It was consumed, and the loop logged it as "rejected" (145 such lines).
+  - **Mechanism:** a landing dragon (slow descent passes the < 0.3 movement check) destroys blocks it touches; the sitting phase doesn't. Every real detonation had the dragon at y 65.8–66.0 over the y-65 fountain top.
+  - A second try also ran with `held=None` (the hand was empty after the consumed bed).
+  - **Build `late12-v2j`:**
+    1. Perched requires a landed dragon, y ≤ top + 1.3 (was top + 3).
+    2. A bed that leaves the inventory but isn't there counts as spent: log `placed then gone`, back off 2 s, re-confirm sitting.
+    3. The bed is re-selected per candidate cell.
+  - Relaunched, sniffer on.
+- **Dragon late12-v2j trial 1, killed at ~370 s: 12 beds destroyed, 0 damage (RCON: dragon 200, 6 then 4 beds left).** Sniff: each `(4,67,0) -> red_bed` was followed within 10 ticks by `(3,67,0) -> air`, `(4,67,0) -> air` **with the dragon landed** (y ≤ top + 1.3 passed). So the sitting dragon's head/neck destroys a bed at top + 2 too, not only the landing body.
+  - **Build `late13-v2k`:**
+    1. **Bridge at the fountain-top level, bed at top + 1**, under the head (how runners place them).
+    2. **Two destroyed beds in a row → hold until the dragon leaves the perch (or 20 s)**, so one bad perch can't drain the kit.
+- **6c+lsm9 portal FAIL: 2400 s timeout, 0 deaths**, still tunnelling at depth toward lava 15 away (`desc at-depth y=-54 … hd=15`).
+- **Phase 1 portal comparison DECIDED: 6c+lsm9 LOSES to 6b.** compare.ts: 6b 3/3 vs 6c+lsm9 1/4 clean, 25% [5%, 70%], **P(B > A) = 0.039 → stop**.
+  - 6c+lsm9's four trials: 1 clean PASS (1513 s), 2 timeouts with 0 deaths (at-depth tunnelling toward lava 15–46 away; a water-escape loop ×484 at y 35), 1 timeout with 1 death (the legacy drop-to-scoop-level, old path).
+  - Caveat recorded: 6b's 3/3 is a backfill from the pre-reset world, not paired regions.
+  - **The Phase 1 gate's "0 deaths within 4 blocks of lava" is not met** (deaths across 6c+lsm2…lsm9 are recorded above). The safety work removed the death mechanisms it targeted; the remaining losses are progress walls.
+  - Batch stopped; 6c+lsm9 is not adopted.
+- **New comparison: `6c+lsm10` vs 6b** (launched 06:47 MDT, region 32: portal ×5 + drill; TRIALS=2, STAGGER=30). It adds to 6c+lsm9:
+  - the station step fallback (`lava_safe_move_ex` after sealing) and the entrance-rejection count;
+  - deletion of drop-to-scoop-level;
+  - **the water-escape loop leaves its column**: 3 escapes at one level → walk 12 out (rotating) and start a new shaft.
+  - 186/186 lib tests.
+- **Dragon late13-v2k (bed at top + 1, under the head): 4 detonations at (4, 66, 0) in 5 s, none destroyed; RCON 200 → 149.1 (~12.7 per bed), 12 beds left.** At this rate 16 beds come to about 203: a kill needs 3–4 perches inside the 900 s.
+- **6c+lsm10 drill: 2/2 PASS (36.5 s, 16.3 s).**
+- **Batch 6c+lsm10 stopped at 06:27 MDT by clause (a): rust-gym-003 died in lava at 12:26:49 UTC on the station-entrance walk** (new in 6c+lsm8). `lava_safe_move station_entrance` pathed 21.7 s and ended at (97051.4, −54.8, 3326.5), over a lava cell at −55. Its veto came after the bot was in it.
+  - **Root cause (SDK pathfinder): `move_diagonal` had no lava rule at all.** Walks go through `safe_or_break` (refuses any cell with lava in, beside or under it); diagonals checked neither the destination's neighbours nor the two corner cells the 0.6-wide body sweeps. A diagonal past a lava-floored corner put the bot over lava.
+  - The live waypoint check (6c+lsm9) only sees waypoint cells, not the corner a diagonal cuts.
+- **Build `6c+lsm11`:** `move_diagonal` refuses a diagonal whose destination or either corner cell has lava in, beside or under it (feet, floor and the cell below that), the walk rule extended to the swept corners. 186/186 lib tests (path tests included). **Batch 6c+lsm11 launched 06:58 MDT** (portal ×5 + drill, TRIALS=2, STAGGER=30), vs 6b.
+- **Dragon late13-v2k trial 1: FAIL 900 s, 0 deaths, dragon 149.1 / 200.** All damage came in perch 1 (4 beds at 88–93 s at (4, 66, 0)). Later perches destroyed 5 beds at the same cell (`placed then gone`) with the dragon sitting.
+  - **Reading:** `checkWalls` runs on the head/neck/body parts in every phase, sitting included (mob griefing on), and where the head lies varies per perch. The client sees only the main entity, not the parts.
+  - **Build `late14-v2l`:** a destroyed bed moves on to the next bridge cell (x 5, toward the pillar) within the same attempt; the 2-in-a-row hold applies only when every cell lost its bed.
+- **6c+lsm11 drill: 2/2 PASS (17.5 s, 17.4 s)**, so the diagonal lava rule doesn't regress the primitive.
+- **6c+lsm11 progress walls (no deaths so far):**
+  - rust-gym-001 `MOLD end 8/10`: the pool ran dry (`STATION none`, 1 open source left in the window, 0 pairs blocked by the entrance filter); needs re-siting to a second pool for the last cells.
+  - rust-gym-004 `MOLD end 4/10`: every entrance walk pathed ~18.8 s and never left the −52 mold platform for the −54 rim stations. This is the old "station unreachable from the platform" wall, i.e. the refill design's **step 4 walkway** (still unbuilt); the diagonal lava rule plausibly tightens it near lakes.
+- **Dragon late14-v2l trial 1: FAIL 900 s, 0 deaths. Best so far: 9 real detonations, dragon 200 → 81.8 (RCON after perch 2).**
+  - Perch 1 (54–61 s): 5 beds → 138.6. Perch 2 (304–309 s): 4 beds → 81.8, ~14.2 per bed. Perch 3 (687–740 s): every bed at x 4 and x 5 destroyed (6 beds).
+  - The sitting dragon's head points at the bot, laying the head along the bridge line itself.
+  - The hold's 20 s cap resumed while it still sat, twice.
+  - **Build `late15-v2m`** (`target-late2`): the hold waits until the dragon leaves (hd > 6), with a 120 s safety cap only.
+  - **Queued idea:** bed cells off the bot-fountain line (z ± 2), beside the head rather than under it.
+- **Dragon late15-v2m: perch 1 again destroyed both on-line beds (x 4, x 5).** On-line cells were eaten in 3 of the last 4 perches. Killed for the next build.
+- **Build `late16-v2n`: off-axis beds.**
+  - Best-effort side arms from the bridge's far end to z ± 2 at the fountain-top level (each cell rests on the previous).
+  - Bed candidates in order: (4, 66, 0), (5, 66, 0), (4, 66, 2), (4, 66, −2); the side tips are ~3.9 from the bot's eye, ~2 from a head lying on the line. A candidate whose support didn't place is skipped.
+  - The hold now triggers once per attempt in which every candidate was destroyed (it used to trigger after 2 beds, before the arms were tried).
+  - Relaunched (bot 007, 3 trials, sniffer on).
+- **Dragon late16-v2n trial 1 (off-axis arms): the arm tip works.** 5 detonations at (4, 66, 2) in 15 s on one perch; **RCON 200 → 148.0 (~10.4 per bed)**. But each attempt re-fed both on-line cells first (10 beds destroyed; 15 of 16 used).
+- **Build `late17-v2o`** (`target-late2`):
+  1. **Place and use the bed in the same client tick** (two `use_item_on` back to back, no wait). The server handles both packets before the dragon's entity tick, so the bed goes off before a head/neck lying over it can destroy it.
+  2. **SDK: `explode` packets are counted (`bot.explosions`)**; a detonation is counted only when an explosion arrives, never from the block view (which can't tell exploded from destroyed).
+  3. A candidate that lost a bed this perch is skipped until the dragon leaves (`eaten`, cleared at hd > 6).
+  4. The hold waits until the dragon leaves (120 s safety cap).
+  - Relaunched (bot 007, 3 trials, sniffer on).
+- **FIRST DRAGON KILL (Phase 3, skill 12, crystals pre-removed): late17-v2o trial 1, 0 bot deaths.** 14 bed detonations over 3 perches. Ground truth (RCON): 200 → 142.6 after perch 1 (3 beds, ~19.1 per bed), 82.8 after perch 2 (4), 28.6 after perch 3 (4), then beds #12–#14 at 686–688 s, after which `execute in the_end if entity @e[type=ender_dragon]` fails ("No entity was found").
+  - **What made it work, in order of discovery** (each from a sniffed or RCON ground truth):
+    1. live entity tracking (SDK `dX/dY/dZ`);
+    2. a pillar above the crater line (obsidian: the dragon eats cobble);
+    3. a bridge to x = 4;
+    4. bed count by inventory with a server check;
+    5. landed-only perch gate;
+    6. bed at top + 1 under the head;
+    7. rejected/destroyed-cell fallbacks and holds;
+    8. **place and use in the same client tick** (the bed goes off before a head or neck lying over it can destroy it; it also raised damage to ~15–19 per bed);
+    9. detonations counted from `explode` packets.
+- **6c+lsm11 so far:** 1 PASS (1980 s, 0 deaths), FAILs: 2 at-depth tunnel timeouts, a mold 8/10 (pool dry), and a `MOLD cell (1,0) ok=false → 0/10` ×430 timeout. **0 deaths in the batch.**
+  - **The dominant wall** (gym-003 timeline): approach to 1–3 of a lake → `STATION none … (8 / 2 / 2 / 17 / 13 with targets but no safe entrance)` → pool retired → re-descend, again and again.
+  - **Build `6c+lsm12`:** the station's entrance may be any of S's three non-scoop neighbours (behind first, then the sides) that passes the safety check, not only S − d.
+- **Comparison DECIDED: 6c+lsm11 LOSES to 6b: 1/5 clean, P(B > A) = 0.023 → stop. 0 deaths in its trials:** the losses are progress walls (station entrance, at-depth tunnel, pool exhaustion), not safety.
+- **Batch 6c+lsm12 launched 08:05 MDT** (portal ×5 + drill, TRIALS=2, STAGGER=30), vs 6b.
+- **late17-v2o: trial 1 PASS (gym: "server dragon check: no dragon (killed)", 904.5 s, 0 deaths). Trial 2 FAIL, invalid as a measurement:** after the kill, setup's `/summon`ed dragon has no fight manager and sat in **DragonPhase 10 (hover)** at (5, 100, 0) for 900 s, never perching (all 16 beds unused).
+  - **Fix (gym.rs):** setup sets `DragonPhase:0` (holding pattern; without a fight manager it reads 0 crystals and lands like a normal dragon). Verified by RCON on the live dragon: 10 → 0.
+  - Trial 3 runs on that dragon with the phase set by hand.
+  - **Next repeat test:** the setup fix build on `target-late`.
+- **6c+lsm12 drill: 2/2 PASS (17.8 s, 16.6 s).**
+- With phase 0 the re-summoned dragon flew and landed, but it **sits at y 67.4** over the y-65 top (no fight manager), above the `top + 1.3` landed gate, so the bot never fired (trial 3, hd 1.6). **Build `late18-v2p`:** gate y ≤ top + 2.6; the sitting check (< 0.3 movement in 10 ticks) separates sitting from landing. Plus the setup phase fix. 3 trials, bot 007: the repeatability test.
+- **6c+lsm12: 0/5 clean, P = 0.005 → loses.** All 5 FAILs had 0 deaths. 4 of 5 were **surface-water walls** (head under water at y 60 and 52; water within 3 below y 55 with no dry detour; water over the head, sealed): gym region 38 is watery. 1 was an at-depth tunnel timeout. Drill 2/2.
+- **Methodology fix: the comparison was confounded.** The baseline was 3 backfilled 6b trials from the pre-reset world; each B batch ran in one fresh region; region luck (oceans, rivers, lake-poor depths) dominated. True pairing is impossible (two builds can't share terrain without disturbing it).
+  - **New design: concurrent arms.** A = the 6b code itself (git HEAD 41a8f55, built niced into `target-head`, label **`6b-head`**) and B run side by side in neighbouring fresh regions at the same time, 3 bots × 3 trials each.
+  - HEAD predates attempt rows, so A is backfilled from gym.db (ids > 684) with `backfill-gym.ts portal 6b-head`.
+  - **Arms launched 08:58 MDT:** A bots 001–003 region 40; B (6c+lsm12) bots 004–006 region 41 (KEEP_FORCELOADS).
+- **Dragon late18-v2p:** trial 1 FAIL (all 4 first candidates server-rejected 770× under a re-summoned dragon sitting nearer, at x ≈ 1.2); trial 2: 11 real detonations so far.
+  - **Built `late19-v2q`** (`target-late2`, not yet deployed): a second pair of arms one cell nearer the pillar, tips (5, 66, ± 2).
+- **SECOND DRAGON KILL: late18-v2p trial 2 PASS** ("server dragon check: no dragon (killed)", 0 deaths, 14 beds used, against a re-summoned dragon running phase 0). Valid dragon trials since the same-tick build: v2o t1 PASS, v2o t2 invalid (hover phase), v2o t3 killed for v2p, v2p t1 FAIL (all candidates under the dragon's parts), **v2p t2 PASS**. v2p t3 running.
+- **Arm A (6b-head) death: rust-gym-002 died in lava at 14:19:02 UTC** (baseline build; no stop rule for the reference arm, an unclean trial for A). Measured on today's terrain alongside B, which is what the backfilled 3/3 never showed.
+- **Dragon late18-v2p trial 3:** 12 real detonations over 3 perches (1861–1968 s), RCON 200 → 88.4 → 30.1; 4 beds left.
+- **THIRD DRAGON KILL: late18-v2p trial 3** (16/16 beds, 4 perches 1861–2155 s; RCON after bed #16: no ender dragon). **late18-v2p: 2 of 3 trials killed, 0 bot deaths** (t1 FAIL: candidates under a nearer-sitting re-summoned dragon's parts, which v2q's extra arm pair targets).
+  - **Dragon skill (crystals pre-removed, kitted, 16 beds): ≥ 2 of 3 met on one build.** Gate 6 in full still needs the crystals and End entry. Next late-game gym per Part 9: **crystals**.
+- **Arm A (6b-head) death 2: rust-gym-001 died in lava at 14:24:05 UTC.**
+- late18-v2p trial 3: the kill is confirmed by RCON; its gym row stayed `running` (I relaunched the side batch before the trial printed), so it is excluded as unmeasured. Measured dragon record on v2p: t1 FAIL, t2 PASS.
+- **Crystals gym v1 (`SLUG=crystals`, build `late20-cry1`, bot 007):**
+  - **Setup `EndCrystals`:** the End-dragon setup, then a crystal summoned on top of each of the 10 towers (vanilla spike layout, radius 42 at i·36°; `positioned over motion_blocking`); the dragon flies in phase 0.
+  - **Task `crystals_bow`:** walk within ~12–16 of the nearest crystal's tower; solve the full-power arrow pitch by simulating vanilla flight per tick (launch 3.0, drag 0.99, gravity 0.05; flattest arc within 0.35); draw 22 ticks; release (**new SDK `release_use_item`**, player_action status 5); a kill is the entity disappearing; a crystal is given up after 8 misses (v1 doesn't climb caged towers).
+  - **Kit:** bow, 64 arrows, 16 beef, 64 cobble, water bucket. **Pass = server: no `end_crystal` left.** 3 trials, sniffer on.
+- **Crystals v1 (late20-cry1): 0 kills.** Arrows did fire: server count 57 left, 7 arrows lying in the End; `use_item` held=bow. But every crystal took 8 misses at steep arcs (69–74° from ~10 out; 55° from 12 out), and some west towers were never reached on foot ("could not close").
+  - **Mechanism:** from near the foot of a tower of radius ~3–4, the arc crosses the tower's own side below its top: the arrow hits obsidian.
+  - **Build `late21-cry2`:**
+    1. The pitch solver simulates the arrow against chunk data and rejects an arc with a solid block on its path before the target.
+    2. Close in to ~24 out (was 12), only when beyond 30.
+    3. No clear arc → step 8 straight out from the tower and re-solve.
+    4. ±0.4° jitter on repeated misses.
+  - Relaunched (bot 007, 3 trials).
+- **Arm A (6b-head) on today's terrain:** rust-gym-002 died in lava at 14:19, 14:30 and 14:35 (plus rust-gym-001 at 14:24). Its trial **PASSed in 1577 s with 3 deaths, i.e. unclean**. The backfilled "6b 3/3 clean" doesn't hold up in the same conditions B runs in.
+- **Crystals cry2 works:** 5 of 10 killed by ~590 s, each in 1–4 arrows at 30–80° from ~24 out (the clear-path solver and the longer stand-off), including the tallest tower, (13, 104, −39), at 80°. The kill counter restarts when the step re-enters (stall detector); the per-crystal log is the record.
+- **Arm A (6b-head) round 1, region 40, backfilled (gym ids 685–687): 0/3 clean.** PASS with 3 deaths (lava ×3); FAIL timeout with 1 death (at-depth tunnel); FAIL timeout 0 deaths (`desc STUCK y=63 below=ice`, relocate #105). compare.ts **6b-head 0/3 vs 6c+lsm12 0/5 → P(B > A) = 0.402, continue.** Reading: on today's fresh terrain no build passes the portal cleanly, and the backfilled "6b 3/3" was an artifact of its regions. Every earlier "B loses" was decided against that artifact.
+- **Arm B (6c+lsm12) region 41: stopped at 14:49 UTC by clause (a).** rust-gym-006 died in lava at 14:48:23 on the at-depth tunnel (`lava_safe_move tunnel_detour → VETO (lava in a body column at (123540,−50,4604))`, a cell it had capped earlier and lava flowed back in). It had **worn out all three kit iron pickaxes** by 1843–1923 s (~750 digs) and was hand-digging beside the lake. Its 3 trials were killed, so unmeasured.
+  - **Build `6c+lsm13`:** the descent aborts when no pickaxe is left (`ensure_pickaxe` false → return), never hand-digs toward lava.
+  - **Arm B relaunched on 6c+lsm13**, bots 004–006, region 44, 3 trials.
+- **Crystals cry2 trial 1: FAIL 1200 s timeout, 6/10 killed, 0 deaths.** It stalls on crystals with no clear arc from where the "back out 8 from the tower" rule sends the bot (toward the fountain).
+  - **Next (cry3):** pick the shooting stand from 8 points around each tower at radius 20–28 with a clear arc and floor; budget 1800 s.
+- **Build `late22-cry3` (crystals):** with no clear arc from where it stands, the bot evaluates 16 stands around the tower (radius 20 and 26, 8 directions) for a floor in chunk data and a clear arrow arc, and walks to the nearest one. No such stand → the crystal is given up. Budget 1200 → 1800 s (gym timeout, learn budget, task cap). Launched on bot 007, 3 trials.
+- **Arm A (6b-head) clean PASS: 974.5 s, 0 deaths, portal lit at (121179, −54, 3495)** (region 40, round 2).
+- **Arm B (6c+lsm13) stopped at 15:08 UTC by clause (a): rust-gym-006 died in lava at 15:07:43 on the at-depth tunnel.** It logged `capped 7, staying put` twice, then its step toward (132496, −54, 4211) was vetoed for "lava in a body column at (132497, −54, 4211)" (the "capped" cell); two in-lava escapes failed; dead.
+  - **Root cause (systemic):** `place_cobble` re-read the cell 3 ticks after `place_block`, but `place_block` **predicts the block client-side at once**, so a placement the server rejected or reverted counted as placed. Every cap, shaft seal and station seal could be a ghost; the dragon sniff showed the same predicted-vs-server gap.
+  - **Build `6c+lsm14`:** `place_cobble` judges by the server's answer: wait 8 ticks, require the cell still solid **and** a scaffold block spent; "solid locally but no block spent" is logged as a ghost and returns false. Arm B relaunched on 6c+lsm14 (bots 004–006, region 46, 3 trials).
+- **Arm A (6b-head) round 2:** a second clean PASS (1674.9 s, 0 deaths) and a FAIL timeout with 0 deaths (at-depth tunnel); one mold ended 2/10 (a round-3 trial, running).
+- **Crystals cry3 trial 1: 0 kills, an invalid setup.** The bot spawned at (8, 57, 0) inside the crater earlier dragon trials' beds blew east of the fountain, and couldn't walk out ("could not close" on every crystal for 25 min).
+  - **Build `late23-cry4`:** End setup refills air with end stone at x 4..10, z −4..4, y 50..62 (the island top is y 62) and tps the bot to (8, 63, 0); this also fixes the dragon gym's crater drift.
+  - Relaunched (bot 007, 3 trials).
+- **Crystals cry4: the crater refill worked** (spawned on level ground; kill at (13, 77, 40) in 1 shot at 6 s). But 4 crystals were given up within the first 8 s ("no stand with a clear arc"): far stands lie in chunks the client hasn't loaded.
+  - **Build `late24-cry5`:** no stand known and farther than 30 from the tower → walk to ~24 from it and re-evaluate (counts 1 miss); give up only when close with no stand. Relaunched.
+- **Crystals cry5/cry6 diagnosis:** the give-ups were real "no clear arc" verdicts, not unloaded chunks. 14–16 of 16 stands at r 20 and 26 had floors, but **0 had a clear arc** to the crystal's centre (hd 18–30), while cry2 killed some of these same crystals from ~14 out at 71–80°. A crystal sits ~1 above a wide obsidian top or cage roof, so arcs to its centre from mid-range clip the rim. cry6 killed 2 before the rest were given up.
+  - **Build `late26-cry7`:** `aim()` tries the crystal's centre then its top (base + 1.8); stands at r 14 / 20 / 26 / 32 / 40 × 16 directions (80), used both from the bot's own spot and from stands. Relaunched.
+- **Arm A (6b-head), region 40, backfilled ids 685–707 (A rows only): 4/8 clean** (PASSes 974 s, 1158 s, 1300 s, 1675 s with 0 deaths; one PASS with 3 deaths; 3 timeouts, one with 1 death). 1 trial running.
+  - **Confound recorded:** every A trial ran in one region (40), while B ran in 41 / 44 / 46. **Next round: the arms swap regions** (each region gets one A batch and one B batch, run back to back), so terrain luck cancels.
+- **Crystals cry7: the broader search works.** It killed crystals cry5/cry6 had given up ((34, 92, −24) at 56° in 1 shot; (−41, 89, 0) at 48.7°; (−33, 86, −24) at 43.8°) plus (13, 77, 40): 4 so far, trial running.
+- **Arm A (6b-head) region 40 complete: 5/9 clean** (the last trial, id 702, PASS in 2311.5 s with 0 deaths). **Arm A batch 2 launched in region 51** (fresh). From now on each arm gets a new region per batch, so region luck averages out across several regions per arm.
+- **Arm B (6c+lsm14) region 46, trial 1 of each bot: 0/3 clean, all timeouts with 0 deaths** (at-depth: "no lava yet", lava 79 away, a pre-fill loop ×114).
+- **Root cause of the lsm progress regression, by A/B log counts per bot:**
+
+  | | drops to scoop level | early scoops ok | STATION pick | pools retired |
+  |---|---|---|---|---|
+  | **A (6b), region 40** | 7–12 | 5–6 | 35–45 | 3–12 |
+  | **B (lsm14), region 46** | 0 | 0–1 | — | 3–22 |
+
+  **The 6c+lsm10 deletion of "drop to scoop level" broke the early scoop:** without dropping to the pool's level, no station is found and the pool is retired. I deleted it over one death (6c+lsm9 rust-gym-002); that was the wrong call.
+- **Build `6c+lsm15`:** the drop-to-scoop-level block is restored verbatim from HEAD (111 lines), plus the descent's fall-column rule before its dig (`drop_lands_hot` → stop the drop). Everything else in the lsm chain stays: live lava check, no sprint near lava, diagonal lava rule, verified caps, pickaxe abort, seal-before-stepping, the in-lava escapes. **Arm B relaunched on 6c+lsm15**, region 52.
+- **The verified-cap check fires in the field:** 6c+lsm15 (region 52) logged `place_cobble (157370, -52, 3924): solid locally but no block spent — treating as a ghost`. Under the old 3-tick check that would have counted as a cap. (Ambiguity noted: a late inventory update would read the same; either way, treating it as uncapped is the safe direction.)
+- Arm A batch 2 (region 51): rust-gym-003 died in lava at 16:02:08 UTC (baseline); several molds ended 4/10 (arm attribution pending the trial results).
+- Crystals cry7: RCON shows 4 left of 10 at ~1170 s (6 killed).
+- **Correction: the lsm14/lsm15 "ghost cap" flags were FALSE.** RCON shows **cobblestone** in both flagged cells, (157368, −52, 3925) and (157370, −52, 3924). **The SDK never decrements the held stack when it places a block** (vanilla's client predicts that decrement itself and the server doesn't confirm a success), so "no block spent" misread real caps, and the callers re-placed them about once a second. The same desync explains late4-v2b's bed count.
+  - **Build `6c+lsm16`:** `place_cobble` judges only by the cell still being solid 8 ticks after placement (a rejection's revert arrives within a few ticks). Arm B's lsm15 batch was corrupted by the false flags, so it was stopped and relaunched as **6c+lsm16** in region 53.
+  - **Open SDK item:** predict the held-stack decrement on placement, as vanilla does.
+- Arm A batch 2: rust-gym-003 died in lava again at 16:06:42 UTC (baseline).
+- **Crystals cry7 trial 1: FAIL 1800 s, 0 deaths, 6 of 10 killed** (4 left by RCON). Ended on "could not close on crystal (−33, 80, 25)": a pathing wall reaching one tower.
+- **Arm A (6b-head) region 51 so far:** 1 clean PASS (1903 s); FAIL with **5 deaths** (rust-gym-003 death loop, last on a mold move with lava at its feet); FAIL timeout 0 deaths ending `NO PICKAXE in inventory — digging by hand`; rust-gym-002 died twice more (16:26:57, 16:27:35).
+  - **Finding for Phase 2:** the baseline also wears out all three kit iron pickaxes (~750 digs), as 6c+lsm12 did. The portal kit/race plan needs a 4th pickaxe, or a mid-task craft.
+- **Crystals cry7 trial 2: FAIL 1800 s, "171 attempts".** The per-call `misses` map reset every time the step re-entered: with only an unreachable crystal left ("could not close on (−33, 80, 25)"), the step gave up at once, the gym re-called it, and the count reset ×171.
+  - **Build `late27-cry8`:** `CRYSTAL_MISSES` (static, reset per trial by the gym) persists give-ups across step calls; when every remaining crystal is given up, wait 200 ticks before returning. Relaunched.
+- **Arm A (6b-head) region 51:** another PASS **with 3 deaths** (976.5 s, unclean); several molds ended 6/10 and 8/10.
+- **Arm B 6c+lsm16 (region 53): first finished trial is a clean PASS** (2286.6 s, 0 deaths, portal lit at (159984, −54, 4102)), the first clean B pass since drop-to-scoop-level was restored. compare.ts **6b-head 5/9 vs 6c+lsm16 1/1 → P(B > A) = 0.683, continue.** A's region-51 rows are not yet backfilled (so far 2 clean PASSes, 2 PASSes with deaths, 2 FAILs).
+- **Crystals cry8:** 3 kills in the first 247 s of trial 1 ((34, 92, −24), (13, 104, −39) at 80°, (13, 77, 40)).
+- **Arm A (6b-head), regions 40 + 51 backfilled: 8/16 clean** (50% [28%, 72%]). 5 of its 16 trials had deaths (1, 3, 5, 3, 2: 14 deaths); one region-51 trial still running.
+- **Arm B (6c+lsm16), region 53: 1/3 clean, 0 deaths** (PASS 2287 s; FAIL timeout mid-mold; FAIL timeout at-depth). **compare.ts: P(B > A) = 0.322 → continue.**
+  - Reading so far: equal-ish pass rate, B much safer (0 vs 14 deaths); both arms' failures are progress walls (at-depth time, pickaxe wear, pool exhaustion).

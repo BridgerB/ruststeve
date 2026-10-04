@@ -13,7 +13,7 @@ use crate::vec3::{vec3, Vec3};
 
 use crate::bot_utils::{count_items, select_item};
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};
-use crate::tasks::mining::{descend_step, dig_down, ensure_pickaxe, strip_tunnel};
+use crate::tasks::mining::{descend_step, dig_down, ensure_pickaxe};
 use crate::types::{failure, success, StepResult};
 
 // ── block classification ────────────────────────────────────────────────────
@@ -228,12 +228,252 @@ pub(crate) async fn place_cobble(bot: &mut Bot<'_>, pos: (i32, i32, i32)) -> boo
         bot.look_at(vec3(pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 + 0.5));
         bot.wait_ticks(2).await.ok();
         let _ = bot.place_block(r.0, r.1, r.2, face_back(d)).await;
-        bot.wait_ticks(3).await.ok();
+        // Judge by the SERVER's answer, not the client's prediction: `place_block` predicts the block
+        // locally at once, so a 3-tick re-read counted rejected caps as placed ("capped 7") while the
+        // lava stayed (6c+lsm13 rust-gym-006 stepped into a "capped" cell and died). A rejection is
+        // reverted by a block_update within a few ticks (dragon sniff), so re-read after 8.
+        // NOT by the inventory count: the SDK never decrements the held stack on placement (vanilla's
+        // client predicts that itself), so "no block spent" flagged real caps as ghosts in 6c+lsm15
+        // (server had cobblestone in both flagged cells) and the callers re-placed them.
+        bot.wait_ticks(8).await.ok();
         if solid_at(bot, pos.0, pos.1, pos.2) {
             return true;
         }
     }
     false
+}
+
+/// Why the bot's current cell is unsafe near lava, or None if it is safe. Read from chunk data:
+/// - the floor under the body's centre is solid and not lava;
+/// - no lava in any column the 0.6-wide body overlaps (floor, feet, head);
+/// - no lava in the 3×3 ring at feet and head height;
+/// - no open side cell that drops into lava within 4 blocks.
+/// The last is cycle 4's "no missing floor in the four side cells" read as a lava drop, not any drop:
+/// the 2-wide mold platform has open sides by design, and a survivable fall is not the hazard.
+/// `allow_side`: one intended open side over lava (the sealed station's scoop side O) that the
+/// side-drop check skips. Everything else is still checked.
+pub(crate) fn lava_unsafe_here(bot: &Bot, allow_side: Option<(i32, i32)>) -> Option<String> {
+    let p = bot.entity.position;
+    let fy = feet_y(bot);
+    let (cx, cz) = (p.x.floor() as i32, p.z.floor() as i32);
+    // Footing: lava, or a non-solid floor (air/water) with lava within 4 below it. Water or air over
+    // no lava is not this primitive's hazard (leave_water owns water); vetoing it stalled descents
+    // over water in comparison 6c+lsm2.
+    let floor = name_at(bot, cx, fy - 1, cz);
+    if is_lava(&floor) || (!is_solid(&floor) && (2..=5).any(|d| is_lava(&name_at(bot, cx, fy - d, cz)))) {
+        return Some(format!("footing {floor} under ({cx},{},{cz})", fy - 1));
+    }
+    for (ox, oz) in [(-0.299, -0.299), (-0.299, 0.299), (0.299, -0.299), (0.299, 0.299)] {
+        let (x, z) = ((p.x + ox).floor() as i32, (p.z + oz).floor() as i32);
+        for y in [fy - 1, fy, fy + 1] {
+            if is_lava(&name_at(bot, x, y, z)) {
+                return Some(format!("lava in a body column at ({x},{y},{z})"));
+            }
+        }
+    }
+    for dx in -1..=1 {
+        for dz in -1..=1 {
+            for y in [fy, fy + 1] {
+                if is_lava(&name_at(bot, cx + dx, y, cz + dz)) {
+                    return Some(format!("lava in the body ring at ({},{y},{})", cx + dx, cz + dz));
+                }
+            }
+        }
+    }
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        if Some((dx, dz)) == allow_side {
+            continue;
+        }
+        let (x, z) = (cx + dx, cz + dz);
+        if is_air(&name_at(bot, x, fy, z)) && !solid_at(bot, x, fy - 1, z) {
+            if let Some(d) = (1..=4).find(|d| is_lava(&name_at(bot, x, fy - d, z))) {
+                return Some(format!("side ({x},{z}) drops into lava {d} below"));
+            }
+        }
+    }
+    None
+}
+
+/// THE movement primitive near lava (cycle 4, Part 7). Every walk that can end within four blocks
+/// of lava goes through here; nothing near lava improvises a raw walk.
+/// 1. Farther than one block: only the lava-aware pathfinder (it refuses lava-adjacent cells and
+///    lava-ringed drop landings), capped at `cap`. Never a raw jumping walk.
+/// 2. The last block, for an arrival (reach ≤ 1): the sneaking, non-jumping settle.
+/// 3. **Post-condition** (from chunk data, `lava_unsafe_here`): safe footing and no lava in the body
+///    ring or a side drop.
+/// 4. If it fails: step back one cell toward where the move started, write a `vetoed` primitive
+///    row, and return false. The caller re-plans; it never improvises a stand.
+/// Returns true only when the bot is within `reach` of the target and the post-condition holds.
+pub(crate) async fn lava_safe_move(bot: &mut Bot<'_>, target: (i32, i32, i32), reach: f64, cap: std::time::Duration, why: &str) -> bool {
+    lava_safe_move_ex(bot, target, reach, cap, why, None).await
+}
+
+/// `lava_safe_move` with one intended open side over lava (the station's scoop side).
+pub(crate) async fn lava_safe_move_ex(bot: &mut Bot<'_>, target: (i32, i32, i32), reach: f64, cap: std::time::Duration, why: &str, allow_side: Option<(i32, i32)>) -> bool {
+    let t0 = std::time::Instant::now();
+    let start = bot.entity.position;
+    let start_cell = (start.x.floor() as i32, feet_y(bot), start.z.floor() as i32);
+    let hd = |b: &Bot| ((target.0 as f64 + 0.5 - b.entity.position.x).powi(2) + (target.2 as f64 + 0.5 - b.entity.position.z).powi(2)).sqrt();
+    let adjacent = hd(bot) <= 1.5 && (feet_y(bot) - target.1).abs() == 0;
+    if !adjacent {
+        // Never let the pathfinder walk all the way onto an arrival target (reach ≤ 1): stop ≥ 1.6 short and
+        // finish with the sneaking settle, which will not walk off an edge. Walked or dropped all the way,
+        // the bot's momentum carried it past a station stand into the open lava side (cycle-4 comparison,
+        // rust-gym-002, dead within 1 s of `STATION pick`).
+        // 6c+lsm5 drill: the 1.6 stop-short left every last block to the sneaking settle, which can't dig
+        // and stalls at pool corners — one clean 10/10 in 24 runs. The momentum death it was added for
+        // is covered by the pathfinder refusing drop landings beside an open lava hole (same build), so
+        // path all the way again (6c+lsm: 10/10 twice) and keep the settle as the finisher.
+        let path_reach = reach;
+        let r = tokio::time::timeout(cap, bot.goto_near(target.0, target.1, target.2, path_reach)).await;
+        if r.is_err() {
+            bot.clear_control_states();
+        }
+    }
+    if reach <= 1.0 && feet_y(bot) == target.1 && hd(bot) <= 2.5 {
+        // One cell diagonal to the target with a pool corner between: the straight sneaking settle stops at
+        // the edge and never leaves its cell (drill on 6c+lsm3: moves 6/8/9/10 vetoed for the target's own
+        // open side, evaluated from the old cell). Go in an L through an orthogonal neighbour that is a
+        // safe stand (solid non-lava floor, open body cells).
+        // Any move that changes both x and z: a straight settle cuts the corner (next-lsm-L drill move 9
+        // ended with its centre over a flush pool corner, 2 cells off in x). Take the L whose two legs
+        // cross only safe stands.
+        let (cx, cz) = (bot.entity.position.x.floor() as i32, bot.entity.position.z.floor() as i32);
+        if target.0 != cx && target.2 != cz {
+            let stand = |b: &Bot, x: i32, z: i32| {
+                let f = name_at(b, x, target.1 - 1, z);
+                is_solid(&f) && !is_lava(&f) && is_air(&name_at(b, x, target.1, z)) && is_air(&name_at(b, x, target.1 + 1, z))
+            };
+            let span = |a: i32, b: i32| if a <= b { a..=b } else { b..=a };
+            let leg_x = |b: &Bot, z: i32| span(cx, target.0).all(|x| stand(b, x, z));
+            let leg_z = |b: &Bot, x: i32| span(cz, target.2).all(|z| stand(b, x, z));
+            // Via (tx, cz): x first along z = cz, then z along x = tx. Via (cx, tz): the other way round.
+            let mut via = if leg_x(bot, cz) && leg_z(bot, target.0) {
+                Some((target.0, cz))
+            } else if leg_z(bot, cx) && leg_x(bot, target.2) {
+                Some((cx, target.2))
+            } else {
+                None
+            };
+            // No open L: the corner is usually rock (the drill arena's rim corners are uncarved, which the
+            // old full-pathfinder move dug through; 6c+lsm4 drill 6/10). Dig a corner waypoint's body cells
+            // when it has solid non-lava footing and no lava touches it or the cell above.
+            if via.is_none() && (target.0 - cx).abs() == 1 && (target.2 - cz).abs() == 1 {
+                for (wx, wz) in [(cx, target.2), (target.0, cz)] {
+                    let f = name_at(bot, wx, target.1 - 1, wz);
+                    let lava_near = (target.1..=target.1 + 2).any(|y| {
+                        [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(ox, oz)| is_lava(&name_at(bot, wx + ox, y, wz + oz)))
+                    });
+                    if !is_solid(&f) || is_lava(&f) || lava_near {
+                        continue;
+                    }
+                    for y in [target.1 + 1, target.1] {
+                        if !is_air(&name_at(bot, wx, y, wz)) {
+                            dig_at(bot, wx, y, wz).await;
+                        }
+                    }
+                    bot.wait_ticks(5).await.ok();
+                    if stand(bot, wx, wz) {
+                        via = Some((wx, wz));
+                        break;
+                    }
+                }
+            }
+            if let Some((wx, wz)) = via {
+                crate::tasks::portal_mold::settle_xz(bot, wx as f64 + 0.5, wz as f64 + 0.5, 0.2, 80).await;
+            }
+        }
+        crate::tasks::portal_mold::settle_xz(bot, target.0 as f64 + 0.5, target.2 as f64 + 0.5, 0.2, 120).await;
+        bot.set_control_state("sneak", false);
+    }
+    let arrived = {
+        let p = bot.entity.position;
+        let d3 = ((target.0 as f64 + 0.5 - p.x).powi(2) + (target.1 as f64 - p.y).powi(2) + (target.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
+        d3 <= reach.max(0.5) + 0.75
+    };
+    let unsafe_why = lava_unsafe_here(bot, allow_side);
+    let row_ctx = |b: &Bot, extra: &str| {
+        let p = b.entity.position;
+        serde_json::json!({ "why": why, "target": [target.0, target.1, target.2], "reach": reach,
+            "start": [start_cell.0, start_cell.1, start_cell.2], "end": [p.x.floor() as i64, p.y.floor() as i64, p.z.floor() as i64],
+            "health": b.health, "detail": extra })
+    };
+    if let Some(u) = unsafe_why {
+        cast_debug(&format!("lava_safe_move {why} → {target:?}: VETO ({u}) — stepping back toward {start_cell:?}"));
+        bot.clear_control_states();
+        // Already IN lava (the path's last drop or a flow the chunk data didn't show): escape first. The
+        // step-back goto can't path out of lava, and the caller's own step keeps running with the
+        // survival reflex blocked until it returns (6c+lsm3 rust-gym-001: veto at hp 8, dead in the pool).
+        if crate::survival::in_lava(bot) {
+            // escape_lava drives forward along the current yaw: face where the move started (known ground).
+            bot.look_at(vec3(start_cell.0 as f64 + 0.5, start_cell.1 as f64 + 1.6, start_cell.2 as f64 + 0.5));
+            crate::survival::escape_lava(bot, 60).await;
+        }
+        let p = bot.entity.position;
+        let back = ((start_cell.0 as f64 + 0.5 - p.x).powi(2) + (start_cell.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
+        if back <= 1.5 && feet_y(bot) == start_cell.1 {
+            crate::tasks::portal_mold::settle_xz(bot, start_cell.0 as f64 + 0.5, start_cell.2 as f64 + 0.5, 0.2, 80).await;
+            bot.set_control_state("sneak", false);
+        } else {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(8), bot.goto_near(start_cell.0, start_cell.1, start_cell.2, 0.5)).await;
+            bot.clear_control_states();
+        }
+        let ctx = row_ctx(bot, &u);
+        crate::learn::primitive_row(bot, "lava_safe_move", "build_nether_portal", t0, "vetoed", &u, ctx);
+        return false;
+    }
+    let ctx = row_ctx(bot, "");
+    crate::learn::primitive_row(bot, "lava_safe_move", "build_nether_portal", t0, if arrived { "ok" } else { "failed" }, if arrived { "" } else { "not within reach" }, ctx);
+    arrived
+}
+
+/// `lava_safe_move` gym drill (cycle 4 Part 7, SLUG=lava_safe_move). The LavaPool arena puts the bot at
+/// (px, py, pz) beside a 5×5 flush pool at x px+4..px+8, z pz−2..pz+2, y py−1. Ten moves alternate
+/// between the four rims, so each one paths around the pool; each rim stand's pool side is its
+/// intended open side. Pass = 10 arrivals with the post-condition true (deaths are counted by the gym).
+/// Set by the last `lsm_drill` run that went 10/10; the gym slug's pass reads it. The drill is not in
+/// the step list, so the gym's default pass (the step's `is_complete`) never held and it re-ran the
+/// drill from wherever the bot stood (targets no longer rim stands).
+pub static DRILL_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The arena start of this trial's drill (reset per trial with DRILL_OK). A re-run after a failed pass
+/// used the bot's position wherever it stood, so its targets drifted off the pool (6c+lsm3, next-lsm-L).
+pub static DRILL_ANCHOR: std::sync::Mutex<Option<(i32, i32, i32)>> = std::sync::Mutex::new(None);
+
+/// Shaft-top columns where the bot died mid-descent (process lifetime; a new trial's arena is far away).
+pub static DEATH_SHAFTS: std::sync::Mutex<Vec<(i32, i32)>> = std::sync::Mutex::new(Vec::new());
+
+pub async fn lsm_drill(bot: &mut Bot<'_>) -> StepResult {
+    DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed);
+    let here = (bot.entity.position.x.floor() as i32, feet_y(bot), bot.entity.position.z.floor() as i32);
+    let (px, py, pz) = *DRILL_ANCHOR.lock().unwrap().get_or_insert(here);
+    if here != (px, py, pz) {
+        lava_safe_move(bot, (px, py, pz), 0.3, std::time::Duration::from_secs(30), "drill_home").await;
+    }
+    let w = (1, 0); // the pool is +X of the west rim
+    let e = (-1, 0);
+    let n = (0, 1);
+    let s = (0, -1);
+    let targets = [
+        ((px + 3, py, pz), w), ((px + 6, py, pz - 3), n), ((px + 9, py, pz), e), ((px + 6, py, pz + 3), s),
+        ((px + 3, py, pz - 2), w), ((px + 4, py, pz - 3), n), ((px + 9, py, pz + 2), e), ((px + 8, py, pz + 3), s),
+        ((px + 3, py, pz + 2), w), ((px + 8, py, pz - 3), n),
+    ];
+    let mut ok = 0;
+    for (i, (t, side)) in targets.iter().enumerate() {
+        let arrived = lava_safe_move_ex(bot, *t, 0.3, std::time::Duration::from_secs(30), "drill", Some(*side)).await;
+        let unsafe_now = lava_unsafe_here(bot, Some(*side));
+        cast_debug(&format!("DRILL {}/10 → {t:?}: arrived={arrived} post={} hp={:.0}", i + 1, unsafe_now.clone().unwrap_or_else(|| "ok".into()), bot.health));
+        if arrived && unsafe_now.is_none() {
+            ok += 1;
+        }
+    }
+    if ok == targets.len() {
+        DRILL_OK.store(true, std::sync::atomic::Ordering::Relaxed);
+        success(format!("lava_safe_move drill {ok}/10"))
+    } else {
+        failure(format!("lava_safe_move drill {ok}/10"))
+    }
 }
 
 /// Eat cooked food when hurt and safe. The portal build takes lava nicks the bot can't otherwise
@@ -531,6 +771,12 @@ pub(crate) async fn drop_into_cavern(bot: &mut Bot<'_>) -> bool {
 /// Raise the bot's feet to `target_y` by sneaking, looking down, and placing a
 /// block underneath each jump. Sneaking stops it walking off the 1-wide pillar.
 pub(crate) async fn pillar_up(bot: &mut Bot<'_>, target_y: i32) -> bool {
+    pillar_up_with(bot, target_y, None).await
+}
+
+/// `pillar_up` with a chosen block (the End pillar uses obsidian: the dragon's body destroys any block
+/// not in its immune tag, cobble included — late8-v2f's pillar was eaten 4× in 143 s).
+pub(crate) async fn pillar_up_with(bot: &mut Bot<'_>, target_y: i32, block: Option<&'static str>) -> bool {
     bot.set_control_state("sneak", true);
     let cell_x = bot.entity.position.x.floor() as i32;
     let cell_z = bot.entity.position.z.floor() as i32;
@@ -548,7 +794,8 @@ pub(crate) async fn pillar_up(bot: &mut Bot<'_>, target_y: i32) -> bool {
                 dig_at(bot, cell_x, f + dy, cell_z).await;
             }
         }
-        if !select_item(bot, build_block(bot)).await.unwrap_or(false) {
+        let b = block.filter(|b| count_items(bot, b) > 0).unwrap_or_else(|| build_block(bot));
+        if !select_item(bot, b).await.unwrap_or(false) {
             break;
         }
         bot.look_at(vec3(cell_x as f64 + 0.5, (f - 2) as f64, cell_z as f64 + 0.5));
@@ -652,710 +899,57 @@ fn find_fluid(bot: &Bot, fluid: &str, max_dist: i32) -> Option<(i32, i32, i32)> 
     })
 }
 
-/// Stand beside a fluid source and fill an empty bucket from it.
+/// Fill an empty bucket with WATER from the nearest exposed water source. Cycle 4 Part 7 deleted the
+/// lava stand search, approach and per-site guards that lived here (~700 lines). Lava is scooped
+/// only by the sealed station (portal_mold::station_refill). Every move goes through lava_safe_move.
 pub(crate) async fn fill_bucket(bot: &mut Bot<'_>, fluid: &str) -> bool {
-    cast_debug(&format!(
-        "fill {fluid}: ENTER empty_buckets={} {fluid}_buckets={}",
-        count_items(bot, "bucket"),
-        count_items(bot, &format!("{fluid}_bucket"))
-    ));
-    if count_items(bot, "bucket") < 1 {
+    if fluid != "water" {
+        cast_debug("fill_bucket: lava is scooped only by the sealed station (cycle 4) — refusing");
         return false;
     }
-    // Find an EDGE source (open surface + a solid horizontal neighbour to stand on),
-    // not just the nearest — the centre of a pool has only fluid neighbours, so the
-    // bot would have nowhere safe to stand. find_blocks returns nearest-first.
-    // Settle first + retry: a just-dug chamber's block updates can leave the local
-    // world momentarily missing the pool we located a moment ago.
-    // Wide + high cap: standing at a big pool's edge, the nearest blocks are all interior
-    // lava (fluid-only neighbours, no stand spot); the scoopable rim blocks are farther down
-    // the nearest-first list, so a small cap (64) never reaches them. Match prepare's range.
-    let mut candidates = bot.find_exposed_blocks(fluid, 24, 256);
-    if candidates.is_empty() {
-        bot.wait_ticks(10).await.ok();
-        candidates = bot.find_exposed_blocks(fluid, 24, 256);
-    }
-    // Only SOURCE blocks (level=0) can be bucketed — flowing edges scoop nothing. Try
-    // source blocks first (stable sort keeps nearest-first within each group).
-    candidates.sort_by_key(|&(x, y, z)| u8::from(!is_fluid_source(bot, x, y, z, fluid)));
-    let dirs8 = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
-    // Classify stand options against SOURCE blocks only (flowing scoops nothing). A FLUSH
-    // stand puts the feet ONE block above the source — a shallow look that scoops reliably.
-    // A RECESSED stand (feet TWO above) makes the look too steep and misses (observed live:
-    // bot at y=-37 over a y=-39 source failed all rounds). So prefer, in order: a natural
-    // flush stand; recessed; a roofed source (dig its roof). The pillar-beside-a-source fallback was
-    // removed (jumping in place next to the lake killed rust-gym-003 right after a good scoop). Building a
-    // flush stand was removed — its goto routed the bot over the sea (hp=0 under the surface).
-    let mut flush: Option<((i32, i32, i32), (f64, f64, f64))> = None;
-    let mut recessed: Option<((i32, i32, i32), (f64, f64, f64))> = None;
-    let mut any_source: Option<(i32, i32, i32)> = None; // nearest source w/ air above (pillar fallback)
-    // Sources ROOFED by diggable rock (the deep lakes at y≈-55 sit under a deepslate ceiling; the
-    // bot's tunnel meets them from the side): (source, roof block). Scooped by digging the roof.
-    let mut covered: Vec<((i32, i32, i32), (i32, i32, i32))> = Vec::new();
-    let mut source_count = 0u32;
-    for src in candidates {
-        if !is_fluid_source(bot, src.0, src.1, src.2, fluid) || OBSIDIAN_BLOCKED.lock().unwrap().contains(&src) {
-            continue; // only ever anchor the scoop on a real, reachable source block
-        }
-        let above = name_at(bot, src.0, src.1 + 1, src.2);
-        if !is_air(&above) {
-            // Bedrock is not a diggable roof: race i6's rust-race-003 spent 3 h "digging roof … (bedrock)"
-            // over a −62 pool, 39 times, without one scoop.
-            if fluid == "lava" && is_solid(&above) && above != "obsidian" && above != "bedrock" && covered.len() < 8 {
-                covered.push((src, (src.0, src.1 + 1, src.2)));
-            }
-            continue; // need an open surface to scoop (or dig one — see `covered`)
-        }
-        source_count += 1;
-        if any_source.is_none() {
-            any_source = Some(src);
-        }
-        for (dx, dz) in dirs8 {
-            let (sx, sz) = (src.0 + dx, src.2 + dz);
-            if flush.is_none()
-                && solid_at(bot, sx, src.1, sz)
-                && is_air(&name_at(bot, sx, src.1 + 1, sz))
-                && is_air(&name_at(bot, sx, src.1 + 2, sz))
-            {
-                flush = Some((src, (sx as f64 + 0.5, (src.1 + 1) as f64, sz as f64 + 0.5)));
-            }
-            if recessed.is_none()
-                && solid_at(bot, sx, src.1 + 1, sz)
-                && is_air(&name_at(bot, sx, src.1 + 2, sz))
-                && is_air(&name_at(bot, sx, src.1 + 3, sz))
-            {
-                recessed = Some((src, (sx as f64 + 0.5, (src.1 + 2) as f64, sz as f64 + 0.5)));
-            }
-        }
-        if flush.is_some() {
-            break; // best option found — nearest-first, so stop here
-        }
-    }
-    // Resolve the preference. Water doesn't burn, so as a last resort scoop it from
-    // directly above; never do that for lava.
-    let (src, stand) = if let Some(f) = flush {
-        f
-    } else if let Some(r) = recessed {
-        r
-    } else if fluid == "lava" && !covered.is_empty() {
-        // ROOFED LAKE: no source has air above, but sources under diggable rock are right here
-        // (natural: "0 sources, 256 lava blocks seen", deepslate at src+1). Stand on a solid
-        // horizontal neighbour at the source's level (the tunnel floor — feet one above the
-        // source, the flush geometry), dig the roof block, then scoop as usual.
-        let dirs8 = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
-        let mut pick: Option<((i32, i32, i32), (i32, i32, i32), (i32, i32))> = None;
-        'outer: for &(s, roof) in &covered {
-            for (dx, dz) in dirs8 {
-                let (nx, nz) = (s.0 + dx, s.2 + dz);
-                // Two-deep solid floor, not a falling block: a one-block shelf over the lake (or
-                // gravel) gave way under rust-gym-002 — stand (1488,-54,1408), bot found at y −59 in
-                // the lake after the roof dig (04:31 binary).
-                let floor = name_at(bot, nx, s.1, nz);
-                let under = name_at(bot, nx, s.1 - 1, nz);
-                if solid_at(bot, nx, s.1, nz)
-                    && !is_lava(&floor)
-                    && !floor.contains("gravel")
-                    && !floor.contains("sand")
-                    && is_solid(&under)
-                    && !is_lava(&under)
-                    && is_air(&name_at(bot, nx, s.1 + 1, nz))
-                    && is_air(&name_at(bot, nx, s.1 + 2, nz))
-                {
-                    pick = Some((s, roof, (nx, nz)));
-                    break 'outer;
-                }
-            }
-        }
-        if let Some((s, roof, (nx, nz))) = pick {
-            bot.movement.blocks_cant_break.clear();
-            let _ = bot.goto_near(nx, s.1 + 1, nz, 1.0).await;
-            walk_to_xz(bot, nx as f64 + 0.5, nz as f64 + 0.5, 0.4, 40).await;
-            cast_debug(&format!("fill lava: roofed source {s:?} — digging roof {roof:?} ({}) from ({nx},{},{nz})", name_at(bot, roof.0, roof.1, roof.2), s.1 + 1));
-            dig_at(bot, roof.0, roof.1, roof.2).await;
-            bot.wait_ticks(4).await.ok();
-            (s, (nx as f64 + 0.5, (s.1 + 1) as f64, nz as f64 + 0.5))
-        } else {
-            // ON THE ROOF (feet = source+2, standing on the roof itself): dig the roof of a source
-            // 1.5–2.6 blocks away horizontally — never the block under our feet — and scoop from
-            // where we stand. Closer than ~1.5 the down-ray clips the top of our own block.
-            let p = bot.entity.position;
-            let fy = feet_y(bot);
-            // …or IN THE TUNNEL beside a roofed lake (feet = source+1 on solid ground, source ≤2.3
-            // away but not an 8-neighbour): dig that source's roof — it is at our feet level, and
-            // lava never flows up — then scoop from here. rust-gym-00x (04:31 binary) refused
-            // `5 roofed sources but no stand (feet=-54)` ×5 at (981,-55,1488) and retired the pool.
-            let far = covered.iter().find(|&&(s, _)| {
-                let d = ((s.0 as f64 + 0.5 - p.x).powi(2) + (s.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
-                (fy == s.1 + 2 && (1.5..=2.6).contains(&d))
-                    || (fy == s.1 + 1 && d <= 2.3 && solid_at(bot, p.x.floor() as i32, fy - 1, p.z.floor() as i32))
+    let before = count_items(bot, "water_bucket");
+    for attempt in 0..3 {
+        let o = bot.entity.position;
+        let src = bot
+            .find_exposed_blocks("water", 16, 128)
+            .into_iter()
+            .filter(|&(x, y, z)| is_fluid_source(bot, x, y, z, "water") && is_air(&name_at(bot, x, y + 1, z)))
+            .min_by(|a, b| {
+                let da = (a.0 as f64 - o.x).powi(2) + (a.1 as f64 - o.y).powi(2) + (a.2 as f64 - o.z).powi(2);
+                let db = (b.0 as f64 - o.x).powi(2) + (b.1 as f64 - o.y).powi(2) + (b.2 as f64 - o.z).powi(2);
+                da.total_cmp(&db)
             });
-            let Some(&(s, roof)) = far else {
-                // No stand from HERE: move toward the nearest roofed source (the pathfinder digs
-                // through rock and refuses lava-adjacent cells) so the caller's next attempt scoops
-                // from its side. Refusing in place starved the mold: rust-gym-002 (05:01 binary)
-                // `5 roofed sources but no stand (feet=-54)` ×4 on its pad → `MOLD end 4/10`.
-                // Only sources BELOW our feet: climbing toward an elevated one digs up into its
-                // flow — rust-gym-002 (10:45 binary) `moving toward (1165,-49,439)` from feet -54,
-                // dug up, `eat: health 0->0`, `MOLD end 4/10`.
-                if let Some(&(s, _)) = covered.iter().filter(|(s, _)| s.1 < fy).min_by(|a, b| {
-                    let da = (a.0 .0 as f64 + 0.5 - p.x).powi(2) + (a.0 .2 as f64 + 0.5 - p.z).powi(2);
-                    let db = (b.0 .0 as f64 + 0.5 - p.x).powi(2) + (b.0 .2 as f64 + 0.5 - p.z).powi(2);
-                    da.total_cmp(&db)
-                }) {
-                    // DIG DOWN IN PLACE to the roof (feet = source+2) when our own column is plain rock
-                    // touching no lava and the cell at source+1 is solid to stand on. The goto below asks
-                    // the pathfinder to dig beside a lava body, which it refuses (lava-adjacent cells):
-                    // batch 6 had three bots at feet −51/−52 over a −56 roofed lake, each repeating
-                    // `moving toward …` for 20+ min without descending. The next attempt then hits the
-                    // on-roof scoop above (feet source+2, source 1.5–2.6 away).
-                    let (px, pz) = (p.x.floor() as i32, p.z.floor() as i32);
-                    let lava_touch = |y: i32| {
-                        [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(ox, oz)| is_lava(&name_at(bot, px + ox, y, pz + oz)))
-                    };
-                    if fy > s.1 + 2 && solid_at(bot, px, s.1 + 1, pz) && !(s.1 + 1..fy).any(lava_touch) {
-                        cast_debug(&format!("fill lava: roofed lake below (feet={fy}, source {}) — digging down in place to the roof (feet {})", s.1, s.1 + 2));
-                        descend_to_y(bot, s.1 + 2).await;
-                        return false;
-                    }
-                    cast_debug(&format!("fill lava: {} roofed sources, no stand from (feet={fy}) — moving toward {s:?}", covered.len()));
-                    bot.movement.blocks_cant_break.clear();
-                    // Above the roof (feet ≥ source+2): walk ALONG the roof to within the on-roof
-                    // scoop range (feet source+2). Aiming at source+1 (beside it, under the roof)
-                    // was unreachable from above — rust-gym-001: 4× `moving toward (1291,-58,821)`
-                    // from feet -55/-56 in one second, no movement, `MOLD end 2/10`.
-                    let target_feet = if fy >= s.1 + 2 { s.1 + 2 } else { s.1 + 1 };
-                    let _ = bot.goto_near(s.0, target_feet, s.2, 2.0).await;
-                } else {
-                    cast_debug(&format!("fill lava: {} roofed sources but no stand (feet={fy}) — refuse", covered.len()));
-                }
-                return false;
-            };
-            cast_debug(&format!("fill lava: roofed source {s:?} from ON the roof — digging {roof:?} ({})", name_at(bot, roof.0, roof.1, roof.2)));
-            dig_at(bot, roof.0, roof.1, roof.2).await;
-            bot.wait_ticks(4).await.ok();
-            (s, (p.x, fy as f64, p.z))
-        }
-    } else if fluid == "lava" {
-        cast_debug(&format!(
-            "fill lava: NO scoopable source ({source_count} sources, {} lava blocks seen)",
-            bot.find_exposed_blocks(fluid, 24, 256).len()
-        ));
-        return false;
-    } else {
-        let Some(s) = find_fluid(bot, fluid, 16) else {
+        let Some(src) = src else {
+            cast_debug("fill water: no exposed water source within 16");
             return false;
         };
-        (s, (s.0 as f64 + 0.5, (s.1 + 1) as f64, s.2 as f64 + 0.5))
-    };
-    let filled_bucket_name = format!("{fluid}_bucket");
-    // Success = the filled-bucket count ROSE. The old `> 0` check reported "OK" on every refill
-    // once a single lava bucket was held, so natural-lake refills silently failed (gym-002: four
-    // "OK (round 0)" lines, lava_b stayed 1) and the mold ran out of lava on the top row.
-    let before = count_items(bot, &filled_bucket_name);
-    // Up to 3 re-approach rounds: navigate to the stand spot, then try scooping any
-    // reachable source block (the located one OR a neighbour) from a couple of aim
-    // heights. Being a block off the exact stand spot is fine — the source is well
-    // within reach; we just need the look to actually land on lava.
-    for round in 0..3 {
-        // SURVIVAL: at a deep lava SEA the stand can end up on/over the lava (no solid rim
-        // to stand on), and the bot takes fire damage while repeatedly failing to scoop —
-        // it burned to death at y-54 casting, losing its whole portal kit and regressing to
-        // Mine Iron. If health is low, bail UP off the lava with the kit intact rather than
-        // die: pillar a few blocks up, then abort this fill so the step retries alive.
-        // 14, not 8: lava fire keeps burning ~1 hp/s for seconds after the bot leaves the lava, so a
-        // round started at 7–10 hp is already lost (batch A walk-cap build: both refill deaths entered
-        // their last round at hp ≤ 7). Retreat and heal with enough margin to outlive the fire.
-        if bot.health < 14.0 {
-            let p = bot.entity.position;
-            // DEAD (hp<=0): a corpse can't pillar/goto/eat — those block until the 1800s step
-            // watchdog kills the whole cast (011 hung here after 2 obsidian, made 0 more for
-            // 30min). Respawn and abort so the step re-derives; keep_inventory preserves the kit
-            // and the already-placed obsidian persists, so the frame resumes.
-            if bot.health <= 0.0 {
-                cast_debug("fill lava: DEAD — respawning (a corpse can't retreat; this hung the cast)");
-                respawn_at_frame(bot).await;
-                bot.set_control_state("sneak", false);
-                return false;
-            }
-            cast_debug(&format!("fill lava: ABORT low health={:.0} at ({:.1},{:.1},{:.1}) below={} — retreat + heal", bot.health, p.x, p.y, p.z, name_at(bot, p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32)));
-            // Retreat CLEAR of the lava, then HEAL before returning. The old code just pillared
-            // 4 up and returned, so the step re-dived at ~0 hp and burned again — casting 0
-            // obsidian across dozens of retries (the bot ate 18x but FIRE, not hunger, was the
-            // killer: it keeps burning on solid ground after a lava nick, and eat_if_hurt won't
-            // even eat within 3 of lava). Pillar clear so the fire burns out (a few seconds off
-            // the lava) and eating is allowed, then top health back up so the NEXT cast approach
-            // starts survivable instead of at death's door.
-            pillar_up(bot, feet_y(bot) + 6).await;
-            bot.set_control_state("sneak", false);
-            for &(dx, dz) in &[(1, 0), (0, 1), (-1, 0), (0, -1)] {
-                if !raw_lava_near(bot, 3) {
-                    break;
-                }
-                let q = bot.entity.position;
-                let _ = bot.goto_xz(q.x.floor() as i32 + dx * 4, q.z.floor() as i32 + dz * 4, 2.0).await;
-            }
-            for _ in 0..8 {
-                // Died during the retreat → respawn now; eating as a corpse burned 70 s
-                // (rust-gym-003: `eat: health 0->0` ×8 after `ABORT low health=4`).
-                if bot.health <= 0.0 {
-                    respawn_at_frame(bot).await;
-                    break;
-                }
-                if bot.health >= 16.0 {
-                    break;
-                }
-                eat_if_hurt(bot).await;
-                bot.wait_ticks(20).await.ok();
-            }
+        // A flush stand beside the source: solid floor at the source's level, air for the body.
+        let stand = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .map(|&(dx, dz)| (src.0 + dx, src.1 + 1, src.2 + dz))
+            .find(|&(x, y, z)| solid_at(bot, x, y - 1, z) && is_air(&name_at(bot, x, y, z)) && is_air(&name_at(bot, x, y + 1, z)));
+        let Some(stand) = stand else {
+            cast_debug(&format!("fill water: no flush stand beside {src:?}"));
             return false;
-        }
-        // PRE-DESCENT SAFETY — the #1 death, and the sole wall past block 1: the descend/approach
-        // below walks the bot DOWN toward the source through the open lava band; it burns to 0
-        // DURING that nav and is only caught at the NEXT round's top guard ("DEAD — respawning"),
-        // making zero progress past block 1 (frame stuck at 1/10, deaths climbing). Every fire-safety
-        // guard + the cap sit AFTER the descent, too late. So BEFORE stepping into the band:
-        //  (1) heal to full while still clear of lava (eat_if_hurt self-guards the 3-block radius),
-        //      so the descent starts survivable instead of at death's door, and
-        //  (2) cap the lava the bot is standing over/beside RIGHT NOW (its own 3×3×2 footing) so the
-        //      first steps of the descent are on cobble, not fire. Never cap the source we scoop.
-        for _ in 0..3 {
-            if bot.health >= 18.0 {
-                break;
-            }
-            eat_if_hurt(bot).await;
-        }
-        if count_items(bot, "cobblestone") >= 1 {
-            let p = bot.entity.position;
-            let (px, pz, fy) = (p.x.floor() as i32, p.z.floor() as i32, feet_y(bot));
-            for dx in -1..=1 {
-                for dz in -1..=1 {
-                    for dyy in [-1_i32, 0] {
-                        let (cx, cy, cz) = (px + dx, fy + dyy, pz + dz);
-                        // Keep the scoop SOURCE and its whole horizontal ring open: fill_bucket
-                        // scoops src OR any horizontal neighbour of it (4 targets), so capping any
-                        // cell within 1 of src turns a scoop candidate into cobblestone and the
-                        // fill fails ("src=…(cobblestone), all rounds failed" — the bot caps the
-                        // very lava it needs). Only cap the surrounding FIELD, never the scoop lane.
-                        if (cx - src.0).abs() <= 1 && (cz - src.2).abs() <= 1 {
-                            continue;
-                        }
-                        if is_lava(&name_at(bot, cx, cy, cz)) {
-                            place_cobble(bot, (cx, cy, cz)).await;
-                        }
-                    }
-                }
-            }
-        }
-        let _ = bot.goto_near(stand.0 as i32, stand.1 as i32, stand.2 as i32, 1.0).await;
-        walk_to_xz(bot, stand.0, stand.2, 0.15, 50).await; // centred: the body must stay clear of the source column (see the touch guard)
-        // DESCEND to the source's level if the stand nav left the bot perched ABOVE it. A scoop is a
-        // short raycast; when the source sits well below the bot (e.g. the bot was tp'd to y-41 but
-        // the scoopable source is in the deep sea at y-55) goto_near stops at the higher lip and the
-        // bot scoops from 14 blocks up (`hdist=14.9 lava true->lava` → "all rounds failed" → retire).
-        // Drop to one above the source and re-pin, so the aim is a shallow reach into the surface.
-        if feet_y(bot) > src.1 + 2 {
-            bot.movement.blocks_cant_break.clear();
-            descend_to_y(bot, src.1 + 1).await;
-            let _ = bot.goto_near(stand.0 as i32, (src.1 + 1).max(feet_y(bot)), stand.2 as i32, 1.0).await;
-            walk_to_xz(bot, stand.0, stand.2, 0.15, 40).await;
+        };
+        if !lava_safe_move(bot, stand, 0.3, std::time::Duration::from_secs(20), "water_fill").await {
+            continue;
         }
         if !select_item(bot, "bucket").await.unwrap_or(false) {
             return false;
         }
-        // Candidate source blocks: the located one + its horizontal neighbours that
-        // are actually this fluid (so a slightly-off bot still has a target it sees).
-        // Target SOURCE blocks (level=0) — the located one and any source neighbour, at
-        // the source level and one below (source lava often sits a level down from what the
-        // exposed scan reported). Flowing blocks are skipped; fall back to src if none found.
-        let mut targets: Vec<(i32, i32, i32)> = Vec::new();
-        for (dx, dy, dz) in [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0)] {
-            let t = (src.0 + dx, src.1 + dy, src.2 + dz);
-            if is_fluid_source(bot, t.0, t.1, t.2, fluid) && !OBSIDIAN_BLOCKED.lock().unwrap().contains(&t) {
-                targets.push(t);
-            }
-        }
-        if targets.is_empty() {
-            if OBSIDIAN_BLOCKED.lock().unwrap().contains(&src) {
-                // Every scoop ray from here ends in obsidian — a new stand/source is needed, which
-                // the caller's next fill_bucket picks (blocked sources are skipped as candidates).
-                cast_debug(&format!("fill {fluid}: {src:?} and its neighbours are obsidian-blocked — re-pick"));
-                return false;
-            }
-            targets.push(src);
-        }
-        {
-            let p = bot.entity.position;
-            let d = ((src.0 as f64 - p.x).powi(2) + (src.2 as f64 - p.z).powi(2)).sqrt();
-            let lvl = bot.block_at(src.0, src.1, src.2).and_then(|b| b.properties.get("level").cloned());
-            cast_debug(&format!(
-                "fill try r{round}: src={src:?}({}) lvl={lvl:?} targets={} bot=({:.1},{:.1},{:.1}) hdist={d:.1} hp={:.0}",
-                name_at(bot, src.0, src.1, src.2), targets.len(), p.x, p.y, p.z, bot.health
-            ));
-        }
-        // CLOSE THE GAP: a scoop is a raycast from the eyes, so being >~2 blocks from the source
-        // makes the aim miss and the bucket never fills (`hdist=8.6 lava true->lava` → "all rounds
-        // failed" → retire loop, on wide lava lakes where goto_near/stand stopped short). Before
-        // scooping, step onto a non-lava cell right beside the nearest target so the source is in
-        // arm's reach. Pick the target closest to the bot and a safe (solid floor + air) neighbour.
-        {
-            let p = bot.entity.position;
-            let nearest = targets.iter().min_by(|a, b| {
-                let da = (a.0 as f64 - p.x).powi(2) + (a.2 as f64 - p.z).powi(2);
-                let db = (b.0 as f64 - p.x).powi(2) + (b.2 as f64 - p.z).powi(2);
-                da.total_cmp(&db)
-            });
-            if let Some(&(tx, ty, tz)) = nearest {
-                let hdist = ((tx as f64 - p.x).powi(2) + (tz as f64 - p.z).powi(2)).sqrt();
-                if hdist > 2.0 {
-                    // A horizontal neighbour of the source with solid footing + 2 air to stand in,
-                    // and itself not lava — stand there and scoop across into the source.
-                    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                        let (sx, sz) = (tx + dx, tz + dz);
-                        if !is_lava(&name_at(bot, sx, ty, sz))
-                            && !is_lava(&name_at(bot, sx, ty + 1, sz))
-                            && solid_at(bot, sx, ty - 1, sz)
-                            && is_air(&name_at(bot, sx, ty, sz))
-                            && is_air(&name_at(bot, sx, ty + 1, sz))
-                        {
-                            bot.movement.blocks_cant_break.clear();
-                            let _ = bot.goto_near(sx, ty, sz, 1.0).await;
-                            walk_to_xz(bot, sx as f64 + 0.5, sz as f64 + 0.5, 0.4, 40).await;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        for t in &targets {
-            // UNOBSTRUCT the fluid raytrace: filling a bucket ray-traces from the eye to the
-            // lava SURFACE. If the block directly above the source is solid (common when the
-            // bot tunnels to a source at the band — the ceiling stays), the ray hits that block
-            // instead of the fluid and activate scoops nothing (live: held=bucket, "lava
-            // true->lava" 373×, perfect geometry). Open the column above the source first.
-            // Never scoop a source at or above our own feet level — that lava is IN our body layer
-            // and flows into our cell. A pool with sources at two levels (-56 and -55) had prepare
-            // drop the bot to -55 for the -56 surface; the fill then picked a -55 source beside the
-            // feet and the bot burned (rust-gym-002: hp 20 → 3 in 4 s, pool retired).
-            if t.1 >= feet_y(bot) {
-                cast_debug(&format!("  source {t:?} is at/above our feet ({}) — skip", feet_y(bot)));
-                continue;
-            }
-            // Never scoop a source in a column our body touches (half-width 0.3, +0.1 drift margin):
-            // scooping turns it into a HOLE at lava level right at our feet, and the next drift drops
-            // us in with the neighbours flowing in — the "fell below the source within 3 s" deaths.
-            // rust-gym-002: at x=441.7 it scooped (442,-55,555) and (442,-55,556), then was found at
-            // (442.6,-55.6,555.7) hp 14 → dead.
-            {
-                let p = bot.entity.position;
-                let touches = [(-0.4, -0.4), (-0.4, 0.4), (0.4, -0.4), (0.4, 0.4)]
-                    .iter()
-                    .any(|&(ox, oz)| ((p.x + ox).floor() as i32, (p.z + oz).floor() as i32) == (t.0, t.2));
-                if touches {
-                    cast_debug(&format!("  source {t:?} is in a column our body touches — skip"));
-                    continue;
-                }
-            }
-            let above = name_at(bot, t.0, t.1 + 1, t.2);
-            // Never the block under the bot's own body: rust-gym-002 stood ON the source's roof
-            // (298,-55,549), dug it (`unobstruct above source … → dig`) and dropped into the lava.
-            let under_body = {
-                let p = bot.entity.position;
-                let fy = feet_y(bot);
-                t.1 + 1 == fy - 1
-                    && [(-0.299, -0.299), (-0.299, 0.299), (0.299, -0.299), (0.299, 0.299)]
-                        .iter()
-                        .any(|&(ox, oz)| ((p.x + ox).floor() as i32, (p.z + oz).floor() as i32) == (t.0, t.2))
-            };
-            if under_body {
-                cast_debug(&format!("  source {t:?} is under our own feet — skip"));
-                continue;
-            }
-            if above == "bedrock" {
-                cast_debug(&format!("  source {t:?} under bedrock — skip"));
-                continue;
-            }
-            if is_solid(&above) {
-                cast_debug(&format!("  unobstruct above source {t:?}: {above} → dig"));
-                dig_at(bot, t.0, t.1 + 1, t.2).await;
-            }
-            // APPROACH: a bucket fill ray-traces only ~4.5 blocks. After casting a few frame
-            // blocks the bot drifts and the next source ends up 5-6.5 away — the ray falls short
-            // and the fill misses (live: reach=5.4..6.5 → "lava true->lava", stalled 011 at 3
-            // obsidian). Step adjacent (to the safe air ABOVE the source) before scooping.
-            {
-                let p = bot.entity.position;
-                let horiz = ((t.0 as f64 + 0.5 - p.x).powi(2) + (t.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
-                if horiz > 2.5 {
-                    // Approach a concrete SAFE STAND beside the source — solid non-lava floor at the
-                    // source's level, body cells air and not lava, no lava under the floor — not
-                    // "near the air above the source" (range 1.8): that goal sits over the lake and
-                    // the bot finished standing ON it (rust-gym-003, 01:53 binary: `FOOTING on lava
-                    // at (401.7,-54,872.3)` → hp 0, refill death at 4/10). No safe stand → skip t.
-                    // Flush stand (floor at the source level) first, else RECESSED (floor one above,
-                    // feet source+2 — the stand scan's second choice). Flush-only skipped every
-                    // target in a basin pool (rust-gym-002: `no safe stand beside it — skip` ×16,
-                    // refill 0 buckets, mold ended at 2/10).
-                    let stand_at = |floor_y: i32| {
-                        [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
-                            .iter()
-                            .map(|&(dx, dz)| (t.0 + dx, t.2 + dz))
-                            .filter(|&(sx, sz)| {
-                                let floor = name_at(bot, sx, floor_y, sz);
-                                is_solid(&floor)
-                                    && !is_lava(&floor)
-                                    && !is_lava(&name_at(bot, sx, floor_y - 1, sz))
-                                    && is_air(&name_at(bot, sx, floor_y + 1, sz))
-                                    && is_air(&name_at(bot, sx, floor_y + 2, sz))
-                            })
-                            .min_by(|a, b| {
-                                let da = (a.0 as f64 + 0.5 - p.x).powi(2) + (a.1 as f64 + 0.5 - p.z).powi(2);
-                                let db = (b.0 as f64 + 0.5 - p.x).powi(2) + (b.1 as f64 + 0.5 - p.z).powi(2);
-                                da.total_cmp(&db)
-                            })
-                            .map(|(sx, sz)| (sx, sz, floor_y + 1))
-                    };
-                    let stand = stand_at(t.1).or_else(|| stand_at(t.1 + 1));
-                    let Some((sx, sz, stand_feet)) = stand else {
-                        cast_debug(&format!("  approach source {t:?}: {horiz:.1} away, no safe stand beside it — skip"));
-                        continue;
-                    };
-                    cast_debug(&format!("  approach source {t:?}: {horiz:.1} away → stand ({sx},{stand_feet},{sz})"));
-                    let _ = bot.goto_near(sx, stand_feet, sz, 0.8).await;
-                    // No dig-toward fallback: digging a straight feet+head path toward the stand opened
-                    // pool rims (rust-gym-002: three approaches of 66/126/100 s, the last ending at
-                    // y -58 inside the lake). If the pathfinder can't reach the stand, the reach
-                    // check below skips this target.
-                    // The raw walk only finishes a SHORT last stretch (≤ 3 blocks). Since walk_to_xz counts
-                    // real ticks it walks for real; when the pathfinder stopped 12 blocks short it crossed
-                    // that gap in a straight line toward a stand beside the lake, and died (batch 10:
-                    // `approach … 12.4 away`, `out of reach (12.8)`, then a lava death).
-                    let q = bot.entity.position;
-                    if ((sx as f64 + 0.5 - q.x).powi(2) + (sz as f64 + 0.5 - q.z).powi(2)).sqrt() <= 3.0 {
-                        walk_to_xz(bot, sx as f64 + 0.5, sz as f64 + 0.5, 0.4, 30).await;
-                    }
-                }
-            }
-            // OUT OF REACH after the approach → skip this target now. A bucket ray reaches ~4.5;
-            // when the stand was unreachable the bot still fired 3 aims from 8.5 blocks
-            // (`lava true->lava … reach=8.5`) and re-approached twice — one 2-bucket refill on
-            // rust-gym-003 took ~12 min (1400 → 2143 s) and the trial ran out of clock at 4/10.
-            {
-                let p = bot.entity.position;
-                let reach = ((t.0 as f64 + 0.5 - p.x).powi(2) + (t.1 as f64 + 0.9 - (p.y + 1.62)).powi(2) + (t.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
-                if reach > 4.6 {
-                    // Remember it: the next fill_bucket then picks OTHER sources in its 24-block scan
-                    // instead of re-approaching the same unreachable one (rust-gym-002 timed out at
-                    // 7/10 cycling `out of reach … — skip` on one pool).
-                    cast_debug(&format!("  scoop t={t:?}: out of reach ({reach:.1}) after the approach — skip (blocked from now on)"));
-                    OBSIDIAN_BLOCKED.lock().unwrap().push(*t);
-                    continue;
-                }
-            }
-            // FIRE-SAFETY: cap OPEN lava blocks touching the stand (except the target source)
-            // with cobble so the bot isn't cooked by a lava FIELD while scooping — the open-band
-            // fire (hp 20→0 faster than the bail) capped the cast at ~1 obsidian per death. One
-            // adjacent source is fine (that's what we scoop); it's the surrounding field that kills.
-            if count_items(bot, "cobblestone") >= 1 {
-                let p = bot.entity.position;
-                let fy = feet_y(bot);
-                let (px, pz) = (p.x.floor() as i32, p.z.floor() as i32);
-                for dx in -1..=1 {
-                    for dz in -1..=1 {
-                        for dyy in [-1_i32, 0] {
-                            let (cx, cy, cz) = (px + dx, fy + dyy, pz + dz);
-                            // Keep EVERY scoop target open, not just the current `t`: `targets` holds
-                            // src + its scoopable neighbours, and capping any of them (while this loop
-                            // iterates a different one) turns a source into cobblestone → the next
-                            // round scoops a capped cell and "all rounds failed" forever. Cap only the
-                            // field OUTSIDE the target set.
-                            if targets.contains(&(cx, cy, cz)) {
-                                continue; // keep the scoop hole(s) open
-                            }
-                            if is_lava(&name_at(bot, cx, cy, cz)) {
-                                place_cobble(bot, (cx, cy, cz)).await;
-                            }
-                        }
-                    }
-                }
-            }
-            for dy in [0.6_f64, 0.2, 0.9] {
-                // FOOTING guard (health-independent, checked BEFORE every activate): never scoop
-                // while standing on lava. A receding rim / flowing-lava backfill can park the bot
-                // on a source; the health bail below only fires AFTER the nick lands (too late —
-                // 20→0 in ~1s). Bail the moment the block under our feet is lava, before damage.
-                // Checks EVERY column the 0.6-wide body overlaps (a bot at x=402.0 straddles 401 and
-                // 402). The retreat is a WALK to the nearest cell centre whose floor and body cells
-                // are lava-free — not `pillar_up`: jumping in place beside the lava column is what
-                // killed rust-gym-003 three times at (402.0,-54,872.6) (its own floor was deepslate
-                // on the server; the lava was the neighbour column its box overlapped).
-                {
-                    let p = bot.entity.position;
-                    let fy = feet_y(bot);
-                    // Danger = lava under the body's CENTRE, or lava at feet/head height in any column
-                    // the box overlaps. A flush stand's neighbour column has the SOURCE one level
-                    // below the feet — that is the scoop target, not a hazard (treating it as one
-                    // refused 5 good scoops on rust-gym-001 at (801.7,-54,1174.7) and retired the pool).
-                    // ±0.299: a box edge exactly on a block boundary does not overlap that block.
-                    let cols: Vec<(i32, i32)> = [(-0.299, -0.299), (-0.299, 0.299), (0.299, -0.299), (0.299, 0.299)]
-                        .iter()
-                        .map(|&(ox, oz)| ((p.x + ox).floor() as i32, (p.z + oz).floor() as i32))
-                        .collect();
-                    let body_lava = |x: i32, z: i32| is_lava(&name_at(bot, x, fy, z)) || is_lava(&name_at(bot, x, fy + 1, z));
-                    let lava_col = |x: i32, z: i32| is_lava(&name_at(bot, x, fy - 1, z)) || body_lava(x, z);
-                    let (ccx, ccz) = (p.x.floor() as i32, p.z.floor() as i32);
-                    if is_lava(&name_at(bot, ccx, fy - 1, ccz)) || cols.iter().any(|&(x, z)| body_lava(x, z)) {
-                        let (cx, cz) = (p.x.floor() as i32, p.z.floor() as i32);
-                        let safe = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
-                            .iter()
-                            .map(|&(dx, dz)| (cx + dx, cz + dz))
-                            .find(|&(x, z)| {
-                                solid_at(bot, x, fy - 1, z)
-                                    && is_air(&name_at(bot, x, fy, z))
-                                    && is_air(&name_at(bot, x, fy + 1, z))
-                                    && [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)].iter().all(|&(ox, oz)| !lava_col(x + ox, z + oz))
-                            });
-                        cast_debug(&format!("fill {fluid}: FOOTING overlaps lava at ({:.1},{:.1},{:.1}) — stepping to {safe:?}, no scoop", p.x, p.y, p.z));
-                        bot.set_control_state("sneak", false);
-                        if let Some((sx, sz)) = safe {
-                            walk_to_xz(bot, sx as f64 + 0.5, sz as f64 + 0.5, 0.2, 30).await;
-                        } else {
-                            // Standing IN the pool's top layer: every same-level neighbour touches
-                            // lava. Climb one level instead — the mold pad / rim is there. rust-gym-002
-                            // (11:51 binary) stood at −55 in a re-flooded scooped cell, `stepping to
-                            // None`, and burned 10 s later (`eat: health 1->0`) at 4/10.
-                            let up = (-2..=2)
-                                .flat_map(|dx| (-2..=2).map(move |dz| (cx + dx, cz + dz)))
-                                .filter(|&(x, z)| {
-                                    solid_at(bot, x, fy, z)
-                                        && is_air(&name_at(bot, x, fy + 1, z))
-                                        && is_air(&name_at(bot, x, fy + 2, z))
-                                        && !is_lava(&name_at(bot, x, fy, z))
-                                })
-                                .min_by_key(|&(x, z)| (x - cx).abs() + (z - cz).abs());
-                            cast_debug(&format!("fill {fluid}: no same-level stand — climbing to {up:?}"));
-                            if let Some((ux, uz)) = up {
-                                bot.movement.blocks_cant_break.clear();
-                                let _ = bot.goto_near(ux, fy + 1, uz, 0.5).await;
-                            }
-                        }
-                        return false;
-                    }
-                }
-                // Bail the INSTANT health drops — a receding-rim scoop can leave the bot standing
-                // on a lava column, cooking it 20→0 in ~1s, FASTER than the once-per-round guard
-                // above (that's how it died in-limbo at 8/10). Bail at <14 (only ~6 dmg taken) so
-                // it retreats ALIVE with the kit; the caller re-scoops from a fresh, safer approach.
-                if bot.health < 14.0 {
-                    let p = bot.entity.position;
-                    // DEAD (hp<=0): don't retreat a corpse — pillar/goto/eat block until the step
-                    // watchdog kills the cast. Respawn + abort; kit + placed obsidian persist.
-                    if bot.health <= 0.0 {
-                        cast_debug("fill lava: EARLY BAIL DEAD — respawning (corpse can't retreat)");
-                        respawn_at_frame(bot).await;
-                        bot.set_control_state("sneak", false);
-                        return false;
-                    }
-                    cast_debug(&format!("fill lava: EARLY BAIL hp={:.0} at ({:.1},{:.1},{:.1}) below={} — retreat + heal", bot.health, p.x, p.y, p.z, name_at(bot, p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32)));
-                    // Retreat CLEAR of the lava + HEAL, not just pillar 3 and return: the old
-                    // code re-approached still hurt (and often still on fire) → took more damage
-                    // → bailed again, never recovering (0/10 across attempts). Get off the lava
-                    // column so fire burns out and eating is allowed, then top health back up so
-                    // the next scoop/cast starts survivable. Same recovery as the <8 abort.
-                    pillar_up(bot, feet_y(bot) + 6).await;
-                    bot.set_control_state("sneak", false);
-                    for &(dx, dz) in &[(1, 0), (0, 1), (-1, 0), (0, -1)] {
-                        if !raw_lava_near(bot, 3) {
-                            break;
-                        }
-                        let q = bot.entity.position;
-                        let _ = bot.goto_xz(q.x.floor() as i32 + dx * 4, q.z.floor() as i32 + dz * 4, 2.0).await;
-                    }
-                    for _ in 0..8 {
-                        // Died during the retreat → respawn now; eating as a corpse burned 70 s
-                        // (rust-gym-003: `eat: health 0->0` ×8 after `ABORT low health=4`).
-                        if bot.health <= 0.0 {
-                            respawn_at_frame(bot).await;
-                            break;
-                        }
-                        if bot.health >= 16.0 {
-                            break;
-                        }
-                        eat_if_hurt(bot).await;
-                        bot.wait_ticks(20).await.ok();
-                    }
-                    return false;
-                }
-                let was_lava = is_lava(&name_at(bot, t.0, t.1, t.2));
-                let look_pt = vec3(t.0 as f64 + 0.5, t.1 as f64 + dy, t.2 as f64 + 0.5);
-                bot.look_at(look_pt);
-                bot.wait_ticks(7).await.ok();
-                // RE-ASSERT the look immediately before activate: the 7-tick settle can reset
-                // pitch to LEVEL (the movement-facing look at mod.rs:1638), so use_item would
-                // carry a horizontal rotation and the server's fluid raytrace misses lava BELOW
-                // the bot — scoops fine on the gym's horizontal lava, fails on the natural
-                // downward scoop ("lava true->lava" 373×). look() sets pitch directly and
-                // use_item embeds the current rotation, so re-looking here guarantees the steep
-                // downward pitch is what gets sent.
-                bot.look_at(look_pt);
-                // ★ HOLD THE EMPTY BUCKET before scooping. The cap/floor placement earlier in this
-                // loop (place_cobble) leaves COBBLESTONE selected, so activate_item "scoops" with
-                // cobble and the lava stays lava (live: `held=cobblestone lava true->lava`, 0 fills
-                // across every bot on the deep band — the whole 2026-09 nether wall after the
-                // bucket-count fix). select_item is a no-op if the bucket is already held.
-                let _ = select_item(bot, "bucket").await;
-                let held = bot.held_item().map(|i| i.name.clone());
-                let (sent_yaw, sent_pitch) = (bot.entity.yaw.to_degrees(), bot.entity.pitch.to_degrees());
-                let eye = bot.entity.position;
-                let reach = ((look_pt.x - eye.x).powi(2) + (look_pt.y - (eye.y + 1.62)).powi(2) + (look_pt.z - eye.z).powi(2)).sqrt();
-                // LINE OF SIGHT. The scoop is a raycast, and from inside the bot's own 1-wide
-                // tunnel a DIAGONAL target's ray clips the tunnel wall at head level before it
-                // ever reaches the lava — every aim "missed" with the rotation, reach and source
-                // all correct (natural: `lava true->lava` ×15 with deepslate at (1262,-53,435) and
-                // (1261,-53,434) beside the head). Trace the ray through the local world and dig
-                // the first solid cell in the way (never obsidian/lava), then re-aim.
-                if let Some(occ) = first_solid_on_ray(bot, vec3(eye.x, eye.y + 1.62, eye.z), look_pt, *t) {
-                    let n = name_at(bot, occ.0, occ.1, occ.2);
-                    cast_debug(&format!("  scoop t={t:?}: ray occluded by {occ:?} ({n}) — digging it"));
-                    // Never dig an occluder BELOW the feet or touching lava: that is the pool's rim /
-                    // the stand's own floor (rust-gym-003 dug (399,-55,872) = its stand floor beside
-                    // the lake, then died on the next fill). Treat it like obsidian: skip the source.
-                    let below_feet = occ.1 < feet_y(bot);
-                    let rim = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0), (0, -1, 0)]
-                        .iter()
-                        .any(|&(ox, oy, oz)| is_lava(&name_at(bot, occ.0 + ox, occ.1 + oy, occ.2 + oz)));
-                    if n == "obsidian" || below_feet || rim {
-                        OBSIDIAN_BLOCKED.lock().unwrap().push(*t);
-                    } else if !is_lava(&n) {
-                        dig_at(bot, occ.0, occ.1, occ.2).await;
-                        bot.wait_ticks(3).await.ok();
-                    }
-                    continue;
-                }
-                bot.activate_item().await.ok();
-                bot.wait_ticks(10).await.ok();
-                if count_items(bot, &filled_bucket_name) > before {
-                    cast_debug(&format!("fill {fluid}: OK (round {round}) → {}", count_items(bot, &filled_bucket_name)));
-                    return true;
-                }
-                // Server scooped it but the inventory didn't sync (the same raciness the
-                // water fill predicts around): if the target source VANISHED right as we
-                // used the bucket, the fill happened — mirror it locally so the step
-                // machine sees the filled bucket instead of re-scooping an empty spot.
-                let now = name_at(bot, t.0, t.1, t.2);
-                if fluid == "lava" && was_lava && is_air(&now) && count_items(bot, "bucket") > 0 {
-                    bot.ensure_item("lava_bucket", 1);
-                    if let Some(s) = bot.inventory.slots.iter_mut().flatten().find(|i| i.name == "bucket") {
-                        s.count -= 1;
-                    }
-                    cast_debug(&format!("fill lava: OK (round {round}, source vanished — predicted)"));
-                    return true;
-                }
-                cast_debug(&format!("  scoop t={t:?} dy={dy:.1} held={held:?} lava {was_lava}->{now} pitch={sent_pitch:.0} yaw={sent_yaw:.0} reach={reach:.1}"));
-            }
+        let look = vec3(src.0 as f64 + 0.5, src.1 as f64 + 0.8, src.2 as f64 + 0.5);
+        bot.look_at(look);
+        bot.wait_ticks(5).await.ok();
+        bot.look_at(look);
+        bot.activate_item().await.ok();
+        bot.wait_ticks(10).await.ok();
+        if count_items(bot, "water_bucket") > before {
+            cast_debug(&format!("fill water: OK from {src:?} (try {attempt})"));
+            return true;
         }
     }
-    cast_debug(&format!("fill {fluid}: all rounds failed"));
-    false
+    count_items(bot, "water_bucket") > before
 }
 
 // ── prepare site + build the whole portal ─────────────────────────────────────
@@ -1520,11 +1114,26 @@ async fn tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) {
     // missing floor) and walk in. The pathfinder goto (strip_tunnel, 6 ahead) is only the fallback
     // for a blocked direct step: it timed out on nearly every step (~20 s each even along an open
     // cave corridor — rust-gym-003: one block per ~21 s at (1179,-54,1126..1128)).
+    // The descent loop never yields to the survival reflexes between tunnel steps, so check here:
+    // comparison 6c+lsm2 rust-gym-002 burned to death inside this loop (10:25 UTC).
+    if crate::survival::in_lava(bot) {
+        cast_debug("tunnel_step: in lava — escaping before the next step");
+        // escape_lava drives forward along the yaw: face back along the tunnel (dug, floored rock)
+        // rather than wherever the bot happened to face (6c+lsm6 rust-gym-001 thrashed 4 s in a lake).
+        let p = bot.entity.position;
+        bot.look_at(vec3(p.x - dx as f64 * 3.0, p.y + 1.6, p.z - dz as f64 * 3.0));
+        crate::survival::escape_lava(bot, 60).await;
+        return;
+    }
     let p0 = bot.entity.position;
     let (fx, fz, fy) = (p0.x.floor() as i32, p0.z.floor() as i32, feet_y(bot));
     let (ax, az) = (fx + dx, fz + dz);
+    // The same "near lava" as lava_unsafe_here's body ring (diagonals included): with only the
+    // orthogonal neighbours the tunnel kept choosing diagonal-to-lava cells the primitive then vetoed.
+    const TOUCH: [(i32, i32, i32); 11] =
+        [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (1, 0, 1), (1, 0, -1), (-1, 0, 1), (-1, 0, -1), (0, 1, 0), (0, -1, 0)];
     let lava_touch = |x: i32, y: i32, z: i32| {
-        [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0), (0, -1, 0)]
+        TOUCH
             .iter()
             .any(|&(ox, oy, oz)| is_lava(&name_at(bot, x + ox, y + oy, z + oz)))
     };
@@ -1538,7 +1147,7 @@ async fn tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) {
         let mut capped = 0;
         let mut cells: Vec<(i32, i32, i32)> = Vec::new();
         for y in [fy, fy + 1] {
-            for (ox, oy, oz) in [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0), (0, -1, 0)] {
+            for (ox, oy, oz) in TOUCH {
                 let c = (ax + ox, y + oy, az + oz);
                 if (c.0, c.2) != (fx, fz) && is_lava(&name_at(bot, c.0, c.1, c.2)) && !cells.contains(&c) {
                     cells.push(c);
@@ -1557,16 +1166,52 @@ async fn tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) {
             [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)].iter().any(|&(ox, oz)| is_lava(&name_at(bot, fx + ox, y, fz + oz)))
         }) || is_lava(&name_at(bot, fx, fy - 1, fz));
         if own_hot {
-            cast_debug(&format!("tunnel_step: lava touches our own cell at ({fx},{fy},{fz}) after capping {capped} — stepping back"));
-            walk_to_xz(bot, (fx - dx) as f64 + 0.5, (fz - dz) as f64 + 0.5, 0.3, 20).await;
+            // Cap the lava beside our own cell too (the loop above skips our column), then step to a
+            // neighbour that is open, floored and lava-free — the cell behind is not always one (the
+            // heading rotates). The old raw step-back returned at once with nothing capped, and the
+            // caller re-entered ~20×/s while rust-gym-002 burned (6c+lsm2, 10:25 UTC).
+            let mut own_capped = 0;
+            for y in [fy, fy + 1] {
+                for (ox, oz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    if is_lava(&name_at(bot, fx + ox, y, fz + oz)) && place_cobble(bot, (fx + ox, y, fz + oz)).await {
+                        own_capped += 1;
+                    }
+                }
+            }
+            if is_lava(&name_at(bot, fx, fy - 1, fz)) && place_cobble(bot, (fx, fy - 1, fz)).await {
+                own_capped += 1;
+            }
+            let safe = |bot: &Bot, x: i32, z: i32| {
+                let touch = |y: i32| {
+                    TOUCH
+                        .iter()
+                        .any(|&(ox, oy, oz)| is_lava(&name_at(bot, x + ox, y + oy, z + oz)))
+                };
+                is_air(&name_at(bot, x, fy, z))
+                    && is_air(&name_at(bot, x, fy + 1, z))
+                    && solid_at(bot, x, fy - 1, z)
+                    && !touch(fy)
+                    && !touch(fy + 1)
+            };
+            let back = [(-dx, -dz), (dz, dx), (-dz, -dx), (dx, dz)]
+                .into_iter()
+                .find(|&(ox, oz)| (ox, oz) != (0, 0) && safe(bot, fx + ox, fz + oz));
+            cast_debug(&format!(
+                "tunnel_step: lava touches our own cell at ({fx},{fy},{fz}) after capping {capped}+{own_capped} — stepping {back:?}"
+            ));
+            if let Some((ox, oz)) = back {
+                walk_to_xz(bot, (fx + ox) as f64 + 0.5, (fz + oz) as f64 + 0.5, 0.3, 20).await;
+            }
+            // Never return straight into the caller's next step: it re-enters this branch at once.
+            bot.wait_ticks(10).await.ok();
             return;
         }
         cast_debug(&format!("tunnel_step: lava at the next cell ({ax},{fy},{az}) dir=({dx},{dz}) — capped {capped}, staying put (no pathfinder detour)"));
         return;
     }
     if !solid_at(bot, ax, fy - 1, az) {
-        cast_debug(&format!("tunnel_step: no floor at ({ax},{},{az}) dir=({dx},{dz}) — pathfinder", fy - 1));
-        strip_tunnel(bot, dx, dz).await;
+        cast_debug(&format!("tunnel_step: no floor at ({ax},{},{az}) dir=({dx},{dz}) — lava_safe_move detour", fy - 1));
+        lava_safe_move(bot, (fx + dx * 6, fy, fz + dz * 6), 1.5, std::time::Duration::from_secs(20), "tunnel_detour").await;
         return;
     }
     for c in [(ax, fy + 1, az), (ax, fy, az)] {
@@ -1577,11 +1222,11 @@ async fn tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) {
     // Let a rejected break come back from the server before stepping in (the SDK predicts air).
     bot.wait_ticks(5).await.ok();
     if !is_air(&name_at(bot, ax, fy, az)) || !is_air(&name_at(bot, ax, fy + 1, az)) {
-        cast_debug(&format!("tunnel_step: ({ax},{fy},{az}) still solid after the dig — pathfinder"));
-        strip_tunnel(bot, dx, dz).await;
+        cast_debug(&format!("tunnel_step: ({ax},{fy},{az}) still solid after the dig — lava_safe_move detour"));
+        lava_safe_move(bot, (fx + dx * 6, fy, fz + dz * 6), 1.5, std::time::Duration::from_secs(20), "tunnel_detour").await;
         return;
     }
-    walk_to_xz(bot, ax as f64 + 0.5, az as f64 + 0.5, 0.3, 30).await;
+    lava_safe_move(bot, (ax, fy, az), 0.3, std::time::Duration::from_secs(5), "tunnel_step").await;
 }
 
 /// A WATER BODY ahead of the shaft: water directly below within 3, or ≥ 8 water blocks in the
@@ -1589,6 +1234,19 @@ async fn tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) {
 /// wall). A small pocket beside the column is not a hazard. Counting any single neighbour made every
 /// step past a ~6-block pocket a failed detour, and the fall-through to the fluid-cautious dig_down
 /// crawled ~25 s/block (batch 2 rust-gym-005: y 64 → 51 in 330 s).
+/// Digging out (x, feet−1, z) opens a drop when feet−2 is open: follow the column to its landing (≤ 24
+/// down). Some(landing) when the landing is lava or has lava in the 3×3 at landing..+2; None when the
+/// drop is safe, there is no drop, or more than 24 is open (unknown; the shaft seal + survival own it).
+fn drop_lands_hot(bot: &Bot, x: i32, feet: i32, z: i32) -> Option<i32> {
+    if solid_at(bot, x, feet - 2, z) {
+        return None;
+    }
+    let y = (2..=24).map(|d| feet - d).find(|&y| !is_air(&name_at(bot, x, y, z)))?;
+    let hot = is_lava(&name_at(bot, x, y, z))
+        || (-1..=1).any(|ox| (-1..=1).any(|oz| [y, y + 1, y + 2].iter().any(|&yy| is_lava(&name_at(bot, x + ox, yy, z + oz)))));
+    hot.then_some(y)
+}
+
 fn wet_column(bot: &Bot, x: i32, feet: i32, z: i32) -> bool {
     if (1..=3).any(|d| name_at(bot, x, feet - d, z).contains("water")) {
         return true;
@@ -1718,7 +1376,11 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         if let Some(poi) = mem.nearest(&[PoiKind::Lava], from, 4) {
             cast_debug(&format!("prepare: heading to remembered lava {:?}", poi.pos));
             bot.movement.blocks_cant_break.clear();
-            let _ = bot.goto_near(poi.pos.0, poi.pos.1, poi.pos.2, 3.0).await;
+            // Through the primitive like the approach: a plain goto_near here walked rust-gym-005 into
+            // lava (6c+lsm2, 10:18 UTC).
+            // Stop 6 out, not 3: the rescan below sees 16 and the approach (also through the primitive)
+            // closes the rest. Reach 3 toward the lake's surface cell walked 6c+lsm8 rust-gym-004 into it.
+            let _ = lava_safe_move(bot, (poi.pos.0, poi.pos.1 + 1, poi.pos.2), 6.0, std::time::Duration::from_secs(30), "remembered_lava").await;
             // Chunks after an underground tp (the LavaPool gym) can take a second to settle, so
             // find_fluid/source_lava_near race empty at a pool that's really there — which marked
             // the pool "dry" and blind-descended right past it. Retry the scan a few times with
@@ -1747,8 +1409,25 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         // tunnelling ACROSS at depth until an exposed source comes into reach with a solid
         // tunnel floor to stand on and scoop from.
         bot.movement.blocks_cant_break.clear();
+        // Never re-dig a shaft the bot died in: respawn returns it to the same column and it falls the
+        // same way (6c+lsm6 rust-gym-001 died twice in 3 min down one shaft). Start ≥ 10 blocks away,
+        // rotating the direction per death.
+        {
+            let p = bot.entity.position;
+            let (bx, bz) = (p.x.floor() as i32, p.z.floor() as i32);
+            let deaths = DEATH_SHAFTS.lock().unwrap().clone();
+            if deaths.iter().any(|&(x, z)| (x - bx).abs() <= 4 && (z - bz).abs() <= 4) {
+                let (dx, dz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][deaths.len() % 4];
+                cast_debug(&format!("desc: died in a shaft near ({bx},{bz}) before — starting a new shaft 12 blocks ({dx},{dz})"));
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(30), bot.goto_xz(bx + dx * 12, bz + dz * 12, 2.0)).await;
+                bot.clear_control_states();
+            }
+        }
+        let shaft_xz = (bot.entity.position.x.floor() as i32, bot.entity.position.z.floor() as i32);
         let mut desc_relocate = 0u32;
         let mut wet_detour_fails = 0u32;
+        let mut drop_detour_fails = 0u32;
+        let (mut water_escapes, mut water_y) = (0u32, i32::MIN);
         // Reset the relocate escalation only on a NEW lowest depth. Bobbing in an aquifer (feet
         // -35 → -36 → -35 …) counted every 1-block dip as progress and pinned the escape at
         // relocate#1 (12 blocks) forever: rust-gym-002 logged it 96× and never left the water.
@@ -1770,6 +1449,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             // below its body before `pre-scoop heal → hp=0` (respawn tp: `moved too quickly 0,-37.8,0`).
             if bot.health <= 0.0 {
                 cast_debug("desc: DEAD mid-descent — respawning");
+                DEATH_SHAFTS.lock().unwrap().push(shaft_xz);
                 respawn_at_frame(bot).await;
                 return None;
             }
@@ -1801,7 +1481,25 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             // once at depth, so reach the lava layer ASAP with no safe-descent relocate/cavern
             // dance. The portal phase holds buckets/flint, so keep a pickaxe equipped or hard
             // stone (deepslate/andesite) can't be broken and the shaft stalls.
-            ensure_pickaxe(bot).await;
+            // No pickaxe left: never hand-dig toward lava (6c+lsm12 rust-gym-006 wore out all three iron
+            // pickaxes, then hand-dug at −50 beside a lake for minutes and died there). Give the step
+            // back; the step loop's re-plan (or a race's craft step) owns getting a new one.
+            if !ensure_pickaxe(bot).await {
+                cast_debug("desc: no pickaxe left — abandoning the descent (never hand-dig toward lava)");
+                return None;
+            }
+            // Mid-fall (a dig opened into a cave): let the bot land before any check or dig (≤ 2 s).
+            if !bot.entity.on_ground && !crate::bot_utils::feet_in_water(bot) {
+                for _ in 0..40 {
+                    if bot.entity.on_ground || crate::survival::in_lava(bot) {
+                        break;
+                    }
+                    bot.wait_ticks(1).await.ok();
+                }
+                if crate::survival::in_lava(bot) {
+                    crate::survival::escape_lava(bot, 60).await;
+                }
+            }
             let fy = feet_y(bot);
             let (px, pz) = (bot.entity.position.x.floor() as i32, bot.entity.position.z.floor() as i32);
             let below = name_at(bot, px, fy - 1, pz);
@@ -1823,6 +1521,21 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 cast_debug(&format!("desc: head under water at y={fy} — escaping before digging"));
                 crate::bot_utils::leave_water(bot, 200).await;
                 desc_relocate += 1;
+                // The escape can return still under water at the same level (an aquifer the shaft opened
+                // into): 6c+lsm9 rust-gym-003 logged this 484× at y 35 and timed out. After 3 at one
+                // level, leave the column: walk 12 out (direction rotates) and start a new shaft there.
+                water_escapes = if water_y == fy { water_escapes + 1 } else { 1 };
+                water_y = fy;
+                if water_escapes >= 3 {
+                    let (dx, dz) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(desc_relocate as usize) % 4];
+                    let p = bot.entity.position;
+                    let (bx, bz) = (p.x.floor() as i32, p.z.floor() as i32);
+                    cast_debug(&format!("desc: {water_escapes} water escapes at y={fy} — new shaft 12 ({dx},{dz})"));
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), bot.goto_xz(bx + dx * 12, bz + dz * 12, 2.0)).await;
+                    bot.clear_control_states();
+                    water_escapes = 0;
+                }
+                bot.wait_ticks(5).await.ok();
                 continue;
             }
             let wet_ahead = fy > -50 && wet_column(bot, px, fy, pz);
@@ -1888,6 +1601,36 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     }
                 }
             }
+            // FALL COLUMN: when the next dig opens a drop (air two below), follow the column to its
+            // landing (≤ 24 down) and never take a drop that lands in or beside lava. wet_column's
+            // look-ahead covers 3 below; comparison 6c+lsm2 rust-gym-002 fell −49 → −56 into a lake whose
+            // surface was 6 below the drop start (10:16 UTC).
+            // Every column the bot's box covers, not only the centre: 6c+lsm6 rust-gym-001 drifted off a
+            // cave ledge it had dropped onto. Only on the ground: mid-fall the check can't change anything.
+            if fy > -50 && !is_lava(&below) && bot.entity.on_ground {
+                let p = bot.entity.position;
+                let cols: Vec<(i32, i32)> = [(-0.3, -0.3), (-0.3, 0.3), (0.3, -0.3), (0.3, 0.3)]
+                    .iter()
+                    .map(|&(ox, oz)| ((p.x + ox).floor() as i32, (p.z + oz).floor() as i32))
+                    .collect();
+                if let Some((cx, cz, landing)) = cols.iter().find_map(|&(cx, cz)| drop_lands_hot(bot, cx, fy, cz).map(|l| (cx, cz, l))) {
+                    desc_relocate += 1;
+                    drop_detour_fails += 1;
+                    let moved = detour_dry(bot, desc_relocate).await;
+                    cast_debug(&format!(
+                        "desc: drop at ({cx},{cz}) from y={fy} lands at {landing} in/beside lava — detour sideways moved={moved} (#{drop_detour_fails})"
+                    ));
+                    if moved {
+                        drop_detour_fails = 0;
+                    } else if drop_detour_fails >= 3 {
+                        // No sideways way off a drop into lava: give the step back so it re-plans, never
+                        // spin here (6c+lsm6: 135 re-checks in under a second while the bot fell).
+                        return None;
+                    }
+                    bot.wait_ticks(10).await.ok();
+                    continue;
+                }
+            }
             if fy > -50 && !is_lava(&below) {
                 // FAST path: the miner's dig_down centres the bot, digs with proper break timing,
                 // and drops in a single pass. A hand-rolled dig+wait under-waited and re-dug the
@@ -1925,6 +1668,11 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     }
                     for (cx, cz) in cells {
                         if is_lava(&name_at(bot, cx, fy - 1, cz)) {
+                            continue;
+                        }
+                        // The corner dig opened the cave that 6c+lsm6 rust-gym-001 fell through: scan first.
+                        if let Some(l) = drop_lands_hot(bot, cx, fy, cz) {
+                            cast_debug(&format!("desc: corner dig ({cx},{},{cz}) would drop to {l} beside lava — skipped", fy - 1));
                             continue;
                         }
                         if is_solid(&name_at(bot, cx, fy - 1, cz)) {
@@ -2020,7 +1768,9 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     cluster_scanned = Some(Instant::now());
                     // Lower bound −58: sources in the bedrock band (−64..−59) sit under/among bedrock and
                     // cannot be opened (race i6: a 113-source cluster at −62 held rust-race-003 for 3 h).
-                    let found = bot.find_lava_cluster((-58, scoop_feet - 1), 100, 12, &|s| lava_retired(s)); // ≥100: big lakes (hour-15 "reduce ambition")
+                    // cluster_min is a bandit arm (60/100/150); 100 when the bandit is off (cycle 4 Part 5.3).
+                    let cluster_min = crate::learn::param_i32("cluster_min", 100) as usize;
+                    let found = bot.find_lava_cluster((-58, scoop_feet - 1), cluster_min, 12, &|s| lava_retired(s));
                     if found.is_some() && found.map(|f| f.0) != cluster.map(|c| c.0) {
                         let (c, n) = found.unwrap();
                         let p = bot.entity.position;
@@ -2078,8 +1828,10 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     cast_debug(&format!("desc at-depth y={fy} lava@{l:?} hd={hd:.0} — tunnelling toward ({tx},{tz})"));
                     tunnel_step(bot, tx, tz).await;
                 } else {
-                    cast_debug(&format!("desc at-depth y={fy} below={below} — no lava yet, tunnelling +Z"));
-                    tunnel_step(bot, 0, 1).await;
+                    // Blind heading rotates with each stalled attempt (learn.rs alternative): +Z, +X, −Z, −X.
+                    let (bdx, bdz) = [(0, 1), (1, 0), (0, -1), (-1, 0)][crate::learn::alternatives("build_nether_portal") as usize % 4];
+                    cast_debug(&format!("desc at-depth y={fy} below={below} — no lava yet, tunnelling ({bdx},{bdz})"));
+                    tunnel_step(bot, bdx, bdz).await;
                 }
             }
             // Settle only when a source is within bucket REACH (~5) — i.e. the tunnel has
@@ -2119,7 +1871,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     // the pool open at head height (rust-gym-003, 02:50 binary: lava surface -53, feet -54,
     // `pre-scoop heal → hp=0`). A bot that still ends below the surface abandons this pool.
     let t_app = Instant::now();
-    let app = bot.goto_near(lava.0, lava.1 + 1, lava.2, 3.0).await;
+    let app: Result<bool, String> = Ok(lava_safe_move(bot, (lava.0, lava.1 + 1, lava.2), 3.0, std::time::Duration::from_secs(30), "approach").await);
     {
         // The approach logged nothing: batch 3 rust-gym-001 went from the −50 tunnel (hd 5) to feet −55
         // inside the lake in 33 s with no line between, and died. Record what the goto did.
@@ -2138,6 +1890,10 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         cast_debug(&format!("prepare: approached lava, now {dist:.0} away at ({:.0},{:.0},{:.0})", p.x, p.y, p.z));
     }
 
+    // Restored in 6c+lsm15 after its 6c+lsm10 deletion: without it the bot never gets down to a pool's
+    // level, no station is found, and the pool is retired (arm B dropped 0× and scooped 0–1× per bot vs
+    // arm A's 7–12 drops and 5–6 scoops). The deaths it was blamed for are now also covered by the
+    // live lava check in follow_path and the fall-column scan below.
     // Drop to the lava's LEVEL if perched above it. The descent settles as soon as an
     // exposed source is merely NEAR (within source_lava_near's radius), which over a deep
     // lava sea leaves the bot on the overburden ~10 blocks up — out of the ~4.5-block
@@ -2207,6 +1963,14 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     .any(|&(ox, oz)| (0..=1).any(|h| is_lava(&name_at(bot, fx + ox, fy - 1 + h, fz + oz))));
                 if beside {
                     cast_debug(&format!("prepare: lava beside the next cell below feet {fy} — stop the drop here"));
+                    break;
+                }
+            }
+            // The descent's fall-column rule here too: never open a drop that lands in or beside lava.
+            {
+                let (fx, fz, fy) = (bot.entity.position.x.floor() as i32, bot.entity.position.z.floor() as i32, feet_y(bot));
+                if let Some(l) = drop_lands_hot(bot, fx, fy, fz) {
+                    cast_debug(&format!("prepare: drop from feet {fy} would land at {l} beside lava — stop the drop here"));
                     break;
                 }
             }
@@ -2314,29 +2078,16 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             }
             cast_debug(&format!("prepare: pre-scoop heal → hp={:.0}", bot.health));
         }
-        // Through the sealed station too (unless REFILL_LEGACY=1). The old fill_bucket scoop killed
-        // rust-gym-001 twice beside one pool in batch 3: two seconds into `fill lava` it stood IN the
-        // −55 surface cell at hp 10. Same goal as before: up to 10 lava, keeping 1 empty bucket.
-        if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") {
-            let p = bot.entity.position;
-            let here = (p.x.floor() as i32, feet_y(bot), p.z.floor() as i32);
-            let ok = crate::tasks::portal_mold::station_refill(bot, here, Some(lava), 10, 1, false).await;
-            cast_debug(&format!("prepare: early scoop (station) ok={ok} → lava_buckets={}", count_items(bot, "lava_bucket")));
-        }
-        let mut misses = if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") { 5 } else { 0 };
-        while misses < 5 && count_items(bot, "lava_bucket") < 10 && count_items(bot, "bucket") >= 2 {
-            let before = count_items(bot, "lava_bucket");
-            fill_bucket(bot, "lava").await;
-            if count_items(bot, "lava_bucket") > before {
-                misses = 0;
-            } else {
-                misses += 1;
-                if misses >= 5 {
-                    break;
-                }
-            }
-        }
-        cast_debug(&format!("prepare: early scoop → lava_buckets={}", count_items(bot, "lava_bucket")));
+        // The early scoop goes through the sealed station only (cycle 4 Part 7 deleted the legacy
+        // fill_bucket loop, which killed rust-gym-001 twice beside one pool in batch 3). Up to 10 lava,
+        // keeping 1 empty bucket.
+        let p = bot.entity.position;
+        let here = (p.x.floor() as i32, feet_y(bot), p.z.floor() as i32);
+        // `buckets` bandit arm k = the kit's bucket count in use: 1 stays water, so at most k−1 lava. Off → 10
+        // (fill every empty but one, the old behaviour).
+        let want = crate::learn::param("buckets").and_then(|k| k.parse::<i32>().ok()).map(|k| k - 1).unwrap_or(10);
+        let ok = crate::tasks::portal_mold::station_refill(bot, here, Some(lava), want, 1, false).await;
+        cast_debug(&format!("prepare: early scoop (station) ok={ok} → lava_buckets={}", count_items(bot, "lava_bucket")));
     }
     // Remember WHERE we scooped safely — refills return here rather than re-finding a stand.
     if count_items(bot, "lava_bucket") >= 1 {
@@ -2442,11 +2193,6 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             bot.find_exposed_blocks("lava", 32, 64).len()
         ));
     }
-    // Legacy only: with the station, a 0-lava early scoop must re-site, not improvise with the old
-    // fill_bucket (the path that killed rust-gym-001 twice beside one pool in batch 3).
-    if std::env::var("REFILL_LEGACY").as_deref() == Ok("1") && count_items(bot, "lava_bucket") < 1 && count_items(bot, "bucket") >= 1 {
-        fill_bucket(bot, "lava").await;
-    }
     // Return to the frame anchor (precisely) so build_nether_portal anchors there. The anchor is now
     // usually the station stand, whose open side O is air over lava. A jumping `walk_to_xz` (real ticks)
     // from 0.5 off killed batch 6b rust-gym-002 right after `prepare pre-fill`. Already close → a
@@ -2454,11 +2200,8 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     {
         let p = bot.entity.position;
         let off = ((bx as f64 + 0.5 - p.x).powi(2) + (bz as f64 + 0.5 - p.z).powi(2)).sqrt();
-        if off > 1.5 || feet_y(bot) != by {
-            let _ = bot.goto_near(bx, by, bz, 1.0).await;
-        }
-        crate::tasks::portal_mold::settle_xz(bot, bx as f64 + 0.5, bz as f64 + 0.5, 0.3, 60).await;
-        bot.set_control_state("sneak", false);
+        let _ = off;
+        lava_safe_move(bot, (bx, by, bz), 0.3, std::time::Duration::from_secs(30), "anchor_return").await;
     }
     // Return the pool location so casts can navigate BACK to it to refill lava
     // (re-scanning from wherever a cast left the bot is what wedged the descend-loop).

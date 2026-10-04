@@ -28,6 +28,11 @@ use crate::types::GameState;
 pub enum GymSetup {
     /// The surface at a fixed (x, z): a known terrain case (e.g. race i5's treeless start).
     FixedSurface { x: i32, z: i32 },
+    /// The End, skill 12's precondition: bot teleported in (which initialises the dragon fight and
+    /// the exit fountain), crystals killed, a dragon present. Kit from the slug's prereq.
+    EndDragon,
+    /// The End with a dragon and a crystal on top of each of the ten towers (crystals gym).
+    EndCrystals,
     /// A 1-wide × 2-tall × 6-long tunnel in solid stone at y 20 (the iron-band tunnels a race bot
     /// crafts in). Placed in the batch's gym region; spawnpoint in the tunnel.
     Tunnel,
@@ -143,10 +148,21 @@ pub static GYM_STEPS: &[GymStep] = &[
     // ~0..10k) — NOT the seeded arena — and build + light + ENTER a portal on whatever lava
     // the world offers. This is exactly the race's failing case (bots arrive at Build Portal
     // fully supplied, then can't cast over the deep sea). Pass = in the nether.
+    // Kit held at 6b's for the 6b vs 6c+lsm2 comparison (a kit change would confound it). Phase 2 switches
+    // it to the race kit (decision 5: iron_pickaxe 2, bucket 4, water_bucket 1) once the comparison decides.
     GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 3", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 256", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 2400, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
     // The operator's design: tp the bot to a REAL underground lava pool with the full kit (2 water
     // buckets → infinite source), then it must dig out a safe cast site, build the obsidian frame,
     // light it, and enter. Isolates the CAST at a real pool from the (easy, solved) descent.
+    // Cycle 4 Phase 1 iron reproduction: the smoke race bot rust-race-001's lane in the cycle-4 world (its two
+    // mine_iron attempts stalled; it started with 376 stale iron POIs from the deleted world). Fresh memory
+    // here (the gym clears it), the race kit for the step, pass = the full 22 iron (race target), 30 min.
+    GymStep { slug: "iron_repro", label: "Iron, race lane (22 iron)", order: 0, prereq: &["stone_pickaxe 1", "cobblestone 16", "cooked_beef 8"], step_id: "mine_iron", timeout_secs: 1800, custom_pass: Some(|bot, _| count_items(bot, "raw_iron") + count_items(bot, "iron_ingot") + count_items(bot, "iron_ore") + count_items(bot, "deepslate_iron_ore") >= 22), setup: GymSetup::FixedSurface { x: 300900, z: 350 } },
+    // Cycle 4 Part 6, skill 12: kitted teleport into the End, crystals gone, beds detonated at the perch.
+    // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
+    GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
+    GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
+    GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::portal::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
 
@@ -347,6 +363,10 @@ async fn run_one_trial(
     // Start row BEFORE setup: a bot that dies or disconnects in setup still leaves a `running`
     // row (counted as killed) — cycle-2 water batch 2 lost one launch that way.
     let run_id = store.start(step.slug, 0, 0, 0, step.prereq);
+    crate::learn::gym_begin(step.step_id);
+    crate::tasks::portal::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
+    *crate::tasks::portal::DRILL_ANCHOR.lock().unwrap() = None;
+    *crate::tasks::end::CRYSTAL_MISSES.lock().unwrap() = None;
     let (gx, gy, gz, cx, cz) = setup_trial(bot, rcon, &name, step).await;
     // Portal steps: record the SEEDED lava pool in memory so prepare_cast_site's memory-first
     // path walks straight to it (as it would in a real run after mining recorded exposed lava),
@@ -487,6 +507,18 @@ async fn run_one_trial(
             last_msg = format!("goal met (post-timeout re-check); {last_msg}");
         }
     }
+    // Crystals slug: pass = no end crystal left in the End (server ground truth).
+    if step.slug == "crystals" {
+        let left = rcon_driving(bot, rcon, "execute in minecraft:the_end if entity @e[type=minecraft:end_crystal]").await;
+        pass = left.contains("failed");
+        last_msg = format!("server crystal check: {} | {last_msg}", if pass { "none left" } else { "crystals remain" });
+    }
+    // Dragon slug: ground truth from the server, never the bot's own view (cycle 4 Part 3).
+    if step.slug == "dragon" {
+        let alive = rcon_driving(bot, rcon, "execute in minecraft:the_end if entity @e[type=minecraft:ender_dragon]").await;
+        pass = alive.contains("failed");
+        last_msg = format!("server dragon check: {} | {last_msg}", if pass { "no dragon (killed)" } else { "dragon alive" });
+    }
     let dur = t0.elapsed().as_millis() as i64;
     let deaths = bot.deaths - deaths0;
     // Water slugs gate on SURVIVAL: a drowning that respawned the bot onto dry land is not a
@@ -498,6 +530,9 @@ async fn run_one_trial(
     }
     last_msg = format!("deaths={deaths} | {last_msg}");
     store.finish(run_id, pass, dur, outcome, &last_msg);
+    // A setup skip (no land, etc.) measures nothing about the bot: `skipped`, excluded by compare/funnel.
+    let row_outcome = if last_msg.contains("trial skipped") { "skipped" } else { match outcome { "pass" => "ok", "timeout" => "timeout", "died" => "death", _ => "failed" } };
+    crate::learn::gym_row(bot, step.slug, step.step_id, t0, row_outcome, &last_msg, deaths);
     println!(
         "[gym:{}] {} {:.1}s @{gx},{gy},{gz} — {last_msg}",
         step.slug,
@@ -642,6 +677,7 @@ async fn setup_trial(
             let submerge: i32 = std::env::var("WATER_SUBMERGE").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
             let cap = std::env::var("WATER_CAP").is_ok();
             let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4)).await;
+            wait_area_loaded(bot, rcon, fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4).await;
             // Clear the column above (leftover blocks/pillars from a prior trial), then a solid
             // stone shell, then carve the water pool inside it (open surface at fy).
             let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", fx - half - 2, fy + 1, fz - half - 2, fx + half + 2, fy + 24, fz + half + 2)).await;
@@ -674,6 +710,7 @@ async fn setup_trial(
             let fz = 600 + if region > 0 { 3000 } else { 0 } + botn * 40;
             let fy: i32 = 72;
             let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4)).await;
+            wait_area_loaded(bot, rcon, fx - half - 4, fz - half - 4, fx + half + 4, fz + half + 4).await;
             let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:air", fx - half - 2, fy + 1, fz - half - 2, fx + half + 2, fy + 24, fz + half + 2)).await;
             let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:stone", fx - half - 1, fy - depth - 1, fz - half - 1, fx + half + 1, fy, fz + half + 1)).await;
             let _ = rcon_driving(bot, rcon, &format!("fill {} {} {} {} {} {} minecraft:water", fx - half, fy - depth, fz - half, fx + half, fy, fz + half)).await;
@@ -707,6 +744,72 @@ async fn setup_trial(
             bot.wait_ticks(10).await.ok();
             let p = bot.entity.position;
             return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, fx, fz);
+        }
+        GymSetup::EndDragon | GymSetup::EndCrystals => {
+            let end = |c: &str| format!("execute in minecraft:the_end run {c}");
+            let _ = rcon_driving(bot, rcon, &end("forceload add -64 -64 64 64")).await;
+            for _ in 0..60 {
+                if rcon_driving(bot, rcon, "execute in minecraft:the_end if loaded 0 0 0").await.contains("passed") {
+                    break;
+                }
+                bot.wait_ticks(20).await.ok();
+            }
+            // Arrive east of the fountain on the end stone; the first arrival starts the dragon fight.
+            let _ = rcon_driving(bot, rcon, &format!("execute in minecraft:the_end positioned 8 0 0 positioned over motion_blocking run tp {name} ~ ~1 ~")).await;
+            let _ = rcon_driving(bot, rcon, &format!("execute in minecraft:the_end positioned 8 0 0 positioned over motion_blocking run spawnpoint {name} ~ ~1 ~")).await;
+            for _ in 0..60 {
+                if bot.game.dimension.contains("the_end") {
+                    break;
+                }
+                bot.wait_ticks(10).await.ok();
+            }
+            // Wait for the exit fountain (bedrock pillar at x=z=0), then remove the crystals and make
+            // sure a dragon exists (a re-run after a kill needs one summoned).
+            for _ in 0..60 {
+                let probe = rcon_driving(bot, rcon, "execute in minecraft:the_end if block 0 64 0 minecraft:bedrock").await;
+                let probe2 = rcon_driving(bot, rcon, "execute in minecraft:the_end if block 0 65 0 minecraft:bedrock").await;
+                if probe.contains("passed") || probe2.contains("passed") {
+                    break;
+                }
+                bot.wait_ticks(20).await.ok();
+            }
+            let _ = rcon_driving(bot, rcon, &end("kill @e[type=minecraft:end_crystal]")).await;
+            if matches!(step.setup, GymSetup::EndCrystals) {
+                // A crystal on top of each of the ten towers (vanilla spike layout: radius 42, i·36°);
+                // `over motion_blocking` puts it on the tower's top (on a cage's roof for caged ones).
+                for i in 0..10 {
+                    let a = 2.0 * (-std::f64::consts::PI + std::f64::consts::PI / 10.0 * i as f64);
+                    let (x, z) = ((42.0 * a.cos()).floor() as i32, (42.0 * a.sin()).floor() as i32);
+                    let _ = rcon_driving(
+                        bot,
+                        rcon,
+                        &format!("execute in minecraft:the_end positioned {x} 0 {z} positioned over motion_blocking run summon minecraft:end_crystal ~0.5 ~ ~0.5"),
+                    )
+                    .await;
+                }
+            }
+            if rcon_driving(bot, rcon, "execute in minecraft:the_end if entity @e[type=minecraft:ender_dragon]").await.contains("failed") {
+                let _ = rcon_driving(bot, rcon, &end("summon minecraft:ender_dragon 0 100 0")).await;
+            }
+            // Every trial fights a full-health dragon on clean ground: the dragon outlives a failed
+            // trial (late4-v2b trial 1 left it at 48 / 200), and the last trial's pillar and bridge
+            // (x 4..8 east of the fountain, above the y-62 island surface) would change the geometry.
+            let _ = rcon_driving(bot, rcon, &end("data merge entity @e[type=minecraft:ender_dragon,limit=1] {Health:200f}")).await;
+            // A /summon'ed dragon (re-run after a kill) has no fight manager and starts in phase 10
+            // (hover): late17-v2o trial 2 hovered at (5, 100, 0) for 900 s, never perching. The holding
+            // pattern (0) runs without a fight (crystal count 0) and lands like a normal dragon.
+            let _ = rcon_driving(bot, rcon, &end("data merge entity @e[type=minecraft:ender_dragon,limit=1] {DragonPhase:0}")).await;
+            let _ = rcon_driving(bot, rcon, &end("fill 4 63 -1 8 80 1 minecraft:air")).await;
+            // Refill the crater earlier trials' beds blew east of the fountain (island top is y 62): the
+            // crystals bot spawned at (8, 57, 0) in that pit and could not walk out to any tower
+            // (late22-cry3 trial 1: "could not close" on every crystal, 0 kills).
+            let _ = rcon_driving(bot, rcon, &end("fill 4 50 -4 10 62 4 minecraft:end_stone replace minecraft:air")).await;
+            let who = bot.username().to_string();
+            let _ = rcon_driving(bot, rcon, &end(&format!("tp {who} 8 63 0"))).await;
+            bot.wait_ticks(40).await.ok();
+            let p = bot.entity.position;
+            println!("[gym] EndDragon: in {} at ({:.0},{:.0},{:.0}), crystals killed, dragon ensured", bot.game.dimension, p.x, p.y, p.z);
+            return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, 0, 0);
         }
         GymSetup::FixedSurface { x, z } => {
             let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", x - 16, z - 16, x + 16, z + 16)).await;
@@ -753,6 +856,7 @@ async fn setup_trial(
             let pz = rand::Rng::gen_range(&mut rand::thread_rng(), 500..9500);
             let py: i32 = rand::Rng::gen_range(&mut rand::thread_rng(), -50..-30); // deep underground band
             let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", px - 24, pz - 24, px + 24, pz + 24)).await;
+            wait_area_loaded(bot, rcon, px - 24, pz - 24, px + 24, pz + 24).await;
             // EXACTLY the DEEPSEA rock-pool arena dimensions (which builds 10/10 + enters reliably),
             // just at a random location. Do NOT diverge — every geometry tweak (roomier/taller pocket)
             // re-introduced per-run drift. Solid stone box, then a 3-tall air pocket; the frame's top
@@ -901,6 +1005,30 @@ async fn setup_trial(
 /// Run one RCON command while DRIVING the bot's connection. `spreadplayers` into a fresh region
 /// makes the server generate terrain and can take 40+ s; awaiting it bare starved the bot's
 /// keep-alive (cycle 2: `LOOP STALL 46756 ms` → `CONNECTION LOST` at trial start in region 92).
+/// Wait until the forceloaded area (corners + centre) is loaded before any RCON `fill` touches it.
+/// Forceload tickets load and generate chunks asynchronously, but a `fill` on a chunk that isn't
+/// loaded yet generates it synchronously on the server thread. On a fresh world, seven water slugs
+/// filling at once made a single tick take 60 s, and the watchdog crashed Server B
+/// (2026-10-03 08:36 UTC, server thread in ServerChunkCache.getChunk).
+async fn wait_area_loaded(bot: &mut Bot<'_>, rcon: &mut RconClient, x0: i32, z0: i32, x1: i32, z1: i32) -> bool {
+    let pts = [(x0, z0), (x0, z1), (x1, z0), (x1, z1), ((x0 + x1) / 2, (z0 + z1) / 2)];
+    for _ in 0..90 {
+        let mut all = true;
+        for &(x, z) in &pts {
+            if !rcon_driving(bot, rcon, &format!("execute if loaded {x} 0 {z}")).await.contains("passed") {
+                all = false;
+                break;
+            }
+        }
+        if all {
+            return true;
+        }
+        bot.wait_ticks(20).await.ok();
+    }
+    println!("[gym] area ({x0},{z0})..({x1},{z1}) not loaded after 90 s — filling anyway");
+    false
+}
+
 async fn rcon_driving(bot: &mut Bot<'_>, rcon: &mut RconClient, cmd: &str) -> String {
     use std::future::Future;
     use std::task::Poll;

@@ -2,6 +2,7 @@
 
 pub mod bucket;
 pub mod craft;
+pub mod end;
 pub mod food;
 pub mod gather_wood;
 pub mod mining;
