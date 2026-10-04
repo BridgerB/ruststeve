@@ -1220,3 +1220,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - 1 loop: craft_furnace picked 420× on `missing crafting ingredient id=35` (cobblestone) while holding 64 cobblestone. This is the craft-window desync, not the rule, but the rule had no bound.
   - Bound added (4e6c4a6): the rule stands down for 600 s after 300 s without ingots.
 - **Dragon gym, hour ~11 (mandatory; late27-cry8, bot 008, region 67):** PASS by the server check (no dragon left), 0 deaths, at the 900 s timeout. Cycle-5 dragon runs: 2/2 by the server check.
+- **Region-68 matched portal check (6b-head vs race-iron2 = this tree, SAFE off, wall-clock A*, early iron, table fix):**
+  - 6b-head 4/4 (3 clean); race-iron2 0/3, all three at 2,400 s tunnelling blind, two last logging `tunnel_step: no floor … — pathfinder` (a goto that keeps failing).
+  - This tree on portal across matched regions: 1/15 vs 6b-head 8/10. The sliced, wall-clock A* is the leading suspect.
+  - Batch stopped once decided (rows 854–856 aborted).
+- **Region-69 concurrent arms:** 6b-head (bots 001–003) vs race-iron2 with `ASTAR_SEARCH_BUDGET=1` (bots 004–006), 4 trials each. The earlier A* batch's stop (2 deaths, walk to a dry remembered pool) stands; this is a fresh measurement under the same death rule.
