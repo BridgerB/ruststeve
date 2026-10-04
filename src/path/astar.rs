@@ -29,7 +29,11 @@ pub struct AStar {
     open_map: HashMap<i64, usize>,
     closed: HashSet<i64>,
     best: usize,
-    start_time: Instant,
+    /// Search time spent in earlier slices. The total budget counts SEARCH time, not wall time: with
+    /// one 50 ms tick driven between 40 ms slices (Bot::plan_path), a wall-clock budget gave A* about
+    /// 0.9 s of its 2 s, and paths the old synchronous search found came back Timeout (cycle 5:
+    /// "MOLD slow goto … ok=false" timeouts, race-head 1/10 vs 6b-head 12/22 on the portal gym).
+    spent: Duration,
     max_cost: f64,
 }
 
@@ -51,7 +55,7 @@ impl AStar {
             open_map: HashMap::new(),
             closed: HashSet::new(),
             best: 0,
-            start_time: Instant::now(),
+            spent: Duration::ZERO,
             max_cost: if search_radius < 0.0 {
                 -1.0
             } else {
@@ -149,12 +153,25 @@ impl AStar {
         tick_timeout: Duration,
         total_timeout: Duration,
     ) -> PathResult {
-        let tick_start = Instant::now();
+        let t = Instant::now();
+        let r = self.compute_slice(goal, movements, tick_timeout, total_timeout, t);
+        self.spent += t.elapsed();
+        r
+    }
+
+    fn compute_slice(
+        &mut self,
+        goal: &dyn Goal,
+        movements: &dyn NeighborGen,
+        tick_timeout: Duration,
+        total_timeout: Duration,
+        tick_start: Instant,
+    ) -> PathResult {
         while !self.heap_is_empty() {
             if tick_start.elapsed() > tick_timeout {
                 return self.result(PathStatus::Partial, self.best);
             }
-            if self.start_time.elapsed() > total_timeout {
+            if self.spent + tick_start.elapsed() > total_timeout {
                 return self.result(PathStatus::Timeout, self.best);
             }
 
