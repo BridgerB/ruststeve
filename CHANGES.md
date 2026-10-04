@@ -1203,3 +1203,11 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Tool loop at depth, 1 of 5: rust-race-002 alternated craft_planks / craft_sticks / build_nether_portal at y −53 for its last ~1.5 h (no wood at depth to remake a tool).
 - Race integrity: 8 relaunches (001 ×2, 003 ×1, 004 ×2, 005 ×3), 0 watchdog kills. Step cadence (race.db tick gaps): median 43–167 s per bot.
 - Harness: 2 `harness_respawn_far` events (001, 002) tp'd portal bots from their own spawnpoint near the mold back to the lane surface. Fixed in race-b.sh after the race (a far respawn must also be >32 from the last position before the death).
+
+## Phase 3: iron_from_surface
+- **Baseline** (target-race = this tree, SAFE_FIXES off, wall-clock A*; regions 63 + 64; kit = median i6/i100 state at the first post-tools step; pass = server `clear … iron_pickaxe 0`): **1/10 (Wilson 95% 0.02–0.40)**, 2 more skipped (no land), deaths 3 in 10 (2 drowned, 1 lava). The one pass: 938 s. Failures: 9 timeouts at 1,200 s, 8 of them last logging `NO PICKAXE in inventory — digging by hand`.
+- **Failure anatomy:**
+  - The kit's stone pickaxe often isn't in the client inventory when mine_iron starts (`NO PICKAXE` at t=0 s, then a stone pickaxe crafted); a gym artifact.
+  - Stone pickaxes then wear out in strip mining and get re-crafted (slow).
+  - One trial (rust-gym-004) looped `table: could not place a server-confirmed table` **1,944 times**: `place_crafting_table` took only state 0 as an empty cell, and cave_air is 15293, so in a carved cave no cell qualified.
+- **One build (2885487, target-table, BUILD race-table):** table placement accepts any *air, needs a non-fluid support, and retries once after a 3-block move; the A* search-time budget is gated off (`ASTAR_SEARCH_BUDGET`, default off), so the build differs from the baseline only by the table fix. 10 trials running (region 65).
