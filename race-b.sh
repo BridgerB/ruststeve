@@ -116,12 +116,24 @@ launch_bot() {
     RCON_HOST=$RCON_HOST RCON_PORT=$RCON_PORT \
     RACE_HOLD=$HOLD RACE_GOAL="$RACE_GOAL" CRAFT_DEBUG=1 ${view[@]+"${view[@]}"} \
     RACE_ID="$RACE_ID" BUILD="$BUILD" WORLD_SEED="${WORLD_SEED:-}" \
+    ${ARM_B[i]:+BOT_ARMS=1 ARM_BUCKETS=${ARM_B[i]} ARM_CLUSTER_MIN=${ARM_C[i]}} \
     "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   PIDS[$i]=$!
   echo "$!" >> "$DIR/race.pids"
   LAUNCHED[$i]=$SECONDS
 }
 declare -a LAUNCHED
+# Bandit arms (cycle 5, decision 6): buckets and cluster_min drawn ONCE per bot for the whole race
+# (uniform over the arms) and logged; relaunches reuse them. BOT_ARMS=0 turns this off.
+declare -a ARM_B ARM_C
+if [ "${BOT_ARMS:-1}" = "1" ]; then
+  BA=(3 4 5); CA=(60 100 150)
+  for ((i = 0; i < N; i++)); do
+    ARM_B[$i]=${BA[$((RANDOM % 3))]}; ARM_C[$i]=${CA[$((RANDOM % 3))]}
+    echo "[race-b] arms ${NAMES[i]}: buckets=${ARM_B[$i]} cluster_min=${ARM_C[$i]}"
+    meta "${NAMES[i]}" bot_arms "buckets=${ARM_B[$i]} cluster_min=${ARM_C[$i]}"
+  done
+fi
 # Seconds since the bot's tick loop last touched its heartbeat file (999 if missing).
 hb_age() { perl -e 'my $m=(stat shift)[9]; print defined $m ? time-$m : 999' "$DIR/.heartbeat-$1"; }
 

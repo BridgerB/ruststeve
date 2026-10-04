@@ -191,6 +191,12 @@ pub fn bot_arms() -> &'static BTreeMap<String, String> {
         let p = read_params();
         let mut rng = rand::thread_rng();
         for name in BOT_ARM_PARAMS {
+            // A harness that relaunches bots (race-b.sh) draws once per bot and passes ARM_<NAME>, so a
+            // relaunch keeps the bot's arm instead of redrawing.
+            if let Ok(v) = std::env::var(format!("ARM_{}", name.to_uppercase())) {
+                out.insert(name.to_string(), v);
+                continue;
+            }
             let Some(arms) = p["params"][name]["arms"].as_object() else { continue };
             let best = arms
                 .iter()
