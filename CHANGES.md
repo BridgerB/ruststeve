@@ -1219,3 +1219,4 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - 4 timeouts on slow iron;
   - 1 loop: craft_furnace picked 420× on `missing crafting ingredient id=35` (cobblestone) while holding 64 cobblestone. This is the craft-window desync, not the rule, but the rule had no bound.
   - Bound added (4e6c4a6): the rule stands down for 600 s after 300 s without ingots.
+- **Dragon gym, hour ~11 (mandatory; late27-cry8, bot 008, region 67):** PASS by the server check (no dragon left), 0 deaths, at the 900 s timeout. Cycle-5 dragon runs: 2/2 by the server check.
