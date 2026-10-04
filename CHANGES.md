@@ -1215,3 +1215,7 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - The real cause: the furthest-runnable picker keeps the bot on mine_iron until the full 22-iron quota, because smelt needs a furnace and craft_furnace (priority 9) ranks below mine_iron (11). So no iron pickaxe is made until all 22 are mined with wearing stone pickaxes. Example: table-fix rust-gym-003 had 7 raw iron at 1,200 s and never smelted.
   - The table-fix batch (0/3 so far, all this mode) was stopped (rows 828–832 aborted) and the build re-aimed.
 - **Build (b08ffcd, target-iron, BUILD race-iron):** with ≥3 iron and no iron pickaxe, the picker runs mine_coal → smelt_iron / craft_furnace → craft_iron_pickaxe first, then mining resumes; includes the table fix. 10 trials vs the 1/10 baseline.
+- **Early-iron result (b08ffcd, target-iron, region 66): 5/10 (Wilson 0.24–0.76)**, deaths 2 (1 lava, 1 drowned), passes 359–1,119 s; vs baseline 1/10 (0.02–0.40), deaths 3. P(early-iron > baseline) = 0.968 (Beta(1,1) priors). Failures:
+  - 4 timeouts on slow iron;
+  - 1 loop: craft_furnace picked 420× on `missing crafting ingredient id=35` (cobblestone) while holding 64 cobblestone. This is the craft-window desync, not the rule, but the rule had no bound.
+  - Bound added (4e6c4a6): the rule stands down for 600 s after 300 s without ingots.
