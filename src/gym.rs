@@ -185,6 +185,11 @@ pub static GYM_STEPS: &[GymStep] = &[
     // pickaxe, ~12 logs, ~2 planks, 0 sticks, ~22 cobble, no sword/table/furnace/coal). Fresh terrain,
     // POIs cleared. Pass = the SERVER's count of iron pickaxes on the bot (`clear … 0`), not the client.
     GymStep { slug: "iron_from_surface", label: "Surface → iron pickaxe (step machine)", order: 0, prereq: &["stone_pickaxe 1", "oak_log 12", "oak_planks 2", "cobblestone 22"], step_id: "pipeline", timeout_secs: 1200, custom_pass: Some(|bot, _| count_items(bot, "iron_pickaxe") >= 1), setup: GymSetup::RandomSurface },
+    // Cycle 5: the race water wall. Race i8 rust-race-002 sat in this lake on mine_stone (BANK swims that
+    // never reach ground, WATER ALARM, "mined 0/16 cobblestone" ×20 → relaunch, 3×); i7 lost 3/5 bots to
+    // lakes the same way. FixedSurface on the lake = the stuck state; the bot's race kit at that moment;
+    // the step machine runs. Pass = 16 cobblestone (mine_stone's target), i.e. out of the lake and mining.
+    GymStep { slug: "water_wall_i8", label: "Race water wall (i8 lake, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::FixedSurface { x: 25085, z: 584 } },
     GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
