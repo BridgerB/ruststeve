@@ -1182,3 +1182,24 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
 - **Found: sliced A* budget was wall-clock** (`path/astar.rs`, cycle-4 plan_path): `start_time.elapsed() > total` counted the 50 ms ticks driven between 40 ms slices, so A* searched ~0.9 s of its 2 s (less on the loaded 2-CPU box). Present in every binary built from this tree (6b-safe, race-head), absent from the old 6b-head tree. Fixed: the budget counts search time only (`spent`). Not yet measured.
 - **Race i7 binary: target-head** (the old 6b-head tree, decision 1 literally). Deviation: no per-attempt event rows and no bandit arms in i7 (that tree has neither); race-b.sh's placement and respawn checks still apply. Bandits go live once this tree's A* fix is measured against 6b-head.
 - **A* fix (target-fix, SAFE_FIXES off, region 62, bots 001–003, 1 trial each) stopped by clause (a)** at ~01:05 MDT: rust-gym-001 (311 s) and rust-gym-002 (471 s) died the same way — `prepare: heading to remembered lava … dry on arrival → Gone`, then `desc: DEAD mid-descent` — a pathfinder goto toward a retired pool, the path the A* budget fix changes (002 died a second time at 06:57:55 UTC). Rows 810–812 aborted. Hypothesis: with its full search budget A* now returns routes into the pool area that the truncated search gave up on (Timeout → the bot did something else). Not measured further; the A* fix stays committed but off the race path.
+
+## Phase 2: race i7 (race-20261004-070530-i7)
+- Build: **target-head** (old 6b-head tree; see Phase 1), 5 bots, 240 min, tick 20, region x=21900, BOT_ARMS off (that binary has no bandit or event-row code; deviation from decisions 5 and 6 for this race). Placement: 5/5 on land (race-place.ts).
+- Funnel by race.db milestones. A milestone fires when the completed-step count rises and carries the NEXT step's name, so "reached X" means every earlier kit step was done. Same tool on all three races (`scripts/ml/race-funnel.ts`).
+
+| reached (of 5) | i5 | i6 | i7 |
+|---|---|---|---|
+| Craft Planks (left the start) | 3 | 3 | 3 |
+| Mine Iron Ore | 1 | 3 | 3 |
+| Craft Buckets | 1 | 2 | 3 |
+| Build Nether Portal (kit done) | 0 | 2 | 2 |
+| Enter Nether | 0 | 0 | 0 |
+
+- Time to the portal step: i7 42 and 45 min (rust-race-001, -002); i6 38 and 150 min.
+- Deaths: i7 3 (rust-race-001 ×1, -002 ×2), all lava. 001's: `cast: pre-frame heal → hp=0` at the scoop stand (6b behaviour, also seen 4× in the gym); i6 2; i5 0.
+- **Where the five bots ended:**
+  - Water, 3 of 5 (the dominant wall). rust-race-004 and -005 stood in water on gather_wood from ~10 min to the end, with 0 logs, ~14,600 breath pre-emption jumps each and 2–3 relaunches each; placement put them on land and gather_wood walked them into a lake. rust-race-001 ended swimming on craft_bucket after its relaunches.
+  - Portal blind tunnel, 1 of 5: rust-race-003 reached build_nether_portal with 15 ingots but tunnelled ~2,500 blocks along y −60 ("no lava yet, tunnelling +Z") for its last ~2 h.
+  - Tool loop at depth, 1 of 5: rust-race-002 alternated craft_planks / craft_sticks / build_nether_portal at y −53 for its last ~1.5 h (no wood at depth to remake a tool).
+- Race integrity: 9 relaunches (001 ×2, 003 ×1, 004 ×2, 005 ×3), 0 watchdog kills. Step cadence (race.db tick gaps): median 43–167 s per bot.
+- Harness: 2 `harness_respawn_far` events (001, 002) tp'd portal bots from their own spawnpoint near the mold back to the lane surface. Fixed in race-b.sh after the race (a far respawn must also be >32 from the last position before the death).
