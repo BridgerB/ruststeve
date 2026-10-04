@@ -1257,3 +1257,28 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - i8: rust-race-001 was tp'd to its i7 mold at (21762,-55,337), 3,200 blocks from its lane. It finished that frame (10/10) and lit it ("nether portal cast & lit at 21762,-55,337"); the harness then tp'd it back, and `enter_nether` failed ×20 ("no portal found to enter").
   - Both are invalid as race results; the i7/i8 portal rows for these bots are flagged in the report.
   - Fixed (race-b.sh now removes `.frame-<bot>.txt` with the memory DB); deploys after i8.
+
+## Phase 4: race i8 (race-20261004-161946-i8, started 10:20 MDT, moved up from ~13:40 because the gym was idle)
+- Build target-head (same binary as i7), 5 bots, 240 min, region x=24900, 5/5 placed on land.
+- Funnel (race.db milestones), of 5:
+
+| reached | i5 | i6 | i7 | i8 |
+|---|---|---|---|---|
+| Craft Planks | 3 | 3 | 3 | 5 |
+| Mine Iron Ore | 1 | 3 | 3 | 4 |
+| Craft Buckets | 1 | 2 | 3 | 4 |
+| Build Nether Portal | 0 | 2 | 2 | 3 |
+| Enter Nether | 0 | 0 | 0 | 0 valid (1 invalid: stale i7 anchor) |
+
+- Portal step reached at 82 and 84 min (rust-race-004, -005). rust-race-001 reached it at ~30 min, then was tp'd by its stale i7 frame anchor (see Phase 1 harness fault).
+- Deaths: 9 (001 ×3 lava, 004 ×1 drowned, 005 ×5: 2 drowned, 3 lava). Relaunches: 116 (001 ×100 on the invalid-portal `enter_nether` loop, 002 ×14 on the lake, 004 ×2).
+- Harness respawn tp: 2, both correct (world-spawn respawns, 3,249 / 3,217 blocks).
+- Where bots ended:
+  - 001: enter_nether loop, invalid;
+  - 002: mine_stone in a lake all race;
+  - 003: get_flint_and_steel;
+  - 004, 005: build_nether_portal at depth.
+- **water_wall_i8 slug baseline** (target-tree, the i8 lake (25085,584), 2 trials × 5 bots): **0/10 (0.00–0.28)**, 0 deaths.
+  - Every trial cycles WATER ALARM → surface → mine_stone → drift back, between x 25082 and 25085.
+  - Nearest shore: 28 blocks (diagonal), 36–52 blocks in other directions, >60 in three. The survival escape had 200 ticks (10 s).
+  - Build 56f7e6b gives it 800 ticks (40 s); 10 trials running.
