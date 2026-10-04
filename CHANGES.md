@@ -1252,3 +1252,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - one climb ran short of obsidian (15 left for a ~21-block tower).
   - The v2 list above stands; also scan cages after walking near each tower, not from the start position.
 - **6b-head water set (region 71 run, fixed arena):** 13/14 (Wilson 0.69–0.99), 0 deaths: lake 2/2, shore 2/2, cave 2/2, cave_iron 2/2, roofed 2/2, descent 2/2, aquifer 1/2. Same as 6b-safe's 12/14. **The water slugs do not separate the builds and do not reproduce race i7's water wall:** in i7 bots started on land, then gather_wood walked into a lake (3/5 bots), whereas these slugs start the bot in water. That wall needs its own slug: race placement plus gather_wood with a lake within the search radius.
+- **Harness fault in races i7 and i8 (found during i8):** race-b.sh cleared each bot's memory DB at race start but **not its portal frame anchor** (`.frame-<bot>.txt`, which survives relaunches by design). 6b's displacement recovery (>16 blocks from the anchor → tp back) then sent bots to molds from earlier races.
+  - i7: rust-race-003's "2,500-block blind tunnel" at y −60 was toward its i6 mold (i6 region x≈18900; it ended at x 18939). Its anchor file is dated 2026-10-03 01:08.
+  - i8: rust-race-001 was tp'd to its i7 mold at (21762,-55,337), 3,200 blocks from its lane. It finished that frame (10/10) and lit it ("nether portal cast & lit at 21762,-55,337"); the harness then tp'd it back, and `enter_nether` failed ×20 ("no portal found to enter").
+  - Both are invalid as race results; the i7/i8 portal rows for these bots are flagged in the report.
+  - Fixed (race-b.sh now removes `.frame-<bot>.txt` with the memory DB); deploys after i8.
