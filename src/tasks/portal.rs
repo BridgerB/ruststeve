@@ -2037,7 +2037,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     cluster_scanned = Some(Instant::now());
                     // Lower bound −58: sources in the bedrock band (−64..−59) sit under/among bedrock and
                     // cannot be opened (race i6: a 113-source cluster at −62 held rust-race-003 for 3 h).
-                    let found = bot.find_lava_cluster((-58, scoop_feet - 1), 100, 12, &|s| lava_retired(s)); // ≥100: big lakes (hour-15 "reduce ambition")
+                    let found = bot.find_lava_cluster((-58, scoop_feet - 1), crate::learn::bot_arm_i32("cluster_min", 100) as usize, 12, &|s| lava_retired(s)); // ≥100: big lakes (hour-15 "reduce ambition")
                     if found.is_some() && found.map(|f| f.0) != cluster.map(|c| c.0) {
                         let (c, n) = found.unwrap();
                         let p = bot.entity.position;

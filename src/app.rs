@@ -60,6 +60,10 @@ pub async fn run() -> std::io::Result<()> {
         memory.attach_race_log(&username);
     }
     crate::learn::close_orphan(memory.race_log());
+    let arms = crate::learn::bot_arms();
+    if !arms.is_empty() {
+        memory.log("arms", "bot_arms", &format!("{arms:?}"));
+    }
     memory.log("session", "start", &format!("{host}:{port} as {username}"));
 
     println!("connecting to {host}:{port} as {username}…");

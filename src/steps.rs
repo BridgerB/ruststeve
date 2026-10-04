@@ -148,7 +148,7 @@ pub const STEPS: &[Step] = &[
         priority: 14,
         can_execute: |s| s.inventory.iron_pickaxes >= 2 && s.inventory.iron_ingots >= 3,
         // Cycle 4 decision 5: race kit = 5 buckets (22 iron covers 2 pickaxes, 5 buckets, flint and steel).
-        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 5,
+        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= crate::learn::bot_arm_i32("buckets", 5),
     },
     Step {
         id: "get_water_buckets",
@@ -402,7 +402,7 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
         // Count 3 must match craft_bucket's is_complete (buckets+water>=3) — a lower count
         // stops the task below the step threshold and re-runs "have N buckets" forever.
-        "craft_bucket" => tasks::craft::craft_buckets(bot, 5, mem).await,
+        "craft_bucket" => tasks::craft::craft_buckets(bot, crate::learn::bot_arm_i32("buckets", 5), mem).await,
         // Fill ONE water bucket (keep the second bucket empty for lava).
         "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 1, mem).await,
         "get_flint_and_steel" => tasks::craft::get_flint_and_steel(bot, mem).await,
