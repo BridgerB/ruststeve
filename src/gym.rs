@@ -177,7 +177,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     GymStep { slug: "iron_repro", label: "Iron, race lane (22 iron)", order: 0, prereq: &["stone_pickaxe 1", "cobblestone 16", "cooked_beef 8"], step_id: "mine_iron", timeout_secs: 1800, custom_pass: Some(|bot, _| count_items(bot, "raw_iron") + count_items(bot, "iron_ingot") + count_items(bot, "iron_ore") + count_items(bot, "deepslate_iron_ore") >= 22), setup: GymSetup::FixedSurface { x: 300900, z: 350 } },
     // Cycle 4 Part 6, skill 12: kitted teleport into the End, crystals gone, beds detonated at the perch.
     // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
-    GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
+    GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1", "obsidian 32"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
     GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
     // Cycle 5 Phase 3: the race from "wood and stone tools done" to an iron pickaxe, through the real
     // step machine (step_id "pipeline": each attempt runs get_next_step, as the race loop does). The
@@ -425,6 +425,7 @@ async fn run_one_trial(
     crate::tasks::lava_move::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
     *crate::tasks::lava_move::DRILL_ANCHOR.lock().unwrap() = None;
     *crate::tasks::end::CRYSTAL_MISSES.lock().unwrap() = None;
+    crate::tasks::end::CLIMBED.lock().unwrap().clear();
     let (gx, gy, gz, cx, cz) = setup_trial(bot, rcon, &name, step).await;
     // Portal steps: record the SEEDED lava pool in memory so prepare_cast_site's memory-first
     // path walks straight to it (as it would in a real run after mining recorded exposed lava),
