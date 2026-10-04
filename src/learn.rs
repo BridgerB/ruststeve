@@ -281,6 +281,16 @@ fn bump_alternative(step_id: &str) {
     ALT[alt_slot(step_id)].fetch_add(1, Ordering::Relaxed);
 }
 
+/// What the next attempt changes after a budget/stall cut (logged with the cut, cycle 5 Phase 1 (iii)).
+/// The portal has none: under 6b-safe the site/pool choice is frozen (decision 1).
+pub fn alternative_taken(step_id: &str) -> &'static str {
+    match step_id {
+        "gather_wood" => "sweep heading +2",
+        "mine_iron" => "strip and range direction +1",
+        _ => "none (re-derive only)",
+    }
+}
+
 // ── context features (exposure-only) ─────────────────────────────────────────────────────────
 
 const HOSTILES: [&str; 14] = [
@@ -467,6 +477,11 @@ impl Attempt {
         m.insert("progress_best".into(), json!(self.best));
         m.insert("params".into(), json!(self.chosen));
         m.insert("context".into(), self.context.clone());
+        if outcome == "timeout" {
+            // The cut and the alternative the next attempt takes, in the same row.
+            m.insert("alternative".into(), json!({"index": alternatives(&self.step_id) + 1, "takes": alternative_taken(&self.step_id)}));
+            println!("    cut: {} after {:.0} s ({reason}) → next attempt: {}", self.step_id, self.start.elapsed().as_secs_f64(), alternative_taken(&self.step_id));
+        }
         let row = Value::Object(m);
         write_row(&row);
         if let Some(r) = race {

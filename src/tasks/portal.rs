@@ -1404,6 +1404,11 @@ pub(crate) static SAFE_SCOOP_STAND: std::sync::Mutex<Option<(f64, f64, f64)>> = 
 /// at 0/10). Stored on the first anchor, reused (walk back) on every later call, cleared once the
 /// frame is complete, so obsidian accumulates in ONE frame across in-process respawns.
 pub(crate) static FRAME_ANCHOR: std::sync::Mutex<Option<(i32, i32, i32)>> = std::sync::Mutex::new(None);
+/// Re-site-after-death instrumentation (cycle 5): whether an anchor has been seen, the bot's death count
+/// when it was first seen, and how many times a death was followed by a lost anchor.
+static HAD_ANCHOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DEATHS_AT_ANCHOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub(crate) static RESITE_AFTER_DEATH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// The anchor is also persisted to a per-bot FILE so a partial frame survives a PROCESS relaunch
 /// (a stuck-bail → watchdog restart wipes the static, abandoning e.g. a 7/10 frame — but the
@@ -2490,6 +2495,21 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
         anchor_now = load_frame_anchor();
         if anchor_now.is_some() {
             *FRAME_ANCHOR.lock().unwrap() = anchor_now;
+        }
+    }
+    // Cycle 5, Phase 1 (ii): count re-sites after a death (should read 0). Instrumentation only: a
+    // frame anchor that existed before a death and is gone after it means the bot started a new site.
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        if anchor_now.is_some() {
+            if !HAD_ANCHOR.swap(true, Relaxed) {
+                DEATHS_AT_ANCHOR.store(bot.deaths, Relaxed);
+            }
+        } else if HAD_ANCHOR.load(Relaxed) && bot.deaths > DEATHS_AT_ANCHOR.load(Relaxed) {
+            let n = RESITE_AFTER_DEATH.fetch_add(1, Relaxed) + 1;
+            HAD_ANCHOR.store(false, Relaxed);
+            mem.log("cast", "resite_after_death", &format!("{n}"));
+            cast_debug(&format!("build: RE-SITE AFTER DEATH #{n}: the frame anchor did not survive the death"));
         }
     }
     if let Some((ax, ay, az)) = anchor_now {
