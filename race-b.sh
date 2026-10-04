@@ -143,7 +143,11 @@ for i in $(seq 0 $((N-1))); do
   # Fresh memory per RACE (never per relaunch): POIs from an earlier race are in another region or
   # a deleted world. The smoke race of 2026-10-03 started with 298 iron sightings from race i6 in
   # a world that no longer exists. A relaunch keeps memory: it resumes where it stood.
-  rm -f "$DIR/.memory-${NAMES[i]}.db" "$DIR/.memory-${NAMES[i]}.db-wal" "$DIR/.memory-${NAMES[i]}.db-shm" "$DIR/data/.attempt-${NAMES[i]}.json"
+  # The portal frame anchor too (.frame-<bot>.txt): it survives relaunches on purpose, but not races.
+  # Races i7 and i8 inherited anchors from earlier races, and 6b's displacement recovery tp'd bots to
+  # them: i7 rust-race-003 tunnelled ~2,500 blocks toward its i6 mold; i8 rust-race-001 finished and
+  # lit its i7 frame 3,200 blocks from its lane.
+  rm -f "$DIR/.memory-${NAMES[i]}.db" "$DIR/.memory-${NAMES[i]}.db-wal" "$DIR/.memory-${NAMES[i]}.db-shm" "$DIR/data/.attempt-${NAMES[i]}.json" "$DIR/.frame-${NAMES[i]}.txt"
   launch_bot "$i"
   sleep 2
 done
