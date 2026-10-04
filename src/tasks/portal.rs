@@ -1403,6 +1403,14 @@ pub(crate) static SAFE_SCOOP_STAND: std::sync::Mutex<Option<(f64, f64, f64)>> = 
 /// starts a NEW empty frame and abandons the partial one (013 built 4 obsidian, relocated, restarted
 /// at 0/10). Stored on the first anchor, reused (walk back) on every later call, cleared once the
 /// frame is complete, so obsidian accumulates in ONE frame across in-process respawns.
+/// Obsidian among the 10 frame cells of the frame anchored at `(bx,by,bz)` (frame plane z = bz,
+/// same cells as frame_check).
+fn anchored_frame_present(bot: &Bot, (bx, by, bz): (i32, i32, i32)) -> usize {
+    let mut cells = vec![(bx + 1, by), (bx + 2, by), (bx + 1, by + 4), (bx + 2, by + 4)];
+    cells.extend((1..=3).flat_map(|dy| [(bx, by + dy), (bx + 3, by + dy)]));
+    cells.iter().filter(|&&(x, y)| name_at(bot, x, y, bz) == "obsidian").count()
+}
+
 pub(crate) static FRAME_ANCHOR: std::sync::Mutex<Option<(i32, i32, i32)>> = std::sync::Mutex::new(None);
 /// Re-site-after-death instrumentation (cycle 5): whether an anchor has been seen, the bot's death count
 /// when it was first seen, and how many times a death was followed by a lost anchor.
@@ -2545,7 +2553,16 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     }
     // Already cast?
     let mut lava_pool: Option<(i32, i32, i32)> = None;
-    if bot.find_blocks("obsidian", 8, 12).len() >= 10 {
+    // Cycle 5 (steve's cycle-4 finding): "already cast" is read off the STORED mold's 10 cells, never a
+    // radius count — natural obsidian (lava meeting water, a ruined portal) within 8 blocks made the
+    // count skip prepare + cast, then frame_check on the anchor failed, the same way every attempt.
+    let stored = (*FRAME_ANCHOR.lock().unwrap()).or_else(load_frame_anchor);
+    let anchored_present = stored.map(|a| anchored_frame_present(bot, a)).unwrap_or(0);
+    let near_count = bot.find_blocks("obsidian", 8, 12).len();
+    if near_count >= 10 && anchored_present < 10 {
+        cast_debug(&format!("build: {near_count} obsidian within 8 but the stored mold reads {anchored_present}/10 — not treated as cast"));
+    }
+    if anchored_present >= 10 {
         // Frame complete — fall through to lighting. KEEP the anchor: clearing it here made the
         // next lines anchor a brand-new frame at the bot's feet when lighting failed once
         // (gym-003: `frame_check 10/10` → `portal_start` one block over → a second mold). The
