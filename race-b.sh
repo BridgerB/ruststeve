@@ -179,12 +179,23 @@ land_xz() {
   echo "[race-b] lane z=$z0: water at every candidate — keeping ($BASEX,$z0)" >&2
   echo "$BASEX $z0"
 }
+declare -a LANDX LANDZ DEATHS_SEEN
 for i in $(seq 0 $((N-1))); do
   n=${NAMES[i]}; z=${LANES[i]}
-  read -r lx lz < <(land_xz "$z")
-  [ "$lx $lz" != "$BASEX $z" ] && echo "[race-b] lane $i: ocean at ($BASEX,$z) — placed on land at ($lx,$lz)"
+  # Cycle 5: the gym's RandomSurface rules by RCON (scripts/race-place.ts): wait for the column to
+  # LOAD before testing it, reject water/lava underfoot and any water within 3. The old land_xz tested
+  # unloaded columns, whose empty replies read as land: two of five bots started at sea in i5 and i6.
+  if out=$(node "$DIR/scripts/race-place.ts" "$BASEX" "$z" "$RCONBIN" 2>>"$DIR/race-place.log"); then
+    read -r lx lz <<<"$out"
+  else
+    echo "[race-b] lane $i: no land near ($BASEX,$z) — falling back to land_xz" | tee -a "$DIR/race-place.log"
+    read -r lx lz < <(land_xz "$z")
+  fi
+  [ "$lx $lz" != "$BASEX $z" ] && echo "[race-b] lane $i: placed on land at ($lx,$lz) (lane start ($BASEX,$z))"
+  meta "$n" placement "lane $i landing ($lx,$lz), lane start ($BASEX,$z)"
   z=$lz
-  [ "$lx" -lt $((BASEX-20)) ] || [ "$lx" -gt $((BASEX+60)) ] && EXTRA_FL+=("$lx $lz")
+  LANDX[$i]=$lx; LANDZ[$i]=$lz; DEATHS_SEEN[$i]=0
+  EXTRA_FL+=("$lx $lz")
   # Surface of a fresh, forceloaded column (no hard-coded y: terrain differs per region).
   PLACE=("execute positioned $lx 0 $z positioned over motion_blocking_no_leaves run tp $n ~ ~1 ~"
          "execute positioned $lx 0 $z positioned over motion_blocking_no_leaves run spawnpoint $n ~ ~1 ~")
@@ -204,6 +215,22 @@ while [ $SECONDS -lt $RACE_SECONDS ]; do
     n=${NAMES[i]}
     if [ -z "${ANNOUNCED[i]:-}" ] && [ -n "$(sqlite3 "$DB" "SELECT 1 FROM events WHERE category='win' AND bot='$n' LIMIT 1" 2>/dev/null)" ]; then
       ANNOUNCED[$i]=1; echo "[race-b t=${SECONDS}s] $n reached goal '$RACE_GOAL' — continuing"
+    fi
+    # Respawn check (cycle 5): after a death the bot must be back within 32 blocks of its landing (the
+    # spawnpoint is not always honoured; steve saw the same). If not, tp it back and log a harness event.
+    deaths=$(sqlite3 "$DB" "SELECT COUNT(*) FROM events WHERE category='death' AND bot='$n'" 2>/dev/null || echo 0)
+    if [ "${deaths:-0}" -gt "${DEATHS_SEEN[i]:-0}" ]; then
+      DEATHS_SEEN[$i]=$deaths
+      pos=$(perl -e 'alarm shift; exec @ARGV' 30 "$RCONBIN" "data get entity $n Pos" 2>/dev/null | grep -oE -- '-?[0-9]+\.[0-9]+d' | tr -d d | head -3 | tr '\n' ' ')
+      read -r px _ pz <<<"$pos"
+      if [ -n "${px:-}" ]; then
+        d=$(awk -v a="$px" -v b="$pz" -v c="${LANDX[i]}" -v e="${LANDZ[i]}" 'BEGIN { printf "%d", sqrt((a-c)^2 + (b-e)^2) }')
+        if [ "$d" -gt 32 ]; then
+          echo "[race-b t=${SECONDS}s] HARNESS $n respawned ${d} blocks from its landing — tp back"
+          meta "$n" harness_respawn_far "death #$deaths: respawn ${d} blocks from landing (${LANDX[i]},${LANDZ[i]}); tp back"
+          rc "execute positioned ${LANDX[i]} 0 ${LANDZ[i]} positioned over motion_blocking_no_leaves run tp $n ~ ~1 ~"
+        fi
+      fi
     fi
     if kill -0 "${PIDS[i]}" 2>/dev/null; then
       # Watchdog: the process is alive but its TICK LOOP is not running (heartbeat file older
