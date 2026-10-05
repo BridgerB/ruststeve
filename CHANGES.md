@@ -1282,3 +1282,9 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Every trial cycles WATER ALARM → surface → mine_stone → drift back, between x 25082 and 25085.
   - Nearest shore: 28 blocks (diagonal), 36–52 blocks in other directions, >60 in three. The survival escape had 200 ticks (10 s).
   - Build 56f7e6b gives it 800 ticks (40 s); 10 trials running.
+- **Water wall, the cause:** the i8 lake has a **lily pad** at (25081,63,583).
+  - `water_exit_dir` took it as land 1–4 blocks away, so every escape swam to it, while the shore is 28–50 blocks out.
+  - Its collision box then stops the swim at x 25082.3.
+  - 40 s escape (56f7e6b): 0/2, stopped.
+  - Exclude afloat "land" (b395ecb): 0/10; the bot still stops at the pad's edge.
+  - Break a lily pad in the next cell (13ef075): 10 trials running (region 75).
