@@ -921,13 +921,17 @@ impl PhysicsEngine {
             entity.vel.x *= horizontal_inertia;
             entity.vel.z *= horizontal_inertia;
 
+            // `does_not_collide` takes a POSITION. prismarine-physics passes `pos.offset(vel.x,
+            // vel.y + 0.6 - pos.y + lastY, vel.z)`; the port passed the bare offset, so the free-space
+            // test ran at the world origin and the out-of-water lift onto a ledge fired only by chance.
+            // A swimming bot pressed against a 1-high bank never climbed out (water_wall_i8, cycle 5).
             if entity.is_collided_horizontally
                 && self.does_not_collide(
                     world,
                     Mv3 {
-                        x: entity.vel.x,
-                        y: entity.vel.y + 0.6 - entity.pos.y + last_y,
-                        z: entity.vel.z,
+                        x: entity.pos.x + entity.vel.x,
+                        y: entity.pos.y + entity.vel.y + 0.6 - entity.pos.y + last_y,
+                        z: entity.pos.z + entity.vel.z,
                     },
                 )
             {
