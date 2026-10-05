@@ -38,6 +38,10 @@ pub enum GymSetup {
     Tunnel,
     /// Random surface teleport (`spreadplayers` in 0..10k) — the terrain-variance test.
     RandomSurface,
+    /// A REAL lake each trial (cycle 5): the surface of a random water body with no land within 8 and
+    /// dry shore 9–48 blocks out. A fixed lake (water_wall_i8) wore out under ~80 trials of digging and
+    /// building: target-wade went 4/10 then 0/10 at the same spot.
+    RandomLake,
     /// A controlled water pool in a fixed arena — the water-escape test. Geometry via env:
     /// WATER_HALF (pool half-width → bank distance), WATER_DEPTH, WATER_SUBMERGE (start depth
     /// below the surface), WATER_CAP=1 (solid ceiling over the bot). Drops the bot submerged.
@@ -190,6 +194,8 @@ pub static GYM_STEPS: &[GymStep] = &[
     // lakes the same way. FixedSurface on the lake = the stuck state; the bot's race kit at that moment;
     // the step machine runs. Pass = 16 cobblestone (mine_stone's target), i.e. out of the lake and mining.
     GymStep { slug: "water_wall_i8", label: "Race water wall (i8 lake, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::FixedSurface { x: 25085, z: 584 } },
+    // The race water wall on a fresh real lake per trial (see GymSetup::RandomLake); same kit and pass as water_wall_i8.
+    GymStep { slug: "water_wall_lake", label: "Race water wall (random real lake, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::RandomLake },
     GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
@@ -769,6 +775,47 @@ async fn setup_trial(
             let p = bot.entity.position;
             let (spx, spz) = (p.x.floor() as i32 + 3, p.z.floor() as i32);
             let _ = rcon_driving(bot, rcon, &format!("execute positioned {spx} 0 {spz} positioned over motion_blocking_no_leaves run spawnpoint {name} ~ ~ ~")).await;
+        }
+        GymSetup::RandomLake => {
+            SETUP_NO_LAND.store(true, std::sync::atomic::Ordering::Relaxed);
+            let mut offsets = Vec::new();
+            for r in [0, 64, 128, 192, 256, 320, 384, 448] {
+                for (ux, uz) in [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
+                    offsets.push((ux * r, uz * r));
+                    if r == 0 {
+                        break;
+                    }
+                }
+            }
+            for (attempt, &(ox, oz)) in offsets.iter().enumerate() {
+                let (sx, sz) = (cx + ox, cz + oz);
+                if attempt > 0 {
+                    let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", sx - 8, sz - 8, sx + 8, sz + 8)).await;
+                }
+                for _ in 0..90 {
+                    if rcon_driving(bot, rcon, &format!("execute if loaded {sx} 0 {sz}")).await.contains("passed") {
+                        break;
+                    }
+                    bot.wait_ticks(20).await.ok();
+                }
+                let _ = rcon_driving(bot, rcon, &format!("execute positioned {sx} 0 {sz} positioned over motion_blocking_no_leaves run tp {name} ~ ~1 ~")).await;
+                pump_teleport(bot, sx, sz).await;
+                bot.wait_ticks(20).await.ok();
+                let p = bot.entity.position;
+                let (lx, ly, lz) = (p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32);
+                let water = |x: i32, z: i32| bot.block_at(x, ly, z).is_some_and(|b| b.name.contains("water"));
+                let open = water(lx, lz) && (-8..=8).all(|dx| (-8..=8).all(|dz| water(lx + dx, lz + dz)));
+                let shore = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+                    .iter()
+                    .filter_map(|&(dx, dz)| (9..=48).find(|&k| bot.block_at(lx + dx * k, ly, lz + dz * k).is_some_and(|b| !b.name.contains("water") && !b.name.ends_with("air"))))
+                    .min();
+                if open && shore.is_some() {
+                    println!("[gym] lake start at ({lx},{lz}): shore {} blocks", shore.unwrap());
+                    SETUP_NO_LAND.store(false, std::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+                println!("[gym] lake candidate ({sx},{sz}) unusable (open {open}, shore {shore:?}) — shifting");
+            }
         }
         GymSetup::WaterPool => {
             // A contained water pool in a fixed arena, geometry from env — reproducible so we
