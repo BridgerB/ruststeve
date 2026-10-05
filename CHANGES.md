@@ -1358,3 +1358,6 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - i8 rust-race-004's race log shows the race failure: `CRAFT 36: result not seen in slot 0 (grid [])` ×7. The 2×2 stick craft finds the grid empty after the clicks, i.e. the local inventory window has drifted from the server's over a long session.
   - Fresh gym connections recover; race bots that had run for hours did not.
   - Next: force a full window resync after a failed craft (vanilla resends the container when a click carries a stale state id), and test on a long-running bot, not a fresh one.
+- **Stale-window fix (3968bcf):** a 2×2 craft clicked into `active_window()`, i.e. a table window the server had closed (walk-away or death), so the clicks were ignored and the grid stayed empty. The fix closes it first and drops it on respawn.
+  - Long-session tool_loop_depth arms (6 trials per process): old and fixed both pass every trial so far, and both log 8 `grid []` lines.
+  - The slug never leaves a table window open, so it cannot show the fix. It is unmeasured; the next race (or a slug that opens a table and walks away before a 2×2 craft) is the test.
