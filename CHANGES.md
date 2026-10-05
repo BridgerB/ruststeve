@@ -1347,3 +1347,5 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - The fixed-site slug is retired as a measure.
   - New slug `water_wall_lake` (RandomLake: a fresh real lake per trial, no land within 8, shore 9–48 out).
   - Next: arms on it, default sliced A* vs `ASTAR_SYNC=1` (regions 88/89).
+- **RandomLake is too slow in fresh regions:** chunk generation per candidate; 1 lake in 30 min across 10 bots, even with an RCON pre-check. Stopped.
+- New slug `water_wall_pool`: the arena pool rebuilt every trial, 33×33, the bot 16 blocks from any bank, stone under the water. Arms next: default A* vs `ASTAR_SYNC=1`.
