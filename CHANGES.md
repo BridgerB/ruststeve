@@ -1288,3 +1288,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - 40 s escape (56f7e6b): 0/2, stopped.
   - Exclude afloat "land" (b395ecb): 0/10; the bot still stops at the pad's edge.
   - Break a lily pad in the next cell (13ef075): 10 trials running (region 75).
+- **Lily-clear build (13ef075, region 75): 2/10** (P > baseline 0/10 = 0.89), 0 deaths.
+  - The clear never fired; the pad is still at (25081,63,583).
+  - With b395ecb the bank direction changed to (0.6,-0.8), toward real shore, and escapes covered 6–12 blocks each. Then mine_stone pulled the bot back: find_stone (radius 6, no exposure test) found stone under the lake bed and the dig-down dove under again.
+  - Next build (this commit): mine_stone swims out first (800-tick escape) and returns until the bot is out of the water.
+  - Audit note: find_stone reads any stone within 6 blocks, exposed or not; exposure honesty is a strategist question, like find_lava_cluster.
