@@ -800,6 +800,16 @@ pub async fn mine_gravel_for_flint(bot: &mut Bot<'_>, target: i32, mem: &mut Wor
 }
 
 pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -> StepResult {
+    // In water: swim out first. find_stone (radius 6) picks stone under the lake bed and the dig-down
+    // pulls the bot back under, undoing every escape (water_wall_i8: escapes covered 6–12 blocks toward
+    // the shore, then mine_stone dove again; 0/10 → 2/10 with the lily-pad fixes alone). Each call
+    // resumes the swim from where the bot is.
+    if crate::bot_utils::feet_in_water(bot) {
+        crate::bot_utils::leave_water(bot, 800).await;
+        if crate::bot_utils::feet_in_water(bot) {
+            return failure("stone: in water — swimming to shore first");
+        }
+    }
     record_descent(bot, mem);
     // Equip the best available pickaxe.
     for tier in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe"] {
