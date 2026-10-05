@@ -1925,6 +1925,12 @@ impl<'a> Bot<'a> {
     /// and its breath alarm fired at 11.3 s against the 6 s rule. The search state lives in AStar;
     /// Movements only borrows the world, so it is rebuilt per slice.
     async fn plan_path(&mut self, start: (i32, i32, i32), goal: &dyn Goal, total: Duration) -> std::io::Result<PathResult> {
+        // ASTAR_SYNC=1: the old one-shot search (6b-head's), to isolate the slicing in the tree-vs-head
+        // portal gap (cycle 5: tree + search-time budget 11/23 vs 6b-head 16/26). No ticks during the search.
+        static SYNC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *SYNC.get_or_init(|| std::env::var("ASTAR_SYNC").ok().as_deref() == Some("1")) {
+            return Ok(crate::path::get_path_to(&self.world, start, goal, self.movement.clone(), -1.0, total));
+        }
         // Ticks now run while planning, so release the movement keys first: the old synchronous
         // search froze the bot in place, and walking on stale keys for up to 2 s near lava is not
         // safe. Sneak (edge safety) and the watchdog's jump are left as they are.
