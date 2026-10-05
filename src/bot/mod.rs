@@ -620,7 +620,7 @@ impl<'a> Bot<'a> {
             "respawn" => {
                 // The server closes any open container on respawn (death or dimension change); a window
                 // still recorded here would take later inventory clicks (see Bot::craft).
-                if self.current_window.is_some() {
+                if self.current_window.is_some() && crate::bot::crafting::stale_window_fix() {
                     self.sync_window_to_inventory();
                 }
                 if let Some(dim) = params

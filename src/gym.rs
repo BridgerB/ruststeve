@@ -204,6 +204,8 @@ pub static GYM_STEPS: &[GymStep] = &[
     // logs in hand, then craft_sticks / craft_planks for hours while sticks stayed 0. Kit = i7 002's state;
     // the step machine runs in a stone tunnel; pass = any pickaxe in the inventory.
     GymStep { slug: "tool_loop_depth", label: "Tool loop at depth (no pickaxe, planks in hand)", order: 0, prereq: &["oak_log 5", "oak_planks 10", "cobblestone 64", "iron_ingot 2", "crafting_table 1"], step_id: "pipeline", timeout_secs: 180, custom_pass: Some(|bot, _| ["wooden_pickaxe", "stone_pickaxe", "iron_pickaxe", "diamond_pickaxe"].iter().any(|p| count_items(bot, p) > 0)), setup: GymSetup::Tunnel },
+    // Stale-window craft (see the run loop): kit = planks; pass = sticks after a death with a table open.
+    GymStep { slug: "stale_window_craft", label: "2x2 craft after dying with a table window open", order: 0, prereq: &["oak_planks 8"], step_id: "pipeline", timeout_secs: 60, custom_pass: Some(|bot, _| count_items(bot, "stick") > 0), setup: GymSetup::Tunnel },
     GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
@@ -530,6 +532,25 @@ async fn run_one_trial(
         // Water-escape drill: drive `leave_water` directly (the unit under test) rather than
         // through the survival preempt, so we measure IT. The loop's top pass-check (fully out
         // of water) ends the trial; the 90s timeout bounds a failure.
+        // Stale container window (3968bcf): open a crafting table, die with it open (the server closes it,
+        // the old client kept the record), respawn, then craft sticks in the 2×2 inventory grid.
+        if step.slug == "stale_window_craft" {
+            attempts += 1;
+            if attempts == 1 {
+                let (tx, ty, tz) = (gx + 2, gy, gz);
+                let _ = rcon_driving(bot, rcon, &format!("setblock {tx} {ty} {tz} minecraft:crafting_table")).await;
+                bot.wait_ticks(10).await.ok();
+                let opened = bot.open_block(tx, ty, tz, crate::bot::Face::Top).await.unwrap_or(false);
+                let _ = rcon_driving(bot, rcon, &format!("kill {name}")).await;
+                bot.wait_ticks(20).await.ok();
+                bot.respawn().await.ok();
+                bot.wait_ticks(40).await.ok();
+                println!("[gym:stale_window_craft] table opened={opened}, died with it open, window recorded={}", bot.current_window.is_some());
+            }
+            let r = crate::bot_utils::craft_item(bot, "stick", 4, None, memory).await;
+            last_msg = r.message;
+            continue;
+        }
         if step.slug == "leave_water" {
             attempts += 1;
             crate::bot_utils::leave_water(bot, 40).await;
