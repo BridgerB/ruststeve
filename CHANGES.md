@@ -1322,3 +1322,13 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - 6 trials per bot, still running.
 - **Wading fix (07b588d, target-wade, region 82): water_wall_i8 4/10 (0.17–0.69)**, 0 deaths, passes at 495–600 s; P(> baseline 0/10) = 0.98. First real movement on the race water wall. Water-wall table: 0/10, 0/2, 0/10, 2/10, 0/10, 0/10, 1/10, **4/10**. Arena water set (2 trials each) running as a regression (region 83).
 - **Arena water set on target-wade (region 83, 2 trials each): 14/14 (Wilson 0.78–1.00)**, 0 deaths, including water_cave 2/2 (historically 19/46). No regression; the best water-set result this cycle (6b-head 13/14, 6b-safe 12/14).
+- **Portal arms in separate regions (79 vs 80), near the cap:**
+  - A 6b-head 10/16 any-pass; B target-shore + `ASTAR_SEARCH_BUDGET=1` 7/16 (3 trials still running); P(B > A) = 0.15.
+  - Each arm had 1 death-loop trial; A had 1 skipped (no land).
+  - B's timeouts mostly end on long siting trips: tunnelling toward lava 46–99 blocks away, or heading to a remembered pool.
+  - Pooled with region 69: tree + search-time A* 11/23 vs 6b-head 16/26. The tree still trails 6b-head on the portal after the A* fix; the remaining difference looks like lava siting/descent, not yet isolated.
+- **Race-build trade-off for the strategist:** tree (target-wade + A*) vs 6b-head:
+  - water wall 4/10 vs 0/10;
+  - water set 14/14 vs 13/14;
+  - iron 5/10 vs 1/10 (early iron);
+  - portal ~11/23 vs 16/26.
