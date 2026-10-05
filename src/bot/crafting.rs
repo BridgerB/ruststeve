@@ -59,6 +59,14 @@ impl<'a> Bot<'a> {
         if recipe.requires_table && !crafting_table {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "recipe requires a crafting table"));
         }
+        // A 2×2 craft uses the PLAYER inventory grid. If a table window is still recorded as open (the
+        // server closed it on a walk-away or a death), active_window() is that stale window: the 2×2
+        // clicks went to a window id the server had closed, and the grid stayed empty — race i8
+        // rust-race-004: "CRAFT 36: result not seen in slot 0 (grid [])" ×7, craft_sticks for hours
+        // at depth. Close it first so the clicks land in the inventory.
+        if !crafting_table && self.current_window.is_some() {
+            self.close_window().await?;
+        }
         let (w, h) = if crafting_table { (3usize, 3usize) } else { (2usize, 2usize) };
         let slot = |x: usize, y: usize| -> i32 { (1 + x + w * y) as i32 };
 

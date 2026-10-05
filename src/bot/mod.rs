@@ -618,6 +618,11 @@ impl<'a> Bot<'a> {
             // callers can detect the change. Without this `game.dimension` would stay
             // "overworld" forever and entering the Nether would be invisible.
             "respawn" => {
+                // The server closes any open container on respawn (death or dimension change); a window
+                // still recorded here would take later inventory clicks (see Bot::craft).
+                if self.current_window.is_some() {
+                    self.sync_window_to_inventory();
+                }
                 if let Some(dim) = params
                     .get("worldState")
                     .and_then(|w| w.get("name"))
