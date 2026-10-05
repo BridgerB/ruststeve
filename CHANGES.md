@@ -1306,3 +1306,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
 | exclude afloat land | 0/10 |
 | break lily pads | 2/10 |
 | swim-first | 0/10 |
+- **Shore-commit build (8f82c54, target-shore, region 77): water_wall 0/10**, 0 deaths. Water set (one pass, region 78): 5/7 (cave and aquifer failed, the two historically flakiest; no clear regression vs 13/14).
+  - The heading now holds steady ((0.44,−0.90) every leg), and bots reach ~(25091.4, 576.3), then stall.
+  - What's there: (25091,62,575) is a solid block at water level with air above. That is the committed shore/island target, and the bot cannot climb out of the water onto it.
+  - This matches the SDK water-physics limit (no jump impulse in water; only wall collision lifts), and the bank-stair dig removes the very block it should stand on.
+  - **The water wall is now a climb-out problem, not a steering one.** Next: an SDK fix for exiting water onto a block one above the surface (vanilla gives a jump boost when swimming into a wall at the surface), measured on water_wall_i8 and the arena set.
