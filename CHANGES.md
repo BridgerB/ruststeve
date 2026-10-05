@@ -1332,3 +1332,7 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - water set 14/14 vs 13/14;
   - iron 5/10 vs 1/10 (early iron);
   - portal ~11/23 vs 16/26.
+- **Regions 79/80 final:** 6b-head 10/17, tree + search-time A* 7/18 (any-pass), P(B > A) = 0.125.
+  - With SAFE_FIXES off, the tree's portal.rs matches 6b-head's (only gated code and instrumentation differ), so the gap is elsewhere.
+  - Next suspect: plan_path still ticks the bot between 40 ms slices.
+  - `ASTAR_SYNC=1` (this commit) restores the one-shot search; arms 6b-head vs tree + sync next (regions 84/85).
