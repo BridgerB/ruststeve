@@ -1336,3 +1336,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - With SAFE_FIXES off, the tree's portal.rs matches 6b-head's (only gated code and instrumentation differ), so the gap is elsewhere.
   - Next suspect: plan_path still ticks the bot between 40 ms slices.
   - `ASTAR_SYNC=1` (this commit) restores the one-shot search; arms 6b-head vs tree + sync next (regions 84/85).
+- **Regions 84/85: tree + `ASTAR_SYNC=1` (target-sync) 11/17 any-pass vs 6b-head 6/16** (2 still running), P(B > A) = 0.94.
+  - Clean passes: 7/17 vs 6/16. Deaths: 4 of B's passes had deaths, none of A's.
+  - **The sliced A* was the tree's portal gap:** with the one-shot search the tree matches or beats 6b-head on the portal (before: 11/25 vs 16/27).
+  - target-sync is this tree plus the water fixes (14/14 set, 4/10 wall), early iron (5/10 vs 1/10), the table fix, event rows and bandits.
+  - **Recommended race build for cycle 6: target-sync with `ASTAR_SYNC=1`** (the strategist's decision 1 still governs; not raced here).
