@@ -1342,3 +1342,4 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - target-sync is this tree plus the water fixes (14/14 set, 4/10 wall), early iron (5/10 vs 1/10), the table fix, event rows and bandits.
   - **Recommended race build for cycle 6: target-sync with `ASTAR_SYNC=1`** (the strategist's decision 1 still governs; not raced here).
 - **Regions 84/85 final:** 6b-head 8/18, tree + `ASTAR_SYNC=1` 11/17, P(B > A) = 0.88 (any-pass).
+- **water_wall_i8 on target-sync with `ASTAR_SYNC=1` (region 86): 0/10**, against target-wade's 4/10 at the same lake. Either the one-shot A* hurts the lake escape, or the lake changed: the same fixed site has been dug and built on by ~60 trials. Re-running target-wade now (region 87) to separate the two.
