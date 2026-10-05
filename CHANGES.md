@@ -1343,3 +1343,7 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - **Recommended race build for cycle 6: target-sync with `ASTAR_SYNC=1`** (the strategist's decision 1 still governs; not raced here).
 - **Regions 84/85 final:** 6b-head 8/18, tree + `ASTAR_SYNC=1` 11/17, P(B > A) = 0.88 (any-pass).
 - **water_wall_i8 on target-sync with `ASTAR_SYNC=1` (region 86): 0/10**, against target-wade's 4/10 at the same lake. Either the one-shot A* hurts the lake escape, or the lake changed: the same fixed site has been dug and built on by ~60 trials. Re-running target-wade now (region 87) to separate the two.
+- **target-wade re-run at the i8 lake (region 87): 0/10** (pooled 4/20). The 4/10 did not reproduce, so ASTAR_SYNC is not implicated; the fixed lake has worn (or the 4/10 was luck).
+  - The fixed-site slug is retired as a measure.
+  - New slug `water_wall_lake` (RandomLake: a fresh real lake per trial, no land within 8, shore 9–48 out).
+  - Next: arms on it, default sliced A* vs `ASTAR_SYNC=1` (regions 88/89).
