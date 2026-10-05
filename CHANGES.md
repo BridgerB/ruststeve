@@ -1321,3 +1321,4 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - B target-shore + `ASTAR_SEARCH_BUDGET=1` (region 80): 4/6;
   - 6 trials per bot, still running.
 - **Wading fix (07b588d, target-wade, region 82): water_wall_i8 4/10 (0.17–0.69)**, 0 deaths, passes at 495–600 s; P(> baseline 0/10) = 0.98. First real movement on the race water wall. Water-wall table: 0/10, 0/2, 0/10, 2/10, 0/10, 0/10, 1/10, **4/10**. Arena water set (2 trials each) running as a regression (region 83).
+- **Arena water set on target-wade (region 83, 2 trials each): 14/14 (Wilson 0.78–1.00)**, 0 deaths, including water_cave 2/2 (historically 19/46). No regression; the best water-set result this cycle (6b-head 13/14, 6b-safe 12/14).
