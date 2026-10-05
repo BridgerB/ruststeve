@@ -99,7 +99,7 @@ None live. The bandit-capable tree never raced: decision 1 put both races on 6b-
 | region | x=21900 | x=24900 |
 | land placement | 5/5 | 5/5 |
 | furthest | Build Nether Portal ×2 | Build Nether Portal ×3 (+1 invalid Enter Nether) |
-| portal step reached at | 42, 45 min | 3_TIMES |
+| portal step reached at | 42, 45 min | ~30, 82, 84 min |
 | deaths (all causes) | 3 (lava 3) | 9 (lava 6, drowned 3) |
 | relaunches | 8 | 116 (001 ×100 on the invalid-portal loop, 002 ×14 in a lake, 004 ×2) |
 | harness respawn tp | 2 (wrong: landing-only check) | 2 (correct: world-spawn respawns) |
@@ -192,7 +192,7 @@ These are things steve likely shares, since ruststeve's SDK is a port of typecra
   - `GYM_PARITY=1`: no same-failure cut or respawn tp, for arms against old trees;
   - `BOT_ARMS=1` or `ARM_BUCKETS` / `ARM_CLUSTER_MIN`: per-bot bandit arms.
 - **Data:**
-  - `data/gym.db` (gym-index 74);
+  - `data/gym.db` (gym-index 75);
   - `data/race.db` = race i8 (race-index 8, so the next race is i9); archives in `data/archive/`;
   - `data/attempts/*.jsonl`, plus the legacy `data/attempts.jsonl` (read-only);
   - `data/params.json`: all bandits `enabled: false`.
@@ -209,6 +209,6 @@ cd ~/ruststeve && ASTAR_SEARCH_BUDGET=1 BIN=$HOME/ruststeve/target-lily/release/
 - **Next arms** (separate regions; B = candidate):
 
 ```
-cd ~/ruststeve && BIN=$HOME/ruststeve/target-head/release/ruststeve BUILD=6b-head SLUG=portal N=3 TRIALS=6 STAGGER=30 GYM_REGION=75 PIDFILE=gym-a.pids NAME_START=1 setsid ./gym-tonether-b.sh > gym-arm-a.out 2>&1 < /dev/null &
-ASTAR_SEARCH_BUDGET=1 GYM_PARITY=1 BIN=$HOME/ruststeve/target-lily/release/ruststeve BUILD=tree-lily SLUG=portal N=3 TRIALS=6 STAGGER=30 GYM_REGION=76 PIDFILE=gym.pids NAME_START=4 KEEP_FORCELOADS=1 setsid ./gym-tonether-b.sh > gym-arm-b.out 2>&1 < /dev/null &
+cd ~/ruststeve && BIN=$HOME/ruststeve/target-head/release/ruststeve BUILD=6b-head SLUG=portal N=3 TRIALS=6 STAGGER=30 GYM_REGION=76 PIDFILE=gym-a.pids NAME_START=1 setsid ./gym-tonether-b.sh > gym-arm-a.out 2>&1 < /dev/null &
+ASTAR_SEARCH_BUDGET=1 GYM_PARITY=1 BIN=$HOME/ruststeve/target-lily/release/ruststeve BUILD=tree-lily SLUG=portal N=3 TRIALS=6 STAGGER=30 GYM_REGION=77 PIDFILE=gym.pids NAME_START=4 KEEP_FORCELOADS=1 setsid ./gym-tonether-b.sh > gym-arm-b.out 2>&1 < /dev/null &
 ```
