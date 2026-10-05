@@ -196,6 +196,10 @@ pub static GYM_STEPS: &[GymStep] = &[
     GymStep { slug: "water_wall_i8", label: "Race water wall (i8 lake, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::FixedSurface { x: 25085, z: 584 } },
     // The race water wall on a fresh real lake per trial (see GymSetup::RandomLake); same kit and pass as water_wall_i8.
     GymStep { slug: "water_wall_lake", label: "Race water wall (random real lake, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::RandomLake },
+    // The race water wall on a rebuilt pool (fresh every trial, no terrain wear): a 33×33 lake, the bot at
+    // the surface centre 16 blocks from any bank, stone under the water (what mine_stone dove for in the
+    // i8 lake). Random real lakes were too slow to find (1 lake in 30 min across 10 bots, chunk generation).
+    GymStep { slug: "water_wall_pool", label: "Race water wall (33x33 pool, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::Water { half: 16, depth: 4, submerge: 0, cap: false, pocket: false, buried: false } },
     GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
