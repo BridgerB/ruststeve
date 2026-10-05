@@ -1354,3 +1354,7 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Deaths: 3 trials per arm had one (water slugs fail on any death); two of them mined the full 16 and failed only on the death.
   - The one-shot A* does not hurt water; it helps.
   - **The race-build recommendation stands: the tree with `ASTAR_SYNC=1`.**
+- **tool_loop_depth slug (Tunnel, i7 rust-race-002's kit, target-tool + `ASTAR_SYNC=1`): 10/10** (8 in under 45 s). It does **not** reproduce the race loop.
+  - i8 rust-race-004's race log shows the race failure: `CRAFT 36: result not seen in slot 0 (grid [])` ×7. The 2×2 stick craft finds the grid empty after the clicks, i.e. the local inventory window has drifted from the server's over a long session.
+  - Fresh gym connections recover; race bots that had run for hours did not.
+  - Next: force a full window resync after a failed craft (vanilla resends the container when a click carries a stale state id), and test on a long-running bot, not a fresh one.
