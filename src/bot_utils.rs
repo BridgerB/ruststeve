@@ -387,10 +387,26 @@ async fn leave_water_inner(bot: &mut Bot<'_>, ticks: u32) -> bool {
             // PHASE 2 — at the surface (head out, feet still in water). Swim to the nearest
             // bank and climb out. Face the closest air-headed column (progressively wider —
             // a 5-block scan misses a lake edge), committed for several ticks.
-            let dir = water_exit_dir(bot, 6)
-                .or_else(|| water_exit_dir(bot, 14))
-                .or_else(|| water_exit_dir(bot, 24))
-                .or_else(|| water_exit_dir(bot, 40));
+            // COMMIT to one shore column. Re-picking the nearest "land" every 8-tick leg flipped the
+            // heading ((0.89,0.45) → (0,−1) → (0,1)) and the bot wandered along a big lake for the whole
+            // trial (water_wall_i8 swim-first: 0/10, last legs ~38 blocks out). The target lives across
+            // escape calls; it is dropped when reached (≤1.5) or after 90 s, then re-picked.
+            static SHORE: std::sync::Mutex<Option<((i32, i32), std::time::Instant)>> = std::sync::Mutex::new(None);
+            let here = bot.entity.position;
+            let dir = {
+                let mut s = SHORE.lock().unwrap();
+                let keep = s.is_some_and(|((tx, tz), at)| {
+                    at.elapsed().as_secs() < 90 && ((tx as f64 + 0.5 - here.x).powi(2) + (tz as f64 + 0.5 - here.z).powi(2)).sqrt() > 1.5
+                });
+                if !keep {
+                    let (bx, bz) = (here.x.floor() as i32, here.z.floor() as i32);
+                    *s = [6, 14, 24, 48]
+                        .iter()
+                        .find_map(|&r| water_exit_dir(bot, r))
+                        .map(|(ox, oz)| ((bx + ox as i32, bz + oz as i32), std::time::Instant::now()));
+                }
+                s.map(|((tx, tz), _)| (tx as f64 + 0.5 - here.x, tz as f64 + 0.5 - here.z))
+            };
             // UNIT vector: `water_exit_dir` returns a cell offset (e.g. (-7,0)), and the bank-stair dig
             // below aims at `p + d*0.8`. Unnormalised it dug the lake rim 5.6 blocks away, floating, by
             // hand: one dig blocked ~25 s (water_lake regression once `name_at` let the scan see air;
