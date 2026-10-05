@@ -1311,3 +1311,12 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - What's there: (25091,62,575) is a solid block at water level with air above. That is the committed shore/island target, and the bot cannot climb out of the water onto it.
   - This matches the SDK water-physics limit (no jump impulse in water; only wall collision lifts), and the bank-stair dig removes the very block it should stand on.
   - **The water wall is now a climb-out problem, not a steering one.** Next: an SDK fix for exiting water onto a block one above the surface (vanilla gives a jump boost when swimming into a wall at the surface), measured on water_wall_i8 and the arena set.
+- **Found an SDK physics porting bug** (636e8ba): the out-of-liquid ledge lift called `does_not_collide` with a bare velocity offset where prismarine-physics passes `pos.offset(...)`, so its free-space test ran near the world origin. Fixed.
+  - water_wall_i8 with it (target-water, region 81): **1/10** (0.02–0.40).
+  - Some bots now leave the lake and mine: rust-gym-008 reached craft_stone_pickaxe 3× before falling back in, but not 16 cobblestone in 600 s.
+  - New loop: rust-gym-012 called mine_stone 726× in one trial. The swim-first check returns at once while the bot stands wading (feet in water, head out), so mine_stone fails straight back.
+  - Water-wall table: 0/10, 0/2, 0/10, 2/10, 0/10, 0/10, **1/10**.
+- **Portal arms, separate regions, in progress:**
+  - A 6b-head (region 79): 5/9 any-pass (1 skipped);
+  - B target-shore + `ASTAR_SEARCH_BUDGET=1` (region 80): 4/6;
+  - 6 trials per bot, still running.
