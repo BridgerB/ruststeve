@@ -804,9 +804,11 @@ pub async fn mine_stone(bot: &mut Bot<'_>, target: i32, mem: &mut WorldMemory) -
     // pulls the bot back under, undoing every escape (water_wall_i8: escapes covered 6–12 blocks toward
     // the shore, then mine_stone dove again; 0/10 → 2/10 with the lily-pad fixes alone). Each call
     // resumes the swim from where the bot is.
-    if crate::bot_utils::feet_in_water(bot) {
+    // Only when actually swimming: a bot standing in shallow water (on the ground, head out) mines
+    // normally. Failing it too made a 726-call loop in one water_wall_i8 trial.
+    if crate::bot_utils::feet_in_water(bot) && !bot.entity.on_ground {
         crate::bot_utils::leave_water(bot, 800).await;
-        if crate::bot_utils::feet_in_water(bot) {
+        if crate::bot_utils::feet_in_water(bot) && !bot.entity.on_ground {
             return failure("stone: in water — swimming to shore first");
         }
     }
