@@ -1293,3 +1293,16 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - With b395ecb the bank direction changed to (0.6,-0.8), toward real shore, and escapes covered 6–12 blocks each. Then mine_stone pulled the bot back: find_stone (radius 6, no exposure test) found stone under the lake bed and the dig-down dove under again.
   - Next build (this commit): mine_stone swims out first (800-tick escape) and returns until the bot is out of the water.
   - Audit note: find_stone reads any stone within 6 blocks, exposed or not; exposure honesty is a strategist question, like find_lava_cluster.
+- **Swim-first build (target-swim, region 76): 0/10**, 0 deaths. Bots now get far: last BANK legs at x 25122–25124, ~38 blocks east.
+  - But `water_exit_dir` re-picks the nearest "land" every 8-tick leg, and the pick flips: (0.89,0.45) → (0,−1) → (0,1).
+  - So the bot wanders along a big lake instead of committing to one shore.
+  - Next design: choose one shore column from a wide scan (dry surface, reachable at the water's level), commit to it, and re-pick only when no progress for N legs.
+  - Water-wall builds so far:
+
+| build | result |
+|---|---|
+| baseline | 0/10 |
+| 40 s escape | 0/2 |
+| exclude afloat land | 0/10 |
+| break lily pads | 2/10 |
+| swim-first | 0/10 |
