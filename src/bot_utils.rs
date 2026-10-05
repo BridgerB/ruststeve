@@ -403,6 +403,18 @@ async fn leave_water_inner(bot: &mut Bot<'_>, ticks: u32) -> bool {
                 .unwrap_or((1.0, 0.0));
             let p = bot.entity.position;
             eprintln!("    BANK ({:.2},{:.2},{:.2}) ground={} dir=({dx:.2},{dz:.2}) found={}", p.x, p.y, p.z, bot.entity.on_ground, dir.is_some());
+            // A lily pad on the surface has a collision box: swimming into it stalls the bot at its
+            // edge (water_wall_i8: every escape stopped at x 25082.3 against the pad at 25081, 63).
+            // Lily pads break instantly by hand, so clear any in the next cell before pressing on.
+            {
+                let (ax, az) = ((p.x + dx * 0.9).floor() as i32, (p.z + dz * 0.9).floor() as i32);
+                for y in [p.y.floor() as i32, p.y.floor() as i32 + 1] {
+                    if name_at(bot, ax, y, az).is_some_and(|n| n == "lily_pad") {
+                        let _ = bot.dig(ax, y, az).await;
+                        eprintln!("    BANK cleared a lily pad at ({ax},{y},{az})");
+                    }
+                }
+            }
             bot.look_at(crate::vec3::vec3(p.x + dx * 4.0, p.y + 0.3, p.z + dz * 4.0));
             bot.set_control_state("jump", true);
             bot.set_control_state("forward", true);
