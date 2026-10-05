@@ -1349,3 +1349,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Next: arms on it, default sliced A* vs `ASTAR_SYNC=1` (regions 88/89).
 - **RandomLake is too slow in fresh regions:** chunk generation per candidate; 1 lake in 30 min across 10 bots, even with an RCON pre-check. Stopped.
 - New slug `water_wall_pool`: the arena pool rebuilt every trial, 33×33, the bot 16 blocks from any bank, stone under the water. Arms next: default A* vs `ASTAR_SYNC=1`.
+- **water_wall_pool (rebuilt 33×33 lake, target-pool), arms:**
+  - default sliced A* **1/10**; `ASTAR_SYNC=1` **4/10**. P(sync > default) = 0.93.
+  - Deaths: 3 trials per arm had one (water slugs fail on any death); two of them mined the full 16 and failed only on the death.
+  - The one-shot A* does not hurt water; it helps.
+  - **The race-build recommendation stands: the tree with `ASTAR_SYNC=1`.**
