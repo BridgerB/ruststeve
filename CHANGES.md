@@ -1341,3 +1341,4 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - **The sliced A* was the tree's portal gap:** with the one-shot search the tree matches or beats 6b-head on the portal (before: 11/25 vs 16/27).
   - target-sync is this tree plus the water fixes (14/14 set, 4/10 wall), early iron (5/10 vs 1/10), the table fix, event rows and bandits.
   - **Recommended race build for cycle 6: target-sync with `ASTAR_SYNC=1`** (the strategist's decision 1 still governs; not raced here).
+- **Regions 84/85 final:** 6b-head 8/18, tree + `ASTAR_SYNC=1` 11/17, P(B > A) = 0.88 (any-pass).

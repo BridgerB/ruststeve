@@ -171,6 +171,11 @@ These are things steve likely shares, since ruststeve's SDK is a port of typecra
 - Clause (a) stopped three arms that were not worse on any-pass (6b-safe 3/6, A* 4/7 at P = 0.45, the first A* batch). Its "path the build changed" is broad when a change touches the pathfinder, which every movement uses.
 
 **Decisions I need:**
+0. **Post-handoff update (2026-10-05):**
+   - The tree's portal gap was the sliced A*. With `ASTAR_SYNC=1` (one-shot search) the tree scored 11/17 against 6b-head's 8/18 (regions 84/85, P = 0.88).
+   - The race water wall moved from 0/10 to 4/10. The causes were a lily-pad false bank, a physics porting bug in the out-of-water lift, and a shallow-water loop.
+   - The arena water set scored 14/14.
+   - **Recommendation: race cycle 6 on target-sync with `ASTAR_SYNC=1`.**
 1. **The race tree for cycle 6:** the current tree with `ASTAR_SEARCH_BUDGET=1` + early iron + the table fix (event rows, bandits, water fixes), or keep racing 6b-head?
 2. **Clause (a) for pathfinder-wide changes:** keep stopping at two same-site deaths, or compare deaths per trial at the cap (6b-head runs at 1.25 deaths per trial)?
 3. **find_lava_cluster reads unexposed lava;** 57 of 64 portal passes used it. Keep it, or replace it with an exposure-honest search (it changes pool choice)?
@@ -200,10 +205,10 @@ These are things steve likely shares, since ruststeve's SDK is a port of typecra
   - the respawn check accepts the last position;
   - frame anchors are cleared per race.
 - **Disk:** 11 G free of 46 G. **Memory:** 17 Gi available of 23 Gi.
-- **Next race command** (current tree, if decision 1 changes):
+- **Next race command** (recommended build; target-sync, with `ASTAR_SYNC=1`):
 
 ```
-cd ~/ruststeve && ASTAR_SEARCH_BUDGET=1 BIN=$HOME/ruststeve/target-lily/release/ruststeve BUILD=tree-lily RACE_INDEX=9 N=5 setsid ./race-b.sh > race-i9.out 2>&1 < /dev/null &
+cd ~/ruststeve && ASTAR_SYNC=1 BIN=$HOME/ruststeve/target-sync/release/ruststeve BUILD=tree-sync RACE_INDEX=9 N=5 setsid ./race-b.sh > race-i9.out 2>&1 < /dev/null &
 ```
 
 - **Next arms** (separate regions; B = candidate):
