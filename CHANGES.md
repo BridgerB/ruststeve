@@ -1361,3 +1361,8 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
 - **Stale-window fix (3968bcf):** a 2×2 craft clicked into `active_window()`, i.e. a table window the server had closed (walk-away or death), so the clicks were ignored and the grid stayed empty. The fix closes it first and drops it on respawn.
   - Long-session tool_loop_depth arms (6 trials per process): old and fixed both pass every trial so far, and both log 8 `grid []` lines.
   - The slug never leaves a table window open, so it cannot show the fix. It is unmeasured; the next race (or a slug that opens a table and walks away before a 2×2 craft) is the test.
+- **Server B watchdog crashes (my load):** 4 in 24 h, at 07:25, 07:53, 10:23 and 10:51 MDT ("A single server tick took 60.00 seconds"; systemd restart counter 7).
+  - All coincide with 10-bot concurrent gyms: lake arms with RandomLake chunk generation, long-session tool-loop arms, stale-window arms.
+  - 112 leaked forced chunks were cleared (restart spawn prep took 68 s).
+  - From here: ≤6 bots at once. Trials that spanned a crash: tool-loop long-session arms (all PASS, unaffected) and the first stale-window run (rerun).
+- **Stale-window reproduction (fix off, bot 001):** after dying with a table open, `CRAFT 947: result not seen in slot 0 (grid ["1:1xoak_planks", "3:1xoak_planks"])` ×3. The 2×2 clicks landed in the stale table window's 3×3 slots. That is the race's failure, reproduced.
