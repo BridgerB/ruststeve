@@ -779,7 +779,7 @@ async fn setup_trial(
         GymSetup::RandomLake => {
             SETUP_NO_LAND.store(true, std::sync::atomic::Ordering::Relaxed);
             let mut offsets = Vec::new();
-            for r in [0, 64, 128, 192, 256, 320, 384, 448] {
+            for r in [0, 32, 64, 96, 128, 160, 192, 224, 256, 320, 384, 448] {
                 for (ux, uz) in [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
                     offsets.push((ux * r, uz * r));
                     if r == 0 {
@@ -798,16 +798,25 @@ async fn setup_trial(
                     }
                     bot.wait_ticks(20).await.ok();
                 }
+                // Cheap server-side pre-check: skip a dry candidate without teleporting (most are land;
+                // the first version teleported to every one and found 2 lakes in 30 min across 10 bots).
+                let wet = rcon_driving(bot, rcon, &format!("execute positioned {sx} 0 {sz} positioned over motion_blocking_no_leaves if block ~ ~-1 ~ minecraft:water")).await;
+                if !wet.contains("passed") {
+                    if attempt > 0 {
+                        let _ = rcon_driving(bot, rcon, &format!("forceload remove {} {} {} {}", sx - 8, sz - 8, sx + 8, sz + 8)).await;
+                    }
+                    continue;
+                }
                 let _ = rcon_driving(bot, rcon, &format!("execute positioned {sx} 0 {sz} positioned over motion_blocking_no_leaves run tp {name} ~ ~1 ~")).await;
                 pump_teleport(bot, sx, sz).await;
                 bot.wait_ticks(20).await.ok();
                 let p = bot.entity.position;
                 let (lx, ly, lz) = (p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32);
                 let water = |x: i32, z: i32| bot.block_at(x, ly, z).is_some_and(|b| b.name.contains("water"));
-                let open = water(lx, lz) && (-8..=8).all(|dx| (-8..=8).all(|dz| water(lx + dx, lz + dz)));
+                let open = water(lx, lz) && (-5..=5).all(|dx| (-5..=5).all(|dz| water(lx + dx, lz + dz)));
                 let shore = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
                     .iter()
-                    .filter_map(|&(dx, dz)| (9..=48).find(|&k| bot.block_at(lx + dx * k, ly, lz + dz * k).is_some_and(|b| !b.name.contains("water") && !b.name.ends_with("air"))))
+                    .filter_map(|&(dx, dz)| (6..=48).find(|&k| bot.block_at(lx + dx * k, ly, lz + dz * k).is_some_and(|b| !b.name.contains("water") && !b.name.ends_with("air"))))
                     .min();
                 if open && shore.is_some() {
                     println!("[gym] lake start at ({lx},{lz}): shore {} blocks", shore.unwrap());
