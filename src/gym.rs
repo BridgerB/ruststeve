@@ -544,6 +544,15 @@ async fn run_one_trial(
             last_msg = format!("death loop — {} deaths this trial | last: {}", bot.deaths - deaths0, crate::tasks::portal::last_cast_line());
             break;
         }
+        // Nether slugs: a death respawns in the overworld, and the tp-back below is an OVERWORLD tp to Nether
+        // coordinates (blaze_rod 2026-10-09: the bot came back 57,818 blocks off at x 3470 in the overworld and
+        // ran mine_iron). A death there ends the trial.
+        if !s.alive && matches!(step.setup, GymSetup::NetherFortress | GymSetup::NetherPiglins) {
+            bot.respawn().await.ok();
+            bot.wait_ticks(20).await.ok();
+            last_msg = format!("died in the Nether | last: {last_msg}");
+            break;
+        }
         if !s.alive {
             bot.respawn().await.ok();
             bot.wait_ticks(40).await.ok();
