@@ -2854,7 +2854,9 @@ pub async fn enter_nether(bot: &mut Bot<'_>) -> StepResult {
         }
         found
     };
-    let Some(portal) = bot.find_block("nether_portal", 64).or_else(own) else {
+    // Last, the same test that sets portal_built (an exposed portal block, no line of sight): when the two
+    // disagreed, i9 rust-race-004 sat in enter_nether beside a portal it could not "see" (1,280 lines).
+    let Some(portal) = own().or_else(|| bot.find_block("nether_portal", 64)).or_else(|| bot.find_exposed_blocks("nether_portal", 64, 1).into_iter().next()) else {
         return failure("no portal found to enter");
     };
     let start_dim = bot.game.dimension.clone();
