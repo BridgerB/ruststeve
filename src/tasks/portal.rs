@@ -1439,6 +1439,21 @@ pub(crate) fn set_frame_anchor(a: (i32, i32, i32)) {
     save_frame_anchor(a);
 }
 
+/// The frame anchor of the portal this bot LIT (cycle 6), persisted per bot like the anchor, which is
+/// released at lighting. enter_nether walks back to it without needing line of sight. Cleared per race
+/// (race-b.sh) and per gym trial.
+fn lit_portal_path() -> String {
+    format!(".portal-{}.txt", std::env::var("MC_USERNAME").unwrap_or_else(|_| "bot".into()))
+}
+pub(crate) fn lit_portal() -> Option<(i32, i32, i32)> {
+    let s = std::fs::read_to_string(lit_portal_path()).ok()?;
+    let n: Vec<i32> = s.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    (n.len() == 3).then(|| (n[0], n[1], n[2]))
+}
+pub(crate) fn clear_lit_portal() {
+    let _ = std::fs::remove_file(lit_portal_path());
+}
+
 pub(crate) fn clear_frame_anchor() {
     *FRAME_ANCHOR.lock().unwrap() = None;
     // A deliberate release (portal lit, new gym trial) is not a re-site after death: without this
@@ -2814,6 +2829,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
             }
             if lit_now(bot) {
                 mem.log("cast", "portal_lit", &format!("{bx},{by},{bz}"));
+                let _ = std::fs::write(lit_portal_path(), format!("{bx} {by} {bz}"));
                 clear_frame_anchor(); // done with this frame; a future portal re-anchors fresh
                 return success(format!("nether portal cast & lit at {bx},{by},{bz}"));
             }
@@ -2826,7 +2842,19 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
 
 /// Walk into the lit portal and wait for the dimension change.
 pub async fn enter_nether(bot: &mut Bot<'_>) -> StepResult {
-    let Some(portal) = bot.find_block("nether_portal", 64) else {
+    // Its OWN portal needs no line of sight: the bot cast and lit it at the frame anchor. Race i9
+    // rust-race-001 lit its portal at (27911,-54,433), walked off to craft a furnace, and then logged
+    // "no portal found to enter" 1,190 times standing 5 blocks from it behind the mold walls (the server
+    // showed the portal lit). find_block wants the block in view; the anchor is knowledge, not X-ray.
+    let own = || {
+        let (bx, by, bz) = lit_portal().or(*FRAME_ANCHOR.lock().unwrap())?;
+        let found = (1..=2).flat_map(|dx| (1..=3).map(move |dy| (bx + dx, by + dy, bz))).find(|c| name_at(bot, c.0, c.1, c.2) == "nether_portal");
+        if let Some(c) = found {
+            println!("    enter_nether: own portal at {c:?} (not in view)");
+        }
+        found
+    };
+    let Some(portal) = bot.find_block("nether_portal", 64).or_else(own) else {
         return failure("no portal found to enter");
     };
     let start_dim = bot.game.dimension.clone();

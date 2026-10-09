@@ -472,6 +472,7 @@ async fn run_one_trial(
     // A stale persisted frame anchor from an earlier trial/run would make build_nether_portal
     // "tp back to resume" a frame thousands of blocks away. Each trial is a fresh frame.
     crate::tasks::portal::clear_frame_anchor();
+    crate::tasks::portal::clear_lit_portal();
     // Start row BEFORE setup: a bot that dies or disconnects in setup still leaves a `running`
     // row (counted as killed) — cycle-2 water batch 2 lost one launch that way.
     let run_id = store.start(step.slug, 0, 0, 0, step.prereq);

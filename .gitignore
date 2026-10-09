@@ -29,3 +29,4 @@
 /bins/
 /pids/
 /target-*/
+.portal-*.txt
