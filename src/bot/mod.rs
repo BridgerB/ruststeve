@@ -18,7 +18,7 @@ use crate::block::{state_id_to_block, BlockInfo};
 use crate::chunk::{ChunkColumn, ChunkColumnOptions, GLOBAL_BITS_PER_BIOME, GLOBAL_BITS_PER_BLOCK};
 use crate::entity::Entity;
 use crate::item::{from_notch, Item};
-use crate::path::{AStar, Goal, GoalNear, GoalNearXZ, Move, Movements, MovementsConfig, PathResult, PathStatus};
+use crate::path::{Goal, GoalNear, GoalNearXZ, Move, MovementsConfig, PathResult, PathStatus};
 use crate::physics::{
     apply_player_state, create_player_state, PhysicsEngine, PhysicsWorld, PlayerControls,
     WorldPhysics,
@@ -632,7 +632,7 @@ impl<'a> Bot<'a> {
             "respawn" => {
                 // The server closes any open container on respawn (death or dimension change); a window
                 // still recorded here would take later inventory clicks (see Bot::craft).
-                if self.current_window.is_some() && crate::bot::crafting::stale_window_fix() {
+                if self.current_window.is_some() {
                     self.sync_window_to_inventory();
                 }
                 if let Some(dim) = params
@@ -1950,35 +1950,11 @@ impl<'a> Bot<'a> {
     /// Navigate to a goal: compute an A* path, follow it (digging obstacles,
     /// jumping, dropping), and re-path when stuck or the path runs out before the
     /// goal. Single-task port of typecraft's tick-driven pathfinder follower.
-    /// A* in 40 ms slices with one driven tick between slices, same 2 s total budget as before.
-    /// A single synchronous search froze the tick loop, and with it the breath watchdog, for up to
-    /// 2 s per call. Race i6 logged `LOOP STALL 4060 ms` right after each `moving toward …` goto,
-    /// and its breath alarm fired at 11.3 s against the 6 s rule. The search state lives in AStar;
-    /// Movements only borrows the world, so it is rebuilt per slice.
+    /// One synchronous A* search (cycle 6, decision 9: ASTAR_SYNC won and is the only planner). The sliced
+    /// search kept ticks running but cut the search to ~45% and lost the portal comparison: one-shot 11/17 vs
+    /// sliced 8/18 (regions 85/84), water_wall_pool 4/10 vs 1/10.
     async fn plan_path(&mut self, start: (i32, i32, i32), goal: &dyn Goal, total: Duration) -> std::io::Result<PathResult> {
-        // ASTAR_SYNC=1: the old one-shot search (6b-head's), to isolate the slicing in the tree-vs-head
-        // portal gap (cycle 5: tree + search-time budget 11/23 vs 6b-head 16/26). No ticks during the search.
-        static SYNC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *SYNC.get_or_init(|| std::env::var("ASTAR_SYNC").ok().as_deref() == Some("1")) {
-            return Ok(crate::path::get_path_to(&self.world, start, goal, self.movement.clone(), -1.0, total));
-        }
-        // Ticks now run while planning, so release the movement keys first: the old synchronous
-        // search froze the bot in place, and walking on stale keys for up to 2 s near lava is not
-        // safe. Sneak (edge safety) and the watchdog's jump are left as they are.
-        for k in ["forward", "back", "left", "right", "sprint"] {
-            self.set_control_state(k, false);
-        }
-        let mut astar = AStar::new(Move::start(start.0, start.1, start.2), goal, -1.0);
-        loop {
-            let r = {
-                let mv = Movements::new(&self.world, self.movement.clone());
-                astar.compute(goal, &mv, Duration::from_millis(40), total)
-            };
-            if r.status != PathStatus::Partial {
-                return Ok(r);
-            }
-            self.drive_tick().await?;
-        }
+        Ok(crate::path::get_path_to(&self.world, start, goal, self.movement.clone(), -1.0, total))
     }
 
     pub async fn goto_goal(&mut self, goal: &dyn Goal, timeout: Duration) -> std::io::Result<bool> {
@@ -2125,19 +2101,6 @@ impl<'a> Bot<'a> {
             let dx = next.x as f64 + 0.5 - p.x;
             let dz = next.z as f64 + 0.5 - p.z;
             let dy = next.y as f64 - p.y;
-            // LIVE lava check against the current world, not the one A* planned on (lava flows; a
-            // slice-planned path can be seconds old): the waypoint's feet or floor cell is lava now →
-            // re-plan. And never sprint toward a waypoint with lava within 1 — sprint momentum carried
-            // bots off lake edges (6c+lsm8 rust-gym-004: walking west at −54, feet cell lava at −55).
-            let lava_at = |b: &Self, x: i32, y: i32, z: i32| {
-                b.registry.blocks_by_state_id.get(&b.block_state_at(x, y, z)).map(|bl| bl.name.contains("lava")).unwrap_or(false)
-            };
-            let safe = crate::learn::safe_fixes();
-            if safe && (lava_at(self, next.x, next.y, next.z) || lava_at(self, next.x, next.y - 1, next.z)) {
-                self.clear_control_states();
-                return Ok(FollowOutcome::NeedRepath);
-            }
-            let lava_close = safe && (-1..=1).any(|ox| (-1..=1).any(|oz| (-1..=0).any(|oy| lava_at(self, next.x + ox, next.y + oy, next.z + oz))));
 
             // Reached the waypoint only when at/above its level (dy <= 0.6) —
             // for an upward step this forces the bot to actually CLIMB before
@@ -2174,7 +2137,7 @@ impl<'a> Bot<'a> {
             let mz = next.z as f64 + 0.5 - p.z;
             self.look((-mx).atan2(-mz), 0.0);
             self.set_control_state("forward", true);
-            self.set_control_state("sprint", !lava_close);
+            self.set_control_state("sprint", true);
             // Jump to climb only when CLOSE to the up-step (so we walk up to it with
             // ground momentum and step onto it), or for parkour. Jumping while far
             // from the step just bounces in open air with no forward progress.

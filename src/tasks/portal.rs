@@ -232,7 +232,7 @@ pub(crate) async fn place_cobble(bot: &mut Bot<'_>, pos: (i32, i32, i32)) -> boo
         // client-side at once, and a rejected placement is reverted by a block_update a few ticks
         // later, so a 3-tick re-read counted rejected caps as placed (6c+lsm13: a "capped" lava cell
         // the bot then stepped into). Never by an inventory count (the SDK doesn't decrement it).
-        bot.wait_ticks(if crate::learn::safe_fixes() { 8 } else { 3 }).await.ok();
+        bot.wait_ticks(3).await.ok();
         if solid_at(bot, pos.0, pos.1, pos.2) {
             return true;
         }
@@ -1442,7 +1442,7 @@ pub(crate) fn set_frame_anchor(a: (i32, i32, i32)) {
 /// The frame anchor of the portal this bot LIT (cycle 6), persisted per bot like the anchor, which is
 /// released at lighting. enter_nether walks back to it without needing line of sight. Cleared per race
 /// (race-b.sh) and per gym trial.
-fn lit_portal_path() -> String {
+pub(crate) fn lit_portal_path() -> String {
     format!(".portal-{}.txt", std::env::var("MC_USERNAME").unwrap_or_else(|_| "bot".into()))
 }
 pub(crate) fn lit_portal() -> Option<(i32, i32, i32)> {
@@ -2370,29 +2370,13 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             }
             cast_debug(&format!("prepare: pre-scoop heal → hp={:.0}", bot.health));
         }
-        // Through the sealed station too (unless REFILL_LEGACY=1). The old fill_bucket scoop killed
-        // rust-gym-001 twice beside one pool in batch 3: two seconds into `fill lava` it stood IN the
-        // −55 surface cell at hp 10. Same goal as before: up to 10 lava, keeping 1 empty bucket.
-        if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") {
-            let p = bot.entity.position;
-            let here = (p.x.floor() as i32, feet_y(bot), p.z.floor() as i32);
-            let ok = crate::tasks::portal_mold::station_refill(bot, here, Some(lava), 10, 1, false).await;
-            cast_debug(&format!("prepare: early scoop (station) ok={ok} → lava_buckets={}", count_items(bot, "lava_bucket")));
-        }
-        let mut misses = if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") { 5 } else { 0 };
-        while misses < 5 && count_items(bot, "lava_bucket") < 10 && count_items(bot, "bucket") >= 2 {
-            let before = count_items(bot, "lava_bucket");
-            fill_bucket(bot, "lava").await;
-            if count_items(bot, "lava_bucket") > before {
-                misses = 0;
-            } else {
-                misses += 1;
-                if misses >= 5 {
-                    break;
-                }
-            }
-        }
-        cast_debug(&format!("prepare: early scoop → lava_buckets={}", count_items(bot, "lava_bucket")));
+        // Through the sealed station. The old fill_bucket scoop killed rust-gym-001 twice beside one pool
+        // in batch 3: two seconds into `fill lava` it stood IN the −55 surface cell at hp 10. Up to 10 lava,
+        // keeping 1 empty bucket.
+        let p = bot.entity.position;
+        let here = (p.x.floor() as i32, feet_y(bot), p.z.floor() as i32);
+        let ok = crate::tasks::portal_mold::station_refill(bot, here, Some(lava), 10, 1, false).await;
+        cast_debug(&format!("prepare: early scoop (station) ok={ok} → lava_buckets={}", count_items(bot, "lava_bucket")));
     }
     // Remember WHERE we scooped safely — refills return here rather than re-finding a stand.
     if count_items(bot, "lava_bucket") >= 1 {
@@ -2498,11 +2482,6 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             bot.find_exposed_blocks("lava", 32, 64).len()
         ));
     }
-    // Legacy only: with the station, a 0-lava early scoop must re-site, not improvise with the old
-    // fill_bucket (the path that killed rust-gym-001 twice beside one pool in batch 3).
-    if std::env::var("REFILL_LEGACY").as_deref() == Ok("1") && count_items(bot, "lava_bucket") < 1 && count_items(bot, "bucket") >= 1 {
-        fill_bucket(bot, "lava").await;
-    }
     // Return to the frame anchor (precisely) so build_nether_portal anchors there. The anchor is now
     // usually the station stand, whose open side O is air over lava. A jumping `walk_to_xz` (real ticks)
     // from 0.5 off killed batch 6b rust-gym-002 right after `prepare pre-fill`. Already close → a
@@ -2601,7 +2580,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     if near_count >= 10 && anchored_present < 10 {
         cast_debug(&format!("build: {near_count} obsidian within 8 but the stored mold reads {anchored_present}/10 — not treated as cast"));
     }
-    let cast_already = if crate::learn::safe_fixes() { anchored_present >= 10 } else { near_count >= 10 };
+    let cast_already = near_count >= 10;
     if cast_already {
         // Frame complete — fall through to lighting. KEEP the anchor: clearing it here made the
         // next lines anchor a brand-new frame at the bot's feet when lighting failed once
