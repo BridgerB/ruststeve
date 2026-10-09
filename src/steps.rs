@@ -467,7 +467,8 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "find_fortress" => tasks::nether::find_fortress(bot, mem).await,
         "kill_blaze" => tasks::nether::kill_blaze(bot, mem, 1).await,
         "gather_blaze_rods" => tasks::nether::kill_blaze(bot, mem, 7).await,
-        "get_pearls" | "craft_eyes" | "find_stronghold" | "enter_end" | "kill_dragon" | "exit_end" => {
+        "get_pearls" => tasks::nether::barter_pearls(bot, mem, 12).await,
+        "craft_eyes" | "find_stronghold" | "enter_end" | "kill_dragon" | "exit_end" => {
             failure(format!("step {id} not implemented yet (end-game skeleton)"))
         }
         other => failure(format!("no executor for step {other}")),

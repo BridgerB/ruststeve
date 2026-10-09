@@ -454,3 +454,56 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
         failure(format!("no blaze rod yet ({rods}/{target_rods}) — will keep hunting"))
     }
 }
+
+/// PEARLS BY BARTER (cycle 6, Phase 4 baseline; no design beyond throw-gold-and-collect): walk to the
+/// nearest piglin, look at it, toss ONE gold ingot, wait for the 6 s barter, then walk over every item
+/// within 8 blocks so its drop is picked up. Repeats until `target` pearls or no gold. Piglins attack a
+/// player without gold armour, so the kit wears a golden helmet.
+pub async fn barter_pearls(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target: i32) -> StepResult {
+    let deadline = Instant::now() + Duration::from_secs(150);
+    let gold = bot.registry.items_by_name.get("gold_ingot").map(|d| d.id);
+    let piglin = bot.registry.entities_by_name.get("piglin").map(|d| d.id);
+    let item = bot.registry.entities_by_name.get("item").map(|d| d.id);
+    let mut tossed = 0;
+    while count_items(bot, "ender_pearl") < target && count_items(bot, "gold_ingot") > 0 && Instant::now() < deadline {
+        let me = bot.entity.position;
+        let Some((pid, pp)) = bot
+            .entities
+            .values()
+            .filter(|e| e.is_valid && (e.entity_type == piglin || e.name.as_deref() == Some("piglin")) && horiz_dist(e.position, me) <= 32.0)
+            .map(|e| (e.id, e.position))
+            .min_by(|a, b| horiz_dist(a.1, me).total_cmp(&horiz_dist(b.1, me)))
+        else {
+            println!("    [pearls] no piglin within 32");
+            return failure("no piglin within 32 blocks");
+        };
+        if horiz_dist(pp, me) > 3.0 {
+            let _ = bot.goto_near(pp.x.floor() as i32, pp.y.floor() as i32, pp.z.floor() as i32, 2.5).await;
+        }
+        let Some(pp) = bot.entities.get(&pid).map(|e| e.position) else { continue };
+        bot.look_at(vec3(pp.x, pp.y + 0.9, pp.z));
+        bot.wait_ticks(2).await.ok();
+        if let Some(g) = gold {
+            let _ = bot.toss(g, 1).await;
+            tossed += 1;
+        }
+        // The piglin walks to the ingot, inspects it ~6 s, then throws its barter item toward the player.
+        bot.wait_ticks(160).await.ok();
+        let me = bot.entity.position;
+        let drops: Vec<Vec3> = bot
+            .entities
+            .values()
+            .filter(|e| e.is_valid && (e.entity_type == item || e.name.as_deref() == Some("item")) && horiz_dist(e.position, me) <= 8.0)
+            .map(|e| e.position)
+            .collect();
+        for d in drops {
+            let _ = bot.goto_near(d.x.floor() as i32, d.y.floor() as i32, d.z.floor() as i32, 0.8).await;
+        }
+        println!("    [pearls] tossed {tossed}, pearls {}, gold left {}", count_items(bot, "ender_pearl"), count_items(bot, "gold_ingot"));
+    }
+    if count_items(bot, "ender_pearl") >= target {
+        success(&format!("{} pearls after {tossed} ingots", count_items(bot, "ender_pearl")))
+    } else {
+        failure(&format!("{} pearls after {tossed} ingots", count_items(bot, "ender_pearl")))
+    }
+}

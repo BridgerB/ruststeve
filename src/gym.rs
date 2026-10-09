@@ -38,6 +38,13 @@ pub enum GymSetup {
     Tunnel,
     /// Random surface teleport (`spreadplayers` in 0..10k) — the terrain-variance test.
     RandomSurface,
+    /// The Nether beside a real fortress (cycle 6, blaze_rod slug): `locate structure fortress` by RCON from a
+    /// per-trial random point (harness only; the bot gets no coordinates), then `spreadplayers … under 100`
+    /// onto solid ground within 16 blocks of it.
+    NetherFortress,
+    /// The Nether in a crimson forest with three piglins summoned 4–6 blocks away (cycle 6, pearls slug):
+    /// `locate biome crimson_forest` by RCON, bot placed by `spreadplayers`, golden helmet worn.
+    NetherPiglins,
     /// A REAL lake each trial (cycle 5): the surface of a random water body with no land within 8 and
     /// dry shore 9–48 blocks out. A fixed lake (water_wall_i8) wore out under ~80 trials of digging and
     /// building: target-wade went 4/10 then 0/10 at the same spot.
@@ -181,6 +188,8 @@ pub static GYM_STEPS: &[GymStep] = &[
     GymStep { slug: "iron_repro", label: "Iron, race lane (22 iron)", order: 0, prereq: &["stone_pickaxe 1", "cobblestone 16", "cooked_beef 8"], step_id: "mine_iron", timeout_secs: 1800, custom_pass: Some(|bot, _| count_items(bot, "raw_iron") + count_items(bot, "iron_ingot") + count_items(bot, "iron_ore") + count_items(bot, "deepslate_iron_ore") >= 22), setup: GymSetup::FixedSurface { x: 300900, z: 350 } },
     // Cycle 4 Part 6, skill 12: kitted teleport into the End, crystals gone, beds detonated at the perch.
     // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
+    GymStep { slug: "blaze_rod", label: "Blaze rod at a real fortress (kit, tp)", order: 0, prereq: &["iron_sword 1", "iron_helmet 1", "iron_chestplate 1", "iron_leggings 1", "iron_boots 1", "shield 1", "cooked_beef 16", "cobblestone 64", "iron_pickaxe 1"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "blaze_rod") >= 1), setup: GymSetup::NetherFortress },
+    GymStep { slug: "pearls", label: "Pearls by bartering 40 gold with piglins", order: 0, prereq: &["gold_ingot 40", "iron_sword 1", "cooked_beef 16", "cobblestone 64"], step_id: "get_pearls", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "ender_pearl") >= 4), setup: GymSetup::NetherPiglins },
     GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1", "obsidian 32"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
     GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
     // Cycle 5 Phase 3: the race from "wood and stone tools done" to an iron pickaxe, through the real
@@ -675,6 +684,18 @@ async fn run_one_trial(
         pass = server_pass;
         last_msg = format!("server iron_pickaxe check: {} | {last_msg}", truth.trim());
     }
+    // blaze_rod / pearls: the server's item count, never the client's (cycle 6, Phase 4).
+    for (slug, item, need) in [("blaze_rod", "blaze_rod", 1), ("pearls", "ender_pearl", 4)] {
+        if step.slug == slug {
+            let truth = rcon_driving(bot, rcon, &format!("clear {name} minecraft:{item} 0")).await;
+            let n: i32 = truth.split_whitespace().find_map(|w| w.parse().ok()).unwrap_or(0);
+            if pass != (n >= need) {
+                last_msg = format!("client said {pass}, server said {} | {last_msg}", n >= need);
+            }
+            pass = n >= need;
+            last_msg = format!("server {item} count {n} | {last_msg}");
+        }
+    }
     // Dragon slug: ground truth from the server, never the bot's own view (cycle 4 Part 3).
     if step.slug == "dragon" {
         let alive = rcon_driving(bot, rcon, "execute in minecraft:the_end if entity @e[type=minecraft:ender_dragon]").await;
@@ -1046,6 +1067,50 @@ async fn setup_trial(
             let p = bot.entity.position;
             println!("[gym] EndDragon: in {} at ({:.0},{:.0},{:.0}), crystals killed, dragon ensured", bot.game.dimension, p.x, p.y, p.z);
             return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, 0, 0);
+        }
+        GymSetup::NetherFortress | GymSetup::NetherPiglins => {
+            let nether = |c: &str| format!("execute in minecraft:the_nether run {c}");
+            // A per-trial origin in the Nether (overworld trial centre / 8), so trials use different structures.
+            let (ox, oz) = (cx / 8, cz / 8);
+            let query = if matches!(step.setup, GymSetup::NetherFortress) { "locate structure minecraft:fortress" } else { "locate biome minecraft:crimson_forest" };
+            let out = rcon_driving(bot, rcon, &format!("execute in minecraft:the_nether positioned {ox} 64 {oz} run {query}")).await;
+            let nums: Vec<i32> = out
+                .split(['[', ']'])
+                .nth(1)
+                .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+                .unwrap_or_default();
+            let (tx, tz) = match nums.as_slice() {
+                [x, z] | [x, _, z] => (*x, *z),
+                _ => {
+                    println!("[gym] nether locate failed: {out}");
+                    SETUP_NO_LAND.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return (0, 0, 0, cx, cz);
+                }
+            };
+            let _ = rcon_driving(bot, rcon, &nether(&format!("forceload add {} {} {} {}", tx - 24, tz - 24, tx + 24, tz + 24))).await;
+            for _ in 0..90 {
+                if rcon_driving(bot, rcon, &format!("execute in minecraft:the_nether if loaded {tx} 64 {tz}")).await.contains("passed") {
+                    break;
+                }
+                bot.wait_ticks(20).await.ok();
+            }
+            let _ = rcon_driving(bot, rcon, &nether(&format!("spreadplayers {tx} {tz} 0 16 under 100 false {name}"))).await;
+            for _ in 0..60 {
+                if bot.game.dimension.contains("nether") {
+                    break;
+                }
+                bot.wait_ticks(10).await.ok();
+            }
+            bot.wait_ticks(40).await.ok();
+            if matches!(step.setup, GymSetup::NetherPiglins) {
+                let _ = rcon_driving(bot, rcon, &format!("item replace entity {name} armor.head with minecraft:golden_helmet")).await;
+                for (dx, dz) in [(4, 0), (5, 2), (4, -2)] {
+                    let _ = rcon_driving(bot, rcon, &format!("execute in minecraft:the_nether at {name} run summon minecraft:piglin ~{dx} ~ ~{dz} {{IsImmuneToZombification:1b}}")).await;
+                }
+            }
+            let p = bot.entity.position;
+            println!("[gym] {} target ({tx},{tz}): bot in {} at ({:.0},{:.0},{:.0})", query, bot.game.dimension, p.x, p.y, p.z);
+            return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, tx, tz);
         }
         GymSetup::FixedSurface { x, z } => {
             let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", x - 16, z - 16, x + 16, z + 16)).await;
