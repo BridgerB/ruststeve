@@ -160,6 +160,10 @@ pub(crate) fn build_block(bot: &Bot) -> &'static str {
         "cobblestone"
     } else if count_items(bot, "cobbled_deepslate") > 0 {
         "cobbled_deepslate"
+    } else if count_items(bot, "netherrack") > 0 {
+        // The Nether tunnel digs netherrack every step: race i12 rust-race-004 ran out of cobble at y 33 over the
+        // lava sea and shuttled between its tunnel's two open ends for an hour holding none of this.
+        "netherrack"
     } else {
         "dirt"
     }
@@ -167,7 +171,7 @@ pub(crate) fn build_block(bot: &Bot) -> &'static str {
 
 /// Total throwaway scaffold blocks on hand (cobble of either kind + dirt).
 pub(crate) fn scaffold_count(bot: &Bot) -> i32 {
-    count_items(bot, "cobblestone") + count_items(bot, "cobbled_deepslate") + count_items(bot, "dirt")
+    count_items(bot, "cobblestone") + count_items(bot, "cobbled_deepslate") + count_items(bot, "netherrack") + count_items(bot, "dirt")
 }
 
 /// The face on the reference block `ref = pos + d` that points back toward `pos`

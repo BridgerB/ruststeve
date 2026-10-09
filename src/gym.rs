@@ -54,6 +54,9 @@ pub enum GymSetup {
     /// Race i11 rust-race-004's Nether arrival (cycle 6): beside a real fortress but boxed in by a portal frame,
     /// obsidian on ±X and netherrack on ±Z, obsidian overhead.
     NetherPortalPocket,
+    /// Race i12's find_fortress wall (cycle 6, 3.02 of 4.15 bot-hours past budget): a race-like kit 160 blocks
+    /// along ±X from a real fortress (harness locate only), on solid ground at about the same height.
+    NetherFar,
     /// A REAL lake each trial (cycle 5): the surface of a random water body with no land within 8 and
     /// dry shore 9–48 blocks out. A fixed lake (water_wall_i8) wore out under ~80 trials of digging and
     /// building: target-wade went 4/10 then 0/10 at the same spot.
@@ -199,6 +202,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
     GymStep { slug: "blaze_rod", label: "Blaze rod at a real fortress (kit, tp)", order: 0, prereq: &["iron_sword 1", "iron_helmet 1", "iron_chestplate 1", "iron_leggings 1", "iron_boots 1", "shield 1", "cooked_beef 16", "cobblestone 64", "iron_pickaxe 1"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "blaze_rod") >= 1), setup: GymSetup::NetherFortress },
     GymStep { slug: "nether_portal_exit", label: "Leave a Nether portal pocket, no fortress in view (race i11)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8", "iron_sword 1"], step_id: "find_fortress", timeout_secs: 180, custom_pass: Some(|bot, _| POCKET_START.lock().unwrap().is_some_and(|(x, z)| (bot.entity.position.x - x as f64 - 0.5).hypot(bot.entity.position.z - z as f64 - 0.5) > 4.0)), setup: GymSetup::NetherPortalPocket },
+    GymStep { slug: "nether_far", label: "Find a fortress 160 blocks away (race i12 wall)", order: 0, prereq: &["iron_pickaxe 1", "iron_sword 1", "cobblestone 16", "cooked_beef 16"], step_id: "find_fortress", timeout_secs: 600, custom_pass: Some(|_, s| s.world.fortress_found), setup: GymSetup::NetherFar },
     GymStep { slug: "pearls", label: "Pearls by bartering 40 gold with piglins", order: 0, prereq: &["gold_ingot 40", "iron_sword 1", "cooked_beef 16", "cobblestone 64"], step_id: "get_pearls", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "ender_pearl") >= 4), setup: GymSetup::NetherPiglins },
     GymStep { slug: "enter_own_portal", label: "Enter its own lit portal, out of view (race i9 wall)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8"], step_id: "enter_nether", timeout_secs: 120, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::OwnPortalHidden },
     GymStep { slug: "enter_portal_front", label: "Enter its own lit portal from the cell in front (race i11)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8"], step_id: "enter_nether", timeout_secs: 120, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::OwnPortalFront },
@@ -563,7 +567,7 @@ async fn run_one_trial(
         // Nether slugs: a death respawns in the overworld, and the tp-back below is an OVERWORLD tp to Nether
         // coordinates (blaze_rod 2026-10-09: the bot came back 57,818 blocks off at x 3470 in the overworld and
         // ran mine_iron). A death there ends the trial.
-        if !s.alive && matches!(step.setup, GymSetup::NetherFortress | GymSetup::NetherPiglins | GymSetup::NetherPortalPocket) {
+        if !s.alive && matches!(step.setup, GymSetup::NetherFortress | GymSetup::NetherPiglins | GymSetup::NetherPortalPocket | GymSetup::NetherFar) {
             bot.respawn().await.ok();
             bot.wait_ticks(20).await.ok();
             last_msg = format!("died in the Nether | last: {last_msg}");
@@ -1094,13 +1098,13 @@ async fn setup_trial(
             println!("[gym] EndDragon: in {} at ({:.0},{:.0},{:.0}), crystals killed, dragon ensured", bot.game.dimension, p.x, p.y, p.z);
             return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, 0, 0);
         }
-        GymSetup::NetherFortress | GymSetup::NetherPiglins | GymSetup::NetherPortalPocket => {
+        GymSetup::NetherFortress | GymSetup::NetherPiglins | GymSetup::NetherPortalPocket | GymSetup::NetherFar => {
             let nether = |c: &str| format!("execute in minecraft:the_nether run {c}");
             // A per-trial origin in the Nether (overworld trial centre / 8), so trials use different structures.
             let (ox, oz) = (cx / 8, cz / 8);
             // The pocket must NOT be near a fortress: with brick in the loaded chunks find_fortress never reaches the
             // wander tunnel that race i11 stuck in (old build 11/12 there). A crimson forest is fortress-free terrain.
-            let query = if matches!(step.setup, GymSetup::NetherFortress) { "locate structure minecraft:fortress" } else { "locate biome minecraft:crimson_forest" };
+            let query = if matches!(step.setup, GymSetup::NetherFortress | GymSetup::NetherFar) { "locate structure minecraft:fortress" } else { "locate biome minecraft:crimson_forest" };
             // Pocket: a spot whose nearest fortress is > 200 blocks off, so find_fortress has nothing in view and
             // must sweep (race i11). Shift the origin 400 east until locate agrees (harness-only knowledge).
             let (mut ox, oz) = (ox, oz);
@@ -1125,6 +1129,7 @@ async fn setup_trial(
                 .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
                 .unwrap_or_default();
             let (tx, tz) = match nums.as_slice() {
+                [x, z] | [x, _, z] if matches!(step.setup, GymSetup::NetherFar) => (*x + if rand::Rng::gen_bool(&mut rand::thread_rng(), 0.5) { 160 } else { -160 }, *z),
                 [x, z] | [x, _, z] => (*x, *z),
                 _ => {
                     println!("[gym] nether locate failed: {out}");

@@ -265,12 +265,12 @@ async fn nether_tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
     for c in cells.iter().copied().chain(std::iter::once((ax, fy - 1, az))) {
         for (ox, oy, oz) in [(dx, 0, dz), (0, 1, 0), (0, -1, 0), (dz, 0, dx), (-dz, 0, -dx)] {
             let n = (c.0 + ox, c.1 + oy, c.2 + oz);
-            if is_lava(&name_at(bot, n.0, n.1, n.2)) && count_items(bot, "cobblestone") > 0 {
+            if is_lava(&name_at(bot, n.0, n.1, n.2)) && crate::tasks::portal::scaffold_count(bot) > 0 {
                 place_cobble(bot, n).await;
             }
         }
     }
-    if !is_solid_name(&name_at(bot, ax, fy - 1, az)) && count_items(bot, "cobblestone") > 0 {
+    if !is_solid_name(&name_at(bot, ax, fy - 1, az)) && crate::tasks::portal::scaffold_count(bot) > 0 {
         place_cobble(bot, (ax, fy - 1, az)).await;
     }
     for c in cells {
