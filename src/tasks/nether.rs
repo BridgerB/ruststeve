@@ -275,6 +275,19 @@ async fn nether_tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
 /// already flailed at). A blaze the bot swung a full set at without killing is almost certainly a
 /// stale entity the server already removed (missed entity_remove) sitting on top of us — it would
 /// otherwise be picked as "nearest" every time and starve the real blazes of attacks.
+/// The nearest non-blaze hostile within `range` (horizontal): the fortress and wastes mobs that killed blaze
+/// hunters in the cycle-6 gym.
+fn nearest_hostile(bot: &Bot, range: f64) -> Option<(i32, String)> {
+    const HOSTILE: [&str; 6] = ["wither_skeleton", "skeleton", "hoglin", "magma_cube", "zombified_piglin", "piglin_brute"];
+    let me = bot.entity.position;
+    bot.entities
+        .values()
+        .filter(|e| e.is_valid && horiz_dist(e.position, me) <= range && (e.position.y - me.y).abs() < 3.0)
+        .filter_map(|e| e.name.as_deref().filter(|n| HOSTILE.contains(n)).map(|n| (e.id, n.to_string(), horiz_dist(e.position, me))))
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(id, n, _)| (id, n))
+}
+
 fn nearest_blaze(bot: &Bot, skip: &std::collections::HashSet<i32>, max_range: f64) -> Option<(i32, Vec3)> {
     let blaze_id = bot.registry.entities_by_name.get("blaze").map(|d| d.id);
     let me = bot.entity.position;
@@ -314,6 +327,23 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
             eat_if_hurt(bot).await;
         }
 
+        // DEFEND first (cycle 6 blaze_rod gym: 3 of 10 deaths to wither skeletons the hunt never fought).
+        // Any other hostile within 4 blocks gets the sword until it dies or backs off.
+        if let Some((hid, name)) = nearest_hostile(bot, 4.0) {
+            println!("    [dbg] defending against {name} {hid}");
+            for _ in 0..12 {
+                let Some(hp) = bot.entities.get(&hid).map(|e| e.position) else { break };
+                if horiz_dist(hp, bot.entity.position) > 4.5 {
+                    break;
+                }
+                bot.look_at(vec3(hp.x, hp.y + 1.0, hp.z));
+                if bot.attack(hid).await.is_err() {
+                    break;
+                }
+                let _ = bot.wait_real_ms(450).await;
+            }
+            continue;
+        }
         if let Some((id, bpos)) = nearest_blaze(bot, &ghosts, 12.0) {
             if horiz_dist(bpos, bot.entity.position) > 3.0 {
                 let _ = bot.goto_near(bpos.x.floor() as i32, bpos.y.floor() as i32, bpos.z.floor() as i32, 2.0).await;
