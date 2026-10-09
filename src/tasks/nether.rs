@@ -138,6 +138,20 @@ pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepRes
         // ENCLOSED approach while far: tunnel toward the brick (dominant axis each step) instead of a
         // pathfinder walk over open terrain — harness 08:52: one bot fell from the open route into the
         // lava sea at the SAME spot (-11.5,28,182) three times (ghast knockback over the sea).
+        // Fortress BELOW (blaze_rod gym, cycle 6: brick at y 51 under a y 98 landing, 0 horizontal blocks
+        // away): the horizontal tunnel below stops at once and the pathfinder cannot dig down 47 blocks, so
+        // the step failed 4× and the trial ended. Dig down to the brick's level first (the portal descent:
+        // never onto or beside lava, never into an air pocket), then tunnel across.
+        if pos.1 + 3 < crate::tasks::portal::feet_y(bot) {
+            let from = crate::tasks::portal::feet_y(bot);
+            for _ in 0..4 {
+                crate::tasks::portal::descend_to_y(bot, pos.1 + 1).await;
+                if crate::tasks::portal::feet_y(bot) <= pos.1 + 3 {
+                    break;
+                }
+            }
+            println!("    [dbg] fortress below: descended {from} -> {} toward brick y {}", crate::tasks::portal::feet_y(bot), pos.1);
+        }
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut blocked = 0;
         while Instant::now() < deadline {
