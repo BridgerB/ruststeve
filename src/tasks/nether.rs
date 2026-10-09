@@ -103,6 +103,9 @@ async fn eat_if_hurt(bot: &mut Bot<'_>) {
 /// Search for a nether fortress by sweeping along the X axis (fortresses generate in
 /// X-aligned bands), stopping when nether brick comes into view. Hardened vs steve's
 /// raw sprint: bridge cobble over lava gaps and bail off lava rather than walk in.
+/// Consecutive X-sweep flips with no step taken (reset on any successful step).
+static FLIPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepResult {
     {
         let p = bot.entity.position;
@@ -211,12 +214,27 @@ pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepRes
         let (fx, fy, fz) = (bot.entity.position.x.floor() as i32, feet_y(bot), bot.entity.position.z.floor() as i32);
         if !nether_tunnel_step(bot, dir, 0).await {
             stuck += 1;
+            // Blocked both ways along X (race i11 rust-race-004 sat in its Nether arrival portal at (4236,89,78):
+            // the frame's obsidian on ±X, never dug, and the sweep flipped between them forever). After the first
+            // flip, step out along ±Z before sweeping X again.
+            if stuck >= 2 && FLIPS.load(std::sync::atomic::Ordering::Relaxed) >= 1 {
+                for dz in [1, -1] {
+                    if nether_tunnel_step(bot, 0, dz).await && nether_tunnel_step(bot, 0, dz).await {
+                        println!("    [dbg] nether: X blocked both ways — stepped out along z {dz}");
+                        FLIPS.store(0, std::sync::atomic::Ordering::Relaxed);
+                        stuck = 0;
+                        break;
+                    }
+                }
+            }
             if stuck >= 4 {
                 *WANDER_DIR.lock().unwrap() = -dir;
+                FLIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 return failure(format!("nether tunnel stuck at ({fx},{fy},{fz}) dir={dir} — flipping"));
             }
         } else {
             stuck = 0;
+            FLIPS.store(0, std::sync::atomic::Ordering::Relaxed);
         }
         if horiz_dist(bot.entity.position, start) > 180.0 {
             *WANDER_DIR.lock().unwrap() = -dir;
@@ -238,7 +256,10 @@ async fn nether_tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
         eat_if_hurt(bot).await;
     }
     let p0 = bot.entity.position;
-    let (fx, fy, fz) = (p0.x.floor() as i32, feet_y(bot), p0.z.floor() as i32);
+    // Feet from y + 0.01: standing on a block top reads 83.9999…, and floor() put the feet one block low, so
+    // the step tested the FLOOR row as "ahead". At race i11 rust-race-004's Nether arrival that row was the
+    // portal frame's bottom obsidian on both ±X: "blocked … ahead=obsidian head=air", forever.
+    let (fx, fy, fz) = (p0.x.floor() as i32, (p0.y + 0.01).floor() as i32, p0.z.floor() as i32);
     let (ax, az) = (fx + dx, fz + dz);
     let cells = [(ax, fy, az), (ax, fy + 1, az)];
     for c in cells.iter().copied().chain(std::iter::once((ax, fy - 1, az))) {
