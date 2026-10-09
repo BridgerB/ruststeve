@@ -41,6 +41,9 @@ pub enum GymSetup {
     /// Race i9's enter_nether wall (cycle 6): a LIT portal the bot built (its lit record is written) in a stone
     /// room at y 20, reachable through an L-shaped corridor but out of line of sight from the bot's start.
     OwnPortalHidden,
+    /// Race i11 rust-race-005 (cycle 6): its own lit portal straight ahead, the bot one cell in front of it in the
+    /// same column, nothing between (it stood at z 734.7 before a portal at z 735 for three hours).
+    OwnPortalFront,
     /// The Nether beside a real fortress (cycle 6, blaze_rod slug): `locate structure fortress` by RCON from a
     /// per-trial random point (harness only; the bot gets no coordinates), then `spreadplayers … under 100`
     /// onto solid ground within 16 blocks of it.
@@ -198,6 +201,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     GymStep { slug: "nether_portal_exit", label: "Leave a Nether portal pocket, no fortress in view (race i11)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8", "iron_sword 1"], step_id: "find_fortress", timeout_secs: 180, custom_pass: Some(|bot, _| POCKET_START.lock().unwrap().is_some_and(|(x, z)| (bot.entity.position.x - x as f64 - 0.5).hypot(bot.entity.position.z - z as f64 - 0.5) > 4.0)), setup: GymSetup::NetherPortalPocket },
     GymStep { slug: "pearls", label: "Pearls by bartering 40 gold with piglins", order: 0, prereq: &["gold_ingot 40", "iron_sword 1", "cooked_beef 16", "cobblestone 64"], step_id: "get_pearls", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "ender_pearl") >= 4), setup: GymSetup::NetherPiglins },
     GymStep { slug: "enter_own_portal", label: "Enter its own lit portal, out of view (race i9 wall)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8"], step_id: "enter_nether", timeout_secs: 120, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::OwnPortalHidden },
+    GymStep { slug: "enter_portal_front", label: "Enter its own lit portal from the cell in front (race i11)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8"], step_id: "enter_nether", timeout_secs: 120, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::OwnPortalFront },
     GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1", "obsidian 32", "iron_pickaxe 1"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
     GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
     // Cycle 5 Phase 3: the race from "wood and stone tools done" to an iron pickaxe, through the real
@@ -1189,7 +1193,7 @@ async fn setup_trial(
             bot.wait_ticks(10).await.ok();
             let _ = rcon_driving(bot, rcon, &format!("execute positioned {} 0 {z} positioned over motion_blocking_no_leaves run spawnpoint {name} ~ ~ ~", x + 3)).await;
         }
-        GymSetup::OwnPortalHidden => {
+        GymSetup::OwnPortalHidden | GymSetup::OwnPortalFront => {
             // Room x cx..cx+12, z cz..cz+6, floor y 19, air y 20..24. A wall at x cx+6 with a door only at
             // z cz (the far corner): the bot starts at (cx+2, cz+5), the portal (frame plane z = cz+5) sits at
             // x cx+8..cx+11, so the wall blocks every sightline and the walk is an L through the door.
@@ -1211,7 +1215,12 @@ async fn setup_trial(
                 let _ = rcon_driving(bot, rcon, c).await;
             }
             let _ = std::fs::write(crate::tasks::portal::lit_portal_path(), format!("{} {ty} {}", cx + 8, cz + 5));
-            let (sx, sz) = (cx + 2, cz + 5);
+            let front = matches!(step.setup, GymSetup::OwnPortalFront);
+            if front {
+                // Open the wall: one room, the bot right in front of the portal cell.
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {ty} {} {} {} {} minecraft:air", cx + 6, cz + 1, cx + 6, ty + 4, cz + 6)).await;
+            }
+            let (sx, sz) = if front { (cx + 9, cz + 4) } else { (cx + 2, cz + 5) };
             let _ = rcon_driving(bot, rcon, &format!("tp {name} {sx} {ty} {sz}")).await;
             pump_teleport(bot, sx, sz).await;
             bot.wait_ticks(20).await.ok();
