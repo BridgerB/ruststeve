@@ -188,6 +188,12 @@ pub struct Bot<'a> {
     pub escaping: bool,
     /// Set by the escape only while a route leg dives (jump released on purpose).
     pub escape_diving: bool,
+    /// LAVA SIGHTINGS (cycle 6, Part 3): every lava SOURCE the bot has seen with an air face, with the
+    /// time (ms since epoch) it was first seen. Filled from the loaded chunks every few seconds by the tick
+    /// driver during every step, so lava passed at minute 40 is still known at the portal step. Persists
+    /// across deaths; cleared on a dimension change (a new world). Site selection reads only this.
+    pub lava_seen: HashMap<(i32, i32, i32), u64>,
+    lava_scan_last: Instant,
 }
 
 fn block_pos(x: i32, y: i32, z: i32) -> PValue {
@@ -277,6 +283,8 @@ impl<'a> Bot<'a> {
             wet_since: None,
             escaping: false,
             escape_diving: false,
+            lava_seen: HashMap::new(),
+            lava_scan_last: Instant::now(),
             view_last: Instant::now(),
             viewer: {
                 if std::env::var("RUST_VIEW").is_ok() {
@@ -349,6 +357,10 @@ impl<'a> Bot<'a> {
         if self.heartbeat_last.elapsed() >= std::time::Duration::from_secs(10) {
             self.heartbeat_last = Instant::now();
             let _ = std::fs::write(format!(".heartbeat-{}", self.username()), b"");
+        }
+        if self.lava_scan_last.elapsed() >= std::time::Duration::from_secs(5) {
+            self.lava_scan_last = Instant::now();
+            self.record_lava_sightings();
         }
         if elapsed >= TICK {
             self.breath_watchdog();
@@ -635,6 +647,7 @@ impl<'a> Bot<'a> {
                     if self.game.dimension != dim {
                         self.world.columns.clear();
                         self.entities.clear();
+                        self.lava_seen.clear();
                     }
                     self.game.dimension = dim.to_string();
                     // Update world height for the NEW dimension so chunk parsing reads the right
@@ -1324,71 +1337,88 @@ impl<'a> Bot<'a> {
     /// search covers the whole view distance (±96 blocks at view-distance 6) instead of a small
     /// radius. Cheap: a palette check per 16³ section (`ChunkSection::contains_where`) and a cell
     /// scan only inside sections that hold one of the states.
-    /// LAVA SITING (cycle 2, Phase C): every lava SOURCE block (level 0 = the block's min state)
-    /// in the loaded chunks within `y_range`, bucketed into 4×4×4 cells; returns the nearest
-    /// (to the bot, horizontally) source that has at least `min_sources` sources within `radius`
-    /// blocks, with that count. No exposure test — the bot tunnels to it. This replaces the blind
-    /// fixed-heading tunnel (cycle 1: 300 blocks of probed-solid deepslate, three pickaxes).
-    pub fn find_lava_cluster(&self, y_range: (i32, i32), min_sources: usize, radius: i32, skip: &dyn Fn((i32, i32, i32)) -> bool) -> Option<((i32, i32, i32), usize)> {
-        let def = self.registry.blocks_by_name.get("lava")?;
+    /// Record every lava SOURCE in the loaded chunks that has an AIR face (air, cave_air, void_air, or a
+    /// see-through non-fluid block such as a torch) into `lava_seen`. Lava touching only stone, lava or
+    /// an unloaded cell is never recorded: the bot cannot see it (cycle 6, decision 5).
+    pub fn record_lava_sightings(&mut self) {
+        let Some(def) = self.registry.blocks_by_name.get("lava") else { return };
         let source = def.min_state_id;
-        let mut sources: Vec<(i32, i32, i32)> = Vec::new();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let mut found: Vec<(i32, i32, i32)> = Vec::new();
         for (&(cx, cz), col) in self.world.columns.iter() {
             for (si, sec) in col.sections.iter().enumerate() {
-                let y0 = col.min_y + si as i32 * 16;
-                if y0 + 15 < y_range.0 || y0 > y_range.1 || !sec.contains_where(&|s: u32| s == source) {
+                if !sec.contains_where(&|s: u32| s == source) {
                     continue;
                 }
+                let y0 = col.min_y + si as i32 * 16;
                 for y in 0..16 {
-                    let wy = y0 + y as i32;
-                    if wy < y_range.0 || wy > y_range.1 {
-                        continue;
-                    }
                     for z in 0..16 {
                         for x in 0..16 {
                             if sec.get_block(x, y, z) == source {
-                                sources.push((cx * 16 + x as i32, wy, cz * 16 + z as i32));
+                                found.push((cx * 16 + x as i32, y0 + y as i32, cz * 16 + z as i32));
                             }
                         }
                     }
                 }
             }
         }
-        if sources.len() < min_sources {
-            return None;
+        for c in found {
+            if !self.lava_seen.contains_key(&c) && self.is_exposed(c.0, c.1, c.2) {
+                self.lava_seen.insert(c, now);
+            }
         }
-        // Bucket into 4-block cells so the radius count only visits nearby cells.
+    }
+
+    /// Was this cell ever seen as an exposed lava source (or is it one now)? The honest-lava check.
+    pub fn lava_was_seen(&self, c: (i32, i32, i32)) -> bool {
+        self.lava_seen.contains_key(&c) || (self.block_at(c.0, c.1, c.2).is_some_and(|b| b.name == "lava") && self.is_exposed(c.0, c.1, c.2))
+    }
+
+    /// DEBUG ASSERTION (cycle 6, decision 5), on in gyms (`GYM` set): a lava-site decision whose target
+    /// cell was never seen exposed panics, so no path can quietly read lava through rock again.
+    pub fn assert_lava_seen(&self, c: (i32, i32, i32), ctx: &str) {
+        if std::env::var("GYM").is_ok_and(|v| !v.is_empty()) && !self.lava_was_seen(c) {
+            panic!("X-RAY ASSERTION: lava-site decision '{ctx}' targets {c:?}, a cell never seen with an air face");
+        }
+    }
+
+    /// The largest remembered cluster of SEEN lava: among remembered sources within `horiz` blocks
+    /// horizontally and inside `y_range`, the one with the most remembered sources within 6 blocks (3D);
+    /// distance breaks ties. Sources still loaded and no longer lava (scooped, turned to obsidian) are
+    /// dropped. Returns (source, count) when the count is at least `min_count`.
+    pub fn lava_seen_cluster(&self, y_range: (i32, i32), min_count: usize, horiz: f64, skip: &dyn Fn((i32, i32, i32)) -> bool) -> Option<((i32, i32, i32), usize)> {
+        let p = self.entity.position;
+        let live: Vec<(i32, i32, i32)> = self
+            .lava_seen
+            .keys()
+            .copied()
+            .filter(|c| self.block_at(c.0, c.1, c.2).is_none_or(|b| b.name == "lava"))
+            .collect();
         let mut grid: HashMap<(i32, i32, i32), Vec<(i32, i32, i32)>> = HashMap::new();
-        for &s in &sources {
+        for &s in &live {
             grid.entry((s.0.div_euclid(4), s.1.div_euclid(4), s.2.div_euclid(4))).or_default().push(s);
         }
-        let r2 = radius * radius;
-        let cr = radius / 4 + 1;
-        let p = self.entity.position;
         let mut best: Option<((i32, i32, i32), usize, f64)> = None;
-        // Candidate centres: every source (dense lakes make this cheap enough; sources ≪ blocks).
-        for &c in &sources {
-            // A skipped source (a retired pool) still counts toward its neighbours' clusters but is
-            // never the target, so the nearest NON-retired cluster wins instead of none at all.
-            if skip(c) {
+        for &c in &live {
+            if c.1 < y_range.0 || c.1 > y_range.1 || skip(c) {
                 continue;
             }
             let d = ((c.0 as f64 + 0.5 - p.x).powi(2) + (c.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
-            if best.is_some_and(|(_, _, bd)| d >= bd) {
+            if d > horiz {
                 continue;
             }
             let (gx, gy, gz) = (c.0.div_euclid(4), c.1.div_euclid(4), c.2.div_euclid(4));
             let mut n = 0usize;
-            for dx in -cr..=cr {
-                for dy in -cr..=cr {
-                    for dz in -cr..=cr {
+            for dx in -2..=2 {
+                for dy in -2..=2 {
+                    for dz in -2..=2 {
                         if let Some(v) = grid.get(&(gx + dx, gy + dy, gz + dz)) {
-                            n += v.iter().filter(|s| (s.0 - c.0).pow(2) + (s.1 - c.1).pow(2) + (s.2 - c.2).pow(2) <= r2).count();
+                            n += v.iter().filter(|s| (s.0 - c.0).pow(2) + (s.1 - c.1).pow(2) + (s.2 - c.2).pow(2) <= 36).count();
                         }
                     }
                 }
             }
-            if n >= min_sources {
+            if n >= min_count && best.is_none_or(|(_, bn, bd)| n > bn || (n == bn && d < bd)) {
                 best = Some((c, n, d));
             }
         }
@@ -1480,14 +1510,20 @@ impl<'a> Bot<'a> {
         results
     }
 
-    fn is_exposed(&self, x: i32, y: i32, z: i32) -> bool {
+    /// A face the bot could see this block through: air (any kind), water, or a see-through non-fluid block.
+    /// Not lava (the registry marks lava `transparent`, so the old test counted every source inside a buried
+    /// lava lake as exposed, cycle 6 audit), and not an unloaded cell (nothing is known there).
+    pub fn is_exposed(&self, x: i32, y: i32, z: i32) -> bool {
         for (ox, oy, oz) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
-            match self.world.get_block_state_id(vec3((x + ox) as f64, (y + oy) as f64, (z + oz) as f64)) {
-                None | Some(0) => return true,
-                Some(s) => {
-                    if self.registry.blocks_by_state_id.get(&s).map(|d| d.transparent).unwrap_or(false) {
-                        return true;
-                    }
+            let Some(s) = self.world.get_block_state_id(vec3((x + ox) as f64, (y + oy) as f64, (z + oz) as f64)) else {
+                continue;
+            };
+            if s == 0 {
+                return true;
+            }
+            if let Some(d) = self.registry.blocks_by_state_id.get(&s) {
+                if d.name != "lava" && (d.transparent || d.name.ends_with("air")) {
+                    return true;
                 }
             }
         }

@@ -222,8 +222,12 @@ pub struct GymStore {
 
 impl GymStore {
     pub fn open() -> Self {
-        let _ = std::fs::create_dir_all("data");
-        let conn = Connection::open("data/gym.db").expect("open gym db");
+        // GYM_DB: each server profile keeps its own store (gym.sh sets data/<profile>/gym.db for local servers).
+        let path = std::env::var("GYM_DB").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "data/gym.db".to_string());
+        if let Some(dir) = std::path::Path::new(&path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let conn = Connection::open(&path).expect("open gym db");
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              CREATE TABLE IF NOT EXISTS gym_runs(
@@ -687,6 +691,17 @@ async fn run_one_trial(
 /// Reset the bot to a clean survival state, grant the step's prerequisites, and
 /// random-teleport it to a real surface spot. Returns the resulting landing
 /// `(gx,gy,gz)` plus the forceload center `(cx,cz)` so the caller can release it.
+/// The next landing of a paired set: GYM_LANDINGS is a landings-<set>.json file (array of {id, x, y, z});
+/// this bot's trials take entries GYM_LANDING_OFFSET, +1, +2, … in order. None without the env.
+fn next_landing() -> Option<(i32, i32)> {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let path = std::env::var("GYM_LANDINGS").ok().filter(|s| !s.is_empty())?;
+    let set: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let k = env("GYM_LANDING_OFFSET", "0").parse::<usize>().unwrap_or(0) + NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let l = set.as_array()?.get(k)?;
+    Some((l["x"].as_i64()? as i32, l["z"].as_i64()? as i32))
+}
+
 async fn setup_trial(
     bot: &mut Bot<'_>,
     rcon: &mut RconClient,
@@ -703,8 +718,15 @@ async fn setup_trial(
     // is never wiped). GYM_REGION=0 (unset) keeps the cycle-1 square.
     let region: i32 = env("GYM_REGION", "0").parse().unwrap_or(0);
     let (ox, oz) = if region > 0 { (region * 3000, 3000) } else { (0, 0) };
-    let cx = ox + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
-    let cz = oz + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
+    // PAIRED LANDINGS (cycle 6, decision 4): with GYM_LANDINGS set, trial k of this bot starts at landing
+    // GYM_LANDING_OFFSET + k of the pre-checked set, so every arm runs the same ordered landings.
+    let (cx, cz) = match next_landing() {
+        Some((lx, lz)) => {
+            println!("[gym] paired landing ({lx},{lz})");
+            (lx, lz)
+        }
+        None => (ox + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400), oz + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400)),
+    };
     // A DEAD bot can't be teleported by spreadplayers — it stays put, so several
     // trials in a row "run" at the same corpse spot ("0 attempts" timeouts, seen live
     // at 4822,5254 x3). Respawn first so every trial gets a fresh random location.

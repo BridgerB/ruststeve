@@ -1773,11 +1773,15 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         // -35 → -36 → -35 …) counted every 1-block dip as progress and pinned the escape at
         // relocate#1 (12 blocks) forever: rust-gym-002 logged it 96× and never left the water.
         let mut desc_min_y = i32::MAX;
-        // LAVA SITING by chunk scan (cycle 2 Phase C): the nearest cluster of ≥ 40 lava sources
-        // within 12 blocks, below the tunnel floor, from ALL loaded chunk data (not just exposed
-        // lava). Rescanned at most every 10 s as new chunks load.
+        // LAVA SITING from SEEN lava (cycle 6, Part 3): the largest remembered cluster of exposed sources
+        // (`Bot::lava_seen`) within 64 blocks horizontally, below the tunnel floor. Re-read every 10 s and
+        // every 8 blind tunnel blocks. The chunk-data cluster read it replaces saw lava through rock.
         let mut cluster: Option<((i32, i32, i32), usize)> = None;
         let mut cluster_scanned: Option<Instant> = None;
+        // Nothing seen: tunnel a straight line, turning 90° after 900 s on one heading (Part 3).
+        let mut heading = 0usize;
+        let mut heading_t0 = Instant::now();
+        let mut blind_blocks = 0u32;
         // Tunnel progress per target: (target, best horizontal distance, when it last improved).
         let mut tun_best: Option<((i32, i32, i32), f64, Instant)> = None;
         let site_t0 = Instant::now();
@@ -2040,12 +2044,14 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     cluster_scanned = Some(Instant::now());
                     // Lower bound −58: sources in the bedrock band (−64..−59) sit under/among bedrock and
                     // cannot be opened (race i6: a 113-source cluster at −62 held rust-race-003 for 3 h).
-                    let found = bot.find_lava_cluster((-58, scoop_feet - 1), crate::learn::bot_arm_i32("cluster_min", 100) as usize, 12, &|s| lava_retired(s)); // ≥100: big lakes (hour-15 "reduce ambition")
+                    // The cluster_min arm (60/100/150 sources by chunk data) maps to 6/10/15 SEEN sources within 6.
+                    let min_seen = (crate::learn::bot_arm_i32("cluster_min", 100) / 10).max(1) as usize;
+                    let found = bot.lava_seen_cluster((-58, scoop_feet - 1), min_seen, 64.0, &|s| lava_retired(s));
                     if found.is_some() && found.map(|f| f.0) != cluster.map(|c| c.0) {
                         let (c, n) = found.unwrap();
                         let p = bot.entity.position;
                         let d = ((c.0 as f64 - p.x).powi(2) + (c.2 as f64 - p.z).powi(2)).sqrt();
-                        cast_debug(&format!("SITE cluster {n} sources near {c:?}, {d:.0} blocks away, {:.0}s into the at-depth search", site_t0.elapsed().as_secs_f64()));
+                        cast_debug(&format!("SITE seen {n} exposed sources near {c:?}, {d:.0} blocks away, {:.0}s into the at-depth search ({} remembered)", site_t0.elapsed().as_secs_f64(), bot.lava_seen.len()));
                         let st = crate::state::sync_from_bot(bot);
                         mem.race_event("site", "cluster", Some("build_nether_portal"), &format!("{c:?} d={d:.0} t={:.0}s", site_t0.elapsed().as_secs_f64()), &st, n as i64);
                     }
@@ -2053,6 +2059,8 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 }
                 let cluster_target = cluster.map(|c| c.0).filter(|l| !lava_retired(*l));
                 if let Some(l) = band_lava.or(cluster_target).or_else(|| find_fluid(bot, "lava", 24).filter(below_floor)).or_else(far_band_lava) {
+                    bot.assert_lava_seen(l, "at-depth tunnel target");
+                    blind_blocks = 0;
                     let p = bot.entity.position;
                     let (ddx, ddz) = (l.0 as f64 - p.x, l.2 as f64 - p.z);
                     let hd = (ddx * ddx + ddz * ddz).sqrt();
@@ -2098,8 +2106,18 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     cast_debug(&format!("desc at-depth y={fy} lava@{l:?} hd={hd:.0} — tunnelling toward ({tx},{tz})"));
                     tunnel_step(bot, tx, tz).await;
                 } else {
-                    cast_debug(&format!("desc at-depth y={fy} below={below} — no lava yet, tunnelling +Z"));
-                    tunnel_step(bot, 0, 1).await;
+                    if heading_t0.elapsed() > Duration::from_secs(900) {
+                        heading = (heading + 1) % 4;
+                        heading_t0 = Instant::now();
+                        cast_debug(&format!("desc at-depth: 900 s on one heading with no lava seen — turning 90° to heading {heading}"));
+                    }
+                    let (tx, tz) = [(0, 1), (1, 0), (0, -1), (-1, 0)][heading];
+                    blind_blocks += 1;
+                    if blind_blocks % 8 == 0 {
+                        cluster_scanned = None;
+                    }
+                    cast_debug(&format!("desc at-depth y={fy} below={below} — no lava seen yet ({} remembered), tunnelling ({tx},{tz}) block {blind_blocks}", bot.lava_seen.len()));
+                    tunnel_step(bot, tx, tz).await;
                 }
             }
             // Settle only when a source is within bucket REACH (~5) — i.e. the tunnel has
@@ -2121,6 +2139,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     let Some(lava) = lava else {
         return None;
     };
+    bot.assert_lava_seen(lava, "prepare: chosen pool");
     mem.log("cast", "lava", &format!("{},{},{}", lava.0, lava.1, lava.2));
     // Remember the pool so retries navigate STRAIGHT back (memory-first path above)
     // instead of re-descending from the surface each time — the descent eats most of
