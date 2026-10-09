@@ -23,7 +23,7 @@ export const paired = (argv: string[]) => {
   const load = (b: string) =>
     new Map(
       (conn.prepare("SELECT landing, pass, outcome, duration_ms, message, lava_s FROM gym_runs WHERE slug = ? AND build = ? AND landing IS NOT NULL ORDER BY id").all(slug, b) as Trial[])
-        .filter((t) => t.outcome !== "aborted" && t.outcome !== "running")
+        .filter((t) => t.outcome !== "aborted" && t.outcome !== "running" && !t.message.includes("trial skipped"))
         .map((t) => [t.landing, t]),
     );
   const A = load(buildA);
