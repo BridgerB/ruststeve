@@ -570,6 +570,11 @@ async fn run_one_trial(
         if !s.alive && matches!(step.setup, GymSetup::NetherFortress | GymSetup::NetherPiglins | GymSetup::NetherPortalPocket | GymSetup::NetherFar) {
             bot.respawn().await.ok();
             bot.wait_ticks(20).await.ok();
+            // A find_fortress step that already reported success met the goal before the death: count it (nether_far,
+            // 2026-10-09: several bots "reached fortress" and died before the next pass check).
+            if step.step_id == "find_fortress" && (last_msg.contains("reached fortress") || last_msg.contains("found fortress")) {
+                pass = true;
+            }
             last_msg = format!("died in the Nether | last: {last_msg}");
             break;
         }
