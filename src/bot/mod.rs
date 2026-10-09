@@ -618,6 +618,11 @@ impl<'a> Bot<'a> {
             // callers can detect the change. Without this `game.dimension` would stay
             // "overworld" forever and entering the Nether would be invisible.
             "respawn" => {
+                // The server closes any open container on respawn (death or dimension change); a window
+                // still recorded here would take later inventory clicks (see Bot::craft).
+                if self.current_window.is_some() && crate::bot::crafting::stale_window_fix() {
+                    self.sync_window_to_inventory();
+                }
                 if let Some(dim) = params
                     .get("worldState")
                     .and_then(|w| w.get("name"))
@@ -1925,6 +1930,12 @@ impl<'a> Bot<'a> {
     /// and its breath alarm fired at 11.3 s against the 6 s rule. The search state lives in AStar;
     /// Movements only borrows the world, so it is rebuilt per slice.
     async fn plan_path(&mut self, start: (i32, i32, i32), goal: &dyn Goal, total: Duration) -> std::io::Result<PathResult> {
+        // ASTAR_SYNC=1: the old one-shot search (6b-head's), to isolate the slicing in the tree-vs-head
+        // portal gap (cycle 5: tree + search-time budget 11/23 vs 6b-head 16/26). No ticks during the search.
+        static SYNC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *SYNC.get_or_init(|| std::env::var("ASTAR_SYNC").ok().as_deref() == Some("1")) {
+            return Ok(crate::path::get_path_to(&self.world, start, goal, self.movement.clone(), -1.0, total));
+        }
         // Ticks now run while planning, so release the movement keys first: the old synchronous
         // search froze the bot in place, and walking on stale keys for up to 2 s near lava is not
         // safe. Sneak (edge safety) and the watchdog's jump are left as they are.
@@ -2095,11 +2106,12 @@ impl<'a> Bot<'a> {
             let lava_at = |b: &Self, x: i32, y: i32, z: i32| {
                 b.registry.blocks_by_state_id.get(&b.block_state_at(x, y, z)).map(|bl| bl.name.contains("lava")).unwrap_or(false)
             };
-            if lava_at(self, next.x, next.y, next.z) || lava_at(self, next.x, next.y - 1, next.z) {
+            let safe = crate::learn::safe_fixes();
+            if safe && (lava_at(self, next.x, next.y, next.z) || lava_at(self, next.x, next.y - 1, next.z)) {
                 self.clear_control_states();
                 return Ok(FollowOutcome::NeedRepath);
             }
-            let lava_close = (-1..=1).any(|ox| (-1..=1).any(|oz| (-1..=0).any(|oy| lava_at(self, next.x + ox, next.y + oy, next.z + oz))));
+            let lava_close = safe && (-1..=1).any(|ox| (-1..=1).any(|oz| (-1..=0).any(|oy| lava_at(self, next.x + ox, next.y + oy, next.z + oz))));
 
             // Reached the waypoint only when at/above its level (dy <= 0.6) —
             // for an upward step this forces the bot to actually CLIMB before

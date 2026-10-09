@@ -161,7 +161,7 @@ impl<'a> Movements<'a> {
             // momentum carries the bot a block past the landing and into it. Cycle-4 portal comparison,
             // rust-gym-002: a drop from the −53 platform onto a station stand at −54 slid into the
             // station's open scoop side O, with lava at −55, and died within 1 s.
-            || [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| {
+            || crate::learn::safe_fixes() && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| {
                 !self.query(x + dx, y, z + dz).physical && self.query(x + dx, y - 1, z + dz).lava
             })
     }
@@ -362,6 +362,9 @@ impl<'a> Movements<'a> {
         // station-entrance walk ended at (97051.4, −54.8, 3326.5) over a −55 lava cell; dead). Refuse a
         // diagonal whose destination or either corner cell has lava in, beside or under it.
         for y in [node.y, node.y - 1, node.y - 2] {
+            if !crate::learn::safe_fixes() {
+                break;
+            }
             if self.lava_near_cell(nx, y, nz) || self.lava_near_cell(node.x, y, node.z + dz) || self.lava_near_cell(node.x + dx, y, node.z) {
                 return;
             }

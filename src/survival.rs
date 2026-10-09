@@ -77,7 +77,10 @@ pub async fn handle_survival(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> bool {
     if head_in_water(bot) || bot.breath_alarm {
         throttled(&LAST_WATER, "    !! underwater — surfacing");
         mem.log("survival", "water", "surfacing");
-        leave_water(bot, 200).await; // real ticks (10 s): enough to swim to a bank
+        // 800 real ticks (40 s), not 200: 10 s reached a nearby bank but not a lake shore 28–50 blocks
+        // out. The bot surfaced, swam a few blocks, the task resumed and drifted back (race i8
+        // rust-race-002 relaunched 3× on mine_stone; water_wall_i8 baseline 0/10 at that lake).
+        leave_water(bot, 800).await;
         return true;
     }
 

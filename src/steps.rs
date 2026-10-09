@@ -148,7 +148,7 @@ pub const STEPS: &[Step] = &[
         priority: 14,
         can_execute: |s| s.inventory.iron_pickaxes >= 2 && s.inventory.iron_ingots >= 3,
         // Cycle 4 decision 5: race kit = 5 buckets (22 iron covers 2 pickaxes, 5 buckets, flint and steel).
-        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= 5,
+        is_complete: |s| s.inventory.buckets + s.inventory.water_buckets >= crate::learn::bot_arm_i32("buckets", 5),
     },
     Step {
         id: "get_water_buckets",
@@ -335,6 +335,56 @@ pub fn get_next_step(state: &GameState) -> Option<&'static Step> {
             return Some(step);
         }
     }
+    // EARLY IRON PICKAXE (cycle 5, iron_from_surface): the furthest-runnable picker keeps a bot on
+    // mine_iron until the full 22-iron quota, because smelt_iron needs a furnace and craft_furnace
+    // sits below mine_iron. So every block of the quota was strip-mined with stone pickaxes that wore
+    // out and were re-crafted. Baseline 1/10: a bot with 7 raw iron at 1,200 s and no iron pickaxe.
+    // With 3+ iron and no iron pickaxe, make one first (furnace → coal → smelt → craft), then mine on.
+    // Bounded: if the rule has been choosing for 300 s without reaching 3 ingots (a craft that keeps
+    // failing: early-iron rust-gym-003 picked craft_furnace 420× on "missing crafting ingredient" while
+    // holding 64 cobblestone), it stands down for 600 s and the old order resumes.
+    static EARLY: std::sync::Mutex<Option<(std::time::Instant, Option<std::time::Instant>)>> = std::sync::Mutex::new(None);
+    let early_ok = {
+        let mut e = EARLY.lock().unwrap();
+        let now = std::time::Instant::now();
+        if state.equipment.pickaxe_tier().rank() >= 3 {
+            *e = None; // done: a later broken pickaxe starts a fresh 300 s window
+        }
+        match *e {
+            Some((_, Some(off))) if now.duration_since(off).as_secs() < 600 => false,
+            Some((_, Some(_))) => {
+                *e = None;
+                true
+            }
+            Some((start, None)) if now.duration_since(start).as_secs() > 300 && state.inventory.iron_ingots < 3 => {
+                *e = Some((start, Some(now)));
+                println!("early iron pickaxe: no ingots after 300 s — standing down for 600 s");
+                false
+            }
+            _ => true,
+        }
+    };
+    if early_ok && state.equipment.pickaxe_tier().rank() < 3 && state.inventory.iron_ore + state.inventory.iron_ingots >= 3 {
+        EARLY.lock().unwrap().get_or_insert((std::time::Instant::now(), None));
+        // smelt_iron places the furnace (has_furnace = furnace ITEM in inventory, so it reads false
+        // after the first smelt) and reuses a placed one within 24, or crafts its own.
+        let id = if state.inventory.iron_ingots >= 3 {
+            "craft_iron_pickaxe"
+        } else if state.inventory.coal < 1 {
+            "mine_coal"
+        } else if state.equipment.has_furnace {
+            "smelt_iron"
+        } else if state.inventory.cobblestone >= 8 {
+            "craft_furnace"
+        } else {
+            ""
+        };
+        if let Some(step) = STEPS.iter().find(|st| st.id == id) {
+            if (step.can_execute)(state) {
+                return Some(step);
+            }
+        }
+    }
     } // end overworld-only recovery guards
     // DIMENSION-AWARE: in the nether only the post-portal steps (find_fortress onward) are
     // runnable. The precondition drop-back below sent cycle-1's only nether bot (rust-race-004)
@@ -402,7 +452,7 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "craft_iron_pickaxe" => tasks::craft::craft_iron_pickaxe(bot, mem).await,
         // Count 3 must match craft_bucket's is_complete (buckets+water>=3) — a lower count
         // stops the task below the step threshold and re-runs "have N buckets" forever.
-        "craft_bucket" => tasks::craft::craft_buckets(bot, 5, mem).await,
+        "craft_bucket" => tasks::craft::craft_buckets(bot, crate::learn::bot_arm_i32("buckets", 5), mem).await,
         // Fill ONE water bucket (keep the second bucket empty for lava).
         "get_water_buckets" => tasks::bucket::fill_water_buckets(bot, 1, mem).await,
         "get_flint_and_steel" => tasks::craft::get_flint_and_steel(bot, mem).await,
@@ -411,7 +461,7 @@ pub async fn execute_step(bot: &mut Bot<'_>, id: &str, mem: &mut WorldMemory) ->
         "gather_build_blocks" => tasks::mining::mine_stone(bot, 72, mem).await,
         "build_nether_portal" => tasks::portal::build_nether_portal(bot, mem).await,
         "enter_nether" => tasks::portal::enter_nether(bot).await,
-        "lsm_drill" => tasks::portal::lsm_drill(bot).await,
+        "lsm_drill" => tasks::lava_move::lsm_drill(bot).await,
         "dragon" => tasks::end::dragon_beds(bot, mem).await,
         "crystals" => tasks::end::crystals_bow(bot, mem).await,
         "find_fortress" => tasks::nether::find_fortress(bot, mem).await,

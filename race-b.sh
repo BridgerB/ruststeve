@@ -15,7 +15,7 @@
 set -u
 
 DIR=${DIR:-$(cd "$(dirname "$0")" && pwd)}
-BIN=$DIR/target/release/ruststeve
+BIN=${BIN:-$DIR/target/release/ruststeve}  # override to race a specific build (cycle 5: target-head)
 RCONBIN=$DIR/target/release/rcon
 DATA=$DIR/data
 DB=$DATA/race.db
@@ -116,12 +116,24 @@ launch_bot() {
     RCON_HOST=$RCON_HOST RCON_PORT=$RCON_PORT \
     RACE_HOLD=$HOLD RACE_GOAL="$RACE_GOAL" CRAFT_DEBUG=1 ${view[@]+"${view[@]}"} \
     RACE_ID="$RACE_ID" BUILD="$BUILD" WORLD_SEED="${WORLD_SEED:-}" \
+    ${ARM_B[i]:+BOT_ARMS=1 ARM_BUCKETS=${ARM_B[i]} ARM_CLUSTER_MIN=${ARM_C[i]}} \
     "$BIN" >> "$DIR/race-$i.log" 2>&1 &
   PIDS[$i]=$!
   echo "$!" >> "$DIR/race.pids"
   LAUNCHED[$i]=$SECONDS
 }
 declare -a LAUNCHED
+# Bandit arms (cycle 5, decision 6): buckets and cluster_min drawn ONCE per bot for the whole race
+# (uniform over the arms) and logged; relaunches reuse them. BOT_ARMS=0 turns this off.
+declare -a ARM_B ARM_C
+if [ "${BOT_ARMS:-1}" = "1" ]; then
+  BA=(3 4 5); CA=(60 100 150)
+  for ((i = 0; i < N; i++)); do
+    ARM_B[$i]=${BA[$((RANDOM % 3))]}; ARM_C[$i]=${CA[$((RANDOM % 3))]}
+    echo "[race-b] arms ${NAMES[i]}: buckets=${ARM_B[$i]} cluster_min=${ARM_C[$i]}"
+    meta "${NAMES[i]}" bot_arms "buckets=${ARM_B[$i]} cluster_min=${ARM_C[$i]}"
+  done
+fi
 # Seconds since the bot's tick loop last touched its heartbeat file (999 if missing).
 hb_age() { perl -e 'my $m=(stat shift)[9]; print defined $m ? time-$m : 999' "$DIR/.heartbeat-$1"; }
 
@@ -131,7 +143,11 @@ for i in $(seq 0 $((N-1))); do
   # Fresh memory per RACE (never per relaunch): POIs from an earlier race are in another region or
   # a deleted world. The smoke race of 2026-10-03 started with 298 iron sightings from race i6 in
   # a world that no longer exists. A relaunch keeps memory: it resumes where it stood.
-  rm -f "$DIR/.memory-${NAMES[i]}.db" "$DIR/.memory-${NAMES[i]}.db-wal" "$DIR/.memory-${NAMES[i]}.db-shm" "$DIR/data/.attempt-${NAMES[i]}.json"
+  # The portal frame anchor too (.frame-<bot>.txt): it survives relaunches on purpose, but not races.
+  # Races i7 and i8 inherited anchors from earlier races, and 6b's displacement recovery tp'd bots to
+  # them: i7 rust-race-003 tunnelled ~2,500 blocks toward its i6 mold; i8 rust-race-001 finished and
+  # lit its i7 frame 3,200 blocks from its lane.
+  rm -f "$DIR/.memory-${NAMES[i]}.db" "$DIR/.memory-${NAMES[i]}.db-wal" "$DIR/.memory-${NAMES[i]}.db-shm" "$DIR/data/.attempt-${NAMES[i]}.json" "$DIR/.frame-${NAMES[i]}.txt"
   launch_bot "$i"
   sleep 2
 done
@@ -179,12 +195,23 @@ land_xz() {
   echo "[race-b] lane z=$z0: water at every candidate — keeping ($BASEX,$z0)" >&2
   echo "$BASEX $z0"
 }
+declare -a LANDX LANDZ DEATHS_SEEN
 for i in $(seq 0 $((N-1))); do
   n=${NAMES[i]}; z=${LANES[i]}
-  read -r lx lz < <(land_xz "$z")
-  [ "$lx $lz" != "$BASEX $z" ] && echo "[race-b] lane $i: ocean at ($BASEX,$z) — placed on land at ($lx,$lz)"
+  # Cycle 5: the gym's RandomSurface rules by RCON (scripts/race-place.ts): wait for the column to
+  # LOAD before testing it, reject water/lava underfoot and any water within 3. The old land_xz tested
+  # unloaded columns, whose empty replies read as land: two of five bots started at sea in i5 and i6.
+  if out=$(node "$DIR/scripts/race-place.ts" "$BASEX" "$z" "$RCONBIN" 2>>"$DIR/race-place.log"); then
+    read -r lx lz <<<"$out"
+  else
+    echo "[race-b] lane $i: no land near ($BASEX,$z) — falling back to land_xz" | tee -a "$DIR/race-place.log"
+    read -r lx lz < <(land_xz "$z")
+  fi
+  [ "$lx $lz" != "$BASEX $z" ] && echo "[race-b] lane $i: placed on land at ($lx,$lz) (lane start ($BASEX,$z))"
+  meta "$n" placement "lane $i landing ($lx,$lz), lane start ($BASEX,$z)"
   z=$lz
-  [ "$lx" -lt $((BASEX-20)) ] || [ "$lx" -gt $((BASEX+60)) ] && EXTRA_FL+=("$lx $lz")
+  LANDX[$i]=$lx; LANDZ[$i]=$lz; DEATHS_SEEN[$i]=0
+  EXTRA_FL+=("$lx $lz")
   # Surface of a fresh, forceloaded column (no hard-coded y: terrain differs per region).
   PLACE=("execute positioned $lx 0 $z positioned over motion_blocking_no_leaves run tp $n ~ ~1 ~"
          "execute positioned $lx 0 $z positioned over motion_blocking_no_leaves run spawnpoint $n ~ ~1 ~")
@@ -204,6 +231,28 @@ while [ $SECONDS -lt $RACE_SECONDS ]; do
     n=${NAMES[i]}
     if [ -z "${ANNOUNCED[i]:-}" ] && [ -n "$(sqlite3 "$DB" "SELECT 1 FROM events WHERE category='win' AND bot='$n' LIMIT 1" 2>/dev/null)" ]; then
       ANNOUNCED[$i]=1; echo "[race-b t=${SECONDS}s] $n reached goal '$RACE_GOAL' — continuing"
+    fi
+    # Respawn check (cycle 5): the spawnpoint is not always honoured (steve saw the same). A bot that
+    # respawned within 32 blocks of its landing OR of its last recorded position (race.db tick before the
+    # death) is where it should be: bots move their own spawnpoint to their work (the portal sets it at the
+    # frame). Only a respawn far from both is a harness fault: tp to the landing and log it. Race i7 tp'd
+    # two portal bots off their molds by checking the landing alone.
+    deaths=$(sqlite3 "$DB" "SELECT COUNT(*) FROM events WHERE category='death' AND bot='$n'" 2>/dev/null || echo 0)
+    if [ "${deaths:-0}" -gt "${DEATHS_SEEN[i]:-0}" ]; then
+      DEATHS_SEEN[$i]=$deaths
+      pos=$(perl -e 'alarm shift; exec @ARGV' 30 "$RCONBIN" "data get entity $n Pos" 2>/dev/null | grep -oE -- '-?[0-9]+\.[0-9]+d' | tr -d d | head -3 | tr '\n' ' ')
+      read -r px _ pz <<<"$pos"
+      if [ -n "${px:-}" ]; then
+        d=$(awk -v a="$px" -v b="$pz" -v c="${LANDX[i]}" -v e="${LANDZ[i]}" 'BEGIN { printf "%d", sqrt((a-c)^2 + (b-e)^2) }')
+        last=$(sqlite3 "$DB" "SELECT x||' '||z FROM ticks WHERE bot='$n' AND ts_ms < (SELECT MAX(ts_ms) FROM events WHERE category='death' AND bot='$n') ORDER BY ts_ms DESC LIMIT 1" 2>/dev/null)
+        read -r lx2 lz2 <<<"$last"
+        dl=$(awk -v a="$px" -v b="$pz" -v c="${lx2:-${LANDX[i]}}" -v e="${lz2:-${LANDZ[i]}}" 'BEGIN { printf "%d", sqrt((a-c)^2 + (b-e)^2) }')
+        if [ "$d" -gt 32 ] && [ "$dl" -gt 32 ]; then
+          echo "[race-b t=${SECONDS}s] HARNESS $n respawned ${d} blocks from its landing and ${dl} from its last position — tp back"
+          meta "$n" harness_respawn_far "death #$deaths: respawn ${d} blocks from landing (${LANDX[i]},${LANDZ[i]}); tp back"
+          rc "execute positioned ${LANDX[i]} 0 ${LANDZ[i]} positioned over motion_blocking_no_leaves run tp $n ~ ~1 ~"
+        fi
+      fi
     fi
     if kill -0 "${PIDS[i]}" 2>/dev/null; then
       # Watchdog: the process is alive but its TICK LOOP is not running (heartbeat file older

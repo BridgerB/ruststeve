@@ -26,7 +26,6 @@ use crate::bot::Bot;
 use crate::bot_utils::count_items;
 use crate::types::GameState;
 
-const ATTEMPTS: &str = "data/attempts.jsonl";
 const PARAMS: &str = "data/params.json";
 
 pub fn now_ms() -> i64 {
@@ -176,6 +175,55 @@ pub fn param_i32(name: &str, default: i32) -> i32 {
     param(name).and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+/// SAFE_FIXES=1 turns on 6b-safe's progress-neutral safety changes (decision 1): the open-hole landing
+/// and diagonal lava rules, the live lava re-check and no-sprint near lava, the 8-tick cap verify, the
+/// settle lava refusal, the mid-task stone pickaxe craft and the stored-mold frame check. Off = 6b-head
+/// behaviour on this tree, so a race can run 6b-head with the cycle-4/5 instrumentation and harness.
+pub fn safe_fixes() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SAFE_FIXES").ok().as_deref() == Some("1"))
+}
+
+/// Per-bot arms (cycle 5, decision 6): with `BOT_ARMS=1`, `buckets` and `cluster_min` are drawn ONCE per
+/// bot process (Thompson, from params.json arms, regardless of `enabled`), logged at startup, stamped on
+/// every event row, and credited on the attempts of the skills listed for them. Unset → empty, and
+/// callers keep their scripted defaults (buckets 5, cluster_min 100).
+static BOT_ARMS: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
+const BOT_ARM_PARAMS: [&str; 2] = ["buckets", "cluster_min"];
+
+pub fn bot_arms() -> &'static BTreeMap<String, String> {
+    BOT_ARMS.get_or_init(|| {
+        let mut out = BTreeMap::new();
+        if std::env::var("BOT_ARMS").ok().as_deref() != Some("1") {
+            return out;
+        }
+        let p = read_params();
+        let mut rng = rand::thread_rng();
+        for name in BOT_ARM_PARAMS {
+            // A harness that relaunches bots (race-b.sh) draws once per bot and passes ARM_<NAME>, so a
+            // relaunch keeps the bot's arm instead of redrawing.
+            if let Ok(v) = std::env::var(format!("ARM_{}", name.to_uppercase())) {
+                out.insert(name.to_string(), v);
+                continue;
+            }
+            let Some(arms) = p["params"][name]["arms"].as_object() else { continue };
+            let best = arms
+                .iter()
+                .map(|(k, ab)| (k.clone(), beta(ab[0].as_f64().unwrap_or(1.0).max(0.01), ab[1].as_f64().unwrap_or(1.0).max(0.01), &mut rng)))
+                .max_by(|x, y| x.1.total_cmp(&y.1));
+            if let Some((k, _)) = best {
+                out.insert(name.to_string(), k);
+            }
+        }
+        println!("bot arms (drawn once for this bot): {out:?}");
+        out
+    })
+}
+
+pub fn bot_arm_i32(name: &str, default: i32) -> i32 {
+    bot_arms().get(name).and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
 /// Thompson draw for every enabled parameter whose `skills` include `skill`.
 fn draw_arms(skill: &str) -> BTreeMap<String, String> {
     let p = read_params();
@@ -282,6 +330,16 @@ fn bump_alternative(step_id: &str) {
     ALT[alt_slot(step_id)].fetch_add(1, Ordering::Relaxed);
 }
 
+/// What the next attempt changes after a budget/stall cut (logged with the cut, cycle 5 Phase 1 (iii)).
+/// The portal has none: under 6b-safe the site/pool choice is frozen (decision 1).
+pub fn alternative_taken(step_id: &str) -> &'static str {
+    match step_id {
+        "gather_wood" => "sweep heading +2",
+        "mine_iron" => "strip and range direction +1",
+        _ => "none (re-derive only)",
+    }
+}
+
 // ── context features (exposure-only) ─────────────────────────────────────────────────────────
 
 const HOSTILES: [&str; 14] = [
@@ -324,12 +382,27 @@ pub fn context(bot: &Bot, s: &GameState, mem_ore: i64) -> Value {
 
 // ── rows ─────────────────────────────────────────────────────────────────────────────────────
 
-/// Append one row to attempts.jsonl (and race.db when attached by the caller).
+/// The per-process event file: `data/attempts/<run_id>-<bot>.jsonl`, one writer each. One shared
+/// file with many appending processes interleaved rows (cycle 4: 118 of 27,011 lines unparseable).
+/// `ATTEMPTS_DIR` overrides the directory (tests). The old `data/attempts.jsonl` stays read-only.
+fn attempts_path(row: &Value) -> std::path::PathBuf {
+    let dir = std::env::var("ATTEMPTS_DIR").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "data/attempts".to_string());
+    let clean = |s: &str| s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '+' { c } else { '_' }).collect::<String>();
+    let run = row.get("run_id").and_then(Value::as_str).unwrap_or("adhoc");
+    let bot = row.get("bot").and_then(Value::as_str).unwrap_or("bot");
+    std::path::Path::new(&dir).join(format!("{}-{}.jsonl", clean(run), clean(bot)))
+}
+
+/// Append one row to this process's event file (and race.db when attached by the caller). The row
+/// goes out as a single write of one line.
 pub fn write_row(row: &Value) {
     use std::io::Write;
-    let _ = std::fs::create_dir_all("data");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(ATTEMPTS) {
-        let _ = writeln!(f, "{row}");
+    let path = attempts_path(row);
+    if let Some(d) = path.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(format!("{row}\n").as_bytes());
     }
 }
 
@@ -343,6 +416,7 @@ fn base_row(bot_name: &str, skill: &str, step_id: &str) -> Map<String, Value> {
     m.insert("step_id".into(), json!(step_id));
     m.insert("source".into(), json!(source()));
     m.insert("bot".into(), json!(bot_name));
+    m.insert("bot_arms".into(), json!(bot_arms()));
     m
 }
 
@@ -386,7 +460,15 @@ pub enum Verdict {
 impl Attempt {
     pub fn start(bot: &Bot, step_id: &str, s: &GameState, mem_ore: i64) -> Attempt {
         let skill = skill_of(step_id);
-        let chosen = draw_arms(skill);
+        let mut chosen = draw_arms(skill);
+        // Per-bot arms count toward the posterior of the skills they are listed for.
+        let p = read_params();
+        for (name, arm) in bot_arms() {
+            let listed = p["params"][name]["skills"].as_array().is_some_and(|a| a.iter().any(|s| s.as_str() == Some(skill)));
+            if listed {
+                chosen.insert(name.clone(), arm.clone());
+            }
+        }
         *CHOSEN.lock().unwrap() = chosen.clone();
         let p = s.position;
         let a = Attempt {
@@ -453,6 +535,11 @@ impl Attempt {
         m.insert("progress_best".into(), json!(self.best));
         m.insert("params".into(), json!(self.chosen));
         m.insert("context".into(), self.context.clone());
+        if outcome == "timeout" {
+            // The cut and the alternative the next attempt takes, in the same row.
+            m.insert("alternative".into(), json!({"index": alternatives(&self.step_id) + 1, "takes": alternative_taken(&self.step_id)}));
+            println!("    cut: {} after {:.0} s ({reason}) → next attempt: {}", self.step_id, self.start.elapsed().as_secs_f64(), alternative_taken(&self.step_id));
+        }
         let row = Value::Object(m);
         write_row(&row);
         if let Some(r) = race {
@@ -534,6 +621,43 @@ pub fn gym_row(bot: &Bot, slug: &str, step_id: &str, start: Instant, outcome: &s
 
 #[cfg(test)]
 mod tests {
+    /// Decision 5 (cycle 5): two concurrent writers produce zero unparseable lines. Each process
+    /// (here: each thread with its own bot name) gets its own file; every line parses.
+    #[test]
+    fn two_writers_zero_unparseable() {
+        let dir = std::env::temp_dir().join(format!("attempts-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("ATTEMPTS_DIR", &dir);
+        let writers: Vec<_> = ["bot-a", "bot-b"]
+            .iter()
+            .map(|bot| {
+                let bot = bot.to_string();
+                std::thread::spawn(move || {
+                    for i in 0..2000 {
+                        super::write_row(&serde_json::json!({ "run_id": "test-run", "bot": bot, "i": i, "pad": "x".repeat(200) }));
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        std::env::remove_var("ATTEMPTS_DIR");
+        let (mut good, mut bad) = (0, 0);
+        for f in std::fs::read_dir(&dir).unwrap() {
+            for line in std::fs::read_to_string(f.unwrap().path()).unwrap().lines() {
+                if serde_json::from_str::<serde_json::Value>(line).is_ok() {
+                    good += 1;
+                } else {
+                    bad += 1;
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(bad, 0, "unparseable lines");
+        assert_eq!(good, 4000);
+    }
+
     /// Cross-implementation agreement with scripts/ml/bandit.ts: mean of 10,000 Beta(3,7) draws ≈ 0.3.
     #[test]
     fn beta_3_7_mean() {

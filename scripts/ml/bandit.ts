@@ -8,6 +8,7 @@
 //                                                  rebuild every arm's posterior from the event log
 //   node scripts/ml/bandit.ts show [params.json]   posterior mean and count per arm
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readRows } from "./rows.ts";
 
 const stdNormal = (): number => {
   const u1 = Math.max(Number.MIN_VALUE, Math.random());
@@ -51,17 +52,6 @@ const initial = (): Params => ({
   stall_s: { default: 180, build_nether_portal: 300, find_fortress: 300 },
 });
 
-const readJsonl = (path: string): Record<string, unknown>[] =>
-  existsSync(path)
-    ? readFileSync(path, "utf8").split("\n").filter((l) => l.trim()).flatMap((l) => {
-        try {
-          return [JSON.parse(l)];
-        } catch {
-          return [];
-        }
-      })
-    : [];
-
 const [cmd = "show", a1, a2] = process.argv.slice(2);
 
 // CLI only when run directly (compare.ts imports the sampler).
@@ -87,7 +77,7 @@ if (!import.meta.main) {
   writeFileSync(path, JSON.stringify(fresh, null, 2));
   console.log(`wrote ${path}`);
 } else if (cmd === "refit") {
-  const rows = readJsonl(a1 ?? "data/attempts.jsonl");
+  const rows = readRows(a1); // data/attempts/*.jsonl + the read-only data/attempts.jsonl
   const path = a2 ?? "data/params.json";
   const p = JSON.parse(readFileSync(path, "utf8")) as Params;
   for (const spec of Object.values(p.params)) for (const k of Object.keys(spec.arms)) spec.arms[k] = [1, 1];

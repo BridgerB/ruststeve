@@ -30,7 +30,18 @@ echo "gym batch: slug=${SLUGS:-$SLUG} N=$( [ -n "${SLUGS:-}" ] && echo "$SLUGS" 
 # Only the previous GYM batch's bots (pid file) — never a race running on the same host.
 # PIDFILE: a side batch keeps its own pid file so it never kills the main batch (and vice versa).
 PIDFILE=${PIDFILE:-gym.pids}
-[ -f "$PIDFILE" ] && while read -r p; do kill -9 "$p" 2>/dev/null; done < "$PIDFILE"
+# SIGTERM first: the bot records its trial in progress as `aborted` (never left `running`), then
+# exits. -9 only for a bot that hasn't exited after 10 s.
+if [ -f "$PIDFILE" ]; then
+  while read -r p; do kill "$p" 2>/dev/null; done < "$PIDFILE"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    alive=0
+    while read -r p; do kill -0 "$p" 2>/dev/null && alive=1; done < "$PIDFILE"
+    [ "$alive" = 0 ] && break
+    sleep 1
+  done
+  while read -r p; do kill -9 "$p" 2>/dev/null; done < "$PIDFILE"
+fi
 : > "$PIDFILE"; sleep 1
 mkdir -p logs/archive
 # Cycle 4 event log (src/learn.rs): every attempt row carries the build, the world seed and the run.

@@ -1131,3 +1131,245 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
 - **Arm A (6b-head), regions 40 + 51 backfilled: 8/16 clean** (50% [28%, 72%]). 5 of its 16 trials had deaths (1, 3, 5, 3, 2: 14 deaths); one region-51 trial still running.
 - **Arm B (6c+lsm16), region 53: 1/3 clean, 0 deaths** (PASS 2287 s; FAIL timeout mid-mold; FAIL timeout at-depth). **compare.ts: P(B > A) = 0.322 → continue.**
   - Reading so far: equal-ish pass rate, B much safer (0 vs 14 deaths); both arms' failures are progress walls (at-depth time, pickaxe wear, pool exhaustion).
+
+# Cycle 5 (2026-10-04 01:40 UTC →), the race-funnel cycle: strategist's answer to the cycle-4 report
+
+## Phase 0: branch, log, gym rules, tick rate
+- Branch `feat/cycle5-race-funnel` from main (PR #3 merged). Orphaned cycle-4 monitor processes on the box killed (mine only; steve's gym untouched).
+- **Per-process event log (decision 5):**
+  - Each process writes `data/attempts/<run_id>-<bot>.jsonl` (one writer, one write per line); `data/attempts.jsonl` is now read-only.
+  - `scripts/ml/rows.ts` is the single reader (globs the directory plus the legacy file, counts unparseable lines).
+  - Test `two_writers_zero_unparseable`: 2 threads × 2,000 rows → 4,000 parse, 0 unparseable. 187/187 lib tests.
+- **compare.ts:**
+  - Any pass is the default metric (`--clean` for clean).
+  - No stop before 12 trials per arm, cap 18 (decision 2).
+  - `aborted` and `skipped` rows are excluded.
+- **funnel.ts:** `water` is its own skill. Correction to the cycle-4 report: the water gyms run `gather_wood`, so its "wood_stone_tools gym 7/10" row mixed water trials in.
+- **Aborted, never running:**
+  - The gym installs a SIGTERM handler that writes the trial in progress as `aborted` (gym.db + event row with reason) and exits.
+  - `gym-tonether-b.sh` stops a batch with SIGTERM, waits 10 s, then -9.
+  - Verified live: one water_shore bot, SIGTERM at 46 s → `[gym:water_shore] ABORTED after 46s (SIGTERM)`; gym.db row 741 `aborted`; matching event row in `data/attempts/gym-r55-water_shore-rust-gym-001.jsonl`.
+- **The same failure 4× in one trial** (digits ignored) ends it as failed with that reason.
+- **Respawn more than 32 blocks from the trial's landing:** tp back and count `harness_events` in the trial message (gym). The race-side check goes with the Phase 1 race-harness work.
+- **Tick-rate acceptance test: REJECTED by audit, not run.**
+  - The SDK's client tick is a fixed 50 ms (`const TICK`, `src/bot/mod.rs`), and the `ticking_state` / `ticking_step` packets in the schema are not handled. At `/tick rate 60` the world (lava flow, mob AI, drowning air loss) runs 3× faster while the bot simulates and acts at 20 Hz, so a pass rate measured there says nothing about tick 20.
+  - On top of that, ~50 timers on the water and portal paths are wall-clock: `Instant::now` in bot/mod.rs 23 (breath watchdog, stall timing), portal.rs 10, portal_mold.rs 7, gym.rs 6, learn.rs 3, bot_utils.rs 1; plus `tokio::time::timeout`/`sleep` caps and `wait_real_ms`.
+  - Making 60 valid needs (a) the client to follow `ticking_state` (tick length = 1000 / rate) and (b) every one of those timers converted to game ticks: a cross-cutting change that touches every arm's behaviour.
+  - Gyms stay at tick 20.
+
+## Phase 1: 6b-safe, race harness, audits
+- **6b-safe build** (decision 1, commit 06c0c04): the portal files are 6b's (41a8f55) except the cap verify wait (8 ticks). lava_safe_move moved to `src/tasks/lava_move.rs`, off the portal path (drill only). A mid-task stone pickaxe craft from carried cobble + sticks replaces the no-pickaxe abort (`mining.rs craft_stone_pickaxe_mid_task`, once per 60 s).
+- **Frame check fix** (dcd279c, allowed: a check, no change to pool choice/drops/scoops): "already cast" read `find_blocks("obsidian", 8) >= 10`, a radius count (steve's cycle-4 finding). Natural obsidian within 8 skipped prepare + cast, then frame_check on the anchor failed the same way every attempt. Now only the stored anchor's 10 cells count; a disagreeing radius count is logged. This was the only radius-count frame/re-site check in portal.rs and portal_mold.rs.
+- **Race harness:**
+  - (i) Placement (66a6d7a): `scripts/race-place.ts` forceloads a candidate column, waits for `execute if loaded`, rejects water/lava underfoot and shores (7×7 ring), spirals along the lane; race-b.sh uses it per bot and logs the placement.
+  - Respawn check in race-b.sh: a new death event for a bot → read its position; >32 blocks from the landing → tp back + `harness_respawn_far` meta event.
+  - (ii) Mold resume after death: the frame anchor is a static plus a per-bot file, so it survives the respawn and a relaunch; 6b already tps back to it when displaced >16. New counter `resite_after_death` (a death followed by a lost anchor), logged as a `cast` event; expected 0. Instrumentation only.
+  - (iii) Step attempts: one event row per attempt existed (cycle 4); timeout rows now carry `alternative: {index, takes}`, printed as `cut: …`. Portal: none (6b-safe freezes site choice).
+- **Audit, find_lava_cluster (report only, not fixed):** `bot/mod.rs find_lava_cluster` reads every lava SOURCE in the loaded sections with **no exposure test** (doc comment: "No exposure test — the bot tunnels to it"), so it reads blocks that are neither touching air nor visible. Path: `portal.rs` at-depth site search, called only when no exposed band-level lava is within 24 (`band_lava.is_none()`), every 10 s, `min_sources 100, radius 12`, y −58..floor−1. Dependence: race i6 (archive `race-pre-race-20261003-082924-i100.db`) logged 4 `site/cluster` events from 2 of 5 bots (rust-race-001 ×2, rust-race-003 ×2); race i5: 0. Gym (all 414 archived + current bot logs, split per trial at the `[gym:…] @` line): **110 of 138 portal trials logged a `SITE cluster` (57 of 64 portal passes, 53 of 74 fails)**; water_descent 6 of 20. So most portal passes so far depended on a read of lava that need not touch air. Not fixed (audit only, decision: report); an exposure-honest version would need a strategist decision because it changes pool choice.
+- **6b-safe regressions** (region 56, gym.db 742–757, binary target-safe): water 12/14 pass (Wilson 95% 0.60–0.96), 0 deaths. Per slug: lake 2/2, shore 2/2, cave 0/2, cave_iron 2/2, roofed 2/2, descent 2/2, aquifer 2/2. Both fails are water_cave timeouts; water_cave before 6b-safe was 19/46, so in line, not a regression. lava_safe_move drill 2/2 at 10/10, 0 deaths.
+- **Check, lava rules on the paths they are meant for** (steve's cycle-4 finding):
+  - goto_near / goto_xz (about 35 portal-path sites) → A* rules (open-hole landing `path/movements.rs:156`, diagonal `:358`) plus the live waypoint re-check and no-sprint (`bot/mod.rs:2098/2139`, inside follow_path only).
+  - walk_to_xz (13 sites, including pillar_up's) → its own lava_cell check only.
+  - descend_to_y digs with its own LAVA-STOP; respawn_at_frame teleports.
+  - **settle_xz** (`portal_mold.rs`: cast_cell, assert_stance, station centring next to the pool; `portal.rs` build) was a raw sneak-walk with **no** lava check; only the sneak edge-backoff (holes, not lava on a floor). Fixed (allowed: refuse a single move): a burst into a cell with lava at feet, floor or head is refused and logged `settle: refused a step into lava`.
+  - No portal code sets sprint; no-sprint is enforced only inside goto, and raw walks inherit whatever the caller left (normally off: goto exits clear controls).
+- **Arms harness fault (clause (a): harness fault → stop and restart):** arm A (6b-head) is built on the older `~/ruststeve-head` tree, which has neither the same-failure-4× cut nor the respawn tp-back. Arm B (6b-safe) had both, so its trials were cut at 4 identical fails (478 s and 2,114 s: "no lava pool found / lava bucket not filled") while A's ran to 2,400 s, biasing any-pass against B. Fix: `GYM_PARITY=1` turns both rules off (far respawns still counted). Arm B restarted as BUILD `6b-safe-p` (target-safe3 = target-safe2 + parity switch + instrumentation + inert BOT_ARMS code) in region 59; the region-58 `6b-safe` rows are excluded from the comparison. Arm A (region 57) continues.
+- **Arm B (6b-safe-p) stopped by clause (a)** at 04:15 UTC: rust-gym-004 died twice in 31 s (04:14:28, 04:14:59) in lava at the same mold site (anchor (178525,-54,4002)), both during mold goto moves: the platform step-up goto (HURT 20→12, then hp 0) and, after the respawn tp, the stance goto that carried the bot from x 178528.5 into the lava cell under the unfinished platform (y −52.3). The mold-goto path is one 6b-safe changed (pathfinder lava rules, settle refusal; settle had refused 13 steps into lava at this site an hour earlier, then the cell failed and 11 stray lava were swept). Hypothesis, not established: a refused/aborted move leaves the bot short of the platform beside flowing lava. Rows: B (region 59) any-pass **3/6** (clean 3/6; deaths 5 in 6 counted trials, plus 2 in the aborted row 781); trials 781/783/787 aborted. Below the 12-trial minimum, so compare.ts cannot pass 6b-safe: **race i7 runs 6b-head** (decision 1). Arm A continues to its cap as the 6b-head baseline.
+- **Arm A (6b-head, region 57) to the cap:** 18 launched, 2 skipped (no land), **8/16 any-pass (Wilson 95% 0.28–0.72)**, clean 6/16, deaths 20 in 16 trials (1.25 per trial), 8 timeouts at 2,400 s. Arm B (6b-safe-p) for reference: 3/6 any-pass (0.19–0.81), clean 3/6, deaths 5 in 6. One A timeout ended on `NO PICKAXE in inventory — digging by hand` (the case 6b-safe's mid-task craft covers).
+- **Race-head smoke (target-race, SAFE_FIXES off, region 60):** one trial hung 102 attempts on the radius-count frame check (12 obsidian within 8, stored mold 0/10): the hang the gated frame-cell fix removes, reproduced on 6b-head behaviour (n=1).
+- **Dragon gym (mandatory, hour ~3.5, late27-cry8 on bot 007, region 61):** PASS by the server check (no dragon left), 0 deaths, at the 900 s timeout.
+- **Region-62 matched check** (same region, concurrent): 6b-head (old tree, target-head) 4/6 any-pass, race-head (this tree, SAFE_FIXES off) 1/4 with 2 trials running. Across both batches race-head 1/10 vs 6b-head 12/22. Many race-head timeouts end on `MOLD slow goto … ok=false`.
+- **Found: sliced A* budget was wall-clock** (`path/astar.rs`, cycle-4 plan_path): `start_time.elapsed() > total` counted the 50 ms ticks driven between 40 ms slices, so A* searched ~0.9 s of its 2 s (less on the loaded 2-CPU box). Present in every binary built from this tree (6b-safe, race-head), absent from the old 6b-head tree. Fixed: the budget counts search time only (`spent`). Not yet measured.
+- **Race i7 binary: target-head** (the old 6b-head tree, decision 1 literally). Deviation: no per-attempt event rows and no bandit arms in i7 (that tree has neither); race-b.sh's placement and respawn checks still apply. Bandits go live once this tree's A* fix is measured against 6b-head.
+- **A* fix (target-fix, SAFE_FIXES off, region 62, bots 001–003, 1 trial each) stopped by clause (a)** at ~01:05 MDT: rust-gym-001 (311 s) and rust-gym-002 (471 s) died the same way — `prepare: heading to remembered lava … dry on arrival → Gone`, then `desc: DEAD mid-descent` — a pathfinder goto toward a retired pool, the path the A* budget fix changes (002 died a second time at 06:57:55 UTC). Rows 810–812 aborted. Hypothesis: with its full search budget A* now returns routes into the pool area that the truncated search gave up on (Timeout → the bot did something else). Not measured further; the A* fix stays committed but off the race path.
+
+## Phase 2: race i7 (race-20261004-070530-i7)
+- Build: **target-head** (old 6b-head tree; see Phase 1), 5 bots, 240 min, tick 20, region x=21900, BOT_ARMS off (that binary has no bandit or event-row code; deviation from decisions 5 and 6 for this race). Placement: 5/5 on land (race-place.ts).
+- Funnel by race.db milestones. A milestone fires when the completed-step count rises and carries the NEXT step's name, so "reached X" means every earlier kit step was done. Same tool on all three races (`scripts/ml/race-funnel.ts`).
+
+| reached (of 5) | i5 | i6 | i7 |
+|---|---|---|---|
+| Craft Planks (left the start) | 3 | 3 | 3 |
+| Mine Iron Ore | 1 | 3 | 3 |
+| Craft Buckets | 1 | 2 | 3 |
+| Build Nether Portal (kit done) | 0 | 2 | 2 |
+| Enter Nether | 0 | 0 | 0 |
+
+- Time to the portal step: i7 42 and 45 min (rust-race-001, -002); i6 38 and 150 min.
+- Deaths: i7 3 (rust-race-001 ×1, -002 ×2), all lava. 001's: `cast: pre-frame heal → hp=0` at the scoop stand (6b behaviour, also seen 4× in the gym); i6 2; i5 0.
+- **Where the five bots ended:**
+  - Water, 3 of 5 (the dominant wall). rust-race-004 and -005 stood in water on gather_wood from ~10 min to the end, with 0 logs, ~14,600 breath pre-emption jumps each and 2–3 relaunches each; placement put them on land and gather_wood walked them into a lake. rust-race-001 ended swimming on craft_bucket after its relaunches.
+  - Portal blind tunnel, 1 of 5: rust-race-003 reached build_nether_portal with 15 ingots but tunnelled ~2,500 blocks along y −60 ("no lava yet, tunnelling +Z") for its last ~2 h.
+  - Tool loop at depth, 1 of 5: rust-race-002 alternated craft_planks / craft_sticks / build_nether_portal at y −53 for its last ~1.5 h (no wood at depth to remake a tool).
+- Race integrity: 8 relaunches (001 ×2, 003 ×1, 004 ×2, 005 ×3), 0 watchdog kills. Step cadence (race.db tick gaps): median 43–167 s per bot.
+- Harness: 2 `harness_respawn_far` events (001, 002) tp'd portal bots from their own spawnpoint near the mold back to the lane surface. Fixed in race-b.sh after the race (a far respawn must also be >32 from the last position before the death).
+
+## Phase 3: iron_from_surface
+- **Baseline** (target-race = this tree, SAFE_FIXES off, wall-clock A*; regions 63 + 64; kit = median i6/i100 state at the first post-tools step; pass = server `clear … iron_pickaxe 0`): **1/10 (Wilson 95% 0.02–0.40)**, 2 more skipped (no land), deaths 3 in 10 (2 drowned, 1 lava). The one pass: 938 s. Failures: 9 timeouts at 1,200 s, 8 of them last logging `NO PICKAXE in inventory — digging by hand`.
+- **Failure anatomy:**
+  - The kit's stone pickaxe often isn't in the client inventory when mine_iron starts (`NO PICKAXE` at t=0 s, then a stone pickaxe crafted); a gym artifact.
+  - Stone pickaxes then wear out in strip mining and get re-crafted (slow).
+  - One trial (rust-gym-004) looped `table: could not place a server-confirmed table` **1,944 times**: `place_crafting_table` took only state 0 as an empty cell, and cave_air is 15293, so in a carved cave no cell qualified.
+- **One build (2885487, target-table, BUILD race-table):** table placement accepts any *air, needs a non-fluid support, and retries once after a 3-block move; the A* search-time budget is gated off (`ASTAR_SEARCH_BUDGET`, default off), so the build differs from the baseline only by the table fix. 10 trials running (region 65).
+- **Correction to the failure anatomy:** `NO PICKAXE …` is a rate-limited (60 s) cast_debug line, so as a trial's last line it is stale, not the cause.
+  - The real cause: the furthest-runnable picker keeps the bot on mine_iron until the full 22-iron quota, because smelt needs a furnace and craft_furnace (priority 9) ranks below mine_iron (11). So no iron pickaxe is made until all 22 are mined with wearing stone pickaxes. Example: table-fix rust-gym-003 had 7 raw iron at 1,200 s and never smelted.
+  - The table-fix batch (0/3 so far, all this mode) was stopped (rows 828–832 aborted) and the build re-aimed.
+- **Build (b08ffcd, target-iron, BUILD race-iron):** with ≥3 iron and no iron pickaxe, the picker runs mine_coal → smelt_iron / craft_furnace → craft_iron_pickaxe first, then mining resumes; includes the table fix. 10 trials vs the 1/10 baseline.
+- **Early-iron result (b08ffcd, target-iron, region 66): 5/10 (Wilson 0.24–0.76)**, deaths 2 (1 lava, 1 drowned), passes 359–1,119 s; vs baseline 1/10 (0.02–0.40), deaths 3. P(early-iron > baseline) = 0.968 (Beta(1,1) priors). Failures:
+  - 4 timeouts on slow iron;
+  - 1 loop: craft_furnace picked 420× on `missing crafting ingredient id=35` (cobblestone) while holding 64 cobblestone. This is the craft-window desync, not the rule, but the rule had no bound.
+  - Bound added (4e6c4a6): the rule stands down for 600 s after 300 s without ingots.
+- **Dragon gym, hour ~11 (mandatory; late27-cry8, bot 008, region 67):** PASS by the server check (no dragon left), 0 deaths, at the 900 s timeout. Cycle-5 dragon runs: 2/2 by the server check.
+- **Region-68 matched portal check (6b-head vs race-iron2 = this tree, SAFE off, wall-clock A*, early iron, table fix):**
+  - 6b-head 4/4 (3 clean); race-iron2 0/3, all three at 2,400 s tunnelling blind, two last logging `tunnel_step: no floor … — pathfinder` (a goto that keeps failing).
+  - This tree on portal across matched regions: 1/15 vs 6b-head 8/10. The sliced, wall-clock A* is the leading suspect.
+  - Batch stopped once decided (rows 854–856 aborted).
+- **Region-69 concurrent arms:** 6b-head (bots 001–003) vs race-iron2 with `ASTAR_SEARCH_BUDGET=1` (bots 004–006), 4 trials each. The earlier A* batch's stop (2 deaths, walk to a dry remembered pool) stands; this is a fresh measurement under the same death rule.
+- **Harness gap found (shared-region arms):** row 867 (6b-head rust-gym-001, region 69) "passed" in 459 s with `mold cast incomplete at 0/10`: it walked into a portal another bot had lit nearby (the pass check is in_nether). It is excluded as contaminated. It is the only portal pass since row 795 whose message lacks `cast & lit`, so the region-62/68 comparisons are clean. Future concurrent arms: separate regions (as the cycle-5 Phase 1 arms did), or a pass check requiring the bot's own frame.
+- **Region-69 arms result:**
+  - Arm B (race-iron2 + `ASTAR_SEARCH_BUDGET=1`, bots 004–006): **4/7 any-pass, all clean**, deaths 6 (rust-gym-006 ×6 across trials).
+  - Arm B **stopped by clause (a)** at ~09:20 MDT: rust-gym-006 died twice in 2 min at one mold site (anchor (207664,-53,4000)). First during the layer-0 platform build (ended at y −58, hp 0); second during the stance moves after the respawn. Mold movement runs through the pathfinder, the path the A* change alters. Same pattern as the region-59 6b-safe stop. Rows 873/874/878 aborted.
+  - Arm A (6b-head) so far 3/7 (all clean), 1 contaminated row excluded.
+  - P(B > A) on any-pass = 0.69 (Beta(1,1) priors, 4/7 vs 3/7); below 12 per arm, so no decision by compare.ts. **Race i8 runs target-head** (decision 1, applied as for i7).
+
+## Crystals slot (decision 4; moved from hour 20 to ~hour 14 because race i8 runs 13:40–17:40)
+- Build 4d91508 (target-crystal, BUILD cage1, bot 007, region 70, 3 trials): a crystal the bow gave up on gets one climb per trial.
+- **First trial, so far:**
+  - Of three given-up crystals, 2 had no iron bars (not caged; the bow had no arc) and 1 was caged (33 bars).
+  - The climb reached the tower top (feet 80 from ground 63, 16 obsidian) but **opened 0 bars**, and the water descent left the bot at feet 80.
+  - Cause from the geometry: the tower radius read r=1, but the cage ring is at radius 2. The pillar column (r+1 = 2) ran up inside the ring, and pillar_up dug the bars above its head by hand (no pickaxe in the kit), so none of the "side" bars counted.
+  - The next climb then started from the pillar top and mis-read the ground (y 82).
+- **Next build (not this cycle's slot; decision 4 allows one):**
+  - pillar at max(tower r, cage radius) + 1;
+  - add a pickaxe to the kit for the bars;
+  - take the ground from the start position before climbing;
+  - verify the water pour (`reliable_use` at the outer edge) actually placed water before stepping off.
+- **Region-69 arm A (6b-head) final:** 6/10 any-pass, all clean (row 867 contaminated, excluded; 1 skipped). Arm B (stopped): 4/7. P(B > A) = 0.45 (4/7 vs 6/10, Beta(1,1)) — no difference on portal once the A* search-time budget is on, unlike the wall-clock tree (1/15 vs 8/10).
+- **Crystals slot result: 0/3** by the server check, 0 deaths. Bow kills per trial 3, 4, 4 of 10 (6–7 crystals left each time); the bow gave up on the rest after 8 misses each. Cage climbs:
+  - two towers registered as caged (33 bars each), three climbs reached the top;
+  - **1 bar opened in total**, and the bow still could not hit that crystal;
+  - the other given-up crystals showed no bars from where the bot stood, so they were unseen or uncaged, i.e. missed for another reason (no arc);
+  - one climb ran short of obsidian (15 left for a ~21-block tower).
+  - The v2 list above stands; also scan cages after walking near each tower, not from the start position.
+- **6b-head water set (region 71 run, fixed arena):** 13/14 (Wilson 0.69–0.99), 0 deaths: lake 2/2, shore 2/2, cave 2/2, cave_iron 2/2, roofed 2/2, descent 2/2, aquifer 1/2. Same as 6b-safe's 12/14. **The water slugs do not separate the builds and do not reproduce race i7's water wall:** in i7 bots started on land, then gather_wood walked into a lake (3/5 bots), whereas these slugs start the bot in water. That wall needs its own slug: race placement plus gather_wood with a lake within the search radius.
+- **Harness fault in races i7 and i8 (found during i8):** race-b.sh cleared each bot's memory DB at race start but **not its portal frame anchor** (`.frame-<bot>.txt`, which survives relaunches by design). 6b's displacement recovery (>16 blocks from the anchor → tp back) then sent bots to molds from earlier races.
+  - i7: rust-race-003's "2,500-block blind tunnel" at y −60 was toward its i6 mold (i6 region x≈18900; it ended at x 18939). Its anchor file is dated 2026-10-03 01:08.
+  - i8: rust-race-001 was tp'd to its i7 mold at (21762,-55,337), 3,200 blocks from its lane. It finished that frame (10/10) and lit it ("nether portal cast & lit at 21762,-55,337"); the harness then tp'd it back, and `enter_nether` failed ×20 ("no portal found to enter").
+  - Both are invalid as race results; the i7/i8 portal rows for these bots are flagged in the report.
+  - Fixed (race-b.sh now removes `.frame-<bot>.txt` with the memory DB); deploys after i8.
+
+## Phase 4: race i8 (race-20261004-161946-i8, started 10:20 MDT, moved up from ~13:40 because the gym was idle)
+- Build target-head (same binary as i7), 5 bots, 240 min, region x=24900, 5/5 placed on land.
+- Funnel (race.db milestones), of 5:
+
+| reached | i5 | i6 | i7 | i8 |
+|---|---|---|---|---|
+| Craft Planks | 3 | 3 | 3 | 5 |
+| Mine Iron Ore | 1 | 3 | 3 | 4 |
+| Craft Buckets | 1 | 2 | 3 | 4 |
+| Build Nether Portal | 0 | 2 | 2 | 3 |
+| Enter Nether | 0 | 0 | 0 | 0 valid (1 invalid: stale i7 anchor) |
+
+- Portal step reached at 82 and 84 min (rust-race-004, -005). rust-race-001 reached it at ~30 min, then was tp'd by its stale i7 frame anchor (see Phase 1 harness fault).
+- Deaths: 9 (001 ×3 lava, 004 ×1 drowned, 005 ×5: 2 drowned, 3 lava). Relaunches: 116 (001 ×100 on the invalid-portal `enter_nether` loop, 002 ×14 on the lake, 004 ×2).
+- Harness respawn tp: 2, both correct (world-spawn respawns, 3,249 / 3,217 blocks).
+- Where bots ended:
+  - 001: enter_nether loop, invalid;
+  - 002: mine_stone in a lake all race;
+  - 003: get_flint_and_steel;
+  - 004, 005: build_nether_portal at depth.
+- **water_wall_i8 slug baseline** (target-tree, the i8 lake (25085,584), 2 trials × 5 bots): **0/10 (0.00–0.28)**, 0 deaths.
+  - Every trial cycles WATER ALARM → surface → mine_stone → drift back, between x 25082 and 25085.
+  - Nearest shore: 28 blocks (diagonal), 36–52 blocks in other directions, >60 in three. The survival escape had 200 ticks (10 s).
+  - Build 56f7e6b gives it 800 ticks (40 s); 10 trials running.
+- **Water wall, the cause:** the i8 lake has a **lily pad** at (25081,63,583).
+  - `water_exit_dir` took it as land 1–4 blocks away, so every escape swam to it, while the shore is 28–50 blocks out.
+  - Its collision box then stops the swim at x 25082.3.
+  - 40 s escape (56f7e6b): 0/2, stopped.
+  - Exclude afloat "land" (b395ecb): 0/10; the bot still stops at the pad's edge.
+  - Break a lily pad in the next cell (13ef075): 10 trials running (region 75).
+- **Lily-clear build (13ef075, region 75): 2/10** (P > baseline 0/10 = 0.89), 0 deaths.
+  - The clear never fired; the pad is still at (25081,63,583).
+  - With b395ecb the bank direction changed to (0.6,-0.8), toward real shore, and escapes covered 6–12 blocks each. Then mine_stone pulled the bot back: find_stone (radius 6, no exposure test) found stone under the lake bed and the dig-down dove under again.
+  - Next build (this commit): mine_stone swims out first (800-tick escape) and returns until the bot is out of the water.
+  - Audit note: find_stone reads any stone within 6 blocks, exposed or not; exposure honesty is a strategist question, like find_lava_cluster.
+- **Swim-first build (target-swim, region 76): 0/10**, 0 deaths. Bots now get far: last BANK legs at x 25122–25124, ~38 blocks east.
+  - But `water_exit_dir` re-picks the nearest "land" every 8-tick leg, and the pick flips: (0.89,0.45) → (0,−1) → (0,1).
+  - So the bot wanders along a big lake instead of committing to one shore.
+  - Next design: choose one shore column from a wide scan (dry surface, reachable at the water's level), commit to it, and re-pick only when no progress for N legs.
+  - Water-wall builds so far:
+
+| build | result |
+|---|---|
+| baseline | 0/10 |
+| 40 s escape | 0/2 |
+| exclude afloat land | 0/10 |
+| break lily pads | 2/10 |
+| swim-first | 0/10 |
+- **Shore-commit build (8f82c54, target-shore, region 77): water_wall 0/10**, 0 deaths. Water set (one pass, region 78): 5/7 (cave and aquifer failed, the two historically flakiest; no clear regression vs 13/14).
+  - The heading now holds steady ((0.44,−0.90) every leg), and bots reach ~(25091.4, 576.3), then stall.
+  - What's there: (25091,62,575) is a solid block at water level with air above. That is the committed shore/island target, and the bot cannot climb out of the water onto it.
+  - This matches the SDK water-physics limit (no jump impulse in water; only wall collision lifts), and the bank-stair dig removes the very block it should stand on.
+  - **The water wall is now a climb-out problem, not a steering one.** Next: an SDK fix for exiting water onto a block one above the surface (vanilla gives a jump boost when swimming into a wall at the surface), measured on water_wall_i8 and the arena set.
+- **Found an SDK physics porting bug** (636e8ba): the out-of-liquid ledge lift called `does_not_collide` with a bare velocity offset where prismarine-physics passes `pos.offset(...)`, so its free-space test ran near the world origin. Fixed.
+  - water_wall_i8 with it (target-water, region 81): **1/10** (0.02–0.40).
+  - Some bots now leave the lake and mine: rust-gym-008 reached craft_stone_pickaxe 3× before falling back in, but not 16 cobblestone in 600 s.
+  - New loop: rust-gym-012 called mine_stone 726× in one trial. The swim-first check returns at once while the bot stands wading (feet in water, head out), so mine_stone fails straight back.
+  - Water-wall table: 0/10, 0/2, 0/10, 2/10, 0/10, 0/10, **1/10**.
+- **Portal arms, separate regions, in progress:**
+  - A 6b-head (region 79): 5/9 any-pass (1 skipped);
+  - B target-shore + `ASTAR_SEARCH_BUDGET=1` (region 80): 4/6;
+  - 6 trials per bot, still running.
+- **Wading fix (07b588d, target-wade, region 82): water_wall_i8 4/10 (0.17–0.69)**, 0 deaths, passes at 495–600 s; P(> baseline 0/10) = 0.98. First real movement on the race water wall. Water-wall table: 0/10, 0/2, 0/10, 2/10, 0/10, 0/10, 1/10, **4/10**. Arena water set (2 trials each) running as a regression (region 83).
+- **Arena water set on target-wade (region 83, 2 trials each): 14/14 (Wilson 0.78–1.00)**, 0 deaths, including water_cave 2/2 (historically 19/46). No regression; the best water-set result this cycle (6b-head 13/14, 6b-safe 12/14).
+- **Portal arms in separate regions (79 vs 80), near the cap:**
+  - A 6b-head 10/16 any-pass; B target-shore + `ASTAR_SEARCH_BUDGET=1` 7/16 (3 trials still running); P(B > A) = 0.15.
+  - Each arm had 1 death-loop trial; A had 1 skipped (no land).
+  - B's timeouts mostly end on long siting trips: tunnelling toward lava 46–99 blocks away, or heading to a remembered pool.
+  - Pooled with region 69: tree + search-time A* 11/23 vs 6b-head 16/26. The tree still trails 6b-head on the portal after the A* fix; the remaining difference looks like lava siting/descent, not yet isolated.
+- **Race-build trade-off for the strategist:** tree (target-wade + A*) vs 6b-head:
+  - water wall 4/10 vs 0/10;
+  - water set 14/14 vs 13/14;
+  - iron 5/10 vs 1/10 (early iron);
+  - portal ~11/23 vs 16/26.
+- **Regions 79/80 final:** 6b-head 10/17, tree + search-time A* 7/18 (any-pass), P(B > A) = 0.125.
+  - With SAFE_FIXES off, the tree's portal.rs matches 6b-head's (only gated code and instrumentation differ), so the gap is elsewhere.
+  - Next suspect: plan_path still ticks the bot between 40 ms slices.
+  - `ASTAR_SYNC=1` (this commit) restores the one-shot search; arms 6b-head vs tree + sync next (regions 84/85).
+- **Regions 84/85: tree + `ASTAR_SYNC=1` (target-sync) 11/17 any-pass vs 6b-head 6/16** (2 still running), P(B > A) = 0.94.
+  - Clean passes: 7/17 vs 6/16. Deaths: 4 of B's passes had deaths, none of A's.
+  - **The sliced A* was the tree's portal gap:** with the one-shot search the tree matches or beats 6b-head on the portal (before: 11/25 vs 16/27).
+  - target-sync is this tree plus the water fixes (14/14 set, 4/10 wall), early iron (5/10 vs 1/10), the table fix, event rows and bandits.
+  - **Recommended race build for cycle 6: target-sync with `ASTAR_SYNC=1`** (the strategist's decision 1 still governs; not raced here).
+- **Regions 84/85 final:** 6b-head 8/18, tree + `ASTAR_SYNC=1` 11/17, P(B > A) = 0.88 (any-pass).
+- **water_wall_i8 on target-sync with `ASTAR_SYNC=1` (region 86): 0/10**, against target-wade's 4/10 at the same lake. Either the one-shot A* hurts the lake escape, or the lake changed: the same fixed site has been dug and built on by ~60 trials. Re-running target-wade now (region 87) to separate the two.
+- **target-wade re-run at the i8 lake (region 87): 0/10** (pooled 4/20). The 4/10 did not reproduce, so ASTAR_SYNC is not implicated; the fixed lake has worn (or the 4/10 was luck).
+  - The fixed-site slug is retired as a measure.
+  - New slug `water_wall_lake` (RandomLake: a fresh real lake per trial, no land within 8, shore 9–48 out).
+  - Next: arms on it, default sliced A* vs `ASTAR_SYNC=1` (regions 88/89).
+- **RandomLake is too slow in fresh regions:** chunk generation per candidate; 1 lake in 30 min across 10 bots, even with an RCON pre-check. Stopped.
+- New slug `water_wall_pool`: the arena pool rebuilt every trial, 33×33, the bot 16 blocks from any bank, stone under the water. Arms next: default A* vs `ASTAR_SYNC=1`.
+- **water_wall_pool (rebuilt 33×33 lake, target-pool), arms:**
+  - default sliced A* **1/10**; `ASTAR_SYNC=1` **4/10**. P(sync > default) = 0.93.
+  - Deaths: 3 trials per arm had one (water slugs fail on any death); two of them mined the full 16 and failed only on the death.
+  - The one-shot A* does not hurt water; it helps.
+  - **The race-build recommendation stands: the tree with `ASTAR_SYNC=1`.**
+- **tool_loop_depth slug (Tunnel, i7 rust-race-002's kit, target-tool + `ASTAR_SYNC=1`): 10/10** (8 in under 45 s). It does **not** reproduce the race loop.
+  - i8 rust-race-004's race log shows the race failure: `CRAFT 36: result not seen in slot 0 (grid [])` ×7. The 2×2 stick craft finds the grid empty after the clicks, i.e. the local inventory window has drifted from the server's over a long session.
+  - Fresh gym connections recover; race bots that had run for hours did not.
+  - Next: force a full window resync after a failed craft (vanilla resends the container when a click carries a stale state id), and test on a long-running bot, not a fresh one.
+- **Stale-window fix (3968bcf):** a 2×2 craft clicked into `active_window()`, i.e. a table window the server had closed (walk-away or death), so the clicks were ignored and the grid stayed empty. The fix closes it first and drops it on respawn.
+  - Long-session tool_loop_depth arms (6 trials per process): old and fixed both pass every trial so far, and both log 8 `grid []` lines.
+  - The slug never leaves a table window open, so it cannot show the fix. It is unmeasured; the next race (or a slug that opens a table and walks away before a 2×2 craft) is the test.
+- **Server B watchdog crashes (my load):** 4 in 24 h, at 07:25, 07:53, 10:23 and 10:51 MDT ("A single server tick took 60.00 seconds"; systemd restart counter 7).
+  - All coincide with 10-bot concurrent gyms: lake arms with RandomLake chunk generation, long-session tool-loop arms, stale-window arms.
+  - 112 leaked forced chunks were cleared (restart spawn prep took 68 s).
+  - From here: ≤6 bots at once. Trials that spanned a crash: tool-loop long-session arms (all PASS, unaffected) and the first stale-window run (rerun).
+- **Stale-window reproduction (fix off, bot 001):** after dying with a table open, `CRAFT 947: result not seen in slot 0 (grid ["1:1xoak_planks", "3:1xoak_planks"])` ×3. The 2×2 clicks landed in the stale table window's 3×3 slots. That is the race's failure, reproduced.
+- **Stale-window rerun (target-stale, ≤6 bots, 2 trials per bot, gym.db 1196–1207):**
+  - A `STALE_WINDOW_FIX=0` (bots 001–003, region 99): **0/6** (Wilson 95% 0.00–0.39). Every trial timed out at 257–266 s. Each log has `window recorded=true` after the death and 12× `CRAFT 947: result not seen in slot 0 (grid ["1:1xoak_planks", "3:1xoak_planks"])`, then `CRAFT stick: result=Ok(())` with 8 planks and no sticks. bot.craft reports Ok on a craft that never happened: a false success.
+  - B fix on (bots 008–010, region 100): **6/6** (0.61–1.00), every trial `crafted stick (have 4)` in 97–115 s. Each log has `window recorded=false` (the respawn drop worked).
+  - **The fix is necessary but not sufficient.** Every fixed trial also logged 11× `CRAFT 947: result not seen in slot 0 (grid ["0:1xoak_button"])` / `(grid [])`, about 90 s in all, before the stick craft landed. The 2×2 grid ended up with one plank, so the output was a button. A second craft flake (a click lost or misplaced in the 2×2 grid) is still open.
+  - Each trial has deaths=1 by design: the slug kills the bot with the table open.
+  - P(B > A) ≈ 1.00 (Beta(1,1)). The stale-window fix (3968bcf) is confirmed on the slug that reproduces the race failure. It has not been raced yet.
+- **Wrap-up (2026-10-08):** 285 gym.db rows left `running` became `aborted`, each with a reason: the four Server B crashes (33 rows), an operator stop on 2026-10-04 (3), and pre-cycle-5 relaunches (249). The 36 cycle-5 rows also got event rows, in `data/attempts/backfill-aborted-cycle5.jsonl`. The pre-wrap-up gym.db is at `data/archive/gym-pre-wrapup-2026-10-08.db`.

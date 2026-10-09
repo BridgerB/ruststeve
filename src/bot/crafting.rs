@@ -33,6 +33,12 @@ fn find_ingredient_slot(window: &Window, ingredient: &RecipeItem) -> Option<usiz
     None
 }
 
+/// STALE_WINDOW_FIX=0 turns the stale-window fix off (for measuring it against the old behaviour).
+pub(crate) fn stale_window_fix() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("STALE_WINDOW_FIX").ok().as_deref() != Some("0"))
+}
+
 impl<'a> Bot<'a> {
     /// Recipes producing `item_type`, optionally filtered by whether a crafting
     /// table is available and a minimum result count.
@@ -58,6 +64,14 @@ impl<'a> Bot<'a> {
     pub async fn craft(&mut self, recipe: &Recipe, times: i32, crafting_table: bool) -> std::io::Result<()> {
         if recipe.requires_table && !crafting_table {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "recipe requires a crafting table"));
+        }
+        // A 2×2 craft uses the PLAYER inventory grid. If a table window is still recorded as open (the
+        // server closed it on a walk-away or a death), active_window() is that stale window: the 2×2
+        // clicks went to a window id the server had closed, and the grid stayed empty — race i8
+        // rust-race-004: "CRAFT 36: result not seen in slot 0 (grid [])" ×7, craft_sticks for hours
+        // at depth. Close it first so the clicks land in the inventory.
+        if !crafting_table && self.current_window.is_some() && stale_window_fix() {
+            self.close_window().await?;
         }
         let (w, h) = if crafting_table { (3usize, 3usize) } else { (2usize, 2usize) };
         let slot = |x: usize, y: usize| -> i32 { (1 + x + w * y) as i32 };

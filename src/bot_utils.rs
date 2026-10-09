@@ -53,7 +53,11 @@ fn water_exit_dir(bot: &Bot, r: i32) -> Option<(f64, f64)> {
             let land = (fy..=fy + 1).any(|y| {
                 let top = bot.block_at(x, y, z).map(|b| is_standable(&b.name)).unwrap_or(false);
                 let above = name_at(bot, x, y + 1, z).is_some_and(|n| n == "air" || n == "cave_air");
-                top && above
+                // Not floating on the water: a lily pad on the lake surface read as "land" 1–4 blocks
+                // off, so every escape swam to it and stalled there instead of the shore 28–50 blocks
+                // out (water_wall_i8: lily_pad at (25081,63,583); race i8 rust-race-002, 3 relaunches).
+                let afloat = name_at(bot, x, y - 1, z).is_some_and(|n| n == "water");
+                top && above && !afloat
             });
             if !land {
                 continue;
@@ -383,10 +387,26 @@ async fn leave_water_inner(bot: &mut Bot<'_>, ticks: u32) -> bool {
             // PHASE 2 — at the surface (head out, feet still in water). Swim to the nearest
             // bank and climb out. Face the closest air-headed column (progressively wider —
             // a 5-block scan misses a lake edge), committed for several ticks.
-            let dir = water_exit_dir(bot, 6)
-                .or_else(|| water_exit_dir(bot, 14))
-                .or_else(|| water_exit_dir(bot, 24))
-                .or_else(|| water_exit_dir(bot, 40));
+            // COMMIT to one shore column. Re-picking the nearest "land" every 8-tick leg flipped the
+            // heading ((0.89,0.45) → (0,−1) → (0,1)) and the bot wandered along a big lake for the whole
+            // trial (water_wall_i8 swim-first: 0/10, last legs ~38 blocks out). The target lives across
+            // escape calls; it is dropped when reached (≤1.5) or after 90 s, then re-picked.
+            static SHORE: std::sync::Mutex<Option<((i32, i32), std::time::Instant)>> = std::sync::Mutex::new(None);
+            let here = bot.entity.position;
+            let dir = {
+                let mut s = SHORE.lock().unwrap();
+                let keep = s.is_some_and(|((tx, tz), at)| {
+                    at.elapsed().as_secs() < 90 && ((tx as f64 + 0.5 - here.x).powi(2) + (tz as f64 + 0.5 - here.z).powi(2)).sqrt() > 1.5
+                });
+                if !keep {
+                    let (bx, bz) = (here.x.floor() as i32, here.z.floor() as i32);
+                    *s = [6, 14, 24, 48]
+                        .iter()
+                        .find_map(|&r| water_exit_dir(bot, r))
+                        .map(|(ox, oz)| ((bx + ox as i32, bz + oz as i32), std::time::Instant::now()));
+                }
+                s.map(|((tx, tz), _)| (tx as f64 + 0.5 - here.x, tz as f64 + 0.5 - here.z))
+            };
             // UNIT vector: `water_exit_dir` returns a cell offset (e.g. (-7,0)), and the bank-stair dig
             // below aims at `p + d*0.8`. Unnormalised it dug the lake rim 5.6 blocks away, floating, by
             // hand: one dig blocked ~25 s (water_lake regression once `name_at` let the scan see air;
@@ -399,6 +419,18 @@ async fn leave_water_inner(bot: &mut Bot<'_>, ticks: u32) -> bool {
                 .unwrap_or((1.0, 0.0));
             let p = bot.entity.position;
             eprintln!("    BANK ({:.2},{:.2},{:.2}) ground={} dir=({dx:.2},{dz:.2}) found={}", p.x, p.y, p.z, bot.entity.on_ground, dir.is_some());
+            // A lily pad on the surface has a collision box: swimming into it stalls the bot at its
+            // edge (water_wall_i8: every escape stopped at x 25082.3 against the pad at 25081, 63).
+            // Lily pads break instantly by hand, so clear any in the next cell before pressing on.
+            {
+                let (ax, az) = ((p.x + dx * 0.9).floor() as i32, (p.z + dz * 0.9).floor() as i32);
+                for y in [p.y.floor() as i32, p.y.floor() as i32 + 1] {
+                    if name_at(bot, ax, y, az).is_some_and(|n| n == "lily_pad") {
+                        let _ = bot.dig(ax, y, az).await;
+                        eprintln!("    BANK cleared a lily pad at ({ax},{y},{az})");
+                    }
+                }
+            }
             bot.look_at(crate::vec3::vec3(p.x + dx * 4.0, p.y + 0.3, p.z + dz * 4.0));
             bot.set_control_state("jump", true);
             bot.set_control_state("forward", true);
@@ -885,9 +917,41 @@ async fn place_table_confirmed(bot: &mut Bot<'_>, tx: i32, ty: i32, tz: i32) -> 
     Ok(bot.block_at(tx, ty, tz).map(|b| b.name == "crafting_table").unwrap_or(false))
 }
 
+/// An empty cell a table can go into: any air (plain, cave_air, void_air). The old `state == 0`
+/// test rejected cave_air, so in a carved cave no neighbour qualified and the niche fallback tried to
+/// "dig" air; iron_from_surface baseline rust-gym-004 looped "could not place a server-confirmed
+/// table" 1,944 times in one 1,200 s trial (cycle 5).
+fn table_cell_empty(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    name_at(bot, x, y, z).is_some_and(|n| n.ends_with("air"))
+}
+
+/// A block a table can stand on: loaded, not air, not a fluid.
+fn table_support(bot: &Bot, x: i32, y: i32, z: i32) -> bool {
+    name_at(bot, x, y, z).is_some_and(|n| !n.ends_with("air") && n != "water" && n != "lava")
+}
+
 /// Place a crafting table on an air block next to the bot with solid ground.
 /// Only returns a position once the server CONFIRMS the table is really there.
 async fn place_crafting_table(
+    bot: &mut Bot<'_>,
+    mem: &mut WorldMemory,
+) -> std::io::Result<Option<(i32, i32, i32)>> {
+    if let Some(p) = place_crafting_table_here(bot, mem).await? {
+        return Ok(Some(p));
+    }
+    // Nothing worked from here: step a few blocks to one side and try once more.
+    let p = bot.entity.position;
+    for (dx, dz) in [(3, 0), (-3, 0), (0, 3), (0, -3)] {
+        let (gx, gz) = (p.x.floor() as i32 + dx, p.z.floor() as i32 + dz);
+        if bot.goto_near(gx, p.y.floor() as i32, gz, 1.5).await.unwrap_or(false) {
+            println!("    table: moved to ({gx},{gz}) to retry the placement");
+            return place_crafting_table_here(bot, mem).await;
+        }
+    }
+    Ok(None)
+}
+
+async fn place_crafting_table_here(
     bot: &mut Bot<'_>,
     mem: &mut WorldMemory,
 ) -> std::io::Result<Option<(i32, i32, i32)>> {
@@ -901,7 +965,7 @@ async fn place_crafting_table(
     // block beneath it to place the table on.
     for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (1, -1, 0), (-1, -1, 0), (0, -1, 1), (0, -1, -1)] {
         let (tx, ty, tz) = (fx + dx, fy + dy, fz + dz);
-        if bot.block_state_at(tx, ty, tz) == 0 && bot.block_state_at(tx, ty - 1, tz) != 0 {
+        if table_cell_empty(bot, tx, ty, tz) && table_support(bot, tx, ty - 1, tz) {
             if place_table_confirmed(bot, tx, ty, tz).await? {
                 println!("    table: placed + server-confirmed at ({tx},{ty},{tz})");
                 mem.record(PoiKind::CraftingTable, (tx, ty, tz), PoiStatus::Available);
@@ -914,11 +978,11 @@ async fn place_crafting_table(
     // cell opens up with solid ground below it, then place the table there.
     for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
         let (tx, ty, tz) = (fx + dx, fy, fz + dz);
-        if bot.block_state_at(tx, ty - 1, tz) != 0 {
-            if bot.block_state_at(tx, ty, tz) != 0 && bot.dig(tx, ty, tz).await.is_err() {
+        if table_support(bot, tx, ty - 1, tz) {
+            if !table_cell_empty(bot, tx, ty, tz) && bot.dig(tx, ty, tz).await.is_err() {
                 continue;
             }
-            if bot.block_state_at(tx, ty, tz) != 0 {
+            if !table_cell_empty(bot, tx, ty, tz) {
                 continue; // couldn't break it (e.g. bedrock)
             }
             if place_table_confirmed(bot, tx, ty, tz).await? {
@@ -928,6 +992,10 @@ async fn place_crafting_table(
             }
         }
     }
-    println!("    table: could not place a server-confirmed table (bot at {fx},{fy},{fz})");
+    let around: Vec<String> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .iter()
+        .map(|&(dx, dz)| format!("{}/{}", name_at(bot, fx + dx, fy, fz + dz).unwrap_or_default(), name_at(bot, fx + dx, fy - 1, fz + dz).unwrap_or_default()))
+        .collect();
+    println!("    table: could not place a server-confirmed table (bot at {fx},{fy},{fz}; cell/below {around:?})");
     Ok(None)
 }

@@ -29,6 +29,13 @@ pub struct AStar {
     open_map: HashMap<i64, usize>,
     closed: HashSet<i64>,
     best: usize,
+    /// Search time spent in earlier slices. The total budget counts SEARCH time, not wall time: with
+    /// one 50 ms tick driven between 40 ms slices (Bot::plan_path), a wall-clock budget gave A* about
+    /// 0.9 s of its 2 s, and paths the old synchronous search found came back Timeout (cycle 5:
+    /// "MOLD slow goto … ok=false" timeouts, race-head 1/10 vs 6b-head 12/22 on the portal gym).
+    spent: Duration,
+    /// Wall-clock start, for the old budget (the default until the search-time budget is measured: the
+    /// region-62 run of it was stopped by the death rule, cycle 5). `ASTAR_SEARCH_BUDGET=1` uses `spent`.
     start_time: Instant,
     max_cost: f64,
 }
@@ -51,6 +58,7 @@ impl AStar {
             open_map: HashMap::new(),
             closed: HashSet::new(),
             best: 0,
+            spent: Duration::ZERO,
             start_time: Instant::now(),
             max_cost: if search_radius < 0.0 {
                 -1.0
@@ -149,12 +157,26 @@ impl AStar {
         tick_timeout: Duration,
         total_timeout: Duration,
     ) -> PathResult {
-        let tick_start = Instant::now();
+        let t = Instant::now();
+        let r = self.compute_slice(goal, movements, tick_timeout, total_timeout, t);
+        self.spent += t.elapsed();
+        r
+    }
+
+    fn compute_slice(
+        &mut self,
+        goal: &dyn Goal,
+        movements: &dyn NeighborGen,
+        tick_timeout: Duration,
+        total_timeout: Duration,
+        tick_start: Instant,
+    ) -> PathResult {
         while !self.heap_is_empty() {
             if tick_start.elapsed() > tick_timeout {
                 return self.result(PathStatus::Partial, self.best);
             }
-            if self.start_time.elapsed() > total_timeout {
+            let used = if search_budget() { self.spent + tick_start.elapsed() } else { self.start_time.elapsed() };
+            if used > total_timeout {
                 return self.result(PathStatus::Timeout, self.best);
             }
 
@@ -307,4 +329,9 @@ mod tests {
         assert_eq!(result.status, PathStatus::Success);
         assert_eq!(result.cost, 7.0); // 3 + 4 manhattan
     }
+}
+
+fn search_budget() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("ASTAR_SEARCH_BUDGET").ok().as_deref() == Some("1"))
 }

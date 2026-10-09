@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::bot::{Bot, Face};
 use crate::bot_utils::{count_items, select_item};
 use crate::memory::WorldMemory;
-use crate::tasks::portal::{cast_debug, eat_if_hurt, feet_y, name_at, pillar_up_with, place_cobble, solid_at};
+use crate::tasks::portal::{cast_debug, eat_if_hurt, feet_y, name_at, place_cobble, solid_at};
 use crate::types::{failure, success, StepResult};
 use crate::vec3::vec3;
 
@@ -429,6 +429,18 @@ pub async fn crystals_bow(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepResu
             .filter(|(id, _)| misses.get(id).copied().unwrap_or(0) < 8)
             .min_by(|a, b| a.1.distance_xz(p).total_cmp(&b.1.distance_xz(p)))
         else {
+            // Cycle 5 (decision 4): a crystal given up on is usually caged. Climb beside its tower once,
+            // open the cage side facing the pillar, come down in a water column, and let the bow retry.
+            let given_up = cs.iter().filter(|(cid, _)| !CLIMBED.lock().unwrap().contains(cid)).min_by(|a, b| a.1.distance_xz(p).total_cmp(&b.1.distance_xz(p))).copied();
+            if let Some((cid, cp)) = given_up {
+                CLIMBED.lock().unwrap().insert(cid);
+                let opened = open_cage(bot, cp).await;
+                cast_debug(&format!("CRYSTALS cage climb for crystal {cid} at ({:.0},{:.0},{:.0}): opened {opened} bars", cp.x, cp.y, cp.z));
+                if opened > 0 {
+                    misses.insert(cid, 0);
+                }
+                continue;
+            }
             *CRYSTAL_MISSES.lock().unwrap() = Some(misses.clone());
             bot.wait_ticks(200).await.ok(); // nothing left to try: don't let the gym re-call it at once
             return failure(format!("CRYSTALS {} left, each missed 8× (caged?): {kills} kills in {shots} shots", cs.len()));
@@ -526,4 +538,110 @@ pub async fn crystals_bow(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepResu
         }
     }
     failure(format!("CRYSTALS budget spent: {kills} kills in {shots} shots, {} left", crystals(bot).len()))
+}
+
+/// Crystals already climbed this trial (the gym resets it with CRYSTAL_MISSES).
+pub static CLIMBED: std::sync::Mutex<std::collections::BTreeSet<i32>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Open a crystal cage's side facing the bot (one 2-hour build, cycle 5 decision 4; kit 32 obsidian).
+/// Find the tower's edge on the bot's side, pillar obsidian beside it to the top, step onto the top,
+/// dig the iron bars on that side, step back, pour water over the outer edge and ride the column down.
+/// Returns the number of iron bars removed.
+async fn open_cage(bot: &mut Bot<'_>, cp: crate::vec3::Vec3) -> usize {
+    let (cx, cz, top) = (cp.x.floor() as i32, cp.z.floor() as i32, cp.y.floor() as i32); // feet level on the tower top
+    let bars: Vec<(i32, i32, i32)> = (-2..=2)
+        .flat_map(|dx| (-2..=2).flat_map(move |dz| (-1..=3).map(move |dy| (cx + dx, top + dy, cz + dz))))
+        .filter(|&(x, y, z)| name_at(bot, x, y, z) == "iron_bars")
+        .collect();
+    if bars.is_empty() {
+        cast_debug("CRYSTALS cage: no iron bars around this crystal (not caged, or not loaded)");
+        return 0;
+    }
+    // Axis direction toward the bot, then the tower radius along it (obsidian under the top level).
+    let p = bot.entity.position;
+    let (dx, dz) = if (p.x - cp.x).abs() >= (p.z - cp.z).abs() { ((p.x - cp.x).signum() as i32, 0) } else { (0, (p.z - cp.z).signum() as i32) };
+    let r = (1..12).take_while(|&k| crate::tasks::portal::is_solid(&name_at(bot, cx + dx * k, top - 1, cz + dz * k))).count() as i32;
+    let (sx, sz) = (cx + dx * (r + 1), cz + dz * (r + 1));
+    let ground = (30..top).rev().find(|&y| solid_at(bot, sx, y - 1, sz) && !solid_at(bot, sx, y, sz)).unwrap_or(top - 20);
+    cast_debug(&format!("CRYSTALS cage: {} bars, tower r={r}, pillar at ({sx},{ground},{sz}) → feet {top}, obsidian={}", bars.len(), count_items(bot, "obsidian")));
+    let _ = tokio::time::timeout(Duration::from_secs(60), bot.goto_near(sx, ground, sz, 0.8)).await;
+    bot.clear_control_states();
+    for _ in 0..4 {
+        if pillar_up_with(bot, top, Some("obsidian")).await {
+            break;
+        }
+    }
+    bot.set_control_state("sneak", false);
+    if feet_y(bot) < top {
+        cast_debug(&format!("CRYSTALS cage: pillar stopped at feet {} (want {top})", feet_y(bot)));
+        return 0;
+    }
+    // Onto the top, one block in, then dig every bar on this side within reach.
+    crate::tasks::portal::walk_to_xz(bot, (sx - dx) as f64 + 0.5, (sz - dz) as f64 + 0.5, 0.3, 40).await;
+    let mut opened = 0;
+    let mut side: Vec<(i32, i32, i32)> = bars.into_iter().filter(|&(x, _, z)| (x - cx) * dx + (z - cz) * dz > 0).collect();
+    side.sort_by_key(|&(x, y, z)| (x - sx).abs() + (y - top).abs() + (z - sz).abs());
+    for (x, y, z) in side {
+        crate::tasks::portal::dig_at(bot, x, y, z).await;
+        if name_at(bot, x, y, z) != "iron_bars" {
+            opened += 1;
+        }
+    }
+    // Down: back to the pillar cell, water over the outer edge, step into the falling column.
+    crate::tasks::portal::walk_to_xz(bot, sx as f64 + 0.5, sz as f64 + 0.5, 0.3, 40).await;
+    let (wx, wz) = (sx + dx, sz + dz);
+    if select_item(bot, "water_bucket").await.unwrap_or(false) {
+        crate::tasks::portal::reliable_use(bot, vec3(wx as f64 + 0.5, top as f64 - 0.5, wz as f64 + 0.5)).await;
+        bot.wait_ticks(10).await.ok();
+        crate::tasks::portal::walk_to_xz(bot, wx as f64 + 0.5, wz as f64 + 0.5, 0.3, 40).await;
+        for _ in 0..30 {
+            bot.wait_ticks(10).await.ok();
+            if bot.entity.on_ground && feet_y(bot) <= ground + 1 {
+                break;
+            }
+        }
+    }
+    cast_debug(&format!("CRYSTALS cage: opened {opened}, back down at feet {} hp={:.0}", feet_y(bot), bot.health));
+    opened
+}
+
+/// `pillar_up` with a chosen block, for the End only (the dragon destroys any block outside its immune
+/// tag, cobble included, so the dragon pillar is obsidian). Kept here, not in portal.rs, so the portal
+/// module stays 6b plus the cycle-5 safety fixes.
+pub(crate) async fn pillar_up_with(bot: &mut Bot<'_>, target_y: i32, block: Option<&'static str>) -> bool {
+    bot.set_control_state("sneak", true);
+    let cell_x = bot.entity.position.x.floor() as i32;
+    let cell_z = bot.entity.position.z.floor() as i32;
+    for _ in 0..24 {
+        if feet_y(bot) >= target_y {
+            break;
+        }
+        crate::tasks::portal::walk_to_xz(bot, cell_x as f64 + 0.5, cell_z as f64 + 0.5, 0.1, 24).await;
+        bot.set_control_state("sneak", true);
+        let f = feet_y(bot);
+        // Clear the climb path two/three blocks up so a stray block doesn't block the jump.
+        for dy in [2, 3] {
+            let n = name_at(bot, cell_x, f + dy, cell_z);
+            if crate::tasks::portal::is_solid(&n) && n != "obsidian" {
+                crate::tasks::portal::dig_at(bot, cell_x, f + dy, cell_z).await;
+            }
+        }
+        let b = block.filter(|b| count_items(bot, b) > 0).unwrap_or_else(|| crate::tasks::portal::build_block(bot));
+        if !select_item(bot, b).await.unwrap_or(false) {
+            break;
+        }
+        bot.look_at(vec3(cell_x as f64 + 0.5, (f - 2) as f64, cell_z as f64 + 0.5));
+        bot.wait_ticks(3).await.ok();
+        bot.set_control_state("jump", true);
+        bot.wait_ticks(7).await.ok();
+        // Place on top of the block one below our feet (the pillar we stand on).
+        if solid_at(bot, cell_x, f - 1, cell_z) {
+            let _ = bot.place_block(cell_x, f - 1, cell_z, Face::Top).await;
+        }
+        bot.wait_ticks(5).await.ok();
+        bot.set_control_state("jump", false);
+        bot.wait_ticks(8).await.ok();
+    }
+    feet_y(bot) >= target_y
+    // Leave sneak ON — caller clears it once the block is poured.
 }

@@ -38,6 +38,10 @@ pub enum GymSetup {
     Tunnel,
     /// Random surface teleport (`spreadplayers` in 0..10k) — the terrain-variance test.
     RandomSurface,
+    /// A REAL lake each trial (cycle 5): the surface of a random water body with no land within 8 and
+    /// dry shore 9–48 blocks out. A fixed lake (water_wall_i8) wore out under ~80 trials of digging and
+    /// building: target-wade went 4/10 then 0/10 at the same spot.
+    RandomLake,
     /// A controlled water pool in a fixed arena — the water-escape test. Geometry via env:
     /// WATER_HALF (pool half-width → bank distance), WATER_DEPTH, WATER_SUBMERGE (start depth
     /// below the surface), WATER_CAP=1 (solid ceiling over the bot). Drops the bot submerged.
@@ -66,6 +70,23 @@ pub struct GymStep {
     /// Pass check on the live bot; `None` → the `step_id`'s own `is_complete`.
     pub custom_pass: Option<fn(&Bot, &GameState) -> bool>,
     pub setup: GymSetup,
+}
+
+/// The step an attempt runs: the slug's own, or for `pipeline` slugs the step machine's choice.
+fn step_for_attempt(step: &GymStep, bot: &Bot) -> &'static str {
+    if step.step_id != "pipeline" {
+        return step.step_id;
+    }
+    let id = crate::steps::get_next_step(&sync_from_bot(bot)).map(|s| s.id).unwrap_or("gather_wood");
+    println!("[gym:{}] pipeline → {id}", step.slug);
+    id
+}
+
+/// GYM_PARITY=1: run without the cycle-5 trial rules (same-failure 4× cut, respawn tp-back) so an arm
+/// built on this tree is measured under the same harness as an arm built on an older tree (6b-head).
+/// Respawns far from the landing are still counted.
+fn parity() -> bool {
+    std::env::var("GYM_PARITY").ok().as_deref() == Some("1")
 }
 
 fn passes(step: &GymStep, bot: &Bot, s: &GameState) -> bool {
@@ -150,7 +171,7 @@ pub static GYM_STEPS: &[GymStep] = &[
     // fully supplied, then can't cast over the deep sea). Pass = in the nether.
     // Kit held at 6b's for the 6b vs 6c+lsm2 comparison (a kit change would confound it). Phase 2 switches
     // it to the race kit (decision 5: iron_pickaxe 2, bucket 4, water_bucket 1) once the comparison decides.
-    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 3", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 256", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 2400, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
+    GymStep { slug: "portal", label: "Build + Enter Portal (wild)", order: 20, prereq: &["iron_pickaxe 3", "bucket 5", "water_bucket 1", "flint_and_steel 1", "cobblestone 256", "cooked_beef 16", "stick 4", "crafting_table 1"], step_id: "build_nether_portal", timeout_secs: 2400, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::RandomSurface },
     // The operator's design: tp the bot to a REAL underground lava pool with the full kit (2 water
     // buckets → infinite source), then it must dig out a safe cast site, build the obsidian frame,
     // light it, and enter. Isolates the CAST at a real pool from the (easy, solved) descent.
@@ -160,9 +181,32 @@ pub static GYM_STEPS: &[GymStep] = &[
     GymStep { slug: "iron_repro", label: "Iron, race lane (22 iron)", order: 0, prereq: &["stone_pickaxe 1", "cobblestone 16", "cooked_beef 8"], step_id: "mine_iron", timeout_secs: 1800, custom_pass: Some(|bot, _| count_items(bot, "raw_iron") + count_items(bot, "iron_ingot") + count_items(bot, "iron_ore") + count_items(bot, "deepslate_iron_ore") >= 22), setup: GymSetup::FixedSurface { x: 300900, z: 350 } },
     // Cycle 4 Part 6, skill 12: kitted teleport into the End, crystals gone, beds detonated at the perch.
     // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
-    GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
+    GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1", "obsidian 32"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
     GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
-    GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::portal::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
+    // Cycle 5 Phase 3: the race from "wood and stone tools done" to an iron pickaxe, through the real
+    // step machine (step_id "pipeline": each attempt runs get_next_step, as the race loop does). The
+    // kit is the median race state at the first post-tools step (i6 + i100 archives, 5 bots: stone
+    // pickaxe, ~12 logs, ~2 planks, 0 sticks, ~22 cobble, no sword/table/furnace/coal). Fresh terrain,
+    // POIs cleared. Pass = the SERVER's count of iron pickaxes on the bot (`clear … 0`), not the client.
+    GymStep { slug: "iron_from_surface", label: "Surface → iron pickaxe (step machine)", order: 0, prereq: &["stone_pickaxe 1", "oak_log 12", "oak_planks 2", "cobblestone 22"], step_id: "pipeline", timeout_secs: 1200, custom_pass: Some(|bot, _| count_items(bot, "iron_pickaxe") >= 1), setup: GymSetup::RandomSurface },
+    // Cycle 5: the race water wall. Race i8 rust-race-002 sat in this lake on mine_stone (BANK swims that
+    // never reach ground, WATER ALARM, "mined 0/16 cobblestone" ×20 → relaunch, 3×); i7 lost 3/5 bots to
+    // lakes the same way. FixedSurface on the lake = the stuck state; the bot's race kit at that moment;
+    // the step machine runs. Pass = 16 cobblestone (mine_stone's target), i.e. out of the lake and mining.
+    GymStep { slug: "water_wall_i8", label: "Race water wall (i8 lake, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::FixedSurface { x: 25085, z: 584 } },
+    // The race water wall on a fresh real lake per trial (see GymSetup::RandomLake); same kit and pass as water_wall_i8.
+    GymStep { slug: "water_wall_lake", label: "Race water wall (random real lake, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::RandomLake },
+    // The race water wall on a rebuilt pool (fresh every trial, no terrain wear): a 33×33 lake, the bot at
+    // the surface centre 16 blocks from any bank, stone under the water (what mine_stone dove for in the
+    // i8 lake). Random real lakes were too slow to find (1 lake in 30 min across 10 bots, chunk generation).
+    GymStep { slug: "water_wall_pool", label: "Race water wall (33x33 pool, mine_stone)", order: 0, prereq: &["wooden_pickaxe 1", "oak_planks 2", "stick 4"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "cobblestone") >= 16), setup: GymSetup::Water { half: 16, depth: 4, submerge: 0, cap: false, pocket: false, buried: false } },
+    // The tool loop at depth (races i7 rust-race-002, i8 rust-race-004): pickaxe gone at y −50 with planks and
+    // logs in hand, then craft_sticks / craft_planks for hours while sticks stayed 0. Kit = i7 002's state;
+    // the step machine runs in a stone tunnel; pass = any pickaxe in the inventory.
+    GymStep { slug: "tool_loop_depth", label: "Tool loop at depth (no pickaxe, planks in hand)", order: 0, prereq: &["oak_log 5", "oak_planks 10", "cobblestone 64", "iron_ingot 2", "crafting_table 1"], step_id: "pipeline", timeout_secs: 180, custom_pass: Some(|bot, _| ["wooden_pickaxe", "stone_pickaxe", "iron_pickaxe", "diamond_pickaxe"].iter().any(|p| count_items(bot, p) > 0)), setup: GymSetup::Tunnel },
+    // Stale-window craft (see the run loop): kit = planks; pass = sticks after a death with a table open.
+    GymStep { slug: "stale_window_craft", label: "2x2 craft after dying with a table window open", order: 0, prereq: &["oak_planks 8"], step_id: "pipeline", timeout_secs: 60, custom_pass: Some(|bot, _| count_items(bot, "stick") > 0), setup: GymSetup::Tunnel },
+    GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
 ];
 
@@ -284,12 +328,45 @@ pub fn report() {
 // ── the runner ──────────────────────────────────────────────────────────────
 
 /// Run `trials` gym trials of `slug` on this bot, recording each to `gym.db`.
+/// The trial in progress: (gym.db row id, slug, step_id, start). The SIGTERM handler reads it so a
+/// trial I stop leaves an `aborted` row with a reason, never a `running` one (cycle 5: 111 of 208
+/// cycle-4 gym rows were left `running` by my own relaunches).
+static CURRENT_TRIAL: std::sync::Mutex<Option<(i64, &'static str, &'static str, Instant)>> = std::sync::Mutex::new(None);
+
+/// Install the SIGTERM handler once: record the current trial as `aborted` (gym.db + event log),
+/// then exit. The launchers stop a batch with SIGTERM, and use -9 only as a fallback.
+fn install_abort_handler() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tokio::spawn(async {
+            let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) else {
+                return;
+            };
+            sig.recv().await;
+            if let Some((id, slug, step_id, t0)) = CURRENT_TRIAL.lock().unwrap().take() {
+                let reason = "aborted: stopped by the operator (SIGTERM)";
+                GymStore::open().finish(id, false, t0.elapsed().as_millis() as i64, "aborted", reason);
+                let e = |k: &str| std::env::var(k).unwrap_or_default();
+                crate::learn::write_row(&serde_json::json!({
+                    "run_id": e("GYM_RUN"), "bot_impl": "rs", "build": e("BUILD"), "bot": e("MC_USERNAME"),
+                    "world_seed": e("WORLD_SEED").parse::<i64>().ok(), "skill": crate::learn::skill_of(step_id), "step_id": step_id,
+                    "source": "gym", "gym_slug": slug, "start_ms": crate::learn::now_ms() - t0.elapsed().as_millis() as i64,
+                    "duration_s": t0.elapsed().as_secs_f64(), "outcome": "aborted", "reason": reason, "deaths": 0, "gym_id": id,
+                }));
+                println!("[gym:{slug}] ABORTED after {:.0}s (SIGTERM) — row {id} recorded as aborted", t0.elapsed().as_secs_f64());
+            }
+            std::process::exit(0);
+        });
+    });
+}
+
 pub async fn run(
     bot: &mut Bot<'_>,
     memory: &mut WorldMemory,
     slug: &str,
     trials: u32,
 ) -> std::io::Result<()> {
+    install_abort_handler();
     let Some(step) = GYM_STEPS.iter().find(|s| s.slug == slug) else {
         println!("GYM: unknown slug '{slug}'. Known: {}", GYM_STEPS.iter().map(|s| s.slug).collect::<Vec<_>>().join(", "));
         return Ok(());
@@ -324,6 +401,7 @@ pub async fn run_random(
     memory: &mut WorldMemory,
     trials: u32,
 ) -> std::io::Result<()> {
+    install_abort_handler();
     let mut rcon = RconClient::connect(RconOptions {
         host: env("RCON_HOST", "localhost"),
         port: env("RCON_PORT", "25575").parse().unwrap_or(25575),
@@ -363,10 +441,12 @@ async fn run_one_trial(
     // Start row BEFORE setup: a bot that dies or disconnects in setup still leaves a `running`
     // row (counted as killed) — cycle-2 water batch 2 lost one launch that way.
     let run_id = store.start(step.slug, 0, 0, 0, step.prereq);
+    *CURRENT_TRIAL.lock().unwrap() = Some((run_id, step.slug, step.step_id, Instant::now()));
     crate::learn::gym_begin(step.step_id);
-    crate::tasks::portal::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
-    *crate::tasks::portal::DRILL_ANCHOR.lock().unwrap() = None;
+    crate::tasks::lava_move::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
+    *crate::tasks::lava_move::DRILL_ANCHOR.lock().unwrap() = None;
     *crate::tasks::end::CRYSTAL_MISSES.lock().unwrap() = None;
+    crate::tasks::end::CLIMBED.lock().unwrap().clear();
     let (gx, gy, gz, cx, cz) = setup_trial(bot, rcon, &name, step).await;
     // Portal steps: record the SEEDED lava pool in memory so prepare_cast_site's memory-first
     // path walks straight to it (as it would in a real run after mining recorded exposed lava),
@@ -400,6 +480,8 @@ async fn run_one_trial(
     let mut pass = false;
     let mut last_msg = String::new();
     let mut attempts = 0u32;
+    let mut harness_events = 0u32;
+    let (mut same_fail, mut last_fail_key) = (0u32, String::new());
     // Setup found no land within ±480 (all-ocean region): FAIL the trial without running it.
     let no_land = SETUP_NO_LAND.swap(false, std::sync::atomic::Ordering::Relaxed);
     if no_land {
@@ -426,14 +508,22 @@ async fn run_one_trial(
             break;
         }
         if !s.alive {
-
             bot.respawn().await.ok();
             bot.wait_ticks(40).await.ok();
-            // Fixed-arena steps: a mid-build death respawns at WORLD SPAWN (no bed), stranding the
-            // bot thousands of blocks from the arena+lava so it can never recover — it burns the
-            // rest of the budget building futile frames on bare terrain. RCON-tp it back onto the
-            // arena pad so the retry has lava in reach.
-            if matches!(step.slug, "reach_lava" | "to_nether") {
+            // Respawn must land within 32 blocks of the trial's landing. The spawnpoint isn't always
+            // honoured (steve saw the same on its server), and a bot respawned at world spawn burns
+            // the rest of the budget on foreign terrain. Otherwise tp back and count a harness event.
+            // (Fixed-arena steps always went back to the pad; this generalises it.)
+            let p = bot.entity.position;
+            let d = ((p.x - gx as f64).powi(2) + (p.z - gz as f64).powi(2)).sqrt();
+            if d > 32.0 && parity() {
+                harness_events += 1;
+                println!("[gym:{}] HARNESS respawn {d:.0} blocks from the landing — parity mode, not moved", step.slug);
+            } else if d > 32.0 || matches!(step.slug, "reach_lava" | "to_nether") {
+                if d > 32.0 {
+                    harness_events += 1;
+                    println!("[gym:{}] HARNESS respawn {d:.0} blocks from the landing ({:.0},{:.0},{:.0}) — tp back", step.slug, p.x, p.y, p.z);
+                }
                 let _ = rcon_driving(bot, rcon, &format!("tp {name} {gx} {gy} {gz}")).await;
                 pump_teleport(bot, gx, gz).await;
             }
@@ -442,6 +532,25 @@ async fn run_one_trial(
         // Water-escape drill: drive `leave_water` directly (the unit under test) rather than
         // through the survival preempt, so we measure IT. The loop's top pass-check (fully out
         // of water) ends the trial; the 90s timeout bounds a failure.
+        // Stale container window (3968bcf): open a crafting table, die with it open (the server closes it,
+        // the old client kept the record), respawn, then craft sticks in the 2×2 inventory grid.
+        if step.slug == "stale_window_craft" {
+            attempts += 1;
+            if attempts == 1 {
+                let (tx, ty, tz) = (gx + 2, gy, gz);
+                let _ = rcon_driving(bot, rcon, &format!("setblock {tx} {ty} {tz} minecraft:crafting_table")).await;
+                bot.wait_ticks(10).await.ok();
+                let opened = bot.open_block(tx, ty, tz, crate::bot::Face::Top).await.unwrap_or(false);
+                let _ = rcon_driving(bot, rcon, &format!("kill {name}")).await;
+                bot.wait_ticks(20).await.ok();
+                bot.respawn().await.ok();
+                bot.wait_ticks(40).await.ok();
+                println!("[gym:stale_window_craft] table opened={opened}, died with it open, window recorded={}", bot.current_window.is_some());
+            }
+            let r = crate::bot_utils::craft_item(bot, "stick", 4, None, memory).await;
+            last_msg = r.message;
+            continue;
+        }
         if step.slug == "leave_water" {
             attempts += 1;
             crate::bot_utils::leave_water(bot, 40).await;
@@ -473,8 +582,24 @@ async fn run_one_trial(
             }
         };
         tokio::select! {
-            r = tokio::time::timeout(remaining, crate::steps::execute_step(bot, step.step_id, memory)) => match r {
-                Ok(r) => last_msg = r.message,
+            r = tokio::time::timeout(remaining, crate::steps::execute_step(bot, step_for_attempt(step, bot), memory)) => match r {
+                Ok(r) => {
+                    // The same failure four times in one trial ends it, failed, with that reason (steve
+                    // lost a run to a 102-dispatch "pickaxe worn out" loop). Digits are ignored so a
+                    // counter or coordinate in the message doesn't make repeats look different.
+                    if !r.success {
+                        let key: String = r.message.chars().filter(|c| !c.is_ascii_digit()).collect();
+                        same_fail = if key == last_fail_key { same_fail + 1 } else { 1 };
+                        last_fail_key = key;
+                    } else {
+                        same_fail = 0;
+                    }
+                    last_msg = r.message;
+                    if same_fail >= 4 && !parity() {
+                        last_msg = format!("same failure 4× in this trial: {last_msg}");
+                        break;
+                    }
+                }
                 Err(_) => {
                     last_msg = format!("gym timeout — task hung ({attempts} attempts) | last: {}", crate::tasks::portal::last_cast_line());
                     break;
@@ -513,6 +638,16 @@ async fn run_one_trial(
         pass = left.contains("failed");
         last_msg = format!("server crystal check: {} | {last_msg}", if pass { "none left" } else { "crystals remain" });
     }
+    // iron_from_surface: ground truth from the server (the client's inventory can lag or ghost).
+    if step.slug == "iron_from_surface" {
+        let truth = rcon_driving(bot, rcon, &format!("clear {name} minecraft:iron_pickaxe 0")).await;
+        let server_pass = truth.contains("Found");
+        if pass != server_pass {
+            last_msg = format!("client said {pass}, server said {server_pass} | {last_msg}");
+        }
+        pass = server_pass;
+        last_msg = format!("server iron_pickaxe check: {} | {last_msg}", truth.trim());
+    }
     // Dragon slug: ground truth from the server, never the bot's own view (cycle 4 Part 3).
     if step.slug == "dragon" {
         let alive = rcon_driving(bot, rcon, "execute in minecraft:the_end if entity @e[type=minecraft:ender_dragon]").await;
@@ -528,7 +663,12 @@ async fn run_one_trial(
         pass = false;
         outcome = "died";
     }
+    if harness_events > 0 {
+        last_msg = format!("harness_events={harness_events} | {last_msg}");
+    }
     last_msg = format!("deaths={deaths} | {last_msg}");
+    // Finished normally: the abort handler must no longer claim this row.
+    *CURRENT_TRIAL.lock().unwrap() = None;
     store.finish(run_id, pass, dur, outcome, &last_msg);
     // A setup skip (no land, etc.) measures nothing about the bot: `skipped`, excluded by compare/funnel.
     let row_outcome = if last_msg.contains("trial skipped") { "skipped" } else { match outcome { "pass" => "ok", "timeout" => "timeout", "died" => "death", _ => "failed" } };
@@ -664,6 +804,56 @@ async fn setup_trial(
             let p = bot.entity.position;
             let (spx, spz) = (p.x.floor() as i32 + 3, p.z.floor() as i32);
             let _ = rcon_driving(bot, rcon, &format!("execute positioned {spx} 0 {spz} positioned over motion_blocking_no_leaves run spawnpoint {name} ~ ~ ~")).await;
+        }
+        GymSetup::RandomLake => {
+            SETUP_NO_LAND.store(true, std::sync::atomic::Ordering::Relaxed);
+            let mut offsets = Vec::new();
+            for r in [0, 32, 64, 96, 128, 160, 192, 224, 256, 320, 384, 448] {
+                for (ux, uz) in [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
+                    offsets.push((ux * r, uz * r));
+                    if r == 0 {
+                        break;
+                    }
+                }
+            }
+            for (attempt, &(ox, oz)) in offsets.iter().enumerate() {
+                let (sx, sz) = (cx + ox, cz + oz);
+                if attempt > 0 {
+                    let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", sx - 8, sz - 8, sx + 8, sz + 8)).await;
+                }
+                for _ in 0..90 {
+                    if rcon_driving(bot, rcon, &format!("execute if loaded {sx} 0 {sz}")).await.contains("passed") {
+                        break;
+                    }
+                    bot.wait_ticks(20).await.ok();
+                }
+                // Cheap server-side pre-check: skip a dry candidate without teleporting (most are land;
+                // the first version teleported to every one and found 2 lakes in 30 min across 10 bots).
+                let wet = rcon_driving(bot, rcon, &format!("execute positioned {sx} 0 {sz} positioned over motion_blocking_no_leaves if block ~ ~-1 ~ minecraft:water")).await;
+                if !wet.contains("passed") {
+                    if attempt > 0 {
+                        let _ = rcon_driving(bot, rcon, &format!("forceload remove {} {} {} {}", sx - 8, sz - 8, sx + 8, sz + 8)).await;
+                    }
+                    continue;
+                }
+                let _ = rcon_driving(bot, rcon, &format!("execute positioned {sx} 0 {sz} positioned over motion_blocking_no_leaves run tp {name} ~ ~1 ~")).await;
+                pump_teleport(bot, sx, sz).await;
+                bot.wait_ticks(20).await.ok();
+                let p = bot.entity.position;
+                let (lx, ly, lz) = (p.x.floor() as i32, p.y.floor() as i32 - 1, p.z.floor() as i32);
+                let water = |x: i32, z: i32| bot.block_at(x, ly, z).is_some_and(|b| b.name.contains("water"));
+                let open = water(lx, lz) && (-5..=5).all(|dx| (-5..=5).all(|dz| water(lx + dx, lz + dz)));
+                let shore = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+                    .iter()
+                    .filter_map(|&(dx, dz)| (6..=48).find(|&k| bot.block_at(lx + dx * k, ly, lz + dz * k).is_some_and(|b| !b.name.contains("water") && !b.name.ends_with("air"))))
+                    .min();
+                if open && shore.is_some() {
+                    println!("[gym] lake start at ({lx},{lz}): shore {} blocks", shore.unwrap());
+                    SETUP_NO_LAND.store(false, std::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+                println!("[gym] lake candidate ({sx},{sz}) unusable (open {open}, shore {shore:?}) — shifting");
+            }
         }
         GymSetup::WaterPool => {
             // A contained water pool in a fixed arena, geometry from env — reproducible so we
