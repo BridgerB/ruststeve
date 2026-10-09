@@ -2059,6 +2059,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 }
                 let cluster_target = cluster.map(|c| c.0).filter(|l| !lava_retired(*l));
                 if let Some(l) = band_lava.or(cluster_target).or_else(|| find_fluid(bot, "lava", 24).filter(below_floor)).or_else(far_band_lava) {
+                    crate::gym::note_lava_target();
                     bot.assert_lava_seen(l, "at-depth tunnel target");
                     blind_blocks = 0;
                     let p = bot.entity.position;
@@ -2139,6 +2140,7 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     let Some(lava) = lava else {
         return None;
     };
+    crate::gym::note_lava_target();
     bot.assert_lava_seen(lava, "prepare: chosen pool");
     mem.log("cast", "lava", &format!("{},{},{}", lava.0, lava.1, lava.2));
     // Remember the pool so retries navigate STRAIGHT back (memory-first path above)

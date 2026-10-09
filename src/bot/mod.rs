@@ -1070,6 +1070,12 @@ impl<'a> Bot<'a> {
             let items = items.iter().map(|s| from_notch(registry, s)).collect();
             crate::window::apply_server_content(&mut self.inventory, self.current_window.as_mut(), window_id, items);
         }
+        // The server's cursor stack. Never read before: the local cursor was a prediction only, and after a
+        // click the server rejected (a result taken with planks still held) the bot believed it held what
+        // it did not (decision 7, capture 2026-10-09 rust-gym-010: cursor 6×oak_planks server-side).
+        if let (Some(c), Some(window)) = (params.get("carriedItem"), self.window_for(window_id)) {
+            window.selected_item = from_notch(registry, c);
+        }
         if let (Some(sid), Some(window)) = (state_id, self.window_for(window_id)) {
             window.state_id = sid;
         }
@@ -1084,6 +1090,12 @@ impl<'a> Bot<'a> {
             return;
         };
         let item = params.get("item").and_then(|it| from_notch(registry, it));
+        // windowId -1, slot -1: the cursor stack.
+        if window_id == -1 && slot == -1 {
+            let w = self.current_window.as_mut().unwrap_or(&mut self.inventory);
+            w.selected_item = item;
+            return;
+        }
         crate::window::apply_server_slot(&mut self.inventory, self.current_window.as_mut(), window_id, slot, item);
         if let (Some(sid), Some(window)) = (state_id, self.window_for(window_id)) {
             window.state_id = sid;

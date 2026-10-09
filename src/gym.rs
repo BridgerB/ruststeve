@@ -246,6 +246,11 @@ impl GymStore {
         // A trial whose process is killed stays 'running' and the report counts it as a FAIL
         // (cycle 1 lost ~10 killed trials from gym.db, inflating the pass rate).
         let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN outcome TEXT", []);
+        // Cycle 6: the build (BUILD env) and paired landing of every trial, and the seconds from trial start to
+        // the first lava-site decision (`note_lava_target`), for the paired arm comparison.
+        let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN build TEXT", []);
+        let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN landing TEXT", []);
+        let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN lava_s REAL", []);
         GymStore { conn }
     }
 
@@ -255,22 +260,25 @@ impl GymStore {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let _ = self.conn.execute(
-            "INSERT INTO gym_runs(ts, slug, pass, duration_ms, x, y, z, prereq, message, outcome)
-             VALUES(?1,?2,0,0,?3,?4,?5,?6,'',  'running')",
-            params![now, slug, x, y, z, prereq.join(", ")],
+            "INSERT INTO gym_runs(ts, slug, pass, duration_ms, x, y, z, prereq, message, outcome, build)
+             VALUES(?1,?2,0,0,?3,?4,?5,?6,'',  'running', ?7)",
+            params![now, slug, x, y, z, prereq.join(", "), std::env::var("BUILD").ok()],
         );
         self.conn.last_insert_rowid()
     }
 
     pub fn set_pos(&self, id: i64, x: i32, y: i32, z: i32) {
         let _ = self.conn.execute("UPDATE gym_runs SET x=?2, y=?3, z=?4 WHERE id=?1", params![id, x, y, z]);
+        if let Some(l) = CUR_LANDING.lock().unwrap().clone() {
+            let _ = self.conn.execute("UPDATE gym_runs SET landing=?2 WHERE id=?1", params![id, l]);
+        }
     }
 
     pub fn finish(&self, id: i64, pass: bool, duration_ms: i64, outcome: &str, message: &str) {
         let msg: String = message.chars().take(400).collect();
         let _ = self.conn.execute(
-            "UPDATE gym_runs SET pass=?2, duration_ms=?3, outcome=?4, message=?5 WHERE id=?1",
-            params![id, pass as i32, duration_ms, outcome, msg],
+            "UPDATE gym_runs SET pass=?2, duration_ms=?3, outcome=?4, message=?5, lava_s=?6 WHERE id=?1",
+            params![id, pass as i32, duration_ms, outcome, msg, *LAVA_AT.lock().unwrap()],
         );
     }
 
@@ -336,6 +344,19 @@ pub fn report() {
 /// trial I stop leaves an `aborted` row with a reason, never a `running` one (cycle 5: 111 of 208
 /// cycle-4 gym rows were left `running` by my own relaunches).
 static CURRENT_TRIAL: std::sync::Mutex<Option<(i64, &'static str, &'static str, Instant)>> = std::sync::Mutex::new(None);
+/// The paired landing id of the trial in progress (set by `next_landing`).
+static CUR_LANDING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Seconds from trial start to the trial's first lava-site decision.
+static LAVA_AT: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
+
+/// Called by the portal's lava siting when it first targets a pool: records time-to-lava for the trial.
+pub fn note_lava_target() {
+    let t0 = CURRENT_TRIAL.lock().unwrap().map(|c| c.3);
+    let mut at = LAVA_AT.lock().unwrap();
+    if let (None, Some(t0)) = (*at, t0) {
+        *at = Some(t0.elapsed().as_secs_f64());
+    }
+}
 
 /// Install the SIGTERM handler once: record the current trial as `aborted` (gym.db + event log),
 /// then exit. The launchers stop a batch with SIGTERM, and use -9 only as a fallback.
@@ -446,6 +467,8 @@ async fn run_one_trial(
     // row (counted as killed) — cycle-2 water batch 2 lost one launch that way.
     let run_id = store.start(step.slug, 0, 0, 0, step.prereq);
     *CURRENT_TRIAL.lock().unwrap() = Some((run_id, step.slug, step.step_id, Instant::now()));
+    *LAVA_AT.lock().unwrap() = None;
+    *CUR_LANDING.lock().unwrap() = None;
     crate::learn::gym_begin(step.step_id);
     crate::tasks::lava_move::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
     *crate::tasks::lava_move::DRILL_ANCHOR.lock().unwrap() = None;
@@ -699,6 +722,7 @@ fn next_landing() -> Option<(i32, i32)> {
     let set: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
     let k = env("GYM_LANDING_OFFSET", "0").parse::<usize>().unwrap_or(0) + NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let l = set.as_array()?.get(k)?;
+    *CUR_LANDING.lock().unwrap() = l["id"].as_str().map(String::from);
     Some((l["x"].as_i64()? as i32, l["z"].as_i64()? as i32))
 }
 
