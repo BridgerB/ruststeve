@@ -13,14 +13,17 @@ fn ingredient_matches(type_id: i32, ingredient: &RecipeItem) -> bool {
         || ingredient.choices.as_ref().map(|c| c.contains(&type_id)).unwrap_or(false)
 }
 
-/// Find a slot in `window` holding any item that satisfies `ingredient`.
+/// Find a slot in `window`'s INVENTORY section holding any item that satisfies `ingredient`. Never the
+/// result or grid slots (cycle 6): searching the whole window found the plank just placed in the grid once
+/// the cursor stack ran out, picked it back up and moved it to the next grid slot. With 1 oak + 28 cherry
+/// planks every stick and table craft made an oak_button (race i10 rust-race-005, 20 failures).
 fn find_ingredient_slot(window: &Window, ingredient: &RecipeItem) -> Option<usize> {
     let mut ids = vec![ingredient.id];
     if let Some(choices) = &ingredient.choices {
         ids.extend(choices.iter().copied());
     }
     for id in ids {
-        for (i, slot) in window.slots.iter().enumerate() {
+        for (i, slot) in window.slots.iter().enumerate().take(window.inventory_end).skip(window.inventory_start) {
             if let Some(item) = slot {
                 if item.type_id == id
                     && (ingredient.metadata.is_none() || Some(item.metadata) == ingredient.metadata)
@@ -274,4 +277,35 @@ fn missing(ingredient: &RecipeItem) -> std::io::Error {
         std::io::ErrorKind::NotFound,
         format!("missing crafting ingredient id={}", ingredient.id),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::item::create_item;
+    use crate::registry::{BlockCollisionShapes, ItemDefinition, Registry};
+
+    #[test]
+    fn ingredient_search_skips_the_grid() {
+        let defs = [(36, "oak_planks"), (41, "cherry_planks")];
+        let reg = Registry::build(
+            vec![],
+            defs.iter()
+                .map(|&(id, name)| ItemDefinition { id, name: name.into(), display_name: name.into(), stack_size: 64, enchant_categories: None, repair_with: None, max_durability: None })
+                .collect(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            BlockCollisionShapes::default(),
+            std::collections::HashMap::new(),
+            "26.1.2",
+        );
+        let mut inv = Window::new(0, "minecraft:inventory", "", 46, 9, 44, 0, true);
+        // The oak just placed in grid slot 1; the cherry stack in the hotbar.
+        inv.slots[1] = Some(create_item(&reg, 36, 1, 0, None, vec![], vec![]));
+        inv.slots[37] = Some(create_item(&reg, 41, 28, 0, None, vec![], vec![]));
+        let planks = RecipeItem { id: 36, metadata: None, count: 1, choices: Some(vec![36, 41]) };
+        assert_eq!(find_ingredient_slot(&inv, &planks), Some(37));
+    }
 }
