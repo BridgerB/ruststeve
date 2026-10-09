@@ -127,7 +127,16 @@ impl<'a> Bot<'a> {
         end: usize,
         fallback_slot: i32,
     ) -> std::io::Result<()> {
+        // Capped: the cursor is the SERVER's since cycle 6 (carriedItem), so a click the server does not
+        // apply no longer empties it locally, and an uncapped loop could spin without end (race i10
+        // rust-race-004: craft_iron_pickaxe hung 330 s per attempt beside its table, no CRAFT line).
+        let mut tries = 0;
         while let Some(sel) = self.selected_item().cloned() {
+            tries += 1;
+            if tries > 12 {
+                eprintln!("CURSOR stuck: server cursor still holds {}x{} after 12 put-away clicks into [{start},{end})", sel.count, sel.name);
+                break;
+            }
             let mut dest: Option<usize> = None;
             for i in start..end {
                 if let Some(item) = self.slot_item(i) {
