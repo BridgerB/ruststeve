@@ -1063,31 +1063,15 @@ impl<'a> Bot<'a> {
         let window_id = params.get("windowId").and_then(PValue::as_i32).unwrap_or(-1);
         let state_id = params.get("stateId").and_then(PValue::as_i32);
         let registry = self.registry;
-        let Some(window) = self.window_for(window_id) else {
-            return;
-        };
+        // Verbatim, grid included (decision 7). The typecraft port moved 2×2 grid items into empty
+        // inventory slots here on the client only: the server still held them in the grid, the craft
+        // grabbed phantoms and made oak_buttons (tests/fixtures/stale-craft-window.json).
         if let Some(items) = params.get("items").and_then(PValue::as_list) {
-            for (i, slot) in items.iter().enumerate() {
-                if i < window.slots.len() {
-                    window.slots[i] = from_notch(registry, slot);
-                }
-            }
+            let items = items.iter().map(|s| from_notch(registry, s)).collect();
+            crate::window::apply_server_content(&mut self.inventory, self.current_window.as_mut(), window_id, items);
         }
-        if let Some(sid) = state_id {
+        if let (Some(sid), Some(window)) = (state_id, self.window_for(window_id)) {
             window.state_id = sid;
-        }
-        // Clear any items stuck in the 2x2 crafting grid after a resync.
-        if window_id == 0 {
-            for s in 1..=4 {
-                if self.inventory.slots[s].is_some() {
-                    for dest in 9..45 {
-                        if self.inventory.slots[dest].is_none() {
-                            self.inventory.slots[dest] = self.inventory.slots[s].take();
-                            break;
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -1099,15 +1083,9 @@ impl<'a> Bot<'a> {
         let Some(slot) = params.get("slot").and_then(PValue::as_i32) else {
             return;
         };
-        let item = params.get("item");
-        let Some(window) = self.window_for(window_id) else {
-            return;
-        };
-        let i = slot as usize;
-        if i < window.slots.len() {
-            window.slots[i] = item.and_then(|it| from_notch(registry, it));
-        }
-        if let Some(sid) = state_id {
+        let item = params.get("item").and_then(|it| from_notch(registry, it));
+        crate::window::apply_server_slot(&mut self.inventory, self.current_window.as_mut(), window_id, slot, item);
+        if let (Some(sid), Some(window)) = (state_id, self.window_for(window_id)) {
             window.state_id = sid;
         }
     }

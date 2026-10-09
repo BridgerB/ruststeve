@@ -117,6 +117,11 @@ fn summarize(name: &str, params: &PValue) -> String {
     if !is_interaction(name) {
         return String::new();
     }
+    // SNIFF_JSON=1: the FULL params as JSON (no truncation), so a recorded exchange can be replayed in a
+    // unit test (cycle 6: the 2×2 craft flake's window packets, tests/fixtures/).
+    if std::env::var("SNIFF_JSON").is_ok_and(|v| v == "1") {
+        return pvalue_json(params).to_string();
+    }
     let mut s = format!("{params:?}");
     const MAX: usize = 600;
     if s.len() > MAX {
@@ -124,4 +129,19 @@ fn summarize(name: &str, params: &PValue) -> String {
         s.push('…');
     }
     s
+}
+
+/// A packet value as JSON: numbers, strings, lists and compounds as themselves; NBT and raw bytes as null.
+pub fn pvalue_json(v: &PValue) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        PValue::Void | PValue::Nbt(_) | PValue::Bytes(_) => Value::Null,
+        PValue::Bool(b) => Value::Bool(*b),
+        PValue::Num(n) => serde_json::Number::from_f64(*n).map(Value::Number).unwrap_or(Value::Null),
+        PValue::Long(n) => Value::from(*n),
+        PValue::ULong(n) => Value::from(*n),
+        PValue::Str(s) => Value::String(s.clone()),
+        PValue::List(l) => Value::Array(l.iter().map(pvalue_json).collect()),
+        PValue::Compound(c) => Value::Object(c.iter().map(|(k, v)| (k.clone(), pvalue_json(v))).collect()),
+    }
 }
