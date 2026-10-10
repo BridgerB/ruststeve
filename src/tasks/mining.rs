@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::bot::Bot;
 
-use crate::bot_utils::{collect_drops, count_items, select_item};
+use crate::bot_utils::{collect_drops, select_item};
 use crate::memory::{PoiKind, PoiStatus, WorldMemory};
 use crate::types::{failure, success, StepResult};
 
@@ -182,36 +182,7 @@ fn held_is_pickaxe(bot: &Bot) -> bool {
 /// (durability management). False if the bot has no pickaxe at all — the caller
 /// should bail so the step machine crafts a replacement instead of mining
 /// bare-handed (which on stone yields nothing).
-/// Craft a stone pickaxe where the bot stands, from carried cobble (3) and sticks (2), at a table
-/// within 24 blocks or one placed from the inventory (crafted from 4 planks if needed). A throwaway
-/// in-memory WorldMemory keeps the craft from walking back to a remembered table far away. At most
-/// once a minute, so a bot with no materials can't loop on it. Returns whether a pickaxe was made.
-async fn craft_stone_pickaxe_mid_task(bot: &mut Bot<'_>) -> bool {
-    static LAST_TRY: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
-    {
-        let mut last = LAST_TRY.lock().unwrap();
-        if last.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(60)) {
-            return false;
-        }
-        *last = Some(std::time::Instant::now());
-    }
-    let cobble = count_items(bot, "cobblestone") + count_items(bot, "cobbled_deepslate");
-    let planks: i32 = bot.inventory.slots.iter().flatten().filter(|i| i.name.ends_with("_planks")).map(|i| i.count).sum();
-    let sticks = count_items(bot, "stick");
-    let table = count_items(bot, "crafting_table") > 0 || bot.find_block("crafting_table", 24).is_some();
-    let planks_needed = if sticks < 2 { 2 } else { 0 } + if table { 0 } else { 4 };
-    if cobble < 3 || planks < planks_needed {
-        crate::tasks::portal::cast_debug(&format!(
-            "pickaxe craft: not enough materials (cobble {cobble}, sticks {sticks}, planks {planks}, table {table})"
-        ));
-        return false;
-    }
-    let mut mem = crate::memory::WorldMemory::open(std::path::Path::new(":memory:"));
-    // Boxed: the craft path can reach ensure_pickaxe again (table placement digs), an async recursion.
-    let r = Box::pin(crate::tasks::craft::craft_stone_pickaxe(bot, &mut mem)).await;
-    crate::tasks::portal::cast_debug(&format!("pickaxe craft: stone pickaxe mid-task → {} ({})", r.success, r.message));
-    r.success && count_items(bot, "stone_pickaxe") > 0
-}
+
 
 pub(crate) async fn ensure_pickaxe(bot: &mut Bot<'_>) -> bool {
     if held_is_pickaxe(bot) {
@@ -221,11 +192,6 @@ pub(crate) async fn ensure_pickaxe(bot: &mut Bot<'_>) -> bool {
         if select_item(bot, tier).await.unwrap_or(false) {
             return true;
         }
-    }
-    // Cycle 5, decision 1: the last pickaxe broke mid-task (both arms wore out all three kit iron
-    // pickaxes in hard sites, ~750 digs): craft a stone pickaxe from carried cobble and sticks.
-    if crate::learn::safe_fixes() && craft_stone_pickaxe_mid_task(bot).await && select_item(bot, "stone_pickaxe").await.unwrap_or(false) {
-        return true;
     }
     // Loud, rate-limited: a natural portal run needs ~500 digs (551 in one rust-gym-001 trial) —
     // two iron pickaxes — and without one every stone dig is ~10 s by hand (and deepslate fails).

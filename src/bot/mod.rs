@@ -18,7 +18,7 @@ use crate::block::{state_id_to_block, BlockInfo};
 use crate::chunk::{ChunkColumn, ChunkColumnOptions, GLOBAL_BITS_PER_BIOME, GLOBAL_BITS_PER_BLOCK};
 use crate::entity::Entity;
 use crate::item::{from_notch, Item};
-use crate::path::{AStar, Goal, GoalNear, GoalNearXZ, Move, Movements, MovementsConfig, PathResult, PathStatus};
+use crate::path::{Goal, GoalNear, GoalNearXZ, Move, MovementsConfig, PathResult, PathStatus};
 use crate::physics::{
     apply_player_state, create_player_state, PhysicsEngine, PhysicsWorld, PlayerControls,
     WorldPhysics,
@@ -188,6 +188,12 @@ pub struct Bot<'a> {
     pub escaping: bool,
     /// Set by the escape only while a route leg dives (jump released on purpose).
     pub escape_diving: bool,
+    /// LAVA SIGHTINGS (cycle 6, Part 3): every lava SOURCE the bot has seen with an air face, with the
+    /// time (ms since epoch) it was first seen. Filled from the loaded chunks every few seconds by the tick
+    /// driver during every step, so lava passed at minute 40 is still known at the portal step. Persists
+    /// across deaths; cleared on a dimension change (a new world). Site selection reads only this.
+    pub lava_seen: HashMap<(i32, i32, i32), u64>,
+    lava_scan_last: Instant,
 }
 
 fn block_pos(x: i32, y: i32, z: i32) -> PValue {
@@ -277,6 +283,8 @@ impl<'a> Bot<'a> {
             wet_since: None,
             escaping: false,
             escape_diving: false,
+            lava_seen: HashMap::new(),
+            lava_scan_last: Instant::now(),
             view_last: Instant::now(),
             viewer: {
                 if std::env::var("RUST_VIEW").is_ok() {
@@ -349,6 +357,10 @@ impl<'a> Bot<'a> {
         if self.heartbeat_last.elapsed() >= std::time::Duration::from_secs(10) {
             self.heartbeat_last = Instant::now();
             let _ = std::fs::write(format!(".heartbeat-{}", self.username()), b"");
+        }
+        if self.lava_scan_last.elapsed() >= std::time::Duration::from_secs(5) {
+            self.lava_scan_last = Instant::now();
+            self.record_lava_sightings();
         }
         if elapsed >= TICK {
             self.breath_watchdog();
@@ -620,7 +632,7 @@ impl<'a> Bot<'a> {
             "respawn" => {
                 // The server closes any open container on respawn (death or dimension change); a window
                 // still recorded here would take later inventory clicks (see Bot::craft).
-                if self.current_window.is_some() && crate::bot::crafting::stale_window_fix() {
+                if self.current_window.is_some() {
                     self.sync_window_to_inventory();
                 }
                 if let Some(dim) = params
@@ -635,6 +647,7 @@ impl<'a> Bot<'a> {
                     if self.game.dimension != dim {
                         self.world.columns.clear();
                         self.entities.clear();
+                        self.lava_seen.clear();
                     }
                     self.game.dimension = dim.to_string();
                     // Update world height for the NEW dimension so chunk parsing reads the right
@@ -1050,31 +1063,21 @@ impl<'a> Bot<'a> {
         let window_id = params.get("windowId").and_then(PValue::as_i32).unwrap_or(-1);
         let state_id = params.get("stateId").and_then(PValue::as_i32);
         let registry = self.registry;
-        let Some(window) = self.window_for(window_id) else {
-            return;
-        };
+        // Verbatim, grid included (decision 7). The typecraft port moved 2×2 grid items into empty
+        // inventory slots here on the client only: the server still held them in the grid, the craft
+        // grabbed phantoms and made oak_buttons (tests/fixtures/stale-craft-window.json).
         if let Some(items) = params.get("items").and_then(PValue::as_list) {
-            for (i, slot) in items.iter().enumerate() {
-                if i < window.slots.len() {
-                    window.slots[i] = from_notch(registry, slot);
-                }
-            }
+            let items = items.iter().map(|s| from_notch(registry, s)).collect();
+            crate::window::apply_server_content(&mut self.inventory, self.current_window.as_mut(), window_id, items);
         }
-        if let Some(sid) = state_id {
+        // The server's cursor stack. Never read before: the local cursor was a prediction only, and after a
+        // click the server rejected (a result taken with planks still held) the bot believed it held what
+        // it did not (decision 7, capture 2026-10-09 rust-gym-010: cursor 6×oak_planks server-side).
+        if let (Some(c), Some(window)) = (params.get("carriedItem"), self.window_for(window_id)) {
+            window.selected_item = from_notch(registry, c);
+        }
+        if let (Some(sid), Some(window)) = (state_id, self.window_for(window_id)) {
             window.state_id = sid;
-        }
-        // Clear any items stuck in the 2x2 crafting grid after a resync.
-        if window_id == 0 {
-            for s in 1..=4 {
-                if self.inventory.slots[s].is_some() {
-                    for dest in 9..45 {
-                        if self.inventory.slots[dest].is_none() {
-                            self.inventory.slots[dest] = self.inventory.slots[s].take();
-                            break;
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -1086,15 +1089,15 @@ impl<'a> Bot<'a> {
         let Some(slot) = params.get("slot").and_then(PValue::as_i32) else {
             return;
         };
-        let item = params.get("item");
-        let Some(window) = self.window_for(window_id) else {
+        let item = params.get("item").and_then(|it| from_notch(registry, it));
+        // windowId -1, slot -1: the cursor stack.
+        if window_id == -1 && slot == -1 {
+            let w = self.current_window.as_mut().unwrap_or(&mut self.inventory);
+            w.selected_item = item;
             return;
-        };
-        let i = slot as usize;
-        if i < window.slots.len() {
-            window.slots[i] = item.and_then(|it| from_notch(registry, it));
         }
-        if let Some(sid) = state_id {
+        crate::window::apply_server_slot(&mut self.inventory, self.current_window.as_mut(), window_id, slot, item);
+        if let (Some(sid), Some(window)) = (state_id, self.window_for(window_id)) {
             window.state_id = sid;
         }
     }
@@ -1324,71 +1327,88 @@ impl<'a> Bot<'a> {
     /// search covers the whole view distance (±96 blocks at view-distance 6) instead of a small
     /// radius. Cheap: a palette check per 16³ section (`ChunkSection::contains_where`) and a cell
     /// scan only inside sections that hold one of the states.
-    /// LAVA SITING (cycle 2, Phase C): every lava SOURCE block (level 0 = the block's min state)
-    /// in the loaded chunks within `y_range`, bucketed into 4×4×4 cells; returns the nearest
-    /// (to the bot, horizontally) source that has at least `min_sources` sources within `radius`
-    /// blocks, with that count. No exposure test — the bot tunnels to it. This replaces the blind
-    /// fixed-heading tunnel (cycle 1: 300 blocks of probed-solid deepslate, three pickaxes).
-    pub fn find_lava_cluster(&self, y_range: (i32, i32), min_sources: usize, radius: i32, skip: &dyn Fn((i32, i32, i32)) -> bool) -> Option<((i32, i32, i32), usize)> {
-        let def = self.registry.blocks_by_name.get("lava")?;
+    /// Record every lava SOURCE in the loaded chunks that has an AIR face (air, cave_air, void_air, or a
+    /// see-through non-fluid block such as a torch) into `lava_seen`. Lava touching only stone, lava or
+    /// an unloaded cell is never recorded: the bot cannot see it (cycle 6, decision 5).
+    pub fn record_lava_sightings(&mut self) {
+        let Some(def) = self.registry.blocks_by_name.get("lava") else { return };
         let source = def.min_state_id;
-        let mut sources: Vec<(i32, i32, i32)> = Vec::new();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let mut found: Vec<(i32, i32, i32)> = Vec::new();
         for (&(cx, cz), col) in self.world.columns.iter() {
             for (si, sec) in col.sections.iter().enumerate() {
-                let y0 = col.min_y + si as i32 * 16;
-                if y0 + 15 < y_range.0 || y0 > y_range.1 || !sec.contains_where(&|s: u32| s == source) {
+                if !sec.contains_where(&|s: u32| s == source) {
                     continue;
                 }
+                let y0 = col.min_y + si as i32 * 16;
                 for y in 0..16 {
-                    let wy = y0 + y as i32;
-                    if wy < y_range.0 || wy > y_range.1 {
-                        continue;
-                    }
                     for z in 0..16 {
                         for x in 0..16 {
                             if sec.get_block(x, y, z) == source {
-                                sources.push((cx * 16 + x as i32, wy, cz * 16 + z as i32));
+                                found.push((cx * 16 + x as i32, y0 + y as i32, cz * 16 + z as i32));
                             }
                         }
                     }
                 }
             }
         }
-        if sources.len() < min_sources {
-            return None;
+        for c in found {
+            if !self.lava_seen.contains_key(&c) && self.is_exposed(c.0, c.1, c.2) {
+                self.lava_seen.insert(c, now);
+            }
         }
-        // Bucket into 4-block cells so the radius count only visits nearby cells.
+    }
+
+    /// Was this cell ever seen as an exposed lava source (or is it one now)? The honest-lava check.
+    pub fn lava_was_seen(&self, c: (i32, i32, i32)) -> bool {
+        self.lava_seen.contains_key(&c) || (self.block_at(c.0, c.1, c.2).is_some_and(|b| b.name == "lava") && self.is_exposed(c.0, c.1, c.2))
+    }
+
+    /// DEBUG ASSERTION (cycle 6, decision 5), on in gyms (`GYM` set): a lava-site decision whose target
+    /// cell was never seen exposed panics, so no path can quietly read lava through rock again.
+    pub fn assert_lava_seen(&self, c: (i32, i32, i32), ctx: &str) {
+        if std::env::var("GYM").is_ok_and(|v| !v.is_empty()) && !self.lava_was_seen(c) {
+            panic!("X-RAY ASSERTION: lava-site decision '{ctx}' targets {c:?}, a cell never seen with an air face");
+        }
+    }
+
+    /// The largest remembered cluster of SEEN lava: among remembered sources within `horiz` blocks
+    /// horizontally and inside `y_range`, the one with the most remembered sources within 6 blocks (3D);
+    /// distance breaks ties. Sources still loaded and no longer lava (scooped, turned to obsidian) are
+    /// dropped. Returns (source, count) when the count is at least `min_count`.
+    pub fn lava_seen_cluster(&self, y_range: (i32, i32), min_count: usize, horiz: f64, skip: &dyn Fn((i32, i32, i32)) -> bool) -> Option<((i32, i32, i32), usize)> {
+        let p = self.entity.position;
+        let live: Vec<(i32, i32, i32)> = self
+            .lava_seen
+            .keys()
+            .copied()
+            .filter(|c| self.block_at(c.0, c.1, c.2).is_none_or(|b| b.name == "lava"))
+            .collect();
         let mut grid: HashMap<(i32, i32, i32), Vec<(i32, i32, i32)>> = HashMap::new();
-        for &s in &sources {
+        for &s in &live {
             grid.entry((s.0.div_euclid(4), s.1.div_euclid(4), s.2.div_euclid(4))).or_default().push(s);
         }
-        let r2 = radius * radius;
-        let cr = radius / 4 + 1;
-        let p = self.entity.position;
         let mut best: Option<((i32, i32, i32), usize, f64)> = None;
-        // Candidate centres: every source (dense lakes make this cheap enough; sources ≪ blocks).
-        for &c in &sources {
-            // A skipped source (a retired pool) still counts toward its neighbours' clusters but is
-            // never the target, so the nearest NON-retired cluster wins instead of none at all.
-            if skip(c) {
+        for &c in &live {
+            if c.1 < y_range.0 || c.1 > y_range.1 || skip(c) {
                 continue;
             }
             let d = ((c.0 as f64 + 0.5 - p.x).powi(2) + (c.2 as f64 + 0.5 - p.z).powi(2)).sqrt();
-            if best.is_some_and(|(_, _, bd)| d >= bd) {
+            if d > horiz {
                 continue;
             }
             let (gx, gy, gz) = (c.0.div_euclid(4), c.1.div_euclid(4), c.2.div_euclid(4));
             let mut n = 0usize;
-            for dx in -cr..=cr {
-                for dy in -cr..=cr {
-                    for dz in -cr..=cr {
+            for dx in -2..=2 {
+                for dy in -2..=2 {
+                    for dz in -2..=2 {
                         if let Some(v) = grid.get(&(gx + dx, gy + dy, gz + dz)) {
-                            n += v.iter().filter(|s| (s.0 - c.0).pow(2) + (s.1 - c.1).pow(2) + (s.2 - c.2).pow(2) <= r2).count();
+                            n += v.iter().filter(|s| (s.0 - c.0).pow(2) + (s.1 - c.1).pow(2) + (s.2 - c.2).pow(2) <= 36).count();
                         }
                     }
                 }
             }
-            if n >= min_sources {
+            if n >= min_count && best.is_none_or(|(_, bn, bd)| n > bn || (n == bn && d < bd)) {
                 best = Some((c, n, d));
             }
         }
@@ -1480,14 +1500,20 @@ impl<'a> Bot<'a> {
         results
     }
 
-    fn is_exposed(&self, x: i32, y: i32, z: i32) -> bool {
+    /// A face the bot could see this block through: air (any kind), water, or a see-through non-fluid block.
+    /// Not lava (the registry marks lava `transparent`, so the old test counted every source inside a buried
+    /// lava lake as exposed, cycle 6 audit), and not an unloaded cell (nothing is known there).
+    pub fn is_exposed(&self, x: i32, y: i32, z: i32) -> bool {
         for (ox, oy, oz) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
-            match self.world.get_block_state_id(vec3((x + ox) as f64, (y + oy) as f64, (z + oz) as f64)) {
-                None | Some(0) => return true,
-                Some(s) => {
-                    if self.registry.blocks_by_state_id.get(&s).map(|d| d.transparent).unwrap_or(false) {
-                        return true;
-                    }
+            let Some(s) = self.world.get_block_state_id(vec3((x + ox) as f64, (y + oy) as f64, (z + oz) as f64)) else {
+                continue;
+            };
+            if s == 0 {
+                return true;
+            }
+            if let Some(d) = self.registry.blocks_by_state_id.get(&s) {
+                if d.name != "lava" && (d.transparent || d.name.ends_with("air")) {
+                    return true;
                 }
             }
         }
@@ -1924,35 +1950,11 @@ impl<'a> Bot<'a> {
     /// Navigate to a goal: compute an A* path, follow it (digging obstacles,
     /// jumping, dropping), and re-path when stuck or the path runs out before the
     /// goal. Single-task port of typecraft's tick-driven pathfinder follower.
-    /// A* in 40 ms slices with one driven tick between slices, same 2 s total budget as before.
-    /// A single synchronous search froze the tick loop, and with it the breath watchdog, for up to
-    /// 2 s per call. Race i6 logged `LOOP STALL 4060 ms` right after each `moving toward …` goto,
-    /// and its breath alarm fired at 11.3 s against the 6 s rule. The search state lives in AStar;
-    /// Movements only borrows the world, so it is rebuilt per slice.
+    /// One synchronous A* search (cycle 6, decision 9: ASTAR_SYNC won and is the only planner). The sliced
+    /// search kept ticks running but cut the search to ~45% and lost the portal comparison: one-shot 11/17 vs
+    /// sliced 8/18 (regions 85/84), water_wall_pool 4/10 vs 1/10.
     async fn plan_path(&mut self, start: (i32, i32, i32), goal: &dyn Goal, total: Duration) -> std::io::Result<PathResult> {
-        // ASTAR_SYNC=1: the old one-shot search (6b-head's), to isolate the slicing in the tree-vs-head
-        // portal gap (cycle 5: tree + search-time budget 11/23 vs 6b-head 16/26). No ticks during the search.
-        static SYNC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *SYNC.get_or_init(|| std::env::var("ASTAR_SYNC").ok().as_deref() == Some("1")) {
-            return Ok(crate::path::get_path_to(&self.world, start, goal, self.movement.clone(), -1.0, total));
-        }
-        // Ticks now run while planning, so release the movement keys first: the old synchronous
-        // search froze the bot in place, and walking on stale keys for up to 2 s near lava is not
-        // safe. Sneak (edge safety) and the watchdog's jump are left as they are.
-        for k in ["forward", "back", "left", "right", "sprint"] {
-            self.set_control_state(k, false);
-        }
-        let mut astar = AStar::new(Move::start(start.0, start.1, start.2), goal, -1.0);
-        loop {
-            let r = {
-                let mv = Movements::new(&self.world, self.movement.clone());
-                astar.compute(goal, &mv, Duration::from_millis(40), total)
-            };
-            if r.status != PathStatus::Partial {
-                return Ok(r);
-            }
-            self.drive_tick().await?;
-        }
+        Ok(crate::path::get_path_to(&self.world, start, goal, self.movement.clone(), -1.0, total))
     }
 
     pub async fn goto_goal(&mut self, goal: &dyn Goal, timeout: Duration) -> std::io::Result<bool> {
@@ -2099,19 +2101,6 @@ impl<'a> Bot<'a> {
             let dx = next.x as f64 + 0.5 - p.x;
             let dz = next.z as f64 + 0.5 - p.z;
             let dy = next.y as f64 - p.y;
-            // LIVE lava check against the current world, not the one A* planned on (lava flows; a
-            // slice-planned path can be seconds old): the waypoint's feet or floor cell is lava now →
-            // re-plan. And never sprint toward a waypoint with lava within 1 — sprint momentum carried
-            // bots off lake edges (6c+lsm8 rust-gym-004: walking west at −54, feet cell lava at −55).
-            let lava_at = |b: &Self, x: i32, y: i32, z: i32| {
-                b.registry.blocks_by_state_id.get(&b.block_state_at(x, y, z)).map(|bl| bl.name.contains("lava")).unwrap_or(false)
-            };
-            let safe = crate::learn::safe_fixes();
-            if safe && (lava_at(self, next.x, next.y, next.z) || lava_at(self, next.x, next.y - 1, next.z)) {
-                self.clear_control_states();
-                return Ok(FollowOutcome::NeedRepath);
-            }
-            let lava_close = safe && (-1..=1).any(|ox| (-1..=1).any(|oz| (-1..=0).any(|oy| lava_at(self, next.x + ox, next.y + oy, next.z + oz))));
 
             // Reached the waypoint only when at/above its level (dy <= 0.6) —
             // for an upward step this forces the bot to actually CLIMB before
@@ -2148,7 +2137,7 @@ impl<'a> Bot<'a> {
             let mz = next.z as f64 + 0.5 - p.z;
             self.look((-mx).atan2(-mz), 0.0);
             self.set_control_state("forward", true);
-            self.set_control_state("sprint", !lava_close);
+            self.set_control_state("sprint", true);
             // Jump to climb only when CLOSE to the up-step (so we walk up to it with
             // ground momentum and step onto it), or for parkour. Jumping while far
             // from the step just bounces in open air with no forward progress.

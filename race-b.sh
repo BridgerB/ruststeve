@@ -147,7 +147,7 @@ for i in $(seq 0 $((N-1))); do
   # Races i7 and i8 inherited anchors from earlier races, and 6b's displacement recovery tp'd bots to
   # them: i7 rust-race-003 tunnelled ~2,500 blocks toward its i6 mold; i8 rust-race-001 finished and
   # lit its i7 frame 3,200 blocks from its lane.
-  rm -f "$DIR/.memory-${NAMES[i]}.db" "$DIR/.memory-${NAMES[i]}.db-wal" "$DIR/.memory-${NAMES[i]}.db-shm" "$DIR/data/.attempt-${NAMES[i]}.json" "$DIR/.frame-${NAMES[i]}.txt"
+  rm -f "$DIR/.memory-${NAMES[i]}.db" "$DIR/.memory-${NAMES[i]}.db-wal" "$DIR/.memory-${NAMES[i]}.db-shm" "$DIR/data/.attempt-${NAMES[i]}.json" "$DIR/.frame-${NAMES[i]}.txt" "$DIR/.portal-${NAMES[i]}.txt"
   launch_bot "$i"
   sleep 2
 done

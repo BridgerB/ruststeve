@@ -157,13 +157,6 @@ impl<'a> Movements<'a> {
         (0..=1).any(|h| {
             [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| self.query(x + dx, y + h, z + dz).lava)
         }) || self.query(x, y - 1, z).lava
-            // An OPEN LAVA HOLE beside the landing (side cell air, lava directly below it): a drop's
-            // momentum carries the bot a block past the landing and into it. Cycle-4 portal comparison,
-            // rust-gym-002: a drop from the −53 platform onto a station stand at −54 slid into the
-            // station's open scoop side O, with lava at −55, and died within 1 s.
-            || crate::learn::safe_fixes() && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| {
-                !self.query(x + dx, y, z + dz).physical && self.query(x + dx, y - 1, z + dz).lava
-            })
     }
 
     /// 0 if safe, dig_cost if breakable (records break), -1 if impassable.
@@ -348,27 +341,10 @@ impl<'a> Movements<'a> {
         }
     }
 
-    /// Lava in the cell or beside it (4 sides at feet), or under it: the walk rule of `safe_or_break`.
-    fn lava_near_cell(&self, x: i32, y: i32, z: i32) -> bool {
-        [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0), (0, 1, 0)]
-            .iter()
-            .any(|&(ox, oy, oz)| self.query(x + ox, y + oy, z + oz).lava)
-    }
+
 
     fn move_diagonal(&self, node: &Move, dx: i32, dz: i32, out: &mut Vec<Move>) {
         let (nx, nz) = (node.x + dx, node.z + dz);
-        // Diagonals skipped the walk's lava rule entirely: the body (0.6 wide) sweeps both corner cells,
-        // so a diagonal past a lava-floored corner put the bot over lava (6c+lsm10 rust-gym-003: the
-        // station-entrance walk ended at (97051.4, −54.8, 3326.5) over a −55 lava cell; dead). Refuse a
-        // diagonal whose destination or either corner cell has lava in, beside or under it.
-        for y in [node.y, node.y - 1, node.y - 2] {
-            if !crate::learn::safe_fixes() {
-                break;
-            }
-            if self.lava_near_cell(nx, y, nz) || self.lava_near_cell(node.x, y, node.z + dz) || self.lava_near_cell(node.x + dx, y, node.z) {
-                return;
-            }
-        }
         let dest_floor = self.query(nx, node.y - 1, nz);
         if dest_floor.physical {
             if !self.query(nx, node.y, nz).safe || !self.query(nx, node.y + 1, nz).safe {

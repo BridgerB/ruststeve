@@ -74,12 +74,27 @@ impl<'a> Bot<'a> {
     }
 
     /// Drive the loop until the server sends a slot/content update (or timeout).
+    /// Then keep reading until the window has been quiet for 100 ms: one click can draw several packets
+    /// (a set_slot per changed slot, or a full resync), and returning on the first left the rest to be read
+    /// as the NEXT click's ack. The client then ran one click behind the server (decision 7 capture:
+    /// replies lag one click, planks pile into grid slot 3, the result is an oak_button).
     pub(crate) async fn wait_for_inventory_ack(&mut self, timeout: Duration) -> std::io::Result<()> {
         let rev = self.inv_revision;
         let deadline = Instant::now() + timeout;
         while self.inv_revision == rev && Instant::now() < deadline {
             if matches!(self.drive_tick().await?, DriveStep::Disconnected) {
                 return Ok(());
+            }
+        }
+        let quiet_cap = Instant::now() + Duration::from_millis(1000);
+        let (mut seen, mut since) = (self.inv_revision, Instant::now());
+        while since.elapsed() < Duration::from_millis(100) && Instant::now() < quiet_cap {
+            if matches!(self.drive_tick().await?, DriveStep::Disconnected) {
+                return Ok(());
+            }
+            if self.inv_revision != seen {
+                seen = self.inv_revision;
+                since = Instant::now();
             }
         }
         Ok(())
@@ -112,7 +127,16 @@ impl<'a> Bot<'a> {
         end: usize,
         fallback_slot: i32,
     ) -> std::io::Result<()> {
+        // Capped: the cursor is the SERVER's since cycle 6 (carriedItem), so a click the server does not
+        // apply no longer empties it locally, and an uncapped loop could spin without end (race i10
+        // rust-race-004: craft_iron_pickaxe hung 330 s per attempt beside its table, no CRAFT line).
+        let mut tries = 0;
         while let Some(sel) = self.selected_item().cloned() {
+            tries += 1;
+            if tries > 12 {
+                eprintln!("CURSOR stuck: server cursor still holds {}x{} after 12 put-away clicks into [{start},{end})", sel.count, sel.name);
+                break;
+            }
             let mut dest: Option<usize> = None;
             for i in start..end {
                 if let Some(item) = self.slot_item(i) {
