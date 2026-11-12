@@ -8,6 +8,15 @@
 //!     [--lane 0] [--first-seed 0] [--cap 6000] [--walk square] [--run local-<ms>] [--threads N]
 //! ```
 //!
+//! With `--landings-file F --worlds DIR --goal log:30` it runs the planner in each captured
+//! landing instead (issue 09's measure, `bot::landings`), prints the measure and, with
+//! `--check`, fails when a done-condition or the CPU budget does not hold:
+//!
+//! ```text
+//! cargo run --release -p bot --bin simrace -- --landings-file config/landings-grid.toml \
+//!     --worlds W --goal log:30 --ticks 3000 --want 200 --check [--report measure.md]
+//! ```
+//!
 //! A sim number counts only beside a passing parity table for what it measures
 //! (brain/ruststeve/decisions/measurement-rules.md).
 
@@ -32,6 +41,13 @@ struct Args {
     run: String,
     threads: u64,
     config: String,
+    landings_file: Option<String>,
+    worlds: PathBuf,
+    goal: Option<plan::Aim>,
+    ticks: u64,
+    want: usize,
+    check: bool,
+    report: Option<PathBuf>,
 }
 
 fn args() -> Result<Args, String> {
@@ -45,6 +61,13 @@ fn args() -> Result<Args, String> {
         run: format!("local-sim-{}", bot::now_ms()),
         threads: std::thread::available_parallelism().map_or(4, |n| n.get() as u64),
         config: "config/race.toml".to_owned(),
+        landings_file: None,
+        worlds: PathBuf::from("target/worlds"),
+        goal: None,
+        ticks: 3000,
+        want: 200,
+        check: false,
+        report: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -60,6 +83,13 @@ fn args() -> Result<Args, String> {
             "--run" => a.run = v,
             "--threads" => a.threads = num(&v)?.max(1),
             "--config" => a.config = v,
+            "--landings-file" => a.landings_file = Some(v),
+            "--worlds" => a.worlds = PathBuf::from(v),
+            "--goal" => a.goal = Some(plan::Aim::parse(&v).ok_or(format!("--goal: no aim {v}"))?),
+            "--ticks" => a.ticks = num(&v)?,
+            "--want" => a.want = usize::try_from(num(&v)?).map_err(|e| e.to_string())?,
+            "--check" => a.check = v == "true",
+            "--report" => a.report = Some(PathBuf::from(v)),
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -207,6 +237,51 @@ fn simrace(a: &Args) -> Result<bool, String> {
     Ok(batch.coverage.cases == batch.coverage.runs)
 }
 
+/// Issue 09's measure over captured landings.
+fn landings(a: &Args, file: &str) -> Result<bool, String> {
+    let (race, _) = RaceConfig::read(&a.config)?;
+    let config = sim::Config {
+        view_distance: i32::try_from(race.server.view_distance).map_err(|e| e.to_string())?,
+        simulation_distance: i32::try_from(race.server.simulation_distance)
+            .map_err(|e| e.to_string())?,
+        peaceful: race.server.difficulty == "peaceful",
+    };
+    let aim = a.goal.ok_or("--landings-file needs --goal")?;
+    let list = results::parity::Landings::read(file)?;
+    let n = list.landing.len();
+    let runs: Vec<bot::landings::LandingRun> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..a.threads)
+            .map(|t| {
+                let list = &list;
+                s.spawn(move || {
+                    (0..n)
+                        .filter(|i| *i as u64 % a.threads == t)
+                        .map(|i| bot::landings::run_one(&a.worlds, list, i, config, aim, a.ticks))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let mut all: Vec<_> = handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect();
+        all.sort_by_key(|r| r.index);
+        all
+    });
+    let m = bot::landings::measure(
+        &runs,
+        a.want,
+        0.95,
+        plan::walk::PATIENCE_TICKS.max(1200),
+        race.budget.as_ref(),
+    );
+    print!("{}", m.text);
+    if let Some(p) = &a.report {
+        std::fs::write(p, &m.text).map_err(|e| e.to_string())?;
+    }
+    Ok(m.pass || !a.check)
+}
+
 fn main() -> ExitCode {
     let a = match args() {
         Ok(a) => a,
@@ -215,10 +290,14 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match simrace(&a) {
+    let result = match a.landings_file.clone() {
+        Some(f) => landings(&a, &f),
+        None => simrace(&a),
+    };
+    match result {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => {
-            eprintln!("simrace: coverage under 1.0");
+            eprintln!("simrace: a done-condition does not hold (or coverage under 1.0)");
             ExitCode::FAILURE
         }
         Err(e) => {

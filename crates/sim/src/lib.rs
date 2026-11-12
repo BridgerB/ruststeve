@@ -716,3 +716,75 @@ impl ModelWorld {
         })
     }
 }
+
+impl ModelWorld {
+    /// Where a player is placed at a column: the surface ignoring leaves, as vanilla places one
+    /// (the `MOTION_BLOCKING_NO_LEAVES` heightmap): under a tree's canopy, never on top of it, from
+    /// where no walk gets down (found by issue 09's landing measure: 14 of 22 misses began on
+    /// leaves).
+    pub fn ground(&self, x: i32, z: i32) -> Option<f64> {
+        use data::types::Collision;
+        let leaves = data::generated::tags::block_tag("leaves").unwrap_or_default();
+        let col = self.columns.get(&(x >> 4, z >> 4))?;
+        let top = col.column.max_y() - 1;
+        (col.column.min_y..=top).rev().find_map(|y| {
+            let kind = data::block_of_state(col.column.state_at(x, y, z)?)?;
+            if kind == data::BlockKind::Water {
+                return Some(f64::from(y) + 0.5);
+            }
+            if leaves.contains(&kind) {
+                return None;
+            }
+            match data::generated::shapes::collision(kind)? {
+                Collision::Empty => None,
+                Collision::Partial { top } => Some(f64::from(y) + top),
+                Collision::Full => Some(f64::from(y) + 1.0),
+            }
+        })
+    }
+}
+
+impl ModelWorld {
+    /// Where a player can be placed near (x, z): the nearest column, spiralling out at most
+    /// `radius`, whose ground (`ground`) has its feet and head cells free of anything that
+    /// collides, as vanilla needs two free cells to place a player. A start under a low canopy
+    /// has leaves at head height and the body begins embedded (found by issue 09's measure).
+    pub fn placeable(&self, x: i32, z: i32, radius: i32) -> Option<(i32, f64, i32)> {
+        use data::types::Collision;
+        let free = |cx: i32, cy: i32, cz: i32| {
+            self.columns
+                .get(&(cx >> 4, cz >> 4))
+                .and_then(|c| c.column.state_at(cx, cy, cz))
+                .and_then(data::block_of_state)
+                .is_some_and(|k| {
+                    k != data::BlockKind::Water
+                        && matches!(
+                            data::generated::shapes::collision(k),
+                            Some(Collision::Empty) | Some(Collision::Partial { .. })
+                        )
+                })
+        };
+        (0..=radius)
+            .flat_map(|r| {
+                (-r..=r).flat_map(move |d| {
+                    let ring = [(d, -r), (d, r), (-r, d), (r, d)];
+                    ring.into_iter()
+                })
+            })
+            .find_map(|(dx, dz)| {
+                let (cx, cz) = (x + dx, z + dz);
+                let y = self.ground(cx, cz)?;
+                let feet = y.floor() as i32;
+                let head_free = free(cx, feet + 1, cz)
+                    && !matches!(
+                        self.columns
+                            .get(&(cx >> 4, cz >> 4))
+                            .and_then(|c| c.column.state_at(cx, feet + 1, cz))
+                            .and_then(data::block_of_state)
+                            .and_then(data::generated::shapes::collision),
+                        Some(Collision::Partial { .. })
+                    );
+                (free(cx, feet, cz) && head_free).then_some((cx, y, cz))
+            })
+    }
+}

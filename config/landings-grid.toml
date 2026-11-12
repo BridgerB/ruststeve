@@ -1,0 +1,1284 @@
+# Candidate landings for issue 09's measure (brain/ruststeve/design/planner.md): a 20 x 16 grid
+# on the race seed, 192 blocks apart. A landing qualifies when its start is dry ground and a log
+# 30+ blocks away is in view once the bot has joined; the first 200 that qualify are the measure.
+# Generated, never hand-picked.
+
+[[landing]]
+x = -1880
+z = -1496
+
+[[landing]]
+x = -1688
+z = -1496
+
+[[landing]]
+x = -1496
+z = -1496
+
+[[landing]]
+x = -1304
+z = -1496
+
+[[landing]]
+x = -1112
+z = -1496
+
+[[landing]]
+x = -920
+z = -1496
+
+[[landing]]
+x = -728
+z = -1496
+
+[[landing]]
+x = -536
+z = -1496
+
+[[landing]]
+x = -344
+z = -1496
+
+[[landing]]
+x = -152
+z = -1496
+
+[[landing]]
+x = 40
+z = -1496
+
+[[landing]]
+x = 232
+z = -1496
+
+[[landing]]
+x = 424
+z = -1496
+
+[[landing]]
+x = 616
+z = -1496
+
+[[landing]]
+x = 808
+z = -1496
+
+[[landing]]
+x = 1000
+z = -1496
+
+[[landing]]
+x = 1192
+z = -1496
+
+[[landing]]
+x = 1384
+z = -1496
+
+[[landing]]
+x = 1576
+z = -1496
+
+[[landing]]
+x = 1768
+z = -1496
+
+[[landing]]
+x = -1880
+z = -1304
+
+[[landing]]
+x = -1688
+z = -1304
+
+[[landing]]
+x = -1496
+z = -1304
+
+[[landing]]
+x = -1304
+z = -1304
+
+[[landing]]
+x = -1112
+z = -1304
+
+[[landing]]
+x = -920
+z = -1304
+
+[[landing]]
+x = -728
+z = -1304
+
+[[landing]]
+x = -536
+z = -1304
+
+[[landing]]
+x = -344
+z = -1304
+
+[[landing]]
+x = -152
+z = -1304
+
+[[landing]]
+x = 40
+z = -1304
+
+[[landing]]
+x = 232
+z = -1304
+
+[[landing]]
+x = 424
+z = -1304
+
+[[landing]]
+x = 616
+z = -1304
+
+[[landing]]
+x = 808
+z = -1304
+
+[[landing]]
+x = 1000
+z = -1304
+
+[[landing]]
+x = 1192
+z = -1304
+
+[[landing]]
+x = 1384
+z = -1304
+
+[[landing]]
+x = 1576
+z = -1304
+
+[[landing]]
+x = 1768
+z = -1304
+
+[[landing]]
+x = -1880
+z = -1112
+
+[[landing]]
+x = -1688
+z = -1112
+
+[[landing]]
+x = -1496
+z = -1112
+
+[[landing]]
+x = -1304
+z = -1112
+
+[[landing]]
+x = -1112
+z = -1112
+
+[[landing]]
+x = -920
+z = -1112
+
+[[landing]]
+x = -728
+z = -1112
+
+[[landing]]
+x = -536
+z = -1112
+
+[[landing]]
+x = -344
+z = -1112
+
+[[landing]]
+x = -152
+z = -1112
+
+[[landing]]
+x = 40
+z = -1112
+
+[[landing]]
+x = 232
+z = -1112
+
+[[landing]]
+x = 424
+z = -1112
+
+[[landing]]
+x = 616
+z = -1112
+
+[[landing]]
+x = 808
+z = -1112
+
+[[landing]]
+x = 1000
+z = -1112
+
+[[landing]]
+x = 1192
+z = -1112
+
+[[landing]]
+x = 1384
+z = -1112
+
+[[landing]]
+x = 1576
+z = -1112
+
+[[landing]]
+x = 1768
+z = -1112
+
+[[landing]]
+x = -1880
+z = -920
+
+[[landing]]
+x = -1688
+z = -920
+
+[[landing]]
+x = -1496
+z = -920
+
+[[landing]]
+x = -1304
+z = -920
+
+[[landing]]
+x = -1112
+z = -920
+
+[[landing]]
+x = -920
+z = -920
+
+[[landing]]
+x = -728
+z = -920
+
+[[landing]]
+x = -536
+z = -920
+
+[[landing]]
+x = -344
+z = -920
+
+[[landing]]
+x = -152
+z = -920
+
+[[landing]]
+x = 40
+z = -920
+
+[[landing]]
+x = 232
+z = -920
+
+[[landing]]
+x = 424
+z = -920
+
+[[landing]]
+x = 616
+z = -920
+
+[[landing]]
+x = 808
+z = -920
+
+[[landing]]
+x = 1000
+z = -920
+
+[[landing]]
+x = 1192
+z = -920
+
+[[landing]]
+x = 1384
+z = -920
+
+[[landing]]
+x = 1576
+z = -920
+
+[[landing]]
+x = 1768
+z = -920
+
+[[landing]]
+x = -1880
+z = -728
+
+[[landing]]
+x = -1688
+z = -728
+
+[[landing]]
+x = -1496
+z = -728
+
+[[landing]]
+x = -1304
+z = -728
+
+[[landing]]
+x = -1112
+z = -728
+
+[[landing]]
+x = -920
+z = -728
+
+[[landing]]
+x = -728
+z = -728
+
+[[landing]]
+x = -536
+z = -728
+
+[[landing]]
+x = -344
+z = -728
+
+[[landing]]
+x = -152
+z = -728
+
+[[landing]]
+x = 40
+z = -728
+
+[[landing]]
+x = 232
+z = -728
+
+[[landing]]
+x = 424
+z = -728
+
+[[landing]]
+x = 616
+z = -728
+
+[[landing]]
+x = 808
+z = -728
+
+[[landing]]
+x = 1000
+z = -728
+
+[[landing]]
+x = 1192
+z = -728
+
+[[landing]]
+x = 1384
+z = -728
+
+[[landing]]
+x = 1576
+z = -728
+
+[[landing]]
+x = 1768
+z = -728
+
+[[landing]]
+x = -1880
+z = -536
+
+[[landing]]
+x = -1688
+z = -536
+
+[[landing]]
+x = -1496
+z = -536
+
+[[landing]]
+x = -1304
+z = -536
+
+[[landing]]
+x = -1112
+z = -536
+
+[[landing]]
+x = -920
+z = -536
+
+[[landing]]
+x = -728
+z = -536
+
+[[landing]]
+x = -536
+z = -536
+
+[[landing]]
+x = -344
+z = -536
+
+[[landing]]
+x = -152
+z = -536
+
+[[landing]]
+x = 40
+z = -536
+
+[[landing]]
+x = 232
+z = -536
+
+[[landing]]
+x = 424
+z = -536
+
+[[landing]]
+x = 616
+z = -536
+
+[[landing]]
+x = 808
+z = -536
+
+[[landing]]
+x = 1000
+z = -536
+
+[[landing]]
+x = 1192
+z = -536
+
+[[landing]]
+x = 1384
+z = -536
+
+[[landing]]
+x = 1576
+z = -536
+
+[[landing]]
+x = 1768
+z = -536
+
+[[landing]]
+x = -1880
+z = -344
+
+[[landing]]
+x = -1688
+z = -344
+
+[[landing]]
+x = -1496
+z = -344
+
+[[landing]]
+x = -1304
+z = -344
+
+[[landing]]
+x = -1112
+z = -344
+
+[[landing]]
+x = -920
+z = -344
+
+[[landing]]
+x = -728
+z = -344
+
+[[landing]]
+x = -536
+z = -344
+
+[[landing]]
+x = -344
+z = -344
+
+[[landing]]
+x = -152
+z = -344
+
+[[landing]]
+x = 40
+z = -344
+
+[[landing]]
+x = 232
+z = -344
+
+[[landing]]
+x = 424
+z = -344
+
+[[landing]]
+x = 616
+z = -344
+
+[[landing]]
+x = 808
+z = -344
+
+[[landing]]
+x = 1000
+z = -344
+
+[[landing]]
+x = 1192
+z = -344
+
+[[landing]]
+x = 1384
+z = -344
+
+[[landing]]
+x = 1576
+z = -344
+
+[[landing]]
+x = 1768
+z = -344
+
+[[landing]]
+x = -1880
+z = -152
+
+[[landing]]
+x = -1688
+z = -152
+
+[[landing]]
+x = -1496
+z = -152
+
+[[landing]]
+x = -1304
+z = -152
+
+[[landing]]
+x = -1112
+z = -152
+
+[[landing]]
+x = -920
+z = -152
+
+[[landing]]
+x = -728
+z = -152
+
+[[landing]]
+x = -536
+z = -152
+
+[[landing]]
+x = -344
+z = -152
+
+[[landing]]
+x = -152
+z = -152
+
+[[landing]]
+x = 40
+z = -152
+
+[[landing]]
+x = 232
+z = -152
+
+[[landing]]
+x = 424
+z = -152
+
+[[landing]]
+x = 616
+z = -152
+
+[[landing]]
+x = 808
+z = -152
+
+[[landing]]
+x = 1000
+z = -152
+
+[[landing]]
+x = 1192
+z = -152
+
+[[landing]]
+x = 1384
+z = -152
+
+[[landing]]
+x = 1576
+z = -152
+
+[[landing]]
+x = 1768
+z = -152
+
+[[landing]]
+x = -1880
+z = 40
+
+[[landing]]
+x = -1688
+z = 40
+
+[[landing]]
+x = -1496
+z = 40
+
+[[landing]]
+x = -1304
+z = 40
+
+[[landing]]
+x = -1112
+z = 40
+
+[[landing]]
+x = -920
+z = 40
+
+[[landing]]
+x = -728
+z = 40
+
+[[landing]]
+x = -536
+z = 40
+
+[[landing]]
+x = -344
+z = 40
+
+[[landing]]
+x = -152
+z = 40
+
+[[landing]]
+x = 40
+z = 40
+
+[[landing]]
+x = 232
+z = 40
+
+[[landing]]
+x = 424
+z = 40
+
+[[landing]]
+x = 616
+z = 40
+
+[[landing]]
+x = 808
+z = 40
+
+[[landing]]
+x = 1000
+z = 40
+
+[[landing]]
+x = 1192
+z = 40
+
+[[landing]]
+x = 1384
+z = 40
+
+[[landing]]
+x = 1576
+z = 40
+
+[[landing]]
+x = 1768
+z = 40
+
+[[landing]]
+x = -1880
+z = 232
+
+[[landing]]
+x = -1688
+z = 232
+
+[[landing]]
+x = -1496
+z = 232
+
+[[landing]]
+x = -1304
+z = 232
+
+[[landing]]
+x = -1112
+z = 232
+
+[[landing]]
+x = -920
+z = 232
+
+[[landing]]
+x = -728
+z = 232
+
+[[landing]]
+x = -536
+z = 232
+
+[[landing]]
+x = -344
+z = 232
+
+[[landing]]
+x = -152
+z = 232
+
+[[landing]]
+x = 40
+z = 232
+
+[[landing]]
+x = 232
+z = 232
+
+[[landing]]
+x = 424
+z = 232
+
+[[landing]]
+x = 616
+z = 232
+
+[[landing]]
+x = 808
+z = 232
+
+[[landing]]
+x = 1000
+z = 232
+
+[[landing]]
+x = 1192
+z = 232
+
+[[landing]]
+x = 1384
+z = 232
+
+[[landing]]
+x = 1576
+z = 232
+
+[[landing]]
+x = 1768
+z = 232
+
+[[landing]]
+x = -1880
+z = 424
+
+[[landing]]
+x = -1688
+z = 424
+
+[[landing]]
+x = -1496
+z = 424
+
+[[landing]]
+x = -1304
+z = 424
+
+[[landing]]
+x = -1112
+z = 424
+
+[[landing]]
+x = -920
+z = 424
+
+[[landing]]
+x = -728
+z = 424
+
+[[landing]]
+x = -536
+z = 424
+
+[[landing]]
+x = -344
+z = 424
+
+[[landing]]
+x = -152
+z = 424
+
+[[landing]]
+x = 40
+z = 424
+
+[[landing]]
+x = 232
+z = 424
+
+[[landing]]
+x = 424
+z = 424
+
+[[landing]]
+x = 616
+z = 424
+
+[[landing]]
+x = 808
+z = 424
+
+[[landing]]
+x = 1000
+z = 424
+
+[[landing]]
+x = 1192
+z = 424
+
+[[landing]]
+x = 1384
+z = 424
+
+[[landing]]
+x = 1576
+z = 424
+
+[[landing]]
+x = 1768
+z = 424
+
+[[landing]]
+x = -1880
+z = 616
+
+[[landing]]
+x = -1688
+z = 616
+
+[[landing]]
+x = -1496
+z = 616
+
+[[landing]]
+x = -1304
+z = 616
+
+[[landing]]
+x = -1112
+z = 616
+
+[[landing]]
+x = -920
+z = 616
+
+[[landing]]
+x = -728
+z = 616
+
+[[landing]]
+x = -536
+z = 616
+
+[[landing]]
+x = -344
+z = 616
+
+[[landing]]
+x = -152
+z = 616
+
+[[landing]]
+x = 40
+z = 616
+
+[[landing]]
+x = 232
+z = 616
+
+[[landing]]
+x = 424
+z = 616
+
+[[landing]]
+x = 616
+z = 616
+
+[[landing]]
+x = 808
+z = 616
+
+[[landing]]
+x = 1000
+z = 616
+
+[[landing]]
+x = 1192
+z = 616
+
+[[landing]]
+x = 1384
+z = 616
+
+[[landing]]
+x = 1576
+z = 616
+
+[[landing]]
+x = 1768
+z = 616
+
+[[landing]]
+x = -1880
+z = 808
+
+[[landing]]
+x = -1688
+z = 808
+
+[[landing]]
+x = -1496
+z = 808
+
+[[landing]]
+x = -1304
+z = 808
+
+[[landing]]
+x = -1112
+z = 808
+
+[[landing]]
+x = -920
+z = 808
+
+[[landing]]
+x = -728
+z = 808
+
+[[landing]]
+x = -536
+z = 808
+
+[[landing]]
+x = -344
+z = 808
+
+[[landing]]
+x = -152
+z = 808
+
+[[landing]]
+x = 40
+z = 808
+
+[[landing]]
+x = 232
+z = 808
+
+[[landing]]
+x = 424
+z = 808
+
+[[landing]]
+x = 616
+z = 808
+
+[[landing]]
+x = 808
+z = 808
+
+[[landing]]
+x = 1000
+z = 808
+
+[[landing]]
+x = 1192
+z = 808
+
+[[landing]]
+x = 1384
+z = 808
+
+[[landing]]
+x = 1576
+z = 808
+
+[[landing]]
+x = 1768
+z = 808
+
+[[landing]]
+x = -1880
+z = 1000
+
+[[landing]]
+x = -1688
+z = 1000
+
+[[landing]]
+x = -1496
+z = 1000
+
+[[landing]]
+x = -1304
+z = 1000
+
+[[landing]]
+x = -1112
+z = 1000
+
+[[landing]]
+x = -920
+z = 1000
+
+[[landing]]
+x = -728
+z = 1000
+
+[[landing]]
+x = -536
+z = 1000
+
+[[landing]]
+x = -344
+z = 1000
+
+[[landing]]
+x = -152
+z = 1000
+
+[[landing]]
+x = 40
+z = 1000
+
+[[landing]]
+x = 232
+z = 1000
+
+[[landing]]
+x = 424
+z = 1000
+
+[[landing]]
+x = 616
+z = 1000
+
+[[landing]]
+x = 808
+z = 1000
+
+[[landing]]
+x = 1000
+z = 1000
+
+[[landing]]
+x = 1192
+z = 1000
+
+[[landing]]
+x = 1384
+z = 1000
+
+[[landing]]
+x = 1576
+z = 1000
+
+[[landing]]
+x = 1768
+z = 1000
+
+[[landing]]
+x = -1880
+z = 1192
+
+[[landing]]
+x = -1688
+z = 1192
+
+[[landing]]
+x = -1496
+z = 1192
+
+[[landing]]
+x = -1304
+z = 1192
+
+[[landing]]
+x = -1112
+z = 1192
+
+[[landing]]
+x = -920
+z = 1192
+
+[[landing]]
+x = -728
+z = 1192
+
+[[landing]]
+x = -536
+z = 1192
+
+[[landing]]
+x = -344
+z = 1192
+
+[[landing]]
+x = -152
+z = 1192
+
+[[landing]]
+x = 40
+z = 1192
+
+[[landing]]
+x = 232
+z = 1192
+
+[[landing]]
+x = 424
+z = 1192
+
+[[landing]]
+x = 616
+z = 1192
+
+[[landing]]
+x = 808
+z = 1192
+
+[[landing]]
+x = 1000
+z = 1192
+
+[[landing]]
+x = 1192
+z = 1192
+
+[[landing]]
+x = 1384
+z = 1192
+
+[[landing]]
+x = 1576
+z = 1192
+
+[[landing]]
+x = 1768
+z = 1192
+
+[[landing]]
+x = -1880
+z = 1384
+
+[[landing]]
+x = -1688
+z = 1384
+
+[[landing]]
+x = -1496
+z = 1384
+
+[[landing]]
+x = -1304
+z = 1384
+
+[[landing]]
+x = -1112
+z = 1384
+
+[[landing]]
+x = -920
+z = 1384
+
+[[landing]]
+x = -728
+z = 1384
+
+[[landing]]
+x = -536
+z = 1384
+
+[[landing]]
+x = -344
+z = 1384
+
+[[landing]]
+x = -152
+z = 1384
+
+[[landing]]
+x = 40
+z = 1384
+
+[[landing]]
+x = 232
+z = 1384
+
+[[landing]]
+x = 424
+z = 1384
+
+[[landing]]
+x = 616
+z = 1384
+
+[[landing]]
+x = 808
+z = 1384
+
+[[landing]]
+x = 1000
+z = 1384
+
+[[landing]]
+x = 1192
+z = 1384
+
+[[landing]]
+x = 1384
+z = 1384
+
+[[landing]]
+x = 1576
+z = 1384
+
+[[landing]]
+x = 1768
+z = 1384

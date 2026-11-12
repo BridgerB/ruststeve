@@ -26,7 +26,7 @@ related:
 The Mac never runs code ([[runners-not-the-mac]]). Two workflows are how it runs: `ci` on every push and PR, and `probe` for any one-off question.
 
 ## Key files
-- `.github/workflows/ci.yml`, `.github/workflows/probe.yml`; the race is `race.yml` ([[race-and-results]]); ci.yml's `worlds` job walks the bot through 1,000 generated worlds against the server model, in release ([[server-model]])
+- `.github/workflows/ci.yml`, `.github/workflows/probe.yml`; the race is `race.yml` ([[race-and-results]]); ci.yml's `worlds` job walks the bot through 1,000 generated worlds against the server model, in release ([[server-model]]); its `walk` job runs issue 09's landing measure and the CPU budget ([[planner]])
 - `rust-toolchain.toml`: the one pinned toolchain (1.96.0, rustfmt, clippy); `rustup show` on the runner installs it, so no toolchain action is needed.
 - `crates/xtask`: repository automation: `deps-boundary` (CI), `commit-msg` (the git hook), `server` (a local vanilla server, [[connection]]).
 

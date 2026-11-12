@@ -146,14 +146,29 @@ impl Walk {
         WALK_TIMEOUT_TICKS + WAYPOINT_TICKS * self.waypoints.as_ref().map_or(0, |w| w.len() as u64)
     }
 
-    /// Plan the route now; false when there is no way at all (no waypoints, `None`): a walk
-    /// with no way is never started (the churn invariant).
+    /// Plan the route now and say whether the target is walkable (clojurecraft's `walkable?`):
+    /// the route is found, or it ends short only because the target's column is not loaded yet
+    /// (the walk plans again as chunks arrive). A partial route toward a loaded target is not a
+    /// way: a log seen down a cave or up a cliff is not walked at. A walk with no way is never
+    /// started (the churn invariant).
     pub fn route_now(&mut self, w: &World, tick: u64) -> bool {
         let Some(body) = w.body else {
             return false;
         };
         self.route(w, body.pos, tick);
-        !(self.route == Some(Status::None) && self.waypoints.as_ref().is_some_and(Vec::is_empty))
+        let loaded = w.columns.contains_key(
+            &world::BlockPos::new(self.target.0, self.target.1, self.target.2).chunk(),
+        );
+        match self.route {
+            Some(Status::Found) => true,
+            // An explore only needs ground to cover: any route with waypoints, the progress
+            // invariant failing it if it paces.
+            Some(Status::Partial | Status::None) => {
+                (!loaded || self.arrive == Arrive::Goal)
+                    && self.waypoints.as_ref().is_some_and(|w| !w.is_empty())
+            }
+            None => false,
+        }
     }
 
     fn route(&mut self, w: &World, pos: [f64; 3], tick: u64) {
