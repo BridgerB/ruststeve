@@ -6,7 +6,7 @@ tags: [wire, nbt, text, death, damage]
 aliases: [network NBT, text component, death message, player_combat_kill, damage_event, killer, damage type]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@ed3d084 clojurecraft@be85a92
+verifiedAgainst: ruststeve@50f68a3 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/nbt.rs#pub fn read_root(r: &mut Reader<'_>) -> Result<Nbt, ParseError> {"
   - "ruststeve:crates/protocol/src/nbt.rs#pub fn death(c: &Nbt) -> Death {"

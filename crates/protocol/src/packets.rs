@@ -182,6 +182,24 @@ pub enum S2c {
     ChunkBatchFinished {
         size: i32,
     },
+    /// The server has handled the client's block actions up to `sequence` (a dig's FINISH).
+    BlockChangedAck {
+        sequence: i32,
+    },
+    /// The server set the selected hotbar slot (0-8).
+    SetHeldSlot {
+        slot: i32,
+    },
+    /// An item entity was picked up: by whom, and how many of it.
+    TakeItemEntity {
+        item: i32,
+        collector: i32,
+        amount: i32,
+    },
+    /// The server closed a window.
+    ContainerClose {
+        window: i32,
+    },
     StartConfiguration,
     Disconnect {
         reason: Vec<u8>,
@@ -430,6 +448,18 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 }
             }
             Some(PlayIn::ChunkBatchFinished) => S2c::ChunkBatchFinished { size: r.varint()? },
+            Some(PlayIn::BlockChangedAck) => S2c::BlockChangedAck {
+                sequence: r.varint()?,
+            },
+            Some(PlayIn::SetHeldSlot) => S2c::SetHeldSlot { slot: r.varint()? },
+            Some(PlayIn::TakeItemEntity) => S2c::TakeItemEntity {
+                item: r.varint()?,
+                collector: r.varint()?,
+                amount: r.varint()?,
+            },
+            Some(PlayIn::ContainerClose) => S2c::ContainerClose {
+                window: r.varint()?,
+            },
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {
                 reason: r.rest().to_vec(),
@@ -498,6 +528,34 @@ pub enum C2s {
     MovePlayerStatusOnly {
         flags: u8,
     },
+    /// A dig: status 0 START, 1 ABORT, 2 FINISH; the block, the face, and the client's
+    /// sequence number the server acknowledges.
+    PlayerAction {
+        status: i32,
+        pos: (i32, i32, i32),
+        face: i8,
+        sequence: i32,
+    },
+    /// Select a hotbar slot (0-8).
+    SetCarriedItem {
+        slot: i16,
+    },
+    /// A click in a window, predicting nothing: no changed slots and an empty cursor, so the
+    /// server answers with authoritative slots (brain/wire/wire-container-click.md).
+    ContainerClick {
+        window: i32,
+        state_id: i32,
+        slot: i16,
+        button: i8,
+        mode: i32,
+    },
+    ContainerClose {
+        window: i32,
+    },
+    /// The arm swing: 0 the main hand.
+    Swing {
+        hand: i32,
+    },
 }
 
 impl C2s {
@@ -518,6 +576,11 @@ impl C2s {
             | C2s::ChunkBatchReceived { .. }
             | C2s::MovePlayerPosRot { .. }
             | C2s::MovePlayerStatusOnly { .. }
+            | C2s::PlayerAction { .. }
+            | C2s::SetCarriedItem { .. }
+            | C2s::ContainerClick { .. }
+            | C2s::ContainerClose { .. }
+            | C2s::Swing { .. }
             | C2s::ConfigurationAcknowledged => State::Play,
         }
     }
@@ -612,6 +675,46 @@ impl C2s {
             C2s::MovePlayerStatusOnly { flags } => {
                 w.u8(*flags);
                 PlayOut::MovePlayerStatusOnly.id()
+            }
+            C2s::PlayerAction {
+                status,
+                pos,
+                face,
+                sequence,
+            } => {
+                w.varint(*status);
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.i8(*face);
+                w.varint(*sequence);
+                PlayOut::PlayerAction.id()
+            }
+            C2s::SetCarriedItem { slot } => {
+                w.i16(*slot);
+                PlayOut::SetCarriedItem.id()
+            }
+            C2s::ContainerClick {
+                window,
+                state_id,
+                slot,
+                button,
+                mode,
+            } => {
+                w.varint(*window);
+                w.varint(*state_id);
+                w.i16(*slot);
+                w.i8(*button);
+                w.varint(*mode);
+                w.varint(0); // no changed slots: nothing predicted
+                crate::slot::write_hashed_slot(&mut w, crate::slot::Slot::Empty); // nor the cursor
+                PlayOut::ContainerClick.id()
+            }
+            C2s::ContainerClose { window } => {
+                w.varint(*window);
+                PlayOut::ContainerClose.id()
+            }
+            C2s::Swing { hand } => {
+                w.varint(*hand);
+                PlayOut::Swing.id()
             }
         };
         Ok((id, w.buf))
@@ -766,9 +869,60 @@ impl S2c {
             | S2c::EntityPositionSync { .. }
             | S2c::TeleportEntity { .. }
             | S2c::SetEntityData { .. } => return Err(EncodeError::NotModelled("entities")),
-            S2c::ContainerSetContent { .. }
-            | S2c::ContainerSetSlot { .. }
-            | S2c::SetPlayerInventory { .. } => return Err(EncodeError::NotModelled("windows")),
+            S2c::ContainerSetContent {
+                window,
+                state_id,
+                slots,
+                carried,
+            } => {
+                w.varint(*window);
+                w.varint(*state_id);
+                w.varint(i32::try_from(slots.len()).map_err(|_| EncodeError::TooLong)?);
+                for s in slots {
+                    crate::slot::write_slot(&mut w, *s);
+                }
+                crate::slot::write_slot(&mut w, carried.unwrap_or(crate::slot::Slot::Empty));
+                PlayIn::ContainerSetContent.id()
+            }
+            S2c::ContainerSetSlot {
+                window,
+                state_id,
+                slot,
+                item,
+            } => {
+                w.varint(*window);
+                w.varint(*state_id);
+                w.i16(*slot);
+                crate::slot::write_slot(&mut w, *item);
+                PlayIn::ContainerSetSlot.id()
+            }
+            S2c::SetPlayerInventory { slot, item } => {
+                w.varint(*slot);
+                crate::slot::write_slot(&mut w, *item);
+                PlayIn::SetPlayerInventory.id()
+            }
+            S2c::BlockChangedAck { sequence } => {
+                w.varint(*sequence);
+                PlayIn::BlockChangedAck.id()
+            }
+            S2c::SetHeldSlot { slot } => {
+                w.varint(*slot);
+                PlayIn::SetHeldSlot.id()
+            }
+            S2c::TakeItemEntity {
+                item,
+                collector,
+                amount,
+            } => {
+                w.varint(*item);
+                w.varint(*collector);
+                w.varint(*amount);
+                PlayIn::TakeItemEntity.id()
+            }
+            S2c::ContainerClose { window } => {
+                w.varint(*window);
+                PlayIn::ContainerClose.id()
+            }
             S2c::PlayerCombatKill { player_id, death } => {
                 // The message as the server builds it; a death without a key goes as its text.
                 let component = match &death.key {

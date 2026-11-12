@@ -83,6 +83,8 @@ pub enum EventRecord {
     Tick { now_ms: u64, seed: u64 },
     /// What to press from now on (added in issue 06; older files simply have none).
     Controls(physics::Controls),
+    /// An act: dig, hold, click (issue 10).
+    Act(world::Act),
 }
 
 /// An output of the world: a packet as it is written on the wire, or the compression switch.
@@ -276,6 +278,7 @@ impl Folder {
                 seed: *seed,
             },
             EventRecord::Controls(c) => Event::Controls(*c),
+            EventRecord::Act(a) => Event::Act(*a),
             EventRecord::Packet { state, id, body } => {
                 if *state != self.state {
                     return Err(format!(
