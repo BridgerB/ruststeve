@@ -1,0 +1,16 @@
+# The sources brain notes cite. One per line: name, mode, pin, dir, then an optional env var
+# that overrides dir. `worktree` sources are read from the files on disk; `git` sources are read
+# with `git show <pin>:<path>` at the pin each note records in verifiedAgainst (name@sha). The
+# pin column here is the current pin: `brain-check drift` compares every note's pin against it.
+#
+# ruststeve      this repository (refs resolve from the working tree)
+# clojurecraft   the Clojure bot, the oracle being ported (github.com/BridgerB/clojurecraft). Pinned to
+#                be85a92, the head of PR #871: main 177d858be plus docs/HANDOFF-RUSTSTEVE.md, the closing
+#                change. Re-pin to main's merge commit once #871 merges (a squash merge orphans be85a92).
+# steve          the TypeScript bot with the typecraft SDK in src/lib/typecraft (github.com/BridgerB/steve, main)
+# ruststeve-v1   the first Rust port: this repository's main at the last commit before the reset
+
+ruststeve     worktree  c87ac55    .
+clojurecraft  git       be85a92    ~/orca/workspaces/mc/clojurecraft/upstream/clojurecraft  CLOJURECRAFT_DIR
+steve         git       46c1264    ~/Developer/steve                                        STEVE_DIR
+ruststeve-v1  git       9e1567f    .
