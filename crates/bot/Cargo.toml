@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 data = { path = "../data" }
 net = { path = "../net" }
+physics = { path = "../physics" }
 protocol = { path = "../protocol" }
 record = { path = "../record" }
 world = { path = "../world" }

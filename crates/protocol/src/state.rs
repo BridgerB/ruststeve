@@ -42,7 +42,9 @@ impl State {
             | C2s::Pong { .. }
             | C2s::AcceptTeleportation { .. }
             | C2s::PlayerLoaded
-            | C2s::ChunkBatchReceived { .. } => self,
+            | C2s::ChunkBatchReceived { .. }
+            | C2s::MovePlayerPosRot { .. }
+            | C2s::MovePlayerStatusOnly { .. } => self,
         }
     }
 

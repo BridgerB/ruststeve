@@ -12,8 +12,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use data::generated::dimensions::DIMENSION_TYPES;
+use data::generated::shapes::collision;
+use data::types::Collision;
 use data::{BlockKind, EntityKind, ItemKind};
 use memory::{Memory, Seen};
+use physics::{Body, Controls, Fluid, FluidKind};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::slot::Slot;
@@ -155,6 +158,8 @@ pub enum Event {
         now_ms: u64,
         seed: u64,
     },
+    /// What to press from now on: a script today, the planner from issue 09.
+    Controls(Controls),
 }
 
 /// What the world asks the shell to do.
@@ -243,7 +248,21 @@ pub struct World {
     /// The loop clock and seed of the last tick.
     pub now_ms: u64,
     pub seed: u64,
+    /// The body physics moves: placed by the server's teleport (velocity zeroed), stepped every
+    /// tick once its column is loaded, cleared by a change of dimension.
+    pub body: Option<Body>,
+    /// What is pressed: set by `Event::Controls` (a script today, the planner from issue 09).
+    pub controls: Controls,
+    /// Ticks the world has stepped, and what was last reported: the movement packets go out
+    /// when position or look changed, else status-only once every 20 ticks (vanilla's rule).
+    pub ticks: u64,
+    pub sent_pos: Option<[f64; 3]>,
+    pub sent_look: Option<(f32, f32)>,
+    pub sent_tick: u64,
 }
+
+/// Ticks between status-only movement packets when nothing moved: once a second.
+const STATUS_ONLY_EVERY: u64 = 20;
 
 impl World {
     pub fn new() -> Self {
@@ -256,6 +275,10 @@ impl World {
             Event::Tick { now_ms, seed } => {
                 self.now_ms = *now_ms;
                 self.seed = *seed;
+                self.tick()
+            }
+            Event::Controls(c) => {
+                self.controls = *c;
                 Vec::new()
             }
             Event::Packet(p) => {
@@ -269,6 +292,74 @@ impl World {
         }
     }
 
+    /// What collides at a block, for physics: a full cube, a flat box's top, or nothing. An
+    /// unloaded block counts as a full cube, so the body never falls out of the world.
+    pub fn solid(&self, x: i32, y: i32, z: i32) -> Option<f64> {
+        let Some(state) = self.state_at(BlockPos::new(x, y, z)) else {
+            return Some(1.0);
+        };
+        match data::block_of_state(state).and_then(collision) {
+            Some(Collision::Empty) => None,
+            Some(Collision::Partial { top }) => Some(top),
+            Some(Collision::Full) | None => Some(1.0),
+        }
+    }
+
+    /// The fluid at a block, for physics: water or lava and its level (the block state's
+    /// `level` property; unloaded is no fluid).
+    pub fn fluid(&self, x: i32, y: i32, z: i32) -> Option<Fluid> {
+        let state = self.state_at(BlockPos::new(x, y, z))?;
+        let kind = match data::block_of_state(state)? {
+            BlockKind::Water => FluidKind::Water,
+            BlockKind::Lava => FluidKind::Lava,
+            _ => return None,
+        };
+        let first = data::block_of_state(state)?.info()?.first_state;
+        let level = u8::try_from(state.checked_sub(first)?).ok()?;
+        Some(Fluid { kind, level })
+    }
+
+    /// One tick of the body: physics, then the movement packet vanilla would send.
+    fn tick(&mut self) -> Vec<Effect> {
+        self.ticks += 1;
+        let Some(body) = self.body else {
+            return Vec::new();
+        };
+        let at = BlockPos::containing(body.pos[0], body.pos[1], body.pos[2]).chunk();
+        if !self.columns.contains_key(&at) {
+            return Vec::new();
+        }
+        let solid = |x, y, z| self.solid(x, y, z);
+        let fluid = |x, y, z| self.fluid(x, y, z);
+        let moved = physics::step(&solid, &fluid, &body, &self.controls);
+        self.body = Some(moved);
+        self.player.pos = Some(moved.pos);
+        // Physics and the movement packets use the controls' yaw; the server's look is kept.
+        #[allow(clippy::cast_possible_truncation)]
+        let look = (self.controls.yaw as f32, self.player.pitch);
+        self.player.yaw = look.0;
+        let flags = u8::from(moved.on_ground) | (u8::from(moved.horizontal_collision) << 1);
+        if self.sent_pos != Some(moved.pos) || self.sent_look != Some(look) {
+            self.sent_pos = Some(moved.pos);
+            self.sent_look = Some(look);
+            self.sent_tick = self.ticks;
+            let [x, y, z] = moved.pos;
+            return vec![Effect::Send(C2s::MovePlayerPosRot {
+                x,
+                y,
+                z,
+                yaw: look.0,
+                pitch: look.1,
+                flags,
+            })];
+        }
+        if self.ticks - self.sent_tick >= STATUS_ONLY_EVERY {
+            self.sent_tick = self.ticks;
+            return vec![Effect::Send(C2s::MovePlayerStatusOnly { flags })];
+        }
+        Vec::new()
+    }
+
     fn enter(&mut self, type_id: i32, name: &str) {
         let same = self.dimension.as_ref().is_some_and(|d| d.name == name);
         if !same {
@@ -277,6 +368,7 @@ impl World {
             self.columns.clear();
             self.overlay.clear();
             self.entities.clear();
+            self.body = None;
         }
         self.dimension = Some(Dimension::new(type_id, name));
     }
@@ -552,6 +644,12 @@ impl World {
                 // Non-finite is a boundary error; a built packet that slips one in changes nothing.
                 if pos.iter().all(|v| v.is_finite()) {
                     self.player.pos = Some(pos);
+                    // The server placed the body: vanilla zeroes its velocity on a teleport.
+                    let mut body = self.body.unwrap_or_default();
+                    body.pos = pos;
+                    body.vel = [0.0; 3];
+                    self.body = Some(body);
+                    self.sent_pos = Some(pos);
                 }
                 self.player.yaw = if rel(3) { self.player.yaw + yaw } else { *yaw };
                 self.player.pitch = if rel(4) {

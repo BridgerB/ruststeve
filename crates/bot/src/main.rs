@@ -33,6 +33,8 @@ struct Args {
     name: String,
     seconds: u64,
     record: Option<PathBuf>,
+    /// Walk a scripted square (issue 06's live check) instead of standing still.
+    walk: bool,
 }
 
 fn args() -> Result<Args, String> {
@@ -42,6 +44,7 @@ fn args() -> Result<Args, String> {
         name: "rs-001".to_owned(),
         seconds: 600,
         record: None,
+        walk: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -52,6 +55,7 @@ fn args() -> Result<Args, String> {
             "--name" => a.name = value,
             "--seconds" => a.seconds = value.parse().map_err(|e| format!("--seconds: {e}"))?,
             "--record" => a.record = Some(PathBuf::from(value)),
+            "--walk" => a.walk = value == "square",
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -228,6 +232,10 @@ fn run(a: &Args) -> Result<(), String> {
     };
     let mut last_status = Instant::now();
     let mut last_tick = Instant::now();
+    let mut walk_ticks: u64 = 0;
+    let mut walk_start: Option<[f64; 3]> = None;
+    let mut last_controls: Option<physics::Controls> = None;
+    let mut walked = 0.0f64;
     let limit = (a.seconds > 0).then(|| Duration::from_secs(a.seconds));
 
     let result = loop {
@@ -235,6 +243,13 @@ fn run(a: &Args) -> Result<(), String> {
             && t.elapsed() >= limit
         {
             println!("bot {}: {}", a.name, stats.summary(&run.world, "done"));
+            if a.walk {
+                println!(
+                    "bot {}: walked {walked:.1} blocks from the start, server corrections {}",
+                    a.name,
+                    run.world.session.teleports.saturating_sub(1)
+                );
+            }
             break Ok(());
         }
         if last_status.elapsed() >= STATUS_EVERY {
@@ -252,6 +267,20 @@ fn run(a: &Args) -> Result<(), String> {
         }
         if last_tick.elapsed() >= TICK_EVERY {
             last_tick = Instant::now();
+            if a.walk && run.world.body.is_some() {
+                let start = *walk_start.get_or_insert(run.world.body.map_or([0.0; 3], |b| b.pos));
+                let c = walk_controls(walk_ticks);
+                walk_ticks += 1;
+                if Some(c) != last_controls {
+                    last_controls = Some(c);
+                    if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
+                        break Err(e);
+                    }
+                }
+                if let Some(b) = run.world.body {
+                    walked = ((b.pos[0] - start[0]).powi(2) + (b.pos[2] - start[2]).powi(2)).sqrt();
+                }
+            }
             let (now_ms, seed) = (now_ms(), seeds.next());
             if let Err(e) = run.step(
                 &conn,
@@ -332,4 +361,18 @@ fn run(a: &Args) -> Result<(), String> {
         println!("bot {}: recorded {events} events", a.name);
     }
     result
+}
+
+/// Issue 06's scripted walk, a test harness until the planner (issue 09): a staircase, 40 ticks
+/// south then 40 west, over and over, so the body keeps getting farther from where it began,
+/// jumping for a few ticks at the start of every west leg so ledges and slopes are climbed.
+fn walk_controls(tick: u64) -> physics::Controls {
+    let side = (tick / 40) % 4;
+    let into_side = tick % 40;
+    physics::Controls {
+        forward: true,
+        jump: side % 2 == 1 && into_side < 6,
+        sneak: false,
+        yaw: [0.0, 90.0, 0.0, 90.0][side as usize],
+    }
 }

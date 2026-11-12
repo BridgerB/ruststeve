@@ -194,6 +194,10 @@ fn export(path: &Path) -> Result<(), String> {
                 println!("event {event} tick now_ms {now_ms} seed {seed}");
                 event += 1;
             }
+            Record::Event(record::EventRecord::Controls(c)) => {
+                println!("event {event} controls {c:?}");
+                event += 1;
+            }
             Record::Effects(e) => {
                 let list: Vec<String> = e
                     .iter()

@@ -452,6 +452,19 @@ pub enum C2s {
         chunks_per_tick: f32,
     },
     ConfigurationAcknowledged,
+    /// The player's position and look; flags bit 0 on the ground, bit 1 against a wall.
+    MovePlayerPosRot {
+        x: f64,
+        y: f64,
+        z: f64,
+        yaw: f32,
+        pitch: f32,
+        flags: u8,
+    },
+    /// Nothing moved: the flags only, sent once a second.
+    MovePlayerStatusOnly {
+        flags: u8,
+    },
 }
 
 impl C2s {
@@ -470,6 +483,8 @@ impl C2s {
             | C2s::AcceptTeleportation { .. }
             | C2s::PlayerLoaded
             | C2s::ChunkBatchReceived { .. }
+            | C2s::MovePlayerPosRot { .. }
+            | C2s::MovePlayerStatusOnly { .. }
             | C2s::ConfigurationAcknowledged => State::Play,
         }
     }
@@ -545,6 +560,26 @@ impl C2s {
                 PlayOut::ChunkBatchReceived.id()
             }
             C2s::ConfigurationAcknowledged => PlayOut::ConfigurationAcknowledged.id(),
+            C2s::MovePlayerPosRot {
+                x,
+                y,
+                z,
+                yaw,
+                pitch,
+                flags,
+            } => {
+                w.f64(*x);
+                w.f64(*y);
+                w.f64(*z);
+                w.f32(*yaw);
+                w.f32(*pitch);
+                w.u8(*flags);
+                PlayOut::MovePlayerPosRot.id()
+            }
+            C2s::MovePlayerStatusOnly { flags } => {
+                w.u8(*flags);
+                PlayOut::MovePlayerStatusOnly.id()
+            }
         };
         Ok((id, w.buf))
     }

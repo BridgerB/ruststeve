@@ -10,6 +10,7 @@ description = "The world as one value, folded only from what the server sent (no
 serde = { version = "1", features = ["derive", "rc"] }
 data = { path = "../data" }
 memory = { path = "../memory" }
+physics = { path = "../physics" }
 protocol = { path = "../protocol" }
 
 [dev-dependencies]

@@ -8,6 +8,7 @@ description = "Recordings: MessagePack with named fields in zstd, commit-pinned 
 
 [dependencies]
 data = { path = "../data" }
+physics = { path = "../physics" }
 protocol = { path = "../protocol" }
 rmp-serde = "1"
 serde = { version = "1", features = ["derive", "rc"] }

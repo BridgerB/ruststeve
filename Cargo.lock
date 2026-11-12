@@ -123,6 +123,7 @@ version = "0.1.0"
 dependencies = [
  "data",
  "net",
+ "physics",
  "protocol",
  "record",
  "world",
@@ -1052,6 +1053,7 @@ name = "record"
 version = "0.1.0"
 dependencies = [
  "data",
+ "physics",
  "proptest",
  "protocol",
  "rmp-serde",
@@ -2050,6 +2052,7 @@ version = "0.1.0"
 dependencies = [
  "data",
  "memory",
+ "physics",
  "proptest",
  "protocol",
  "serde",
