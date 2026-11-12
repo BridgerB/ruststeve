@@ -4,103 +4,109 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An Ender-Dragon speedrun bot — a **Rust port of `steve`** (the TypeScript speedrun bot), with a built-in Minecraft SDK (the `bot`/`world`/`protocol`/… modules, formerly the separate `rustcraft` crate, now flattened into this one crate). It ports the **single-bot core of steve's `main.ts`**; steve's multi-bot/MCP orchestration is out of scope here.
+An autonomous Ender-Dragon speedrun bot (random seed, any%, no human input) — a Rust port of the TypeScript `steve` bot — with its own Minecraft SDK flattened into the same crate (formerly the `rustcraft` crate; `git grep 'rustcraft::'` returns nothing). One crate, three binaries: `ruststeve` (the bot), `datagen` (registry extractor), `rcon` (tiny RCON CLI). Targets **MC 26.1.2, protocol 775**, offline mode only (no auth; bots must be op'd for RCON/`MC_TP`).
 
-A single binary: connect → wait for spawn + chunks → run a tick loop until the dragon is dead.
+Reliability and generality over speed. **No X-ray:** the bot may act only on blocks it has seen with an exposed face. This is enforced in code (see "Honest perception" below), not just policy.
+
+Work proceeds in **cycles** set by a strategy prompt (`docs/ruststeve-loop-cycle4.md` holds the standing rules; each cycle has a `docs/playbook-<date>.md`, `docs/status-cycle<N>-h<H>.md` every 8 h, and a `docs/report-<date>.md` wrap-up). `CHANGES.md` is the running changelog per cycle. Read the latest report's "state for the next cycle" block before starting work. `LOOP.md` is the cycle-1 procedure and is historical.
 
 ## Commands
 
 ```bash
-cargo run                    # connect and run the speedrun loop (app::run)
-cargo build --release        # the harness scripts run the release binary
-cargo test                   # 172 SDK tests + the bot, all one crate now
-cargo test <name>            # run one test by (sub)string, e.g. `cargo test nbt`
-cargo run --bin datagen      # regenerate data/ (registry) from the Mojang jars
-
-# Config via env vars (main.rs / app.rs read these):
-MC_HOST=<host> MC_PORT=25565 MC_USERNAME=ruststeve-001 cargo run
-STEVE_DATA=data              # registry dir (default shown)
-MC_TP="x y z"                # teleport to a real forest on spawn (needs op); steve's spawnBot equivalent
-RACE_HOLD=<secs>             # spawn, then idle alive so the orchestrator can position the bot
-RACE_GOAL=nether|blaze|iron_pickaxe|…   # stop as soon as that goal is reached (race finish line)
-STEVE_TEST=<step_id> STEVE_TEST_SECS=<n>   # isolation mode: run ONLY that step until is_complete
-GYM=<slug>|report GYM_TRIALS=<n>  # in-Rust gym: loop a sub-task on random terrain → data/gym.db
-ARENA_TEST=1                 # combat rig: treat fortress as found + run find_fortress/kill_blaze in the overworld
-FORTRESS_HINT="x y z"        # pathfind toward a known fortress origin before wandering (real-nether combat)
-NETHER_START="x y z"         # command-tp the bot straight into the nether on spawn (skip the portal build)
-SNIFF=1 | SNIFF=a,b,c        # capture packets → data/sniff-<user>.db (all, or names containing a/b/c)
-CRAFT_DEBUG=1                # dump inventory/window state around each craft (also enables CAST debug)
-MINE_DEBUG=1                 # log descent/dig-down decisions
-# other targeted flags: GOTO_DEBUG, DIG_DEBUG, CHUNK_DEBUG, PKT_DEBUG, FOLLOW_DEBUG, GM_DEBUG, PORTAL_BUDGET_SECS
+cargo build --release              # harnesses run target/release/ruststeve (or a copied bins/<name>/ruststeve)
+cargo test --release --lib         # ~190 unit tests (SDK + bot); one crate
+cargo test --release --lib <name>  # one test by substring, e.g. `cargo test --release --lib recorded_craft`
+cargo run --bin datagen            # regenerate data/ (registry) from the Mojang jars — required before any run
+cargo run --release --bin rcon -- "list"   # RCON_HOST/RCON_PORT/RCON_PASS (defaults localhost:25576, minecraft-test-rcon)
 ```
 
-**Development is driven by two live-server harnesses, not just `cargo run`** (see "Race & test harness" below) — most changes are validated by running a step in isolation or a full race against the shared MC box at `144.24.32.76`.
+There is no CI (`.github/` does not exist) and no lint config; `cargo build` warnings are kept at zero by convention.
 
-**The registry must exist.** `STEVE_DATA` points at the generated `data/` (run `cargo run --bin datagen` first — it extracts blocks/items/recipes straight from the Mojang jars). Without it the bot starts with an empty registry and resolves no block/item names — it will spawn but can't do anything useful. `data/` is gitignored (regenerable); `src/protocol/data/protocol-schema.json` is NOT — it's `include_str!`'d at compile time, so it must stay committed.
+**The registry must exist.** `STEVE_DATA` (default `data`) points at the generated registry (`blocks.json`, `items.json`, `recipes-raw/`, `tags/`, `blockCollisionShapes.json`, …). `data/` is gitignored and also holds run outputs (gym.db, race.db, attempts/, params.json, landings). `src/protocol/data/protocol-schema.json` is the exception: it is `include_str!`'d and committed. `src/registry/mod.rs` patches generated data at load time (portal blocks get no collision — the generated full cube was wrong).
 
-This is offline-mode only (no auth wired up): `ClientOptions { access_token: None, uuid: None }`. The server must allow offline players, and `MC_TP` / RCON ops need the bot to be op'd.
+### Run modes (all selected by env vars read in `src/app.rs`)
+
+```bash
+MC_HOST=<host> MC_PORT=<port> MC_USERNAME=rust-gym-001 target/release/ruststeve   # plain run: the step machine until death/goal
+GYM=<slug> GYM_TRIALS=<n> …        # in-Rust gym: one bot loops a sub-task (src/gym.rs) and records to GYM_DB
+GYM=report                         # print the per-slug pass table and exit (no bot)
+STEVE_TEST=<step_id> STEVE_TEST_SECS=<n>   # isolation: run only that step until is_complete → "TEST RESULT: PASS|FAIL"
+RACE_GOAL=nether|blaze|iron_pickaxe|… RACE_HOLD=<secs>   # race path: telemetry to data/race.db, win recorded once, bot keeps running
+```
+
+Other env worth knowing: `RACE_ID`, `BUILD`, `WORLD_SEED` (stamped on every event row); `BOT_ARMS=1` + `ARM_BUCKETS`/`ARM_CLUSTER_MIN` (per-bot bandit arms); `GYM_REGION`, `GYM_DB`, `ATTEMPTS_DIR`, `GYM_LANDINGS` + `GYM_LANDING_OFFSET` (paired landings); `MC_TP`, `NETHER_START`, `FORTRESS_HINT`, `ARENA_TEST`, `RACE_MAX_PRIORITY`, `RACE_STOP_ON_GOAL`, `RUST_VIEW` (SSE world feed for the 3D viewer); debug: `SNIFF`, `SNIFF_JSON=1`, `CRAFT_DEBUG`, `CAST_SNIFF`, `MINE_DEBUG`, `GOTO_DEBUG`, `DIG_DEBUG`, `CHUNK_DEBUG`, `PKT_DEBUG`, `FOLLOW_DEBUG`, `GM_DEBUG`. Full list: `grep -rho 'var("[A-Z_]*")' src | sort -u`.
+
+### Harnesses (the current ones)
+
+- **`local-server.sh [1|2]`** — a local vanilla 26.1.2 gym server (sha1-checked piston-data jar, Java 25 from nixpkgs, difficulty normal, view 6 / sim 4, 6 GB): profile `local-1` = game 25567 / RCON 25577, world `data/local-world`; `local-2` = 25568 / 25578. Runs in the foreground; stop with `rcon stop`. The local world is ours to reset (stop the server, move `data/local-world/world` aside).
+- **`gym.sh`** — `PROFILE=local-1|local-2|box-b SLUG=<slug> | SLUGS=a,b,c  N=<bots> TRIALS=<n> BIN=… BUILD=… [LANDINGS=data/landings-<set>.json] ./gym.sh`. Fresh region per batch (`GYM_REGION`, persisted in `<store>/gym-index`), SIGTERMs the previous batch on the same `PIDTAG` (its trials are recorded `aborted`, never left `running`), clears forceloads in all three dimensions unless `KEEP_FORCELOADS=1`, and **refuses more than 6 live bots per server** across all pid files of a profile. Local stores live in `data/local-1/` (gym.db, attempts/). `gym-tonether-b.sh` is a thin `PROFILE=box-b` wrapper.
+- **`race-b.sh`** — a 5-bot, 240-min race: fresh region (`x = 900 + RACE_INDEX*3000`), land-checked lane placement (`scripts/race-place.ts`), memory/frame/lit-portal files cleared per race, bandit arms drawn per bot, a heartbeat watchdog that relaunches stalled bots, a respawn check, and the previous `race.db` archived to `data/archive/race-pre-<id>.db`. Host-agnostic via `MC_HOST`/`PORT`/`RCON_PORT` (defaults: Server B, 25566/25576). Example: `BIN=… BUILD=… RACE_INDEX=<n> N=5 setsid ./race-b.sh > race-i<n>.out 2>&1 < /dev/null &`.
+- **Legacy, cycle-1 era (hard-coded to the old shared box, sudo `mcrcon`, port 25575):** `race.sh`, `race-loop.sh`, `stop-race.sh`, `isolation-test.sh`, `arena-run.sh`, `nether-run.sh`, `cast-one.sh`, `portal-test.sh`, `lava-find-test.sh`, `gym-portal-run.sh`, `gym-reach-b.sh`, `loop-watchdog.sh`, `tunnel-keep.sh`, `gen_dashboard.sh`. Read before reusing; most need porting to `gym.sh`-style profiles.
+
+**Where the servers are (checked 2026-11-11):** the OCI box `bridger@144.24.32.76` no longer runs any Minecraft server (Server A/B and their ports are gone; it hosts Factorio now). `race-b.sh` therefore has no default target until a server is provisioned; point it at one with `MC_HOST`/`PORT`/`RCON_PORT`. Never touch another project's server, and never wipe a world you don't own.
+
+### Analysis scripts (TypeScript, run directly with `node`, no build)
+
+`scripts/ml/compare.ts` (Bayesian P(B>A) with a sequential stop rule; `--paired <gym.db> <slug> <A> <B> [--exclude ids]` for paired landings: per-landing table, bootstrap of the paired mean, sign test), `race-funnel.ts <race.db…>` (per-bot furthest milestone, first Nether tick, deaths, tick gaps; funnel through the post-portal steps), `race-budget.ts label=<race.db>…` (bot-hours past budget by step), `funnel.ts`, `bandit.ts`, `rows.ts` (reads `data/attempts/*.jsonl`). Plus `scripts/landings.ts` (generate a pre-checked paired landing set by RCON), `scripts/mspt-sample.ts` (server tick sampling), `scripts/sniff-window.ts` / `sniff-fixture.ts` (read a `SNIFF_JSON` capture; cut a unit-test fixture), `scripts/rate-report.sh`, `scripts/gym-report.sh`.
 
 ## Architecture
 
-The loop in `main.rs` is **sync state → pick the next incomplete step → execute it**, repeated. Three files form the engine; `tasks/` does the real work.
+### The engine: sync → pick → execute
 
-**`state.rs` — perception.** `sync_from_bot(&Bot)` scans `bot.inventory` and folds it into a flat `GameState` (counts of logs/planks/sticks/cobble/coal/iron/diamonds/food/buckets/flint, best pickaxe & sword `Tier`, has-table/has-furnace, plus health/food/position/dimension). The step machine only ever reads `GameState`, never the bot directly.
+`app::run` connects, waits for spawn and chunks, then loops: drain packets, **`state::sync_from_bot(&Bot)`** folds the bot into a flat `GameState` (inventory counts, best tool tiers, vitals, dimension, `portal_built`, `fortress_found`), **`survival::handle_survival`** runs reflexes first (breath, lava, health — the first one that fires wins the cycle), then **`steps::get_next_step`** picks a step and `steps::execute_step` dispatches by string id into `tasks::`. Each step attempt is wrapped by `learn::Attempt` (event row, budget, stall detector). A respawn-loop guard and a "20 failures with no progress" guard exit the process so the harness relaunches it fresh.
 
-**`steps.rs` — the plan.** A static ordered `&[Step]` walking the tech tree (gather wood → planks → table → sticks → wooden pick → mine stone → stone pick/sword → furnace → coal → iron → smelt → iron pick → buckets → water → food → flint & steel). Each `Step` is gated by `can_execute(&GameState) -> bool` and satisfied by `is_complete(&GameState) -> bool`; `execute_step` dispatches by string `id` into `tasks::`.
+`steps.rs` is a static ordered `&[Step]` (28 steps: wood → tools → iron → buckets → flint → build blocks → **build_nether_portal → enter_nether → find_fortress → kill_blaze**, then end-game skeleton steps whose bodies are mostly unimplemented — `get_pearls` barters, the End steps return "not implemented"). Gym-only dispatch ids (`crystals`, `dragon`) also live in `execute_step`.
 
-> **Critical invariant — `get_next_step` returns the FURTHEST-along runnable step (`.next_back()`), not the first.** Steps consume the (consumable) outputs of earlier steps, so an earlier step looks "incomplete" again the moment a later one runs. Picking the last runnable+incomplete step is what stops the bot from looping forever re-gathering. Preserve this when adding steps; keep the slice ordered by progression.
+> **Critical invariant: `get_next_step` returns the FURTHEST runnable incomplete step (`.next_back()`), not the first.** Later steps consume earlier steps' outputs, so earlier steps look incomplete again; picking the last runnable one prevents re-gather loops. Keep the slice ordered by progression. Before that pick, overworld-only overrides run in order: pickaxe recovery, wood recovery, and the bounded early-iron-pickaxe rule. In the Nether only steps with priority ≥ 20 are eligible.
 
-**`tasks/` — execution**, one module per family, each a faithful port of the matching steve task. They translate goals into the SDK's bot primitives (`bot.goto*`, `dig`/`dig_toward`, `place_block`, `click_window`, `look_at` + control states — all in the in-crate `bot`/`world`/… modules). Recurring patterns worth knowing before editing:
+### Tasks (`src/tasks/`)
 
-- **Pathfinder-first, raw-walk fallback.** Tasks try `bot.goto*` (the SDK's A*); when it stalls short, they fall back to manual control-state walking that carves through terrain. `gather_wood` is the fullest example: `approach_raw` carves stairs up a hillside, `chop` fells a trunk via block-prediction, `explore`/`downhill_angle` escape stone-locked basins, and unreachable trees get blacklisted. `mining` mirrors this with `dig_down`/`descend_step`/`strip_tunnel`.
-- **Local state prediction.** The SDK's container-craft and item-use inventory sync is inherently racy (see "Minecraft SDK" below), so tasks predict known results with `bot.ensure_item(...)` / manual count edits after a server action succeeds but doesn't echo (e.g. `craft_item` in `bot_utils.rs`, `fill_water_buckets`). Without this the step machine re-runs the step forever.
-- **Resource-finding is explore-or-remember, never give up.** A task that needs a resource not in immediate scan range must roam/descend to look (rotating headings) or reuse a remembered POI — never fail outright. `bucket` roams for water; `mine_ore` records exposed **lava** it passes (`find_exposed_blocks`) so `portal::prepare_cast_site` can navigate back to it for the obsidian cast instead of blind-searching (digging *down* toward lava is refused by `dig_down`'s death-avoidance, so the bot can't reach the lava layer that way).
-- **Crafting-table acquisition.** `bot_utils::get_crafting_table` finds a nearby table, else crafts and places one — digging a side niche if the bot is boxed in (e.g. mid-tunnel). 2×2 recipes pass `table: None`; 3×3 recipes need a placed table.
-- **Physics-jitter guards.** Vertical block math uses `floor(y - 0.5)` (not `floor(y) - 1`) so a position dipping just under an integer doesn't target the wrong block — see `dig_down`.
+One module per capability family, ported from steve's tasks: `gather_wood`, `mining`, `craft`, `smelt`, `bucket`, `food`, `lava_move`, `portal` + `portal_mold`, `nether`, `end`. Shared helpers in `bot_utils.rs` (`craft_item`, `get_crafting_table`, `count_items`, water escape). Patterns that recur:
 
-### Minecraft SDK (in-crate, ~11k lines)
+- **Pathfinder first, raw walk second.** `bot.goto*` (A*, **one synchronous search** — the sliced variant was deleted after losing a paired comparison), then control-state walking/tunnelling when the path stalls. `walk_to_xz` jumps; `settle_xz` is the sneaking, non-jumping precise version used beside lava.
+- **Explore or remember, never give up.** Missing resources trigger roaming/descending with rotating headings, or navigation to a remembered POI (`memory::WorldMemory`, per-bot SQLite `.memory-<bot>.db`, cleared per race).
+- **The portal is cast, not mined:** `portal.rs::prepare_cast_site` finds lava (descend to −50, tunnel; see Honest perception), the sealed scoop **station** (`portal_mold::station_refill`) fills buckets, and `portal_mold.rs` builds a template mold and pours lava cups + water to make obsidian, then lights it. The frame anchor persists per bot in `.frame-<bot>.txt`; the lit frame in `.portal-<bot>.txt` so `enter_nether` can walk back to its **own** portal without line of sight. `enter_nether` order: own lit portal → `find_block` (line of sight) → any exposed portal (the same test that sets `portal_built`).
+- **Nether:** `find_fortress` digs down to brick seen below, tunnels toward it, or sweeps ±X (stepping out along ±Z if X is blocked both ways); bridging uses cobble, then netherrack. `kill_blaze` defends against nearby hostiles, then melees blazes on a wall-clock cadence.
+- **Feet height:** standing on a block top reads y = 89.9999. Code that derives the feet row uses `floor(y + 0.01)` (Nether tunnel) or `floor(y - 0.5)` for the block below (`dig_down`); a bare `floor(y)` was the cause of a race-stopping bug.
 
-The `bot`, `world`, `protocol`, `chunk`, `path`, `physics`, `registry`, `anvil`, `recipe`, `item`, `block`, `entity`, `nbt`, `window`, `chat`, `auth`, `rcon`, `vec3` modules ARE the SDK (a Rust port of the `typecraft` TS SDK). `src/lib.rs` is the crate root and re-exports them; the bot core (`app`/`state`/`steps`/`tasks`/…) sits alongside them and calls them via `crate::`. There is no separate crate anymore — `git grep 'rustcraft::'` should return nothing.
+### Honest perception (no X-ray, enforced)
 
-- **`bot::Bot`** is the handle: `Bot::connect(opts, &registry)` then an async event loop (`next_event`, `drive_tick`, `wait_ticks`). It owns `inventory`, `entity`, `world`, `movement`, `registry`, `current_window`, and exposes `goto*`/`dig`/`place_block`/`click_window`/`look_at`/`open_block`/`run_command`, etc.
-- **Container-click sync is the single most load-bearing, hard-won mechanism** — read `bot/inventory.rs::click_window` before touching anything crafting-related. It sends the click with **empty `changedSlots`**, which forces the server to treat every click as a prediction mismatch and reply with a full authoritative `container_set_content`. This is deliberate: the optimistic local-prediction path desynced under sustained multi-bot load and cascaded into `missing crafting ingredient` / `result never appeared` failures that capped every race at iron ore. Forcing a server resync after each click keeps the window authoritative. `craft_item` (bot_utils) layers on top: retry-on-ingredient-not-found and poll-for-the-exact-result-item. Do **not** "optimize" click_window back to sending predicted changed slots.
-- **Melee combat is a second load-bearing, protocol-version-specific mechanism** (`bot/mod.rs::attack`) — read it before touching anything combat-related. **Protocol 775 (MC 26.1.2) split attacking into a dedicated `attack` packet (id 0x01, just `{entityId: varint}`); the old `interact` packet (0x1a) is now RIGHT-CLICK ONLY** and its 775 form even requires a trailing `hand` field. The whole "melee deals zero damage" wall was sending an interact-with-mouse=1 (a no-op right-click that decoded fine and dealt nothing). Do NOT revert `attack` to send `interact`. Two more hard-won details live in that function and `tasks/nether.rs::kill_blaze`: (1) it force-sends `send_position()` *before* the attack so the server evaluates reach/angle against the current pose, not a stale one; (2) swings are paced with **`wait_real_ms(650)`, never `wait_ticks`** — under the combat packet flood `wait_ticks` collapses to ~0ms (buffered packets satisfy the tick counter), bursting every swing into the mob's 10-tick hurt-invulnerability so only the first lands. 650ms of *wall-clock* clears both the i-frames and the iron-sword cooldown. `packet_attack`'s field lives in `src/protocol/data/protocol-schema.json` (authoritative source: minecraft-data `pc/26.1` — there is no `26.1.2` dir).
-- **`WorldMemory`** (`memory.rs`) is a per-bot SQLite POI store (`.memory-<username>.db`): `record`/`observe`/`nearest`/`mark` remember ore/log/water/lava/table/descent locations across ticks and deaths, plus an event log. Passive block sightings during mining feed it (`observe_blocks`), so the bot never X-rays — it only remembers exposed blocks it actually saw.
+- `Bot::is_exposed` counts air, water and see-through non-fluid blocks as a face — **not lava and not unloaded cells** (the registry marks lava `transparent`, which once made every source inside a buried lake "exposed").
+- `Bot::lava_seen` remembers every lava source seen with an air face, refreshed from the loaded chunks every 5 s by the tick driver in every step; `lava_seen_cluster` picks the largest remembered cluster within 64 blocks. `find_lava_cluster` (a chunk-data read through rock) was deleted.
+- `Bot::assert_lava_seen` **panics in gym mode** on any lava-site decision whose target was never seen exposed. Keep the assertion on any new lava-targeting path.
+- Remaining danger-avoidance reads of unexposed lava (`raw_lava_near`, the shaft seal, `dig_down`'s refusal) are an open strategist question; don't add more.
 
-### State of the port
+### The SDK (in-crate)
 
-The full **overworld→nether pipeline** is ported (21 steps): gather wood → planks → table → sticks → wooden pick → mine stone → stone pick/sword → furnace → coal → iron → smelt → iron pick → buckets → water → flint & steel → gather build blocks → build nether portal (obsidian cast) → enter nether → **find fortress → kill a blaze**. The portal is built by casting obsidian (lava cup + water bowl, no diamond pickaxe) and lit with flint & steel.
+`bot`, `world`, `protocol`, `chunk`, `path`, `physics`, `registry`, `anvil`, `recipe`, `item`, `block`, `entity`, `nbt`, `window`, `chat`, `auth`, `rcon`, `vec3` — a Rust port of the typecraft TS SDK, re-exported from `src/lib.rs`. `bot::Bot` is the handle (`Bot::connect`, `next_event`/`drive_tick`/`wait_ticks`, `goto*`, `dig`, `place_block`, `click_window`, `look_at`, `open_block`, `attack`).
 
-The first **post-nether step pair** (`tasks/nether.rs`) is ported and working: `find_fortress` sweeps ±X (fortresses X-align) — bridging cobble over lava, bailing off lava underfoot — until nether brick is in a direct block scan (`see_fortress`, NOT `find_block`, which needs LOS to an exposed block and returns None for the floor you stand on), then pathfinds onto it; `kill_blaze` equips the best sword, camps the spawner, and melees the nearest reachable blaze (≤12 blocks) on the 650ms cadence until it holds a blaze rod (`RACE_GOAL=blaze`). **Verified end-to-end in the overworld `ARENA_TEST` rig** ("RACE GOAL REACHED: blaze"), not yet exercised in a real fortress (that needs the cross-dim chunk-load delay solved, or a real portal entry, plus fortress-finding traversal). **This work is currently uncommitted** (last commit is the portal); `src/tasks/nether.rs`, `arena-run.sh`, `nether-run.sh` are untracked.
+Load-bearing mechanisms — read the code before touching them:
 
-Beyond the blaze rod, the run stops: `is_dragon_dead` always returns false (`WorldState::dragon_dead` is never set), so the rest of the Nether (more rods, ender pearls) and the whole End *combat* phase — the victory path — are **not yet implemented**. Extending the run means adding ordered steps + task modules following the patterns above.
+- **Window/inventory sync** (`bot/inventory.rs::click_window`, `bot/mod.rs` slot handlers, `window.rs::apply_server_slot/apply_server_content`). Clicks are sent with **empty `changedSlots`** so the server always answers with authoritative state. Server set-slot/set-content packets are applied **verbatim**, the player's 36 slots are mirrored between the player window and an open container, the server's cursor (`carriedItem`, and set-slot −1/−1) is applied, and each click's ack wait reads until the window has been quiet for 100 ms. Each of these fixed a measured craft failure; `tests/fixtures/stale-craft-window.json` (recorded with `SNIFF_JSON=1`) replays one. `crafting.rs::find_ingredient_slot` searches **only the inventory section**, never the grid.
+- **Melee** (`bot/mod.rs::attack`): protocol 775 has a dedicated `attack` packet (0x01, `{entityId}`); `interact` is right-click only. Send position before attacking; pace swings with `wait_real_ms(650)`, never `wait_ticks` (which collapses under a packet flood).
+- **Dimension change** clears loaded columns, entities and `lava_seen`, and resets world height (overworld −64/384, Nether/End 0/256).
+- **Packet sniffer** (`src/sniff.rs`): `SNIFF=1` or `SNIFF=container,click,carried` captures both directions with ms timestamps into `data/sniff-<user>.db`; `SNIFF_JSON=1` stores full params as JSON for replay. Reach for it before guessing at any interaction failure.
 
-## Race & test harness
+### Measurement plumbing
 
-Development happens against a **shared, always-on MC server at `144.24.32.76`** (RCON on 25575), driven by helper scripts that build the release binary and orchestrate bots over SSH. Two ways to validate a change:
+- **Gym** (`src/gym.rs`): `GYM_STEPS` holds ~50 slugs, each a kit (`prereq` RCON `give`s), a `step_id` (or `pipeline` = the step machine), a timeout, a pass check and a `GymSetup` (random surface, paired landing, fixed surface, water pools/arenas, real lakes, tunnels, End dragon/crystals, Nether fortress/piglins/pocket/far, hidden or front-facing own portal). Late-game and iron slugs pass on **server truth** (RCON `clear <bot> <item> 0`, entity checks), never the client. `gym_runs` rows carry `build`, `landing` and `lava_s`; a trial killed by SIGTERM is written `aborted`. A death in a Nether setup ends the trial.
+- **Event log** (`src/learn.rs`, schema `docs/events-schema.md`): one JSON row per step attempt and per guarded primitive, appended to `ATTEMPTS_DIR` (default `data/attempts/<run>-<bot>.jsonl`, one file per process), mirrored into race.db `attempts`. Rows carry build, seed, run id, bandit arms and an exposure-only `context`. Per-step budgets and stall windows (`budget_s`, `stall_s`, overridable in `data/params.json`) end attempts as `timeout` and bump an alternative counter.
+- **Bandits:** `data/params.json` holds Beta arms (buckets, cluster_min, iron_band, retreat_hp, station_tiebreak), all `enabled: false`; races draw buckets × cluster_min per bot (`BOT_ARMS=1`).
+- **Race telemetry** (`src/telemetry.rs`, race path only): `data/race.db` tables `ticks`, `events` (death, milestone, win, `race_meta`), `attempts`, `counters`; views `v_step_spans`, `v_top_fails`, `v_deaths`, `v_milestones`. A milestone names the step *reached*, so "Find Nether Fortress" means the bot is in the Nether; the ground truth for Nether entry is the first `ticks` row with a `the_nether` dimension.
 
-- **`./isolation-test.sh <step_id> [N] [SECS]`** — the fast loop. Spawns N bots in clean stone arenas, gives each the step's prerequisites (see `setup_prereqs()`), and runs the binary in **`STEVE_TEST` mode** (main.rs: run only that one step until its `is_complete` passes → `TEST RESULT: PASS`, else `FAIL` on timeout). Add a `setup_prereqs()` case to support a new step. This is how portal/mining/craft fixes are verified without a full run.
-- **`./race.sh`** — the full loop. `N` bots (default lanes at `x≈680`, `z=350+90·i`) race spawn→…→nether; `RACE_SECONDS` bounds it, `RACE_GOAL=nether` is the finish line. `gen_dashboard.sh` renders live standings to `/tmp/race.html`; `stop-race.sh` ends a run cleanly (kills only `target/release/ruststeve` + kicks the `rust-race-*` names — never touches other processes). `race-loop.sh` respawns dead bots mid-race. Per-bot logs are `race-<i>.log`.
-- **`GYM=<slug> GYM_TRIALS=<n> cargo run`** — the *in-Rust* gym (`src/gym.rs`, no shell): one connected bot self-RCONs `clear`/`give`/`spreadplayers` and reruns a single sub-task across random real terrain, recording pass/duration/xyz to `data/gym.db` (`GYM=report` prints the per-slug pass table). Use it to harden a terrain-sensitive step in isolation before chaining it into a race. RCON reaches the shared box over the SSH tunnel (`localhost:25575`).
-- **Combat rigs:** `./arena-run.sh` (overworld sealed netherrack arena + `ARENA_TEST=1`, fast) and `./nether-run.sh` (kit + tp into the real nether, blaze spawner via RCON) drive the `find_fortress`/`kill_blaze` steps. `cast-one.sh` / `gym-portal-run.sh` are the portal rigs. Bots always run on this MacBook; the *world* is the OCI box — bots reach it via the SSH tunnel (`tunnel-keep.sh` forwards 25565/25575), so scripts connect to `MC_HOST=localhost`.
+### Other crates/dirs
 
-**Packet sniffer (the protocol-debug tool):** `SNIFF=1` (or `SNIFF=name,substrings`) captures every packet, both directions, with ms timestamps into `data/sniff-<user>.db` (`src/sniff.rs`), so a desync (late/reordered/absent server reply, or a mis-encoded outbound packet) can be queried after the fact with SQL. Combined with `PKT_DEBUG=1` (prints packets to stderr, including the server's `disconnect` reason before EOF) this is how the 775 attack-packet bug was found — reach for it before guessing at any interaction-reliability failure.
+`dashboard/` is a separate Leptos crate (own `target/`); `viewer/` + `src/viewer.rs` (`RUST_VIEW`) stream a bot's world to steve's Babylon viewer over SSE; `examples/` holds small SDK examples (`cargo run --example spawn|ping|craft|digtest|worldview`).
 
-**Shared-server rules (this box is shared with the TypeScript `steve` bot):**
-- **NEVER wipe/reset the world or restart the server** — automatically or manually. That is the operator's call only. The harness must not `forceload remove all` (it nukes the other project's chunks) or reset the world; scope forceloads to this project's region.
-- Gamerules on 26.x are **snake_case** (`keep_inventory`, not `keepInventory`).
-- Keep bot names in the `rust-race-*` / `ruststeve-*` namespace and process-kills scoped to `target/release/ruststeve`, so races can run concurrently with the other agent's Node bots.
+## Rules specific to this project
+
+- **Measure every change against the old build** on the same slug before claiming it: build both binaries (a `git worktree` for the old arm is the usual way), run equal trial counts, report k/n with Wilson intervals; use paired landing sets for terrain-sensitive steps. A reproducing slug must fail on the old build before its pass rate means anything.
+- **≤ 6 concurrent bots per server** (10 crashed a 2-CPU server's watchdog four times). Build niced (`nice -n 19`, `-j 1`) on a small shared box, and `cmp` a copied binary before launching it.
+- **Never edit a racing binary's tree mid-race**; a race reads one fixed build (`BUILD` label on every row).
+- **Never wipe or reset a world you don't own**; a local server's world is yours. MC 26.x gamerules are snake_case (`keep_inventory`).
+- Every trial you cut must end as an `aborted` row with its reason; nothing is left `running` in gym.db.
+- Commits: conventional prefixes (`feat`/`fix`/`refactor`/`docs`/`chore`), bodies explain the measured cause and result. No AI attribution anywhere. Never push to `main`.
 
 ## Code style
 
-**Descriptive names — no cryptic abbreviations.** Name things for what they are.
-Recent renames that show the bar (prefer the right-hand side):
-
-- `cdbg` → `cast_debug`
-- `bkt` → `filled_bucket_name`
-- `is_obs` → `is_obsidian_at`
-- `off_now` → `dist_from_stand`
-
-Short conventional loop/coordinate names (`dx`/`dy`/`dz`, `bx`/`by`/`bz` for a frame
-anchor, `i`) are fine; helper functions, locals that carry meaning, and closures
-should read like prose.
+Descriptive names, no cryptic abbreviations (prefer `cast_debug` over `cdbg`, `filled_bucket_name` over `bkt`, `dist_from_stand` over `off_now`); `dx`/`dy`/`dz`, `bx`/`by`/`bz` (frame anchor) and `i` are fine. Comments explain **why** and usually cite the race/gym evidence that motivated the code (`race i11 rust-race-004 …`); keep that habit — it is how later readers know a guard is load-bearing. One-off scripts are TypeScript run with `node` (Node strips types natively), never Python.
