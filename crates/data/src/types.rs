@@ -26,6 +26,9 @@ pub struct Property {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockInfo {
     pub name: &'static str,
+    /// The definition type from the blocks report, without its namespace (`slab`, `stair`,
+    /// `block`): how the game builds the block; routes classify by it.
+    pub definition: &'static str,
     pub first_state: u32,
     pub last_state: u32,
     pub default_state: u32,

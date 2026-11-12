@@ -5,7 +5,7 @@ type: reference
 tags: [planner, phases, tasks, recovery]
 aliases: [Phase, Task, Plan, Recovery, Failure, planner, TaskStatus]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: ruststeve@c87ac55
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#A phase is complete when a predicate on the world model is true, not when some code path says so."
@@ -33,6 +33,9 @@ The brain decides in three layers of printable data: a **phase** (where we are i
 - `Plan { phase, stack: Vec<Task>, watchdog }`; the top of the stack is current. On `Failed(f)` one pure `recover(&f, &plan, &world) -> Recovery` chooses `Retry`, `PushSubtask`, `ReplaceWith`, `PopAndReplan` or `Escalate`, and logs both. All recovery policy sits in one table.
 - Runtime state machines are enums; the typestate pattern is only for shell APIs where misuse is a programmer error (a `Recorder<NoHeader>` that becomes `Recorder<Ready>`).
 - `clippy::wildcard_enum_match_arm` is denied, so adding `Task::Bridge` makes the compiler list every place that must decide. The only exception is the porting-time `_ => todo!()`, which must be gone by the end of phase 4.
+
+## In ruststeve so far (issue 09a)
+`plan::Task` is `Idle | ToLog(Walk) | Explore(Walk)`, `walk::TaskStatus` is `Running | Done | Failed(Failure)` and `Failure` is `NoPath | NoProgress | Deadline | TargetLost`; one task is held, not yet a stack, and recovery is refuse-and-choose-again ([[planner]]). Phases arrive with the issues that need them.
 
 ## Gotchas
 - The phase list is a placeholder. clojurecraft has no phase enum; its progress lives in goal rows ([[cc-goals-and-intents]]). Deriving the real sequence is inventory work ([[port-phases]]).

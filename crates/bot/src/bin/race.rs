@@ -34,6 +34,7 @@ struct Args {
     cap: Option<u64>,
     wall_limit: Option<u64>,
     walk: Option<bot::Script>,
+    goal: Option<plan::Aim>,
 }
 
 fn args() -> Result<Args, String> {
@@ -51,6 +52,7 @@ fn args() -> Result<Args, String> {
         cap: None,
         wall_limit: None,
         walk: None,
+        goal: None,
     };
     let mut it = std::env::args().skip(1);
     let num = |flag: &str, v: &str| -> Result<u64, String> {
@@ -73,6 +75,7 @@ fn args() -> Result<Args, String> {
             "--run" => a.run = v,
             "--cap" => a.cap = Some(num(&flag, &v)?),
             "--wall-limit" => a.wall_limit = Some(num(&flag, &v)?),
+            "--goal" => a.goal = Some(plan::Aim::parse(&v).ok_or(format!("--goal: no aim {v}"))?),
             "--walk" => {
                 a.walk = Some(bot::Script::parse(&v).ok_or(format!("--walk: no script {v}"))?)
             }
@@ -144,6 +147,7 @@ fn race(a: &Args) -> Result<bool, String> {
             record: Some(a.out.join(format!("{name}.rsr"))),
             script: a.walk,
             script_ticks: None,
+            aim: a.goal,
             cap_ticks: Some(cap),
             deadline,
             start: apply,
@@ -230,6 +234,10 @@ fn race(a: &Args) -> Result<bool, String> {
             wall_ms: outcome.stats.wall_ms,
             recording: outcome.recorded.then(|| recording.clone()),
             replay: format!("cargo run -p replay -- verify {recording}"),
+            plan: outcome
+                .plan
+                .as_ref()
+                .map(|p| bot::plan_summary(p, &outcome.plan_tick_us)),
             stream: outcome.stream.map(|c| results::StreamCounts {
                 sent: c.sent,
                 dropped: c.dropped,
@@ -324,6 +332,7 @@ fn never_connected(
         recording: None,
         replay: "-".to_owned(),
         stream: None,
+        plan: None,
     };
     write_case(&a.out, &case, coverage)
 }

@@ -1,0 +1,21 @@
+# Route queries shared with clojurecraft's path/plan (be85a92). Columns: <world>_<cx>_<cz>.bin,
+# chunk data bytes from two landings captured on the race seed (issue 08c's parity worlds).
+# name world from-x from-y from-z budget goal args...
+#   near x y z range | block x y z | xz x z | away x y z range | afar x y z range
+p-east plains 160 67 0 6000 near 185 67 0 3
+p-west plains 160 67 0 6000 near 135 67 0 3
+p-south plains 160 67 0 6000 near 160 67 25 3
+p-north plains 160 67 0 6000 near 160 67 -25 3
+p-diag plains 160 67 0 6000 near 178 67 18 3
+p-far plains 160 67 0 6000 near 190 67 -24 2
+p-afar plains 160 67 0 6000 afar 160 67 0 28
+p-away plains 160 67 0 6000 away 160 67 0 15
+p-xz plains 160 67 0 6000 xz 171 -9
+p-block plains 160 67 0 6000 block 163 67 2
+p-tight plains 160 67 0 400 near 185 67 20 1
+p-tiny plains 160 67 0 50 near 150 67 -15 1
+s-near shore -240 63 -240 6000 near -232 63 -240 1
+s-water shore -240 63 -240 6000 near -215 62 -240 1
+s-afar shore -240 63 -240 6000 afar -240 63 -240 20
+s-xz shore -240 63 -240 6000 xz -236 -236
+s-away shore -240 63 -240 3000 away -240 63 -240 6

@@ -30,6 +30,7 @@ path = "src/bin/simrace.rs"
 data = { path = "../data" }
 net = { path = "../net" }
 physics = { path = "../physics" }
+plan = { path = "../plan" }
 protocol = { path = "../protocol" }
 rcon = { path = "../rcon" }
 record = { path = "../record" }

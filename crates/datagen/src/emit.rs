@@ -232,8 +232,8 @@ fn blocks_rs(g: &Game) -> Result<String> {
     for b in &g.blocks {
         write!(
             s,
-            "    BlockInfo {{ name: {:?}, first_state: {}, last_state: {}, default_state: {}, properties: &[",
-            b.name, b.first_state, b.last_state, b.default_state
+            "    BlockInfo {{ name: {:?}, definition: {:?}, first_state: {}, last_state: {}, default_state: {}, properties: &[",
+            b.name, b.definition, b.first_state, b.last_state, b.default_state
         )?;
         for (name, values) in &b.properties {
             write!(s, "Property {{ name: {name:?}, values: &[")?;

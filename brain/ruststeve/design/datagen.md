@@ -49,6 +49,9 @@ Hardness, needs-correct-tool, collision shapes, tool materials, fuel, mob health
 ## Regenerating
 On a runner only. Push a change under `crates/datagen`, `crates/data` or `crates/verify-stream` (or dispatch `datagen`); download the `generated-<run id>` artifact with `gh run download` and copy it over `crates/data/src/generated/`. The last step of the workflow fails while the committed files differ from the regenerated ones.
 
+## Block definition types
+Since issue 09a every block carries its definition type from the blocks report (`BlockInfo::definition`: `slab`, `stair`, `block` ...), which routes classify by ([[pathfinding]]).
+
 ## Gotchas
 - Registry order is load-bearing wherever the wire sends an index; the static registries keep protocol-id order, the data-driven ones (damage types, biomes, dimension types) are sorted by name as clojurecraft found the server syncs them.
 - Block properties must keep the report's order (serde_json's `preserve_order`): a state id counts through them with the last property fastest.

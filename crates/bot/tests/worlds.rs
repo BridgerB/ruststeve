@@ -19,14 +19,9 @@ const CONFIG: Config = Config {
 fn one(seed: u64) -> Result<([f64; 3], f64), String> {
     let world = sim::terrain::world(seed, RADIUS).map_err(|e| e.to_string())?;
     let spawn = world.spawn;
-    let run = lockstep::run(
-        Sim::new(CONFIG, world),
-        "rs-gen",
-        seed,
-        TICKS,
-        0,
-        bot::walk_controls,
-    );
+    let run = lockstep::run(Sim::new(CONFIG, world), "rs-gen", seed, TICKS, 0, |_, t| {
+        bot::walk_controls(t)
+    });
     let w = &run.world;
     let body = w.body.ok_or("never placed")?;
     let mut problems = Vec::new();

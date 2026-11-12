@@ -28,6 +28,7 @@ fn the_bot_joins_the_model_and_walks() {
         record: Some(rec.clone()),
         script: Some(bot::Script::WalkSquare),
         script_ticks: None,
+        aim: None,
         cap_ticks: Some(100),
         deadline: Some(Instant::now() + Duration::from_secs(30)),
         start: None,

@@ -54,6 +54,9 @@ pub struct Block {
     pub default_state: u64,
     /// In the report's order: a state's id counts through them with the last property fastest.
     pub properties: Vec<(String, Vec<String>)>,
+    /// The block's definition type without its namespace (`slab`, `stair`, `block`):
+    /// how the game builds it, what a route classifies by (clojurecraft's `blocks/type-of`).
+    pub definition: String,
 }
 
 /// An ingredient: the item names it accepts.
@@ -387,6 +390,11 @@ fn read_blocks(path: &Path, registry: &Registry) -> Result<Vec<Block>> {
             last_state: last,
             default_state: default.with_context(|| format!("{name}: no default state"))?,
             properties,
+            definition: m["definition"]["type"]
+                .as_str()
+                .with_context(|| format!("{name}: no definition type"))?
+                .trim_start_matches("minecraft:")
+                .to_owned(),
         });
     }
     let mut ranges: Vec<(u64, u64)> = blocks

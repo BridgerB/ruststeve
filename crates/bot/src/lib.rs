@@ -48,6 +48,9 @@ pub struct Opts {
     pub script: Option<Script>,
     /// End the run (`Cap`) after the script has run this many ticks.
     pub script_ticks: Option<u64>,
+    /// What the planner should do; it runs once the start has settled, and ends the run (`Cap`)
+    /// when its aim is met or it stops stuck.
+    pub aim: Option<plan::Aim>,
     /// The run ends `Cap` after this many server ticks in play.
     pub cap_ticks: Option<u64>,
     /// The job's end: the run ends `Cut` at this instant (never a cap on behaviour).
@@ -99,6 +102,9 @@ pub struct Outcome {
     pub teleports_at_script: Option<u64>,
     /// The lowest health the server told of while the script ran.
     pub min_health_in_script: Option<f32>,
+    /// The planner, when the run had an aim, and its time per tick in microseconds.
+    pub plan: Option<plan::Plan>,
+    pub plan_tick_us: Vec<u64>,
 }
 
 impl Outcome {
@@ -239,6 +245,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         record,
         script,
         script_ticks,
+        aim,
         cap_ticks,
         deadline,
         start,
@@ -309,8 +316,16 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut script_tick: u64 = 0;
     let mut teleports_at_script: Option<u64> = None;
     let mut min_health_in_script: Option<f32> = None;
+    let mut planner = aim.map(plan::Plan::new);
+    let mut plan_seen: u64 = 0;
+    let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut last_controls: Option<physics::Controls> = None;
-    let doing = if let Some(s) = script {
+    let doing = if let Some(a) = aim {
+        Doing {
+            task: format!("aim {}", a.name()),
+            why: "the planner (issue 09)".to_owned(),
+        }
+    } else if let Some(s) = script {
         Doing {
             task: format!("script {}", s.name()),
             why: "scripted harness until the planner (issue 09)".to_owned(),
@@ -413,6 +428,32 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 }
                 let c = s.controls(script_tick);
                 script_tick += 1;
+                if Some(c) != last_controls {
+                    last_controls = Some(c);
+                    if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
+                        break Ending::Error { why: e };
+                    }
+                }
+            }
+            if let Some(p) = planner.as_mut()
+                && matches!(start_state, StartState::Taken)
+            {
+                if p.reached.is_some() || p.stuck {
+                    break Ending::Cap;
+                }
+                let t0 = Instant::now();
+                let c = p.step(&run.world);
+                plan_tick_us.push(u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX));
+                teleports_at_script.get_or_insert(run.world.session.teleports);
+                for e in p.events_since(plan_seen) {
+                    if let Some(r) = &mut run.recorder {
+                        let note = format!("plan tick {}: {} ({})", e.tick, e.what, e.why);
+                        if let Err(err) = r.write(&Record::Note(note)) {
+                            eprintln!("bot {name}: note: {err}");
+                        }
+                    }
+                }
+                plan_seen = p.event_count;
                 if Some(c) != last_controls {
                     last_controls = Some(c);
                     if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
@@ -541,5 +582,29 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         stream: stream_counts,
         teleports_at_script,
         min_health_in_script,
+        plan: planner,
+        plan_tick_us,
     })
+}
+
+/// The planner's account for a case file: its aim and outcome, its walks and the brain's time
+/// per tick (mean, p99, max microseconds).
+pub fn plan_summary(p: &plan::Plan, tick_us: &[u64]) -> results::PlanSummary {
+    let mut sorted = tick_us.to_vec();
+    sorted.sort_unstable();
+    let tick = (!sorted.is_empty()).then(|| {
+        let mean = sorted.iter().sum::<u64>() / sorted.len() as u64;
+        let p99 = sorted[(sorted.len() * 99 / 100).min(sorted.len() - 1)];
+        [mean, p99, *sorted.last().unwrap_or(&0)]
+    });
+    results::PlanSummary {
+        aim: p.aim.name(),
+        reached: p.reached.is_some(),
+        stuck: p.stuck,
+        walks: p.walks,
+        failures: p.failures.clone(),
+        longest_stall: p.longest_stall,
+        expanded: p.expanded,
+        tick_us: tick,
+    }
 }

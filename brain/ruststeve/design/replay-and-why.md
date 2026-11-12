@@ -32,6 +32,9 @@ related:
 ## Example
 The first `why` asked of a 75 s recording showed a zombie 0.4 blocks from the idle bot at tick 600, health 13: the reason earlier idle sessions ended at health 0. Survival is issue 12.
 
+## The planner's decisions
+Since issue 09a every planner decision (a task started, ended or failed, with why) is written into the recording as a note; `why` prints the last ones up to the moment ([[planner]]).
+
 ## See also
 - [[recordings]] - the format.
 - [[replay-limits]] - open loop versus closed loop.

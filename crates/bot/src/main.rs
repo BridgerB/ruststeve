@@ -24,6 +24,7 @@ fn opts() -> Result<bot::Opts, String> {
         record: None,
         script: None,
         script_ticks: None,
+        aim: None,
         cap_ticks: None,
         deadline: None,
         start: None,
@@ -46,6 +47,12 @@ fn opts() -> Result<bot::Opts, String> {
             "--name" => o.name = value,
             "--seconds" => seconds = value.parse().map_err(|e| format!("--seconds: {e}"))?,
             "--record" => o.record = Some(PathBuf::from(value)),
+            // log or log:<min>: the planner's aim (issue 09)
+            "--goal" => {
+                o.aim = Some(
+                    plan::Aim::parse(&value).ok_or_else(|| format!("--goal: no aim {value}"))?,
+                );
+            }
             // square, straight:<yaw>, jump:<yaw>, still
             "--walk" => {
                 o.script = Some(

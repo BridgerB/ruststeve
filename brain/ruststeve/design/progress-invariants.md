@@ -5,7 +5,7 @@ type: reference
 tags: [design, progress, loops, cpu, watchdog]
 aliases: [progress invariant, no-progress loops, resources per progress, CPU budget, spatial index, chunk buckets, churn]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92 ruststeve@c87ac55
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Build a progress invariant into every long intent (distance to target must shrink, or digs must open new cells) and fail fast when it doesn't."
@@ -30,6 +30,11 @@ clojurecraft's stage 18 died of loops that made no progress, each invisible in c
 - **The churn invariant** (from clojurecraft's `churn_guard`): in any state, the task the planner chooses is not already over after one tick. A property test over recorded and generated worlds ([[cc-stall-and-budgets]]).
 - **A CPU budget per bot per tick, measured in CI**: clojurecraft's planner was about 93% of its race JVM's CPU and starved the server on the same runner. Spatial data is indexed by chunk column from the start; no planner question scans the world.
 - **Grid items count as held** while a craft is laid out (the 410-flip case).
+
+## In ruststeve (issue 09a)
+- The walk's invariant: no gain toward the target for 200 ticks fails it `NoProgress`, and its longest stall is reported per run ([[walk-and-watchdog]]).
+- Targets are held; the churn invariant holds by construction (every candidate routed before it is chosen) and is tested over generated worlds; 12 failures in a row stop the planner, said so ([[planner]]).
+- Spatial questions read memory's chunk-column index in rings; searches are budgeted in node expansions ([[pathfinding]]).
 
 ## See also
 - [[expectations-and-watchdog]] - the mechanism that fails a task.

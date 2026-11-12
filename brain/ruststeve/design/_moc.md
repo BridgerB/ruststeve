@@ -34,6 +34,9 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[insight-store]] - the SurrealDB 4 store built from the race's files, its views, the schema that is steve's contract.
 - [[snapshot-stream]] - the live view: a bot pushes MessagePack frames to steve's local relay, never in the way of a run.
 - [[server-model]] - the vanilla server as a pure reducer, the bot's body without Java, grown per issue.
+- [[planner]] - the planner: an aim, tasks held, choices routed first, failure memory, giving up, decisions recorded.
+- [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
+- [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
 - [[parity-table]] - captured worlds, 50 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.
 - [[world-value]] - what `World` holds, how `step` folds each packet, `block_at`, the chunk decoder checked against clojurecraft.
 - [[connection]] - how a bot connects and stays in the world: the pure protocol crate, the net threads, the bot binary, running a server locally.

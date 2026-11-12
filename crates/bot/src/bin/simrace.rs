@@ -75,7 +75,7 @@ fn one(a: &Args, config: sim::Config, seed: u64) -> Result<Case, String> {
         seed,
         a.cap,
         bot::SETTLE_TICKS,
-        |t| script.map_or_else(physics::Controls::default, |s| s.controls(t)),
+        |_, t| script.map_or_else(physics::Controls::default, |s| s.controls(t)),
     );
     let w = &run.world;
     let ending = match (&w.death, &run.sim.closed) {
@@ -127,6 +127,7 @@ fn one(a: &Args, config: sim::Config, seed: u64) -> Result<Case, String> {
             record::COMMIT
         ),
         stream: None,
+        plan: None,
     })
 }
 
