@@ -6,7 +6,7 @@ tags: [decision, mcp, tooling, agents]
 aliases: [rmcp, MCP server, ruststeve-mcp, .mcp.json, model context protocol, agent tools]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@c5567a0
+verifiedAgainst: ruststeve@cd6e03e
 sourceRefs:
   - "ruststeve:crates/mcp/src/main.rs#//! ruststeve-mcp: an MCP server (the official Rust SDK, rmcp) that gives coding agents"
   - "ruststeve:crates/mcp/Cargo.toml#rmcp = { version = \"=3.9.0\", features = [\"server\", \"transport-io\"] }"
