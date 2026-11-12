@@ -26,6 +26,7 @@ The core only sees inputs and outputs, so what it talks to is behind one seam wi
 ## How it works
 - The real body is the `net` crate's reader and writer threads plus the `protocol` codec ([[wire-boundary-parsing]]).
 - The model body comes in clojurecraft's two forms: folded together with the bot in one thread (deterministic and fast, for the sim race and property tests), or behind the same channel pair the socket uses, so the real loop runs against it unchanged.
+- Since issue 08a the model body exists in the second form: `bot::model::connect` runs `sim::Sim` on a thread behind the channel pair `net::Connection` has, now holding its threads as a list ([[server-model]]).
 - Synchronous: `FUNCTIONAL.md` sketched an `async` trait; ruststeve's loop is threads and channels ([[sync-core-and-time]]).
 - The Minecraft version is pinned in config and written into every recording header.
 

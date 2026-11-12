@@ -22,5 +22,6 @@ protocol = { path = "../protocol" }
 rcon = { path = "../rcon" }
 record = { path = "../record" }
 results = { path = "../results" }
+sim = { path = "../sim" }
 stream = { path = "../stream" }
 world = { path = "../world" }

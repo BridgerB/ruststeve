@@ -185,6 +185,10 @@ impl Writer {
         self.buf.extend_from_slice(&v.to_be_bytes());
     }
 
+    pub fn i16(&mut self, v: i16) {
+        self.buf.extend_from_slice(&v.to_be_bytes());
+    }
+
     pub fn i32(&mut self, v: i32) {
         self.buf.extend_from_slice(&v.to_be_bytes());
     }

@@ -4,6 +4,7 @@
 //! every 50 ms, records every run when asked, and ends with an `Ending`.
 
 pub mod live;
+pub mod model;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -56,6 +57,8 @@ pub struct Opts {
     pub start_name: String,
     /// Where this run's case file will be, for the stream's `end` frame ("" for none).
     pub case_path: String,
+    /// Play against the server model instead of the server at host:port (issue 08).
+    pub model: Option<Box<sim::Sim>>,
 }
 
 /// What the bot counts while it runs.
@@ -236,9 +239,16 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         lane,
         start_name,
         case_path,
+        model,
     } = opts;
-    let addr = format!("{host}:{port}");
-    let conn = net::connect(&addr).map_err(|e| format!("connect {addr}: {e}"))?;
+    let (addr, conn) = match model {
+        Some(sim) => ("model".to_owned(), model::connect(*sim)),
+        None => {
+            let addr = format!("{host}:{port}");
+            let conn = net::connect(&addr).map_err(|e| format!("connect {addr}: {e}"))?;
+            (addr, conn)
+        }
+    };
     let protocol = i32::try_from(data::VERSION.protocol).map_err(|e| e.to_string())?;
     for p in opening(protocol, &host, port, &name) {
         conn.outbound

@@ -60,4 +60,6 @@ pub enum EncodeError {
     Deflate(String),
     #[error("a string or list too long for a varint length")]
     TooLong,
+    #[error("the model does not send {0} yet")]
+    NotModelled(&'static str),
 }

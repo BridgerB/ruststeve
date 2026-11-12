@@ -47,8 +47,9 @@ pub enum Inbound {
 pub struct Connection {
     pub inbound: Receiver<Inbound>,
     pub outbound: SyncSender<Out>,
-    pub reader: JoinHandle<()>,
-    pub writer: JoinHandle<()>,
+    /// The threads behind it: the reader and writer for a socket, the model's for the server
+    /// model (brain/ruststeve/design/body-boundary.md).
+    pub threads: Vec<JoinHandle<()>>,
 }
 
 /// Connect to `addr` (`host:port`) and start the reader and writer threads. The reader decodes
@@ -68,8 +69,7 @@ pub fn connect(addr: &str) -> std::io::Result<Connection> {
     Ok(Connection {
         inbound,
         outbound,
-        reader,
-        writer,
+        threads: vec![reader, writer],
     })
 }
 

@@ -151,6 +151,7 @@ fn race(a: &Args) -> Result<bool, String> {
             lane: a.lane,
             start_name: start.name.clone(),
             case_path: a.out.join(format!("{name}.case.rsc")).display().to_string(),
+            model: None,
         };
         handles.push((name, std::thread::spawn(move || bot::run(opts))));
     }
