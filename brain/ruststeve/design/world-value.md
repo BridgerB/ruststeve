@@ -6,7 +6,7 @@ tags: [world, chunks, overlay, fold, state]
 aliases: [World, World::step, block_at, state_at, overlay, chunk columns, Event, Effect, world crate]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@e25875e clojurecraft@be85a92
+verifiedAgainst: ruststeve@ff7281f clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn step(&mut self, e: &Event) -> Vec<Effect> {"
   - "ruststeve:crates/world/src/lib.rs#pub fn state_at(&self, pos: BlockPos) -> Option<u32> {"
@@ -41,7 +41,7 @@ related:
   - `body`, `controls` and what was last sent: the physics body and what it presses ([[physics]]);
   - `hits`, `death` and `stage_reached`: the hits on the bot in the last minute, the server's death message, the highest stage held ([[entities-and-inventory]], [[race-and-results]]);
   - `now_ms`, `seed`.
-- **Chunks** are decoded on the net reader thread into `Column`s whose sections stay packed paletted containers (no 4096-cell expansion); a cell is read on demand. A column's height comes from its section count: 24 starts at y −64, 16 at y 0.
+- **Chunks** are decoded on the net reader thread into `Column`s (and, since issue 08a, encoded back by `Column::encode` for the server model's generated worlds, [[server-model]]) whose sections stay packed paletted containers (no 4096-cell expansion); a cell is read on demand. A column's height comes from its section count: 24 starts at y −64, 16 at y 0.
 - **Block changes** (`block_update`, `section_blocks_update`) go to the overlay; a column resent or forgotten drops its overlay. `state_at` reads the overlay first, then the column; `block_at` maps the state through `data::block_of_state`.
 - **A dimension change** (respawn into another level) clears every column and the overlay: chunks belong to one dimension.
 

@@ -33,6 +33,7 @@ fn opts() -> Result<bot::Opts, String> {
         lane: 0,
         start_name: "spawn".to_owned(),
         case_path: String::new(),
+        model: None,
     };
     let mut seconds = 600u64;
     let mut it = std::env::args().skip(1);

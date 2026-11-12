@@ -5,8 +5,8 @@ type: explanation
 tags: [wire, codec, packets, specs]
 aliases: [packet specs, spec table, interpreter, decode, encode, conditional tail, unknown packet]
 status: verified
-lastUpdated: 2026-11-11
-verifiedAgainst: clojurecraft@be85a92 ruststeve@c87ac55
+lastUpdated: 2026-11-12
+verifiedAgainst: clojurecraft@be85a92 ruststeve@ff7281f
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#reports). Decoding reads only the listed fields and ignores the tail of the frame: that is"
   - "clojurecraft:src/clojurecraft/packet.clj#how big packets (chunks) skip the parts we do not model. Unknown ids decode to"
@@ -36,7 +36,7 @@ clojurecraft implements protocol 775 as a table of packet specs and one interpre
 - About ninety packet specs (both directions, all states) out of the several hundred the tables name; everything else is `:unknown` and counted.
 
 ## For ruststeve
-The Clojure table is data interpreted at runtime. In Rust the same idea becomes closed types parsed once at the boundary: one decoder function per modelled packet into a typed `S2c` enum variant, an `Unknown { id, len }` variant for the rest, and one `C2s` enum written by one encoder. The decoder still reads only what it models and ignores the tail; each variant then becomes `Observation`s ([[wire-boundary-parsing]]). Exhaustive matches replace the runtime "no such spec" error.
+The Clojure table is data interpreted at runtime. In Rust the same idea becomes closed types parsed once at the boundary: one decoder function per modelled packet into a typed `S2c` enum variant, an `Unknown { id, len }` variant for the rest, and one `C2s` enum written by one encoder. Since issue 08 `S2c` has an encoder too, for the packets the server model sends: the inverse of the decoder, round-trip tested ([[server-model]]). The decoder still reads only what it models and ignores the tail; each variant then becomes `Observation`s ([[wire-boundary-parsing]]). Exhaustive matches replace the runtime "no such spec" error.
 
 ## Gotchas
 - Never give a field the bare name `name` next to the packet's identity; clojurecraft once overwrote its packet name with the login `hello`'s player name and now spells the field `:username`.

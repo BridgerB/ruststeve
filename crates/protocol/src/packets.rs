@@ -627,3 +627,159 @@ fn finite(v: f64) -> Result<f64, ParseError> {
         Err(ParseError::NonFinite)
     }
 }
+
+impl S2c {
+    /// The packet id and its fields, for the server model (brain/ruststeve/design/server-model.md):
+    /// the inverse of `decode` for every packet the model sends, so the bot reads the model's
+    /// bytes exactly as a server's. Field layouts are the game's own `write` methods, as
+    /// clojurecraft's spec has them; fields the decoder skips are written with vanilla's
+    /// defaults. A packet the model does not send yet is `NotModelled`, never invented.
+    pub fn encode(&self) -> Result<(u32, Vec<u8>), EncodeError> {
+        let mut w = Writer::new();
+        let id = match self {
+            S2c::LoginFinished { uuid, username } => {
+                w.uuid(uuid);
+                w.string(username)?;
+                w.varint(0); // no profile properties
+                LoginIn::LoginFinished.id()
+            }
+            S2c::SelectKnownPacks => {
+                w.varint(0);
+                ConfIn::SelectKnownPacks.id()
+            }
+            S2c::ConfigKeepAlive { id } => {
+                w.i64(*id);
+                ConfIn::KeepAlive.id()
+            }
+            S2c::FinishConfiguration => ConfIn::FinishConfiguration.id(),
+            S2c::Login {
+                entity_id,
+                view_distance,
+                simulation_distance,
+                dimension_type,
+                dimension,
+                game_type,
+            } => {
+                w.i32(*entity_id);
+                w.bool(false); // hardcore
+                w.varint(1);
+                w.string(dimension)?; // the levels the server has; this one is enough
+                w.varint(20); // max players
+                w.varint(*view_distance);
+                w.varint(*simulation_distance);
+                w.bool(false); // reduced debug info
+                w.bool(true); // show the death screen
+                w.bool(false); // limited crafting
+                // CommonPlayerSpawnInfo
+                w.varint(*dimension_type);
+                w.string(dimension)?;
+                w.i64(0); // hashed seed
+                w.u8(*game_type);
+                w.i8(-1); // no previous game type
+                w.bool(false); // debug world
+                w.bool(false); // flat world
+                w.bool(false); // no last death location
+                w.varint(0); // portal cooldown
+                w.varint(63); // sea level
+                w.bool(false); // enforces secure chat
+                PlayIn::Login.id()
+            }
+            S2c::KeepAlive { id } => {
+                w.i64(*id);
+                PlayIn::KeepAlive.id()
+            }
+            S2c::PlayerPosition {
+                teleport_id,
+                x,
+                y,
+                z,
+                yaw,
+                pitch,
+                flags,
+            } => {
+                w.varint(*teleport_id);
+                w.f64(*x);
+                w.f64(*y);
+                w.f64(*z);
+                w.f64(0.0);
+                w.f64(0.0);
+                w.f64(0.0); // velocity
+                w.f32(*yaw);
+                w.f32(*pitch);
+                w.i32(*flags as i32);
+                PlayIn::PlayerPosition.id()
+            }
+            S2c::SetTime => {
+                // The bot counts the packet, not its fields; game time and day time, ticking.
+                w.i64(0);
+                w.i64(0);
+                w.bool(true);
+                PlayIn::SetTime.id()
+            }
+            S2c::ForgetLevelChunk { x, z } => {
+                // ChunkPos.toLong: x in the low 32 bits, z in the high.
+                w.i64((i64::from(*z) << 32) | i64::from(*x as u32));
+                PlayIn::ForgetLevelChunk.id()
+            }
+            S2c::BlockUpdate { pos, state } => {
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.varint(*state as i32);
+                PlayIn::BlockUpdate.id()
+            }
+            S2c::SetHealth {
+                health,
+                food,
+                saturation,
+            } => {
+                w.f32(*health);
+                w.varint(*food);
+                w.f32(*saturation);
+                PlayIn::SetHealth.id()
+            }
+            S2c::ChunkBatchFinished { size } => {
+                w.varint(*size);
+                PlayIn::ChunkBatchFinished.id()
+            }
+            S2c::LevelChunkWithLight { x, z, column } => {
+                w.bytes(&column.packet_body(*x, *z)?);
+                PlayIn::LevelChunkWithLight.id()
+            }
+            S2c::LoginCompression { .. } => {
+                return Err(EncodeError::NotModelled("login_compression"));
+            }
+            S2c::LoginDisconnect { .. } => {
+                return Err(EncodeError::NotModelled("login_disconnect"));
+            }
+            S2c::ConfigPing { .. } => return Err(EncodeError::NotModelled("config ping")),
+            S2c::ConfigDisconnect { .. } => {
+                return Err(EncodeError::NotModelled("config disconnect"));
+            }
+            S2c::Ping { .. } => return Err(EncodeError::NotModelled("ping")),
+            S2c::SectionBlocksUpdate { .. } => {
+                return Err(EncodeError::NotModelled("section_blocks_update"));
+            }
+            S2c::Respawn { .. } => return Err(EncodeError::NotModelled("respawn")),
+            S2c::AddEntity { .. }
+            | S2c::RemoveEntities { .. }
+            | S2c::MoveEntity { .. }
+            | S2c::MoveEntityRot { .. }
+            | S2c::EntityPositionSync { .. }
+            | S2c::TeleportEntity { .. }
+            | S2c::SetEntityData { .. } => return Err(EncodeError::NotModelled("entities")),
+            S2c::ContainerSetContent { .. }
+            | S2c::ContainerSetSlot { .. }
+            | S2c::SetPlayerInventory { .. } => return Err(EncodeError::NotModelled("windows")),
+            S2c::PlayerCombatKill { .. } => {
+                return Err(EncodeError::NotModelled("player_combat_kill"));
+            }
+            S2c::DamageEvent { .. } => return Err(EncodeError::NotModelled("damage_event")),
+            S2c::StartConfiguration => return Err(EncodeError::NotModelled("start_configuration")),
+            S2c::Disconnect { reason } => {
+                w.bytes(reason);
+                PlayIn::Disconnect.id()
+            }
+            S2c::Unknown { .. } => return Err(EncodeError::NotModelled("an unknown packet")),
+        };
+        Ok((id, w.buf))
+    }
+}

@@ -162,3 +162,101 @@ impl Column {
         self.section_at(y)?.blocks.get(block_index(x, y, z))
     }
 }
+
+impl Paletted {
+    /// The container as the wire carries it, the inverse of `read`.
+    fn write(&self, w: &mut crate::bytes::Writer) -> Result<(), crate::EncodeError> {
+        match self {
+            Self::Single(v) => {
+                w.u8(0);
+                w.varint(*v as i32);
+            }
+            Self::Indirect {
+                bits,
+                palette,
+                longs,
+            } => {
+                w.u8(*bits);
+                w.varint(i32::try_from(palette.len()).map_err(|_| crate::EncodeError::TooLong)?);
+                for v in palette {
+                    w.varint(*v as i32);
+                }
+                for l in longs {
+                    w.i64(*l as i64);
+                }
+            }
+            Self::Direct { bits, longs } => {
+                w.u8(*bits);
+                for l in longs {
+                    w.i64(*l as i64);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A container of `entries` cells from their values: a single value when they agree, else
+    /// a palette of the smallest width vanilla allows (4 bits at least for blocks), packed as
+    /// the decoder reads it. Direct ids above `max_bits` are not produced: a model world's
+    /// palettes stay small.
+    pub fn pack(values: &[u32], min_bits: u8) -> Self {
+        let mut palette: Vec<u32> = Vec::new();
+        for v in values {
+            if !palette.contains(v) {
+                palette.push(*v);
+            }
+        }
+        if palette.len() <= 1 {
+            return Self::Single(palette.first().copied().unwrap_or(0));
+        }
+        let need = (usize::BITS - (palette.len() - 1).leading_zeros()) as u8;
+        let bits = need.max(min_bits);
+        let per_long = 64 / usize::from(bits);
+        let mut longs = vec![0u64; values.len().div_ceil(per_long)];
+        for (i, v) in values.iter().enumerate() {
+            let idx = palette.iter().position(|p| p == v).unwrap_or(0) as u64;
+            if let Some(l) = longs.get_mut(i / per_long) {
+                *l |= idx << (usize::from(bits) * (i % per_long));
+            }
+        }
+        Self::Indirect {
+            bits,
+            palette,
+            longs,
+        }
+    }
+}
+
+impl Column {
+    /// The chunk-data bytes, the inverse of `decode`.
+    pub fn encode(&self) -> Result<Vec<u8>, crate::EncodeError> {
+        let mut w = crate::bytes::Writer::new();
+        for s in &self.sections {
+            w.i16(s.block_count);
+            w.i16(s.fluid_count);
+            s.blocks.write(&mut w)?;
+            s.biomes.write(&mut w)?;
+        }
+        Ok(w.buf)
+    }
+
+    /// The whole `level_chunk_with_light` body for this column at (x, z): no heightmaps, the
+    /// chunk data, no block entities, and empty light (every bitset empty). What a model world
+    /// sends; a captured world sends the server's own bytes instead.
+    pub fn packet_body(&self, x: i32, z: i32) -> Result<Vec<u8>, crate::EncodeError> {
+        let data = self.encode()?;
+        let mut w = crate::bytes::Writer::new();
+        w.i32(x);
+        w.i32(z);
+        w.varint(0); // heightmaps
+        w.varint(i32::try_from(data.len()).map_err(|_| crate::EncodeError::TooLong)?);
+        w.bytes(&data);
+        w.varint(0); // block entities
+        for _ in 0..4 {
+            w.varint(0); // sky, block, empty sky, empty block masks
+        }
+        w.varint(0); // sky light arrays
+        w.varint(0); // block light arrays
+        Ok(w.buf)
+    }
+}

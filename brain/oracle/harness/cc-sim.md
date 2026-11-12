@@ -5,7 +5,7 @@ type: reference
 tags: [oracle, sim, testing, closed-loop]
 aliases: [sim.clj, server model, simrace, captured worlds, snapshots, judge, fault knobs, violations]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:src/clojurecraft/sim.clj#\"A pure model of the vanilla server: enough of it to take a bot from handshake to a held log"
@@ -17,6 +17,7 @@ related:
   - "[[oracle/harness/_moc|Harness]]"
   - "[[replay-limits]]"
   - "[[body-boundary]]"
+  - "[[server-model]]"
   - "[[cc-record-replay]]"
 ---
 
@@ -38,7 +39,7 @@ clojurecraft closes the loop without a server: a second pure reducer models the 
 - **Snapshots and the judge**: a sim run keeps moments; on failure the moment before the failing choice is kept. A fix is checked by playing that moment on the base code (the failure must recur) and on the fix (it must not). A real race failure becomes the same kind of snapshot, kept only when it recurs against the model; otherwise it is a model gap, never evidence.
 
 ## For ruststeve
-The model is a `Body` implementation ([[body-boundary]]). Porting it (or running clojurecraft's model as a sidecar test oracle) is the cheapest way to get closed-loop tests before ruststeve plays a real server. Decide early; the model is about 4,000 lines of Clojure.
+The model is a body implementation ([[body-boundary]]). ruststeve ports it in Rust and grows it per issue (Bridger, 2026-11-12) rather than all 4,000 lines at once: issue 08 models joining, chunks, time and movement, with a parity table against real ([[server-model]]).
 
 ## See also
 - [[replay-limits]] - why this tool matters.
