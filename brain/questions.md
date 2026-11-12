@@ -3,7 +3,7 @@ title: Question set
 type: moc
 tags: [brain, questions]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 ---
 
 # Question set
@@ -34,7 +34,8 @@ Real questions, the traversal that answers each, and how many notes past the ind
 | Why was ruststeve v1 reset? | [[history/_moc]] → [[hist-why-v1-failed]] | 1 |
 | Where is each bot stuck right now? | [[hist-walls]] → [[cc-roadmap-stages]] | 2 |
 | May the bot read lava buried in rock? | [[hist-no-xray]] | 1 |
-| Where does a packet id come from? | [[wire-packet-ids]] → [[cc-datagen]] | 2 |
+| Where does a packet id come from? | [[wire-packet-ids]] → [[datagen]] | 2 |
+| How do I regenerate the game tables? | [[ruststeve/design/_moc]] → [[datagen]] | 1 |
 | What happens when the bot gets stuck in a real run? | [[incident-to-regression]] → [[blaze-debugging-method]] | 2 |
 | What do we build first, and when is it done? | [[ruststeve/roadmap/_moc]] → [[first-twenty-issues]] | 1 |
 | Where does code run? How many runners? | [[runners-not-the-mac]] | 1 |

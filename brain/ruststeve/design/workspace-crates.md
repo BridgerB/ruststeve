@@ -5,8 +5,8 @@ type: reference
 tags: [crates, layout, architecture]
 aliases: [crate layout, protocol crate, world crate, plan crate, sim crate, net crate, bins, bot-core]
 status: verified
-lastUpdated: 2026-11-11
-verifiedAgainst: clojurecraft@be85a92 ruststeve@cd6e03e
+lastUpdated: 2026-11-12
+verifiedAgainst: clojurecraft@be85a92 ruststeve@a02c9a0
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#protocol/    packet specs as data, decode/encode, state transitions; no I/O"
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Crate boundaries: core crates (protocol, world, plan, sim) have no I/O dependencies at all. Only net, rcon, record and the binaries touch sockets and files."
@@ -27,7 +27,9 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 
 | Crate | Holds | I/O? |
 |---|---|---|
-| `data` | generated tables (packets, blocks, items, recipes, hardness, damage types) and loaders | no |
+| `data` | generated tables (packets, blocks and states, items, entities, registries, tags, recipes, loot, dimensions, harvest; [[datagen]]) | no |
+| `datagen` | generates `data` from the 26.1.2 server jar and reports (runners only) | network, files, java |
+| `verify-stream` | logs in to a real server and fails on a packet id `data` lacks (runners only) | sockets |
 | `protocol` | packet specs, decode/encode, state transitions ([[wire/_moc|Wire]]) | no |
 | `world` | `World`, `Event`, `Effect`, the protocol reducer, chunk sections, entities, inventory | no |
 | `physics` | vanilla movement as a pure function, collision, fluids | no |
@@ -41,7 +43,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `mcp` (`ruststeve-mcp`) | the MCP server of agent tools, built on `rmcp` ([[agent-tools-over-mcp]]) | `gh`, files |
 | `xtask` | repository automation run in CI (`deps-boundary`) | runs `cargo` |
 
-Binaries: `bot` (one bot against a server), `race` (many bots, one server, case files), `simrace` (many bots against the model, in parallel), `replay` (fold a recording, verify effects), `why` (fold to time t and explain the planner's choice), `datagen` (the vanilla jar and reports into `data/`). Data files: `data/` (goals, thresholds, starts, problem statements). Workflows rebuilt lean on the runners ([[runners-not-the-mac]]).
+Binaries: `bot` (one bot against a server), `race` (many bots, one server, case files), `simrace` (many bots against the model, in parallel), `replay` (fold a recording, verify effects), `why` (fold to time t and explain the planner's choice), `datagen` (the vanilla jar and reports into `crates/data`, now a crate of its own). Data files: `data/` (goals, thresholds, starts, problem statements). Workflows rebuilt lean on the runners ([[runners-not-the-mac]]).
 
 The handoff's `store` crate (a Postgres writer) becomes `ingest`: a binary that loads batch and case files into an embedded SurrealDB for insight, kept out of the core's build ([[data-out]]).
 
