@@ -6,7 +6,7 @@ tags: [wire, windows, crafting, clicks]
 aliases: [container-click, state id, changed slots, predict nothing, set-cursor-item, container-set-content]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@3042214
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@8df1710
 sourceRefs:
   - "ruststeve:crates/protocol/src/packets.rs#w.varint(0); // no changed slots: nothing predicted"
   - "ruststeve:crates/world/src/lib.rs#fn window_moved(&mut self, state_id: i32) {"
@@ -41,6 +41,7 @@ A click is `container-click`: window id, **state id**, slot (i16), button (i8), 
 - clojurecraft sends `:cursor nil` while v1 still sent its predicted cursor. Because the claim is empty, clojurecraft's `click` forgets its cursor as it sends; after a lost click, `resync-click` sends a state id the server's window never has, which makes the server answer with the whole window and the real cursor.
 - A click into a window the server already closed is silently ignored ([[hist-v1-load-bearing-fixes]]).
 - **The cursor is forgotten as the click goes** (ruststeve, issue 10b): the server takes the click's claimed cursor (empty) as the client's and sends `set_cursor_item` only when the real cursor differs, so an emptied cursor is never announced. The world sets its cursor to empty on every click; a non-empty one comes back in the reply. Found by the parity table: crafts ended with a phantom ingredient in the bot's cursor.
+- **The resync** (ruststeve's `Act::Resync`, issue 10c): a click on slot -1 (which does nothing) with state id -1 (which the server never has) draws the whole window, for after a missed click ([[crafting-window]]).
 - **A click that changes nothing draws no reply** (ruststeve, live on a local 26.1.2 server, 2026-11-12): a pick-up on an empty slot with an empty cursor left the state id at 1 and no window packet came. So a pending click is cleared only by the state id moving, never assumed answered; the craft task sends no no-op clicks and treats 3 s without a move as a missed expectation ([[cc-window-clicks]]).
 
 ## See also

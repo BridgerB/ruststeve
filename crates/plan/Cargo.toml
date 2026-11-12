@@ -14,6 +14,7 @@ serde = { version = "1", features = ["derive"] }
 world = { path = "../world" }
 
 [dev-dependencies]
+toml = "1"
 proptest = "1"
 protocol = { path = "../protocol" }
 sim = { path = "../sim" }

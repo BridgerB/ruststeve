@@ -1,12 +1,12 @@
 ---
 title: The planner
-description: What the bot decides and why - the plan crate's aim, tasks and choices (a held target from memory's column index, explore on a held heading), failure memory, the churn invariant, giving up, the decisions recorded as notes, and how the shell drives it.
+description: What the bot decides and why - the plan crate's aims (a log, or a goal row such as the kit), tasks (walks, digs, crafts) and choices (a held target from memory's column index, explore on a held heading), failure memory, the churn invariant, giving up, the decisions recorded as notes, and how the shell drives it.
 type: reference
 tags: [plan, planner, tasks, decisions, churn]
-aliases: [Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
+aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@b4d3e95 clojurecraft@be85a92
+verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -15,6 +15,8 @@ sourceRefs:
   - "ruststeve:crates/bot/src/landings.rs#pub fn walkable_log(w: &world::World, start: [f64; 3], min: f64) -> bool {"
   - "ruststeve:config/landings-grid.toml#on the race seed, 192 blocks apart."
   - "clojurecraft:src/clojurecraft/plan.clj#(def max-unwalkable 12)"
+  - "ruststeve:crates/plan/src/lib.rs#fn decide(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
+  - "ruststeve:crates/plan/src/lib.rs#pub fn take_acts(&mut self) -> Vec<world::Act> {"
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[phases-and-task-stack]]"
@@ -27,8 +29,9 @@ related:
 Issue 09a begins the `plan` crate (core): `Plan::step(&World) -> Controls`, the world read, never changed.
 
 ## How it works
-- **One aim so far**: `ReachLog { min_distance }` (`--goal log` or `log:<min>`), the checkpoint start's measure for issue 09.
-- **Tasks** (`Task`, an enum): `Idle`, `ToLog(Walk)`, `Explore(Walk)`. A target is held until the walk ends, never re-chosen per tick.
+- **Aims**: `ReachLog { min_distance }` (`--goal log` or `log:<min>`), issue 09's measure; `Table` (`--goal table`, issue 10), the goal table's `kit` row, decided each idle tick by the needs planner ([[goal-table-and-needs]]).
+- **Tasks** (`Task`, an enum): `Idle`, `ToLog(Walk)`, `Explore(Walk)`, and since issue 10 `Dig` ([[digging]]) and `Craft` ([[crafting-window]]). Under `Table` a walk to a log ends beside it and becomes a dig.
+- **Acts**: a dig or a craft makes `world::Act`s; the shell takes them with `take_acts` after each step and sends them as events (recorded, replayed), in `bot::run`, lockstep and the landing measure. A target is held until the walk ends, never re-chosen per tick.
 - **Choosing**: the nearest log *sighting* (memory: seen with an exposed face, so no X-ray) at least `min_distance` from where the planner began, found by a ring query over memory's chunk-column index, never a scan; else explore 48 blocks out on a held heading, turned a quarter after each failure.
 - **The churn invariant** (clojurecraft's `churn_guard`): every candidate is routed before it is chosen, so a chosen task always has a way and is not over after one tick; at most 2 candidates a tick. A test checks it over generated worlds.
 - **Failure memory**: a failed target is refused 600 ticks, for good after 3 failures; a `NoPath` refuses every target within 6 blocks (one unreachable tree is not tried log by log). After a failure the planner waits 20 ticks.
@@ -49,7 +52,7 @@ Issue 09a begins the `plan` crate (core): `Plan::step(&World) -> Controls`, the 
 - Getting there, each cause named from traces: starts on a tree canopy (14 of the first 22 misses), starts with leaves at head height, targets chosen on a partial route down a cave or up a cliff, and no explore once every log was refused. First full measure 176/200; then 178, 183, 187, 200 as each was fixed.
 
 ## Limits
-- One aim, no phases yet: digging the log (issue 10) and everything after add rows.
+- Two aims, no phases yet: stone and tools (issue 11) and everything after add rows.
 
 ## See also
 - [[phases-and-task-stack]] - the design this begins.

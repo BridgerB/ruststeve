@@ -6,7 +6,7 @@ tags: [game, digging, timing]
 aliases: [delayed destroy, hasDelayedDestroy, break time, hardness, early FINISH, finish margin, dig penalties, player-action]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve@3042214
+verifiedAgainst: clojurecraft@be85a92 ruststeve@8df1710
 sourceRefs:
   - "ruststeve:crates/sim/src/survival.rs#const FINISH_ACCEPT: f32 = 0.7;"
   - "ruststeve:crates/sim/src/survival.rs#pub(crate) fn tick_digging(&mut self) -> Result<Vec<Wire>, EncodeError> {"
