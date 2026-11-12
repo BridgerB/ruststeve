@@ -769,10 +769,33 @@ impl S2c {
             S2c::ContainerSetContent { .. }
             | S2c::ContainerSetSlot { .. }
             | S2c::SetPlayerInventory { .. } => return Err(EncodeError::NotModelled("windows")),
-            S2c::PlayerCombatKill { .. } => {
-                return Err(EncodeError::NotModelled("player_combat_kill"));
+            S2c::PlayerCombatKill { player_id, death } => {
+                // The message as the server builds it; a death without a key goes as its text.
+                let component = match &death.key {
+                    Some(key) => crate::nbt::death_component(
+                        key,
+                        death.victim.as_deref().unwrap_or_default(),
+                        death.by.as_deref(),
+                    ),
+                    None => crate::nbt::Nbt::String(death.text.clone()),
+                };
+                w.varint(*player_id);
+                w.bytes(&crate::nbt::write_root(&component));
+                PlayIn::PlayerCombatKill.id()
             }
-            S2c::DamageEvent { .. } => return Err(EncodeError::NotModelled("damage_event")),
+            S2c::DamageEvent {
+                entity_id,
+                source_type,
+                cause,
+                direct,
+            } => {
+                w.varint(*entity_id);
+                w.varint(*source_type);
+                w.varint(cause.map_or(0, |c| c + 1));
+                w.varint(direct.map_or(0, |d| d + 1));
+                w.bool(false); // no source position
+                PlayIn::DamageEvent.id()
+            }
             S2c::StartConfiguration => return Err(EncodeError::NotModelled("start_configuration")),
             S2c::Disconnect { reason } => {
                 w.bytes(reason);

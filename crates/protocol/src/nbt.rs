@@ -225,6 +225,98 @@ pub fn death(c: &Nbt) -> Death {
     }
 }
 
+/// The anonymous root tag as network NBT: the inverse of `read_root` (the server model's text).
+pub fn write_root(v: &Nbt) -> Vec<u8> {
+    let mut out = vec![tag_of(v)];
+    write_payload(&mut out, v);
+    out
+}
+
+fn tag_of(v: &Nbt) -> u8 {
+    match v {
+        Nbt::Byte(_) => 1,
+        Nbt::Short(_) => 2,
+        Nbt::Int(_) => 3,
+        Nbt::Long(_) => 4,
+        Nbt::Float(_) => 5,
+        Nbt::Double(_) => 6,
+        Nbt::ByteArray(_) => 7,
+        Nbt::String(_) => 8,
+        Nbt::List(_) => 9,
+        Nbt::Compound(_) => 10,
+        Nbt::IntArray(_) => 11,
+        Nbt::LongArray(_) => 12,
+    }
+}
+
+fn put_string(out: &mut Vec<u8>, s: &str) {
+    let n = u16::try_from(s.len()).unwrap_or(u16::MAX);
+    out.extend_from_slice(&n.to_be_bytes());
+    out.extend_from_slice(s.as_bytes().get(..usize::from(n)).unwrap_or_default());
+}
+
+fn put_len(out: &mut Vec<u8>, n: usize) {
+    out.extend_from_slice(&i32::try_from(n).unwrap_or(i32::MAX).to_be_bytes());
+}
+
+fn write_payload(out: &mut Vec<u8>, v: &Nbt) {
+    match v {
+        Nbt::Byte(b) => out.extend_from_slice(&b.to_be_bytes()),
+        Nbt::Short(s) => out.extend_from_slice(&s.to_be_bytes()),
+        Nbt::Int(i) => out.extend_from_slice(&i.to_be_bytes()),
+        Nbt::Long(l) => out.extend_from_slice(&l.to_be_bytes()),
+        Nbt::Float(f) => out.extend_from_slice(&f.to_be_bytes()),
+        Nbt::Double(d) => out.extend_from_slice(&d.to_be_bytes()),
+        Nbt::ByteArray(a) => {
+            put_len(out, a.len());
+            out.extend(a.iter().flat_map(|b| b.to_be_bytes()));
+        }
+        Nbt::String(s) => put_string(out, s),
+        Nbt::List(items) => {
+            out.push(items.first().map_or(0, tag_of));
+            put_len(out, items.len());
+            for i in items {
+                write_payload(out, i);
+            }
+        }
+        Nbt::Compound(entries) => {
+            for (k, v) in entries {
+                out.push(tag_of(v));
+                put_string(out, k);
+                write_payload(out, v);
+            }
+            out.push(0);
+        }
+        Nbt::IntArray(a) => {
+            put_len(out, a.len());
+            out.extend(a.iter().flat_map(|i| i.to_be_bytes()));
+        }
+        Nbt::LongArray(a) => {
+            put_len(out, a.len());
+            out.extend(a.iter().flat_map(|l| l.to_be_bytes()));
+        }
+    }
+}
+
+/// The component a server sends for a death: `key` with the victim's name and, when a mob did
+/// it, the mob's entity name, as the `with` arguments (clojurecraft's `text/death-component`).
+pub fn death_component(key: &str, victim: &str, by: Option<&str>) -> Nbt {
+    let mut with = vec![Nbt::Compound(vec![(
+        "text".to_owned(),
+        Nbt::String(victim.to_owned()),
+    )])];
+    if let Some(by) = by {
+        with.push(Nbt::Compound(vec![(
+            "translate".to_owned(),
+            Nbt::String(format!("entity.minecraft.{by}")),
+        )]));
+    }
+    Nbt::Compound(vec![
+        ("translate".to_owned(), Nbt::String(key.to_owned())),
+        ("with".to_owned(), Nbt::List(with)),
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

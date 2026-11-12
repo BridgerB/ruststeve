@@ -114,6 +114,45 @@ fn modelled() -> impl Strategy<Value = (State, S2c)> {
             }
         )),
         (0i32..1000).prop_map(|size| (State::Play, S2c::ChunkBatchFinished { size })),
+        (
+            any::<i32>(),
+            0i32..50,
+            proptest::option::of(0i32..100_000),
+            proptest::option::of(0i32..100_000)
+        )
+            .prop_map(|(entity_id, source_type, cause, direct)| (
+                State::Play,
+                S2c::DamageEvent {
+                    entity_id,
+                    source_type,
+                    cause,
+                    direct
+                }
+            )),
+        (
+            any::<i32>(),
+            "death\\.attack\\.[a-z]{1,8}",
+            "[a-z0-9_-]{1,16}",
+            proptest::option::of("[a-z_]{1,12}")
+        )
+            .prop_map(|(player_id, key, victim, by)| {
+                let text = match &by {
+                    Some(b) => format!("{key} {victim} entity.minecraft.{b}"),
+                    None => format!("{key} {victim}"),
+                };
+                (
+                    State::Play,
+                    S2c::PlayerCombatKill {
+                        player_id,
+                        death: protocol::nbt::Death {
+                            text,
+                            key: Some(key),
+                            victim: Some(victim),
+                            by,
+                        },
+                    },
+                )
+            }),
     ]
 }
 

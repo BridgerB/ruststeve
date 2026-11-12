@@ -107,11 +107,27 @@ jobs:
           save-if: false
       - run: cargo run -q --locked -p xtask -- deps-boundary
 
+  # Done-condition 2 of issue 08: the bot walks 1,000 generated worlds against the server model
+  # (crates/bot/tests/worlds.rs), in release: a debug build is too slow for 1,000.
+  worlds:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: worlds
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test --release --locked -p bot --test worlds -- --nocapture
+        env:
+          RUSTSTEVE_WORLDS: "1000"
+
   # One stable check name for branch protection.
   ci-ok:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
-    needs: [fmt, clippy, test, brain, boundary]
+    needs: [fmt, clippy, test, brain, boundary, worlds]
     if: always()
     steps:
       - run: |
