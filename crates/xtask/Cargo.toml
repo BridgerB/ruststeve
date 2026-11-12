@@ -7,3 +7,4 @@ publish = false
 description = "Repository automation run in CI (cargo run -p xtask -- <task>)"
 
 [dependencies]
+results = { path = "../results" }

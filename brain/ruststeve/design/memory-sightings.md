@@ -6,7 +6,7 @@ tags: [memory, sightings, no-xray, facts, world]
 aliases: [Memory, Sighting, Seen, watched kinds, exposed face, memory crate, facts with time]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@219c53c clojurecraft@be85a92
+verifiedAgainst: ruststeve@e25875e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#pub fn check("
   - "ruststeve:crates/memory/src/lib.rs#pub fn record(&mut self, seen: Seen, at_tick: u64) -> bool {"
@@ -26,7 +26,7 @@ The `memory` crate (core, no I/O) is clojurecraft's sighting store in Rust ([[cc
 
 ## How it works
 - A `Sighting { dimension, pos, state, at_tick }` is appended only when the state differs from the latest sighting at that position; a dug log becomes a newer fact of air, and the history stays.
-- Indexes: the latest sighting by position, and positions by dimension and chunk column. `refold_latest` rebuilds the index from the log; the property test holds them equal.
+- Indexes: the latest sighting by position, and positions by dimension and chunk column. Since issue 07a also every block kind ever sighted (`has_seen`), so the stage ladder asks "seen nether bricks?" without a scan. `refold_latest` rebuilds the index from the log; the property test holds them equal.
 - **Only watched kinds start a record**: the `logs` block tag, crafting table, furnace, nether bricks, spawner, obsidian. A position on record is then followed through every change, whatever it becomes.
 - **No X-ray by construction**: a `Sighting` needs a `Seen`, and only `Seen::check` makes one, when a neighbour is loaded and its collision (generated from the game, [[datagen]]) is not a full cube. An unloaded neighbour does not count.
 - **What the world looks at** (`World::observe_column`, `observe_around`): when a column loads, its sections whose palette may hold a watched kind, the positions already on record in it, and the facing edge cells of loaded neighbouring columns; after a block change, the cell and its six neighbours.

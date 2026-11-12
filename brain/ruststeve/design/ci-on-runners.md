@@ -6,7 +6,7 @@ tags: [ci, runners, github-actions, probe, caching]
 aliases: [ci.yml, probe.yml, how to run code, rust-cache, nextest, workflow_dispatch, deps-boundary, xtask]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@6907139
+verifiedAgainst: ruststeve@e25875e
 sourceRefs:
   - "ruststeve:.github/workflows/ci.yml## Incremental compilation only adds overhead and cache churn on a fresh runner."
   - "ruststeve:.github/workflows/ci.yml## Only main writes the cache; branches and PRs restore it."
@@ -26,7 +26,7 @@ related:
 The Mac never runs code ([[runners-not-the-mac]]). Two workflows are how it runs: `ci` on every push and PR, and `probe` for any one-off question.
 
 ## Key files
-- `.github/workflows/ci.yml`, `.github/workflows/probe.yml`
+- `.github/workflows/ci.yml`, `.github/workflows/probe.yml`; the race is `race.yml` ([[race-and-results]])
 - `rust-toolchain.toml`: the one pinned toolchain (1.96.0, rustfmt, clippy); `rustup show` on the runner installs it, so no toolchain action is needed.
 - `crates/xtask`: repository automation: `deps-boundary` (CI), `commit-msg` (the git hook), `server` (a local vanilla server, [[connection]]).
 

@@ -3,7 +3,7 @@
 //! ```text
 //! cargo run -q -p xtask -- deps-boundary       the core crates depend on nothing that does I/O
 //! cargo run -q -p xtask -- commit-msg <file>   a commit message keeps the repository's rules
-//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar] [--difficulty peaceful]
+//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar] [--difficulty peaceful] [--config config/race.toml] [--rcon-port 25575]
 //!                                            a local vanilla 26.1.2 server (offline, simulation distance 3)
 //! ```
 //!
@@ -20,7 +20,7 @@ const CORE_CRATES: [&str; 7] = [
 
 /// Crates a core crate must never depend on, directly or through another crate: async runtimes and
 /// I/O libraries, and our own crates that touch sockets, files or the insight store.
-const FORBIDDEN: [&str; 10] = [
+const FORBIDDEN: [&str; 14] = [
     "tokio",
     "mio",
     "reqwest",
@@ -29,6 +29,10 @@ const FORBIDDEN: [&str; 10] = [
     "rcon",
     "record",
     "ingest",
+    "results",
+    "stream",
+    "bot",
+    "tungstenite",
     "async-std",
     "rmcp",
 ];
@@ -173,16 +177,27 @@ fn commit_msg(file: &Path) -> ExitCode {
     }
 }
 
-/// The server settings every bot's server uses: offline mode (no Mojang account), and the race
-/// servers' simulation distance 3, which freezes mobs past about 48 blocks
-/// (brain/game/mc-mob-facts.md). The seed is clojurecraft's, so its worlds stay comparable.
-const SERVER_PROPERTIES: &str = "online-mode=false
-simulation-distance=3
-view-distance=8
-level-seed=typecraft
-spawn-protection=0
-enable-rcon=false
-";
+/// The properties every bot's server uses, from the race's shared config
+/// (`config/race.toml`: simulation distance, view distance, seed, difficulty): offline mode
+/// (no Mojang account), no spawn protection. RCON only when a password is in
+/// `RUSTSTEVE_RCON_PASSWORD` (the race's own server; generated per run, never committed).
+fn server_properties(
+    c: &results::config::ServerConfig,
+    port: &str,
+    difficulty: &str,
+    rcon: Option<(&str, &str)>,
+) -> String {
+    let rcon = match rcon {
+        Some((rcon_port, password)) => {
+            format!("enable-rcon=true\nrcon.port={rcon_port}\nrcon.password={password}\n")
+        }
+        None => "enable-rcon=false\n".to_owned(),
+    };
+    format!(
+        "online-mode=false\nsimulation-distance={}\nview-distance={}\nlevel-seed={}\nspawn-protection=0\nserver-port={port}\ndifficulty={difficulty}\n{rcon}",
+        c.simulation_distance, c.view_distance, c.seed
+    )
+}
 
 /// Run a vanilla 26.1.2 server in the foreground: copy datagen's sha1-checked jar into `dir`,
 /// accept the EULA, write the properties, `java -jar server.jar nogui` (Java 25: `nix develop`).
@@ -191,7 +206,9 @@ fn server(args: &[String]) -> ExitCode {
     let mut dir = "target/server".to_owned();
     let mut port = "25565".to_owned();
     let mut jar = "target/datagen/server.jar".to_owned();
-    let mut difficulty = "normal".to_owned();
+    let mut difficulty = None;
+    let mut config = "config/race.toml".to_owned();
+    let mut rcon_port = "25575".to_owned();
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         let Some(value) = it.next() else {
@@ -202,22 +219,38 @@ fn server(args: &[String]) -> ExitCode {
             "--dir" => dir.clone_from(value),
             "--port" => port.clone_from(value),
             "--jar" => jar.clone_from(value),
-            "--difficulty" => difficulty.clone_from(value),
+            "--difficulty" => difficulty = Some(value.clone()),
+            "--config" => config.clone_from(value),
+            "--rcon-port" => rcon_port.clone_from(value),
             other => {
                 eprintln!("unknown flag {other}");
                 return ExitCode::FAILURE;
             }
         }
     }
+    let race = match results::config::RaceConfig::read(&config) {
+        Ok((c, _)) => c,
+        Err(e) => {
+            eprintln!("server: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let difficulty = difficulty.unwrap_or_else(|| race.server.difficulty.clone());
+    let password = std::env::var("RUSTSTEVE_RCON_PASSWORD")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let properties = server_properties(
+        &race.server,
+        &port,
+        &difficulty,
+        password.as_deref().map(|p| (rcon_port.as_str(), p)),
+    );
     let dir = Path::new(&dir);
     let setup = || -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
         std::fs::copy(&jar, dir.join("server.jar"))?;
         std::fs::write(dir.join("eula.txt"), "eula=true\n")?;
-        std::fs::write(
-            dir.join("server.properties"),
-            format!("{SERVER_PROPERTIES}server-port={port}\ndifficulty={difficulty}\n"),
-        )
+        std::fs::write(dir.join("server.properties"), &properties)
     };
     if let Err(e) = setup() {
         eprintln!(
@@ -226,7 +259,15 @@ fn server(args: &[String]) -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
-    println!("server: {} on port {port}", dir.display());
+    println!(
+        "server: {} on port {port}, rcon {}",
+        dir.display(),
+        if password.is_some() {
+            rcon_port.as_str()
+        } else {
+            "off"
+        }
+    );
     match Command::new("java")
         .args(["-Xmx2G", "-jar", "server.jar", "nogui"])
         .current_dir(dir)

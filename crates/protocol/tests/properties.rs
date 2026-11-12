@@ -25,6 +25,15 @@ proptest! {
     /// Any byte stream through the frame decoder, compressed or not: frames or an error, never a
     /// panic, and never an endless loop.
     #[test]
+    fn nbt_never_panics(tag in 0u8..14, body in proptest::collection::vec(prop_oneof![0u8..14, any::<u8>()], 0..512)) {
+        let mut bytes = vec![tag];
+        bytes.extend(body);
+        if let Ok(c) = protocol::nbt::read_root(&mut Reader::new(&bytes)) {
+            let _ = protocol::nbt::death(&c);
+        }
+    }
+
+    #[test]
     fn frames_never_panic(compressed in any::<bool>(), chunks in proptest::collection::vec(proptest::collection::vec(any::<u8>(), 0..64), 0..16)) {
         let mut d = FrameDecoder::new();
         if compressed {

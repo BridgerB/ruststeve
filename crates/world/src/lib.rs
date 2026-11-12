@@ -19,8 +19,30 @@ use memory::{Memory, Seen};
 use physics::{Body, Controls, Fluid, FluidKind};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
+use protocol::nbt::Death;
 use protocol::slot::Slot;
 use protocol::{C2s, Out, S2c, Session};
+
+pub mod stage;
+pub use stage::Stage;
+
+/// How long hits are kept: a minute of server ticks (a case file's "first hit in the last
+/// minute", clojurecraft's observability rule).
+pub const HITS_KEPT_TICKS: u64 = 1200;
+
+/// A hit on the bot, from a `damage_event` naming its own entity.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Hit {
+    /// Server ticks when it landed.
+    pub at_tick: u64,
+    /// The damage type's name (`mob_attack`, `lava`, `fall`), from the generated registry in
+    /// the order the server syncs it; `unknown:<id>` for an id the table lacks.
+    pub damage_type: String,
+    /// The entity behind it and the one that dealt it (an arrow's shooter, the arrow), by kind
+    /// when the world holds them; `None` for no entity or one the world does not hold.
+    pub cause: Option<EntityKind>,
+    pub direct: Option<EntityKind>,
+}
 
 /// An entity as the server last described it.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
@@ -259,6 +281,16 @@ pub struct World {
     pub sent_pos: Option<[f64; 3]>,
     pub sent_look: Option<(f32, f32)>,
     pub sent_tick: u64,
+    /// Hits on the bot in the last `HITS_KEPT_TICKS` server ticks, oldest first.
+    #[serde(default)]
+    pub hits: Vec<Hit>,
+    /// The server's account of the bot's death (`player_combat_kill`); the run ends there.
+    #[serde(default)]
+    pub death: Option<Death>,
+    /// The highest stage the world has held during the run (items get spent, so it only
+    /// rises): raised on every tick.
+    #[serde(default)]
+    pub stage_reached: Option<Stage>,
 }
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
@@ -275,6 +307,11 @@ impl World {
             Event::Tick { now_ms, seed } => {
                 self.now_ms = *now_ms;
                 self.seed = *seed;
+                if let Some(s) = Stage::highest(self)
+                    && self.stage_reached.is_none_or(|r| s > r)
+                {
+                    self.stage_reached = Some(s);
+                }
                 self.tick()
             }
             Event::Controls(c) => {
@@ -657,6 +694,35 @@ impl World {
                 } else {
                     *pitch
                 };
+            }
+            S2c::PlayerCombatKill { player_id, death } => {
+                if Some(*player_id) == self.player.entity_id {
+                    self.death = Some(death.clone());
+                }
+            }
+            S2c::DamageEvent {
+                entity_id,
+                source_type,
+                cause,
+                direct,
+            } => {
+                if Some(*entity_id) == self.player.entity_id {
+                    let tick = self.session.server_ticks;
+                    let kind =
+                        |id: &Option<i32>| id.and_then(|i| self.entities.get(&i)).map(|e| e.kind);
+                    let damage_type = usize::try_from(*source_type)
+                        .ok()
+                        .and_then(|i| data::generated::registries::DAMAGE_TYPE.get(i))
+                        .map_or_else(|| format!("unknown:{source_type}"), |n| (*n).to_owned());
+                    let hit = Hit {
+                        at_tick: tick,
+                        damage_type,
+                        cause: kind(cause),
+                        direct: kind(direct),
+                    };
+                    self.hits.retain(|h| h.at_tick + HITS_KEPT_TICKS >= tick);
+                    self.hits.push(hit);
+                }
             }
             S2c::SetHealth {
                 health,

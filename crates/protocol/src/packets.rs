@@ -165,6 +165,20 @@ pub enum S2c {
         slot: i32,
         item: Slot,
     },
+    /// The bot died: its entity id and the server's death message (a text component), read
+    /// as clojurecraft's `text/death` does.
+    PlayerCombatKill {
+        player_id: i32,
+        death: crate::nbt::Death,
+    },
+    /// An entity was hurt: the damage type (an id into `data::DAMAGE_TYPE`, the order the server
+    /// syncs) and the entities that caused it and dealt it (`None`: no entity).
+    DamageEvent {
+        entity_id: i32,
+        source_type: i32,
+        cause: Option<i32>,
+        direct: Option<i32>,
+    },
     ChunkBatchFinished {
         size: i32,
     },
@@ -396,6 +410,25 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 slot: r.varint()?,
                 item: read_slot(&mut r)?,
             },
+            Some(PlayIn::PlayerCombatKill) => S2c::PlayerCombatKill {
+                player_id: r.varint()?,
+                death: crate::nbt::death(&crate::nbt::read_root(&mut r)?),
+            },
+            Some(PlayIn::DamageEvent) => {
+                // ClientboundDamageEventPacket: the cause and direct ids are sent plus one, 0 for
+                // none; an optional source position follows (an unread tail).
+                let entity_id = r.varint()?;
+                let source_type = r.varint()?;
+                let plus_one = |v: i32| (v > 0).then(|| v - 1);
+                let cause = plus_one(r.varint()?);
+                let direct = plus_one(r.varint()?);
+                S2c::DamageEvent {
+                    entity_id,
+                    source_type,
+                    cause,
+                    direct,
+                }
+            }
             Some(PlayIn::ChunkBatchFinished) => S2c::ChunkBatchFinished { size: r.varint()? },
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {

@@ -109,6 +109,11 @@ pub struct Memory {
     latest: BTreeMap<(String, Cell), usize>,
     /// Positions on record, by dimension and chunk column.
     by_column: BTreeMap<(String, i32, i32), BTreeSet<Cell>>,
+    /// Every block kind ever sighted, in any dimension: answers "seen nether bricks?" without a
+    /// scan of the log (the stage ladder asks every tick). Added in issue 07; older
+    /// checkpoints read it as empty.
+    #[serde(default)]
+    kinds: BTreeSet<BlockKind>,
 }
 
 impl Memory {
@@ -130,6 +135,9 @@ impl Memory {
             .entry((seen.dimension.clone(), x >> 4, z >> 4))
             .or_default()
             .insert(seen.pos);
+        if let Some(kind) = data::block_of_state(seen.state) {
+            self.kinds.insert(kind);
+        }
         self.latest.insert(key, self.log.len());
         self.log.push(Sighting {
             dimension: seen.dimension,
@@ -149,6 +157,11 @@ impl Memory {
     pub fn latest(&self, dimension: &str, pos: Cell) -> Option<&Sighting> {
         let i = self.latest.get(&(dimension.to_owned(), pos))?;
         self.log.get(*i)
+    }
+
+    /// Whether a block of this kind was ever sighted.
+    pub fn has_seen(&self, kind: BlockKind) -> bool {
+        self.kinds.contains(&kind)
     }
 
     /// Every sighting, oldest first.

@@ -89,6 +89,8 @@ impl State {
             | S2c::SetPlayerInventory { .. }
             | S2c::ChunkBatchFinished { .. }
             | S2c::Disconnect { .. }
+            | S2c::PlayerCombatKill { .. }
+            | S2c::DamageEvent { .. }
             | S2c::Unknown { .. } => self,
         }
     }

@@ -12,6 +12,7 @@ pub mod bytes;
 pub mod chunk;
 pub mod frame;
 pub mod metadata;
+pub mod nbt;
 pub mod packets;
 pub mod session;
 pub mod slot;
@@ -48,6 +49,8 @@ pub enum ParseError {
     BadSectionCount(usize),
     #[error("a coordinate that is not finite")]
     NonFinite,
+    #[error("NBT: {0}")]
+    BadNbt(&'static str),
 }
 
 /// Why a packet could not be written: only compression can fail, and only in theory.

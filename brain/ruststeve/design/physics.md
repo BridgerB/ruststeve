@@ -6,14 +6,14 @@ tags: [physics, movement, collision, water, packets, core]
 aliases: [physics crate, step, Body, Controls, move_player_pos_rot, movement packets, differential test, server corrections]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@219c53c clojurecraft@be85a92
+verifiedAgainst: ruststeve@e25875e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/physics/src/lib.rs#pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Controls) -> Body {"
   - "ruststeve:crates/physics/src/lib.rs#pub fn land_tick(solid: &impl Solid, pos: Vec3, [vx, vy, vz]: Vec3) -> (Vec3, Vec3, bool, bool) {"
   - "ruststeve:crates/physics/tests/differential.rs#fn every_tick_equals_clojurecraft() {"
   - "ruststeve:crates/world/src/lib.rs#pub fn solid(&self, x: i32, y: i32, z: i32) -> Option<f64> {"
   - "ruststeve:crates/world/src/lib.rs#fn tick(&mut self) -> Vec<Effect> {"
-  - "ruststeve:crates/bot/src/main.rs#fn walk_controls(tick: u64) -> physics::Controls {"
+  - "ruststeve:crates/bot/src/lib.rs#pub fn walk_controls(tick: u64) -> physics::Controls {"
   - "clojurecraft:src/clojurecraft/physics.clj#siblings' ports of the client): no buoyancy to speak of, a swim-up of 0.04 a tick while jumping,"
 related:
   - "[[ruststeve/design/_moc|Design]]"

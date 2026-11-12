@@ -6,13 +6,13 @@ tags: [recording, replay, determinism, format]
 aliases: [Record, Header, Checkpoint, EventRecord, EffectRecord, Recorder, replay verify, .rsr]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@219c53c clojurecraft@be85a92
+verifiedAgainst: ruststeve@e25875e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/record/src/lib.rs#    Controls(physics::Controls),"
   - "ruststeve:crates/record/src/lib.rs#pub enum Record {"
   - "ruststeve:crates/record/src/lib.rs#pub fn step(&mut self, e: &EventRecord) -> Result<Vec<EffectRecord>, String> {"
   - "ruststeve:crates/record/build.rs#println!(\"cargo:rustc-env=RUSTSTEVE_COMMIT={commit}\");"
-  - "ruststeve:crates/bot/src/main.rs#struct Run {"
+  - "ruststeve:crates/bot/src/lib.rs#struct Run {"
   - "clojurecraft:src/clojurecraft/record.clj#\"Packet keys that are pure functions of the wire bytes, added on the reader thread. A"
 related:
   - "[[ruststeve/design/_moc|Design]]"
@@ -29,7 +29,7 @@ Every run can be a file (`bot --record <path>`, `.rsr`) that replays exactly, of
 ## Key files
 - `crates/record/src/lib.rs`: `Header`, `Record`, `EventRecord`, `EffectRecord`, `Recorder`, `Recording`, `Folder`, `check_commit`.
 - `crates/record/build.rs`: bakes the full commit sha and a dirty flag into every build.
-- `crates/bot/src/main.rs` (`Run::step`): writes each event before the step, its effects after, a checkpoint every 1,200 server ticks.
+- `crates/bot/src/lib.rs` (`Run::step`): writes each event before the step, its effects after, a checkpoint every 1,200 server ticks.
 
 ## What is in a file
 A zstd stream of length-prefixed MessagePack records with named fields ([[recording-format]]):
