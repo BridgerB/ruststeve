@@ -33,7 +33,7 @@ struct Args {
     run: String,
     cap: Option<u64>,
     wall_limit: Option<u64>,
-    walk: bool,
+    walk: Option<bot::Script>,
 }
 
 fn args() -> Result<Args, String> {
@@ -50,7 +50,7 @@ fn args() -> Result<Args, String> {
         run: format!("local-{}", bot::now_ms()),
         cap: None,
         wall_limit: None,
-        walk: false,
+        walk: None,
     };
     let mut it = std::env::args().skip(1);
     let num = |flag: &str, v: &str| -> Result<u64, String> {
@@ -73,7 +73,9 @@ fn args() -> Result<Args, String> {
             "--run" => a.run = v,
             "--cap" => a.cap = Some(num(&flag, &v)?),
             "--wall-limit" => a.wall_limit = Some(num(&flag, &v)?),
-            "--walk" => a.walk = v == "square",
+            "--walk" => {
+                a.walk = Some(bot::Script::parse(&v).ok_or(format!("--walk: no script {v}"))?)
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -140,7 +142,8 @@ fn race(a: &Args) -> Result<bool, String> {
             port: a.port,
             name: name.clone(),
             record: Some(a.out.join(format!("{name}.rsr"))),
-            walk: a.walk,
+            script: a.walk,
+            script_ticks: None,
             cap_ticks: Some(cap),
             deadline,
             start: apply,

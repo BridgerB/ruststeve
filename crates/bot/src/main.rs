@@ -22,7 +22,8 @@ fn opts() -> Result<bot::Opts, String> {
         port: 25565,
         name: "rs-001".to_owned(),
         record: None,
-        walk: false,
+        script: None,
+        script_ticks: None,
         cap_ticks: None,
         deadline: None,
         start: None,
@@ -45,7 +46,13 @@ fn opts() -> Result<bot::Opts, String> {
             "--name" => o.name = value,
             "--seconds" => seconds = value.parse().map_err(|e| format!("--seconds: {e}"))?,
             "--record" => o.record = Some(PathBuf::from(value)),
-            "--walk" => o.walk = value == "square",
+            // square, straight:<yaw>, jump:<yaw>, still
+            "--walk" => {
+                o.script = Some(
+                    bot::Script::parse(&value)
+                        .ok_or_else(|| format!("--walk: no script {value}"))?,
+                );
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }

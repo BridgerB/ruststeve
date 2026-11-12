@@ -1,0 +1,108 @@
+# The parity table (issue #13, brain/ruststeve/design/parity-table.md): on one runner, a fresh
+# peaceful vanilla 26.1.2 server on the race seed; capture the landings' worlds byte for byte;
+# run the 50 moments in real and against the server model in those worlds; compare their outcome
+# classes field by field against the stated tolerance (48 of 50). Dispatch only:
+#   gh workflow run parity.yml --ref <branch>
+name: parity
+run-name: "parity table"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+
+jobs:
+  parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: datagen
+          save-if: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v1
+
+      - name: Get the server jar if the cache missed
+        run: |
+          if [ ! -f "$DATAGEN_WORK/server.jar" ]; then
+            cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out "$RUNNER_TEMP/generated"
+          fi
+
+      - name: Build
+        run: cargo build -q --locked --release -p xtask -p bot -p replay
+
+      - name: Start a fresh peaceful server (RCON on, a password for this run only)
+        run: |
+          set -euo pipefail
+          pw="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+          echo "::add-mask::$pw"
+          echo "RUSTSTEVE_RCON_PASSWORD=$pw" >> "$GITHUB_ENV"
+          RUSTSTEVE_RCON_PASSWORD="$pw" nohup ./target/release/xtask server --jar "$DATAGEN_WORK/server.jar" --difficulty peaceful > server.log 2>&1 &
+          for _ in $(seq 1 180); do
+            if grep -q 'Done (' server.log; then exit 0; fi
+            sleep 2
+          done
+          cat server.log
+          exit 1
+
+      - name: Capture the landings
+        run: ./target/release/capture --out parity/worlds 2>&1 | tee capture.log
+
+      - name: The moments in real
+        run: ./target/release/moments real --worlds parity/worlds --out parity/real 2>&1 | tee real.log
+
+      - name: The moments against the model
+        run: ./target/release/moments sim --worlds parity/worlds --out parity/sim 2>&1 | tee sim.log
+
+      - name: Compare
+        id: compare
+        run: |
+          set -o pipefail
+          ./target/release/moments compare parity/real parity/sim --report parity/parity.md
+          {
+            echo "## parity table, commit $(git rev-parse --short HEAD)"
+            echo
+            cat parity/parity.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the logs with the table
+        if: always()
+        run: cp server.log capture.log real.log sim.log parity/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-${{ github.run_id }}
+          path: parity
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish the table and the worlds
+        if: always() && steps.compare.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tar --zstd -cf "worlds-${{ github.run_id }}.tar.zst" -C parity worlds
+          gh release create "parity-${{ github.run_id }}" parity/parity.md "worlds-${{ github.run_id }}.tar.zst" \
+            --target "${{ github.sha }}" --prerelease \
+            --title "parity ${{ github.run_id }} ($(git rev-parse --short HEAD))" \
+            --notes-file parity/parity.md

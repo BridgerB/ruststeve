@@ -1,0 +1,129 @@
+# The sim race (issue #13, brain/ruststeve/design/server-model.md): lanes of runs against the
+# server model in generated worlds, each a pure function of world, seed and commit; the same case
+# and batch files as the real race with source = sim, published as a race-sim-<run id> release
+# and added to the insight store. A sim number counts only beside a passing parity table.
+#   gh workflow run simrace.yml --ref <branch> -f lanes=4 -f runs=1000 -f cap=6000
+name: simrace
+run-name: "simrace: ${{ inputs.lanes }} lanes x ${{ inputs.runs }} runs, cap ${{ inputs.cap }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      lanes:
+        description: Lanes, one runner each (at most 20)
+        default: "4"
+      runs:
+        description: Runs per lane
+        default: "1000"
+      cap:
+        description: Cap per run in server ticks
+        default: "6000"
+      walk:
+        description: A script (square, straight:<yaw>, jump:<yaw>, still) or empty for idle
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lanes:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          LANES: ${{ inputs.lanes }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$LANES" =~ ^[0-9]+$ ]] || [ "$LANES" -lt 1 ] || [ "$LANES" -gt 20 ]; then
+            echo "lanes must be 1 to 20, got $LANES"; exit 1
+          fi
+          echo "matrix=$(seq 0 $((LANES - 1)) | paste -sd, | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  lane:
+    needs: lanes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON(needs.lanes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: worlds
+          save-if: false
+      - run: cargo build -q --locked --release -p bot --bin simrace
+      - name: Run the lane
+        env:
+          LANE: ${{ matrix.lane }}
+          RUNS: ${{ inputs.runs }}
+          CAP: ${{ inputs.cap }}
+          WALK: ${{ inputs.walk }}
+        run: |
+          set -euo pipefail
+          mkdir -p "lane-$LANE"
+          walk=()
+          if [ -n "$WALK" ]; then walk=(--walk "$WALK"); fi
+          ./target/release/simrace --runs "$RUNS" --first-seed "$((LANE * RUNS))" --lane "$LANE" \
+            --cap "$CAP" --run "sim-${{ github.run_id }}" --out "lane-$LANE" "${walk[@]}" | tee "lane-$LANE/simrace.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simrace-${{ github.run_id }}-lane-${{ matrix.lane }}
+          path: lane-${{ matrix.lane }}
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    needs: lane
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: datagen
+          save-if: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: simrace-${{ github.run_id }}-lane-*
+          path: lanes
+      - name: k/n per stage and commit
+        run: |
+          set -euo pipefail
+          cargo run -q --locked --release -p results -- summary lanes | tee summary.md
+          {
+            echo "## simrace ${{ github.run_id }}: ${{ inputs.lanes }} lanes x ${{ inputs.runs }} runs, cap ${{ inputs.cap }}"
+            echo
+            cat summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the batches as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          find lanes \( -name 'batch.rsb' -o -name '*.case.rsc' \) -print0 \
+            | tar --zstd --null -T - -cf "batches-${{ github.run_id }}.tar.zst"
+          # race-* so the insight store picks it up; the batches say source = sim.
+          gh release create "race-sim-${{ github.run_id }}" "batches-${{ github.run_id }}.tar.zst" summary.md \
+            --target "${{ github.sha }}" --prerelease \
+            --title "simrace ${{ github.run_id }} ($(git rev-parse --short HEAD))" \
+            --notes-file summary.md
+
+  insight:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ingest.yml

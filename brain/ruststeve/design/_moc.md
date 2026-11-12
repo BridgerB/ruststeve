@@ -34,6 +34,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[insight-store]] - the SurrealDB 4 store built from the race's files, its views, the schema that is steve's contract.
 - [[snapshot-stream]] - the live view: a bot pushes MessagePack frames to steve's local relay, never in the way of a run.
 - [[server-model]] - the vanilla server as a pure reducer, the bot's body without Java, grown per issue.
+- [[parity-table]] - captured worlds, 50 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.
 - [[world-value]] - what `World` holds, how `step` folds each packet, `block_at`, the chunk decoder checked against clojurecraft.
 - [[connection]] - how a bot connects and stays in the world: the pure protocol crate, the net threads, the bot binary, running a server locally.
 - [[datagen]] - the game tables: generated from the 26.1.2 server on a runner, committed in `crates/data`, drift and unknown packet ids caught in CI.

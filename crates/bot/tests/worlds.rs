@@ -12,6 +12,7 @@ const RADIUS: i32 = 5;
 const CONFIG: Config = Config {
     view_distance: 4,
     simulation_distance: 3,
+    peaceful: false,
 };
 
 /// A clean run: its final position and how far it got from the spawn.
@@ -23,6 +24,7 @@ fn one(seed: u64) -> Result<([f64; 3], f64), String> {
         "rs-gen",
         seed,
         TICKS,
+        0,
         bot::walk_controls,
     );
     let w = &run.world;

@@ -364,6 +364,14 @@ impl World {
         };
         let at = BlockPos::containing(body.pos[0], body.pos[1], body.pos[2]).chunk();
         if !self.columns.contains_key(&at) {
+            // No physics without the ground, but still the once-a-second status: the server
+            // re-centres a player's chunks only when the client reports a move (handleMovePlayer
+            // calls ServerChunkCache.move), so a teleport far from the loaded columns would
+            // otherwise wait forever on chunks that wait on a move (found by the parity table).
+            if self.ticks - self.sent_tick >= STATUS_ONLY_EVERY {
+                self.sent_tick = self.ticks;
+                return vec![Effect::Send(C2s::MovePlayerStatusOnly { flags: 0 })];
+            }
             return Vec::new();
         }
         let solid = |x, y, z| self.solid(x, y, z);
@@ -764,6 +772,14 @@ impl World {
     /// The block at `pos`; `None` where no column is loaded.
     pub fn block_at(&self, pos: BlockPos) -> Option<BlockKind> {
         data::block_of_state(self.state_at(pos)?)
+    }
+
+    /// Whether the column under the body is loaded (physics runs only then).
+    pub fn columns_loaded_under_body(&self) -> bool {
+        self.body.is_some_and(|b| {
+            self.columns
+                .contains_key(&BlockPos::containing(b.pos[0], b.pos[1], b.pos[2]).chunk())
+        })
     }
 
     /// The block the player stands on (just below the feet).

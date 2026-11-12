@@ -5,7 +5,7 @@ type: decision
 tags: [decision, measurement, races, sim, parity]
 aliases: [real race metric, parity table, checkpoint starts, k/n, game-tick caps, paired runs, scripted expert]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#The real race is the metric. Report every rate as k/n."
@@ -23,7 +23,7 @@ related:
 
 ## The choice
 1. **The real race is the metric**: real vanilla 26.1.2 servers on runners, many bots each; every rate reported as k/n with its commit.
-2. **A sim number counts only after a parity table**: the same recorded moments run in sim and real, outcome classes matching within a stated tolerance. A gap is a sim bug until shown otherwise.
+2. **A sim number counts only after a parity table**: the same recorded moments run in sim and real, outcome classes matching within a stated tolerance. A gap is a sim bug until shown otherwise. Issue 08 states it: at least 48 of 50 moments match in every field ([[parity-table]]).
 3. **One config file for the race and the model**: simulation distance (3 on the race servers), tick rate, caps. The model reads the same file.
 4. **Caps in game ticks**, counted from the server (20 per `set-time` heard), never wall time. A real server under 14 bots ticks at 150–300 ms; a wall-clock hour was under 12 game minutes there.
 5. **A checkpoint start for every stage from day one** (a kit and a place), and every lane can play any stage.

@@ -63,6 +63,9 @@ pub struct Wire {
 pub struct Config {
     pub view_distance: i32,
     pub simulation_distance: i32,
+    /// Peaceful difficulty: the player heals 1 every 20 ticks below full
+    /// (ServerPlayer.tickRegeneration, with natural_health_regeneration on, its default).
+    pub peaceful: bool,
 }
 
 /// One chunk column the model can send: the bytes a server sent (a captured world) or the
@@ -543,6 +546,21 @@ impl Sim {
         if self.ticks.is_multiple_of(SET_TIME_EVERY) {
             out.push(wire(State::Play, &S2c::SetTime)?);
         }
+        if self.config.peaceful
+            && self.health > 0.0
+            && self.health < 20.0
+            && self.ticks.is_multiple_of(20)
+        {
+            self.health = (self.health + 1.0).min(20.0);
+            out.push(wire(
+                State::Play,
+                &S2c::SetHealth {
+                    health: self.health,
+                    food: 20,
+                    saturation: 5.0,
+                },
+            )?);
+        }
         if let Some((_, at)) = self.keep_alive
             && self.ticks - at >= KEEP_ALIVE_LIMIT
         {
@@ -645,5 +663,56 @@ impl ModelWorld {
         self.columns
             .insert(key, ModelColumn::generated(key.0, key.1, column)?);
         Ok(())
+    }
+}
+
+impl ModelWorld {
+    /// A model world from columns a server sent (a captured world): each body kept byte for
+    /// byte and decoded once for the model's own rules.
+    pub fn captured(
+        columns: impl IntoIterator<Item = ((i32, i32), Vec<u8>)>,
+        spawn: [f64; 3],
+    ) -> Result<Self, protocol::ParseError> {
+        let id = data::generated::packets::PlayClientbound::LevelChunkWithLight.id();
+        let mut out = BTreeMap::new();
+        for (key, body) in columns {
+            if let S2c::LevelChunkWithLight { column, .. } =
+                protocol::decode(State::Play, id, &body)?
+            {
+                out.insert(
+                    key,
+                    ModelColumn {
+                        body: Arc::new(body),
+                        column,
+                    },
+                );
+            }
+        }
+        Ok(Self {
+            columns: out,
+            spawn,
+            dimension: "minecraft:overworld".to_owned(),
+            dimension_type: 0,
+        })
+    }
+
+    /// Where feet stand at a column: the top of the highest block that collides, or inside the
+    /// highest water; plants and other non-colliding blocks are passed through. `None` where
+    /// the world holds no column.
+    pub fn surface(&self, x: i32, z: i32) -> Option<f64> {
+        use data::types::Collision;
+        let col = self.columns.get(&(x >> 4, z >> 4))?;
+        let top = col.column.max_y() - 1;
+        (col.column.min_y..=top).rev().find_map(|y| {
+            let kind = data::block_of_state(col.column.state_at(x, y, z)?)?;
+            if kind == data::BlockKind::Water {
+                return Some(f64::from(y) + 0.5);
+            }
+            match data::generated::shapes::collision(kind)? {
+                Collision::Empty => None,
+                Collision::Partial { top } => Some(f64::from(y) + top),
+                Collision::Full => Some(f64::from(y) + 1.0),
+            }
+        })
     }
 }

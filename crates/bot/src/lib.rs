@@ -3,9 +3,13 @@
 //! login, configuration, play), folds everything the server sends into `World`, steps a tick
 //! every 50 ms, records every run when asked, and ends with an `Ending`.
 
+pub mod captured;
 pub mod live;
 pub mod lockstep;
 pub mod model;
+pub mod script;
+
+pub use script::Script;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -24,9 +28,10 @@ use world::{Event, Inventory, World};
 const STATUS_EVERY: Duration = Duration::from_secs(10);
 /// The loop's tick: the world gets the clock and a fresh seed this often (a game tick).
 const TICK_EVERY: Duration = Duration::from_millis(50);
-/// Server ticks after a start is applied before the inventory is taken as the start's: the
-/// kit's slot packets arrive within a tick or two.
-const KIT_SETTLE_TICKS: u64 = 20;
+/// Physics ticks a start settles before the inventory is taken as the start's and a script
+/// begins: the kit's slot packets arrive within a tick or two, and a body placed by a teleport
+/// comes to rest. `bot::lockstep` settles the same.
+pub const SETTLE_TICKS: u64 = 20;
 
 /// What applies a start to the bot once it is in the world (the race's RCON commands); run on
 /// its own thread so the loop never blocks on it.
@@ -39,8 +44,10 @@ pub struct Opts {
     pub name: String,
     /// Record the run to this file.
     pub record: Option<PathBuf>,
-    /// Walk issue 06's scripted staircase instead of standing still.
-    pub walk: bool,
+    /// What to press once the start has settled; `None` stands still (no planner yet).
+    pub script: Option<Script>,
+    /// End the run (`Cap`) after the script has run this many ticks.
+    pub script_ticks: Option<u64>,
     /// The run ends `Cap` after this many server ticks in play.
     pub cap_ticks: Option<u64>,
     /// The job's end: the run ends `Cut` at this instant (never a cap on behaviour).
@@ -88,6 +95,10 @@ pub struct Outcome {
     pub recorded: bool,
     /// What the live stream sent, dropped and failed, when it ran.
     pub stream: Option<stream::Counts>,
+    /// The bot's teleports when its script began: later ones are the server's corrections.
+    pub teleports_at_script: Option<u64>,
+    /// The lowest health the server told of while the script ran.
+    pub min_health_in_script: Option<f32>,
 }
 
 impl Outcome {
@@ -201,24 +212,20 @@ pub fn killer(d: &protocol::nbt::Death) -> String {
     }
 }
 
-/// Issue 06's scripted walk, a test harness until the planner (issue 09): a staircase, 40 ticks
-/// south then 40 west, over and over, jumping for a few ticks at the start of every west leg.
+/// Issue 06's staircase (`Script::WalkSquare`), as a function of the tick.
 pub fn walk_controls(tick: u64) -> physics::Controls {
-    let side = (tick / 40) % 4;
-    let into_side = tick % 40;
-    physics::Controls {
-        forward: true,
-        jump: side % 2 == 1 && into_side < 6,
-        sneak: false,
-        yaw: [0.0, 90.0, 0.0, 90.0][side as usize],
-    }
+    Script::WalkSquare.controls(tick)
 }
 
 /// Where the start stands: not yet in the world, applying, settling, or taken.
 enum StartState {
     Waiting(Option<ApplyStart>),
     Applying(JoinHandle<Result<(), String>>),
-    Settling { until_tick: u64 },
+    /// Counting physics ticks with the ground loaded since the last teleport.
+    Settling {
+        since: u64,
+        teleports: u64,
+    },
     Taken,
 }
 
@@ -230,7 +237,8 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         port,
         name,
         record,
-        walk,
+        script,
+        script_ticks,
         cap_ticks,
         deadline,
         start,
@@ -298,11 +306,13 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut start_inventory = None;
     let mut last_status = Instant::now();
     let mut last_tick = Instant::now();
-    let mut walk_ticks: u64 = 0;
+    let mut script_tick: u64 = 0;
+    let mut teleports_at_script: Option<u64> = None;
+    let mut min_health_in_script: Option<f32> = None;
     let mut last_controls: Option<physics::Controls> = None;
-    let doing = if walk {
+    let doing = if let Some(s) = script {
         Doing {
-            task: "walk-square".to_owned(),
+            task: format!("script {}", s.name()),
             why: "scripted harness until the planner (issue 09)".to_owned(),
         }
     } else {
@@ -349,12 +359,14 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             StartState::Waiting(apply) if run.world.body.is_some() => match apply {
                 Some(f) => StartState::Applying(std::thread::spawn(f)),
                 None => StartState::Settling {
-                    until_tick: run.world.session.server_ticks + KIT_SETTLE_TICKS,
+                    since: run.world.ticks,
+                    teleports: run.world.session.teleports,
                 },
             },
             StartState::Applying(h) if h.is_finished() => match h.join() {
                 Ok(Ok(())) => StartState::Settling {
-                    until_tick: run.world.session.server_ticks + KIT_SETTLE_TICKS,
+                    since: run.world.ticks,
+                    teleports: run.world.session.teleports,
                 },
                 Ok(Err(e)) => {
                     break Ending::Error {
@@ -367,7 +379,21 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     };
                 }
             },
-            StartState::Settling { until_tick } if run.world.session.server_ticks >= until_tick => {
+            // The start settles over `SETTLE_TICKS` physics ticks with the ground under the body
+            // loaded and no teleport since: a teleport far from the loaded columns waits for
+            // them, the start's own teleport may land after its command returns, and a script
+            // must begin from the same state in a real run as against the model (the parity
+            // table found a 20-to-40-tick jitter when this counted server ticks).
+            StartState::Settling { teleports, .. }
+                if teleports != run.world.session.teleports
+                    || !run.world.columns_loaded_under_body() =>
+            {
+                StartState::Settling {
+                    since: run.world.ticks,
+                    teleports: run.world.session.teleports,
+                }
+            }
+            StartState::Settling { since, .. } if run.world.ticks - since >= SETTLE_TICKS => {
                 start_inventory = Some(run.world.inventory.clone());
                 StartState::Taken
             }
@@ -375,9 +401,18 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         };
         if last_tick.elapsed() >= TICK_EVERY {
             last_tick = Instant::now();
-            if walk && run.world.body.is_some() {
-                let c = walk_controls(walk_ticks);
-                walk_ticks += 1;
+            if let Some(s) = script
+                && matches!(start_state, StartState::Taken)
+            {
+                if script_ticks.is_some_and(|n| script_tick >= n) {
+                    break Ending::Cap;
+                }
+                teleports_at_script.get_or_insert(run.world.session.teleports);
+                if let Some(h) = run.world.player.health {
+                    min_health_in_script = Some(min_health_in_script.map_or(h, |m: f32| m.min(h)));
+                }
+                let c = s.controls(script_tick);
+                script_tick += 1;
                 if Some(c) != last_controls {
                     last_controls = Some(c);
                     if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
@@ -504,5 +539,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         doing,
         recorded,
         stream: stream_counts,
+        teleports_at_script,
+        min_health_in_script,
     })
 }

@@ -1,0 +1,43 @@
+# Landings on the race seed (`typecraft`, config/race.toml), for captured worlds and the parity
+# table's moments (brain/ruststeve/design/parity-table.md). Spread out so the moments meet
+# different ground: plains, slopes, shores, water. Column positions in blocks.
+
+[[landing]]
+x = 0
+z = 0
+
+[[landing]]
+x = 160
+z = 0
+
+[[landing]]
+x = 0
+z = 160
+
+[[landing]]
+x = -160
+z = 0
+
+[[landing]]
+x = 0
+z = -160
+
+[[landing]]
+x = 240
+z = 240
+
+[[landing]]
+x = -240
+z = 240
+
+[[landing]]
+x = 240
+z = -240
+
+[[landing]]
+x = -240
+z = -240
+
+[[landing]]
+x = 400
+z = 80

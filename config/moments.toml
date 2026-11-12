@@ -1,0 +1,406 @@
+# The parity table's moments (brain/ruststeve/design/parity-table.md): 50 rows, each a start on
+# a captured landing (config/landings.toml), a script and a length. Run in real and against the
+# server model, their outcome classes are compared field by field. Five starts per landing, six
+# blocks apart, each walking away from the centre (yaw 0 south, 90 west, 180 north, 270 east),
+# so bots running at once never touch (vanilla players push each other); 160 ticks (8 s) keeps a walk within the
+# captured radius of 4 columns. Mobs join with issue 12; the real side runs peaceful.
+
+[[moment]]
+id = "m00-0"
+landing = 0
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m00-1"
+landing = 0
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m00-2"
+landing = 0
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m00-3"
+landing = 0
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m00-4"
+landing = 0
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m01-0"
+landing = 1
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m01-1"
+landing = 1
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m01-2"
+landing = 1
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m01-3"
+landing = 1
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m01-4"
+landing = 1
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m02-0"
+landing = 2
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m02-1"
+landing = 2
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m02-2"
+landing = 2
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m02-3"
+landing = 2
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m02-4"
+landing = 2
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m03-0"
+landing = 3
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m03-1"
+landing = 3
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m03-2"
+landing = 3
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m03-3"
+landing = 3
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m03-4"
+landing = 3
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m04-0"
+landing = 4
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m04-1"
+landing = 4
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m04-2"
+landing = 4
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m04-3"
+landing = 4
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m04-4"
+landing = 4
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m05-0"
+landing = 5
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m05-1"
+landing = 5
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m05-2"
+landing = 5
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m05-3"
+landing = 5
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m05-4"
+landing = 5
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m06-0"
+landing = 6
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m06-1"
+landing = 6
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m06-2"
+landing = 6
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m06-3"
+landing = 6
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m06-4"
+landing = 6
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m07-0"
+landing = 7
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m07-1"
+landing = 7
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m07-2"
+landing = 7
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m07-3"
+landing = 7
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m07-4"
+landing = 7
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m08-0"
+landing = 8
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m08-1"
+landing = 8
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m08-2"
+landing = 8
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m08-3"
+landing = 8
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m08-4"
+landing = 8
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
+
+[[moment]]
+id = "m09-0"
+landing = 9
+dx = 0
+dz = 0
+script = "still"
+ticks = 160
+
+[[moment]]
+id = "m09-1"
+landing = 9
+dx = 6
+dz = 0
+script = "straight:270"
+ticks = 160
+
+[[moment]]
+id = "m09-2"
+landing = 9
+dx = 0
+dz = 6
+script = "straight:0"
+ticks = 160
+
+[[moment]]
+id = "m09-3"
+landing = 9
+dx = -6
+dz = 0
+script = "jump:90"
+ticks = 160
+
+[[moment]]
+id = "m09-4"
+landing = 9
+dx = 0
+dz = -6
+script = "straight:180"
+ticks = 160
