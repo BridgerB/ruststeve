@@ -5,7 +5,7 @@ type: reference
 tags: [world-model, observations, core]
 aliases: [WorldModel, apply, rebuild, observation fold, derived index]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: ruststeve@c87ac55
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#The event log is append-only. The WorldModel is a derived index: always rebuildable by folding observations."
@@ -39,6 +39,9 @@ Facts accrete; they are never edited. The log of observations is the source of t
 
 ## Limits
 `SelfState`, `EntityRecord` and the exact observation set are not fixed by the guide; they come from what clojurecraft folds from packets ([[cc-world-value]]).
+
+## In ruststeve today
+The fold is `World::step` in the `world` crate ([[world-value]]): server packets are folded directly (not yet as `Observation`s), and chunks are kept as packed paletted sections in `Arc<Column>`, not expanded to `[BlockKind; 4096]`.
 
 ## See also
 - [[domain-types]] - the newtypes and context types the model is built from.

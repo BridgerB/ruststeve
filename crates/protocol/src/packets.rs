@@ -8,7 +8,10 @@ use data::generated::packets::{
     PlayClientbound as PlayIn, PlayServerbound as PlayOut,
 };
 
+use std::sync::Arc;
+
 use crate::bytes::{Reader, Writer};
+use crate::chunk::Column;
 use crate::state::State;
 use crate::{EncodeError, ParseError};
 
@@ -67,6 +70,36 @@ pub enum S2c {
     },
     /// The clock, sent every 20 server ticks; its arrival is what matters.
     SetTime,
+    /// A chunk column, its sections decoded on the reader thread (heightmaps and light skipped).
+    LevelChunkWithLight {
+        x: i32,
+        z: i32,
+        column: Arc<Column>,
+    },
+    /// A column the client should drop.
+    ForgetLevelChunk {
+        x: i32,
+        z: i32,
+    },
+    /// One block changed: its position and new state id.
+    BlockUpdate {
+        pos: (i32, i32, i32),
+        state: u32,
+    },
+    /// Several blocks in one section changed: `(world position, state id)` each.
+    SectionBlocksUpdate {
+        changes: Vec<((i32, i32, i32), u32)>,
+    },
+    /// A respawn or a dimension change: the start of `CommonPlayerSpawnInfo`.
+    Respawn {
+        dimension_type: i32,
+        dimension: String,
+    },
+    SetHealth {
+        health: f32,
+        food: i32,
+        saturation: f32,
+    },
     ChunkBatchFinished {
         size: i32,
     },
@@ -163,6 +196,62 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 }
             }
             Some(PlayIn::SetTime) => S2c::SetTime,
+            Some(PlayIn::LevelChunkWithLight) => {
+                let (x, z) = (r.i32()?, r.i32()?);
+                for _ in 0..r.length()? {
+                    let _kind = r.varint()?;
+                    let longs = r.length()?;
+                    r.take(longs.saturating_mul(8))?;
+                }
+                let n = r.length()?;
+                let column = Column::decode(r.take(n)?)?;
+                S2c::LevelChunkWithLight {
+                    x,
+                    z,
+                    column: Arc::new(column),
+                }
+            }
+            Some(PlayIn::ForgetLevelChunk) => {
+                // ChunkPos.toLong: x in the low 32 bits, z in the high.
+                let v = r.i64()?;
+                S2c::ForgetLevelChunk {
+                    x: v as i32,
+                    z: (v >> 32) as i32,
+                }
+            }
+            Some(PlayIn::BlockUpdate) => S2c::BlockUpdate {
+                pos: r.position()?,
+                state: r.varint()? as u32,
+            },
+            Some(PlayIn::SectionBlocksUpdate) => {
+                // SectionPos.asLong: x 22 bits, z 22 bits, y 20 bits; each change a varlong of
+                // state << 12 | local x << 8 | local z << 4 | local y (clojurecraft's
+                // terrain/section-update).
+                let s = r.i64()?;
+                let (sx, sz, sy) = (s >> 42, (s << 22) >> 42, (s << 44) >> 44);
+                let n = r.length()?;
+                let mut changes = Vec::with_capacity(n.min(4096));
+                for _ in 0..n {
+                    let v = r.varlong()?;
+                    let (lx, lz, ly) = ((v >> 8) & 15, (v >> 4) & 15, v & 15);
+                    let pos = (
+                        (sx * 16 + lx) as i32,
+                        (sy * 16 + ly) as i32,
+                        (sz * 16 + lz) as i32,
+                    );
+                    changes.push((pos, ((v as u64) >> 12) as u32));
+                }
+                S2c::SectionBlocksUpdate { changes }
+            }
+            Some(PlayIn::Respawn) => S2c::Respawn {
+                dimension_type: r.varint()?,
+                dimension: r.string()?,
+            },
+            Some(PlayIn::SetHealth) => S2c::SetHealth {
+                health: r.f32()?,
+                food: r.varint()?,
+                saturation: r.f32()?,
+            },
             Some(PlayIn::ChunkBatchFinished) => S2c::ChunkBatchFinished { size: r.varint()? },
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {

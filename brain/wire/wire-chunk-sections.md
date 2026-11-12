@@ -5,7 +5,7 @@ type: reference
 tags: [wire, chunks, palette, blocks]
 aliases: [paletted container, level-chunk-with-light, section, bits per entry, block-index, biomes]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:src/clojurecraft/chunk.clj#with palette nil above max-bits (direct ids). 26.1 sends no long count; it is"
@@ -37,6 +37,9 @@ A column arrives in `level-chunk-with-light`: chunk x and z (i32), heightmaps, t
 ## Gotchas
 - Forgetting the 26.1 fluid count, or reading a long count that is no longer sent, shifts every later byte.
 - `section-blocks-update` packs a section position in an i64 and each change as a varlong; `block-update` carries a packed position and a state id.
+
+## ruststeve
+ruststeve decodes the same way (`protocol::chunk`, sections kept packed) and is checked against clojurecraft's decoder at 200 positions in the overworld and the Nether ([[world-value]]).
 
 ## See also
 - [[world-model-fold]] - the core's decoded form.

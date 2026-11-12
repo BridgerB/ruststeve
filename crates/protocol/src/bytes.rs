@@ -66,6 +66,10 @@ impl<'a> Reader<'a> {
         Ok(self.u8()? != 0)
     }
 
+    pub fn i16(&mut self) -> Result<i16, ParseError> {
+        Ok(i16::from_be_bytes(self.array()?))
+    }
+
     pub fn u16(&mut self) -> Result<u16, ParseError> {
         Ok(u16::from_be_bytes(self.array()?))
     }

@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use net::Inbound;
 use protocol::session::opening;
-use protocol::{Out, S2c, Session, State};
+use protocol::{Out, S2c, State};
+use world::{Effect, Event, World};
 
 /// How often the bot prints a status line.
 const STATUS_EVERY: Duration = Duration::from_secs(10);
@@ -83,14 +84,18 @@ struct Stats {
 }
 
 impl Stats {
-    fn summary(&self, session: &Session, why: &str) -> String {
+    fn summary(&self, world: &World, why: &str) -> String {
+        let session = &world.session;
         format!(
-            "{why}: {:.0} s connected, {:.0} s in play, {} keep-alives answered, {} server ticks, {} teleports, packets {:?}, unknown ids {}, decode errors {}",
+            "{why}: {:.0} s connected, {:.0} s in play, {} keep-alives answered, {} server ticks, {} teleports, {} columns, health {:?}, standing on {:?}, packets {:?}, unknown ids {}, decode errors {}",
             self.started.elapsed().as_secs_f64(),
             self.play_since.map_or(0.0, |t| t.elapsed().as_secs_f64()),
             session.keep_alives_answered,
             session.server_ticks,
             session.teleports,
+            world.columns.len(),
+            world.player.health,
+            world.block_under_player(),
             self.per_state,
             self.unknown.len(),
             self.decode_errors
@@ -116,7 +121,7 @@ fn run(a: &Args) -> Result<(), String> {
         a.name
     );
 
-    let mut session = Session::new();
+    let mut world = World::new();
     let mut stats = Stats {
         started: Instant::now(),
         play_since: None,
@@ -131,7 +136,7 @@ fn run(a: &Args) -> Result<(), String> {
         if let (Some(limit), Some(t)) = (limit, stats.play_since)
             && t.elapsed() >= limit
         {
-            println!("bot {}: {}", a.name, stats.summary(&session, "done"));
+            println!("bot {}: {}", a.name, stats.summary(&world, "done"));
             return Ok(());
         }
         if last_status.elapsed() >= STATUS_EVERY {
@@ -139,16 +144,16 @@ fn run(a: &Args) -> Result<(), String> {
             println!(
                 "bot {}: {:?} in {}, {}",
                 a.name,
-                session.state,
-                session.dimension.as_deref().unwrap_or("-"),
-                stats.summary(&session, "status")
+                world.session.state,
+                world.dimension.as_ref().map_or("-", |d| d.name.as_str()),
+                stats.summary(&world, "status")
             );
         }
         let msg = match conn.inbound.recv_timeout(Duration::from_secs(1)) {
             Ok(m) => m,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
-                return Err(stats.summary(&session, "the reader thread stopped"));
+                return Err(stats.summary(&world, "the reader thread stopped"));
             }
         };
         let packet = match msg {
@@ -158,18 +163,18 @@ fn run(a: &Args) -> Result<(), String> {
                 eprintln!("bot {}: cannot decode {state:?} id {id}: {error}", a.name);
                 continue;
             }
-            Inbound::Closed(why) => return Err(stats.summary(&session, &format!("closed ({why})"))),
+            Inbound::Closed(why) => return Err(stats.summary(&world, &format!("closed ({why})"))),
         };
-        *stats.per_state.entry(session.state).or_default() += 1;
+        *stats.per_state.entry(world.session.state).or_default() += 1;
         match &packet {
             S2c::Unknown { state, id, .. } => *stats.unknown.entry((*state, *id)).or_default() += 1,
             S2c::LoginDisconnect { reason } => {
-                return Err(stats.summary(&session, &format!("kicked in login: {reason}")));
+                return Err(stats.summary(&world, &format!("kicked in login: {reason}")));
             }
             S2c::ConfigDisconnect { reason } | S2c::Disconnect { reason } => {
                 return Err(stats.summary(
-                    &session,
-                    &format!("kicked in {:?}: {}", session.state, printable(reason)),
+                    &world,
+                    &format!("kicked in {:?}: {}", world.session.state, printable(reason)),
                 ));
             }
             S2c::Login {
@@ -193,15 +198,27 @@ fn run(a: &Args) -> Result<(), String> {
             | S2c::PlayerPosition { .. }
             | S2c::SetTime
             | S2c::ChunkBatchFinished { .. }
-            | S2c::StartConfiguration => {}
+            | S2c::StartConfiguration
+            | S2c::LevelChunkWithLight { .. }
+            | S2c::ForgetLevelChunk { .. }
+            | S2c::BlockUpdate { .. }
+            | S2c::SectionBlocksUpdate { .. }
+            | S2c::Respawn { .. }
+            | S2c::SetHealth { .. } => {}
         }
-        let before = session.state;
-        for out in session.on_packet(&packet) {
-            send(&conn, out)?;
+        let before = world.session.state;
+        for effect in world.step(&Event::Packet(packet)) {
+            send(
+                &conn,
+                match effect {
+                    Effect::Send(p) => Out::Send(p),
+                    Effect::SetCompression(t) => Out::SetCompression(t),
+                },
+            )?;
         }
-        if before != session.state {
-            println!("bot {}: {before:?} -> {:?}", a.name, session.state);
-            if session.state == State::Play {
+        if before != world.session.state {
+            println!("bot {}: {before:?} -> {:?}", a.name, world.session.state);
+            if world.session.state == State::Play {
                 stats.play_since.get_or_insert_with(Instant::now);
             }
         }

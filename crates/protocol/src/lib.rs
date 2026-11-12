@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod bytes;
+pub mod chunk;
 pub mod frame;
 pub mod packets;
 pub mod session;
@@ -39,6 +40,10 @@ pub enum ParseError {
     Inflate(String),
     #[error("inflated {got} bytes, the frame said {want}")]
     InflateLength { want: usize, got: usize },
+    #[error("a paletted container of {0} bits")]
+    BadBits(u8),
+    #[error("a chunk column of {0} sections, which no dimension has")]
+    BadSectionCount(usize),
 }
 
 /// Why a packet could not be written: only compression can fail, and only in theory.
