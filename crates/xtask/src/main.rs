@@ -3,6 +3,8 @@
 //! ```text
 //! cargo run -q -p xtask -- deps-boundary       the core crates depend on nothing that does I/O
 //! cargo run -q -p xtask -- commit-msg <file>   a commit message keeps the repository's rules
+//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar]
+//!                                            a local vanilla 26.1.2 server (offline, simulation distance 3)
 //! ```
 //!
 //! Standard library only, like `brain-check`: it must build in seconds.
@@ -41,8 +43,9 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("server") => server(&std::env::args().skip(2).collect::<Vec<_>>()),
         other => {
-            eprintln!("unknown task {other:?}; tasks: deps-boundary, commit-msg");
+            eprintln!("unknown task {other:?}; tasks: deps-boundary, commit-msg, server");
             ExitCode::FAILURE
         }
     }
@@ -167,6 +170,75 @@ fn commit_msg(file: &Path) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+/// The server settings every bot's server uses: offline mode (no Mojang account), and the race
+/// servers' simulation distance 3, which freezes mobs past about 48 blocks
+/// (brain/game/mc-mob-facts.md). The seed is clojurecraft's, so its worlds stay comparable.
+const SERVER_PROPERTIES: &str = "online-mode=false
+simulation-distance=3
+view-distance=8
+level-seed=typecraft
+spawn-protection=0
+enable-rcon=false
+";
+
+/// Run a vanilla 26.1.2 server in the foreground: copy datagen's sha1-checked jar into `dir`,
+/// accept the EULA, write the properties, `java -jar server.jar nogui` (Java 25: `nix develop`).
+/// The world in `dir` is kept between runs; nothing here deletes one.
+fn server(args: &[String]) -> ExitCode {
+    let mut dir = "target/server".to_owned();
+    let mut port = "25565".to_owned();
+    let mut jar = "target/datagen/server.jar".to_owned();
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        let Some(value) = it.next() else {
+            eprintln!("{flag} needs a value");
+            return ExitCode::FAILURE;
+        };
+        match flag.as_str() {
+            "--dir" => dir.clone_from(value),
+            "--port" => port.clone_from(value),
+            "--jar" => jar.clone_from(value),
+            other => {
+                eprintln!("unknown flag {other}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let dir = Path::new(&dir);
+    let setup = || -> std::io::Result<()> {
+        std::fs::create_dir_all(dir)?;
+        std::fs::copy(&jar, dir.join("server.jar"))?;
+        std::fs::write(dir.join("eula.txt"), "eula=true\n")?;
+        std::fs::write(
+            dir.join("server.properties"),
+            format!("{SERVER_PROPERTIES}server-port={port}\n"),
+        )
+    };
+    if let Err(e) = setup() {
+        eprintln!(
+            "server: set up {} from {jar}: {e} (run datagen once to download the jar)",
+            dir.display()
+        );
+        return ExitCode::FAILURE;
+    }
+    println!("server: {} on port {port}", dir.display());
+    match Command::new("java")
+        .args(["-Xmx2G", "-jar", "server.jar", "nogui"])
+        .current_dir(dir)
+        .status()
+    {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(s) => {
+            eprintln!("server: exited {s}");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("server: run java (Java 25 must be on PATH: nix develop): {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 

@@ -5,7 +5,7 @@ type: reference
 tags: [wire, states, login, configuration]
 aliases: [handshake, login, configuration, play, protocol state, intention, finish-configuration, start-configuration]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#\"Protocol state after the client sends a packet: {[state name] next-state}.\""
@@ -46,7 +46,7 @@ The wire is always in one protocol state, and the same packet id means different
 - The play `login` and `respawn` frames have tails (death location and more) that clojurecraft does not model; its decoder simply ignores a frame's unread tail ([[wire-packets-as-data]]).
 
 ## Limits
-Which configuration packets a 26.1.2 server sends, and in what order, is not recorded here; clojurecraft answers only what its specs list.
+Which configuration packets a 26.1.2 server sends, and in what order, is not recorded here; clojurecraft answers only what its specs list, and so does ruststeve's `Session` ([[connection]]), which reaches play with those answers.
 
 ## See also
 - [[wire-offline-login]] - the identity the hello carries.

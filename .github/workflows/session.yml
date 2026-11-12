@@ -1,0 +1,77 @@
+# A session on a runner (issue #8): start a vanilla 26.1.2 server and keep a bot in the world for
+# the given seconds. Dispatch only, to save runner time while work runs locally:
+#   gh workflow run session.yml --ref <branch> -f seconds=600
+# Notes: brain/ruststeve/design/connection.md
+name: session
+run-name: "session: ${{ inputs.seconds }} s"
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds the bot must stay in play
+        default: "600"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+
+jobs:
+  session:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: datagen
+          save-if: false
+      # The sha1-checked server jar datagen downloaded (same cache key as datagen.yml).
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v1
+
+      - name: Get the server jar if the cache missed
+        run: |
+          if [ ! -f "$DATAGEN_WORK/server.jar" ]; then
+            cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out "$RUNNER_TEMP/generated"
+          fi
+
+      - name: Start the server
+        run: |
+          set -euo pipefail
+          cargo build -q --locked -p xtask -p bot
+          nohup cargo run -q --locked -p xtask -- server --jar "$DATAGEN_WORK/server.jar" > server.log 2>&1 &
+          for _ in $(seq 1 180); do
+            if grep -q 'Done (' server.log; then exit 0; fi
+            sleep 2
+          done
+          cat server.log
+          exit 1
+
+      - name: Keep a bot in the world
+        env:
+          SECONDS_IN_PLAY: ${{ inputs.seconds }}
+        run: cargo run -q --locked -p bot -- --seconds "$SECONDS_IN_PLAY" 2>&1 | tee bot.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: session-${{ github.run_id }}
+          path: |
+            bot.log
+            server.log
+          if-no-files-found: warn
+          retention-days: 14
