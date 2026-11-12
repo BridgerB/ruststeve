@@ -55,6 +55,7 @@ Use SurrealDB (the `ingest` binary's insight store) for questions across many ru
 ## 5. Commands
 
 ```bash
+nix develop                                       # dev shell: JDK 25 (datagen, the server) + rustup (flake.nix)
 cargo fmt --all                                   # format (local)
 cargo clippy --workspace --all-targets -- -D warnings   # lint (local)
 cargo run -q -p brain-check                       # the brain's four invariants, must be zero (local)

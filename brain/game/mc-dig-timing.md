@@ -5,7 +5,7 @@ type: reference
 tags: [game, digging, timing]
 aliases: [break time, hardness, early FINISH, finish margin, dig penalties, player-action]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:src/clojurecraft/dig.clj#damage per tick = speed / hardness / (30 when the tool harvests the block, else 100)"
@@ -39,5 +39,6 @@ The client digs with two `player-action` packets, START and FINISH. The server b
 - Hold the right tool *before* START and confirm the held slot; ruststeve v1 and steve both lost digs to a drifted held slot ([[hist-v1-load-bearing-fixes]]).
 
 ## See also
+- [[datagen]] - ruststeve's hardness and needs-correct-tool tables (`data::generated::hardness`), read from the game by the JNI probe and equal to clojurecraft's for all 1,168 blocks.
 - [[wire-actions]] - the packet.
 - [[cc-datagen]] - hardness and tool tables.
