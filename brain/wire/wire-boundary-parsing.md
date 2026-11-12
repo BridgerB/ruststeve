@@ -5,7 +5,7 @@ type: explanation
 tags: [wire, boundary, observations, design]
 aliases: [adapter, parse don't validate, S2c enum, C2s enum, Unknown variant, decode errors]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: ruststeve@c87ac55 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#Parse, don't validate. Turn raw protocol data into Observations at this boundary only."
@@ -36,7 +36,7 @@ The wire layer is the only place bytes exist. It turns frames into typed packets
 
 ## Gotchas
 - Decode the chunk columns here, off the tick path ([[wire-framing]]).
-- Keep-alive replies are protocol upkeep, not decisions. clojurecraft answers them in its packet reducer (`on-packet [:play :keep-alive]` emits the echo as an effect), far from its planner. Whether ruststeve answers them in the wire layer or as an automatic command from the core is open, but they must never wait on planning.
+- Keep-alive replies are protocol upkeep, not decisions. clojurecraft answers them in its packet reducer (`on-packet [:play :keep-alive]` emits the echo as an effect), far from its planner. ruststeve answers them in `protocol`'s `Session`, before any planning ([[connection]]).
 
 ## Limits
 Whether the packet → observation mapping lives in the wire crate or in `bot-shell` is not decided.

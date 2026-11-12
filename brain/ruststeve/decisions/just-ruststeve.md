@@ -6,7 +6,7 @@ tags: [decision, naming, reset, tooling]
 aliases: [not v2, the reset, functional branch, main branch, all Rust, no TypeScript tools]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@c5567a0 ruststeve-v1@9e1567f
+verifiedAgainst: ruststeve@6907139 ruststeve-v1@9e1567f
 sourceRefs:
   - "ruststeve:crates/brain-check/src/main.rs#//! Standard library only: the checker must build in seconds with no registry access."
   - "ruststeve-v1:CLAUDE.md#An autonomous Ender-Dragon speedrun bot (random seed, any%, no human input) — a Rust port of the TypeScript steve bot"

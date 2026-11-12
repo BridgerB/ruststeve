@@ -1,0 +1,16 @@
+[package]
+name = "bot"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "One bot against one server: joins, stays in the world (issue 03)"
+
+[[bin]]
+name = "bot"
+path = "src/main.rs"
+
+[dependencies]
+data = { path = "../data" }
+net = { path = "../net" }
+protocol = { path = "../protocol" }

@@ -6,7 +6,7 @@ tags: [datagen, data, tables, ci, packets]
 aliases: [crates/data, generated tables, JNI probe, jar probe, hardness, fuel values, collision shapes, entity data serializers, --oracle, datagen.yml, verify-stream, regenerate the tables, BlockKind, ItemKind, packet enums]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@a02c9a0 clojurecraft@be85a92
+verifiedAgainst: ruststeve@6907139 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/main.rs#//! datagen: the game's tables, generated from the vanilla server itself and committed as Rust in"
   - "ruststeve:crates/datagen/src/fetch.rs#pub fn server_jar(work: &Path) -> Result<PathBuf> {"

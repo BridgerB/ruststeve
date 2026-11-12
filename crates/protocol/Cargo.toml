@@ -1,0 +1,17 @@
+[package]
+name = "protocol"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Minecraft 26.1.2 (protocol 775) on the wire: primitives, framing, typed packets, states, the upkeep reducer (no I/O)"
+
+[dependencies]
+data = { path = "../data" }
+# zlib is computation, not I/O; the pure-Rust backend keeps the core free of C.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+md-5 = "0.10"
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"
