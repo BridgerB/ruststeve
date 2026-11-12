@@ -11,7 +11,9 @@ use std::process::{Command, ExitCode};
 
 /// The crates that hold the deterministic core: no I/O, no clock, no async runtime
 /// (brain/ruststeve/design/workspace-crates.md).
-const CORE_CRATES: [&str; 6] = ["protocol", "world", "physics", "memory", "plan", "sim"];
+const CORE_CRATES: [&str; 7] = [
+    "data", "protocol", "world", "physics", "memory", "plan", "sim",
+];
 
 /// Crates a core crate must never depend on, directly or through another crate: async runtimes and
 /// I/O libraries, and our own crates that touch sockets, files or the insight store.
