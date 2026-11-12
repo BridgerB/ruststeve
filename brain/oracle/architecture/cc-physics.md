@@ -5,7 +5,7 @@ type: reference
 tags: [oracle, physics, movement, water]
 aliases: [physics.clj, physics/step, out-of-liquid impulse, no buoyancy, tick-ms, movement]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92 steve@46c1264
 sourceRefs:
   - "clojurecraft:src/clojurecraft/physics.clj#\"Vanilla land and liquid movement as a pure function over the world's :player/* attributes. Full-cube"
@@ -16,6 +16,7 @@ related:
   - "[[oracle/architecture/_moc|Architecture]]"
   - "[[body-boundary]]"
   - "[[mc-water]]"
+  - "[[physics]]"
 ---
 
 # Client physics
@@ -34,7 +35,7 @@ The server does not move the player; the client simulates its own movement every
 - The route search treats liquids as walls and never enters a cell beside or over lava; blocks the physics cannot simulate (slabs, stairs, fences, doors) are awkward, routed around.
 
 ## For ruststeve
-Physics is deterministic given the world and controls, so it belongs in the core where replay covers it ([[body-boundary]]). It is the most numerically sensitive port: differential-test it against clojurecraft step by step.
+Physics is deterministic given the world and controls, so it belongs in the core where replay covers it ([[body-boundary]]). ruststeve's `physics` crate is a port of `step` checked bit-equal against it on 752 ticks of shared scenarios ([[physics]]).
 
 ## Gotchas
 - Water traps every bot: escape is by pressing into a bank or digging a notch, never by jumping ([[mc-water]]).

@@ -70,7 +70,7 @@ impl Header {
 }
 
 /// An input to the world, as it arrived.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EventRecord {
     /// A server packet, decompressed: the state it was read in, its id and its fields.
     Packet {
@@ -81,6 +81,8 @@ pub enum EventRecord {
     },
     /// The loop's clock and a random seed.
     Tick { now_ms: u64, seed: u64 },
+    /// What to press from now on (added in issue 06; older files simply have none).
+    Controls(physics::Controls),
 }
 
 /// An output of the world: a packet as it is written on the wire, or the compression switch.
@@ -273,6 +275,7 @@ impl Folder {
                 now_ms: *now_ms,
                 seed: *seed,
             },
+            EventRecord::Controls(c) => Event::Controls(*c),
             EventRecord::Packet { state, id, body } => {
                 if *state != self.state {
                     return Err(format!(

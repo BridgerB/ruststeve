@@ -5,8 +5,8 @@ type: reference
 tags: [shell, body, boundary, trait]
 aliases: [Body trait, adapter, simulator body, sim body, real server]
 status: verified
-lastUpdated: 2026-11-11
-verifiedAgainst: ruststeve@c87ac55 clojurecraft@be85a92
+lastUpdated: 2026-11-12
+verifiedAgainst: ruststeve@219c53c clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#/// Shell-side boundary to the game. An open set (azalea, sidecar, simulator), so a trait is right here (3.7)."
   - "ruststeve:FUNCTIONAL.md#The core doesn't care which option you pick, because it only sees Input and Output."
@@ -16,6 +16,7 @@ related:
   - "[[own-protocol-not-azalea]]"
   - "[[wire-boundary-parsing]]"
   - "[[cc-sim]]"
+  - "[[physics]]"
 ---
 
 # The Body boundary
@@ -29,7 +30,7 @@ The core only sees inputs and outputs, so what it talks to is behind one seam wi
 - The Minecraft version is pinned in config and written into every recording header.
 
 ## Physics
-The server expects the client to simulate its own movement. clojurecraft does it as a pure function inside its reducer, so it is recorded and replayed ([[cc-physics]]); ruststeve keeps physics in the core (`physics` crate), not in the body.
+The server expects the client to simulate its own movement. clojurecraft does it as a pure function inside its reducer, so it is recorded and replayed ([[cc-physics]]); ruststeve keeps physics in the core (`physics` crate, [[physics]]), not in the body: the world steps it on each tick and sends the movement packets as effects.
 
 ## See also
 - [[tick-loop]] - the caller.

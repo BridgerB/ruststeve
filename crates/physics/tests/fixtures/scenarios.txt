@@ -1,0 +1,107 @@
+# Physics scenarios shared by ruststeve's tests/differential.rs and the one-off clojurecraft
+# oracle that wrote expected.txt (clojurecraft.physics/step at be85a92).
+#
+#   scenario <name>
+#   solid x0 y0 z0 x1 y1 z1 <top>          inclusive block range; top 1.0 full, under 1 a flat box
+#   fluid x0 y0 z0 x1 y1 z1 <water|lava> <level>
+#   start x y z <ground|air>               feet position, on the ground or not
+#   ticks <n> <forward 0|1> <jump 0|1> <sneak 0|1> <yaw degrees>
+#   end
+# The first matching line answers a block; anything else is empty.
+
+scenario flat-walk
+solid -16 60 -16 16 63 16 1.0
+start 0.5 64 0.5 ground
+ticks 40 1 0 0 0
+end
+
+scenario wall
+solid 0 64 3 0 65 3 1.0
+solid -16 60 -16 16 63 16 1.0
+start 0.5 64 0.5 ground
+ticks 40 1 0 0 0
+end
+
+scenario jump-onto-block
+solid -1 64 2 1 64 2 1.0
+solid -16 60 -16 16 63 16 1.0
+start 0.5 64 0.5 ground
+ticks 5 1 0 0 0
+ticks 12 1 1 0 0
+ticks 25 1 0 0 0
+end
+
+scenario carpet
+solid -1 64 2 1 64 2 0.0625
+solid -16 60 -16 16 63 16 1.0
+start 0.5 64 0.5 ground
+ticks 40 1 0 0 0
+end
+
+scenario off-a-ledge
+solid -16 60 -16 16 63 1 1.0
+solid -16 52 2 16 55 16 1.0
+start 0.5 64 0.5 ground
+ticks 60 1 0 0 0
+end
+
+scenario sink-in-water
+solid -8 54 -8 8 58 8 1.0
+fluid -8 59 -8 8 66 8 water 0
+start 0.5 63 0.5 air
+ticks 60 0 0 0 0
+end
+
+scenario swim-up
+solid -8 54 -8 8 58 8 1.0
+fluid -8 59 -8 8 66 8 water 0
+start 0.5 60 0.5 air
+ticks 80 0 1 0 0
+end
+
+scenario sneak-down-in-water
+solid -8 54 -8 8 58 8 1.0
+fluid -8 59 -8 8 66 8 water 0
+start 0.5 64 0.5 air
+ticks 40 0 0 1 0
+end
+
+scenario bank-impulse
+solid -8 64 3 8 64 10 1.0
+solid -8 54 -8 8 63 10 1.0
+fluid -8 59 -8 8 63 2 water 0
+start 0.5 62.2 0.5 air
+ticks 80 1 1 0 0
+end
+
+scenario flowing-water
+solid -8 54 -8 8 58 8 1.0
+fluid -8 59 -8 8 59 8 water 3
+fluid -8 60 -8 8 63 8 water 8
+start 0.5 61 0.5 air
+ticks 50 1 0 0 30
+end
+
+scenario in-lava
+solid -8 54 -8 8 58 8 1.0
+fluid -8 59 -8 8 62 8 lava 0
+start 0.5 60 0.5 air
+ticks 30 1 0 0 0
+ticks 30 1 1 0 90
+end
+
+scenario turning-walk
+solid -32 60 -32 32 63 32 1.0
+start 0.5 64 0.5 ground
+ticks 20 1 0 0 0
+ticks 20 1 0 0 45
+ticks 20 1 0 0 90
+ticks 20 1 0 0 -135
+ticks 20 1 0 0 30.5
+end
+
+scenario held-jump-cooldown
+solid -16 60 -16 16 63 16 1.0
+start 0.5 64 0.5 ground
+ticks 60 0 1 0 0
+end

@@ -5,7 +5,7 @@ type: reference
 tags: [game, water, lava, physics, survival]
 aliases: [drowning, swim out, out-of-liquid impulse, buoyancy, lava safety, water traps]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92 steve@46c1264
 sourceRefs:
   - "clojurecraft:src/clojurecraft/physics.clj#the one real lift, an impulse of 0.3 when pressing into a bank whose top is free, asked while"
@@ -15,6 +15,7 @@ sourceRefs:
 related:
   - "[[game/_moc|Game]]"
   - "[[cc-physics]]"
+  - "[[physics]]"
   - "[[hist-walls]]"
 ---
 
@@ -32,4 +33,5 @@ related:
 
 ## See also
 - [[cc-physics]] - the pure physics step.
+- [[physics]] - ruststeve's port of it.
 - [[hist-walls]] - water as the second wall.
