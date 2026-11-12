@@ -3,7 +3,7 @@
 //! ```text
 //! cargo run -q -p xtask -- deps-boundary       the core crates depend on nothing that does I/O
 //! cargo run -q -p xtask -- commit-msg <file>   a commit message keeps the repository's rules
-//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar]
+//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar] [--difficulty peaceful]
 //!                                            a local vanilla 26.1.2 server (offline, simulation distance 3)
 //! ```
 //!
@@ -191,6 +191,7 @@ fn server(args: &[String]) -> ExitCode {
     let mut dir = "target/server".to_owned();
     let mut port = "25565".to_owned();
     let mut jar = "target/datagen/server.jar".to_owned();
+    let mut difficulty = "normal".to_owned();
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         let Some(value) = it.next() else {
@@ -201,6 +202,7 @@ fn server(args: &[String]) -> ExitCode {
             "--dir" => dir.clone_from(value),
             "--port" => port.clone_from(value),
             "--jar" => jar.clone_from(value),
+            "--difficulty" => difficulty.clone_from(value),
             other => {
                 eprintln!("unknown flag {other}");
                 return ExitCode::FAILURE;
@@ -214,7 +216,7 @@ fn server(args: &[String]) -> ExitCode {
         std::fs::write(dir.join("eula.txt"), "eula=true\n")?;
         std::fs::write(
             dir.join("server.properties"),
-            format!("{SERVER_PROPERTIES}server-port={port}\n"),
+            format!("{SERVER_PROPERTIES}server-port={port}\ndifficulty={difficulty}\n"),
         )
     };
     if let Err(e) = setup() {

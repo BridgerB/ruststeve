@@ -32,7 +32,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `verify-stream` | logs in to a real server and fails on a packet id `data` lacks (runners only) | sockets |
 | `protocol` | primitives, framing, typed packets, states, the upkeep `Session` ([[connection]]) | no |
 | `world` | `World`, `Event`, `Effect`, `step`; columns, overlay, the player ([[world-value]]) | no |
-| `physics` | vanilla movement as a pure function, collision, fluids | no |
+| `physics` | vanilla movement as a pure function, collision, fluids; bit-equal to clojurecraft ([[physics]]) | no |
 | `memory` | sightings with time, indexed by position and column; `Seen` enforces no X-ray ([[memory-sightings]]) | no |
 | `plan` | goal table, needs planner, intents, executors, progress invariants | no |
 | `sim` | the server model: blocks, fluids, mobs, combat, simulation distance | no |

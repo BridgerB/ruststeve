@@ -6,8 +6,9 @@ tags: [recording, replay, determinism, format]
 aliases: [Record, Header, Checkpoint, EventRecord, EffectRecord, Recorder, replay verify, .rsr]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@9e6cbcd clojurecraft@be85a92
+verifiedAgainst: ruststeve@219c53c clojurecraft@be85a92
 sourceRefs:
+  - "ruststeve:crates/record/src/lib.rs#    Controls(physics::Controls),"
   - "ruststeve:crates/record/src/lib.rs#pub enum Record {"
   - "ruststeve:crates/record/src/lib.rs#pub fn step(&mut self, e: &EventRecord) -> Result<Vec<EffectRecord>, String> {"
   - "ruststeve:crates/record/build.rs#println!(\"cargo:rustc-env=RUSTSTEVE_COMMIT={commit}\");"
@@ -33,7 +34,7 @@ Every run can be a file (`bot --record <path>`, `.rsr`) that replays exactly, of
 ## What is in a file
 A zstd stream of length-prefixed MessagePack records with named fields ([[recording-format]]):
 1. **`Header`**: format version, commit, dirty, Minecraft version, protocol, bot name, server label, seed, target triple, previous segment.
-2. **`Event`**: either a server packet **as it arrived** (the state it was read in, its id, its decompressed bytes; replay decodes it again, so chunk columns are never stored twice) or a **tick** (the loop's clock and a fresh seed, every 50 ms: time and randomness are inputs, [[sync-core-and-time]]).
+2. **`Event`**: either a server packet **as it arrived** (the state it was read in, its id, its decompressed bytes; replay decodes it again, so chunk columns are never stored twice), a **tick** (the loop's clock and a fresh seed, every 50 ms: time and randomness are inputs, [[sync-core-and-time]]), or **controls** (what the body presses: forward, jump, sneak, yaw; [[physics]]), added by accretion in issue 06.
 3. **`Effects`**: what that step produced, each packet as its encoded bytes.
 4. **`Checkpoint`**: the whole `World` (serde on every world type; kinds as protocol ids) every 1,200 server ticks, a minute of game time.
 5. `Note`.
