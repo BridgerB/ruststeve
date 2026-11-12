@@ -9,7 +9,8 @@
 //! `set_time` every 20 ticks, keep-alives every 15 s of ticks and the kick when one goes
 //! unanswered. Issue 08b adds the server's movement check and falls, read from the 26.1.2 jar
 //! (`ServerGamePacketListenerImpl.handleMovePlayer`, `Entity.checkFallDamage`,
-//! `LivingEntity.calculateFallDamage`): a correction is the server's verdict on a move.
+//! `LivingEntity.calculateFallDamage`): a correction is the server's verdict on a move. Issue
+//! 10b adds digging, drops and pickup and window 0's crafting (`survival`).
 
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -137,6 +138,8 @@ pub struct Sim {
     pub health: f32,
     /// Server corrections sent: the parity table's `corrected`.
     pub corrections: u64,
+    /// Digging, item entities and window 0 (issue 10b).
+    pub survival: survival::Survival,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -174,7 +177,14 @@ impl Sim {
             fall_distance: 0.0,
             health: 20.0,
             corrections: 0,
+            survival: survival::Survival::new(0),
         }
+    }
+
+    /// The model's randomness (where a drop lands, how it flies) from the run's seed.
+    pub fn seeded(mut self, seed: u64) -> Self {
+        self.survival = survival::Survival::new(seed);
+        self
     }
 
     /// Whether the connection is open.
@@ -256,8 +266,33 @@ impl Sim {
                 let pos = self.pos;
                 self.on_move(pos, flags & 1 != 0)
             }
+            (
+                Phase::Play,
+                C2s::PlayerAction {
+                    status,
+                    pos,
+                    sequence,
+                    ..
+                },
+            ) => self.on_player_action(*status, *pos, *sequence),
+            (Phase::Play, C2s::SetCarriedItem { slot }) => {
+                self.on_hold(*slot);
+                Ok(Vec::new())
+            }
+            (
+                Phase::Play,
+                C2s::ContainerClick {
+                    window,
+                    state_id,
+                    slot,
+                    button,
+                    mode,
+                },
+            ) => self.on_click(*window, *state_id, *slot, *button, *mode),
+            (Phase::Play, C2s::ContainerClose { window }) => self.on_close(*window),
             (Phase::Play, C2s::PlayerLoaded)
             | (Phase::Play, C2s::ChunkBatchReceived { .. })
+            | (Phase::Play, C2s::Swing { .. })
             | (Phase::Play, C2s::Pong { .. }) => Ok(Vec::new()),
             (phase, other) => {
                 self.violations.push(format!("{other:?} in {phase:?}"));
@@ -289,6 +324,14 @@ impl Sim {
                 saturation: 5.0,
             },
         )?);
+        // placeNewPlayer: the selected slot, then initMenu's whole window 0 (state id 1).
+        out.push(wire(
+            State::Play,
+            &S2c::SetHeldSlot {
+                slot: i32::from(self.survival.held),
+            },
+        )?);
+        out.push(self.full_state()?);
         Ok(out)
     }
 
@@ -447,6 +490,7 @@ impl Sim {
             return self.correct(old);
         }
         self.pos = to;
+        self.survival.on_ground = on_ground;
         let mut out = self.fall(delta[1], on_ground)?;
         out.extend(self.chunks_around()?);
         Ok(out)
@@ -571,6 +615,11 @@ impl Sim {
             self.keep_alive = Some((id, self.ticks));
             out.push(wire(State::Play, &S2c::KeepAlive { id })?);
         }
+        // The game mode's tick, the item entities, then the player's touch and its menu's
+        // changes (ServerPlayer.doTick's broadcastChanges).
+        out.extend(self.tick_digging()?);
+        out.extend(self.tick_items()?);
+        out.extend(self.broadcast_changes()?);
         Ok(out)
     }
 
@@ -637,6 +686,7 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
     })
 }
 
+pub mod survival;
 pub mod terrain;
 
 impl ModelWorld {

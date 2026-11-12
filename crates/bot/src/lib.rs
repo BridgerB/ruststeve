@@ -428,12 +428,19 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     min_health_in_script = Some(min_health_in_script.map_or(h, |m: f32| m.min(h)));
                 }
                 let c = s.controls(script_tick);
+                let acts = s.acts(script_tick, &run.world);
                 script_tick += 1;
                 if Some(c) != last_controls {
                     last_controls = Some(c);
                     if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
                         break Ending::Error { why: e };
                     }
+                }
+                if let Some(e) = acts
+                    .into_iter()
+                    .find_map(|a| run.step(&conn, EventRecord::Act(a), Event::Act(a)).err())
+                {
+                    break Ending::Error { why: e };
                 }
             }
             if let Some(p) = planner.as_mut()

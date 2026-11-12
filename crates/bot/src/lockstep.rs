@@ -69,12 +69,27 @@ struct Counts {
 /// `settle` ticks after the body is placed (a real run's start settles the same 20). Joins
 /// first (the opening packets), then ticks.
 pub fn run(
-    mut sim: Sim,
+    sim: Sim,
     name: &str,
     seed: u64,
     ticks: u64,
     settle: u64,
     mut controls: impl FnMut(&World, u64) -> physics::Controls,
+) -> Run {
+    run_acting(sim, name, seed, ticks, settle, |w, t| {
+        (controls(w, t), Vec::new())
+    })
+}
+
+/// `run`, with the controller also acting on the world (digs, clicks) each tick: issue 10b's
+/// dig and craft moments, issue 10c's tasks.
+pub fn run_acting(
+    mut sim: Sim,
+    name: &str,
+    seed: u64,
+    ticks: u64,
+    settle: u64,
+    mut controls: impl FnMut(&World, u64) -> (physics::Controls, Vec<world::Act>),
 ) -> Run {
     let mut world = World::new();
     let mut counts = Counts::default();
@@ -112,11 +127,20 @@ pub fn run(
             if let Some(h) = world.player.health {
                 min_health_in_script = Some(min_health_in_script.map_or(h, |m: f32| m.min(h)));
             }
-            let c = controls(&world, walk_tick);
+            let (c, acts) = controls(&world, walk_tick);
             walk_tick += 1;
             if pressed != Some(c) {
                 pressed = Some(c);
                 world.step(&Event::Controls(c));
+            }
+            for a in acts {
+                for e in world.step(&Event::Act(a)) {
+                    if let Effect::Send(p) = e
+                        && let Ok(out) = sim.step(&In::Packet(p))
+                    {
+                        to_bot.extend(out);
+                    }
+                }
             }
         }
         let effects = world.step(&Event::Tick {

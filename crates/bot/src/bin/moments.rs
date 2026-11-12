@@ -26,8 +26,9 @@ use world::World;
 
 /// Server ticks a start settles before the script, the same in real and sim (bot::run's).
 const SETTLE: u64 = bot::SETTLE_TICKS;
-/// The table's stated tolerance: at least this many of the 50 moments match in every field.
-const TOLERANCE: usize = 48;
+/// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
+/// 08's 50; 78 of 80 since issue 10b's dig and craft rows).
+const TOLERANCE: usize = 78;
 
 struct Args {
     cmd: String,
@@ -122,13 +123,41 @@ fn outcome(
         (false, Some(h)) if h < 20.0 => Health::Hurt,
         _ => Health::Full,
     };
+    let mut inventory: std::collections::BTreeMap<String, i32> = std::collections::BTreeMap::new();
+    let name = |k: data::ItemKind| k.name().map_or_else(|| format!("{k:?}"), str::to_owned);
+    let held = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(s, _)| **s >= 1)
+        .map(|(_, st)| *st)
+        .chain(w.inventory.carried);
+    for (k, n) in held {
+        *inventory.entry(name(k)).or_default() += n;
+    }
+    let grid = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(s, _)| **s <= 4)
+        .map(|(_, (_, n))| *n)
+        .chain(w.inventory.carried.map(|(_, n)| n))
+        .sum();
     Some(Outcome {
         cell: body.pos.map(|v| v.floor() as i32),
         on_ground: body.on_ground,
         in_water: body.in_water,
         corrected: w.session.teleports > at,
         health,
+        inventory,
+        grid,
     })
+}
+
+/// A moment's `give` (`oak_log 1`) as a stack.
+fn give_of(g: &str) -> Option<(data::ItemKind, i32)> {
+    let (item, count) = g.split_once(' ')?;
+    Some((data::ItemKind::from_name(item)?, count.parse().ok()?))
 }
 
 fn save(out: &Path, r: &MomentResult) -> Result<(), String> {
@@ -163,6 +192,11 @@ fn real(a: &Args) -> Result<(), String> {
             // water for its chunks would drown on a clock the model does not keep, so the real
             // side breathes. Stated in the report; drowning joins the table with issue 12.
             let breathe = format!("effect give {name} minecraft:water_breathing 600 0 true");
+            let gives: Vec<String> = m
+                .give
+                .iter()
+                .map(|g| format!("give {name} minecraft:{g}"))
+                .collect();
             let opts = bot::Opts {
                 host: a.host.clone(),
                 port: a.port,
@@ -176,7 +210,8 @@ fn real(a: &Args) -> Result<(), String> {
                 start: Some(Box::new(move || {
                     let mut r = rcon::Rcon::connect(&rcon_addr, &password)?;
                     r.command(&breathe)?;
-                    r.command(&tp).map(|_| ())
+                    r.command(&tp)?;
+                    gives.iter().try_for_each(|g| r.command(g).map(|_| ()))
                 })),
                 verbose: false,
                 relay: None,
@@ -236,14 +271,19 @@ fn sim(a: &Args) -> Result<(), String> {
         let (captured, start) = start_of(a, &landings, m)?;
         let script =
             Script::parse(&m.script).ok_or_else(|| format!("{}: no script {}", m.id, m.script))?;
-        let model = sim::Sim::new(config, captured.model(start)?);
-        let run = bot::lockstep::run(
+        let mut model = sim::Sim::new(config, captured.model(start)?).seeded(i as u64 + 1);
+        for g in &m.give {
+            model
+                .survival
+                .give(give_of(g).ok_or_else(|| format!("{}: give {g}", m.id))?);
+        }
+        let run = bot::lockstep::run_acting(
             model,
             &format!("rs-m{i:02}"),
             i as u64 + 1,
             SETTLE + m.ticks,
             SETTLE,
-            |_, t| script.controls(t),
+            |w, t| (script.controls(t), script.acts(t, w)),
         );
         let r = MomentResult {
             moment: m.id.clone(),

@@ -1,18 +1,20 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 50 moments, running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 80 moments (walks, digs, crafts), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
-aliases: [parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
+aliases: [dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@d65565e
+verifiedAgainst: ruststeve@3042214
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
   - "ruststeve:crates/results/src/parity.rs#pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {"
   - "ruststeve:crates/bot/src/bin/simrace.rs#fn simrace(a: &Args) -> Result<bool, String> {"
   - "ruststeve:config/moments.toml#id = \"m00-0\""
+  - "ruststeve:config/moments.toml#id = \"d00-late\""
+  - "ruststeve:crates/bot/src/script.rs#pub fn acts(self, tick: u64, w: &World) -> Vec<Act> {"
   - "ruststeve:.github/workflows/parity.yml#./target/release/moments compare parity/real parity/sim --report parity/parity.md"
 related:
   - "[[ruststeve/design/_moc|Design]]"
@@ -28,7 +30,7 @@ A sim number counts only after the model agrees with a real server at the same m
 ## Key files
 - `crates/bot/src/bin/capture.rs`, `src/captured.rs`: captured worlds.
 - `crates/bot/src/bin/moments.rs` (`real`, `sim`, `compare`), `crates/results/src/parity.rs`.
-- `config/landings.toml` (10 landings), `config/moments.toml` (50 moments).
+- `config/landings.toml` (10 landings), `config/moments.toml` (80 moments).
 - `.github/workflows/parity.yml`; `crates/bot/src/bin/simrace.rs` and `simrace.yml` for sim races.
 
 ## How it works
@@ -36,8 +38,10 @@ A sim number counts only after the model agrees with a real server at the same m
 - **A moment**: a landing, a start offset (the start stands on the captured surface there), a script (`still`, `straight:<yaw>`, `jump:<yaw>`), 160 ticks. Five per landing, six blocks apart, each walking away from the centre (vanilla players push each other).
 - **Real**: the same fresh server, peaceful, bots in waves of 10, each with a fresh name (the server saves a player's place and health by name); RCON gives water breathing and teleports to the start; the script begins after 20 physics ticks with the ground loaded and no teleport since.
 - **Sim**: the model in the captured world, the bot spawning at the start, in lockstep, the same settle and script.
-- **The outcome class**, compared field by field: the final block cell, on the ground, in water, corrected (a teleport after the script began), and the lowest health during the script (full, hurt, dead).
-- **The stated tolerance**: at least 48 of 50 moments match in every field. A mismatch is a model or harness bug until shown otherwise, never tuned away.
+- **Dig and craft rows** (issue 10b), after the walks so the real world's holes come after every walk row: per landing a dig of the block under the feet with FINISH at tick 30 (`dig:30`) and at tick 5 (`dig:5`, a delayed destroy), and a craft (`craft:planks|sticks|table`) from items a row `give`s (`/give` by RCON in real, `Survival::give` in the model). A script now also acts (`Script::acts`): a craft sends its next click only once the last moved the window's state id.
+- **The outcome class**, compared field by field: the final block cell, on the ground, in water, corrected (a teleport after the script began), the lowest health during the script (full, hurt, dead), and since 10b the inventory by item name (slots 1-45 and the cursor) and the count in the grid, result and cursor.
+- **Random drops are not a class**: the model's roll is seeded, not vanilla's, so a dig row stands where neither the dug block nor the one on it drops by chance (leaves a sapling 1 in 20, short grass a seed 1 in 8); seven rows were moved for it, found in the captured worlds.
+- **The stated tolerance**: all but 2 of the moments match in every field (78 of 80; 48 of 50 before 10b). A mismatch is a model or harness bug until shown otherwise, never tuned away.
 - **simrace**: lanes of lockstep runs in generated worlds, the same case and batch files with `source = sim`, released as `race-sim-<run>` so the insight store keeps sim beside real, never mixed.
 
 ## What the table found
@@ -49,9 +53,12 @@ The first table matched 19 of 50. Each cause was named from a recording, then fi
 5. **Saved players**: a reused bot name rejoined where the last run left it, hurt.
 Then: **50 of 50** locally.
 
+Issue 10b's 30 rows first matched 28: the bot's world kept a stale cursor (a click claims an empty cursor and the server answers only a difference, so the world now forgets its cursor as it clicks, [[wire-container-click]]); two leaf rows differed by a sapling roll (moved). Then a grass row's leaf litter popped off in real only: the model now breaks what rests on a broken block. Then **80 of 80** locally.
+
 ## Limits
 - No mobs (peaceful) and no air or drowning yet: the real side gives water breathing. Both join the table with issue 12 (survival), as rows, before any sim number about them counts.
-- Moments test movement, falls and the server's corrections in the terrain the bot meets; digging, items and windows add moments with their issues.
+- Moments test movement, falls, the server's corrections, digging by hand, drops and pickup and the 2x2 grid; tools, placing and other windows add moments with their issues.
+- A dig row checks whether the block broke by the row's end, not the tick it broke on.
 
 ## See also
 - [[server-model]] - what the model models.

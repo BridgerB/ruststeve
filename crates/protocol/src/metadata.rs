@@ -74,6 +74,68 @@ pub fn read_metadata(r: &mut Reader<'_>) -> Result<Vec<(u8, MetaValue)>, ParseEr
     }
 }
 
+fn serializer_id(name: &str) -> i32 {
+    ENTITY_DATA_SERIALIZERS
+        .iter()
+        .find(|s| s.name == name)
+        .and_then(|s| i32::try_from(s.id).ok())
+        .unwrap_or(-1)
+}
+
+/// Entries as a server writes them, for the server model (the inverse of `read_metadata`).
+pub fn write_metadata(
+    w: &mut crate::bytes::Writer,
+    entries: &[(u8, MetaValue)],
+) -> Result<(), crate::EncodeError> {
+    for (index, value) in entries {
+        w.u8(*index);
+        match value {
+            MetaValue::Byte(b) => {
+                w.varint(serializer_id("BYTE"));
+                w.u8(*b);
+            }
+            MetaValue::Int(v) => {
+                w.varint(serializer_id("INT"));
+                w.varint(*v);
+            }
+            MetaValue::Long(v) => {
+                w.varint(serializer_id("LONG"));
+                w.varlong(*v);
+            }
+            MetaValue::Float(v) => {
+                w.varint(serializer_id("FLOAT"));
+                w.f32(*v);
+            }
+            MetaValue::String(s) => {
+                w.varint(serializer_id("STRING"));
+                w.string(s)?;
+            }
+            MetaValue::Item(s) => {
+                w.varint(serializer_id("ITEM_STACK"));
+                crate::slot::write_slot(w, *s);
+            }
+            MetaValue::Bool(b) => {
+                w.varint(serializer_id("BOOLEAN"));
+                w.bool(*b);
+            }
+            MetaValue::Direction(d) => {
+                w.varint(serializer_id("DIRECTION"));
+                w.varint(*d);
+            }
+            MetaValue::BlockState(s) => {
+                w.varint(serializer_id("OPTIONAL_BLOCK_STATE"));
+                w.varint(s.map_or(0, |v| v as i32));
+            }
+            MetaValue::Pose(p) => {
+                w.varint(serializer_id("POSE"));
+                w.varint(*p);
+            }
+        }
+    }
+    w.u8(END);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -653,6 +653,11 @@ impl World {
                     at_tick: self.ticks,
                 });
                 self.clicks_sent += 1;
+                // The click claims an empty cursor, and the server sends the cursor only when it
+                // differs from the claim (`setRemoteCarried`, then `broadcastChanges`): so the
+                // cursor is forgotten here and a `set_cursor_item` restores it when it holds
+                // something (clojurecraft's `click` does the same).
+                self.inventory.carried = None;
                 vec![Effect::Send(C2s::ContainerClick {
                     window: 0,
                     state_id: self.inventory.state_id,
@@ -863,6 +868,9 @@ impl World {
                 }
             }
             S2c::ContainerClose { .. } => {}
+            // The cursor carries no state id: it never answers a click on its own (the slot the
+            // click emptied or filled does).
+            S2c::SetCursorItem { item } => self.inventory.carried = Inventory::stack(*item),
             S2c::PlayerCombatKill { player_id, death } => {
                 if Some(*player_id) == self.player.entity_id {
                     self.death = Some(death.clone());

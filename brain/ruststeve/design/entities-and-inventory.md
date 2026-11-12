@@ -6,7 +6,7 @@ tags: [world, entities, metadata, inventory, slots]
 aliases: [Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@50f68a3 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3042214 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -36,7 +36,7 @@ related:
 ## The inventory (window 0)
 - `World::inventory: Inventory { slots: BTreeMap<menu slot, (ItemKind, count)>, state_id, carried, truncated }`: only slots holding at least one item are present, so no count is ever zero or negative.
 - `container_set_content` (window 0) replaces it, `container_set_slot` sets one menu slot, `set_player_inventory` sets one by inventory index, mapped by `Inventory::menu_slot`: 0-8 → 36-44, 9-35 stay, 36-39 armour (feet to head) → 8-5, 40 → 45.
-- Since issue 10a: `held` (the hotbar slot, set by `Act::Hold` and by the server's `set_held_slot`), `click` (the one pending click, cleared when window 0's state id moves, [[wire-container-click]]) with `clicks_sent`/`clicks_answered`, and `pickups`: the bot's own `take_item_entity`s (item entity, amount, tick), a ring of recent ones. `Entity::item` reads an item entity's stack at metadata index 8. `container_close` from the server drops the pending click.
+- Since issue 10a: `held` (the hotbar slot, set by `Act::Hold` and by the server's `set_held_slot`), `click` (the one pending click, cleared when window 0's state id moves, [[wire-container-click]]) with `clicks_sent`/`clicks_answered`, and `pickups`: the bot's own `take_item_entity`s (item entity, amount, tick), a ring of recent ones. `Entity::item` reads an item entity's stack at metadata index 8. `container_close` from the server drops the pending click. `set_cursor_item` (10b) sets the cursor; a click empties it first ([[wire-container-click]]).
 - Slots read the components clojurecraft reads (`max_stack_size`, `max_damage`, `damage`, `repair_cost`, `unbreakable`); any other ends the frame as `Slot::Truncated` (the item and count still right) and is counted in `truncated` ([[wire-slots]]).
 
 ## Tests

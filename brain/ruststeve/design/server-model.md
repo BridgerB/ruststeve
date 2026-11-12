@@ -3,10 +3,10 @@ title: The server model
 description: How ruststeve plays without a Java server - the sim crate (the vanilla server as a pure reducer, grown per issue), S2c encoders that make the model's bytes a server's, the model as the bot's body behind the same channels a socket gives, and what it models so far.
 type: reference
 tags: [sim, model, server, body, closed-loop]
-aliases: [sim crate, Sim, server model, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
+aliases: [sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@50f68a3 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3042214 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -16,6 +16,10 @@ sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#fn on_move(&mut self, to: [f64; 3], on_ground: bool) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn fall(&mut self, dy: f64, on_ground: bool) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/terrain.rs#pub fn world(seed: u64, radius: i32) -> Result<ModelWorld, EncodeError> {"
+  - "ruststeve:crates/sim/src/survival.rs#fn stop_destroy(&mut self, pos: (i32, i32, i32)) -> Result<Vec<Wire>, EncodeError> {"
+  - "ruststeve:crates/sim/src/survival.rs#pub fn craft_result(grid: [Option<ItemKind>; 4]) -> Option<Stack> {"
+  - "ruststeve:crates/sim/src/survival.rs#pub(crate) fn broadcast_changes(&mut self) -> Result<Vec<Wire>, EncodeError> {"
+  - "ruststeve:crates/sim/tests/survival.rs#fn an_early_finish_is_a_delayed_destroy_not_an_abort() {"
   - "ruststeve:crates/bot/src/lockstep.rs#pub fn run("
   - "ruststeve:crates/bot/tests/worlds.rs#fn the_bot_walks_a_thousand_generated_worlds_clean() {"
   - "clojurecraft:src/clojurecraft/sim.clj#Two ways to drive it: run folds bot and model together, deterministic and fast (generated worlds); connect puts the model on a thread behind a channel pair shaped like conn/open!'s, so main's own loop (its clock, its effects, its tap) runs against it with no Java process."
@@ -48,9 +52,18 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **Falls**: falling (not in water) adds to the fall distance; landing hurts `floor(fall + 1e-6 - 3)` (safe fall 3, multiplier 1) and resets it; moving up resets it. A hurt sends `damage_event` (type `fall`) and `set_health`; at 0 health `player_combat_kill` with `death.attack.fall`.
 - Not modelled: the server's own velocity for the player (knockback adds to the allowance), elytra, sleeping, vehicles.
 
+## Digging, drops, pickup and window 0 (10b, read from the 26.1.2 jar)
+`crates/sim/src/survival.rs`, each rule read with `javap` ([[mc-dig-timing]]):
+- **Digging** (`ServerPlayerGameMode`): START times the dig from the server's own tick; the progress per tick is `getDestroyProgress` (speed / hardness / 30, or 100 when the hand may not harvest it; the hand's speed 1, × 0.2 with the eyes in water, ÷ 5 off the ground). FINISH is accepted once progress × (ticks + 1) ≥ 0.7. **An earlier FINISH is a delayed destroy**: the server's tick keeps adding progress and breaks the block itself at 1.0 (one pending at a time). Every action is acknowledged with `block_changed_ack`, after the block update. Out of reach (eye to box over 4.5 + 1) the action does nothing but the ack.
+- **Drops**: the block's first loot pool from the generated tables, only when the hand may harvest it; `Block.popResource`'s item entity (random offset ±0.25, velocity ±0.1 sideways and 0.2 up, pickup delay 10) from the model's seeded roll; sent as `add_entity` and `set_entity_data` (the stack at index 8). Items fall (gravity 0.04, drag 0.98, ground friction 0.588) straight down; the client is told where every 20 ticks (`entity_position_sync`); they despawn at 6,000 ticks.
+- **Support**: a block that rests on the broken one (plants, leaf litter, flower beds, snow, torches, carpets: an allow-list of the blocks report's `definition`) pops off first with its own drops, as many as its `segment_amount`; a two-high plant loses both halves. Found by the parity table (leaf litter on grass).
+- **Pickup**: `Player.aiStep`'s touch box (the player's grown 1 sideways and 0.5 up) over an item with no delay left; `Inventory.add` (same-item stacks: the held slot, the offhand, then inventory order; then the first free slot, the hotbar first); `take_item_entity`, `remove_entities`, then the menu's changes.
+- **Window 0**: the 46 menu slots, the cursor, the state id and the server's view of the client's (remote) slots and cursor. A click: the client's claim becomes the remote view (the bot claims nothing: an empty cursor), `doClick` runs (mode 0 pick/place/swap/merge with left and right, the result slot taken whole; mode 1 the result crafted again into 9-44 from the hotbar's end while it fits, other slots as `InventoryMenu.quickMoveStack`), then **either** `broadcastChanges` (one `container_set_slot` per changed slot, each a new state id, and `set_cursor_item` when the cursor differs from the claim) **or**, for a stale state id, the whole window. A grid change sends the result at once with its own state id (`slotChangedCraftingGrid`), so it arrives first. The result comes from the generated recipes (shaped as laid or mirrored, shapeless). A click that changes nothing sends nothing. Closing window 0 puts the grid back and throws the cursor. The join sends `set_held_slot` and window 0 at state id 1.
+- Every stack the model makes stacks to 64 (the tables do not carry `max_stack_size` yet; tools, which stack to 1, come with issue 11).
+
 ## Generated worlds and lockstep (08b)
 - `sim::terrain::world(seed, radius)`: seeded rolling ground (value noise), one-block steps, still water to y 62 over sand, carpets, cobblestone pillars, encoded as real chunk columns; a pure function of its seed.
-- `bot::lockstep::run`: the bot's world and the model folded together in one thread with no clock: each tick the model ticks, the world ticks, and every packet is delivered both ways before the next. A run is a pure function of world, seed and code.
+- `bot::lockstep::run`: the bot's world and the model folded together in one thread with no clock: each tick the model ticks, the world ticks, and every packet is delivered both ways before the next. A run is a pure function of world, seed and code. `run_acting` lets the controller act too (digs, clicks); `Sim::seeded` gives the model's rolls the run's seed.
 
 ## Evidence
 - **1,000 generated worlds** (`the_bot_walks_a_thousand_generated_worlds_clean`, CI's `worlds` job, release): every run placed, no correction, no violation, no decode error, no kick, no death; walked median 31 blocks in 400 ticks. A run repeats exactly from its seed. The first run found 1 world of 1,000 where the server corrected the bot 31 times at a water bank: a bot physics bug, fixed in [[physics]] (vanilla's 1e-7 collision tolerance).
@@ -58,7 +71,9 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - `the_bot_joins_the_model_and_walks`: the bot joins a flat model world, is placed on the grass, walks its staircase past 5 blocks, runs to its 100-tick cap with no correction, no decode error, and its recording replays with 0 mismatches (done-condition 2's first half).
 
 ## Limits
-- Capture, simrace and the parity table: [[parity-table]]. Then digging (11), mobs, air and drowning (12) and the rest as their issues come.
+- Capture, simrace and the parity table: [[parity-table]]. Then tools and placing (11), mobs, air and drowning (12) and the rest as their issues come.
+- Drop rolls are the model's own seeded randomness, never vanilla's `RandomSource`: a chance drop (a sapling, a seed) is not an outcome the table can compare.
+- Items move only down; their sideways drift is not collided. Seagrass and kelp, which turn to water, are not popped. Item merging is not modelled.
 - The server-side move uses the bot's own collision (`land_tick`), not vanilla's `Entity.collide` order (y, then the larger of x and z first): the parity table is what says whether it matters.
 - `chunk_batch_start` goes out as its id with an empty body; the bot counts it unknown.
 - `ModelWorld::ground` and `placeable` place a player as vanilla does (under leaves, two free cells): found by issue 09's measure ([[planner]]).

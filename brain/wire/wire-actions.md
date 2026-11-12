@@ -6,7 +6,7 @@ tags: [wire, actions, attack, dig, use-item]
 aliases: [attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@50f68a3
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@3042214
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub enum Act {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_dig_carries_its_sequence() {"

@@ -210,6 +210,19 @@ impl Writer {
         write_varint(&mut self.buf, v);
     }
 
+    /// LEB128 of the unsigned 64-bit form, at most 10 bytes.
+    pub fn varlong(&mut self, v: i64) {
+        let mut u = v as u64;
+        loop {
+            if u & !0x7f == 0 {
+                self.buf.push(u as u8);
+                return;
+            }
+            self.buf.push((u as u8 & 0x7f) | 0x80);
+            u >>= 7;
+        }
+    }
+
     pub fn string(&mut self, s: &str) -> Result<(), EncodeError> {
         let n = i32::try_from(s.len()).map_err(|_| EncodeError::TooLong)?;
         self.varint(n);

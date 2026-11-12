@@ -156,6 +156,7 @@ impl Session {
             | S2c::SetHeldSlot { .. }
             | S2c::TakeItemEntity { .. }
             | S2c::ContainerClose { .. }
+            | S2c::SetCursorItem { .. }
             | S2c::Unknown { .. } => Vec::new(),
         };
         self.state = self.state.after_receive(p);
