@@ -48,7 +48,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 
 Binaries: `bot` (one bot against a server; exists), `race` (a lane of bots on one server, case and batch files; exists, [[race-and-results]]), `simrace` (many bots against the model, in parallel), `replay` (fold a recording, verify effects), `why` (fold to time t and explain the planner's choice), `datagen` (the vanilla jar and reports into `crates/data`, now a crate of its own). Data files: `config/` (the race config and starts, [[race-and-results]]; goals, thresholds and problem statements join it). Workflows rebuilt lean on the runners ([[runners-not-the-mac]]).
 
-The handoff's `store` crate (a Postgres writer) becomes `ingest`: a binary that loads batch and case files into an embedded SurrealDB for insight, kept out of the core's build ([[data-out]]).
+The handoff's `store` crate (a Postgres writer) became `ingest`: a binary that loads batch and case files into an embedded SurrealDB for insight; its own workspace, excluded from the root, so the core's build never sees SurrealDB ([[data-out]], [[insight-store]]).
 
 ## Enforcement
 - The no-I/O crates must not depend on `net`, `rcon`, `record`, `tokio` or any socket or file crate; a CI check on `cargo tree` holds it.

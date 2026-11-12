@@ -6,7 +6,7 @@ tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@e25875e clojurecraft@be85a92
+verifiedAgainst: ruststeve@3f52970 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -46,9 +46,10 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - **A case file per ended run** (`<bot>.case.rsc`, named MessagePack + zstd, and `<bot>.case.txt`): run, bot, commit, lane, start, stage reached, ending, the death text, the first hit and every hit in the last minute (damage type by name, attacker kinds), what the bot was doing and why, items gained and lost against the start inventory, swings, health, place, server ticks, wall time, the recording and its replay command. A bot that never connects still gets one.
 - **A batch file per lane** (`batch.rsb`): the header (run, commit, lane, start, source, config hash, bots, server, the server's tick rate), a row per run with its signature `[ending killer doing why]`, and **coverage**: cases/runs, recordings/runs, events dropped, unknown packets. The race exits non-zero when cases/runs is under 1.0.
 - **k/n**: `results summary <dirs>` folds batches into k/n per stage for each (commit, start, source); k counts runs whose stage reached is at least the stage, n every run but `Cut`. It also prints coverage and the ranked signatures.
-- **race.yml** (dispatch): one runner per lane (up to 20), Java 25, the cached sha1-checked jar, the server with RCON on, `race`, one recording replayed at the commit; each lane uploads its directory; `publish` writes the summary into the job summary and a `race-<run id>` release with the batches and cases.
+- **race.yml** (dispatch): one runner per lane (up to 20), Java 25, the cached sha1-checked jar, the server with RCON on, `race`, one recording replayed at the commit; each lane uploads its directory; `publish` writes the summary into the job summary and a `race-<run id>` release with the batches and cases, then calls `ingest.yml` to add the race to the insight store ([[insight-store]]).
 
 ## Evidence
+- Runners, run 43181608927 on main 409c473: 4 lanes × 14 bots on `spawn`, cap 6000: **56/56 `in_world`, 0/56 above, coverage cases 56/56 and recordings 56/56**, every lane in about 7 minutes; the server ticked 20.1 a second with 14 bots (headroom for more).
 - Local, 3 bots on `table`, cap 600: the kit arrived over RCON, 3/3 reached `table`, coverage 1.0, a recording verified with 0 mismatches over 10,846 events; the local server ticked 21.3 a second.
 
 ## Gotchas

@@ -169,3 +169,10 @@ jobs:
             --target "${{ github.sha }}" --prerelease \
             --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
             --notes-file summary.md
+
+  # The insight store: add this race to the published store (ingest.yml).
+  insight:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ingest.yml
