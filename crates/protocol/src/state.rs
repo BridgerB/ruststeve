@@ -44,7 +44,12 @@ impl State {
             | C2s::PlayerLoaded
             | C2s::ChunkBatchReceived { .. }
             | C2s::MovePlayerPosRot { .. }
-            | C2s::MovePlayerStatusOnly { .. } => self,
+            | C2s::MovePlayerStatusOnly { .. }
+            | C2s::PlayerAction { .. }
+            | C2s::SetCarriedItem { .. }
+            | C2s::ContainerClick { .. }
+            | C2s::ContainerClose { .. }
+            | C2s::Swing { .. } => self,
         }
     }
 
@@ -91,6 +96,10 @@ impl State {
             | S2c::Disconnect { .. }
             | S2c::PlayerCombatKill { .. }
             | S2c::DamageEvent { .. }
+            | S2c::BlockChangedAck { .. }
+            | S2c::SetHeldSlot { .. }
+            | S2c::TakeItemEntity { .. }
+            | S2c::ContainerClose { .. }
             | S2c::Unknown { .. } => self,
         }
     }

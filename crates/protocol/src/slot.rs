@@ -81,6 +81,36 @@ pub fn read_slot(r: &mut Reader<'_>) -> Result<Slot, ParseError> {
     Ok(Slot::Item { item, count })
 }
 
+/// A slot as a server writes it, for the server model: count, item, and an empty component
+/// patch (the inverse of `read_slot` for the stacks the model makes).
+pub fn write_slot(w: &mut crate::bytes::Writer, s: Slot) {
+    match s.stack() {
+        None => w.varint(0),
+        Some((item, count)) => {
+            w.varint(count);
+            w.varint(item as i32);
+            w.varint(0);
+            w.varint(0);
+        }
+    }
+}
+
+/// A slot as a client writes it in a click (a "hashed" slot): present, item, count, no
+/// component hashes. The bot always sends it empty: it predicts nothing
+/// (brain/wire/wire-container-click.md).
+pub fn write_hashed_slot(w: &mut crate::bytes::Writer, s: Slot) {
+    match s.stack() {
+        None => w.bool(false),
+        Some((item, count)) => {
+            w.bool(true);
+            w.varint(item as i32);
+            w.varint(count);
+            w.varint(0);
+            w.varint(0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

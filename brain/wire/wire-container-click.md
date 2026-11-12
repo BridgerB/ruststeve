@@ -5,9 +5,12 @@ type: reference
 tags: [wire, windows, crafting, clicks]
 aliases: [container-click, state id, changed slots, predict nothing, set-cursor-item, container-set-content]
 status: verified
-lastUpdated: 2026-11-11
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f
+lastUpdated: 2026-11-12
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@50f68a3
 sourceRefs:
+  - "ruststeve:crates/protocol/src/packets.rs#w.varint(0); // no changed slots: nothing predicted"
+  - "ruststeve:crates/world/src/lib.rs#fn window_moved(&mut self, state_id: i32) {"
+  - "ruststeve:crates/protocol/tests/encode.rs#fn a_click_predicts_nothing() {"
   - "clojurecraft:src/clojurecraft/packet.clj#;; 775 clicks carry the client's prediction as hashed slots; we always predict nothing"
   - "clojurecraft:src/clojurecraft/packet.clj#[[:window-id :varint] [:state-id :varint] [:slot :i16] [:button :i8] [:mode :varint]"
   - "ruststeve-v1:src/bot/inventory.rs#// Send EMPTY changedSlots so the server ALWAYS sees a prediction mismatch and"
@@ -27,6 +30,7 @@ A click is `container-click`: window id, **state id**, slot (i16), button (i8), 
 ## Key files
 - clojurecraft `src/clojurecraft/packet.clj` (the spec) and `window.clj` (`click`).
 - ruststeve v1 `src/bot/inventory.rs` (`click_window`, `wait_for_inventory_ack`).
+- ruststeve `crates/protocol/src/packets.rs` (`C2s::ContainerClick`: `varint 0` changed slots and an empty hashed cursor, checked byte for byte by `a_click_predicts_nothing`) and `crates/world/src/lib.rs` (`Act::Click` stamps the window's last state id and holds a `PendingClick`; `window_moved` clears it when a window-0 content or slot packet brings a new state id).
 
 ## How it works
 - The server stamps every window update (`container-set-content`, `container-set-slot`) with a state id; the client echoes the last one it saw in each click.
@@ -36,6 +40,7 @@ A click is `container-click`: window id, **state id**, slot (i16), button (i8), 
 ## Gotchas
 - clojurecraft sends `:cursor nil` while v1 still sent its predicted cursor. Because the claim is empty, clojurecraft's `click` forgets its cursor as it sends; after a lost click, `resync-click` sends a state id the server's window never has, which makes the server answer with the whole window and the real cursor.
 - A click into a window the server already closed is silently ignored ([[hist-v1-load-bearing-fixes]]).
+- **A click that changes nothing draws no reply** (ruststeve, live on a local 26.1.2 server, 2026-11-12): a pick-up on an empty slot with an empty cursor left the state id at 1 and no window packet came. So a pending click is cleared only by the state id moving, never assumed answered; the craft task sends no no-op clicks and treats 3 s without a move as a missed expectation ([[cc-window-clicks]]).
 
 ## See also
 - [[cc-window-clicks]] - clojurecraft's click rules and the 3 s stale-window deadline.

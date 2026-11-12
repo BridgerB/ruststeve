@@ -152,6 +152,10 @@ impl Session {
             | S2c::SetPlayerInventory { .. }
             | S2c::PlayerCombatKill { .. }
             | S2c::DamageEvent { .. }
+            | S2c::BlockChangedAck { .. }
+            | S2c::SetHeldSlot { .. }
+            | S2c::TakeItemEntity { .. }
+            | S2c::ContainerClose { .. }
             | S2c::Unknown { .. } => Vec::new(),
         };
         self.state = self.state.after_receive(p);

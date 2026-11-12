@@ -7,6 +7,13 @@ use proptest::prelude::*;
 use protocol::chunk::{Column, Paletted, Section};
 use protocol::{S2c, State, decode};
 
+fn slot() -> impl Strategy<Value = protocol::slot::Slot> {
+    prop_oneof![
+        Just(protocol::slot::Slot::Empty),
+        (0u32..1500, 1i32..65).prop_map(|(item, count)| protocol::slot::Slot::Item { item, count }),
+    ]
+}
+
 fn finite() -> impl Strategy<Value = f64> {
     -3.0e7..3.0e7f64
 }
@@ -114,6 +121,43 @@ fn modelled() -> impl Strategy<Value = (State, S2c)> {
             }
         )),
         (0i32..1000).prop_map(|size| (State::Play, S2c::ChunkBatchFinished { size })),
+        any::<i32>().prop_map(|sequence| (State::Play, S2c::BlockChangedAck { sequence })),
+        (0i32..9).prop_map(|slot| (State::Play, S2c::SetHeldSlot { slot })),
+        (any::<i32>(), any::<i32>(), 1i32..65).prop_map(|(item, collector, amount)| (
+            State::Play,
+            S2c::TakeItemEntity {
+                item,
+                collector,
+                amount
+            }
+        )),
+        (0i32..10).prop_map(|window| (State::Play, S2c::ContainerClose { window })),
+        (0i32..3, any::<i32>(), 0i16..46, slot()).prop_map(|(window, state_id, slot, item)| (
+            State::Play,
+            S2c::ContainerSetSlot {
+                window,
+                state_id,
+                slot,
+                item
+            }
+        )),
+        (0i32..41, slot())
+            .prop_map(|(slot, item)| (State::Play, S2c::SetPlayerInventory { slot, item })),
+        (
+            0i32..3,
+            any::<i32>(),
+            proptest::collection::vec(slot(), 0..46),
+            slot()
+        )
+            .prop_map(|(window, state_id, slots, carried)| (
+                State::Play,
+                S2c::ContainerSetContent {
+                    window,
+                    state_id,
+                    slots,
+                    carried: Some(carried)
+                }
+            )),
         (
             any::<i32>(),
             0i32..50,
@@ -185,4 +229,38 @@ fn a_packed_container_reads_back_every_cell() {
         assert_eq!(p.get(i), Some(*want));
     }
     assert_eq!(Paletted::pack(&[5; 4096], 4), Paletted::Single(5));
+}
+
+#[test]
+fn a_click_predicts_nothing() {
+    let (id, body) = protocol::C2s::ContainerClick {
+        window: 0,
+        state_id: 7,
+        slot: 36,
+        button: 0,
+        mode: 0,
+    }
+    .encode()
+    .unwrap();
+    assert_eq!(
+        id,
+        data::generated::packets::PlayServerbound::ContainerClick.id()
+    );
+    // window 0, state id 7, slot 36 (i16), button 0, mode 0, no changed slots, an empty cursor.
+    assert_eq!(body, [0, 7, 0, 36, 0, 0, 0, 0]);
+}
+
+#[test]
+fn a_dig_carries_its_sequence() {
+    let (_, body) = protocol::C2s::PlayerAction {
+        status: 2,
+        pos: (1, 64, -1),
+        face: 1,
+        sequence: 5,
+    }
+    .encode()
+    .unwrap();
+    assert_eq!(body[0], 2);
+    assert_eq!(*body.last().unwrap(), 5);
+    assert_eq!(body.len(), 1 + 8 + 1 + 1);
 }

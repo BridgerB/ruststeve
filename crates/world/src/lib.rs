@@ -66,6 +66,14 @@ impl Entity {
         }
     }
 
+    /// What an item entity holds: metadata index 8, an item stack (ItemEntity.DATA_ITEM).
+    pub fn item(&self) -> Option<(ItemKind, i32)> {
+        match self.metadata.get(&8) {
+            Some(MetaValue::Item(s)) => s.stack().map(|(i, n)| (ItemKind::from_id(i), n)),
+            Some(_) | None => None,
+        }
+    }
+
     /// The shared flags bitfield, metadata index 0 (on fire, sneaking, ...).
     pub fn flags(&self) -> u8 {
         match self.metadata.get(&0) {
@@ -182,6 +190,65 @@ pub enum Event {
     },
     /// What to press from now on: a script today, the planner from issue 09.
     Controls(Controls),
+    /// Something to do that the server must answer (issue 10): dig, hold, click.
+    Act(Act),
+}
+
+/// A dig's step (`player_action`'s status).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DigStep {
+    Start,
+    Abort,
+    Finish,
+}
+
+impl DigStep {
+    fn status(self) -> i32 {
+        match self {
+            DigStep::Start => 0,
+            DigStep::Abort => 1,
+            DigStep::Finish => 2,
+        }
+    }
+}
+
+/// An act: a decision the world turns into packets and remembers the sending of, so what the
+/// server answers can be matched to it (brain/ruststeve/design/digging.md, crafting-window.md).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Act {
+    Dig {
+        step: DigStep,
+        pos: BlockPos,
+        face: i8,
+    },
+    /// Select hotbar slot 0-8.
+    Hold {
+        slot: u8,
+    },
+    /// A click in window 0, predicting nothing, stamped with the last state id the server sent.
+    Click {
+        slot: i16,
+        button: i8,
+        mode: i32,
+    },
+    CloseWindow,
+    Swing,
+}
+
+/// A click sent and not yet answered: the window's state id when it went, and when.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingClick {
+    pub slot: i16,
+    pub state_id: i32,
+    pub at_tick: u64,
+}
+
+/// An item picked up by the bot (`take_item_entity` naming it).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pickup {
+    pub at_tick: u64,
+    pub item_entity: i32,
+    pub amount: i32,
 }
 
 /// What the world asks the shell to do.
@@ -291,6 +358,26 @@ pub struct World {
     /// rises): raised on every tick.
     #[serde(default)]
     pub stage_reached: Option<Stage>,
+    /// The selected hotbar slot (0-8): set by the server's `set_held_slot` and by the bot's own
+    /// `Act::Hold`.
+    #[serde(default)]
+    pub held: u8,
+    /// The last block-action sequence sent, and the highest the server has acknowledged.
+    #[serde(default)]
+    pub sequence_sent: i32,
+    #[serde(default)]
+    pub sequence_acked: i32,
+    /// Pickups by the bot in the last minute of server ticks, oldest first.
+    #[serde(default)]
+    pub pickups: Vec<Pickup>,
+    /// The click waiting for the server's answer: answered when window 0's state id moves.
+    #[serde(default)]
+    pub click: Option<PendingClick>,
+    /// Clicks sent and answered.
+    #[serde(default)]
+    pub clicks_sent: u64,
+    #[serde(default)]
+    pub clicks_answered: u64,
 }
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
@@ -318,6 +405,7 @@ impl World {
                 self.controls = *c;
                 Vec::new()
             }
+            Event::Act(a) => self.act(*a),
             Event::Packet(p) => {
                 self.fold(p);
                 self.session
@@ -540,6 +628,54 @@ impl World {
             .insert(pos, state);
     }
 
+    /// An act's packets, remembering what was sent.
+    fn act(&mut self, a: Act) -> Vec<Effect> {
+        match a {
+            Act::Dig { step, pos, face } => {
+                self.sequence_sent += 1;
+                vec![Effect::Send(C2s::PlayerAction {
+                    status: step.status(),
+                    pos: (pos.x, pos.y, pos.z),
+                    face,
+                    sequence: self.sequence_sent,
+                })]
+            }
+            Act::Hold { slot } => {
+                self.held = slot.min(8);
+                vec![Effect::Send(C2s::SetCarriedItem {
+                    slot: i16::from(self.held),
+                })]
+            }
+            Act::Click { slot, button, mode } => {
+                self.click = Some(PendingClick {
+                    slot,
+                    state_id: self.inventory.state_id,
+                    at_tick: self.ticks,
+                });
+                self.clicks_sent += 1;
+                vec![Effect::Send(C2s::ContainerClick {
+                    window: 0,
+                    state_id: self.inventory.state_id,
+                    slot,
+                    button,
+                    mode,
+                })]
+            }
+            Act::CloseWindow => vec![Effect::Send(C2s::ContainerClose { window: 0 })],
+            Act::Swing => vec![Effect::Send(C2s::Swing { hand: 0 })],
+        }
+    }
+
+    /// The server answered the pending click: window 0's state id moved.
+    fn window_moved(&mut self, state_id: i32) {
+        if let Some(c) = self.click
+            && c.state_id != state_id
+        {
+            self.click = None;
+            self.clicks_answered += 1;
+        }
+    }
+
     fn fold(&mut self, p: &S2c) {
         match p {
             S2c::Login {
@@ -643,6 +779,7 @@ impl World {
                 carried,
             } => {
                 if *window == 0 {
+                    self.window_moved(*state_id);
                     self.inventory.state_id = *state_id;
                     self.inventory.slots.clear();
                     for (i, s) in slots.iter().enumerate() {
@@ -660,6 +797,7 @@ impl World {
                 item,
             } => {
                 if *window == 0 {
+                    self.window_moved(*state_id);
                     self.inventory.state_id = *state_id;
                     self.inventory.put(*slot, *item);
                 }
@@ -703,6 +841,28 @@ impl World {
                     *pitch
                 };
             }
+            S2c::BlockChangedAck { sequence } => {
+                self.sequence_acked = self.sequence_acked.max(*sequence);
+            }
+            S2c::SetHeldSlot { slot } => {
+                self.held = u8::try_from(*slot).unwrap_or(0).min(8);
+            }
+            S2c::TakeItemEntity {
+                item,
+                collector,
+                amount,
+            } => {
+                if Some(*collector) == self.player.entity_id {
+                    let tick = self.session.server_ticks;
+                    self.pickups.retain(|p| p.at_tick + HITS_KEPT_TICKS >= tick);
+                    self.pickups.push(Pickup {
+                        at_tick: tick,
+                        item_entity: *item,
+                        amount: *amount,
+                    });
+                }
+            }
+            S2c::ContainerClose { .. } => {}
             S2c::PlayerCombatKill { player_id, death } => {
                 if Some(*player_id) == self.player.entity_id {
                     self.death = Some(death.clone());
