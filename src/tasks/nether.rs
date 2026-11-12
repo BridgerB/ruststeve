@@ -103,6 +103,9 @@ async fn eat_if_hurt(bot: &mut Bot<'_>) {
 /// Search for a nether fortress by sweeping along the X axis (fortresses generate in
 /// X-aligned bands), stopping when nether brick comes into view. Hardened vs steve's
 /// raw sprint: bridge cobble over lava gaps and bail off lava rather than walk in.
+/// Consecutive X-sweep flips with no step taken (reset on any successful step).
+static FLIPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepResult {
     {
         let p = bot.entity.position;
@@ -138,6 +141,20 @@ pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepRes
         // ENCLOSED approach while far: tunnel toward the brick (dominant axis each step) instead of a
         // pathfinder walk over open terrain — harness 08:52: one bot fell from the open route into the
         // lava sea at the SAME spot (-11.5,28,182) three times (ghast knockback over the sea).
+        // Fortress BELOW (blaze_rod gym, cycle 6: brick at y 51 under a y 98 landing, 0 horizontal blocks
+        // away): the horizontal tunnel below stops at once and the pathfinder cannot dig down 47 blocks, so
+        // the step failed 4× and the trial ended. Dig down to the brick's level first (the portal descent:
+        // never onto or beside lava, never into an air pocket), then tunnel across.
+        if pos.1 + 3 < crate::tasks::portal::feet_y(bot) {
+            let from = crate::tasks::portal::feet_y(bot);
+            for _ in 0..4 {
+                crate::tasks::portal::descend_to_y(bot, pos.1 + 1).await;
+                if crate::tasks::portal::feet_y(bot) <= pos.1 + 3 {
+                    break;
+                }
+            }
+            println!("    [dbg] fortress below: descended {from} -> {} toward brick y {}", crate::tasks::portal::feet_y(bot), pos.1);
+        }
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut blocked = 0;
         while Instant::now() < deadline {
@@ -197,12 +214,27 @@ pub async fn find_fortress(bot: &mut Bot<'_>, _mem: &mut WorldMemory) -> StepRes
         let (fx, fy, fz) = (bot.entity.position.x.floor() as i32, feet_y(bot), bot.entity.position.z.floor() as i32);
         if !nether_tunnel_step(bot, dir, 0).await {
             stuck += 1;
+            // Blocked both ways along X (race i11 rust-race-004 sat in its Nether arrival portal at (4236,89,78):
+            // the frame's obsidian on ±X, never dug, and the sweep flipped between them forever). After the first
+            // flip, step out along ±Z before sweeping X again.
+            if stuck >= 2 && FLIPS.load(std::sync::atomic::Ordering::Relaxed) >= 1 {
+                for dz in [1, -1] {
+                    if nether_tunnel_step(bot, 0, dz).await && nether_tunnel_step(bot, 0, dz).await {
+                        println!("    [dbg] nether: X blocked both ways — stepped out along z {dz}");
+                        FLIPS.store(0, std::sync::atomic::Ordering::Relaxed);
+                        stuck = 0;
+                        break;
+                    }
+                }
+            }
             if stuck >= 4 {
                 *WANDER_DIR.lock().unwrap() = -dir;
+                FLIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 return failure(format!("nether tunnel stuck at ({fx},{fy},{fz}) dir={dir} — flipping"));
             }
         } else {
             stuck = 0;
+            FLIPS.store(0, std::sync::atomic::Ordering::Relaxed);
         }
         if horiz_dist(bot.entity.position, start) > 180.0 {
             *WANDER_DIR.lock().unwrap() = -dir;
@@ -224,18 +256,21 @@ async fn nether_tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
         eat_if_hurt(bot).await;
     }
     let p0 = bot.entity.position;
-    let (fx, fy, fz) = (p0.x.floor() as i32, feet_y(bot), p0.z.floor() as i32);
+    // Feet from y + 0.01: standing on a block top reads 83.9999…, and floor() put the feet one block low, so
+    // the step tested the FLOOR row as "ahead". At race i11 rust-race-004's Nether arrival that row was the
+    // portal frame's bottom obsidian on both ±X: "blocked … ahead=obsidian head=air", forever.
+    let (fx, fy, fz) = (p0.x.floor() as i32, (p0.y + 0.01).floor() as i32, p0.z.floor() as i32);
     let (ax, az) = (fx + dx, fz + dz);
     let cells = [(ax, fy, az), (ax, fy + 1, az)];
     for c in cells.iter().copied().chain(std::iter::once((ax, fy - 1, az))) {
         for (ox, oy, oz) in [(dx, 0, dz), (0, 1, 0), (0, -1, 0), (dz, 0, dx), (-dz, 0, -dx)] {
             let n = (c.0 + ox, c.1 + oy, c.2 + oz);
-            if is_lava(&name_at(bot, n.0, n.1, n.2)) && count_items(bot, "cobblestone") > 0 {
+            if is_lava(&name_at(bot, n.0, n.1, n.2)) && crate::tasks::portal::scaffold_count(bot) > 0 {
                 place_cobble(bot, n).await;
             }
         }
     }
-    if !is_solid_name(&name_at(bot, ax, fy - 1, az)) && count_items(bot, "cobblestone") > 0 {
+    if !is_solid_name(&name_at(bot, ax, fy - 1, az)) && crate::tasks::portal::scaffold_count(bot) > 0 {
         place_cobble(bot, (ax, fy - 1, az)).await;
     }
     for c in cells {
@@ -261,6 +296,19 @@ async fn nether_tunnel_step(bot: &mut Bot<'_>, dx: i32, dz: i32) -> bool {
 /// already flailed at). A blaze the bot swung a full set at without killing is almost certainly a
 /// stale entity the server already removed (missed entity_remove) sitting on top of us — it would
 /// otherwise be picked as "nearest" every time and starve the real blazes of attacks.
+/// The nearest non-blaze hostile within `range` (horizontal): the fortress and wastes mobs that killed blaze
+/// hunters in the cycle-6 gym.
+fn nearest_hostile(bot: &Bot, range: f64) -> Option<(i32, String)> {
+    const HOSTILE: [&str; 6] = ["wither_skeleton", "skeleton", "hoglin", "magma_cube", "zombified_piglin", "piglin_brute"];
+    let me = bot.entity.position;
+    bot.entities
+        .values()
+        .filter(|e| e.is_valid && horiz_dist(e.position, me) <= range && (e.position.y - me.y).abs() < 3.0)
+        .filter_map(|e| e.name.as_deref().filter(|n| HOSTILE.contains(n)).map(|n| (e.id, n.to_string(), horiz_dist(e.position, me))))
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(id, n, _)| (id, n))
+}
+
 fn nearest_blaze(bot: &Bot, skip: &std::collections::HashSet<i32>, max_range: f64) -> Option<(i32, Vec3)> {
     let blaze_id = bot.registry.entities_by_name.get("blaze").map(|d| d.id);
     let me = bot.entity.position;
@@ -300,6 +348,23 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
             eat_if_hurt(bot).await;
         }
 
+        // DEFEND first (cycle 6 blaze_rod gym: 3 of 10 deaths to wither skeletons the hunt never fought).
+        // Any other hostile within 4 blocks gets the sword until it dies or backs off.
+        if let Some((hid, name)) = nearest_hostile(bot, 4.0) {
+            println!("    [dbg] defending against {name} {hid}");
+            for _ in 0..12 {
+                let Some(hp) = bot.entities.get(&hid).map(|e| e.position) else { break };
+                if horiz_dist(hp, bot.entity.position) > 4.5 {
+                    break;
+                }
+                bot.look_at(vec3(hp.x, hp.y + 1.0, hp.z));
+                if bot.attack(hid).await.is_err() {
+                    break;
+                }
+                let _ = bot.wait_real_ms(450).await;
+            }
+            continue;
+        }
         if let Some((id, bpos)) = nearest_blaze(bot, &ghosts, 12.0) {
             if horiz_dist(bpos, bot.entity.position) > 3.0 {
                 let _ = bot.goto_near(bpos.x.floor() as i32, bpos.y.floor() as i32, bpos.z.floor() as i32, 2.0).await;
@@ -452,5 +517,58 @@ pub async fn kill_blaze(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target_rods: 
         success(format!("killed a blaze — {rods} blaze rod(s)"))
     } else {
         failure(format!("no blaze rod yet ({rods}/{target_rods}) — will keep hunting"))
+    }
+}
+
+/// PEARLS BY BARTER (cycle 6, Phase 4 baseline; no design beyond throw-gold-and-collect): walk to the
+/// nearest piglin, look at it, toss ONE gold ingot, wait for the 6 s barter, then walk over every item
+/// within 8 blocks so its drop is picked up. Repeats until `target` pearls or no gold. Piglins attack a
+/// player without gold armour, so the kit wears a golden helmet.
+pub async fn barter_pearls(bot: &mut Bot<'_>, _mem: &mut WorldMemory, target: i32) -> StepResult {
+    let deadline = Instant::now() + Duration::from_secs(150);
+    let gold = bot.registry.items_by_name.get("gold_ingot").map(|d| d.id);
+    let piglin = bot.registry.entities_by_name.get("piglin").map(|d| d.id);
+    let item = bot.registry.entities_by_name.get("item").map(|d| d.id);
+    let mut tossed = 0;
+    while count_items(bot, "ender_pearl") < target && count_items(bot, "gold_ingot") > 0 && Instant::now() < deadline {
+        let me = bot.entity.position;
+        let Some((pid, pp)) = bot
+            .entities
+            .values()
+            .filter(|e| e.is_valid && (e.entity_type == piglin || e.name.as_deref() == Some("piglin")) && horiz_dist(e.position, me) <= 32.0)
+            .map(|e| (e.id, e.position))
+            .min_by(|a, b| horiz_dist(a.1, me).total_cmp(&horiz_dist(b.1, me)))
+        else {
+            println!("    [pearls] no piglin within 32");
+            return failure("no piglin within 32 blocks");
+        };
+        if horiz_dist(pp, me) > 3.0 {
+            let _ = bot.goto_near(pp.x.floor() as i32, pp.y.floor() as i32, pp.z.floor() as i32, 2.5).await;
+        }
+        let Some(pp) = bot.entities.get(&pid).map(|e| e.position) else { continue };
+        bot.look_at(vec3(pp.x, pp.y + 0.9, pp.z));
+        bot.wait_ticks(2).await.ok();
+        if let Some(g) = gold {
+            let _ = bot.toss(g, 1).await;
+            tossed += 1;
+        }
+        // The piglin walks to the ingot, inspects it ~6 s, then throws its barter item toward the player.
+        bot.wait_ticks(160).await.ok();
+        let me = bot.entity.position;
+        let drops: Vec<Vec3> = bot
+            .entities
+            .values()
+            .filter(|e| e.is_valid && (e.entity_type == item || e.name.as_deref() == Some("item")) && horiz_dist(e.position, me) <= 8.0)
+            .map(|e| e.position)
+            .collect();
+        for d in drops {
+            let _ = bot.goto_near(d.x.floor() as i32, d.y.floor() as i32, d.z.floor() as i32, 0.8).await;
+        }
+        println!("    [pearls] tossed {tossed}, pearls {}, gold left {}", count_items(bot, "ender_pearl"), count_items(bot, "gold_ingot"));
+    }
+    if count_items(bot, "ender_pearl") >= target {
+        success(&format!("{} pearls after {tossed} ingots", count_items(bot, "ender_pearl")))
+    } else {
+        failure(&format!("{} pearls after {tossed} ingots", count_items(bot, "ender_pearl")))
     }
 }

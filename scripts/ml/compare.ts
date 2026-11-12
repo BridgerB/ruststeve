@@ -1,6 +1,7 @@
 // Bayesian build comparison with a sequential stop rule (cycle 4, Part 5.2; cycle 5, decision 2).
 //
 //   node scripts/ml/compare.ts <skill|step_id> <buildA> <buildB> [attempts file or dir] [--source gym|race] [--clean]
+//   node scripts/ml/compare.ts --paired <gym.db> <slug> <buildA> <buildB> [--exclude A11]   (cycle 6, paired.ts)
 //
 // Beta(successes + 1, failures + 1) per build; P(B > A) from 10,000 posterior draws. Success is any
 // pass (reached the goal, deaths allowed: cycle 5's primary metric); --clean counts only passes with
@@ -8,11 +9,16 @@
 // "B loses" at P < 0.05; cap 18 per arm ("cap reached, undecided"). Rows are read through rows.ts
 // (data/attempts/*.jsonl + the read-only data/attempts.jsonl).
 import { beta } from "./bandit.ts";
+import { paired } from "./paired.ts";
 import { readRows, unparseable } from "./rows.ts";
 
 type Row = { deaths?: number; build?: string; skill?: string; step_id?: string; outcome?: string; source?: string; world_seed?: number | null; pos?: number[] };
 
 const args = process.argv.slice(2);
+if (args[0] === "--paired") {
+  paired(args.slice(1));
+  process.exit(0);
+}
 const clean = args.includes("--clean");
 const srcIdx0 = args.filter((a) => a !== "--clean");
 args.length = 0;

@@ -566,19 +566,6 @@ pub(crate) async fn settle_xz(bot: &mut Bot<'_>, tx: f64, tz: f64, tol: f64, max
         // place) never moves at all (3× `stance FAIL` at 1.2 blocks off). Straight legs stay on
         // the row the bot is already standing on.
         let (lx, lz) = if (tz - p.z).abs() > tol * 0.7 { (p.x, tz) } else { (tx, p.z) };
-        // Cycle 5 lava audit: this raw walk bypassed every lava rule (no pathfinder, not walk_to_xz),
-        // and the station centring runs beside the pool. Refuse a burst that would carry the bot
-        // into a cell with lava at its feet, floor or head (the sneak edge-backoff stops holes only).
-        {
-            let step = |d: f64| if d > 0.05 { 0.6 } else if d < -0.05 { -0.6 } else { 0.0 };
-            let (cx, cz) = (p.x.floor() as i32, p.z.floor() as i32);
-            let (nx, nz) = ((p.x + step(lx - p.x)).floor() as i32, (p.z + step(lz - p.z)).floor() as i32);
-            let fy = p.y.floor() as i32;
-            if crate::learn::safe_fixes() && (nx, nz) != (cx, cz) && (-1..=1).any(|dy| is_lava(&name_at(bot, nx, fy + dy, nz))) {
-                cast_debug(&format!("settle: refused a step into lava at ({nx},{fy},{nz})"));
-                break;
-            }
-        }
         bot.look_at(vec3(lx, p.y + 1.62, lz));
         // Far: 3-tick bursts (sneak speed needs a few ticks to build). Near: a single tick of
         // input then two ticks coasting — 3-tick bursts overshot a 0.2 target by ~0.4 every time
@@ -1060,75 +1047,10 @@ pub(crate) async fn station_refill(bot: &mut Bot<'_>, anchor: (i32, i32, i32), l
 
 /// Refill lava buckets at the pool station (the last safe scoop stand), then come back to the pad.
 async fn refill_lava(bot: &mut Bot<'_>, lava_pool: Option<(i32, i32, i32)>, anchor: (i32, i32, i32)) {
-    // Sealed station (cycle 3): every refill death of cycle 3 happened re-planning a stand beside a
-    // pool the scoops were reshaping. REFILL_LEGACY=1 keeps the old path for A/B comparison only.
-    if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") {
-        let ok = station_refill(bot, anchor, lava_pool, 2, 0, true).await;
-        cast_debug(&format!("MOLD refill (station) ok={ok} → lava_b={} bucket={}", count_items(bot, "lava_bucket"), count_items(bot, "bucket")));
-        return;
-    }
-    let by = anchor.1;
-    let mut safe = *SAFE_SCOOP_STAND.lock().unwrap();
-    // The remembered stand is where prepare's early scoop ENDED — a shore cell that the pad/rim
-    // build, a roof dig or the sea's own flow may have changed since. Walking blindly back to it
-    // killed rust-gym-003 (natural, 4/10): OK scoop → goto stand → next fill_bucket found the bot
-    // at hp 0 two blocks under the lava surface. Re-validate it against the world first: solid
-    // non-lava floor, air for the body, no lava touching the floor or feet ring. Otherwise let
-    // fill_bucket approach from where the bot is (it re-locates the nearest source itself).
-    if let Some(s) = safe {
-        let (sx, sy, sz) = (s.0.floor() as i32, s.1.floor() as i32, s.2.floor() as i32);
-        let floor = name_at(bot, sx, sy - 1, sz);
-        let body_clear = is_air(&name_at(bot, sx, sy, sz)) && is_air(&name_at(bot, sx, sy + 1, sz));
-        let lava_ring = (-1..=1).any(|dx| (-1..=1).any(|dz| is_lava(&name_at(bot, sx + dx, sy - 1, sz + dz)) || is_lava(&name_at(bot, sx + dx, sy, sz + dz))));
-        // A stand blocked ONLY by the mold's own blocks (pad, rim, stair or platform cobble built into
-        // the body cells) is still the place we scooped safely: dig it clear instead of abandoning it.
-        // Abandoning it is what killed batch 1. Every refill logged `INVALID … body_clear=false`, then
-        // improvised beside the pool: `FOOTING overlaps lava` at hp 1 (rust-gym-001 t=797 s), and a
-        // death after roof digs over the source (t=1350 s). Frame obsidian is never dug.
-        let body = [(sx, sy, sz), (sx, sy + 1, sz)];
-        let repairable = !body_clear
-            && is_solid(&floor)
-            && !is_lava(&floor)
-            && !lava_ring
-            && body.iter().all(|&(x, y, z)| name_at(bot, x, y, z) != "obsidian");
-        if repairable {
-            cast_debug(&format!("MOLD refill: safe stand ({sx},{sy},{sz}) blocked by our own blocks — clearing it"));
-            let _ = bot.goto_near(sx, sy, sz, 2.5).await;
-            for &(x, y, z) in body.iter().rev() {
-                if !is_air(&name_at(bot, x, y, z)) {
-                    dig_at(bot, x, y, z).await;
-                }
-            }
-        }
-        let body_clear = is_air(&name_at(bot, sx, sy, sz)) && is_air(&name_at(bot, sx, sy + 1, sz));
-        if !is_solid(&floor) || is_lava(&floor) || !body_clear || lava_ring {
-            cast_debug(&format!("MOLD refill: safe stand ({sx},{sy},{sz}) INVALID floor={floor} body_clear={body_clear} lava_ring={lava_ring} — approaching from here"));
-            safe = None;
-        }
-    }
-    for _ in 0..4 {
-        if count_items(bot, "bucket") < 1 || count_items(bot, "lava_bucket") >= 2 {
-            break;
-        }
-        if let Some(s) = safe {
-            let _ = bot.goto_near(s.0.floor() as i32, s.1.floor() as i32, s.2.floor() as i32, 1.5).await;
-            // Raw-walk only a short last stretch (≤ 3 blocks), as in fill_bucket's approach. With real
-            // ticks this walk carried the bot off the −51 platform toward the stand and down into the
-            // pool cavity: −51 → −55.6 within 5 s of `fill lava: ENTER`, hp 14 → 4 (batch A restart,
-            // rust-gym-001).
-            let q = bot.entity.position;
-            if ((s.0 - q.x).powi(2) + (s.2 - q.z).powi(2)).sqrt() <= 3.0 && (s.1 - q.y).abs() <= 1.5 {
-                walk_to_xz(bot, s.0, s.2, 0.4, 40).await;
-            }
-        } else if let Some(l) = lava_pool {
-            let _ = bot.goto_near(l.0, l.1 + 1, l.2, 2.0).await;
-            descend_to_y(bot, l.1 + 1).await;
-        }
-        fill_bucket(bot, "lava").await;
-        eat_if_hurt(bot).await;
-    }
-    cast_debug(&format!("MOLD refill → lava_b={} bucket={} (safe_stand={})", count_items(bot, "lava_bucket"), count_items(bot, "bucket"), safe.is_some()));
-    let _ = by;
+    // Sealed station (cycle 3): every refill death of cycle 3 happened re-planning a stand beside a pool the
+    // scoops were reshaping. The legacy stand/fill_bucket path is deleted (cycle 6, decision 9).
+    let ok = station_refill(bot, anchor, lava_pool, 2, 0, true).await;
+    cast_debug(&format!("MOLD refill (station) ok={ok} → lava_b={} bucket={}", count_items(bot, "lava_bucket"), count_items(bot, "bucket")));
 }
 
 fn lava_near(bot: &Bot, (bx, by, bz): (i32, i32, i32)) -> Vec<(i32, i32, i32)> {

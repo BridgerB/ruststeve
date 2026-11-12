@@ -270,13 +270,23 @@ struct RawBiome {
 pub fn create_registry(data_dir: impl AsRef<Path>, version: &str) -> std::io::Result<Registry> {
     let dir = data_dir.as_ref();
 
-    let blocks: Vec<BlockDefinition> = load_json(dir, "blocks.json")?;
+    let mut blocks: Vec<BlockDefinition> = load_json(dir, "blocks.json")?;
     let items: Vec<ItemDefinition> = load_json(dir, "items.json")?;
     let entities: Vec<EntityDefinition> = load_json(dir, "entities.json")?;
     let effects: Vec<EffectDefinition> = load_json(dir, "effects.json")?;
     let attributes: Vec<AttributeDefinition> = load_json(dir, "attributes.json")?;
-    let block_collision_shapes: BlockCollisionShapes =
+    let mut block_collision_shapes: BlockCollisionShapes =
         load_json(dir, "blockCollisionShapes.json").unwrap_or_default();
+    // Portals have NO collision in vanilla (noCollission), but the generated data gives them a full cube. The client
+    // physics then stopped a walking bot flush against the portal cell, its box a hair short of it, so the server
+    // never teleported it: race i11 rust-race-005 stood at z 734.7 before its lit portal at z 735 for 3 h
+    // ("stood in portal but no dimension change"). Empty them here, for physics, pathing and raycasts alike.
+    for name in ["nether_portal", "end_portal", "end_gateway"] {
+        if let Some(b) = blocks.iter_mut().find(|b| b.name == name) {
+            b.bounding_box = "empty".into();
+        }
+        block_collision_shapes.blocks.insert(name.to_string(), serde_json::json!(0));
+    }
 
     let mut biomes = Vec::new();
     let biomes_dir = dir.join("biomes-raw");

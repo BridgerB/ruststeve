@@ -561,7 +561,11 @@ async fn open_cage(bot: &mut Bot<'_>, cp: crate::vec3::Vec3) -> usize {
     let p = bot.entity.position;
     let (dx, dz) = if (p.x - cp.x).abs() >= (p.z - cp.z).abs() { ((p.x - cp.x).signum() as i32, 0) } else { (0, (p.z - cp.z).signum() as i32) };
     let r = (1..12).take_while(|&k| crate::tasks::portal::is_solid(&name_at(bot, cx + dx * k, top - 1, cz + dz * k))).count() as i32;
-    let (sx, sz) = (cx + dx * (r + 1), cz + dz * (r + 1));
+    // Cage v2 (cycle 6, decision 6): the pillar stands OUTSIDE the cage ring (bars at ±2 from the crystal), at
+    // least 3 out. v1 stood at r + 1, inside the ring on the caged towers, and dug the bars overhead by hand
+    // (cycle 5: one bar opened in three climbs).
+    let off = (r + 1).max(3);
+    let (sx, sz) = (cx + dx * off, cz + dz * off);
     let ground = (30..top).rev().find(|&y| solid_at(bot, sx, y - 1, sz) && !solid_at(bot, sx, y, sz)).unwrap_or(top - 20);
     cast_debug(&format!("CRYSTALS cage: {} bars, tower r={r}, pillar at ({sx},{ground},{sz}) → feet {top}, obsidian={}", bars.len(), count_items(bot, "obsidian")));
     let _ = tokio::time::timeout(Duration::from_secs(60), bot.goto_near(sx, ground, sz, 0.8)).await;
@@ -576,8 +580,12 @@ async fn open_cage(bot: &mut Bot<'_>, cp: crate::vec3::Vec3) -> usize {
         cast_debug(&format!("CRYSTALS cage: pillar stopped at feet {} (want {top})", feet_y(bot)));
         return 0;
     }
-    // Onto the top, one block in, then dig every bar on this side within reach.
-    crate::tasks::portal::walk_to_xz(bot, (sx - dx) as f64 + 0.5, (sz - dz) as f64 + 0.5, 0.3, 40).await;
+    // From the pillar top, with a pickaxe (the v2 kit carries one), dig every bar on this side within reach.
+    for pick in ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe"] {
+        if select_item(bot, pick).await.unwrap_or(false) {
+            break;
+        }
+    }
     let mut opened = 0;
     let mut side: Vec<(i32, i32, i32)> = bars.into_iter().filter(|&(x, _, z)| (x - cx) * dx + (z - cz) * dz > 0).collect();
     side.sort_by_key(|&(x, y, z)| (x - sx).abs() + (y - top).abs() + (z - sz).abs());

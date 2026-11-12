@@ -38,6 +38,25 @@ pub enum GymSetup {
     Tunnel,
     /// Random surface teleport (`spreadplayers` in 0..10k) — the terrain-variance test.
     RandomSurface,
+    /// Race i9's enter_nether wall (cycle 6): a LIT portal the bot built (its lit record is written) in a stone
+    /// room at y 20, reachable through an L-shaped corridor but out of line of sight from the bot's start.
+    OwnPortalHidden,
+    /// Race i11 rust-race-005 (cycle 6): its own lit portal straight ahead, the bot one cell in front of it in the
+    /// same column, nothing between (it stood at z 734.7 before a portal at z 735 for three hours).
+    OwnPortalFront,
+    /// The Nether beside a real fortress (cycle 6, blaze_rod slug): `locate structure fortress` by RCON from a
+    /// per-trial random point (harness only; the bot gets no coordinates), then `spreadplayers … under 100`
+    /// onto solid ground within 16 blocks of it.
+    NetherFortress,
+    /// The Nether in a crimson forest with three piglins summoned 4–6 blocks away (cycle 6, pearls slug):
+    /// `locate biome crimson_forest` by RCON, bot placed by `spreadplayers`, golden helmet worn.
+    NetherPiglins,
+    /// Race i11 rust-race-004's Nether arrival (cycle 6): beside a real fortress but boxed in by a portal frame,
+    /// obsidian on ±X and netherrack on ±Z, obsidian overhead.
+    NetherPortalPocket,
+    /// Race i12's find_fortress wall (cycle 6, 3.02 of 4.15 bot-hours past budget): a race-like kit 160 blocks
+    /// along ±X from a real fortress (harness locate only), on solid ground at about the same height.
+    NetherFar,
     /// A REAL lake each trial (cycle 5): the surface of a random water body with no land within 8 and
     /// dry shore 9–48 blocks out. A fixed lake (water_wall_i8) wore out under ~80 trials of digging and
     /// building: target-wade went 4/10 then 0/10 at the same spot.
@@ -181,7 +200,13 @@ pub static GYM_STEPS: &[GymStep] = &[
     GymStep { slug: "iron_repro", label: "Iron, race lane (22 iron)", order: 0, prereq: &["stone_pickaxe 1", "cobblestone 16", "cooked_beef 8"], step_id: "mine_iron", timeout_secs: 1800, custom_pass: Some(|bot, _| count_items(bot, "raw_iron") + count_items(bot, "iron_ingot") + count_items(bot, "iron_ore") + count_items(bot, "deepslate_iron_ore") >= 22), setup: GymSetup::FixedSurface { x: 300900, z: 350 } },
     // Cycle 4 Part 6, skill 12: kitted teleport into the End, crystals gone, beds detonated at the perch.
     // Pass = the server has no ender dragon (RCON, ground truth), checked after the trial.
-    GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1", "obsidian 32"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
+    GymStep { slug: "blaze_rod", label: "Blaze rod at a real fortress (kit, tp)", order: 0, prereq: &["iron_sword 1", "iron_helmet 1", "iron_chestplate 1", "iron_leggings 1", "iron_boots 1", "shield 1", "cooked_beef 16", "cobblestone 64", "iron_pickaxe 1"], step_id: "pipeline", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "blaze_rod") >= 1), setup: GymSetup::NetherFortress },
+    GymStep { slug: "nether_portal_exit", label: "Leave a Nether portal pocket, no fortress in view (race i11)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8", "iron_sword 1"], step_id: "find_fortress", timeout_secs: 180, custom_pass: Some(|bot, _| POCKET_START.lock().unwrap().is_some_and(|(x, z)| (bot.entity.position.x - x as f64 - 0.5).hypot(bot.entity.position.z - z as f64 - 0.5) > 4.0)), setup: GymSetup::NetherPortalPocket },
+    GymStep { slug: "nether_far", label: "Find a fortress 160 blocks away (race i12 wall)", order: 0, prereq: &["iron_pickaxe 1", "iron_sword 1", "cobblestone 16", "cooked_beef 16"], step_id: "find_fortress", timeout_secs: 600, custom_pass: Some(|_, s| s.world.fortress_found), setup: GymSetup::NetherFar },
+    GymStep { slug: "pearls", label: "Pearls by bartering 40 gold with piglins", order: 0, prereq: &["gold_ingot 40", "iron_sword 1", "cooked_beef 16", "cobblestone 64"], step_id: "get_pearls", timeout_secs: 600, custom_pass: Some(|bot, _| count_items(bot, "ender_pearl") >= 4), setup: GymSetup::NetherPiglins },
+    GymStep { slug: "enter_own_portal", label: "Enter its own lit portal, out of view (race i9 wall)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8"], step_id: "enter_nether", timeout_secs: 120, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::OwnPortalHidden },
+    GymStep { slug: "enter_portal_front", label: "Enter its own lit portal from the cell in front (race i11)", order: 0, prereq: &["iron_pickaxe 1", "cobblestone 64", "cooked_beef 8"], step_id: "enter_nether", timeout_secs: 120, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::OwnPortalFront },
+    GymStep { slug: "crystals", label: "End crystals (bow from the ground)", order: 0, prereq: &["bow 1", "arrow 64", "cooked_beef 16", "cobblestone 64", "water_bucket 1", "obsidian 32", "iron_pickaxe 1"], step_id: "crystals", timeout_secs: 1800, custom_pass: None, setup: GymSetup::EndCrystals },
     GymStep { slug: "dragon", label: "Dragon (beds, crystals gone)", order: 0, prereq: &["red_bed 16", "obsidian 32", "iron_sword 1", "cooked_beef 16", "cobblestone 128", "water_bucket 1"], step_id: "dragon", timeout_secs: 900, custom_pass: None, setup: GymSetup::EndDragon },
     // Cycle 5 Phase 3: the race from "wood and stone tools done" to an iron pickaxe, through the real
     // step machine (step_id "pipeline": each attempt runs get_next_step, as the race loop does). The
@@ -205,6 +230,8 @@ pub static GYM_STEPS: &[GymStep] = &[
     // the step machine runs in a stone tunnel; pass = any pickaxe in the inventory.
     GymStep { slug: "tool_loop_depth", label: "Tool loop at depth (no pickaxe, planks in hand)", order: 0, prereq: &["oak_log 5", "oak_planks 10", "cobblestone 64", "iron_ingot 2", "crafting_table 1"], step_id: "pipeline", timeout_secs: 180, custom_pass: Some(|bot, _| ["wooden_pickaxe", "stone_pickaxe", "iron_pickaxe", "diamond_pickaxe"].iter().any(|p| count_items(bot, p) > 0)), setup: GymSetup::Tunnel },
     // Stale-window craft (see the run loop): kit = planks; pass = sticks after a death with a table open.
+    // Race i10 rust-race-005 (cycle 6): 20 × "craft stick: result never appeared" holding 1 oak + 28 cherry planks.
+    GymStep { slug: "mixed_planks_craft", label: "2x2 stick craft from mixed plank types", order: 0, prereq: &["oak_planks 1", "cherry_planks 28"], step_id: "craft_sticks", timeout_secs: 60, custom_pass: Some(|bot, _| count_items(bot, "stick") > 0), setup: GymSetup::Tunnel },
     GymStep { slug: "stale_window_craft", label: "2x2 craft after dying with a table window open", order: 0, prereq: &["oak_planks 8"], step_id: "pipeline", timeout_secs: 60, custom_pass: Some(|bot, _| count_items(bot, "stick") > 0), setup: GymSetup::Tunnel },
     GymStep { slug: "lava_safe_move", label: "lava_safe_move drill (pool arena)", order: 0, prereq: &["cobblestone 64", "cooked_beef 8", "iron_pickaxe 1"], step_id: "lsm_drill", timeout_secs: 400, custom_pass: Some(|_, _| crate::tasks::lava_move::DRILL_OK.load(std::sync::atomic::Ordering::Relaxed)), setup: GymSetup::LavaPool },
     GymStep { slug: "pool", label: "Underground Pool → Nether", order: 21, prereq: &["iron_pickaxe 1", "bucket 3", "water_bucket 2", "flint_and_steel 1", "cobblestone 200", "cooked_beef 16"], step_id: "build_nether_portal", timeout_secs: 1500, custom_pass: Some(|_, s| s.world.in_nether()), setup: GymSetup::LavaPool },
@@ -222,8 +249,12 @@ pub struct GymStore {
 
 impl GymStore {
     pub fn open() -> Self {
-        let _ = std::fs::create_dir_all("data");
-        let conn = Connection::open("data/gym.db").expect("open gym db");
+        // GYM_DB: each server profile keeps its own store (gym.sh sets data/<profile>/gym.db for local servers).
+        let path = std::env::var("GYM_DB").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "data/gym.db".to_string());
+        if let Some(dir) = std::path::Path::new(&path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let conn = Connection::open(&path).expect("open gym db");
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              CREATE TABLE IF NOT EXISTS gym_runs(
@@ -242,6 +273,11 @@ impl GymStore {
         // A trial whose process is killed stays 'running' and the report counts it as a FAIL
         // (cycle 1 lost ~10 killed trials from gym.db, inflating the pass rate).
         let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN outcome TEXT", []);
+        // Cycle 6: the build (BUILD env) and paired landing of every trial, and the seconds from trial start to
+        // the first lava-site decision (`note_lava_target`), for the paired arm comparison.
+        let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN build TEXT", []);
+        let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN landing TEXT", []);
+        let _ = conn.execute("ALTER TABLE gym_runs ADD COLUMN lava_s REAL", []);
         GymStore { conn }
     }
 
@@ -251,22 +287,25 @@ impl GymStore {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let _ = self.conn.execute(
-            "INSERT INTO gym_runs(ts, slug, pass, duration_ms, x, y, z, prereq, message, outcome)
-             VALUES(?1,?2,0,0,?3,?4,?5,?6,'',  'running')",
-            params![now, slug, x, y, z, prereq.join(", ")],
+            "INSERT INTO gym_runs(ts, slug, pass, duration_ms, x, y, z, prereq, message, outcome, build)
+             VALUES(?1,?2,0,0,?3,?4,?5,?6,'',  'running', ?7)",
+            params![now, slug, x, y, z, prereq.join(", "), std::env::var("BUILD").ok()],
         );
         self.conn.last_insert_rowid()
     }
 
     pub fn set_pos(&self, id: i64, x: i32, y: i32, z: i32) {
         let _ = self.conn.execute("UPDATE gym_runs SET x=?2, y=?3, z=?4 WHERE id=?1", params![id, x, y, z]);
+        if let Some(l) = CUR_LANDING.lock().unwrap().clone() {
+            let _ = self.conn.execute("UPDATE gym_runs SET landing=?2 WHERE id=?1", params![id, l]);
+        }
     }
 
     pub fn finish(&self, id: i64, pass: bool, duration_ms: i64, outcome: &str, message: &str) {
         let msg: String = message.chars().take(400).collect();
         let _ = self.conn.execute(
-            "UPDATE gym_runs SET pass=?2, duration_ms=?3, outcome=?4, message=?5 WHERE id=?1",
-            params![id, pass as i32, duration_ms, outcome, msg],
+            "UPDATE gym_runs SET pass=?2, duration_ms=?3, outcome=?4, message=?5, lava_s=?6 WHERE id=?1",
+            params![id, pass as i32, duration_ms, outcome, msg, *LAVA_AT.lock().unwrap()],
         );
     }
 
@@ -332,6 +371,21 @@ pub fn report() {
 /// trial I stop leaves an `aborted` row with a reason, never a `running` one (cycle 5: 111 of 208
 /// cycle-4 gym rows were left `running` by my own relaunches).
 static CURRENT_TRIAL: std::sync::Mutex<Option<(i64, &'static str, &'static str, Instant)>> = std::sync::Mutex::new(None);
+/// The paired landing id of the trial in progress (set by `next_landing`).
+static CUR_LANDING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Where the nether_portal_exit pocket was built (pass = the bot left it).
+static POCKET_START: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+/// Seconds from trial start to the trial's first lava-site decision.
+static LAVA_AT: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
+
+/// Called by the portal's lava siting when it first targets a pool: records time-to-lava for the trial.
+pub fn note_lava_target() {
+    let t0 = CURRENT_TRIAL.lock().unwrap().map(|c| c.3);
+    let mut at = LAVA_AT.lock().unwrap();
+    if let (None, Some(t0)) = (*at, t0) {
+        *at = Some(t0.elapsed().as_secs_f64());
+    }
+}
 
 /// Install the SIGTERM handler once: record the current trial as `aborted` (gym.db + event log),
 /// then exit. The launchers stop a batch with SIGTERM, and use -9 only as a fallback.
@@ -438,10 +492,13 @@ async fn run_one_trial(
     // A stale persisted frame anchor from an earlier trial/run would make build_nether_portal
     // "tp back to resume" a frame thousands of blocks away. Each trial is a fresh frame.
     crate::tasks::portal::clear_frame_anchor();
+    crate::tasks::portal::clear_lit_portal();
     // Start row BEFORE setup: a bot that dies or disconnects in setup still leaves a `running`
     // row (counted as killed) — cycle-2 water batch 2 lost one launch that way.
     let run_id = store.start(step.slug, 0, 0, 0, step.prereq);
     *CURRENT_TRIAL.lock().unwrap() = Some((run_id, step.slug, step.step_id, Instant::now()));
+    *LAVA_AT.lock().unwrap() = None;
+    *CUR_LANDING.lock().unwrap() = None;
     crate::learn::gym_begin(step.step_id);
     crate::tasks::lava_move::DRILL_OK.store(false, std::sync::atomic::Ordering::Relaxed); // per-trial, never inherited
     *crate::tasks::lava_move::DRILL_ANCHOR.lock().unwrap() = None;
@@ -505,6 +562,20 @@ async fn run_one_trial(
         // watcher (1 s sleep) tick (batch 3 rust-gym-002: 234 deaths over 479 attempts).
         if bot.deaths - deaths0 >= 5 {
             last_msg = format!("death loop — {} deaths this trial | last: {}", bot.deaths - deaths0, crate::tasks::portal::last_cast_line());
+            break;
+        }
+        // Nether slugs: a death respawns in the overworld, and the tp-back below is an OVERWORLD tp to Nether
+        // coordinates (blaze_rod 2026-10-09: the bot came back 57,818 blocks off at x 3470 in the overworld and
+        // ran mine_iron). A death there ends the trial.
+        if !s.alive && matches!(step.setup, GymSetup::NetherFortress | GymSetup::NetherPiglins | GymSetup::NetherPortalPocket | GymSetup::NetherFar) {
+            bot.respawn().await.ok();
+            bot.wait_ticks(20).await.ok();
+            // A find_fortress step that already reported success met the goal before the death: count it (nether_far,
+            // 2026-10-09: several bots "reached fortress" and died before the next pass check).
+            if step.step_id == "find_fortress" && (last_msg.contains("reached fortress") || last_msg.contains("found fortress")) {
+                pass = true;
+            }
+            last_msg = format!("died in the Nether | last: {last_msg}");
             break;
         }
         if !s.alive {
@@ -648,6 +719,18 @@ async fn run_one_trial(
         pass = server_pass;
         last_msg = format!("server iron_pickaxe check: {} | {last_msg}", truth.trim());
     }
+    // blaze_rod / pearls: the server's item count, never the client's (cycle 6, Phase 4).
+    for (slug, item, need) in [("blaze_rod", "blaze_rod", 1), ("pearls", "ender_pearl", 4)] {
+        if step.slug == slug {
+            let truth = rcon_driving(bot, rcon, &format!("clear {name} minecraft:{item} 0")).await;
+            let n: i32 = truth.split_whitespace().find_map(|w| w.parse().ok()).unwrap_or(0);
+            if pass != (n >= need) {
+                last_msg = format!("client said {pass}, server said {} | {last_msg}", n >= need);
+            }
+            pass = n >= need;
+            last_msg = format!("server {item} count {n} | {last_msg}");
+        }
+    }
     // Dragon slug: ground truth from the server, never the bot's own view (cycle 4 Part 3).
     if step.slug == "dragon" {
         let alive = rcon_driving(bot, rcon, "execute in minecraft:the_end if entity @e[type=minecraft:ender_dragon]").await;
@@ -687,6 +770,18 @@ async fn run_one_trial(
 /// Reset the bot to a clean survival state, grant the step's prerequisites, and
 /// random-teleport it to a real surface spot. Returns the resulting landing
 /// `(gx,gy,gz)` plus the forceload center `(cx,cz)` so the caller can release it.
+/// The next landing of a paired set: GYM_LANDINGS is a landings-<set>.json file (array of {id, x, y, z});
+/// this bot's trials take entries GYM_LANDING_OFFSET, +1, +2, … in order. None without the env.
+fn next_landing() -> Option<(i32, i32)> {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let path = std::env::var("GYM_LANDINGS").ok().filter(|s| !s.is_empty())?;
+    let set: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let k = env("GYM_LANDING_OFFSET", "0").parse::<usize>().unwrap_or(0) + NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let l = set.as_array()?.get(k)?;
+    *CUR_LANDING.lock().unwrap() = l["id"].as_str().map(String::from);
+    Some((l["x"].as_i64()? as i32, l["z"].as_i64()? as i32))
+}
+
 async fn setup_trial(
     bot: &mut Bot<'_>,
     rcon: &mut RconClient,
@@ -703,8 +798,15 @@ async fn setup_trial(
     // is never wiped). GYM_REGION=0 (unset) keeps the cycle-1 square.
     let region: i32 = env("GYM_REGION", "0").parse().unwrap_or(0);
     let (ox, oz) = if region > 0 { (region * 3000, 3000) } else { (0, 0) };
-    let cx = ox + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
-    let cz = oz + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400);
+    // PAIRED LANDINGS (cycle 6, decision 4): with GYM_LANDINGS set, trial k of this bot starts at landing
+    // GYM_LANDING_OFFSET + k of the pre-checked set, so every arm runs the same ordered landings.
+    let (cx, cz) = match next_landing() {
+        Some((lx, lz)) => {
+            println!("[gym] paired landing ({lx},{lz})");
+            (lx, lz)
+        }
+        None => (ox + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400), oz + rand::Rng::gen_range(&mut rand::thread_rng(), 300..1400)),
+    };
     // A DEAD bot can't be teleported by spreadplayers — it stays put, so several
     // trials in a row "run" at the same corpse spot ("0 attempts" timeouts, seen live
     // at 4822,5254 x3). Respawn first so every trial gets a fresh random location.
@@ -1001,6 +1103,93 @@ async fn setup_trial(
             println!("[gym] EndDragon: in {} at ({:.0},{:.0},{:.0}), crystals killed, dragon ensured", bot.game.dimension, p.x, p.y, p.z);
             return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, 0, 0);
         }
+        GymSetup::NetherFortress | GymSetup::NetherPiglins | GymSetup::NetherPortalPocket | GymSetup::NetherFar => {
+            let nether = |c: &str| format!("execute in minecraft:the_nether run {c}");
+            // A per-trial origin in the Nether (overworld trial centre / 8), so trials use different structures.
+            let (ox, oz) = (cx / 8, cz / 8);
+            // The pocket must NOT be near a fortress: with brick in the loaded chunks find_fortress never reaches the
+            // wander tunnel that race i11 stuck in (old build 11/12 there). A crimson forest is fortress-free terrain.
+            let query = if matches!(step.setup, GymSetup::NetherFortress | GymSetup::NetherFar) { "locate structure minecraft:fortress" } else { "locate biome minecraft:crimson_forest" };
+            // Pocket: a spot whose nearest fortress is > 200 blocks off, so find_fortress has nothing in view and
+            // must sweep (race i11). Shift the origin 400 east until locate agrees (harness-only knowledge).
+            let (mut ox, oz) = (ox, oz);
+            if matches!(step.setup, GymSetup::NetherPortalPocket) {
+                for _ in 0..6 {
+                    let f = rcon_driving(bot, rcon, &format!("execute in minecraft:the_nether positioned {ox} 64 {oz} run locate structure minecraft:fortress")).await;
+                    let away: i32 = f.split('(').nth(1).and_then(|t| t.split_whitespace().next()).and_then(|n| n.parse().ok()).unwrap_or(0);
+                    if away > 200 {
+                        break;
+                    }
+                    ox += 400;
+                }
+            }
+            let out = if matches!(step.setup, GymSetup::NetherPortalPocket) {
+                format!("[{ox}, ~, {oz}]")
+            } else {
+                rcon_driving(bot, rcon, &format!("execute in minecraft:the_nether positioned {ox} 64 {oz} run {query}")).await
+            };
+            let nums: Vec<i32> = out
+                .split(['[', ']'])
+                .nth(1)
+                .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+                .unwrap_or_default();
+            let (tx, tz) = match nums.as_slice() {
+                [x, z] | [x, _, z] if matches!(step.setup, GymSetup::NetherFar) => (*x + if rand::Rng::gen_bool(&mut rand::thread_rng(), 0.5) { 160 } else { -160 }, *z),
+                [x, z] | [x, _, z] => (*x, *z),
+                _ => {
+                    println!("[gym] nether locate failed: {out}");
+                    SETUP_NO_LAND.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return (0, 0, 0, cx, cz);
+                }
+            };
+            let _ = rcon_driving(bot, rcon, &nether(&format!("forceload add {} {} {} {}", tx - 24, tz - 24, tx + 24, tz + 24))).await;
+            for _ in 0..90 {
+                if rcon_driving(bot, rcon, &format!("execute in minecraft:the_nether if loaded {tx} 64 {tz}")).await.contains("passed") {
+                    break;
+                }
+                bot.wait_ticks(20).await.ok();
+            }
+            let _ = rcon_driving(bot, rcon, &nether(&format!("spreadplayers {tx} {tz} 0 16 under 100 false {name}"))).await;
+            for _ in 0..60 {
+                if bot.game.dimension.contains("nether") {
+                    break;
+                }
+                bot.wait_ticks(10).await.ok();
+            }
+            bot.wait_ticks(40).await.ok();
+            if matches!(step.setup, GymSetup::NetherPortalPocket) {
+                // Build around the feet once the bot has landed (built mid-settle, the pocket sat one block high).
+                for _ in 0..40 {
+                    if bot.entity.on_ground {
+                        break;
+                    }
+                    bot.wait_ticks(5).await.ok();
+                }
+                let q = bot.entity.position;
+                let (x, y, z) = (q.x.floor() as i32, q.y.round() as i32, q.z.floor() as i32);
+                for c in [
+                    format!("fill {} {y} {z} {} {} {z} minecraft:obsidian", x - 1, x - 1, y + 1),
+                    format!("fill {} {y} {z} {} {} {z} minecraft:obsidian", x + 1, x + 1, y + 1),
+                    format!("fill {x} {y} {} {x} {} {} minecraft:netherrack", z - 1, y + 1, z - 1),
+                    format!("fill {x} {y} {} {x} {} {} minecraft:netherrack", z + 1, y + 1, z + 1),
+                    format!("setblock {x} {} {z} minecraft:obsidian", y + 2),
+                    format!("setblock {x} {} {z} minecraft:obsidian", y - 1),
+                ] {
+                    let _ = rcon_driving(bot, rcon, &nether(&c)).await;
+                }
+                *POCKET_START.lock().unwrap() = Some((x, z));
+                println!("[gym] portal pocket built around ({x},{y},{z})");
+            }
+            if matches!(step.setup, GymSetup::NetherPiglins) {
+                let _ = rcon_driving(bot, rcon, &format!("item replace entity {name} armor.head with minecraft:golden_helmet")).await;
+                for (dx, dz) in [(4, 0), (5, 2), (4, -2)] {
+                    let _ = rcon_driving(bot, rcon, &format!("execute in minecraft:the_nether at {name} run summon minecraft:piglin ~{dx} ~ ~{dz} {{IsImmuneToZombification:1b}}")).await;
+                }
+            }
+            let p = bot.entity.position;
+            println!("[gym] {} target ({tx},{tz}): bot in {} at ({:.0},{:.0},{:.0})", query, bot.game.dimension, p.x, p.y, p.z);
+            return (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32, tx, tz);
+        }
         GymSetup::FixedSurface { x, z } => {
             let _ = rcon_driving(bot, rcon, &format!("forceload add {} {} {} {}", x - 16, z - 16, x + 16, z + 16)).await;
             for _ in 0..90 {
@@ -1013,6 +1202,41 @@ async fn setup_trial(
             pump_teleport(bot, x, z).await;
             bot.wait_ticks(10).await.ok();
             let _ = rcon_driving(bot, rcon, &format!("execute positioned {} 0 {z} positioned over motion_blocking_no_leaves run spawnpoint {name} ~ ~ ~", x + 3)).await;
+        }
+        GymSetup::OwnPortalHidden | GymSetup::OwnPortalFront => {
+            // Room x cx..cx+12, z cz..cz+6, floor y 19, air y 20..24. A wall at x cx+6 with a door only at
+            // z cz (the far corner): the bot starts at (cx+2, cz+5), the portal (frame plane z = cz+5) sits at
+            // x cx+8..cx+11, so the wall blocks every sightline and the walk is an L through the door.
+            let ty = 20;
+            for _ in 0..90 {
+                if rcon_driving(bot, rcon, &format!("execute if loaded {cx} 0 {cz}")).await.contains("passed") {
+                    break;
+                }
+                bot.wait_ticks(20).await.ok();
+            }
+            let cmds = [
+                format!("fill {} {} {} {} {} {} minecraft:stone", cx - 1, ty - 1, cz - 1, cx + 13, ty + 6, cz + 7),
+                format!("fill {} {} {} {} {} {} minecraft:air", cx, ty, cz, cx + 12, ty + 4, cz + 6),
+                format!("fill {} {} {} {} {} {} minecraft:stone", cx + 6, ty, cz + 1, cx + 6, ty + 4, cz + 6),
+                format!("fill {} {} {} {} {} {} minecraft:obsidian", cx + 8, ty, cz + 5, cx + 11, ty + 4, cz + 5),
+                format!("fill {} {} {} {} {} {} minecraft:nether_portal[axis=x]", cx + 9, ty + 1, cz + 5, cx + 10, ty + 3, cz + 5),
+            ];
+            for c in &cmds {
+                let _ = rcon_driving(bot, rcon, c).await;
+            }
+            let _ = std::fs::write(crate::tasks::portal::lit_portal_path(), format!("{} {ty} {}", cx + 8, cz + 5));
+            let front = matches!(step.setup, GymSetup::OwnPortalFront);
+            if front {
+                // Open the wall: one room, the bot right in front of the portal cell.
+                let _ = rcon_driving(bot, rcon, &format!("fill {} {ty} {} {} {} {} minecraft:air", cx + 6, cz + 1, cx + 6, ty + 4, cz + 6)).await;
+            }
+            let (sx, sz) = if front { (cx + 9, cz + 4) } else { (cx + 2, cz + 5) };
+            let _ = rcon_driving(bot, rcon, &format!("tp {name} {sx} {ty} {sz}")).await;
+            pump_teleport(bot, sx, sz).await;
+            bot.wait_ticks(20).await.ok();
+            let _ = rcon_driving(bot, rcon, &format!("spawnpoint {name} {sx} {ty} {sz}")).await;
+            let lit = rcon_driving(bot, rcon, &format!("execute if block {} {} {} minecraft:nether_portal", cx + 9, ty + 1, cz + 5)).await;
+            println!("[gym] own portal hidden at ({},{ty},{}) lit={} bot at ({sx},{ty},{sz})", cx + 8, cz + 5, lit.contains("passed"));
         }
         GymSetup::Tunnel => {
             // Race i5 bot 5 looped on the table craft at y 19–23 in its iron tunnels; the surface

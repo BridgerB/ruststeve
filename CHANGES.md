@@ -1373,3 +1373,21 @@ The cycle-4 document is the playbook (Part 9 has the hour budgets and gates). Co
   - Each trial has deaths=1 by design: the slug kills the bot with the table open.
   - P(B > A) ≈ 1.00 (Beta(1,1)). The stale-window fix (3968bcf) is confirmed on the slug that reproduces the race failure. It has not been raced yet.
 - **Wrap-up (2026-10-08):** 285 gym.db rows left `running` became `aborted`, each with a reason: the four Server B crashes (33 rows), an operator stop on 2026-10-04 (3), and pre-cycle-5 relaunches (249). The 36 cycle-5 rows also got event rows, in `data/attempts/backfill-aborted-cycle5.jsonl`. The pre-wrap-up gym.db is at `data/archive/gym-pre-wrapup-2026-10-08.db`.
+
+# Cycle 6 (2026-10-09 → 10-10, branch feat/cycle6-honest-lava)
+
+## Phase 0: race first, local gyms
+- Race i9 on the decision-1 build (target-stale + ASTAR_SYNC=1). 5/5 reached the portal step; 0 entered (enter_nether wanted line of sight).
+- `local-server.sh`, `gym.sh PROFILE=local-1|local-2|box-b` (≤ 6 bots per server), `GYM_DB` per profile. Box: old build dirs deleted, pre-cycle-5 logs tarred (8.8 G → 11 G free).
+- Decision 10: 6-bot local sample, P99 up to 618 ms; no second local server.
+
+## Phase 1: honest lava site (Part 3)
+- `find_lava_cluster` deleted; `Bot::lava_seen` from exposed sources; `is_exposed` no longer counts lava or unloaded cells; gym assertion. Paired on landing set A: honest 3/11 vs X-ray 1/11 (A11 excluded).
+- Craft flake (decision 7): verbatim window packets, server cursor, settled acks. stale_window_craft 6/6, 0 lost attempts.
+
+## Phase 2 and later fixes, each with its slug
+- enter_nether finds its own lit portal (enter_own_portal 12/12 vs 0/12).
+- Decision 9: one-shot A* only, STALE_WINDOW_FIX on, REFILL_LEGACY and SAFE_FIXES deleted; portal module 4,030 → 3,961.
+- Mixed plank crafting (mixed_planks_craft 6/6 vs 0/6); cursor put-away loop capped.
+- Nether tunnel feet row (nether_portal_exit 12/12 vs 6/12); portal blocks have no collision; netherrack bridging (unmeasured).
+- Gym slugs: blaze_rod, pearls, enter_own_portal, enter_portal_front, mixed_planks_craft, nether_portal_exit, nether_far; crystals cage v2; paired mode in compare.ts; race-budget.ts; race funnel past the portal.

@@ -66,6 +66,48 @@ fn nbt_matches(query: Option<&NbtCompound>, item_nbt: Option<&NbtCompound>) -> b
     }
 }
 
+/// Where a slot of one window shows up in another: the player's 36 main + hotbar slots appear in the
+/// player window (id 0, slots 9–44) AND in every open container's inventory section.
+fn mirror_slot(from: &Window, to: &Window, slot: usize) -> Option<usize> {
+    if slot < from.inventory_start || slot >= from.inventory_end {
+        return None;
+    }
+    let t = to.inventory_start + (slot - from.inventory_start);
+    (t < to.inventory_end && t < to.slots.len()).then_some(t)
+}
+
+/// Apply a server `container_set_slot` verbatim (cycle 6, decision 7). The update lands in its window and
+/// its mirror in the other one, so the player window and an open container never disagree about the
+/// player's own slots: closing a container no longer copies a stale view over newer updates.
+pub fn apply_server_slot(inv: &mut Window, container: Option<&mut Window>, window_id: i32, slot: i32, item: Option<Item>) {
+    let Ok(slot) = usize::try_from(slot) else { return };
+    if window_id == 0 || window_id == -1 {
+        if let Some(c) = container {
+            if let Some(t) = mirror_slot(inv, c, slot) {
+                c.slots[t] = item.clone();
+            }
+        }
+        if slot < inv.slots.len() {
+            inv.slots[slot] = item;
+        }
+    } else if let Some(c) = container.filter(|c| c.id == window_id) {
+        if let Some(t) = mirror_slot(c, inv, slot) {
+            inv.slots[t] = item.clone();
+        }
+        if slot < c.slots.len() {
+            c.slots[slot] = item;
+        }
+    }
+}
+
+/// Apply a server `container_set_content` verbatim, slot by slot (see `apply_server_slot`). The server's
+/// content is the truth, including items it holds in the 2×2 crafting grid.
+pub fn apply_server_content(inv: &mut Window, mut container: Option<&mut Window>, window_id: i32, items: Vec<Option<Item>>) {
+    for (i, item) in items.into_iter().enumerate() {
+        apply_server_slot(inv, container.as_deref_mut(), window_id, i as i32, item);
+    }
+}
+
 impl Window {
     pub fn new(
         id: i32,
@@ -910,6 +952,80 @@ mod tests {
         assert_eq!(win.selected_item.as_ref().unwrap().count, 5);
         assert_eq!(win.slots[20].as_ref().unwrap().count, 5);
         assert_eq!(win.window_count(1, None), 5);
+    }
+
+    /// Decision 7: replay the server's window-0 packets recorded around the 2×2 stick craft that went
+    /// wrong (local capture 2026-10-09, rust-gym-008, stale_window_craft; ids 36 oak_planks, 947 stick,
+    /// 752 oak_button). The old content handler moved grid items into empty inventory slots on the client
+    /// only: after the last packet the client saw an empty grid and a phantom plank in slot 9, while the
+    /// server held the plank in grid slot 3 (result: oak_button). The next craft grabbed the phantom, placed
+    /// nothing, and crafted a button, 11 times per craft in the race logs. The client must end equal to
+    /// the server's final content.
+    #[test]
+    fn recorded_craft_packets_keep_the_grid() {
+        let defs = [(36, "oak_planks"), (752, "oak_button"), (947, "stick")];
+        let reg = Registry::build(
+            vec![],
+            defs.iter()
+                .map(|&(id, name)| ItemDefinition { id, name: name.into(), display_name: name.into(), stack_size: 64, enchant_categories: None, repair_with: None, max_durability: None })
+                .collect(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            BlockCollisionShapes::default(),
+            std::collections::HashMap::new(),
+            "26.1.2",
+        );
+        let item = |v: &serde_json::Value| -> Option<Item> {
+            let a = v.as_array()?;
+            Some(create_item(&reg, a[0].as_i64()? as i32, a[1].as_i64()? as i32, 0, None, vec![], vec![]))
+        };
+        let packets: Vec<serde_json::Value> = serde_json::from_str(include_str!("../tests/fixtures/stale-craft-window.json")).unwrap();
+        let mut inv = Window::new(0, "minecraft:inventory", "", 46, 9, 44, 0, true);
+        let mut table: Option<Window> = None;
+        let mut last_content: Option<Vec<Option<Item>>> = None;
+        for p in &packets {
+            let wid = p["windowId"].as_i64().unwrap() as i32;
+            if p["name"] == "container_set_content" {
+                let items: Vec<Option<Item>> = p["items"].as_array().unwrap().iter().map(item).collect();
+                if wid == 0 {
+                    last_content = Some(items.clone());
+                }
+                apply_server_content(&mut inv, table.as_mut(), wid, items);
+            } else {
+                let it = item(&p["item"]);
+                if wid == 0 {
+                    if let Some(c) = last_content.as_mut() {
+                        if let Some(s) = c.get_mut(p["slot"].as_i64().unwrap() as usize) {
+                            *s = it.clone();
+                        }
+                    }
+                }
+                apply_server_slot(&mut inv, table.as_mut(), wid, p["slot"].as_i64().unwrap() as i32, it);
+            }
+        }
+        let server = last_content.unwrap();
+        let view = |w: &[Option<Item>]| w.iter().map(|s| s.as_ref().map(|i| (i.type_id, i.count))).collect::<Vec<_>>();
+        assert_eq!(view(&inv.slots), view(&server), "client view differs from the server's last window-0 content");
+        assert_eq!(inv.slots[3].as_ref().map(|i| (i.type_id, i.count)), Some((36, 1)), "the server's grid plank in slot 3");
+        assert!(inv.slots[9].is_none(), "no phantom plank in slot 9");
+    }
+
+    #[test]
+    fn container_and_player_window_mirror() {
+        let reg = registry();
+        let mut inv = Window::new(0, "minecraft:inventory", "", 46, 9, 44, 0, true);
+        let mut table = Window::new(3, "minecraft:crafting", "", 46, 10, 45, 0, true);
+        // A window-0 update while the table is open (a pickup, a death) reaches the table's copy too…
+        apply_server_slot(&mut inv, Some(&mut table), 0, 36, Some(stone(&reg, 7)));
+        assert_eq!(table.slots[37].as_ref().map(|i| i.count), Some(7));
+        // …and a table update reaches the player window.
+        apply_server_slot(&mut inv, Some(&mut table), 3, 10, Some(stone(&reg, 2)));
+        assert_eq!(inv.slots[9].as_ref().map(|i| i.count), Some(2));
+        // The table's own grid never leaks into the player window.
+        apply_server_slot(&mut inv, Some(&mut table), 3, 1, Some(stone(&reg, 1)));
+        assert!(inv.slots[1].is_none());
     }
 
     #[test]

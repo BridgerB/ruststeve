@@ -160,6 +160,10 @@ pub(crate) fn build_block(bot: &Bot) -> &'static str {
         "cobblestone"
     } else if count_items(bot, "cobbled_deepslate") > 0 {
         "cobbled_deepslate"
+    } else if count_items(bot, "netherrack") > 0 {
+        // The Nether tunnel digs netherrack every step: race i12 rust-race-004 ran out of cobble at y 33 over the
+        // lava sea and shuttled between its tunnel's two open ends for an hour holding none of this.
+        "netherrack"
     } else {
         "dirt"
     }
@@ -167,7 +171,7 @@ pub(crate) fn build_block(bot: &Bot) -> &'static str {
 
 /// Total throwaway scaffold blocks on hand (cobble of either kind + dirt).
 pub(crate) fn scaffold_count(bot: &Bot) -> i32 {
-    count_items(bot, "cobblestone") + count_items(bot, "cobbled_deepslate") + count_items(bot, "dirt")
+    count_items(bot, "cobblestone") + count_items(bot, "cobbled_deepslate") + count_items(bot, "netherrack") + count_items(bot, "dirt")
 }
 
 /// The face on the reference block `ref = pos + d` that points back toward `pos`
@@ -232,7 +236,7 @@ pub(crate) async fn place_cobble(bot: &mut Bot<'_>, pos: (i32, i32, i32)) -> boo
         // client-side at once, and a rejected placement is reverted by a block_update a few ticks
         // later, so a 3-tick re-read counted rejected caps as placed (6c+lsm13: a "capped" lava cell
         // the bot then stepped into). Never by an inventory count (the SDK doesn't decrement it).
-        bot.wait_ticks(if crate::learn::safe_fixes() { 8 } else { 3 }).await.ok();
+        bot.wait_ticks(3).await.ok();
         if solid_at(bot, pos.0, pos.1, pos.2) {
             return true;
         }
@@ -1439,6 +1443,21 @@ pub(crate) fn set_frame_anchor(a: (i32, i32, i32)) {
     save_frame_anchor(a);
 }
 
+/// The frame anchor of the portal this bot LIT (cycle 6), persisted per bot like the anchor, which is
+/// released at lighting. enter_nether walks back to it without needing line of sight. Cleared per race
+/// (race-b.sh) and per gym trial.
+pub(crate) fn lit_portal_path() -> String {
+    format!(".portal-{}.txt", std::env::var("MC_USERNAME").unwrap_or_else(|_| "bot".into()))
+}
+pub(crate) fn lit_portal() -> Option<(i32, i32, i32)> {
+    let s = std::fs::read_to_string(lit_portal_path()).ok()?;
+    let n: Vec<i32> = s.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    (n.len() == 3).then(|| (n[0], n[1], n[2]))
+}
+pub(crate) fn clear_lit_portal() {
+    let _ = std::fs::remove_file(lit_portal_path());
+}
+
 pub(crate) fn clear_frame_anchor() {
     *FRAME_ANCHOR.lock().unwrap() = None;
     // A deliberate release (portal lit, new gym trial) is not a re-site after death: without this
@@ -1773,11 +1792,15 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
         // -35 → -36 → -35 …) counted every 1-block dip as progress and pinned the escape at
         // relocate#1 (12 blocks) forever: rust-gym-002 logged it 96× and never left the water.
         let mut desc_min_y = i32::MAX;
-        // LAVA SITING by chunk scan (cycle 2 Phase C): the nearest cluster of ≥ 40 lava sources
-        // within 12 blocks, below the tunnel floor, from ALL loaded chunk data (not just exposed
-        // lava). Rescanned at most every 10 s as new chunks load.
+        // LAVA SITING from SEEN lava (cycle 6, Part 3): the largest remembered cluster of exposed sources
+        // (`Bot::lava_seen`) within 64 blocks horizontally, below the tunnel floor. Re-read every 10 s and
+        // every 8 blind tunnel blocks. The chunk-data cluster read it replaces saw lava through rock.
         let mut cluster: Option<((i32, i32, i32), usize)> = None;
         let mut cluster_scanned: Option<Instant> = None;
+        // Nothing seen: tunnel a straight line, turning 90° after 900 s on one heading (Part 3).
+        let mut heading = 0usize;
+        let mut heading_t0 = Instant::now();
+        let mut blind_blocks = 0u32;
         // Tunnel progress per target: (target, best horizontal distance, when it last improved).
         let mut tun_best: Option<((i32, i32, i32), f64, Instant)> = None;
         let site_t0 = Instant::now();
@@ -2040,12 +2063,14 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     cluster_scanned = Some(Instant::now());
                     // Lower bound −58: sources in the bedrock band (−64..−59) sit under/among bedrock and
                     // cannot be opened (race i6: a 113-source cluster at −62 held rust-race-003 for 3 h).
-                    let found = bot.find_lava_cluster((-58, scoop_feet - 1), crate::learn::bot_arm_i32("cluster_min", 100) as usize, 12, &|s| lava_retired(s)); // ≥100: big lakes (hour-15 "reduce ambition")
+                    // The cluster_min arm (60/100/150 sources by chunk data) maps to 6/10/15 SEEN sources within 6.
+                    let min_seen = (crate::learn::bot_arm_i32("cluster_min", 100) / 10).max(1) as usize;
+                    let found = bot.lava_seen_cluster((-58, scoop_feet - 1), min_seen, 64.0, &|s| lava_retired(s));
                     if found.is_some() && found.map(|f| f.0) != cluster.map(|c| c.0) {
                         let (c, n) = found.unwrap();
                         let p = bot.entity.position;
                         let d = ((c.0 as f64 - p.x).powi(2) + (c.2 as f64 - p.z).powi(2)).sqrt();
-                        cast_debug(&format!("SITE cluster {n} sources near {c:?}, {d:.0} blocks away, {:.0}s into the at-depth search", site_t0.elapsed().as_secs_f64()));
+                        cast_debug(&format!("SITE seen {n} exposed sources near {c:?}, {d:.0} blocks away, {:.0}s into the at-depth search ({} remembered)", site_t0.elapsed().as_secs_f64(), bot.lava_seen.len()));
                         let st = crate::state::sync_from_bot(bot);
                         mem.race_event("site", "cluster", Some("build_nether_portal"), &format!("{c:?} d={d:.0} t={:.0}s", site_t0.elapsed().as_secs_f64()), &st, n as i64);
                     }
@@ -2053,6 +2078,9 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                 }
                 let cluster_target = cluster.map(|c| c.0).filter(|l| !lava_retired(*l));
                 if let Some(l) = band_lava.or(cluster_target).or_else(|| find_fluid(bot, "lava", 24).filter(below_floor)).or_else(far_band_lava) {
+                    crate::gym::note_lava_target();
+                    bot.assert_lava_seen(l, "at-depth tunnel target");
+                    blind_blocks = 0;
                     let p = bot.entity.position;
                     let (ddx, ddz) = (l.0 as f64 - p.x, l.2 as f64 - p.z);
                     let hd = (ddx * ddx + ddz * ddz).sqrt();
@@ -2098,8 +2126,18 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
                     cast_debug(&format!("desc at-depth y={fy} lava@{l:?} hd={hd:.0} — tunnelling toward ({tx},{tz})"));
                     tunnel_step(bot, tx, tz).await;
                 } else {
-                    cast_debug(&format!("desc at-depth y={fy} below={below} — no lava yet, tunnelling +Z"));
-                    tunnel_step(bot, 0, 1).await;
+                    if heading_t0.elapsed() > Duration::from_secs(900) {
+                        heading = (heading + 1) % 4;
+                        heading_t0 = Instant::now();
+                        cast_debug(&format!("desc at-depth: 900 s on one heading with no lava seen — turning 90° to heading {heading}"));
+                    }
+                    let (tx, tz) = [(0, 1), (1, 0), (0, -1), (-1, 0)][heading];
+                    blind_blocks += 1;
+                    if blind_blocks % 8 == 0 {
+                        cluster_scanned = None;
+                    }
+                    cast_debug(&format!("desc at-depth y={fy} below={below} — no lava seen yet ({} remembered), tunnelling ({tx},{tz}) block {blind_blocks}", bot.lava_seen.len()));
+                    tunnel_step(bot, tx, tz).await;
                 }
             }
             // Settle only when a source is within bucket REACH (~5) — i.e. the tunnel has
@@ -2121,6 +2159,8 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
     let Some(lava) = lava else {
         return None;
     };
+    crate::gym::note_lava_target();
+    bot.assert_lava_seen(lava, "prepare: chosen pool");
     mem.log("cast", "lava", &format!("{},{},{}", lava.0, lava.1, lava.2));
     // Remember the pool so retries navigate STRAIGHT back (memory-first path above)
     // instead of re-descending from the surface each time — the descent eats most of
@@ -2334,29 +2374,13 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             }
             cast_debug(&format!("prepare: pre-scoop heal → hp={:.0}", bot.health));
         }
-        // Through the sealed station too (unless REFILL_LEGACY=1). The old fill_bucket scoop killed
-        // rust-gym-001 twice beside one pool in batch 3: two seconds into `fill lava` it stood IN the
-        // −55 surface cell at hp 10. Same goal as before: up to 10 lava, keeping 1 empty bucket.
-        if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") {
-            let p = bot.entity.position;
-            let here = (p.x.floor() as i32, feet_y(bot), p.z.floor() as i32);
-            let ok = crate::tasks::portal_mold::station_refill(bot, here, Some(lava), 10, 1, false).await;
-            cast_debug(&format!("prepare: early scoop (station) ok={ok} → lava_buckets={}", count_items(bot, "lava_bucket")));
-        }
-        let mut misses = if std::env::var("REFILL_LEGACY").as_deref() != Ok("1") { 5 } else { 0 };
-        while misses < 5 && count_items(bot, "lava_bucket") < 10 && count_items(bot, "bucket") >= 2 {
-            let before = count_items(bot, "lava_bucket");
-            fill_bucket(bot, "lava").await;
-            if count_items(bot, "lava_bucket") > before {
-                misses = 0;
-            } else {
-                misses += 1;
-                if misses >= 5 {
-                    break;
-                }
-            }
-        }
-        cast_debug(&format!("prepare: early scoop → lava_buckets={}", count_items(bot, "lava_bucket")));
+        // Through the sealed station. The old fill_bucket scoop killed rust-gym-001 twice beside one pool
+        // in batch 3: two seconds into `fill lava` it stood IN the −55 surface cell at hp 10. Up to 10 lava,
+        // keeping 1 empty bucket.
+        let p = bot.entity.position;
+        let here = (p.x.floor() as i32, feet_y(bot), p.z.floor() as i32);
+        let ok = crate::tasks::portal_mold::station_refill(bot, here, Some(lava), 10, 1, false).await;
+        cast_debug(&format!("prepare: early scoop (station) ok={ok} → lava_buckets={}", count_items(bot, "lava_bucket")));
     }
     // Remember WHERE we scooped safely — refills return here rather than re-finding a stand.
     if count_items(bot, "lava_bucket") >= 1 {
@@ -2462,11 +2486,6 @@ async fn prepare_cast_site(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> Option<(
             bot.find_exposed_blocks("lava", 32, 64).len()
         ));
     }
-    // Legacy only: with the station, a 0-lava early scoop must re-site, not improvise with the old
-    // fill_bucket (the path that killed rust-gym-001 twice beside one pool in batch 3).
-    if std::env::var("REFILL_LEGACY").as_deref() == Ok("1") && count_items(bot, "lava_bucket") < 1 && count_items(bot, "bucket") >= 1 {
-        fill_bucket(bot, "lava").await;
-    }
     // Return to the frame anchor (precisely) so build_nether_portal anchors there. The anchor is now
     // usually the station stand, whose open side O is air over lava. A jumping `walk_to_xz` (real ticks)
     // from 0.5 off killed batch 6b rust-gym-002 right after `prepare pre-fill`. Already close → a
@@ -2565,7 +2584,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
     if near_count >= 10 && anchored_present < 10 {
         cast_debug(&format!("build: {near_count} obsidian within 8 but the stored mold reads {anchored_present}/10 — not treated as cast"));
     }
-    let cast_already = if crate::learn::safe_fixes() { anchored_present >= 10 } else { near_count >= 10 };
+    let cast_already = near_count >= 10;
     if cast_already {
         // Frame complete — fall through to lighting. KEEP the anchor: clearing it here made the
         // next lines anchor a brand-new frame at the bot's feet when lighting failed once
@@ -2793,6 +2812,7 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
             }
             if lit_now(bot) {
                 mem.log("cast", "portal_lit", &format!("{bx},{by},{bz}"));
+                let _ = std::fs::write(lit_portal_path(), format!("{bx} {by} {bz}"));
                 clear_frame_anchor(); // done with this frame; a future portal re-anchors fresh
                 return success(format!("nether portal cast & lit at {bx},{by},{bz}"));
             }
@@ -2805,7 +2825,21 @@ pub async fn build_nether_portal(bot: &mut Bot<'_>, mem: &mut WorldMemory) -> St
 
 /// Walk into the lit portal and wait for the dimension change.
 pub async fn enter_nether(bot: &mut Bot<'_>) -> StepResult {
-    let Some(portal) = bot.find_block("nether_portal", 64) else {
+    // Its OWN portal needs no line of sight: the bot cast and lit it at the frame anchor. Race i9
+    // rust-race-001 lit its portal at (27911,-54,433), walked off to craft a furnace, and then logged
+    // "no portal found to enter" 1,190 times standing 5 blocks from it behind the mold walls (the server
+    // showed the portal lit). find_block wants the block in view; the anchor is knowledge, not X-ray.
+    let own = || {
+        let (bx, by, bz) = lit_portal().or(*FRAME_ANCHOR.lock().unwrap())?;
+        let found = (1..=2).flat_map(|dx| (1..=3).map(move |dy| (bx + dx, by + dy, bz))).find(|c| name_at(bot, c.0, c.1, c.2) == "nether_portal");
+        if let Some(c) = found {
+            println!("    enter_nether: own portal at {c:?} (not in view)");
+        }
+        found
+    };
+    // Last, the same test that sets portal_built (an exposed portal block, no line of sight): when the two
+    // disagreed, i9 rust-race-004 sat in enter_nether beside a portal it could not "see" (1,280 lines).
+    let Some(portal) = own().or_else(|| bot.find_block("nether_portal", 64)).or_else(|| bot.find_exposed_blocks("nether_portal", 64, 1).into_iter().next()) else {
         return failure("no portal found to enter");
     };
     let start_dim = bot.game.dimension.clone();

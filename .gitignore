@@ -24,3 +24,9 @@
 *.out
 *.pids
 .heartbeat-*
+
+# Cycle 6: local gym binaries and per-profile pid files
+/bins/
+/pids/
+/target-*/
+.portal-*.txt
