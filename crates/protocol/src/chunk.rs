@@ -14,7 +14,7 @@ const BIOME_ENTRIES: usize = 64;
 const BIOME_MAX_BITS: u8 = 3;
 
 /// One paletted container, straight off the wire.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum Paletted {
     /// Bits 0: one value for every cell.
     Single(u32),
@@ -93,7 +93,7 @@ impl Paletted {
 }
 
 /// One 16-block section.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Section {
     /// Non-air blocks, as the server counts them.
     pub block_count: i16,
@@ -104,7 +104,7 @@ pub struct Section {
 }
 
 /// A chunk column: its sections bottom to top, from `min_y`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Column {
     pub min_y: i32,
     pub sections: Vec<Section>,

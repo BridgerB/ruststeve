@@ -25,7 +25,7 @@ const VIEW_DISTANCE: i8 = 8;
 const CHUNKS_PER_TICK: f32 = 20.0;
 
 /// The connection as the upkeep sees it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Session {
     /// The state the next packet from the server is read in.
     pub state: State,

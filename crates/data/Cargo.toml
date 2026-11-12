@@ -7,3 +7,4 @@ publish = false
 description = "The game's tables, generated from the vanilla 26.1.2 server by datagen and committed (no I/O)"
 
 [dependencies]
+serde = { version = "1", features = ["derive", "rc"] }

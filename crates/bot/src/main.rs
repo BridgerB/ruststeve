@@ -1,31 +1,38 @@
-//! bot: one bot against one server. For now it joins and stays in the world (issue 03): the
-//! handshake, offline login, configuration, then play, answering keep-alives and pings.
+//! bot: one bot against one server. For now it joins and stays in the world: the handshake,
+//! offline login, configuration, then play, folding everything the server sends into `World`
+//! and answering keep-alives and pings. With `--record` every run is a file `replay` can verify.
 //!
 //! ```text
 //! cargo run -p bot -- [--host 127.0.0.1] [--port 25565] [--name rs-001] [--seconds 600]
+//!                     [--record target/recordings/rs-001.rsr]
 //! ```
 //!
 //! `--seconds 0` stays until the server closes. It exits 0 when the time is up while still in
 //! play, and 1 when the server disconnects it first.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use net::Inbound;
 use protocol::session::opening;
 use protocol::{Out, S2c, State};
-use world::{Effect, Event, World};
+use record::{CHECKPOINT_TICKS, EffectRecord, EventRecord, Header, Record, Recorder};
+use world::{Event, World};
 
 /// How often the bot prints a status line.
 const STATUS_EVERY: Duration = Duration::from_secs(10);
+/// The loop's tick: the world gets the clock and a fresh seed this often (a game tick).
+const TICK_EVERY: Duration = Duration::from_millis(50);
 
 struct Args {
     host: String,
     port: u16,
     name: String,
     seconds: u64,
+    record: Option<PathBuf>,
 }
 
 fn args() -> Result<Args, String> {
@@ -34,6 +41,7 @@ fn args() -> Result<Args, String> {
         port: 25565,
         name: "rs-001".to_owned(),
         seconds: 600,
+        record: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -43,6 +51,7 @@ fn args() -> Result<Args, String> {
             "--port" => a.port = value.parse().map_err(|e| format!("--port: {e}"))?,
             "--name" => a.name = value,
             "--seconds" => a.seconds = value.parse().map_err(|e| format!("--seconds: {e}"))?,
+            "--record" => a.record = Some(PathBuf::from(value)),
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -106,10 +115,73 @@ impl Stats {
     }
 }
 
-fn send(conn: &net::Connection, out: Out) -> Result<(), String> {
-    conn.outbound
-        .send(out)
-        .map_err(|_| "the writer thread stopped".to_owned())
+/// The shell's randomness: xorshift64 from a clock-derived start. The core never draws its
+/// own; it gets these on the tick, and the recording keeps them.
+struct Seeds(u64);
+
+impl Seeds {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// The world and, when recording, its file: every event is written before the step, its
+/// effects after, and a checkpoint every `CHECKPOINT_TICKS` server ticks.
+struct Run {
+    world: World,
+    recorder: Option<Recorder>,
+    events: u64,
+    next_checkpoint: u64,
+}
+
+impl Run {
+    fn step(
+        &mut self,
+        conn: &net::Connection,
+        record: EventRecord,
+        event: Event,
+    ) -> Result<(), String> {
+        if let Some(r) = &mut self.recorder {
+            r.write(&Record::Event(record))?;
+        }
+        let effects = self.world.step(&event);
+        self.events += 1;
+        if let Some(r) = &mut self.recorder {
+            let recorded = effects
+                .iter()
+                .map(EffectRecord::of)
+                .collect::<Result<Vec<_>, _>>()?;
+            r.write(&Record::Effects(recorded))?;
+            let ticks = self.world.session.server_ticks;
+            if ticks >= self.next_checkpoint {
+                r.write(&Record::Checkpoint {
+                    event_index: self.events,
+                    server_ticks: ticks,
+                    world: Box::new(self.world.clone()),
+                })?;
+                self.next_checkpoint = (ticks / CHECKPOINT_TICKS + 1) * CHECKPOINT_TICKS;
+            }
+        }
+        for e in &effects {
+            conn.outbound
+                .send(record::as_out(e))
+                .map_err(|_| "the writer thread stopped".to_owned())?;
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Result<(), String> {
+        self.recorder.map_or(Ok(()), Recorder::finish)
+    }
 }
 
 fn run(a: &Args) -> Result<(), String> {
@@ -117,14 +189,36 @@ fn run(a: &Args) -> Result<(), String> {
     let conn = net::connect(&addr).map_err(|e| format!("connect {addr}: {e}"))?;
     let protocol = i32::try_from(data::VERSION.protocol).map_err(|e| e.to_string())?;
     for p in opening(protocol, &a.host, a.port, &a.name) {
-        send(&conn, Out::Send(p))?;
+        conn.outbound
+            .send(Out::Send(p))
+            .map_err(|_| "the writer thread stopped".to_owned())?;
     }
     println!(
         "bot {}: connecting to {addr} as protocol {protocol}",
         a.name
     );
 
-    let mut world = World::new();
+    let seed = now_ms() | 1;
+    let mut seeds = Seeds(seed);
+    let recorder = match &a.record {
+        Some(path) => {
+            let r = Recorder::create(path, &Header::new(&a.name, &addr, seed))?;
+            println!(
+                "bot {}: recording to {} (commit {})",
+                a.name,
+                path.display(),
+                record::COMMIT
+            );
+            Some(r)
+        }
+        None => None,
+    };
+    let mut run = Run {
+        world: World::new(),
+        recorder,
+        events: 0,
+        next_checkpoint: CHECKPOINT_TICKS,
+    };
     let mut stats = Stats {
         started: Instant::now(),
         play_since: None,
@@ -133,51 +227,72 @@ fn run(a: &Args) -> Result<(), String> {
         decode_errors: 0,
     };
     let mut last_status = Instant::now();
+    let mut last_tick = Instant::now();
     let limit = (a.seconds > 0).then(|| Duration::from_secs(a.seconds));
 
-    loop {
+    let result = loop {
         if let (Some(limit), Some(t)) = (limit, stats.play_since)
             && t.elapsed() >= limit
         {
-            println!("bot {}: {}", a.name, stats.summary(&world, "done"));
-            return Ok(());
+            println!("bot {}: {}", a.name, stats.summary(&run.world, "done"));
+            break Ok(());
         }
         if last_status.elapsed() >= STATUS_EVERY {
             last_status = Instant::now();
             println!(
                 "bot {}: {:?} in {}, {}",
                 a.name,
-                world.session.state,
-                world.dimension.as_ref().map_or("-", |d| d.name.as_str()),
-                stats.summary(&world, "status")
+                run.world.session.state,
+                run.world
+                    .dimension
+                    .as_ref()
+                    .map_or("-", |d| d.name.as_str()),
+                stats.summary(&run.world, "status")
             );
         }
-        let msg = match conn.inbound.recv_timeout(Duration::from_secs(1)) {
+        if last_tick.elapsed() >= TICK_EVERY {
+            last_tick = Instant::now();
+            let (now_ms, seed) = (now_ms(), seeds.next());
+            if let Err(e) = run.step(
+                &conn,
+                EventRecord::Tick { now_ms, seed },
+                Event::Tick { now_ms, seed },
+            ) {
+                break Err(e);
+            }
+        }
+        let msg = match conn.inbound.recv_timeout(TICK_EVERY) {
             Ok(m) => m,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
-                return Err(stats.summary(&world, "the reader thread stopped"));
+                break Err(stats.summary(&run.world, "the reader thread stopped"));
             }
         };
-        let packet = match msg {
-            Inbound::Packet(p) => p,
+        let (packet, raw) = match msg {
+            Inbound::Packet { packet, raw } => (packet, raw),
             Inbound::DecodeError { state, id, error } => {
                 stats.decode_errors += 1;
                 eprintln!("bot {}: cannot decode {state:?} id {id}: {error}", a.name);
                 continue;
             }
-            Inbound::Closed(why) => return Err(stats.summary(&world, &format!("closed ({why})"))),
+            Inbound::Closed(why) => {
+                break Err(stats.summary(&run.world, &format!("closed ({why})")));
+            }
         };
-        *stats.per_state.entry(world.session.state).or_default() += 1;
+        *stats.per_state.entry(run.world.session.state).or_default() += 1;
         match &packet {
             S2c::Unknown { state, id, .. } => *stats.unknown.entry((*state, *id)).or_default() += 1,
             S2c::LoginDisconnect { reason } => {
-                return Err(stats.summary(&world, &format!("kicked in login: {reason}")));
+                break Err(stats.summary(&run.world, &format!("kicked in login: {reason}")));
             }
             S2c::ConfigDisconnect { reason } | S2c::Disconnect { reason } => {
-                return Err(stats.summary(
-                    &world,
-                    &format!("kicked in {:?}: {}", world.session.state, printable(reason)),
+                break Err(stats.summary(
+                    &run.world,
+                    &format!(
+                        "kicked in {:?}: {}",
+                        run.world.session.state,
+                        printable(reason)
+                    ),
                 ));
             }
             S2c::Login {
@@ -190,50 +305,31 @@ fn run(a: &Args) -> Result<(), String> {
                     a.name
                 );
             }
-            S2c::LoginCompression { .. }
-            | S2c::LoginFinished { .. }
-            | S2c::SelectKnownPacks
-            | S2c::ConfigKeepAlive { .. }
-            | S2c::ConfigPing { .. }
-            | S2c::FinishConfiguration
-            | S2c::KeepAlive { .. }
-            | S2c::Ping { .. }
-            | S2c::PlayerPosition { .. }
-            | S2c::SetTime
-            | S2c::ChunkBatchFinished { .. }
-            | S2c::StartConfiguration
-            | S2c::LevelChunkWithLight { .. }
-            | S2c::ForgetLevelChunk { .. }
-            | S2c::BlockUpdate { .. }
-            | S2c::SectionBlocksUpdate { .. }
-            | S2c::Respawn { .. }
-            | S2c::SetHealth { .. }
-            | S2c::AddEntity { .. }
-            | S2c::RemoveEntities { .. }
-            | S2c::MoveEntity { .. }
-            | S2c::MoveEntityRot { .. }
-            | S2c::EntityPositionSync { .. }
-            | S2c::TeleportEntity { .. }
-            | S2c::SetEntityData { .. }
-            | S2c::ContainerSetContent { .. }
-            | S2c::ContainerSetSlot { .. }
-            | S2c::SetPlayerInventory { .. } => {}
+            _ => {}
         }
-        let before = world.session.state;
-        for effect in world.step(&Event::Packet(packet)) {
-            send(
-                &conn,
-                match effect {
-                    Effect::Send(p) => Out::Send(p),
-                    Effect::SetCompression(t) => Out::SetCompression(t),
-                },
-            )?;
+        let before = run.world.session.state;
+        let record = EventRecord::Packet {
+            state: raw.state,
+            id: raw.id,
+            body: raw.body,
+        };
+        if let Err(e) = run.step(&conn, record, Event::Packet(packet)) {
+            break Err(e);
         }
-        if before != world.session.state {
-            println!("bot {}: {before:?} -> {:?}", a.name, world.session.state);
-            if world.session.state == State::Play {
+        if before != run.world.session.state {
+            println!(
+                "bot {}: {before:?} -> {:?}",
+                a.name, run.world.session.state
+            );
+            if run.world.session.state == State::Play {
                 stats.play_since.get_or_insert_with(Instant::now);
             }
         }
+    };
+    let events = run.events;
+    run.finish()?;
+    if a.record.is_some() {
+        println!("bot {}: recorded {events} events", a.name);
     }
+    result
 }

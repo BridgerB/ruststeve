@@ -1,0 +1,19 @@
+[package]
+name = "record"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Recordings: MessagePack with named fields in zstd, commit-pinned (files; shell side)"
+
+[dependencies]
+data = { path = "../data" }
+protocol = { path = "../protocol" }
+rmp-serde = "1"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_bytes = "0.11"
+world = { path = "../world" }
+zstd = "0.13"
+
+[dev-dependencies]
+proptest = "1"

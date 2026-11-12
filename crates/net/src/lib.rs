@@ -17,10 +17,22 @@ const OUTBOUND_CAPACITY: usize = 1024;
 /// Bytes read from the socket at a time.
 const READ_CHUNK: usize = 64 * 1024;
 
+/// A packet as it arrived: the state it was read in, its id and its fields (decompressed). What
+/// a recording keeps, so replay decodes it again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Raw {
+    pub state: State,
+    pub id: u32,
+    pub body: Vec<u8>,
+}
+
 /// What the reader thread reports. Errors are values: nothing is dropped silently.
 #[derive(Debug)]
 pub enum Inbound {
-    Packet(S2c),
+    Packet {
+        packet: S2c,
+        raw: Raw,
+    },
     /// A frame that would not decode as its modelled packet; the stream continues.
     DecodeError {
         state: State,
@@ -92,13 +104,18 @@ fn read_packets(stream: &mut TcpStream, tx: &SyncSender<Inbound>) -> String {
             };
             let msg = match decode(state, id, body) {
                 Ok(p) => {
+                    let raw = Raw {
+                        state,
+                        id,
+                        body: body.to_vec(),
+                    };
                     // Compression applies to every frame after this one, including frames
                     // already buffered, so it is switched before the next is taken.
                     if let S2c::LoginCompression { threshold } = p {
                         decoder.set_compression(threshold);
                     }
                     state = state.after_receive(&p);
-                    Inbound::Packet(p)
+                    Inbound::Packet { packet: p, raw }
                 }
                 Err(error) => Inbound::DecodeError { state, id, error },
             };

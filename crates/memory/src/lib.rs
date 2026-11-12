@@ -79,7 +79,7 @@ impl Seen {
 }
 
 /// One fact: what was at a position, in a dimension, from a server tick on.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Sighting {
     pub dimension: String,
     pub pos: Cell,
@@ -101,7 +101,7 @@ pub fn neighbours(pos: Cell) -> [Cell; 6] {
 }
 
 /// The sightings and their indexes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Memory {
     /// Every sighting, in the order it was made. Never edited or shortened.
     log: Vec<Sighting>,
