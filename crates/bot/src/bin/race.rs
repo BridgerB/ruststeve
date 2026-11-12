@@ -290,6 +290,7 @@ fn write_case(dir: &Path, case: &Case, coverage: &mut Coverage) -> Result<Row, S
         wall_ms: case.wall_ms,
         case: Some(file),
         recording: case.recording.clone(),
+        aim: case.plan.as_ref().map(|p| (p.aim.clone(), p.reached)),
     })
 }
 

@@ -6,7 +6,7 @@ tags: [parity, sim, measurement, capture, moments, real]
 aliases: [parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@b4d3e95
+verifiedAgainst: ruststeve@d65565e
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
