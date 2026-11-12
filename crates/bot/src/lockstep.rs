@@ -74,7 +74,7 @@ pub fn run(
     seed: u64,
     ticks: u64,
     settle: u64,
-    controls: impl Fn(u64) -> physics::Controls,
+    mut controls: impl FnMut(&World, u64) -> physics::Controls,
 ) -> Run {
     let mut world = World::new();
     let mut counts = Counts::default();
@@ -112,7 +112,7 @@ pub fn run(
             if let Some(h) = world.player.health {
                 min_health_in_script = Some(min_health_in_script.map_or(h, |m: f32| m.min(h)));
             }
-            let c = controls(walk_tick);
+            let c = controls(&world, walk_tick);
             walk_tick += 1;
             if pressed != Some(c) {
                 pressed = Some(c);

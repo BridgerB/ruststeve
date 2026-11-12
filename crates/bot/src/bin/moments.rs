@@ -170,6 +170,7 @@ fn real(a: &Args) -> Result<(), String> {
                 record: Some(a.out.join(format!("{}.real.rsr", m.id))),
                 script: Some(script),
                 script_ticks: Some(m.ticks),
+                aim: None,
                 cap_ticks: None,
                 deadline: Some(Instant::now() + Duration::from_secs(300)),
                 start: Some(Box::new(move || {
@@ -242,7 +243,7 @@ fn sim(a: &Args) -> Result<(), String> {
             i as u64 + 1,
             SETTLE + m.ticks,
             SETTLE,
-            |t| script.controls(t),
+            |_, t| script.controls(t),
         );
         let r = MomentResult {
             moment: m.id.clone(),

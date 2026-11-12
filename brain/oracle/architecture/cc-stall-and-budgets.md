@@ -5,7 +5,7 @@ type: reference
 tags: [oracle, watchdog, thresholds, config]
 aliases: [stuck-ms, stall-ms, max-attempts, wait-ticks, failure memory, churn, A* budget]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:src/clojurecraft/plan.clj#(def max-attempts 3)                  ; consecutive failed intents before the plan fails"
@@ -47,7 +47,7 @@ The guide says to take watchdog thresholds from clojurecraft where it has them. 
 - **Churn**: the intent the table chooses must not be already over after one tick. When the planner's choice and the intent's end check disagree, the same intent restarts every 50 ms while the bot stands still; `churn_guard` checks the invariant over recorded snapshots.
 
 ## For ruststeve
-These become `Config` fields of the watchdog and planner, converted from ms to ticks ([[cc-main-loop]]). The churn invariant is a property test: for any world, the chosen task's first step does not end it.
+These become `Config` fields of the watchdog and planner, converted from ms to ticks ([[cc-main-loop]]). The churn invariant is a property test: for any world, the chosen task's first step does not end it. Issue 09a ported `failure-memory` (600 ticks), `blocked-after` (3), `area-radius` (6), `max-unwalkable` (12) and the walk's own constants, and the search budgets in expansions ([[planner]], [[pathfinding]]).
 
 ## See also
 - [[expectations-and-watchdog]] - the Rust mechanism.

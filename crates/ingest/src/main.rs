@@ -380,6 +380,7 @@ mod tests {
             recording: None,
             replay: "-".to_owned(),
             stream: None,
+            plan: None,
         }
     }
 

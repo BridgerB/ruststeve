@@ -6212,6 +6212,7 @@ impl BlockKind {
 pub static BLOCKS: [BlockInfo; 1168] = [
     BlockInfo {
         name: "air",
+        definition: "air",
         first_state: 0,
         last_state: 0,
         default_state: 0,
@@ -6219,6 +6220,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone",
+        definition: "block",
         first_state: 1,
         last_state: 1,
         default_state: 1,
@@ -6226,6 +6228,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "granite",
+        definition: "block",
         first_state: 2,
         last_state: 2,
         default_state: 2,
@@ -6233,6 +6236,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_granite",
+        definition: "block",
         first_state: 3,
         last_state: 3,
         default_state: 3,
@@ -6240,6 +6244,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "diorite",
+        definition: "block",
         first_state: 4,
         last_state: 4,
         default_state: 4,
@@ -6247,6 +6252,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_diorite",
+        definition: "block",
         first_state: 5,
         last_state: 5,
         default_state: 5,
@@ -6254,6 +6260,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "andesite",
+        definition: "block",
         first_state: 6,
         last_state: 6,
         default_state: 6,
@@ -6261,6 +6268,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_andesite",
+        definition: "block",
         first_state: 7,
         last_state: 7,
         default_state: 7,
@@ -6268,6 +6276,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "grass_block",
+        definition: "grass",
         first_state: 8,
         last_state: 9,
         default_state: 9,
@@ -6278,6 +6287,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dirt",
+        definition: "block",
         first_state: 10,
         last_state: 10,
         default_state: 10,
@@ -6285,6 +6295,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "coarse_dirt",
+        definition: "block",
         first_state: 11,
         last_state: 11,
         default_state: 11,
@@ -6292,6 +6303,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "podzol",
+        definition: "snowy_dirt",
         first_state: 12,
         last_state: 13,
         default_state: 13,
@@ -6302,6 +6314,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobblestone",
+        definition: "block",
         first_state: 14,
         last_state: 14,
         default_state: 14,
@@ -6309,6 +6322,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_planks",
+        definition: "block",
         first_state: 15,
         last_state: 15,
         default_state: 15,
@@ -6316,6 +6330,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_planks",
+        definition: "block",
         first_state: 16,
         last_state: 16,
         default_state: 16,
@@ -6323,6 +6338,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_planks",
+        definition: "block",
         first_state: 17,
         last_state: 17,
         default_state: 17,
@@ -6330,6 +6346,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_planks",
+        definition: "block",
         first_state: 18,
         last_state: 18,
         default_state: 18,
@@ -6337,6 +6354,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_planks",
+        definition: "block",
         first_state: 19,
         last_state: 19,
         default_state: 19,
@@ -6344,6 +6362,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_planks",
+        definition: "block",
         first_state: 20,
         last_state: 20,
         default_state: 20,
@@ -6351,6 +6370,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_planks",
+        definition: "block",
         first_state: 21,
         last_state: 21,
         default_state: 21,
@@ -6358,6 +6378,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_wood",
+        definition: "rotated_pillar",
         first_state: 22,
         last_state: 24,
         default_state: 23,
@@ -6368,6 +6389,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_planks",
+        definition: "block",
         first_state: 25,
         last_state: 25,
         default_state: 25,
@@ -6375,6 +6397,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_planks",
+        definition: "block",
         first_state: 26,
         last_state: 26,
         default_state: 26,
@@ -6382,6 +6405,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_planks",
+        definition: "block",
         first_state: 27,
         last_state: 27,
         default_state: 27,
@@ -6389,6 +6413,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_mosaic",
+        definition: "block",
         first_state: 28,
         last_state: 28,
         default_state: 28,
@@ -6396,6 +6421,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_sapling",
+        definition: "sapling",
         first_state: 29,
         last_state: 30,
         default_state: 29,
@@ -6406,6 +6432,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_sapling",
+        definition: "sapling",
         first_state: 31,
         last_state: 32,
         default_state: 31,
@@ -6416,6 +6443,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_sapling",
+        definition: "sapling",
         first_state: 33,
         last_state: 34,
         default_state: 33,
@@ -6426,6 +6454,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_sapling",
+        definition: "sapling",
         first_state: 35,
         last_state: 36,
         default_state: 35,
@@ -6436,6 +6465,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_sapling",
+        definition: "sapling",
         first_state: 37,
         last_state: 38,
         default_state: 37,
@@ -6446,6 +6476,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_sapling",
+        definition: "sapling",
         first_state: 39,
         last_state: 40,
         default_state: 39,
@@ -6456,6 +6487,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_sapling",
+        definition: "sapling",
         first_state: 41,
         last_state: 42,
         default_state: 41,
@@ -6466,6 +6498,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_sapling",
+        definition: "sapling",
         first_state: 43,
         last_state: 44,
         default_state: 43,
@@ -6476,6 +6509,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_propagule",
+        definition: "mangrove_propagule",
         first_state: 45,
         last_state: 84,
         default_state: 50,
@@ -6500,6 +6534,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bedrock",
+        definition: "block",
         first_state: 85,
         last_state: 85,
         default_state: 85,
@@ -6507,6 +6542,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "water",
+        definition: "liquid",
         first_state: 86,
         last_state: 101,
         default_state: 86,
@@ -6520,6 +6556,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lava",
+        definition: "liquid",
         first_state: 102,
         last_state: 117,
         default_state: 102,
@@ -6533,6 +6570,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sand",
+        definition: "sand",
         first_state: 118,
         last_state: 118,
         default_state: 118,
@@ -6540,6 +6578,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "suspicious_sand",
+        definition: "brushable",
         first_state: 119,
         last_state: 122,
         default_state: 119,
@@ -6550,6 +6589,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_sand",
+        definition: "sand",
         first_state: 123,
         last_state: 123,
         default_state: 123,
@@ -6557,6 +6597,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gravel",
+        definition: "colored_falling",
         first_state: 124,
         last_state: 124,
         default_state: 124,
@@ -6564,6 +6605,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "suspicious_gravel",
+        definition: "brushable",
         first_state: 125,
         last_state: 128,
         default_state: 125,
@@ -6574,6 +6616,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gold_ore",
+        definition: "drop_experience",
         first_state: 129,
         last_state: 129,
         default_state: 129,
@@ -6581,6 +6624,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_gold_ore",
+        definition: "drop_experience",
         first_state: 130,
         last_state: 130,
         default_state: 130,
@@ -6588,6 +6632,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "iron_ore",
+        definition: "drop_experience",
         first_state: 131,
         last_state: 131,
         default_state: 131,
@@ -6595,6 +6640,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_iron_ore",
+        definition: "drop_experience",
         first_state: 132,
         last_state: 132,
         default_state: 132,
@@ -6602,6 +6648,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "coal_ore",
+        definition: "drop_experience",
         first_state: 133,
         last_state: 133,
         default_state: 133,
@@ -6609,6 +6656,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_coal_ore",
+        definition: "drop_experience",
         first_state: 134,
         last_state: 134,
         default_state: 134,
@@ -6616,6 +6664,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_gold_ore",
+        definition: "drop_experience",
         first_state: 135,
         last_state: 135,
         default_state: 135,
@@ -6623,6 +6672,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_log",
+        definition: "rotated_pillar",
         first_state: 136,
         last_state: 138,
         default_state: 137,
@@ -6633,6 +6683,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_log",
+        definition: "rotated_pillar",
         first_state: 139,
         last_state: 141,
         default_state: 140,
@@ -6643,6 +6694,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_log",
+        definition: "rotated_pillar",
         first_state: 142,
         last_state: 144,
         default_state: 143,
@@ -6653,6 +6705,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_log",
+        definition: "rotated_pillar",
         first_state: 145,
         last_state: 147,
         default_state: 146,
@@ -6663,6 +6716,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_log",
+        definition: "rotated_pillar",
         first_state: 148,
         last_state: 150,
         default_state: 149,
@@ -6673,6 +6727,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_log",
+        definition: "rotated_pillar",
         first_state: 151,
         last_state: 153,
         default_state: 152,
@@ -6683,6 +6738,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_log",
+        definition: "rotated_pillar",
         first_state: 154,
         last_state: 156,
         default_state: 155,
@@ -6693,6 +6749,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_log",
+        definition: "rotated_pillar",
         first_state: 157,
         last_state: 159,
         default_state: 158,
@@ -6703,6 +6760,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_log",
+        definition: "rotated_pillar",
         first_state: 160,
         last_state: 162,
         default_state: 161,
@@ -6713,6 +6771,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_roots",
+        definition: "mangrove_roots",
         first_state: 163,
         last_state: 164,
         default_state: 164,
@@ -6723,6 +6782,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "muddy_mangrove_roots",
+        definition: "rotated_pillar",
         first_state: 165,
         last_state: 167,
         default_state: 166,
@@ -6733,6 +6793,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_block",
+        definition: "rotated_pillar",
         first_state: 168,
         last_state: 170,
         default_state: 169,
@@ -6743,6 +6804,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_spruce_log",
+        definition: "rotated_pillar",
         first_state: 171,
         last_state: 173,
         default_state: 172,
@@ -6753,6 +6815,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_birch_log",
+        definition: "rotated_pillar",
         first_state: 174,
         last_state: 176,
         default_state: 175,
@@ -6763,6 +6826,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_jungle_log",
+        definition: "rotated_pillar",
         first_state: 177,
         last_state: 179,
         default_state: 178,
@@ -6773,6 +6837,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_acacia_log",
+        definition: "rotated_pillar",
         first_state: 180,
         last_state: 182,
         default_state: 181,
@@ -6783,6 +6848,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_cherry_log",
+        definition: "rotated_pillar",
         first_state: 183,
         last_state: 185,
         default_state: 184,
@@ -6793,6 +6859,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_dark_oak_log",
+        definition: "rotated_pillar",
         first_state: 186,
         last_state: 188,
         default_state: 187,
@@ -6803,6 +6870,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_pale_oak_log",
+        definition: "rotated_pillar",
         first_state: 189,
         last_state: 191,
         default_state: 190,
@@ -6813,6 +6881,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_oak_log",
+        definition: "rotated_pillar",
         first_state: 192,
         last_state: 194,
         default_state: 193,
@@ -6823,6 +6892,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_mangrove_log",
+        definition: "rotated_pillar",
         first_state: 195,
         last_state: 197,
         default_state: 196,
@@ -6833,6 +6903,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_bamboo_block",
+        definition: "rotated_pillar",
         first_state: 198,
         last_state: 200,
         default_state: 199,
@@ -6843,6 +6914,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_wood",
+        definition: "rotated_pillar",
         first_state: 201,
         last_state: 203,
         default_state: 202,
@@ -6853,6 +6925,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_wood",
+        definition: "rotated_pillar",
         first_state: 204,
         last_state: 206,
         default_state: 205,
@@ -6863,6 +6936,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_wood",
+        definition: "rotated_pillar",
         first_state: 207,
         last_state: 209,
         default_state: 208,
@@ -6873,6 +6947,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_wood",
+        definition: "rotated_pillar",
         first_state: 210,
         last_state: 212,
         default_state: 211,
@@ -6883,6 +6958,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_wood",
+        definition: "rotated_pillar",
         first_state: 213,
         last_state: 215,
         default_state: 214,
@@ -6893,6 +6969,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_wood",
+        definition: "rotated_pillar",
         first_state: 216,
         last_state: 218,
         default_state: 217,
@@ -6903,6 +6980,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_wood",
+        definition: "rotated_pillar",
         first_state: 219,
         last_state: 221,
         default_state: 220,
@@ -6913,6 +6991,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_wood",
+        definition: "rotated_pillar",
         first_state: 222,
         last_state: 224,
         default_state: 223,
@@ -6923,6 +7002,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_oak_wood",
+        definition: "rotated_pillar",
         first_state: 225,
         last_state: 227,
         default_state: 226,
@@ -6933,6 +7013,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_spruce_wood",
+        definition: "rotated_pillar",
         first_state: 228,
         last_state: 230,
         default_state: 229,
@@ -6943,6 +7024,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_birch_wood",
+        definition: "rotated_pillar",
         first_state: 231,
         last_state: 233,
         default_state: 232,
@@ -6953,6 +7035,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_jungle_wood",
+        definition: "rotated_pillar",
         first_state: 234,
         last_state: 236,
         default_state: 235,
@@ -6963,6 +7046,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_acacia_wood",
+        definition: "rotated_pillar",
         first_state: 237,
         last_state: 239,
         default_state: 238,
@@ -6973,6 +7057,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_cherry_wood",
+        definition: "rotated_pillar",
         first_state: 240,
         last_state: 242,
         default_state: 241,
@@ -6983,6 +7068,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_dark_oak_wood",
+        definition: "rotated_pillar",
         first_state: 243,
         last_state: 245,
         default_state: 244,
@@ -6993,6 +7079,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_pale_oak_wood",
+        definition: "rotated_pillar",
         first_state: 246,
         last_state: 248,
         default_state: 247,
@@ -7003,6 +7090,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_mangrove_wood",
+        definition: "rotated_pillar",
         first_state: 249,
         last_state: 251,
         default_state: 250,
@@ -7013,6 +7101,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_leaves",
+        definition: "tinted_particle_leaves",
         first_state: 252,
         last_state: 279,
         default_state: 279,
@@ -7033,6 +7122,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_leaves",
+        definition: "tinted_particle_leaves",
         first_state: 280,
         last_state: 307,
         default_state: 307,
@@ -7053,6 +7143,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_leaves",
+        definition: "tinted_particle_leaves",
         first_state: 308,
         last_state: 335,
         default_state: 335,
@@ -7073,6 +7164,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_leaves",
+        definition: "tinted_particle_leaves",
         first_state: 336,
         last_state: 363,
         default_state: 363,
@@ -7093,6 +7185,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_leaves",
+        definition: "tinted_particle_leaves",
         first_state: 364,
         last_state: 391,
         default_state: 391,
@@ -7113,6 +7206,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_leaves",
+        definition: "untinted_particle_leaves",
         first_state: 392,
         last_state: 419,
         default_state: 419,
@@ -7133,6 +7227,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_leaves",
+        definition: "tinted_particle_leaves",
         first_state: 420,
         last_state: 447,
         default_state: 447,
@@ -7153,6 +7248,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_leaves",
+        definition: "untinted_particle_leaves",
         first_state: 448,
         last_state: 475,
         default_state: 475,
@@ -7173,6 +7269,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_leaves",
+        definition: "mangrove_leaves",
         first_state: 476,
         last_state: 503,
         default_state: 503,
@@ -7193,6 +7290,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "azalea_leaves",
+        definition: "untinted_particle_leaves",
         first_state: 504,
         last_state: 531,
         default_state: 531,
@@ -7213,6 +7311,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "flowering_azalea_leaves",
+        definition: "untinted_particle_leaves",
         first_state: 532,
         last_state: 559,
         default_state: 559,
@@ -7233,6 +7332,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sponge",
+        definition: "sponge",
         first_state: 560,
         last_state: 560,
         default_state: 560,
@@ -7240,6 +7340,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "wet_sponge",
+        definition: "wet_sponge",
         first_state: 561,
         last_state: 561,
         default_state: 561,
@@ -7247,6 +7348,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "glass",
+        definition: "transparent",
         first_state: 562,
         last_state: 562,
         default_state: 562,
@@ -7254,6 +7356,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lapis_ore",
+        definition: "drop_experience",
         first_state: 563,
         last_state: 563,
         default_state: 563,
@@ -7261,6 +7364,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_lapis_ore",
+        definition: "drop_experience",
         first_state: 564,
         last_state: 564,
         default_state: 564,
@@ -7268,6 +7372,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lapis_block",
+        definition: "block",
         first_state: 565,
         last_state: 565,
         default_state: 565,
@@ -7275,6 +7380,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dispenser",
+        definition: "dispenser",
         first_state: 566,
         last_state: 577,
         default_state: 567,
@@ -7291,6 +7397,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sandstone",
+        definition: "block",
         first_state: 578,
         last_state: 578,
         default_state: 578,
@@ -7298,6 +7405,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_sandstone",
+        definition: "block",
         first_state: 579,
         last_state: 579,
         default_state: 579,
@@ -7305,6 +7413,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cut_sandstone",
+        definition: "block",
         first_state: 580,
         last_state: 580,
         default_state: 580,
@@ -7312,6 +7421,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "note_block",
+        definition: "note",
         first_state: 581,
         last_state: 1930,
         default_state: 582,
@@ -7363,6 +7473,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_bed",
+        definition: "bed",
         first_state: 1931,
         last_state: 1946,
         default_state: 1934,
@@ -7383,6 +7494,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_bed",
+        definition: "bed",
         first_state: 1947,
         last_state: 1962,
         default_state: 1950,
@@ -7403,6 +7515,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_bed",
+        definition: "bed",
         first_state: 1963,
         last_state: 1978,
         default_state: 1966,
@@ -7423,6 +7536,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_bed",
+        definition: "bed",
         first_state: 1979,
         last_state: 1994,
         default_state: 1982,
@@ -7443,6 +7557,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_bed",
+        definition: "bed",
         first_state: 1995,
         last_state: 2010,
         default_state: 1998,
@@ -7463,6 +7578,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_bed",
+        definition: "bed",
         first_state: 2011,
         last_state: 2026,
         default_state: 2014,
@@ -7483,6 +7599,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_bed",
+        definition: "bed",
         first_state: 2027,
         last_state: 2042,
         default_state: 2030,
@@ -7503,6 +7620,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_bed",
+        definition: "bed",
         first_state: 2043,
         last_state: 2058,
         default_state: 2046,
@@ -7523,6 +7641,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_bed",
+        definition: "bed",
         first_state: 2059,
         last_state: 2074,
         default_state: 2062,
@@ -7543,6 +7662,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_bed",
+        definition: "bed",
         first_state: 2075,
         last_state: 2090,
         default_state: 2078,
@@ -7563,6 +7683,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_bed",
+        definition: "bed",
         first_state: 2091,
         last_state: 2106,
         default_state: 2094,
@@ -7583,6 +7704,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_bed",
+        definition: "bed",
         first_state: 2107,
         last_state: 2122,
         default_state: 2110,
@@ -7603,6 +7725,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_bed",
+        definition: "bed",
         first_state: 2123,
         last_state: 2138,
         default_state: 2126,
@@ -7623,6 +7746,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_bed",
+        definition: "bed",
         first_state: 2139,
         last_state: 2154,
         default_state: 2142,
@@ -7643,6 +7767,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_bed",
+        definition: "bed",
         first_state: 2155,
         last_state: 2170,
         default_state: 2158,
@@ -7663,6 +7788,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_bed",
+        definition: "bed",
         first_state: 2171,
         last_state: 2186,
         default_state: 2174,
@@ -7683,6 +7809,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "powered_rail",
+        definition: "powered_rail",
         first_state: 2187,
         last_state: 2210,
         default_state: 2200,
@@ -7710,6 +7837,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "detector_rail",
+        definition: "detector_rail",
         first_state: 2211,
         last_state: 2234,
         default_state: 2224,
@@ -7737,6 +7865,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sticky_piston",
+        definition: "piston_base",
         first_state: 2235,
         last_state: 2246,
         default_state: 2241,
@@ -7753,6 +7882,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobweb",
+        definition: "web",
         first_state: 2247,
         last_state: 2247,
         default_state: 2247,
@@ -7760,6 +7890,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "short_grass",
+        definition: "tall_grass",
         first_state: 2248,
         last_state: 2248,
         default_state: 2248,
@@ -7767,6 +7898,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "fern",
+        definition: "tall_grass",
         first_state: 2249,
         last_state: 2249,
         default_state: 2249,
@@ -7774,6 +7906,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_bush",
+        definition: "dry_vegetation",
         first_state: 2250,
         last_state: 2250,
         default_state: 2250,
@@ -7781,6 +7914,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bush",
+        definition: "bush",
         first_state: 2251,
         last_state: 2251,
         default_state: 2251,
@@ -7788,6 +7922,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "short_dry_grass",
+        definition: "short_dry_grass",
         first_state: 2252,
         last_state: 2252,
         default_state: 2252,
@@ -7795,6 +7930,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tall_dry_grass",
+        definition: "tall_dry_grass",
         first_state: 2253,
         last_state: 2253,
         default_state: 2253,
@@ -7802,6 +7938,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "seagrass",
+        definition: "seagrass",
         first_state: 2254,
         last_state: 2254,
         default_state: 2254,
@@ -7809,6 +7946,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tall_seagrass",
+        definition: "tall_seagrass",
         first_state: 2255,
         last_state: 2256,
         default_state: 2256,
@@ -7819,6 +7957,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "piston",
+        definition: "piston_base",
         first_state: 2257,
         last_state: 2268,
         default_state: 2263,
@@ -7835,6 +7974,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "piston_head",
+        definition: "piston_head",
         first_state: 2269,
         last_state: 2292,
         default_state: 2271,
@@ -7855,6 +7995,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_wool",
+        definition: "block",
         first_state: 2293,
         last_state: 2293,
         default_state: 2293,
@@ -7862,6 +8003,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_wool",
+        definition: "block",
         first_state: 2294,
         last_state: 2294,
         default_state: 2294,
@@ -7869,6 +8011,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_wool",
+        definition: "block",
         first_state: 2295,
         last_state: 2295,
         default_state: 2295,
@@ -7876,6 +8019,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_wool",
+        definition: "block",
         first_state: 2296,
         last_state: 2296,
         default_state: 2296,
@@ -7883,6 +8027,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_wool",
+        definition: "block",
         first_state: 2297,
         last_state: 2297,
         default_state: 2297,
@@ -7890,6 +8035,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_wool",
+        definition: "block",
         first_state: 2298,
         last_state: 2298,
         default_state: 2298,
@@ -7897,6 +8043,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_wool",
+        definition: "block",
         first_state: 2299,
         last_state: 2299,
         default_state: 2299,
@@ -7904,6 +8051,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_wool",
+        definition: "block",
         first_state: 2300,
         last_state: 2300,
         default_state: 2300,
@@ -7911,6 +8059,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_wool",
+        definition: "block",
         first_state: 2301,
         last_state: 2301,
         default_state: 2301,
@@ -7918,6 +8067,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_wool",
+        definition: "block",
         first_state: 2302,
         last_state: 2302,
         default_state: 2302,
@@ -7925,6 +8075,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_wool",
+        definition: "block",
         first_state: 2303,
         last_state: 2303,
         default_state: 2303,
@@ -7932,6 +8083,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_wool",
+        definition: "block",
         first_state: 2304,
         last_state: 2304,
         default_state: 2304,
@@ -7939,6 +8091,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_wool",
+        definition: "block",
         first_state: 2305,
         last_state: 2305,
         default_state: 2305,
@@ -7946,6 +8099,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_wool",
+        definition: "block",
         first_state: 2306,
         last_state: 2306,
         default_state: 2306,
@@ -7953,6 +8107,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_wool",
+        definition: "block",
         first_state: 2307,
         last_state: 2307,
         default_state: 2307,
@@ -7960,6 +8115,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_wool",
+        definition: "block",
         first_state: 2308,
         last_state: 2308,
         default_state: 2308,
@@ -7967,6 +8123,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "moving_piston",
+        definition: "moving_piston",
         first_state: 2309,
         last_state: 2320,
         default_state: 2309,
@@ -7983,6 +8140,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dandelion",
+        definition: "flower",
         first_state: 2321,
         last_state: 2321,
         default_state: 2321,
@@ -7990,6 +8148,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "golden_dandelion",
+        definition: "flower",
         first_state: 2322,
         last_state: 2322,
         default_state: 2322,
@@ -7997,6 +8156,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "torchflower",
+        definition: "flower",
         first_state: 2323,
         last_state: 2323,
         default_state: 2323,
@@ -8004,6 +8164,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "poppy",
+        definition: "flower",
         first_state: 2324,
         last_state: 2324,
         default_state: 2324,
@@ -8011,6 +8172,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_orchid",
+        definition: "flower",
         first_state: 2325,
         last_state: 2325,
         default_state: 2325,
@@ -8018,6 +8180,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "allium",
+        definition: "flower",
         first_state: 2326,
         last_state: 2326,
         default_state: 2326,
@@ -8025,6 +8188,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "azure_bluet",
+        definition: "flower",
         first_state: 2327,
         last_state: 2327,
         default_state: 2327,
@@ -8032,6 +8196,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_tulip",
+        definition: "flower",
         first_state: 2328,
         last_state: 2328,
         default_state: 2328,
@@ -8039,6 +8204,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_tulip",
+        definition: "flower",
         first_state: 2329,
         last_state: 2329,
         default_state: 2329,
@@ -8046,6 +8212,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_tulip",
+        definition: "flower",
         first_state: 2330,
         last_state: 2330,
         default_state: 2330,
@@ -8053,6 +8220,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_tulip",
+        definition: "flower",
         first_state: 2331,
         last_state: 2331,
         default_state: 2331,
@@ -8060,6 +8228,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxeye_daisy",
+        definition: "flower",
         first_state: 2332,
         last_state: 2332,
         default_state: 2332,
@@ -8067,6 +8236,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cornflower",
+        definition: "flower",
         first_state: 2333,
         last_state: 2333,
         default_state: 2333,
@@ -8074,6 +8244,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "wither_rose",
+        definition: "wither_rose",
         first_state: 2334,
         last_state: 2334,
         default_state: 2334,
@@ -8081,6 +8252,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lily_of_the_valley",
+        definition: "flower",
         first_state: 2335,
         last_state: 2335,
         default_state: 2335,
@@ -8088,6 +8260,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_mushroom",
+        definition: "mushroom",
         first_state: 2336,
         last_state: 2336,
         default_state: 2336,
@@ -8095,6 +8268,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_mushroom",
+        definition: "mushroom",
         first_state: 2337,
         last_state: 2337,
         default_state: 2337,
@@ -8102,6 +8276,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gold_block",
+        definition: "block",
         first_state: 2338,
         last_state: 2338,
         default_state: 2338,
@@ -8109,6 +8284,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "iron_block",
+        definition: "block",
         first_state: 2339,
         last_state: 2339,
         default_state: 2339,
@@ -8116,6 +8292,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bricks",
+        definition: "block",
         first_state: 2340,
         last_state: 2340,
         default_state: 2340,
@@ -8123,6 +8300,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tnt",
+        definition: "tnt",
         first_state: 2341,
         last_state: 2342,
         default_state: 2342,
@@ -8133,6 +8311,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bookshelf",
+        definition: "block",
         first_state: 2343,
         last_state: 2343,
         default_state: 2343,
@@ -8140,6 +8319,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_bookshelf",
+        definition: "chiseled_book_shelf",
         first_state: 2344,
         last_state: 2599,
         default_state: 2407,
@@ -8176,6 +8356,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_shelf",
+        definition: "shelf",
         first_state: 2600,
         last_state: 2663,
         default_state: 2609,
@@ -8200,6 +8381,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_shelf",
+        definition: "shelf",
         first_state: 2664,
         last_state: 2727,
         default_state: 2673,
@@ -8224,6 +8406,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_shelf",
+        definition: "shelf",
         first_state: 2728,
         last_state: 2791,
         default_state: 2737,
@@ -8248,6 +8431,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_shelf",
+        definition: "shelf",
         first_state: 2792,
         last_state: 2855,
         default_state: 2801,
@@ -8272,6 +8456,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_shelf",
+        definition: "shelf",
         first_state: 2856,
         last_state: 2919,
         default_state: 2865,
@@ -8296,6 +8481,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_shelf",
+        definition: "shelf",
         first_state: 2920,
         last_state: 2983,
         default_state: 2929,
@@ -8320,6 +8506,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_shelf",
+        definition: "shelf",
         first_state: 2984,
         last_state: 3047,
         default_state: 2993,
@@ -8344,6 +8531,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_shelf",
+        definition: "shelf",
         first_state: 3048,
         last_state: 3111,
         default_state: 3057,
@@ -8368,6 +8556,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_shelf",
+        definition: "shelf",
         first_state: 3112,
         last_state: 3175,
         default_state: 3121,
@@ -8392,6 +8581,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_shelf",
+        definition: "shelf",
         first_state: 3176,
         last_state: 3239,
         default_state: 3185,
@@ -8416,6 +8606,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_shelf",
+        definition: "shelf",
         first_state: 3240,
         last_state: 3303,
         default_state: 3249,
@@ -8440,6 +8631,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_shelf",
+        definition: "shelf",
         first_state: 3304,
         last_state: 3367,
         default_state: 3313,
@@ -8464,6 +8656,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_cobblestone",
+        definition: "block",
         first_state: 3368,
         last_state: 3368,
         default_state: 3368,
@@ -8471,6 +8664,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "obsidian",
+        definition: "block",
         first_state: 3369,
         last_state: 3369,
         default_state: 3369,
@@ -8478,6 +8672,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "torch",
+        definition: "torch",
         first_state: 3370,
         last_state: 3370,
         default_state: 3370,
@@ -8485,6 +8680,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "wall_torch",
+        definition: "wall_torch",
         first_state: 3371,
         last_state: 3374,
         default_state: 3371,
@@ -8495,6 +8691,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "fire",
+        definition: "fire",
         first_state: 3375,
         last_state: 3886,
         default_state: 3406,
@@ -8530,6 +8727,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "soul_fire",
+        definition: "soul_fire",
         first_state: 3887,
         last_state: 3887,
         default_state: 3887,
@@ -8537,6 +8735,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spawner",
+        definition: "spawner",
         first_state: 3888,
         last_state: 3888,
         default_state: 3888,
@@ -8544,6 +8743,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "creaking_heart",
+        definition: "creaking_heart",
         first_state: 3889,
         last_state: 3906,
         default_state: 3896,
@@ -8564,6 +8764,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_stairs",
+        definition: "stair",
         first_state: 3907,
         last_state: 3986,
         default_state: 3918,
@@ -8594,6 +8795,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chest",
+        definition: "chest",
         first_state: 3987,
         last_state: 4010,
         default_state: 3988,
@@ -8614,6 +8816,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "redstone_wire",
+        definition: "redstone_wire",
         first_state: 4011,
         last_state: 5306,
         default_state: 5171,
@@ -8645,6 +8848,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "diamond_ore",
+        definition: "drop_experience",
         first_state: 5307,
         last_state: 5307,
         default_state: 5307,
@@ -8652,6 +8856,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_diamond_ore",
+        definition: "drop_experience",
         first_state: 5308,
         last_state: 5308,
         default_state: 5308,
@@ -8659,6 +8864,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "diamond_block",
+        definition: "block",
         first_state: 5309,
         last_state: 5309,
         default_state: 5309,
@@ -8666,6 +8872,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crafting_table",
+        definition: "crafting_table",
         first_state: 5310,
         last_state: 5310,
         default_state: 5310,
@@ -8673,6 +8880,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "wheat",
+        definition: "crop",
         first_state: 5311,
         last_state: 5318,
         default_state: 5311,
@@ -8683,6 +8891,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "farmland",
+        definition: "farmland",
         first_state: 5319,
         last_state: 5326,
         default_state: 5319,
@@ -8693,6 +8902,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "furnace",
+        definition: "furnace",
         first_state: 5327,
         last_state: 5334,
         default_state: 5328,
@@ -8709,6 +8919,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_sign",
+        definition: "standing_sign",
         first_state: 5335,
         last_state: 5366,
         default_state: 5352,
@@ -8728,6 +8939,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_sign",
+        definition: "standing_sign",
         first_state: 5367,
         last_state: 5398,
         default_state: 5384,
@@ -8747,6 +8959,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_sign",
+        definition: "standing_sign",
         first_state: 5399,
         last_state: 5430,
         default_state: 5416,
@@ -8766,6 +8979,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_sign",
+        definition: "standing_sign",
         first_state: 5431,
         last_state: 5462,
         default_state: 5448,
@@ -8785,6 +8999,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_sign",
+        definition: "standing_sign",
         first_state: 5463,
         last_state: 5494,
         default_state: 5480,
@@ -8804,6 +9019,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_sign",
+        definition: "standing_sign",
         first_state: 5495,
         last_state: 5526,
         default_state: 5512,
@@ -8823,6 +9039,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_sign",
+        definition: "standing_sign",
         first_state: 5527,
         last_state: 5558,
         default_state: 5544,
@@ -8842,6 +9059,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_sign",
+        definition: "standing_sign",
         first_state: 5559,
         last_state: 5590,
         default_state: 5576,
@@ -8861,6 +9079,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_sign",
+        definition: "standing_sign",
         first_state: 5591,
         last_state: 5622,
         default_state: 5608,
@@ -8880,6 +9099,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_sign",
+        definition: "standing_sign",
         first_state: 5623,
         last_state: 5654,
         default_state: 5640,
@@ -8899,6 +9119,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_door",
+        definition: "door",
         first_state: 5655,
         last_state: 5718,
         default_state: 5666,
@@ -8927,6 +9148,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "ladder",
+        definition: "ladder",
         first_state: 5719,
         last_state: 5726,
         default_state: 5720,
@@ -8943,6 +9165,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "rail",
+        definition: "rail",
         first_state: 5727,
         last_state: 5746,
         default_state: 5728,
@@ -8970,6 +9193,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobblestone_stairs",
+        definition: "stair",
         first_state: 5747,
         last_state: 5826,
         default_state: 5758,
@@ -9000,6 +9224,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_wall_sign",
+        definition: "wall_sign",
         first_state: 5827,
         last_state: 5834,
         default_state: 5828,
@@ -9016,6 +9241,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_wall_sign",
+        definition: "wall_sign",
         first_state: 5835,
         last_state: 5842,
         default_state: 5836,
@@ -9032,6 +9258,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_wall_sign",
+        definition: "wall_sign",
         first_state: 5843,
         last_state: 5850,
         default_state: 5844,
@@ -9048,6 +9275,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_wall_sign",
+        definition: "wall_sign",
         first_state: 5851,
         last_state: 5858,
         default_state: 5852,
@@ -9064,6 +9292,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_wall_sign",
+        definition: "wall_sign",
         first_state: 5859,
         last_state: 5866,
         default_state: 5860,
@@ -9080,6 +9309,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_wall_sign",
+        definition: "wall_sign",
         first_state: 5867,
         last_state: 5874,
         default_state: 5868,
@@ -9096,6 +9326,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_wall_sign",
+        definition: "wall_sign",
         first_state: 5875,
         last_state: 5882,
         default_state: 5876,
@@ -9112,6 +9343,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_wall_sign",
+        definition: "wall_sign",
         first_state: 5883,
         last_state: 5890,
         default_state: 5884,
@@ -9128,6 +9360,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_wall_sign",
+        definition: "wall_sign",
         first_state: 5891,
         last_state: 5898,
         default_state: 5892,
@@ -9144,6 +9377,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_wall_sign",
+        definition: "wall_sign",
         first_state: 5899,
         last_state: 5906,
         default_state: 5900,
@@ -9160,6 +9394,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 5907,
         last_state: 5970,
         default_state: 5956,
@@ -9183,6 +9418,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 5971,
         last_state: 6034,
         default_state: 6020,
@@ -9206,6 +9442,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6035,
         last_state: 6098,
         default_state: 6084,
@@ -9229,6 +9466,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6099,
         last_state: 6162,
         default_state: 6148,
@@ -9252,6 +9490,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6163,
         last_state: 6226,
         default_state: 6212,
@@ -9275,6 +9514,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6227,
         last_state: 6290,
         default_state: 6276,
@@ -9298,6 +9538,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6291,
         last_state: 6354,
         default_state: 6340,
@@ -9321,6 +9562,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6355,
         last_state: 6418,
         default_state: 6404,
@@ -9344,6 +9586,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6419,
         last_state: 6482,
         default_state: 6468,
@@ -9367,6 +9610,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6483,
         last_state: 6546,
         default_state: 6532,
@@ -9390,6 +9634,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6547,
         last_state: 6610,
         default_state: 6596,
@@ -9413,6 +9658,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_hanging_sign",
+        definition: "ceiling_hanging_sign",
         first_state: 6611,
         last_state: 6674,
         default_state: 6660,
@@ -9436,6 +9682,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6675,
         last_state: 6682,
         default_state: 6676,
@@ -9452,6 +9699,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6683,
         last_state: 6690,
         default_state: 6684,
@@ -9468,6 +9716,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6691,
         last_state: 6698,
         default_state: 6692,
@@ -9484,6 +9733,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6699,
         last_state: 6706,
         default_state: 6700,
@@ -9500,6 +9750,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6707,
         last_state: 6714,
         default_state: 6708,
@@ -9516,6 +9767,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6715,
         last_state: 6722,
         default_state: 6716,
@@ -9532,6 +9784,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6723,
         last_state: 6730,
         default_state: 6724,
@@ -9548,6 +9801,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6731,
         last_state: 6738,
         default_state: 6732,
@@ -9564,6 +9818,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6739,
         last_state: 6746,
         default_state: 6740,
@@ -9580,6 +9835,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6747,
         last_state: 6754,
         default_state: 6748,
@@ -9596,6 +9852,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6755,
         last_state: 6762,
         default_state: 6756,
@@ -9612,6 +9869,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_wall_hanging_sign",
+        definition: "wall_hanging_sign",
         first_state: 6763,
         last_state: 6770,
         default_state: 6764,
@@ -9628,6 +9886,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lever",
+        definition: "lever",
         first_state: 6771,
         last_state: 6794,
         default_state: 6780,
@@ -9648,6 +9907,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6795,
         last_state: 6796,
         default_state: 6796,
@@ -9658,6 +9918,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "iron_door",
+        definition: "door",
         first_state: 6797,
         last_state: 6860,
         default_state: 6808,
@@ -9686,6 +9947,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6861,
         last_state: 6862,
         default_state: 6862,
@@ -9696,6 +9958,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6863,
         last_state: 6864,
         default_state: 6864,
@@ -9706,6 +9969,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6865,
         last_state: 6866,
         default_state: 6866,
@@ -9716,6 +9980,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6867,
         last_state: 6868,
         default_state: 6868,
@@ -9726,6 +9991,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6869,
         last_state: 6870,
         default_state: 6870,
@@ -9736,6 +10002,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6871,
         last_state: 6872,
         default_state: 6872,
@@ -9746,6 +10013,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6873,
         last_state: 6874,
         default_state: 6874,
@@ -9756,6 +10024,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6875,
         last_state: 6876,
         default_state: 6876,
@@ -9766,6 +10035,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6877,
         last_state: 6878,
         default_state: 6878,
@@ -9776,6 +10046,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_pressure_plate",
+        definition: "pressure_plate",
         first_state: 6879,
         last_state: 6880,
         default_state: 6880,
@@ -9786,6 +10057,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "redstone_ore",
+        definition: "redstone_ore",
         first_state: 6881,
         last_state: 6882,
         default_state: 6882,
@@ -9796,6 +10068,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_redstone_ore",
+        definition: "redstone_ore",
         first_state: 6883,
         last_state: 6884,
         default_state: 6884,
@@ -9806,6 +10079,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "redstone_torch",
+        definition: "redstone_torch",
         first_state: 6885,
         last_state: 6886,
         default_state: 6885,
@@ -9816,6 +10090,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "redstone_wall_torch",
+        definition: "redstone_wall_torch",
         first_state: 6887,
         last_state: 6894,
         default_state: 6887,
@@ -9832,6 +10107,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_button",
+        definition: "button",
         first_state: 6895,
         last_state: 6918,
         default_state: 6904,
@@ -9852,6 +10128,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "snow",
+        definition: "snow_layer",
         first_state: 6919,
         last_state: 6926,
         default_state: 6919,
@@ -9862,6 +10139,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "ice",
+        definition: "ice",
         first_state: 6927,
         last_state: 6927,
         default_state: 6927,
@@ -9869,6 +10147,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "snow_block",
+        definition: "block",
         first_state: 6928,
         last_state: 6928,
         default_state: 6928,
@@ -9876,6 +10155,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cactus",
+        definition: "cactus",
         first_state: 6929,
         last_state: 6944,
         default_state: 6929,
@@ -9889,6 +10169,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cactus_flower",
+        definition: "cactus_flower",
         first_state: 6945,
         last_state: 6945,
         default_state: 6945,
@@ -9896,6 +10177,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "clay",
+        definition: "block",
         first_state: 6946,
         last_state: 6946,
         default_state: 6946,
@@ -9903,6 +10185,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sugar_cane",
+        definition: "sugar_cane",
         first_state: 6947,
         last_state: 6962,
         default_state: 6947,
@@ -9916,6 +10199,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jukebox",
+        definition: "jukebox",
         first_state: 6963,
         last_state: 6964,
         default_state: 6964,
@@ -9926,6 +10210,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_fence",
+        definition: "fence",
         first_state: 6965,
         last_state: 6996,
         default_state: 6996,
@@ -9954,6 +10239,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "netherrack",
+        definition: "netherrack",
         first_state: 6997,
         last_state: 6997,
         default_state: 6997,
@@ -9961,6 +10247,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "soul_sand",
+        definition: "soul_sand",
         first_state: 6998,
         last_state: 6998,
         default_state: 6998,
@@ -9968,6 +10255,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "soul_soil",
+        definition: "block",
         first_state: 6999,
         last_state: 6999,
         default_state: 6999,
@@ -9975,6 +10263,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "basalt",
+        definition: "rotated_pillar",
         first_state: 7000,
         last_state: 7002,
         default_state: 7001,
@@ -9985,6 +10274,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_basalt",
+        definition: "rotated_pillar",
         first_state: 7003,
         last_state: 7005,
         default_state: 7004,
@@ -9995,6 +10285,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "soul_torch",
+        definition: "torch",
         first_state: 7006,
         last_state: 7006,
         default_state: 7006,
@@ -10002,6 +10293,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "soul_wall_torch",
+        definition: "wall_torch",
         first_state: 7007,
         last_state: 7010,
         default_state: 7007,
@@ -10012,6 +10304,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_torch",
+        definition: "torch",
         first_state: 7011,
         last_state: 7011,
         default_state: 7011,
@@ -10019,6 +10312,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_wall_torch",
+        definition: "wall_torch",
         first_state: 7012,
         last_state: 7015,
         default_state: 7012,
@@ -10029,6 +10323,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "glowstone",
+        definition: "block",
         first_state: 7016,
         last_state: 7016,
         default_state: 7016,
@@ -10036,6 +10331,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_portal",
+        definition: "nether_portal",
         first_state: 7017,
         last_state: 7018,
         default_state: 7017,
@@ -10046,6 +10342,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "carved_pumpkin",
+        definition: "jack_o_lantern",
         first_state: 7019,
         last_state: 7022,
         default_state: 7019,
@@ -10056,6 +10353,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jack_o_lantern",
+        definition: "jack_o_lantern",
         first_state: 7023,
         last_state: 7026,
         default_state: 7023,
@@ -10066,6 +10364,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cake",
+        definition: "cake",
         first_state: 7027,
         last_state: 7033,
         default_state: 7027,
@@ -10076,6 +10375,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "repeater",
+        definition: "repeater",
         first_state: 7034,
         last_state: 7097,
         default_state: 7037,
@@ -10100,6 +10400,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_stained_glass",
+        definition: "stained_glass",
         first_state: 7098,
         last_state: 7098,
         default_state: 7098,
@@ -10107,6 +10408,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_stained_glass",
+        definition: "stained_glass",
         first_state: 7099,
         last_state: 7099,
         default_state: 7099,
@@ -10114,6 +10416,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_stained_glass",
+        definition: "stained_glass",
         first_state: 7100,
         last_state: 7100,
         default_state: 7100,
@@ -10121,6 +10424,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_stained_glass",
+        definition: "stained_glass",
         first_state: 7101,
         last_state: 7101,
         default_state: 7101,
@@ -10128,6 +10432,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_stained_glass",
+        definition: "stained_glass",
         first_state: 7102,
         last_state: 7102,
         default_state: 7102,
@@ -10135,6 +10440,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_stained_glass",
+        definition: "stained_glass",
         first_state: 7103,
         last_state: 7103,
         default_state: 7103,
@@ -10142,6 +10448,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_stained_glass",
+        definition: "stained_glass",
         first_state: 7104,
         last_state: 7104,
         default_state: 7104,
@@ -10149,6 +10456,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_stained_glass",
+        definition: "stained_glass",
         first_state: 7105,
         last_state: 7105,
         default_state: 7105,
@@ -10156,6 +10464,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_stained_glass",
+        definition: "stained_glass",
         first_state: 7106,
         last_state: 7106,
         default_state: 7106,
@@ -10163,6 +10472,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_stained_glass",
+        definition: "stained_glass",
         first_state: 7107,
         last_state: 7107,
         default_state: 7107,
@@ -10170,6 +10480,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_stained_glass",
+        definition: "stained_glass",
         first_state: 7108,
         last_state: 7108,
         default_state: 7108,
@@ -10177,6 +10488,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_stained_glass",
+        definition: "stained_glass",
         first_state: 7109,
         last_state: 7109,
         default_state: 7109,
@@ -10184,6 +10496,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_stained_glass",
+        definition: "stained_glass",
         first_state: 7110,
         last_state: 7110,
         default_state: 7110,
@@ -10191,6 +10504,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_stained_glass",
+        definition: "stained_glass",
         first_state: 7111,
         last_state: 7111,
         default_state: 7111,
@@ -10198,6 +10512,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_stained_glass",
+        definition: "stained_glass",
         first_state: 7112,
         last_state: 7112,
         default_state: 7112,
@@ -10205,6 +10520,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_stained_glass",
+        definition: "stained_glass",
         first_state: 7113,
         last_state: 7113,
         default_state: 7113,
@@ -10212,6 +10528,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_trapdoor",
+        definition: "trapdoor",
         first_state: 7114,
         last_state: 7177,
         default_state: 7129,
@@ -10240,6 +10557,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_trapdoor",
+        definition: "trapdoor",
         first_state: 7178,
         last_state: 7241,
         default_state: 7193,
@@ -10268,6 +10586,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_trapdoor",
+        definition: "trapdoor",
         first_state: 7242,
         last_state: 7305,
         default_state: 7257,
@@ -10296,6 +10615,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_trapdoor",
+        definition: "trapdoor",
         first_state: 7306,
         last_state: 7369,
         default_state: 7321,
@@ -10324,6 +10644,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_trapdoor",
+        definition: "trapdoor",
         first_state: 7370,
         last_state: 7433,
         default_state: 7385,
@@ -10352,6 +10673,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_trapdoor",
+        definition: "trapdoor",
         first_state: 7434,
         last_state: 7497,
         default_state: 7449,
@@ -10380,6 +10702,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_trapdoor",
+        definition: "trapdoor",
         first_state: 7498,
         last_state: 7561,
         default_state: 7513,
@@ -10408,6 +10731,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_trapdoor",
+        definition: "trapdoor",
         first_state: 7562,
         last_state: 7625,
         default_state: 7577,
@@ -10436,6 +10760,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_trapdoor",
+        definition: "trapdoor",
         first_state: 7626,
         last_state: 7689,
         default_state: 7641,
@@ -10464,6 +10789,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_trapdoor",
+        definition: "trapdoor",
         first_state: 7690,
         last_state: 7753,
         default_state: 7705,
@@ -10492,6 +10818,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_bricks",
+        definition: "block",
         first_state: 7754,
         last_state: 7754,
         default_state: 7754,
@@ -10499,6 +10826,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_stone_bricks",
+        definition: "block",
         first_state: 7755,
         last_state: 7755,
         default_state: 7755,
@@ -10506,6 +10834,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cracked_stone_bricks",
+        definition: "block",
         first_state: 7756,
         last_state: 7756,
         default_state: 7756,
@@ -10513,6 +10842,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_stone_bricks",
+        definition: "block",
         first_state: 7757,
         last_state: 7757,
         default_state: 7757,
@@ -10520,6 +10850,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "packed_mud",
+        definition: "block",
         first_state: 7758,
         last_state: 7758,
         default_state: 7758,
@@ -10527,6 +10858,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mud_bricks",
+        definition: "block",
         first_state: 7759,
         last_state: 7759,
         default_state: 7759,
@@ -10534,6 +10866,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "infested_stone",
+        definition: "infested",
         first_state: 7760,
         last_state: 7760,
         default_state: 7760,
@@ -10541,6 +10874,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "infested_cobblestone",
+        definition: "infested",
         first_state: 7761,
         last_state: 7761,
         default_state: 7761,
@@ -10548,6 +10882,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "infested_stone_bricks",
+        definition: "infested",
         first_state: 7762,
         last_state: 7762,
         default_state: 7762,
@@ -10555,6 +10890,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "infested_mossy_stone_bricks",
+        definition: "infested",
         first_state: 7763,
         last_state: 7763,
         default_state: 7763,
@@ -10562,6 +10898,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "infested_cracked_stone_bricks",
+        definition: "infested",
         first_state: 7764,
         last_state: 7764,
         default_state: 7764,
@@ -10569,6 +10906,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "infested_chiseled_stone_bricks",
+        definition: "infested",
         first_state: 7765,
         last_state: 7765,
         default_state: 7765,
@@ -10576,6 +10914,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_mushroom_block",
+        definition: "huge_mushroom",
         first_state: 7766,
         last_state: 7829,
         default_state: 7766,
@@ -10608,6 +10947,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_mushroom_block",
+        definition: "huge_mushroom",
         first_state: 7830,
         last_state: 7893,
         default_state: 7830,
@@ -10640,6 +10980,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mushroom_stem",
+        definition: "huge_mushroom",
         first_state: 7894,
         last_state: 7957,
         default_state: 7894,
@@ -10672,6 +11013,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "iron_bars",
+        definition: "iron_bars",
         first_state: 7958,
         last_state: 7989,
         default_state: 7989,
@@ -10700,6 +11042,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_bars",
+        definition: "weathering_copper_bar",
         first_state: 7990,
         last_state: 8021,
         default_state: 8021,
@@ -10728,6 +11071,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_bars",
+        definition: "weathering_copper_bar",
         first_state: 8022,
         last_state: 8053,
         default_state: 8053,
@@ -10756,6 +11100,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_bars",
+        definition: "weathering_copper_bar",
         first_state: 8054,
         last_state: 8085,
         default_state: 8085,
@@ -10784,6 +11129,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_bars",
+        definition: "weathering_copper_bar",
         first_state: 8086,
         last_state: 8117,
         default_state: 8117,
@@ -10812,6 +11158,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_bars",
+        definition: "iron_bars",
         first_state: 8118,
         last_state: 8149,
         default_state: 8149,
@@ -10840,6 +11187,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_bars",
+        definition: "iron_bars",
         first_state: 8150,
         last_state: 8181,
         default_state: 8181,
@@ -10868,6 +11216,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_bars",
+        definition: "iron_bars",
         first_state: 8182,
         last_state: 8213,
         default_state: 8213,
@@ -10896,6 +11245,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_bars",
+        definition: "iron_bars",
         first_state: 8214,
         last_state: 8245,
         default_state: 8245,
@@ -10924,6 +11274,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "iron_chain",
+        definition: "chain",
         first_state: 8246,
         last_state: 8251,
         default_state: 8249,
@@ -10940,6 +11291,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_chain",
+        definition: "weathering_copper_chain",
         first_state: 8252,
         last_state: 8257,
         default_state: 8255,
@@ -10956,6 +11308,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_chain",
+        definition: "weathering_copper_chain",
         first_state: 8258,
         last_state: 8263,
         default_state: 8261,
@@ -10972,6 +11325,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_chain",
+        definition: "weathering_copper_chain",
         first_state: 8264,
         last_state: 8269,
         default_state: 8267,
@@ -10988,6 +11342,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_chain",
+        definition: "weathering_copper_chain",
         first_state: 8270,
         last_state: 8275,
         default_state: 8273,
@@ -11004,6 +11359,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_chain",
+        definition: "chain",
         first_state: 8276,
         last_state: 8281,
         default_state: 8279,
@@ -11020,6 +11376,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_chain",
+        definition: "chain",
         first_state: 8282,
         last_state: 8287,
         default_state: 8285,
@@ -11036,6 +11393,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_chain",
+        definition: "chain",
         first_state: 8288,
         last_state: 8293,
         default_state: 8291,
@@ -11052,6 +11410,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_chain",
+        definition: "chain",
         first_state: 8294,
         last_state: 8299,
         default_state: 8297,
@@ -11068,6 +11427,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "glass_pane",
+        definition: "iron_bars",
         first_state: 8300,
         last_state: 8331,
         default_state: 8331,
@@ -11096,6 +11456,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pumpkin",
+        definition: "pumpkin",
         first_state: 8332,
         last_state: 8332,
         default_state: 8332,
@@ -11103,6 +11464,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "melon",
+        definition: "block",
         first_state: 8333,
         last_state: 8333,
         default_state: 8333,
@@ -11110,6 +11472,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "attached_pumpkin_stem",
+        definition: "attached_stem",
         first_state: 8334,
         last_state: 8337,
         default_state: 8334,
@@ -11120,6 +11483,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "attached_melon_stem",
+        definition: "attached_stem",
         first_state: 8338,
         last_state: 8341,
         default_state: 8338,
@@ -11130,6 +11494,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pumpkin_stem",
+        definition: "stem",
         first_state: 8342,
         last_state: 8349,
         default_state: 8342,
@@ -11140,6 +11505,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "melon_stem",
+        definition: "stem",
         first_state: 8350,
         last_state: 8357,
         default_state: 8350,
@@ -11150,6 +11516,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "vine",
+        definition: "vine",
         first_state: 8358,
         last_state: 8389,
         default_state: 8389,
@@ -11178,6 +11545,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "glow_lichen",
+        definition: "glow_lichen",
         first_state: 8390,
         last_state: 8517,
         default_state: 8517,
@@ -11214,6 +11582,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "resin_clump",
+        definition: "multiface",
         first_state: 8518,
         last_state: 8645,
         default_state: 8645,
@@ -11250,6 +11619,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_fence_gate",
+        definition: "fence_gate",
         first_state: 8646,
         last_state: 8677,
         default_state: 8653,
@@ -11274,6 +11644,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brick_stairs",
+        definition: "stair",
         first_state: 8678,
         last_state: 8757,
         default_state: 8689,
@@ -11304,6 +11675,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_brick_stairs",
+        definition: "stair",
         first_state: 8758,
         last_state: 8837,
         default_state: 8769,
@@ -11334,6 +11706,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mud_brick_stairs",
+        definition: "stair",
         first_state: 8838,
         last_state: 8917,
         default_state: 8849,
@@ -11364,6 +11737,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mycelium",
+        definition: "mycelium",
         first_state: 8918,
         last_state: 8919,
         default_state: 8919,
@@ -11374,6 +11748,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lily_pad",
+        definition: "lily_pad",
         first_state: 8920,
         last_state: 8920,
         default_state: 8920,
@@ -11381,6 +11756,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "resin_block",
+        definition: "block",
         first_state: 8921,
         last_state: 8921,
         default_state: 8921,
@@ -11388,6 +11764,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "resin_bricks",
+        definition: "block",
         first_state: 8922,
         last_state: 8922,
         default_state: 8922,
@@ -11395,6 +11772,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "resin_brick_stairs",
+        definition: "stair",
         first_state: 8923,
         last_state: 9002,
         default_state: 8934,
@@ -11425,6 +11803,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "resin_brick_slab",
+        definition: "slab",
         first_state: 9003,
         last_state: 9008,
         default_state: 9006,
@@ -11441,6 +11820,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "resin_brick_wall",
+        definition: "wall",
         first_state: 9009,
         last_state: 9332,
         default_state: 9012,
@@ -11473,6 +11853,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_resin_bricks",
+        definition: "block",
         first_state: 9333,
         last_state: 9333,
         default_state: 9333,
@@ -11480,6 +11861,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_bricks",
+        definition: "block",
         first_state: 9334,
         last_state: 9334,
         default_state: 9334,
@@ -11487,6 +11869,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_brick_fence",
+        definition: "fence",
         first_state: 9335,
         last_state: 9366,
         default_state: 9366,
@@ -11515,6 +11898,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_brick_stairs",
+        definition: "stair",
         first_state: 9367,
         last_state: 9446,
         default_state: 9378,
@@ -11545,6 +11929,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_wart",
+        definition: "nether_wart",
         first_state: 9447,
         last_state: 9450,
         default_state: 9447,
@@ -11555,6 +11940,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "enchanting_table",
+        definition: "enchantment_table",
         first_state: 9451,
         last_state: 9451,
         default_state: 9451,
@@ -11562,6 +11948,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brewing_stand",
+        definition: "brewing_stand",
         first_state: 9452,
         last_state: 9459,
         default_state: 9459,
@@ -11582,6 +11969,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cauldron",
+        definition: "cauldron",
         first_state: 9460,
         last_state: 9460,
         default_state: 9460,
@@ -11589,6 +11977,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "water_cauldron",
+        definition: "layered_cauldron",
         first_state: 9461,
         last_state: 9463,
         default_state: 9461,
@@ -11599,6 +11988,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lava_cauldron",
+        definition: "lava_cauldron",
         first_state: 9464,
         last_state: 9464,
         default_state: 9464,
@@ -11606,6 +11996,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "powder_snow_cauldron",
+        definition: "layered_cauldron",
         first_state: 9465,
         last_state: 9467,
         default_state: 9465,
@@ -11616,6 +12007,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_portal",
+        definition: "end_portal",
         first_state: 9468,
         last_state: 9468,
         default_state: 9468,
@@ -11623,6 +12015,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_portal_frame",
+        definition: "end_portal_frame",
         first_state: 9469,
         last_state: 9476,
         default_state: 9473,
@@ -11639,6 +12032,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_stone",
+        definition: "block",
         first_state: 9477,
         last_state: 9477,
         default_state: 9477,
@@ -11646,6 +12040,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dragon_egg",
+        definition: "dragon_egg",
         first_state: 9478,
         last_state: 9478,
         default_state: 9478,
@@ -11653,6 +12048,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "redstone_lamp",
+        definition: "redstone_lamp",
         first_state: 9479,
         last_state: 9480,
         default_state: 9480,
@@ -11663,6 +12059,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cocoa",
+        definition: "cocoa",
         first_state: 9481,
         last_state: 9492,
         default_state: 9481,
@@ -11679,6 +12076,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sandstone_stairs",
+        definition: "stair",
         first_state: 9493,
         last_state: 9572,
         default_state: 9504,
@@ -11709,6 +12107,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "emerald_ore",
+        definition: "drop_experience",
         first_state: 9573,
         last_state: 9573,
         default_state: 9573,
@@ -11716,6 +12115,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_emerald_ore",
+        definition: "drop_experience",
         first_state: 9574,
         last_state: 9574,
         default_state: 9574,
@@ -11723,6 +12123,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "ender_chest",
+        definition: "ender_chest",
         first_state: 9575,
         last_state: 9582,
         default_state: 9576,
@@ -11739,6 +12140,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tripwire_hook",
+        definition: "trip_wire_hook",
         first_state: 9583,
         last_state: 9598,
         default_state: 9592,
@@ -11759,6 +12161,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tripwire",
+        definition: "tripwire",
         first_state: 9599,
         last_state: 9726,
         default_state: 9726,
@@ -11795,6 +12198,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "emerald_block",
+        definition: "block",
         first_state: 9727,
         last_state: 9727,
         default_state: 9727,
@@ -11802,6 +12206,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_stairs",
+        definition: "stair",
         first_state: 9728,
         last_state: 9807,
         default_state: 9739,
@@ -11832,6 +12237,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_stairs",
+        definition: "stair",
         first_state: 9808,
         last_state: 9887,
         default_state: 9819,
@@ -11862,6 +12268,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_stairs",
+        definition: "stair",
         first_state: 9888,
         last_state: 9967,
         default_state: 9899,
@@ -11892,6 +12299,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "command_block",
+        definition: "command",
         first_state: 9968,
         last_state: 9979,
         default_state: 9974,
@@ -11908,6 +12316,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "beacon",
+        definition: "beacon",
         first_state: 9980,
         last_state: 9980,
         default_state: 9980,
@@ -11915,6 +12324,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobblestone_wall",
+        definition: "wall",
         first_state: 9981,
         last_state: 10304,
         default_state: 9984,
@@ -11947,6 +12357,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_cobblestone_wall",
+        definition: "wall",
         first_state: 10305,
         last_state: 10628,
         default_state: 10308,
@@ -11979,6 +12390,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "flower_pot",
+        definition: "flower_pot",
         first_state: 10629,
         last_state: 10629,
         default_state: 10629,
@@ -11986,6 +12398,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_torchflower",
+        definition: "flower_pot",
         first_state: 10630,
         last_state: 10630,
         default_state: 10630,
@@ -11993,6 +12406,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_oak_sapling",
+        definition: "flower_pot",
         first_state: 10631,
         last_state: 10631,
         default_state: 10631,
@@ -12000,6 +12414,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_spruce_sapling",
+        definition: "flower_pot",
         first_state: 10632,
         last_state: 10632,
         default_state: 10632,
@@ -12007,6 +12422,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_birch_sapling",
+        definition: "flower_pot",
         first_state: 10633,
         last_state: 10633,
         default_state: 10633,
@@ -12014,6 +12430,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_jungle_sapling",
+        definition: "flower_pot",
         first_state: 10634,
         last_state: 10634,
         default_state: 10634,
@@ -12021,6 +12438,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_acacia_sapling",
+        definition: "flower_pot",
         first_state: 10635,
         last_state: 10635,
         default_state: 10635,
@@ -12028,6 +12446,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_cherry_sapling",
+        definition: "flower_pot",
         first_state: 10636,
         last_state: 10636,
         default_state: 10636,
@@ -12035,6 +12454,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_dark_oak_sapling",
+        definition: "flower_pot",
         first_state: 10637,
         last_state: 10637,
         default_state: 10637,
@@ -12042,6 +12462,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_pale_oak_sapling",
+        definition: "flower_pot",
         first_state: 10638,
         last_state: 10638,
         default_state: 10638,
@@ -12049,6 +12470,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_mangrove_propagule",
+        definition: "flower_pot",
         first_state: 10639,
         last_state: 10639,
         default_state: 10639,
@@ -12056,6 +12478,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_fern",
+        definition: "flower_pot",
         first_state: 10640,
         last_state: 10640,
         default_state: 10640,
@@ -12063,6 +12486,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_dandelion",
+        definition: "flower_pot",
         first_state: 10641,
         last_state: 10641,
         default_state: 10641,
@@ -12070,6 +12494,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_golden_dandelion",
+        definition: "flower_pot",
         first_state: 10642,
         last_state: 10642,
         default_state: 10642,
@@ -12077,6 +12502,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_poppy",
+        definition: "flower_pot",
         first_state: 10643,
         last_state: 10643,
         default_state: 10643,
@@ -12084,6 +12510,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_blue_orchid",
+        definition: "flower_pot",
         first_state: 10644,
         last_state: 10644,
         default_state: 10644,
@@ -12091,6 +12518,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_allium",
+        definition: "flower_pot",
         first_state: 10645,
         last_state: 10645,
         default_state: 10645,
@@ -12098,6 +12526,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_azure_bluet",
+        definition: "flower_pot",
         first_state: 10646,
         last_state: 10646,
         default_state: 10646,
@@ -12105,6 +12534,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_red_tulip",
+        definition: "flower_pot",
         first_state: 10647,
         last_state: 10647,
         default_state: 10647,
@@ -12112,6 +12542,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_orange_tulip",
+        definition: "flower_pot",
         first_state: 10648,
         last_state: 10648,
         default_state: 10648,
@@ -12119,6 +12550,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_white_tulip",
+        definition: "flower_pot",
         first_state: 10649,
         last_state: 10649,
         default_state: 10649,
@@ -12126,6 +12558,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_pink_tulip",
+        definition: "flower_pot",
         first_state: 10650,
         last_state: 10650,
         default_state: 10650,
@@ -12133,6 +12566,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_oxeye_daisy",
+        definition: "flower_pot",
         first_state: 10651,
         last_state: 10651,
         default_state: 10651,
@@ -12140,6 +12574,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_cornflower",
+        definition: "flower_pot",
         first_state: 10652,
         last_state: 10652,
         default_state: 10652,
@@ -12147,6 +12582,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_lily_of_the_valley",
+        definition: "flower_pot",
         first_state: 10653,
         last_state: 10653,
         default_state: 10653,
@@ -12154,6 +12590,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_wither_rose",
+        definition: "flower_pot",
         first_state: 10654,
         last_state: 10654,
         default_state: 10654,
@@ -12161,6 +12598,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_red_mushroom",
+        definition: "flower_pot",
         first_state: 10655,
         last_state: 10655,
         default_state: 10655,
@@ -12168,6 +12606,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_brown_mushroom",
+        definition: "flower_pot",
         first_state: 10656,
         last_state: 10656,
         default_state: 10656,
@@ -12175,6 +12614,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_dead_bush",
+        definition: "flower_pot",
         first_state: 10657,
         last_state: 10657,
         default_state: 10657,
@@ -12182,6 +12622,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_cactus",
+        definition: "flower_pot",
         first_state: 10658,
         last_state: 10658,
         default_state: 10658,
@@ -12189,6 +12630,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "carrots",
+        definition: "carrot",
         first_state: 10659,
         last_state: 10666,
         default_state: 10659,
@@ -12199,6 +12641,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potatoes",
+        definition: "potato",
         first_state: 10667,
         last_state: 10674,
         default_state: 10667,
@@ -12209,6 +12652,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_button",
+        definition: "button",
         first_state: 10675,
         last_state: 10698,
         default_state: 10684,
@@ -12229,6 +12673,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_button",
+        definition: "button",
         first_state: 10699,
         last_state: 10722,
         default_state: 10708,
@@ -12249,6 +12694,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_button",
+        definition: "button",
         first_state: 10723,
         last_state: 10746,
         default_state: 10732,
@@ -12269,6 +12715,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_button",
+        definition: "button",
         first_state: 10747,
         last_state: 10770,
         default_state: 10756,
@@ -12289,6 +12736,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_button",
+        definition: "button",
         first_state: 10771,
         last_state: 10794,
         default_state: 10780,
@@ -12309,6 +12757,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_button",
+        definition: "button",
         first_state: 10795,
         last_state: 10818,
         default_state: 10804,
@@ -12329,6 +12778,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_button",
+        definition: "button",
         first_state: 10819,
         last_state: 10842,
         default_state: 10828,
@@ -12349,6 +12799,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_button",
+        definition: "button",
         first_state: 10843,
         last_state: 10866,
         default_state: 10852,
@@ -12369,6 +12820,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_button",
+        definition: "button",
         first_state: 10867,
         last_state: 10890,
         default_state: 10876,
@@ -12389,6 +12841,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_button",
+        definition: "button",
         first_state: 10891,
         last_state: 10914,
         default_state: 10900,
@@ -12409,6 +12862,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "skeleton_skull",
+        definition: "skull",
         first_state: 10915,
         last_state: 10946,
         default_state: 10931,
@@ -12428,6 +12882,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "skeleton_wall_skull",
+        definition: "wall_skull",
         first_state: 10947,
         last_state: 10954,
         default_state: 10948,
@@ -12444,6 +12899,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "wither_skeleton_skull",
+        definition: "wither_skull",
         first_state: 10955,
         last_state: 10986,
         default_state: 10971,
@@ -12463,6 +12919,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "wither_skeleton_wall_skull",
+        definition: "wither_wall_skull",
         first_state: 10987,
         last_state: 10994,
         default_state: 10988,
@@ -12479,6 +12936,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "zombie_head",
+        definition: "skull",
         first_state: 10995,
         last_state: 11026,
         default_state: 11011,
@@ -12498,6 +12956,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "zombie_wall_head",
+        definition: "wall_skull",
         first_state: 11027,
         last_state: 11034,
         default_state: 11028,
@@ -12514,6 +12973,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "player_head",
+        definition: "player_head",
         first_state: 11035,
         last_state: 11066,
         default_state: 11051,
@@ -12533,6 +12993,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "player_wall_head",
+        definition: "player_wall_head",
         first_state: 11067,
         last_state: 11074,
         default_state: 11068,
@@ -12549,6 +13010,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "creeper_head",
+        definition: "skull",
         first_state: 11075,
         last_state: 11106,
         default_state: 11091,
@@ -12568,6 +13030,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "creeper_wall_head",
+        definition: "wall_skull",
         first_state: 11107,
         last_state: 11114,
         default_state: 11108,
@@ -12584,6 +13047,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dragon_head",
+        definition: "skull",
         first_state: 11115,
         last_state: 11146,
         default_state: 11131,
@@ -12603,6 +13067,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dragon_wall_head",
+        definition: "wall_skull",
         first_state: 11147,
         last_state: 11154,
         default_state: 11148,
@@ -12619,6 +13084,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "piglin_head",
+        definition: "skull",
         first_state: 11155,
         last_state: 11186,
         default_state: 11171,
@@ -12638,6 +13104,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "piglin_wall_head",
+        definition: "piglinwallskull",
         first_state: 11187,
         last_state: 11194,
         default_state: 11188,
@@ -12654,6 +13121,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "anvil",
+        definition: "anvil",
         first_state: 11195,
         last_state: 11198,
         default_state: 11195,
@@ -12664,6 +13132,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chipped_anvil",
+        definition: "anvil",
         first_state: 11199,
         last_state: 11202,
         default_state: 11199,
@@ -12674,6 +13143,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "damaged_anvil",
+        definition: "anvil",
         first_state: 11203,
         last_state: 11206,
         default_state: 11203,
@@ -12684,6 +13154,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "trapped_chest",
+        definition: "trapped_chest",
         first_state: 11207,
         last_state: 11230,
         default_state: 11208,
@@ -12704,6 +13175,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_weighted_pressure_plate",
+        definition: "weighted_pressure_plate",
         first_state: 11231,
         last_state: 11246,
         default_state: 11231,
@@ -12717,6 +13189,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "heavy_weighted_pressure_plate",
+        definition: "weighted_pressure_plate",
         first_state: 11247,
         last_state: 11262,
         default_state: 11247,
@@ -12730,6 +13203,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "comparator",
+        definition: "comparator",
         first_state: 11263,
         last_state: 11278,
         default_state: 11264,
@@ -12750,6 +13224,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "daylight_detector",
+        definition: "daylight_detector",
         first_state: 11279,
         last_state: 11310,
         default_state: 11295,
@@ -12769,6 +13244,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "redstone_block",
+        definition: "powered",
         first_state: 11311,
         last_state: 11311,
         default_state: 11311,
@@ -12776,6 +13252,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_quartz_ore",
+        definition: "drop_experience",
         first_state: 11312,
         last_state: 11312,
         default_state: 11312,
@@ -12783,6 +13260,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "hopper",
+        definition: "hopper",
         first_state: 11313,
         last_state: 11322,
         default_state: 11313,
@@ -12799,6 +13277,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "quartz_block",
+        definition: "block",
         first_state: 11323,
         last_state: 11323,
         default_state: 11323,
@@ -12806,6 +13285,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_quartz_block",
+        definition: "block",
         first_state: 11324,
         last_state: 11324,
         default_state: 11324,
@@ -12813,6 +13293,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "quartz_pillar",
+        definition: "rotated_pillar",
         first_state: 11325,
         last_state: 11327,
         default_state: 11326,
@@ -12823,6 +13304,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "quartz_stairs",
+        definition: "stair",
         first_state: 11328,
         last_state: 11407,
         default_state: 11339,
@@ -12853,6 +13335,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "activator_rail",
+        definition: "powered_rail",
         first_state: 11408,
         last_state: 11431,
         default_state: 11421,
@@ -12880,6 +13363,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dropper",
+        definition: "dropper",
         first_state: 11432,
         last_state: 11443,
         default_state: 11433,
@@ -12896,6 +13380,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_terracotta",
+        definition: "block",
         first_state: 11444,
         last_state: 11444,
         default_state: 11444,
@@ -12903,6 +13388,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_terracotta",
+        definition: "block",
         first_state: 11445,
         last_state: 11445,
         default_state: 11445,
@@ -12910,6 +13396,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_terracotta",
+        definition: "block",
         first_state: 11446,
         last_state: 11446,
         default_state: 11446,
@@ -12917,6 +13404,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_terracotta",
+        definition: "block",
         first_state: 11447,
         last_state: 11447,
         default_state: 11447,
@@ -12924,6 +13412,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_terracotta",
+        definition: "block",
         first_state: 11448,
         last_state: 11448,
         default_state: 11448,
@@ -12931,6 +13420,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_terracotta",
+        definition: "block",
         first_state: 11449,
         last_state: 11449,
         default_state: 11449,
@@ -12938,6 +13428,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_terracotta",
+        definition: "block",
         first_state: 11450,
         last_state: 11450,
         default_state: 11450,
@@ -12945,6 +13436,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_terracotta",
+        definition: "block",
         first_state: 11451,
         last_state: 11451,
         default_state: 11451,
@@ -12952,6 +13444,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_terracotta",
+        definition: "block",
         first_state: 11452,
         last_state: 11452,
         default_state: 11452,
@@ -12959,6 +13452,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_terracotta",
+        definition: "block",
         first_state: 11453,
         last_state: 11453,
         default_state: 11453,
@@ -12966,6 +13460,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_terracotta",
+        definition: "block",
         first_state: 11454,
         last_state: 11454,
         default_state: 11454,
@@ -12973,6 +13468,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_terracotta",
+        definition: "block",
         first_state: 11455,
         last_state: 11455,
         default_state: 11455,
@@ -12980,6 +13476,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_terracotta",
+        definition: "block",
         first_state: 11456,
         last_state: 11456,
         default_state: 11456,
@@ -12987,6 +13484,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_terracotta",
+        definition: "block",
         first_state: 11457,
         last_state: 11457,
         default_state: 11457,
@@ -12994,6 +13492,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_terracotta",
+        definition: "block",
         first_state: 11458,
         last_state: 11458,
         default_state: 11458,
@@ -13001,6 +13500,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_terracotta",
+        definition: "block",
         first_state: 11459,
         last_state: 11459,
         default_state: 11459,
@@ -13008,6 +13508,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11460,
         last_state: 11491,
         default_state: 11491,
@@ -13036,6 +13537,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11492,
         last_state: 11523,
         default_state: 11523,
@@ -13064,6 +13566,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11524,
         last_state: 11555,
         default_state: 11555,
@@ -13092,6 +13595,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11556,
         last_state: 11587,
         default_state: 11587,
@@ -13120,6 +13624,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11588,
         last_state: 11619,
         default_state: 11619,
@@ -13148,6 +13653,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11620,
         last_state: 11651,
         default_state: 11651,
@@ -13176,6 +13682,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11652,
         last_state: 11683,
         default_state: 11683,
@@ -13204,6 +13711,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11684,
         last_state: 11715,
         default_state: 11715,
@@ -13232,6 +13740,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11716,
         last_state: 11747,
         default_state: 11747,
@@ -13260,6 +13769,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11748,
         last_state: 11779,
         default_state: 11779,
@@ -13288,6 +13798,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11780,
         last_state: 11811,
         default_state: 11811,
@@ -13316,6 +13827,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11812,
         last_state: 11843,
         default_state: 11843,
@@ -13344,6 +13856,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11844,
         last_state: 11875,
         default_state: 11875,
@@ -13372,6 +13885,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11876,
         last_state: 11907,
         default_state: 11907,
@@ -13400,6 +13914,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11908,
         last_state: 11939,
         default_state: 11939,
@@ -13428,6 +13943,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_stained_glass_pane",
+        definition: "stained_glass_pane",
         first_state: 11940,
         last_state: 11971,
         default_state: 11971,
@@ -13456,6 +13972,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_stairs",
+        definition: "stair",
         first_state: 11972,
         last_state: 12051,
         default_state: 11983,
@@ -13486,6 +14003,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_stairs",
+        definition: "stair",
         first_state: 12052,
         last_state: 12131,
         default_state: 12063,
@@ -13516,6 +14034,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_stairs",
+        definition: "stair",
         first_state: 12132,
         last_state: 12211,
         default_state: 12143,
@@ -13546,6 +14065,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_stairs",
+        definition: "stair",
         first_state: 12212,
         last_state: 12291,
         default_state: 12223,
@@ -13576,6 +14096,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_stairs",
+        definition: "stair",
         first_state: 12292,
         last_state: 12371,
         default_state: 12303,
@@ -13606,6 +14127,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_stairs",
+        definition: "stair",
         first_state: 12372,
         last_state: 12451,
         default_state: 12383,
@@ -13636,6 +14158,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_mosaic_stairs",
+        definition: "stair",
         first_state: 12452,
         last_state: 12531,
         default_state: 12463,
@@ -13666,6 +14189,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "slime_block",
+        definition: "slime",
         first_state: 12532,
         last_state: 12532,
         default_state: 12532,
@@ -13673,6 +14197,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "barrier",
+        definition: "barrier",
         first_state: 12533,
         last_state: 12534,
         default_state: 12534,
@@ -13683,6 +14208,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light",
+        definition: "light",
         first_state: 12535,
         last_state: 12566,
         default_state: 12566,
@@ -13702,6 +14228,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "iron_trapdoor",
+        definition: "trapdoor",
         first_state: 12567,
         last_state: 12630,
         default_state: 12582,
@@ -13730,6 +14257,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "prismarine",
+        definition: "block",
         first_state: 12631,
         last_state: 12631,
         default_state: 12631,
@@ -13737,6 +14265,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "prismarine_bricks",
+        definition: "block",
         first_state: 12632,
         last_state: 12632,
         default_state: 12632,
@@ -13744,6 +14273,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_prismarine",
+        definition: "block",
         first_state: 12633,
         last_state: 12633,
         default_state: 12633,
@@ -13751,6 +14281,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "prismarine_stairs",
+        definition: "stair",
         first_state: 12634,
         last_state: 12713,
         default_state: 12645,
@@ -13781,6 +14312,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "prismarine_brick_stairs",
+        definition: "stair",
         first_state: 12714,
         last_state: 12793,
         default_state: 12725,
@@ -13811,6 +14343,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_prismarine_stairs",
+        definition: "stair",
         first_state: 12794,
         last_state: 12873,
         default_state: 12805,
@@ -13841,6 +14374,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "prismarine_slab",
+        definition: "slab",
         first_state: 12874,
         last_state: 12879,
         default_state: 12877,
@@ -13857,6 +14391,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "prismarine_brick_slab",
+        definition: "slab",
         first_state: 12880,
         last_state: 12885,
         default_state: 12883,
@@ -13873,6 +14408,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_prismarine_slab",
+        definition: "slab",
         first_state: 12886,
         last_state: 12891,
         default_state: 12889,
@@ -13889,6 +14425,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sea_lantern",
+        definition: "block",
         first_state: 12892,
         last_state: 12892,
         default_state: 12892,
@@ -13896,6 +14433,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "hay_block",
+        definition: "hay",
         first_state: 12893,
         last_state: 12895,
         default_state: 12894,
@@ -13906,6 +14444,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_carpet",
+        definition: "wool_carpet",
         first_state: 12896,
         last_state: 12896,
         default_state: 12896,
@@ -13913,6 +14452,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_carpet",
+        definition: "wool_carpet",
         first_state: 12897,
         last_state: 12897,
         default_state: 12897,
@@ -13920,6 +14460,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_carpet",
+        definition: "wool_carpet",
         first_state: 12898,
         last_state: 12898,
         default_state: 12898,
@@ -13927,6 +14468,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_carpet",
+        definition: "wool_carpet",
         first_state: 12899,
         last_state: 12899,
         default_state: 12899,
@@ -13934,6 +14476,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_carpet",
+        definition: "wool_carpet",
         first_state: 12900,
         last_state: 12900,
         default_state: 12900,
@@ -13941,6 +14484,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_carpet",
+        definition: "wool_carpet",
         first_state: 12901,
         last_state: 12901,
         default_state: 12901,
@@ -13948,6 +14492,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_carpet",
+        definition: "wool_carpet",
         first_state: 12902,
         last_state: 12902,
         default_state: 12902,
@@ -13955,6 +14500,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_carpet",
+        definition: "wool_carpet",
         first_state: 12903,
         last_state: 12903,
         default_state: 12903,
@@ -13962,6 +14508,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_carpet",
+        definition: "wool_carpet",
         first_state: 12904,
         last_state: 12904,
         default_state: 12904,
@@ -13969,6 +14516,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_carpet",
+        definition: "wool_carpet",
         first_state: 12905,
         last_state: 12905,
         default_state: 12905,
@@ -13976,6 +14524,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_carpet",
+        definition: "wool_carpet",
         first_state: 12906,
         last_state: 12906,
         default_state: 12906,
@@ -13983,6 +14532,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_carpet",
+        definition: "wool_carpet",
         first_state: 12907,
         last_state: 12907,
         default_state: 12907,
@@ -13990,6 +14540,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_carpet",
+        definition: "wool_carpet",
         first_state: 12908,
         last_state: 12908,
         default_state: 12908,
@@ -13997,6 +14548,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_carpet",
+        definition: "wool_carpet",
         first_state: 12909,
         last_state: 12909,
         default_state: 12909,
@@ -14004,6 +14556,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_carpet",
+        definition: "wool_carpet",
         first_state: 12910,
         last_state: 12910,
         default_state: 12910,
@@ -14011,6 +14564,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_carpet",
+        definition: "wool_carpet",
         first_state: 12911,
         last_state: 12911,
         default_state: 12911,
@@ -14018,6 +14572,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "terracotta",
+        definition: "block",
         first_state: 12912,
         last_state: 12912,
         default_state: 12912,
@@ -14025,6 +14580,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "coal_block",
+        definition: "block",
         first_state: 12913,
         last_state: 12913,
         default_state: 12913,
@@ -14032,6 +14588,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "packed_ice",
+        definition: "block",
         first_state: 12914,
         last_state: 12914,
         default_state: 12914,
@@ -14039,6 +14596,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sunflower",
+        definition: "tall_flower",
         first_state: 12915,
         last_state: 12916,
         default_state: 12916,
@@ -14049,6 +14607,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lilac",
+        definition: "tall_flower",
         first_state: 12917,
         last_state: 12918,
         default_state: 12918,
@@ -14059,6 +14618,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "rose_bush",
+        definition: "tall_flower",
         first_state: 12919,
         last_state: 12920,
         default_state: 12920,
@@ -14069,6 +14629,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "peony",
+        definition: "tall_flower",
         first_state: 12921,
         last_state: 12922,
         default_state: 12922,
@@ -14079,6 +14640,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tall_grass",
+        definition: "double_plant",
         first_state: 12923,
         last_state: 12924,
         default_state: 12924,
@@ -14089,6 +14651,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "large_fern",
+        definition: "double_plant",
         first_state: 12925,
         last_state: 12926,
         default_state: 12926,
@@ -14099,6 +14662,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_banner",
+        definition: "banner",
         first_state: 12927,
         last_state: 12942,
         default_state: 12935,
@@ -14112,6 +14676,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_banner",
+        definition: "banner",
         first_state: 12943,
         last_state: 12958,
         default_state: 12951,
@@ -14125,6 +14690,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_banner",
+        definition: "banner",
         first_state: 12959,
         last_state: 12974,
         default_state: 12967,
@@ -14138,6 +14704,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_banner",
+        definition: "banner",
         first_state: 12975,
         last_state: 12990,
         default_state: 12983,
@@ -14151,6 +14718,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_banner",
+        definition: "banner",
         first_state: 12991,
         last_state: 13006,
         default_state: 12999,
@@ -14164,6 +14732,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_banner",
+        definition: "banner",
         first_state: 13007,
         last_state: 13022,
         default_state: 13015,
@@ -14177,6 +14746,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_banner",
+        definition: "banner",
         first_state: 13023,
         last_state: 13038,
         default_state: 13031,
@@ -14190,6 +14760,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_banner",
+        definition: "banner",
         first_state: 13039,
         last_state: 13054,
         default_state: 13047,
@@ -14203,6 +14774,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_banner",
+        definition: "banner",
         first_state: 13055,
         last_state: 13070,
         default_state: 13063,
@@ -14216,6 +14788,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_banner",
+        definition: "banner",
         first_state: 13071,
         last_state: 13086,
         default_state: 13079,
@@ -14229,6 +14802,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_banner",
+        definition: "banner",
         first_state: 13087,
         last_state: 13102,
         default_state: 13095,
@@ -14242,6 +14816,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_banner",
+        definition: "banner",
         first_state: 13103,
         last_state: 13118,
         default_state: 13111,
@@ -14255,6 +14830,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_banner",
+        definition: "banner",
         first_state: 13119,
         last_state: 13134,
         default_state: 13127,
@@ -14268,6 +14844,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_banner",
+        definition: "banner",
         first_state: 13135,
         last_state: 13150,
         default_state: 13143,
@@ -14281,6 +14858,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_banner",
+        definition: "banner",
         first_state: 13151,
         last_state: 13166,
         default_state: 13159,
@@ -14294,6 +14872,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_banner",
+        definition: "banner",
         first_state: 13167,
         last_state: 13182,
         default_state: 13175,
@@ -14307,6 +14886,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_wall_banner",
+        definition: "wall_banner",
         first_state: 13183,
         last_state: 13186,
         default_state: 13183,
@@ -14317,6 +14897,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_wall_banner",
+        definition: "wall_banner",
         first_state: 13187,
         last_state: 13190,
         default_state: 13187,
@@ -14327,6 +14908,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_wall_banner",
+        definition: "wall_banner",
         first_state: 13191,
         last_state: 13194,
         default_state: 13191,
@@ -14337,6 +14919,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_wall_banner",
+        definition: "wall_banner",
         first_state: 13195,
         last_state: 13198,
         default_state: 13195,
@@ -14347,6 +14930,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_wall_banner",
+        definition: "wall_banner",
         first_state: 13199,
         last_state: 13202,
         default_state: 13199,
@@ -14357,6 +14941,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_wall_banner",
+        definition: "wall_banner",
         first_state: 13203,
         last_state: 13206,
         default_state: 13203,
@@ -14367,6 +14952,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_wall_banner",
+        definition: "wall_banner",
         first_state: 13207,
         last_state: 13210,
         default_state: 13207,
@@ -14377,6 +14963,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_wall_banner",
+        definition: "wall_banner",
         first_state: 13211,
         last_state: 13214,
         default_state: 13211,
@@ -14387,6 +14974,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_wall_banner",
+        definition: "wall_banner",
         first_state: 13215,
         last_state: 13218,
         default_state: 13215,
@@ -14397,6 +14985,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_wall_banner",
+        definition: "wall_banner",
         first_state: 13219,
         last_state: 13222,
         default_state: 13219,
@@ -14407,6 +14996,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_wall_banner",
+        definition: "wall_banner",
         first_state: 13223,
         last_state: 13226,
         default_state: 13223,
@@ -14417,6 +15007,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_wall_banner",
+        definition: "wall_banner",
         first_state: 13227,
         last_state: 13230,
         default_state: 13227,
@@ -14427,6 +15018,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_wall_banner",
+        definition: "wall_banner",
         first_state: 13231,
         last_state: 13234,
         default_state: 13231,
@@ -14437,6 +15029,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_wall_banner",
+        definition: "wall_banner",
         first_state: 13235,
         last_state: 13238,
         default_state: 13235,
@@ -14447,6 +15040,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_wall_banner",
+        definition: "wall_banner",
         first_state: 13239,
         last_state: 13242,
         default_state: 13239,
@@ -14457,6 +15051,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_wall_banner",
+        definition: "wall_banner",
         first_state: 13243,
         last_state: 13246,
         default_state: 13243,
@@ -14467,6 +15062,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_sandstone",
+        definition: "block",
         first_state: 13247,
         last_state: 13247,
         default_state: 13247,
@@ -14474,6 +15070,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_red_sandstone",
+        definition: "block",
         first_state: 13248,
         last_state: 13248,
         default_state: 13248,
@@ -14481,6 +15078,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cut_red_sandstone",
+        definition: "block",
         first_state: 13249,
         last_state: 13249,
         default_state: 13249,
@@ -14488,6 +15086,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_sandstone_stairs",
+        definition: "stair",
         first_state: 13250,
         last_state: 13329,
         default_state: 13261,
@@ -14518,6 +15117,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oak_slab",
+        definition: "slab",
         first_state: 13330,
         last_state: 13335,
         default_state: 13333,
@@ -14534,6 +15134,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_slab",
+        definition: "slab",
         first_state: 13336,
         last_state: 13341,
         default_state: 13339,
@@ -14550,6 +15151,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_slab",
+        definition: "slab",
         first_state: 13342,
         last_state: 13347,
         default_state: 13345,
@@ -14566,6 +15168,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_slab",
+        definition: "slab",
         first_state: 13348,
         last_state: 13353,
         default_state: 13351,
@@ -14582,6 +15185,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_slab",
+        definition: "slab",
         first_state: 13354,
         last_state: 13359,
         default_state: 13357,
@@ -14598,6 +15202,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_slab",
+        definition: "slab",
         first_state: 13360,
         last_state: 13365,
         default_state: 13363,
@@ -14614,6 +15219,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_slab",
+        definition: "slab",
         first_state: 13366,
         last_state: 13371,
         default_state: 13369,
@@ -14630,6 +15236,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_slab",
+        definition: "slab",
         first_state: 13372,
         last_state: 13377,
         default_state: 13375,
@@ -14646,6 +15253,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_slab",
+        definition: "slab",
         first_state: 13378,
         last_state: 13383,
         default_state: 13381,
@@ -14662,6 +15270,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_slab",
+        definition: "slab",
         first_state: 13384,
         last_state: 13389,
         default_state: 13387,
@@ -14678,6 +15287,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_mosaic_slab",
+        definition: "slab",
         first_state: 13390,
         last_state: 13395,
         default_state: 13393,
@@ -14694,6 +15304,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_slab",
+        definition: "slab",
         first_state: 13396,
         last_state: 13401,
         default_state: 13399,
@@ -14710,6 +15321,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_stone_slab",
+        definition: "slab",
         first_state: 13402,
         last_state: 13407,
         default_state: 13405,
@@ -14726,6 +15338,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sandstone_slab",
+        definition: "slab",
         first_state: 13408,
         last_state: 13413,
         default_state: 13411,
@@ -14742,6 +15355,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cut_sandstone_slab",
+        definition: "slab",
         first_state: 13414,
         last_state: 13419,
         default_state: 13417,
@@ -14758,6 +15372,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "petrified_oak_slab",
+        definition: "slab",
         first_state: 13420,
         last_state: 13425,
         default_state: 13423,
@@ -14774,6 +15389,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobblestone_slab",
+        definition: "slab",
         first_state: 13426,
         last_state: 13431,
         default_state: 13429,
@@ -14790,6 +15406,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brick_slab",
+        definition: "slab",
         first_state: 13432,
         last_state: 13437,
         default_state: 13435,
@@ -14806,6 +15423,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_brick_slab",
+        definition: "slab",
         first_state: 13438,
         last_state: 13443,
         default_state: 13441,
@@ -14822,6 +15440,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mud_brick_slab",
+        definition: "slab",
         first_state: 13444,
         last_state: 13449,
         default_state: 13447,
@@ -14838,6 +15457,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_brick_slab",
+        definition: "slab",
         first_state: 13450,
         last_state: 13455,
         default_state: 13453,
@@ -14854,6 +15474,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "quartz_slab",
+        definition: "slab",
         first_state: 13456,
         last_state: 13461,
         default_state: 13459,
@@ -14870,6 +15491,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_sandstone_slab",
+        definition: "slab",
         first_state: 13462,
         last_state: 13467,
         default_state: 13465,
@@ -14886,6 +15508,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cut_red_sandstone_slab",
+        definition: "slab",
         first_state: 13468,
         last_state: 13473,
         default_state: 13471,
@@ -14902,6 +15525,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purpur_slab",
+        definition: "slab",
         first_state: 13474,
         last_state: 13479,
         default_state: 13477,
@@ -14918,6 +15542,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_stone",
+        definition: "block",
         first_state: 13480,
         last_state: 13480,
         default_state: 13480,
@@ -14925,6 +15550,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_sandstone",
+        definition: "block",
         first_state: 13481,
         last_state: 13481,
         default_state: 13481,
@@ -14932,6 +15558,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_quartz",
+        definition: "block",
         first_state: 13482,
         last_state: 13482,
         default_state: 13482,
@@ -14939,6 +15566,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_red_sandstone",
+        definition: "block",
         first_state: 13483,
         last_state: 13483,
         default_state: 13483,
@@ -14946,6 +15574,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_fence_gate",
+        definition: "fence_gate",
         first_state: 13484,
         last_state: 13515,
         default_state: 13491,
@@ -14970,6 +15599,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_fence_gate",
+        definition: "fence_gate",
         first_state: 13516,
         last_state: 13547,
         default_state: 13523,
@@ -14994,6 +15624,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_fence_gate",
+        definition: "fence_gate",
         first_state: 13548,
         last_state: 13579,
         default_state: 13555,
@@ -15018,6 +15649,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_fence_gate",
+        definition: "fence_gate",
         first_state: 13580,
         last_state: 13611,
         default_state: 13587,
@@ -15042,6 +15674,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_fence_gate",
+        definition: "fence_gate",
         first_state: 13612,
         last_state: 13643,
         default_state: 13619,
@@ -15066,6 +15699,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_fence_gate",
+        definition: "fence_gate",
         first_state: 13644,
         last_state: 13675,
         default_state: 13651,
@@ -15090,6 +15724,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_fence_gate",
+        definition: "fence_gate",
         first_state: 13676,
         last_state: 13707,
         default_state: 13683,
@@ -15114,6 +15749,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_fence_gate",
+        definition: "fence_gate",
         first_state: 13708,
         last_state: 13739,
         default_state: 13715,
@@ -15138,6 +15774,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_fence_gate",
+        definition: "fence_gate",
         first_state: 13740,
         last_state: 13771,
         default_state: 13747,
@@ -15162,6 +15799,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_fence",
+        definition: "fence",
         first_state: 13772,
         last_state: 13803,
         default_state: 13803,
@@ -15190,6 +15828,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_fence",
+        definition: "fence",
         first_state: 13804,
         last_state: 13835,
         default_state: 13835,
@@ -15218,6 +15857,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_fence",
+        definition: "fence",
         first_state: 13836,
         last_state: 13867,
         default_state: 13867,
@@ -15246,6 +15886,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_fence",
+        definition: "fence",
         first_state: 13868,
         last_state: 13899,
         default_state: 13899,
@@ -15274,6 +15915,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_fence",
+        definition: "fence",
         first_state: 13900,
         last_state: 13931,
         default_state: 13931,
@@ -15302,6 +15944,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_fence",
+        definition: "fence",
         first_state: 13932,
         last_state: 13963,
         default_state: 13963,
@@ -15330,6 +15973,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_fence",
+        definition: "fence",
         first_state: 13964,
         last_state: 13995,
         default_state: 13995,
@@ -15358,6 +16002,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_fence",
+        definition: "fence",
         first_state: 13996,
         last_state: 14027,
         default_state: 14027,
@@ -15386,6 +16031,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_fence",
+        definition: "fence",
         first_state: 14028,
         last_state: 14059,
         default_state: 14059,
@@ -15414,6 +16060,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spruce_door",
+        definition: "door",
         first_state: 14060,
         last_state: 14123,
         default_state: 14071,
@@ -15442,6 +16089,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "birch_door",
+        definition: "door",
         first_state: 14124,
         last_state: 14187,
         default_state: 14135,
@@ -15470,6 +16118,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jungle_door",
+        definition: "door",
         first_state: 14188,
         last_state: 14251,
         default_state: 14199,
@@ -15498,6 +16147,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "acacia_door",
+        definition: "door",
         first_state: 14252,
         last_state: 14315,
         default_state: 14263,
@@ -15526,6 +16176,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cherry_door",
+        definition: "door",
         first_state: 14316,
         last_state: 14379,
         default_state: 14327,
@@ -15554,6 +16205,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dark_oak_door",
+        definition: "door",
         first_state: 14380,
         last_state: 14443,
         default_state: 14391,
@@ -15582,6 +16234,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_oak_door",
+        definition: "door",
         first_state: 14444,
         last_state: 14507,
         default_state: 14455,
@@ -15610,6 +16263,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mangrove_door",
+        definition: "door",
         first_state: 14508,
         last_state: 14571,
         default_state: 14519,
@@ -15638,6 +16292,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_door",
+        definition: "door",
         first_state: 14572,
         last_state: 14635,
         default_state: 14583,
@@ -15666,6 +16321,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_rod",
+        definition: "end_rod",
         first_state: 14636,
         last_state: 14641,
         default_state: 14640,
@@ -15676,6 +16332,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chorus_plant",
+        definition: "chorus_plant",
         first_state: 14642,
         last_state: 14705,
         default_state: 14705,
@@ -15708,6 +16365,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chorus_flower",
+        definition: "chorus_flower",
         first_state: 14706,
         last_state: 14711,
         default_state: 14706,
@@ -15718,6 +16376,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purpur_block",
+        definition: "block",
         first_state: 14712,
         last_state: 14712,
         default_state: 14712,
@@ -15725,6 +16384,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purpur_pillar",
+        definition: "rotated_pillar",
         first_state: 14713,
         last_state: 14715,
         default_state: 14714,
@@ -15735,6 +16395,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purpur_stairs",
+        definition: "stair",
         first_state: 14716,
         last_state: 14795,
         default_state: 14727,
@@ -15765,6 +16426,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_stone_bricks",
+        definition: "block",
         first_state: 14796,
         last_state: 14796,
         default_state: 14796,
@@ -15772,6 +16434,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "torchflower_crop",
+        definition: "torchflower_crop",
         first_state: 14797,
         last_state: 14798,
         default_state: 14797,
@@ -15782,6 +16445,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pitcher_crop",
+        definition: "pitcher_crop",
         first_state: 14799,
         last_state: 14808,
         default_state: 14800,
@@ -15798,6 +16462,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pitcher_plant",
+        definition: "double_plant",
         first_state: 14809,
         last_state: 14810,
         default_state: 14810,
@@ -15808,6 +16473,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "beetroots",
+        definition: "beetroot",
         first_state: 14811,
         last_state: 14814,
         default_state: 14811,
@@ -15818,6 +16484,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dirt_path",
+        definition: "dirt_path",
         first_state: 14815,
         last_state: 14815,
         default_state: 14815,
@@ -15825,6 +16492,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_gateway",
+        definition: "end_gateway",
         first_state: 14816,
         last_state: 14816,
         default_state: 14816,
@@ -15832,6 +16500,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "repeating_command_block",
+        definition: "command",
         first_state: 14817,
         last_state: 14828,
         default_state: 14823,
@@ -15848,6 +16517,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chain_command_block",
+        definition: "command",
         first_state: 14829,
         last_state: 14840,
         default_state: 14835,
@@ -15864,6 +16534,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "frosted_ice",
+        definition: "frosted_ice",
         first_state: 14841,
         last_state: 14844,
         default_state: 14841,
@@ -15874,6 +16545,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magma_block",
+        definition: "magma",
         first_state: 14845,
         last_state: 14845,
         default_state: 14845,
@@ -15881,6 +16553,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_wart_block",
+        definition: "block",
         first_state: 14846,
         last_state: 14846,
         default_state: 14846,
@@ -15888,6 +16561,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_nether_bricks",
+        definition: "block",
         first_state: 14847,
         last_state: 14847,
         default_state: 14847,
@@ -15895,6 +16569,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bone_block",
+        definition: "rotated_pillar",
         first_state: 14848,
         last_state: 14850,
         default_state: 14849,
@@ -15905,6 +16580,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "structure_void",
+        definition: "structure_void",
         first_state: 14851,
         last_state: 14851,
         default_state: 14851,
@@ -15912,6 +16588,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "observer",
+        definition: "observer",
         first_state: 14852,
         last_state: 14863,
         default_state: 14857,
@@ -15928,6 +16605,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "shulker_box",
+        definition: "shulker_box",
         first_state: 14864,
         last_state: 14869,
         default_state: 14868,
@@ -15938,6 +16616,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_shulker_box",
+        definition: "shulker_box",
         first_state: 14870,
         last_state: 14875,
         default_state: 14874,
@@ -15948,6 +16627,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_shulker_box",
+        definition: "shulker_box",
         first_state: 14876,
         last_state: 14881,
         default_state: 14880,
@@ -15958,6 +16638,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_shulker_box",
+        definition: "shulker_box",
         first_state: 14882,
         last_state: 14887,
         default_state: 14886,
@@ -15968,6 +16649,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_shulker_box",
+        definition: "shulker_box",
         first_state: 14888,
         last_state: 14893,
         default_state: 14892,
@@ -15978,6 +16660,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_shulker_box",
+        definition: "shulker_box",
         first_state: 14894,
         last_state: 14899,
         default_state: 14898,
@@ -15988,6 +16671,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_shulker_box",
+        definition: "shulker_box",
         first_state: 14900,
         last_state: 14905,
         default_state: 14904,
@@ -15998,6 +16682,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_shulker_box",
+        definition: "shulker_box",
         first_state: 14906,
         last_state: 14911,
         default_state: 14910,
@@ -16008,6 +16693,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_shulker_box",
+        definition: "shulker_box",
         first_state: 14912,
         last_state: 14917,
         default_state: 14916,
@@ -16018,6 +16704,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_shulker_box",
+        definition: "shulker_box",
         first_state: 14918,
         last_state: 14923,
         default_state: 14922,
@@ -16028,6 +16715,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_shulker_box",
+        definition: "shulker_box",
         first_state: 14924,
         last_state: 14929,
         default_state: 14928,
@@ -16038,6 +16726,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_shulker_box",
+        definition: "shulker_box",
         first_state: 14930,
         last_state: 14935,
         default_state: 14934,
@@ -16048,6 +16737,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_shulker_box",
+        definition: "shulker_box",
         first_state: 14936,
         last_state: 14941,
         default_state: 14940,
@@ -16058,6 +16748,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_shulker_box",
+        definition: "shulker_box",
         first_state: 14942,
         last_state: 14947,
         default_state: 14946,
@@ -16068,6 +16759,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_shulker_box",
+        definition: "shulker_box",
         first_state: 14948,
         last_state: 14953,
         default_state: 14952,
@@ -16078,6 +16770,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_shulker_box",
+        definition: "shulker_box",
         first_state: 14954,
         last_state: 14959,
         default_state: 14958,
@@ -16088,6 +16781,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_shulker_box",
+        definition: "shulker_box",
         first_state: 14960,
         last_state: 14965,
         default_state: 14964,
@@ -16098,6 +16792,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14966,
         last_state: 14969,
         default_state: 14966,
@@ -16108,6 +16803,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14970,
         last_state: 14973,
         default_state: 14970,
@@ -16118,6 +16814,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14974,
         last_state: 14977,
         default_state: 14974,
@@ -16128,6 +16825,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14978,
         last_state: 14981,
         default_state: 14978,
@@ -16138,6 +16836,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14982,
         last_state: 14985,
         default_state: 14982,
@@ -16148,6 +16847,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14986,
         last_state: 14989,
         default_state: 14986,
@@ -16158,6 +16858,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14990,
         last_state: 14993,
         default_state: 14990,
@@ -16168,6 +16869,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14994,
         last_state: 14997,
         default_state: 14994,
@@ -16178,6 +16880,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 14998,
         last_state: 15001,
         default_state: 14998,
@@ -16188,6 +16891,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 15002,
         last_state: 15005,
         default_state: 15002,
@@ -16198,6 +16902,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 15006,
         last_state: 15009,
         default_state: 15006,
@@ -16208,6 +16913,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 15010,
         last_state: 15013,
         default_state: 15010,
@@ -16218,6 +16924,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 15014,
         last_state: 15017,
         default_state: 15014,
@@ -16228,6 +16935,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 15018,
         last_state: 15021,
         default_state: 15018,
@@ -16238,6 +16946,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 15022,
         last_state: 15025,
         default_state: 15022,
@@ -16248,6 +16957,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_glazed_terracotta",
+        definition: "glazed_terracotta",
         first_state: 15026,
         last_state: 15029,
         default_state: 15026,
@@ -16258,6 +16968,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_concrete",
+        definition: "block",
         first_state: 15030,
         last_state: 15030,
         default_state: 15030,
@@ -16265,6 +16976,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_concrete",
+        definition: "block",
         first_state: 15031,
         last_state: 15031,
         default_state: 15031,
@@ -16272,6 +16984,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_concrete",
+        definition: "block",
         first_state: 15032,
         last_state: 15032,
         default_state: 15032,
@@ -16279,6 +16992,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_concrete",
+        definition: "block",
         first_state: 15033,
         last_state: 15033,
         default_state: 15033,
@@ -16286,6 +17000,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_concrete",
+        definition: "block",
         first_state: 15034,
         last_state: 15034,
         default_state: 15034,
@@ -16293,6 +17008,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_concrete",
+        definition: "block",
         first_state: 15035,
         last_state: 15035,
         default_state: 15035,
@@ -16300,6 +17016,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_concrete",
+        definition: "block",
         first_state: 15036,
         last_state: 15036,
         default_state: 15036,
@@ -16307,6 +17024,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_concrete",
+        definition: "block",
         first_state: 15037,
         last_state: 15037,
         default_state: 15037,
@@ -16314,6 +17032,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_concrete",
+        definition: "block",
         first_state: 15038,
         last_state: 15038,
         default_state: 15038,
@@ -16321,6 +17040,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_concrete",
+        definition: "block",
         first_state: 15039,
         last_state: 15039,
         default_state: 15039,
@@ -16328,6 +17048,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_concrete",
+        definition: "block",
         first_state: 15040,
         last_state: 15040,
         default_state: 15040,
@@ -16335,6 +17056,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_concrete",
+        definition: "block",
         first_state: 15041,
         last_state: 15041,
         default_state: 15041,
@@ -16342,6 +17064,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_concrete",
+        definition: "block",
         first_state: 15042,
         last_state: 15042,
         default_state: 15042,
@@ -16349,6 +17072,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_concrete",
+        definition: "block",
         first_state: 15043,
         last_state: 15043,
         default_state: 15043,
@@ -16356,6 +17080,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_concrete",
+        definition: "block",
         first_state: 15044,
         last_state: 15044,
         default_state: 15044,
@@ -16363,6 +17088,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_concrete",
+        definition: "block",
         first_state: 15045,
         last_state: 15045,
         default_state: 15045,
@@ -16370,6 +17096,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15046,
         last_state: 15046,
         default_state: 15046,
@@ -16377,6 +17104,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15047,
         last_state: 15047,
         default_state: 15047,
@@ -16384,6 +17112,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15048,
         last_state: 15048,
         default_state: 15048,
@@ -16391,6 +17120,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15049,
         last_state: 15049,
         default_state: 15049,
@@ -16398,6 +17128,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15050,
         last_state: 15050,
         default_state: 15050,
@@ -16405,6 +17136,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15051,
         last_state: 15051,
         default_state: 15051,
@@ -16412,6 +17144,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15052,
         last_state: 15052,
         default_state: 15052,
@@ -16419,6 +17152,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15053,
         last_state: 15053,
         default_state: 15053,
@@ -16426,6 +17160,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15054,
         last_state: 15054,
         default_state: 15054,
@@ -16433,6 +17168,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15055,
         last_state: 15055,
         default_state: 15055,
@@ -16440,6 +17176,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15056,
         last_state: 15056,
         default_state: 15056,
@@ -16447,6 +17184,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15057,
         last_state: 15057,
         default_state: 15057,
@@ -16454,6 +17192,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15058,
         last_state: 15058,
         default_state: 15058,
@@ -16461,6 +17200,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15059,
         last_state: 15059,
         default_state: 15059,
@@ -16468,6 +17208,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15060,
         last_state: 15060,
         default_state: 15060,
@@ -16475,6 +17216,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_concrete_powder",
+        definition: "concrete_powder",
         first_state: 15061,
         last_state: 15061,
         default_state: 15061,
@@ -16482,6 +17224,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "kelp",
+        definition: "kelp",
         first_state: 15062,
         last_state: 15087,
         default_state: 15062,
@@ -16495,6 +17238,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "kelp_plant",
+        definition: "kelp_plant",
         first_state: 15088,
         last_state: 15088,
         default_state: 15088,
@@ -16502,6 +17246,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dried_kelp_block",
+        definition: "block",
         first_state: 15089,
         last_state: 15089,
         default_state: 15089,
@@ -16509,6 +17254,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "turtle_egg",
+        definition: "turtle_egg",
         first_state: 15090,
         last_state: 15101,
         default_state: 15090,
@@ -16525,6 +17271,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sniffer_egg",
+        definition: "sniffer_egg",
         first_state: 15102,
         last_state: 15104,
         default_state: 15102,
@@ -16535,6 +17282,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dried_ghast",
+        definition: "dried_ghast",
         first_state: 15105,
         last_state: 15136,
         default_state: 15106,
@@ -16555,6 +17303,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_tube_coral_block",
+        definition: "block",
         first_state: 15137,
         last_state: 15137,
         default_state: 15137,
@@ -16562,6 +17311,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_brain_coral_block",
+        definition: "block",
         first_state: 15138,
         last_state: 15138,
         default_state: 15138,
@@ -16569,6 +17319,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_bubble_coral_block",
+        definition: "block",
         first_state: 15139,
         last_state: 15139,
         default_state: 15139,
@@ -16576,6 +17327,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_fire_coral_block",
+        definition: "block",
         first_state: 15140,
         last_state: 15140,
         default_state: 15140,
@@ -16583,6 +17335,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_horn_coral_block",
+        definition: "block",
         first_state: 15141,
         last_state: 15141,
         default_state: 15141,
@@ -16590,6 +17343,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tube_coral_block",
+        definition: "coral",
         first_state: 15142,
         last_state: 15142,
         default_state: 15142,
@@ -16597,6 +17351,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brain_coral_block",
+        definition: "coral",
         first_state: 15143,
         last_state: 15143,
         default_state: 15143,
@@ -16604,6 +17359,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bubble_coral_block",
+        definition: "coral",
         first_state: 15144,
         last_state: 15144,
         default_state: 15144,
@@ -16611,6 +17367,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "fire_coral_block",
+        definition: "coral",
         first_state: 15145,
         last_state: 15145,
         default_state: 15145,
@@ -16618,6 +17375,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "horn_coral_block",
+        definition: "coral",
         first_state: 15146,
         last_state: 15146,
         default_state: 15146,
@@ -16625,6 +17383,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_tube_coral",
+        definition: "base_coral_plant",
         first_state: 15147,
         last_state: 15148,
         default_state: 15147,
@@ -16635,6 +17394,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_brain_coral",
+        definition: "base_coral_plant",
         first_state: 15149,
         last_state: 15150,
         default_state: 15149,
@@ -16645,6 +17405,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_bubble_coral",
+        definition: "base_coral_plant",
         first_state: 15151,
         last_state: 15152,
         default_state: 15151,
@@ -16655,6 +17416,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_fire_coral",
+        definition: "base_coral_plant",
         first_state: 15153,
         last_state: 15154,
         default_state: 15153,
@@ -16665,6 +17427,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_horn_coral",
+        definition: "base_coral_plant",
         first_state: 15155,
         last_state: 15156,
         default_state: 15155,
@@ -16675,6 +17438,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tube_coral",
+        definition: "coral_plant",
         first_state: 15157,
         last_state: 15158,
         default_state: 15157,
@@ -16685,6 +17449,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brain_coral",
+        definition: "coral_plant",
         first_state: 15159,
         last_state: 15160,
         default_state: 15159,
@@ -16695,6 +17460,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bubble_coral",
+        definition: "coral_plant",
         first_state: 15161,
         last_state: 15162,
         default_state: 15161,
@@ -16705,6 +17471,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "fire_coral",
+        definition: "coral_plant",
         first_state: 15163,
         last_state: 15164,
         default_state: 15163,
@@ -16715,6 +17482,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "horn_coral",
+        definition: "coral_plant",
         first_state: 15165,
         last_state: 15166,
         default_state: 15165,
@@ -16725,6 +17493,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_tube_coral_fan",
+        definition: "base_coral_fan",
         first_state: 15167,
         last_state: 15168,
         default_state: 15167,
@@ -16735,6 +17504,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_brain_coral_fan",
+        definition: "base_coral_fan",
         first_state: 15169,
         last_state: 15170,
         default_state: 15169,
@@ -16745,6 +17515,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_bubble_coral_fan",
+        definition: "base_coral_fan",
         first_state: 15171,
         last_state: 15172,
         default_state: 15171,
@@ -16755,6 +17526,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_fire_coral_fan",
+        definition: "base_coral_fan",
         first_state: 15173,
         last_state: 15174,
         default_state: 15173,
@@ -16765,6 +17537,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_horn_coral_fan",
+        definition: "base_coral_fan",
         first_state: 15175,
         last_state: 15176,
         default_state: 15175,
@@ -16775,6 +17548,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tube_coral_fan",
+        definition: "coral_fan",
         first_state: 15177,
         last_state: 15178,
         default_state: 15177,
@@ -16785,6 +17559,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brain_coral_fan",
+        definition: "coral_fan",
         first_state: 15179,
         last_state: 15180,
         default_state: 15179,
@@ -16795,6 +17570,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bubble_coral_fan",
+        definition: "coral_fan",
         first_state: 15181,
         last_state: 15182,
         default_state: 15181,
@@ -16805,6 +17581,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "fire_coral_fan",
+        definition: "coral_fan",
         first_state: 15183,
         last_state: 15184,
         default_state: 15183,
@@ -16815,6 +17592,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "horn_coral_fan",
+        definition: "coral_fan",
         first_state: 15185,
         last_state: 15186,
         default_state: 15185,
@@ -16825,6 +17603,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_tube_coral_wall_fan",
+        definition: "base_coral_wall_fan",
         first_state: 15187,
         last_state: 15194,
         default_state: 15187,
@@ -16841,6 +17620,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_brain_coral_wall_fan",
+        definition: "base_coral_wall_fan",
         first_state: 15195,
         last_state: 15202,
         default_state: 15195,
@@ -16857,6 +17637,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_bubble_coral_wall_fan",
+        definition: "base_coral_wall_fan",
         first_state: 15203,
         last_state: 15210,
         default_state: 15203,
@@ -16873,6 +17654,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_fire_coral_wall_fan",
+        definition: "base_coral_wall_fan",
         first_state: 15211,
         last_state: 15218,
         default_state: 15211,
@@ -16889,6 +17671,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dead_horn_coral_wall_fan",
+        definition: "base_coral_wall_fan",
         first_state: 15219,
         last_state: 15226,
         default_state: 15219,
@@ -16905,6 +17688,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tube_coral_wall_fan",
+        definition: "coral_wall_fan",
         first_state: 15227,
         last_state: 15234,
         default_state: 15227,
@@ -16921,6 +17705,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brain_coral_wall_fan",
+        definition: "coral_wall_fan",
         first_state: 15235,
         last_state: 15242,
         default_state: 15235,
@@ -16937,6 +17722,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bubble_coral_wall_fan",
+        definition: "coral_wall_fan",
         first_state: 15243,
         last_state: 15250,
         default_state: 15243,
@@ -16953,6 +17739,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "fire_coral_wall_fan",
+        definition: "coral_wall_fan",
         first_state: 15251,
         last_state: 15258,
         default_state: 15251,
@@ -16969,6 +17756,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "horn_coral_wall_fan",
+        definition: "coral_wall_fan",
         first_state: 15259,
         last_state: 15266,
         default_state: 15259,
@@ -16985,6 +17773,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sea_pickle",
+        definition: "sea_pickle",
         first_state: 15267,
         last_state: 15274,
         default_state: 15267,
@@ -17001,6 +17790,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_ice",
+        definition: "half_transparent",
         first_state: 15275,
         last_state: 15275,
         default_state: 15275,
@@ -17008,6 +17798,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "conduit",
+        definition: "conduit",
         first_state: 15276,
         last_state: 15277,
         default_state: 15276,
@@ -17018,6 +17809,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo_sapling",
+        definition: "bamboo_sapling",
         first_state: 15278,
         last_state: 15278,
         default_state: 15278,
@@ -17025,6 +17817,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bamboo",
+        definition: "bamboo_stalk",
         first_state: 15279,
         last_state: 15290,
         default_state: 15279,
@@ -17045,6 +17838,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_bamboo",
+        definition: "flower_pot",
         first_state: 15291,
         last_state: 15291,
         default_state: 15291,
@@ -17052,6 +17846,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "void_air",
+        definition: "air",
         first_state: 15292,
         last_state: 15292,
         default_state: 15292,
@@ -17059,6 +17854,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cave_air",
+        definition: "air",
         first_state: 15293,
         last_state: 15293,
         default_state: 15293,
@@ -17066,6 +17862,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bubble_column",
+        definition: "bubble_column",
         first_state: 15294,
         last_state: 15295,
         default_state: 15294,
@@ -17076,6 +17873,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_granite_stairs",
+        definition: "stair",
         first_state: 15296,
         last_state: 15375,
         default_state: 15307,
@@ -17106,6 +17904,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_red_sandstone_stairs",
+        definition: "stair",
         first_state: 15376,
         last_state: 15455,
         default_state: 15387,
@@ -17136,6 +17935,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_stone_brick_stairs",
+        definition: "stair",
         first_state: 15456,
         last_state: 15535,
         default_state: 15467,
@@ -17166,6 +17966,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_diorite_stairs",
+        definition: "stair",
         first_state: 15536,
         last_state: 15615,
         default_state: 15547,
@@ -17196,6 +17997,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_cobblestone_stairs",
+        definition: "stair",
         first_state: 15616,
         last_state: 15695,
         default_state: 15627,
@@ -17226,6 +18028,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_stone_brick_stairs",
+        definition: "stair",
         first_state: 15696,
         last_state: 15775,
         default_state: 15707,
@@ -17256,6 +18059,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_stairs",
+        definition: "stair",
         first_state: 15776,
         last_state: 15855,
         default_state: 15787,
@@ -17286,6 +18090,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_sandstone_stairs",
+        definition: "stair",
         first_state: 15856,
         last_state: 15935,
         default_state: 15867,
@@ -17316,6 +18121,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_quartz_stairs",
+        definition: "stair",
         first_state: 15936,
         last_state: 16015,
         default_state: 15947,
@@ -17346,6 +18152,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "granite_stairs",
+        definition: "stair",
         first_state: 16016,
         last_state: 16095,
         default_state: 16027,
@@ -17376,6 +18183,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "andesite_stairs",
+        definition: "stair",
         first_state: 16096,
         last_state: 16175,
         default_state: 16107,
@@ -17406,6 +18214,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_nether_brick_stairs",
+        definition: "stair",
         first_state: 16176,
         last_state: 16255,
         default_state: 16187,
@@ -17436,6 +18245,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_andesite_stairs",
+        definition: "stair",
         first_state: 16256,
         last_state: 16335,
         default_state: 16267,
@@ -17466,6 +18276,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "diorite_stairs",
+        definition: "stair",
         first_state: 16336,
         last_state: 16415,
         default_state: 16347,
@@ -17496,6 +18307,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_granite_slab",
+        definition: "slab",
         first_state: 16416,
         last_state: 16421,
         default_state: 16419,
@@ -17512,6 +18324,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_red_sandstone_slab",
+        definition: "slab",
         first_state: 16422,
         last_state: 16427,
         default_state: 16425,
@@ -17528,6 +18341,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_stone_brick_slab",
+        definition: "slab",
         first_state: 16428,
         last_state: 16433,
         default_state: 16431,
@@ -17544,6 +18358,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_diorite_slab",
+        definition: "slab",
         first_state: 16434,
         last_state: 16439,
         default_state: 16437,
@@ -17560,6 +18375,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_cobblestone_slab",
+        definition: "slab",
         first_state: 16440,
         last_state: 16445,
         default_state: 16443,
@@ -17576,6 +18392,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_stone_brick_slab",
+        definition: "slab",
         first_state: 16446,
         last_state: 16451,
         default_state: 16449,
@@ -17592,6 +18409,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_sandstone_slab",
+        definition: "slab",
         first_state: 16452,
         last_state: 16457,
         default_state: 16455,
@@ -17608,6 +18426,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_quartz_slab",
+        definition: "slab",
         first_state: 16458,
         last_state: 16463,
         default_state: 16461,
@@ -17624,6 +18443,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "granite_slab",
+        definition: "slab",
         first_state: 16464,
         last_state: 16469,
         default_state: 16467,
@@ -17640,6 +18460,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "andesite_slab",
+        definition: "slab",
         first_state: 16470,
         last_state: 16475,
         default_state: 16473,
@@ -17656,6 +18477,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_nether_brick_slab",
+        definition: "slab",
         first_state: 16476,
         last_state: 16481,
         default_state: 16479,
@@ -17672,6 +18494,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_andesite_slab",
+        definition: "slab",
         first_state: 16482,
         last_state: 16487,
         default_state: 16485,
@@ -17688,6 +18511,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "diorite_slab",
+        definition: "slab",
         first_state: 16488,
         last_state: 16493,
         default_state: 16491,
@@ -17704,6 +18528,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brick_wall",
+        definition: "wall",
         first_state: 16494,
         last_state: 16817,
         default_state: 16497,
@@ -17736,6 +18561,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "prismarine_wall",
+        definition: "wall",
         first_state: 16818,
         last_state: 17141,
         default_state: 16821,
@@ -17768,6 +18594,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_sandstone_wall",
+        definition: "wall",
         first_state: 17142,
         last_state: 17465,
         default_state: 17145,
@@ -17800,6 +18627,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mossy_stone_brick_wall",
+        definition: "wall",
         first_state: 17466,
         last_state: 17789,
         default_state: 17469,
@@ -17832,6 +18660,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "granite_wall",
+        definition: "wall",
         first_state: 17790,
         last_state: 18113,
         default_state: 17793,
@@ -17864,6 +18693,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stone_brick_wall",
+        definition: "wall",
         first_state: 18114,
         last_state: 18437,
         default_state: 18117,
@@ -17896,6 +18726,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mud_brick_wall",
+        definition: "wall",
         first_state: 18438,
         last_state: 18761,
         default_state: 18441,
@@ -17928,6 +18759,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_brick_wall",
+        definition: "wall",
         first_state: 18762,
         last_state: 19085,
         default_state: 18765,
@@ -17960,6 +18792,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "andesite_wall",
+        definition: "wall",
         first_state: 19086,
         last_state: 19409,
         default_state: 19089,
@@ -17992,6 +18825,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_nether_brick_wall",
+        definition: "wall",
         first_state: 19410,
         last_state: 19733,
         default_state: 19413,
@@ -18024,6 +18858,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sandstone_wall",
+        definition: "wall",
         first_state: 19734,
         last_state: 20057,
         default_state: 19737,
@@ -18056,6 +18891,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "end_stone_brick_wall",
+        definition: "wall",
         first_state: 20058,
         last_state: 20381,
         default_state: 20061,
@@ -18088,6 +18924,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "diorite_wall",
+        definition: "wall",
         first_state: 20382,
         last_state: 20705,
         default_state: 20385,
@@ -18120,6 +18957,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "scaffolding",
+        definition: "scaffolding",
         first_state: 20706,
         last_state: 20737,
         default_state: 20737,
@@ -18140,6 +18978,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "loom",
+        definition: "loom",
         first_state: 20738,
         last_state: 20741,
         default_state: 20738,
@@ -18150,6 +18989,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "barrel",
+        definition: "barrel",
         first_state: 20742,
         last_state: 20753,
         default_state: 20743,
@@ -18166,6 +19006,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smoker",
+        definition: "smoker",
         first_state: 20754,
         last_state: 20761,
         default_state: 20755,
@@ -18182,6 +19023,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blast_furnace",
+        definition: "blast_furnace",
         first_state: 20762,
         last_state: 20769,
         default_state: 20763,
@@ -18198,6 +19040,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cartography_table",
+        definition: "cartography_table",
         first_state: 20770,
         last_state: 20770,
         default_state: 20770,
@@ -18205,6 +19048,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "fletching_table",
+        definition: "block",
         first_state: 20771,
         last_state: 20771,
         default_state: 20771,
@@ -18212,6 +19056,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "grindstone",
+        definition: "grindstone",
         first_state: 20772,
         last_state: 20783,
         default_state: 20776,
@@ -18228,6 +19073,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lectern",
+        definition: "lectern",
         first_state: 20784,
         last_state: 20799,
         default_state: 20787,
@@ -18248,6 +19094,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smithing_table",
+        definition: "smithing_table",
         first_state: 20800,
         last_state: 20800,
         default_state: 20800,
@@ -18255,6 +19102,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stonecutter",
+        definition: "stonecutter",
         first_state: 20801,
         last_state: 20804,
         default_state: 20801,
@@ -18265,6 +19113,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bell",
+        definition: "bell",
         first_state: 20805,
         last_state: 20836,
         default_state: 20806,
@@ -18285,6 +19134,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lantern",
+        definition: "lantern",
         first_state: 20837,
         last_state: 20840,
         default_state: 20840,
@@ -18301,6 +19151,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "soul_lantern",
+        definition: "lantern",
         first_state: 20841,
         last_state: 20844,
         default_state: 20844,
@@ -18317,6 +19168,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_lantern",
+        definition: "weathering_lantern",
         first_state: 20845,
         last_state: 20848,
         default_state: 20848,
@@ -18333,6 +19185,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_lantern",
+        definition: "weathering_lantern",
         first_state: 20849,
         last_state: 20852,
         default_state: 20852,
@@ -18349,6 +19202,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_lantern",
+        definition: "weathering_lantern",
         first_state: 20853,
         last_state: 20856,
         default_state: 20856,
@@ -18365,6 +19219,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_lantern",
+        definition: "weathering_lantern",
         first_state: 20857,
         last_state: 20860,
         default_state: 20860,
@@ -18381,6 +19236,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_lantern",
+        definition: "lantern",
         first_state: 20861,
         last_state: 20864,
         default_state: 20864,
@@ -18397,6 +19253,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_lantern",
+        definition: "lantern",
         first_state: 20865,
         last_state: 20868,
         default_state: 20868,
@@ -18413,6 +19270,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_lantern",
+        definition: "lantern",
         first_state: 20869,
         last_state: 20872,
         default_state: 20872,
@@ -18429,6 +19287,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_lantern",
+        definition: "lantern",
         first_state: 20873,
         last_state: 20876,
         default_state: 20876,
@@ -18445,6 +19304,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "campfire",
+        definition: "campfire",
         first_state: 20877,
         last_state: 20908,
         default_state: 20880,
@@ -18469,6 +19329,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "soul_campfire",
+        definition: "campfire",
         first_state: 20909,
         last_state: 20940,
         default_state: 20912,
@@ -18493,6 +19354,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sweet_berry_bush",
+        definition: "sweet_berry_bush",
         first_state: 20941,
         last_state: 20944,
         default_state: 20941,
@@ -18503,6 +19365,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_stem",
+        definition: "rotated_pillar",
         first_state: 20945,
         last_state: 20947,
         default_state: 20946,
@@ -18513,6 +19376,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_warped_stem",
+        definition: "rotated_pillar",
         first_state: 20948,
         last_state: 20950,
         default_state: 20949,
@@ -18523,6 +19387,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_hyphae",
+        definition: "rotated_pillar",
         first_state: 20951,
         last_state: 20953,
         default_state: 20952,
@@ -18533,6 +19398,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_warped_hyphae",
+        definition: "rotated_pillar",
         first_state: 20954,
         last_state: 20956,
         default_state: 20955,
@@ -18543,6 +19409,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_nylium",
+        definition: "nylium",
         first_state: 20957,
         last_state: 20957,
         default_state: 20957,
@@ -18550,6 +19417,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_fungus",
+        definition: "nether_fungus",
         first_state: 20958,
         last_state: 20958,
         default_state: 20958,
@@ -18557,6 +19425,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_wart_block",
+        definition: "block",
         first_state: 20959,
         last_state: 20959,
         default_state: 20959,
@@ -18564,6 +19433,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_roots",
+        definition: "nether_roots",
         first_state: 20960,
         last_state: 20960,
         default_state: 20960,
@@ -18571,6 +19441,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "nether_sprouts",
+        definition: "nether_sprouts",
         first_state: 20961,
         last_state: 20961,
         default_state: 20961,
@@ -18578,6 +19449,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_stem",
+        definition: "rotated_pillar",
         first_state: 20962,
         last_state: 20964,
         default_state: 20963,
@@ -18588,6 +19460,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_crimson_stem",
+        definition: "rotated_pillar",
         first_state: 20965,
         last_state: 20967,
         default_state: 20966,
@@ -18598,6 +19471,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_hyphae",
+        definition: "rotated_pillar",
         first_state: 20968,
         last_state: 20970,
         default_state: 20969,
@@ -18608,6 +19482,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "stripped_crimson_hyphae",
+        definition: "rotated_pillar",
         first_state: 20971,
         last_state: 20973,
         default_state: 20972,
@@ -18618,6 +19493,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_nylium",
+        definition: "nylium",
         first_state: 20974,
         last_state: 20974,
         default_state: 20974,
@@ -18625,6 +19501,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_fungus",
+        definition: "nether_fungus",
         first_state: 20975,
         last_state: 20975,
         default_state: 20975,
@@ -18632,6 +19509,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "shroomlight",
+        definition: "block",
         first_state: 20976,
         last_state: 20976,
         default_state: 20976,
@@ -18639,6 +19517,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weeping_vines",
+        definition: "weeping_vines",
         first_state: 20977,
         last_state: 21002,
         default_state: 20977,
@@ -18652,6 +19531,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weeping_vines_plant",
+        definition: "weeping_vines_plant",
         first_state: 21003,
         last_state: 21003,
         default_state: 21003,
@@ -18659,6 +19539,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "twisting_vines",
+        definition: "twisting_vines",
         first_state: 21004,
         last_state: 21029,
         default_state: 21004,
@@ -18672,6 +19553,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "twisting_vines_plant",
+        definition: "twisting_vines_plant",
         first_state: 21030,
         last_state: 21030,
         default_state: 21030,
@@ -18679,6 +19561,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_roots",
+        definition: "nether_roots",
         first_state: 21031,
         last_state: 21031,
         default_state: 21031,
@@ -18686,6 +19569,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_planks",
+        definition: "block",
         first_state: 21032,
         last_state: 21032,
         default_state: 21032,
@@ -18693,6 +19577,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_planks",
+        definition: "block",
         first_state: 21033,
         last_state: 21033,
         default_state: 21033,
@@ -18700,6 +19585,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_slab",
+        definition: "slab",
         first_state: 21034,
         last_state: 21039,
         default_state: 21037,
@@ -18716,6 +19602,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_slab",
+        definition: "slab",
         first_state: 21040,
         last_state: 21045,
         default_state: 21043,
@@ -18732,6 +19619,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_pressure_plate",
+        definition: "pressure_plate",
         first_state: 21046,
         last_state: 21047,
         default_state: 21047,
@@ -18742,6 +19630,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_pressure_plate",
+        definition: "pressure_plate",
         first_state: 21048,
         last_state: 21049,
         default_state: 21049,
@@ -18752,6 +19641,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_fence",
+        definition: "fence",
         first_state: 21050,
         last_state: 21081,
         default_state: 21081,
@@ -18780,6 +19670,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_fence",
+        definition: "fence",
         first_state: 21082,
         last_state: 21113,
         default_state: 21113,
@@ -18808,6 +19699,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_trapdoor",
+        definition: "trapdoor",
         first_state: 21114,
         last_state: 21177,
         default_state: 21129,
@@ -18836,6 +19728,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_trapdoor",
+        definition: "trapdoor",
         first_state: 21178,
         last_state: 21241,
         default_state: 21193,
@@ -18864,6 +19757,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_fence_gate",
+        definition: "fence_gate",
         first_state: 21242,
         last_state: 21273,
         default_state: 21249,
@@ -18888,6 +19782,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_fence_gate",
+        definition: "fence_gate",
         first_state: 21274,
         last_state: 21305,
         default_state: 21281,
@@ -18912,6 +19807,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_stairs",
+        definition: "stair",
         first_state: 21306,
         last_state: 21385,
         default_state: 21317,
@@ -18942,6 +19838,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_stairs",
+        definition: "stair",
         first_state: 21386,
         last_state: 21465,
         default_state: 21397,
@@ -18972,6 +19869,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_button",
+        definition: "button",
         first_state: 21466,
         last_state: 21489,
         default_state: 21475,
@@ -18992,6 +19890,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_button",
+        definition: "button",
         first_state: 21490,
         last_state: 21513,
         default_state: 21499,
@@ -19012,6 +19911,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_door",
+        definition: "door",
         first_state: 21514,
         last_state: 21577,
         default_state: 21525,
@@ -19040,6 +19940,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_door",
+        definition: "door",
         first_state: 21578,
         last_state: 21641,
         default_state: 21589,
@@ -19068,6 +19969,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_sign",
+        definition: "standing_sign",
         first_state: 21642,
         last_state: 21673,
         default_state: 21659,
@@ -19087,6 +19989,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_sign",
+        definition: "standing_sign",
         first_state: 21674,
         last_state: 21705,
         default_state: 21691,
@@ -19106,6 +20009,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crimson_wall_sign",
+        definition: "wall_sign",
         first_state: 21706,
         last_state: 21713,
         default_state: 21707,
@@ -19122,6 +20026,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "warped_wall_sign",
+        definition: "wall_sign",
         first_state: 21714,
         last_state: 21721,
         default_state: 21715,
@@ -19138,6 +20043,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "structure_block",
+        definition: "structure",
         first_state: 21722,
         last_state: 21725,
         default_state: 21723,
@@ -19148,6 +20054,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "jigsaw",
+        definition: "jigsaw",
         first_state: 21726,
         last_state: 21737,
         default_state: 21736,
@@ -19171,6 +20078,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "test_block",
+        definition: "test",
         first_state: 21738,
         last_state: 21741,
         default_state: 21738,
@@ -19181,6 +20089,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "test_instance_block",
+        definition: "test_instance",
         first_state: 21742,
         last_state: 21742,
         default_state: 21742,
@@ -19188,6 +20097,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "composter",
+        definition: "composter",
         first_state: 21743,
         last_state: 21751,
         default_state: 21743,
@@ -19198,6 +20108,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "target",
+        definition: "target",
         first_state: 21752,
         last_state: 21767,
         default_state: 21752,
@@ -19211,6 +20122,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "bee_nest",
+        definition: "beehive",
         first_state: 21768,
         last_state: 21791,
         default_state: 21768,
@@ -19227,6 +20139,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "beehive",
+        definition: "beehive",
         first_state: 21792,
         last_state: 21815,
         default_state: 21792,
@@ -19243,6 +20156,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "honey_block",
+        definition: "honey",
         first_state: 21816,
         last_state: 21816,
         default_state: 21816,
@@ -19250,6 +20164,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "honeycomb_block",
+        definition: "block",
         first_state: 21817,
         last_state: 21817,
         default_state: 21817,
@@ -19257,6 +20172,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "netherite_block",
+        definition: "block",
         first_state: 21818,
         last_state: 21818,
         default_state: 21818,
@@ -19264,6 +20180,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "ancient_debris",
+        definition: "block",
         first_state: 21819,
         last_state: 21819,
         default_state: 21819,
@@ -19271,6 +20188,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crying_obsidian",
+        definition: "crying_obsidian",
         first_state: 21820,
         last_state: 21820,
         default_state: 21820,
@@ -19278,6 +20196,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "respawn_anchor",
+        definition: "respawn_anchor",
         first_state: 21821,
         last_state: 21825,
         default_state: 21821,
@@ -19288,6 +20207,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_crimson_fungus",
+        definition: "flower_pot",
         first_state: 21826,
         last_state: 21826,
         default_state: 21826,
@@ -19295,6 +20215,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_warped_fungus",
+        definition: "flower_pot",
         first_state: 21827,
         last_state: 21827,
         default_state: 21827,
@@ -19302,6 +20223,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_crimson_roots",
+        definition: "flower_pot",
         first_state: 21828,
         last_state: 21828,
         default_state: 21828,
@@ -19309,6 +20231,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_warped_roots",
+        definition: "flower_pot",
         first_state: 21829,
         last_state: 21829,
         default_state: 21829,
@@ -19316,6 +20239,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lodestone",
+        definition: "block",
         first_state: 21830,
         last_state: 21830,
         default_state: 21830,
@@ -19323,6 +20247,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blackstone",
+        definition: "block",
         first_state: 21831,
         last_state: 21831,
         default_state: 21831,
@@ -19330,6 +20255,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blackstone_stairs",
+        definition: "stair",
         first_state: 21832,
         last_state: 21911,
         default_state: 21843,
@@ -19360,6 +20286,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blackstone_wall",
+        definition: "wall",
         first_state: 21912,
         last_state: 22235,
         default_state: 21915,
@@ -19392,6 +20319,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blackstone_slab",
+        definition: "slab",
         first_state: 22236,
         last_state: 22241,
         default_state: 22239,
@@ -19408,6 +20336,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone",
+        definition: "block",
         first_state: 22242,
         last_state: 22242,
         default_state: 22242,
@@ -19415,6 +20344,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_bricks",
+        definition: "block",
         first_state: 22243,
         last_state: 22243,
         default_state: 22243,
@@ -19422,6 +20352,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cracked_polished_blackstone_bricks",
+        definition: "block",
         first_state: 22244,
         last_state: 22244,
         default_state: 22244,
@@ -19429,6 +20360,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_polished_blackstone",
+        definition: "block",
         first_state: 22245,
         last_state: 22245,
         default_state: 22245,
@@ -19436,6 +20368,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_brick_slab",
+        definition: "slab",
         first_state: 22246,
         last_state: 22251,
         default_state: 22249,
@@ -19452,6 +20385,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_brick_stairs",
+        definition: "stair",
         first_state: 22252,
         last_state: 22331,
         default_state: 22263,
@@ -19482,6 +20416,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_brick_wall",
+        definition: "wall",
         first_state: 22332,
         last_state: 22655,
         default_state: 22335,
@@ -19514,6 +20449,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gilded_blackstone",
+        definition: "block",
         first_state: 22656,
         last_state: 22656,
         default_state: 22656,
@@ -19521,6 +20457,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_stairs",
+        definition: "stair",
         first_state: 22657,
         last_state: 22736,
         default_state: 22668,
@@ -19551,6 +20488,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_slab",
+        definition: "slab",
         first_state: 22737,
         last_state: 22742,
         default_state: 22740,
@@ -19567,6 +20505,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_pressure_plate",
+        definition: "pressure_plate",
         first_state: 22743,
         last_state: 22744,
         default_state: 22744,
@@ -19577,6 +20516,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_button",
+        definition: "button",
         first_state: 22745,
         last_state: 22768,
         default_state: 22754,
@@ -19597,6 +20537,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_blackstone_wall",
+        definition: "wall",
         first_state: 22769,
         last_state: 23092,
         default_state: 22772,
@@ -19629,6 +20570,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_nether_bricks",
+        definition: "block",
         first_state: 23093,
         last_state: 23093,
         default_state: 23093,
@@ -19636,6 +20578,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cracked_nether_bricks",
+        definition: "block",
         first_state: 23094,
         last_state: 23094,
         default_state: 23094,
@@ -19643,6 +20586,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "quartz_bricks",
+        definition: "block",
         first_state: 23095,
         last_state: 23095,
         default_state: 23095,
@@ -19650,6 +20594,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "candle",
+        definition: "candle",
         first_state: 23096,
         last_state: 23111,
         default_state: 23099,
@@ -19670,6 +20615,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_candle",
+        definition: "candle",
         first_state: 23112,
         last_state: 23127,
         default_state: 23115,
@@ -19690,6 +20636,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_candle",
+        definition: "candle",
         first_state: 23128,
         last_state: 23143,
         default_state: 23131,
@@ -19710,6 +20657,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_candle",
+        definition: "candle",
         first_state: 23144,
         last_state: 23159,
         default_state: 23147,
@@ -19730,6 +20678,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_candle",
+        definition: "candle",
         first_state: 23160,
         last_state: 23175,
         default_state: 23163,
@@ -19750,6 +20699,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_candle",
+        definition: "candle",
         first_state: 23176,
         last_state: 23191,
         default_state: 23179,
@@ -19770,6 +20720,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_candle",
+        definition: "candle",
         first_state: 23192,
         last_state: 23207,
         default_state: 23195,
@@ -19790,6 +20741,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_candle",
+        definition: "candle",
         first_state: 23208,
         last_state: 23223,
         default_state: 23211,
@@ -19810,6 +20762,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_candle",
+        definition: "candle",
         first_state: 23224,
         last_state: 23239,
         default_state: 23227,
@@ -19830,6 +20783,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_candle",
+        definition: "candle",
         first_state: 23240,
         last_state: 23255,
         default_state: 23243,
@@ -19850,6 +20804,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_candle",
+        definition: "candle",
         first_state: 23256,
         last_state: 23271,
         default_state: 23259,
@@ -19870,6 +20825,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_candle",
+        definition: "candle",
         first_state: 23272,
         last_state: 23287,
         default_state: 23275,
@@ -19890,6 +20846,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_candle",
+        definition: "candle",
         first_state: 23288,
         last_state: 23303,
         default_state: 23291,
@@ -19910,6 +20867,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_candle",
+        definition: "candle",
         first_state: 23304,
         last_state: 23319,
         default_state: 23307,
@@ -19930,6 +20888,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_candle",
+        definition: "candle",
         first_state: 23320,
         last_state: 23335,
         default_state: 23323,
@@ -19950,6 +20909,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_candle",
+        definition: "candle",
         first_state: 23336,
         last_state: 23351,
         default_state: 23339,
@@ -19970,6 +20930,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_candle",
+        definition: "candle",
         first_state: 23352,
         last_state: 23367,
         default_state: 23355,
@@ -19990,6 +20951,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "candle_cake",
+        definition: "candle_cake",
         first_state: 23368,
         last_state: 23369,
         default_state: 23369,
@@ -20000,6 +20962,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "white_candle_cake",
+        definition: "candle_cake",
         first_state: 23370,
         last_state: 23371,
         default_state: 23371,
@@ -20010,6 +20973,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "orange_candle_cake",
+        definition: "candle_cake",
         first_state: 23372,
         last_state: 23373,
         default_state: 23373,
@@ -20020,6 +20984,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "magenta_candle_cake",
+        definition: "candle_cake",
         first_state: 23374,
         last_state: 23375,
         default_state: 23375,
@@ -20030,6 +20995,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_blue_candle_cake",
+        definition: "candle_cake",
         first_state: 23376,
         last_state: 23377,
         default_state: 23377,
@@ -20040,6 +21006,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "yellow_candle_cake",
+        definition: "candle_cake",
         first_state: 23378,
         last_state: 23379,
         default_state: 23379,
@@ -20050,6 +21017,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lime_candle_cake",
+        definition: "candle_cake",
         first_state: 23380,
         last_state: 23381,
         default_state: 23381,
@@ -20060,6 +21028,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_candle_cake",
+        definition: "candle_cake",
         first_state: 23382,
         last_state: 23383,
         default_state: 23383,
@@ -20070,6 +21039,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "gray_candle_cake",
+        definition: "candle_cake",
         first_state: 23384,
         last_state: 23385,
         default_state: 23385,
@@ -20080,6 +21050,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "light_gray_candle_cake",
+        definition: "candle_cake",
         first_state: 23386,
         last_state: 23387,
         default_state: 23387,
@@ -20090,6 +21061,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cyan_candle_cake",
+        definition: "candle_cake",
         first_state: 23388,
         last_state: 23389,
         default_state: 23389,
@@ -20100,6 +21072,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "purple_candle_cake",
+        definition: "candle_cake",
         first_state: 23390,
         last_state: 23391,
         default_state: 23391,
@@ -20110,6 +21083,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "blue_candle_cake",
+        definition: "candle_cake",
         first_state: 23392,
         last_state: 23393,
         default_state: 23393,
@@ -20120,6 +21094,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "brown_candle_cake",
+        definition: "candle_cake",
         first_state: 23394,
         last_state: 23395,
         default_state: 23395,
@@ -20130,6 +21105,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "green_candle_cake",
+        definition: "candle_cake",
         first_state: 23396,
         last_state: 23397,
         default_state: 23397,
@@ -20140,6 +21116,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "red_candle_cake",
+        definition: "candle_cake",
         first_state: 23398,
         last_state: 23399,
         default_state: 23399,
@@ -20150,6 +21127,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "black_candle_cake",
+        definition: "candle_cake",
         first_state: 23400,
         last_state: 23401,
         default_state: 23401,
@@ -20160,6 +21138,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "amethyst_block",
+        definition: "amethyst",
         first_state: 23402,
         last_state: 23402,
         default_state: 23402,
@@ -20167,6 +21146,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "budding_amethyst",
+        definition: "budding_amethyst",
         first_state: 23403,
         last_state: 23403,
         default_state: 23403,
@@ -20174,6 +21154,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "amethyst_cluster",
+        definition: "amethyst_cluster",
         first_state: 23404,
         last_state: 23415,
         default_state: 23413,
@@ -20190,6 +21171,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "large_amethyst_bud",
+        definition: "amethyst_cluster",
         first_state: 23416,
         last_state: 23427,
         default_state: 23425,
@@ -20206,6 +21188,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "medium_amethyst_bud",
+        definition: "amethyst_cluster",
         first_state: 23428,
         last_state: 23439,
         default_state: 23437,
@@ -20222,6 +21205,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "small_amethyst_bud",
+        definition: "amethyst_cluster",
         first_state: 23440,
         last_state: 23451,
         default_state: 23449,
@@ -20238,6 +21222,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff",
+        definition: "block",
         first_state: 23452,
         last_state: 23452,
         default_state: 23452,
@@ -20245,6 +21230,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff_slab",
+        definition: "slab",
         first_state: 23453,
         last_state: 23458,
         default_state: 23456,
@@ -20261,6 +21247,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff_stairs",
+        definition: "stair",
         first_state: 23459,
         last_state: 23538,
         default_state: 23470,
@@ -20291,6 +21278,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff_wall",
+        definition: "wall",
         first_state: 23539,
         last_state: 23862,
         default_state: 23542,
@@ -20323,6 +21311,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_tuff",
+        definition: "block",
         first_state: 23863,
         last_state: 23863,
         default_state: 23863,
@@ -20330,6 +21319,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_tuff_slab",
+        definition: "slab",
         first_state: 23864,
         last_state: 23869,
         default_state: 23867,
@@ -20346,6 +21336,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_tuff_stairs",
+        definition: "stair",
         first_state: 23870,
         last_state: 23949,
         default_state: 23881,
@@ -20376,6 +21367,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_tuff_wall",
+        definition: "wall",
         first_state: 23950,
         last_state: 24273,
         default_state: 23953,
@@ -20408,6 +21400,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_tuff",
+        definition: "block",
         first_state: 24274,
         last_state: 24274,
         default_state: 24274,
@@ -20415,6 +21408,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff_bricks",
+        definition: "block",
         first_state: 24275,
         last_state: 24275,
         default_state: 24275,
@@ -20422,6 +21416,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff_brick_slab",
+        definition: "slab",
         first_state: 24276,
         last_state: 24281,
         default_state: 24279,
@@ -20438,6 +21433,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff_brick_stairs",
+        definition: "stair",
         first_state: 24282,
         last_state: 24361,
         default_state: 24293,
@@ -20468,6 +21464,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tuff_brick_wall",
+        definition: "wall",
         first_state: 24362,
         last_state: 24685,
         default_state: 24365,
@@ -20500,6 +21497,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_tuff_bricks",
+        definition: "block",
         first_state: 24686,
         last_state: 24686,
         default_state: 24686,
@@ -20507,6 +21505,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "calcite",
+        definition: "block",
         first_state: 24687,
         last_state: 24687,
         default_state: 24687,
@@ -20514,6 +21513,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "tinted_glass",
+        definition: "tinted_glass",
         first_state: 24688,
         last_state: 24688,
         default_state: 24688,
@@ -20521,6 +21521,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "powder_snow",
+        definition: "powder_snow",
         first_state: 24689,
         last_state: 24689,
         default_state: 24689,
@@ -20528,6 +21529,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sculk_sensor",
+        definition: "sculk_sensor",
         first_state: 24690,
         last_state: 24785,
         default_state: 24691,
@@ -20551,6 +21553,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "calibrated_sculk_sensor",
+        definition: "calibrated_sculk_sensor",
         first_state: 24786,
         last_state: 25169,
         default_state: 24787,
@@ -20578,6 +21581,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sculk",
+        definition: "sculk",
         first_state: 25170,
         last_state: 25170,
         default_state: 25170,
@@ -20585,6 +21589,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sculk_vein",
+        definition: "sculk_vein",
         first_state: 25171,
         last_state: 25298,
         default_state: 25298,
@@ -20621,6 +21626,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sculk_catalyst",
+        definition: "sculk_catalyst",
         first_state: 25299,
         last_state: 25300,
         default_state: 25300,
@@ -20631,6 +21637,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "sculk_shrieker",
+        definition: "sculk_shrieker",
         first_state: 25301,
         last_state: 25308,
         default_state: 25308,
@@ -20651,6 +21658,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_block",
+        definition: "weathering_copper_full",
         first_state: 25309,
         last_state: 25309,
         default_state: 25309,
@@ -20658,6 +21666,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper",
+        definition: "weathering_copper_full",
         first_state: 25310,
         last_state: 25310,
         default_state: 25310,
@@ -20665,6 +21674,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper",
+        definition: "weathering_copper_full",
         first_state: 25311,
         last_state: 25311,
         default_state: 25311,
@@ -20672,6 +21682,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper",
+        definition: "weathering_copper_full",
         first_state: 25312,
         last_state: 25312,
         default_state: 25312,
@@ -20679,6 +21690,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_ore",
+        definition: "drop_experience",
         first_state: 25313,
         last_state: 25313,
         default_state: 25313,
@@ -20686,6 +21698,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_copper_ore",
+        definition: "drop_experience",
         first_state: 25314,
         last_state: 25314,
         default_state: 25314,
@@ -20693,6 +21706,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_cut_copper",
+        definition: "weathering_copper_full",
         first_state: 25315,
         last_state: 25315,
         default_state: 25315,
@@ -20700,6 +21714,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_cut_copper",
+        definition: "weathering_copper_full",
         first_state: 25316,
         last_state: 25316,
         default_state: 25316,
@@ -20707,6 +21722,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_cut_copper",
+        definition: "weathering_copper_full",
         first_state: 25317,
         last_state: 25317,
         default_state: 25317,
@@ -20714,6 +21730,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cut_copper",
+        definition: "weathering_copper_full",
         first_state: 25318,
         last_state: 25318,
         default_state: 25318,
@@ -20721,6 +21738,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_chiseled_copper",
+        definition: "weathering_copper_full",
         first_state: 25319,
         last_state: 25319,
         default_state: 25319,
@@ -20728,6 +21746,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_chiseled_copper",
+        definition: "weathering_copper_full",
         first_state: 25320,
         last_state: 25320,
         default_state: 25320,
@@ -20735,6 +21754,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_chiseled_copper",
+        definition: "weathering_copper_full",
         first_state: 25321,
         last_state: 25321,
         default_state: 25321,
@@ -20742,6 +21762,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_copper",
+        definition: "weathering_copper_full",
         first_state: 25322,
         last_state: 25322,
         default_state: 25322,
@@ -20749,6 +21770,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_chiseled_copper",
+        definition: "block",
         first_state: 25323,
         last_state: 25323,
         default_state: 25323,
@@ -20756,6 +21778,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_chiseled_copper",
+        definition: "block",
         first_state: 25324,
         last_state: 25324,
         default_state: 25324,
@@ -20763,6 +21786,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_chiseled_copper",
+        definition: "block",
         first_state: 25325,
         last_state: 25325,
         default_state: 25325,
@@ -20770,6 +21794,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_chiseled_copper",
+        definition: "block",
         first_state: 25326,
         last_state: 25326,
         default_state: 25326,
@@ -20777,6 +21802,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_cut_copper_stairs",
+        definition: "weathering_copper_stair",
         first_state: 25327,
         last_state: 25406,
         default_state: 25338,
@@ -20807,6 +21833,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_cut_copper_stairs",
+        definition: "weathering_copper_stair",
         first_state: 25407,
         last_state: 25486,
         default_state: 25418,
@@ -20837,6 +21864,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_cut_copper_stairs",
+        definition: "weathering_copper_stair",
         first_state: 25487,
         last_state: 25566,
         default_state: 25498,
@@ -20867,6 +21895,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cut_copper_stairs",
+        definition: "weathering_copper_stair",
         first_state: 25567,
         last_state: 25646,
         default_state: 25578,
@@ -20897,6 +21926,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_cut_copper_slab",
+        definition: "weathering_copper_slab",
         first_state: 25647,
         last_state: 25652,
         default_state: 25650,
@@ -20913,6 +21943,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_cut_copper_slab",
+        definition: "weathering_copper_slab",
         first_state: 25653,
         last_state: 25658,
         default_state: 25656,
@@ -20929,6 +21960,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_cut_copper_slab",
+        definition: "weathering_copper_slab",
         first_state: 25659,
         last_state: 25664,
         default_state: 25662,
@@ -20945,6 +21977,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cut_copper_slab",
+        definition: "weathering_copper_slab",
         first_state: 25665,
         last_state: 25670,
         default_state: 25668,
@@ -20961,6 +21994,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_block",
+        definition: "block",
         first_state: 25671,
         last_state: 25671,
         default_state: 25671,
@@ -20968,6 +22002,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper",
+        definition: "block",
         first_state: 25672,
         last_state: 25672,
         default_state: 25672,
@@ -20975,6 +22010,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper",
+        definition: "block",
         first_state: 25673,
         last_state: 25673,
         default_state: 25673,
@@ -20982,6 +22018,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper",
+        definition: "block",
         first_state: 25674,
         last_state: 25674,
         default_state: 25674,
@@ -20989,6 +22026,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_cut_copper",
+        definition: "block",
         first_state: 25675,
         last_state: 25675,
         default_state: 25675,
@@ -20996,6 +22034,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_cut_copper",
+        definition: "block",
         first_state: 25676,
         last_state: 25676,
         default_state: 25676,
@@ -21003,6 +22042,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_cut_copper",
+        definition: "block",
         first_state: 25677,
         last_state: 25677,
         default_state: 25677,
@@ -21010,6 +22050,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_cut_copper",
+        definition: "block",
         first_state: 25678,
         last_state: 25678,
         default_state: 25678,
@@ -21017,6 +22058,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_cut_copper_stairs",
+        definition: "stair",
         first_state: 25679,
         last_state: 25758,
         default_state: 25690,
@@ -21047,6 +22089,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_cut_copper_stairs",
+        definition: "stair",
         first_state: 25759,
         last_state: 25838,
         default_state: 25770,
@@ -21077,6 +22120,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_cut_copper_stairs",
+        definition: "stair",
         first_state: 25839,
         last_state: 25918,
         default_state: 25850,
@@ -21107,6 +22151,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_cut_copper_stairs",
+        definition: "stair",
         first_state: 25919,
         last_state: 25998,
         default_state: 25930,
@@ -21137,6 +22182,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_cut_copper_slab",
+        definition: "slab",
         first_state: 25999,
         last_state: 26004,
         default_state: 26002,
@@ -21153,6 +22199,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_cut_copper_slab",
+        definition: "slab",
         first_state: 26005,
         last_state: 26010,
         default_state: 26008,
@@ -21169,6 +22216,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_cut_copper_slab",
+        definition: "slab",
         first_state: 26011,
         last_state: 26016,
         default_state: 26014,
@@ -21185,6 +22233,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_cut_copper_slab",
+        definition: "slab",
         first_state: 26017,
         last_state: 26022,
         default_state: 26020,
@@ -21201,6 +22250,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_door",
+        definition: "weathering_copper_door",
         first_state: 26023,
         last_state: 26086,
         default_state: 26034,
@@ -21229,6 +22279,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_door",
+        definition: "weathering_copper_door",
         first_state: 26087,
         last_state: 26150,
         default_state: 26098,
@@ -21257,6 +22308,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_door",
+        definition: "weathering_copper_door",
         first_state: 26151,
         last_state: 26214,
         default_state: 26162,
@@ -21285,6 +22337,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_door",
+        definition: "weathering_copper_door",
         first_state: 26215,
         last_state: 26278,
         default_state: 26226,
@@ -21313,6 +22366,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_door",
+        definition: "door",
         first_state: 26279,
         last_state: 26342,
         default_state: 26290,
@@ -21341,6 +22395,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_door",
+        definition: "door",
         first_state: 26343,
         last_state: 26406,
         default_state: 26354,
@@ -21369,6 +22424,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_door",
+        definition: "door",
         first_state: 26407,
         last_state: 26470,
         default_state: 26418,
@@ -21397,6 +22453,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_door",
+        definition: "door",
         first_state: 26471,
         last_state: 26534,
         default_state: 26482,
@@ -21425,6 +22482,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_trapdoor",
+        definition: "weathering_copper_trap_door",
         first_state: 26535,
         last_state: 26598,
         default_state: 26550,
@@ -21453,6 +22511,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_trapdoor",
+        definition: "weathering_copper_trap_door",
         first_state: 26599,
         last_state: 26662,
         default_state: 26614,
@@ -21481,6 +22540,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_trapdoor",
+        definition: "weathering_copper_trap_door",
         first_state: 26663,
         last_state: 26726,
         default_state: 26678,
@@ -21509,6 +22569,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_trapdoor",
+        definition: "weathering_copper_trap_door",
         first_state: 26727,
         last_state: 26790,
         default_state: 26742,
@@ -21537,6 +22598,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_trapdoor",
+        definition: "trapdoor",
         first_state: 26791,
         last_state: 26854,
         default_state: 26806,
@@ -21565,6 +22627,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_trapdoor",
+        definition: "trapdoor",
         first_state: 26855,
         last_state: 26918,
         default_state: 26870,
@@ -21593,6 +22656,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_trapdoor",
+        definition: "trapdoor",
         first_state: 26919,
         last_state: 26982,
         default_state: 26934,
@@ -21621,6 +22685,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_trapdoor",
+        definition: "trapdoor",
         first_state: 26983,
         last_state: 27046,
         default_state: 26998,
@@ -21649,6 +22714,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_grate",
+        definition: "weathering_copper_grate",
         first_state: 27047,
         last_state: 27048,
         default_state: 27048,
@@ -21659,6 +22725,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_grate",
+        definition: "weathering_copper_grate",
         first_state: 27049,
         last_state: 27050,
         default_state: 27050,
@@ -21669,6 +22736,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_grate",
+        definition: "weathering_copper_grate",
         first_state: 27051,
         last_state: 27052,
         default_state: 27052,
@@ -21679,6 +22747,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_grate",
+        definition: "weathering_copper_grate",
         first_state: 27053,
         last_state: 27054,
         default_state: 27054,
@@ -21689,6 +22758,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_grate",
+        definition: "waterlogged_transparent",
         first_state: 27055,
         last_state: 27056,
         default_state: 27056,
@@ -21699,6 +22769,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_grate",
+        definition: "waterlogged_transparent",
         first_state: 27057,
         last_state: 27058,
         default_state: 27058,
@@ -21709,6 +22780,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_grate",
+        definition: "waterlogged_transparent",
         first_state: 27059,
         last_state: 27060,
         default_state: 27060,
@@ -21719,6 +22791,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_grate",
+        definition: "waterlogged_transparent",
         first_state: 27061,
         last_state: 27062,
         default_state: 27062,
@@ -21729,6 +22802,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_bulb",
+        definition: "weathering_copper_bulb",
         first_state: 27063,
         last_state: 27066,
         default_state: 27066,
@@ -21745,6 +22819,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_bulb",
+        definition: "weathering_copper_bulb",
         first_state: 27067,
         last_state: 27070,
         default_state: 27070,
@@ -21761,6 +22836,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_bulb",
+        definition: "weathering_copper_bulb",
         first_state: 27071,
         last_state: 27074,
         default_state: 27074,
@@ -21777,6 +22853,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_bulb",
+        definition: "weathering_copper_bulb",
         first_state: 27075,
         last_state: 27078,
         default_state: 27078,
@@ -21793,6 +22870,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_bulb",
+        definition: "copper_bulb_block",
         first_state: 27079,
         last_state: 27082,
         default_state: 27082,
@@ -21809,6 +22887,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_bulb",
+        definition: "copper_bulb_block",
         first_state: 27083,
         last_state: 27086,
         default_state: 27086,
@@ -21825,6 +22904,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_bulb",
+        definition: "copper_bulb_block",
         first_state: 27087,
         last_state: 27090,
         default_state: 27090,
@@ -21841,6 +22921,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_bulb",
+        definition: "copper_bulb_block",
         first_state: 27091,
         last_state: 27094,
         default_state: 27094,
@@ -21857,6 +22938,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_chest",
+        definition: "weathering_copper_chest",
         first_state: 27095,
         last_state: 27118,
         default_state: 27096,
@@ -21877,6 +22959,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_chest",
+        definition: "weathering_copper_chest",
         first_state: 27119,
         last_state: 27142,
         default_state: 27120,
@@ -21897,6 +22980,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_chest",
+        definition: "weathering_copper_chest",
         first_state: 27143,
         last_state: 27166,
         default_state: 27144,
@@ -21917,6 +23001,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_chest",
+        definition: "weathering_copper_chest",
         first_state: 27167,
         last_state: 27190,
         default_state: 27168,
@@ -21937,6 +23022,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_chest",
+        definition: "copper_chest",
         first_state: 27191,
         last_state: 27214,
         default_state: 27192,
@@ -21957,6 +23043,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_chest",
+        definition: "copper_chest",
         first_state: 27215,
         last_state: 27238,
         default_state: 27216,
@@ -21977,6 +23064,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_chest",
+        definition: "copper_chest",
         first_state: 27239,
         last_state: 27262,
         default_state: 27240,
@@ -21997,6 +23085,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_chest",
+        definition: "copper_chest",
         first_state: 27263,
         last_state: 27286,
         default_state: 27264,
@@ -22017,6 +23106,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "copper_golem_statue",
+        definition: "weathering_copper_golem_statue",
         first_state: 27287,
         last_state: 27318,
         default_state: 27288,
@@ -22037,6 +23127,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_copper_golem_statue",
+        definition: "weathering_copper_golem_statue",
         first_state: 27319,
         last_state: 27350,
         default_state: 27320,
@@ -22057,6 +23148,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_copper_golem_statue",
+        definition: "weathering_copper_golem_statue",
         first_state: 27351,
         last_state: 27382,
         default_state: 27352,
@@ -22077,6 +23169,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_copper_golem_statue",
+        definition: "weathering_copper_golem_statue",
         first_state: 27383,
         last_state: 27414,
         default_state: 27384,
@@ -22097,6 +23190,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_copper_golem_statue",
+        definition: "copper_golem_statue",
         first_state: 27415,
         last_state: 27446,
         default_state: 27416,
@@ -22117,6 +23211,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_copper_golem_statue",
+        definition: "copper_golem_statue",
         first_state: 27447,
         last_state: 27478,
         default_state: 27448,
@@ -22137,6 +23232,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_copper_golem_statue",
+        definition: "copper_golem_statue",
         first_state: 27479,
         last_state: 27510,
         default_state: 27480,
@@ -22157,6 +23253,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_copper_golem_statue",
+        definition: "copper_golem_statue",
         first_state: 27511,
         last_state: 27542,
         default_state: 27512,
@@ -22177,6 +23274,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "lightning_rod",
+        definition: "weathering_lightning_rod",
         first_state: 27543,
         last_state: 27566,
         default_state: 27562,
@@ -22197,6 +23295,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "exposed_lightning_rod",
+        definition: "weathering_lightning_rod",
         first_state: 27567,
         last_state: 27590,
         default_state: 27586,
@@ -22217,6 +23316,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "weathered_lightning_rod",
+        definition: "weathering_lightning_rod",
         first_state: 27591,
         last_state: 27614,
         default_state: 27610,
@@ -22237,6 +23337,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "oxidized_lightning_rod",
+        definition: "weathering_lightning_rod",
         first_state: 27615,
         last_state: 27638,
         default_state: 27634,
@@ -22257,6 +23358,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_lightning_rod",
+        definition: "lightning_rod",
         first_state: 27639,
         last_state: 27662,
         default_state: 27658,
@@ -22277,6 +23379,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_exposed_lightning_rod",
+        definition: "lightning_rod",
         first_state: 27663,
         last_state: 27686,
         default_state: 27682,
@@ -22297,6 +23400,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_weathered_lightning_rod",
+        definition: "lightning_rod",
         first_state: 27687,
         last_state: 27710,
         default_state: 27706,
@@ -22317,6 +23421,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "waxed_oxidized_lightning_rod",
+        definition: "lightning_rod",
         first_state: 27711,
         last_state: 27734,
         default_state: 27730,
@@ -22337,6 +23442,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pointed_dripstone",
+        definition: "pointed_dripstone",
         first_state: 27735,
         last_state: 27754,
         default_state: 27740,
@@ -22357,6 +23463,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "dripstone_block",
+        definition: "block",
         first_state: 27755,
         last_state: 27755,
         default_state: 27755,
@@ -22364,6 +23471,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cave_vines",
+        definition: "cave_vines",
         first_state: 27756,
         last_state: 27807,
         default_state: 27757,
@@ -22383,6 +23491,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cave_vines_plant",
+        definition: "cave_vines_plant",
         first_state: 27808,
         last_state: 27809,
         default_state: 27809,
@@ -22393,6 +23502,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "spore_blossom",
+        definition: "spore_blossom",
         first_state: 27810,
         last_state: 27810,
         default_state: 27810,
@@ -22400,6 +23510,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "azalea",
+        definition: "azalea",
         first_state: 27811,
         last_state: 27811,
         default_state: 27811,
@@ -22407,6 +23518,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "flowering_azalea",
+        definition: "azalea",
         first_state: 27812,
         last_state: 27812,
         default_state: 27812,
@@ -22414,6 +23526,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "moss_carpet",
+        definition: "carpet",
         first_state: 27813,
         last_state: 27813,
         default_state: 27813,
@@ -22421,6 +23534,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pink_petals",
+        definition: "flower_bed",
         first_state: 27814,
         last_state: 27829,
         default_state: 27814,
@@ -22437,6 +23551,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "wildflowers",
+        definition: "flower_bed",
         first_state: 27830,
         last_state: 27845,
         default_state: 27830,
@@ -22453,6 +23568,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "leaf_litter",
+        definition: "leaf_litter",
         first_state: 27846,
         last_state: 27861,
         default_state: 27846,
@@ -22469,6 +23585,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "moss_block",
+        definition: "bonemealable_feature_placer",
         first_state: 27862,
         last_state: 27862,
         default_state: 27862,
@@ -22476,6 +23593,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "big_dripleaf",
+        definition: "big_dripleaf",
         first_state: 27863,
         last_state: 27894,
         default_state: 27864,
@@ -22496,6 +23614,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "big_dripleaf_stem",
+        definition: "big_dripleaf_stem",
         first_state: 27895,
         last_state: 27902,
         default_state: 27896,
@@ -22512,6 +23631,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "small_dripleaf",
+        definition: "small_dripleaf",
         first_state: 27903,
         last_state: 27918,
         default_state: 27906,
@@ -22532,6 +23652,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "hanging_roots",
+        definition: "hanging_roots",
         first_state: 27919,
         last_state: 27920,
         default_state: 27920,
@@ -22542,6 +23663,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "rooted_dirt",
+        definition: "rooted_dirt",
         first_state: 27921,
         last_state: 27921,
         default_state: 27921,
@@ -22549,6 +23671,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "mud",
+        definition: "mud",
         first_state: 27922,
         last_state: 27922,
         default_state: 27922,
@@ -22556,6 +23679,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate",
+        definition: "rotated_pillar",
         first_state: 27923,
         last_state: 27925,
         default_state: 27924,
@@ -22566,6 +23690,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobbled_deepslate",
+        definition: "block",
         first_state: 27926,
         last_state: 27926,
         default_state: 27926,
@@ -22573,6 +23698,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobbled_deepslate_stairs",
+        definition: "stair",
         first_state: 27927,
         last_state: 28006,
         default_state: 27938,
@@ -22603,6 +23729,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobbled_deepslate_slab",
+        definition: "slab",
         first_state: 28007,
         last_state: 28012,
         default_state: 28010,
@@ -22619,6 +23746,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cobbled_deepslate_wall",
+        definition: "wall",
         first_state: 28013,
         last_state: 28336,
         default_state: 28016,
@@ -22651,6 +23779,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_deepslate",
+        definition: "block",
         first_state: 28337,
         last_state: 28337,
         default_state: 28337,
@@ -22658,6 +23787,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_deepslate_stairs",
+        definition: "stair",
         first_state: 28338,
         last_state: 28417,
         default_state: 28349,
@@ -22688,6 +23818,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_deepslate_slab",
+        definition: "slab",
         first_state: 28418,
         last_state: 28423,
         default_state: 28421,
@@ -22704,6 +23835,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "polished_deepslate_wall",
+        definition: "wall",
         first_state: 28424,
         last_state: 28747,
         default_state: 28427,
@@ -22736,6 +23868,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_tiles",
+        definition: "block",
         first_state: 28748,
         last_state: 28748,
         default_state: 28748,
@@ -22743,6 +23876,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_tile_stairs",
+        definition: "stair",
         first_state: 28749,
         last_state: 28828,
         default_state: 28760,
@@ -22773,6 +23907,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_tile_slab",
+        definition: "slab",
         first_state: 28829,
         last_state: 28834,
         default_state: 28832,
@@ -22789,6 +23924,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_tile_wall",
+        definition: "wall",
         first_state: 28835,
         last_state: 29158,
         default_state: 28838,
@@ -22821,6 +23957,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_bricks",
+        definition: "block",
         first_state: 29159,
         last_state: 29159,
         default_state: 29159,
@@ -22828,6 +23965,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_brick_stairs",
+        definition: "stair",
         first_state: 29160,
         last_state: 29239,
         default_state: 29171,
@@ -22858,6 +23996,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_brick_slab",
+        definition: "slab",
         first_state: 29240,
         last_state: 29245,
         default_state: 29243,
@@ -22874,6 +24013,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "deepslate_brick_wall",
+        definition: "wall",
         first_state: 29246,
         last_state: 29569,
         default_state: 29249,
@@ -22906,6 +24046,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "chiseled_deepslate",
+        definition: "block",
         first_state: 29570,
         last_state: 29570,
         default_state: 29570,
@@ -22913,6 +24054,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cracked_deepslate_bricks",
+        definition: "block",
         first_state: 29571,
         last_state: 29571,
         default_state: 29571,
@@ -22920,6 +24062,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "cracked_deepslate_tiles",
+        definition: "block",
         first_state: 29572,
         last_state: 29572,
         default_state: 29572,
@@ -22927,6 +24070,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "infested_deepslate",
+        definition: "infested_rotated_pillar",
         first_state: 29573,
         last_state: 29575,
         default_state: 29574,
@@ -22937,6 +24081,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "smooth_basalt",
+        definition: "block",
         first_state: 29576,
         last_state: 29576,
         default_state: 29576,
@@ -22944,6 +24089,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "raw_iron_block",
+        definition: "block",
         first_state: 29577,
         last_state: 29577,
         default_state: 29577,
@@ -22951,6 +24097,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "raw_copper_block",
+        definition: "block",
         first_state: 29578,
         last_state: 29578,
         default_state: 29578,
@@ -22958,6 +24105,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "raw_gold_block",
+        definition: "block",
         first_state: 29579,
         last_state: 29579,
         default_state: 29579,
@@ -22965,6 +24113,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_azalea_bush",
+        definition: "flower_pot",
         first_state: 29580,
         last_state: 29580,
         default_state: 29580,
@@ -22972,6 +24121,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_flowering_azalea_bush",
+        definition: "flower_pot",
         first_state: 29581,
         last_state: 29581,
         default_state: 29581,
@@ -22979,6 +24129,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "ochre_froglight",
+        definition: "rotated_pillar",
         first_state: 29582,
         last_state: 29584,
         default_state: 29583,
@@ -22989,6 +24140,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "verdant_froglight",
+        definition: "rotated_pillar",
         first_state: 29585,
         last_state: 29587,
         default_state: 29586,
@@ -22999,6 +24151,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pearlescent_froglight",
+        definition: "rotated_pillar",
         first_state: 29588,
         last_state: 29590,
         default_state: 29589,
@@ -23009,6 +24162,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "frogspawn",
+        definition: "frogspawn",
         first_state: 29591,
         last_state: 29591,
         default_state: 29591,
@@ -23016,6 +24170,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "reinforced_deepslate",
+        definition: "block",
         first_state: 29592,
         last_state: 29592,
         default_state: 29592,
@@ -23023,6 +24178,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "decorated_pot",
+        definition: "decorated_pot",
         first_state: 29593,
         last_state: 29608,
         default_state: 29602,
@@ -23043,6 +24199,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "crafter",
+        definition: "crafter",
         first_state: 29609,
         last_state: 29656,
         default_state: 29654,
@@ -23076,6 +24233,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "trial_spawner",
+        definition: "trial_spawner",
         first_state: 29657,
         last_state: 29668,
         default_state: 29663,
@@ -23099,6 +24257,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "vault",
+        definition: "vault",
         first_state: 29669,
         last_state: 29700,
         default_state: 29673,
@@ -23119,6 +24278,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "heavy_core",
+        definition: "heavy_core",
         first_state: 29701,
         last_state: 29702,
         default_state: 29702,
@@ -23129,6 +24289,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_moss_block",
+        definition: "bonemealable_feature_placer",
         first_state: 29703,
         last_state: 29703,
         default_state: 29703,
@@ -23136,6 +24297,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_moss_carpet",
+        definition: "mossy_carpet",
         first_state: 29704,
         last_state: 29865,
         default_state: 29704,
@@ -23164,6 +24326,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "pale_hanging_moss",
+        definition: "hanging_moss",
         first_state: 29866,
         last_state: 29867,
         default_state: 29866,
@@ -23174,6 +24337,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "open_eyeblossom",
+        definition: "eyeblossom",
         first_state: 29868,
         last_state: 29868,
         default_state: 29868,
@@ -23181,6 +24345,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "closed_eyeblossom",
+        definition: "eyeblossom",
         first_state: 29869,
         last_state: 29869,
         default_state: 29869,
@@ -23188,6 +24353,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_open_eyeblossom",
+        definition: "flower_pot",
         first_state: 29870,
         last_state: 29870,
         default_state: 29870,
@@ -23195,6 +24361,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "potted_closed_eyeblossom",
+        definition: "flower_pot",
         first_state: 29871,
         last_state: 29871,
         default_state: 29871,
@@ -23202,6 +24369,7 @@ pub static BLOCKS: [BlockInfo; 1168] = [
     },
     BlockInfo {
         name: "firefly_bush",
+        definition: "firefly_bush",
         first_state: 29872,
         last_state: 29872,
         default_state: 29872,

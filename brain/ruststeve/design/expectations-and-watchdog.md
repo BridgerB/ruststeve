@@ -5,7 +5,7 @@ type: reference
 tags: [stuck, expectations, watchdog, progress]
 aliases: [Expectation, Expect, deadline, NoProgress, stuck detection]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: ruststeve@c87ac55
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#A missed expectation is a logged event and an input to replanning. This is the main mechanism for detecting \"stuck.\""
@@ -35,7 +35,7 @@ A Minecraft server is a remote system that can ignore you. So every command that
 - Thresholds go in `Config`, taken from clojurecraft where it has them ([[cc-stall-and-budgets]]) or measured from successful recordings.
 
 ## Limits
-The patience values are not set. clojurecraft's own window rule (a third unanswered click after 3 s) is one real example of an expectation with a deadline.
+The walk's patience is set (issue 09a: 200 ticks without gain, a deadline of 1,200 ticks plus 10 per waypoint, [[walk-and-watchdog]]); the other tasks' come with them. clojurecraft's own window rule (a third unanswered click after 3 s) is one real example of an expectation with a deadline.
 
 ## See also
 - [[progress-invariants]] - the specific invariants the handoff asks for.

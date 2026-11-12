@@ -109,6 +109,26 @@ pub struct Case {
     /// What the live stream sent, dropped and failed, when the run streamed (issue 07c).
     #[serde(default)]
     pub stream: Option<StreamCounts>,
+    /// The planner's account, when the run had an aim (issue 09).
+    #[serde(default)]
+    pub plan: Option<PlanSummary>,
+}
+
+/// What the planner did in a run: its aim, whether it was met or the planner stopped stuck,
+/// walks started and why they failed, the longest any walk went without getting closer (the
+/// progress invariant's measure) and what its searches spent.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlanSummary {
+    pub aim: String,
+    pub reached: bool,
+    pub stuck: bool,
+    pub walks: u64,
+    pub failures: BTreeMap<String, u64>,
+    pub longest_stall: u64,
+    pub expanded: u64,
+    /// The brain's time per tick in the shell's measure, microseconds: mean, p99 and max.
+    #[serde(default)]
+    pub tick_us: Option<[u64; 3]>,
 }
 
 /// The live stream's counts for one run (schema/snapshot-v1.md).
@@ -198,6 +218,12 @@ impl Case {
             ),
             format!("replay: {}", self.replay),
         ];
+        if let Some(p) = &self.plan {
+            lines.push(format!(
+                "plan {}: reached {}, stuck {}, {} walks, failures {:?}, longest stall {} ticks, {} expansions, tick us {:?}",
+                p.aim, p.reached, p.stuck, p.walks, p.failures, p.longest_stall, p.expanded, p.tick_us
+            ));
+        }
         if let Some(s) = self.stream {
             lines.push(format!(
                 "stream: sent {}, dropped {}, failed {}, connects {}",

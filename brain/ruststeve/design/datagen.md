@@ -6,7 +6,7 @@ tags: [datagen, data, tables, ci, packets]
 aliases: [crates/data, generated tables, JNI probe, jar probe, hardness, fuel values, collision shapes, entity data serializers, --oracle, datagen.yml, verify-stream, regenerate the tables, BlockKind, ItemKind, packet enums]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@6907139 clojurecraft@be85a92
+verifiedAgainst: ruststeve@d683c9b clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/main.rs#//! datagen: the game's tables, generated from the vanilla server itself and committed as Rust in"
   - "ruststeve:crates/datagen/src/fetch.rs#pub fn server_jar(work: &Path) -> Result<PathBuf> {"
@@ -48,6 +48,9 @@ Hardness, needs-correct-tool, collision shapes, tool materials, fuel, mob health
 
 ## Regenerating
 On a runner only. Push a change under `crates/datagen`, `crates/data` or `crates/verify-stream` (or dispatch `datagen`); download the `generated-<run id>` artifact with `gh run download` and copy it over `crates/data/src/generated/`. The last step of the workflow fails while the committed files differ from the regenerated ones.
+
+## Block definition types
+Since issue 09a every block carries its definition type from the blocks report (`BlockInfo::definition`: `slab`, `stair`, `block` ...), which routes classify by ([[pathfinding]]).
 
 ## Gotchas
 - Registry order is load-bearing wherever the wire sends an index; the static registries keep protocol-id order, the data-driven ones (damage types, biomes, dimension types) are sorted by name as clojurecraft found the server syncs them.

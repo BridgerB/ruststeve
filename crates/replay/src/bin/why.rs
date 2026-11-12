@@ -1,5 +1,5 @@
-//! why: fold a recording to a moment and print what the bot knew there. It grows as the planner
-//! does: today the world, later every planner branch's answer (brain/ruststeve/design/replay-and-why.md).
+//! why: fold a recording to a moment and print what the bot knew there and what its planner had
+//! decided, with why (the planner's events, recorded as notes; brain/ruststeve/design/replay-and-why.md).
 //!
 //! ```text
 //! cargo run -p why -- <file.rsr> --at <server ticks> [--force]
@@ -87,16 +87,32 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    for rec in records.iter().skip(start) {
-        if reached(&folder) {
+    // The planner's notes up to the moment: from the start, since a checkpoint holds the world,
+    // not the notes.
+    let mut notes = Vec::new();
+    for (i, rec) in records.iter().enumerate() {
+        if i >= start && reached(&folder) {
             break;
         }
-        if let Record::Event(e) = rec {
-            folder.step(e)?;
+        match rec {
+            Record::Note(n) => notes.push(n.clone()),
+            Record::Event(e) if i >= start => folder.step(e).map(|_| ())?,
+            _ => {}
         }
     }
     print_world(&folder.world, folder.events);
-    println!("planner: none yet (issue 09 adds it; then every branch's answer prints here)");
+    if notes.is_empty() {
+        println!("planner: no decisions recorded (a run with no aim, or none made yet)");
+    } else {
+        println!(
+            "planner, the last {} of {} decisions:",
+            notes.len().min(8),
+            notes.len()
+        );
+        for n in notes.iter().rev().take(8).rev() {
+            println!("  {n}");
+        }
+    }
     Ok(())
 }
 

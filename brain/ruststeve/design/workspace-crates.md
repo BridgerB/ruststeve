@@ -34,7 +34,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `world` | `World`, `Event`, `Effect`, `step`; columns, overlay, the player ([[world-value]]) | no |
 | `physics` | vanilla movement as a pure function, collision, fluids; bit-equal to clojurecraft ([[physics]]) | no |
 | `memory` | sightings with time, indexed by position and column; `Seen` enforces no X-ray ([[memory-sightings]]) | no |
-| `plan` | goal table, needs planner, intents, executors, progress invariants | no |
+| `plan` | the planner: aims, tasks, the pathfinder, the walk, progress invariants (exists from issue 09a, [[planner]]) | no |
 | `sim` | the server model as a pure reducer, grown per issue: join, chunks, time, the movement check, falls, generated terrain so far ([[server-model]]) | no |
 | `record` | recordings: zstd MessagePack, commit-pinned, `Folder` ([[recordings]]) | files |
 | `replay` | the `replay` (verify, export) and `why` binaries ([[replay-and-why]]) | files |
