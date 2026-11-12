@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# The insight store is its own workspace: SurrealDB stays out of the core's build.
+exclude = ["crates/ingest"]
 
 [workspace.package]
 edition = "2024"

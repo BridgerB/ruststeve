@@ -5,7 +5,7 @@ type: decision
 tags: [decision, data, storage, surrealdb, frontend]
 aliases: [no Postgres, SurrealDB, insight store, ingest, batch file, snapshot stream, steve front end, SurrealKV]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92 ruststeve@c87ac55
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Rust only, backend only. No HTML, no viewer and no dashboard in ruststeve."
@@ -17,6 +17,7 @@ related:
   - "[[ruststeve/decisions/_moc|Decisions]]"
   - "[[recording-format]]"
   - "[[observability]]"
+  - "[[insight-store]]"
   - "[[measurement-rules]]"
 ---
 
@@ -47,9 +48,9 @@ More data would not have unstuck clojurecraft's stage 18: it already kept case f
 - **No database at all**: files alone answer one run well and many runs badly; cross-run insight (which killer dominates stage 15 on which commit) is the database's job.
 - **Old tooling** (steve's Postgres tables, clojurecraft's Babashka churn and gh-pages site, ruststeve v1's SQLite and Leptos dashboard): the point of the reset is to start fresh. steve is kept only as the front end.
 
-## Open
-- **Where the database lives**: start with a SurrealKV file built by an ingest job on a runner and published as a release asset, which steve downloads and opens embedded (no server, no account). SurrealDB's hosted service (SurrealDB Earth) would add live updates without a download, but needs an account: Bridger's call.
-- **Version**: SurrealDB 4 shipped in early November 2026; pin an exact 4.0.x and verify the Rust and JavaScript SDK versions match before relying on a feature.
+## Settled (issue 07b)
+- **Where the database lives**: a SurrealKV store built by `ingest` on a runner and published as the asset `insight.surrealkv.tar.zst` on the release `insight-latest`; steve downloads it and opens it embedded (no server, no account). SurrealDB Earth (hosted, live updates) stays Bridger's call if a download ever stops being enough ([[insight-store]]).
+- **Version**: `surrealdb = "=4.0.1"` in Rust, `@surrealdb/node` 3.2.0 on `@surrealdb/node-native` 4.x in steve; the schema file records both.
 
 ## What would change the answer
 Ingest or query time on the runners outgrowing an embedded store, or a need for live multi-writer updates: then a SurrealDB server, with only the connection string changed.

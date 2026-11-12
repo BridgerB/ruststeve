@@ -1,0 +1,119 @@
+# The insight store (issue #12, brain/ruststeve/design/insight-store.md). Two jobs:
+# - check: on a change to ingest, results, world or the schema, lint and test the ingest crate
+#   (its own workspace, so the root CI never compiles SurrealDB).
+# - publish: on dispatch or when race.yml calls it, download the store from the fixed release
+#   insight-latest, add every race-* release's batches (a batch already in the store is skipped,
+#   so SurrealKV's versions keep what it said before), and replace the asset.
+#   gh workflow run ingest.yml --ref main
+name: ingest
+
+on:
+  push:
+    branches: [main, "issue-*"]
+    paths: [crates/ingest/**, crates/results/**, crates/world/**, schema/**, .github/workflows/ingest.yml]
+  pull_request:
+    branches: [main]
+    paths: [crates/ingest/**, crates/results/**, crates/world/**, schema/**, .github/workflows/ingest.yml]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ingest
+          workspaces: crates/ingest -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - working-directory: crates/ingest
+        run: cargo fmt --check
+      - working-directory: crates/ingest
+        run: cargo clippy --release --locked --all-targets -- -D warnings
+      - working-directory: crates/ingest
+        run: cargo test --release --locked
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    concurrency:
+      group: insight-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ingest
+          workspaces: crates/ingest -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build ingest
+        working-directory: crates/ingest
+        run: cargo build --release --locked
+
+      - name: The store as published, if any
+        run: |
+          set -euo pipefail
+          mkdir -p store
+          if gh release download insight-latest -p insight.surrealkv.tar.zst -D . 2>/dev/null; then
+            tar --zstd -xf insight.surrealkv.tar.zst -C store
+            echo "restored the published store"
+          else
+            echo "no published store yet: starting empty"
+          fi
+
+      - name: Every race's batches
+        run: |
+          set -euo pipefail
+          mkdir -p races
+          gh release list --limit 1000 --json tagName --jq '.[].tagName | select(startswith("race-"))' > tags.txt
+          while read -r tag; do
+            mkdir -p "races/$tag"
+            gh release download "$tag" -p 'batches-*.tar.zst' -D "races/$tag"
+            tar --zstd -xf "races/$tag"/batches-*.tar.zst -C "races/$tag"
+          done < tags.txt
+          echo "$(wc -l < tags.txt) races"
+
+      - name: Add them and query
+        run: |
+          set -euo pipefail
+          i=crates/ingest/target/release/ingest
+          $i add store/insight races | tee ingest.log
+          {
+            echo "## insight store"
+            echo
+            cat ingest.log
+            echo
+            echo '```'
+            $i query store/insight batches
+            $i query store/insight kn
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Replace the asset on insight-latest
+        run: |
+          set -euo pipefail
+          tar --zstd -cf insight.surrealkv.tar.zst -C store insight
+          if ! gh release view insight-latest > /dev/null 2>&1; then
+            gh release create insight-latest --prerelease --title "insight store (latest)" \
+              --notes "The SurrealDB 4 insight store built by ingest from every race. Schema: schema/insight-v1.surql. Open read-only with @surrealdb/node at surrealkv://<unpacked>/insight?versioned=true, namespace ruststeve, database insight."
+          fi
+          gh release upload insight-latest insight.surrealkv.tar.zst --clobber

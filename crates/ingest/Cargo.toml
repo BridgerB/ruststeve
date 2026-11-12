@@ -1,0 +1,20 @@
+# Its own workspace (excluded from the root's): SurrealDB never enters the core's or CI's normal
+# build (brain/ruststeve/decisions/data-out.md).
+[workspace]
+
+[package]
+name = "ingest"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The insight store: an embedded SurrealDB 4 (SurrealKV) built from race batch and case files"
+
+[dependencies]
+results = { path = "../results" }
+world = { path = "../world" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Pinned exactly: steve opens the same file with @surrealdb/node 3.2.0 on node-native 4.x.
+surrealdb = { version = "=4.0.1", default-features = false, features = ["kv-surrealkv", "kv-mem"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
