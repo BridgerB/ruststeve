@@ -213,6 +213,60 @@ impl<'a> Reflect<'a, '_> {
         Ok(true)
     }
 
+    fn is_public(&mut self, class: &JObject<'a>) -> Result<bool> {
+        let r = self
+            .env
+            .call_method(class, "getModifiers", "()I", &[])
+            .and_then(|v| v.i());
+        Ok(self.check(r, "getModifiers")? & 0x1 != 0)
+    }
+
+    /// The same method declared on a public class or interface. A public method of a non-public
+    /// class (the tag loader's anonymous `MappedRegistry$3`) cannot be invoked from a JNI thread,
+    /// which has no caller frame, and `setAccessible` is refused too; invoking it through the
+    /// public supertype that declares it still dispatches to the same code.
+    fn public_variant(&mut self, m: &JObject<'a>, name: &str) -> Result<JObject<'a>> {
+        let decl = self.call(m, "getDeclaringClass", "()Ljava/lang/Class;", &[])?;
+        if self.is_public(&decl)? {
+            return Ok(self.env.new_local_ref(m)?);
+        }
+        let class_name = self.class_name(&decl)?;
+        let params = self.call(m, "getParameterTypes", "()[Ljava/lang/Class;", &[])?;
+        let method_name = self.string(name)?;
+        let mut queue = vec![decl];
+        while let Some(c) = queue.pop() {
+            let mut supers = Vec::new();
+            let sup = self.call(&c, "getSuperclass", "()Ljava/lang/Class;", &[])?;
+            if !sup.is_null() {
+                supers.push(sup);
+            }
+            let ifaces = self.call(&c, "getInterfaces", "()[Ljava/lang/Class;", &[])?;
+            supers.extend(self.array(ifaces)?);
+            for s in supers {
+                if self.is_public(&s)? {
+                    let r = self
+                        .env
+                        .call_method(
+                            &s,
+                            "getMethod",
+                            "(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;",
+                            &[JValue::Object(&method_name), JValue::Object(&params)],
+                        )
+                        .and_then(|v| v.l());
+                    match r {
+                        Ok(found) => return Ok(found),
+                        Err(_) => {
+                            // NoSuchMethodException: this supertype does not declare it.
+                            let _ = self.env.exception_clear();
+                        }
+                    }
+                }
+                queue.push(s);
+            }
+        }
+        bail!("{class_name}.{name} is declared on no public class or interface")
+    }
+
     /// The public method of `class` with this name that takes these arguments.
     fn method(
         &mut self,
@@ -250,12 +304,7 @@ impl<'a> Reflect<'a, '_> {
                 args.len()
             )
         })?;
-        // A public method of a non-public class (an anonymous registry iterator, MappedRegistry$3)
-        // cannot be invoked from a JNI-attached thread unless it is made accessible.
-        let r = self
-            .env
-            .call_method(&m, "setAccessible", "(Z)V", &[JValue::Bool(1)]);
-        self.check(r, "setAccessible")?;
+        let m = self.public_variant(&m, name)?;
         let global = self.env.new_global_ref(m)?;
         self.methods.insert(key, global.clone());
         Ok(global)
