@@ -5,7 +5,7 @@ type: decision
 tags: [decision, recording, format, replay]
 aliases: [not JSON, MessagePack, zstd, rmp-serde, bincode, recording header, commit-pinned replay, replay export]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92 ruststeve@c87ac55
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Record (Event, Vec<Effect>) with serde + bincode or MessagePack, compressed with zstd."
@@ -21,6 +21,8 @@ related:
 # The recording format
 
 ## The choice
+(As built, 2026-11-12: a server packet is recorded as its raw bytes and decoded again on replay; effects as their encoded bytes; the commit comes from `build.rs`. See [[recordings]].)
+
 A recording is one zstd-compressed stream of length-delimited **MessagePack** records, encoded by serde with **named fields** (maps, not positional arrays). The first record is a header: format version, git commit, Minecraft version, seed, config and its hash, and the previous segment on a reconnect. Then the run's inputs and outputs, and periodic checkpoints.
 
 - **Commit-pinned**: `replay` refuses a file from another commit unless forced; a new function is evaluated as a pure function over the worlds the old commit folded, never by refolding with new code (lesson 4.5 of the handoff).

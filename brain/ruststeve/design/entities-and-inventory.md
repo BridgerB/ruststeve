@@ -6,7 +6,7 @@ tags: [world, entities, metadata, inventory, slots]
 aliases: [Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@5a0f8e2 clojurecraft@be85a92
+verifiedAgainst: ruststeve@9e6cbcd clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn menu_slot(index: i32) -> Option<i16> {"
   - "ruststeve:crates/world/src/lib.rs#fn place_entity(&mut self, id: i32, [x, y, z]: [f64; 3], flags: u32) {"

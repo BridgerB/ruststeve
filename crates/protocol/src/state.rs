@@ -3,7 +3,9 @@
 use crate::packets::{C2s, S2c};
 
 /// The protocol state: the same packet id means different packets in different states.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub enum State {
     Handshake,
     Login,

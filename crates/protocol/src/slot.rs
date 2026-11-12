@@ -8,7 +8,7 @@ use crate::ParseError;
 use crate::bytes::Reader;
 
 /// One slot.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
     Empty,
     /// An item and how many (always at least 1).

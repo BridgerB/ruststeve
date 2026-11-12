@@ -1,43 +1,54 @@
 ---
 title: Recordings
-description: What a recording file holds (header, Input/Output records, checkpoints), how it evolves without breaking old files, and how verify proves determinism.
+description: What a ruststeve recording holds (header with commit, raw packets and ticks in, encoded effects out, checkpoints of the whole World), how a killed run still reads, and how verify proves a run replays exactly.
 type: reference
 tags: [recording, replay, determinism, format]
-aliases: [Record, Header, Checkpoint, replay verify, golden recordings]
+aliases: [Record, Header, Checkpoint, EventRecord, EffectRecord, Recorder, replay verify, .rsr]
 status: verified
-lastUpdated: 2026-11-11
-verifiedAgainst: ruststeve@c87ac55
+lastUpdated: 2026-11-12
+verifiedAgainst: ruststeve@9e6cbcd clojurecraft@be85a92
 sourceRefs:
-  - "ruststeve:FUNCTIONAL.md#One JSON object per line, header first. Write a Checkpoint every 1,200 ticks (one minute of game time) so replay can start near any tick without folding from spawn."
-  - "ruststeve:FUNCTIONAL.md#Run it in CI on every recording in recordings/golden/, twice."
-  - "ruststeve:FUNCTIONAL.md#This matters most for the event log, because old recordings are your regression suite."
+  - "ruststeve:crates/record/src/lib.rs#pub enum Record {"
+  - "ruststeve:crates/record/src/lib.rs#pub fn step(&mut self, e: &EventRecord) -> Result<Vec<EffectRecord>, String> {"
+  - "ruststeve:crates/record/build.rs#println!(\"cargo:rustc-env=RUSTSTEVE_COMMIT={commit}\");"
+  - "ruststeve:crates/bot/src/main.rs#struct Run {"
+  - "clojurecraft:src/clojurecraft/record.clj#\"Packet keys that are pure functions of the wire bytes, added on the reader thread. A"
 related:
   - "[[ruststeve/design/_moc|Design]]"
+  - "[[recording-format]]"
+  - "[[replay-and-why]]"
   - "[[replay-limits]]"
-  - "[[determinism-rules]]"
   - "[[cc-record-replay]]"
 ---
 
 # Recordings
 
-Every run writes a recording: enough to replay it exactly, offline, with no server. Old recordings are the regression suite, so the format grows by accretion and never breaks.
+Every run can be a file (`bot --record <path>`, `.rsr`) that replays exactly, offline, at its own commit. Old recordings are the regression suite, so the format grows by accretion and never breaks.
 
 ## Key files
-- `FUNCTIONAL.md`, sections 3.13, 5.5, 9.2 and 9.3.
+- `crates/record/src/lib.rs`: `Header`, `Record`, `EventRecord`, `EffectRecord`, `Recorder`, `Recording`, `Folder`, `check_commit`.
+- `crates/record/build.rs`: bakes the full commit sha and a dirty flag into every build.
+- `crates/bot/src/main.rs` (`Run::step`): writes each event before the step, its effects after, a checkpoint every 1,200 server ticks.
 
-## How it works
-- **Format**: MessagePack with named fields, zstd, a versioned commit-pinned header; not JSON ([[recording-format]]). `Record` is `Input | Output | Checkpoint | Note`; `replay export` prints one as text.
-- **Header**: `schema_version`, `seed`, `config` and `config_hash`, `git_commit`, `minecraft_version`, `target_triple`, `previous_segment` (a reconnect chains segments).
-- **Checkpoint** every 1,200 ticks (a minute of game time), so replay can start near any tick. `Brain` must therefore serialize, one more reason to keep it plain data.
-- **Verify**: build `Brain::new(header.config, header.seed)`, step every recorded input, and compare each output with the recorded one; the first difference is a `Divergence { tick, expected, actual }`. CI runs it over `recordings/golden/` twice, and also checks that starting from any checkpoint gives the same outputs as replaying from the start.
-- **Accretion**: add variants and fields, never rename or repurpose; new fields get `#[serde(default)]`; a changed meaning is `ObservationV2` plus an upcaster.
+## What is in a file
+A zstd stream of length-prefixed MessagePack records with named fields ([[recording-format]]):
+1. **`Header`**: format version, commit, dirty, Minecraft version, protocol, bot name, server label, seed, target triple, previous segment.
+2. **`Event`**: either a server packet **as it arrived** (the state it was read in, its id, its decompressed bytes; replay decodes it again, so chunk columns are never stored twice) or a **tick** (the loop's clock and a fresh seed, every 50 ms: time and randomness are inputs, [[sync-core-and-time]]).
+3. **`Effects`**: what that step produced, each packet as its encoded bytes.
+4. **`Checkpoint`**: the whole `World` (serde on every world type; kinds as protocol ids) every 1,200 server ticks, a minute of game time.
+5. `Note`.
+
+## How verify works
+`Folder` steps a fresh `World`, decoding each recorded packet in a decode state that moves exactly as the net reader's does (`State::after_receive`); `replay verify` compares each step's effects byte for byte with the recorded ones and the folded world with every checkpoint, then folds again from **each** checkpoint to the end. Measured: a 75 s local run, 7,227 events in 0.8 s, 0 mismatches from the start and from its checkpoint.
 
 ## Gotchas
-- `verify` failing on a commit that was not meant to change behaviour means nondeterminism or an unintended change; both are bugs.
-- A recording from last week that no longer loads is the smell; the schema broke instead of growing.
-- A recording is valid only against the Minecraft version in its header, and it is folded only at its own commit: a newer fold drifts, because the bot's own choices move it (clojurecraft's lesson 4.5, [[cc-stage18-lessons]]).
+- A run killed mid-write still reads: the reader stops at the last whole record, and the recorder flushes a zstd block at least once a second.
+- A recording is folded only at its own commit; a newer fold drifts because the bot's own choices move it (lesson 4.5, [[cc-stage18-lessons]]). `check_commit` refuses another commit's file unless `--force`.
+- Decode errors are not stepped, so they are not recorded either: the world never saw them.
+
+## Limits
+- About 3.4 MB for a minute of play; checkpoints carry every column. Sharing unchanged columns between checkpoints waits until size matters.
 
 ## See also
+- [[replay-and-why]] - the tools.
 - [[replay-limits]] - what a recording can and cannot test.
-- [[incident-to-regression]] - how a stuck run becomes a recording in the suite.
-- [[cc-record-replay]] - clojurecraft records EDN events today.

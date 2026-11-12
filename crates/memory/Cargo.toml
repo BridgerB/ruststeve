@@ -7,4 +7,5 @@ publish = false
 description = "Memory as facts with time: sightings of watched blocks, only ever seen with an exposed face (no I/O)"
 
 [dependencies]
+serde = { version = "1", features = ["derive", "rc"] }
 data = { path = "../data" }

@@ -13,7 +13,7 @@ use crate::slot::{Slot, read_slot};
 const END: u8 = 0xff;
 
 /// One metadata value, for the serializers the bot reads (the ones clojurecraft reads).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub enum MetaValue {
     Byte(u8),
     Int(i32),

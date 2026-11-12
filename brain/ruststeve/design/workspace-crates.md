@@ -36,7 +36,8 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `memory` | sightings with time, indexed by position and column; `Seen` enforces no X-ray ([[memory-sightings]]) | no |
 | `plan` | goal table, needs planner, intents, executors, progress invariants | no |
 | `sim` | the server model: blocks, fluids, mobs, combat, simulation distance | no |
-| `record` | record and replay, versioned, commit-pinned ([[recording-format]]) | files |
+| `record` | recordings: zstd MessagePack, commit-pinned, `Folder` ([[recordings]]) | files |
+| `replay` | the `replay` (verify, export) and `why` binaries ([[replay-and-why]]) | files |
 | `net` | the socket: reader and writer threads over bounded channels ([[connection]]) | sockets |
 | `rcon` | RCON client | sockets |
 | `brain-check` | the brain's checker (exists) | files |

@@ -7,6 +7,7 @@ publish = false
 description = "Minecraft 26.1.2 (protocol 775) on the wire: primitives, framing, typed packets, states, the upkeep reducer (no I/O)"
 
 [dependencies]
+serde = { version = "1", features = ["derive", "rc"] }
 data = { path = "../data" }
 # zlib is computation, not I/O; the pure-Rust backend keeps the core free of C.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

@@ -20,7 +20,7 @@ use protocol::slot::Slot;
 use protocol::{C2s, Out, S2c, Session};
 
 /// An entity as the server last described it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Entity {
     pub kind: EntityKind,
     /// Feet position, in blocks.
@@ -52,7 +52,7 @@ impl Entity {
 
 /// Window 0: the player's inventory by menu slot (0 craft result, 1-4 grid, 5-8 armour, 9-35
 /// main, 36-44 hotbar, 45 offhand).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Inventory {
     /// Every slot that holds something: the item and a count of at least 1.
     pub slots: BTreeMap<i16, (ItemKind, i32)>,
@@ -108,7 +108,9 @@ impl Inventory {
 }
 
 /// A block position, in whole blocks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub struct BlockPos {
     pub x: i32,
     pub y: i32,
@@ -135,7 +137,9 @@ impl BlockPos {
 }
 
 /// A chunk column's position, in columns (blocks / 16).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
@@ -171,7 +175,7 @@ impl From<Out> for Effect {
 }
 
 /// The dimension the player is in.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Dimension {
     /// The dimension type's index in the synced registry (sorted by name: 3 is the Nether).
     pub type_id: i32,
@@ -198,7 +202,7 @@ impl Dimension {
 }
 
 /// The player's own body, as the server last said.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Player {
     /// The entity id the play login gave the player.
     pub entity_id: Option<i32>,
@@ -213,7 +217,7 @@ pub struct Player {
 }
 
 /// The world value.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct World {
     /// The protocol upkeep: state, keep-alives, server ticks. Its replies become effects.
     pub session: Session,

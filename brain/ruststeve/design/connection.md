@@ -6,7 +6,7 @@ tags: [protocol, net, bot, connection, keep-alive, threads]
 aliases: [protocol crate, net crate, bot binary, Session, keep-alive, xtask server, run a bot locally, local server, receive-side state]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@5a0f8e2 clojurecraft@be85a92
+verifiedAgainst: ruststeve@9e6cbcd clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/session.rs#pub fn on_packet(&mut self, p: &S2c) -> Vec<Out> {"
   - "ruststeve:crates/protocol/src/state.rs#pub fn after_receive(self, p: &S2c) -> State {"
@@ -35,9 +35,9 @@ A bot connects with our own protocol layer ([[own-protocol-not-azalea]]): a pure
 
 ## How it works
 1. `bot` sends `opening(...)`: `intention` (next state 2) and `hello` with the offline UUID ([[wire-offline-login]]).
-2. **The reader thread** reads bytes into `FrameDecoder`, takes whole frames (inflating once `login_compression` arrives), splits the id, `decode`s in its own `State`, and sends `Inbound::Packet` to the loop. A frame that will not decode is `Inbound::DecodeError`, the end is `Inbound::Closed(why)`: values, never dropped.
+2. **The reader thread** reads bytes into `FrameDecoder`, takes whole frames (inflating once `login_compression` arrives), splits the id, `decode`s in its own `State`, and sends `Inbound::Packet` to the loop, with the packet's raw bytes for the recording ([[recordings]]). A frame that will not decode is `Inbound::DecodeError`, the end is `Inbound::Closed(why)`: values, never dropped.
 3. **The receive-side state.** The reader flips its state on the server's trigger packet itself (`login_finished`, `finish_configuration`, `start_configuration`), with no word from the writer: the server sends nothing in the next state until our acknowledgement arrives, and nothing in the old state after the trigger. Each flip is guarded by its source state, so the state only ever moves along `State::EDGES` (a property test found the unguarded version jumping login → play).
-4. **The loop** folds each packet through `Session::on_packet`, which returns the replies: known packs, keep-alive echoes, pongs, finish-configuration, the teleport acknowledgement (and `player_loaded` once per play session), chunk-batch acknowledgements, configuration acknowledgement, and `SetCompression`. Keep-alives are answered here, as protocol upkeep that never waits on planning ([[wire-boundary-parsing]]).
+4. **The loop** folds each packet through `World::step` ([[world-value]]), whose `Session::on_packet` returns the replies: known packs, keep-alive echoes, pongs, finish-configuration, the teleport acknowledgement (and `player_loaded` once per play session), chunk-batch acknowledgements, configuration acknowledgement, and `SetCompression`. Keep-alives are answered here, as protocol upkeep that never waits on planning ([[wire-boundary-parsing]]).
 5. **The writer thread** encodes each `C2s` (ids from `data`'s generated enums) and applies `SetCompression` in order, so every frame after `login_compression` carries a data length.
 6. `Session` counts server ticks, 20 per `set_time` ([[sync-core-and-time]]).
 

@@ -1,6 +1,6 @@
 # A session on a runner (issue #8): start a vanilla 26.1.2 server and keep a bot in the world for
 # the given seconds. Dispatch only, to save runner time while work runs locally:
-#   gh workflow run session.yml --ref <branch> -f seconds=600
+#   gh workflow run session.yml --ref <branch> -f seconds=120
 # Notes: brain/ruststeve/design/connection.md
 name: session
 run-name: "session: ${{ inputs.seconds }} s"
@@ -10,7 +10,7 @@ on:
     inputs:
       seconds:
         description: Seconds the bot must stay in play
-        default: "600"
+        default: "120"
 
 permissions:
   contents: read
@@ -52,7 +52,7 @@ jobs:
       - name: Start the server
         run: |
           set -euo pipefail
-          cargo build -q --locked -p xtask -p bot
+          cargo build -q --locked -p xtask -p bot -p replay
           nohup cargo run -q --locked -p xtask -- server --jar "$DATAGEN_WORK/server.jar" > server.log 2>&1 &
           for _ in $(seq 1 180); do
             if grep -q 'Done (' server.log; then exit 0; fi
@@ -64,7 +64,10 @@ jobs:
       - name: Keep a bot in the world
         env:
           SECONDS_IN_PLAY: ${{ inputs.seconds }}
-        run: cargo run -q --locked -p bot -- --seconds "$SECONDS_IN_PLAY" 2>&1 | tee bot.log
+        run: cargo run -q --locked -p bot -- --seconds "$SECONDS_IN_PLAY" --record session.rsr 2>&1 | tee bot.log
+
+      - name: Replay the recording at this commit
+        run: cargo run -q --locked -p replay --bin replay -- verify session.rsr 2>&1 | tee replay.log
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -72,6 +75,8 @@ jobs:
           name: session-${{ github.run_id }}
           path: |
             bot.log
+            replay.log
+            session.rsr
             server.log
           if-no-files-found: warn
           retention-days: 14
