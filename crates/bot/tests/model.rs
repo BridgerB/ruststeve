@@ -14,6 +14,7 @@ fn the_bot_joins_the_model_and_walks() {
         Config {
             view_distance: 3,
             simulation_distance: 3,
+            peaceful: false,
         },
         world,
     );
@@ -25,7 +26,8 @@ fn the_bot_joins_the_model_and_walks() {
         port: 0,
         name: "rs-model".to_owned(),
         record: Some(rec.clone()),
-        walk: true,
+        script: Some(bot::Script::WalkSquare),
+        script_ticks: None,
         cap_ticks: Some(100),
         deadline: Some(Instant::now() + Duration::from_secs(30)),
         start: None,

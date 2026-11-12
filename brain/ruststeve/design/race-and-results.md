@@ -6,7 +6,7 @@ tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@ed3d084 clojurecraft@be85a92
+verifiedAgainst: ruststeve@cb90ee0 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -59,6 +59,7 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 
 ## Limits
 - Today's bots stand still (no planner until issue 09): `doing` is `idle` with that why, and the honest ladder is `in_world` and the kit.
+- Sim batches (`simrace`, [[parity-table]]) are the same files with `source = sim`, released as `race-sim-<run>`; scripts (`--walk square|straight:<yaw>|jump:<yaw>|still`) start after the start settles.
 - Swings are 0 until combat exists; the fields are there.
 
 ## See also

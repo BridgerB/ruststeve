@@ -6,7 +6,7 @@ tags: [physics, movement, collision, water, packets, core]
 aliases: [physics crate, step, Body, Controls, move_player_pos_rot, movement packets, differential test, server corrections]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@ed3d084 clojurecraft@be85a92
+verifiedAgainst: ruststeve@cb90ee0 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/physics/src/lib.rs#pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Controls) -> Body {"
   - "ruststeve:crates/physics/src/lib.rs#pub fn land_tick(solid: &impl Solid, pos: Vec3, [vx, vy, vz]: Vec3) -> (Vec3, Vec3, bool, bool) {"
@@ -39,6 +39,7 @@ The server does not move the player: the client simulates its own movement each 
 - **Live**: a 30 s staircase walk on a local 26.1.2 server: 34.5 blocks from the start, **0 server corrections** (teleports after the first), `replay verify` 0 mismatches over 5,858 events.
 
 ## Gotchas
+- **No ground, still the status**: a body whose column is not loaded runs no physics but still sends `move_player_status_only` once a second; the server re-centres a player's chunks only on a reported move, so a teleport far from the loaded columns otherwise deadlocks (found by the parity table, [[parity-table]]).
 - **Vanilla's collision tolerance** (`physics::COLLISION_EPSILON`, 1e-7, from `VoxelShape.collideX`): a face within 1e-7 of the box's own counts as ahead, and the other axes must overlap by more than 1e-7. clojurecraft's port had none, so a box whose edge rounded a hair past a face (-2.3 + 0.3 = -1.9999999999999998) walked into the block and the server corrected it; the server model's 1,000 generated worlds found it ([[server-model]]). The differential against clojurecraft stays bit-equal: its scenarios never sit on that edge.
 - A server correction is a `player_position` after the first: the server's verdict that the client moved wrongly. Counting them is the live test.
 - The world uses the controls' yaw for the look it sends; the pitch is the server's.

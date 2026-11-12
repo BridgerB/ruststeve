@@ -18,6 +18,10 @@ pub struct Run {
     pub unknown: u64,
     /// The bot's own death, if the model told of one.
     pub died: bool,
+    /// The bot's teleports when the controls began: later ones are corrections.
+    pub teleports_at_script: Option<u64>,
+    /// The lowest health the model told of while the controls ran.
+    pub min_health_in_script: Option<f32>,
 }
 
 /// xorshift64: the tick seeds, from the run's seed.
@@ -29,7 +33,7 @@ fn next(s: &mut u64) -> u64 {
 }
 
 /// Deliver the model's packets to the bot and the bot's to the model until both are quiet.
-fn settle(world: &mut World, sim: &mut Sim, mut to_bot: Vec<sim::Wire>, run: &mut Counts) {
+fn deliver(world: &mut World, sim: &mut Sim, mut to_bot: Vec<sim::Wire>, run: &mut Counts) {
     let mut guard = 0;
     while !to_bot.is_empty() && guard < 64 {
         guard += 1;
@@ -61,13 +65,15 @@ struct Counts {
     unknown: u64,
 }
 
-/// Run the bot against `sim` for `ticks` server ticks, pressing `controls(tick)` once in the
-/// world. Joins first (the opening packets), then ticks.
+/// Run the bot against `sim` for `ticks` server ticks, pressing `controls(tick)` from
+/// `settle` ticks after the body is placed (a real run's start settles the same 20). Joins
+/// first (the opening packets), then ticks.
 pub fn run(
     mut sim: Sim,
     name: &str,
     seed: u64,
     ticks: u64,
+    settle: u64,
     controls: impl Fn(u64) -> physics::Controls,
 ) -> Run {
     let mut world = World::new();
@@ -80,15 +86,32 @@ pub fn run(
             first.extend(out);
         }
     }
-    settle(&mut world, &mut sim, first, &mut counts);
+    deliver(&mut world, &mut sim, first, &mut counts);
     let mut pressed: Option<physics::Controls> = None;
     let mut walk_tick = 0;
+    // The settle, as bot::run counts it: physics ticks with the ground loaded and no teleport
+    // since; the script begins once `settle` have passed.
+    let mut since = world.ticks;
+    let mut teleports_seen = world.session.teleports;
+    let mut teleports_at_script = None;
+    let mut min_health_in_script: Option<f32> = None;
     for t in 0..ticks {
         if !sim.open() || world.death.is_some() {
             break;
         }
         let mut to_bot = sim.step(&In::Tick).unwrap_or_default();
-        if world.body.is_some() {
+        if teleports_at_script.is_none()
+            && (teleports_seen != world.session.teleports || !world.columns_loaded_under_body())
+        {
+            since = world.ticks;
+            teleports_seen = world.session.teleports;
+        }
+        if world.body.is_some() && (teleports_at_script.is_some() || world.ticks - since >= settle)
+        {
+            teleports_at_script.get_or_insert(world.session.teleports);
+            if let Some(h) = world.player.health {
+                min_health_in_script = Some(min_health_in_script.map_or(h, |m: f32| m.min(h)));
+            }
             let c = controls(walk_tick);
             walk_tick += 1;
             if pressed != Some(c) {
@@ -107,7 +130,7 @@ pub fn run(
                 to_bot.extend(out);
             }
         }
-        settle(&mut world, &mut sim, to_bot, &mut counts);
+        deliver(&mut world, &mut sim, to_bot, &mut counts);
     }
     let died = world.death.is_some();
     Run {
@@ -116,5 +139,7 @@ pub fn run(
         decode_errors: counts.decode_errors,
         unknown: counts.unknown,
         died,
+        teleports_at_script,
+        min_health_in_script,
     }
 }

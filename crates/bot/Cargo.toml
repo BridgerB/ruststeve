@@ -14,6 +14,18 @@ path = "src/main.rs"
 name = "race"
 path = "src/bin/race.rs"
 
+[[bin]]
+name = "capture"
+path = "src/bin/capture.rs"
+
+[[bin]]
+name = "moments"
+path = "src/bin/moments.rs"
+
+[[bin]]
+name = "simrace"
+path = "src/bin/simrace.rs"
+
 [dependencies]
 data = { path = "../data" }
 net = { path = "../net" }
@@ -22,6 +34,9 @@ protocol = { path = "../protocol" }
 rcon = { path = "../rcon" }
 record = { path = "../record" }
 results = { path = "../results" }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+toml = "1"
 sim = { path = "../sim" }
 stream = { path = "../stream" }
 world = { path = "../world" }

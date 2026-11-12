@@ -128,8 +128,11 @@ dependencies = [
  "rcon",
  "record",
  "results",
+ "serde",
+ "serde_bytes",
  "sim",
  "stream",
+ "toml",
  "world",
 ]
 

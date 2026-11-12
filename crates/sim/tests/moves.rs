@@ -8,6 +8,7 @@ use sim::{Config, In, Sim, Wire, flat_world};
 const CONFIG: Config = Config {
     view_distance: 2,
     simulation_distance: 2,
+    peaceful: false,
 };
 
 fn state(k: BlockKind) -> u32 {
