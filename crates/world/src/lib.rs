@@ -233,6 +233,10 @@ pub enum Act {
     },
     CloseWindow,
     Swing,
+    /// Ask for window 0 again: a click with a state id the server never has, on slot -1 (which
+    /// does nothing), so the server answers with the whole window (clojurecraft's
+    /// `resync-click`). After a missed click.
+    Resync,
 }
 
 /// A click sent and not yet answered: the window's state id when it went, and when.
@@ -668,6 +672,20 @@ impl World {
             }
             Act::CloseWindow => vec![Effect::Send(C2s::ContainerClose { window: 0 })],
             Act::Swing => vec![Effect::Send(C2s::Swing { hand: 0 })],
+            Act::Resync => {
+                self.click = Some(PendingClick {
+                    slot: -1,
+                    state_id: self.inventory.state_id,
+                    at_tick: self.ticks,
+                });
+                vec![Effect::Send(C2s::ContainerClick {
+                    window: 0,
+                    state_id: -1,
+                    slot: -1,
+                    button: 0,
+                    mode: 0,
+                })]
+            }
         }
     }
 

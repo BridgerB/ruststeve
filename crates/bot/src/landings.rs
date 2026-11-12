@@ -87,6 +87,7 @@ pub fn run_one(
     config: sim::Config,
     aim: plan::Aim,
     ticks: u64,
+    table: Option<std::sync::Arc<plan::make::Table>>,
 ) -> LandingRun {
     let empty = |excluded| LandingRun {
         index: i,
@@ -140,12 +141,19 @@ pub fn run_one(
     let Ok(world) = captured.model(start) else {
         return empty("missing");
     };
-    let plan::Aim::ReachLog { min_distance } = aim;
-    let mut p = plan::Plan::new(aim);
+    // A goal aim (issue 10's `table`) qualifies on a walkable log in view at any distance.
+    let min_distance = match aim {
+        plan::Aim::ReachLog { min_distance } => min_distance,
+        plan::Aim::Table => 0.0,
+    };
+    let mut p = match table {
+        Some(t) => plan::Plan::with_table(aim, t),
+        None => plan::Plan::new(aim),
+    };
     let mut seen: Option<(bool, bool)> = None;
     let mut tick_us = Vec::new();
-    let run = crate::lockstep::run(
-        sim::Sim::new(config, world),
+    let run = crate::lockstep::run_acting(
+        sim::Sim::new(config, world).seeded(i as u64 + 1),
         &format!("rs-l{i}"),
         i as u64 + 1,
         ticks,
@@ -158,7 +166,7 @@ pub fn run_one(
             let t0 = Instant::now();
             let c = p.step(w);
             tick_us.push(u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX));
-            c
+            (c, p.take_acts())
         },
     );
     let corrections = run
@@ -171,7 +179,7 @@ pub fn run_one(
             Some((true, false)) => Some("not walkable"),
             _ => Some("no log"),
         },
-        reached: p.reached.is_some(),
+        reached: p.reached.is_some() || p.met,
         stuck: p.stuck,
         plan: Some(p),
         tick_us,
@@ -187,6 +195,7 @@ pub struct Measure {
 
 pub fn measure(
     runs: &[LandingRun],
+    what: &str,
     want: usize,
     pass_rate: f64,
     stall_limit: u64,
@@ -258,7 +267,7 @@ pub fn measure(
         .collect();
     let mut lines = vec![
         format!(
-            "**reach a log 30+ blocks away: {k}/{n} qualifying landings ({:.1}%)**, need {want} at {:.0}%: {}",
+            "**{what}: {k}/{n} qualifying landings ({:.1}%)**, need {want} at {:.0}%: {}",
             100.0 * rate,
             100.0 * pass_rate,
             if reach_ok { "PASS" } else { "FAIL" }
@@ -287,7 +296,7 @@ pub fn measure(
             excluded("missing"),
         ),
         format!(
-            "raw: any log 30+ in view, walkable or not: {any_k}/{} reached ({:.1}%)",
+            "raw: any log in view, walkable or not: {any_k}/{} reached ({:.1}%)",
             any.len(),
             if any.is_empty() {
                 0.0

@@ -23,7 +23,7 @@ on:
         description: Cap per run in server ticks (6000 = 5 game minutes)
         default: "6000"
       goal:
-        description: The planner's aim (log or log:<min>), or empty for idle bots
+        description: The planner's aim (log, log:<min> or table), or empty for idle bots
         default: ""
 
 permissions:

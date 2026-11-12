@@ -115,6 +115,22 @@ impl Walk {
         }
     }
 
+    /// A walk to beside a block to dig (issue 10): where its drop falls within the pickup box,
+    /// a neighbouring column (diagonals too) with the block at the feet's height or up to
+    /// `PICKUP_RISE` above (clojurecraft's `:pickup` goal). Arrives at the goal.
+    pub fn to_dig(target: Cell, tick: u64) -> Self {
+        Self::new(
+            target,
+            Goal::Pickup {
+                pos: target,
+                range: path::DIAGONAL_COST,
+                rise: PICKUP_RISE,
+            },
+            Arrive::Goal,
+            tick,
+        )
+    }
+
     /// A walk to within reach of a block (a log): its route ends within `GOAL_RANGE`.
     pub fn to_block(target: Cell, tick: u64) -> Self {
         Self::new(

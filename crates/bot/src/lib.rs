@@ -157,6 +157,13 @@ impl Seeds {
     }
 }
 
+/// The goal table (`config/goals.toml`, issue 10) with its generated producer rows.
+pub fn goals_table(path: &str) -> Result<plan::make::Table, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let goals: plan::make::Goals = toml::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+    plan::make::Table::new(&goals)
+}
+
 pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -317,7 +324,14 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut script_tick: u64 = 0;
     let mut teleports_at_script: Option<u64> = None;
     let mut min_health_in_script: Option<f32> = None;
-    let mut planner = aim.map(plan::Plan::new);
+    let mut planner = match aim {
+        Some(a @ plan::Aim::Table) => Some(plan::Plan::with_table(
+            a,
+            std::sync::Arc::new(goals_table("config/goals.toml")?),
+        )),
+        Some(a) => Some(plan::Plan::new(a)),
+        None => None,
+    };
     let mut plan_seen: u64 = 0;
     let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut last_controls: Option<physics::Controls> = None;
@@ -446,11 +460,12 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             if let Some(p) = planner.as_mut()
                 && matches!(start_state, StartState::Taken)
             {
-                if p.reached.is_some() || p.stuck {
+                if p.finished() {
                     break Ending::Cap;
                 }
                 let t0 = Instant::now();
                 let c = p.step(&run.world);
+                let acts = p.take_acts();
                 plan_tick_us.push(u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX));
                 teleports_at_script.get_or_insert(run.world.session.teleports);
                 for e in p.events_since(plan_seen) {
@@ -467,6 +482,12 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
                         break Ending::Error { why: e };
                     }
+                }
+                if let Some(e) = acts
+                    .into_iter()
+                    .find_map(|a| run.step(&conn, EventRecord::Act(a), Event::Act(a)).err())
+                {
+                    break Ending::Error { why: e };
                 }
             }
             let (now_ms, seed) = (now_ms(), seeds.next());
@@ -607,7 +628,7 @@ pub fn plan_summary(p: &plan::Plan, tick_us: &[u64]) -> results::PlanSummary {
     });
     results::PlanSummary {
         aim: p.aim.name(),
-        reached: p.reached.is_some(),
+        reached: p.reached.is_some() || p.met,
         stuck: p.stuck,
         walks: p.walks,
         failures: p.failures.clone(),

@@ -459,6 +459,9 @@ pub enum Goal {
     Away { pos: Cell, range: f64 },
     /// Farther than `range` from `pos` on the plane alone.
     Afar { pos: Cell, range: f64 },
+    /// Where a block dug at `pos` drops within the pickup box (clojurecraft's `:pickup`):
+    /// within `range` of it on the plane, with `pos` at the feet's height or up to `rise` above.
+    Pickup { pos: Cell, range: f64, rise: i32 },
 }
 
 /// Octile distance on the plane: diagonals at their real cost.
@@ -481,6 +484,9 @@ impl Goal {
             Goal::Xz { pos } => node.0 == pos.0 && node.2 == pos.2,
             Goal::Away { pos, range } => flat_distance(node, pos) > range,
             Goal::Afar { pos, range } => octile(node, pos) > range,
+            Goal::Pickup { pos, range, rise } => {
+                octile(node, pos) <= range && node.1 <= pos.1 && pos.1 <= node.1 + rise
+            }
         }
     }
 
@@ -491,6 +497,16 @@ impl Goal {
             Goal::Xz { pos } => octile(node, pos),
             Goal::Away { pos, range } => (range - flat_distance(node, pos)).max(0.0),
             Goal::Afar { pos, range } => (range - octile(node, pos)).max(0.0),
+            Goal::Pickup { pos, range, rise } => {
+                let up = if pos.1 < node.1 {
+                    node.1 - pos.1
+                } else if pos.1 > node.1 + rise {
+                    pos.1 - node.1 - rise
+                } else {
+                    0
+                };
+                (octile(node, pos) - range).max(0.0) + f64::from(up)
+            }
         }
     }
 }
@@ -672,5 +688,26 @@ pub fn plan(world: &World, from: Cell, goal: &Goal, max_nodes: u32) -> Route {
             from: None,
             expanded: 0,
         },
+    }
+}
+
+#[cfg(test)]
+mod pickup_tests {
+    use super::*;
+
+    #[test]
+    fn pickup_is_beside_with_the_block_up_to_rise_above() {
+        let g = Goal::Pickup {
+            pos: (0, 70, 0),
+            range: DIAGONAL_COST,
+            rise: 2,
+        };
+        assert!(g.done((1, 70, 0)));
+        assert!(g.done((1, 68, 1)));
+        assert!(!g.done((1, 67, 1)), "the block too high");
+        assert!(!g.done((1, 71, 0)), "the block below the feet");
+        assert!(!g.done((2, 70, 0)), "too far");
+        assert_eq!(g.heuristic((1, 70, 0)), 0.0);
+        assert!(g.heuristic((5, 70, 0)) > 0.0);
     }
 }

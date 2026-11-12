@@ -1,0 +1,28 @@
+# The goal table (brain/ruststeve/design/goal-table-and-needs.md): clojurecraft's goals.edn rows
+# for issue 10, as data. A goal row says what it provides; `until` is the --goal name that puts it
+# in play. A producer row (with `act`) is how a need is met; the planner adds one generated
+# producer row per 2x2 recipe (plan::make). Needs and provides are `item:<name>` or
+# `tag:<item tag>` with a count, planned in the order written.
+
+[[goal]]
+id = "wood"
+priority = 1
+until = "log"
+doc = "hold one log"
+provides = [["tag:logs", 1]]
+
+[[goal]]
+id = "kit"
+priority = 2
+until = "table"
+# Sticks first: one log is four planks, and a table first spent all four before the sticks
+# (clojurecraft issue #104).
+doc = "four sticks, then a crafting table, from logs"
+provides = [["item:stick", 4], ["item:crafting_table", 1]]
+
+[[goal]]
+id = "gather"
+priority = 10
+doc = "dig a log seen with an exposed face, in reach of a walk, and collect it"
+provides = [["tag:logs", 1]]
+act = "gather"
