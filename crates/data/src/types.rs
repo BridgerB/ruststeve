@@ -1,7 +1,9 @@
 //! The shapes the generated tables are made of. Hand-written; the values are generated.
 
 use crate::generated::blocks::BlockKind;
+use crate::generated::entities::EntityKind;
 use crate::generated::items::ItemKind;
+use crate::generated::mobs::MobCategory;
 
 /// The server version the tables were generated from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,4 +124,50 @@ pub fn index_of(table: &[&str], name: &str) -> Option<u32> {
         .iter()
         .position(|n| *n == name)
         .and_then(|i| u32::try_from(i).ok())
+}
+
+/// A block's default-state collision shape, read from the game (`getCollisionShape`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Collision {
+    /// Nothing to stand on or bump into (air, flowers, portals).
+    Empty,
+    /// A full cube.
+    Full,
+    /// Neither: `top` is the top of the shape in blocks (a slab 0.5, a carpet 0.0625).
+    Partial { top: f64 },
+}
+
+/// A tool material (`ToolMaterial`): mining speed, durability, and the block tag it cannot drop.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolMaterial {
+    /// The constant's name, lower-cased (`wood`, `stone`, `iron`, `gold`, ...).
+    pub name: &'static str,
+    pub speed: f32,
+    pub durability: u32,
+    /// The block tag (without namespace) this material cannot get drops from.
+    pub incorrect_for_drops: &'static str,
+}
+
+/// An item that burns in a furnace, and for how many game ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fuel {
+    pub item: ItemKind,
+    pub ticks: u32,
+}
+
+/// An entity data serializer and the id the wire names it by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DataSerializer {
+    /// The `EntityDataSerializers` constant (`BYTE`, `INT`, `ITEM_STACK`, ...).
+    pub name: &'static str,
+    pub id: u32,
+}
+
+/// An entity type the game gives attributes to (the living ones): its base max health and
+/// spawn category.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mob {
+    pub entity: EntityKind,
+    pub max_health: f64,
+    pub category: MobCategory,
 }

@@ -16,4 +16,5 @@ anyhow = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 sha1 = "0.10"
 ureq = "2"
+jni = { version = "=0.21.1", features = ["invocation"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
