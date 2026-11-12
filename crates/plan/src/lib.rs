@@ -623,7 +623,11 @@ impl Plan {
                     for s in w.memory.in_column(&dim, cx + dx, cz + dz) {
                         let is_log =
                             data::block_of_state(s.state).is_some_and(|k| logs.contains(&k));
-                        if !is_log || self.refused_now(s.pos, tick) || flat(origin, s.pos) < min {
+                        if !is_log
+                            || self.refused_now(s.pos, tick)
+                            || flat(origin, s.pos) < min
+                            || crowded(w, s.pos)
+                        {
                             continue;
                         }
                         let d = flat(body.pos, s.pos);
@@ -636,6 +640,21 @@ impl Plan {
         }
         best.map(|(_, c)| c)
     }
+}
+
+/// Another player stands within this of a log's column (horizontally, and within 4 blocks of
+/// height): a trunk someone is working. Its drops go to whoever touches them first.
+pub const CROWD_RADIUS: f64 = 2.0;
+
+/// Whether another player is at a log (docs/problems/wood.md): fourteen bots joining at one
+/// spawn chose the same trunk and lost their drops to each other.
+pub fn crowded(w: &World, (x, y, z): Cell) -> bool {
+    let c = [f64::from(x) + 0.5, f64::from(z) + 0.5];
+    w.entities.values().any(|e| {
+        e.kind == data::EntityKind::Player
+            && ((e.pos[0] - c[0]).powi(2) + (e.pos[2] - c[1]).powi(2)).sqrt() <= CROWD_RADIUS
+            && (e.pos[1] - f64::from(y)).abs() <= 4.0
+    })
 }
 
 /// What the player holds, by item: window 0's slots from 1 (the grid, armour, inventory,

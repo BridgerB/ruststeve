@@ -36,6 +36,8 @@ pub const COLLECT_TICKS: u64 = 300;
 pub const BESIDE: f64 = 1.0;
 /// A drop farther than this from the block is not the block's.
 pub const DROP_RANGE: f64 = 3.0;
+/// Ticks a vanished drop is given for this bot's own pickup to show before it counts as taken.
+pub const TAKEN_TICKS: u64 = 10;
 /// The server's clock over ours is measured once this many server ticks have been heard.
 const SLOWDOWN_AFTER: u64 = 200;
 
@@ -57,6 +59,10 @@ pub enum DigFailure {
     DropUnreachable,
     /// The walk to the drop failed.
     DropWalkFailed,
+    /// The drop went to someone else: it vanished and the bot neither took it nor holds more.
+    Taken,
+    /// The block was gone before the dig began (another player broke it).
+    Gone,
     /// The body is gone.
     Lost,
 }
@@ -82,6 +88,11 @@ pub struct Dig {
     pub drop_seen: Option<[f64; 3]>,
     #[serde(default)]
     pub feet: Option<[f64; 3]>,
+    /// The drop's entity once seen, and the tick it was last there.
+    #[serde(default)]
+    pub drop_id: Option<i32>,
+    #[serde(default)]
+    pub drop_last: u64,
 }
 
 fn pos((x, y, z): Cell) -> BlockPos {
@@ -142,6 +153,8 @@ impl Dig {
             started: tick,
             drop_seen: None,
             feet: None,
+            drop_id: None,
+            drop_last: tick,
         }
     }
 
@@ -151,16 +164,18 @@ impl Dig {
     }
 
     /// The nearest item entity of the drop's kind within `DROP_RANGE` of the block.
-    fn drop_entity(&self, w: &World) -> Option<[f64; 3]> {
+    fn drop_entity(&self, w: &World) -> Option<(i32, [f64; 3])> {
         let want = self.drop?;
         let (x, y, z) = self.target;
         let c = [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5];
         w.entities
-            .values()
-            .filter(|e| e.item().is_some_and(|(k, _)| k == want))
-            .map(|e| e.pos)
-            .filter(|p| (0..3).map(|i| (p[i] - c[i]).powi(2)).sum::<f64>().sqrt() <= DROP_RANGE)
-            .min_by(|a, b| {
+            .iter()
+            .filter(|(_, e)| e.item().is_some_and(|(k, _)| k == want))
+            .map(|(id, e)| (*id, e.pos))
+            .filter(|(_, p)| {
+                (0..3).map(|i| (p[i] - c[i]).powi(2)).sum::<f64>().sqrt() <= DROP_RANGE
+            })
+            .min_by(|(_, a), (_, b)| {
                 let d = |p: &[f64; 3]| (0..3).map(|i| (p[i] - c[i]).powi(2)).sum::<f64>();
                 d(a).total_cmp(&d(b))
             })
@@ -173,13 +188,28 @@ impl Dig {
             return (still, None, DigStatus::Failed(DigFailure::Lost));
         };
         let gone = self.gone(w);
-        let drop_at = self.drop_entity(w);
+        let seen = self.drop_entity(w);
+        let drop_at = seen.map(|(_, p)| p);
         if drop_at.is_some() {
             self.drop_seen = drop_at;
         }
+        let in_collect = matches!(self.stage, DigStage::Collect { .. });
+        if let Some((id, _)) = seen.filter(|_| in_collect) {
+            self.drop_id.get_or_insert(id);
+        }
+        if self.drop_id.is_some_and(|id| w.entities.contains_key(&id)) {
+            self.drop_last = tick;
+        }
+        // The drop vanished, not into this bot's hands: someone else took it.
+        let taken_by_other = self.drop_id.is_some_and(|id| {
+            !w.entities.contains_key(&id) && !w.pickups.iter().any(|p| p.item_entity == id)
+        }) && tick.saturating_sub(self.drop_last) > TAKEN_TICKS;
         self.feet = Some(body.pos);
         match &mut self.stage {
             DigStage::Start => {
+                if gone && self.tries == 0 {
+                    return (still, None, DigStatus::Failed(DigFailure::Gone));
+                }
                 if gone {
                     self.stage = DigStage::Collect {
                         since: tick,
@@ -245,6 +275,9 @@ impl Dig {
                 };
                 if held_of(w, item) > self.before {
                     return (still, None, DigStatus::Done);
+                }
+                if taken_by_other {
+                    return (still, None, DigStatus::Failed(DigFailure::Taken));
                 }
                 if tick.saturating_sub(*since) > COLLECT_TICKS {
                     return (still, None, DigStatus::Failed(DigFailure::Uncollected));

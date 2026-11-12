@@ -3,7 +3,7 @@ title: The dig task
 description: How the bot digs a block and collects its drop (plan::dig) - START, FINISH at the break time times 1.15 times the measured slowdown plus 2 ticks, confirmation by the block update, retries, the collect walk - and why logs are dug from beside them (the pickup goal).
 type: reference
 tags: [plan, dig, gather, collect, pickup]
-aliases: [Dig, DigStage, DigFailure, break_ticks, slowdown, FINISH margin, collect, pickup goal, Goal::Pickup, to_dig, DropUnreachable, DropWalkFailed, Uncollected, Refused]
+aliases: [Dig, DigStage, DigFailure, Taken, Gone, crowded, CROWD_RADIUS, break_ticks, slowdown, FINISH margin, collect, pickup goal, Goal::Pickup, to_dig, DropUnreachable, DropWalkFailed, Uncollected, Refused]
 status: verified
 lastUpdated: 2026-11-12
 verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
@@ -12,6 +12,7 @@ sourceRefs:
   - "ruststeve:crates/plan/src/dig.rs#pub fn slowdown(w: &World) -> f64 {"
   - "ruststeve:crates/plan/src/dig.rs#pub fn step(&mut self, w: &World, tick: u64) -> (physics::Controls, Option<Act>, DigStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub fn to_dig(target: Cell, tick: u64) -> Self {"
+  - "ruststeve:crates/plan/src/lib.rs#pub fn crowded(w: &World, (x, y, z): Cell) -> bool {"
   - "ruststeve:crates/plan/src/path.rs#Pickup { pos: Cell, range: f64, rise: i32 },"
   - "clojurecraft:src/clojurecraft/path.clj#(defmethod goal-done? :pickup"
   - "clojurecraft:src/clojurecraft/intent.clj#(def finish-margin 1.15)"
@@ -37,6 +38,7 @@ Issue 10c. `plan::dig::Dig` breaks one block from where the bot stands and colle
 - **Finish**: at `ticks × 1.15 × slowdown + 2` (clojurecraft's margin and its 100 ms); `slowdown` is our ticks over the server's once 200 server ticks are heard (20 per `set_time`), between 1 and 8. An early FINISH would still break the block later (a delayed destroy), but the task does not count on it.
 - **Confirm**: the block update to air; past `waited + 60` ticks without it the dig is tried again, and the third try fails `Refused`.
 - **Collect**: done when the inventory holds more of what the block drops (its first sure loot). The drop is waited for 20 ticks where it fell; then the bot walks to beside it (`Near`, range 1); no route fails `DropUnreachable`, a failed walk `DropWalkFailed`, 300 ticks `Uncollected`. A failure notes where the drop and the feet were.
+- **Other players** (docs/problems/wood.md): a log with another player within 2 blocks of its column is not chosen (`crowded`); a drop that vanishes without this bot's own `take_item_entity` and with no rise in its count fails at once `Taken` (after 10 ticks for the bot's own pickup to show); a block already gone when the dig begins fails `Gone`, never "dug".
 - **Failures** go to the planner's failure memory: the block is refused a while.
 
 ## Evidence
