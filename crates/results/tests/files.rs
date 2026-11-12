@@ -39,6 +39,7 @@ fn case(bot: &str, stage: Option<Stage>, ending: Ending) -> Case {
         wall_ms: 300_000,
         recording: Some(format!("{bot}.rsr")),
         replay: format!("cargo run -p replay -- verify {bot}.rsr"),
+        stream: None,
     }
 }
 

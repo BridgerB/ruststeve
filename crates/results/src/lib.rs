@@ -105,6 +105,18 @@ pub struct Case {
     /// The recording, relative to the batch directory, and how to replay it.
     pub recording: Option<String>,
     pub replay: String,
+    /// What the live stream sent, dropped and failed, when the run streamed (issue 07c).
+    #[serde(default)]
+    pub stream: Option<StreamCounts>,
+}
+
+/// The live stream's counts for one run (schema/snapshot-v1.md).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamCounts {
+    pub sent: u64,
+    pub dropped: u64,
+    pub failed: u64,
+    pub connects: u64,
 }
 
 impl Case {
@@ -185,6 +197,12 @@ impl Case {
             ),
             format!("replay: {}", self.replay),
         ];
+        if let Some(s) = self.stream {
+            lines.push(format!(
+                "stream: sent {}, dropped {}, failed {}, connects {}",
+                s.sent, s.dropped, s.failed, s.connects
+            ));
+        }
         lines.extend(self.hits.iter().map(|h| format!("  hit {}", hit(h))));
         lines.join("\n") + "\n"
     }

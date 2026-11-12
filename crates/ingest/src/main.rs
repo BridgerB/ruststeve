@@ -379,6 +379,7 @@ mod tests {
             wall_ms: 5000,
             recording: None,
             replay: "-".to_owned(),
+            stream: None,
         }
     }
 

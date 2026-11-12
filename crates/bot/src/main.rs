@@ -27,6 +27,12 @@ fn opts() -> Result<bot::Opts, String> {
         deadline: None,
         start: None,
         verbose: true,
+        // The live view, local only (schema/snapshot-v1.md).
+        relay: std::env::var("STEVE_RELAY").ok().filter(|r| !r.is_empty()),
+        run_id: format!("local-{}", bot::now_ms()),
+        lane: 0,
+        start_name: "spawn".to_owned(),
+        case_path: String::new(),
     };
     let mut seconds = 600u64;
     let mut it = std::env::args().skip(1);
@@ -80,6 +86,12 @@ fn main() -> ExitCode {
         out.stats.unknown.len(),
         out.stats.decode_errors
     );
+    if let Some(c) = out.stream {
+        println!(
+            "bot {name}: stream sent {}, dropped {}, failed {}, connects {}",
+            c.sent, c.dropped, c.failed, c.connects
+        );
+    }
     let in_world = w.body.is_some();
     match out.ending {
         Ending::Cut | Ending::Cap if in_world => ExitCode::SUCCESS,
