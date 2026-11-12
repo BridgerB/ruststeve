@@ -39,6 +39,7 @@ related:
 The full serializer list (components, particles, block positions, variants) is not here; clojurecraft never reads past them.
 
 ## See also
+- [[entities-and-inventory]] - ruststeve's skim (`protocol::metadata`): serializers looked up by name in the generated table, stopping at the first without a reader.
 - [[datagen]] - ruststeve's serializer ids (`data::generated::metadata::ENTITY_DATA_SERIALIZERS`), read from `EntityDataSerializers` by the JNI probe, never hand-ordered.
 - [[wire-slots]] - the item-stack serializer.
 - [[cc-entities]] - what clojurecraft folds from these.

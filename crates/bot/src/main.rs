@@ -87,7 +87,7 @@ impl Stats {
     fn summary(&self, world: &World, why: &str) -> String {
         let session = &world.session;
         format!(
-            "{why}: {:.0} s connected, {:.0} s in play, {} keep-alives answered, {} server ticks, {} teleports, {} columns, health {:?}, standing on {:?}, packets {:?}, unknown ids {}, decode errors {}",
+            "{why}: {:.0} s connected, {:.0} s in play, {} keep-alives answered, {} server ticks, {} teleports, {} columns, health {:?}, standing on {:?}, {} entities, {} inventory stacks, {} sightings, packets {:?}, unknown ids {}, decode errors {}",
             self.started.elapsed().as_secs_f64(),
             self.play_since.map_or(0.0, |t| t.elapsed().as_secs_f64()),
             session.keep_alives_answered,
@@ -96,6 +96,9 @@ impl Stats {
             world.columns.len(),
             world.player.health,
             world.block_under_player(),
+            world.entities.len(),
+            world.inventory.slots.len(),
+            world.memory.log().len(),
             self.per_state,
             self.unknown.len(),
             self.decode_errors
@@ -204,7 +207,17 @@ fn run(a: &Args) -> Result<(), String> {
             | S2c::BlockUpdate { .. }
             | S2c::SectionBlocksUpdate { .. }
             | S2c::Respawn { .. }
-            | S2c::SetHealth { .. } => {}
+            | S2c::SetHealth { .. }
+            | S2c::AddEntity { .. }
+            | S2c::RemoveEntities { .. }
+            | S2c::MoveEntity { .. }
+            | S2c::MoveEntityRot { .. }
+            | S2c::EntityPositionSync { .. }
+            | S2c::TeleportEntity { .. }
+            | S2c::SetEntityData { .. }
+            | S2c::ContainerSetContent { .. }
+            | S2c::ContainerSetSlot { .. }
+            | S2c::SetPlayerInventory { .. } => {}
         }
         let before = world.session.state;
         for effect in world.step(&Event::Packet(packet)) {

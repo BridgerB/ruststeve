@@ -33,7 +33,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `protocol` | primitives, framing, typed packets, states, the upkeep `Session` ([[connection]]) | no |
 | `world` | `World`, `Event`, `Effect`, `step`; columns, overlay, the player ([[world-value]]) | no |
 | `physics` | vanilla movement as a pure function, collision, fluids | no |
-| `memory` | append-only facts with time, spatial indexes | no |
+| `memory` | sightings with time, indexed by position and column; `Seen` enforces no X-ray ([[memory-sightings]]) | no |
 | `plan` | goal table, needs planner, intents, executors, progress invariants | no |
 | `sim` | the server model: blocks, fluids, mobs, combat, simulation distance | no |
 | `record` | record and replay, versioned, commit-pinned ([[recording-format]]) | files |
