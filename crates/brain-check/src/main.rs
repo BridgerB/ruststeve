@@ -243,7 +243,13 @@ fn occurrences(hay: &str, needle: &str) -> Vec<usize> {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    // Inside a git hook, git exports GIT_DIR and GIT_INDEX_FILE for this repository; left in
+    // place they would make `git -C <sibling>` read this repository instead of the sibling.
     let out = Command::new("git")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_PREFIX")
         .arg("-C")
         .arg(dir)
         .args(args)

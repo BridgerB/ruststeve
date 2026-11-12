@@ -55,7 +55,8 @@ Use SurrealDB (the `ingest` binary's insight store) for questions across many ru
 ## 5. Commands
 
 ```bash
-nix develop                                       # dev shell: JDK 25 (datagen, the server) + rustup (flake.nix)
+nix develop                                       # dev shell: JDK 25 + rustup; installs the git hooks (flake.nix)
+prek run --all-files                              # every hook by hand: fmt, clippy, brain-check, actionlint, nixfmt, secrets
 cargo fmt --all                                   # format (local)
 cargo clippy --workspace --all-targets -- -D warnings   # lint (local)
 cargo run -q -p brain-check                       # the brain's four invariants, must be zero (local)
@@ -84,7 +85,7 @@ Tests, the bot and every binary run in the workflows under `.github/workflows/`,
 ## 7. Commits and PRs
 
 - Conventional prefixes (`feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `ci`), a short imperative subject, a bulleted body wrapped at about 72 columns.
-- **No AI attribution anywhere**: no `Co-Authored-By`, no session links, no "generated with" lines, in commits, PR bodies, issues, comments or code. Check before every commit and PR.
+- **No AI attribution anywhere**: no `Co-Authored-By`, no session links, no "generated with" lines, in commits, PR bodies, issues, comments or code. Check before every commit and PR. The `commit-msg` hook (`xtask commit-msg`) refuses it mechanically.
 - PR bodies: what changed, the done-condition's evidence (run ids, k/n, commit), what is unverified. Prose is not hard-wrapped.
 
 ## 8. Other repositories
