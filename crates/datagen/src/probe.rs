@@ -250,6 +250,12 @@ impl<'a> Reflect<'a, '_> {
                 args.len()
             )
         })?;
+        // A public method of a non-public class (an anonymous registry iterator, MappedRegistry$3)
+        // cannot be invoked from a JNI-attached thread unless it is made accessible.
+        let r = self
+            .env
+            .call_method(&m, "setAccessible", "(Z)V", &[JValue::Bool(1)]);
+        self.check(r, "setAccessible")?;
         let global = self.env.new_global_ref(m)?;
         self.methods.insert(key, global.clone());
         Ok(global)
