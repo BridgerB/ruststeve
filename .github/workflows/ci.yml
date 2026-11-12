@@ -173,8 +173,16 @@ jobs:
           set -o pipefail
           ./target/release/simrace --landings-file config/landings-grid.toml --worlds landings \
             --goal log:30 --ticks 3000 --want 200 --check true --report walk.md
+      - name: The kit measure (issue 10, four sticks and a crafting table from nothing in 6,000 ticks)
+        if: always()
+        run: |
+          set -o pipefail
+          ./target/release/simrace --landings-file config/landings-grid.toml --worlds landings \
+            --goal table --ticks 6000 --want 200 --rate 0.9 --check true --report wood.md
       - if: always()
         run: cat walk.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - if: always()
+        run: cat wood.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
   # One stable check name for branch protection.
   ci-ok:

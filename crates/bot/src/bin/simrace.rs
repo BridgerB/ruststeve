@@ -8,8 +8,8 @@
 //!     [--lane 0] [--first-seed 0] [--cap 6000] [--walk square] [--run local-<ms>] [--threads N]
 //! ```
 //!
-//! With `--landings-file F --worlds DIR --goal log:30` it runs the planner in each captured
-//! landing instead (issue 09's measure, `bot::landings`), prints the measure and, with
+//! With `--landings-file F --worlds DIR --goal log:30` (or `--goal table --rate 0.9`, issue
+//! 10) it runs the planner in each captured landing instead (issue 09's measure, `bot::landings`), prints the measure and, with
 //! `--check`, fails when a done-condition or the CPU budget does not hold:
 //!
 //! ```text
@@ -49,6 +49,7 @@ struct Args {
     check: bool,
     report: Option<PathBuf>,
     goals: String,
+    rate: f64,
 }
 
 fn args() -> Result<Args, String> {
@@ -70,6 +71,7 @@ fn args() -> Result<Args, String> {
         check: false,
         report: None,
         goals: "config/goals.toml".to_owned(),
+        rate: 0.95,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -93,6 +95,7 @@ fn args() -> Result<Args, String> {
             "--check" => a.check = v == "true",
             "--report" => a.report = Some(PathBuf::from(v)),
             "--goals" => a.goals = v,
+            "--rate" => a.rate = v.parse().map_err(|e| format!("--rate: {e}"))?,
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -295,7 +298,7 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
         &runs,
         &what,
         a.want,
-        0.95,
+        a.rate,
         plan::walk::PATIENCE_TICKS.max(1200),
         race.budget.as_ref(),
     );
