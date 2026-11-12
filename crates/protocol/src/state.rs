@@ -67,6 +67,12 @@ impl State {
             | S2c::Ping { .. }
             | S2c::PlayerPosition { .. }
             | S2c::SetTime
+            | S2c::LevelChunkWithLight { .. }
+            | S2c::ForgetLevelChunk { .. }
+            | S2c::BlockUpdate { .. }
+            | S2c::SectionBlocksUpdate { .. }
+            | S2c::Respawn { .. }
+            | S2c::SetHealth { .. }
             | S2c::ChunkBatchFinished { .. }
             | S2c::Disconnect { .. }
             | S2c::Unknown { .. } => self,

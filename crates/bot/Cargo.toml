@@ -14,3 +14,4 @@ path = "src/main.rs"
 data = { path = "../data" }
 net = { path = "../net" }
 protocol = { path = "../protocol" }
+world = { path = "../world" }

@@ -34,6 +34,7 @@ Do these in order before writing any code, every session, and again after any co
 ## 3. How to work an issue
 
 - **One issue at a time**, in order. Do not start the next until Bridger says "do the next one".
+- **No approval gate** (Bridger, 2026-11-12): on "do the next one", post the plan as a comment on the issue, then implement, open the PR and merge it when green, without stopping to ask. No plan-mode approval dialog for ruststeve issues.
 - Branch from `main` as `issue-NN-<slug>` (e.g. `issue-03-connect`). Committing, pushing the branch, opening its PR **into `main`** and merging it are authorized. Never push directly to `main`, never force-push, never `--no-verify`.
 - An issue closes only when **its done-condition holds on a runner**, measured as the issue states (real race, k/n, the named checkpoint start). Put the evidence (run ids, k/n, the commit) in the PR body, then merge into `main` and report.
 - **A failure inside an issue** gets a written problem statement in `docs/problems/<stage>.md` (needs, risks, done in world terms, the last recorded failure). Never open a new issue for a symptom. An issue too big splits into numbered sub-issues (`17a`, `17b`) so the plan stays one list.

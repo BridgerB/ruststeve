@@ -31,7 +31,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `datagen` | generates `data` from the 26.1.2 server jar and reports (runners only) | network, files, java |
 | `verify-stream` | logs in to a real server and fails on a packet id `data` lacks (runners only) | sockets |
 | `protocol` | primitives, framing, typed packets, states, the upkeep `Session` ([[connection]]) | no |
-| `world` | `World`, `Event`, `Effect`, the protocol reducer, chunk sections, entities, inventory | no |
+| `world` | `World`, `Event`, `Effect`, `step`; columns, overlay, the player ([[world-value]]) | no |
 | `physics` | vanilla movement as a pure function, collision, fluids | no |
 | `memory` | append-only facts with time, spatial indexes | no |
 | `plan` | goal table, needs planner, intents, executors, progress invariants | no |
