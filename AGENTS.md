@@ -6,7 +6,7 @@ ruststeve is an autonomous Minecraft bot in Rust: from a fresh spawn to a dead E
 
 Do these in order before writing any code, every session, and again after any context reset.
 
-1. **Get the branch.** All work is on `functional` (never `main`). `git fetch origin && git checkout functional && git pull`.
+1. **Get the branch.** All work is on `main` (the old `functional` and `reset` branches were fast-forwarded into it on 2026-11-11). `git fetch origin && git checkout main && git pull`.
 2. **Read the brain's spine, in full.** These are short; read every one:
    - `brain/_index.md`, `brain/operating-manual.md`, `brain/conventions.md`, `brain/rules.md`, `brain/glossary.md`
    - every hub: `brain/*/_moc.md` and `brain/*/*/_moc.md`
@@ -32,8 +32,8 @@ Do these in order before writing any code, every session, and again after any co
 ## 3. How to work an issue
 
 - **One issue at a time**, in order. Do not start the next until Bridger says "do the next one".
-- Branch from `functional` as `issue-NN-<slug>` (e.g. `issue-03-connect`). Pushing the branch and opening its PR **into `functional`** is authorized; never push to `main`, never force-push, never `--no-verify`.
-- An issue closes only when **its done-condition holds on a runner**, measured as the issue states (real race, k/n, the named checkpoint start). Put the evidence (run ids, k/n, the commit) in the PR body, then merge into `functional` and report.
+- Branch from `main` as `issue-NN-<slug>` (e.g. `issue-03-connect`). Committing, pushing the branch, opening its PR **into `main`** and merging it are authorized. Never push directly to `main`, never force-push, never `--no-verify`.
+- An issue closes only when **its done-condition holds on a runner**, measured as the issue states (real race, k/n, the named checkpoint start). Put the evidence (run ids, k/n, the commit) in the PR body, then merge into `main` and report.
 - **A failure inside an issue** gets a written problem statement in `docs/problems/<stage>.md` (needs, risks, done in world terms, the last recorded failure). Never open a new issue for a symptom. An issue too big splits into numbered sub-issues (`17a`, `17b`) so the plan stays one list.
 - Every change that touches a subsystem updates its brain note in the same PR, bumping `lastUpdated` and the `ruststeve@` pin; `cargo run -q -p brain-check -- touches ruststeve <paths>` lists the notes a diff affects.
 

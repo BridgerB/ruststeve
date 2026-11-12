@@ -38,6 +38,7 @@ Real questions, the traversal that answers each, and how many notes past the ind
 | What happens when the bot gets stuck in a real run? | [[incident-to-regression]] → [[blaze-debugging-method]] | 2 |
 | What do we build first, and when is it done? | [[ruststeve/roadmap/_moc]] → [[first-twenty-issues]] | 1 |
 | Where does code run? How many runners? | [[runners-not-the-mac]] | 1 |
+| How do I run a command on a runner? | [[ci-on-runners]] | 1 |
 | What format are recordings? Why not JSON? | [[recording-format]] | 1 |
 | Do we use Postgres, SurrealDB, or a database at all? | [[data-out]] | 1 |
 | How far did clojurecraft get, and why did it stop? | [[oracle/handoff/_moc]] → [[cc-handoff]] → [[cc-stage18-lessons]] | 2 |
@@ -50,4 +51,4 @@ Real questions, the traversal that answers each, and how many notes past the ind
 ## Gaps
 - Resolved: `Tick` versus the ms clock ([[sync-core-and-time]]); physics lives in the core ([[body-boundary]]); the server model is ported into the `sim` crate ([[first-twenty-issues]], issue 6).
 - Decided: steve is the front end, reading SurrealDB ([[data-out]]). Open: where the database lives.
-- Open: the first push of `functional`, which running anything on the runners needs ([[runners-not-the-mac]]).
+- Resolved: the work moved to `main`, and code runs on the runners through CI and the probe ([[ci-on-runners]]).

@@ -1,0 +1,61 @@
+# The probe (issue #6): run one command on a runner, for any question that needs code run.
+#   gh workflow run probe.yml --ref <branch> -f command='cargo tree --workspace'
+#   gh run download <run id>      # probe.log and anything the command wrote to probe-out/
+# workflow_dispatch needs this file on the default branch (main); --ref picks the code to run.
+name: probe
+run-name: "probe: ${{ inputs.command }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Shell command to run at the repository root
+        required: true
+      timeout:
+        description: Minutes before the command is stopped
+        default: "60"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Run the command
+        # The command comes in through the environment, never interpolated into the script.
+        env:
+          PROBE_COMMAND: ${{ inputs.command }}
+          PROBE_TIMEOUT: ${{ inputs.timeout }}
+        run: |
+          set -o pipefail
+          mkdir -p probe-out
+          echo "\$ $PROBE_COMMAND" | tee probe.log
+          timeout "${PROBE_TIMEOUT}m" bash -o pipefail -c "$PROBE_COMMAND" 2>&1 | tee -a probe.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-${{ github.run_id }}
+          path: |
+            probe.log
+            probe-out/
+          if-no-files-found: warn
+          retention-days: 14

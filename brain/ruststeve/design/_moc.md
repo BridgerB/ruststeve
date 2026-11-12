@@ -26,6 +26,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[tick-loop]] - how the shell drives the core; record before step; what runs on which thread.
 - [[body-boundary]] - the trait that hides the game; in ruststeve, our own wire layer.
 - [[workspace-crates]] - the crates and the one-way dependency rule.
+- [[ci-on-runners]] - how code runs: the ci jobs, the cache rule, the probe for one-off questions, the boundary check.
 
 ## Truth and time
 - [[determinism-rules]] - every nondeterminism source and the lint that bans it.

@@ -1,0 +1,6 @@
+# The one toolchain for local edits and every runner. rustup on the runner image reads this file
+# (`rustup show` installs it), so CI needs no third-party toolchain action.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -5,7 +5,7 @@ type: decision
 tags: [decision, compute, ci, runners]
 aliases: [no compute on the Mac, GitHub Actions, runners, 20 runners, 16 GB, probe, where code runs]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#No compute on the Mac. Edit, cargo fmt, cargo clippy and git locally. Tests, sims, races and probes run on GitHub runners."
@@ -15,6 +15,7 @@ related:
   - "[[ruststeve/decisions/_moc|Decisions]]"
   - "[[testing-kinds]]"
   - "[[first-twenty-issues]]"
+  - "[[ci-on-runners]]"
 ---
 
 # Code runs on runners, never on the Mac
@@ -29,7 +30,7 @@ Locally only: editing, `cargo fmt`, `cargo clippy`, git, `gh`, reading files, an
 - **Running on the Mac "just this once"**: results then depend on a machine nobody else can reproduce; on the runners every result has a run id.
 
 ## Consequences
-- Running anything needs a pushed branch, and pushes still need Bridger's go. The `functional` and `reset` branches are not pushed yet; ask before the first push.
+- Running anything needs a pushed branch: work on an `issue-NN` branch, push it, and CI runs on the push. A one-off question goes to the probe workflow ([[ci-on-runners]]). `main` is the default branch, which `workflow_dispatch` requires.
 - The runners are the race hardware too: a real race lane is one runner with its own vanilla server. clojurecraft's 4-vCPU runners starved the server when the bot JVM took about 3.3 cores; give each bot a CPU budget ([[cc-stage18-lessons]]).
 - clojurecraft's workflows are disabled, so all 20 runners are free for ruststeve ([[cc-handoff]]).
 
