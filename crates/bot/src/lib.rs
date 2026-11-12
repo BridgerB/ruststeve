@@ -3,6 +3,8 @@
 //! login, configuration, play), folds everything the server sends into `World`, steps a tick
 //! every 50 ms, records every run when asked, and ends with an `Ending`.
 
+pub mod live;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
@@ -44,6 +46,16 @@ pub struct Opts {
     pub start: Option<ApplyStart>,
     /// Print status lines every 10 s.
     pub verbose: bool,
+    /// Stream snapshots to steve's local relay (`STEVE_RELAY`, schema/snapshot-v1.md); `None`
+    /// streams nothing, and the bot behaves the same either way.
+    pub relay: Option<String>,
+    /// The race run id (`local-<ms>` for one bot), lane and start: the stream's and the
+    /// results' shared names.
+    pub run_id: String,
+    pub lane: u32,
+    pub start_name: String,
+    /// Where this run's case file will be, for the stream's `end` frame ("" for none).
+    pub case_path: String,
 }
 
 /// What the bot counts while it runs.
@@ -70,6 +82,8 @@ pub struct Outcome {
     pub doing: Doing,
     /// The recording was written to the end.
     pub recorded: bool,
+    /// What the live stream sent, dropped and failed, when it ran.
+    pub stream: Option<stream::Counts>,
 }
 
 impl Outcome {
@@ -217,6 +231,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         deadline,
         start,
         verbose,
+        relay,
+        run_id,
+        lane,
+        start_name,
+        case_path,
     } = opts;
     let addr = format!("{host}:{port}");
     let conn = net::connect(&addr).map_err(|e| format!("connect {addr}: {e}"))?;
@@ -230,6 +249,19 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
 
     let seed = now_ms() | 1;
     let mut seeds = Seeds(seed);
+    // The live stream: an observer on its own thread, fed after each step.
+    let sink = relay.as_deref().map(|r| {
+        println!("bot {name}: streaming to {r}");
+        stream::Sink::start(
+            r,
+            stream::Identity {
+                bot: name.clone(),
+                run: run_id.clone(),
+                hello: live::hello(seed, lane, &start_name, &addr),
+            },
+        )
+    });
+    let mut world_ticks: u64 = 0;
     let recorder = match &record {
         Some(path) => {
             let r = Recorder::create(path, &Header::new(&name, &addr, seed))?;
@@ -350,6 +382,20 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             ) {
                 break Ending::Error { why: e };
             }
+            world_ticks += 1;
+            if let Some(sink) = &sink {
+                let tick = run.world.session.server_ticks;
+                if world_ticks.is_multiple_of(live::SELF_EVERY_TICKS)
+                    && let Some(b) = live::self_state(&run.world, &doing)
+                {
+                    sink.send(tick, b);
+                }
+                if world_ticks.is_multiple_of(live::ENTITIES_EVERY_TICKS)
+                    && run.world.body.is_some()
+                {
+                    sink.send(tick, live::entities(&run.world));
+                }
+            }
         }
         let msg = match conn.inbound.recv_timeout(TICK_EVERY) {
             Ok(m) => m,
@@ -390,6 +436,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             _ => {}
         }
         let before = run.world.session.state;
+        // What the stream will show of this packet, read before the step consumes it.
+        let shown = sink
+            .as_ref()
+            .map(|_| live::from_packet(&packet, Some(&raw.body)))
+            .unwrap_or_default();
         let record = EventRecord::Packet {
             state: raw.state,
             id: raw.id,
@@ -397,6 +448,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         };
         if let Err(e) = run.step(&conn, record, Event::Packet(packet)) {
             break Ending::Error { why: e };
+        }
+        if let Some(sink) = &sink {
+            for b in shown {
+                sink.send(run.world.session.server_ticks, b);
+            }
         }
         if before != run.world.session.state && run.world.session.state == State::Play {
             play_since.get_or_insert_with(Instant::now);
@@ -422,6 +478,13 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         "bot {name}: ended {ending:?} after {} server ticks, stage {:?}, {} events",
         run.world.session.server_ticks, run.world.stage_reached, stats.events
     );
+    let stream_counts = sink.map(|s| {
+        s.send(
+            run.world.session.server_ticks,
+            live::end(&ending, &run.world, &case_path),
+        );
+        s.finish()
+    });
     Ok(Outcome {
         world: run.world,
         ending,
@@ -429,5 +492,6 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         start_inventory,
         doing,
         recorded,
+        stream: stream_counts,
     })
 }

@@ -31,7 +31,7 @@ related:
    - **time travel** on the versioned store: what the results looked like before a merge;
    - **live queries** for the front end when a new batch lands.
 3. **steve is the front end** (Bridger, 2026-11-11). It runs as a SvelteKit app only, never the TypeScript bot, and reads SurrealDB through the JavaScript SDK's embedded Node engine (`@surrealdb/node`, `surrealkv://` path) or a SurrealDB server: checkpoints, stage progress, runs, case files. No ruststeve code in steve; the contract is the SurrealDB schema plus the snapshot-stream schema, both versioned files in this repo.
-4. **Live view of one bot**: the read-only snapshot stream, snapshots only, never commands; not routed through the database.
+4. **Live view of one bot**: the read-only snapshot stream, snapshots only, never commands; not routed through the database. The bot is the client: it pushes frames out to steve's relay, local only ([[snapshot-stream]]).
 
 ## Why both, and what each is for
 More data would not have unstuck clojurecraft's stage 18: it already kept case files, ledgers and recordings of every failed run. It stalled on structure: symptom fixes judged on 30–150 attempts, a sim that disagreed with real, resource-burning loops, and recordings folded on newer code ([[cc-stage18-lessons]]). So the two layers have different jobs:

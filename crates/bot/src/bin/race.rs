@@ -145,6 +145,12 @@ fn race(a: &Args) -> Result<bool, String> {
             deadline,
             start: apply,
             verbose: false,
+            // The live view is local only: a runner never sets STEVE_RELAY.
+            relay: std::env::var("STEVE_RELAY").ok().filter(|r| !r.is_empty()),
+            run_id: a.run.clone(),
+            lane: a.lane,
+            start_name: start.name.clone(),
+            case_path: a.out.join(format!("{name}.case.rsc")).display().to_string(),
         };
         handles.push((name, std::thread::spawn(move || bot::run(opts))));
     }
@@ -220,6 +226,12 @@ fn race(a: &Args) -> Result<bool, String> {
             wall_ms: outcome.stats.wall_ms,
             recording: outcome.recorded.then(|| recording.clone()),
             replay: format!("cargo run -p replay -- verify {recording}"),
+            stream: outcome.stream.map(|c| results::StreamCounts {
+                sent: c.sent,
+                dropped: c.dropped,
+                failed: c.failed,
+                connects: c.connects,
+            }),
         };
         let row = write_case(&a.out, &case, &mut coverage)?;
         rows.push(row);
@@ -307,6 +319,7 @@ fn never_connected(
         wall_ms: 0,
         recording: None,
         replay: "-".to_owned(),
+        stream: None,
     };
     write_case(&a.out, &case, coverage)
 }

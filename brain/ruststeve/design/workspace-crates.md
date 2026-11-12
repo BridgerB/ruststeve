@@ -42,6 +42,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `rcon` | a Source RCON client for the race's own server ([[race-and-results]]) | sockets |
 | `results` | race config and starts, case and batch files, the k/n summary ([[race-and-results]]) | files |
 | `bot` | the bot loop as a library; binaries `bot` and `race` ([[race-and-results]]) | sockets, files |
+| `stream` | the live snapshot stream to steve's local relay; the `relay-stub` binary ([[snapshot-stream]]) | sockets |
 | `brain-check` | the brain's checker (exists) | files |
 | `mcp` (`ruststeve-mcp`) | the MCP server of agent tools, built on `rmcp` ([[agent-tools-over-mcp]]) | `gh`, files |
 | `xtask` | repository automation run in CI (`deps-boundary`) | runs `cargo` |

@@ -34,7 +34,7 @@ At any tick a human must be able to see what the bot believed, what it decided, 
 | Snapshot stream | read-only live view of one bot, never commands |
 
 - **Coverage** is a number on every batch: runs with each file over runs that should have one, tasks with a why over tasks, events dropped (must be 0), packets thrown away unheard. Coverage under 1.0 is fixed before any bot change.
-- **What exists (issue 07a)**: recordings, case files, batch files and coverage from the race ([[race-and-results]]); the death message and hits on the bot ([[wire-nbt-text]]). BrainEvents, senses and the snapshot stream come with the planner and 07c.
+- **What exists (issue 07a)**: recordings, case files, batch files and coverage from the race ([[race-and-results]]); the death message and hits on the bot ([[wire-nbt-text]]). The live snapshot stream to a local steve ([[snapshot-stream]]). BrainEvents and senses come with the planner.
 - `tracing` stays a developer tool in the shell; it is never the record of a decision.
 - The flight recorder of `FUNCTIONAL.md` is the "moment a minute" ring above.
 
