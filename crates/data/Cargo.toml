@@ -1,0 +1,9 @@
+[package]
+name = "data"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "The game's tables, generated from the vanilla 26.1.2 server by datagen and committed (no I/O)"
+
+[dependencies]

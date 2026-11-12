@@ -6,14 +6,14 @@ tags: [ci, runners, github-actions, probe, caching]
 aliases: [ci.yml, probe.yml, how to run code, rust-cache, nextest, workflow_dispatch, deps-boundary, xtask]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@cd6e03e
+verifiedAgainst: ruststeve@a02c9a0
 sourceRefs:
   - "ruststeve:.github/workflows/ci.yml## Incremental compilation only adds overhead and cache churn on a fresh runner."
   - "ruststeve:.github/workflows/ci.yml## Only main writes the cache; branches and PRs restore it."
   - "ruststeve:.github/workflows/ci.yml#- run: cargo nextest run --workspace --locked --no-tests=pass"
   - "ruststeve:.github/workflows/ci.yml#- run: cargo run -q --locked -p brain-check -- --strict"
   - "ruststeve:.github/workflows/probe.yml## workflow_dispatch needs this file on the default branch (main); --ref picks the code to run."
-  - "ruststeve:crates/xtask/src/main.rs#const CORE_CRATES: [&str; 6] = [\"protocol\", \"world\", \"physics\", \"memory\", \"plan\", \"sim\"];"
+  - "ruststeve:crates/xtask/src/main.rs#\"data\", \"protocol\", \"world\", \"physics\", \"memory\", \"plan\", \"sim\","
   - "ruststeve:rust-toolchain.toml#channel = \"1.96.0\""
 related:
   - "[[ruststeve/design/_moc|Design]]"
@@ -36,7 +36,7 @@ The Mac never runs code ([[runners-not-the-mac]]). Two workflows are how it runs
 - **Cache**: `Swatinem/rust-cache@v2` with one `shared-key`; only `main` saves it, branches and PRs restore it, so a branch never evicts `main`'s warm cache.
 - **Environment**: `CARGO_INCREMENTAL=0` (incremental compilation only adds overhead and cache churn on a fresh runner), `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0` (smaller `target/`, smaller cache). `-D warnings` is passed to clippy only, never through `RUSTFLAGS`, which would change every cache key.
 - **nextest** is installed as a prebuilt binary by `taiki-e/install-action@v2`; it runs tests in parallel processes and reports per test.
-- **The boundary**: `xtask deps-boundary` runs `cargo tree -e normal` for each core crate that exists (`protocol`, `world`, `physics`, `memory`, `plan`, `sim`) and fails if any depends on an async runtime, an I/O library, SurrealDB, or our own `net`, `rcon`, `record`, `ingest`.
+- **The boundary**: `xtask deps-boundary` runs `cargo tree -e normal` for each core crate that exists (`data`, `protocol`, `world`, `physics`, `memory`, `plan`, `sim`) and fails if any depends on an async runtime, an I/O library, SurrealDB, or our own `net`, `rcon`, `record`, `ingest`.
 
 ## Running code on a runner (the probe)
 ```bash

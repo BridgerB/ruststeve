@@ -1,0 +1,111 @@
+# Datagen (issue #7): regenerate the game tables from the vanilla 26.1.2 server, lint and test them,
+# log a raw client in and check every packet id the server sends is in the tables, then fail if
+# the regenerated files differ from the committed ones. Notes: brain/ruststeve/design/datagen.md
+name: datagen
+
+on:
+  push:
+    branches: [main, "issue-*"]
+    paths:
+      - crates/datagen/**
+      - crates/data/**
+      - crates/verify-stream/**
+      - rust-toolchain.toml
+      - .github/workflows/datagen.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - crates/datagen/**
+      - crates/data/**
+      - crates/verify-stream/**
+      - rust-toolchain.toml
+      - .github/workflows/datagen.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: datagen-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  # The server jar and its reports, kept between runs (keyed by the Minecraft version).
+  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+
+jobs:
+  datagen:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: datagen
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v1
+
+      - name: Generate the tables
+        run: cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out crates/data/src/generated
+
+      - name: Upload the generated tables
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-${{ github.run_id }}
+          path: crates/data/src/generated/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Lint and test the generated tables
+        run: |
+          cargo clippy --locked -p data -p verify-stream --all-targets -- -D warnings
+          cargo test --locked -p data
+
+      - name: Start the vanilla server (offline mode)
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/server"
+          mkdir -p "$dir"
+          cp "$DATAGEN_WORK/server.jar" "$dir/"
+          cd "$dir"
+          echo "eula=true" > eula.txt
+          printf '%s\n' online-mode=false simulation-distance=3 view-distance=3 level-seed=typecraft spawn-protection=0 > server.properties
+          nohup java -Xmx2G -jar server.jar nogui > server.log 2>&1 &
+          for _ in $(seq 1 180); do
+            if grep -q 'Done (' server.log; then exit 0; fi
+            sleep 2
+          done
+          cat server.log
+          exit 1
+
+      - name: Log in and check every packet id
+        run: cargo run -q --locked -p verify-stream -- 127.0.0.1 25565 20
+
+      - name: Upload the stream report and server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-${{ github.run_id }}
+          path: |
+            stream-report.txt
+            ${{ runner.temp }}/server/server.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: The committed tables match the regenerated ones
+        run: |
+          git add -N crates/data
+          git diff --exit-code --stat crates/data

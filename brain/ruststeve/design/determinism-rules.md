@@ -5,8 +5,8 @@ type: reference
 tags: [determinism, replay, lint, clippy]
 aliases: [clippy.toml, banned types, disallowed methods, no HashMap]
 status: verified
-lastUpdated: 2026-11-11
-verifiedAgainst: ruststeve@c87ac55
+lastUpdated: 2026-11-12
+verifiedAgainst: ruststeve@a02c9a0
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#{ path = \"std::collections::HashMap\", reason = \"random iteration order breaks replay: use BTreeMap or IndexMap\" },"
   - "ruststeve:FUNCTIONAL.md#{ path = \"std::time::Instant::now\",    reason = \"core is deterministic: use Input.tick\" },"
@@ -41,7 +41,7 @@ A run is reproducible when the same config, seed and recorded inputs always prod
 | Parallelism | no `rayon` in the core | `cargo tree` check |
 | Internal ids | `CommandId`, `TaskId`, `ExpectationId` from counters in `Brain` | review |
 
-A `clippy.toml` lives in each core crate (`protocol`, `world`, `physics`, `memory`, `plan`, `sim`, [[workspace-crates]]) because clippy reads the one found from the crate's directory upward; it also sets `allow-unwrap-in-tests = true`.
+A `clippy.toml` lives in each core crate (`data`, `protocol`, `world`, `physics`, `memory`, `plan`, `sim`, [[workspace-crates]]) because clippy reads the one found from the crate's directory upward; it also sets `allow-unwrap-in-tests = true`.
 
 ## Gotchas
 - Any text form of a recording (the `replay export` view) must round-trip floats exactly: the guide found `serde_json` drifts in the last bit unless `float_roundtrip` is on. The recording itself is binary ([[recording-format]]).

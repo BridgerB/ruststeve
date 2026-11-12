@@ -66,7 +66,7 @@ Tests, the bot and every binary run in the workflows under `.github/workflows/`,
 
 ## 6. Code rules
 
-- **The core is pure.** `protocol`, `world`, `physics`, `memory`, `plan`, `sim` have no I/O, no clock reads, no unseeded randomness, no `env::var`, no `HashMap`/`HashSet` iteration, no `Rc`/`RefCell`/`Arc<Mutex>`. Time and randomness arrive on the tick event. A `clippy.toml` per core crate enforces it (`brain/ruststeve/design/determinism-rules.md`).
+- **The core is pure.** `data`, `protocol`, `world`, `physics`, `memory`, `plan`, `sim` have no I/O, no clock reads, no unseeded randomness, no `env::var`, no `HashMap`/`HashSet` iteration, no `Rc`/`RefCell`/`Arc<Mutex>`. Time and randomness arrive on the tick event. A `clippy.toml` per core crate enforces it (`brain/ruststeve/design/determinism-rules.md`).
 - **One owner.** The loop thread owns the world; `step` is the only way it changes; observers read snapshots.
 - **Closed sets are enums**, matched with no `_ =>` arm. Kinds generated from the game carry `Unknown(u32)`.
 - **Data, not literals.** Thresholds, goals, starts and problem statements are data files; every number has a comment saying where it came from.
