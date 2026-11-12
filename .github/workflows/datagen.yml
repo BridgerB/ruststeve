@@ -57,8 +57,21 @@ jobs:
           path: ${{ env.DATAGEN_WORK }}
           key: datagen-work-26.1.2-v1
 
-      - name: Generate the tables
-        run: cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out crates/data/src/generated
+      - name: Fetch clojurecraft at its pin (the oracle the probe's tables are compared with)
+        run: |
+          set -euo pipefail
+          pin=$(awk '$1 == "clojurecraft" { print $3 }' brain/sources)
+          git init -q "$RUNNER_TEMP/clojurecraft"
+          git -C "$RUNNER_TEMP/clojurecraft" remote add origin https://github.com/BridgerB/clojurecraft.git
+          git -C "$RUNNER_TEMP/clojurecraft" fetch -q --depth=1 origin "$pin"
+          git -C "$RUNNER_TEMP/clojurecraft" checkout -q FETCH_HEAD
+          echo "clojurecraft $pin"
+
+      - name: Generate the tables (reports, inner jar, and the JNI probe of the game's classes)
+        run: |
+          cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" \
+            --out crates/data/src/generated \
+            --oracle "$RUNNER_TEMP/clojurecraft/resources/clojurecraft"
 
       - name: Upload the generated tables
         if: always()

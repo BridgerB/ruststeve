@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! cargo run -p datagen -- generate [--work target/datagen] [--out crates/data/src/generated]
+//!                                  [--oracle <clojurecraft>/resources/clojurecraft]
 //! ```
 //!
 //! Runs on the runners only (the Mac never runs code). It downloads the 26.1.2 server jar named by
@@ -11,9 +12,12 @@
 //! rustfmt'd Rust file per table. CI regenerates and fails on any diff against the committed files.
 
 mod emit;
+mod emit_probe;
 mod fetch;
 mod jar;
 mod model;
+mod oracle;
+mod probe;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -35,6 +39,7 @@ fn run() -> Result<()> {
     let task = args.next();
     let mut work = PathBuf::from("target/datagen");
     let mut out = PathBuf::from("crates/data/src/generated");
+    let mut oracle = None;
     while let Some(flag) = args.next() {
         let value = args
             .next()
@@ -42,23 +47,32 @@ fn run() -> Result<()> {
         match flag.as_str() {
             "--work" => work = PathBuf::from(value),
             "--out" => out = PathBuf::from(value),
+            "--oracle" => oracle = Some(PathBuf::from(value)),
             other => bail!("unknown flag {other}"),
         }
     }
     match task.as_deref() {
-        Some("generate") => generate(&work, &out),
+        Some("generate") => generate(&work, &out, oracle.as_deref()),
         other => bail!("unknown task {other:?}; tasks: generate"),
     }
 }
 
-fn generate(work: &std::path::Path, out: &std::path::Path) -> Result<()> {
+fn generate(
+    work: &std::path::Path,
+    out: &std::path::Path,
+    oracle: Option<&std::path::Path>,
+) -> Result<()> {
     std::fs::create_dir_all(work).with_context(|| format!("create {}", work.display()))?;
     let jar = fetch::server_jar(work)?;
     let reports = fetch::reports(work)?;
     let entries = jar::inner_entries(&jar)?;
     let game = model::Game::read(&reports, &entries)?;
     game.print_counts();
-    emit::write_all(&game, out)?;
+    let probe = probe::run(work)?;
+    if let Some(dir) = oracle {
+        oracle::compare(dir, &probe)?;
+    }
+    emit::write_all(&game, &probe, out)?;
     println!("wrote {}", out.display());
     Ok(())
 }

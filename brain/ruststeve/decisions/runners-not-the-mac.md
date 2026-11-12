@@ -25,6 +25,8 @@ The Mac edits code. Everything that runs it (tests, sims, races, replays, probes
 
 Locally only: editing, `cargo fmt`, `cargo clippy`, git, `gh`, reading files, and the seconds-long brain checker (`cargo run -q -p brain-check`), the same allowance clojurecraft gave `bb check`.
 
+**One exception: watching the bot live** (Bridger, 2026-11-12). To see where the bot gets stuck, the bot and a vanilla server may run on the Mac and stream to steve's local relay (`STEVE_RELAY=ws://localhost:8787`), with steve running locally. Runners do not stream to steve; their results reach it through the insight store ([[data-out]]). Tests, CI, races, sims and datagen stay on the runners.
+
 ## What was rejected
 - **"Mostly local"** (Bridger's word on 2026-11-11, before this decision) and `FUNCTIONAL.md`'s `bacon` on every save. Replaced by runners.
 - **Running on the Mac "just this once"**: results then depend on a machine nobody else can reproduce; on the runners every result has a run id.

@@ -24,7 +24,8 @@ Do these in order before writing any code, every session, and again after any co
 **No code runs on the Mac.** It only edits code. Everything that runs code goes to GitHub Actions runners: **20 at once, 16 GB each**.
 
 - Locally only: editing, `cargo fmt`, `cargo clippy`, `cargo run -q -p brain-check` (seconds; it is the brain's static check), `git`, `gh`, reading files.
-- Not locally: tests, builds for running, the bot, servers, sims, races, replays, benchmarks, probes.
+- Not locally: tests, builds for running, sims, races, replays, benchmarks, probes.
+- The one exception (Bridger, 2026-11-12): to **watch the bot live**, the bot and a vanilla server may run on the Mac, streaming to steve running locally (`STEVE_RELAY=ws://localhost:8787`). Runners never stream to steve.
 - The loop: change code, commit, push the branch, let CI run on the push, read the run's logs (`gh run view <id> --log-failed`), push again.
 - A question that needs code run goes to the probe: the `probe_run` MCP tool, or `gh workflow run probe.yml --ref <branch> -f command=...` ([`brain/ruststeve/design/ci-on-runners.md`](brain/ruststeve/design/ci-on-runners.md)).
 - **Use the `ruststeve` MCP server** (`.mcp.json`, built with the official Rust MCP SDK `rmcp`): `probe_run`, `probe_output`, `run_status`, `run_log`, `ci_runs`, `brain_check`, `brain_note`, `brain_search`. New agent-facing tooling is added there as a tool, not as a script (`brain/ruststeve/decisions/agent-tools-over-mcp.md`).
@@ -54,6 +55,7 @@ Use SurrealDB (the `ingest` binary's insight store) for questions across many ru
 ## 5. Commands
 
 ```bash
+nix develop                                       # dev shell: JDK 25 (datagen, the server) + rustup (flake.nix)
 cargo fmt --all                                   # format (local)
 cargo clippy --workspace --all-targets -- -D warnings   # lint (local)
 cargo run -q -p brain-check                       # the brain's four invariants, must be zero (local)

@@ -5,7 +5,7 @@ type: reference
 tags: [wire, entities, metadata]
 aliases: [set-entity-data, entity data serializers, read-metadata, index 255, health index 9]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92 steve@46c1264
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#\"How the metadata values the bot steps over are written, by serializer id: the game's"
@@ -39,5 +39,6 @@ related:
 The full serializer list (components, particles, block positions, variants) is not here; clojurecraft never reads past them.
 
 ## See also
+- [[datagen]] - ruststeve's serializer ids (`data::generated::metadata::ENTITY_DATA_SERIALIZERS`), read from `EntityDataSerializers` by the JNI probe, never hand-ordered.
 - [[wire-slots]] - the item-stack serializer.
 - [[cc-entities]] - what clojurecraft folds from these.
