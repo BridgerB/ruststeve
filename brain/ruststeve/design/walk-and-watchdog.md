@@ -6,7 +6,7 @@ tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@b4d3e95 clojurecraft@be85a92
+verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -26,7 +26,7 @@ Issue 09a: clojurecraft's walk intent, made to fail fast when it stops getting c
 ## How it works
 - **Following** (`follow`): face the next waypoint's centre and go forward; jump only when the waypoint is above and within 1.3, or when blocked; stop once wholly over a descending waypoint. A waypoint is reached within 0.35 horizontally and 0.5 vertically.
 - **Replanning** (clojurecraft's `route-stale?`): a waypoint ahead no longer standable, no waypoint reached for 40 ticks, or a short route walked out; at most 6 plans, then `NoPath`. Deadline 1,200 ticks plus 10 per waypoint.
-- **Arriving**: for a log, the eye within 4.0 of its centre and the feet at most 2 below it; for an explore, the route's goal.
+- **Arriving**: for a log to reach (issue 09), the eye within 4.0 of its centre and the feet at most 2 below it; for a log to dig (`to_dig`, issue 10c), beside it by the `Pickup` goal ([[digging]]); for an explore, the route's goal.
 - **The progress invariant**: every tick the walk keeps the nearest it has come to the target (a gain under 0.25 does not count). No gain for **200 ticks** (10 game seconds) fails it `NoProgress`; the longest stall is kept and reported, so "no walk 60 game seconds without progress" is counted per run, not assumed.
 - **Failures are data**: `NoPath`, `NoProgress`, `Deadline`, `TargetLost`; the planner refuses and chooses again ([[planner]]).
 

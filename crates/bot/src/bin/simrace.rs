@@ -8,8 +8,8 @@
 //!     [--lane 0] [--first-seed 0] [--cap 6000] [--walk square] [--run local-<ms>] [--threads N]
 //! ```
 //!
-//! With `--landings-file F --worlds DIR --goal log:30` it runs the planner in each captured
-//! landing instead (issue 09's measure, `bot::landings`), prints the measure and, with
+//! With `--landings-file F --worlds DIR --goal log:30` (or `--goal table --rate 0.9`, issue
+//! 10) it runs the planner in each captured landing instead (issue 09's measure, `bot::landings`), prints the measure and, with
 //! `--check`, fails when a done-condition or the CPU budget does not hold:
 //!
 //! ```text
@@ -48,6 +48,8 @@ struct Args {
     want: usize,
     check: bool,
     report: Option<PathBuf>,
+    goals: String,
+    rate: f64,
 }
 
 fn args() -> Result<Args, String> {
@@ -68,6 +70,8 @@ fn args() -> Result<Args, String> {
         want: 200,
         check: false,
         report: None,
+        goals: "config/goals.toml".to_owned(),
+        rate: 0.95,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -90,6 +94,8 @@ fn args() -> Result<Args, String> {
             "--want" => a.want = usize::try_from(num(&v)?).map_err(|e| e.to_string())?,
             "--check" => a.check = v == "true",
             "--report" => a.report = Some(PathBuf::from(v)),
+            "--goals" => a.goals = v,
+            "--rate" => a.rate = v.parse().map_err(|e| format!("--rate: {e}"))?,
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -248,16 +254,31 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
         peaceful: race.server.difficulty == "peaceful",
     };
     let aim = a.goal.ok_or("--landings-file needs --goal")?;
+    let table = match aim {
+        plan::Aim::Table => Some(std::sync::Arc::new(bot::goals_table(&a.goals)?)),
+        plan::Aim::ReachLog { .. } => None,
+    };
     let list = results::parity::Landings::read(file)?;
     let n = list.landing.len();
     let runs: Vec<bot::landings::LandingRun> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..a.threads)
             .map(|t| {
                 let list = &list;
+                let table = table.clone();
                 s.spawn(move || {
                     (0..n)
                         .filter(|i| *i as u64 % a.threads == t)
-                        .map(|i| bot::landings::run_one(&a.worlds, list, i, config, aim, a.ticks))
+                        .map(|i| {
+                            bot::landings::run_one(
+                                &a.worlds,
+                                list,
+                                i,
+                                config,
+                                aim,
+                                a.ticks,
+                                table.clone(),
+                            )
+                        })
                         .collect::<Vec<_>>()
                 })
             })
@@ -269,10 +290,15 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
         all.sort_by_key(|r| r.index);
         all
     });
+    let what = match aim {
+        plan::Aim::ReachLog { min_distance } => format!("reach a log {min_distance}+ blocks away"),
+        plan::Aim::Table => format!("hold a crafting table (the kit) within {} ticks", a.ticks),
+    };
     let m = bot::landings::measure(
         &runs,
+        &what,
         a.want,
-        0.95,
+        a.rate,
         plan::walk::PATIENCE_TICKS.max(1200),
         race.budget.as_ref(),
     );

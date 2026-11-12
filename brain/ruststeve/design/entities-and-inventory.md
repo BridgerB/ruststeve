@@ -6,7 +6,7 @@ tags: [world, entities, metadata, inventory, slots]
 aliases: [Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3042214 clojurecraft@be85a92
+verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"

@@ -639,6 +639,20 @@ impl Sim {
         })
     }
 
+    /// Whether an item's box at (x, y, z) would be inside something that collides.
+    fn item_blocked(&self, x: f64, y: f64, z: f64) -> bool {
+        let h = ITEM_SIZE / 2.0;
+        let cells = |lo: f64, hi: f64| (lo.floor() as i32)..=(hi.floor() as i32);
+        cells(x - h, x + h).any(|cx| {
+            cells(z - h, z + h).any(|cz| {
+                cells(y + 1e-3, y + ITEM_SIZE - 1e-3).any(|cy| {
+                    self.solid(cx, cy, cz)
+                        .is_some_and(|top| y + 1e-3 < f64::from(cy) + top)
+                })
+            })
+        })
+    }
+
     /// `ItemEntity.tick` for each item: gravity, the move (straight down onto what is under it;
     /// sideways the drift is small and not collided), drag and friction; the delay and the age.
     /// Then `Player.aiStep`'s touch: an item with no delay left inside the grown box is picked
@@ -659,11 +673,20 @@ impl Sim {
             }
             if !it.on_ground {
                 it.velocity[1] -= ITEM_GRAVITY;
-                let next = [
-                    it.pos[0] + it.velocity[0],
-                    it.pos[1] + it.velocity[1],
-                    it.pos[2] + it.velocity[2],
-                ];
+                // Sideways, a move into a block is stopped on that axis (Entity.collide, per
+                // axis): a drop beside a trunk stays in the dug log's column rather than sinking
+                // into the higher ground next to it (found by issue 10c's sim measure).
+                let mut x = it.pos[0] + it.velocity[0];
+                if self.item_blocked(x, it.pos[1], it.pos[2]) {
+                    x = it.pos[0];
+                    it.velocity[0] = 0.0;
+                }
+                let mut z = it.pos[2] + it.velocity[2];
+                if self.item_blocked(x, it.pos[1], z) {
+                    z = it.pos[2];
+                    it.velocity[2] = 0.0;
+                }
+                let next = [x, it.pos[1] + it.velocity[1], z];
                 let floor = self.floor_under(next[0], it.pos[1].max(next[1]), next[2]);
                 match floor {
                     Some(f) if next[1] <= f => {
