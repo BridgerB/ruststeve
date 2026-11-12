@@ -196,6 +196,10 @@ pub enum S2c {
         collector: i32,
         amount: i32,
     },
+    /// What the cursor holds now (sent when a click's claimed cursor differs).
+    SetCursorItem {
+        item: Slot,
+    },
     /// The server closed a window.
     ContainerClose {
         window: i32,
@@ -456,6 +460,9 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 item: r.varint()?,
                 collector: r.varint()?,
                 amount: r.varint()?,
+            },
+            Some(PlayIn::SetCursorItem) => S2c::SetCursorItem {
+                item: read_slot(&mut r)?,
             },
             Some(PlayIn::ContainerClose) => S2c::ContainerClose {
                 window: r.varint()?,
@@ -862,13 +869,59 @@ impl S2c {
                 return Err(EncodeError::NotModelled("section_blocks_update"));
             }
             S2c::Respawn { .. } => return Err(EncodeError::NotModelled("respawn")),
-            S2c::AddEntity { .. }
-            | S2c::RemoveEntities { .. }
-            | S2c::MoveEntity { .. }
-            | S2c::MoveEntityRot { .. }
-            | S2c::EntityPositionSync { .. }
-            | S2c::TeleportEntity { .. }
-            | S2c::SetEntityData { .. } => return Err(EncodeError::NotModelled("entities")),
+            S2c::AddEntity {
+                id,
+                uuid,
+                kind,
+                x,
+                y,
+                z,
+            } => {
+                // ClientboundAddEntityPacket.write: then the velocity (an LpVec3, 0 is one zero
+                // byte), pitch, yaw and head yaw as bytes, and the type's data.
+                w.varint(*id);
+                w.uuid(uuid);
+                w.varint(*kind as i32);
+                w.f64(*x);
+                w.f64(*y);
+                w.f64(*z);
+                w.u8(0);
+                w.u8(0);
+                w.u8(0);
+                w.u8(0);
+                w.varint(0);
+                PlayIn::AddEntity.id()
+            }
+            S2c::RemoveEntities { ids } => {
+                w.varint(i32::try_from(ids.len()).map_err(|_| EncodeError::TooLong)?);
+                for id in ids {
+                    w.varint(*id);
+                }
+                PlayIn::RemoveEntities.id()
+            }
+            S2c::EntityPositionSync { id, x, y, z } => {
+                // PositionMoveRotation then on-ground: the velocity, yaw and pitch the model
+                // does not send are zero.
+                w.varint(*id);
+                w.f64(*x);
+                w.f64(*y);
+                w.f64(*z);
+                w.f64(0.0);
+                w.f64(0.0);
+                w.f64(0.0);
+                w.f32(0.0);
+                w.f32(0.0);
+                w.bool(true);
+                PlayIn::EntityPositionSync.id()
+            }
+            S2c::SetEntityData { id, entries } => {
+                w.varint(*id);
+                crate::metadata::write_metadata(&mut w, entries)?;
+                PlayIn::SetEntityData.id()
+            }
+            S2c::MoveEntity { .. } | S2c::MoveEntityRot { .. } | S2c::TeleportEntity { .. } => {
+                return Err(EncodeError::NotModelled("entity moves"));
+            }
             S2c::ContainerSetContent {
                 window,
                 state_id,
@@ -918,6 +971,10 @@ impl S2c {
                 w.varint(*collector);
                 w.varint(*amount);
                 PlayIn::TakeItemEntity.id()
+            }
+            S2c::SetCursorItem { item } => {
+                crate::slot::write_slot(&mut w, *item);
+                PlayIn::SetCursorItem.id()
             }
             S2c::ContainerClose { window } => {
                 w.varint(*window);

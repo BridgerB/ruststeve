@@ -1,4 +1,4 @@
-# The parity table's moments (brain/ruststeve/design/parity-table.md): 50 rows, each a start on
+# The parity table's moments (brain/ruststeve/design/parity-table.md): 50 walking rows (issue 08) and 30 dig and craft rows (issue 10b, at the end), each a start on
 # a captured landing (config/landings.toml), a script and a length. Run in real and against the
 # server model, their outcome classes are compared field by field. Five starts per landing, six
 # blocks apart, each walking away from the centre (yaw 0 south, 90 west, 180 north, 270 east),
@@ -404,3 +404,264 @@ dx = 0
 dz = -6
 script = "straight:180"
 ticks = 160
+
+# Issue 10b's rows, after the walks so the real world's holes come after every walk row. Each
+# landing gets a dig of the block under the feet with FINISH late (tick 30: accepted, the block
+# breaks, the bot drops into the hole and picks up the drop) and early (tick 5: under 0.7 of the
+# progress, a delayed destroy the server finishes itself), and a craft in window 0 from items
+# given at the start (planks from a log, sticks from two planks, a table from four). Three blocks
+# off the centre diagonally, so no walk row crosses them. Items a block drops only by chance
+# (a sapling from leaves, a seed from grass) are left out of the inventory class: the model's
+# roll is not vanilla's, and the canopies a fresh server grows on the same seed differ from run to
+# run (two runner captures disagree at landings 4 and 7). Seven rows stand off the first spots,
+# chosen on an older capture.
+
+[[moment]]
+id = "d00-late"
+landing = 0
+dx = 3
+dz = 3
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d01-late"
+landing = 1
+dx = 3
+dz = 3
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d02-late"
+landing = 2
+dx = 3
+dz = 3
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d03-late"
+landing = 3
+dx = 3
+dz = 3
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d04-late"
+landing = 4
+dx = 2
+dz = 6
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d05-late"
+landing = 5
+dx = 3
+dz = 3
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d06-late"
+landing = 6
+dx = 9
+dz = -2
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d07-late"
+landing = 7
+dx = -4
+dz = -4
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d08-late"
+landing = 8
+dx = 3
+dz = 3
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d09-late"
+landing = 9
+dx = 3
+dz = 3
+script = "dig:30"
+ticks = 100
+
+[[moment]]
+id = "d00-early"
+landing = 0
+dx = -2
+dz = -2
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d01-early"
+landing = 1
+dx = -2
+dz = -2
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d02-early"
+landing = 2
+dx = -3
+dz = -3
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d03-early"
+landing = 3
+dx = -3
+dz = -3
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d04-early"
+landing = 4
+dx = 2
+dz = 4
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d05-early"
+landing = 5
+dx = -3
+dz = -3
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d06-early"
+landing = 6
+dx = -3
+dz = -3
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d07-early"
+landing = 7
+dx = -3
+dz = -3
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d08-early"
+landing = 8
+dx = -3
+dz = -3
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "d09-early"
+landing = 9
+dx = -2
+dz = -2
+script = "dig:5"
+ticks = 100
+
+[[moment]]
+id = "c00-planks"
+landing = 0
+dx = 3
+dz = -3
+script = "craft:planks"
+ticks = 100
+give = ["oak_log 1"]
+
+[[moment]]
+id = "c01-planks"
+landing = 1
+dx = 3
+dz = -3
+script = "craft:planks"
+ticks = 100
+give = ["oak_log 1"]
+
+[[moment]]
+id = "c02-planks"
+landing = 2
+dx = 3
+dz = -3
+script = "craft:planks"
+ticks = 100
+give = ["oak_log 1"]
+
+[[moment]]
+id = "c03-sticks"
+landing = 3
+dx = 3
+dz = -3
+script = "craft:sticks"
+ticks = 100
+give = ["oak_planks 2"]
+
+[[moment]]
+id = "c04-sticks"
+landing = 4
+dx = 3
+dz = -3
+script = "craft:sticks"
+ticks = 100
+give = ["oak_planks 2"]
+
+[[moment]]
+id = "c05-sticks"
+landing = 5
+dx = 3
+dz = -3
+script = "craft:sticks"
+ticks = 100
+give = ["oak_planks 2"]
+
+[[moment]]
+id = "c06-table"
+landing = 6
+dx = 3
+dz = -3
+script = "craft:table"
+ticks = 100
+give = ["oak_planks 4"]
+
+[[moment]]
+id = "c07-table"
+landing = 7
+dx = 3
+dz = -3
+script = "craft:table"
+ticks = 100
+give = ["oak_planks 4"]
+
+[[moment]]
+id = "c08-table"
+landing = 8
+dx = 3
+dz = -3
+script = "craft:table"
+ticks = 100
+give = ["oak_planks 4"]
+
+[[moment]]
+id = "c09-table"
+landing = 9
+dx = 3
+dz = -3
+script = "craft:table"
+ticks = 100
+give = ["oak_planks 4"]

@@ -6,7 +6,7 @@ tags: [memory, sightings, no-xray, facts, world]
 aliases: [Memory, Sighting, Seen, watched kinds, exposed face, memory crate, facts with time]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@50f68a3 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3042214 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#pub fn check("
   - "ruststeve:crates/memory/src/lib.rs#pub fn record(&mut self, seen: Seen, at_tick: u64) -> bool {"

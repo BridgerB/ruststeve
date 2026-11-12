@@ -100,6 +100,7 @@ impl State {
             | S2c::SetHeldSlot { .. }
             | S2c::TakeItemEntity { .. }
             | S2c::ContainerClose { .. }
+            | S2c::SetCursorItem { .. }
             | S2c::Unknown { .. } => self,
         }
     }

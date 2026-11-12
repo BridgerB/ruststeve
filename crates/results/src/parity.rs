@@ -17,9 +17,14 @@ pub struct Moment {
     /// Blocks from the landing's centre; the start stands on the surface there.
     pub dx: i32,
     pub dz: i32,
-    /// A script name (`straight:90`, `jump:180`, `square`, `still`).
+    /// A script name (`straight:90`, `jump:180`, `square`, `still`, `dig:30`,
+    /// `craft:planks`).
     pub script: String,
     pub ticks: u64,
+    /// Items given at the start, as `item count` (`oak_log 1`): `/give` in real, into the
+    /// model's inventory in sim (issue 10b).
+    #[serde(default)]
+    pub give: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -62,7 +67,7 @@ pub enum Health {
 }
 
 /// The outcome class of a moment: what the table compares, field by field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Outcome {
     /// The block the feet ended in (floor of the position).
     pub cell: [i32; 3],
@@ -71,6 +76,12 @@ pub struct Outcome {
     /// The server corrected the bot at least once after the script began.
     pub corrected: bool,
     pub health: Health,
+    /// What the player holds at the end, by item name (window 0's slots 1-45 and the cursor),
+    /// and how many items sit in the grid, its result and the cursor (issue 10b).
+    #[serde(default)]
+    pub inventory: BTreeMap<String, i32>,
+    #[serde(default)]
+    pub grid: i32,
 }
 
 /// One run of a moment.
@@ -99,20 +110,24 @@ pub struct Row {
 
 pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
     let by = |rs: &[MomentResult]| -> BTreeMap<String, Option<Outcome>> {
-        rs.iter().map(|r| (r.moment.clone(), r.outcome)).collect()
+        rs.iter()
+            .map(|r| (r.moment.clone(), r.outcome.clone()))
+            .collect()
     };
     let (r, s) = (by(real), by(sim));
     let ids: std::collections::BTreeSet<&String> = r.keys().chain(s.keys()).collect();
     ids.into_iter()
         .map(|id| {
-            let (real, sim) = (r.get(id).copied().flatten(), s.get(id).copied().flatten());
-            let differ = match (real, sim) {
+            let (real, sim) = (r.get(id).cloned().flatten(), s.get(id).cloned().flatten());
+            let differ = match (&real, &sim) {
                 (Some(a), Some(b)) => [
                     ("cell", a.cell != b.cell),
                     ("on_ground", a.on_ground != b.on_ground),
                     ("in_water", a.in_water != b.in_water),
                     ("corrected", a.corrected != b.corrected),
                     ("health", a.health != b.health),
+                    ("inventory", a.inventory != b.inventory),
+                    ("grid", a.grid != b.grid),
                 ]
                 .into_iter()
                 .filter_map(|(n, d)| d.then_some(n))
@@ -132,9 +147,14 @@ pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
 /// The table as markdown, with the totals and the stated tolerance's verdict.
 pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
     let show = |o: &Option<Outcome>| {
-        o.map_or("-".to_owned(), |o| {
+        o.as_ref().map_or("-".to_owned(), |o| {
+            let held = if o.inventory.is_empty() && o.grid == 0 {
+                String::new()
+            } else {
+                format!(" {:?} grid {}", o.inventory, o.grid)
+            };
             format!(
-                "{:?} {} {} {} {:?}",
+                "{:?} {} {} {} {:?}{held}",
                 o.cell,
                 if o.on_ground { "ground" } else { "air" },
                 if o.in_water { "water" } else { "dry" },
