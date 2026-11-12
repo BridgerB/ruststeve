@@ -6,7 +6,7 @@ tags: [crates, layout, architecture]
 aliases: [crate layout, protocol crate, world crate, plan crate, sim crate, net crate, bins, bot-core]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve@a02c9a0
+verifiedAgainst: clojurecraft@be85a92 ruststeve@6907139
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#protocol/    packet specs as data, decode/encode, state transitions; no I/O"
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Crate boundaries: core crates (protocol, world, plan, sim) have no I/O dependencies at all. Only net, rcon, record and the binaries touch sockets and files."
