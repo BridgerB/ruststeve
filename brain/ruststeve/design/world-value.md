@@ -6,7 +6,7 @@ tags: [world, chunks, overlay, fold, state]
 aliases: [World, World::step, block_at, state_at, overlay, chunk columns, Event, Effect, world crate]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@ff7281f clojurecraft@be85a92
+verifiedAgainst: ruststeve@cb90ee0 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn step(&mut self, e: &Event) -> Vec<Effect> {"
   - "ruststeve:crates/world/src/lib.rs#pub fn state_at(&self, pos: BlockPos) -> Option<u32> {"
