@@ -1,0 +1,8 @@
+[package]
+name = "brain-check"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Integrity checker for brain/: links, orphans, and source anchors"
+
+[dependencies]
