@@ -15,7 +15,7 @@ related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[brain-events]]"
   - "[[cc-observability]]"
-  - "[[data-out-no-database]]"
+  - "[[data-out]]"
 ---
 
 # Observability
@@ -30,7 +30,7 @@ At any tick a human must be able to see what the bot believed, what it decided, 
 | Case file per ending | killer (the server's death text first), first hit, the task and its why, items gained and lost, swings sent and landed, the replay command |
 | Senses | one line a second; a moment a minute for the last few minutes; the whole mind at the end |
 | Truth | real: entities near the ending as the server holds them; sim: the model's view, and what the bot was blind to |
-| Batch file | every run of a lane batch: stage reached, ending, case signature ([[data-out-no-database]]) |
+| Batch file | every run of a lane batch: stage reached, ending, case signature ([[data-out]]) |
 | Snapshot stream | read-only live view of one bot, never commands |
 
 - **Coverage** is a number on every batch: runs with each file over runs that should have one, tasks with a why over tasks, events dropped (must be 0), packets thrown away unheard. Coverage under 1.0 is fixed before any bot change.
@@ -38,7 +38,7 @@ At any tick a human must be able to see what the bot believed, what it decided, 
 - The flight recorder of `FUNCTIONAL.md` is the "moment a minute" ring above.
 
 ## What was dropped
-Rerun and an in-process axum debug endpoint (`FUNCTIONAL.md`): ruststeve ships no viewer ([[data-out-no-database]]). Replays and the `why` binary are the REPL substitute.
+Rerun and an in-process axum debug endpoint (`FUNCTIONAL.md`): ruststeve ships no viewer; steve is the front end, reading the SurrealDB insight store ([[data-out]]). Replays and the `why` binary are the REPL substitute.
 
 ## See also
 - [[brain-events]] - the events.

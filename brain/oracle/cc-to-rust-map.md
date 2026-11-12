@@ -41,7 +41,7 @@ A boundary note: each clojurecraft mechanism and what replaces it. Map by respon
 | `sim` server model | a `Body` implementation for closed-loop tests ([[cc-sim]]) |
 | `clojure.spec` + `instrument` | newtypes, parse-at-the-boundary, `proptest` |
 | core.async bounded channels | plain threads and bounded `sync_channel`s; no tokio in the core ([[sync-core-and-time]]) |
-| `bb` tasks, Babashka tooling, gh-pages results site | Rust crates and binaries only; results as files, no database ([[just-ruststeve]], [[data-out-no-database]]) |
+| `bb` tasks, Babashka tooling, gh-pages results site | Rust crates and binaries only; results as files, ingested into SurrealDB for insight ([[just-ruststeve]], [[data-out]]) |
 | `ex-info` thrown on bugs | `thiserror` enums; game outcomes as `Failure` values ([[error-kinds]]) |
 
 ## Gotchas

@@ -41,7 +41,7 @@ Deaths on stage 18 were counted but never explained until 2026-11-06, when full 
 - Fights became explicable only after decoding damage types, sounds, hurt flashes (set by the damage event that names the mob: a real server never sends a mob's hurt animation), equipment and attributes ([[cc-entities]]).
 
 ## For ruststeve
-Issue 8 of the plan makes case files and per-second senses a done-condition before gameplay (coverage 1.0) ([[first-twenty-issues]]). The `BrainEvent` stream and `Reason` on every command are the Rust form of the ledger and the why ([[brain-events]]); case files are written by the shell from them, as files in the recording format ([[data-out-no-database]]).
+Issue 8 of the plan makes case files and per-second senses a done-condition before gameplay (coverage 1.0) ([[first-twenty-issues]]). The `BrainEvent` stream and `Reason` on every command are the Rust form of the ledger and the why ([[brain-events]]); case files are written by the shell from them, as files in the recording format ([[data-out]]).
 
 ## See also
 - [[observability]] - ruststeve's design.

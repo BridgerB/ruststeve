@@ -22,7 +22,7 @@ related:
 # A synchronous core, threads, and time as inputs
 
 ## The choice
-- **Threads and bounded channels**: one reader thread decodes packets and chunks; one loop thread steps the world; observers get snapshots over a bounded channel and drop rather than block (`std::sync::mpsc::sync_channel` or `crossbeam-channel`). `tokio` only at the edges (the snapshot stream), if at all.
+- **Threads and bounded channels**: one reader thread decodes packets and chunks; one loop thread steps the world; observers get snapshots over a bounded channel and drop rather than block (`std::sync::mpsc::sync_channel` or `crossbeam-channel`). `tokio` only at the edges (the snapshot stream, the SurrealDB ingest), if at all.
 - **Time as an input, as clojurecraft did**: the tick event carries the client clock (`now_ms`) and a random seed; deadlines inside intents are absolute times compared against the event's clock; nothing in the core reads a clock or an RNG of its own.
 - **Caps and budgets in server ticks**: the bot counts the server's ticks (20 per `set-time` heard) and the server's slowdown, and every cap (a run's length, a stage's time) is in game time.
 

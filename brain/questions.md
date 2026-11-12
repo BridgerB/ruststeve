@@ -39,7 +39,7 @@ Real questions, the traversal that answers each, and how many notes past the ind
 | What do we build first, and when is it done? | [[ruststeve/roadmap/_moc]] → [[first-twenty-issues]] | 1 |
 | Where does code run? How many runners? | [[runners-not-the-mac]] | 1 |
 | What format are recordings? Why not JSON? | [[recording-format]] | 1 |
-| Do we use Postgres or steve's database? | [[data-out-no-database]] | 1 |
+| Do we use Postgres, SurrealDB, or a database at all? | [[data-out]] | 1 |
 | How far did clojurecraft get, and why did it stop? | [[oracle/handoff/_moc]] → [[cc-handoff]] → [[cc-stage18-lessons]] | 2 |
 | Should we port the pearl rule table? | [[cc-pearls-rule-table]] | 1 |
 | Why did sim pass at 30% while real sat at 3%? | [[cc-stage18-lessons]] → [[mc-mob-facts]] | 2 |
@@ -49,5 +49,5 @@ Real questions, the traversal that answers each, and how many notes past the ind
 
 ## Gaps
 - Resolved: `Tick` versus the ms clock ([[sync-core-and-time]]); physics lives in the core ([[body-boundary]]); the server model is ported into the `sim` crate ([[first-twenty-issues]], issue 6).
-- Open: which front end, if any ([[data-out-no-database]]).
+- Decided: steve is the front end, reading SurrealDB ([[data-out]]). Open: where the database lives.
 - Open: the first push of `functional`, which running anything on the runners needs ([[runners-not-the-mac]]).

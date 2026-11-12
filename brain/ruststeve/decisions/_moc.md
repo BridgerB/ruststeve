@@ -17,7 +17,7 @@ Each says what was chosen, what was rejected with the reason, and what would cha
 - [[issues-are-a-plan]] - twenty planned issues, never roadmap or auto-filed issues.
 - [[measurement-rules]] - the real race is the metric; parity before sim numbers; checkpoint starts; caps in game ticks.
 - [[recording-format]] - MessagePack with named fields, zstd, commit-pinned; not JSON.
-- [[data-out-no-database]] - no Postgres, no database, no old tools: files and a read-only snapshot stream; front end open.
+- [[data-out]] - files are the truth; an embedded SurrealDB built from them for insight; steve is the front end; never in the core.
 - [[sync-core-and-time]] - threads and bounded channels; the clock and a seed on every tick.
 - [[clojure-is-the-oracle]] - port clojurecraft, not v1 or steve; it sets every bar until passed.
 - [[own-protocol-not-azalea]] - we parse the byte stream ourselves; no azalea, no sidecar.

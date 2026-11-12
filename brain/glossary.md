@@ -30,7 +30,8 @@ lastUpdated: 2026-11-11
 - **Stuck stage**: the lowest stage under about 5% in the real or sim race; see [[cc-loop-rules]].
 - **Parity table**: the same recorded moments run in sim and real, outcome classes compared; a sim number counts only after it; see [[measurement-rules]].
 - **Case file**: how a run ended: killer, first hit, task and its why; see [[observability]].
-- **Batch file**: one lane batch's runs, stage reached and endings, in the recording format; see [[data-out-no-database]].
+- **Batch file**: one lane batch's runs, stage reached and endings, in the recording format; see [[data-out]].
+- **Insight store**: the embedded SurrealDB built from batch and case files, read by steve; see [[data-out]].
 - **Progress invariant**: what must improve every tick of a long task, or it fails fast; see [[progress-invariants]].
 
 ## Game and protocol

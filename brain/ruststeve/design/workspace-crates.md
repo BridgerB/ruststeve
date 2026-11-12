@@ -16,7 +16,7 @@ related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[determinism-rules]]"
   - "[[own-protocol-not-azalea]]"
-  - "[[data-out-no-database]]"
+  - "[[data-out]]"
 ---
 
 # Workspace crates
@@ -41,7 +41,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 
 Binaries: `bot` (one bot against a server), `race` (many bots, one server, case files), `simrace` (many bots against the model, in parallel), `replay` (fold a recording, verify effects), `why` (fold to time t and explain the planner's choice), `datagen` (the vanilla jar and reports into `data/`). Data files: `data/` (goals, thresholds, starts, problem statements). Workflows rebuilt lean on the runners ([[runners-not-the-mac]]).
 
-The handoff's `store` crate (a Postgres writer) is dropped: no database ([[data-out-no-database]]).
+The handoff's `store` crate (a Postgres writer) becomes `ingest`: a binary that loads batch and case files into an embedded SurrealDB for insight, kept out of the core's build ([[data-out]]).
 
 ## Enforcement
 - The no-I/O crates must not depend on `net`, `rcon`, `record`, `tokio` or any socket or file crate; a CI check on `cargo tree` holds it.

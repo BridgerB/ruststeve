@@ -31,7 +31,7 @@ The plan, one issue at a time; each issue's checkpoint start exists before its g
 5. **Vanilla physics** as a pure function. *Done:* under 0.01 blocks of error over a recorded 5-minute walk against the server's corrections ([[cc-physics]]).
 6. **The server model and its parity table**: blocks, digging, drops, fluids, mobs, simulation distance and tick rate from the race config. *Done:* the same 50 recorded moments in sim and real, outcome classes matching within a stated tolerance ([[cc-sim]], [[measurement-rules]]).
 7. **CI**: test, sim race, real race, probe, results data; runner-only compute. *Done:* a push runs the suite; a dispatch runs N real and N sim bots and publishes k/n per stage and commit ([[runners-not-the-mac]]).
-8. **Case files and the data contract**: killer, first hit, intent and why for every ending; per-second senses; batch files and the snapshot-stream schema. *Done:* every ended run in a batch has a case (coverage 1.0). (The handoff's version wrote these to Postgres for steve; ruststeve writes files, [[data-out-no-database]].)
+8. **Case files and the data contract**: killer, first hit, intent and why for every ending; per-second senses; batch files and the snapshot-stream schema. *Done:* every ended run in a batch has a case (coverage 1.0). (The handoff's version wrote these to Postgres for steve; ruststeve writes files, [[data-out]].)
 
 ## The stages (9–20)
 | # | Issue | Checkpoint start | Done (real race) |
