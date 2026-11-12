@@ -209,6 +209,7 @@ fn simrace(a: &Args) -> Result<bool, String> {
             wall_ms: 0,
             case: Some(file),
             recording: None,
+            aim: None,
         });
     }
     rows.sort_by(|x, y| x.bot.cmp(&y.bot));

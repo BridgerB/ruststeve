@@ -247,6 +247,9 @@ pub struct Row {
     /// The case file and recording, relative to the batch directory.
     pub case: Option<String>,
     pub recording: Option<String>,
+    /// With an aim (issue 09): the aim and whether the planner met it.
+    #[serde(default)]
+    pub aim: Option<(String, bool)>,
 }
 
 /// What a batch could see: full sight is every ratio 1.0 and the counts 0.
@@ -413,6 +416,25 @@ pub fn render_summary(s: &Summary, batches: &[Batch]) -> String {
         total.events_dropped,
         total.unknown_packets
     ));
+    // The planner's aims, when runs had one: met over counted runs, per aim.
+    let mut aims: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    for row in batches
+        .iter()
+        .flat_map(|b| &b.rows)
+        .filter(|r| r.ending.counted())
+    {
+        if let Some((aim, met)) = &row.aim {
+            let e = aims.entry(aim.clone()).or_default();
+            e.1 += 1;
+            e.0 += u64::from(*met);
+        }
+    }
+    for (aim, (k, n)) in &aims {
+        lines.push(format!(
+            "aim {aim}: met {k}/{n} ({:.1}%)",
+            100.0 * ratio(*k, *n)
+        ));
+    }
     let mut endings: BTreeMap<[String; 4], u64> = BTreeMap::new();
     for row in batches.iter().flat_map(|b| &b.rows) {
         *endings.entry(row.signature.clone()).or_default() += 1;

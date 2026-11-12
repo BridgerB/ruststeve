@@ -5,7 +5,7 @@
 # local only). Dispatch only:
 #   gh workflow run race.yml --ref <branch> -f lanes=4 -f bots=14 -f start=spawn -f cap=6000
 name: race
-run-name: "race: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, ${{ inputs.start }}, cap ${{ inputs.cap }}"
+run-name: "race: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, ${{ inputs.start }}, cap ${{ inputs.cap }}, goal ${{ inputs.goal }}"
 
 on:
   workflow_dispatch:
@@ -22,6 +22,9 @@ on:
       cap:
         description: Cap per run in server ticks (6000 = 5 game minutes)
         default: "6000"
+      goal:
+        description: The planner's aim (log or log:<min>), or empty for idle bots
+        default: ""
 
 permissions:
   contents: read
@@ -102,10 +105,13 @@ jobs:
           BOTS: ${{ inputs.bots }}
           START: ${{ inputs.start }}
           CAP: ${{ inputs.cap }}
+          GOAL: ${{ inputs.goal }}
         # The wall limit is the job's end, not a cap: bots still running then end Cut (not counted).
         run: |
+          goal=()
+          if [ -n "$GOAL" ]; then goal=(--goal "$GOAL"); fi
           ./target/release/race --lane "$LANE" --bots "$BOTS" --start "$START" --cap "$CAP" \
-            --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit 2700 2>&1 | tee "race-$LANE.log"
+            --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit 2700 "${goal[@]}" 2>&1 | tee "race-$LANE.log"
 
       - name: Replay one recording at this commit
         if: always()

@@ -401,6 +401,7 @@ mod tests {
                     wall_ms: c.wall_ms,
                     case: Some(f),
                     recording: None,
+                    aim: None,
                 }
             })
             .collect();

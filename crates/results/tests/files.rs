@@ -73,6 +73,7 @@ fn batch(rows: Vec<Case>) -> Batch {
                 wall_ms: c.wall_ms,
                 case: Some(format!("{}.case.rsc", c.bot)),
                 recording: c.recording.clone(),
+                aim: None,
             })
             .collect(),
     }

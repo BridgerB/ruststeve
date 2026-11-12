@@ -59,6 +59,7 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 
 ## Limits
 - Today's bots stand still (no planner until issue 09): `doing` is `idle` with that why, and the honest ladder is `in_world` and the kit.
+- A batch row carries the planner's aim and whether it was met (`Row::aim`), and `results summary` prints "aim <aim>: met k/n"; `race.yml` takes a `goal` input ([[planner]]).
 - Sim batches (`simrace`, [[parity-table]]) are the same files with `source = sim`, released as `race-sim-<run>`; scripts (`--walk square|straight:<yaw>|jump:<yaw>|still`) start after the start settles.
 - Swings are 0 until combat exists; the fields are there.
 
