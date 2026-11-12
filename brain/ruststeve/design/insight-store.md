@@ -6,7 +6,7 @@ tags: [insight, surrealdb, ingest, results, steve, contract]
 aliases: [ingest, insight store, insight-latest, insight.surrealkv.tar.zst, insight-v1.surql, SurrealKV, kn view, deaths view, endings view, steve contract]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3f52970
+verifiedAgainst: ruststeve@9ae5ef0
 sourceRefs:
   - "ruststeve:crates/ingest/src/main.rs#async fn add_batch(db: &Surreal<Db>, path: &Path, b: &Batch) -> Res<bool> {"
   - "ruststeve:crates/ingest/src/main.rs#fn absent_nulls(v: Value) -> Value {"

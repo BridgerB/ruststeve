@@ -6,7 +6,7 @@ tags: [stream, live-view, steve, websocket, observability]
 aliases: [snapshot stream, STEVE_RELAY, relay, relay-stub, live view, Sink, snapshot-v1, hello frame, self frame]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3ea89be
+verifiedAgainst: ruststeve@9ae5ef0
 sourceRefs:
   - "ruststeve:crates/stream/src/lib.rs#pub fn send(&self, tick: u64, body: Body) {"
   - "ruststeve:crates/stream/src/lib.rs#fn connect(url: &str, id: &Identity, mirror: &Mirror, c: &Counters) -> Result<Conn, String> {"
