@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [sim crate, Sim, server model, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@58cbf2e clojurecraft@be85a92
+verifiedAgainst: ruststeve@ff7281f clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"

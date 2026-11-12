@@ -6,7 +6,7 @@ tags: [wire, codec, packets, specs]
 aliases: [packet specs, spec table, interpreter, decode, encode, conditional tail, unknown packet]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve@58cbf2e
+verifiedAgainst: clojurecraft@be85a92 ruststeve@ff7281f
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#reports). Decoding reads only the listed fields and ignores the tail of the frame: that is"
   - "clojurecraft:src/clojurecraft/packet.clj#how big packets (chunks) skip the parts we do not model. Unknown ids decode to"
