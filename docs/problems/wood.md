@@ -33,3 +33,11 @@ for.
 2. Collecting fails at once (`Taken`) when the drop entity it saw is gone and its own count did
    not rise. Before, it waited out 300 ticks.
 3. A dig whose block is already gone when it starts fails `Gone`; it never counts as dug.
+
+## After the fixes
+Race run 43306340069 at 26d38a9 (2026-11-12): **51/56 (91.1%)**, lanes 13, 13, 12, 13 of 14: the
+done-condition holds. The 5 misses each failed `NoPath` 7 to 10 times: the trees near spawn are
+taken and the logs left in view have no walking route (stairs and pillars are issue 11). Two of
+them also spent planner time far over the budget in real: means 0.7 to 1 ms and p99 up to
+63 ms per tick, from 250,000 to 370,000 search expansions on refused routes. The sim measure is
+within budget. Open for issue 11: route budgets when walks keep failing.
