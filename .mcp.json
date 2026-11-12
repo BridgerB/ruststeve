@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ruststeve": {
+      "command": "cargo",
+      "args": ["run", "-q", "--release", "-p", "ruststeve-mcp"]
+    }
+  }
+}

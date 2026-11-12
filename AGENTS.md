@@ -26,7 +26,8 @@ Do these in order before writing any code, every session, and again after any co
 - Locally only: editing, `cargo fmt`, `cargo clippy`, `cargo run -q -p brain-check` (seconds; it is the brain's static check), `git`, `gh`, reading files.
 - Not locally: tests, builds for running, the bot, servers, sims, races, replays, benchmarks, probes.
 - The loop: change code, commit, push the branch, let CI run on the push, read the run's logs (`gh run view <id> --log-failed`), push again.
-- A question that needs code run goes to a probe workflow once issue 01 has made one.
+- A question that needs code run goes to the probe: the `probe_run` MCP tool, or `gh workflow run probe.yml --ref <branch> -f command=...` ([`brain/ruststeve/design/ci-on-runners.md`](brain/ruststeve/design/ci-on-runners.md)).
+- **Use the `ruststeve` MCP server** (`.mcp.json`, built with the official Rust MCP SDK `rmcp`): `probe_run`, `probe_output`, `run_status`, `run_log`, `ci_runs`, `brain_check`, `brain_note`, `brain_search`. New agent-facing tooling is added there as a tool, not as a script (`brain/ruststeve/decisions/agent-tools-over-mcp.md`).
 - Watch runs in the background and keep working; never end a turn just waiting on a run.
 
 ## 3. How to work an issue

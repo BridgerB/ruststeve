@@ -39,6 +39,7 @@ Real questions, the traversal that answers each, and how many notes past the ind
 | What do we build first, and when is it done? | [[ruststeve/roadmap/_moc]] → [[first-twenty-issues]] | 1 |
 | Where does code run? How many runners? | [[runners-not-the-mac]] | 1 |
 | How do I run a command on a runner? | [[ci-on-runners]] | 1 |
+| What tools do agents have, and how do I add one? | [[agent-tools-over-mcp]] | 1 |
 | What format are recordings? Why not JSON? | [[recording-format]] | 1 |
 | Do we use Postgres, SurrealDB, or a database at all? | [[data-out]] | 1 |
 | How far did clojurecraft get, and why did it stop? | [[oracle/handoff/_moc]] → [[cc-handoff]] → [[cc-stage18-lessons]] | 2 |

@@ -15,7 +15,7 @@ const CORE_CRATES: [&str; 6] = ["protocol", "world", "physics", "memory", "plan"
 
 /// Crates a core crate must never depend on, directly or through another crate: async runtimes and
 /// I/O libraries, and our own crates that touch sockets, files or the insight store.
-const FORBIDDEN: [&str; 9] = [
+const FORBIDDEN: [&str; 10] = [
     "tokio",
     "mio",
     "reqwest",
@@ -25,6 +25,7 @@ const FORBIDDEN: [&str; 9] = [
     "record",
     "ingest",
     "async-std",
+    "rmcp",
 ];
 
 fn main() -> ExitCode {
