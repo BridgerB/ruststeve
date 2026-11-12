@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [sim crate, Sim, server model, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@cb90ee0 clojurecraft@be85a92
+verifiedAgainst: ruststeve@d683c9b clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"

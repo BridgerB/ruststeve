@@ -6,7 +6,7 @@ tags: [plan, path, astar, routes, core]
 aliases: [path, pathfinder, A*, route, waypoints, Cells, classify, awkward, moves, goals, Near, Afar, budget, expansions, start_cell]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@e2f14d7 clojurecraft@be85a92
+verifiedAgainst: ruststeve@d683c9b clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/path.rs#pub fn classify(state: Option<u32>) -> Class {"
   - "ruststeve:crates/plan/src/path.rs#pub fn search(cells: &mut Cells<'_>, start: Cell, goal: &Goal, max_nodes: u32) -> Route {"

@@ -6,7 +6,7 @@ tags: [replay, why, recording, debugging]
 aliases: [replay verify, replay export, why binary, --force, debug a run, fold a recording]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@219c53c
+verifiedAgainst: ruststeve@d683c9b
 sourceRefs:
   - "ruststeve:crates/replay/src/bin/replay.rs#fn verify(path: &Path, force: bool) -> Result<(), String> {"
   - "ruststeve:crates/replay/src/bin/why.rs#fn print_world(w: &World, events: u64) {"
