@@ -1,0 +1,16 @@
+# A core crate: deterministic, no I/O (brain/ruststeve/design/determinism-rules.md). Clippy reads
+# the clippy.toml found from the crate's directory upward.
+allow-unwrap-in-tests = true
+
+disallowed-methods = [
+  { path = "std::time::Instant::now", reason = "the core is deterministic: time arrives on the tick" },
+  { path = "std::time::SystemTime::now", reason = "the core is deterministic: time arrives on the tick" },
+  { path = "std::thread::sleep", reason = "the core never blocks" },
+  { path = "std::env::var", reason = "config comes from the recording header" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "random iteration order breaks replay: use BTreeMap" },
+  { path = "std::collections::HashSet", reason = "random iteration order breaks replay: use BTreeSet" },
+  { path = "std::cell::RefCell", reason = "no interior mutability in the core" },
+  { path = "std::rc::Rc", reason = "use ids, not shared pointers" },
+]

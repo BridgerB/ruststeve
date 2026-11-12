@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 use crate::bytes::{Reader, Writer};
 use crate::chunk::Column;
+use crate::metadata::{MetaValue, read_metadata};
+use crate::slot::{Slot, read_slot};
 use crate::state::State;
 use crate::{EncodeError, ParseError};
 
@@ -99,6 +101,69 @@ pub enum S2c {
         health: f32,
         food: i32,
         saturation: f32,
+    },
+    /// An entity appeared: its id, uuid, type id and position (velocity and the rest: an
+    /// ignored tail; field order from the game's ClientboundAddEntityPacket.write).
+    AddEntity {
+        id: i32,
+        uuid: [u8; 16],
+        kind: u32,
+        x: f64,
+        y: f64,
+        z: f64,
+    },
+    RemoveEntities {
+        ids: Vec<i32>,
+    },
+    /// A relative move (`move_entity_pos` or `move_entity_pos_rot`), in blocks.
+    MoveEntity {
+        id: i32,
+        dx: f64,
+        dy: f64,
+        dz: f64,
+    },
+    /// A turn in place.
+    MoveEntityRot {
+        id: i32,
+    },
+    /// The server's absolute position for an entity.
+    EntityPositionSync {
+        id: i32,
+        x: f64,
+        y: f64,
+        z: f64,
+    },
+    /// A long move; `flags` marks relative coordinates as `player_position`'s do.
+    TeleportEntity {
+        id: i32,
+        x: f64,
+        y: f64,
+        z: f64,
+        flags: u32,
+    },
+    /// Changed metadata, skimmed.
+    SetEntityData {
+        id: i32,
+        entries: Vec<(u8, MetaValue)>,
+    },
+    /// A whole window. `slots` stops at a truncated slot; `carried` is `None` then.
+    ContainerSetContent {
+        window: i32,
+        state_id: i32,
+        slots: Vec<Slot>,
+        carried: Option<Slot>,
+    },
+    ContainerSetSlot {
+        window: i32,
+        state_id: i32,
+        slot: i16,
+        item: Slot,
+    },
+    /// One slot of the player's inventory, by inventory index (0-8 hotbar, 9-35 main,
+    /// 36-39 armour, 40 offhand).
+    SetPlayerInventory {
+        slot: i32,
+        item: Slot,
     },
     ChunkBatchFinished {
         size: i32,
@@ -252,6 +317,85 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 food: r.varint()?,
                 saturation: r.f32()?,
             },
+            Some(PlayIn::AddEntity) => S2c::AddEntity {
+                id: r.varint()?,
+                uuid: r.uuid()?,
+                kind: r.varint()? as u32,
+                x: finite(r.f64()?)?,
+                y: finite(r.f64()?)?,
+                z: finite(r.f64()?)?,
+            },
+            Some(PlayIn::RemoveEntities) => {
+                let n = r.length()?;
+                let mut ids = Vec::with_capacity(n.min(1024));
+                for _ in 0..n {
+                    ids.push(r.varint()?);
+                }
+                S2c::RemoveEntities { ids }
+            }
+            Some(PlayIn::MoveEntityPos | PlayIn::MoveEntityPosRot) => {
+                // Deltas in 1/4096 of a block (ClientboundMoveEntityPacket).
+                let id = r.varint()?;
+                let mut delta = || -> Result<f64, ParseError> { Ok(f64::from(r.i16()?) / 4096.0) };
+                let (dx, dy, dz) = (delta()?, delta()?, delta()?);
+                S2c::MoveEntity { id, dx, dy, dz }
+            }
+            Some(PlayIn::MoveEntityRot) => S2c::MoveEntityRot { id: r.varint()? },
+            Some(PlayIn::EntityPositionSync) => S2c::EntityPositionSync {
+                id: r.varint()?,
+                x: finite(r.f64()?)?,
+                y: finite(r.f64()?)?,
+                z: finite(r.f64()?)?,
+            },
+            Some(PlayIn::TeleportEntity) => {
+                let id = r.varint()?;
+                let (x, y, z) = (finite(r.f64()?)?, finite(r.f64()?)?, finite(r.f64()?)?);
+                let _velocity = (r.f64()?, r.f64()?, r.f64()?);
+                let _look = (r.f32()?, r.f32()?);
+                S2c::TeleportEntity {
+                    id,
+                    x,
+                    y,
+                    z,
+                    flags: r.u32()?,
+                }
+            }
+            Some(PlayIn::SetEntityData) => S2c::SetEntityData {
+                id: r.varint()?,
+                entries: read_metadata(&mut r)?,
+            },
+            Some(PlayIn::ContainerSetContent) => {
+                let window = r.varint()?;
+                let state_id = r.varint()?;
+                let n = r.length()?;
+                let mut slots = Vec::with_capacity(n.min(128));
+                let mut cut = false;
+                for _ in 0..n {
+                    let s = read_slot(&mut r)?;
+                    slots.push(s);
+                    if s.truncated() {
+                        cut = true;
+                        break;
+                    }
+                }
+                let carried = if cut { None } else { Some(read_slot(&mut r)?) };
+                S2c::ContainerSetContent {
+                    window,
+                    state_id,
+                    slots,
+                    carried,
+                }
+            }
+            Some(PlayIn::ContainerSetSlot) => S2c::ContainerSetSlot {
+                window: r.varint()?,
+                state_id: r.varint()?,
+                slot: r.i16()?,
+                item: read_slot(&mut r)?,
+            },
+            Some(PlayIn::SetPlayerInventory) => S2c::SetPlayerInventory {
+                slot: r.varint()?,
+                item: read_slot(&mut r)?,
+            },
             Some(PlayIn::ChunkBatchFinished) => S2c::ChunkBatchFinished { size: r.varint()? },
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {
@@ -403,5 +547,15 @@ impl C2s {
             C2s::ConfigurationAcknowledged => PlayOut::ConfigurationAcknowledged.id(),
         };
         Ok((id, w.buf))
+    }
+}
+
+/// A coordinate the core may hold: NaN or infinity from a bad frame is a boundary error, never
+/// a value (brain/ruststeve/design/determinism-rules.md).
+fn finite(v: f64) -> Result<f64, ParseError> {
+    if v.is_finite() {
+        Ok(v)
+    } else {
+        Err(ParseError::NonFinite)
     }
 }

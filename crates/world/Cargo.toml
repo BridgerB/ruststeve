@@ -8,6 +8,7 @@ description = "The world as one value, folded only from what the server sent (no
 
 [dependencies]
 data = { path = "../data" }
+memory = { path = "../memory" }
 protocol = { path = "../protocol" }
 
 [dev-dependencies]

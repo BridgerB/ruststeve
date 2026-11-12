@@ -140,6 +140,16 @@ impl Session {
             | S2c::SectionBlocksUpdate { .. }
             | S2c::Respawn { .. }
             | S2c::SetHealth { .. }
+            | S2c::AddEntity { .. }
+            | S2c::RemoveEntities { .. }
+            | S2c::MoveEntity { .. }
+            | S2c::MoveEntityRot { .. }
+            | S2c::EntityPositionSync { .. }
+            | S2c::TeleportEntity { .. }
+            | S2c::SetEntityData { .. }
+            | S2c::ContainerSetContent { .. }
+            | S2c::ContainerSetSlot { .. }
+            | S2c::SetPlayerInventory { .. }
             | S2c::Unknown { .. } => Vec::new(),
         };
         self.state = self.state.after_receive(p);

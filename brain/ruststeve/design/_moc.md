@@ -26,6 +26,8 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[tick-loop]] - how the shell drives the core; record before step; what runs on which thread.
 - [[body-boundary]] - the trait that hides the game; in ruststeve, our own wire layer.
 - [[workspace-crates]] - the crates and the one-way dependency rule.
+- [[entities-and-inventory]] - how the world folds entities and window 0; what is counted rather than invented.
+- [[memory-sightings]] - watched blocks remembered as sightings with time, only when seen with an exposed face.
 - [[world-value]] - what `World` holds, how `step` folds each packet, `block_at`, the chunk decoder checked against clojurecraft.
 - [[connection]] - how a bot connects and stays in the world: the pure protocol crate, the net threads, the bot binary, running a server locally.
 - [[datagen]] - the game tables: generated from the 26.1.2 server on a runner, committed in `crates/data`, drift and unknown packet ids caught in CI.

@@ -11,8 +11,10 @@
 pub mod bytes;
 pub mod chunk;
 pub mod frame;
+pub mod metadata;
 pub mod packets;
 pub mod session;
+pub mod slot;
 pub mod state;
 pub mod uuid;
 
@@ -44,6 +46,8 @@ pub enum ParseError {
     BadBits(u8),
     #[error("a chunk column of {0} sections, which no dimension has")]
     BadSectionCount(usize),
+    #[error("a coordinate that is not finite")]
+    NonFinite,
 }
 
 /// Why a packet could not be written: only compression can fail, and only in theory.

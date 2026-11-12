@@ -5,7 +5,7 @@ type: reference
 tags: [wire, items, slots, components]
 aliases: [read-slot, ItemStack, data components, DataComponentPatch, damage, truncated frame]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-12
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#\"{:item :count} (plus :components {type-name value} when the slot carries any) or nil for an"
@@ -39,5 +39,6 @@ An item stack on the wire is a varint count (0 = empty), then the item id, then 
 Which other components appear in a speedrun inventory (enchantments, custom names, potion contents) is not surveyed here.
 
 ## See also
+- [[entities-and-inventory]] - ruststeve's reader (`protocol::slot`): clojurecraft's component codecs, `Slot::Truncated` for the rest.
 - [[wire-container-click]] - where hashed slots are sent.
 - [[wire-entity-metadata]] - dropped items carry a slot in metadata.

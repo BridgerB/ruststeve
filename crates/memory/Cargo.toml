@@ -1,0 +1,10 @@
+[package]
+name = "memory"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Memory as facts with time: sightings of watched blocks, only ever seen with an exposed face (no I/O)"
+
+[dependencies]
+data = { path = "../data" }
