@@ -6,7 +6,7 @@ tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@d683c9b clojurecraft@be85a92
+verifiedAgainst: ruststeve@b4d3e95 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"

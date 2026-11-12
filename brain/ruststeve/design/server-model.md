@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [sim crate, Sim, server model, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@d683c9b clojurecraft@be85a92
+verifiedAgainst: ruststeve@b4d3e95 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -61,6 +61,7 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - Capture, simrace and the parity table: [[parity-table]]. Then digging (11), mobs, air and drowning (12) and the rest as their issues come.
 - The server-side move uses the bot's own collision (`land_tick`), not vanilla's `Entity.collide` order (y, then the larger of x and z first): the parity table is what says whether it matters.
 - `chunk_batch_start` goes out as its id with an empty body; the bot counts it unknown.
+- `ModelWorld::ground` and `placeable` place a player as vanilla does (under leaves, two free cells): found by issue 09's measure ([[planner]]).
 - Peaceful regeneration (`ServerPlayer.tickRegeneration`, 1 every 20 ticks below full) is modelled when `Config::peaceful`; found by the parity table.
 
 ## See also

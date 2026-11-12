@@ -4,6 +4,7 @@
 //! every 50 ms, records every run when asked, and ends with an `Ending`.
 
 pub mod captured;
+pub mod landings;
 pub mod live;
 pub mod lockstep;
 pub mod model;

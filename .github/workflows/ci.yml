@@ -123,11 +123,64 @@ jobs:
         env:
           RUSTSTEVE_WORLDS: "1000"
 
+  # Issue 09: the planner in the captured landings against the server model. Done-conditions:
+  # 95% of 200 qualifying landings reach a log 30+ blocks away, no walk 1,200 ticks without
+  # progress, and the planner's CPU per tick within config/race.toml's budget, measured here in
+  # release. The worlds are captured once from a fresh server on the race seed and cached by the
+  # landing list.
+  walk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: worlds
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - id: worlds
+        uses: actions/cache@v4
+        with:
+          path: landings
+          key: landings-26.1.2-${{ hashFiles('config/landings-grid.toml') }}
+      - run: cargo build -q --release --locked -p bot -p xtask
+      - if: steps.worlds.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - if: steps.worlds.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v1
+      - name: Capture the landings (cache miss only)
+        if: steps.worlds.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -f "$DATAGEN_WORK/server.jar" ]; then
+            cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out "$RUNNER_TEMP/generated"
+          fi
+          pw="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+          echo "::add-mask::$pw"
+          RUSTSTEVE_RCON_PASSWORD="$pw" nohup ./target/release/xtask server --jar "$DATAGEN_WORK/server.jar" --difficulty peaceful --view-distance 5 > server.log 2>&1 &
+          for _ in $(seq 1 180); do grep -q 'Done (' server.log && break; sleep 2; done
+          RUSTSTEVE_RCON_PASSWORD="$pw" ./target/release/capture --landings config/landings-grid.toml --out landings 2>&1 | tail -5
+      - name: The measure
+        run: |
+          set -o pipefail
+          ./target/release/simrace --landings-file config/landings-grid.toml --worlds landings \
+            --goal log:30 --ticks 3000 --want 200 --check true --report walk.md
+      - if: always()
+        run: cat walk.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
   # One stable check name for branch protection.
   ci-ok:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
-    needs: [fmt, clippy, test, brain, boundary, worlds]
+    needs: [fmt, clippy, test, brain, boundary, worlds, walk]
     if: always()
     steps:
       - run: |

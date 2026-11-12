@@ -3,7 +3,7 @@
 //! ```text
 //! cargo run -q -p xtask -- deps-boundary       the core crates depend on nothing that does I/O
 //! cargo run -q -p xtask -- commit-msg <file>   a commit message keeps the repository's rules
-//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar] [--difficulty peaceful] [--config config/race.toml] [--rcon-port 25575]
+//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar] [--difficulty peaceful] [--config config/race.toml] [--rcon-port 25575] [--view-distance N]
 //!                                            a local vanilla 26.1.2 server (offline, simulation distance 3)
 //! ```
 //!
@@ -209,6 +209,7 @@ fn server(args: &[String]) -> ExitCode {
     let mut difficulty = None;
     let mut config = "config/race.toml".to_owned();
     let mut rcon_port = "25575".to_owned();
+    let mut view_distance: Option<u32> = None;
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         let Some(value) = it.next() else {
@@ -222,19 +223,31 @@ fn server(args: &[String]) -> ExitCode {
             "--difficulty" => difficulty = Some(value.clone()),
             "--config" => config.clone_from(value),
             "--rcon-port" => rcon_port.clone_from(value),
+            "--view-distance" => match value.parse() {
+                Ok(v) => view_distance = Some(v),
+                Err(e) => {
+                    eprintln!("--view-distance: {e}");
+                    return ExitCode::FAILURE;
+                }
+            },
             other => {
                 eprintln!("unknown flag {other}");
                 return ExitCode::FAILURE;
             }
         }
     }
-    let race = match results::config::RaceConfig::read(&config) {
+    let mut race = match results::config::RaceConfig::read(&config) {
         Ok((c, _)) => c,
         Err(e) => {
             eprintln!("server: {e}");
             return ExitCode::FAILURE;
         }
     };
+    // A capture server sends only what it captures: a smaller view distance generates fewer
+    // chunks per landing.
+    if let Some(v) = view_distance {
+        race.server.view_distance = v;
+    }
     let difficulty = difficulty.unwrap_or_else(|| race.server.difficulty.clone());
     let password = std::env::var("RUSTSTEVE_RCON_PASSWORD")
         .ok()

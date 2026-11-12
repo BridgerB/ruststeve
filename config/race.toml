@@ -22,3 +22,11 @@ bots_per_server = 14
 join_stagger_ms = 2000
 # 6,000 server ticks = 5 game minutes: the default when a start names no cap.
 cap_ticks = 6000
+
+[budget]
+# The brain's CPU per bot per tick (issue 09; brain/ruststeve/design/progress-invariants.md):
+# clojurecraft's planner was 93% of its race JVM's CPU and starved the server on the same
+# runner. Measured in release on a runner around the planner's step, every tick of the
+# 200-landing measure; CI fails over these.
+plan_tick_mean_us = 500
+plan_tick_p99_us = 5000

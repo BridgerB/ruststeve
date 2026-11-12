@@ -6,7 +6,7 @@ tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@d683c9b clojurecraft@be85a92
+verifiedAgainst: ruststeve@b4d3e95 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -33,6 +33,9 @@ Issue 09a: clojurecraft's walk intent, made to fail fast when it stops getting c
 ## Evidence
 - Over 24 generated worlds the longest stall never passes 201 ticks; on the captured plains landing the walk reaches a log 30+ blocks out with no correction (`crates/bot/tests/planner.rs`).
 - Live: a bot on the local 26.1.2 server walked to a log 30+ blocks away in about 13 s, no correction, its recording replaying with 0 mismatches.
+
+## Since 09b
+`route_now` decides whether a target is walkable before the planner chooses it: a found route, or a partial one toward a column not loaded yet; an explore takes any route with waypoints ([[planner]]).
 
 ## See also
 - [[pathfinding]] - the routes.

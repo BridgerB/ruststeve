@@ -35,6 +35,7 @@ clojurecraft's stage 18 died of loops that made no progress, each invisible in c
 - The walk's invariant: no gain toward the target for 200 ticks fails it `NoProgress`, and its longest stall is reported per run ([[walk-and-watchdog]]).
 - Targets are held; the churn invariant holds by construction (every candidate routed before it is chosen) and is tested over generated worlds; 12 failures in a row stop the planner, said so ([[planner]]).
 - Spatial questions read memory's chunk-column index in rings; searches are budgeted in node expansions ([[pathfinding]]).
+- **The CPU budget per bot per tick is measured in CI** (the `walk` job): the planner's step timed by the shell over every tick of the 200-landing measure, against `config/race.toml`'s `[budget]` (mean 500 µs, p99 5 ms); first measure mean 22 µs, p99 74 µs ([[planner]]).
 
 ## See also
 - [[expectations-and-watchdog]] - the mechanism that fails a task.

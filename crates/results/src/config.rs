@@ -11,6 +11,16 @@ use world::Stage;
 pub struct RaceConfig {
     pub server: ServerConfig,
     pub race: RaceRules,
+    /// The brain's CPU budget per bot per tick (issue 09).
+    #[serde(default)]
+    pub budget: Option<Budget>,
+}
+
+/// `[budget]`: microseconds of the planner's step per tick, mean and 99th percentile.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Budget {
+    pub plan_tick_mean_us: u64,
+    pub plan_tick_p99_us: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

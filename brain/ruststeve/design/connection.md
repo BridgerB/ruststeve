@@ -6,7 +6,7 @@ tags: [protocol, net, bot, connection, keep-alive, threads]
 aliases: [protocol crate, net crate, bot binary, Session, keep-alive, xtask server, run a bot locally, local server, receive-side state]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@ff7281f clojurecraft@be85a92
+verifiedAgainst: ruststeve@b4d3e95 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/session.rs#pub fn on_packet(&mut self, p: &S2c) -> Vec<Out> {"
   - "ruststeve:crates/protocol/src/state.rs#pub fn after_receive(self, p: &S2c) -> State {"
@@ -44,7 +44,7 @@ A bot connects with our own protocol layer ([[own-protocol-not-azalea]]): a pure
 ## Running it locally (`nix develop`)
 ```bash
 cargo run -p datagen -- generate     # once: downloads and sha1-checks the server jar
-cargo run -p xtask -- server         # target/server, port 25565, offline; properties from config/race.toml; --difficulty peaceful for a quiet one; RCON on when RUSTSTEVE_RCON_PASSWORD is set
+cargo run -p xtask -- server         # target/server, port 25565, offline; properties from config/race.toml; --difficulty peaceful for a quiet one; RCON on when RUSTSTEVE_RCON_PASSWORD is set; --view-distance N for a capture server
 cargo run -p bot -- --seconds 600    # in another terminal
 ```
 The world in `target/server` is kept between runs; nothing deletes it.

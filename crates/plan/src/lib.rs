@@ -311,22 +311,26 @@ impl Plan {
             return Task::Idle;
         };
         for _ in 0..CANDIDATES_PER_TICK {
-            if let Some(log) = self.nearest_log(w, origin, min_distance, tick) {
-                let mut walk = Walk::to_block(log, tick);
-                if walk.route_now(w, tick) {
-                    self.walks += 1;
-                    self.note(
-                        tick,
-                        format!("walk to log {log:?}"),
-                        format!("the nearest log in view at least {min_distance} blocks from the start, with a route"),
-                    );
-                    return Task::ToLog(walk);
-                }
-                self.expanded += walk.expanded;
-                self.refuse(log, tick);
-                self.refused_areas.push((log, tick + FAILURE_MEMORY_TICKS));
-                continue;
+            let Some(log) = self.nearest_log(w, origin, min_distance, tick) else {
+                break;
+            };
+            let mut walk = Walk::to_block(log, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk to log {log:?}"),
+                    format!("the nearest log in view at least {min_distance} blocks from the start, with a route"),
+                );
+                return Task::ToLog(walk);
             }
+            self.expanded += walk.expanded;
+            self.refuse(log, tick);
+            self.refused_areas.push((log, tick + FAILURE_MEMORY_TICKS));
+        }
+        // No log in view with a way (none seen, or each down a cave, up a cliff, across water):
+        // explore, which finds others, before counting a failed choice.
+        for _ in 0..CANDIDATES_PER_TICK {
             let (s, c) = self.heading.to_radians().sin_cos();
             let d = f64::from(EXPLORE_DISTANCE);
             let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
@@ -346,7 +350,7 @@ impl Plan {
                     tick,
                     format!("explore toward {target:?}"),
                     format!(
-                        "no log in view at least {min_distance} blocks from the start; heading {}",
+                        "no log in view at least {min_distance} blocks from the start with a way; heading {}",
                         self.heading
                     ),
                 );
@@ -418,4 +422,23 @@ impl Plan {
         }
         best.map(|(_, c)| c)
     }
+}
+
+/// Is a log in view (a sighting, so seen with an exposed face) at least `min` blocks from
+/// `origin` on the plane, reachable or not: whether a landing qualifies for the "reach a log"
+/// measure, decided from what the bot could see, never from the world's hidden blocks.
+pub fn log_in_view(w: &World, origin: [f64; 3], min: f64) -> bool {
+    let (Some(dim), Some(logs)) = (w.dimension.as_ref(), block_tag("logs")) else {
+        return false;
+    };
+    w.memory.log().iter().any(|s| {
+        s.dimension == dim.name
+            && w.memory
+                .latest(&dim.name, s.pos)
+                .is_some_and(|l| data::block_of_state(l.state).is_some_and(|k| logs.contains(&k)))
+            && ((origin[0] - (f64::from(s.pos.0) + 0.5)).powi(2)
+                + (origin[2] - (f64::from(s.pos.2) + 0.5)).powi(2))
+            .sqrt()
+                >= min
+    })
 }
