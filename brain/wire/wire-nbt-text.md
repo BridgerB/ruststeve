@@ -6,7 +6,7 @@ tags: [wire, nbt, text, death, damage]
 aliases: [network NBT, text component, death message, player_combat_kill, damage_event, killer, damage type]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@ff7281f clojurecraft@be85a92
+verifiedAgainst: ruststeve@ed3d084 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/nbt.rs#pub fn read_root(r: &mut Reader<'_>) -> Result<Nbt, ParseError> {"
   - "ruststeve:crates/protocol/src/nbt.rs#pub fn death(c: &Nbt) -> Death {"
@@ -31,6 +31,7 @@ Since 1.20.3 a text component on the wire is network NBT: an anonymous root (a t
 - **`damage_event`**: entity id, the damage type id, the cause and direct entity ids sent **plus one** (0 = none), then an optional position (an unread tail). The type id indexes the damage-type registry in the order the server syncs it; ruststeve uses the generated `DAMAGE_TYPE` table, as clojurecraft used its generated `damage-types.edn`.
 
 ## Gotchas
+- The server model writes these packets too (`write_root`, `death_component`, the encoders), round-trip tested against the reader ([[server-model]]).
 - An id outside the table reads `unknown:<id>`, never a guess.
 - The killer the race groups by drops the victim's name (`death.attack.mob zombie`), so one cause groups across bots; the case keeps the whole text.
 

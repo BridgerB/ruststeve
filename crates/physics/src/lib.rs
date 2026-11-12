@@ -182,6 +182,12 @@ pub fn overlaps(a: &Aabb, b: &Aabb, axis: usize) -> bool {
     a[axis] < b[axis + 3] && a[axis + 3] > b[axis]
 }
 
+/// vanilla's collision tolerance (`VoxelShape.collideX`, 1.0E-7): a face within this of the
+/// box's own counts as ahead of it, and the other axes must overlap by more than this. Without
+/// it a box whose edge rounds a hair past a face (-2.3 + 0.3 = -1.9999999999999998) walks into
+/// the block, and the server corrects it (found by the model's generated worlds, issue 08b).
+pub const COLLISION_EPSILON: f64 = 1.0e-7;
+
 /// Shrink the move `d` along `axis` so `boxx` does not enter any of `boxes`.
 pub fn clip(boxx: &Aabb, boxes: &[Aabb], axis: usize, d: f64) -> f64 {
     let others: [usize; 2] = match axis {
@@ -189,11 +195,15 @@ pub fn clip(boxx: &Aabb, boxes: &[Aabb], axis: usize, d: f64) -> f64 {
         1 => [0, 2],
         _ => [0, 1],
     };
+    let e = COLLISION_EPSILON;
     boxes.iter().fold(d, |d, c| {
-        if others.iter().all(|o| overlaps(boxx, c, *o)) {
-            if d > 0.0 && c[axis] >= boxx[axis + 3] {
+        if others
+            .iter()
+            .all(|o| boxx[*o] + e < c[*o + 3] && boxx[*o + 3] - e > c[*o])
+        {
+            if d > 0.0 && c[axis] >= boxx[axis + 3] - e {
                 d.min(c[axis] - boxx[axis + 3])
-            } else if d < 0.0 && c[axis + 3] <= boxx[axis] {
+            } else if d < 0.0 && c[axis + 3] <= boxx[axis] + e {
                 d.max(c[axis + 3] - boxx[axis])
             } else {
                 d

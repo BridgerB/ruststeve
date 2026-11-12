@@ -7,7 +7,9 @@
 //! Issue 08a models: login and configuration, the play login with the race's distances, the
 //! first teleport, health, chunks around the player sent in batches and forgotten as it moves,
 //! `set_time` every 20 ticks, keep-alives every 15 s of ticks and the kick when one goes
-//! unanswered.
+//! unanswered. Issue 08b adds the server's movement check and falls, read from the 26.1.2 jar
+//! (`ServerGamePacketListenerImpl.handleMovePlayer`, `Entity.checkFallDamage`,
+//! `LivingEntity.calculateFallDamage`): a correction is the server's verdict on a move.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -26,6 +28,20 @@ pub const KEEP_ALIVE_EVERY: u64 = 300;
 pub const KEEP_ALIVE_LIMIT: u64 = 300;
 /// The entity id the model gives the player.
 const PLAYER_ID: i32 = 1;
+/// "Moved too quickly": the squared distance from the tick's first position, per move packet
+/// this tick (vanilla's 100; 300 when flying with elytra, not modelled).
+const TOO_QUICK: f64 = 100.0;
+/// More move packets than this in one tick count as one (vanilla's 5).
+const MOVES_PER_TICK: u32 = 5;
+/// "Moved wrongly": the squared distance between where the client says it is and where the
+/// server's own move of the same delta ends (vanilla's 0.0625, a quarter block).
+const WRONGLY: f64 = 0.0625;
+/// A vertical error inside this band is forgiven (vanilla's -0.5 < dy < 0.5).
+const Y_SLACK: f64 = 0.5;
+/// How far a player falls before it hurts (the safe fall distance attribute's default, 3).
+const SAFE_FALL: f64 = 3.0;
+/// The deflation vanilla gives boxes in "colliding with anything new" (1.0E-5 as a float).
+const DEFLATE: f64 = 9.999_999_747_378_752e-6;
 
 /// What the model is told: a client packet, or one server tick.
 #[derive(Clone, Debug, PartialEq)]
@@ -108,6 +124,16 @@ pub struct Sim {
     pub closed: Option<String>,
     /// What the client said that a real server would refuse or kick for; counted, never hidden.
     pub violations: Vec<String>,
+    /// The player's name, for the server's death message.
+    name: String,
+    /// The position at the start of this tick, and move packets since (vanilla's firstGood and
+    /// receivedMovePacketCount).
+    first_good: [f64; 3],
+    moves_this_tick: u32,
+    pub fall_distance: f64,
+    pub health: f32,
+    /// Server corrections sent: the parity table's `corrected`.
+    pub corrections: u64,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -139,6 +165,12 @@ impl Sim {
             keep_alive: None,
             closed: None,
             violations: Vec::new(),
+            name: String::new(),
+            first_good: pos,
+            moves_this_tick: 0,
+            fall_distance: 0.0,
+            health: 20.0,
+            corrections: 0,
         }
     }
 
@@ -159,14 +191,17 @@ impl Sim {
         match (self.phase, p) {
             (Phase::Closed, _) => Ok(Vec::new()),
             (Phase::Login, C2s::Intention { .. }) => Ok(Vec::new()),
-            (Phase::Login, C2s::Hello { username, .. }) => Ok(vec![wire(
-                State::Login,
-                &S2c::LoginFinished {
-                    // Offline mode: the server derives the uuid from the name.
-                    uuid: protocol::uuid::offline_uuid(username),
-                    username: username.clone(),
-                },
-            )?]),
+            (Phase::Login, C2s::Hello { username, .. }) => {
+                self.name.clone_from(username);
+                Ok(vec![wire(
+                    State::Login,
+                    &S2c::LoginFinished {
+                        // Offline mode: the server derives the uuid from the name.
+                        uuid: protocol::uuid::offline_uuid(username),
+                        username: username.clone(),
+                    },
+                )?])
+            }
             (Phase::Login, C2s::LoginAcknowledged) => {
                 self.phase = Phase::Configuration;
                 Ok(vec![wire(State::Configuration, &S2c::SelectKnownPacks)?])
@@ -202,7 +237,7 @@ impl Sim {
                 }
                 Ok(Vec::new())
             }
-            (Phase::Play, C2s::MovePlayerPosRot { x, y, z, .. }) => {
+            (Phase::Play, C2s::MovePlayerPosRot { x, y, z, flags, .. }) => {
                 // Until a teleport is accepted the server ignores the client's moves (vanilla's
                 // awaitingPositionFromClient).
                 if self.teleport_pending.is_some() {
@@ -212,12 +247,14 @@ impl Sim {
                 if !to.iter().all(|v| v.is_finite()) {
                     return self.kick("invalid move player packet received");
                 }
-                self.pos = to;
-                self.chunks_around()
+                self.on_move(to, flags & 1 != 0)
+            }
+            (Phase::Play, C2s::MovePlayerStatusOnly { flags }) => {
+                let pos = self.pos;
+                self.on_move(pos, flags & 1 != 0)
             }
             (Phase::Play, C2s::PlayerLoaded)
             | (Phase::Play, C2s::ChunkBatchReceived { .. })
-            | (Phase::Play, C2s::MovePlayerStatusOnly { .. })
             | (Phase::Play, C2s::Pong { .. }) => Ok(Vec::new()),
             (phase, other) => {
                 self.violations.push(format!("{other:?} in {phase:?}"));
@@ -315,11 +352,193 @@ impl Sim {
         Ok(out)
     }
 
+    /// What collides at a block of the model's world, as the client's physics reads it: a full
+    /// cube, a flat box's top, or nothing; outside the world, a full cube.
+    pub fn solid(&self, x: i32, y: i32, z: i32) -> Option<f64> {
+        use data::types::Collision;
+        let Some(state) = self.state_at(x, y, z) else {
+            return Some(1.0);
+        };
+        match data::block_of_state(state).and_then(data::generated::shapes::collision) {
+            Some(Collision::Empty) => None,
+            Some(Collision::Partial { top }) => Some(top),
+            Some(Collision::Full) | None => Some(1.0),
+        }
+    }
+
+    /// The block state at a position, from the model's columns.
+    pub fn state_at(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+        let col = self.world.columns.get(&(x >> 4, z >> 4))?;
+        col.column.state_at(x, y, z)
+    }
+
+    fn in_water(&self, [x, y, z]: [f64; 3]) -> bool {
+        let b = physics::aabb([x, y, z]);
+        let cells = |lo: f64, hi: f64| (lo.floor() as i32)..=(hi.floor() as i32);
+        cells(b[0], b[3]).any(|cx| {
+            cells(b[1], b[4]).any(|cy| {
+                cells(b[2], b[5]).any(|cz| {
+                    self.state_at(cx, cy, cz)
+                        .and_then(data::block_of_state)
+                        .is_some_and(|k| k == data::BlockKind::Water)
+                })
+            })
+        })
+    }
+
+    /// Solid boxes strictly inside `b`.
+    fn collisions(&self, b: physics::Aabb) -> Vec<physics::Aabb> {
+        let solid = |x, y, z| self.solid(x, y, z);
+        physics::solid_boxes(&solid, b)
+            .into_iter()
+            .filter(|c| (0..3).all(|axis| physics::overlaps(&b, c, axis)))
+            .collect()
+    }
+
+    /// vanilla's isEntityCollidingWithAnythingNew: a block the box at `to` would sit in that the
+    /// box at the old position did not.
+    fn colliding_new(&self, old: physics::Aabb, to: [f64; 3]) -> bool {
+        let deflate = |b: physics::Aabb| {
+            [
+                b[0] + DEFLATE,
+                b[1] + DEFLATE,
+                b[2] + DEFLATE,
+                b[3] - DEFLATE,
+                b[4] - DEFLATE,
+                b[5] - DEFLATE,
+            ]
+        };
+        let (new_box, old_box) = (deflate(physics::aabb(to)), deflate(old));
+        self.collisions(new_box)
+            .iter()
+            .any(|c| !(0..3).all(|axis| physics::overlaps(&old_box, c, axis)))
+    }
+
+    /// A move from the client, judged as handleMovePlayer judges it.
+    fn on_move(&mut self, to: [f64; 3], on_ground: bool) -> Result<Vec<Wire>, EncodeError> {
+        let old = self.pos;
+        self.moves_this_tick += 1;
+        let packets = if self.moves_this_tick > MOVES_PER_TICK {
+            1
+        } else {
+            self.moves_this_tick
+        };
+        let sq = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>();
+        // The server's own velocity for the player is not modelled (0): a knockback would
+        // add to the allowance here.
+        if sq(to, self.first_good) > TOO_QUICK * f64::from(packets) {
+            self.violations.push(format!("moved too quickly to {to:?}"));
+            return self.correct(old);
+        }
+        let delta = [to[0] - old[0], to[1] - old[1], to[2] - old[2]];
+        let solid = |x, y, z| self.solid(x, y, z);
+        let (moved, _, _, _) = physics::land_tick(&solid, old, delta);
+        let mut err = [to[0] - moved[0], to[1] - moved[1], to[2] - moved[2]];
+        if err[1] > -Y_SLACK && err[1] < Y_SLACK {
+            err[1] = 0.0;
+        }
+        let wrongly = err.iter().map(|e| e * e).sum::<f64>() > WRONGLY;
+        let old_box = physics::aabb(old);
+        if (wrongly && self.collisions(old_box).is_empty()) || self.colliding_new(old_box, to) {
+            self.violations.push(format!("moved wrongly to {to:?}"));
+            return self.correct(old);
+        }
+        self.pos = to;
+        let mut out = self.fall(delta[1], on_ground)?;
+        out.extend(self.chunks_around()?);
+        Ok(out)
+    }
+
+    fn correct(&mut self, back: [f64; 3]) -> Result<Vec<Wire>, EncodeError> {
+        self.corrections += 1;
+        Ok(vec![self.teleport(back)?])
+    }
+
+    /// Entity.checkFallDamage then the move's reset: falling adds to the fall distance (not in
+    /// water), landing hurts `floor(fall + 1e-6 - 3)` and resets it, moving up resets it.
+    fn fall(&mut self, dy: f64, on_ground: bool) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        if self.in_water(self.pos) {
+            self.fall_distance = 0.0;
+            return Ok(out);
+        }
+        if dy < 0.0 {
+            // Vanilla narrows the step to a float before subtracting.
+            self.fall_distance -= f64::from(dy as f32);
+        }
+        if on_ground {
+            if self.fall_distance > 0.0 {
+                let damage = (self.fall_distance + 1e-6 - SAFE_FALL).floor();
+                if damage > 0.0 {
+                    out.extend(self.hurt(damage as f32, "fall", "death.attack.fall")?);
+                }
+            }
+            self.fall_distance = 0.0;
+        }
+        if dy > 0.0 {
+            self.fall_distance = 0.0;
+        }
+        Ok(out)
+    }
+
+    /// Damage the player: the hurt, the health, and at 0 the server's death message.
+    fn hurt(
+        &mut self,
+        damage: f32,
+        damage_type: &str,
+        death_key: &str,
+    ) -> Result<Vec<Wire>, EncodeError> {
+        let source_type = data::generated::registries::DAMAGE_TYPE
+            .iter()
+            .position(|n| *n == damage_type)
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap_or(-1);
+        self.health = (self.health - damage).max(0.0);
+        let mut out = vec![
+            wire(
+                State::Play,
+                &S2c::DamageEvent {
+                    entity_id: PLAYER_ID,
+                    source_type,
+                    cause: None,
+                    direct: None,
+                },
+            )?,
+            wire(
+                State::Play,
+                &S2c::SetHealth {
+                    health: self.health,
+                    food: 20,
+                    saturation: 5.0,
+                },
+            )?,
+        ];
+        if self.health <= 0.0 {
+            let death = protocol::nbt::Death {
+                text: format!("{death_key} {}", self.name),
+                key: Some(death_key.to_owned()),
+                victim: Some(self.name.clone()),
+                by: None,
+            };
+            out.push(wire(
+                State::Play,
+                &S2c::PlayerCombatKill {
+                    player_id: PLAYER_ID,
+                    death,
+                },
+            )?);
+        }
+        Ok(out)
+    }
+
     fn tick(&mut self) -> Result<Vec<Wire>, EncodeError> {
         if self.phase != Phase::Play {
             return Ok(Vec::new());
         }
         self.ticks += 1;
+        // vanilla's resetPosition at the start of each tick.
+        self.first_good = self.pos;
+        self.moves_this_tick = 0;
         let mut out = Vec::new();
         if self.ticks.is_multiple_of(SET_TIME_EVERY) {
             out.push(wire(State::Play, &S2c::SetTime)?);
@@ -398,4 +617,33 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
         dimension: "minecraft:overworld".to_owned(),
         dimension_type: 0,
     })
+}
+
+pub mod terrain;
+
+impl ModelWorld {
+    /// Set one block (a start's place, a test's ledge): the column is re-encoded so the bytes
+    /// sent from now on hold it.
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, state: u32) -> Result<(), EncodeError> {
+        use protocol::chunk::{Paletted, block_index};
+        let key = (x >> 4, z >> 4);
+        let Some(mc) = self.columns.get(&key) else {
+            return Ok(());
+        };
+        let mut column = (*mc.column).clone();
+        let si = usize::try_from((y - column.min_y) >> 4).unwrap_or(usize::MAX);
+        let Some(section) = column.sections.get_mut(si) else {
+            return Ok(());
+        };
+        let mut cells: Vec<u32> = (0..4096)
+            .map(|i| section.blocks.get(i).unwrap_or(0))
+            .collect();
+        if let Some(c) = cells.get_mut(block_index(x, y, z)) {
+            *c = state;
+        }
+        section.blocks = Paletted::pack(&cells, 4);
+        self.columns
+            .insert(key, ModelColumn::generated(key.0, key.1, column)?);
+        Ok(())
+    }
 }

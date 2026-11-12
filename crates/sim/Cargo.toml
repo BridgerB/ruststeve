@@ -8,6 +8,7 @@ description = "The vanilla server as a pure reducer, grown per issue and checked
 
 [dependencies]
 data = { path = "../data" }
+physics = { path = "../physics" }
 protocol = { path = "../protocol" }
 serde = { version = "1", features = ["derive"] }
 
