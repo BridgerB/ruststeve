@@ -1,0 +1,20 @@
+[package]
+name = "results"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Race results as files: the shared race config, starts, case and batch files, the k/n summary (shell side)"
+
+[[bin]]
+name = "results"
+path = "src/main.rs"
+
+[dependencies]
+data = { path = "../data" }
+protocol = { path = "../protocol" }
+rmp-serde = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+world = { path = "../world" }
+zstd = "0.13"

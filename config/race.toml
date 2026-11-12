@@ -1,0 +1,24 @@
+# The race's shared config (brain/ruststeve/design/race-and-results.md). The race, the server it
+# starts (`xtask server --config`) and, from issue 08, the model read this one file
+# (brain/ruststeve/decisions/measurement-rules.md).
+
+[server]
+# clojurecraft's race servers ran 3; an A/B showed 3 beat 4 (brain/oracle/harness/cc-race-and-gym.md).
+# Mobs farther than this are frozen (brain/game/mc-mob-facts.md).
+simulation_distance = 3
+# What the bot asks for in client information is the same.
+view_distance = 8
+# The seed every local and race server uses, so landings compare like with like.
+seed = "typecraft"
+# Vanilla's default; the races are measured on it.
+difficulty = "normal"
+
+[race]
+# One server per runner and 14 bots was clojurecraft's measured best: 18 ticked about 3x slower
+# (brain/oracle/harness/cc-race-and-gym.md). Ours is lighter; each batch records the server's
+# tick rate so this is re-measured.
+bots_per_server = 14
+# Joins this far apart, so the server is not asked to load 14 spawns at once.
+join_stagger_ms = 2000
+# 6,000 server ticks = 5 game minutes: the default when a start names no cap.
+cap_ticks = 6000

@@ -30,6 +30,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[entities-and-inventory]] - how the world folds entities and window 0; what is counted rather than invented.
 - [[memory-sightings]] - watched blocks remembered as sightings with time, only when seen with an exposed face.
 - [[physics]] - the body moves: a bit-exact port of clojurecraft's physics step, the movement packets, zero server corrections live.
+- [[race-and-results]] - the race on runners, starts as data, the stage ladder, case and batch files, coverage, k/n.
 - [[world-value]] - what `World` holds, how `step` folds each packet, `block_at`, the chunk decoder checked against clojurecraft.
 - [[connection]] - how a bot connects and stays in the world: the pure protocol crate, the net threads, the bot binary, running a server locally.
 - [[datagen]] - the game tables: generated from the 26.1.2 server on a runner, committed in `crates/data`, drift and unknown packet ids caught in CI.

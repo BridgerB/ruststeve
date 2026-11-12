@@ -38,6 +38,10 @@ related:
 ## Tests
 `crates/world/tests/properties.rs`: any sequence of adds, moves, syncs, teleports, data, removals, inventory packets, chunks and block updates folds without panic; no entity holds the player's id; every position is finite; every count is at least 1.
 
+## Death and hits
+- `World::death`: the server's death message for the bot's own id (`player_combat_kill`, [[wire-nbt-text]]); the race ends the run there.
+- `World::hits`: `damage_event`s naming the bot, the damage type by name and the cause and direct entities by kind when the world holds them; kept for a minute of server ticks (`HITS_KEPT_TICKS`), the window a case file reports.
+
 ## Limits
 - A live session so far ran with an empty inventory (a fresh player); inventory folding is shown by the tests.
 - Other windows (tables, furnaces) and clicks are later issues.

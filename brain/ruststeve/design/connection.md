@@ -44,7 +44,7 @@ A bot connects with our own protocol layer ([[own-protocol-not-azalea]]): a pure
 ## Running it locally (`nix develop`)
 ```bash
 cargo run -p datagen -- generate     # once: downloads and sha1-checks the server jar
-cargo run -p xtask -- server         # target/server, port 25565, offline, simulation distance 3; --difficulty peaceful for a quiet one
+cargo run -p xtask -- server         # target/server, port 25565, offline; properties from config/race.toml; --difficulty peaceful for a quiet one; RCON on when RUSTSTEVE_RCON_PASSWORD is set
 cargo run -p bot -- --seconds 600    # in another terminal
 ```
 The world in `target/server` is kept between runs; nothing deletes it.

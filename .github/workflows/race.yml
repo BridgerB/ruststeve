@@ -1,0 +1,171 @@
+# The real race (issue #12, brain/ruststeve/design/race-and-results.md): one vanilla 26.1.2
+# server per runner, a lane of bots on it, a start from config/starts.toml, caps in server ticks.
+# Every lane uploads its batch, cases, recordings and server log; publish sums k/n per stage and
+# commit into the job summary and a release. Runners never stream to steve (the live view is
+# local only). Dispatch only:
+#   gh workflow run race.yml --ref <branch> -f lanes=4 -f bots=14 -f start=spawn -f cap=6000
+name: race
+run-name: "race: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, ${{ inputs.start }}, cap ${{ inputs.cap }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      lanes:
+        description: Lanes, one runner each (at most 20)
+        default: "4"
+      bots:
+        description: Bots per lane (config/race.toml says 14)
+        default: "14"
+      start:
+        description: A start from config/starts.toml
+        default: spawn
+      cap:
+        description: Cap per run in server ticks (6000 = 5 game minutes)
+        default: "6000"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+
+jobs:
+  lanes:
+    name: lanes
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          LANES: ${{ inputs.lanes }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$LANES" =~ ^[0-9]+$ ]] || [ "$LANES" -lt 1 ] || [ "$LANES" -gt 20 ]; then
+            echo "lanes must be 1 to 20, got $LANES"; exit 1
+          fi
+          echo "matrix=$(seq 0 $((LANES - 1)) | paste -sd, | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  lane:
+    needs: lanes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON(needs.lanes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: datagen
+          save-if: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v1
+
+      - name: Get the server jar if the cache missed
+        run: |
+          if [ ! -f "$DATAGEN_WORK/server.jar" ]; then
+            cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out "$RUNNER_TEMP/generated"
+          fi
+
+      - name: Build
+        run: cargo build -q --locked --release -p xtask -p bot -p results -p replay
+
+      - name: Start the server (RCON on, a password for this run only)
+        run: |
+          set -euo pipefail
+          pw="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+          echo "::add-mask::$pw"
+          echo "RUSTSTEVE_RCON_PASSWORD=$pw" >> "$GITHUB_ENV"
+          RUSTSTEVE_RCON_PASSWORD="$pw" nohup ./target/release/xtask server --jar "$DATAGEN_WORK/server.jar" > server.log 2>&1 &
+          for _ in $(seq 1 180); do
+            if grep -q 'Done (' server.log; then exit 0; fi
+            sleep 2
+          done
+          cat server.log
+          exit 1
+
+      - name: Race the lane
+        env:
+          LANE: ${{ matrix.lane }}
+          BOTS: ${{ inputs.bots }}
+          START: ${{ inputs.start }}
+          CAP: ${{ inputs.cap }}
+        # The wall limit is the job's end, not a cap: bots still running then end Cut (not counted).
+        run: |
+          ./target/release/race --lane "$LANE" --bots "$BOTS" --start "$START" --cap "$CAP" \
+            --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit 2700 2>&1 | tee "race-$LANE.log"
+
+      - name: Replay one recording at this commit
+        if: always()
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          f="$(find "lane-$LANE" -name '*.rsr' | sort | head -n 1)"
+          ./target/release/replay verify "$f" 2>&1 | tee -a "race-$LANE.log"
+
+      - name: Keep the server log with the lane
+        if: always()
+        env:
+          LANE: ${{ matrix.lane }}
+        run: cp server.log "lane-$LANE/server.log" && cp "race-$LANE.log" "lane-$LANE/race.log"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: race-${{ github.run_id }}-lane-${{ matrix.lane }}
+          path: lane-${{ matrix.lane }}
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    needs: lane
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: datagen
+          save-if: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: race-${{ github.run_id }}-lane-*
+          path: lanes
+
+      - name: k/n per stage and commit
+        run: |
+          set -euo pipefail
+          cargo run -q --locked --release -p results -- summary lanes | tee summary.md
+          {
+            echo "## race ${{ github.run_id }}: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, start ${{ inputs.start }}, cap ${{ inputs.cap }}"
+            echo
+            cat summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the batches as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Batches and cases only: recordings stay in the lane artifacts.
+          find lanes \( -name 'batch.rsb' -o -name '*.case.rsc' -o -name '*.case.txt' \) -print0 \
+            | tar --zstd --null -T - -cf "batches-${{ github.run_id }}.tar.zst"
+          gh release create "race-${{ github.run_id }}" "batches-${{ github.run_id }}.tar.zst" summary.md \
+            --target "${{ github.sha }}" --prerelease \
+            --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
+            --notes-file summary.md

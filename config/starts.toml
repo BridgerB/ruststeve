@@ -1,0 +1,15 @@
+# Checkpoint starts as data (brain/ruststeve/design/race-and-results.md): a kit and a place per
+# stage, so every lane can play any stage (brain/oracle/handoff/cc-loop-rules.md, the checkpoint
+# rule). Every issue adds its row before its gameplay. Items by registry name (no namespace).
+
+[[start]]
+name = "spawn"
+stage = "in_world"
+place = "spawn"
+
+# Proves the kit path (issue 07a): the table stage's kit at spawn.
+[[start]]
+name = "table"
+stage = "table"
+place = "spawn"
+kit = [["crafting_table", 1], ["oak_log", 4]]

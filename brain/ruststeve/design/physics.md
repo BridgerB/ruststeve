@@ -13,7 +13,7 @@ sourceRefs:
   - "ruststeve:crates/physics/tests/differential.rs#fn every_tick_equals_clojurecraft() {"
   - "ruststeve:crates/world/src/lib.rs#pub fn solid(&self, x: i32, y: i32, z: i32) -> Option<f64> {"
   - "ruststeve:crates/world/src/lib.rs#fn tick(&mut self) -> Vec<Effect> {"
-  - "ruststeve:crates/bot/src/main.rs#fn walk_controls(tick: u64) -> physics::Controls {"
+  - "ruststeve:crates/bot/src/lib.rs#pub fn walk_controls(tick: u64) -> physics::Controls {"
   - "clojurecraft:src/clojurecraft/physics.clj#siblings' ports of the client): no buoyancy to speak of, a swim-up of 0.04 a tick while jumping,"
 related:
   - "[[ruststeve/design/_moc|Design]]"

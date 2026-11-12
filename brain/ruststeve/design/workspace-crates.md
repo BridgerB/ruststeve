@@ -39,12 +39,14 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `record` | recordings: zstd MessagePack, commit-pinned, `Folder` ([[recordings]]) | files |
 | `replay` | the `replay` (verify, export) and `why` binaries ([[replay-and-why]]) | files |
 | `net` | the socket: reader and writer threads over bounded channels ([[connection]]) | sockets |
-| `rcon` | RCON client | sockets |
+| `rcon` | a Source RCON client for the race's own server ([[race-and-results]]) | sockets |
+| `results` | race config and starts, case and batch files, the k/n summary ([[race-and-results]]) | files |
+| `bot` | the bot loop as a library; binaries `bot` and `race` ([[race-and-results]]) | sockets, files |
 | `brain-check` | the brain's checker (exists) | files |
 | `mcp` (`ruststeve-mcp`) | the MCP server of agent tools, built on `rmcp` ([[agent-tools-over-mcp]]) | `gh`, files |
 | `xtask` | repository automation run in CI (`deps-boundary`) | runs `cargo` |
 
-Binaries: `bot` (one bot against a server; exists, joins and stays in the world), `race` (many bots, one server, case files), `simrace` (many bots against the model, in parallel), `replay` (fold a recording, verify effects), `why` (fold to time t and explain the planner's choice), `datagen` (the vanilla jar and reports into `crates/data`, now a crate of its own). Data files: `data/` (goals, thresholds, starts, problem statements). Workflows rebuilt lean on the runners ([[runners-not-the-mac]]).
+Binaries: `bot` (one bot against a server; exists), `race` (a lane of bots on one server, case and batch files; exists, [[race-and-results]]), `simrace` (many bots against the model, in parallel), `replay` (fold a recording, verify effects), `why` (fold to time t and explain the planner's choice), `datagen` (the vanilla jar and reports into `crates/data`, now a crate of its own). Data files: `config/` (the race config and starts, [[race-and-results]]; goals, thresholds and problem statements join it). Workflows rebuilt lean on the runners ([[runners-not-the-mac]]).
 
 The handoff's `store` crate (a Postgres writer) becomes `ingest`: a binary that loads batch and case files into an embedded SurrealDB for insight, kept out of the core's build ([[data-out]]).
 
