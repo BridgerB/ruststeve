@@ -40,7 +40,7 @@ A sim number counts only after the model agrees with a real server at the same m
 - **Sim**: the model in the captured world, the bot spawning at the start, in lockstep, the same settle and script.
 - **Dig and craft rows** (issue 10b), after the walks so the real world's holes come after every walk row: per landing a dig of the block under the feet with FINISH at tick 30 (`dig:30`) and at tick 5 (`dig:5`, a delayed destroy), and a craft (`craft:planks|sticks|table`) from items a row `give`s (`/give` by RCON in real, `Survival::give` in the model). A script now also acts (`Script::acts`): a craft sends its next click only once the last moved the window's state id.
 - **The outcome class**, compared field by field: the final block cell, on the ground, in water, corrected (a teleport after the script began), the lowest health during the script (full, hurt, dead), and since 10b the inventory by item name (slots 1-45 and the cursor) and the count in the grid, result and cursor.
-- **Random drops are not a class**: the model's roll is seeded, not vanilla's, so a dig row stands where neither the dug block nor the one on it drops by chance (leaves a sapling 1 in 20, short grass a seed 1 in 8); seven rows were moved for it, found in the captured worlds.
+- **Random drops are not a class**: an item some block drops only by chance (a sapling from leaves, a seed from grass, flint from gravel) is left out of the inventory on both sides. The model's roll is seeded, not vanilla's, and **a fresh server grows different canopies on the same seed** from run to run (two runner captures disagree about leaves at landings 4 and 7), so no dig spot can be promised leaf-free.
 - **The stated tolerance**: all but 2 of the moments match in every field (78 of 80; 48 of 50 before 10b). A mismatch is a model or harness bug until shown otherwise, never tuned away.
 - **simrace**: lanes of lockstep runs in generated worlds, the same case and batch files with `source = sim`, released as `race-sim-<run>` so the insight store keeps sim beside real, never mixed.
 
@@ -53,7 +53,7 @@ The first table matched 19 of 50. Each cause was named from a recording, then fi
 5. **Saved players**: a reused bot name rejoined where the last run left it, hurt.
 Then: **50 of 50** locally.
 
-Issue 10b's 30 rows first matched 28: the bot's world kept a stale cursor (a click claims an empty cursor and the server answers only a difference, so the world now forgets its cursor as it clicks, [[wire-container-click]]); two leaf rows differed by a sapling roll (moved). Then a grass row's leaf litter popped off in real only: the model now breaks what rests on a broken block. Then **80 of 80** locally.
+Issue 10b's 30 rows first matched 28: the bot's world kept a stale cursor (a click claims an empty cursor and the server answers only a difference, so the world now forgets its cursor as it clicks, [[wire-container-click]]); two leaf rows differed by a sapling roll. Then a grass row's leaf litter popped off in real only: the model now breaks what rests on a broken block. Then **80 of 80** locally; on a runner 79 of 80, the miss a sapling on a canopy the local world did not have, which led to leaving chance drops out of the class.
 
 ## Limits
 - No mobs (peaceful) and no air or drowning yet: the real side gives water breathing. Both join the table with issue 12 (survival), as rows, before any sim number about them counts.

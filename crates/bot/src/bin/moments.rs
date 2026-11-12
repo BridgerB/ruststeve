@@ -132,7 +132,7 @@ fn outcome(
         .filter(|(s, _)| **s >= 1)
         .map(|(_, st)| *st)
         .chain(w.inventory.carried);
-    for (k, n) in held {
+    for (k, n) in held.filter(|(k, _)| !chance_drop(*k)) {
         *inventory.entry(name(k)).or_default() += n;
     }
     let grid = w
@@ -152,6 +152,17 @@ fn outcome(
         inventory,
         grid,
     })
+}
+
+/// Whether some block drops this item only by chance (a sapling from leaves, a seed from grass,
+/// flint from gravel): the model's roll is its own seeded one, never vanilla's, and the trees a
+/// fresh server grows on the same seed differ from run to run, so such an item is not part of
+/// the inventory class.
+fn chance_drop(k: data::ItemKind) -> bool {
+    data::generated::loot::BLOCK_DROPS
+        .iter()
+        .flat_map(|b| b.tries)
+        .any(|d| d.item == k && d.chance < 1.0)
 }
 
 /// A moment's `give` (`oak_log 1`) as a stack.

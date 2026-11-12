@@ -410,10 +410,11 @@ ticks = 160
 # breaks, the bot drops into the hole and picks up the drop) and early (tick 5: under 0.7 of the
 # progress, a delayed destroy the server finishes itself), and a craft in window 0 from items
 # given at the start (planks from a log, sticks from two planks, a table from four). Three blocks
-# off the centre diagonally, so no walk row crosses them. A dig row stands where neither the dug
-# block nor the one on it drops by chance (leaves a sapling 1 time in 20, short grass a seed 1 in
-# 8): the model's seeded roll is not vanilla's, so a random drop is not an outcome class. Seven
-# rows moved for it (d00/d01/d04/d09-early, d04/d06/d07-late), found in the captured worlds.
+# off the centre diagonally, so no walk row crosses them. Items a block drops only by chance
+# (a sapling from leaves, a seed from grass) are left out of the inventory class: the model's
+# roll is not vanilla's, and the canopies a fresh server grows on the same seed differ from run to
+# run (two runner captures disagree at landings 4 and 7). Seven rows stand off the first spots,
+# chosen on an older capture.
 
 [[moment]]
 id = "d00-late"
