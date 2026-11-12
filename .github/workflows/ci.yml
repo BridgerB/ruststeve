@@ -1,0 +1,119 @@
+# CI on the runners (issue #6). Every push to main or an issue branch and every PR into main runs
+# format, lint, tests, the brain checker and the core-crate dependency boundary, in parallel.
+# The Mac never runs code; this is where code runs. Notes: brain/ruststeve/design/ci-on-runners.md
+name: ci
+
+on:
+  push:
+    branches: [main, "issue-*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same ref cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Incremental compilation only adds overhead and cache churn on a fresh runner.
+  CARGO_INCREMENTAL: 0
+  # No debug info for dev and test builds: a smaller target/ and a smaller cache.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  # -D warnings goes on the clippy command line only: RUSTFLAGS would change every cache key.
+
+jobs:
+  fmt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          # Only main writes the cache; branches and PRs restore it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run --workspace --locked --no-tests=pass
+
+  brain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Full history: the ruststeve-v1 source is read from this repository at its pinned commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          save-if: false
+      - name: Fetch the sibling sources at their pins (brain/sources)
+        run: |
+          set -euo pipefail
+          fetch_source() {
+            local name="$1" repo="$2" dir="$3"
+            local pin
+            pin=$(awk -v n="$name" '$1 == n { print $3 }' brain/sources)
+            git init -q "$dir"
+            git -C "$dir" remote add origin "https://github.com/$repo.git"
+            git -C "$dir" fetch -q --depth=1 origin "$pin"
+            echo "$name $pin -> $dir"
+          }
+          fetch_source clojurecraft BridgerB/clojurecraft "$RUNNER_TEMP/clojurecraft"
+          fetch_source steve BridgerB/steve "$RUNNER_TEMP/steve"
+          echo "CLOJURECRAFT_DIR=$RUNNER_TEMP/clojurecraft" >> "$GITHUB_ENV"
+          echo "STEVE_DIR=$RUNNER_TEMP/steve" >> "$GITHUB_ENV"
+      - run: cargo run -q --locked -p brain-check -- --strict
+
+  boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          save-if: false
+      - run: cargo run -q --locked -p xtask -- deps-boundary
+
+  # One stable check name for branch protection.
+  ci-ok:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    needs: [fmt, clippy, test, brain, boundary]
+    if: always()
+    steps:
+      - run: |
+          echo '${{ toJSON(needs) }}'
+          test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "false"

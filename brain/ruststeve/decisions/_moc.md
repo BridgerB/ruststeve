@@ -14,6 +14,7 @@ Each says what was chosen, what was rejected with the reason, and what would cha
 
 - [[just-ruststeve]] - the name is ruststeve (not v2), a clean reset, Rust-only tooling.
 - [[runners-not-the-mac]] - all code runs on GitHub Actions runners (20 at once, 16 GB each); the Mac only edits.
+- [[agent-tools-over-mcp]] - agent tools (probes, CI runs, the brain) are one MCP server on the official Rust SDK, rmcp.
 - [[issues-are-a-plan]] - twenty planned issues, never roadmap or auto-filed issues.
 - [[measurement-rules]] - the real race is the metric; parity before sim numbers; checkpoint starts; caps in game ticks.
 - [[recording-format]] - MessagePack with named fields, zstd, commit-pinned; not JSON.

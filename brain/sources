@@ -10,7 +10,7 @@
 # steve          the TypeScript bot with the typecraft SDK in src/lib/typecraft (github.com/BridgerB/steve, main)
 # ruststeve-v1   the first Rust port: this repository's main at the last commit before the reset
 
-ruststeve     worktree  c87ac55    .
-clojurecraft  git       be85a92    ~/orca/workspaces/mc/clojurecraft/upstream/clojurecraft  CLOJURECRAFT_DIR
-steve         git       46c1264    ~/Developer/steve                                        STEVE_DIR
-ruststeve-v1  git       9e1567f    .
+ruststeve     worktree  c87ac550cf2fdf256da8a315d70cd49395a5db51  .
+clojurecraft  git       be85a9233f5e6fdc00e2c75297a93637160f60ef  ~/orca/workspaces/mc/clojurecraft/upstream/clojurecraft  CLOJURECRAFT_DIR
+steve         git       46c126425be7f47170b20a4bfb309030c1314d49  ~/Developer/steve                                        STEVE_DIR
+ruststeve-v1  git       9e1567f0dd81fdda85cff7debb9c8087b16f601d  .

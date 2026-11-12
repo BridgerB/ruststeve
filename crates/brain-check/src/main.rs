@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! cargo run -q -p brain-check                          the four invariants (exit 1 on any defect)
+//! cargo run -q -p brain-check -- --strict              also fail when a source checkout is missing (CI)
 //! cargo run -q -p brain-check -- drift                 notes whose cited files changed since their pin
 //! cargo run -q -p brain-check -- touches <source> <path>...   notes citing those paths
 //! ```
@@ -459,11 +460,13 @@ fn main() -> ExitCode {
             println!("stale notes: {stale}");
             ExitCode::SUCCESS
         }
-        _ => check(&notes, &sources),
+        _ => check(&notes, &sources, args.iter().any(|a| a == "--strict")),
     }
 }
 
-fn check(notes: &[Note], sources: &BTreeMap<String, Source>) -> ExitCode {
+/// The four invariants plus metadata. `strict` also fails when any sourceRef could not be checked
+/// because its source checkout is missing, so CI cannot pass by skipping sources.
+fn check(notes: &[Note], sources: &BTreeMap<String, Source>, strict: bool) -> ExitCode {
     let by_path: BTreeSet<&str> = notes.iter().map(|n| n.rel.as_str()).collect();
     let mut by_stem: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for n in notes {
@@ -547,7 +550,10 @@ fn check(notes: &[Note], sources: &BTreeMap<String, Source>) -> ExitCode {
     let clean = [&broken, &ambiguous, &orphans, &unresolved, &meta]
         .iter()
         .all(|v| v.is_empty());
-    if clean {
+    if strict && unchecked > 0 {
+        println!("strict: {unchecked} sourceRefs unchecked (a source checkout is missing)");
+    }
+    if clean && !(strict && unchecked > 0) {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE

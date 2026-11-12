@@ -6,7 +6,7 @@ ruststeve is an autonomous Minecraft bot in Rust: from a fresh spawn to a dead E
 
 Do these in order before writing any code, every session, and again after any context reset.
 
-1. **Get the branch.** All work is on `functional` (never `main`). `git fetch origin && git checkout functional && git pull`.
+1. **Get the branch.** All work is on `main` (the old `functional` and `reset` branches were fast-forwarded into it on 2026-11-11). `git fetch origin && git checkout main && git pull`.
 2. **Read the brain's spine, in full.** These are short; read every one:
    - `brain/_index.md`, `brain/operating-manual.md`, `brain/conventions.md`, `brain/rules.md`, `brain/glossary.md`
    - every hub: `brain/*/_moc.md` and `brain/*/*/_moc.md`
@@ -26,14 +26,15 @@ Do these in order before writing any code, every session, and again after any co
 - Locally only: editing, `cargo fmt`, `cargo clippy`, `cargo run -q -p brain-check` (seconds; it is the brain's static check), `git`, `gh`, reading files.
 - Not locally: tests, builds for running, the bot, servers, sims, races, replays, benchmarks, probes.
 - The loop: change code, commit, push the branch, let CI run on the push, read the run's logs (`gh run view <id> --log-failed`), push again.
-- A question that needs code run goes to a probe workflow once issue 01 has made one.
+- A question that needs code run goes to the probe: the `probe_run` MCP tool, or `gh workflow run probe.yml --ref <branch> -f command=...` ([`brain/ruststeve/design/ci-on-runners.md`](brain/ruststeve/design/ci-on-runners.md)).
+- **Use the `ruststeve` MCP server** (`.mcp.json`, built with the official Rust MCP SDK `rmcp`): `probe_run`, `probe_output`, `run_status`, `run_log`, `ci_runs`, `brain_check`, `brain_note`, `brain_search`. New agent-facing tooling is added there as a tool, not as a script (`brain/ruststeve/decisions/agent-tools-over-mcp.md`).
 - Watch runs in the background and keep working; never end a turn just waiting on a run.
 
 ## 3. How to work an issue
 
 - **One issue at a time**, in order. Do not start the next until Bridger says "do the next one".
-- Branch from `functional` as `issue-NN-<slug>` (e.g. `issue-03-connect`). Pushing the branch and opening its PR **into `functional`** is authorized; never push to `main`, never force-push, never `--no-verify`.
-- An issue closes only when **its done-condition holds on a runner**, measured as the issue states (real race, k/n, the named checkpoint start). Put the evidence (run ids, k/n, the commit) in the PR body, then merge into `functional` and report.
+- Branch from `main` as `issue-NN-<slug>` (e.g. `issue-03-connect`). Committing, pushing the branch, opening its PR **into `main`** and merging it are authorized. Never push directly to `main`, never force-push, never `--no-verify`.
+- An issue closes only when **its done-condition holds on a runner**, measured as the issue states (real race, k/n, the named checkpoint start). Put the evidence (run ids, k/n, the commit) in the PR body, then merge into `main` and report.
 - **A failure inside an issue** gets a written problem statement in `docs/problems/<stage>.md` (needs, risks, done in world terms, the last recorded failure). Never open a new issue for a symptom. An issue too big splits into numbered sub-issues (`17a`, `17b`) so the plan stays one list.
 - Every change that touches a subsystem updates its brain note in the same PR, bumping `lastUpdated` and the `ruststeve@` pin; `cargo run -q -p brain-check -- touches ruststeve <paths>` lists the notes a diff affects.
 
