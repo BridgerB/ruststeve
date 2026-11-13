@@ -53,6 +53,8 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - Runners, run 43181608927 on main 409c473: 4 lanes × 14 bots on `spawn`, cap 6000: **56/56 `in_world`, 0/56 above, coverage cases 56/56 and recordings 56/56**, every lane in about 7 minutes; the server ticked 20.1 a second with 14 bots (headroom for more).
 - Local, 3 bots on `table`, cap 600: the kit arrived over RCON, 3/3 reached `table`, coverage 1.0, a recording verified with 0 mismatches over 10,846 events; the local server ticked 21.3 a second.
 
+- **The first hour** (issue 12e, run 43396217935, spawn, stone-tools, cap 72,000, hold, 4×14 on Normal): **0 deaths of 56**, every run to the cap; stone pickaxe 51/56, aim met 50/56. But the hour tested survival little: the aim is met in 3 to 4 minutes, then the bots stand still, clustered near spawn, for the rest of it. Lane 0's 14 recordings hold no always-row firing at all (no escape, defence, meal or hunt), no hostile came within 4 blocks, and food stayed at 20 (standing still spends none). Monsters spawn at least 24 blocks from any player and within simulation distance 3, so a still cluster sees them only at the edge.
+
 ## Gotchas
 - The killer groups across bots only without the victim's name: `death.attack.mob zombie`; the case keeps the whole text.
 - `workflow_dispatch` needs the workflow on `main`: a new race workflow runs only after its PR merges.
