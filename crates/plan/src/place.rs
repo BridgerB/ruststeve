@@ -7,6 +7,7 @@
 use data::{BlockKind, ItemKind};
 use world::{Act, BlockPos, World};
 
+use crate::dig::{Dig, DigStatus};
 use crate::hold::{self, Hold};
 use crate::path::Cell;
 
@@ -41,7 +42,16 @@ pub struct Place {
     pub at: Option<(Cell, u64)>,
     pub tried: Vec<Cell>,
     pub started: u64,
+    /// A wall cell being dug to make room (issue 13b: a furnace in a one-wide staircase whose
+    /// only free cell the table took), and how many have been.
+    #[serde(default)]
+    pub clearing: Option<Dig>,
+    #[serde(default)]
+    pub cleared: u32,
 }
+
+/// Wall cells dug to make room before the task fails `NoRoom`.
+pub const MAX_CLEARED: u32 = 2;
 
 fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
     w.block_at(BlockPos::new(x, y, z))
@@ -67,6 +77,8 @@ impl Place {
             at: None,
             tried: Vec::new(),
             started: tick,
+            clearing: None,
+            cleared: 0,
         })
     }
 
@@ -109,9 +121,36 @@ impl Place {
         })
     }
 
+    /// A wall cell beside the feet to dig for room: a full block at the feet's height with a full
+    /// block under it, nothing above it at head height but air or another wall, no fluid near.
+    fn wall(&self, w: &World) -> Option<Cell> {
+        let body = w.body?;
+        let (fx, fy, fz) = crate::path::feet_cell(body.pos);
+        [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .into_iter()
+            .map(|(dx, dz)| (fx + dx, fy, fz + dz))
+            .find(|c| {
+                full(kind(w, *c))
+                    && full(kind(w, (c.0, c.1 - 1, c.2)))
+                    && crate::stairs::refusal(w, &[*c], (c.0, c.1 - 1, c.2)).is_none()
+            })
+    }
+
     pub fn step(&mut self, w: &World, tick: u64) -> (Option<Act>, PlaceStatus) {
         if w.body.is_none() {
             return (None, PlaceStatus::Failed(PlaceFailure::Lost));
+        }
+        if let Some(d) = &mut self.clearing {
+            let (_, act, status) = d.step(w, tick);
+            match status {
+                DigStatus::Running => return (act, PlaceStatus::Running),
+                DigStatus::Done | DigStatus::Failed(_) => {
+                    self.clearing = None;
+                    if act.is_some() {
+                        return (act, PlaceStatus::Running);
+                    }
+                }
+            }
         }
         if let Some((c, sent)) = self.at {
             if kind(w, c) == Some(self.block) {
@@ -132,6 +171,13 @@ impl Place {
             Hold::Missing => return (None, PlaceStatus::Failed(PlaceFailure::Missing)),
         }
         let Some(c) = self.choose(w) else {
+            if self.cleared < MAX_CLEARED
+                && let Some(wall) = self.wall(w)
+            {
+                self.cleared += 1;
+                self.clearing = Some(Dig::new(w, wall, tick));
+                return (None, PlaceStatus::Running);
+            }
             return (None, PlaceStatus::Failed(PlaceFailure::NoRoom));
         };
         self.tried.push(c);

@@ -45,6 +45,8 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[escapes]] - the always-rows: out of water, lava and fire ahead of every goal.
 - [[food-and-hunting]] - eating when hungry, and hunting an animal when there is nothing to eat.
 - [[smelting]] - the furnace window, the model's furnace, the smelt task.
+- [[fuel-and-smelt-needs]] - fuel as a need, smelt rows, spares, the batch.
+- [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.

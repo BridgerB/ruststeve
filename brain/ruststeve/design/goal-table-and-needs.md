@@ -6,7 +6,7 @@ tags: [plan, goals, needs, make, crafting]
 aliases: [block needs, holds, place-table, mine-stone, stone-tools, goals.toml, goal table, needs planner, plan::make, make, producer rows, craft rows, kit, wood, Aim::Table, --goal table, producer order, craft-now, make differential]
 status: verified
 lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
+verifiedAgainst: ruststeve@7e42e00 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/make.rs#pub fn make<'a>("
   - "ruststeve:crates/plan/src/make.rs#fn producer_order(counts: &Counts, row: &Row) -> (i32, i32) {"
@@ -47,6 +47,9 @@ Issue 10c. Goals are data; planning is a function. A goal row says what it provi
 
 ## Always-rows (issue 12b)
 `[[always]]` rows (`id`, `priority`, `doc`, `trap`: water, lava or fire) are kept apart from goals and producers in `Table::always`, by priority: they are not planned for, they preempt ([[escapes]]). Issue 12c's rows name an `act` (`eat`, `hunt`) instead of a `trap`, and `[survival]` holds their numbers ([[food-and-hunting]]).
+
+## Issue 13b: fuel, smelting and spares
+Smelt rows, the `fuel:ticks` need and `spares` are in [[fuel-and-smelt-needs]], with their own differential (12,288 of 12,288).
 
 ## Checked against clojurecraft
 `make-expected.txt` is clojurecraft's own `make/next-row` (at be85a92, a one-off oracle in its flake shell, outside this repo) toward the kit with a table of the kit and gather-log rows, for all 480 inventories of oak logs 0-3, planks 0-4, sticks 0-5 and tables 0-1: **480 of 480** choices equal. `make-expected-stone.txt` (issue 11b): toward `stone-pickaxe` with the stone-pickaxe, gather-log, place-table and mine-stone rows, 1,920 inventories of logs, planks, sticks, tables, cobblestone and wooden pickaxes, with and without a remembered table: **1,920 of 1,920** equal.

@@ -86,6 +86,9 @@ pub struct Smelt {
     pub clicks: u32,
     pub misses: u32,
     pub started: u64,
+    /// Only take the results of a batch already loaded (issue 13b: a smelt the planner left).
+    #[serde(default)]
+    pub collect: bool,
 }
 
 /// The fuel the bot burns, hottest first: coal before wood. Logs, sticks and tools are kept for
@@ -130,7 +133,32 @@ impl Smelt {
             clicks: 0,
             misses: 0,
             started: tick,
+            collect: false,
         })
+    }
+
+    /// Go back to a furnace loaded with `count` of a batch whose result is `result`, and take it.
+    pub fn collect(w: &World, furnace: Cell, result: ItemKind, count: i32, tick: u64) -> Self {
+        Self {
+            furnace,
+            input: result,
+            result,
+            count,
+            before: crate::craft::count(w, result),
+            cook_ticks: 200,
+            stage: SmeltStage::Approach,
+            walk: None,
+            opens: 0,
+            clicks: 0,
+            misses: 0,
+            started: tick,
+            collect: true,
+        }
+    }
+
+    /// The batch is in the furnace (the task is past its loads).
+    pub fn loaded(&self) -> bool {
+        matches!(self.stage, SmeltStage::Cook { .. })
     }
 
     fn slot(w: &World, s: i16) -> Option<(ItemKind, i32)> {
@@ -341,7 +369,11 @@ impl Smelt {
                 if w.inventory.carried.is_some() {
                     return self.put_down(w);
                 }
-                self.stage = SmeltStage::Fuel;
+                self.stage = if self.collect {
+                    SmeltStage::Cook { since: tick }
+                } else {
+                    SmeltStage::Fuel
+                };
                 self.stages(w, tick)
             }
             SmeltStage::Fuel => match self.fuel_plan(w) {

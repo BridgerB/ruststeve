@@ -30,6 +30,9 @@ pub struct Need {
     pub items: Vec<ItemKind>,
     /// A `block:<name>` need: such a block remembered near (its count is not counted).
     pub block: Option<data::BlockKind>,
+    /// `fuel:ticks` (issue 13b): fuel that burns its count of game ticks.
+    #[serde(default)]
+    pub fuel: bool,
 }
 
 impl Need {
@@ -50,6 +53,15 @@ impl Need {
                     key: s.to_owned(),
                     items: Vec::new(),
                     block: Some(data::BlockKind::from_name(name)?),
+                    fuel: false,
+                });
+            }
+            "fuel" if name == "ticks" => {
+                return Some(Need {
+                    key: s.to_owned(),
+                    items: Vec::new(),
+                    block: None,
+                    fuel: true,
                 });
             }
             _ => return None,
@@ -58,6 +70,7 @@ impl Need {
             key: s.to_owned(),
             items: Self::sorted(items),
             block: None,
+            fuel: false,
         })
     }
 
@@ -83,6 +96,7 @@ impl Need {
             key,
             items,
             block: None,
+            fuel: false,
         }
     }
 
@@ -119,12 +133,22 @@ pub enum Act {
     Gather,
     /// Put a held block down near the player (`place-table`).
     Place(data::BlockKind),
-    /// Dig an exposed block of these kinds with the held tool, or cut stairs down to find one.
+    /// Dig an exposed block of these kinds with the held tool, or cut stairs down to find one,
+    /// at most `depth` blocks down (unbounded when absent).
     #[serde(skip)]
-    Mine(&'static [data::BlockKind]),
+    Mine {
+        blocks: &'static [data::BlockKind],
+        depth: Option<u32>,
+    },
     /// One run of a 2x2 recipe in window 0.
     #[serde(skip)]
     Craft(&'static Recipe),
+    /// A furnace recipe, a batch at a furnace near (issue 13b).
+    #[serde(skip)]
+    Smelt(&'static data::types::Smelt),
+    /// Put a held block down and dig it again until it drops what the row provides (flint from
+    /// gravel, issue 13b).
+    Redig(data::BlockKind),
 }
 
 /// A row of the goal table, or a generated producer row.
@@ -135,6 +159,9 @@ pub struct Row {
     pub provides: Vec<(Need, i32)>,
     /// What the row keeps rather than spends (a tool): resolved once, never consumed.
     pub holds: Vec<(Need, i32)>,
+    /// One more of each it keeps than it holds, made when that can be started now (issue 13b,
+    /// clojurecraft's `:goal/spares`).
+    pub spares: Vec<(Need, i32)>,
     pub act: Option<Act>,
 }
 
@@ -161,6 +188,12 @@ pub struct GoalRow {
     /// The block a `place` row puts down, or the blocks a `mine` row digs.
     #[serde(default)]
     pub blocks: Vec<String>,
+    /// Spares kept beside what it holds (issue 13b).
+    #[serde(default)]
+    pub spares: Vec<(String, i32)>,
+    /// How deep a `mine` row may cut stairs (issue 13b).
+    #[serde(default)]
+    pub depth: Option<u32>,
 }
 
 /// `config/goals.toml`.
@@ -279,7 +312,11 @@ fn row_of(g: &GoalRow) -> Result<Row, String> {
         (None, _) => None,
         (Some("gather"), _) => Some(Act::Gather),
         (Some("place"), Some(b)) => Some(Act::Place(*b)),
-        (Some("mine"), Some(_)) => Some(Act::Mine(Box::leak(blocks.clone().into_boxed_slice()))),
+        (Some("mine"), Some(_)) => Some(Act::Mine {
+            blocks: Box::leak(blocks.clone().into_boxed_slice()),
+            depth: g.depth,
+        }),
+        (Some("redig"), Some(b)) => Some(Act::Redig(*b)),
         (Some(other), _) => return Err(format!("goal {}: no act {other} (or no blocks)", g.id)),
     };
     Ok(Row {
@@ -287,6 +324,7 @@ fn row_of(g: &GoalRow) -> Result<Row, String> {
         needs: g.needs.iter().map(need).collect::<Result<_, _>>()?,
         provides: g.provides.iter().map(need).collect::<Result<_, _>>()?,
         holds: g.holds.iter().map(need).collect::<Result<_, _>>()?,
+        spares: g.spares.iter().map(need).collect::<Result<_, _>>()?,
         act,
     })
 }
@@ -350,6 +388,7 @@ impl Table {
                         key: "block:crafting_table".to_owned(),
                         items: Vec::new(),
                         block: Some(data::BlockKind::CraftingTable),
+                        fuel: false,
                     },
                     1,
                 ));
@@ -362,12 +401,53 @@ impl Table {
                         key: format!("item:{}", r.result.name().unwrap_or_default()),
                         items: vec![r.result],
                         block: None,
+                        fuel: false,
                     },
                     i32::from(r.count),
                 )],
                 holds: Vec::new(),
+                spares: Vec::new(),
                 act: Some(Act::Craft(r)),
             }
+        }));
+        // One producer per furnace recipe (clojurecraft's `smelt-row`): its input, then the fuel
+        // to cook it (after the input, so the input is never counted as its own fuel), then a
+        // furnace near.
+        producers.extend(data::generated::recipes::SMELTING.iter().map(|r| Row {
+            id: format!("smelt:{}", r.id),
+            needs: vec![
+                (Need::of_set(r.input), 1),
+                (
+                    Need {
+                        key: "fuel:ticks".to_owned(),
+                        items: Vec::new(),
+                        block: None,
+                        fuel: true,
+                    },
+                    i32::try_from(r.ticks).unwrap_or(i32::MAX),
+                ),
+                (
+                    Need {
+                        key: "block:furnace".to_owned(),
+                        items: Vec::new(),
+                        block: Some(data::BlockKind::Furnace),
+                        fuel: false,
+                    },
+                    1,
+                ),
+            ],
+            provides: vec![(
+                Need {
+                    key: format!("item:{}", r.result.name().unwrap_or_default()),
+                    items: vec![r.result],
+                    block: None,
+                    fuel: false,
+                },
+                i32::from(r.count),
+            )],
+            holds: Vec::new(),
+            spares: Vec::new(),
+            act: Some(Act::Smelt(r)),
         }));
         let mut rows: Vec<&AlwaysRow> = g.always.iter().collect();
         rows.sort_by_key(|r| r.priority);
@@ -459,6 +539,71 @@ struct Planner<'a> {
     table: &'a Table,
     /// Whether a block of a kind is remembered near (`make/near`): the world, read by the shell.
     near: &'a dyn Fn(data::BlockKind) -> bool,
+    /// Whether a gather can be started now (a log with a way to it): the world, read by the
+    /// shell; a spare is made by a gather only then (clojurecraft's `spare-worth?`).
+    gather_now: bool,
+}
+
+/// What fuel burns, in the order the smelt burns it: the `coals` tag then the `planks` tag,
+/// each by name, each only where the game burns it (clojurecraft's `smelt/burn-order`).
+pub fn burn_order() -> Vec<ItemKind> {
+    ["coals", "planks"]
+        .iter()
+        .flat_map(|t| {
+            let mut v: Vec<ItemKind> = data::generated::tags::item_tag(t)
+                .unwrap_or(&[])
+                .iter()
+                .copied()
+                .filter(|k| data::generated::fuel::fuel_ticks(*k).is_some())
+                .collect();
+            v.sort_by_key(|k| k.name().unwrap_or_default());
+            v
+        })
+        .collect()
+}
+
+fn burn_ticks(item: ItemKind) -> i32 {
+    data::generated::fuel::fuel_ticks(item)
+        .and_then(|t| i32::try_from(t).ok())
+        .unwrap_or(0)
+}
+
+/// `burn`: the counts with the fuel that burns `ticks` taken out in burn order, whole items
+/// only, and the ticks it could not cover.
+fn burn(counts: &Counts, ticks: i32) -> (Counts, i32) {
+    let mut c = counts.clone();
+    let mut left = ticks;
+    for k in burn_order() {
+        if left <= 0 {
+            break;
+        }
+        let held = c.get(&k).copied().unwrap_or(0);
+        if held <= 0 {
+            continue;
+        }
+        let b = burn_ticks(k).max(1);
+        let take = held.min((left + b - 1) / b);
+        c.insert(k, held - take);
+        left -= take * b;
+    }
+    (c, left.max(0))
+}
+
+/// Planks a log crafts into, and logs never counted as fuel (the sticks and table a new pickaxe
+/// needs) (clojurecraft's `planks-per-log`, `log-reserve`).
+const PLANKS_PER_LOG: i32 = 4;
+const LOG_RESERVE: i32 = 1;
+
+/// `wood-covers?`: do the logs held, but the reserve, make the planks that burn `ticks`?
+fn wood_covers(counts: &Counts, ticks: i32) -> bool {
+    let plank = burn_ticks(ItemKind::OakPlanks).max(1);
+    let planks = (ticks + plank - 1) / plank;
+    let logs: i32 = data::generated::tags::item_tag("logs")
+        .unwrap_or(&[])
+        .iter()
+        .map(|k| counts.get(k).copied().unwrap_or(0))
+        .sum();
+    logs - LOG_RESERVE >= (planks + PLANKS_PER_LOG - 1) / PLANKS_PER_LOG
 }
 
 type Resolved<'a> = (Counts, Option<Result<&'a Row, ()>>);
@@ -479,6 +624,27 @@ impl<'a> Planner<'a> {
                 (_, Some(Err(()))) => return (counts, Some(Err(()))),
                 (c2, Some(Ok(r))) => return (c2, Some(Ok(r))),
                 (_, None) => {}
+            }
+        }
+        // Then its spares (`resolve-spares`): one more than it holds, planned only when the
+        // producer is worth it now (never a mine; a gather only with a log to start on).
+        for (k, n) in &row.spares {
+            let held = row
+                .holds
+                .iter()
+                .find(|(h, _)| h.key == k.key)
+                .map_or(0, |(_, m)| *m);
+            if let (_, Some(Ok(r))) = self.resolve_need(counts.clone(), k, n + held, path) {
+                let worth = match r.act {
+                    Some(Act::Mine { .. }) => false,
+                    Some(Act::Gather) => self.gather_now,
+                    Some(Act::Place(_) | Act::Craft(_) | Act::Smelt(_) | Act::Redig(_)) | None => {
+                        true
+                    }
+                };
+                if worth {
+                    return (counts, Some(Ok(r)));
+                }
             }
         }
         let mut c = counts.clone();
@@ -532,6 +698,32 @@ impl<'a> Planner<'a> {
         (counts, Some(Err(())))
     }
 
+    /// `resolve-fuel-need`: met when the fuel held burns n ticks (taken out as the smelt burns
+    /// it); else the rest is planned from coal, then planks, planks first when the logs held
+    /// cover them (`wood-covers?`).
+    fn resolve_fuel(&self, counts: Counts, n: i32, path: &[Vec<ItemKind>]) -> Resolved<'a> {
+        let (c, left) = burn(&counts, n);
+        if left <= 0 {
+            return (c, None);
+        }
+        let coal = (Need::parse("item:coal"), burn_ticks(ItemKind::Coal));
+        let planks = (Need::parse("tag:planks"), burn_ticks(ItemKind::OakPlanks));
+        let sources = if wood_covers(&c, left) {
+            [planks, coal]
+        } else {
+            [coal, planks]
+        };
+        for (k, b) in sources {
+            let Some(k) = k else { continue };
+            let b = b.max(1);
+            match self.resolve_need(c.clone(), &k, (left + b - 1) / b, path) {
+                (_, Some(Err(()))) => {}
+                done => return done,
+            }
+        }
+        (counts, Some(Err(())))
+    }
+
     /// `resolve-item-need`: met (`None`, the items consumed) when the counts hold n; else what is
     /// held is consumed and the producers of the rest tried in `producer_order`.
     fn resolve_need(
@@ -541,6 +733,9 @@ impl<'a> Planner<'a> {
         n: i32,
         path: &[Vec<ItemKind>],
     ) -> Resolved<'a> {
+        if k.fuel {
+            return self.resolve_fuel(counts, n, path);
+        }
         if let Some(b) = k.block {
             // `resolve-block-need`: met when one is remembered near, else the first producer that
             // provides it and can be done once.
@@ -589,7 +784,22 @@ pub fn make<'a>(
     near: &'a dyn Fn(data::BlockKind) -> bool,
     goal: &'a Row,
 ) -> Choice<'a> {
-    let p = Planner { table, near };
+    make_with(table, counts, near, false, goal)
+}
+
+/// `make`, told whether a gather can be started now (for spares, issue 13b).
+pub fn make_with<'a>(
+    table: &'a Table,
+    counts: &Counts,
+    near: &'a dyn Fn(data::BlockKind) -> bool,
+    gather_now: bool,
+    goal: &'a Row,
+) -> Choice<'a> {
+    let p = Planner {
+        table,
+        near,
+        gather_now,
+    };
     let mut c = counts.clone();
     for (k, n) in goal.provides.iter().chain(&goal.needs) {
         match p.resolve_need(c, k, *n, &[]) {
@@ -621,6 +831,8 @@ mod tests {
                     act: None,
                     holds: Vec::new(),
                     blocks: Vec::new(),
+                    spares: Vec::new(),
+                    depth: None,
                 },
                 GoalRow {
                     id: "gather".to_owned(),
@@ -632,6 +844,8 @@ mod tests {
                     act: Some("gather".to_owned()),
                     holds: Vec::new(),
                     blocks: Vec::new(),
+                    spares: Vec::new(),
+                    depth: None,
                 },
             ],
             always: Vec::new(),

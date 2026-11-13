@@ -72,6 +72,10 @@ pub struct Stairs {
     /// Stairs refused, by reason, for the case file.
     pub refusals: Vec<String>,
     pub started: u64,
+    /// Level steps only (issue 13b): a mine row at its depth tunnels along instead of down, each
+    /// step counted as a stair.
+    #[serde(default)]
+    pub level_only: bool,
 }
 
 fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
@@ -155,13 +159,22 @@ impl Stairs {
             dig: None,
             refusals: Vec::new(),
             started: tick,
+            level_only: false,
+        }
+    }
+
+    /// A tunnel at the feet's level: level steps only, `STAIR_DEPTH` of them.
+    pub fn level(dir: (i32, i32), tick: u64) -> Self {
+        Self {
+            level_only: true,
+            ..Self::new(dir, tick)
         }
     }
 
     /// The next stair from the feet, turning on refusals; a level step when all four refuse.
     fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {
         let (x, y, z) = feet;
-        for _ in 0..4 {
+        for _ in 0..if self.level_only { 0 } else { 4 } {
             let (dx, dz) = self.dir;
             let to = (x + dx, y - 1, z + dz);
             let cells = vec![(x + dx, y + 1, z + dz), (x + dx, y, z + dz), to];
@@ -180,7 +193,7 @@ impl Stairs {
                 }
             }
         }
-        if self.level_steps >= MAX_LEVEL_STEPS {
+        if self.level_steps >= MAX_LEVEL_STEPS && !self.level_only {
             return Err(StairsFailure::Boxed);
         }
         for _ in 0..4 {
@@ -275,7 +288,7 @@ impl Stairs {
                 level,
             } => {
                 if feet == *to {
-                    if !*level {
+                    if !*level || self.level_only {
                         self.stairs += 1;
                         self.turns = 0;
                     }

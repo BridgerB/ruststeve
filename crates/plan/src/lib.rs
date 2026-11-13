@@ -18,6 +18,7 @@ pub mod hunt;
 pub mod make;
 pub mod path;
 pub mod place;
+pub mod redig;
 pub mod smelt;
 pub mod stairs;
 pub mod walk;
@@ -77,6 +78,14 @@ pub enum Aim {
     Cobblestone,
     StonePickaxe,
     StoneTools,
+    /// Issue 13's rows: a furnace placed, four ingots, an iron pickaxe, a bucket, flint and
+    /// steel, and the kit (all three).
+    Furnace,
+    Ingots,
+    IronPickaxe,
+    Bucket,
+    FlintAndSteel,
+    IronKit,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -91,6 +100,12 @@ impl Aim {
             None if s == "cobblestone" => Some(Aim::Cobblestone),
             None if s == "stone-pickaxe" => Some(Aim::StonePickaxe),
             None if s == "stone-tools" => Some(Aim::StoneTools),
+            None if s == "furnace" => Some(Aim::Furnace),
+            None if s == "ingots" => Some(Aim::Ingots),
+            None if s == "iron-pickaxe" => Some(Aim::IronPickaxe),
+            None if s == "bucket" => Some(Aim::Bucket),
+            None if s == "flint-and-steel" => Some(Aim::FlintAndSteel),
+            None if s == "iron-kit" => Some(Aim::IronKit),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -108,6 +123,12 @@ impl Aim {
             Aim::Cobblestone => "cobblestone".to_owned(),
             Aim::StonePickaxe => "stone-pickaxe".to_owned(),
             Aim::StoneTools => "stone-tools".to_owned(),
+            Aim::Furnace => "furnace".to_owned(),
+            Aim::Ingots => "ingots".to_owned(),
+            Aim::IronPickaxe => "iron-pickaxe".to_owned(),
+            Aim::Bucket => "bucket".to_owned(),
+            Aim::FlintAndSteel => "flint-and-steel".to_owned(),
+            Aim::IronKit => "iron-kit".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -121,6 +142,12 @@ impl Aim {
             | Aim::Cobblestone
             | Aim::StonePickaxe
             | Aim::StoneTools
+            | Aim::Furnace
+            | Aim::Ingots
+            | Aim::IronPickaxe
+            | Aim::Bucket
+            | Aim::FlintAndSteel
+            | Aim::IronKit
             | Aim::Hold => true,
         }
     }
@@ -142,6 +169,10 @@ pub enum Task {
     Place(Place),
     /// Cutting stairs down (issue 11b).
     Stairs(Box<Stairs>),
+    /// A batch in a furnace, or the results of one left loaded (issue 13b).
+    Smelt(Box<smelt::Smelt>),
+    /// Place a block and dig it again for its chance drop (flint, issue 13b).
+    Redig(Box<redig::Redig>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
     /// A hostile mob near: fight it or back away (issue 12d).
@@ -162,6 +193,8 @@ impl Task {
             Task::Craft(_) => "craft",
             Task::Place(_) => "place",
             Task::Stairs(_) => "stairs",
+            Task::Smelt(_) => "smelt",
+            Task::Redig(_) => "redig",
             Task::Escape(_) => "escape",
             Task::Defend(_) => "defend",
             Task::Eat(_) => "eat",
@@ -176,6 +209,8 @@ impl Task {
             | Task::Craft(_)
             | Task::Place(_)
             | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_)
             | Task::Escape(_)
             | Task::Defend(_)
             | Task::Eat(_)
@@ -247,6 +282,12 @@ pub struct Plan {
     pub kills: u64,
     #[serde(default)]
     pub always_retry_at: u64,
+    /// A batch left cooking (issue 13b): the furnace, its result and how many. The planner goes
+    /// back for it before anything else, and never mines for what is already in it.
+    #[serde(default)]
+    pub batch: Option<(Cell, data::ItemKind, i32)>,
+    #[serde(default)]
+    pub smelts: u64,
     #[serde(default)]
     pub refused_prey: Vec<i32>,
     /// Acts made this tick, for the shell (`take_acts`).
@@ -282,6 +323,8 @@ impl Plan {
             meals: 0,
             kills: 0,
             always_retry_at: 0,
+            batch: None,
+            smelts: 0,
             refused_prey: Vec::new(),
             acts: Vec::new(),
         }
@@ -350,6 +393,12 @@ impl Plan {
                 | Aim::Pickaxe
                 | Aim::Cobblestone
                 | Aim::StonePickaxe
+                | Aim::Furnace
+                | Aim::Ingots
+                | Aim::IronPickaxe
+                | Aim::Bucket
+                | Aim::FlintAndSteel
+                | Aim::IronKit
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
@@ -377,6 +426,16 @@ impl Plan {
                 let (c, act, status) = st.step(w, tick);
                 self.acts.extend(act);
                 return self.after_stairs(c, status, tick);
+            }
+            Task::Smelt(sm) => {
+                let (c, act, status) = sm.step(w, tick);
+                self.acts.extend(act);
+                return self.after_smelt(c, status, tick);
+            }
+            Task::Redig(r) => {
+                let (c, act, status) = r.step(w, tick);
+                self.acts.extend(act);
+                return self.after_redig(c, status, tick);
             }
             // `always` runs these (and ends them).
             Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
@@ -417,6 +476,8 @@ impl Plan {
                     | Task::Craft(_)
                     | Task::Place(_)
                     | Task::Stairs(_)
+                    | Task::Smelt(_)
+                    | Task::Redig(_)
                     | Task::Escape(_)
                     | Task::Defend(_)
                     | Task::Eat(_)
@@ -458,6 +519,8 @@ impl Plan {
                     | Task::Craft(_)
                     | Task::Place(_)
                     | Task::Stairs(_)
+                    | Task::Smelt(_)
+                    | Task::Redig(_)
                     | Task::Escape(_)
                     | Task::Defend(_)
                     | Task::Eat(_)
@@ -499,7 +562,9 @@ impl Plan {
             | Task::Dig(_)
             | Task::Craft(_)
             | Task::Place(_)
-            | Task::Stairs(_) => None,
+            | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
         let mut chosen: Option<(String, make::Always)> = None;
@@ -549,6 +614,7 @@ impl Plan {
                 self.acts.push(world::Act::ReleaseUse);
             }
             self.finish_walk();
+            self.keep_batch();
             let cut = self.task.name();
             let task = match row {
                 make::Always::Escape(k) => {
@@ -641,7 +707,9 @@ impl Plan {
             | Task::Dig(_)
             | Task::Craft(_)
             | Task::Place(_)
-            | Task::Stairs(_) => return None,
+            | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_) => return None,
         };
         self.acts.extend(act);
         if let Some(end) = ended {
@@ -741,6 +809,12 @@ impl Plan {
             | Aim::Cobblestone
             | Aim::StonePickaxe
             | Aim::StoneTools
+            | Aim::Furnace
+            | Aim::Ingots
+            | Aim::IronPickaxe
+            | Aim::Bucket
+            | Aim::FlintAndSteel
+            | Aim::IronKit
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -758,6 +832,12 @@ impl Plan {
                 | Aim::Cobblestone
                 | Aim::StonePickaxe
                 | Aim::StoneTools
+                | Aim::Furnace
+                | Aim::Ingots
+                | Aim::IronPickaxe
+                | Aim::Bucket
+                | Aim::FlintAndSteel
+                | Aim::IronKit
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -843,12 +923,30 @@ impl Plan {
             );
             return Task::Idle;
         };
-        // Taken up front: the only block need so far is a crafting table.
+        // A batch left cooking is collected before anything else (issue 13b).
+        if let Some((furnace, result, count)) = self.batch {
+            self.note(
+                tick,
+                format!("collect {count} {result:?} at {furnace:?}"),
+                "a batch was left cooking".to_owned(),
+            );
+            return Task::Smelt(Box::new(smelt::Smelt::collect(
+                w, furnace, result, count, tick,
+            )));
+        }
+        // Taken up front: the block needs are a crafting table and a furnace.
         let table_near = self
             .near_block(w, data::BlockKind::CraftingTable, tick)
             .is_some();
-        let near = move |b: data::BlockKind| b == data::BlockKind::CraftingTable && table_near;
-        match make::make(&table, &held(w), &near, goal) {
+        let furnace_near = self.near_block(w, data::BlockKind::Furnace, tick).is_some();
+        let near = move |b: data::BlockKind| match b {
+            data::BlockKind::CraftingTable => table_near,
+            data::BlockKind::Furnace => furnace_near,
+            _ => false,
+        };
+        // A spare is made by a gather only when a log can be started now.
+        let gather_now = self.nearest_log(w, origin, 0.0, tick).is_some();
+        match make::make_with(&table, &held(w), &near, gather_now, goal) {
             make::Choice::Done => {
                 self.met = true;
                 self.note(
@@ -904,12 +1002,58 @@ impl Plan {
                         Task::Idle
                     }
                 },
-                Some(make::Act::Mine(blocks)) => {
+                Some(make::Act::Mine { blocks, depth }) => {
                     if let Some(t) = self.carry_table(w, tick) {
                         return t;
                     }
-                    self.mine(w, blocks, tick)
+                    self.mine(w, blocks, depth, origin, tick)
                 }
+                Some(make::Act::Smelt(r)) => {
+                    let Some(f) = self.near_block(w, data::BlockKind::Furnace, tick) else {
+                        self.retry_at = tick + RETRY_TICKS;
+                        self.note(
+                            tick,
+                            "wait".to_owned(),
+                            format!("smelt {} wants a furnace near and none is remembered", r.id),
+                        );
+                        return Task::Idle;
+                    };
+                    // The whole batch of the input held: one trip to the furnace for all the ore.
+                    let count = r
+                        .input
+                        .iter()
+                        .map(|i| craft::count(w, *i))
+                        .sum::<i32>()
+                        .min(64);
+                    match smelt::Smelt::new(w, f, r, count, tick) {
+                        Some(sm) => {
+                            self.note(
+                                tick,
+                                format!("smelt {count} for {} at {f:?}", r.id),
+                                format!("the needs planner's next step toward {}", goal.id),
+                            );
+                            Task::Smelt(Box::new(sm))
+                        }
+                        None => {
+                            self.retry_at = tick + RETRY_TICKS;
+                            Task::Idle
+                        }
+                    }
+                }
+                Some(make::Act::Redig(b)) => match redig::Redig::new(b, tick) {
+                    Some(r) => {
+                        self.note(
+                            tick,
+                            format!("redig {b:?}"),
+                            format!("its chance drop for {}", goal.id),
+                        );
+                        Task::Redig(Box::new(r))
+                    }
+                    None => {
+                        self.stuck = true;
+                        Task::Idle
+                    }
+                },
                 Some(make::Act::Gather) | None if self.carry_table(w, tick).is_some() => {
                     self.carry_table(w, tick).unwrap_or(Task::Idle)
                 }
@@ -1002,7 +1146,14 @@ impl Plan {
 
     /// The mine act: the nearest exposed block of the kinds the bot can stand beside, routed
     /// first (at most `CANDIDATES_PER_TICK` + 1 tried); with none, stairs down on the held heading.
-    fn mine(&mut self, w: &World, blocks: &[data::BlockKind], tick: u64) -> Task {
+    fn mine(
+        &mut self,
+        w: &World,
+        blocks: &[data::BlockKind],
+        depth: Option<u32>,
+        origin: [f64; 3],
+        tick: u64,
+    ) -> Task {
         let candidates: Vec<Cell> = exposed_near(w, blocks)
             .into_iter()
             .filter(|c| !self.refused_now(*c, tick))
@@ -1028,12 +1179,96 @@ impl Plan {
             270 => (1, 0),
             _ => (0, 1),
         };
+        // At the row's depth below where the planner began, tunnel along instead (issue 13b).
+        let deep =
+            depth.is_some_and(|d| w.body.is_some_and(|b| b.pos[1] <= origin[1] - f64::from(d)));
+        if deep {
+            self.note(
+                tick,
+                "tunnel".to_owned(),
+                format!("no exposed {:?} in sight, at its depth", blocks.first()),
+            );
+            return Task::Stairs(Box::new(Stairs::level(dir, tick)));
+        }
         self.note(
             tick,
             "stairs down".to_owned(),
             format!("no exposed {:?} in sight with a route", blocks.first()),
         );
         Task::Stairs(Box::new(Stairs::new(dir, tick)))
+    }
+
+    /// A smelt cut with its batch loaded leaves it to be collected (issue 13b).
+    fn keep_batch(&mut self) {
+        if let Task::Smelt(sm) = &self.task
+            && sm.loaded()
+        {
+            self.batch = Some((sm.furnace, sm.result, sm.count));
+        }
+    }
+
+    fn after_smelt(&mut self, c: Controls, status: smelt::SmeltStatus, tick: u64) -> Controls {
+        match status {
+            smelt::SmeltStatus::Running => return c,
+            smelt::SmeltStatus::Done => {
+                self.smelts += 1;
+                self.failed_in_row = 0;
+                self.batch = None;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "smelted".to_owned(),
+                    "the batch's results are held".to_owned(),
+                );
+            }
+            smelt::SmeltStatus::Failed(f) => {
+                *self.failures.entry(format!("{f:?}")).or_default() += 1;
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.batch = None;
+                if let Task::Smelt(sm) = std::mem::replace(&mut self.task, Task::Idle)
+                    && f == smelt::SmeltFailure::Unopened
+                {
+                    self.refuse(sm.furnace, tick);
+                }
+                self.note(
+                    tick,
+                    format!("smelt failed: {f:?}"),
+                    "choose again".to_owned(),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
+    }
+
+    fn after_redig(&mut self, c: Controls, status: redig::RedigStatus, tick: u64) -> Controls {
+        match status {
+            redig::RedigStatus::Running => return c,
+            redig::RedigStatus::Done => {
+                self.digs += 1;
+                self.failed_in_row = 0;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "redug".to_owned(),
+                    "the needs planner looks again".to_owned(),
+                );
+            }
+            redig::RedigStatus::Failed(f) => {
+                *self.failures.entry(format!("Redig{f:?}")).or_default() += 1;
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("redig failed: {f:?}"),
+                    "choose again".to_owned(),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
     }
 
     fn after_place(&mut self, status: PlaceStatus, tick: u64) -> Controls {

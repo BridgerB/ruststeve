@@ -76,6 +76,105 @@ provides = [["item:cobblestone", 1]]
 act = "mine"
 blocks = ["stone"]
 
+# Issue 13's rows (clojurecraft's goals.edn): the furnace, the iron kit, and the producers that
+# mine coal, iron and gravel and dig flint out of gravel. The planner adds a smelt row per furnace
+# recipe (its input, then fuel for one cook, then a furnace near).
+
+[[goal]]
+id = "furnace"
+priority = 7
+until = "furnace"
+doc = "a furnace placed near, crafted from eight cobblestone in a placed crafting table"
+provides = [["block:furnace", 1]]
+
+[[goal]]
+id = "ingots"
+priority = 8
+until = "ingots"
+doc = "four iron ingots"
+provides = [["item:iron_ingot", 4]]
+spares = [["item:stick", 24]]
+
+[[goal]]
+id = "iron-pickaxe"
+priority = 8
+until = "iron-pickaxe"
+doc = "an iron pickaxe, from three ingots and two sticks at a crafting table"
+provides = [["item:iron_pickaxe", 1]]
+
+[[goal]]
+id = "bucket"
+priority = 9
+until = "bucket"
+doc = "an empty bucket, from three iron ingots"
+provides = [["item:bucket", 1]]
+
+[[goal]]
+id = "flint-and-steel"
+priority = 11
+until = "flint-and-steel"
+doc = "flint and steel, from an iron ingot and flint dug out of gravel"
+provides = [["item:flint_and_steel", 1]]
+
+# Issue 13's done-condition: the kit (the water bucket is the portal's, issue 14).
+[[goal]]
+id = "iron-kit"
+priority = 12
+until = "iron-kit"
+doc = "the iron kit: an iron pickaxe, a bucket, flint and steel"
+provides = [["item:iron_pickaxe", 1], ["item:bucket", 1], ["item:flint_and_steel", 1]]
+
+[[goal]]
+id = "place-furnace"
+priority = 10
+doc = "put a held furnace down near the player"
+needs = [["item:furnace", 1]]
+provides = [["block:furnace", 1]]
+act = "place"
+blocks = ["furnace"]
+
+[[goal]]
+id = "mine-coal"
+priority = 10
+doc = "dig the nearest exposed coal ore with any pickaxe"
+holds = [["tag:pickaxes", 1]]
+spares = [["tag:pickaxes", 1]]
+provides = [["item:coal", 1]]
+act = "mine"
+blocks = ["coal_ore", "deepslate_coal_ore"]
+depth = 40
+
+[[goal]]
+id = "mine-iron"
+priority = 10
+doc = "dig the nearest exposed iron ore with a stone pickaxe"
+holds = [["item:stone_pickaxe", 1]]
+spares = [["item:stone_pickaxe", 1], ["item:stick", 24]]
+provides = [["item:raw_iron", 1]]
+act = "mine"
+blocks = ["iron_ore", "deepslate_iron_ore"]
+depth = 16
+
+[[goal]]
+id = "dig-gravel"
+priority = 10
+doc = "dig the nearest exposed gravel"
+holds = [["tag:pickaxes", 1]]
+spares = [["tag:pickaxes", 1]]
+provides = [["item:gravel", 1]]
+act = "mine"
+blocks = ["gravel"]
+depth = 40
+
+[[goal]]
+id = "flint-from-gravel"
+priority = 10
+doc = "place a held gravel and dig it, again until it drops flint (the game's loot table: one time in ten)"
+needs = [["item:gravel", 1]]
+provides = [["item:flint", 1]]
+act = "redig"
+blocks = ["gravel"]
+
 # Issue 12b's always-rows (clojurecraft's goals.edn, priority 0): checked every tick ahead of every
 # goal, and after the aim is met; one in force cuts the task in hand (plan::escape).
 

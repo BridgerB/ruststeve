@@ -47,7 +47,7 @@ Issue 13a. The furnace is the first window whose slots change on their own: the 
 ## Limits
 - Experience from a take is an orb entity, not in the outcome class.
 - A furnace broken with items in it does not drop them in the model.
-- The batch left cooking while the bot goes on is issue 13b's (remembered by the planner).
+- The batch left cooking is remembered by the planner and collected first ([[fuel-and-smelt-needs]]).
 
 ## See also
 - [[crafting-window]] - the click rules the smelt task shares.
