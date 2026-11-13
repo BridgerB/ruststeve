@@ -179,10 +179,18 @@ jobs:
           set -o pipefail
           ./target/release/simrace --landings-file config/landings-grid.toml --worlds landings \
             --goal table --ticks 6000 --want 200 --rate 0.9 --check true --report wood.md
+      - name: The stone measure (issue 11, a stone pickaxe and sword from the table start in 12,000 ticks)
+        if: always()
+        run: |
+          set -o pipefail
+          ./target/release/simrace --landings-file config/landings-grid.toml --worlds landings \
+            --goal stone-tools --start table --ticks 12000 --want 200 --rate 0.9 --check true --report stone.md
       - if: always()
         run: cat walk.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
       - if: always()
         run: cat wood.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - if: always()
+        run: cat stone.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
   # One stable check name for branch protection.
   ci-ok:
