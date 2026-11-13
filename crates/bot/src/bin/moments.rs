@@ -28,8 +28,8 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows).
-const TOLERANCE: usize = 126;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows).
+const TOLERANCE: usize = 135;
 
 struct Args {
     cmd: String,

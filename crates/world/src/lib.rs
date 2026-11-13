@@ -270,6 +270,10 @@ pub struct Window {
     pub slots: BTreeMap<i16, (ItemKind, i32)>,
     pub size: i16,
     pub state_id: i32,
+    /// Its properties as the server last sent them (`container_set_data`): a furnace's 0 lit
+    /// time left, 1 lit total, 2 cook progress, 3 cook total (issue 13a).
+    #[serde(default)]
+    pub properties: BTreeMap<i16, i16>,
 }
 
 impl Window {
@@ -438,6 +442,11 @@ pub struct World {
     /// The window open besides the inventory (issue 11a).
     #[serde(default)]
     pub window: Option<Window>,
+    /// The window last closed by the client: the server may still answer a click made in it
+    /// after the close went out (a furnace's take answered over two ticks, issue 13a), and what
+    /// such an answer puts in the player's slots is still the player's.
+    #[serde(default)]
+    pub closed_window: Option<Window>,
     /// Entities the bot struck that the server then said died (entity event 3) (issue 12a):
     /// other deaths in view (another player's kill, a player in lava) are not the bot's.
     #[serde(default)]
@@ -735,7 +744,7 @@ impl World {
             Act::CloseWindow => {
                 // The client closes at once; the server sends nothing back.
                 let (window, _) = self.current_window();
-                self.window = None;
+                self.closed_window = self.window.take();
                 self.click = None;
                 vec![Effect::Send(C2s::ContainerClose { window })]
             }
@@ -983,6 +992,13 @@ impl World {
                     self.window_moved(0, *state_id);
                     self.inventory.state_id = *state_id;
                     self.inventory.put(*slot, *item);
+                } else if let Some(inv) = self
+                    .closed_window
+                    .as_ref()
+                    .filter(|w| w.id == *window)
+                    .and_then(|w| w.inventory_slot(*slot))
+                {
+                    self.inventory.put(inv, *item);
                 }
             }
             S2c::SetPlayerInventory { slot, item } => {
@@ -1082,6 +1098,15 @@ impl World {
                     ..Window::default()
                 });
                 self.click = None;
+            }
+            S2c::ContainerSetData {
+                window,
+                property,
+                value,
+            } => {
+                if let Some(wd) = self.window.as_mut().filter(|wd| wd.id == *window) {
+                    wd.properties.insert(*property, *value);
+                }
             }
             // The cursor carries no state id: it never answers a click on its own (the slot the
             // click emptied or filled does).

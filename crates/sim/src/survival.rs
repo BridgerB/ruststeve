@@ -63,7 +63,22 @@ enum Loc {
     Result,
     Grid(usize),
     Inv(usize),
+    /// An open furnace's own slot: 0 input, 1 fuel, 2 result (issue 13a).
+    Furnace(usize),
 }
+
+/// A furnace's open menu (`FurnaceMenu`, issue 13a): its slots live in the block entity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FurnaceMenu {
+    pub id: i32,
+    pub pos: (i32, i32, i32),
+    pub state_id: i32,
+    remote: [Option<Stack>; MENU_SLOTS],
+    remote_props: [i32; 4],
+}
+
+/// A furnace menu's slots: its 3, then the inventory's 36 (window 0's 9-44).
+const FURNACE_MENU_SLOTS: usize = 39;
 
 /// A crafting table's open menu (`CraftingMenu`, issue 11a).
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +148,9 @@ pub struct Survival {
     /// A crafting table's menu, when one is open (issue 11a), and the last container id given.
     pub table: Option<Table>,
     container_counter: i32,
+    /// Furnaces placed, by position, and the one whose menu is open (issue 13a).
+    pub furnaces: std::collections::BTreeMap<(i32, i32, i32), crate::furnace::Furnace>,
+    pub furnace: Option<FurnaceMenu>,
     /// Blocks placed.
     pub placed: u64,
     /// Air, fire, hunger, eating and placed mobs (issue 12a, `life`).
@@ -159,6 +177,8 @@ impl Survival {
             clicks: 0,
             table: None,
             container_counter: 0,
+            furnaces: std::collections::BTreeMap::new(),
+            furnace: None,
             placed: 0,
             life: crate::life::Life::default(),
         }
@@ -285,6 +305,33 @@ const TWO_HIGH: &[&str] = &["double_plant", "tall_flower"];
 
 /// A state's value for one property: the state's offset from the block's first, with the last
 /// property counting fastest (the blocks report's order).
+/// The state with one property set to a value (the blocks report's order: the last property
+/// varies fastest), `None` when the block has no such property or value.
+pub fn with_property(state: u32, name: &str, value: &str) -> Option<u32> {
+    let info = data::block_of_state(state)?.info()?;
+    let mut offset = state.checked_sub(info.first_state)?;
+    let mut digits = Vec::new();
+    for p in info.properties.iter().rev() {
+        let n = u32::try_from(p.values.len()).ok()?.max(1);
+        digits.push((p, n, offset % n));
+        offset /= n;
+    }
+    let mut out = 0u32;
+    let mut scale = 1u32;
+    let mut found = false;
+    for (p, n, d) in digits {
+        let d = if p.name == name {
+            found = true;
+            u32::try_from(p.values.iter().position(|v| *v == value)?).ok()?
+        } else {
+            d
+        };
+        out += d * scale;
+        scale *= n;
+    }
+    found.then_some(info.first_state + out)
+}
+
 pub fn property(state: u32, name: &str) -> Option<&'static str> {
     let info = data::block_of_state(state)?.info()?;
     let mut offset = state.checked_sub(info.first_state)?;
@@ -877,13 +924,54 @@ impl Sim {
 
     /// The menu open now: a crafting table's, else the inventory's (window 0).
     fn menu_id(&self) -> i32 {
-        self.survival.table.as_ref().map_or(0, |t| t.id)
+        match (&self.survival.table, &self.survival.furnace) {
+            (Some(t), _) => t.id,
+            (None, Some(f)) => f.id,
+            (None, None) => 0,
+        }
+    }
+
+    /// The open menu's slot count.
+    fn menu_size(&self) -> usize {
+        if self.survival.furnace.is_some() {
+            FURNACE_MENU_SLOTS
+        } else {
+            MENU_SLOTS
+        }
+    }
+
+    /// The client's view of a menu slot, as the server last told it.
+    fn remote_slot(&self, i: usize) -> Option<Stack> {
+        match (&self.survival.table, &self.survival.furnace) {
+            (Some(t), _) => t.remote.get(i).copied().flatten(),
+            (None, Some(f)) => f.remote.get(i).copied().flatten(),
+            (None, None) => self.survival.remote.get(i).copied().flatten(),
+        }
+    }
+
+    fn set_remote_slot(&mut self, i: usize, v: Option<Stack>) {
+        let cell = match (&mut self.survival.table, &mut self.survival.furnace) {
+            (Some(t), _) => t.remote.get_mut(i),
+            (None, Some(f)) => f.remote.get_mut(i),
+            (None, None) => self.survival.remote.get_mut(i),
+        };
+        if let Some(c) = cell {
+            *c = v;
+        }
     }
 
     /// Where a menu slot is stored. Window 0: 0 the result, 1-4 the 2x2 grid, 5-45 the inventory's
     /// menu slots. A crafting table's: 0 the result, 1-9 its 3x3 grid, 10-45 the inventory's main
     /// and hotbar slots (window 0's 9-44).
     fn loc(&self, slot: usize) -> Option<Loc> {
+        // A furnace's: 0-2 its own, 3-38 the inventory's main and hotbar slots.
+        if self.survival.furnace.is_some() {
+            return match slot {
+                0..=2 => Some(Loc::Furnace(slot)),
+                3..=38 => Some(Loc::Inv(slot + 6)),
+                _ => None,
+            };
+        }
         match (self.survival.table.is_some(), slot) {
             (_, 0) => Some(Loc::Result),
             (false, 1..=4) => Some(Loc::Grid(slot - 1)),
@@ -895,22 +983,43 @@ impl Sim {
     }
 
     fn get(&self, l: Loc) -> Option<Stack> {
+        if let Loc::Furnace(i) = l {
+            let pos = self.survival.furnace.as_ref()?.pos;
+            return self
+                .survival
+                .furnaces
+                .get(&pos)?
+                .items
+                .get(i)
+                .copied()
+                .flatten();
+        }
         match (&self.survival.table, l) {
             (Some(t), Loc::Result) => t.result,
             (Some(t), Loc::Grid(i)) => t.grid.get(i).copied().flatten(),
             (None, Loc::Result) => self.survival.slots.get(RESULT).copied().flatten(),
             (None, Loc::Grid(i)) => self.survival.slots.get(1 + i).copied().flatten(),
             (_, Loc::Inv(i)) => self.survival.slots.get(i).copied().flatten(),
+            (_, Loc::Furnace(_)) => None,
         }
     }
 
     fn put(&mut self, l: Loc, v: Option<Stack>) {
+        if let Loc::Furnace(i) = l {
+            if let Some(pos) = self.survival.furnace.as_ref().map(|f| f.pos)
+                && let Some(f) = self.survival.furnaces.get_mut(&pos)
+            {
+                f.set(i, v);
+            }
+            return;
+        }
         let cell = match (&mut self.survival.table, l) {
             (Some(t), Loc::Result) => Some(&mut t.result),
             (Some(t), Loc::Grid(i)) => t.grid.get_mut(i),
             (None, Loc::Result) => self.survival.slots.get_mut(RESULT),
             (None, Loc::Grid(i)) => self.survival.slots.get_mut(1 + i),
             (_, Loc::Inv(i)) => self.survival.slots.get_mut(i),
+            (_, Loc::Furnace(_)) => None,
         };
         if let Some(c) = cell {
             *c = v;
@@ -942,9 +1051,10 @@ impl Sim {
     }
 
     fn state_id_mut(&mut self) -> &mut i32 {
-        match &mut self.survival.table {
-            Some(t) => &mut t.state_id,
-            None => &mut self.survival.state_id,
+        match (&mut self.survival.table, &mut self.survival.furnace) {
+            (Some(t), _) => &mut t.state_id,
+            (None, Some(f)) => &mut f.state_id,
+            (None, None) => &mut self.survival.state_id,
         }
     }
 
@@ -959,22 +1069,12 @@ impl Sim {
     pub(crate) fn broadcast_changes(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
         let window = self.menu_id();
-        for i in 0..MENU_SLOTS {
+        for i in 0..self.menu_size() {
             let now = self.view(i);
-            let remote = match &self.survival.table {
-                Some(t) => t.remote.get(i).copied().flatten(),
-                None => self.survival.remote.get(i).copied().flatten(),
-            };
-            if remote == now {
+            if self.remote_slot(i) == now {
                 continue;
             }
-            let r = match &mut self.survival.table {
-                Some(t) => t.remote.get_mut(i),
-                None => self.survival.remote.get_mut(i),
-            };
-            if let Some(r) = r {
-                *r = now;
-            }
+            self.set_remote_slot(i, now);
             let state_id = self.next_state_id();
             out.push(wire(
                 State::Play,
@@ -995,20 +1095,47 @@ impl Sim {
                 },
             )?);
         }
+        out.extend(self.furnace_data(false)?);
+        Ok(out)
+    }
+
+    /// A furnace menu's properties the client has not been told (all of them on `full`), each
+    /// a `container_set_data` (`broadcastChanges`'s data slots).
+    fn furnace_data(&mut self, full: bool) -> Result<Vec<Wire>, EncodeError> {
+        let Some(m) = &self.survival.furnace else {
+            return Ok(Vec::new());
+        };
+        let (id, pos, remote) = (m.id, m.pos, m.remote_props);
+        let now = self
+            .survival
+            .furnaces
+            .get(&pos)
+            .map_or([0; 4], crate::furnace::Furnace::properties);
+        let mut out = Vec::new();
+        for (i, (v, r)) in now.iter().zip(remote.iter()).enumerate() {
+            if full || v != r {
+                out.push(wire(
+                    State::Play,
+                    &S2c::ContainerSetData {
+                        window: id,
+                        property: i16::try_from(i).unwrap_or(0),
+                        value: i16::try_from(*v).unwrap_or(i16::MAX),
+                    },
+                )?);
+            }
+        }
+        if let Some(m) = &mut self.survival.furnace {
+            m.remote_props = now;
+        }
         Ok(out)
     }
 
     /// `sendAllDataToRemote`/`broadcastFullState`: the whole open menu with a new state id.
     pub(crate) fn full_state(&mut self) -> Result<Wire, EncodeError> {
         let window = self.menu_id();
-        let view: Vec<Option<Stack>> = (0..MENU_SLOTS).map(|i| self.view(i)).collect();
-        match &mut self.survival.table {
-            Some(t) => {
-                for (r, v) in t.remote.iter_mut().zip(&view) {
-                    *r = *v;
-                }
-            }
-            None => self.survival.remote = self.survival.slots,
+        let view: Vec<Option<Stack>> = (0..self.menu_size()).map(|i| self.view(i)).collect();
+        for (i, v) in view.iter().enumerate() {
+            self.set_remote_slot(i, *v);
         }
         self.survival.remote_carried = self.survival.carried;
         let state_id = self.next_state_id();
@@ -1075,10 +1202,7 @@ impl Sim {
             return Ok(Vec::new());
         }
         self.survival.clicks += 1;
-        let current = match &self.survival.table {
-            Some(t) => t.state_id,
-            None => self.survival.state_id,
-        };
+        let current = *self.state_id_mut();
         let stale = state_id != current;
         let mut out = self.clicked(slot, button, mode)?;
         self.survival.remote_carried = None;
@@ -1117,11 +1241,16 @@ impl Sim {
 
     /// Whether a stack may be put in a slot: never the result; armour slots only armour (none of
     /// issue 11's items).
-    fn may_place(l: Loc) -> bool {
+    fn may_place(l: Loc, item: ItemKind) -> bool {
         match l {
-            Loc::Result => false,
+            Loc::Result | Loc::Furnace(crate::furnace::RESULT) => false,
             Loc::Inv(i) => !(5..=8).contains(&i),
             Loc::Grid(_) => true,
+            // `FurnaceFuelSlot.mayPlace`: fuel, or a bucket.
+            Loc::Furnace(crate::furnace::FUEL) => {
+                data::generated::fuel::fuel_ticks(item).is_some() || item == ItemKind::Bucket
+            }
+            Loc::Furnace(_) => true,
         }
     }
 
@@ -1134,7 +1263,7 @@ impl Sim {
         match (s, c) {
             (None, None) => {}
             (None, Some((ck, cn))) => {
-                if Self::may_place(l) {
+                if Self::may_place(l, ck) {
                     let put = if all { cn } else { 1 }.min(max_stack(ck));
                     self.put(l, Some((ck, put)));
                     self.survival.carried = (cn > put).then_some((ck, cn - put));
@@ -1152,7 +1281,7 @@ impl Sim {
                 }
             }
             (Some((sk, sn)), Some((ck, cn))) => {
-                if Self::may_place(l) {
+                if Self::may_place(l, ck) {
                     if sk == ck {
                         let put = if all { cn } else { 1 }.min(max_stack(sk) - sn);
                         self.put(l, Some((sk, sn + put)));
@@ -1165,6 +1294,11 @@ impl Sim {
                     self.survival.carried = Some((ck, cn + sn));
                     self.put(l, None);
                     out.push(self.take_result()?);
+                } else if l == Loc::Furnace(crate::furnace::RESULT) && sk == ck {
+                    // The furnace's result onto a cursor of the same item, as much as fits.
+                    let take = sn.min(max_stack(ck) - cn);
+                    self.survival.carried = Some((ck, cn + take));
+                    self.put(l, (sn > take).then_some((sk, sn - take)));
                 }
             }
         }
@@ -1207,7 +1341,7 @@ impl Sim {
                 break;
             }
             let Some(l) = self.loc(s) else { continue };
-            if self.get(l).is_none() && Self::may_place(l) {
+            if self.get(l).is_none() && Self::may_place(l, item) {
                 let moved = count.min(max);
                 self.put(l, Some((item, moved)));
                 count -= moved;
@@ -1244,6 +1378,10 @@ impl Sim {
         let Some(stack) = self.get(l) else {
             return Ok(out);
         };
+        if self.survival.furnace.is_some() {
+            self.furnace_quick_move(i, l, stack);
+            return Ok(out);
+        }
         let grid_before = self.grid();
         self.put(l, None);
         let left = match (table, i) {
@@ -1278,11 +1416,50 @@ impl Sim {
         Ok(out)
     }
 
+    /// `AbstractFurnaceMenu.quickMoveStack`: the result to the inventory from its end; the input
+    /// and fuel to the inventory; from the inventory, what smelts to the input (or nowhere), else
+    /// fuel to the fuel slot, else the main inventory to the hotbar or back.
+    fn furnace_quick_move(&mut self, i: usize, l: Loc, stack: Stack) {
+        self.put(l, None);
+        let left = match i {
+            2 => self.move_to(stack, 3..39, true),
+            0 | 1 => self.move_to(stack, 3..39, false),
+            _ if crate::furnace::recipe(stack.0).is_some() => self.move_to(stack, 0..1, false),
+            _ if data::generated::fuel::fuel_ticks(stack.0).is_some() => {
+                self.move_to(stack, 1..2, false)
+            }
+            3..=29 => self.move_to(stack, 30..39, false),
+            _ => self.move_to(stack, 3..30, false),
+        };
+        if left > 0 {
+            match self.get(l) {
+                None => self.put(l, Some((stack.0, left))),
+                Some(_) => {
+                    let rest = self.survival.add((stack.0, left));
+                    if rest > 0 {
+                        self.violations.push("quick move lost items".to_owned());
+                    }
+                }
+            }
+        }
+    }
+
     /// The client closed a menu (`removed`): its grid goes back into the inventory, and so does
     /// the cursor (`dropOrPlaceInInventory`: a live player keeps it; only a full inventory drops
     /// what does not fit).
     pub(crate) fn on_close(&mut self, window: i32) -> Result<Vec<Wire>, EncodeError> {
         if window != self.menu_id() {
+            return Ok(Vec::new());
+        }
+        if self.survival.furnace.take().is_some() {
+            // A furnace keeps its slots; only the cursor goes back.
+            if let Some(c) = self.survival.carried.take() {
+                let left = self.survival.add(c);
+                if left > 0 {
+                    let at = [self.pos[0], self.pos[1] + 1.32, self.pos[2]];
+                    return self.spawn_item((c.0, left), at, [0.0, 0.1, 0.0], THROW_PICKUP_DELAY);
+                }
+            }
             return Ok(Vec::new());
         }
         let mut back = Vec::new();
@@ -1351,6 +1528,8 @@ impl Sim {
         if self.within_reach(pos) {
             if block_kind(self, pos) == Some(BlockKind::CraftingTable) {
                 out.extend(self.open_table(pos)?);
+            } else if block_kind(self, pos) == Some(BlockKind::Furnace) {
+                out.extend(self.open_furnace(pos)?);
             } else {
                 self.place_held(pos, beside)?;
             }
@@ -1364,13 +1543,7 @@ impl Sim {
     /// `openMenu` for a crafting table: the next container id (1 to 100, round), `open_screen`,
     /// then the whole menu (`initMenu`).
     fn open_table(&mut self, pos: (i32, i32, i32)) -> Result<Vec<Wire>, EncodeError> {
-        let mut out = Vec::new();
-        if let Some(t) = &self.survival.table {
-            // Another menu is open: the server closes it first.
-            let id = t.id;
-            out.extend(self.on_close(id)?);
-            out.push(wire(State::Play, &S2c::ContainerClose { window: id })?);
-        }
+        let mut out = self.close_open_menu()?;
         let id = self.survival.container_counter % 100 + 1;
         self.survival.container_counter = id;
         self.survival.table = Some(Table {
@@ -1388,6 +1561,69 @@ impl Sim {
             .unwrap_or(-1);
         out.push(wire(State::Play, &S2c::OpenScreen { window: id, menu })?);
         out.push(self.full_state()?);
+        Ok(out)
+    }
+
+    /// Another menu is open: the server closes it first.
+    fn close_open_menu(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let id = self.menu_id();
+        if id == 0 {
+            return Ok(Vec::new());
+        }
+        let mut out = self.on_close(id)?;
+        out.push(wire(State::Play, &S2c::ContainerClose { window: id })?);
+        Ok(out)
+    }
+
+    /// `openMenu` for a furnace: its block entity made if new, the next container id,
+    /// `open_screen`, the whole menu and its four properties.
+    fn open_furnace(&mut self, pos: (i32, i32, i32)) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = self.close_open_menu()?;
+        self.survival.furnaces.entry(pos).or_default();
+        let id = self.survival.container_counter % 100 + 1;
+        self.survival.container_counter = id;
+        self.survival.furnace = Some(FurnaceMenu {
+            id,
+            pos,
+            state_id: 0,
+            remote: [None; MENU_SLOTS],
+            remote_props: [0; 4],
+        });
+        let menu = data::generated::registries::MENU
+            .iter()
+            .position(|m| *m == "furnace")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap_or(-1);
+        out.push(wire(State::Play, &S2c::OpenScreen { window: id, menu })?);
+        out.push(self.full_state()?);
+        out.extend(self.furnace_data(true)?);
+        Ok(out)
+    }
+
+    /// Every placed furnace's tick, its `lit` state set when that changes (issue 13a); one whose
+    /// block is gone is forgotten.
+    pub(crate) fn tick_furnaces(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let positions: Vec<(i32, i32, i32)> = self.survival.furnaces.keys().copied().collect();
+        let mut out = Vec::new();
+        for pos in positions {
+            if block_kind(self, pos) != Some(BlockKind::Furnace) {
+                self.survival.furnaces.remove(&pos);
+                continue;
+            }
+            let changed = self
+                .survival
+                .furnaces
+                .get_mut(&pos)
+                .is_some_and(|f| f.tick());
+            if changed {
+                let lit = self.survival.furnaces.get(&pos).is_some_and(|f| f.lit());
+                let state = self.state_at(pos.0, pos.1, pos.2).unwrap_or(0);
+                if let Some(new) = with_property(state, "lit", if lit { "true" } else { "false" }) {
+                    self.world.set_block(pos.0, pos.1, pos.2, new)?;
+                    out.push(self.block_update(pos)?);
+                }
+            }
+        }
         Ok(out)
     }
 
@@ -1444,13 +1680,14 @@ impl Sim {
     /// `stillValid`: a crafting table's menu closes when the player is more than 8 blocks from
     /// it (or it is gone), told by `container_close`.
     pub(crate) fn tick_menu(&mut self) -> Result<Vec<Wire>, EncodeError> {
-        let Some(t) = &self.survival.table else {
-            return Ok(Vec::new());
+        let (id, (x, y, z), kind) = match (&self.survival.table, &self.survival.furnace) {
+            (Some(t), _) => (t.id, t.pos, BlockKind::CraftingTable),
+            (None, Some(f)) => (f.id, f.pos, BlockKind::Furnace),
+            (None, None) => return Ok(Vec::new()),
         };
-        let (id, (x, y, z)) = (t.id, t.pos);
         let c = [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5];
         let d2: f64 = (0..3).map(|i| (self.pos[i] - c[i]).powi(2)).sum();
-        if d2 <= 64.0 && block_kind(self, (x, y, z)) == Some(BlockKind::CraftingTable) {
+        if d2 <= 64.0 && block_kind(self, (x, y, z)) == Some(kind) {
             return Ok(Vec::new());
         }
         let mut out = self.on_close(id)?;

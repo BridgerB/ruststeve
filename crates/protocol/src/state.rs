@@ -104,6 +104,7 @@ impl State {
             | S2c::TakeItemEntity { .. }
             | S2c::ContainerClose { .. }
             | S2c::SetCursorItem { .. }
+            | S2c::ContainerSetData { .. }
             | S2c::OpenScreen { .. }
             | S2c::SetEntityMotion { .. }
             | S2c::EntityEvent { .. }

@@ -5,8 +5,8 @@ type: reference
 tags: [wire, windows, crafting, clicks]
 aliases: [container-click, state id, changed slots, predict nothing, set-cursor-item, container-set-content]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@34b2252
+lastUpdated: 2026-11-13
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@3ee956a
 sourceRefs:
   - "ruststeve:crates/protocol/src/packets.rs#w.varint(0); // no changed slots: nothing predicted"
   - "ruststeve:crates/world/src/lib.rs#fn window_moved(&mut self, window: i32, state_id: i32) {"
@@ -44,6 +44,9 @@ A click is `container-click`: window id, **state id**, slot (i16), button (i8), 
 - **Other windows** (issue 11a): a click goes to the open window with that window's state id; the cursor is the open menu's, so `set_cursor_item` applies whichever window is open ([[table-window]]).
 - **The resync** (ruststeve's `Act::Resync`, issue 10c): a click on slot -1 (which does nothing) with state id -1 (which the server never has) draws the whole window, for after a missed click ([[crafting-window]]).
 - **A click that changes nothing draws no reply** (ruststeve, live on a local 26.1.2 server, 2026-11-12): a pick-up on an empty slot with an empty cursor left the state id at 1 and no window packet came. So a pending click is cleared only by the state id moving, never assumed answered; the craft task sends no no-op clicks and treats 3 s without a move as a missed expectation ([[cc-window-clicks]]).
+
+- **A click's answer can outlive its window** (issue 13a): a furnace take's answer came over two ticks, the inventory slot 30 ticks after the result slot. Close a window only once its clicks are answered, or keep what the late answer brings: the world keeps the last closed window (`closed_window`) and puts its slot updates into the player's slots. A vanilla client predicts the click, so it never notices.
+- **`container_set_data`** carries a window's properties (a furnace's progress) with no state id.
 
 ## See also
 - [[cc-window-clicks]] - clojurecraft's click rules and the 3 s stale-window deadline.

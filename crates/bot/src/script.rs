@@ -110,6 +110,10 @@ pub enum Script {
     Attack { every: u64, yaw: f64 },
     /// Standing still, start using the held item at tick `at` (eating): `eat:<tick>`.
     Eat { at: u64 },
+    /// Standing still, smelt in a furnace (issue 13a): `smelt:<take>`. The given furnace (hotbar
+    /// 0) placed east of the feet and opened; the fuel (hotbar 2) then the input (hotbar 1) put
+    /// in whole; at script tick `take` the result shift-clicked out, then the window closed.
+    Smelt { take: u64 },
 }
 
 impl Script {
@@ -137,9 +141,11 @@ impl Script {
                 sneak: false,
                 yaw,
             },
-            Script::Still | Script::DigDown { .. } | Script::Craft(_) | Script::Eat { .. } => {
-                Controls::default()
-            }
+            Script::Still
+            | Script::DigDown { .. }
+            | Script::Craft(_)
+            | Script::Eat { .. }
+            | Script::Smelt { .. } => Controls::default(),
             Script::Attack { yaw, .. } => Controls {
                 forward: false,
                 jump: false,
@@ -168,6 +174,40 @@ impl Script {
                     _ => return Vec::new(),
                 };
                 vec![Act::Dig { step, pos, face: 1 }]
+            }
+            Script::Smelt { take } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                let (fx, fy, fz) = (
+                    body.pos[0].floor() as i32,
+                    (body.pos[1] + 0.01).floor() as i32,
+                    body.pos[2].floor() as i32,
+                );
+                // The furnace menu: the hotbar at 30-38 (window 0's 36-44).
+                const LOAD: [(i16, i8, i32); 4] = [(32, 0, 0), (1, 0, 0), (31, 0, 0), (0, 0, 0)];
+                let sent = usize::try_from(w.clicks_sent).unwrap_or(usize::MAX);
+                match (w.sequence_sent, &w.window, w.click.is_none()) {
+                    (0, None, _) => vec![Act::UseOn {
+                        pos: world::BlockPos::new(fx + 1, fy - 1, fz),
+                        face: 1,
+                    }],
+                    (1, None, _) if sent == 0 && tick >= 5 => vec![Act::UseOn {
+                        pos: world::BlockPos::new(fx + 1, fy, fz),
+                        face: 4,
+                    }],
+                    (_, Some(_), true) => match LOAD.get(sent) {
+                        Some(&(slot, button, mode)) => vec![Act::Click { slot, button, mode }],
+                        None if sent == LOAD.len() && tick >= take => vec![Act::Click {
+                            slot: 2,
+                            button: 0,
+                            mode: 1,
+                        }],
+                        None if sent > LOAD.len() => vec![Act::CloseWindow],
+                        None => Vec::new(),
+                    },
+                    (_, _, _) => Vec::new(),
+                }
             }
             Script::Craft(c) if c.at_table() => {
                 let Some(body) = w.body else {
@@ -261,6 +301,7 @@ impl Script {
             Script::Craft(c) => format!("craft:{}", c.name()),
             Script::Attack { every, yaw } => format!("attack:{every}:{yaw}"),
             Script::Eat { at } => format!("eat:{at}"),
+            Script::Smelt { take } => format!("smelt:{take}"),
         }
     }
 
@@ -287,6 +328,11 @@ impl Script {
             return Some(Script::Attack {
                 every: every.parse().ok()?,
                 yaw: yaw.parse().ok()?,
+            });
+        }
+        if let Some(take) = s.strip_prefix("smelt:") {
+            return Some(Script::Smelt {
+                take: take.parse().ok()?,
             });
         }
         if let Some(at) = s.strip_prefix("eat:") {
@@ -327,6 +373,7 @@ mod tests {
                 yaw: 270.0,
             },
             Script::Eat { at: 220 },
+            Script::Smelt { take: 460 },
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
         }

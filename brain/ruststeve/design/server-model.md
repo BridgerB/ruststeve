@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
 lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3ee956a clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -76,6 +76,7 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **Melee** (`attack`): damage = 1 + the weapon's modifier, × (0.2 + charge² × 0.8), the charge the ticks since the last swing over 20 / (4 + speed); reach 4 from the eyes to the mob's box (zombie-sized for every kind: `data` has no entity dimensions yet); the mob's own invulnerable window as the player's; death sends entity event 3 and removes it 20 ticks later.
 - `set_health` goes out when health or food change or saturation turns to or from zero; air (metadata 1) and the burning bit (metadata 0) when they change.
 - **The server's motion for the player** (`markHurt`, `ServerEntity.sendChanges`): the server integrates gravity on its own copy of the player's motion (one tick of it on the ground, `(y - 0.08) × 0.98` off it) and sends it as `set_entity_motion` at the end of a tick the player was hurt in, unless the damage is `no_impact` (drowning). A client takes it as its velocity.
+- **Furnaces** (issue 13a): a block entity per placed furnace, its menu and its tick ([[smelting]]).
 - **Mob loot** (issue 12c): a kill drops the mob's unconditioned loot (`data::generated::loot::mob_drops_of`), each count rolled in its range, at its feet with `spawnAtLocation`'s push and a 10-tick pickup delay; a parity row's mob is summoned without loot.
 - **Fire resistance** (a moment's effect): fire, lava and burning do no damage; lava still slows and lights the body.
 - `Sim::summon` places a mob (health from `data::generated::mobs`) for a test or a moment; mobs do not move, fight or drop yet (12c/12d).

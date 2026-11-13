@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 128 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 137 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
 aliases: [drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@b86d924
+verifiedAgainst: ruststeve@3ee956a
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -64,6 +64,8 @@ Issue 12a's 14 rows first differed only in kills: the world counted every death 
 Issue 12b's 9 escape rows run the planner itself (`script = "plan:hold"`: `Aim::Hold`, the always-rows only, on both sides, capped at the row's ticks after the settle): a stone-walled pond, a lava cup and a fire block. The lava rows first died in real only, sitting in lava through the start's setblocks and the settle; they now carry fire resistance (modelled: fire, lava and burning do no damage) and check the flee. Then 9 of 9 locally ([[escapes]]).
 
 Two walk rows that fell and were hurt (m00-3, m06-1) missed on every runner after 12a: the world now takes the server's `set_entity_motion` for itself as its velocity, and the real server sends one when the player is hurt ((0, -0.0784, 0) and (0, -0.2305, 0), one and three ticks of gravity), which the model did not. The model now sends it ([[server-model]]).
+
+Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick loop running at about 0.65 of a client's pace, and a click's answer arriving after the window closed; both fixed, then 9 of 9 locally.
 
 ## Limits
 - The server runs peaceful, which removes hostile mobs: zombie rows (their attacks and knockback) need a non-peaceful row and come with defence (12d). Rows other than the drowning ones still breathe.

@@ -18,6 +18,7 @@ pub mod hunt;
 pub mod make;
 pub mod path;
 pub mod place;
+pub mod smelt;
 pub mod stairs;
 pub mod walk;
 

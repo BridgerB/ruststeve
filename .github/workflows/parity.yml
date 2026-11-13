@@ -1,7 +1,7 @@
 # The parity table (issue #13, brain/ruststeve/design/parity-table.md): on one runner, a fresh
 # peaceful vanilla 26.1.2 server on the race seed; capture the landings' worlds byte for byte;
 # run the 50 moments in real and against the server model in those worlds; compare their outcome
-# classes field by field against the stated tolerance (126 of 128). Dispatch only:
+# classes field by field against the stated tolerance (135 of 137). Dispatch only:
 #   gh workflow run parity.yml --ref <branch>
 name: parity
 run-name: "parity table"

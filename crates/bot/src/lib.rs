@@ -29,6 +29,8 @@ use world::{Event, Inventory, World};
 const STATUS_EVERY: Duration = Duration::from_secs(10);
 /// The loop's tick: the world gets the clock and a fresh seed this often (a game tick).
 const TICK_EVERY: Duration = Duration::from_millis(50);
+/// Behind the tick schedule by more than this (twenty ticks), the schedule starts again.
+const MAX_TICK_LAG: Duration = Duration::from_secs(1);
 /// Physics ticks a start settles before the inventory is taken as the start's and a script
 /// begins: the kit's slot packets arrive within a tick or two, and a body placed by a teleport
 /// comes to rest. `bot::lockstep` settles the same.
@@ -324,7 +326,12 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut start_state = StartState::Waiting(start);
     let mut start_inventory = None;
     let mut last_status = Instant::now();
-    let mut last_tick = Instant::now();
+    // Ticks on a fixed 20 Hz schedule, as a vanilla client's: each due at the last one's due
+    // time plus 50 ms. Waiting for a packet up to a whole tick after each (what this did before
+    // issue 13a) let ticks drift 50 to 100 ms apart, the bot playing at about two thirds of a
+    // client's pace: found by the parity table's half-cooked furnace rows (a cook of 200 server
+    // ticks took 129 bot ticks).
+    let mut next_tick = Instant::now() + TICK_EVERY;
     let mut script_tick: u64 = 0;
     let mut teleports_at_script: Option<u64> = None;
     let mut min_health_in_script: Option<f32> = None;
@@ -433,8 +440,13 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             }
             other => other,
         };
-        if last_tick.elapsed() >= TICK_EVERY {
-            last_tick = Instant::now();
+        let now = Instant::now();
+        if now >= next_tick {
+            next_tick += TICK_EVERY;
+            // Far behind (the machine stalled): start the schedule again rather than burst.
+            if now.saturating_duration_since(next_tick) > MAX_TICK_LAG {
+                next_tick = now + TICK_EVERY;
+            }
             if let Some(s) = script
                 && matches!(start_state, StartState::Taken)
             {
@@ -529,7 +541,10 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 }
             }
         }
-        let msg = match conn.inbound.recv_timeout(TICK_EVERY) {
+        let wait = next_tick
+            .saturating_duration_since(Instant::now())
+            .max(Duration::from_millis(1));
+        let msg = match conn.inbound.recv_timeout(wait) {
             Ok(m) => m,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
