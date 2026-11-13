@@ -1,4 +1,4 @@
-# The parity table's moments (brain/ruststeve/design/parity-table.md): 50 walking rows (issue 08) and 30 dig and craft rows (issue 10b, at the end), each a start on
+# The parity table's moments (brain/ruststeve/design/parity-table.md): 50 walking rows (issue 08), 30 dig and craft rows (issue 10b) and 25 stone and table rows (issue 11a), each a start on
 # a captured landing (config/landings.toml), a script and a length. Run in real and against the
 # server model, their outcome classes are compared field by field. Five starts per landing, six
 # blocks apart, each walking away from the centre (yaw 0 south, 90 west, 180 north, 270 east),
@@ -665,3 +665,256 @@ dz = -3
 script = "craft:table"
 ticks = 100
 give = ["oak_planks 4"]
+
+# Issue 11a's rows, after 10b's, on the five dry landings (0, 1, 2, 4, 7): digging and placing
+# from water is issue 12's. Stone is laid under the feet (`set`: setblock in real, retried until
+# the chunk is loaded; into the model's world in sim) and dug by hand (it breaks by the delayed
+# destroy, 150 ticks, and drops nothing) or with a given wooden pickaxe held (23 ticks,
+# cobblestone), FINISH late (30) or early (5). At a table: room is made east of the feet (stone
+# under, air above), the given table placed there, opened, and a wooden pickaxe crafted in its 3x3
+# grid; or a stone pickaxe and a sword. Each kind of row at its own offset, off the walk lines.
+
+[[moment]]
+id = "s00-hand"
+landing = 0
+dx = -3
+dz = 3
+script = "dig:30"
+ticks = 200
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s01-hand"
+landing = 1
+dx = -3
+dz = 3
+script = "dig:30"
+ticks = 200
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s02-hand"
+landing = 2
+dx = -3
+dz = 3
+script = "dig:30"
+ticks = 200
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s04-hand"
+landing = 4
+dx = -3
+dz = 3
+script = "dig:30"
+ticks = 200
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s07-hand"
+landing = 7
+dx = -3
+dz = 3
+script = "dig:30"
+ticks = 200
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s00-pick"
+landing = 0
+dx = -5
+dz = 5
+script = "dig:30"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s01-pick"
+landing = 1
+dx = -5
+dz = 5
+script = "dig:30"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s02-pick"
+landing = 2
+dx = -5
+dz = 5
+script = "dig:30"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s04-pick"
+landing = 4
+dx = -5
+dz = 5
+script = "dig:30"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s07-pick"
+landing = 7
+dx = -5
+dz = 5
+script = "dig:30"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s00-pick-early"
+landing = 0
+dx = -7
+dz = 7
+script = "dig:5"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s01-pick-early"
+landing = 1
+dx = -7
+dz = 7
+script = "dig:5"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s02-pick-early"
+landing = 2
+dx = -7
+dz = 7
+script = "dig:5"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s04-pick-early"
+landing = 4
+dx = -7
+dz = 7
+script = "dig:5"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "s07-pick-early"
+landing = 7
+dx = -7
+dz = 7
+script = "dig:5"
+ticks = 100
+give = ["wooden_pickaxe 1"]
+set = [["stone", 0, -1, 0]]
+
+[[moment]]
+id = "t00-pickaxe"
+landing = 0
+dx = 5
+dz = -5
+script = "craft:wooden_pickaxe"
+ticks = 160
+give = ["crafting_table 1", "oak_planks 3", "stick 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t01-pickaxe"
+landing = 1
+dx = 5
+dz = -5
+script = "craft:wooden_pickaxe"
+ticks = 160
+give = ["crafting_table 1", "oak_planks 3", "stick 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t02-pickaxe"
+landing = 2
+dx = 5
+dz = -5
+script = "craft:wooden_pickaxe"
+ticks = 160
+give = ["crafting_table 1", "oak_planks 3", "stick 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t04-pickaxe"
+landing = 4
+dx = 5
+dz = -5
+script = "craft:wooden_pickaxe"
+ticks = 160
+give = ["crafting_table 1", "oak_planks 3", "stick 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t07-pickaxe"
+landing = 7
+dx = 5
+dz = -5
+script = "craft:wooden_pickaxe"
+ticks = 160
+give = ["crafting_table 1", "oak_planks 3", "stick 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t00-stone"
+landing = 0
+dx = 7
+dz = -7
+script = "craft:stone_tools"
+ticks = 200
+give = ["crafting_table 1", "cobblestone 5", "stick 3"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t01-stone"
+landing = 1
+dx = 7
+dz = -7
+script = "craft:stone_tools"
+ticks = 200
+give = ["crafting_table 1", "cobblestone 5", "stick 3"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t02-stone"
+landing = 2
+dx = 7
+dz = -7
+script = "craft:stone_tools"
+ticks = 200
+give = ["crafting_table 1", "cobblestone 5", "stick 3"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t04-stone"
+landing = 4
+dx = 7
+dz = -7
+script = "craft:stone_tools"
+ticks = 200
+give = ["crafting_table 1", "cobblestone 5", "stick 3"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "t07-stone"
+landing = 7
+dx = 7
+dz = -7
+script = "craft:stone_tools"
+ticks = 200
+give = ["crafting_table 1", "cobblestone 5", "stick 3"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]

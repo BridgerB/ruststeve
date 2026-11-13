@@ -38,6 +38,9 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[goal-table-and-needs]] - goals as data and the needs planner that walks back from a goal to the next act.
 - [[digging]] - the dig task: dig from beside, FINISH with the margin, confirm, collect the drop.
 - [[crafting-window]] - the craft task: window 0 in stages, one click per round trip, the missed-click rule.
+- [[tools-and-held-slot]] - tools and stack sizes from the game's item components, and the one dig rule bot and model share.
+- [[table-window]] - a window besides the inventory: the crafting table's menu in the world and the model.
+- [[placing]] - placing and opening blocks with use_item_on, and how the server answers.
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
 - [[parity-table]] - captured worlds, 50 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.

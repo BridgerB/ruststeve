@@ -6,7 +6,7 @@ tags: [datagen, data, tables, ci, packets]
 aliases: [crates/data, generated tables, JNI probe, jar probe, hardness, fuel values, collision shapes, entity data serializers, --oracle, datagen.yml, verify-stream, regenerate the tables, BlockKind, ItemKind, packet enums]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@d683c9b clojurecraft@be85a92
+verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/main.rs#//! datagen: the game's tables, generated from the vanilla server itself and committed as Rust in"
   - "ruststeve:crates/datagen/src/fetch.rs#pub fn server_jar(work: &Path) -> Result<PathBuf> {"
@@ -42,6 +42,9 @@ Every game table ruststeve uses is generated from the vanilla 26.1.2 server and 
 3. From the inner jar (`META-INF/versions/26.1.2/server-26.1.2.jar`): `version.json`, item and block tags (nested `#tag`s resolved, cycles cut), shaped and shapeless crafting recipes (patterns trimmed like vanilla), smelting, block loot (the first pool for a plain tool), dimension types, damage types and biomes (sorted by name, the order the server syncs them).
 4. Every table is checked as it is read: ids run 0..n with no gaps, a block's state range equals the product of its property values, every item and block a tag, recipe or loot table names exists. A failure stops the run; nothing is defaulted.
 5. `emit.rs` writes one file per table: kind enums (`BlockKind`, `ItemKind`, `EntityKind`) with `Unknown(u32)` and `from_id`/`id`/`name`/`from_name`; packet enums such as `PlayClientbound` with `ALL`, `from_id`, `id`, `name`; sorted statics with binary-search lookups (`block_of_state`, `item_tag`, `drops_of`, `harvest_of`). No `HashMap` ([[determinism-rules]]). rustfmt runs on the output, so a rerun writes the same bytes.
+
+## Item components (issue 11a)
+The reports also write each item's default components (`reports/minecraft/components/item/<item>.json`); `read_item_props` takes `max_stack_size`, `max_damage` and the `tool` rules, evaluated against every block over the resolved tags, into `item_props.rs` ([[tools-and-held-slot]]). A JNI probe for them was tried and dropped: item components bind lazily in 26.1.2 and need the data-driven registries.
 
 ## The probe (the game's classes)
 Hardness, needs-correct-tool, collision shapes, tool materials, fuel, mob health and category, and the entity-data serializer ids are in no data file. `probe.rs` starts a JVM from Rust (`jni` 0.21, `invocation`: libjvm is found through `JAVA_HOME` and loaded at run time, so the crate builds without Java) with the inner jar and the bundler's `libraries/` on its class path, bootstraps the game and reads them by reflection, mirroring clojurecraft's `jar_probe.clj`. Only JDK methods are called by JNI signature; each game method is found by name, argument count and argument types at run time and cached, so a renamed return type cannot break it. `--oracle <clojurecraft>/resources/clojurecraft` then compares every probe table with clojurecraft's EDN entry by entry and fails on any difference.

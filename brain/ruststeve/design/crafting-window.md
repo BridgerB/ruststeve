@@ -6,7 +6,7 @@ tags: [plan, craft, window, clicks]
 aliases: [Craft, Stage, CraftFailure, StaleWindow, WrongResult, TooManyClicks, Missing, layout, Act::Resync, resync click, put_down]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
+verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/craft.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Option<Act>, CraftStatus) {"
   - "ruststeve:crates/plan/src/craft.rs#pub fn layout(r: &Recipe) -> Vec<(i16, &'static [ItemKind])> {"

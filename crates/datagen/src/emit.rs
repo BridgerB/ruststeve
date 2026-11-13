@@ -652,6 +652,130 @@ fn dimensions_rs(g: &Game) -> Result<String> {
 }
 
 /// Write every table into `out` (replacing what is there) and rustfmt the files.
+/// Every item's max stack size and max damage, by item id; every tool's speed against the blocks
+/// it mines faster than a hand and the blocks it gets drops from: the reports' default
+/// components, the tool rules evaluated per block (issue 11a).
+pub fn item_props_rs(g: &Game) -> Result<String> {
+    ensure!(
+        g.item_props.len() == g.items.names.len(),
+        "{} items have components, the registry has {}",
+        g.item_props.len(),
+        g.items.names.len()
+    );
+    let block_ids: BTreeMap<&str, usize> = g
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.name.as_str(), i))
+        .collect();
+    let prop = |n: &str| {
+        g.item_props
+            .get(n)
+            .with_context(|| format!("no components for {n}"))
+    };
+    let f32_lit = |what: &str, v: f64| -> Result<String> {
+        // A sword on bamboo is `Float.MAX_VALUE`, whose JSON text is not the float exactly.
+        if v >= f64::from(f32::MAX) * (1.0 - 1e-7) {
+            return Ok("f32::MAX".to_owned());
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let f = v as f32;
+        ensure!(f64::from(f) == v, "{what}: {v} is not a float");
+        Ok(format!("{f:?}"))
+    };
+    let mut s = header();
+    writeln!(s, "use super::blocks::BlockKind;")?;
+    writeln!(s, "use super::items::ItemKind;")?;
+    writeln!(s, "use crate::types::Tool;\n")?;
+    writeln!(s, "/// Each item's default max stack size, by item id.")?;
+    writeln!(s, "pub static MAX_STACK: [u8; {}] = [", g.items.names.len())?;
+    for n in &g.items.names {
+        writeln!(s, "    {}, // {n}", u8::try_from(prop(n)?.max_stack)?)?;
+    }
+    writeln!(s, "];\n")?;
+    writeln!(
+        s,
+        "/// Each item's max damage (0: it does not wear), by item id."
+    )?;
+    writeln!(
+        s,
+        "pub static MAX_DAMAGE: [u16; {}] = [",
+        g.items.names.len()
+    )?;
+    for n in &g.items.names {
+        writeln!(s, "    {}, // {n}", u16::try_from(prop(n)?.max_damage)?)?;
+    }
+    writeln!(s, "];\n")?;
+    let mut tools = Vec::new();
+    for n in &g.items.names {
+        if let Some(t) = prop(n)?.tool.as_ref() {
+            tools.push((n, t));
+        }
+    }
+    writeln!(
+        s,
+        "/// Every tool (an item with the `tool` component), in item-id order: its speed against each"
+    )?;
+    writeln!(
+        s,
+        "/// block where that is not 1.0, and the blocks it gets drops from, both in block-id order."
+    )?;
+    writeln!(s, "pub static TOOLS: [Tool; {}] = [", tools.len())?;
+    for (n, t) in &tools {
+        let mut speeds = Vec::new();
+        for (b, v) in &t.speeds {
+            let bid = *block_ids
+                .get(b.as_str())
+                .with_context(|| format!("tool {n}: no block {b}"))?;
+            speeds.push((bid, b, f32_lit(&format!("{n} on {b}"), *v)?));
+        }
+        speeds.sort_unstable();
+        let mut correct = Vec::new();
+        for b in &t.correct {
+            let bid = *block_ids
+                .get(b.as_str())
+                .with_context(|| format!("tool {n}: no block {b}"))?;
+            correct.push((bid, b));
+        }
+        correct.sort_unstable();
+        writeln!(s, "    Tool {{ item: ItemKind::{}, speeds: &[", pascal(n))?;
+        for (_, b, v) in &speeds {
+            writeln!(s, "        (BlockKind::{}, {v}),", pascal(b))?;
+        }
+        writeln!(s, "    ], correct: &[")?;
+        for (_, b) in &correct {
+            writeln!(s, "        BlockKind::{},", pascal(b))?;
+        }
+        writeln!(s, "    ] }},")?;
+    }
+    writeln!(s, "];\n")?;
+    writeln!(s, "/// An item's max stack size (64 for an unknown id).")?;
+    writeln!(s, "pub fn max_stack(item: ItemKind) -> i32 {{")?;
+    writeln!(
+        s,
+        "    usize::try_from(item.id()).ok().and_then(|i| MAX_STACK.get(i)).map_or(64, |n| i32::from(*n))"
+    )?;
+    writeln!(s, "}}\n")?;
+    writeln!(s, "/// An item's max damage; 0 when it does not wear.")?;
+    writeln!(s, "pub fn max_damage(item: ItemKind) -> i32 {{")?;
+    writeln!(
+        s,
+        "    usize::try_from(item.id()).ok().and_then(|i| MAX_DAMAGE.get(i)).map_or(0, |n| i32::from(*n))"
+    )?;
+    writeln!(s, "}}\n")?;
+    writeln!(s, "/// The tool an item is, if it is one.")?;
+    writeln!(
+        s,
+        "pub fn tool_of(item: ItemKind) -> Option<&'static Tool> {{"
+    )?;
+    writeln!(
+        s,
+        "    TOOLS.binary_search_by_key(&item.id(), |t| t.item.id()).ok().and_then(|i| TOOLS.get(i))"
+    )?;
+    writeln!(s, "}}")?;
+    Ok(s)
+}
+
 pub fn write_all(g: &Game, p: &Probe, out: &Path) -> Result<()> {
     if out.exists() {
         std::fs::remove_dir_all(out).with_context(|| format!("clear {}", out.display()))?;
@@ -678,6 +802,7 @@ pub fn write_all(g: &Game, p: &Probe, out: &Path) -> Result<()> {
         ("fuel", crate::emit_probe::fuel_rs(g, p)?),
         ("mobs", crate::emit_probe::mobs_rs(g, p)?),
         ("metadata", crate::emit_probe::metadata_rs(p)?),
+        ("item_props", item_props_rs(g)?),
     ];
     let mut modules: Vec<&str> = files.iter().map(|(n, _)| *n).collect();
     modules.sort_unstable();

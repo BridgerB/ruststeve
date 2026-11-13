@@ -15,6 +15,12 @@ pub enum Craft {
     Sticks,
     /// Four planks, one into each grid slot; shift-click the table out.
     Table,
+    /// At a placed crafting table (issue 11a): the table placed on the block east of the feet,
+    /// opened, three planks and two sticks laid as a wooden pickaxe, taken, the table closed.
+    /// Given: the table (hotbar 0), 3 planks, 2 sticks.
+    WoodenPickaxe,
+    /// The same with 5 cobblestone and 3 sticks: a stone pickaxe, then a stone sword.
+    StoneTools,
 }
 
 impl Craft {
@@ -32,6 +38,37 @@ impl Craft {
                 (4, 1, 0),
                 (0, 0, 1),
             ],
+            // The table's menu: the inventory at 10-45, so window 0's 37 and 38 are 38 and 39.
+            Craft::WoodenPickaxe => &[
+                (38, 0, 0),
+                (1, 1, 0),
+                (2, 1, 0),
+                (3, 1, 0),
+                (39, 0, 0),
+                (5, 1, 0),
+                (8, 1, 0),
+                (0, 0, 1),
+            ],
+            Craft::StoneTools => &[
+                (38, 0, 0),
+                (1, 1, 0),
+                (2, 1, 0),
+                (3, 1, 0),
+                (38, 0, 0),
+                (39, 0, 0),
+                (5, 1, 0),
+                (8, 1, 0),
+                (39, 0, 0),
+                (0, 0, 1),
+                // The sword: the last two cobblestone and the last stick, so the cursor ends
+                // empty and nothing is put back (a click that changes nothing draws no reply).
+                (38, 0, 0),
+                (2, 1, 0),
+                (5, 1, 0),
+                (39, 0, 0),
+                (8, 1, 0),
+                (0, 0, 1),
+            ],
         }
     }
 
@@ -40,7 +77,14 @@ impl Craft {
             Craft::Planks => "planks",
             Craft::Sticks => "sticks",
             Craft::Table => "table",
+            Craft::WoodenPickaxe => "wooden_pickaxe",
+            Craft::StoneTools => "stone_tools",
         }
+    }
+
+    /// Whether it is made at a placed crafting table.
+    fn at_table(self) -> bool {
+        matches!(self, Craft::WoodenPickaxe | Craft::StoneTools)
     }
 }
 
@@ -112,6 +156,34 @@ impl Script {
                 };
                 vec![Act::Dig { step, pos, face: 1 }]
             }
+            Script::Craft(c) if c.at_table() => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                let (fx, fy, fz) = (
+                    body.pos[0].floor() as i32,
+                    (body.pos[1] + 0.01).floor() as i32,
+                    body.pos[2].floor() as i32,
+                );
+                let sent = usize::try_from(w.clicks_sent).unwrap_or(usize::MAX);
+                let clicks = c.clicks();
+                match (w.sequence_sent, &w.window, w.click.is_none()) {
+                    // Place the held table on the block east of the feet, then open it.
+                    (0, None, _) => vec![Act::UseOn {
+                        pos: world::BlockPos::new(fx + 1, fy - 1, fz),
+                        face: 1,
+                    }],
+                    (1, None, _) if sent == 0 && tick >= 5 => vec![Act::UseOn {
+                        pos: world::BlockPos::new(fx + 1, fy, fz),
+                        face: 4,
+                    }],
+                    (_, Some(_), true) => match clicks.get(sent) {
+                        Some(&(slot, button, mode)) => vec![Act::Click { slot, button, mode }],
+                        None => vec![Act::CloseWindow],
+                    },
+                    (_, _, _) => Vec::new(),
+                }
+            }
             Script::Craft(c) => {
                 let sent = usize::try_from(w.clicks_sent).unwrap_or(usize::MAX);
                 match (w.click.is_none(), c.clicks().get(sent)) {
@@ -160,6 +232,8 @@ impl Script {
             "craft:planks" => Some(Script::Craft(Craft::Planks)),
             "craft:sticks" => Some(Script::Craft(Craft::Sticks)),
             "craft:table" => Some(Script::Craft(Craft::Table)),
+            "craft:wooden_pickaxe" => Some(Script::Craft(Craft::WoodenPickaxe)),
+            "craft:stone_tools" => Some(Script::Craft(Craft::StoneTools)),
             _ => None,
         }
     }
@@ -180,6 +254,8 @@ mod tests {
             Script::Craft(Craft::Planks),
             Script::Craft(Craft::Sticks),
             Script::Craft(Craft::Table),
+            Script::Craft(Craft::WoodenPickaxe),
+            Script::Craft(Craft::StoneTools),
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
         }

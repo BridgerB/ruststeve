@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 80 moments (walks, digs, crafts), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 105 moments (walks, digs, crafts, stone and the table), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
 aliases: [dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@8df1710
+verifiedAgainst: ruststeve@34b2252
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -30,7 +30,7 @@ A sim number counts only after the model agrees with a real server at the same m
 ## Key files
 - `crates/bot/src/bin/capture.rs`, `src/captured.rs`: captured worlds.
 - `crates/bot/src/bin/moments.rs` (`real`, `sim`, `compare`), `crates/results/src/parity.rs`.
-- `config/landings.toml` (10 landings), `config/moments.toml` (80 moments).
+- `config/landings.toml` (10 landings), `config/moments.toml` (105 moments).
 - `.github/workflows/parity.yml`; `crates/bot/src/bin/simrace.rs` and `simrace.yml` for sim races.
 
 ## How it works
@@ -40,8 +40,9 @@ A sim number counts only after the model agrees with a real server at the same m
 - **Sim**: the model in the captured world, the bot spawning at the start, in lockstep, the same settle and script.
 - **Dig and craft rows** (issue 10b), after the walks so the real world's holes come after every walk row: per landing a dig of the block under the feet with FINISH at tick 30 (`dig:30`) and at tick 5 (`dig:5`, a delayed destroy), and a craft (`craft:planks|sticks|table`) from items a row `give`s (`/give` by RCON in real, `Survival::give` in the model). A script now also acts (`Script::acts`): a craft sends its next click only once the last moved the window's state id.
 - **The outcome class**, compared field by field: the final block cell, on the ground, in water, corrected (a teleport after the script began), the lowest health during the script (full, hurt, dead), and since 10b the inventory by item name (slots 1-45 and the cursor) and the count in the grid, result and cursor.
-- **Random drops are not a class**: an item some block drops only by chance (a sapling from leaves, a seed from grass, flint from gravel) is left out of the inventory on both sides. The model's roll is seeded, not vanilla's, and **a fresh server grows different canopies on the same seed** from run to run (two runner captures disagree about leaves at landings 4 and 7), so no dig spot can be promised leaf-free.
-- **The stated tolerance**: all but 2 of the moments match in every field (78 of 80; 48 of 50 before 10b). A mismatch is a model or harness bug until shown otherwise, never tuned away.
+- **Random drops are not a class**: an item some block drops only by chance and no recipe makes (a sapling from leaves, a seed from grass, flint from gravel) is left out of the inventory on both sides; sticks, which a dead bush drops by chance, stay in (11a found them left out). The model's roll is seeded, not vanilla's, and **a fresh server grows different canopies on the same seed** from run to run (two runner captures disagree about leaves at landings 4 and 7), so no dig spot can be promised leaf-free.
+- **Stone and table rows** (issue 11a), on the five dry landings (digging and placing from water is issue 12's): a moment may `set` blocks at the start (`setblock` by RCON in real, retried until the chunk is loaded, which right after a teleport it often is not; into the model's world in sim). Stone under the feet dug by hand (the delayed destroy at 150 ticks, no drop) and with a given wooden pickaxe (late and early FINISH); a table placed east of the feet on laid stone, opened, and a wooden pickaxe crafted, or a stone pickaxe and a sword.
+- **The stated tolerance**: all but 2 of the moments match in every field (103 of 105; 78 of 80 with 10b; 48 of 50 before). A mismatch is a model or harness bug until shown otherwise, never tuned away.
 - **simrace**: lanes of lockstep runs in generated worlds, the same case and batch files with `source = sim`, released as `race-sim-<run>` so the insight store keeps sim beside real, never mixed.
 
 ## What the table found
@@ -54,6 +55,8 @@ The first table matched 19 of 50. Each cause was named from a recording, then fi
 Then: **50 of 50** locally.
 
 Issue 10b's 30 rows first matched 28: the bot's world kept a stale cursor (a click claims an empty cursor and the server answers only a difference, so the world now forgets its cursor as it clicks, [[wire-container-click]]); two leaf rows differed by a sapling roll. Then a grass row's leaf litter popped off in real only: the model now breaks what rests on a broken block. Then **80 of 80** locally; on a runner 79 of 80, the miss a sapling on a canopy the local world did not have, which led to leaving chance drops out of the class.
+
+Issue 11a's 25 rows first matched 15 locally: `setblock` landed before the chunk loaded (retried now), the model judged the eyes in water by the cell alone (now by the fluid's height), a scripted click changed nothing and the craft stalled, and water starts differed (the rows moved to dry landings). Then 25 of 25, and 105 of 105 with the earlier rows.
 
 ## Limits
 - No mobs (peaceful) and no air or drowning yet: the real side gives water breathing. Both join the table with issue 12 (survival), as rows, before any sim number about them counts.

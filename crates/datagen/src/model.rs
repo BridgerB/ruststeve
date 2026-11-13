@@ -120,6 +120,27 @@ pub struct Game {
     pub damage_types: Vec<String>,
     pub biomes: Vec<String>,
     pub harvest: BTreeMap<String, Harvest>,
+    /// Item name → its default max stack size, max damage and tool rules, from the reports'
+    /// default components (`reports/minecraft/components/item/<name>.json`, issue 11a).
+    pub item_props: BTreeMap<String, ItemProps>,
+}
+
+/// An item's default components that ruststeve reads.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemProps {
+    pub max_stack: i64,
+    pub max_damage: i64,
+    pub tool: Option<ToolProps>,
+}
+
+/// A tool's rules, evaluated against every block as vanilla's `Tool` does: the speed is the first
+/// rule with a speed whose blocks hold the block (else the default mining speed); the block's drops
+/// are got when the first rule with `correct_for_drops` that holds it says so.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolProps {
+    /// Block name → speed, for the blocks not mined at 1.0.
+    pub speeds: BTreeMap<String, f64>,
+    pub correct: BTreeSet<String>,
 }
 
 /// The states in the order the protocol walks them, and the two directions.
@@ -179,6 +200,7 @@ impl Game {
             damage_types: sorted_stems(entries, "data/minecraft/damage_type/"),
             biomes: sorted_stems(entries, "data/minecraft/worldgen/biome/"),
             harvest: harvest(&block_tags),
+            item_props: read_item_props(reports, &items, &blocks, &block_tags)?,
             items,
             entities,
             blocks,
@@ -752,6 +774,94 @@ fn sorted_stems(entries: &BTreeMap<String, String>, dir: &str) -> Vec<String> {
 
 /// `{block: harvest}` from the block tags: the tool kind that mines it, the lowest tier that
 /// drops it when one is required. A block in no such tag is absent (any tool, by hand).
+/// A rule's `blocks`: a tag (`#minecraft:mineable/pickaxe`), one block or a list, as block names.
+fn rule_blocks(
+    v: &Value,
+    block_tags: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<BTreeSet<String>> {
+    let strip = |s: &str| s.strip_prefix("minecraft:").unwrap_or(s).to_owned();
+    match v {
+        Value::String(s) => match s.strip_prefix('#') {
+            Some(tag) => block_tags
+                .get(&strip(tag))
+                .cloned()
+                .with_context(|| format!("tool rule: no block tag {tag}")),
+            None => Ok(BTreeSet::from([strip(s)])),
+        },
+        Value::Array(list) => list
+            .iter()
+            .map(|b| {
+                b.as_str()
+                    .map(strip)
+                    .context("tool rule: a block that is not a name")
+            })
+            .collect(),
+        other => bail!("tool rule blocks: {other}"),
+    }
+}
+
+fn read_item_props(
+    reports: &Path,
+    items: &Registry,
+    blocks: &[Block],
+    block_tags: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<BTreeMap<String, ItemProps>> {
+    let dir = reports.join("minecraft").join("components").join("item");
+    let mut out = BTreeMap::new();
+    for name in &items.names {
+        let path = dir.join(format!("{name}.json"));
+        let c = &read_json(&path)?["components"];
+        let max_stack = c["minecraft:max_stack_size"].as_i64().unwrap_or(64);
+        let max_damage = c["minecraft:max_damage"].as_i64().unwrap_or(0);
+        let tool = match &c["minecraft:tool"] {
+            Value::Null => None,
+            t => {
+                let default = t["default_mining_speed"].as_f64().unwrap_or(1.0);
+                let rules: Vec<(BTreeSet<String>, Option<f64>, Option<bool>)> = t["rules"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|r| {
+                        Ok((
+                            rule_blocks(&r["blocks"], block_tags)?,
+                            r["speed"].as_f64(),
+                            r["correct_for_drops"].as_bool(),
+                        ))
+                    })
+                    .collect::<Result<_>>()?;
+                let mut speeds = BTreeMap::new();
+                let mut correct = BTreeSet::new();
+                for b in blocks {
+                    let speed = rules
+                        .iter()
+                        .find_map(|(set, s, _)| s.filter(|_| set.contains(&b.name)))
+                        .unwrap_or(default);
+                    if speed != 1.0 {
+                        speeds.insert(b.name.clone(), speed);
+                    }
+                    let gets = rules
+                        .iter()
+                        .find_map(|(set, _, c)| c.filter(|_| set.contains(&b.name)))
+                        .unwrap_or(false);
+                    if gets {
+                        correct.insert(b.name.clone());
+                    }
+                }
+                Some(ToolProps { speeds, correct })
+            }
+        };
+        out.insert(
+            name.clone(),
+            ItemProps {
+                max_stack,
+                max_damage,
+                tool,
+            },
+        );
+    }
+    Ok(out)
+}
+
 fn harvest(block_tags: &BTreeMap<String, BTreeSet<String>>) -> BTreeMap<String, Harvest> {
     let mut out: BTreeMap<String, Harvest> = BTreeMap::new();
     for (tag, tool) in MINEABLE {

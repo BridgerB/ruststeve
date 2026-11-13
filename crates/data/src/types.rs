@@ -151,6 +151,33 @@ pub struct ToolMaterial {
     pub incorrect_for_drops: &'static str,
 }
 
+/// A tool (an item with the `tool` component): its speed against the blocks it mines faster
+/// than a hand (sorted by block id; 1.0 elsewhere) and the blocks whose drops it gets (sorted).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tool {
+    pub item: ItemKind,
+    pub speeds: &'static [(BlockKind, f32)],
+    pub correct: &'static [BlockKind],
+}
+
+impl Tool {
+    /// Its speed against a block (`Item.getDestroySpeed` on the block's default state).
+    pub fn speed(&self, block: BlockKind) -> f32 {
+        self.speeds
+            .binary_search_by_key(&block.id(), |(b, _)| b.id())
+            .ok()
+            .and_then(|i| self.speeds.get(i))
+            .map_or(1.0, |(_, s)| *s)
+    }
+
+    /// Whether it gets the block's drops (`ItemStack.isCorrectToolForDrops`).
+    pub fn correct_for(&self, block: BlockKind) -> bool {
+        self.correct
+            .binary_search_by_key(&block.id(), |b| b.id())
+            .is_ok()
+    }
+}
+
 /// An item that burns in a furnace, and for how many game ticks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fuel {

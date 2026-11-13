@@ -51,10 +51,43 @@ const TOUCH_SIDEWAYS: f64 = 1.0;
 const TOUCH_UP: f64 = 0.5;
 /// The item entity's metadata index for its stack.
 const ITEM_STACK_INDEX: u8 = 8;
-/// Every stack the model makes stacks to 64. The generated tables do not carry
-/// `max_stack_size` yet; wood, planks, sticks and tables all stack to 64 (a limit until tools,
-/// which stack to 1, are crafted in issue 11).
-const MAX_STACK: i32 = 64;
+/// An item's max stack size, from its default components (generated, issue 11a).
+fn max_stack(item: ItemKind) -> i32 {
+    data::generated::item_props::max_stack(item)
+}
+
+/// Where a menu slot is stored: the result, a grid cell, or one of the inventory's menu slots
+/// (window 0's numbering).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Loc {
+    Result,
+    Grid(usize),
+    Inv(usize),
+}
+
+/// A crafting table's open menu (`CraftingMenu`, issue 11a).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Table {
+    pub id: i32,
+    pub pos: (i32, i32, i32),
+    pub grid: [Option<Stack>; 9],
+    pub result: Option<Stack>,
+    pub state_id: i32,
+    remote: [Option<Stack>; MENU_SLOTS],
+}
+
+/// The blocks report's definitions a placed block replaces (air and water aside): plants, snow.
+const REPLACEABLE: &[&str] = &[
+    "tall_grass",
+    "double_plant",
+    "short_dry_grass",
+    "tall_dry_grass",
+    "dry_vegetation",
+    "leaf_litter",
+    "flower_bed",
+    "snow_layer",
+    "vine",
+];
 
 /// A dig the server is timing.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -97,6 +130,11 @@ pub struct Survival {
     pub broken: u64,
     pub picked: u64,
     pub clicks: u64,
+    /// A crafting table's menu, when one is open (issue 11a), and the last container id given.
+    pub table: Option<Table>,
+    container_counter: i32,
+    /// Blocks placed.
+    pub placed: u64,
 }
 
 impl Survival {
@@ -117,6 +155,9 @@ impl Survival {
             broken: 0,
             picked: 0,
             clicks: 0,
+            table: None,
+            container_counter: 0,
+            placed: 0,
         }
     }
 
@@ -168,9 +209,9 @@ impl Survival {
             }
             if let Some(Some((k, n))) = self.slots.get_mut(s)
                 && *k == item
-                && *n < MAX_STACK
+                && *n < max_stack(item)
             {
-                let moved = count.min(MAX_STACK - *n);
+                let moved = count.min(max_stack(item) - *n);
                 *n += moved;
                 count -= moved;
             }
@@ -183,7 +224,7 @@ impl Survival {
             if let Some(slot) = self.slots.get_mut(s)
                 && slot.is_none()
             {
-                let moved = count.min(MAX_STACK);
+                let moved = count.min(max_stack(item));
                 *slot = Some((item, moved));
                 count -= moved;
             }
@@ -255,14 +296,14 @@ fn is_air(k: Option<BlockKind>) -> bool {
     )
 }
 
-/// The 2x2 grid as a recipe sees it: the cells trimmed to the smallest box holding every item.
-fn trimmed(grid: [Option<ItemKind>; 4]) -> (usize, usize, Vec<Option<ItemKind>>) {
-    let at = |r: usize, c: usize| grid.get(r * 2 + c).copied().flatten();
-    let rows: Vec<usize> = (0..2)
-        .filter(|r| (0..2).any(|c| at(*r, c).is_some()))
+/// A grid as a recipe sees it: the cells trimmed to the smallest box holding every item.
+fn trimmed(width: usize, grid: &[Option<ItemKind>]) -> (usize, usize, Vec<Option<ItemKind>>) {
+    let at = |r: usize, c: usize| grid.get(r * width + c).copied().flatten();
+    let rows: Vec<usize> = (0..width)
+        .filter(|r| (0..width).any(|c| at(*r, c).is_some()))
         .collect();
-    let cols: Vec<usize> = (0..2)
-        .filter(|c| (0..2).any(|r| at(r, *c).is_some()))
+    let cols: Vec<usize> = (0..width)
+        .filter(|c| (0..width).any(|r| at(r, *c).is_some()))
         .collect();
     let (Some(r0), Some(r1), Some(c0), Some(c1)) =
         (rows.first(), rows.last(), cols.first(), cols.last())
@@ -304,11 +345,11 @@ fn shapeless_matches(items: &[ItemKind], ingredients: &[&[ItemKind]]) -> bool {
     assign(items, ingredients, &mut vec![false; ingredients.len()])
 }
 
-/// The crafting result of a 2x2 grid, from the generated recipes (shaped, as laid or mirrored,
-/// and shapeless).
-pub fn craft_result(grid: [Option<ItemKind>; 4]) -> Option<Stack> {
+/// The crafting result of a square grid (2x2 or 3x3, `width` cells a row), from the generated
+/// recipes (shaped, as laid or mirrored, and shapeless).
+pub fn craft_result(width: usize, grid: &[Option<ItemKind>]) -> Option<Stack> {
     use data::types::Shape;
-    let (w, h, cells) = trimmed(grid);
+    let (w, h, cells) = trimmed(width, grid);
     if cells.is_empty() {
         return None;
     }
@@ -346,39 +387,65 @@ pub fn craft_result(grid: [Option<ItemKind>; 4]) -> Option<Stack> {
 }
 
 impl Sim {
-    /// The game mode's dig progress for one tick (`BlockBehaviour.getDestroyProgress`): the
-    /// destroy speed over the hardness, over 30 when the hand may harvest it, else 100.
+    /// The game mode's dig progress for one tick (`BlockBehaviour.getDestroyProgress` with the
+    /// held item, `data::dig`): the eyes in water and the feet off the ground slow it.
     pub fn destroy_progress(&self, kind: BlockKind) -> f32 {
-        let hardness = data::generated::hardness::hardness(kind).unwrap_or(0.0);
-        if hardness < 0.0 {
-            return 0.0;
-        }
-        if hardness == 0.0 {
-            return f32::INFINITY;
-        }
-        let harvestable = !data::generated::hardness::needs_correct_tool(kind).unwrap_or(false);
-        let divisor = if harvestable { 30.0 } else { 100.0 };
-        self.destroy_speed() / hardness / divisor
-    }
-
-    /// `Player.getDestroySpeed` for the hand (and any item that is not a tool: speed 1.0; tools
-    /// are issue 11): times the submerged mining speed 0.2 with the eyes in water, over 5 off
-    /// the ground.
-    fn destroy_speed(&self) -> f32 {
-        let mut speed = 1.0_f32;
         let eye = [self.pos[0], self.pos[1] + physics::EYE_HEIGHT, self.pos[2]];
         let eye_cell = (
             eye[0].floor() as i32,
             eye[1].floor() as i32,
             eye[2].floor() as i32,
         );
-        if block_kind(self, eye_cell) == Some(BlockKind::Water) {
-            speed *= 0.2;
+        let eye_in_water = self.eye_in_water(eye[1], eye_cell);
+        let held = self.survival.held_stack().map(|(k, _)| k);
+        data::dig::progress(kind, held, eye_in_water, self.survival.on_ground)
+    }
+
+    /// `isEyeInFluid(WATER)`: the eye below the water's surface in its cell. A water cell (or a
+    /// waterlogged block, kelp, seagrass, a bubble column) holds `amount / 9` of a block, the
+    /// amount 8 for a source or falling water, `8 - level` for a flow; a full block when water
+    /// is above it (`FluidState.getHeight`).
+    fn eye_in_water(&self, eye_y: f64, (x, y, z): (i32, i32, i32)) -> bool {
+        let Some(state) = self.state_at(x, y, z) else {
+            return false;
+        };
+        let Some(kind) = data::block_of_state(state) else {
+            return false;
+        };
+        let watery = |s: u32, k: BlockKind| {
+            matches!(
+                k,
+                BlockKind::Water
+                    | BlockKind::BubbleColumn
+                    | BlockKind::Kelp
+                    | BlockKind::KelpPlant
+                    | BlockKind::Seagrass
+                    | BlockKind::TallSeagrass
+            ) || property(s, "waterlogged") == Some("true")
+        };
+        if !watery(state, kind) {
+            return false;
         }
-        if !self.survival.on_ground {
-            speed /= 5.0;
-        }
-        speed
+        let above = self
+            .state_at(x, y + 1, z)
+            .and_then(|s| data::block_of_state(s).map(|k| (s, k)));
+        let height = if above.is_some_and(|(s, k)| watery(s, k)) {
+            1.0
+        } else {
+            let level = match kind {
+                BlockKind::Water => property(state, "level")
+                    .and_then(|v| v.parse::<i32>().ok())
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            let amount = if level == 0 || level >= 8 {
+                8
+            } else {
+                8 - level
+            };
+            f64::from(amount) / 9.0
+        };
+        eye_y < f64::from(y) + height
     }
 
     fn within_reach(&self, (x, y, z): (i32, i32, i32)) -> bool {
@@ -495,8 +562,8 @@ impl Sim {
         // setBlock's neighbour updates run before the broken block's own drops: what rested on
         // it pops off first.
         out.extend(self.pop_unsupported((pos.0, pos.1 + 1, pos.2))?);
-        let harvestable = !data::generated::hardness::needs_correct_tool(k).unwrap_or(false);
-        if harvestable {
+        let held = self.survival.held_stack().map(|(k, _)| k);
+        if data::dig::harvests(k, held) {
             for item in self.roll_drops(k) {
                 out.extend(self.pop_resource(pos, (item, 1))?);
             }
@@ -792,24 +859,112 @@ impl Sim {
         Ok(out)
     }
 
-    /// The menu's changes since the client was last told (`broadcastChanges`): one slot packet
-    /// per changed slot, each with a new state id, and the cursor when it differs.
+    /// The menu open now: a crafting table's, else the inventory's (window 0).
+    fn menu_id(&self) -> i32 {
+        self.survival.table.as_ref().map_or(0, |t| t.id)
+    }
+
+    /// Where a menu slot is stored. Window 0: 0 the result, 1-4 the 2x2 grid, 5-45 the inventory's
+    /// menu slots. A crafting table's: 0 the result, 1-9 its 3x3 grid, 10-45 the inventory's main
+    /// and hotbar slots (window 0's 9-44).
+    fn loc(&self, slot: usize) -> Option<Loc> {
+        match (self.survival.table.is_some(), slot) {
+            (_, 0) => Some(Loc::Result),
+            (false, 1..=4) => Some(Loc::Grid(slot - 1)),
+            (false, 5..=45) => Some(Loc::Inv(slot)),
+            (true, 1..=9) => Some(Loc::Grid(slot - 1)),
+            (true, 10..=45) => Some(Loc::Inv(slot - 1)),
+            (_, _) => None,
+        }
+    }
+
+    fn get(&self, l: Loc) -> Option<Stack> {
+        match (&self.survival.table, l) {
+            (Some(t), Loc::Result) => t.result,
+            (Some(t), Loc::Grid(i)) => t.grid.get(i).copied().flatten(),
+            (None, Loc::Result) => self.survival.slots.get(RESULT).copied().flatten(),
+            (None, Loc::Grid(i)) => self.survival.slots.get(1 + i).copied().flatten(),
+            (_, Loc::Inv(i)) => self.survival.slots.get(i).copied().flatten(),
+        }
+    }
+
+    fn put(&mut self, l: Loc, v: Option<Stack>) {
+        let cell = match (&mut self.survival.table, l) {
+            (Some(t), Loc::Result) => Some(&mut t.result),
+            (Some(t), Loc::Grid(i)) => t.grid.get_mut(i),
+            (None, Loc::Result) => self.survival.slots.get_mut(RESULT),
+            (None, Loc::Grid(i)) => self.survival.slots.get_mut(1 + i),
+            (_, Loc::Inv(i)) => self.survival.slots.get_mut(i),
+        };
+        if let Some(c) = cell {
+            *c = v;
+        }
+    }
+
+    fn view(&self, slot: usize) -> Option<Stack> {
+        self.loc(slot).and_then(|l| self.get(l))
+    }
+
+    /// The open menu's grid: its width and items, top left first.
+    fn grid(&self) -> (usize, Vec<Option<ItemKind>>) {
+        match &self.survival.table {
+            Some(t) => (3, t.grid.iter().map(|s| s.map(|(k, _)| k)).collect()),
+            None => (
+                2,
+                GRID.iter()
+                    .map(|i| {
+                        self.survival
+                            .slots
+                            .get(*i)
+                            .copied()
+                            .flatten()
+                            .map(|(k, _)| k)
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    fn state_id_mut(&mut self) -> &mut i32 {
+        match &mut self.survival.table {
+            Some(t) => &mut t.state_id,
+            None => &mut self.survival.state_id,
+        }
+    }
+
+    fn next_state_id(&mut self) -> i32 {
+        let s = self.state_id_mut();
+        *s += 1;
+        *s
+    }
+
+    /// The open menu's changes since the client was last told (`broadcastChanges`): one slot
+    /// packet per changed slot, each with a new state id, and the cursor when it differs.
     pub(crate) fn broadcast_changes(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
+        let window = self.menu_id();
         for i in 0..MENU_SLOTS {
-            let now = self.survival.slots.get(i).copied().flatten();
-            if self.survival.remote.get(i).copied().flatten() == now {
+            let now = self.view(i);
+            let remote = match &self.survival.table {
+                Some(t) => t.remote.get(i).copied().flatten(),
+                None => self.survival.remote.get(i).copied().flatten(),
+            };
+            if remote == now {
                 continue;
             }
-            if let Some(r) = self.survival.remote.get_mut(i) {
+            let r = match &mut self.survival.table {
+                Some(t) => t.remote.get_mut(i),
+                None => self.survival.remote.get_mut(i),
+            };
+            if let Some(r) = r {
                 *r = now;
             }
-            self.survival.state_id += 1;
+            let state_id = self.next_state_id();
             out.push(wire(
                 State::Play,
                 &S2c::ContainerSetSlot {
-                    window: 0,
-                    state_id: self.survival.state_id,
+                    window,
+                    state_id,
                     slot: i16::try_from(i).unwrap_or(0),
                     item: slot_of(now),
                 },
@@ -827,41 +982,47 @@ impl Sim {
         Ok(out)
     }
 
-    /// `sendAllDataToRemote`/`broadcastFullState`: the whole window with a new state id.
+    /// `sendAllDataToRemote`/`broadcastFullState`: the whole open menu with a new state id.
     pub(crate) fn full_state(&mut self) -> Result<Wire, EncodeError> {
-        self.survival.state_id += 1;
-        self.survival.remote = self.survival.slots;
+        let window = self.menu_id();
+        let view: Vec<Option<Stack>> = (0..MENU_SLOTS).map(|i| self.view(i)).collect();
+        match &mut self.survival.table {
+            Some(t) => {
+                for (r, v) in t.remote.iter_mut().zip(&view) {
+                    *r = *v;
+                }
+            }
+            None => self.survival.remote = self.survival.slots,
+        }
         self.survival.remote_carried = self.survival.carried;
+        let state_id = self.next_state_id();
         wire(
             State::Play,
             &S2c::ContainerSetContent {
-                window: 0,
-                state_id: self.survival.state_id,
-                slots: self.survival.slots.iter().map(|s| slot_of(*s)).collect(),
+                window,
+                state_id,
+                slots: view.iter().map(|s| slot_of(*s)).collect(),
                 carried: Some(slot_of(self.survival.carried)),
             },
         )
     }
 
-    fn grid(&self) -> [Option<ItemKind>; 4] {
-        GRID.map(|i| self.survival.slots.get(i).copied().flatten().map(|s| s.0))
-    }
-
     /// `slotChangedCraftingGrid`: the result recomputed and sent at once with a new state id.
     fn grid_changed(&mut self) -> Result<Wire, EncodeError> {
-        let result = craft_result(self.grid());
-        if let Some(r) = self.survival.slots.get_mut(RESULT) {
-            *r = result;
+        let (width, items) = self.grid();
+        let result = craft_result(width, &items);
+        self.put(Loc::Result, result);
+        match &mut self.survival.table {
+            Some(t) => t.remote[RESULT] = result,
+            None => self.survival.remote[RESULT] = result,
         }
-        if let Some(r) = self.survival.remote.get_mut(RESULT) {
-            *r = result;
-        }
-        self.survival.state_id += 1;
+        let window = self.menu_id();
+        let state_id = self.next_state_id();
         wire(
             State::Play,
             &S2c::ContainerSetSlot {
-                window: 0,
-                state_id: self.survival.state_id,
+                window,
+                state_id,
                 slot: 0,
                 item: slot_of(result),
             },
@@ -870,21 +1031,20 @@ impl Sim {
 
     /// `ResultSlot.onTake`: one of each grid ingredient is used up.
     fn take_result(&mut self) -> Result<Wire, EncodeError> {
-        for i in GRID {
-            if let Some(slot) = self.survival.slots.get_mut(i) {
-                *slot = match *slot {
-                    Some((k, n)) if n > 1 => Some((k, n - 1)),
-                    Some(_) | None => None,
-                };
-            }
+        let (width, _) = self.grid();
+        for i in 0..width * width {
+            let v = match self.get(Loc::Grid(i)) {
+                Some((k, n)) if n > 1 => Some((k, n - 1)),
+                Some(_) | None => None,
+            };
+            self.put(Loc::Grid(i), v);
         }
         self.grid_changed()
     }
 
-    /// `handleContainerClick` for window 0: the click, then the changes (or the whole window
-    /// when the client's state id is not the server's). The client's claimed slots and cursor
-    /// become the remote view first, as vanilla's `setRemoteSlotUnsafe`/`setRemoteCarried` do:
-    /// the bot claims nothing, so an empty cursor.
+    /// `handleContainerClick` for the open menu: the click, then the changes (or the whole menu
+    /// when the client's state id is not the server's). The client's claimed cursor (the bot
+    /// claims nothing: empty) becomes the remote one first, as `setRemoteCarried` does.
     pub(crate) fn on_click(
         &mut self,
         window: i32,
@@ -893,12 +1053,17 @@ impl Sim {
         button: i8,
         mode: i32,
     ) -> Result<Vec<Wire>, EncodeError> {
-        if window != 0 {
-            self.violations.push(format!("click in window {window}"));
+        if window != self.menu_id() {
+            self.violations
+                .push(format!("click in window {window}, open {}", self.menu_id()));
             return Ok(Vec::new());
         }
         self.survival.clicks += 1;
-        let stale = state_id != self.survival.state_id;
+        let current = match &self.survival.table {
+            Some(t) => t.state_id,
+            None => self.survival.state_id,
+        };
+        let stale = state_id != current;
         let mut out = self.clicked(slot, button, mode)?;
         self.survival.remote_carried = None;
         if stale {
@@ -916,14 +1081,17 @@ impl Sim {
             }
             return Ok(Vec::new());
         };
-        if i >= MENU_SLOTS || !(button == 0 || button == 1) {
-            self.violations
-                .push(format!("click slot {slot} button {button}"));
+        let Some(l) = self.loc(i) else {
+            self.violations.push(format!("click slot {slot}"));
+            return Ok(Vec::new());
+        };
+        if !(button == 0 || button == 1) {
+            self.violations.push(format!("click button {button}"));
             return Ok(Vec::new());
         }
         match mode {
-            0 => self.pickup_click(i, button == 0),
-            1 => self.quick_move(i),
+            0 => self.pickup_click(l, button == 0),
+            1 => self.quick_move(i, l),
             other => {
                 self.violations.push(format!("click mode {other}"));
                 Ok(Vec::new())
@@ -931,69 +1099,67 @@ impl Sim {
         }
     }
 
-    /// Whether a stack may be put in a slot: never the result; armour slots only armour (none
-    /// of issue 10's items).
-    fn may_place(i: usize) -> bool {
-        !(i == RESULT || (5..=8).contains(&i))
+    /// Whether a stack may be put in a slot: never the result; armour slots only armour (none of
+    /// issue 11's items).
+    fn may_place(l: Loc) -> bool {
+        match l {
+            Loc::Result => false,
+            Loc::Inv(i) => !(5..=8).contains(&i),
+            Loc::Grid(_) => true,
+        }
     }
 
     /// Mode 0 (PICKUP), left (`all`) or right.
-    fn pickup_click(&mut self, i: usize, all: bool) -> Result<Vec<Wire>, EncodeError> {
-        let s = self.survival.slots.get(i).copied().flatten();
+    fn pickup_click(&mut self, l: Loc, all: bool) -> Result<Vec<Wire>, EncodeError> {
+        let s = self.get(l);
         let c = self.survival.carried;
         let mut out = Vec::new();
         let grid_before = self.grid();
         match (s, c) {
             (None, None) => {}
             (None, Some((ck, cn))) => {
-                if Self::may_place(i) {
-                    let put = if all { cn } else { 1 }.min(MAX_STACK);
-                    self.set_slot(i, Some((ck, put)));
+                if Self::may_place(l) {
+                    let put = if all { cn } else { 1 }.min(max_stack(ck));
+                    self.put(l, Some((ck, put)));
                     self.survival.carried = (cn > put).then_some((ck, cn - put));
                 }
             }
             (Some((sk, sn)), None) => {
-                if i == RESULT {
+                if l == Loc::Result {
                     self.survival.carried = Some((sk, sn));
-                    self.set_slot(i, None);
+                    self.put(l, None);
                     out.push(self.take_result()?);
                 } else {
                     let take = if all { sn } else { (sn + 1) / 2 };
                     self.survival.carried = Some((sk, take));
-                    self.set_slot(i, (sn > take).then_some((sk, sn - take)));
+                    self.put(l, (sn > take).then_some((sk, sn - take)));
                 }
             }
             (Some((sk, sn)), Some((ck, cn))) => {
-                if Self::may_place(i) {
+                if Self::may_place(l) {
                     if sk == ck {
-                        let put = if all { cn } else { 1 }.min(MAX_STACK - sn);
-                        self.set_slot(i, Some((sk, sn + put)));
+                        let put = if all { cn } else { 1 }.min(max_stack(sk) - sn);
+                        self.put(l, Some((sk, sn + put)));
                         self.survival.carried = (cn > put).then_some((ck, cn - put));
-                    } else if cn <= MAX_STACK {
-                        self.set_slot(i, Some((ck, cn)));
+                    } else if cn <= max_stack(ck) {
+                        self.put(l, Some((ck, cn)));
                         self.survival.carried = Some((sk, sn));
                     }
-                } else if i == RESULT && sk == ck && cn + sn <= MAX_STACK {
+                } else if l == Loc::Result && sk == ck && cn + sn <= max_stack(sk) {
                     self.survival.carried = Some((ck, cn + sn));
-                    self.set_slot(i, None);
+                    self.put(l, None);
                     out.push(self.take_result()?);
                 }
             }
         }
-        if i != RESULT && self.grid() != grid_before {
+        if l != Loc::Result && self.grid() != grid_before {
             out.push(self.grid_changed()?);
         }
         Ok(out)
     }
 
-    fn set_slot(&mut self, i: usize, v: Option<Stack>) {
-        if let Some(s) = self.survival.slots.get_mut(i) {
-            *s = v;
-        }
-    }
-
-    /// `moveItemStackTo(stack, from, to, reverse)`: into stacks of the same item, then empty
-    /// slots, in order or reversed; what did not fit is returned.
+    /// `moveItemStackTo(stack, from, to, reverse)` over the open menu's slots: into stacks of the
+    /// same item, then empty slots, in order or reversed; what did not fit is returned.
     fn move_to(
         &mut self,
         (item, mut count): Stack,
@@ -1005,16 +1171,18 @@ impl Sim {
         } else {
             range.clone().collect()
         };
+        let max = max_stack(item);
         for &s in &order {
             if count == 0 {
                 break;
             }
-            if let Some(Some((k, n))) = self.survival.slots.get_mut(s)
-                && *k == item
-                && *n < MAX_STACK
+            let Some(l) = self.loc(s) else { continue };
+            if let Some((k, n)) = self.get(l)
+                && k == item
+                && n < max
             {
-                let moved = count.min(MAX_STACK - *n);
-                *n += moved;
+                let moved = count.min(max - n);
+                self.put(l, Some((k, n + moved)));
                 count -= moved;
             }
         }
@@ -1022,90 +1190,116 @@ impl Sim {
             if count == 0 {
                 break;
             }
-            if let Some(slot) = self.survival.slots.get_mut(s)
-                && slot.is_none()
-            {
-                *slot = Some((item, count));
-                count = 0;
+            let Some(l) = self.loc(s) else { continue };
+            if self.get(l).is_none() && Self::may_place(l) {
+                let moved = count.min(max);
+                self.put(l, Some((item, moved)));
+                count -= moved;
             }
         }
         count
     }
 
-    /// Mode 1 (QUICK_MOVE), `InventoryMenu.quickMoveStack`: the result crafts again and again
-    /// into slots 9-44 (from the hotbar's end) while it fits whole; the grid and armour go to
-    /// 9-44; the main inventory to the hotbar; the hotbar to the main inventory.
-    fn quick_move(&mut self, i: usize) -> Result<Vec<Wire>, EncodeError> {
+    /// Mode 1 (QUICK_MOVE). The result crafts again and again into the inventory from the
+    /// hotbar's end while it fits whole. Window 0 (`InventoryMenu.quickMoveStack`): the grid and
+    /// armour to 9-44, the main inventory to the hotbar, the hotbar to the main inventory. A
+    /// table (`CraftingMenu.quickMoveStack`): the grid to 10-45; the inventory into the grid
+    /// first, then the main inventory to the hotbar or the hotbar to the main inventory.
+    fn quick_move(&mut self, i: usize, l: Loc) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
-        if i == RESULT {
-            while let Some(stack) = self.survival.slots.get(RESULT).copied().flatten() {
-                let saved = self.survival.slots;
-                if self.move_to(stack, 9..45, true) != 0 {
-                    self.survival.slots = saved;
+        let table = self.survival.table.is_some();
+        let inventory = if table { 10..46 } else { 9..45 };
+        if l == Loc::Result {
+            while let Some(stack) = self.get(Loc::Result) {
+                let (saved_slots, saved_table) = (self.survival.slots, self.survival.table.clone());
+                if self.move_to(stack, inventory.clone(), true) != 0 {
+                    self.survival.slots = saved_slots;
+                    self.survival.table = saved_table;
                     break;
                 }
-                self.set_slot(RESULT, None);
+                self.put(Loc::Result, None);
                 out.push(self.take_result()?);
-                if self
-                    .survival
-                    .slots
-                    .get(RESULT)
-                    .copied()
-                    .flatten()
-                    .map(|s| s.0)
-                    != Some(stack.0)
-                {
+                if self.get(Loc::Result).map(|s| s.0) != Some(stack.0) {
                     break;
                 }
             }
             return Ok(out);
         }
-        let Some(stack) = self.survival.slots.get(i).copied().flatten() else {
+        let Some(stack) = self.get(l) else {
             return Ok(out);
         };
         let grid_before = self.grid();
-        let left = match i {
-            1..=8 => self.move_to(stack, 9..45, false),
-            9..=35 => self.move_to(stack, 36..45, false),
-            36..=44 => self.move_to(stack, 9..36, false),
-            _ => self.move_to(stack, 9..45, false),
+        self.put(l, None);
+        let left = match (table, i) {
+            (false, 1..=8) => self.move_to(stack, 9..45, false),
+            (false, 9..=35) => self.move_to(stack, 36..45, false),
+            (false, _) => self.move_to(stack, 9..36, false),
+            (true, 1..=9) => self.move_to(stack, 10..46, false),
+            (true, _) => {
+                let left = self.move_to(stack, 1..10, false);
+                match (left, i) {
+                    (0, _) => 0,
+                    (n, 10..=36) => self.move_to((stack.0, n), 37..46, false),
+                    (n, _) => self.move_to((stack.0, n), 10..37, false),
+                }
+            }
         };
-        self.set_slot(i, (left > 0).then_some((stack.0, left)));
+        if left > 0 {
+            match self.get(l) {
+                None => self.put(l, Some((stack.0, left))),
+                // Moved into its own slot's place by a move into the grid: keep the rest beside it.
+                Some(_) => {
+                    let rest = self.survival.add((stack.0, left));
+                    if rest > 0 {
+                        self.violations.push("quick move lost items".to_owned());
+                    }
+                }
+            }
+        }
         if self.grid() != grid_before {
             out.push(self.grid_changed()?);
         }
         Ok(out)
     }
 
-    /// The client closed window 0 (`InventoryMenu.removed`): the grid goes back into the
-    /// inventory and the cursor is thrown.
+    /// The client closed a menu (`removed`): its grid goes back into the inventory, and so does
+    /// the cursor (`dropOrPlaceInInventory`: a live player keeps it; only a full inventory drops
+    /// what does not fit).
     pub(crate) fn on_close(&mut self, window: i32) -> Result<Vec<Wire>, EncodeError> {
-        if window != 0 {
+        if window != self.menu_id() {
             return Ok(Vec::new());
         }
-        let mut out = Vec::new();
-        let grid_before = self.grid();
-        for i in GRID {
-            if let Some(stack) = self.survival.slots.get(i).copied().flatten() {
-                self.set_slot(i, None);
-                let left = self.survival.add(stack);
-                if left > 0 {
-                    let at = [self.pos[0], self.pos[1] + 1.32, self.pos[2]];
-                    out.extend(self.spawn_item(
-                        (stack.0, left),
-                        at,
-                        [0.0, 0.1, 0.0],
-                        THROW_PICKUP_DELAY,
-                    )?);
-                }
+        let mut back = Vec::new();
+        let (width, _) = self.grid();
+        let window0_grid = self.survival.table.is_none();
+        for i in 0..width * width {
+            if let Some(stack) = self.get(Loc::Grid(i)) {
+                self.put(Loc::Grid(i), None);
+                back.push(stack);
             }
         }
-        if self.grid() != grid_before {
-            out.push(self.grid_changed()?);
-        }
         if let Some(c) = self.survival.carried.take() {
-            let at = [self.pos[0], self.pos[1] + 1.32, self.pos[2]];
-            out.extend(self.spawn_item(c, at, [0.0, 0.1, 0.0], THROW_PICKUP_DELAY)?);
+            back.push(c);
+        }
+        if window0_grid {
+            self.put(Loc::Result, None);
+        }
+        self.survival.table = None;
+        let mut out = Vec::new();
+        for stack in back {
+            let left = self.survival.add(stack);
+            if left > 0 {
+                let at = [self.pos[0], self.pos[1] + 1.32, self.pos[2]];
+                out.extend(self.spawn_item(
+                    (stack.0, left),
+                    at,
+                    [0.0, 0.1, 0.0],
+                    THROW_PICKUP_DELAY,
+                )?);
+            }
+        }
+        if window0_grid {
+            out.push(self.grid_changed()?);
         }
         Ok(out)
     }
@@ -1116,5 +1310,135 @@ impl Sim {
             Ok(s) if s < 9 => self.survival.held = s,
             Ok(_) | Err(_) => self.violations.push(format!("held slot {slot}")),
         }
+    }
+
+    /// `handleUseItemOn` (issue 11a): out of reach it does nothing; else a crafting table opens
+    /// (`CraftingTableBlock`, the player not sneaking), or a held block item is placed against the
+    /// face (`BlockItem.place`: in the clicked cell when that is replaceable, else beside it,
+    /// never where a player stands). Then, always, the block updates for the clicked cell and
+    /// its neighbour on that face, and the ack.
+    pub(crate) fn on_use_item_on(
+        &mut self,
+        pos: (i32, i32, i32),
+        face: i32,
+        sequence: i32,
+    ) -> Result<Vec<Wire>, EncodeError> {
+        let beside = match face {
+            0 => (pos.0, pos.1 - 1, pos.2),
+            1 => (pos.0, pos.1 + 1, pos.2),
+            2 => (pos.0, pos.1, pos.2 - 1),
+            3 => (pos.0, pos.1, pos.2 + 1),
+            4 => (pos.0 - 1, pos.1, pos.2),
+            _ => (pos.0 + 1, pos.1, pos.2),
+        };
+        let mut out = Vec::new();
+        if self.within_reach(pos) {
+            if block_kind(self, pos) == Some(BlockKind::CraftingTable) {
+                out.extend(self.open_table(pos)?);
+            } else {
+                self.place_held(pos, beside)?;
+            }
+        }
+        out.push(self.block_update(pos)?);
+        out.push(self.block_update(beside)?);
+        out.push(wire(State::Play, &S2c::BlockChangedAck { sequence })?);
+        Ok(out)
+    }
+
+    /// `openMenu` for a crafting table: the next container id (1 to 100, round), `open_screen`,
+    /// then the whole menu (`initMenu`).
+    fn open_table(&mut self, pos: (i32, i32, i32)) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        if let Some(t) = &self.survival.table {
+            // Another menu is open: the server closes it first.
+            let id = t.id;
+            out.extend(self.on_close(id)?);
+            out.push(wire(State::Play, &S2c::ContainerClose { window: id })?);
+        }
+        let id = self.survival.container_counter % 100 + 1;
+        self.survival.container_counter = id;
+        self.survival.table = Some(Table {
+            id,
+            pos,
+            grid: [None; 9],
+            result: None,
+            state_id: 0,
+            remote: [None; MENU_SLOTS],
+        });
+        let menu = data::generated::registries::MENU
+            .iter()
+            .position(|m| *m == "crafting")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap_or(-1);
+        out.push(wire(State::Play, &S2c::OpenScreen { window: id, menu })?);
+        out.push(self.full_state()?);
+        Ok(out)
+    }
+
+    /// `BlockItem.place` for the held stack.
+    fn place_held(
+        &mut self,
+        clicked: (i32, i32, i32),
+        beside: (i32, i32, i32),
+    ) -> Result<(), EncodeError> {
+        let held = self.survival.held_menu_slot();
+        let Some((item, count)) = self.survival.slots.get(held).copied().flatten() else {
+            return Ok(());
+        };
+        let Some(block) = item.name().and_then(BlockKind::from_name) else {
+            return Ok(());
+        };
+        let replaceable = |k: Option<BlockKind>| {
+            is_air(k)
+                || k == Some(BlockKind::Water)
+                || k.and_then(|k| k.info())
+                    .is_some_and(|i| REPLACEABLE.contains(&i.definition))
+        };
+        let at = if replaceable(block_kind(self, clicked)) {
+            clicked
+        } else {
+            beside
+        };
+        if !replaceable(block_kind(self, at)) || self.player_in(at) {
+            return Ok(());
+        }
+        let state = block.info().map_or(0, |i| i.default_state);
+        self.world.set_block(at.0, at.1, at.2, state)?;
+        if let Some(s) = self.survival.slots.get_mut(held) {
+            *s = (count > 1).then_some((item, count - 1));
+        }
+        self.survival.placed += 1;
+        Ok(())
+    }
+
+    /// Whether the player's box overlaps a block cell (`isUnobstructed` for a full block).
+    fn player_in(&self, (x, y, z): (i32, i32, i32)) -> bool {
+        let b = physics::aabb(self.pos);
+        let c = [
+            f64::from(x),
+            f64::from(y),
+            f64::from(z),
+            f64::from(x) + 1.0,
+            f64::from(y) + 1.0,
+            f64::from(z) + 1.0,
+        ];
+        (0..3).all(|a| physics::overlaps(&b, &c, a))
+    }
+
+    /// `stillValid`: a crafting table's menu closes when the player is more than 8 blocks from
+    /// it (or it is gone), told by `container_close`.
+    pub(crate) fn tick_menu(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let Some(t) = &self.survival.table else {
+            return Ok(Vec::new());
+        };
+        let (id, (x, y, z)) = (t.id, t.pos);
+        let c = [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5];
+        let d2: f64 = (0..3).map(|i| (self.pos[i] - c[i]).powi(2)).sum();
+        if d2 <= 64.0 && block_kind(self, (x, y, z)) == Some(BlockKind::CraftingTable) {
+            return Ok(Vec::new());
+        }
+        let mut out = self.on_close(id)?;
+        out.push(wire(State::Play, &S2c::ContainerClose { window: id })?);
+        Ok(out)
     }
 }

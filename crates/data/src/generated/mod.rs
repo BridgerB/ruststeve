@@ -7,6 +7,7 @@ pub mod entities;
 pub mod fuel;
 pub mod hardness;
 pub mod harvest;
+pub mod item_props;
 pub mod items;
 pub mod loot;
 pub mod metadata;

@@ -27,8 +27,9 @@ use world::World;
 /// Server ticks a start settles before the script, the same in real and sim (bot::run's).
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
-/// 08's 50; 78 of 80 since issue 10b's dig and craft rows).
-const TOLERANCE: usize = 78;
+/// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
+/// table rows).
+const TOLERANCE: usize = 103;
 
 struct Args {
     cmd: String,
@@ -157,12 +158,26 @@ fn outcome(
 /// Whether some block drops this item only by chance (a sapling from leaves, a seed from grass,
 /// flint from gravel): the model's roll is its own seeded one, never vanilla's, and the trees a
 /// fresh server grows on the same seed differ from run to run, so such an item is not part of
-/// the inventory class.
+/// the inventory class. An item a recipe makes (sticks: a dead bush drops them by chance) stays
+/// in: the craft rows count it (issue 11a found sticks left out).
 fn chance_drop(k: data::ItemKind) -> bool {
-    data::generated::loot::BLOCK_DROPS
+    let crafted = data::generated::recipes::RECIPES
         .iter()
-        .flat_map(|b| b.tries)
-        .any(|d| d.item == k && d.chance < 1.0)
+        .any(|r| r.result == k);
+    !crafted
+        && data::generated::loot::BLOCK_DROPS
+            .iter()
+            .flat_map(|b| b.tries)
+            .any(|d| d.item == k && d.chance < 1.0)
+}
+
+/// The block cell the feet of a start stand in.
+fn feet_cell(start: [f64; 3]) -> (i32, i32, i32) {
+    (
+        start[0].floor() as i32,
+        (start[1] + 0.01).floor() as i32,
+        start[2].floor() as i32,
+    )
 }
 
 /// A moment's `give` (`oak_log 1`) as a stack.
@@ -207,6 +222,10 @@ fn real(a: &Args) -> Result<(), String> {
                 .give
                 .iter()
                 .map(|g| format!("give {name} minecraft:{g}"))
+                .chain(m.set.iter().map(|(b, dx, dy, dz)| {
+                    let (x, y, z) = feet_cell(start);
+                    format!("setblock {} {} {} minecraft:{b}", x + dx, y + dy, z + dz)
+                }))
                 .collect();
             let opts = bot::Opts {
                 host: a.host.clone(),
@@ -222,7 +241,18 @@ fn real(a: &Args) -> Result<(), String> {
                     let mut r = rcon::Rcon::connect(&rcon_addr, &password)?;
                     r.command(&breathe)?;
                     r.command(&tp)?;
-                    gives.iter().try_for_each(|g| r.command(g).map(|_| ()))
+                    // A setblock right after the teleport can land before the chunk loads
+                    // ("That position is not loaded") and do nothing: try again until it does.
+                    gives.iter().try_for_each(|g| {
+                        for _ in 0..80 {
+                            let reply = r.command(g)?;
+                            if !reply.contains("not loaded") {
+                                return Ok(());
+                            }
+                            std::thread::sleep(Duration::from_millis(250));
+                        }
+                        Err(format!("{g}: never loaded"))
+                    })
                 })),
                 verbose: false,
                 relay: None,
@@ -282,7 +312,18 @@ fn sim(a: &Args) -> Result<(), String> {
         let (captured, start) = start_of(a, &landings, m)?;
         let script =
             Script::parse(&m.script).ok_or_else(|| format!("{}: no script {}", m.id, m.script))?;
-        let mut model = sim::Sim::new(config, captured.model(start)?).seeded(i as u64 + 1);
+        let mut world = captured.model(start)?;
+        for (b, dx, dy, dz) in &m.set {
+            let (x, y, z) = feet_cell(start);
+            let state = data::BlockKind::from_name(b)
+                .and_then(|k| k.info())
+                .map(|i| i.default_state)
+                .ok_or_else(|| format!("{}: no block {b}", m.id))?;
+            world
+                .set_block(x + dx, y + dy, z + dz, state)
+                .map_err(|e| e.to_string())?;
+        }
+        let mut model = sim::Sim::new(config, world).seeded(i as u64 + 1);
         for g in &m.give {
             model
                 .survival
