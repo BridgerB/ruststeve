@@ -832,6 +832,11 @@ impl Plan {
                 self.retry_at = tick + RETRY_TICKS;
                 self.failed_in_row += 1;
                 if let Task::Craft(c) = std::mem::replace(&mut self.task, Task::Idle) {
+                    // A table that will not open (no way to it, another bot's up a cliff) is refused
+                    // like any failed target, so the next choice places one instead (issue 11b).
+                    if let (craft::CraftFailure::Unopened, Some(t)) = (f, c.table) {
+                        self.refuse(t, tick);
+                    }
                     self.note(
                         tick,
                         format!("craft {} failed: {f:?}", c.recipe),
