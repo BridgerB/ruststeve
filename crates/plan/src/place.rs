@@ -64,6 +64,18 @@ fn empty(k: Option<BlockKind>) -> bool {
     )
 }
 
+/// Blocks a right-click opens instead of placing against (the server opens their menu): never a
+/// floor to place on (issue 13b: a furnace clicked onto the table opened it).
+const OPENS: &[BlockKind] = &[
+    BlockKind::CraftingTable,
+    BlockKind::Furnace,
+    BlockKind::BlastFurnace,
+    BlockKind::Smoker,
+    BlockKind::Chest,
+    BlockKind::TrappedChest,
+    BlockKind::Barrel,
+];
+
 fn full(k: Option<BlockKind>) -> bool {
     k.and_then(data::generated::shapes::collision) == Some(data::types::Collision::Full)
 }
@@ -117,6 +129,7 @@ impl Place {
             !self.tried.contains(c)
                 && empty(kind(w, *c))
                 && full(kind(w, (c.0, c.1 - 1, c.2)))
+                && !kind(w, (c.0, c.1 - 1, c.2)).is_some_and(|k| OPENS.contains(&k))
                 && !in_body(*c)
         })
     }

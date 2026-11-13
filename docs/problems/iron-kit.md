@@ -28,3 +28,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: 15 of 56 bots ended `stuck` (12 failed walks in a row). rs-l00-b00, at y 32 with its iron pickaxe made, walked at logs at y 69 to 99 until it stopped.
 - **Cause**: `mine-iron` keeps a spare of 24 sticks; a gather counted as worth a spare when any log was remembered, and the bot remembered the surface trees. clojurecraft's `spare-worth?` counts a gather only when one can be started now, stairs up included; ruststeve has no stairs up.
 - **Fix**: a gather can be started now only on a log remembered within 6 blocks of the feet's height.
+
+### 4. Fourteen bots in one patch (race 43518373160, e89e2f5: 1 of 56)
+- **What happened**: 25 bots held raw iron (60 in all), 13 an iron pickaxe, 3 the stage, 1 the kit. 11 ended `stuck`; 54 crafts or smelts failed `Unopened`, 11 digs `Taken`.
+- **Read**: rs-l00-b04 smelted at tick 4,080 with its table a block away; at 4,090 the table's cell had been air since tick 3,860 and no table was held; with its logs turned into sticks by the spare, it walked at surface trees until it stopped. Ten other bots were within 17 blocks. The same lane's furnace was placed by a click on the table (which opens it instead).
+- **Cause**: every bot of a lane starts at the same spawn and mines the same ground, so tables, furnaces and drops are dug and taken by the others; a place could click an interactive block as its floor.
+- **Fix**: the `stone` start spreads its bots (`spread = 128`, vanilla's `spreadplayers` from where each joined); a place never clicks a table, furnace, chest or barrel to place on it.

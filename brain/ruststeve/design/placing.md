@@ -41,6 +41,7 @@ Issue 11a. `Act::UseOn { pos, face }` right-clicks a block's face with the main 
 - Facing-dependent states (stairs, logs' axis) are placed in their default state; issue 11 places only tables and cobblestone.
 
 ## Issue 13b
+- A table, furnace, chest or barrel is never the floor clicked to place on: the server opens it instead.
 - With no free cell, a wall block beside the feet is dug for room first, at most two ([[veins-and-flint]]).
 
 ## See also
