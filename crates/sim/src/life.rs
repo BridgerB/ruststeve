@@ -76,6 +76,9 @@ pub struct Life {
     pub hunger: Option<(u32, u32)>,
     /// Water breathing (the real side of a moment gives it unless the moment says not to).
     pub water_breathing: bool,
+    /// The fire resistance effect: fire, lava and burning do no damage (`LivingEntity.hurt`
+    /// refuses an `is_fire` source), though lava still slows and sets the body alight.
+    pub fire_resistance: bool,
     /// Ticks since the last swing (`attackStrengthTicker`).
     pub attack_ticker: u32,
     pub mobs: std::collections::BTreeMap<i32, Mob>,
@@ -100,6 +103,7 @@ impl Default for Life {
             using: None,
             hunger: None,
             water_breathing: false,
+            fire_resistance: false,
             attack_ticker: 0,
             mobs: std::collections::BTreeMap::new(),
             sent: (20.0, 20, false),
@@ -188,6 +192,11 @@ impl Sim {
         death_key: &str,
     ) -> Result<Vec<Wire>, EncodeError> {
         if self.health <= 0.0 {
+            return Ok(Vec::new());
+        }
+        if self.survival.life.fire_resistance
+            && matches!(damage_type, "lava" | "in_fire" | "on_fire")
+        {
             return Ok(Vec::new());
         }
         let life = &mut self.survival.life;

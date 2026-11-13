@@ -463,6 +463,18 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 if p.finished() {
                     break Ending::Cap;
                 }
+                // A parity row run by the planner (`plan:<aim>`, issue 12b) ends after its ticks
+                // and keeps the lowest health, as a scripted one does.
+                if script.is_none() {
+                    if script_ticks.is_some_and(|n| script_tick >= n) {
+                        break Ending::Cap;
+                    }
+                    script_tick += 1;
+                    if let Some(h) = run.world.player.health {
+                        min_health_in_script =
+                            Some(min_health_in_script.map_or(h, |m: f32| m.min(h)));
+                    }
+                }
                 let t0 = Instant::now();
                 let c = p.step(&run.world);
                 let acts = p.take_acts();

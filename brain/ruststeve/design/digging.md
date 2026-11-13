@@ -5,8 +5,8 @@ type: reference
 tags: [plan, dig, gather, collect, pickup]
 aliases: [Dig, DigStage, DigFailure, Taken, Gone, crowded, CROWD_RADIUS, break_ticks, slowdown, FINISH margin, collect, pickup goal, Goal::Pickup, to_dig, DropUnreachable, DropWalkFailed, Uncollected, Refused]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
+lastUpdated: 2026-11-13
+verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/dig.rs#pub fn held_item(w: &World) -> Option<ItemKind> {"
   - "ruststeve:crates/plan/src/dig.rs#pub fn slowdown(w: &World) -> f64 {"
@@ -40,6 +40,8 @@ Issue 10c. `plan::dig::Dig` breaks one block from where the bot stands and colle
 - **Collect**: done when the inventory holds more of what the block drops (its first sure loot). The drop is waited for 20 ticks where it fell; then the bot walks to beside it (`Near`, range 1); no route fails `DropUnreachable`, a failed walk `DropWalkFailed`, 300 ticks `Uncollected`. A failure notes where the drop and the feet were.
 - **Other players** (docs/problems/wood.md): a log with another player within 2 blocks of its column is not chosen (`crowded`); a drop that vanishes without this bot's own `take_item_entity` and with no rise in its count fails at once `Taken` (after 10 ticks for the bot's own pickup to show); a block already gone when the dig begins fails `Gone`, never "dug".
 - **Failures** go to the planner's failure memory: the block is refused a while.
+
+- A block counts as gone when it turns to air or to water: water flows into a block dug beside it at once (an escape's dig, [[escapes]]). An escape's dig collects nothing.
 
 ## Evidence
 - Sim, 320 captured landings, `--goal table`, 6,000 ticks: 193 of 200 qualifying made the kit. Before digging from beside, three of a landing's first four digs failed to collect; a drop that drifted sideways sank into the higher ground beside a trunk until the model collided items sideways ([[server-model]]).

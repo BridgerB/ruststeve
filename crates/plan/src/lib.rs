@@ -10,6 +10,7 @@
 
 pub mod craft;
 pub mod dig;
+pub mod escape;
 pub mod hold;
 pub mod make;
 pub mod path;
@@ -72,6 +73,8 @@ pub enum Aim {
     Cobblestone,
     StonePickaxe,
     StoneTools,
+    /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
+    Hold,
 }
 
 impl Aim {
@@ -84,6 +87,7 @@ impl Aim {
             None if s == "cobblestone" => Some(Aim::Cobblestone),
             None if s == "stone-pickaxe" => Some(Aim::StonePickaxe),
             None if s == "stone-tools" => Some(Aim::StoneTools),
+            None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
                 .ok()
@@ -100,6 +104,7 @@ impl Aim {
             Aim::Cobblestone => "cobblestone".to_owned(),
             Aim::StonePickaxe => "stone-pickaxe".to_owned(),
             Aim::StoneTools => "stone-tools".to_owned(),
+            Aim::Hold => "hold".to_owned(),
         }
     }
 
@@ -107,9 +112,12 @@ impl Aim {
     pub fn is_goal(&self) -> bool {
         match self {
             Aim::ReachLog { .. } => false,
-            Aim::Table | Aim::Pickaxe | Aim::Cobblestone | Aim::StonePickaxe | Aim::StoneTools => {
-                true
-            }
+            Aim::Table
+            | Aim::Pickaxe
+            | Aim::Cobblestone
+            | Aim::StonePickaxe
+            | Aim::StoneTools
+            | Aim::Hold => true,
         }
     }
 }
@@ -130,6 +138,8 @@ pub enum Task {
     Place(Place),
     /// Cutting stairs down (issue 11b).
     Stairs(Box<Stairs>),
+    /// Out of water, lava or fire: an always-row in force (issue 12b).
+    Escape(Box<escape::Escape>),
 }
 
 impl Task {
@@ -142,12 +152,18 @@ impl Task {
             Task::Craft(_) => "craft",
             Task::Place(_) => "place",
             Task::Stairs(_) => "stairs",
+            Task::Escape(_) => "escape",
         }
     }
 
     pub fn walk(&self) -> Option<&Walk> {
         match self {
-            Task::Idle | Task::Dig(_) | Task::Craft(_) | Task::Place(_) | Task::Stairs(_) => None,
+            Task::Idle
+            | Task::Dig(_)
+            | Task::Craft(_)
+            | Task::Place(_)
+            | Task::Stairs(_)
+            | Task::Escape(_) => None,
             Task::ToLog(w) | Task::Explore(w) => Some(w),
         }
     }
@@ -201,6 +217,11 @@ pub struct Plan {
     pub digs: u64,
     #[serde(default)]
     pub crafts: u64,
+    /// The trap counters the always-rows read, and escapes started (issue 12b).
+    #[serde(default)]
+    pub traps: escape::Traps,
+    #[serde(default)]
+    pub escapes: u64,
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -229,6 +250,8 @@ impl Plan {
             met: false,
             digs: 0,
             crafts: 0,
+            traps: escape::Traps::default(),
+            escapes: 0,
             acts: Vec::new(),
         }
     }
@@ -278,6 +301,10 @@ impl Plan {
         let Some(body) = w.body else {
             return Controls::default();
         };
+        // The always-rows come first, ahead of every goal and after the aim is met.
+        if let Some(c) = self.always(w, &body, tick) {
+            return c;
+        }
         if self.finished() {
             return Controls::default();
         }
@@ -293,6 +320,7 @@ impl Plan {
                 | Aim::Cobblestone
                 | Aim::StonePickaxe
                 | Aim::StoneTools => self.decide(w, origin, tick),
+                Aim::Hold => Task::Idle,
             };
         }
         let (controls, status) = match &mut self.task {
@@ -319,6 +347,8 @@ impl Plan {
                 self.acts.extend(act);
                 return self.after_stairs(c, status, tick);
             }
+            // `always` ran it (and ends it when the trap clears).
+            Task::Escape(_) => return Controls::default(),
         };
         match status {
             TaskStatus::Running => controls,
@@ -353,7 +383,8 @@ impl Plan {
                     | Task::Dig(_)
                     | Task::Craft(_)
                     | Task::Place(_)
-                    | Task::Stairs(_) => {}
+                    | Task::Stairs(_)
+                    | Task::Escape(_) => {}
                 }
                 Controls::default()
             }
@@ -390,7 +421,8 @@ impl Plan {
                     | Task::Dig(_)
                     | Task::Craft(_)
                     | Task::Place(_)
-                    | Task::Stairs(_) => {}
+                    | Task::Stairs(_)
+                    | Task::Escape(_) => {}
                 }
                 if self.stuck {
                     self.note(
@@ -400,6 +432,59 @@ impl Plan {
                     );
                 }
                 Controls::default()
+            }
+        }
+    }
+
+    /// The always-rows (issue 12b): the trap this tick, if the table answers it, cuts the task
+    /// in hand (nothing of it is kept: the needs planner re-derives what to do from what is held)
+    /// and runs the escape until the trap clears.
+    fn always(&mut self, w: &World, body: &physics::Body, tick: u64) -> Option<Controls> {
+        let rows = self.table.as_ref().map(|t| t.always.clone())?;
+        if rows.is_empty() {
+            return None;
+        }
+        let trap = self.traps.tick(w, body).and_then(|k| {
+            rows.iter()
+                .find(|(_, r)| *r == k)
+                .map(|(id, _)| (id.clone(), k))
+        });
+        let escaping = match &self.task {
+            Task::Escape(e) => Some(e.kind),
+            Task::Idle
+            | Task::ToLog(_)
+            | Task::Explore(_)
+            | Task::Dig(_)
+            | Task::Craft(_)
+            | Task::Place(_)
+            | Task::Stairs(_) => None,
+        };
+        match (trap, escaping) {
+            (None, None) => None,
+            (None, Some(k)) => {
+                self.task = Task::Idle;
+                self.retry_at = tick;
+                self.note(
+                    tick,
+                    format!("out of the {}", k.name()),
+                    "dry land held; back to the goal".to_owned(),
+                );
+                None
+            }
+            (Some((id, k)), was) => {
+                if was != Some(k) {
+                    self.finish_walk();
+                    let cut = self.task.name();
+                    self.escapes += 1;
+                    self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
+                    self.task = Task::Escape(Box::new(escape::Escape::new(k, w, tick)));
+                }
+                let Task::Escape(e) = &mut self.task else {
+                    return None;
+                };
+                let (c, act) = e.step(w, tick);
+                self.acts.extend(act);
+                Some(c)
             }
         }
     }
@@ -445,9 +530,12 @@ impl Plan {
     fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {
         let min_distance = match self.aim {
             Aim::ReachLog { min_distance } => min_distance,
-            Aim::Table | Aim::Pickaxe | Aim::Cobblestone | Aim::StonePickaxe | Aim::StoneTools => {
-                0.0
-            }
+            Aim::Table
+            | Aim::Pickaxe
+            | Aim::Cobblestone
+            | Aim::StonePickaxe
+            | Aim::StoneTools
+            | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
             return Task::Idle;
@@ -463,7 +551,8 @@ impl Plan {
                 | Aim::Pickaxe
                 | Aim::Cobblestone
                 | Aim::StonePickaxe
-                | Aim::StoneTools => Walk::to_dig(log, tick),
+                | Aim::StoneTools
+                | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
                 self.walks += 1;

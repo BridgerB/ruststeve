@@ -28,8 +28,8 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows).
-const TOLERANCE: usize = 117;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows).
+const TOLERANCE: usize = 126;
 
 struct Args {
     cmd: String,
@@ -188,6 +188,18 @@ fn give_of(g: &str) -> Option<(data::ItemKind, i32)> {
     Some((data::ItemKind::from_name(item)?, count.parse().ok()?))
 }
 
+/// A row's script, or the planner's aim for a `plan:<aim>` row (issue 12b: the escape rows run
+/// the planner with `plan:hold`, the always-rows only).
+fn script_or_aim(m: &Moment) -> Result<(Option<Script>, Option<plan::Aim>), String> {
+    if let Some(aim) = m.script.strip_prefix("plan:") {
+        let a = plan::Aim::parse(aim).ok_or_else(|| format!("{}: no aim {aim}", m.id))?;
+        return Ok((None, Some(a)));
+    }
+    Script::parse(&m.script)
+        .map(|s| (Some(s), None))
+        .ok_or_else(|| format!("{}: no script {}", m.id, m.script))
+}
+
 fn save(out: &Path, r: &MomentResult) -> Result<(), String> {
     let tag = match r.source {
         Source::Real => "real",
@@ -208,8 +220,7 @@ fn real(a: &Args) -> Result<(), String> {
         let mut handles = Vec::new();
         for (i, m) in wave.iter().enumerate() {
             let (_, start) = start_of(a, &landings, m)?;
-            let script = Script::parse(&m.script)
-                .ok_or_else(|| format!("{}: no script {}", m.id, m.script))?;
+            let (script, aim) = script_or_aim(m)?;
             // A fresh player per run: the server saves a player's place, health and effects by
             // name, so a reused name would start where the last run left it.
             let name = format!("rs-m{:02}-{:04x}", w * a.wave + i, nonce);
@@ -247,9 +258,9 @@ fn real(a: &Args) -> Result<(), String> {
                 port: a.port,
                 name: name.clone(),
                 record: Some(a.out.join(format!("{}.real.rsr", m.id))),
-                script: Some(script),
+                script,
                 script_ticks: Some(m.ticks),
-                aim: None,
+                aim,
                 cap_ticks: None,
                 deadline: Some(Instant::now() + Duration::from_secs(300)),
                 start: Some(Box::new(move || {
@@ -325,10 +336,10 @@ fn sim(a: &Args) -> Result<(), String> {
         peaceful: true,
     };
     std::fs::create_dir_all(&a.out).map_err(|e| e.to_string())?;
+    let table = std::sync::Arc::new(bot::goals_table("config/goals.toml")?);
     for (i, m) in moments.moment.iter().enumerate() {
         let (captured, start) = start_of(a, &landings, m)?;
-        let script =
-            Script::parse(&m.script).ok_or_else(|| format!("{}: no script {}", m.id, m.script))?;
+        let (script, aim) = script_or_aim(m)?;
         let mut world = captured.model(start)?;
         for (b, dx, dy, dz) in &m.set {
             let (x, y, z) = feet_cell(start);
@@ -350,6 +361,7 @@ fn sim(a: &Args) -> Result<(), String> {
         for (e, secs, amp) in &m.effects {
             match e.as_str() {
                 "hunger" => model.survival.life.hunger = Some((secs * 20, *amp)),
+                "fire_resistance" => model.survival.life.fire_resistance = true,
                 other => return Err(format!("{}: the model has no effect {other}", m.id)),
             }
         }
@@ -370,13 +382,21 @@ fn sim(a: &Args) -> Result<(), String> {
                 ],
             );
         }
+        let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
         let run = bot::lockstep::run_acting(
             model,
             &format!("rs-m{i:02}"),
             i as u64 + 1,
             SETTLE + m.ticks,
             SETTLE,
-            |w, t| (script.controls(t), script.acts(t, w)),
+            |w, t| match (&mut planner, script) {
+                (Some(p), _) => {
+                    let c = p.step(w);
+                    (c, p.take_acts())
+                }
+                (None, Some(s)) => (s.controls(t), s.acts(t, w)),
+                (None, None) => (physics::Controls::default(), Vec::new()),
+            },
         );
         let r = MomentResult {
             moment: m.id.clone(),

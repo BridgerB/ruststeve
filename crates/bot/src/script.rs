@@ -229,7 +229,9 @@ impl Script {
                             .sum::<f64>();
                         (d, *id)
                     })
-                    .filter(|(d, _)| *d <= 25.0)
+                    // Only at the summon spot (two blocks east of the feet): a passive animal that
+                    // wanders by later is not the row's (a runner's cow row struck three).
+                    .filter(|(d, _)| *d <= 6.25)
                     .min_by(|a, b| a.0.total_cmp(&b.0));
                 near.map(|(_, id)| vec![Act::Attack { entity: id }])
                     .unwrap_or_default()
