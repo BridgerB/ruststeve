@@ -289,6 +289,7 @@ fn real(a: &Args) -> Result<(), String> {
                 start_name: m.id.clone(),
                 case_path: String::new(),
                 model: None,
+                hold_after_aim: false,
             };
             let id = m.id.clone();
             handles.push((id, std::thread::spawn(move || bot::run(opts))));

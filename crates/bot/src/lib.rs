@@ -71,6 +71,9 @@ pub struct Opts {
     pub case_path: String,
     /// Play against the server model instead of the server at host:port (issue 08).
     pub model: Option<Box<sim::Sim>>,
+    /// Keep living after the aim is met, to the cap: the planner's always-rows (escapes,
+    /// defence, food) run on (issue 12e's hour).
+    pub hold_after_aim: bool,
 }
 
 /// What the bot counts while it runs.
@@ -264,6 +267,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         start_name,
         case_path,
         model,
+        hold_after_aim,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -460,7 +464,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             if let Some(p) = planner.as_mut()
                 && matches!(start_state, StartState::Taken)
             {
-                if p.finished() {
+                if p.finished() && !hold_after_aim {
                     break Ending::Cap;
                 }
                 // A parity row run by the planner (`plan:<aim>`, issue 12b) ends after its ticks

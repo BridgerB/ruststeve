@@ -39,6 +39,7 @@ fn the_bot_joins_the_model_and_walks() {
         start_name: "spawn".to_owned(),
         case_path: String::new(),
         model: Some(Box::new(sim)),
+        hold_after_aim: false,
     })
     .unwrap();
     let w = &out.world;
