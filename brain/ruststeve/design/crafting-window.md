@@ -6,10 +6,10 @@ tags: [plan, craft, window, clicks]
 aliases: [Craft, Stage, CraftFailure, StaleWindow, WrongResult, TooManyClicks, Missing, layout, Act::Resync, resync click, put_down]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
 sourceRefs:
-  - "ruststeve:crates/plan/src/craft.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Option<Act>, CraftStatus) {"
-  - "ruststeve:crates/plan/src/craft.rs#pub fn layout(r: &Recipe) -> Vec<(i16, &'static [ItemKind])> {"
+  - "ruststeve:crates/plan/src/craft.rs#fn stages(&mut self, w: &World, tick: u64) -> (Option<Act>, CraftStatus) {"
+  - "ruststeve:crates/plan/src/craft.rs#pub fn layout(r: &Recipe, side: usize) -> Vec<(i16, &'static [ItemKind])> {"
   - "ruststeve:crates/plan/src/craft.rs#pub const CLICK_PATIENCE_TICKS: u64 = 60;"
   - "ruststeve:crates/world/src/lib.rs#    Resync,"
   - "clojurecraft:src/clojurecraft/window.clj#way to learn the cursor after a lost click, since click forgets it as it sends."
@@ -36,6 +36,9 @@ Issue 10c. `plan::craft::Craft` makes one run of a 2x2 recipe in window 0, from 
 - **Take**: shift-click slot 0; done when the inventory outside the grid holds more of the result.
 - **A missed click**: unanswered for 60 ticks (3 s) → `Act::Resync` (a click on slot -1 with a state id the server never has, which draws the whole window) and back to Settle; the third miss fails `StaleWindow`.
 - **The progress invariant**: 40 clicks at most for one run (`TooManyClicks`); a planks craft takes 3, sticks 5, a table 7.
+
+## At a crafting table (issue 11b)
+`Craft::at_table`: walk within reach of the remembered table (`Approach`), open it with `use_item_on` on the face toward the bot and wait for its window (`Open`, 40 ticks, three tries, else `Unopened`), then the same stages on the table's window (grid 1-9, the inventory 10-45, [[table-window]]); the craft closes the window as it ends, done or failed. A window that closes under it is opened again.
 
 ## Evidence
 - The sim measure's first run failed 2,376 crafts `TooManyClicks`: leftover planks went back to Settle, which emptied the grid, and the craft began again. Place now puts the cursor down itself.

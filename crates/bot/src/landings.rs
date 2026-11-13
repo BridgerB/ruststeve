@@ -79,16 +79,25 @@ pub struct LandingRun {
     pub corrections: u64,
 }
 
+/// What a landing run plays for: the aim, the goal table for a goal aim, and the start's kit the
+/// model gives (issue 11: the `table` start).
+#[derive(Clone, Debug)]
+pub struct Play {
+    pub aim: plan::Aim,
+    pub table: Option<std::sync::Arc<plan::make::Table>>,
+    pub kit: Vec<(data::ItemKind, i32)>,
+}
+
 /// Run the planner in landing `i`.
 pub fn run_one(
     worlds: &Path,
     landings: &Landings,
     i: usize,
     config: sim::Config,
-    aim: plan::Aim,
+    play: &Play,
     ticks: u64,
-    table: Option<std::sync::Arc<plan::make::Table>>,
 ) -> LandingRun {
+    let (aim, table, kit) = (play.aim, play.table.clone(), &play.kit);
     let empty = |excluded| LandingRun {
         index: i,
         excluded: Some(excluded),
@@ -144,7 +153,11 @@ pub fn run_one(
     // A goal aim (issue 10's `table`) qualifies on a walkable log in view at any distance.
     let min_distance = match aim {
         plan::Aim::ReachLog { min_distance } => min_distance,
-        plan::Aim::Table => 0.0,
+        plan::Aim::Table
+        | plan::Aim::Pickaxe
+        | plan::Aim::Cobblestone
+        | plan::Aim::StonePickaxe
+        | plan::Aim::StoneTools => 0.0,
     };
     let mut p = match table {
         Some(t) => plan::Plan::with_table(aim, t),
@@ -153,7 +166,13 @@ pub fn run_one(
     let mut seen: Option<(bool, bool)> = None;
     let mut tick_us = Vec::new();
     let run = crate::lockstep::run_acting(
-        sim::Sim::new(config, world).seeded(i as u64 + 1),
+        {
+            let mut s = sim::Sim::new(config, world).seeded(i as u64 + 1);
+            for k in kit {
+                s.survival.give(*k);
+            }
+            s
+        },
         &format!("rs-l{i}"),
         i as u64 + 1,
         ticks,

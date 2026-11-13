@@ -6,8 +6,9 @@
 //! progress is stored: a consumed or lost item is planned for again. Needs are netted against one
 //! working inventory, so two needs never count the same item twice.
 //!
-//! Not ported yet: block needs (a crafting table nearby, so 3x3 recipes), held tools and spares,
-//! fuel and smelting: their issues bring them.
+//! Issue 11b adds block needs (`block:crafting_table`: a remembered table near, else a row that
+//! places one; 3x3 recipes need it) and `holds` (a tool a row keeps rather than spends, resolved
+//! once). Not ported yet: spares, fuel and smelting: their issues bring them.
 
 use std::collections::BTreeMap;
 
@@ -24,9 +25,11 @@ pub type Counts = BTreeMap<ItemKind, i32>;
 /// order `consume` takes them in, clojurecraft's `recipe/consume`).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct Need {
-    /// `item:stick`, `tag:logs`, or the set's items joined by `|`.
+    /// `item:stick`, `tag:logs`, `block:crafting_table`, or the set's items joined by `|`.
     pub key: String,
     pub items: Vec<ItemKind>,
+    /// A `block:<name>` need: such a block remembered near (its count is not counted).
+    pub block: Option<data::BlockKind>,
 }
 
 impl Need {
@@ -42,11 +45,19 @@ impl Need {
         let items = match kind {
             "item" => vec![ItemKind::from_name(name)?],
             "tag" => data::generated::tags::item_tag(name)?.to_vec(),
+            "block" => {
+                return Some(Need {
+                    key: s.to_owned(),
+                    items: Vec::new(),
+                    block: Some(data::BlockKind::from_name(name)?),
+                });
+            }
             _ => return None,
         };
         Some(Need {
             key: s.to_owned(),
             items: Self::sorted(items),
+            block: None,
         })
     }
 
@@ -68,7 +79,11 @@ impl Need {
                 .collect::<Vec<_>>()
                 .join("|"),
         };
-        Need { key, items }
+        Need {
+            key,
+            items,
+            block: None,
+        }
     }
 
     /// How many of these items the counts hold (`recipe/have`).
@@ -102,6 +117,11 @@ impl Need {
 pub enum Act {
     /// Dig a log seen with an exposed face.
     Gather,
+    /// Put a held block down near the player (`place-table`).
+    Place(data::BlockKind),
+    /// Dig an exposed block of these kinds with the held tool, or cut stairs down to find one.
+    #[serde(skip)]
+    Mine(&'static [data::BlockKind]),
     /// One run of a 2x2 recipe in window 0.
     #[serde(skip)]
     Craft(&'static Recipe),
@@ -113,6 +133,8 @@ pub struct Row {
     pub id: String,
     pub needs: Vec<(Need, i32)>,
     pub provides: Vec<(Need, i32)>,
+    /// What the row keeps rather than spends (a tool): resolved once, never consumed.
+    pub holds: Vec<(Need, i32)>,
     pub act: Option<Act>,
 }
 
@@ -130,9 +152,15 @@ pub struct GoalRow {
     #[serde(default)]
     pub needs: Vec<(String, i32)>,
     pub provides: Vec<(String, i32)>,
-    /// `gather` for a producer the table itself carries.
+    /// `gather`, `place` or `mine` for a producer the table itself carries.
     #[serde(default)]
     pub act: Option<String>,
+    /// What a row keeps rather than spends (`[["item:wooden_pickaxe", 1]]`).
+    #[serde(default)]
+    pub holds: Vec<(String, i32)>,
+    /// The block a `place` row puts down, or the blocks a `mine` row digs.
+    #[serde(default)]
+    pub blocks: Vec<String>,
 }
 
 /// `config/goals.toml`.
@@ -147,15 +175,25 @@ fn row_of(g: &GoalRow) -> Result<Row, String> {
             .map(|k| (k, *n))
             .ok_or_else(|| format!("goal {}: no need {s}", g.id))
     };
-    let act = match g.act.as_deref() {
-        None => None,
-        Some("gather") => Some(Act::Gather),
-        Some(other) => return Err(format!("goal {}: no act {other}", g.id)),
+    let blocks: Vec<data::BlockKind> = g
+        .blocks
+        .iter()
+        .map(|b| {
+            data::BlockKind::from_name(b).ok_or_else(|| format!("goal {}: no block {b}", g.id))
+        })
+        .collect::<Result<_, _>>()?;
+    let act = match (g.act.as_deref(), blocks.first()) {
+        (None, _) => None,
+        (Some("gather"), _) => Some(Act::Gather),
+        (Some("place"), Some(b)) => Some(Act::Place(*b)),
+        (Some("mine"), Some(_)) => Some(Act::Mine(Box::leak(blocks.clone().into_boxed_slice()))),
+        (Some(other), _) => return Err(format!("goal {}: no act {other} (or no blocks)", g.id)),
     };
     Ok(Row {
         id: g.id.clone(),
         needs: g.needs.iter().map(need).collect::<Result<_, _>>()?,
         provides: g.provides.iter().map(need).collect::<Result<_, _>>()?,
+        holds: g.holds.iter().map(need).collect::<Result<_, _>>()?,
         act,
     })
 }
@@ -206,23 +244,35 @@ impl Table {
             }
         }
         goals.sort_by_key(|(p, _, _)| *p);
-        producers.extend(
-            data::generated::recipes::RECIPES
-                .iter()
-                .filter(|r| fits_grid(r))
-                .map(|r| Row {
-                    id: format!("craft:{}", r.id),
-                    needs: recipe_needs(r),
-                    provides: vec![(
-                        Need {
-                            key: format!("item:{}", r.result.name().unwrap_or_default()),
-                            items: vec![r.result],
-                        },
-                        i32::from(r.count),
-                    )],
-                    act: Some(Act::Craft(r)),
-                }),
-        );
+        producers.extend(data::generated::recipes::RECIPES.iter().map(|r| {
+            // A recipe that does not fit the 2x2 grid needs a crafting table near,
+            // after its ingredients (clojurecraft's `craft-row`).
+            let mut needs = recipe_needs(r);
+            if !fits_grid(r) {
+                needs.push((
+                    Need {
+                        key: "block:crafting_table".to_owned(),
+                        items: Vec::new(),
+                        block: Some(data::BlockKind::CraftingTable),
+                    },
+                    1,
+                ));
+            }
+            Row {
+                id: format!("craft:{}", r.id),
+                needs,
+                provides: vec![(
+                    Need {
+                        key: format!("item:{}", r.result.name().unwrap_or_default()),
+                        items: vec![r.result],
+                        block: None,
+                    },
+                    i32::from(r.count),
+                )],
+                holds: Vec::new(),
+                act: Some(Act::Craft(r)),
+            }
+        }));
         Ok(Self { goals, producers })
     }
 
@@ -261,6 +311,8 @@ fn producer_order(counts: &Counts, row: &Row) -> (i32, i32) {
 
 struct Planner<'a> {
     table: &'a Table,
+    /// Whether a block of a kind is remembered near (`make/near`): the world, read by the shell.
+    near: &'a dyn Fn(data::BlockKind) -> bool,
 }
 
 type Resolved<'a> = (Counts, Option<Result<&'a Row, ()>>);
@@ -275,6 +327,14 @@ impl<'a> Planner<'a> {
         times: i32,
         path: &[Vec<ItemKind>],
     ) -> Resolved<'a> {
+        // What the row holds is resolved once and handed back unconsumed (`resolve-holds`).
+        for (k, n) in &row.holds {
+            match self.resolve_need(counts.clone(), k, *n, path) {
+                (_, Some(Err(()))) => return (counts, Some(Err(()))),
+                (c2, Some(Ok(r))) => return (c2, Some(Ok(r))),
+                (_, None) => {}
+            }
+        }
         let mut c = counts.clone();
         for (k, n) in &row.needs {
             let (c2, a) = self.resolve_need(c, k, n * times, path);
@@ -335,6 +395,20 @@ impl<'a> Planner<'a> {
         n: i32,
         path: &[Vec<ItemKind>],
     ) -> Resolved<'a> {
+        if let Some(b) = k.block {
+            // `resolve-block-need`: met when one is remembered near, else the first producer that
+            // provides it and can be done once.
+            if (self.near)(b) {
+                return (counts, None);
+            }
+            let rows: Vec<&'a Row> = self
+                .table
+                .producers
+                .iter()
+                .filter(|r| r.provides.iter().any(|(p, _)| p.block == Some(b)))
+                .collect();
+            return self.first_resolved(counts, &rows, 1, path);
+        }
         let h = k.have(&counts);
         if h >= n {
             return (k.consume(&counts, n), None);
@@ -363,8 +437,13 @@ impl<'a> Planner<'a> {
 }
 
 /// The act for a goal from what is held: re-derived each tick, nothing stored.
-pub fn make<'a>(table: &'a Table, counts: &Counts, goal: &'a Row) -> Choice<'a> {
-    let p = Planner { table };
+pub fn make<'a>(
+    table: &'a Table,
+    counts: &Counts,
+    near: &'a dyn Fn(data::BlockKind) -> bool,
+    goal: &'a Row,
+) -> Choice<'a> {
+    let p = Planner { table, near };
     let mut c = counts.clone();
     for (k, n) in goal.provides.iter().chain(&goal.needs) {
         match p.resolve_need(c, k, *n, &[]) {
@@ -394,6 +473,8 @@ mod tests {
                         ("item:crafting_table".to_owned(), 1),
                     ],
                     act: None,
+                    holds: Vec::new(),
+                    blocks: Vec::new(),
                 },
                 GoalRow {
                     id: "gather".to_owned(),
@@ -403,6 +484,8 @@ mod tests {
                     needs: Vec::new(),
                     provides: vec![("tag:logs".to_owned(), 1)],
                     act: Some("gather".to_owned()),
+                    holds: Vec::new(),
+                    blocks: Vec::new(),
                 },
             ],
         };
@@ -413,7 +496,7 @@ mod tests {
         let t = table();
         let goal = t.until("table").unwrap();
         let counts: Counts = held.iter().copied().collect();
-        match make(&t, &counts, goal) {
+        match make(&t, &counts, &|_| false, goal) {
             Choice::Done => "done".to_owned(),
             Choice::Act(r) => r.id.clone(),
             Choice::Stuck => "stuck".to_owned(),

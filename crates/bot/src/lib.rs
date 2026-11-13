@@ -325,7 +325,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut teleports_at_script: Option<u64> = None;
     let mut min_health_in_script: Option<f32> = None;
     let mut planner = match aim {
-        Some(a @ plan::Aim::Table) => Some(plan::Plan::with_table(
+        Some(a) if a.is_goal() => Some(plan::Plan::with_table(
             a,
             std::sync::Arc::new(goals_table("config/goals.toml")?),
         )),

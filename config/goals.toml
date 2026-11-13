@@ -26,3 +26,52 @@ priority = 10
 doc = "dig a log seen with an exposed face, in reach of a walk, and collect it"
 provides = [["tag:logs", 1]]
 act = "gather"
+
+# Issue 11's rows (clojurecraft's goals.edn).
+
+[[goal]]
+id = "pickaxe"
+priority = 3
+until = "pickaxe"
+doc = "a wooden pickaxe, placing a crafting table to make it"
+provides = [["item:wooden_pickaxe", 1]]
+
+[[goal]]
+id = "cobblestone"
+priority = 4
+until = "cobblestone"
+doc = "three cobblestone, dug with the wooden pickaxe"
+provides = [["item:cobblestone", 3]]
+
+[[goal]]
+id = "stone-pickaxe"
+priority = 6
+until = "stone-pickaxe"
+doc = "a stone pickaxe, from cobblestone and sticks in a placed crafting table"
+provides = [["item:stone_pickaxe", 1]]
+
+# Issue 11's done-condition holds a stone pickaxe; its scope adds the sword.
+[[goal]]
+id = "stone-tools"
+priority = 6
+until = "stone-tools"
+doc = "a stone pickaxe, then a stone sword"
+provides = [["item:stone_pickaxe", 1], ["item:stone_sword", 1]]
+
+[[goal]]
+id = "place-table"
+priority = 10
+doc = "put a held crafting table down near the player"
+needs = [["item:crafting_table", 1]]
+provides = [["block:crafting_table", 1]]
+act = "place"
+blocks = ["crafting_table"]
+
+[[goal]]
+id = "mine-stone"
+priority = 10
+doc = "dig the nearest exposed stone with a pickaxe, or cut stairs down to stone"
+holds = [["item:wooden_pickaxe", 1]]
+provides = [["item:cobblestone", 1]]
+act = "mine"
+blocks = ["stone"]

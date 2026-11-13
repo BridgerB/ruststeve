@@ -875,7 +875,7 @@ landing = 0
 dx = 7
 dz = -7
 script = "craft:stone_tools"
-ticks = 200
+ticks = 300
 give = ["crafting_table 1", "cobblestone 5", "stick 3"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 
@@ -885,7 +885,7 @@ landing = 1
 dx = 7
 dz = -7
 script = "craft:stone_tools"
-ticks = 200
+ticks = 300
 give = ["crafting_table 1", "cobblestone 5", "stick 3"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 
@@ -895,7 +895,7 @@ landing = 2
 dx = 7
 dz = -7
 script = "craft:stone_tools"
-ticks = 200
+ticks = 300
 give = ["crafting_table 1", "cobblestone 5", "stick 3"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 
@@ -905,7 +905,7 @@ landing = 4
 dx = 7
 dz = -7
 script = "craft:stone_tools"
-ticks = 200
+ticks = 300
 give = ["crafting_table 1", "cobblestone 5", "stick 3"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 
@@ -915,6 +915,6 @@ landing = 7
 dx = 7
 dz = -7
 script = "craft:stone_tools"
-ticks = 200
+ticks = 300
 give = ["crafting_table 1", "cobblestone 5", "stick 3"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]

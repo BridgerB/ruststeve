@@ -6,7 +6,7 @@ tags: [plan, dig, gather, collect, pickup]
 aliases: [Dig, DigStage, DigFailure, Taken, Gone, crowded, CROWD_RADIUS, break_ticks, slowdown, FINISH margin, collect, pickup goal, Goal::Pickup, to_dig, DropUnreachable, DropWalkFailed, Uncollected, Refused]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/dig.rs#pub fn held_item(w: &World) -> Option<ItemKind> {"
   - "ruststeve:crates/plan/src/dig.rs#pub fn slowdown(w: &World) -> f64 {"
