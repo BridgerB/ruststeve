@@ -6,7 +6,7 @@ tags: [wire, actions, attack, dig, use-item]
 aliases: [attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@8df1710
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@34b2252
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub enum Act {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_dig_carries_its_sequence() {"
@@ -41,7 +41,7 @@ Everything the bot does to the world is one of a few client packets. Several car
 | `set-carried-item` | slot (i16) | select a hotbar slot |
 | `client-command` | action (0 respawn) | respawn after death |
 
-Faces: down 0, up 1, north 2, south 3, west 4, east 5. Hands: main 0, off 1.
+Faces: down 0, up 1, north 2, south 3, west 4, east 5. Hands: main 0, off 1. ruststeve sends `use-item-on` as `Act::UseOn` (issue 11a, [[placing]]).
 
 ## Gotchas
 - **In 775 melee is the dedicated `attack` packet, entity id only.** `interact` became right-click only and requires a trailing hand field. ruststeve v1's "melee deals zero damage" wall was an interact with mouse 1: it decoded and did nothing; without the hand field it got the bot kicked.

@@ -6,7 +6,7 @@ tags: [game, digging, timing]
 aliases: [delayed destroy, hasDelayedDestroy, break time, hardness, early FINISH, finish margin, dig penalties, player-action]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve@8df1710
+verifiedAgainst: clojurecraft@be85a92 ruststeve@34b2252
 sourceRefs:
   - "ruststeve:crates/sim/src/survival.rs#const FINISH_ACCEPT: f32 = 0.7;"
   - "ruststeve:crates/sim/src/survival.rs#pub(crate) fn tick_digging(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -31,7 +31,7 @@ The client digs with two `player-action` packets, START and FINISH. The server b
 
 ## How it works
 - **Vanilla's rule**: damage per tick = speed / hardness / (30 when the tool harvests the block, else 100); ticks = ceil(1 / damage), or 0 when damage ≥ 1. Speed is the tool tier's speed when the tool is the right kind for the block, else 1, divided by 5 for each penalty in force: the eyes in water, the feet off the ground. The tool decides harvestability (whether it drops), never the penalised speed. All numbers come from generated tables.
-- A log by hand: hardness 2 → 60 ticks → 3000 ms at 20 ticks a second.
+- A log by hand: hardness 2 → 60 ticks → 3000 ms at 20 ticks a second. Stone by hand 150 ticks and no drop; a wooden pickaxe 23 ticks and cobblestone; a stone pickaxe 12 ([[tools-and-held-slot]], the tools' speeds from their item components).
 - **What the server does** (`ServerPlayerGameMode.handleBlockBreakAction` and `tick`, read with `javap` from the 26.1.2 jar, issue 10b): progress = damage per tick × (server ticks since START + 1). FINISH at progress ≥ 0.7 breaks the block. **Below 0.7 it is not an abort**: the server records a delayed destroy and its tick breaks the block once progress reaches 1.0 — unless a delayed destroy is already pending, when the FINISH is ignored. ABORT ends only the dig in progress. Out of reach (eye to the block's box over 4.5 + 1) the action does nothing. Confirmed by the parity table's `dig:5` rows: 10 of 10 real blocks broke without a second FINISH ([[parity-table]]).
 - **FINISH timing**: the server takes a FINISH at 70% of its own ticks; clojurecraft believed an earlier one aborts (a hypothesis for why it looked so: its 60-tick confirm window ran out before the delayed destroy landed, or a second dig was refused while one was pending). clojurecraft sends FINISH at `ms × 1.15 × slowdown + 100 ms`, where `slowdown` is how much longer the server's ticks are taking than 50 ms (measured from `set-time` arrivals). A late FINISH breaks at once; an early one breaks only at the full time, after the bot may have stopped waiting.
 - **Confirmation**: after FINISH the server sends the breaker a block update (to air) and then a `block-changed-ack` for the FINISH sequence. clojurecraft waits up to 60 ticks for the update; an ack without it is a refusal.

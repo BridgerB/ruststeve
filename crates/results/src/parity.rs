@@ -25,6 +25,11 @@ pub struct Moment {
     /// model's inventory in sim (issue 10b).
     #[serde(default)]
     pub give: Vec<String>,
+    /// Blocks laid at the start, as `[block, dx, dy, dz]` from the start's feet cell: `setblock`
+    /// by RCON in real, into the model's world in sim (issue 11a: stone under the feet, room for
+    /// a table).
+    #[serde(default)]
+    pub set: Vec<(String, i32, i32, i32)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

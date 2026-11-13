@@ -99,28 +99,24 @@ fn pos((x, y, z): Cell) -> BlockPos {
     BlockPos::new(x, y, z)
 }
 
-/// The block's break time in game ticks by hand (any item that is not a tool digs as a hand;
-/// tools come with issue 11): `ceil(1 / progress)`, the progress
-/// `speed / hardness / (30 when the hand harvests it, else 100)`, the speed 1 × 0.2 with the
-/// eyes in water, ÷ 5 off the ground.
-pub fn break_ticks(kind: BlockKind, eye_in_water: bool, on_ground: bool) -> Option<u64> {
-    let hardness = f64::from(data::generated::hardness::hardness(kind)?);
-    if hardness < 0.0 {
-        return None;
-    }
-    if hardness == 0.0 {
-        return Some(0);
-    }
-    let harvests = !data::generated::hardness::needs_correct_tool(kind).unwrap_or(false);
-    let mut speed = 1.0;
-    if eye_in_water {
-        speed *= 0.2;
-    }
-    if !on_ground {
-        speed /= 5.0;
-    }
-    let progress = speed / hardness / if harvests { 30.0 } else { 100.0 };
-    Some((1.0 / progress).ceil() as u64)
+/// The block's break time in game ticks with the held item (`data::dig`, the rule the server
+/// model uses too): a tool's speed and drops from its component; × 0.2 with the eyes in water,
+/// ÷ 5 off the ground.
+pub fn break_ticks(
+    kind: BlockKind,
+    held: Option<ItemKind>,
+    eye_in_water: bool,
+    on_ground: bool,
+) -> Option<u64> {
+    data::dig::break_ticks(kind, held, eye_in_water, on_ground)
+}
+
+/// The item in the selected hotbar slot, as the world last heard it.
+pub fn held_item(w: &World) -> Option<ItemKind> {
+    w.inventory
+        .slots
+        .get(&(36 + i16::from(w.held)))
+        .map(|(k, _)| *k)
 }
 
 /// How much slower the server's ticks run than ours: our ticks over the server's, measured
@@ -220,7 +216,9 @@ impl Dig {
                 let Some(kind) = w.block_at(pos(self.target)) else {
                     return (still, None, DigStatus::Failed(DigFailure::Refused));
                 };
-                let Some(ticks) = break_ticks(kind, body.eye_in_water, body.on_ground) else {
+                let Some(ticks) =
+                    break_ticks(kind, held_item(w), body.eye_in_water, body.on_ground)
+                else {
                     return (still, None, DigStatus::Failed(DigFailure::Refused));
                 };
                 self.tries += 1;
@@ -330,12 +328,23 @@ mod tests {
     #[test]
     fn break_times_by_hand() {
         // A log, hardness 2: 60 ticks; in water 300; in water and off the ground 1,500.
-        assert_eq!(break_ticks(BlockKind::OakLog, false, true), Some(60));
-        assert_eq!(break_ticks(BlockKind::OakLog, true, true), Some(300));
-        assert_eq!(break_ticks(BlockKind::OakLog, true, false), Some(1500));
+        assert_eq!(break_ticks(BlockKind::OakLog, None, false, true), Some(60));
+        assert_eq!(break_ticks(BlockKind::OakLog, None, true, true), Some(300));
+        assert_eq!(
+            break_ticks(BlockKind::OakLog, None, true, false),
+            Some(1500)
+        );
         // Stone by hand does not harvest: 1.5 / 100 → 150 ticks; bedrock never.
-        assert_eq!(break_ticks(BlockKind::Stone, false, true), Some(150));
-        assert_eq!(break_ticks(BlockKind::Bedrock, false, true), None);
-        assert_eq!(break_ticks(BlockKind::ShortGrass, false, true), Some(0));
+        assert_eq!(break_ticks(BlockKind::Stone, None, false, true), Some(150));
+        assert_eq!(break_ticks(BlockKind::Bedrock, None, false, true), None);
+        assert_eq!(
+            break_ticks(BlockKind::ShortGrass, None, false, true),
+            Some(0)
+        );
+        // A wooden pickaxe on stone: 23 ticks.
+        assert_eq!(
+            break_ticks(BlockKind::Stone, Some(ItemKind::WoodenPickaxe), false, true),
+            Some(23)
+        );
     }
 }

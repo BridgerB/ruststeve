@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
+verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -17,7 +17,7 @@ sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#fn fall(&mut self, dy: f64, on_ground: bool) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/terrain.rs#pub fn world(seed: u64, radius: i32) -> Result<ModelWorld, EncodeError> {"
   - "ruststeve:crates/sim/src/survival.rs#fn stop_destroy(&mut self, pos: (i32, i32, i32)) -> Result<Vec<Wire>, EncodeError> {"
-  - "ruststeve:crates/sim/src/survival.rs#pub fn craft_result(grid: [Option<ItemKind>; 4]) -> Option<Stack> {"
+  - "ruststeve:crates/sim/src/survival.rs#pub fn craft_result(width: usize, grid: &[Option<ItemKind>]) -> Option<Stack> {"
   - "ruststeve:crates/sim/src/survival.rs#pub(crate) fn broadcast_changes(&mut self) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/tests/survival.rs#fn an_early_finish_is_a_delayed_destroy_not_an_abort() {"
   - "ruststeve:crates/bot/src/lockstep.rs#pub fn run("
@@ -59,7 +59,12 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **Support**: a block that rests on the broken one (plants, leaf litter, flower beds, snow, torches, carpets: an allow-list of the blocks report's `definition`) pops off first with its own drops, as many as its `segment_amount`; a two-high plant loses both halves. Found by the parity table (leaf litter on grass).
 - **Pickup**: `Player.aiStep`'s touch box (the player's grown 1 sideways and 0.5 up) over an item with no delay left; `Inventory.add` (same-item stacks: the held slot, the offhand, then inventory order; then the first free slot, the hotbar first); `take_item_entity`, `remove_entities`, then the menu's changes.
 - **Window 0**: the 46 menu slots, the cursor, the state id and the server's view of the client's (remote) slots and cursor. A click: the client's claim becomes the remote view (the bot claims nothing: an empty cursor), `doClick` runs (mode 0 pick/place/swap/merge with left and right, the result slot taken whole; mode 1 the result crafted again into 9-44 from the hotbar's end while it fits, other slots as `InventoryMenu.quickMoveStack`), then **either** `broadcastChanges` (one `container_set_slot` per changed slot, each a new state id, and `set_cursor_item` when the cursor differs from the claim) **or**, for a stale state id, the whole window. A grid change sends the result at once with its own state id (`slotChangedCraftingGrid`), so it arrives first. The result comes from the generated recipes (shaped as laid or mirrored, shapeless). A click that changes nothing sends nothing. Closing window 0 puts the grid back and throws the cursor. The join sends `set_held_slot` and window 0 at state id 1.
-- Every stack the model makes stacks to 64 (the tables do not carry `max_stack_size` yet; tools, which stack to 1, come with issue 11).
+
+## Placing, the crafting table and tools (11a, read from the 26.1.2 jar)
+- `use_item_on` ([[placing]]): reach, a crafting table opening its menu, a held block placed in the clicked cell when replaceable else beside it and never in the player, then the two block updates and the ack.
+- The crafting table's menu ([[table-window]]): container ids, `open_screen`, the 3x3 grid over window 0's click rules with `CraftingMenu.quickMoveStack`'s ranges, `stillValid`. Closing any menu puts the grid **and the cursor** back into the inventory (10b threw the cursor).
+- The dig progress and drops come from `data::dig` with the held item: a tool's speed and drops from its `tool` component ([[tools-and-held-slot]]); stacks by each item's `max_stack_size`.
+- **The eyes in water** are judged as `isEyeInFluid` judges them: under the water's surface in its cell (`amount / 9` of a block, a full block under more water; waterlogged blocks, kelp, seagrass and bubble columns count). Found by the parity table at a water landing.
 
 ## Generated worlds and lockstep (08b)
 - `sim::terrain::world(seed, radius)`: seeded rolling ground (value noise), one-block steps, still water to y 62 over sand, carpets, cobblestone pillars, encoded as real chunk columns; a pure function of its seed.

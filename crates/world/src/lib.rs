@@ -225,7 +225,8 @@ pub enum Act {
     Hold {
         slot: u8,
     },
-    /// A click in window 0, predicting nothing, stamped with the last state id the server sent.
+    /// A click in the open window (window 0 when none is), predicting nothing, stamped with that
+    /// window's last state id.
     Click {
         slot: i16,
         button: i8,
@@ -237,11 +238,40 @@ pub enum Act {
     /// does nothing), so the server answers with the whole window (clojurecraft's
     /// `resync-click`). After a missed click.
     Resync,
+    /// Right-click a block's face with the main hand (`use_item_on`, issue 11a): place the held
+    /// block against it, or open the block (a crafting table).
+    UseOn {
+        pos: BlockPos,
+        face: i8,
+    },
+}
+
+/// A window the server opened (`open_screen`, issue 11a): its id, menu type (an index into
+/// `data::generated::registries::MENU`), slots and state id. The player's inventory is its last 36
+/// slots, mirrored into window 0's view as they change.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Window {
+    pub id: i32,
+    pub menu: i32,
+    pub slots: BTreeMap<i16, (ItemKind, i32)>,
+    pub size: i16,
+    pub state_id: i32,
+}
+
+impl Window {
+    /// Window 0's slot for one of this window's inventory slots (its last 36: main 27, hotbar 9).
+    pub fn inventory_slot(&self, slot: i16) -> Option<i16> {
+        let first = self.size - 36;
+        (self.size > 36 && slot >= first && slot < self.size).then_some(9 + slot - first)
+    }
 }
 
 /// A click sent and not yet answered: the window's state id when it went, and when.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingClick {
+    /// The window it went to (0, or the open window).
+    #[serde(default)]
+    pub window: i32,
     pub slot: i16,
     pub state_id: i32,
     pub at_tick: u64,
@@ -382,6 +412,9 @@ pub struct World {
     pub clicks_sent: u64,
     #[serde(default)]
     pub clicks_answered: u64,
+    /// The window open besides the inventory (issue 11a).
+    #[serde(default)]
+    pub window: Option<Window>,
 }
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
@@ -651,9 +684,11 @@ impl World {
                 })]
             }
             Act::Click { slot, button, mode } => {
+                let (window, state_id) = self.current_window();
                 self.click = Some(PendingClick {
+                    window,
                     slot,
-                    state_id: self.inventory.state_id,
+                    state_id,
                     at_tick: self.ticks,
                 });
                 self.clicks_sent += 1;
@@ -663,23 +698,51 @@ impl World {
                 // something (clojurecraft's `click` does the same).
                 self.inventory.carried = None;
                 vec![Effect::Send(C2s::ContainerClick {
-                    window: 0,
-                    state_id: self.inventory.state_id,
+                    window,
+                    state_id,
                     slot,
                     button,
                     mode,
                 })]
             }
-            Act::CloseWindow => vec![Effect::Send(C2s::ContainerClose { window: 0 })],
+            Act::CloseWindow => {
+                // The client closes at once; the server sends nothing back.
+                let (window, _) = self.current_window();
+                self.window = None;
+                self.click = None;
+                vec![Effect::Send(C2s::ContainerClose { window })]
+            }
+            Act::UseOn { pos, face } => {
+                self.sequence_sent += 1;
+                // The cursor at the middle of the face clicked.
+                let cursor = match face {
+                    0 => [0.5, 0.0, 0.5],
+                    1 => [0.5, 1.0, 0.5],
+                    2 => [0.5, 0.5, 0.0],
+                    3 => [0.5, 0.5, 1.0],
+                    4 => [0.0, 0.5, 0.5],
+                    _ => [1.0, 0.5, 0.5],
+                };
+                vec![Effect::Send(C2s::UseItemOn {
+                    hand: 0,
+                    pos: (pos.x, pos.y, pos.z),
+                    face: i32::from(face),
+                    cursor,
+                    inside: false,
+                    sequence: self.sequence_sent,
+                })]
+            }
             Act::Swing => vec![Effect::Send(C2s::Swing { hand: 0 })],
             Act::Resync => {
+                let (window, state_id) = self.current_window();
                 self.click = Some(PendingClick {
+                    window,
                     slot: -1,
-                    state_id: self.inventory.state_id,
+                    state_id,
                     at_tick: self.ticks,
                 });
                 vec![Effect::Send(C2s::ContainerClick {
-                    window: 0,
+                    window,
                     state_id: -1,
                     slot: -1,
                     button: 0,
@@ -689,9 +752,17 @@ impl World {
         }
     }
 
-    /// The server answered the pending click: window 0's state id moved.
-    fn window_moved(&mut self, state_id: i32) {
+    /// The open window's id and last state id, or window 0's.
+    fn current_window(&self) -> (i32, i32) {
+        self.window
+            .as_ref()
+            .map_or((0, self.inventory.state_id), |w| (w.id, w.state_id))
+    }
+
+    /// The server answered the pending click: its window's state id moved.
+    fn window_moved(&mut self, window: i32, state_id: i32) {
         if let Some(c) = self.click
+            && c.window == window
             && c.state_id != state_id
         {
             self.click = None;
@@ -801,8 +872,27 @@ impl World {
                 slots,
                 carried,
             } => {
-                if *window == 0 {
-                    self.window_moved(*state_id);
+                if let Some(w) = self.window.as_mut().filter(|w| w.id == *window) {
+                    w.state_id = *state_id;
+                    w.size = i16::try_from(slots.len()).unwrap_or(0);
+                    w.slots.clear();
+                    let mut mirror = Vec::new();
+                    for (i, s) in slots.iter().enumerate() {
+                        let Ok(i) = i16::try_from(i) else { continue };
+                        if let Some(stack) = Inventory::stack(*s) {
+                            w.slots.insert(i, stack);
+                        }
+                        if let Some(inv) = w.inventory_slot(i) {
+                            mirror.push((inv, *s));
+                        }
+                    }
+                    for (inv, s) in mirror {
+                        self.inventory.put(inv, s);
+                    }
+                    self.inventory.carried = carried.and_then(Inventory::stack);
+                    self.window_moved(*window, *state_id);
+                } else if *window == 0 {
+                    self.window_moved(0, *state_id);
                     self.inventory.state_id = *state_id;
                     self.inventory.slots.clear();
                     for (i, s) in slots.iter().enumerate() {
@@ -819,8 +909,19 @@ impl World {
                 slot,
                 item,
             } => {
-                if *window == 0 {
-                    self.window_moved(*state_id);
+                if let Some(w) = self.window.as_mut().filter(|w| w.id == *window) {
+                    w.state_id = *state_id;
+                    match Inventory::stack(*item) {
+                        Some(stack) => w.slots.insert(*slot, stack),
+                        None => w.slots.remove(slot),
+                    };
+                    let inv = w.inventory_slot(*slot);
+                    if let Some(inv) = inv {
+                        self.inventory.put(inv, *item);
+                    }
+                    self.window_moved(*window, *state_id);
+                } else if *window == 0 {
+                    self.window_moved(0, *state_id);
                     self.inventory.state_id = *state_id;
                     self.inventory.put(*slot, *item);
                 }
@@ -885,7 +986,20 @@ impl World {
                     });
                 }
             }
-            S2c::ContainerClose { .. } => {}
+            S2c::ContainerClose { window } => {
+                if self.window.as_ref().is_some_and(|w| w.id == *window) {
+                    self.window = None;
+                    self.click = None;
+                }
+            }
+            S2c::OpenScreen { window, menu } => {
+                self.window = Some(Window {
+                    id: *window,
+                    menu: *menu,
+                    ..Window::default()
+                });
+                self.click = None;
+            }
             // The cursor carries no state id: it never answers a click on its own (the slot the
             // click emptied or filled does).
             S2c::SetCursorItem { item } => self.inventory.carried = Inventory::stack(*item),

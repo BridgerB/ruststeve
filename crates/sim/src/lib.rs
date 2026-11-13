@@ -10,7 +10,8 @@
 //! unanswered. Issue 08b adds the server's movement check and falls, read from the 26.1.2 jar
 //! (`ServerGamePacketListenerImpl.handleMovePlayer`, `Entity.checkFallDamage`,
 //! `LivingEntity.calculateFallDamage`): a correction is the server's verdict on a move. Issue
-//! 10b adds digging, drops and pickup and window 0's crafting (`survival`).
+//! 10b adds digging, drops and pickup and window 0's crafting (`survival`); 11a placing blocks,
+//! the crafting table's menu, tools and stack sizes.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -290,6 +291,15 @@ impl Sim {
                 },
             ) => self.on_click(*window, *state_id, *slot, *button, *mode),
             (Phase::Play, C2s::ContainerClose { window }) => self.on_close(*window),
+            (
+                Phase::Play,
+                C2s::UseItemOn {
+                    pos,
+                    face,
+                    sequence,
+                    ..
+                },
+            ) => self.on_use_item_on(*pos, *face, *sequence),
             (Phase::Play, C2s::PlayerLoaded)
             | (Phase::Play, C2s::ChunkBatchReceived { .. })
             | (Phase::Play, C2s::Swing { .. })
@@ -619,6 +629,7 @@ impl Sim {
         // changes (ServerPlayer.doTick's broadcastChanges).
         out.extend(self.tick_digging()?);
         out.extend(self.tick_items()?);
+        out.extend(self.tick_menu()?);
         out.extend(self.broadcast_changes()?);
         Ok(out)
     }

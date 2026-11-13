@@ -196,6 +196,12 @@ pub enum S2c {
         collector: i32,
         amount: i32,
     },
+    /// A window opened: its id and its menu type (an index into `data::MENU`); the title is
+    /// skipped.
+    OpenScreen {
+        window: i32,
+        menu: i32,
+    },
     /// What the cursor holds now (sent when a click's claimed cursor differs).
     SetCursorItem {
         item: Slot,
@@ -461,6 +467,10 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 collector: r.varint()?,
                 amount: r.varint()?,
             },
+            Some(PlayIn::OpenScreen) => S2c::OpenScreen {
+                window: r.varint()?,
+                menu: r.varint()?,
+            },
             Some(PlayIn::SetCursorItem) => S2c::SetCursorItem {
                 item: read_slot(&mut r)?,
             },
@@ -563,6 +573,17 @@ pub enum C2s {
     Swing {
         hand: i32,
     },
+    /// Right-click a block face with a hand: place the held block against it, or open the block
+    /// (a crafting table). Field order from the game's `ServerboundUseItemOnPacket`; the cursor is
+    /// where on the face, 0 to 1 on each axis.
+    UseItemOn {
+        hand: i32,
+        pos: (i32, i32, i32),
+        face: i32,
+        cursor: [f32; 3],
+        inside: bool,
+        sequence: i32,
+    },
 }
 
 impl C2s {
@@ -585,6 +606,7 @@ impl C2s {
             | C2s::MovePlayerStatusOnly { .. }
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
+            | C2s::UseItemOn { .. }
             | C2s::ContainerClick { .. }
             | C2s::ContainerClose { .. }
             | C2s::Swing { .. }
@@ -722,6 +744,25 @@ impl C2s {
             C2s::Swing { hand } => {
                 w.varint(*hand);
                 PlayOut::Swing.id()
+            }
+            C2s::UseItemOn {
+                hand,
+                pos,
+                face,
+                cursor,
+                inside,
+                sequence,
+            } => {
+                w.varint(*hand);
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.varint(*face);
+                w.f32(cursor[0]);
+                w.f32(cursor[1]);
+                w.f32(cursor[2]);
+                w.bool(*inside);
+                w.bool(false); // not past the world border
+                w.varint(*sequence);
+                PlayOut::UseItemOn.id()
             }
         };
         Ok((id, w.buf))
@@ -975,6 +1016,16 @@ impl S2c {
             S2c::SetCursorItem { item } => {
                 crate::slot::write_slot(&mut w, *item);
                 PlayIn::SetCursorItem.id()
+            }
+            S2c::OpenScreen { window, menu } => {
+                w.varint(*window);
+                w.varint(*menu);
+                // The title: an NBT string tag, as a server writes a plain text component.
+                let title = b"Crafting";
+                w.u8(8);
+                w.bytes(&u16::try_from(title.len()).unwrap_or(0).to_be_bytes());
+                w.bytes(title);
+                PlayIn::OpenScreen.id()
             }
             S2c::ContainerClose { window } => {
                 w.varint(*window);
