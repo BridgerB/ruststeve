@@ -56,3 +56,4 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 ## See also
 - [[mc-water]] - the water physics the escape relies on.
 - [[server-model]] - the damage the trap costs.
+- [[food-and-hunting]] - the eat and hunt rows after these.

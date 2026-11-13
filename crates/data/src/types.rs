@@ -84,6 +84,21 @@ pub struct BlockDrops {
     pub tries: &'static [Drop],
 }
 
+/// A mob's drop: the item and the range its count is rolled in (issue 12c).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MobDrop {
+    pub item: ItemKind,
+    pub min: i64,
+    pub max: i64,
+}
+
+/// A mob's unconditioned loot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MobDrops {
+    pub entity: EntityKind,
+    pub drops: &'static [MobDrop],
+}
+
 /// A dimension type's column: `sections` 16-block sections from `min_y`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DimensionType {

@@ -9,9 +9,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 /// Directories whose JSON files are read, one level deep (no subfolders).
-const FLAT_DIRS: [&str; 5] = [
+const FLAT_DIRS: [&str; 6] = [
     "data/minecraft/recipe/",
     "data/minecraft/loot_table/blocks/",
+    "data/minecraft/loot_table/entities/",
     "data/minecraft/dimension_type/",
     "data/minecraft/damage_type/",
     "data/minecraft/worldgen/biome/",

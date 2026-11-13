@@ -116,6 +116,9 @@ pub struct Game {
     pub smelting: Vec<Smelt>,
     /// `{block: [(item, chance)]}`: the first loot pool's tries for a breaker with a plain tool.
     pub drops: BTreeMap<String, Vec<(String, f64)>>,
+    /// `{entity: [(item, min, max)]}`: what a mob's loot table drops with no conditions, a count
+    /// from `set_count` each (issue 12c: the meat a hunt is for).
+    pub mob_drops: BTreeMap<String, Vec<MobDrop>>,
     pub dimensions: Vec<Dimension>,
     pub damage_types: Vec<String>,
     pub biomes: Vec<String>,
@@ -203,6 +206,7 @@ impl Game {
             recipes: read_recipes(entries, &item_tags)?,
             smelting: read_smelting(entries, &item_tags)?,
             drops: read_drops(entries)?,
+            mob_drops: read_mob_drops(entries)?,
             dimensions: read_dimensions(entries)?,
             damage_types: sorted_stems(entries, "data/minecraft/damage_type/"),
             biomes: sorted_stems(entries, "data/minecraft/worldgen/biome/"),
@@ -261,6 +265,11 @@ impl Game {
             tries
                 .iter()
                 .try_for_each(|(i, _)| item(i, &format!("loot {block}")))?;
+        }
+        for (mob, drops) in &self.mob_drops {
+            drops
+                .iter()
+                .try_for_each(|(i, _, _)| item(i, &format!("mob loot {mob}")))?;
         }
         for b in self.harvest.keys() {
             ensure!(blocks.contains(b.as_str()), "harvest: unknown block {b}");
@@ -739,6 +748,67 @@ fn read_drops(entries: &BTreeMap<String, String>) -> Result<BTreeMap<String, Vec
         }
         if !tries.is_empty() {
             out.insert(file_stem(path).to_owned(), tries);
+        }
+    }
+    Ok(out)
+}
+
+/// A mob's drop: the item and its count range.
+pub type MobDrop = (String, i64, i64);
+
+/// `{entity: [(item, min, max)]}`: each mob loot table's item entries in pools and entries with
+/// no conditions (a player kill, a chance and a fire are such), the count from `set_count`
+/// (a constant or a uniform range; 1 when absent). Tables in subfolders (a sheep's wool by colour)
+/// are not read.
+fn read_mob_drops(entries: &BTreeMap<String, String>) -> Result<BTreeMap<String, Vec<MobDrop>>> {
+    let mut out = BTreeMap::new();
+    for (path, text) in entries {
+        let Some(rest) = path.strip_prefix("data/minecraft/loot_table/entities/") else {
+            continue;
+        };
+        if rest.contains('/') {
+            continue;
+        }
+        let j = parse(path, text)?;
+        let mut drops = Vec::new();
+        for pool in j["pools"].as_array().into_iter().flatten() {
+            if !pool["conditions"].is_null() {
+                continue;
+            }
+            for e in pool["entries"].as_array().into_iter().flatten() {
+                if e["type"].as_str() != Some("minecraft:item") || !e["conditions"].is_null() {
+                    continue;
+                }
+                let name = e["name"].as_str().context("mob loot item with no name")?;
+                let count = e["functions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|f| f["function"].as_str() == Some("minecraft:set_count"))
+                    .map(|f| &f["count"]);
+                let (min, max) = match count {
+                    None => (1.0, 1.0),
+                    Some(c) if c.is_number() => {
+                        let v = c.as_f64().unwrap_or(1.0);
+                        (v, v)
+                    }
+                    Some(c) => match c["type"].as_str() {
+                        Some("minecraft:uniform") => (
+                            c["min"].as_f64().unwrap_or(0.0),
+                            c["max"].as_f64().unwrap_or(0.0),
+                        ),
+                        Some("minecraft:constant") => {
+                            let v = c["value"].as_f64().unwrap_or(1.0);
+                            (v, v)
+                        }
+                        _ => continue,
+                    },
+                };
+                drops.push((strip_ns(name).to_owned(), min as i64, max as i64));
+            }
+        }
+        if !drops.is_empty() {
+            out.insert(file_stem(path).to_owned(), drops);
         }
     }
     Ok(out)

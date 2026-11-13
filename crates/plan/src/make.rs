@@ -170,6 +170,55 @@ pub struct Goals {
     /// The always-rows (issue 12b): checked every tick ahead of every goal, in order.
     #[serde(default)]
     pub always: Vec<AlwaysRow>,
+    /// The eat and hunt rows' numbers (issue 12c).
+    #[serde(default)]
+    pub survival: Survival,
+}
+
+/// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Survival {
+    /// Food under this is hunger to answer (`hungry-below`).
+    pub hungry_below: i32,
+    /// Food the bot never eats, by item name (`unsafe`).
+    pub unsafe_foods: Vec<String>,
+    /// Blocks from the feet an animal is hunted within (`hunt-radius`) ...
+    pub hunt_radius: f64,
+    /// ... and within this when starving: food at or under `starving_below`.
+    pub starving_below: i32,
+    pub starving_radius: f64,
+}
+
+impl Default for Survival {
+    fn default() -> Self {
+        Self {
+            hungry_below: 14,
+            unsafe_foods: Vec::new(),
+            hunt_radius: 24.0,
+            starving_below: 6,
+            starving_radius: 48.0,
+        }
+    }
+}
+
+/// What an always-row answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Always {
+    Escape(crate::escape::TrapKind),
+    /// Hungry with something edible held (issue 12c).
+    Eat,
+    /// Hungry with nothing edible held: kill an animal for its meat (issue 12c).
+    Hunt,
+}
+
+/// The survival numbers, read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurvivalRules {
+    pub hungry_below: i32,
+    pub unsafe_foods: Vec<data::ItemKind>,
+    pub hunt_radius: f64,
+    pub starving_below: i32,
+    pub starving_radius: f64,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -180,8 +229,12 @@ pub struct AlwaysRow {
     pub priority: u32,
     #[serde(default)]
     pub doc: String,
-    /// `water`, `lava` or `fire`.
-    pub trap: String,
+    /// `water`, `lava` or `fire` for an escape row ...
+    #[serde(default)]
+    pub trap: Option<String>,
+    /// ... or `eat` or `hunt`.
+    #[serde(default)]
+    pub act: Option<String>,
 }
 
 fn row_of(g: &GoalRow) -> Result<Row, String> {
@@ -244,8 +297,9 @@ pub fn fits_grid(r: &Recipe) -> bool {
 pub struct Table {
     pub goals: Vec<(u32, Option<String>, Row)>,
     pub producers: Vec<Row>,
-    /// The always-rows' traps, by priority then as written (issue 12b).
-    pub always: Vec<(String, crate::escape::TrapKind)>,
+    /// The always-rows, by priority then as written (issue 12b).
+    pub always: Vec<(String, Always)>,
+    pub survival: SurvivalRules,
 }
 
 impl Table {
@@ -295,15 +349,33 @@ impl Table {
         let always = rows
             .iter()
             .map(|r| {
-                crate::escape::TrapKind::parse(&r.trap)
-                    .map(|k| (r.id.clone(), k))
-                    .ok_or_else(|| format!("always {}: no trap {}", r.id, r.trap))
+                let a = match (r.trap.as_deref(), r.act.as_deref()) {
+                    (Some(t), None) => crate::escape::TrapKind::parse(t).map(Always::Escape),
+                    (None, Some("eat")) => Some(Always::Eat),
+                    (None, Some("hunt")) => Some(Always::Hunt),
+                    _ => None,
+                };
+                a.map(|a| (r.id.clone(), a))
+                    .ok_or_else(|| format!("always {}: needs one trap or act eat/hunt", r.id))
             })
+            .collect::<Result<_, _>>()?;
+        let unsafe_foods = g
+            .survival
+            .unsafe_foods
+            .iter()
+            .map(|n| data::ItemKind::from_name(n).ok_or_else(|| format!("survival: no item {n}")))
             .collect::<Result<_, _>>()?;
         Ok(Self {
             goals,
             producers,
             always,
+            survival: SurvivalRules {
+                hungry_below: g.survival.hungry_below,
+                unsafe_foods,
+                hunt_radius: g.survival.hunt_radius,
+                starving_below: g.survival.starving_below,
+                starving_radius: g.survival.starving_radius,
+            },
         })
     }
 
@@ -520,6 +592,7 @@ mod tests {
                 },
             ],
             always: Vec::new(),
+            survival: Survival::default(),
         };
         Table::new(&g).unwrap()
     }

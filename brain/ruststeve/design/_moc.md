@@ -43,6 +43,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[placing]] - placing and opening blocks with use_item_on, and how the server answers.
 - [[stairs-down]] - mining exposed stone, and stairs down that never dig under the feet.
 - [[escapes]] - the always-rows: out of water, lava and fire ahead of every goal.
+- [[food-and-hunting]] - eating when hungry, and hunting an animal when there is nothing to eat.
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
 - [[parity-table]] - captured worlds, 50 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.

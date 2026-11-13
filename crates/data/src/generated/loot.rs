@@ -2,8 +2,9 @@
 // regenerate on a runner (brain/ruststeve/design/datagen.md).
 
 use super::blocks::BlockKind;
+use super::entities::EntityKind;
 use super::items::ItemKind;
-use crate::types::{BlockDrops, Drop};
+use crate::types::{BlockDrops, Drop, MobDrop, MobDrops};
 
 /// Each block's first loot pool for a breaker with no enchanted tool: tried in order, the first
 /// that rolls under its chance drops. Sorted by block id.
@@ -7002,4 +7003,601 @@ pub fn drops_of(block: BlockKind) -> &'static [Drop] {
         .ok()
         .and_then(|i| BLOCK_DROPS.get(i))
         .map_or(&[], |d| d.tries)
+}
+
+/// Each mob's loot with no conditions (no player kill, chance or fire asked): the item and
+/// its count range, each rolled. Sorted by entity id.
+pub static MOB_DROPS: [MobDrops; 53] = [
+    MobDrops {
+        entity: EntityKind::Bogged,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Arrow,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Bone,
+                min: 0,
+                max: 2,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::CamelHusk,
+        drops: &[MobDrop {
+            item: ItemKind::RottenFlesh,
+            min: 2,
+            max: 3,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Cat,
+        drops: &[MobDrop {
+            item: ItemKind::String,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::CaveSpider,
+        drops: &[MobDrop {
+            item: ItemKind::String,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Chicken,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Feather,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Chicken,
+                min: 1,
+                max: 1,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Cod,
+        drops: &[MobDrop {
+            item: ItemKind::Cod,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::CopperGolem,
+        drops: &[MobDrop {
+            item: ItemKind::CopperIngot,
+            min: 1,
+            max: 3,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Cow,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Leather,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Beef,
+                min: 1,
+                max: 3,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Creeper,
+        drops: &[MobDrop {
+            item: ItemKind::Gunpowder,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Dolphin,
+        drops: &[MobDrop {
+            item: ItemKind::Cod,
+            min: 0,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Donkey,
+        drops: &[MobDrop {
+            item: ItemKind::Leather,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Drowned,
+        drops: &[MobDrop {
+            item: ItemKind::RottenFlesh,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::ElderGuardian,
+        drops: &[
+            MobDrop {
+                item: ItemKind::PrismarineShard,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Cod,
+                min: 1,
+                max: 1,
+            },
+            MobDrop {
+                item: ItemKind::PrismarineCrystals,
+                min: 1,
+                max: 1,
+            },
+            MobDrop {
+                item: ItemKind::TideArmorTrimSmithingTemplate,
+                min: 1,
+                max: 1,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Enderman,
+        drops: &[MobDrop {
+            item: ItemKind::EnderPearl,
+            min: 0,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Evoker,
+        drops: &[MobDrop {
+            item: ItemKind::TotemOfUndying,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Ghast,
+        drops: &[
+            MobDrop {
+                item: ItemKind::GhastTear,
+                min: 0,
+                max: 1,
+            },
+            MobDrop {
+                item: ItemKind::Gunpowder,
+                min: 0,
+                max: 2,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::GlowSquid,
+        drops: &[MobDrop {
+            item: ItemKind::GlowInkSac,
+            min: 1,
+            max: 3,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Guardian,
+        drops: &[
+            MobDrop {
+                item: ItemKind::PrismarineShard,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Cod,
+                min: 1,
+                max: 1,
+            },
+            MobDrop {
+                item: ItemKind::PrismarineCrystals,
+                min: 1,
+                max: 1,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Hoglin,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Porkchop,
+                min: 2,
+                max: 4,
+            },
+            MobDrop {
+                item: ItemKind::Leather,
+                min: 0,
+                max: 1,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Horse,
+        drops: &[MobDrop {
+            item: ItemKind::Leather,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Husk,
+        drops: &[MobDrop {
+            item: ItemKind::RottenFlesh,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::IronGolem,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Poppy,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::IronIngot,
+                min: 3,
+                max: 5,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Llama,
+        drops: &[MobDrop {
+            item: ItemKind::Leather,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Mooshroom,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Leather,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Beef,
+                min: 1,
+                max: 3,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Mule,
+        drops: &[MobDrop {
+            item: ItemKind::Leather,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Panda,
+        drops: &[MobDrop {
+            item: ItemKind::Bamboo,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Parched,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Arrow,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Bone,
+                min: 0,
+                max: 2,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Parrot,
+        drops: &[MobDrop {
+            item: ItemKind::Feather,
+            min: 1,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Pig,
+        drops: &[MobDrop {
+            item: ItemKind::Porkchop,
+            min: 1,
+            max: 3,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::PolarBear,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Cod,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Salmon,
+                min: 0,
+                max: 2,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Pufferfish,
+        drops: &[MobDrop {
+            item: ItemKind::Pufferfish,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Rabbit,
+        drops: &[
+            MobDrop {
+                item: ItemKind::RabbitHide,
+                min: 0,
+                max: 1,
+            },
+            MobDrop {
+                item: ItemKind::Rabbit,
+                min: 1,
+                max: 1,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Ravager,
+        drops: &[MobDrop {
+            item: ItemKind::Saddle,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Salmon,
+        drops: &[MobDrop {
+            item: ItemKind::Salmon,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Sheep,
+        drops: &[MobDrop {
+            item: ItemKind::Mutton,
+            min: 1,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Skeleton,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Arrow,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Bone,
+                min: 0,
+                max: 2,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::SkeletonHorse,
+        drops: &[MobDrop {
+            item: ItemKind::Bone,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::SnowGolem,
+        drops: &[MobDrop {
+            item: ItemKind::Snowball,
+            min: 0,
+            max: 15,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Spider,
+        drops: &[MobDrop {
+            item: ItemKind::String,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Squid,
+        drops: &[MobDrop {
+            item: ItemKind::InkSac,
+            min: 1,
+            max: 3,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Stray,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Arrow,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Bone,
+                min: 0,
+                max: 2,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Strider,
+        drops: &[MobDrop {
+            item: ItemKind::String,
+            min: 2,
+            max: 5,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::TraderLlama,
+        drops: &[MobDrop {
+            item: ItemKind::Leather,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::TropicalFish,
+        drops: &[MobDrop {
+            item: ItemKind::TropicalFish,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Turtle,
+        drops: &[MobDrop {
+            item: ItemKind::Seagrass,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Warden,
+        drops: &[MobDrop {
+            item: ItemKind::SculkCatalyst,
+            min: 1,
+            max: 1,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Witch,
+        drops: &[
+            MobDrop {
+                item: ItemKind::GlowstoneDust,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Sugar,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::SpiderEye,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::GlassBottle,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Gunpowder,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Stick,
+                min: 0,
+                max: 2,
+            },
+            MobDrop {
+                item: ItemKind::Redstone,
+                min: 4,
+                max: 8,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::WitherSkeleton,
+        drops: &[
+            MobDrop {
+                item: ItemKind::Coal,
+                min: -1,
+                max: 1,
+            },
+            MobDrop {
+                item: ItemKind::Bone,
+                min: 0,
+                max: 2,
+            },
+        ],
+    },
+    MobDrops {
+        entity: EntityKind::Zoglin,
+        drops: &[MobDrop {
+            item: ItemKind::RottenFlesh,
+            min: 1,
+            max: 3,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::Zombie,
+        drops: &[MobDrop {
+            item: ItemKind::RottenFlesh,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::ZombieHorse,
+        drops: &[MobDrop {
+            item: ItemKind::RottenFlesh,
+            min: 2,
+            max: 3,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::ZombieVillager,
+        drops: &[MobDrop {
+            item: ItemKind::RottenFlesh,
+            min: 0,
+            max: 2,
+        }],
+    },
+    MobDrops {
+        entity: EntityKind::ZombifiedPiglin,
+        drops: &[
+            MobDrop {
+                item: ItemKind::RottenFlesh,
+                min: 0,
+                max: 1,
+            },
+            MobDrop {
+                item: ItemKind::GoldNugget,
+                min: 0,
+                max: 1,
+            },
+        ],
+    },
+];
+
+/// What killing a mob drops; empty when nothing does.
+pub fn mob_drops_of(entity: EntityKind) -> &'static [MobDrop] {
+    MOB_DROPS
+        .binary_search_by_key(&entity.id(), |d| d.entity.id())
+        .ok()
+        .and_then(|i| MOB_DROPS.get(i))
+        .map_or(&[], |d| d.drops)
 }

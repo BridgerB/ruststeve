@@ -57,6 +57,8 @@ pub struct Mob {
     pub invulnerable: u32,
     pub last_hurt: f32,
     pub dead_at: Option<u64>,
+    /// Whether its death drops its loot table (a parity row's mob is summoned without).
+    pub loot: bool,
 }
 
 /// The player's body as the server keeps it (issue 12a).
@@ -142,6 +144,7 @@ impl Sim {
                 invulnerable: 0,
                 last_hurt: 0.0,
                 dead_at: None,
+                loot: true,
             },
         );
         id
@@ -447,6 +450,7 @@ impl Sim {
                 entries: vec![(9, MetaValue::Float(health))],
             },
         )?];
+        let (kind, at, loot) = (m.kind, m.pos, m.loot);
         if health <= 0.0 {
             m.dead_at = Some(self.ticks);
             life.kills += 1;
@@ -457,6 +461,30 @@ impl Sim {
                     status: 3,
                 },
             )?);
+            if loot {
+                out.extend(self.drop_loot(kind, at)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// `dropAllDeathLoot`: each unconditioned drop's count rolled in its range
+    /// (`UniformGenerator.getInt`), spawned at the mob's feet as `spawnAtLocation` does (a
+    /// random sideways push of up to 0.1, 0.2 up, the default pickup delay of 10 ticks).
+    fn drop_loot(&mut self, kind: EntityKind, at: [f64; 3]) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        for d in data::generated::loot::mob_drops_of(kind) {
+            let span = (d.max - d.min + 1).max(1) as f64;
+            let n = d.min + (self.survival.next_double() * span).floor() as i64;
+            let Ok(count) = i32::try_from(n) else {
+                continue;
+            };
+            if count <= 0 {
+                continue;
+            }
+            let vx = self.survival.next_double() * 0.2 - 0.1;
+            let vz = self.survival.next_double() * 0.2 - 0.1;
+            out.extend(self.spawn_item((d.item, count), at, [vx, 0.2, vz], 10)?);
         }
         Ok(out)
     }
