@@ -5,7 +5,7 @@
 # local only). Dispatch only:
 #   gh workflow run race.yml --ref <branch> -f lanes=4 -f bots=14 -f start=spawn -f cap=6000
 name: race
-run-name: "race: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, ${{ inputs.start }}, cap ${{ inputs.cap }}, goal ${{ inputs.goal }}"
+run-name: "race: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, ${{ inputs.start }}, cap ${{ inputs.cap }}, goal ${{ inputs.goal }}, hold ${{ inputs.hold }}"
 
 on:
   workflow_dispatch:
@@ -25,6 +25,12 @@ on:
       goal:
         description: The planner's aim (log, log:<min> or table), or empty for idle bots
         default: ""
+      hold:
+        description: Keep each bot living after its aim is met, to the cap (true or false)
+        default: "false"
+      minutes:
+        description: The lane job's timeout; bots still running 15 minutes before it end Cut (72,000 ticks, a game hour, needs over 60 of play)
+        default: "60"
 
 permissions:
   contents: read
@@ -55,7 +61,7 @@ jobs:
   lane:
     needs: lanes
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: ${{ fromJSON(inputs.minutes) }}
     strategy:
       fail-fast: false
       matrix:
@@ -106,12 +112,17 @@ jobs:
           START: ${{ inputs.start }}
           CAP: ${{ inputs.cap }}
           GOAL: ${{ inputs.goal }}
+          HOLD: ${{ inputs.hold }}
+          MINUTES: ${{ inputs.minutes }}
         # The wall limit is the job's end, not a cap: bots still running then end Cut (not counted).
+        # 15 minutes of the job go to the build, the server and the release.
         run: |
           goal=()
           if [ -n "$GOAL" ]; then goal=(--goal "$GOAL"); fi
+          wall=$(( (MINUTES - 15) * 60 ))
           ./target/release/race --lane "$LANE" --bots "$BOTS" --start "$START" --cap "$CAP" \
-            --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit 2700 "${goal[@]}" 2>&1 | tee "race-$LANE.log"
+            --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit "$wall" \
+            --hold-after-aim "$HOLD" "${goal[@]}" 2>&1 | tee "race-$LANE.log"
 
       - name: Replay one recording at this commit
         if: always()

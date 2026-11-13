@@ -3,10 +3,10 @@ title: The race and its results
 description: How ruststeve is measured - the race binary and race.yml (one server per runner, a lane of bots, caps in server ticks), the shared race config, checkpoint starts as data applied over RCON, the stage ladder, endings, case and batch files, coverage and the k/n summary.
 type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
-aliases: [race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
+aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
+lastUpdated: 2026-11-13
+verifiedAgainst: ruststeve@757d9f7 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -47,10 +47,13 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - **A batch file per lane** (`batch.rsb`): the header (run, commit, lane, start, source, config hash, bots, server, the server's tick rate), a row per run with its signature `[ending killer doing why]`, and **coverage**: cases/runs, recordings/runs, events dropped, unknown packets. The race exits non-zero when cases/runs is under 1.0.
 - **k/n**: `results summary <dirs>` folds batches into k/n per stage for each (commit, start, source); k counts runs whose stage reached is at least the stage, n every run but `Cut`. It also prints coverage and the ranked signatures.
 - **race.yml** (dispatch): one runner per lane (up to 20), Java 25, the cached sha1-checked jar, the server with RCON on, `race`, one recording replayed at the commit; each lane uploads its directory; `publish` writes the summary into the job summary and a `race-<run id>` release with the batches and cases, then calls `ingest.yml` to add the race to the insight store ([[insight-store]]).
+- **Holding after the aim** (issue 12e): `hold=true` (`race --hold-after-aim true`, `Opts::hold_after_aim`) keeps a bot whose aim is met living to the cap, its planner's always-rows running on (escapes, defence, food: [[escapes]], [[combat-and-pacing]], [[food-and-hunting]]). `minutes` is the lane job's timeout and the wall limit 15 less: a game hour (72,000 ticks, about 61 minutes at the 19.7 ticks a second a 14-bot runner keeps) takes `minutes=100`.
 
 ## Evidence
 - Runners, run 43181608927 on main 409c473: 4 lanes × 14 bots on `spawn`, cap 6000: **56/56 `in_world`, 0/56 above, coverage cases 56/56 and recordings 56/56**, every lane in about 7 minutes; the server ticked 20.1 a second with 14 bots (headroom for more).
 - Local, 3 bots on `table`, cap 600: the kit arrived over RCON, 3/3 reached `table`, coverage 1.0, a recording verified with 0 mismatches over 10,846 events; the local server ticked 21.3 a second.
+
+- **The first hour** (issue 12e, run 43396217935, spawn, stone-tools, cap 72,000, hold, 4×14 on Normal): **0 deaths of 56**, every run to the cap; stone pickaxe 51/56, aim met 50/56. But the hour tested survival little: the aim is met in 3 to 4 minutes, then the bots stand still, clustered near spawn, for the rest of it. Lane 0's 14 recordings hold no always-row firing at all (no escape, defence, meal or hunt), no hostile came within 4 blocks, and food stayed at 20 (standing still spends none). Monsters spawn at least 24 blocks from any player and within simulation distance 3, so a still cluster sees them only at the edge.
 
 ## Gotchas
 - The killer groups across bots only without the victim's name: `death.attack.mob zombie`; the case keeps the whole text.
