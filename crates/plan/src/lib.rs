@@ -945,7 +945,14 @@ impl Plan {
             _ => false,
         };
         // A spare is made by a gather only when a log can be started now.
-        let gather_now = self.nearest_log(w, origin, 0.0, tick).is_some();
+        // A spare is made by a gather only when a log can be started now: one remembered near
+        // the feet's height. A bot down a mine cannot walk to the trees it saw on the surface (it
+        // has no stairs up), and walks to them failed until the planner stopped
+        // (docs/problems/iron-kit.md wall 3).
+        let gather_now = self
+            .nearest_log(w, origin, 0.0, tick)
+            .zip(w.body)
+            .is_some_and(|((_, y, _), b)| (f64::from(y) - b.pos[1]).abs() <= GATHER_NOW_RISE);
         match make::make_with(&table, &held(w), &near, gather_now, goal) {
             make::Choice::Done => {
                 self.met = true;
@@ -1490,6 +1497,8 @@ pub fn crowded(w: &World, (x, y, z): Cell) -> bool {
 /// How far around the feet exposed blocks are looked for (clojurecraft's `search-radius` and
 /// `search-height`).
 pub const SEARCH_RADIUS: i32 = 24;
+/// A remembered log counts as one a gather can start on now only this near the feet's height.
+pub const GATHER_NOW_RISE: f64 = 6.0;
 pub const SEARCH_HEIGHT: i32 = 12;
 /// Exposed blocks found before the search stops (clojurecraft routes the nearest 3).
 pub const EXPOSED_WANTED: usize = 8;

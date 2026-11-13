@@ -266,7 +266,13 @@ impl Stairs {
                 }
                 match cells.iter().find(|c| !open(kind(w, **c))).copied() {
                     Some(c) => {
-                        self.dig = Some(Dig::new(w, c, tick));
+                        // No collect: the drop falls into the stair the bot steps onto next and
+                        // is picked up there. Waiting for it cost the full collect time (300
+                        // ticks) a stair: docs/problems/iron-kit.md wall 2.
+                        let mut d = Dig::new(w, c, tick);
+                        d.drop = None;
+                        d.others.clear();
+                        self.dig = Some(d);
                         (still, None, StairsStatus::Running)
                     }
                     None => {
