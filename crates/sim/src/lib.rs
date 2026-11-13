@@ -135,6 +135,14 @@ pub struct Sim {
     /// receivedMovePacketCount).
     first_good: [f64; 3],
     moves_this_tick: u32,
+    /// The server's own idea of the player's motion: gravity integrated off the ground, one
+    /// tick of it on the ground (the move that lands zeroes it, the player's tick adds one).
+    /// Sent to the player at the end of a tick it was hurt in (`markHurt`, unless the damage is
+    /// `no_impact`: drowning), and a client takes it as its velocity: found by the parity
+    /// table, two walk rows that fell and were hurt (real sent (0, -0.0784, 0) and
+    /// (0, -0.2305, 0): one and three ticks of gravity).
+    server_vy: f64,
+    motion_due: bool,
     pub fall_distance: f64,
     pub health: f32,
     /// Server corrections sent: the parity table's `corrected`.
@@ -175,6 +183,8 @@ impl Sim {
             name: String::new(),
             first_good: pos,
             moves_this_tick: 0,
+            server_vy: 0.0,
+            motion_due: false,
             fall_distance: 0.0,
             health: 20.0,
             corrections: 0,
@@ -558,6 +568,10 @@ impl Sim {
             .and_then(|i| i32::try_from(i).ok())
             .unwrap_or(-1);
         self.health = (self.health - damage).max(0.0);
+        // `DamageTypeTags.NO_IMPACT` holds only drowning.
+        if damage_type != "drown" {
+            self.motion_due = true;
+        }
         let mut out = vec![
             wire(
                 State::Play,
@@ -633,6 +647,21 @@ impl Sim {
         out.extend(self.tick_life()?);
         out.extend(self.tick_menu()?);
         out.extend(self.broadcast_changes()?);
+        // The player's own tick of gravity, then `ServerEntity.sendChanges`.
+        self.server_vy = if self.survival.on_ground {
+            -physics::GRAVITY * physics::VERTICAL_DRAG
+        } else {
+            (self.server_vy - physics::GRAVITY) * physics::VERTICAL_DRAG
+        };
+        if std::mem::take(&mut self.motion_due) && self.health > 0.0 {
+            out.push(wire(
+                State::Play,
+                &S2c::SetEntityMotion {
+                    id: PLAYER_ID,
+                    velocity: [0.0, self.server_vy, 0.0],
+                },
+            )?);
+        }
         Ok(out)
     }
 

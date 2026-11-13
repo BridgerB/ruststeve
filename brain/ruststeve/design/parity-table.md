@@ -63,6 +63,8 @@ Issue 12a's 14 rows first differed only in kills: the world counted every death 
 
 Issue 12b's 9 escape rows run the planner itself (`script = "plan:hold"`: `Aim::Hold`, the always-rows only, on both sides, capped at the row's ticks after the settle): a stone-walled pond, a lava cup and a fire block. The lava rows first died in real only, sitting in lava through the start's setblocks and the settle; they now carry fire resistance (modelled: fire, lava and burning do no damage) and check the flee. Then 9 of 9 locally ([[escapes]]).
 
+Two walk rows that fell and were hurt (m00-3, m06-1) missed on every runner after 12a: the world now takes the server's `set_entity_motion` for itself as its velocity, and the real server sends one when the player is hurt ((0, -0.0784, 0) and (0, -0.2305, 0), one and three ticks of gravity), which the model did not. The model now sends it ([[server-model]]).
+
 ## Limits
 - The server runs peaceful, which removes hostile mobs: zombie rows (their attacks and knockback) need a non-peaceful row and come with defence (12d). Rows other than the drowning ones still breathe.
 - Moments test movement, falls, the server's corrections, digging by hand, drops and pickup and the 2x2 grid; tools, placing and other windows add moments with their issues.
