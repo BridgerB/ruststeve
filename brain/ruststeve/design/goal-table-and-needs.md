@@ -46,7 +46,7 @@ Issue 10c. Goals are data; planning is a function. A goal row says what it provi
 - The planner turns a 3x3 craft into a craft at the remembered table ([[crafting-window]]), `place` into the place task ([[placing]]), and before a fetching act (mine, gather) digs a table in reach that is not held, to carry it on (`take-table`).
 
 ## Always-rows (issue 12b)
-`[[always]]` rows (`id`, `priority`, `doc`, `trap`: water, lava or fire) are kept apart from goals and producers in `Table::always`, by priority: they are not planned for, they preempt ([[escapes]]).
+`[[always]]` rows (`id`, `priority`, `doc`, `trap`: water, lava or fire) are kept apart from goals and producers in `Table::always`, by priority: they are not planned for, they preempt ([[escapes]]). Issue 12c's rows name an `act` (`eat`, `hunt`) instead of a `trap`, and `[survival]` holds their numbers ([[food-and-hunting]]).
 
 ## Checked against clojurecraft
 `make-expected.txt` is clojurecraft's own `make/next-row` (at be85a92, a one-off oracle in its flake shell, outside this repo) toward the kit with a table of the kit and gather-log rows, for all 480 inventories of oak logs 0-3, planks 0-4, sticks 0-5 and tables 0-1: **480 of 480** choices equal. `make-expected-stone.txt` (issue 11b): toward `stone-pickaxe` with the stone-pickaxe, gather-log, place-table and mine-stone rows, 1,920 inventories of logs, planks, sticks, tables, cobblestone and wooden pickaxes, with and without a remembered table: **1,920 of 1,920** equal.

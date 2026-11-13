@@ -76,6 +76,7 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **Melee** (`attack`): damage = 1 + the weapon's modifier, × (0.2 + charge² × 0.8), the charge the ticks since the last swing over 20 / (4 + speed); reach 4 from the eyes to the mob's box (zombie-sized for every kind: `data` has no entity dimensions yet); the mob's own invulnerable window as the player's; death sends entity event 3 and removes it 20 ticks later.
 - `set_health` goes out when health or food change or saturation turns to or from zero; air (metadata 1) and the burning bit (metadata 0) when they change.
 - **The server's motion for the player** (`markHurt`, `ServerEntity.sendChanges`): the server integrates gravity on its own copy of the player's motion (one tick of it on the ground, `(y - 0.08) × 0.98` off it) and sends it as `set_entity_motion` at the end of a tick the player was hurt in, unless the damage is `no_impact` (drowning). A client takes it as its velocity.
+- **Mob loot** (issue 12c): a kill drops the mob's unconditioned loot (`data::generated::loot::mob_drops_of`), each count rolled in its range, at its feet with `spawnAtLocation`'s push and a 10-tick pickup delay; a parity row's mob is summoned without loot.
 - **Fire resistance** (a moment's effect): fire, lava and burning do no damage; lava still slows and lights the body.
 - `Sim::summon` places a mob (health from `data::generated::mobs`) for a test or a moment; mobs do not move, fight or drop yet (12c/12d).
 

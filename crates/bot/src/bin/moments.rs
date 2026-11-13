@@ -373,7 +373,7 @@ fn sim(a: &Args) -> Result<(), String> {
                 .and_then(|i| u32::try_from(i).ok())
                 .map(data::EntityKind::from_id)
                 .ok_or_else(|| format!("{}: no entity {e}", m.id))?;
-            model.summon(
+            let id = model.summon(
                 kind,
                 [
                     f64::from(x + dx) + 0.5,
@@ -381,6 +381,10 @@ fn sim(a: &Args) -> Result<(), String> {
                     f64::from(z + dz) + 0.5,
                 ],
             );
+            // Summoned with no loot, as the real side's `DeathLootTable:"minecraft:empty"`.
+            if let Some(m) = model.survival.life.mobs.get_mut(&id) {
+                m.loot = false;
+            }
         }
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
         let run = bot::lockstep::run_acting(

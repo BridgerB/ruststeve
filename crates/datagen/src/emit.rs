@@ -520,7 +520,11 @@ fn loot_rs(g: &Game) -> Result<String> {
     let mut s = header();
     writeln!(s, "use super::blocks::BlockKind;")?;
     writeln!(s, "use super::items::ItemKind;")?;
-    writeln!(s, "use crate::types::{{BlockDrops, Drop}};\n")?;
+    writeln!(s, "use super::entities::EntityKind;")?;
+    writeln!(
+        s,
+        "use crate::types::{{BlockDrops, Drop, MobDrop, MobDrops}};\n"
+    )?;
     writeln!(
         s,
         "/// Each block's first loot pool for a breaker with no enchanted tool: tried in order, the first"
@@ -560,7 +564,62 @@ fn loot_rs(g: &Game) -> Result<String> {
         "    BLOCK_DROPS.binary_search_by_key(&block.id(), |d| d.block.id()).ok().and_then(|i| BLOCK_DROPS.get(i)).map_or(&[], |d| d.tries)"
     )?;
     writeln!(s, "}}")?;
+    mob_drops_rs(g, &mut s)?;
     Ok(s)
+}
+
+/// Each mob's unconditioned drops (issue 12c), by entity id: `MOB_DROPS` and `mob_drops_of`.
+fn mob_drops_rs(g: &Game, s: &mut String) -> Result<()> {
+    let mut rows: Vec<(usize, &String, &Vec<crate::model::MobDrop>)> = g
+        .mob_drops
+        .iter()
+        .filter_map(|(m, d)| {
+            g.entities
+                .names
+                .iter()
+                .position(|n| n == m)
+                .map(|i| (i, m, d))
+        })
+        .collect();
+    rows.sort_by_key(|r| r.0);
+    writeln!(s)?;
+    writeln!(
+        s,
+        "/// Each mob's loot with no conditions (no player kill, chance or fire asked): the item and"
+    )?;
+    writeln!(s, "/// its count range, each rolled. Sorted by entity id.")?;
+    writeln!(s, "pub static MOB_DROPS: [MobDrops; {}] = [", rows.len())?;
+    for (_, mob, drops) in &rows {
+        write!(
+            s,
+            "    MobDrops {{ entity: EntityKind::{}, drops: &[",
+            pascal(mob)
+        )?;
+        for (item, min, max) in *drops {
+            write!(
+                s,
+                "MobDrop {{ item: ItemKind::{}, min: {min}, max: {max} }}, ",
+                pascal(item)
+            )?;
+        }
+        writeln!(s, "] }},")?;
+    }
+    writeln!(
+        s,
+        "];
+"
+    )?;
+    writeln!(s, "/// What killing a mob drops; empty when nothing does.")?;
+    writeln!(
+        s,
+        "pub fn mob_drops_of(entity: EntityKind) -> &'static [MobDrop] {{"
+    )?;
+    writeln!(
+        s,
+        "    MOB_DROPS.binary_search_by_key(&entity.id(), |d| d.entity.id()).ok().and_then(|i| MOB_DROPS.get(i)).map_or(&[], |d| d.drops)"
+    )?;
+    writeln!(s, "}}")?;
+    Ok(())
 }
 
 fn harvest_rs(g: &Game) -> Result<String> {

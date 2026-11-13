@@ -174,7 +174,7 @@ impl Survival {
     }
 
     /// A double in [0, 1), as `RandomSource.nextDouble`.
-    fn next_double(&mut self) -> f64 {
+    pub(crate) fn next_double(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
     }
 
@@ -648,7 +648,7 @@ impl Sim {
         self.spawn_item(stack, [px, py, pz], [vx, 0.2, vz], PICKUP_DELAY)
     }
 
-    fn spawn_item(
+    pub(crate) fn spawn_item(
         &mut self,
         stack: Stack,
         pos: [f64; 3],

@@ -96,3 +96,32 @@ id = "escape-fire"
 priority = 0
 doc = "out of a fire block the body touches, before anything else"
 trap = "fire"
+
+# Issue 12c's always-rows, after the escapes (clojurecraft's :eat and :hunt): eat under
+# hungry_below with something safe held; with nothing, kill the nearest animal whose loot is safe
+# food and pick it up (plan::eat, plan::hunt).
+
+[[always]]
+id = "eat"
+priority = 0
+doc = "eat when the food the server sent is under hungry_below and something edible is held"
+act = "eat"
+
+[[always]]
+id = "hunt"
+priority = 0
+doc = "food: hungry with nothing edible held, an animal that drops meat in reach of a walk"
+act = "hunt"
+
+[survival]
+# Food under this is hunger to answer: six short of full, four below where health stops coming
+# back by itself at 18 (clojurecraft's eat/hungry-below).
+hungry_below = 14
+# Never eaten: what poisons or makes hungry, what teleports, a random effect, and golden apples
+# (worth more than food) (clojurecraft's eat/unsafe).
+unsafe_foods = ["rotten_flesh", "spider_eye", "pufferfish", "poisonous_potato", "chicken", "chorus_fruit", "suspicious_stew", "golden_apple", "enchanted_golden_apple"]
+# Blocks from the feet an animal is hunted within; starving (food at or under 6, health no
+# longer comes back) a server's whole view (clojurecraft's forage/hunt-radius, starving-radius).
+hunt_radius = 24.0
+starving_below = 6
+starving_radius = 48.0

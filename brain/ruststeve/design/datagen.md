@@ -6,7 +6,7 @@ tags: [datagen, data, tables, ci, packets]
 aliases: [use_remainder, FOODS, WEAPONS, crates/data, generated tables, JNI probe, jar probe, hardness, fuel values, collision shapes, entity data serializers, --oracle, datagen.yml, verify-stream, regenerate the tables, BlockKind, ItemKind, packet enums]
 status: verified
 lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@8a59f07 clojurecraft@be85a92
+verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/main.rs#//! datagen: the game's tables, generated from the vanilla server itself and committed as Rust in"
   - "ruststeve:crates/datagen/src/fetch.rs#pub fn server_jar(work: &Path) -> Result<PathBuf> {"
@@ -48,6 +48,9 @@ The reports also write each item's default components (`reports/minecraft/compon
 
 ## Food and weapons (issue 12a)
 From the same item components: `FOODS` (`food`: nutrition, saturation as the nearest f32 of the report's double, `can_always_eat`; `consumable`'s seconds × 20, 32 when absent; `use_remainder`, a honey bottle's glass bottle) and `WEAPONS` (the main-hand `attack_damage` and `attack_speed` modifiers, as f64). `food_of` and `weapon_of` look them up.
+
+## Mob loot (issue 12c)
+`MOB_DROPS` and `mob_drops_of`, from `data/minecraft/loot_table/entities/`: each table's item entries in pools and entries with no conditions, the count from `set_count` (a constant or a uniform range). A cow drops 1-3 beef and 0-2 leather.
 
 ## The probe (the game's classes)
 Hardness, needs-correct-tool, collision shapes, tool materials, fuel, mob health and category, and the entity-data serializer ids are in no data file. `probe.rs` starts a JVM from Rust (`jni` 0.21, `invocation`: libjvm is found through `JAVA_HOME` and loaded at run time, so the crate builds without Java) with the inner jar and the bundler's `libraries/` on its class path, bootstraps the game and reads them by reflection, mirroring clojurecraft's `jar_probe.clj`. Only JDK methods are called by JNI signature; each game method is found by name, argument count and argument types at run time and cached, so a renamed return type cannot break it. `--oracle <clojurecraft>/resources/clojurecraft` then compares every probe table with clojurecraft's EDN entry by entry and fails on any difference.

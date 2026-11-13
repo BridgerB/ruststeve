@@ -10,8 +10,10 @@
 
 pub mod craft;
 pub mod dig;
+pub mod eat;
 pub mod escape;
 pub mod hold;
+pub mod hunt;
 pub mod make;
 pub mod path;
 pub mod place;
@@ -140,6 +142,10 @@ pub enum Task {
     Stairs(Box<Stairs>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
+    /// Eating something held (issue 12c).
+    Eat(eat::Eat),
+    /// Killing an animal for its meat (issue 12c).
+    Hunt(Box<hunt::Hunt>),
 }
 
 impl Task {
@@ -153,6 +159,8 @@ impl Task {
             Task::Place(_) => "place",
             Task::Stairs(_) => "stairs",
             Task::Escape(_) => "escape",
+            Task::Eat(_) => "eat",
+            Task::Hunt(_) => "hunt",
         }
     }
 
@@ -163,7 +171,9 @@ impl Task {
             | Task::Craft(_)
             | Task::Place(_)
             | Task::Stairs(_)
-            | Task::Escape(_) => None,
+            | Task::Escape(_)
+            | Task::Eat(_)
+            | Task::Hunt(_) => None,
             Task::ToLog(w) | Task::Explore(w) => Some(w),
         }
     }
@@ -222,6 +232,17 @@ pub struct Plan {
     pub traps: escape::Traps,
     #[serde(default)]
     pub escapes: u64,
+    /// Meals eaten and hunts that ended in a kill (issue 12c); an eat or hunt row is not
+    /// chosen again before `always_retry_at` after it failed, and animals a hunt failed on are
+    /// refused until then too.
+    #[serde(default)]
+    pub meals: u64,
+    #[serde(default)]
+    pub kills: u64,
+    #[serde(default)]
+    pub always_retry_at: u64,
+    #[serde(default)]
+    pub refused_prey: Vec<i32>,
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -252,6 +273,10 @@ impl Plan {
             crafts: 0,
             traps: escape::Traps::default(),
             escapes: 0,
+            meals: 0,
+            kills: 0,
+            always_retry_at: 0,
+            refused_prey: Vec::new(),
             acts: Vec::new(),
         }
     }
@@ -347,8 +372,8 @@ impl Plan {
                 self.acts.extend(act);
                 return self.after_stairs(c, status, tick);
             }
-            // `always` ran it (and ends it when the trap clears).
-            Task::Escape(_) => return Controls::default(),
+            // `always` runs these (and ends them).
+            Task::Escape(_) | Task::Eat(_) | Task::Hunt(_) => return Controls::default(),
         };
         match status {
             TaskStatus::Running => controls,
@@ -384,7 +409,9 @@ impl Plan {
                     | Task::Craft(_)
                     | Task::Place(_)
                     | Task::Stairs(_)
-                    | Task::Escape(_) => {}
+                    | Task::Escape(_)
+                    | Task::Eat(_)
+                    | Task::Hunt(_) => {}
                 }
                 Controls::default()
             }
@@ -422,7 +449,9 @@ impl Plan {
                     | Task::Craft(_)
                     | Task::Place(_)
                     | Task::Stairs(_)
-                    | Task::Escape(_) => {}
+                    | Task::Escape(_)
+                    | Task::Eat(_)
+                    | Task::Hunt(_) => {}
                 }
                 if self.stuck {
                     self.note(
@@ -436,21 +465,23 @@ impl Plan {
         }
     }
 
-    /// The always-rows (issue 12b): the trap this tick, if the table answers it, cuts the task
-    /// in hand (nothing of it is kept: the needs planner re-derives what to do from what is held)
-    /// and runs the escape until the trap clears.
+    /// The always-rows (issues 12b, 12c), in the table's order: an escape answers a trap of its
+    /// kind and holds until it clears; `eat` answers hunger with food held, `hunt` hunger with
+    /// none and an animal a route reaches, each running to its own end. A row in force cuts the
+    /// task in hand (nothing of it is kept: the needs planner re-derives what to do from what is
+    /// held); an escape cuts an eat or a hunt too.
     fn always(&mut self, w: &World, body: &physics::Body, tick: u64) -> Option<Controls> {
-        let rows = self.table.as_ref().map(|t| t.always.clone())?;
-        if rows.is_empty() {
+        let table = self.table.clone()?;
+        if table.always.is_empty() {
             return None;
         }
-        let trap = self.traps.tick(w, body).and_then(|k| {
-            rows.iter()
-                .find(|(_, r)| *r == k)
-                .map(|(id, _)| (id.clone(), k))
-        });
-        let escaping = match &self.task {
-            Task::Escape(e) => Some(e.kind),
+        let trap = self.traps.tick(w, body);
+        let rules = &table.survival;
+        // What is running: an escape whose trap holds, an eat or a hunt, else nothing.
+        let running = match &self.task {
+            Task::Escape(e) => Some(make::Always::Escape(e.kind)),
+            Task::Eat(_) => Some(make::Always::Eat),
+            Task::Hunt(_) => Some(make::Always::Hunt),
             Task::Idle
             | Task::ToLog(_)
             | Task::Explore(_)
@@ -459,9 +490,34 @@ impl Plan {
             | Task::Place(_)
             | Task::Stairs(_) => None,
         };
-        match (trap, escaping) {
-            (None, None) => None,
-            (None, Some(k)) => {
+        // The first row in force, in order; a running eat or hunt stays in force until it ends.
+        let mut chosen: Option<(String, make::Always)> = None;
+        for (id, row) in &table.always {
+            let in_force = match row {
+                make::Always::Escape(k) => trap == Some(*k),
+                make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
+                // A hunt picks up all its drops before the meal: only an escape cuts it.
+                make::Always::Eat => {
+                    running != Some(make::Always::Hunt)
+                        && tick >= self.always_retry_at
+                        && eat::hungry(w, rules)
+                        && eat::best_food(w, rules).is_some()
+                }
+                make::Always::Hunt => {
+                    tick >= self.always_retry_at
+                        && eat::hungry(w, rules)
+                        && eat::best_food(w, rules).is_none()
+                        && !hunt::prey(w, rules, self.hunt_radius(w, rules), &self.refused_prey)
+                            .is_empty()
+                }
+            };
+            if in_force {
+                chosen = Some((id.clone(), *row));
+                break;
+            }
+        }
+        let Some((id, row)) = chosen else {
+            if let Some(make::Always::Escape(k)) = running {
                 self.task = Task::Idle;
                 self.retry_at = tick;
                 self.note(
@@ -469,24 +525,135 @@ impl Plan {
                     format!("out of the {}", k.name()),
                     "dry land held; back to the goal".to_owned(),
                 );
-                None
             }
-            (Some((id, k)), was) => {
-                if was != Some(k) {
-                    self.finish_walk();
-                    let cut = self.task.name();
+            return None;
+        };
+        if running != Some(row) {
+            // Starting a row: what it cuts.
+            if running == Some(make::Always::Eat) {
+                self.acts.push(world::Act::ReleaseUse);
+            }
+            self.finish_walk();
+            let cut = self.task.name();
+            let task = match row {
+                make::Always::Escape(k) => {
                     self.escapes += 1;
                     self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
-                    self.task = Task::Escape(Box::new(escape::Escape::new(k, w, tick)));
+                    Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
-                let Task::Escape(e) = &mut self.task else {
-                    return None;
-                };
-                let (c, act) = e.step(w, tick);
-                self.acts.extend(act);
-                Some(c)
-            }
+                make::Always::Eat => eat::best_food(w, rules).map(|f| {
+                    self.note(
+                        tick,
+                        format!("eat {}", f.name().unwrap_or_default()),
+                        format!(
+                            "food {:?} under {}; cut {cut}",
+                            w.player.food, rules.hungry_below
+                        ),
+                    );
+                    Task::Eat(eat::Eat::new(w, f, tick))
+                }),
+                make::Always::Hunt => self.choose_prey(w, rules, tick).map(|h| {
+                    self.note(
+                        tick,
+                        format!("hunt {:?} {}", h.kind, h.prey),
+                        format!(
+                            "food {:?} and nothing edible held; cut {cut}",
+                            w.player.food
+                        ),
+                    );
+                    Task::Hunt(Box::new(h))
+                }),
+            };
+            let Some(task) = task else {
+                self.always_retry_at = tick + RETRY_TICKS;
+                return None;
+            };
+            self.task = task;
         }
+        let (c, act, ended) = match &mut self.task {
+            Task::Escape(e) => {
+                let (c, act) = e.step(w, tick);
+                (c, act, None)
+            }
+            Task::Eat(e) => {
+                let (act, status) = e.step(w, tick);
+                let ended = match status {
+                    eat::EatStatus::Running => None,
+                    eat::EatStatus::Done => Some(Ok("ate".to_owned())),
+                    eat::EatStatus::Failed(f) => Some(Err(format!("eat failed: {f:?}"))),
+                };
+                (Controls::default(), act, ended)
+            }
+            Task::Hunt(h) => {
+                let (c, act, status) = h.step(w, rules, tick);
+                let ended = match status {
+                    hunt::HuntStatus::Running => None,
+                    hunt::HuntStatus::Done => Some(Ok(format!("hunt done: {} swings", h.swings))),
+                    hunt::HuntStatus::Failed(f) => {
+                        self.refused_prey.push(h.prey);
+                        Some(Err(format!("hunt failed: {f:?}")))
+                    }
+                };
+                (c, act, ended)
+            }
+            Task::Idle
+            | Task::ToLog(_)
+            | Task::Explore(_)
+            | Task::Dig(_)
+            | Task::Craft(_)
+            | Task::Place(_)
+            | Task::Stairs(_) => return None,
+        };
+        self.acts.extend(act);
+        if let Some(end) = ended {
+            match (&self.task, &end) {
+                (Task::Eat(_), Ok(_)) => self.meals += 1,
+                (Task::Hunt(_), Ok(_)) => self.kills += 1,
+                _ => {}
+            }
+            match end {
+                Ok(what) => self.note(tick, what, "back to the goal".to_owned()),
+                Err(what) => {
+                    *self.failures.entry(what.clone()).or_default() += 1;
+                    self.always_retry_at = tick + RETRY_TICKS;
+                    self.note(tick, what, "not again for a while".to_owned());
+                }
+            }
+            self.task = Task::Idle;
+            self.retry_at = tick;
+        }
+        Some(c)
+    }
+
+    /// Starving hunts farther (clojurecraft's `starving-radius`).
+    fn hunt_radius(&self, w: &World, rules: &make::SurvivalRules) -> f64 {
+        if w.player.food.is_some_and(|f| f <= rules.starving_below) {
+            rules.starving_radius
+        } else {
+            rules.hunt_radius
+        }
+    }
+
+    /// The nearest animal a route reaches, of the first `CANDIDATES` (the churn invariant: a
+    /// hunt with no way is never started); the others tried are refused for a while.
+    fn choose_prey(
+        &mut self,
+        w: &World,
+        rules: &make::SurvivalRules,
+        tick: u64,
+    ) -> Option<hunt::Hunt> {
+        let radius = self.hunt_radius(w, rules);
+        for (id, kind) in hunt::prey(w, rules, radius, &self.refused_prey)
+            .into_iter()
+            .take(hunt::CANDIDATES)
+        {
+            let mut h = hunt::Hunt::new(w, id, kind, tick);
+            if h.reachable(w, tick) {
+                return Some(h);
+            }
+            self.refused_prey.push(id);
+        }
+        None
     }
 
     fn finish_walk(&mut self) {
