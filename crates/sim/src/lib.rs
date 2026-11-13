@@ -645,6 +645,7 @@ impl Sim {
         out.extend(self.tick_digging()?);
         out.extend(self.tick_items()?);
         out.extend(self.tick_life()?);
+        out.extend(self.tick_furnaces()?);
         out.extend(self.tick_menu()?);
         out.extend(self.broadcast_changes()?);
         // The player's own tick of gravity, then `ServerEntity.sendChanges`.
@@ -728,6 +729,7 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
     })
 }
 
+pub mod furnace;
 pub mod life;
 pub mod survival;
 pub mod terrain;

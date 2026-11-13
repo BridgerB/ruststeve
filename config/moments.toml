@@ -1164,3 +1164,99 @@ dz = -4
 script = "plan:hold"
 ticks = 100
 set = [["stone", -1, -1, -1], ["stone", -1, -1, 0], ["stone", -1, -1, 1], ["stone", 0, -1, -1], ["stone", 0, -1, 0], ["stone", 0, -1, 1], ["stone", 1, -1, -1], ["stone", 1, -1, 0], ["stone", 1, -1, 1], ["air", -1, 0, -1], ["air", -1, 0, 0], ["air", -1, 0, 1], ["air", -1, 1, -1], ["air", -1, 1, 0], ["air", -1, 1, 1], ["air", 0, 0, -1], ["air", 0, 0, 0], ["air", 0, 0, 1], ["air", 0, 1, -1], ["air", 0, 1, 0], ["air", 0, 1, 1], ["air", 1, 0, -1], ["air", 1, 0, 0], ["air", 1, 0, 1], ["air", 1, 1, -1], ["air", 1, 1, 0], ["air", 1, 1, 1], ["netherrack", 0, -1, 0], ["fire", 0, 0, 0]]
+
+# Issue 13a's smelting rows (`smelt:<take>`): a given furnace placed east of the feet on laid
+# stone and opened; the fuel then two raw iron put in; at script tick 460 (two cooks of 200 after
+# the loads) the result shift-clicked out. Coal burns 1600 ticks (one is enough, and is spent);
+# a plank 300, so the second lights for the second cook. The half rows take at 330: one cook
+# done and the second half way, so the cook's pace is in the class.
+
+[[moment]]
+id = "f00-coal"
+landing = 0
+dx = -4
+dz = -13
+script = "smelt:460"
+ticks = 520
+give = ["furnace 1", "raw_iron 2", "coal 1"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f01-coal"
+landing = 1
+dx = -4
+dz = -13
+script = "smelt:460"
+ticks = 520
+give = ["furnace 1", "raw_iron 2", "coal 1"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f02-coal"
+landing = 2
+dx = -4
+dz = -13
+script = "smelt:460"
+ticks = 520
+give = ["furnace 1", "raw_iron 2", "coal 1"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f00-planks"
+landing = 0
+dx = 13
+dz = -4
+script = "smelt:460"
+ticks = 520
+give = ["furnace 1", "raw_iron 2", "oak_planks 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f01-planks"
+landing = 1
+dx = 13
+dz = -4
+script = "smelt:460"
+ticks = 520
+give = ["furnace 1", "raw_iron 2", "oak_planks 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f02-planks"
+landing = 2
+dx = 13
+dz = -4
+script = "smelt:460"
+ticks = 520
+give = ["furnace 1", "raw_iron 2", "oak_planks 2"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f00-half"
+landing = 0
+dx = -13
+dz = 13
+script = "smelt:330"
+ticks = 400
+give = ["furnace 1", "raw_iron 2", "coal 1"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f01-half"
+landing = 1
+dx = -13
+dz = 13
+script = "smelt:330"
+ticks = 400
+give = ["furnace 1", "raw_iron 2", "coal 1"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "f02-half"
+landing = 2
+dx = -13
+dz = 13
+script = "smelt:330"
+ticks = 400
+give = ["furnace 1", "raw_iron 2", "coal 1"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]

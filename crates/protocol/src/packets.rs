@@ -213,6 +213,13 @@ pub enum S2c {
         window: i32,
         menu: i32,
     },
+    /// One of a window's properties (a furnace's burn and cook progress: 0 lit time left, 1 lit
+    /// total, 2 cook progress, 3 cook total; issue 13a).
+    ContainerSetData {
+        window: i32,
+        property: i16,
+        value: i16,
+    },
     /// What the cursor holds now (sent when a click's claimed cursor differs).
     SetCursorItem {
         item: Slot,
@@ -492,6 +499,11 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
             },
             Some(PlayIn::SetCursorItem) => S2c::SetCursorItem {
                 item: read_slot(&mut r)?,
+            },
+            Some(PlayIn::ContainerSetData) => S2c::ContainerSetData {
+                window: r.varint()?,
+                property: r.i16()?,
+                value: r.i16()?,
             },
             Some(PlayIn::ContainerClose) => S2c::ContainerClose {
                 window: r.varint()?,
@@ -1065,6 +1077,16 @@ impl S2c {
             S2c::SetCursorItem { item } => {
                 crate::slot::write_slot(&mut w, *item);
                 PlayIn::SetCursorItem.id()
+            }
+            S2c::ContainerSetData {
+                window,
+                property,
+                value,
+            } => {
+                w.varint(*window);
+                w.i16(*property);
+                w.i16(*value);
+                PlayIn::ContainerSetData.id()
             }
             S2c::SetEntityMotion { id, velocity } => {
                 w.varint(*id);
