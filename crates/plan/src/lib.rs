@@ -1006,7 +1006,7 @@ impl Plan {
                     if let Some(t) = self.carry_table(w, tick) {
                         return t;
                     }
-                    self.mine(w, blocks, depth, origin, tick)
+                    self.mine(w, blocks, depth, tick)
                 }
                 Some(make::Act::Smelt(r)) => {
                     let Some(f) = self.near_block(w, data::BlockKind::Furnace, tick) else {
@@ -1150,8 +1150,7 @@ impl Plan {
         &mut self,
         w: &World,
         blocks: &[data::BlockKind],
-        depth: Option<u32>,
-        origin: [f64; 3],
+        depth: Option<i32>,
         tick: u64,
     ) -> Task {
         let candidates: Vec<Cell> = exposed_near(w, blocks)
@@ -1179,9 +1178,9 @@ impl Plan {
             270 => (1, 0),
             _ => (0, 1),
         };
-        // At the row's depth below where the planner began, tunnel along instead (issue 13b).
-        let deep =
-            depth.is_some_and(|d| w.body.is_some_and(|b| b.pos[1] <= origin[1] - f64::from(d)));
+        // At the row's depth, the lowest feet height its stairs go to (clojurecraft's
+        // `:goal/depth`), tunnel along instead (issue 13b; docs/problems/iron-kit.md wall 1).
+        let deep = depth.is_some_and(|d| w.body.is_some_and(|b| b.pos[1] <= f64::from(d)));
         if deep {
             self.note(
                 tick,

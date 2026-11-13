@@ -142,6 +142,7 @@ spares = [["tag:pickaxes", 1]]
 provides = [["item:coal", 1]]
 act = "mine"
 blocks = ["coal_ore", "deepslate_coal_ore"]
+# The lowest feet height its stairs go to (clojurecraft's :goal/depth).
 depth = 40
 
 [[goal]]
@@ -153,6 +154,7 @@ spares = [["item:stone_pickaxe", 1], ["item:stick", 24]]
 provides = [["item:raw_iron", 1]]
 act = "mine"
 blocks = ["iron_ore", "deepslate_iron_ore"]
+# 26.x iron is mostly in a band from y -24 to 56 that peaks at 16 (docs/problems/iron-kit.md).
 depth = 16
 
 [[goal]]

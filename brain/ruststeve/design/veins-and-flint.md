@@ -26,7 +26,7 @@ related:
 Issue 13b.
 
 ## How it works
-- **Mine rows** name their blocks and a depth (`mine-coal` and `dig-gravel` 40, `mine-iron` 16, clojurecraft's): the nearest exposed block of the kinds (no X-ray, [[stairs-down]]'s rings) with a route is walked to and dug; with none, stairs down; once the feet are the row's depth below where the planner began, a **level tunnel** (`Stairs::level`: six level steps, each counted as a stair) instead.
+- **Mine rows** name their blocks and a depth, the lowest feet height their stairs go to (`mine-coal` and `dig-gravel` 40, `mine-iron` 16: clojurecraft's, and iron's main band peaks at 16): the nearest exposed block of the kinds (no X-ray, [[stairs-down]]'s rings) with a route is walked to and dug; with none, stairs down; once the feet are at the depth, a **level tunnel** (`Stairs::level`: six level steps, each counted as a stair) instead.
 - **The vein**: after each ore the planner decides again, and the exposed search runs out from the feet, so the ore the last dig uncovered beside it is the next taken while the row still wants its item: the whole vein before moving on (clojurecraft's `vein.clj`, by construction here).
 - **Chance drops**: a dig collects what the block always drops when nothing rarer does (gravel's gravel) and its chance drops before that (gravel's flint): either one picked up ends the collect.
 - **Flint** (`flint-from-gravel`, `Act::Redig`): a held gravel is put down beside the feet and dug again, one cycle a task; the planner asks again until flint is held (one in ten); the gravel is a need, so running out of it sends the bot for gravel.
@@ -36,4 +36,4 @@ Issue 13b.
 - Model: the kit from the `stone` kit (three iron as a vein, coal, stone by stairs, the furnace placed after a wall was dug); flint from thirty held gravel by re-digging.
 
 ## Limits
-- Depth counts from where the planner began, not the surface above the feet.
+- The first race measured depth from where the planner began (spawn minus 16, about y 68): 8 of 56 bots found any iron (docs/problems/iron-kit.md wall 1).

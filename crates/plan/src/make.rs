@@ -134,11 +134,11 @@ pub enum Act {
     /// Put a held block down near the player (`place-table`).
     Place(data::BlockKind),
     /// Dig an exposed block of these kinds with the held tool, or cut stairs down to find one,
-    /// at most `depth` blocks down (unbounded when absent).
+    /// down to the feet height `depth` (unbounded when absent).
     #[serde(skip)]
     Mine {
         blocks: &'static [data::BlockKind],
-        depth: Option<u32>,
+        depth: Option<i32>,
     },
     /// One run of a 2x2 recipe in window 0.
     #[serde(skip)]
@@ -191,9 +191,10 @@ pub struct GoalRow {
     /// Spares kept beside what it holds (issue 13b).
     #[serde(default)]
     pub spares: Vec<(String, i32)>,
-    /// How deep a `mine` row may cut stairs (issue 13b).
+    /// The lowest feet height a `mine` row cuts stairs to (issue 13b, clojurecraft's
+    /// `:goal/depth`).
     #[serde(default)]
-    pub depth: Option<u32>,
+    pub depth: Option<i32>,
 }
 
 /// `config/goals.toml`.
