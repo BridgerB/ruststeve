@@ -6,7 +6,7 @@ tags: [recording, replay, determinism, format]
 aliases: [Record, Header, Checkpoint, EventRecord, EffectRecord, Recorder, replay verify, .rsr]
 status: verified
 lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/record/src/lib.rs#    Controls(physics::Controls),"
   - "ruststeve:crates/record/src/lib.rs#pub enum Record {"

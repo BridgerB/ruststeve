@@ -30,6 +30,9 @@ Issue 11a. `Act::UseOn { pos, face }` right-clicks a block's face with the main 
 - Else a held block item is placed (`BlockItem.place`): in the clicked cell when it is replaceable (air, water, plants, snow), else in the cell beside it on the face; never in a cell the player's box overlaps; the held stack loses one.
 - Always: block updates for the clicked cell and its neighbour on the face, so a refused placement is corrected on the client.
 
+## The place task (issue 11b)
+`plan::place`: the item held first (`plan::hold`: selected if in the hotbar, else swapped into the hotbar's last slot through the cursor), then a floor cell beside the feet, at the feet's height, a block up or a block down (in a staircase the walls are solid at the feet; the stair just come down is open a block up), empty, a full block under it, not in the body; the click on the top of the block under it; done when the block update shows it there; another cell after 40 ticks; three tries.
+
 ## Evidence
 - Model tests: a table placed on the face clicked, the hand emptied, and never placed where the player stands.
 - Parity rows `t…` place a given table on stone laid east of the feet in real and model.

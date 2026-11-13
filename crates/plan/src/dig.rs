@@ -216,6 +216,16 @@ impl Dig {
                 let Some(kind) = w.block_at(pos(self.target)) else {
                     return (still, None, DigStatus::Failed(DigFailure::Refused));
                 };
+                // The fastest tool held that gets the block's drops goes in hand first, and the
+                // dig waits until the world shows it selected (issue 11b).
+                let items: Vec<ItemKind> = w.inventory.slots.values().map(|(k, _)| *k).collect();
+                if let Some(tool) = data::dig::best_tool(kind, items) {
+                    match crate::hold::toward(w, tool) {
+                        crate::hold::Hold::Held | crate::hold::Hold::Missing => {}
+                        crate::hold::Hold::Act(a) => return (still, Some(a), DigStatus::Running),
+                        crate::hold::Hold::Wait => return (still, None, DigStatus::Running),
+                    }
+                }
                 let Some(ticks) =
                     break_ticks(kind, held_item(w), body.eye_in_water, body.on_ground)
                 else {

@@ -50,6 +50,8 @@ struct Args {
     report: Option<PathBuf>,
     goals: String,
     rate: f64,
+    /// A start from `config/starts.toml` whose kit the model gives (issue 11: `table`).
+    start: Option<String>,
 }
 
 fn args() -> Result<Args, String> {
@@ -72,6 +74,7 @@ fn args() -> Result<Args, String> {
         report: None,
         goals: "config/goals.toml".to_owned(),
         rate: 0.95,
+        start: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -95,6 +98,7 @@ fn args() -> Result<Args, String> {
             "--check" => a.check = v == "true",
             "--report" => a.report = Some(PathBuf::from(v)),
             "--goals" => a.goals = v,
+            "--start" => a.start = Some(v),
             "--rate" => a.rate = v.parse().map_err(|e| format!("--rate: {e}"))?,
             other => return Err(format!("unknown flag {other}")),
         }
@@ -255,30 +259,36 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
     };
     let aim = a.goal.ok_or("--landings-file needs --goal")?;
     let table = match aim {
-        plan::Aim::Table => Some(std::sync::Arc::new(bot::goals_table(&a.goals)?)),
         plan::Aim::ReachLog { .. } => None,
+        plan::Aim::Table
+        | plan::Aim::Pickaxe
+        | plan::Aim::Cobblestone
+        | plan::Aim::StonePickaxe
+        | plan::Aim::StoneTools => Some(std::sync::Arc::new(bot::goals_table(&a.goals)?)),
     };
+    let kit: Vec<(data::ItemKind, i32)> = match &a.start {
+        None => Vec::new(),
+        Some(name) => {
+            let starts = results::config::Starts::read("config/starts.toml")?;
+            let s = starts.find(name).ok_or(format!("no start {name}"))?;
+            s.kit
+                .iter()
+                .filter_map(|(i, n)| Some((data::ItemKind::from_name(i)?, i32::try_from(*n).ok()?)))
+                .collect()
+        }
+    };
+    let play = bot::landings::Play { aim, table, kit };
     let list = results::parity::Landings::read(file)?;
     let n = list.landing.len();
     let runs: Vec<bot::landings::LandingRun> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..a.threads)
             .map(|t| {
                 let list = &list;
-                let table = table.clone();
+                let play = &play;
                 s.spawn(move || {
                     (0..n)
                         .filter(|i| *i as u64 % a.threads == t)
-                        .map(|i| {
-                            bot::landings::run_one(
-                                &a.worlds,
-                                list,
-                                i,
-                                config,
-                                aim,
-                                a.ticks,
-                                table.clone(),
-                            )
-                        })
+                        .map(|i| bot::landings::run_one(&a.worlds, list, i, config, play, a.ticks))
                         .collect::<Vec<_>>()
                 })
             })
@@ -293,6 +303,7 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
     let what = match aim {
         plan::Aim::ReachLog { min_distance } => format!("reach a log {min_distance}+ blocks away"),
         plan::Aim::Table => format!("hold a crafting table (the kit) within {} ticks", a.ticks),
+        other => format!("meet the {} goal within {} ticks", other.name(), a.ticks),
     };
     let m = bot::landings::measure(
         &runs,

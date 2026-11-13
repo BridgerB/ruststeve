@@ -34,6 +34,9 @@ Issue 11a. A tool's speed and drops, and every item's stack size, come from the 
 - **`data::dig`** (`Player.getDestroySpeed`, `getDestroyProgress`): the held tool's speed (1.0 for anything else), × 0.2 with the eyes in water, ÷ 5 off the ground, over the hardness, over 30 when the hand or the tool harvests the block (`!requiresCorrectToolForDrops || isCorrectForDrops`), else 100. `break_ticks` is the fewest n with `progress × n ≥ 1` in `float`, the server's own comparison (`ceil(1/p)` in doubles came out a tick high).
 - Numbers: stone by hand 150 ticks and no drop; a wooden pickaxe 23 ticks, cobblestone; a stone pickaxe 12; a log by hand 60. A wooden pickaxe stacks to 1 and lasts 59 blocks; a stone one 131; an ender pearl stacks to 16.
 
+## Holding (issue 11b)
+`plan::hold::toward(item)`: `Held` when the selected hotbar slot holds it; else the hotbar slot that does is selected (`Act::Hold`), or the item is swapped into the hotbar's last slot through the cursor; `Wait` while a click is in flight or a window is open. The dig task holds `data::dig::best_tool` (the fastest held tool that gets the block's drops) before START and waits for the world to show it.
+
 ## Limits
 - Enchantments, haste, mining fatigue and the `mining_efficiency` attribute are not modelled.
 - Tool wear is not in the model yet (a wooden pickaxe lasts 59 blocks, past issue 11's digs).
