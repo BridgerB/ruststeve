@@ -131,6 +131,13 @@ pub struct ItemProps {
     pub max_stack: i64,
     pub max_damage: i64,
     pub tool: Option<ToolProps>,
+    /// The `food` component: nutrition, saturation, whether it can be eaten full; and the
+    /// `consumable` component's seconds (1.6 when absent from it); and the `use_remainder`
+    /// item left in its place (a honey bottle's glass bottle) (issue 12a).
+    pub food: Option<(i64, f64, bool, f64, Option<String>)>,
+    /// The main-hand `attack_damage` and `attack_speed` modifiers (added to the player's base 1
+    /// and 4) of a weapon or tool.
+    pub attack: Option<(f64, f64)>,
 }
 
 /// A tool's rules, evaluated against every block as vanilla's `Tool` does: the speed is the first
@@ -850,12 +857,45 @@ fn read_item_props(
                 Some(ToolProps { speeds, correct })
             }
         };
+        let food = match &c["minecraft:food"] {
+            Value::Null => None,
+            f => Some((
+                f["nutrition"].as_i64().unwrap_or(0),
+                f["saturation"].as_f64().unwrap_or(0.0),
+                f["can_always_eat"].as_bool().unwrap_or(false),
+                c["minecraft:consumable"]["consume_seconds"]
+                    .as_f64()
+                    .unwrap_or(1.6),
+                c["minecraft:use_remainder"]["id"]
+                    .as_str()
+                    .map(|s| s.trim_start_matches("minecraft:").to_owned()),
+            )),
+        };
+        let modifier = |kind: &str| {
+            c["minecraft:attribute_modifiers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|m| {
+                    m["type"].as_str() == Some(kind) && m["slot"].as_str() == Some("mainhand")
+                })
+                .and_then(|m| m["amount"].as_f64())
+        };
+        let attack = match (
+            modifier("minecraft:attack_damage"),
+            modifier("minecraft:attack_speed"),
+        ) {
+            (None, None) => None,
+            (d, s) => Some((d.unwrap_or(0.0), s.unwrap_or(0.0))),
+        };
         out.insert(
             name.clone(),
             ItemProps {
                 max_stack,
                 max_damage,
                 tool,
+                food,
+                attack,
             },
         );
     }

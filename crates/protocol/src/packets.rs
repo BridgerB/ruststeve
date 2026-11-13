@@ -196,6 +196,17 @@ pub enum S2c {
         collector: i32,
         amount: i32,
     },
+    /// The server's velocity for an entity, in blocks a tick (an LpVec3): knockback on the bot.
+    SetEntityMotion {
+        id: i32,
+        velocity: [f64; 3],
+    },
+    /// An entity's status byte (3: a living entity's death; 9: the player finished using an
+    /// item, an eat).
+    EntityEvent {
+        id: i32,
+        status: i8,
+    },
     /// A window opened: its id and its menu type (an index into `data::MENU`); the title is
     /// skipped.
     OpenScreen {
@@ -467,6 +478,14 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 collector: r.varint()?,
                 amount: r.varint()?,
             },
+            Some(PlayIn::SetEntityMotion) => S2c::SetEntityMotion {
+                id: r.varint()?,
+                velocity: r.lpvec3()?,
+            },
+            Some(PlayIn::EntityEvent) => S2c::EntityEvent {
+                id: r.i32()?,
+                status: r.i8()?,
+            },
             Some(PlayIn::OpenScreen) => S2c::OpenScreen {
                 window: r.varint()?,
                 menu: r.varint()?,
@@ -584,6 +603,18 @@ pub enum C2s {
         inside: bool,
         sequence: i32,
     },
+    /// Melee (issue 12a): 775's dedicated packet, the entity id alone (`interact` is right-click
+    /// only; brain/wire/wire-actions.md).
+    Attack {
+        entity: i32,
+    },
+    /// Right-click aimed by look with a hand (eating starts here): hand, sequence, yaw, pitch.
+    UseItem {
+        hand: i32,
+        sequence: i32,
+        yaw: f32,
+        pitch: f32,
+    },
 }
 
 impl C2s {
@@ -607,6 +638,8 @@ impl C2s {
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
             | C2s::UseItemOn { .. }
+            | C2s::Attack { .. }
+            | C2s::UseItem { .. }
             | C2s::ContainerClick { .. }
             | C2s::ContainerClose { .. }
             | C2s::Swing { .. }
@@ -763,6 +796,22 @@ impl C2s {
                 w.bool(false); // not past the world border
                 w.varint(*sequence);
                 PlayOut::UseItemOn.id()
+            }
+            C2s::Attack { entity } => {
+                w.varint(*entity);
+                PlayOut::Attack.id()
+            }
+            C2s::UseItem {
+                hand,
+                sequence,
+                yaw,
+                pitch,
+            } => {
+                w.varint(*hand);
+                w.varint(*sequence);
+                w.f32(*yaw);
+                w.f32(*pitch);
+                PlayOut::UseItem.id()
             }
         };
         Ok((id, w.buf))
@@ -1016,6 +1065,16 @@ impl S2c {
             S2c::SetCursorItem { item } => {
                 crate::slot::write_slot(&mut w, *item);
                 PlayIn::SetCursorItem.id()
+            }
+            S2c::SetEntityMotion { id, velocity } => {
+                w.varint(*id);
+                w.lpvec3(*velocity);
+                PlayIn::SetEntityMotion.id()
+            }
+            S2c::EntityEvent { id, status } => {
+                w.i32(*id);
+                w.i8(*status);
+                PlayIn::EntityEvent.id()
             }
             S2c::OpenScreen { window, menu } => {
                 w.varint(*window);

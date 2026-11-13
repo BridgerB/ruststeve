@@ -3,10 +3,10 @@ title: Entities and the inventory
 description: How the world folds entities (adds, moves, syncs, teleports, metadata, removals) and window 0, the player's inventory (content, slot and player-inventory packets, menu slots, truncated slots); what is counted rather than invented.
 type: reference
 tags: [world, entities, metadata, inventory, slots]
-aliases: [Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
+aliases: [kills, struck, air, on fire, uses_finished, Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+lastUpdated: 2026-11-13
+verifiedAgainst: ruststeve@8a59f07 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -45,6 +45,11 @@ related:
 ## Death and hits
 - `World::death`: the server's death message for the bot's own id (`player_combat_kill`, [[wire-nbt-text]]); the race ends the run there.
 - `World::hits`: `damage_event`s naming the bot, the damage type by name and the cause and direct entities by kind when the world holds them; kept for a minute of server ticks (`HITS_KEPT_TICKS`), the window a case file reports.
+
+## Air, fire, food and kills (issue 12a)
+- The bot's own `set_entity_data`: index 1 is the air supply (`Player.air`), index 0 bit 0 burning (`on_fire`); `set_health` carries food and saturation.
+- `set_entity_motion` (an `LpVec3`) sets the body's velocity: the server's knockback.
+- `entity_event` 9 for the bot counts a finished use (`uses_finished`); 3 marks an entity dead, and counts a kill when the bot had struck it (`Act::Attack` sets `struck`). Deaths in view the bot did not cause are not kills.
 
 ## Limits
 - A live session so far ran with an empty inventory (a fresh player); inventory folding is shown by the tests.

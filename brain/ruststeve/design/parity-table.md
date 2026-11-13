@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 105 moments (walks, digs, crafts, stone and the table), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 119 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
-aliases: [dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
+aliases: [drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3fa1b05
+lastUpdated: 2026-11-13
+verifiedAgainst: ruststeve@8a59f07
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -42,7 +42,8 @@ A sim number counts only after the model agrees with a real server at the same m
 - **The outcome class**, compared field by field: the final block cell, on the ground, in water, corrected (a teleport after the script began), the lowest health during the script (full, hurt, dead), and since 10b the inventory by item name (slots 1-45 and the cursor) and the count in the grid, result and cursor.
 - **Random drops are not a class**: an item some block drops only by chance and no recipe makes (a sapling from leaves, a seed from grass, flint from gravel) is left out of the inventory on both sides; sticks, which a dead bush drops by chance, stay in (11a found them left out). The model's roll is seeded, not vanilla's, and **a fresh server grows different canopies on the same seed** from run to run (two runner captures disagree about leaves at landings 4 and 7), so no dig spot can be promised leaf-free.
 - **Stone and table rows** (issue 11a), on the five dry landings (digging and placing from water is issue 12's): a moment may `set` blocks at the start (`setblock` by RCON in real, retried until the chunk is loaded, which right after a teleport it often is not; into the model's world in sim). Stone under the feet dug by hand (the delayed destroy at 150 ticks, no drop) and with a given wooden pickaxe (late and early FINISH); a table placed east of the feet on laid stone, opened, and a wooden pickaxe crafted, or a stone pickaxe and a sword.
-- **The stated tolerance**: all but 2 of the moments match in every field (103 of 105; 78 of 80 with 10b; 48 of 50 before). A mismatch is a model or harness bug until shown otherwise, never tuned away.
+- **Survival rows** (issue 12a), on the dry landings: a moment may say `breathe = false` (no water breathing), `effects` (`effect give` in real, the model's `Life` in sim) and `summon` (a mob with no AI, no loot and kept). Drowning in a capped water shaft, standing in fire on netherrack, lava in a stone cup, a honey bottle drunk after a hunger effect (`eat:220`), and a stone sword against a cow two blocks east (`attack:13:270`, a swing each 13 ticks, the sword's full charge being 12.5). The class gains the food the server last sent and the bot's kills (deaths of entities it struck).
+- **The stated tolerance**: all but 2 of the moments match in every field (117 of 119; 103 of 105; 78 of 80 with 10b; 48 of 50 before). A mismatch is a model or harness bug until shown otherwise, never tuned away.
 - **simrace**: lanes of lockstep runs in generated worlds, the same case and batch files with `source = sim`, released as `race-sim-<run>` so the insight store keeps sim beside real, never mixed.
 
 ## What the table found
@@ -58,8 +59,10 @@ Issue 10b's 30 rows first matched 28: the bot's world kept a stale cursor (a cli
 
 Issue 11a's 25 rows first matched 15 locally: `setblock` landed before the chunk loaded (retried now), the model judged the eyes in water by the cell alone (now by the fluid's height), a scripted click changed nothing and the craft stalled, and water starts differed (the rows moved to dry landings). Then 25 of 25, and 105 of 105 with the earlier rows.
 
+Issue 12a's 14 rows first differed only in kills: the world counted every death in view (another bot's cow, a bot in lava), so it now counts only entities it struck; and one cow row was kicked (`invalid_entity_attacked`) for swinging at the cow's experience orb, so the script strikes only mobs. Eating bread could not be a row on peaceful, which keeps the food full: the rows drink a honey bottle, which can always be drunk. Then 14 of 14 locally.
+
 ## Limits
-- No mobs (peaceful) and no air or drowning yet: the real side gives water breathing. Both join the table with issue 12 (survival), as rows, before any sim number about them counts.
+- The server runs peaceful, which removes hostile mobs: zombie rows (their attacks and knockback) need a non-peaceful row and come with defence (12d). Rows other than the drowning ones still breathe.
 - Moments test movement, falls, the server's corrections, digging by hand, drops and pickup and the 2x2 grid; tools, placing and other windows add moments with their issues.
 - A dig row checks whether the block broke by the row's end, not the tick it broke on.
 

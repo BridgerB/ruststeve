@@ -28,8 +28,8 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows).
-const TOLERANCE: usize = 103;
+/// table rows; 117 of 119 with issue 12a's survival rows).
+const TOLERANCE: usize = 117;
 
 struct Args {
     cmd: String,
@@ -152,6 +152,8 @@ fn outcome(
         health,
         inventory,
         grid,
+        food: w.player.food,
+        kills: w.kills,
     })
 }
 
@@ -218,6 +220,7 @@ fn real(a: &Args) -> Result<(), String> {
             // water for its chunks would drown on a clock the model does not keep, so the real
             // side breathes. Stated in the report; drowning joins the table with issue 12.
             let breathe = format!("effect give {name} minecraft:water_breathing 600 0 true");
+            let breathe_on = m.breathe;
             let gives: Vec<String> = m
                 .give
                 .iter()
@@ -225,6 +228,18 @@ fn real(a: &Args) -> Result<(), String> {
                 .chain(m.set.iter().map(|(b, dx, dy, dz)| {
                     let (x, y, z) = feet_cell(start);
                     format!("setblock {} {} {} minecraft:{b}", x + dx, y + dy, z + dz)
+                }))
+                .chain(m.effects.iter().map(|(e, secs, amp)| {
+                    format!("effect give {name} minecraft:{e} {secs} {amp} true")
+                }))
+                .chain(m.summon.iter().map(|(e, dx, dy, dz)| {
+                    let (x, y, z) = feet_cell(start);
+                    format!(
+                        "summon minecraft:{e} {} {} {} {{NoAI:1b,DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b,Silent:1b}}",
+                        f64::from(x + dx) + 0.5,
+                        y + dy,
+                        f64::from(z + dz) + 0.5
+                    )
                 }))
                 .collect();
             let opts = bot::Opts {
@@ -239,7 +254,9 @@ fn real(a: &Args) -> Result<(), String> {
                 deadline: Some(Instant::now() + Duration::from_secs(300)),
                 start: Some(Box::new(move || {
                     let mut r = rcon::Rcon::connect(&rcon_addr, &password)?;
-                    r.command(&breathe)?;
+                    if breathe_on {
+                        r.command(&breathe)?;
+                    }
                     r.command(&tp)?;
                     // A setblock right after the teleport can land before the chunk loads
                     // ("That position is not loaded") and do nothing: try again until it does.
@@ -328,6 +345,30 @@ fn sim(a: &Args) -> Result<(), String> {
             model
                 .survival
                 .give(give_of(g).ok_or_else(|| format!("{}: give {g}", m.id))?);
+        }
+        model.survival.life.water_breathing = m.breathe;
+        for (e, secs, amp) in &m.effects {
+            match e.as_str() {
+                "hunger" => model.survival.life.hunger = Some((secs * 20, *amp)),
+                other => return Err(format!("{}: the model has no effect {other}", m.id)),
+            }
+        }
+        for (e, dx, dy, dz) in &m.summon {
+            let (x, y, z) = feet_cell(start);
+            let kind = data::generated::entities::ENTITY_NAMES
+                .iter()
+                .position(|n| n == e)
+                .and_then(|i| u32::try_from(i).ok())
+                .map(data::EntityKind::from_id)
+                .ok_or_else(|| format!("{}: no entity {e}", m.id))?;
+            model.summon(
+                kind,
+                [
+                    f64::from(x + dx) + 0.5,
+                    f64::from(y + dy),
+                    f64::from(z + dz) + 0.5,
+                ],
+            );
         }
         let run = bot::lockstep::run_acting(
             model,

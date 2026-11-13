@@ -686,7 +686,7 @@ pub fn item_props_rs(g: &Game) -> Result<String> {
     let mut s = header();
     writeln!(s, "use super::blocks::BlockKind;")?;
     writeln!(s, "use super::items::ItemKind;")?;
-    writeln!(s, "use crate::types::Tool;\n")?;
+    writeln!(s, "use crate::types::{{Food, Tool, Weapon}};\n")?;
     writeln!(s, "/// Each item's default max stack size, by item id.")?;
     writeln!(s, "pub static MAX_STACK: [u8; {}] = [", g.items.names.len())?;
     for n in &g.items.names {
@@ -749,6 +749,82 @@ pub fn item_props_rs(g: &Game) -> Result<String> {
         writeln!(s, "    ] }},")?;
     }
     writeln!(s, "];\n")?;
+    writeln!(
+        s,
+        "/// Every food (the `food` component), in item-id order: nutrition, saturation, whether it"
+    )?;
+    writeln!(
+        s,
+        "/// can be eaten full, the ticks it takes (the `consumable` component's seconds × 20) and what\n/// is left in its place (`use_remainder`)."
+    )?;
+    let foods: Vec<_> = g
+        .items
+        .names
+        .iter()
+        .filter_map(|n| prop(n).ok()?.food.clone().map(|f| (n, f)))
+        .collect();
+    writeln!(s, "pub static FOODS: [Food; {}] = [", foods.len())?;
+    for (n, (nutrition, sat, always, secs, rest)) in &foods {
+        let remainder = rest.as_ref().map_or("None".to_owned(), |r| {
+            format!("Some(ItemKind::{})", pascal(r))
+        });
+        writeln!(
+            s,
+            "    Food {{ item: ItemKind::{}, nutrition: {}, saturation: {:?}, always: {always}, ticks: {}, remainder: {remainder} }},",
+            pascal(n),
+            u8::try_from(*nutrition)?,
+            // Saturation is written as a computed double (2.4 for an apple): the nearest float.
+            *sat as f32,
+            (secs * 20.0).round() as u16
+        )?;
+    }
+    writeln!(s, "];\n")?;
+    writeln!(
+        s,
+        "/// Every item with main-hand attack modifiers, in item-id order: its `attack_damage` and"
+    )?;
+    writeln!(
+        s,
+        "/// `attack_speed` modifiers, added to the player's base 1 and 4."
+    )?;
+    let weapons: Vec<_> = g
+        .items
+        .names
+        .iter()
+        .filter_map(|n| prop(n).ok()?.attack.map(|a| (n, a)))
+        .collect();
+    writeln!(s, "pub static WEAPONS: [Weapon; {}] = [", weapons.len())?;
+    for (n, (d, sp)) in &weapons {
+        writeln!(
+            s,
+            "    Weapon {{ item: ItemKind::{}, damage: {d:?}, speed: {sp:?} }},",
+            pascal(n)
+        )?;
+    }
+    writeln!(s, "];\n")?;
+    writeln!(s, "/// An item as food, if it is one.")?;
+    writeln!(
+        s,
+        "pub fn food_of(item: ItemKind) -> Option<&'static Food> {{"
+    )?;
+    writeln!(
+        s,
+        "    FOODS.binary_search_by_key(&item.id(), |f| f.item.id()).ok().and_then(|i| FOODS.get(i))"
+    )?;
+    writeln!(s, "}}\n")?;
+    writeln!(
+        s,
+        "/// An item's main-hand attack modifiers, if it has them."
+    )?;
+    writeln!(
+        s,
+        "pub fn weapon_of(item: ItemKind) -> Option<&'static Weapon> {{"
+    )?;
+    writeln!(
+        s,
+        "    WEAPONS.binary_search_by_key(&item.id(), |w| w.item.id()).ok().and_then(|i| WEAPONS.get(i))"
+    )?;
+    writeln!(s, "}}\n")?;
     writeln!(s, "/// An item's max stack size (64 for an unknown id).")?;
     writeln!(s, "pub fn max_stack(item: ItemKind) -> i32 {{")?;
     writeln!(

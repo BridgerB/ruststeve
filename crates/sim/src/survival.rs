@@ -135,6 +135,8 @@ pub struct Survival {
     container_counter: i32,
     /// Blocks placed.
     pub placed: u64,
+    /// Air, fire, hunger, eating and placed mobs (issue 12a, `life`).
+    pub life: crate::life::Life,
 }
 
 impl Survival {
@@ -158,6 +160,7 @@ impl Survival {
             table: None,
             container_counter: 0,
             placed: 0,
+            life: crate::life::Life::default(),
         }
     }
 
@@ -178,6 +181,17 @@ impl Survival {
     /// `Mth.nextDouble(random, lo, hi)`.
     fn between(&mut self, lo: f64, hi: f64) -> f64 {
         lo + self.next_double() * (hi - lo)
+    }
+
+    /// The next entity id the model gives.
+    pub(crate) fn next_id(&mut self) -> i32 {
+        let id = self.next_entity;
+        self.next_entity += 1;
+        id
+    }
+
+    pub(crate) fn held_slot_index(&self) -> usize {
+        self.held_menu_slot()
     }
 
     fn held_menu_slot(&self) -> usize {
@@ -405,7 +419,7 @@ impl Sim {
     /// waterlogged block, kelp, seagrass, a bubble column) holds `amount / 9` of a block, the
     /// amount 8 for a source or falling water, `8 - level` for a flow; a full block when water
     /// is above it (`FluidState.getHeight`).
-    fn eye_in_water(&self, eye_y: f64, (x, y, z): (i32, i32, i32)) -> bool {
+    pub(crate) fn eye_in_water(&self, eye_y: f64, (x, y, z): (i32, i32, i32)) -> bool {
         let Some(state) = self.state_at(x, y, z) else {
             return false;
         };
@@ -484,6 +498,7 @@ impl Sim {
                 1 => {
                     self.survival.dig = None;
                 }
+                5 => self.on_release_use(),
                 other => self.violations.push(format!("player action {other}")),
             }
         }
@@ -558,6 +573,7 @@ impl Sim {
         let air = BlockKind::Air.info().map_or(0, |i| i.default_state);
         self.world.set_block(pos.0, pos.1, pos.2, air)?;
         self.survival.broken += 1;
+        self.mined();
         let mut out = vec![self.block_update(pos)?];
         // setBlock's neighbour updates run before the broken block's own drops: what rested on
         // it pops off first.
