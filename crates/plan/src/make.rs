@@ -187,6 +187,23 @@ pub struct Survival {
     /// ... and within this when starving: food at or under `starving_below`.
     pub starving_below: i32,
     pub starving_radius: f64,
+    /// A hostile mob this near is answered (`defend`, issue 12d) ...
+    #[serde(default = "defend_radius")]
+    pub defend_radius: f64,
+    /// ... but never fought at or under this health (the next two hits and a margin) ...
+    #[serde(default = "danger_health")]
+    pub danger_health: f32,
+    /// ... nor these kinds, by entity name: backed away from.
+    #[serde(default)]
+    pub never_fight: Vec<String>,
+}
+
+fn defend_radius() -> f64 {
+    4.0
+}
+
+fn danger_health() -> f32 {
+    8.0
 }
 
 impl Default for Survival {
@@ -197,6 +214,9 @@ impl Default for Survival {
             hunt_radius: 24.0,
             starving_below: 6,
             starving_radius: 48.0,
+            defend_radius: defend_radius(),
+            danger_health: danger_health(),
+            never_fight: Vec::new(),
         }
     }
 }
@@ -205,6 +225,8 @@ impl Default for Survival {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Always {
     Escape(crate::escape::TrapKind),
+    /// A hostile mob near (issue 12d).
+    Defend,
     /// Hungry with something edible held (issue 12c).
     Eat,
     /// Hungry with nothing edible held: kill an animal for its meat (issue 12c).
@@ -219,6 +241,9 @@ pub struct SurvivalRules {
     pub hunt_radius: f64,
     pub starving_below: i32,
     pub starving_radius: f64,
+    pub defend_radius: f64,
+    pub danger_health: f32,
+    pub never_fight: Vec<data::EntityKind>,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -352,11 +377,13 @@ impl Table {
                 let a = match (r.trap.as_deref(), r.act.as_deref()) {
                     (Some(t), None) => crate::escape::TrapKind::parse(t).map(Always::Escape),
                     (None, Some("eat")) => Some(Always::Eat),
+                    (None, Some("defend")) => Some(Always::Defend),
                     (None, Some("hunt")) => Some(Always::Hunt),
                     _ => None,
                 };
-                a.map(|a| (r.id.clone(), a))
-                    .ok_or_else(|| format!("always {}: needs one trap or act eat/hunt", r.id))
+                a.map(|a| (r.id.clone(), a)).ok_or_else(|| {
+                    format!("always {}: needs one trap or act defend/eat/hunt", r.id)
+                })
             })
             .collect::<Result<_, _>>()?;
         let unsafe_foods = g
@@ -364,6 +391,19 @@ impl Table {
             .unsafe_foods
             .iter()
             .map(|n| data::ItemKind::from_name(n).ok_or_else(|| format!("survival: no item {n}")))
+            .collect::<Result<_, _>>()?;
+        let never_fight = g
+            .survival
+            .never_fight
+            .iter()
+            .map(|n| {
+                data::generated::entities::ENTITY_NAMES
+                    .iter()
+                    .position(|e| e == n)
+                    .and_then(|i| u32::try_from(i).ok())
+                    .map(data::EntityKind::from_id)
+                    .ok_or_else(|| format!("survival: no entity {n}"))
+            })
             .collect::<Result<_, _>>()?;
         Ok(Self {
             goals,
@@ -375,6 +415,9 @@ impl Table {
                 hunt_radius: g.survival.hunt_radius,
                 starving_below: g.survival.starving_below,
                 starving_radius: g.survival.starving_radius,
+                defend_radius: g.survival.defend_radius,
+                danger_health: g.survival.danger_health,
+                never_fight,
             },
         })
     }

@@ -101,6 +101,16 @@ trap = "fire"
 # hungry_below with something safe held; with nothing, kill the nearest animal whose loot is safe
 # food and pick it up (plan::eat, plan::hunt).
 
+# Issue 12d's row, ahead of food (clojurecraft's :defend): a hostile mob within defend_radius is
+# fought, or backed away from under danger_health and when it is one of never_fight
+# (plan::defend).
+
+[[always]]
+id = "defend"
+priority = 0
+doc = "answer a hostile mob within defend_radius: fight it, or back away"
+act = "defend"
+
 [[always]]
 id = "eat"
 priority = 0
@@ -125,3 +135,9 @@ unsafe_foods = ["rotten_flesh", "spider_eye", "pufferfish", "poisonous_potato", 
 hunt_radius = 24.0
 starving_below = 6
 starving_radius = 48.0
+# A hostile this near is answered (clojurecraft's :defend row: within 4 blocks).
+defend_radius = 4.0
+# Never fight at or under this health: two zombie hits on Normal (3 each) and a margin of 2.
+danger_health = 8.0
+# Never fought, only backed away from: a creeper's blast does far more than any fight wins.
+never_fight = ["creeper"]

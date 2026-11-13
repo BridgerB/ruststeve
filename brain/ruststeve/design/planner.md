@@ -42,7 +42,7 @@ Issue 09a begins the `plan` crate (core): `Plan::step(&World) -> Controls`, the 
 - **Choosing a target needs a walkable route** (clojurecraft's `walkable?`): found, or partial only toward a column not loaded yet; an explore takes any route with waypoints. With no log walkable, explore is the fallback in the same choice.
 
 ## Always-rows (issue 12b)
-Every tick, before its task and before checking whether the aim is met, the planner asks `Plan::always` whether a trap the table answers is in force: one cuts the task in hand and runs an escape until the trap clears ([[escapes]]). `Aim::Hold` has no goal: only the always-rows run. Issue 12c adds `eat` and `hunt` after the escapes ([[food-and-hunting]]): each runs to its own end, an escape cuts either, and a running hunt is not cut by the meal.
+Every tick, before its task and before checking whether the aim is met, the planner asks `Plan::always` whether a trap the table answers is in force: one cuts the task in hand and runs an escape until the trap clears ([[escapes]]). `Aim::Hold` has no goal: only the always-rows run. Issue 12d adds `defend` after the escapes ([[combat-and-pacing]]); issue 12c adds `eat` and `hunt` after it ([[food-and-hunting]]): each runs to its own end, an escape cuts either, and a running hunt is not cut by the meal.
 
 ## The measure (issue 09, the `walk` job in ci.yml)
 - **Landings**: `config/landings-grid.toml`, a 20 × 16 grid on the race seed, 192 blocks apart, captured byte for byte (radius 4) from a fresh server; cached in CI by the list's hash.
