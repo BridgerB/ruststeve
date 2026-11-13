@@ -291,6 +291,8 @@ impl Sim {
                 },
             ) => self.on_click(*window, *state_id, *slot, *button, *mode),
             (Phase::Play, C2s::ContainerClose { window }) => self.on_close(*window),
+            (Phase::Play, C2s::UseItem { sequence, .. }) => self.on_use_item(*sequence),
+            (Phase::Play, C2s::Attack { entity }) => self.on_attack(*entity),
             (
                 Phase::Play,
                 C2s::UseItemOn {
@@ -325,6 +327,7 @@ impl Sim {
             },
         )?];
         out.extend(self.chunks_around()?);
+        out.extend(self.mobs_added()?);
         out.push(self.teleport(self.pos)?);
         out.push(wire(
             State::Play,
@@ -499,6 +502,10 @@ impl Sim {
             self.violations.push(format!("moved wrongly to {to:?}"));
             return self.correct(old);
         }
+        // `jumpFromGround`: a move that leaves the ground going up.
+        if self.survival.on_ground && !on_ground && to[1] > old[1] {
+            self.jumped();
+        }
         self.pos = to;
         self.survival.on_ground = on_ground;
         let mut out = self.fall(delta[1], on_ground)?;
@@ -527,7 +534,7 @@ impl Sim {
             if self.fall_distance > 0.0 {
                 let damage = (self.fall_distance + 1e-6 - SAFE_FALL).floor();
                 if damage > 0.0 {
-                    out.extend(self.hurt(damage as f32, "fall", "death.attack.fall")?);
+                    out.extend(self.hurt_player(damage as f32, "fall", "death.attack.fall")?);
                 }
             }
             self.fall_distance = 0.0;
@@ -565,11 +572,12 @@ impl Sim {
                 State::Play,
                 &S2c::SetHealth {
                     health: self.health,
-                    food: 20,
-                    saturation: 5.0,
+                    food: self.survival.life.food,
+                    saturation: self.survival.life.saturation,
                 },
             )?,
         ];
+        self.survival.life.note_health_sent(self.health);
         if self.health <= 0.0 {
             let death = protocol::nbt::Death {
                 text: format!("{death_key} {}", self.name),
@@ -605,15 +613,8 @@ impl Sim {
             && self.health < 20.0
             && self.ticks.is_multiple_of(20)
         {
+            // Told by `life`'s sync below, with the food.
             self.health = (self.health + 1.0).min(20.0);
-            out.push(wire(
-                State::Play,
-                &S2c::SetHealth {
-                    health: self.health,
-                    food: 20,
-                    saturation: 5.0,
-                },
-            )?);
         }
         if let Some((_, at)) = self.keep_alive
             && self.ticks - at >= KEEP_ALIVE_LIMIT
@@ -629,6 +630,7 @@ impl Sim {
         // changes (ServerPlayer.doTick's broadcastChanges).
         out.extend(self.tick_digging()?);
         out.extend(self.tick_items()?);
+        out.extend(self.tick_life()?);
         out.extend(self.tick_menu()?);
         out.extend(self.broadcast_changes()?);
         Ok(out)
@@ -697,6 +699,7 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
     })
 }
 
+pub mod life;
 pub mod survival;
 pub mod terrain;
 

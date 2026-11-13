@@ -55,6 +55,12 @@ pub struct Entity {
     /// Server ticks when it was added and last moved or described.
     pub first_seen: u64,
     pub last_seen: u64,
+    /// The server said it died (entity event 3); it is removed a moment later.
+    #[serde(default)]
+    pub dead: bool,
+    /// The bot has sent it an `attack`: its death counts as a kill.
+    #[serde(default)]
+    pub struck: bool,
 }
 
 impl Entity {
@@ -244,6 +250,14 @@ pub enum Act {
         pos: BlockPos,
         face: i8,
     },
+    /// Melee an entity (775's `attack` packet, issue 12a).
+    Attack {
+        entity: i32,
+    },
+    /// Start using the held item, aimed by the body's look (eating starts here).
+    UseItem,
+    /// Let go of the use key (`player_action` status 5).
+    ReleaseUse,
 }
 
 /// A window the server opened (`open_screen`, issue 11a): its id, menu type (an index into
@@ -342,6 +356,15 @@ pub struct Player {
     pub health: Option<f32>,
     pub food: Option<i32>,
     pub saturation: Option<f32>,
+    /// The air supply, 300 full (the player's own metadata index 1), and whether it is on fire
+    /// (index 0, bit 0), as the server last said (issue 12a).
+    #[serde(default)]
+    pub air: Option<i32>,
+    #[serde(default)]
+    pub on_fire: bool,
+    /// Items finished using (an eat: entity event 9 for the bot), counted.
+    #[serde(default)]
+    pub uses_finished: u64,
 }
 
 /// The world value.
@@ -415,6 +438,10 @@ pub struct World {
     /// The window open besides the inventory (issue 11a).
     #[serde(default)]
     pub window: Option<Window>,
+    /// Entities the bot struck that the server then said died (entity event 3) (issue 12a):
+    /// other deaths in view (another player's kill, a player in lava) are not the bot's.
+    #[serde(default)]
+    pub kills: u64,
 }
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
@@ -712,6 +739,27 @@ impl World {
                 self.click = None;
                 vec![Effect::Send(C2s::ContainerClose { window })]
             }
+            Act::Attack { entity } => {
+                if let Some(e) = self.entities.get_mut(&entity) {
+                    e.struck = true;
+                }
+                vec![Effect::Send(C2s::Attack { entity })]
+            }
+            Act::UseItem => {
+                self.sequence_sent += 1;
+                vec![Effect::Send(C2s::UseItem {
+                    hand: 0,
+                    sequence: self.sequence_sent,
+                    yaw: self.controls.yaw as f32,
+                    pitch: 0.0,
+                })]
+            }
+            Act::ReleaseUse => vec![Effect::Send(C2s::PlayerAction {
+                status: 5,
+                pos: (0, 0, 0),
+                face: 0,
+                sequence: 0,
+            })],
             Act::UseOn { pos, face } => {
                 self.sequence_sent += 1;
                 // The cursor at the middle of the face clicked.
@@ -821,6 +869,8 @@ impl World {
                             metadata: BTreeMap::new(),
                             first_seen: tick,
                             last_seen: tick,
+                            dead: false,
+                            struck: false,
                         },
                     );
                 }
@@ -853,6 +903,15 @@ impl World {
             S2c::EntityPositionSync { id, x, y, z } => self.place_entity(*id, [*x, *y, *z], 0),
             S2c::TeleportEntity { id, x, y, z, flags } => {
                 self.place_entity(*id, [*x, *y, *z], *flags)
+            }
+            S2c::SetEntityData { id, entries } if Some(*id) == self.player.entity_id => {
+                for (index, value) in entries {
+                    match (index, value) {
+                        (1, MetaValue::Int(air)) => self.player.air = Some(*air),
+                        (0, MetaValue::Byte(flags)) => self.player.on_fire = flags & 1 == 1,
+                        _ => {}
+                    }
+                }
             }
             S2c::SetEntityData { id, entries } => {
                 let tick = self.session.server_ticks;
@@ -990,6 +1049,30 @@ impl World {
                 if self.window.as_ref().is_some_and(|w| w.id == *window) {
                     self.window = None;
                     self.click = None;
+                }
+            }
+            S2c::SetEntityMotion { id, velocity } => {
+                // Knockback on the bot: the server sets its velocity (the client's
+                // `handleSetEntityMotion` sets `deltaMovement`).
+                if Some(*id) == self.player.entity_id
+                    && let Some(b) = self.body.as_mut()
+                    && velocity.iter().all(|v| v.is_finite())
+                {
+                    b.vel = *velocity;
+                }
+            }
+            S2c::EntityEvent { id, status } => {
+                if Some(*id) == self.player.entity_id {
+                    if *status == 9 {
+                        self.player.uses_finished += 1;
+                    }
+                } else if *status == 3
+                    && let Some(e) = self.entities.get_mut(id)
+                {
+                    if !e.dead && e.struck {
+                        self.kills += 1;
+                    }
+                    e.dead = true;
                 }
             }
             S2c::OpenScreen { window, menu } => {

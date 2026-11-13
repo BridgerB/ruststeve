@@ -30,6 +30,21 @@ pub struct Moment {
     /// a table).
     #[serde(default)]
     pub set: Vec<(String, i32, i32, i32)>,
+    /// Whether the real side gives water breathing (it does unless a row tests drowning; the
+    /// model's air follows it) (issue 12a).
+    #[serde(default = "yes")]
+    pub breathe: bool,
+    /// Effects given at the start, as `[effect, seconds, amplifier]` (`hunger`).
+    #[serde(default)]
+    pub effects: Vec<(String, u32, u32)>,
+    /// Mobs placed at the start, as `[entity, dx, dy, dz]` from the feet cell: with no AI and no
+    /// loot in real, and the same in the model.
+    #[serde(default)]
+    pub summon: Vec<(String, i32, i32, i32)>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -87,6 +102,11 @@ pub struct Outcome {
     pub inventory: BTreeMap<String, i32>,
     #[serde(default)]
     pub grid: i32,
+    /// The food the server last sent, and the other entities it said died (issue 12a).
+    #[serde(default)]
+    pub food: Option<i32>,
+    #[serde(default)]
+    pub kills: u64,
 }
 
 /// One run of a moment.
@@ -133,6 +153,8 @@ pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
                     ("health", a.health != b.health),
                     ("inventory", a.inventory != b.inventory),
                     ("grid", a.grid != b.grid),
+                    ("food", a.food != b.food),
+                    ("kills", a.kills != b.kills),
                 ]
                 .into_iter()
                 .filter_map(|(n, d)| d.then_some(n))
@@ -158,6 +180,12 @@ pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
             } else {
                 format!(" {:?} grid {}", o.inventory, o.grid)
             };
+            let life = match (o.food, o.kills) {
+                (Some(f), k) if f < 20 || k > 0 => format!(" food {f} kills {k}"),
+                (None, k) if k > 0 => format!(" kills {k}"),
+                _ => String::new(),
+            };
+            let held = held + &life;
             format!(
                 "{:?} {} {} {} {:?}{held}",
                 o.cell,

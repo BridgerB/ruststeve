@@ -264,3 +264,29 @@ fn a_dig_carries_its_sequence() {
     assert_eq!(*body.last().unwrap(), 5);
     assert_eq!(body.len(), 1 + 8 + 1 + 1);
 }
+
+#[test]
+fn lpvec3_round_trips_within_its_precision() {
+    for v in [
+        [0.0, 0.0, 0.0],
+        [0.4, 0.36, -0.4],
+        [-2.5, 0.0, 7.25],
+        [0.0001, -0.0001, 0.0],
+    ] {
+        let mut w = protocol::bytes::Writer::new();
+        w.lpvec3(v);
+        let mut r = protocol::bytes::Reader::new(&w.buf);
+        let back = r.lpvec3().unwrap();
+        let scale = v
+            .iter()
+            .fold(0.0_f64, |m, x| m.max(x.abs()))
+            .ceil()
+            .max(1.0);
+        for i in 0..3 {
+            assert!(
+                (back[i] - v[i]).abs() <= scale / 16000.0 + 1e-4,
+                "{v:?} -> {back:?}"
+            );
+        }
+    }
+}

@@ -3,7 +3,7 @@
 
 use super::blocks::BlockKind;
 use super::items::ItemKind;
-use crate::types::Tool;
+use crate::types::{Food, Tool, Weapon};
 
 /// Each item's default max stack size, by item id.
 pub static MAX_STACK: [u8; 1506] = [
@@ -14895,6 +14895,605 @@ pub static TOOLS: [Tool; 38] = [
         correct: &[],
     },
 ];
+
+/// Every food (the `food` component), in item-id order: nutrition, saturation, whether it
+/// can be eaten full, the ticks it takes (the `consumable` component's seconds × 20) and what
+/// is left in its place (`use_remainder`).
+pub static FOODS: [Food; 44] = [
+    Food {
+        item: ItemKind::Apple,
+        nutrition: 4,
+        saturation: 2.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::MushroomStew,
+        nutrition: 6,
+        saturation: 7.2000003,
+        always: false,
+        ticks: 32,
+        remainder: Some(ItemKind::Bowl),
+    },
+    Food {
+        item: ItemKind::Bread,
+        nutrition: 5,
+        saturation: 6.0,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Porkchop,
+        nutrition: 3,
+        saturation: 1.8000001,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CookedPorkchop,
+        nutrition: 8,
+        saturation: 12.8,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::GoldenApple,
+        nutrition: 4,
+        saturation: 9.6,
+        always: true,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::EnchantedGoldenApple,
+        nutrition: 4,
+        saturation: 9.6,
+        always: true,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::PufferfishBucket,
+        nutrition: 1,
+        saturation: 0.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::SalmonBucket,
+        nutrition: 2,
+        saturation: 0.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CodBucket,
+        nutrition: 2,
+        saturation: 0.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::TropicalFishBucket,
+        nutrition: 1,
+        saturation: 0.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Cod,
+        nutrition: 2,
+        saturation: 0.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Salmon,
+        nutrition: 2,
+        saturation: 0.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::TropicalFish,
+        nutrition: 1,
+        saturation: 0.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Pufferfish,
+        nutrition: 1,
+        saturation: 0.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CookedCod,
+        nutrition: 5,
+        saturation: 6.0,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CookedSalmon,
+        nutrition: 6,
+        saturation: 9.6,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Cookie,
+        nutrition: 2,
+        saturation: 0.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::MelonSlice,
+        nutrition: 2,
+        saturation: 1.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::DriedKelp,
+        nutrition: 1,
+        saturation: 0.6,
+        always: false,
+        ticks: 16,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Beef,
+        nutrition: 3,
+        saturation: 1.8000001,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CookedBeef,
+        nutrition: 8,
+        saturation: 12.8,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Chicken,
+        nutrition: 2,
+        saturation: 1.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CookedChicken,
+        nutrition: 6,
+        saturation: 7.2000003,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::RottenFlesh,
+        nutrition: 4,
+        saturation: 0.8,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::SpiderEye,
+        nutrition: 2,
+        saturation: 3.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Carrot,
+        nutrition: 3,
+        saturation: 3.6000001,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Potato,
+        nutrition: 1,
+        saturation: 0.6,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::BakedPotato,
+        nutrition: 5,
+        saturation: 6.0,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::PoisonousPotato,
+        nutrition: 2,
+        saturation: 1.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::GoldenCarrot,
+        nutrition: 6,
+        saturation: 14.400001,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::PumpkinPie,
+        nutrition: 8,
+        saturation: 4.8,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Rabbit,
+        nutrition: 3,
+        saturation: 1.8000001,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CookedRabbit,
+        nutrition: 5,
+        saturation: 6.0,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::RabbitStew,
+        nutrition: 10,
+        saturation: 12.0,
+        always: false,
+        ticks: 32,
+        remainder: Some(ItemKind::Bowl),
+    },
+    Food {
+        item: ItemKind::Mutton,
+        nutrition: 2,
+        saturation: 1.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::CookedMutton,
+        nutrition: 6,
+        saturation: 9.6,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::ChorusFruit,
+        nutrition: 4,
+        saturation: 2.4,
+        always: true,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::Beetroot,
+        nutrition: 1,
+        saturation: 1.2,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::BeetrootSoup,
+        nutrition: 6,
+        saturation: 7.2000003,
+        always: false,
+        ticks: 32,
+        remainder: Some(ItemKind::Bowl),
+    },
+    Food {
+        item: ItemKind::SuspiciousStew,
+        nutrition: 6,
+        saturation: 7.2000003,
+        always: true,
+        ticks: 32,
+        remainder: Some(ItemKind::Bowl),
+    },
+    Food {
+        item: ItemKind::SweetBerries,
+        nutrition: 2,
+        saturation: 0.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::GlowBerries,
+        nutrition: 2,
+        saturation: 0.4,
+        always: false,
+        ticks: 32,
+        remainder: None,
+    },
+    Food {
+        item: ItemKind::HoneyBottle,
+        nutrition: 6,
+        saturation: 1.2,
+        always: true,
+        ticks: 40,
+        remainder: Some(ItemKind::GlassBottle),
+    },
+];
+
+/// Every item with main-hand attack modifiers, in item-id order: its `attack_damage` and
+/// `attack_speed` modifiers, added to the player's base 1 and 4.
+pub static WEAPONS: [Weapon; 44] = [
+    Weapon {
+        item: ItemKind::WoodenSword,
+        damage: 3.0,
+        speed: -2.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::WoodenShovel,
+        damage: 1.5,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::WoodenPickaxe,
+        damage: 1.0,
+        speed: -2.799999952316284,
+    },
+    Weapon {
+        item: ItemKind::WoodenAxe,
+        damage: 6.0,
+        speed: -3.200000047683716,
+    },
+    Weapon {
+        item: ItemKind::WoodenHoe,
+        damage: 0.0,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::CopperSword,
+        damage: 4.0,
+        speed: -2.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::CopperShovel,
+        damage: 2.5,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::CopperPickaxe,
+        damage: 2.0,
+        speed: -2.799999952316284,
+    },
+    Weapon {
+        item: ItemKind::CopperAxe,
+        damage: 8.0,
+        speed: -3.200000047683716,
+    },
+    Weapon {
+        item: ItemKind::CopperHoe,
+        damage: 0.0,
+        speed: -2.0,
+    },
+    Weapon {
+        item: ItemKind::StoneSword,
+        damage: 4.0,
+        speed: -2.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::StoneShovel,
+        damage: 2.5,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::StonePickaxe,
+        damage: 2.0,
+        speed: -2.799999952316284,
+    },
+    Weapon {
+        item: ItemKind::StoneAxe,
+        damage: 8.0,
+        speed: -3.200000047683716,
+    },
+    Weapon {
+        item: ItemKind::StoneHoe,
+        damage: 0.0,
+        speed: -2.0,
+    },
+    Weapon {
+        item: ItemKind::GoldenSword,
+        damage: 3.0,
+        speed: -2.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::GoldenShovel,
+        damage: 1.5,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::GoldenPickaxe,
+        damage: 1.0,
+        speed: -2.799999952316284,
+    },
+    Weapon {
+        item: ItemKind::GoldenAxe,
+        damage: 6.0,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::GoldenHoe,
+        damage: 0.0,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::IronSword,
+        damage: 5.0,
+        speed: -2.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::IronShovel,
+        damage: 3.5,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::IronPickaxe,
+        damage: 3.0,
+        speed: -2.799999952316284,
+    },
+    Weapon {
+        item: ItemKind::IronAxe,
+        damage: 8.0,
+        speed: -3.0999999046325684,
+    },
+    Weapon {
+        item: ItemKind::IronHoe,
+        damage: 0.0,
+        speed: -1.0,
+    },
+    Weapon {
+        item: ItemKind::DiamondSword,
+        damage: 6.0,
+        speed: -2.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::DiamondShovel,
+        damage: 4.5,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::DiamondPickaxe,
+        damage: 4.0,
+        speed: -2.799999952316284,
+    },
+    Weapon {
+        item: ItemKind::DiamondAxe,
+        damage: 8.0,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::DiamondHoe,
+        damage: 0.0,
+        speed: 0.0,
+    },
+    Weapon {
+        item: ItemKind::NetheriteSword,
+        damage: 7.0,
+        speed: -2.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::NetheriteShovel,
+        damage: 5.5,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::NetheritePickaxe,
+        damage: 5.0,
+        speed: -2.799999952316284,
+    },
+    Weapon {
+        item: ItemKind::NetheriteAxe,
+        damage: 9.0,
+        speed: -3.0,
+    },
+    Weapon {
+        item: ItemKind::NetheriteHoe,
+        damage: 0.0,
+        speed: 0.0,
+    },
+    Weapon {
+        item: ItemKind::Mace,
+        damage: 5.0,
+        speed: -3.4000000953674316,
+    },
+    Weapon {
+        item: ItemKind::WoodenSpear,
+        damage: 0.0,
+        speed: -2.4615384340286255,
+    },
+    Weapon {
+        item: ItemKind::StoneSpear,
+        damage: 1.0,
+        speed: -2.666666626930237,
+    },
+    Weapon {
+        item: ItemKind::CopperSpear,
+        damage: 1.0,
+        speed: -2.8235294818878174,
+    },
+    Weapon {
+        item: ItemKind::IronSpear,
+        damage: 2.0,
+        speed: -2.9473683834075928,
+    },
+    Weapon {
+        item: ItemKind::GoldenSpear,
+        damage: 0.0,
+        speed: -2.9473683834075928,
+    },
+    Weapon {
+        item: ItemKind::DiamondSpear,
+        damage: 3.0,
+        speed: -3.0476189851760864,
+    },
+    Weapon {
+        item: ItemKind::NetheriteSpear,
+        damage: 4.0,
+        speed: -3.13043475151062,
+    },
+    Weapon {
+        item: ItemKind::Trident,
+        damage: 8.0,
+        speed: -2.9000000953674316,
+    },
+];
+
+/// An item as food, if it is one.
+pub fn food_of(item: ItemKind) -> Option<&'static Food> {
+    FOODS
+        .binary_search_by_key(&item.id(), |f| f.item.id())
+        .ok()
+        .and_then(|i| FOODS.get(i))
+}
+
+/// An item's main-hand attack modifiers, if it has them.
+pub fn weapon_of(item: ItemKind) -> Option<&'static Weapon> {
+    WEAPONS
+        .binary_search_by_key(&item.id(), |w| w.item.id())
+        .ok()
+        .and_then(|i| WEAPONS.get(i))
+}
 
 /// An item's max stack size (64 for an unknown id).
 pub fn max_stack(item: ItemKind) -> i32 {

@@ -105,6 +105,11 @@ pub enum Script {
     /// Standing still, craft in window 0: one click per round trip (the next only once the
     /// last moved the window's state id).
     Craft(Craft),
+    /// Standing still facing `yaw`, attack the nearest living entity within 5 blocks every
+    /// `every` ticks (issue 12a): `attack:<every>:<yaw>`.
+    Attack { every: u64, yaw: f64 },
+    /// Standing still, start using the held item at tick `at` (eating): `eat:<tick>`.
+    Eat { at: u64 },
 }
 
 impl Script {
@@ -132,7 +137,15 @@ impl Script {
                 sneak: false,
                 yaw,
             },
-            Script::Still | Script::DigDown { .. } | Script::Craft(_) => Controls::default(),
+            Script::Still | Script::DigDown { .. } | Script::Craft(_) | Script::Eat { .. } => {
+                Controls::default()
+            }
+            Script::Attack { yaw, .. } => Controls {
+                forward: false,
+                jump: false,
+                sneak: false,
+                yaw,
+            },
         }
     }
 
@@ -191,6 +204,43 @@ impl Script {
                     (_, _) => Vec::new(),
                 }
             }
+            Script::Attack { every, .. } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                if tick % every.max(1) != every.max(1) - 1 {
+                    return Vec::new();
+                }
+                let near = w
+                    .entities
+                    .iter()
+                    // Mobs only, never a player: the server kicks a client that attacks an
+                    // item or an experience orb (`invalid_entity_attacked`), and a kill drops one.
+                    .filter(|(_, e)| {
+                        !e.dead
+                            && e.kind != data::EntityKind::Player
+                            && data::generated::mobs::MOBS
+                                .iter()
+                                .any(|m| m.entity == e.kind)
+                    })
+                    .map(|(id, e)| {
+                        let d = (0..3)
+                            .map(|i| (e.pos[i] - body.pos[i]).powi(2))
+                            .sum::<f64>();
+                        (d, *id)
+                    })
+                    .filter(|(d, _)| *d <= 25.0)
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
+                near.map(|(_, id)| vec![Act::Attack { entity: id }])
+                    .unwrap_or_default()
+            }
+            Script::Eat { at } => {
+                if tick == at {
+                    vec![Act::UseItem]
+                } else {
+                    Vec::new()
+                }
+            }
             Script::WalkSquare
             | Script::Straight { .. }
             | Script::JumpForward { .. }
@@ -207,6 +257,8 @@ impl Script {
             Script::Still => "still".to_owned(),
             Script::DigDown { finish } => format!("dig:{finish}"),
             Script::Craft(c) => format!("craft:{}", c.name()),
+            Script::Attack { every, yaw } => format!("attack:{every}:{yaw}"),
+            Script::Eat { at } => format!("eat:{at}"),
         }
     }
 
@@ -228,6 +280,18 @@ impl Script {
     }
 
     fn parse_craft(s: &str) -> Option<Script> {
+        if let Some(rest) = s.strip_prefix("attack:") {
+            let (every, yaw) = rest.split_once(':')?;
+            return Some(Script::Attack {
+                every: every.parse().ok()?,
+                yaw: yaw.parse().ok()?,
+            });
+        }
+        if let Some(at) = s.strip_prefix("eat:") {
+            return Some(Script::Eat {
+                at: at.parse().ok()?,
+            });
+        }
         match s {
             "craft:planks" => Some(Script::Craft(Craft::Planks)),
             "craft:sticks" => Some(Script::Craft(Craft::Sticks)),
@@ -256,6 +320,11 @@ mod tests {
             Script::Craft(Craft::Table),
             Script::Craft(Craft::WoodenPickaxe),
             Script::Craft(Craft::StoneTools),
+            Script::Attack {
+                every: 13,
+                yaw: 270.0,
+            },
+            Script::Eat { at: 220 },
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
         }

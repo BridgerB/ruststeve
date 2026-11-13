@@ -82,6 +82,31 @@ impl<'a> Reader<'a> {
         Ok(u32::from_be_bytes(self.array()?))
     }
 
+    /// An LpVec3, the game's low-precision vector (a velocity in blocks a tick), read as the
+    /// 26.1.2 jar's `LpVec3.read` reads it (brain/wire/wire-lpvec3.md): a zero first byte is the
+    /// zero vector; else that byte, a second and a u32 make 48 bits: the scale's low two bits, a
+    /// continuation bit (a varint with the scale's higher bits follows) and three 15-bit
+    /// components at bits 3, 18 and 33, each in [-1, 1] times the scale.
+    pub fn lpvec3(&mut self) -> Result<[f64; 3], ParseError> {
+        let a = self.u8()?;
+        if a == 0 {
+            return Ok([0.0; 3]);
+        }
+        let b = self.u8()?;
+        let packed = (u64::from(self.u32()?) << 16) | (u64::from(b) << 8) | u64::from(a);
+        let low = u64::from(a & 3);
+        let scale = if a & 4 == 4 {
+            low | (u64::from(self.varint()? as u32) << 2)
+        } else {
+            low
+        };
+        let unpack = |shift: u32| {
+            let v = ((packed >> shift) & 32767) as f64;
+            (v.min(LP_MAX) * 2.0 / LP_MAX - 1.0) * scale as f64
+        };
+        Ok([unpack(3), unpack(18), unpack(33)])
+    }
+
     pub fn i64(&mut self) -> Result<i64, ParseError> {
         Ok(i64::from_be_bytes(self.array()?))
     }
@@ -230,6 +255,36 @@ impl Writer {
         Ok(())
     }
 
+    /// An LpVec3, as the game's `LpVec3.write` writes it (see `Reader::lpvec3`).
+    pub fn lpvec3(&mut self, v: [f64; 3]) {
+        let c = v.map(|x| {
+            if x.is_nan() {
+                0.0
+            } else {
+                x.clamp(-LP_LIMIT, LP_LIMIT)
+            }
+        });
+        let m = c.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+        if m < LP_ZERO {
+            self.u8(0);
+            return;
+        }
+        let scale = m.ceil() as u64;
+        let more = scale != scale & 3;
+        let pack = |x: f64| ((x / scale as f64 * 0.5 + 0.5) * LP_MAX).round() as u64;
+        let bits = (if more { (scale & 3) | 4 } else { scale })
+            | (pack(c[0]) << 3)
+            | (pack(c[1]) << 18)
+            | (pack(c[2]) << 33);
+        self.u8((bits & 0xff) as u8);
+        self.u8(((bits >> 8) & 0xff) as u8);
+        self.buf
+            .extend_from_slice(&((bits >> 16) as u32).to_be_bytes());
+        if more {
+            self.varint((scale >> 2) as i32);
+        }
+    }
+
     pub fn uuid(&mut self, u: &[u8; 16]) {
         self.buf.extend_from_slice(u);
     }
@@ -238,6 +293,12 @@ impl Writer {
         self.buf.extend_from_slice(b);
     }
 }
+
+/// The largest LpVec3 component (it stands for 1.0), the size under which the game writes the
+/// zero vector, and the clamp on every component (`LpVec3` in the 26.1.2 jar).
+const LP_MAX: f64 = 32766.0;
+const LP_ZERO: f64 = 3.051944088384301E-5;
+const LP_LIMIT: f64 = 1.7179869183E10;
 
 pub fn write_varint(out: &mut Vec<u8>, v: i32) {
     let mut u = v as u32;

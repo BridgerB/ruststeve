@@ -3,10 +3,10 @@ title: Acting on the world
 description: The client packets that dig, place, use items and attack in 775, their fields and enum values, and the attack-packet trap that dealt zero damage.
 type: reference
 tags: [wire, actions, attack, dig, use-item]
-aliases: [attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
+aliases: [use_item, release use, LpVec3, set_entity_motion, attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@34b2252
+lastUpdated: 2026-11-13
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@8a59f07
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub enum Act {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_dig_carries_its_sequence() {"
@@ -42,6 +42,11 @@ Everything the bot does to the world is one of a few client packets. Several car
 | `client-command` | action (0 respawn) | respawn after death |
 
 Faces: down 0, up 1, north 2, south 3, west 4, east 5. Hands: main 0, off 1. ruststeve sends `use-item-on` as `Act::UseOn` (issue 11a, [[placing]]).
+
+## Issue 12a in ruststeve
+- `C2s::Attack { entity }` is 775's own packet; `C2s::UseItem { hand, sequence, yaw, pitch }` starts eating (the world's `Act::UseItem` bumps the sequence and sends the body's look); `Act::ReleaseUse` is `player_action` status 5.
+- Attacking an item, an experience orb or an arrow gets the client kicked (`invalid_entity_attacked`): strike only living mobs (found by the parity table, a cow's orb).
+- `set_entity_motion` is an `LpVec3`: a zero first byte means zero; else 48 bits, the scale in the low 2 bits, a continuation flag at bit 2, the three 15-bit components at 3, 18 and 33 (`protocol::bytes`).
 
 ## Gotchas
 - **In 775 melee is the dedicated `attack` packet, entity id only.** `interact` became right-click only and requires a trailing hand field. ruststeve v1's "melee deals zero damage" wall was an interact with mouse 1: it decoded and did nothing; without the hand field it got the bot kicked.

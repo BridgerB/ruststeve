@@ -178,6 +178,29 @@ impl Tool {
     }
 }
 
+/// A food (the `food` and `consumable` components): nutrition, saturation, whether it can be
+/// eaten full, and the ticks eating takes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Food {
+    pub item: ItemKind,
+    pub nutrition: u8,
+    pub saturation: f32,
+    pub always: bool,
+    pub ticks: u16,
+    /// The item left in its place once eaten (`use_remainder`: a honey bottle's glass bottle).
+    pub remainder: Option<ItemKind>,
+}
+
+/// A main-hand item's `attack_damage` and `attack_speed` modifiers (the player's base is 1 and
+/// 4: a stone sword hits for 5 at 1.6 swings a second).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Weapon {
+    pub item: ItemKind,
+    /// Attribute modifiers are doubles (a spear's speed is not a float).
+    pub damage: f64,
+    pub speed: f64,
+}
+
 /// An item that burns in a furnace, and for how many game ticks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fuel {

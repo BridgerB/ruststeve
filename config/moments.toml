@@ -921,3 +921,149 @@ script = "craft:stone_tools"
 ticks = 600
 give = ["crafting_table 1", "cobblestone 5", "stick 3"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+# Issue 12a's rows, on the dry landings, each kind at its own offset off the walk lines. Drowning:
+# a capped shaft of water two high over the feet and no water breathing. Fire: a fire block on
+# netherrack at the feet. Lava: lava at the feet in a stone cup. Eating: a honey bottle (always
+# can be eaten full: the parity server runs peaceful, which keeps the food full), after a hunger
+# effect has spent the saturation. Melee: a given stone sword against a cow placed
+# two blocks east with no AI and no loot (the parity server runs peaceful, which removes hostile
+# mobs; the zombie rows come with defence, 12d).
+
+[[moment]]
+id = "v00-drown"
+landing = 0
+dx = 9
+dz = 9
+script = "still"
+ticks = 420
+set = [["stone", 1, 0, 0], ["stone", -1, 0, 0], ["stone", 0, 0, 1], ["stone", 0, 0, -1], ["stone", 1, 1, 0], ["stone", -1, 1, 0], ["stone", 0, 1, 1], ["stone", 0, 1, -1], ["stone", 0, 2, 0], ["stone", 0, -1, 0], ["water", 0, 0, 0], ["water", 0, 1, 0]]
+breathe = false
+
+[[moment]]
+id = "v01-drown"
+landing = 1
+dx = 9
+dz = 9
+script = "still"
+ticks = 420
+set = [["stone", 1, 0, 0], ["stone", -1, 0, 0], ["stone", 0, 0, 1], ["stone", 0, 0, -1], ["stone", 1, 1, 0], ["stone", -1, 1, 0], ["stone", 0, 1, 1], ["stone", 0, 1, -1], ["stone", 0, 2, 0], ["stone", 0, -1, 0], ["water", 0, 0, 0], ["water", 0, 1, 0]]
+breathe = false
+
+[[moment]]
+id = "v02-drown"
+landing = 2
+dx = 9
+dz = 9
+script = "still"
+ticks = 420
+set = [["stone", 1, 0, 0], ["stone", -1, 0, 0], ["stone", 0, 0, 1], ["stone", 0, 0, -1], ["stone", 1, 1, 0], ["stone", -1, 1, 0], ["stone", 0, 1, 1], ["stone", 0, 1, -1], ["stone", 0, 2, 0], ["stone", 0, -1, 0], ["water", 0, 0, 0], ["water", 0, 1, 0]]
+breathe = false
+
+[[moment]]
+id = "v00-fire"
+landing = 0
+dx = -9
+dz = -9
+script = "still"
+ticks = 100
+set = [["netherrack", 0, -1, 0], ["air", 0, 1, 0], ["fire", 0, 0, 0]]
+
+[[moment]]
+id = "v01-fire"
+landing = 1
+dx = -9
+dz = -9
+script = "still"
+ticks = 100
+set = [["netherrack", 0, -1, 0], ["air", 0, 1, 0], ["fire", 0, 0, 0]]
+
+[[moment]]
+id = "v02-fire"
+landing = 2
+dx = -9
+dz = -9
+script = "still"
+ticks = 100
+set = [["netherrack", 0, -1, 0], ["air", 0, 1, 0], ["fire", 0, 0, 0]]
+
+[[moment]]
+id = "v04-lava"
+landing = 4
+dx = 9
+dz = -9
+script = "still"
+ticks = 200
+set = [["stone", 1, 0, 0], ["stone", -1, 0, 0], ["stone", 0, 0, 1], ["stone", 0, 0, -1], ["stone", 0, -1, 0], ["lava", 0, 0, 0]]
+
+[[moment]]
+id = "v07-lava"
+landing = 7
+dx = 9
+dz = -9
+script = "still"
+ticks = 200
+set = [["stone", 1, 0, 0], ["stone", -1, 0, 0], ["stone", 0, 0, 1], ["stone", 0, 0, -1], ["stone", 0, -1, 0], ["lava", 0, 0, 0]]
+
+[[moment]]
+id = "v04-eat"
+landing = 4
+dx = -9
+dz = 9
+script = "eat:220"
+ticks = 300
+give = ["honey_bottle 1"]
+effects = [["hunger", 10, 40]]
+
+[[moment]]
+id = "v07-eat"
+landing = 7
+dx = -9
+dz = 9
+script = "eat:220"
+ticks = 300
+give = ["honey_bottle 1"]
+effects = [["hunger", 10, 40]]
+
+[[moment]]
+id = "v00-eat"
+landing = 0
+dx = -9
+dz = 9
+script = "eat:220"
+ticks = 300
+give = ["honey_bottle 1"]
+effects = [["hunger", 10, 40]]
+
+[[moment]]
+id = "v01-cow"
+landing = 1
+dx = 11
+dz = -11
+script = "attack:13:270"
+ticks = 200
+give = ["stone_sword 1"]
+set = [["stone", 1, -1, 0], ["stone", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+summon = [["cow", 2, 0, 0]]
+
+[[moment]]
+id = "v02-cow"
+landing = 2
+dx = 11
+dz = -11
+script = "attack:13:270"
+ticks = 200
+give = ["stone_sword 1"]
+set = [["stone", 1, -1, 0], ["stone", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+summon = [["cow", 2, 0, 0]]
+
+[[moment]]
+id = "v04-cow"
+landing = 4
+dx = 11
+dz = -11
+script = "attack:13:270"
+ticks = 200
+give = ["stone_sword 1"]
+set = [["stone", 1, -1, 0], ["stone", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+summon = [["cow", 2, 0, 0]]

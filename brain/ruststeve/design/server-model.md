@@ -3,10 +3,10 @@ title: The server model
 description: How ruststeve plays without a Java server - the sim crate (the vanilla server as a pure reducer, grown per issue), S2c encoders that make the model's bytes a server's, the model as the bot's body behind the same channels a socket gives, and what it models so far.
 type: reference
 tags: [sim, model, server, body, closed-loop]
-aliases: [sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
+aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+lastUpdated: 2026-11-13
+verifiedAgainst: ruststeve@8a59f07 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -66,6 +66,17 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - The dig progress and drops come from `data::dig` with the held item: a tool's speed and drops from its `tool` component ([[tools-and-held-slot]]); stacks by each item's `max_stack_size`.
 - **The eyes in water** are judged as `isEyeInFluid` judges them: under the water's surface in its cell (`amount / 9` of a block, a full block under more water; waterlogged blocks, kelp, seagrass and bubble columns count). Found by the parity table at a water landing.
 
+## Air, fire, hunger, eating and melee (12a, read from the 26.1.2 jar)
+`life.rs` holds `Life`: food, saturation, exhaustion, air, fire ticks, the invulnerable window, the use in hand, a hunger effect, water breathing, the attack ticker and the summoned mobs. `tick_life` runs once a server tick:
+- **Air** (`LivingEntity.baseTick`): 300; −1 a tick with the eyes in water (the fluid's height, as for the parity rows), 2 drowning damage at −20 (then back to 0); +4 a tick out of water. Water breathing (a moment's `breathe`) stops the loss.
+- **Lava**: 4 damage and at least 300 fire ticks while the box touches it; a **fire block** 1 damage and 160 ticks; **burning** 1 each 20 ticks; water puts it out.
+- **Invulnerability**: 20 ticks after a hit; in its second half only damage above the last hit lands, as the excess.
+- **Hunger** (`FoodData.tick`): over 4 exhaustion takes a saturation point, else a food point (not on peaceful); saturation heals fast at full food, 18 food heals 1 each 80 ticks, starvation each 80 down to 1 on Normal. Exhaustion: jump 0.05, attack 0.1, hurt 0.1, a block broken 0.005, a hunger effect 0.005 × (amplifier + 1) a tick.
+- **Eating**: `use_item` with a food held (when food is under 20, or the food can always be eaten) runs the item's ticks (`consume_seconds` × 20), then adds nutrition (max 20) and saturation (max the food), sends entity event 9, and leaves the `use_remainder` (a honey bottle's glass bottle) in the emptied hand, else in the inventory. Releasing the use (`player_action` 5) stops it.
+- **Melee** (`attack`): damage = 1 + the weapon's modifier, × (0.2 + charge² × 0.8), the charge the ticks since the last swing over 20 / (4 + speed); reach 4 from the eyes to the mob's box (zombie-sized for every kind: `data` has no entity dimensions yet); the mob's own invulnerable window as the player's; death sends entity event 3 and removes it 20 ticks later.
+- `set_health` goes out when health or food change or saturation turns to or from zero; air (metadata 1) and the burning bit (metadata 0) when they change.
+- `Sim::summon` places a mob (health from `data::generated::mobs`) for a test or a moment; mobs do not move, fight or drop yet (12c/12d).
+
 ## Generated worlds and lockstep (08b)
 - `sim::terrain::world(seed, radius)`: seeded rolling ground (value noise), one-block steps, still water to y 62 over sand, carpets, cobblestone pillars, encoded as real chunk columns; a pure function of its seed.
 - `bot::lockstep::run`: the bot's world and the model folded together in one thread with no clock: each tick the model ticks, the world ticks, and every packet is delivered both ways before the next. A run is a pure function of world, seed and code. `run_acting` lets the controller act too (digs, clicks); `Sim::seeded` gives the model's rolls the run's seed.
@@ -76,7 +87,7 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - `the_bot_joins_the_model_and_walks`: the bot joins a flat model world, is placed on the grass, walks its staircase past 5 blocks, runs to its 100-tick cap with no correction, no decode error, and its recording replays with 0 mismatches (done-condition 2's first half).
 
 ## Limits
-- Capture, simrace and the parity table: [[parity-table]]. Then tools and placing (11), mobs, air and drowning (12) and the rest as their issues come.
+- Capture, simrace and the parity table: [[parity-table]]. Mob movement, mob attacks, drops and knockback on the player come with 12c and 12d.
 - Drop rolls are the model's own seeded randomness, never vanilla's `RandomSource`: a chance drop (a sapling, a seed) is not an outcome the table can compare.
 - Item collision is per cell (no partial shapes sideways). Seagrass and kelp, which turn to water, are not popped. Item merging is not modelled.
 - The server-side move uses the bot's own collision (`land_tick`), not vanilla's `Entity.collide` order (y, then the larger of x and z first): the parity table is what says whether it matters.

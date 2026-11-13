@@ -48,6 +48,8 @@ impl State {
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
             | C2s::UseItemOn { .. }
+            | C2s::Attack { .. }
+            | C2s::UseItem { .. }
             | C2s::ContainerClick { .. }
             | C2s::ContainerClose { .. }
             | C2s::Swing { .. } => self,
@@ -103,6 +105,8 @@ impl State {
             | S2c::ContainerClose { .. }
             | S2c::SetCursorItem { .. }
             | S2c::OpenScreen { .. }
+            | S2c::SetEntityMotion { .. }
+            | S2c::EntityEvent { .. }
             | S2c::Unknown { .. } => self,
         }
     }
