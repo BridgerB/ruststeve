@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod craft;
+pub mod defend;
 pub mod dig;
 pub mod eat;
 pub mod escape;
@@ -142,6 +143,8 @@ pub enum Task {
     Stairs(Box<Stairs>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
+    /// A hostile mob near: fight it or back away (issue 12d).
+    Defend(Box<defend::Defend>),
     /// Eating something held (issue 12c).
     Eat(eat::Eat),
     /// Killing an animal for its meat (issue 12c).
@@ -159,6 +162,7 @@ impl Task {
             Task::Place(_) => "place",
             Task::Stairs(_) => "stairs",
             Task::Escape(_) => "escape",
+            Task::Defend(_) => "defend",
             Task::Eat(_) => "eat",
             Task::Hunt(_) => "hunt",
         }
@@ -172,6 +176,7 @@ impl Task {
             | Task::Place(_)
             | Task::Stairs(_)
             | Task::Escape(_)
+            | Task::Defend(_)
             | Task::Eat(_)
             | Task::Hunt(_) => None,
             Task::ToLog(w) | Task::Explore(w) => Some(w),
@@ -373,7 +378,9 @@ impl Plan {
                 return self.after_stairs(c, status, tick);
             }
             // `always` runs these (and ends them).
-            Task::Escape(_) | Task::Eat(_) | Task::Hunt(_) => return Controls::default(),
+            Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
+                return Controls::default();
+            }
         };
         match status {
             TaskStatus::Running => controls,
@@ -410,6 +417,7 @@ impl Plan {
                     | Task::Place(_)
                     | Task::Stairs(_)
                     | Task::Escape(_)
+                    | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
                 }
@@ -450,6 +458,7 @@ impl Plan {
                     | Task::Place(_)
                     | Task::Stairs(_)
                     | Task::Escape(_)
+                    | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
                 }
@@ -480,6 +489,7 @@ impl Plan {
         // What is running: an escape whose trap holds, an eat or a hunt, else nothing.
         let running = match &self.task {
             Task::Escape(e) => Some(make::Always::Escape(e.kind)),
+            Task::Defend(_) => Some(make::Always::Defend),
             Task::Eat(_) => Some(make::Always::Eat),
             Task::Hunt(_) => Some(make::Always::Hunt),
             Task::Idle
@@ -495,6 +505,10 @@ impl Plan {
         for (id, row) in &table.always {
             let in_force = match row {
                 make::Always::Escape(k) => trap == Some(*k),
+                make::Always::Defend => {
+                    running == Some(make::Always::Defend)
+                        || defend::nearest_foe(w, rules.defend_radius).is_some()
+                }
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
                 make::Always::Eat => {
@@ -541,6 +555,20 @@ impl Plan {
                     self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
                     Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
+                make::Always::Defend => {
+                    defend::nearest_foe(w, rules.defend_radius).map(|(foe, kind)| {
+                        let d = defend::Defend::new(w, foe, kind, rules, tick);
+                        self.note(
+                            tick,
+                            format!("defend {kind:?} {foe} ({:?})", d.stance),
+                            format!(
+                                "a hostile within {}; health {:?}; cut {cut}",
+                                rules.defend_radius, w.player.health
+                            ),
+                        );
+                        Task::Defend(Box::new(d))
+                    })
+                }
                 make::Always::Eat => eat::best_food(w, rules).map(|f| {
                     self.note(
                         tick,
@@ -574,6 +602,16 @@ impl Plan {
             Task::Escape(e) => {
                 let (c, act) = e.step(w, tick);
                 (c, act, None)
+            }
+            Task::Defend(d) => {
+                let (c, act, status) = d.step(w, rules, tick);
+                let ended = match status {
+                    defend::DefendStatus::Running => None,
+                    defend::DefendStatus::Done => {
+                        Some(Ok(format!("defended: {} swings, {:?}", d.swings, d.stance)))
+                    }
+                };
+                (c, act, ended)
             }
             Task::Eat(e) => {
                 let (act, status) = e.step(w, tick);

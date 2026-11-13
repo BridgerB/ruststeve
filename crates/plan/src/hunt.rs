@@ -122,7 +122,7 @@ pub fn prey(
 }
 
 /// The held item that hits hardest, if any hits harder than the hand.
-fn weapon(w: &World) -> Option<ItemKind> {
+pub fn weapon(w: &World) -> Option<ItemKind> {
     crate::held(w)
         .into_iter()
         .filter(|(_, n)| *n > 0)
@@ -133,7 +133,7 @@ fn weapon(w: &World) -> Option<ItemKind> {
 }
 
 /// Ticks between full swings with what is held: 20 / (4 + the attack speed modifier).
-fn swing_ticks(w: &World) -> f64 {
+pub fn swing_ticks(w: &World) -> f64 {
     let held = crate::dig::held_item(w);
     let speed = 4.0
         + held
