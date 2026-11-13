@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
 lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@8a59f07 clojurecraft@be85a92
+verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -75,6 +75,7 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **Eating**: `use_item` with a food held (when food is under 20, or the food can always be eaten) runs the item's ticks (`consume_seconds` × 20), then adds nutrition (max 20) and saturation (max the food), sends entity event 9, and leaves the `use_remainder` (a honey bottle's glass bottle) in the emptied hand, else in the inventory. Releasing the use (`player_action` 5) stops it.
 - **Melee** (`attack`): damage = 1 + the weapon's modifier, × (0.2 + charge² × 0.8), the charge the ticks since the last swing over 20 / (4 + speed); reach 4 from the eyes to the mob's box (zombie-sized for every kind: `data` has no entity dimensions yet); the mob's own invulnerable window as the player's; death sends entity event 3 and removes it 20 ticks later.
 - `set_health` goes out when health or food change or saturation turns to or from zero; air (metadata 1) and the burning bit (metadata 0) when they change.
+- **Fire resistance** (a moment's effect): fire, lava and burning do no damage; lava still slows and lights the body.
 - `Sim::summon` places a mob (health from `data::generated::mobs`) for a test or a moment; mobs do not move, fight or drop yet (12c/12d).
 
 ## Generated worlds and lockstep (08b)

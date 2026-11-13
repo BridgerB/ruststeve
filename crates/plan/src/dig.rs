@@ -156,7 +156,13 @@ impl Dig {
 
     fn gone(&self, w: &World) -> bool {
         w.block_at(pos(self.target))
-            .is_none_or(|k| matches!(k, BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir))
+            // Water flows into a block dug beside it at once (an escape's dig, issue 12b).
+            .is_none_or(|k| {
+                matches!(
+                    k,
+                    BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir | BlockKind::Water
+                )
+            })
     }
 
     /// The nearest item entity of the drop's kind within `DROP_RANGE` of the block.

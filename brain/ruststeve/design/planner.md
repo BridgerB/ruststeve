@@ -5,8 +5,8 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
+lastUpdated: 2026-11-13
+verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -40,6 +40,9 @@ Issue 09a begins the `plan` crate (core): `Plan::step(&World) -> Controls`, the 
 - **Driving it**: `bot::run` steps the planner each tick once the start has settled and sends `Event::Controls` when they change; `bot::lockstep` takes the same planner as its controls.
 
 - **Choosing a target needs a walkable route** (clojurecraft's `walkable?`): found, or partial only toward a column not loaded yet; an explore takes any route with waypoints. With no log walkable, explore is the fallback in the same choice.
+
+## Always-rows (issue 12b)
+Every tick, before its task and before checking whether the aim is met, the planner asks `Plan::always` whether a trap the table answers is in force: one cuts the task in hand and runs an escape until the trap clears ([[escapes]]). `Aim::Hold` has no goal: only the always-rows run.
 
 ## The measure (issue 09, the `walk` job in ci.yml)
 - **Landings**: `config/landings-grid.toml`, a 20 × 16 grid on the race seed, 192 blocks apart, captured byte for byte (radius 4) from a fresh server; cached in CI by the list's hash.

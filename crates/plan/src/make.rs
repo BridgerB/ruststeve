@@ -167,6 +167,21 @@ pub struct GoalRow {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Goals {
     pub goal: Vec<GoalRow>,
+    /// The always-rows (issue 12b): checked every tick ahead of every goal, in order.
+    #[serde(default)]
+    pub always: Vec<AlwaysRow>,
+}
+
+/// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
+/// answers, ahead of whatever task runs.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AlwaysRow {
+    pub id: String,
+    pub priority: u32,
+    #[serde(default)]
+    pub doc: String,
+    /// `water`, `lava` or `fire`.
+    pub trap: String,
 }
 
 fn row_of(g: &GoalRow) -> Result<Row, String> {
@@ -229,6 +244,8 @@ pub fn fits_grid(r: &Recipe) -> bool {
 pub struct Table {
     pub goals: Vec<(u32, Option<String>, Row)>,
     pub producers: Vec<Row>,
+    /// The always-rows' traps, by priority then as written (issue 12b).
+    pub always: Vec<(String, crate::escape::TrapKind)>,
 }
 
 impl Table {
@@ -273,7 +290,21 @@ impl Table {
                 act: Some(Act::Craft(r)),
             }
         }));
-        Ok(Self { goals, producers })
+        let mut rows: Vec<&AlwaysRow> = g.always.iter().collect();
+        rows.sort_by_key(|r| r.priority);
+        let always = rows
+            .iter()
+            .map(|r| {
+                crate::escape::TrapKind::parse(&r.trap)
+                    .map(|k| (r.id.clone(), k))
+                    .ok_or_else(|| format!("always {}: no trap {}", r.id, r.trap))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            goals,
+            producers,
+            always,
+        })
     }
 
     /// The goal row a `--goal` name puts in play.
@@ -488,6 +519,7 @@ mod tests {
                     blocks: Vec::new(),
                 },
             ],
+            always: Vec::new(),
         };
         Table::new(&g).unwrap()
     }

@@ -75,3 +75,24 @@ holds = [["item:wooden_pickaxe", 1]]
 provides = [["item:cobblestone", 1]]
 act = "mine"
 blocks = ["stone"]
+
+# Issue 12b's always-rows (clojurecraft's goals.edn, priority 0): checked every tick ahead of every
+# goal, and after the aim is met; one in force cuts the task in hand (plan::escape).
+
+[[always]]
+id = "escape-water"
+priority = 0
+doc = "out of water onto dry land, before anything else"
+trap = "water"
+
+[[always]]
+id = "escape-lava"
+priority = 0
+doc = "off lava onto footing, before anything else"
+trap = "lava"
+
+[[always]]
+id = "escape-fire"
+priority = 0
+doc = "out of a fire block the body touches, before anything else"
+trap = "fire"

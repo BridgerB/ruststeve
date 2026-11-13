@@ -157,7 +157,8 @@ pub fn run_one(
         | plan::Aim::Pickaxe
         | plan::Aim::Cobblestone
         | plan::Aim::StonePickaxe
-        | plan::Aim::StoneTools => 0.0,
+        | plan::Aim::StoneTools
+        | plan::Aim::Hold => 0.0,
     };
     let mut p = match table {
         Some(t) => plan::Plan::with_table(aim, t),
