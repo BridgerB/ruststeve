@@ -236,7 +236,16 @@ impl Dig {
                 };
                 // The fastest tool held that gets the block's drops goes in hand first, and the
                 // dig waits until the world shows it selected (issue 11b).
-                let items: Vec<ItemKind> = w.inventory.slots.values().map(|(k, _)| *k).collect();
+                // The cursor counts: a tool picked up on its way to the hotbar is still the best
+                // one. Leaving it out chose the next best mid-swap, put the first one back, and
+                // looped (a bot clicked one slot 19,000 times: docs/problems/iron-kit.md wall 6).
+                let items: Vec<ItemKind> = w
+                    .inventory
+                    .slots
+                    .values()
+                    .chain(w.inventory.carried.iter())
+                    .map(|(k, _)| *k)
+                    .collect();
                 if let Some(tool) = data::dig::best_tool(kind, items) {
                     match crate::hold::toward(w, tool) {
                         crate::hold::Hold::Held | crate::hold::Hold::Missing => {}

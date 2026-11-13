@@ -82,12 +82,12 @@ fn cells(
 
 fn assert_out(e: &Ended, kind: TrapKind) {
     let w = &e.run.world;
+    // The escape counter, not the events: the planner keeps only its last 64 events, and one
+    // that goes on after the escape (relocating, issue 13b) scrolls it out.
     assert!(
-        e.plan
-            .events
-            .iter()
-            .any(|ev| ev.what == format!("escape-{}", kind.name())),
-        "never escaped: {:#?}",
+        e.plan.escapes >= 1,
+        "never escaped from {}: {:#?}",
+        kind.name(),
         e.plan.events
     );
     assert!(

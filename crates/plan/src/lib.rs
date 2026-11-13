@@ -52,6 +52,10 @@ pub const RETRY_TICKS: u64 = 20;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
 /// said so, and the run ends there (clojurecraft's `max-unwalkable`, 12).
 pub const MAX_UNWALKABLE: u32 = 12;
+/// A goal aim that fails `MAX_UNWALKABLE` tasks in a row moves elsewhere (refusals cleared, an
+/// explore walk on a turned heading) this many times before it stops (issue 13b: 13 of 56 bots
+/// stopped for good on a ledge, a lake or out of reach of the trees, and idled out the cap).
+pub const MAX_RELOCATIONS: u32 = 6;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
 /// is not tried log by log (clojurecraft's `area-radius`).
 pub const AREA_RADIUS: f64 = 6.0;
@@ -288,6 +292,11 @@ pub struct Plan {
     pub batch: Option<(Cell, data::ItemKind, i32)>,
     #[serde(default)]
     pub smelts: u64,
+    /// Relocations made, and whether the next choice is one (issue 13b).
+    #[serde(default)]
+    pub relocations: u32,
+    #[serde(default)]
+    pub relocate: bool,
     #[serde(default)]
     pub refused_prey: Vec<i32>,
     /// Acts made this tick, for the shell (`take_acts`).
@@ -325,6 +334,8 @@ impl Plan {
             always_retry_at: 0,
             batch: None,
             smelts: 0,
+            relocations: 0,
+            relocate: false,
             refused_prey: Vec::new(),
             acts: Vec::new(),
         }
@@ -490,9 +501,7 @@ impl Plan {
                 *self.failures.entry(format!("{f:?}")).or_default() += 1;
                 self.retry_at = tick + RETRY_TICKS;
                 self.failed_in_row += 1;
-                if self.failed_in_row >= MAX_UNWALKABLE {
-                    self.stuck = true;
-                }
+                let give_up = self.failed_in_row >= MAX_UNWALKABLE;
                 match std::mem::replace(&mut self.task, Task::Idle) {
                     Task::ToLog(walk) => {
                         self.refuse(walk.target, tick);
@@ -526,10 +535,9 @@ impl Plan {
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
                 }
-                if self.stuck {
-                    self.note(
+                if give_up {
+                    self.give_up(
                         tick,
-                        "stuck".to_owned(),
                         format!("{MAX_UNWALKABLE} walks failed in a row with none done"),
                     );
                 }
@@ -889,10 +897,8 @@ impl Plan {
         self.failed_in_row += 1;
         *self.failures.entry("NoWay".to_owned()).or_default() += 1;
         if self.failed_in_row >= MAX_UNWALKABLE {
-            self.stuck = true;
-            self.note(
+            self.give_up(
                 tick,
-                "stuck".to_owned(),
                 format!("{MAX_UNWALKABLE} choices in a row had no way"),
             );
         } else {
@@ -923,6 +929,12 @@ impl Plan {
             );
             return Task::Idle;
         };
+        // A relocation first: walk off on the turned heading, then plan from there (issue 13b).
+        if std::mem::take(&mut self.relocate)
+            && let Some(t) = self.explore_walk(w, tick, "relocate: plan again from elsewhere")
+        {
+            return t;
+        }
         // A batch left cooking is collected before anything else (issue 13b).
         if let Some((furnace, result, count)) = self.batch {
             self.note(
@@ -1108,10 +1120,8 @@ impl Plan {
                     );
                 }
                 if self.failed_in_row >= MAX_UNWALKABLE {
-                    self.stuck = true;
-                    self.note(
+                    self.give_up(
                         tick,
-                        "stuck".to_owned(),
                         format!("{MAX_UNWALKABLE} tasks failed in a row with none done"),
                     );
                 }
@@ -1340,13 +1350,61 @@ impl Plan {
 
     fn check_stuck(&mut self, tick: u64) {
         if self.failed_in_row >= MAX_UNWALKABLE {
-            self.stuck = true;
-            self.note(
+            self.give_up(
                 tick,
-                "stuck".to_owned(),
                 format!("{MAX_UNWALKABLE} tasks failed in a row with none done"),
             );
         }
+    }
+
+    /// Too many failures in a row: a goal aim moves elsewhere (refusals forgotten, the heading
+    /// turned, the next choice an explore walk) up to `MAX_RELOCATIONS` times; then, or for issue
+    /// 09's log aim, the planner stops.
+    fn give_up(&mut self, tick: u64, why: String) {
+        if self.aim.is_goal() && self.relocations < MAX_RELOCATIONS {
+            self.relocations += 1;
+            self.relocate = true;
+            self.failed_in_row = 0;
+            self.refused.clear();
+            self.refused_areas.clear();
+            self.heading = (self.heading + 90.0) % 360.0;
+            self.note(
+                tick,
+                format!("relocate ({} of {MAX_RELOCATIONS})", self.relocations),
+                why,
+            );
+            return;
+        }
+        self.stuck = true;
+        self.note(tick, "stuck".to_owned(), why);
+    }
+
+    /// An explore walk on the heading (issue 09's, also a relocation's).
+    fn explore_walk(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {
+        let body = w.body?;
+        for _ in 0..CANDIDATES_PER_TICK {
+            let (s, c) = self.heading.to_radians().sin_cos();
+            let d = f64::from(EXPLORE_DISTANCE);
+            let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
+            let target = path::feet_cell(p);
+            let mut walk = Walk::new(
+                target,
+                Goal::Afar {
+                    pos: path::feet_cell(body.pos),
+                    range: d - 4.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(tick, format!("explore toward {target:?}"), why.to_owned());
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            self.heading = (self.heading + 90.0) % 360.0;
+        }
+        None
     }
 
     fn after_craft(&mut self, status: CraftStatus, tick: u64) -> Controls {

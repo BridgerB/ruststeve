@@ -34,3 +34,14 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l00-b04 smelted at tick 4,080 with its table a block away; at 4,090 the table's cell had been air since tick 3,860 and no table was held; with its logs turned into sticks by the spare, it walked at surface trees until it stopped. Ten other bots were within 17 blocks. The same lane's furnace was placed by a click on the table (which opens it instead).
 - **Cause**: every bot of a lane starts at the same spawn and mines the same ground, so tables, furnaces and drops are dug and taken by the others; a place could click an interactive block as its floor.
 - **Fix**: the `stone` start spreads its bots (`spread = 128`, vanilla's `spreadplayers` from where each joined); a place never clicks a table, furnace, chest or barrel to place on it.
+
+### 5. Stopping for good (race 43523765895, 1d19e72: 12 of 56)
+- **What happened**: spread apart, 12 bots made the kit and 19 the stage (an iron pickaxe and a bucket); 6 died to mobs; 13 ended `stuck`.
+- **Read**: rs-l01-b00 (walks at surface trees), rs-l01-b01 (boxed on a ledge, every stair refused for no floor, stopped at tick 1,267) and rs-l01-b03 (stairs refused for water, then no path to coal, stopped at 6,745): each stopped after 12 failures in a row and idled out the cap.
+- **Cause**: issue 09's rule (12 failed walks in a row: stop) was made for a five-minute log aim; in a half-hour goal it throws the rest of the run away on one bad spot.
+- **Fix**: a goal aim relocates instead: refusals forgotten, the heading turned a quarter, an explore walk, up to 6 times before it stops.
+
+### 6. A tool swap that looped (race 43523765895)
+- **What happened**: rs-l01-b09, with three ingots, a bucket and an iron pickaxe in its main inventory, made one decision in its last 19,000 ticks; it stood still at y 19 and sent 19,080 acts, nearly all clicks on slot 13.
+- **Cause**: the dig chose its best tool from the inventory slots only; picking the iron pickaxe up to swap it into the hotbar took it out of the slots, the next best (a stone pickaxe) was chosen, and the cursor was put down in the first empty slot, the one it came from.
+- **Fix**: the cursor counts among the tools a dig chooses from.
