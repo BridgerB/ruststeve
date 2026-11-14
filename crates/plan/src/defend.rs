@@ -78,6 +78,22 @@ pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {
         .map(|(_, id, k)| (id, k))
 }
 
+/// The foe to answer: the nearest hostile within `defend_radius`, else the nearest mob that
+/// shoots within `ranged_radius`.
+pub fn foe(w: &World, rules: &SurvivalRules) -> Option<(i32, EntityKind)> {
+    if let Some(f) = nearest_foe(w, rules.defend_radius) {
+        return Some(f);
+    }
+    let body = w.body?;
+    w.entities
+        .iter()
+        .filter(|(_, e)| !e.dead && rules.ranged.contains(&e.kind))
+        .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
+        .filter(|(d, _, _)| *d <= rules.ranged_radius)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, id, k)| (id, k))
+}
+
 /// Under the danger line: health the next two hits and a margin would take (data).
 pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {
     w.player.health.is_some_and(|h| h <= rules.danger_health)
@@ -123,7 +139,12 @@ impl Defend {
         };
         self.last_seen = pos;
         let d = distance(body.pos, pos);
-        if d > rules.defend_radius + CLEAR_MARGIN {
+        let reach = if rules.ranged.contains(&self.kind) {
+            rules.ranged_radius
+        } else {
+            rules.defend_radius
+        };
+        if d > reach + CLEAR_MARGIN {
             return (still, None, DefendStatus::Done);
         }
         // The progress invariants: the danger line, a fight that lands nothing, a long fight.

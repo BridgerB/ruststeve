@@ -619,8 +619,7 @@ impl Plan {
             let in_force = match row {
                 make::Always::Escape(k) => trap == Some(*k),
                 make::Always::Defend => {
-                    running == Some(make::Always::Defend)
-                        || defend::nearest_foe(w, rules.defend_radius).is_some()
+                    running == Some(make::Always::Defend) || defend::foe(w, rules).is_some()
                 }
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
@@ -669,20 +668,18 @@ impl Plan {
                     self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
                     Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
-                make::Always::Defend => {
-                    defend::nearest_foe(w, rules.defend_radius).map(|(foe, kind)| {
-                        let d = defend::Defend::new(w, foe, kind, rules, tick);
-                        self.note(
-                            tick,
-                            format!("defend {kind:?} {foe} ({:?})", d.stance),
-                            format!(
-                                "a hostile within {}; health {:?}; cut {cut}",
-                                rules.defend_radius, w.player.health
-                            ),
-                        );
-                        Task::Defend(Box::new(d))
-                    })
-                }
+                make::Always::Defend => defend::foe(w, rules).map(|(foe, kind)| {
+                    let d = defend::Defend::new(w, foe, kind, rules, tick);
+                    self.note(
+                        tick,
+                        format!("defend {kind:?} {foe} ({:?})", d.stance),
+                        format!(
+                            "a hostile within {}; health {:?}; cut {cut}",
+                            rules.defend_radius, w.player.health
+                        ),
+                    );
+                    Task::Defend(Box::new(d))
+                }),
                 make::Always::Eat => eat::best_food(w, rules).map(|f| {
                     self.note(
                         tick,

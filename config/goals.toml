@@ -251,3 +251,7 @@ defend_radius = 4.0
 danger_health = 8.0
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
 never_fight = ["creeper"]
+# Mobs that shoot: answered within ranged_radius, closed in on and fought (skeleton arrows were
+# the top killer underground in the iron races: docs/problems/iron-kit.md wall 16).
+ranged = ["skeleton", "stray", "bogged"]
+ranged_radius = 16.0

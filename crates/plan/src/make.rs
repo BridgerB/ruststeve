@@ -236,6 +236,16 @@ pub struct Survival {
     /// ... nor these kinds, by entity name: backed away from.
     #[serde(default)]
     pub never_fight: Vec<String>,
+    /// Mobs that shoot, by entity name, answered within `ranged_radius` (issue 13b: skeleton
+    /// arrows were the top killer underground, from beyond `defend_radius`).
+    #[serde(default)]
+    pub ranged: Vec<String>,
+    #[serde(default = "ranged_radius")]
+    pub ranged_radius: f64,
+}
+
+fn ranged_radius() -> f64 {
+    16.0
 }
 
 fn defend_radius() -> f64 {
@@ -257,6 +267,8 @@ impl Default for Survival {
             defend_radius: defend_radius(),
             danger_health: danger_health(),
             never_fight: Vec::new(),
+            ranged: Vec::new(),
+            ranged_radius: ranged_radius(),
         }
     }
 }
@@ -284,6 +296,8 @@ pub struct SurvivalRules {
     pub defend_radius: f64,
     pub danger_health: f32,
     pub never_fight: Vec<data::EntityKind>,
+    pub ranged: Vec<data::EntityKind>,
+    pub ranged_radius: f64,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -482,6 +496,20 @@ impl Table {
             .iter()
             .map(|n| data::ItemKind::from_name(n).ok_or_else(|| format!("survival: no item {n}")))
             .collect::<Result<_, _>>()?;
+        let entity = |n: &String| {
+            data::generated::entities::ENTITY_NAMES
+                .iter()
+                .position(|e| e == n)
+                .and_then(|i| u32::try_from(i).ok())
+                .map(data::EntityKind::from_id)
+                .ok_or_else(|| format!("survival: no entity {n}"))
+        };
+        let ranged = g
+            .survival
+            .ranged
+            .iter()
+            .map(entity)
+            .collect::<Result<_, _>>()?;
         let never_fight = g
             .survival
             .never_fight
@@ -508,6 +536,8 @@ impl Table {
                 defend_radius: g.survival.defend_radius,
                 danger_health: g.survival.danger_health,
                 never_fight,
+                ranged,
+                ranged_radius: g.survival.ranged_radius,
             },
         })
     }

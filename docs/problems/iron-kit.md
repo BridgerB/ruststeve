@@ -100,3 +100,8 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: 23 kits, 2 deaths; 15 bots ended `stuck`, most with about 80 `Boxed` stairs (rs-l00-b12 in a pit by a lake, every stair refused for water; rs-l00-b00 refused for no floor).
 - **Tried**: a boxed staircase filling the water or the missing floor with a held block (2d8de8c). Race 43571234795 got 14 of 56, with 212 `Stalled` and 181 `StepFailed` where race 43567763309 had almost none, and as many `Boxed` (983); reverted (ae1f54f).
 - **Open**: being boxed in is still the most common way to stop; race-to-race spread (14 to 23 kits on near code) is wide, so the next fix is judged on more than one race.
+
+### 16. Shot from beyond the defence (race 43574192321, dd06007: 17 of 56, the stage 25)
+- **What happened**: on race 43567763309's code again, 17 kits (23 before: the spread); 9 deaths, 5 of them skeleton arrows.
+- **Cause**: `defend` answered only mobs within 4 blocks; a skeleton shoots from up to 15.
+- **Fix**: `[survival] ranged` (skeleton, stray, bogged) are answered within `ranged_radius` (16): closed in on and fought, under the same danger line.
