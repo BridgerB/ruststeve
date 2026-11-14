@@ -165,3 +165,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l02-b00 took about 117 ticks a stair. Its digs, Start to Finish: two cells of each stair in 17 ticks, the top cell (the next column's head height) in 70 to 82. That cell's dig starts just after the step down, with the bot still in the air, and the dig's wait was fixed at its start: five times the on-ground time.
 - **Cause**: the server judges a FINISH by the player's state at that moment times the ticks since the start (`handleBlockBreakAction`, the model's `stop_destroy`), so the dig waited about 55 ticks it did not need on every stair.
 - **Fix**: the dig's Finish is judged each tick by the body's state now; the start's wait is only the latest it finishes.
+
+### 28. Creepers fled into a tunnel's end (race 43615038880, 00c2327, 8 lanes: 44 of 112)
+- **What happened**: 39% (61 of 112 on d040afa the race before; 29 of 56 on the official 4 lanes): 22 deaths, 8 of them creepers.
+- **Read**: rs-l05-b06, mining at y -9 with full health, backed away from a creeper at tick 27,891 and died to it at 28,140 with it 2.3 blocks off and a zombie beside it: straight away from it was the tunnel's wall.
+- **Cause**: a retreat walked straight away from the foe, jumping; underground the way out is the way the tunnels go.
+- **Fix**: a retreat routes to a cell beyond its reach plus the margin (`Goal::Away`), searched again when the foe moves 3 blocks; straight away only when no route is found. Model test: a creeper fled round a tunnel's corner.
