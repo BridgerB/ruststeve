@@ -20,6 +20,10 @@ pub const CLEAR_MARGIN: f64 = 4.0;
 pub const FIGHT_TICKS: u64 = 600;
 /// A fight that lands no hit for this long backs away instead (the progress invariant).
 pub const NO_HIT_TICKS: u64 = 200;
+/// A flee route is searched again when the foe has moved this far from where it was planned, or
+/// this long after a search found none.
+pub const FLEE_REPLAN_BLOCKS: i32 = 3;
+pub const FLEE_RETRY_TICKS: u64 = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Stance {
@@ -49,6 +53,12 @@ pub struct Defend {
     pub last_health: Option<f32>,
     pub last_hit_at: u64,
     pub started: u64,
+    /// A retreat's route away, and the foe's cell it was planned from (wall 28).
+    #[serde(default)]
+    pub flee: Option<(crate::walk::Walk, crate::path::Cell)>,
+    /// The tick the last flee route was searched (no route: straight away, a while).
+    #[serde(default)]
+    pub fled_at: Option<u64>,
 }
 
 /// Is this kind of mob hostile (the game's `monster` category)?
@@ -74,6 +84,36 @@ pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {
         .filter(|(_, e)| !e.dead && hostile(e.kind))
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= radius)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, id, k)| (id, k))
+}
+
+/// The foe to answer: the nearest hostile within `defend_radius`, else the nearest mob that
+/// shoots within `ranged_radius`.
+/// `ignored`: ranged foes a fight landed nothing on lately (out of reach behind rock), left alone
+/// unless they come within `defend_radius` (wall 30).
+pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, EntityKind)> {
+    let body = w.body?;
+    // A kind never fought (a creeper) first, from farther out: backed away from before its fuse.
+    let flee = w
+        .entities
+        .iter()
+        .filter(|(_, e)| !e.dead && rules.never_fight.contains(&e.kind))
+        .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
+        .filter(|(d, _, _)| *d <= rules.flee_radius)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, id, k)| (id, k));
+    if flee.is_some() {
+        return flee;
+    }
+    if let Some(f) = nearest_foe(w, rules.defend_radius) {
+        return Some(f);
+    }
+    w.entities
+        .iter()
+        .filter(|(id, e)| !e.dead && rules.ranged.contains(&e.kind) && !ignored.contains(id))
+        .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
+        .filter(|(d, _, _)| *d <= rules.ranged_radius)
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
         .map(|(_, id, k)| (id, k))
 }
@@ -105,6 +145,8 @@ impl Defend {
             last_health: None,
             last_hit_at: tick,
             started: tick,
+            flee: None,
+            fled_at: None,
         }
     }
 
@@ -123,7 +165,15 @@ impl Defend {
         };
         self.last_seen = pos;
         let d = distance(body.pos, pos);
-        if d > rules.defend_radius + CLEAR_MARGIN {
+        let never = rules.never_fight.contains(&self.kind);
+        let reach = if never {
+            rules.flee_clear - CLEAR_MARGIN
+        } else if rules.ranged.contains(&self.kind) {
+            rules.ranged_radius
+        } else {
+            rules.defend_radius
+        };
+        if d > reach + CLEAR_MARGIN {
             return (still, None, DefendStatus::Done);
         }
         // The progress invariants: the danger line, a fight that lands nothing, a long fight.
@@ -147,7 +197,46 @@ impl Defend {
         let toward = yaw_to(body.pos, target);
         match self.stance {
             Stance::Retreat => {
-                // Straight away from it, jumping what is in the way.
+                // Along a route to beyond the reach, the way the tunnels go: straight away ran
+                // bots into a tunnel's end with the creeper behind (wall 28).
+                let foe_cell = crate::path::feet_cell(pos);
+                let moved = self.flee.as_ref().is_some_and(|(_, c)| {
+                    (c.0 - foe_cell.0)
+                        .abs()
+                        .max((c.1 - foe_cell.1).abs())
+                        .max((c.2 - foe_cell.2).abs())
+                        >= FLEE_REPLAN_BLOCKS
+                });
+                if moved {
+                    self.flee = None;
+                }
+                if self.flee.is_none()
+                    && self
+                        .fled_at
+                        .is_none_or(|t| tick.saturating_sub(t) >= FLEE_RETRY_TICKS)
+                {
+                    self.fled_at = Some(tick);
+                    let mut walk = crate::walk::Walk::new(
+                        foe_cell,
+                        crate::path::Goal::Away {
+                            pos: foe_cell,
+                            range: reach + CLEAR_MARGIN + 1.0,
+                        },
+                        crate::walk::Arrive::Goal,
+                        tick,
+                    );
+                    if walk.route_now(w, tick) {
+                        self.flee = Some((walk, foe_cell));
+                    }
+                }
+                if let Some((walk, _)) = &mut self.flee {
+                    let (c, status) = walk.step(w, tick);
+                    if status == crate::walk::TaskStatus::Running {
+                        return (c, None, DefendStatus::Running);
+                    }
+                    self.flee = None;
+                }
+                // No route: straight away from it, jumping what is in the way.
                 let away = (toward + 180.0) % 360.0;
                 (
                     Controls {

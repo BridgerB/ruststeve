@@ -44,8 +44,12 @@ fn water_lava_and_drops_refuse_a_stair() {
     assert!(water.starts_with("water"), "{water}");
     let lava_beside = stair(&world_with(&[((2, 63, 0), BlockKind::Lava)])).unwrap();
     assert!(lava_beside.starts_with("lava beside"), "{lava_beside}");
-    let drop = stair(&world_with(&[((1, 62, 0), BlockKind::Air)])).unwrap();
+    // A drop deeper than three blocks under the stair is refused ...
+    let deep: Vec<_> = (58..=62).map(|y| ((1, y, 0), BlockKind::Air)).collect();
+    let drop = stair(&world_with(&deep)).unwrap();
     assert!(drop.starts_with("no floor"), "{drop}");
+    // ... a short one (a landing a block down) is taken (issue 13b).
+    assert_eq!(stair(&world_with(&[((1, 62, 0), BlockKind::Air)])), None);
 }
 
 #[test]

@@ -18,6 +18,7 @@ pub mod hunt;
 pub mod make;
 pub mod path;
 pub mod place;
+pub mod redig;
 pub mod smelt;
 pub mod stairs;
 pub mod walk;
@@ -51,14 +52,35 @@ pub const RETRY_TICKS: u64 = 20;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
 /// said so, and the run ends there (clojurecraft's `max-unwalkable`, 12).
 pub const MAX_UNWALKABLE: u32 = 12;
+/// A goal aim that fails `MAX_UNWALKABLE` tasks in a row moves elsewhere (refusals cleared, an
+/// explore walk on a turned heading) this many times before it stops (issue 13b: 13 of 56 bots
+/// stopped for good on a ledge, a lake or out of reach of the trees, and idled out the cap).
+pub const MAX_RELOCATIONS: u32 = 6;
+/// After its relocations, a goal aim rests this long and starts again.
+pub const REST_TICKS: u64 = 600;
+/// A task with no progress this long (the body not a block from where it was, the items held
+/// unchanged, no planner event) is cut: one hung a bot for 33,000 ticks after a stair's digs
+/// (docs/problems/iron-kit.md wall 14).
+pub const STALL_TICKS: u64 = 1200;
+/// The trail: a mark this often, when the body has moved `TRAIL_STEP` since the last; this many
+/// kept; a relocation walks back to one at least `TRAIL_BACK` blocks away.
+pub const TRAIL_EVERY: u64 = 200;
+pub const TRAIL_STEP: f64 = 2.0;
+pub const TRAIL_KEPT: usize = 60;
+pub const TRAIL_BACK: f64 = 10.0;
+/// The most a swim off an island takes.
+pub const SWIM_TICKS: u64 = 1200;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
 /// is not tried log by log (clojurecraft's `area-radius`).
 pub const AREA_RADIUS: f64 = 6.0;
 /// Targets the planner routes to in one tick before it waits: a choice is checked for a way
 /// before it is made, and the check is bounded (brain/ruststeve/design/progress-invariants.md).
 pub const CANDIDATES_PER_TICK: usize = 2;
-/// How far a remembered table counts as near (clojurecraft's `table-search`).
-pub const TABLE_SEARCH: f64 = 24.0;
+/// How far a remembered table or furnace counts as near: 64, where clojurecraft's `table-search`
+/// is 24. A miner 30 blocks from its table and with no wood left planned a new one from logs it
+/// could not reach; one too far to walk to fails `Unopened` and is refused, and a new one is
+/// placed (docs/problems/iron-kit.md wall 22).
+pub const TABLE_SEARCH: f64 = 64.0;
 /// Events kept for `why` and the case file.
 const EVENTS_KEPT: usize = 64;
 
@@ -77,6 +99,14 @@ pub enum Aim {
     Cobblestone,
     StonePickaxe,
     StoneTools,
+    /// Issue 13's rows: a furnace placed, four ingots, an iron pickaxe, a bucket, flint and
+    /// steel, and the kit (all three).
+    Furnace,
+    Ingots,
+    IronPickaxe,
+    Bucket,
+    FlintAndSteel,
+    IronKit,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -91,6 +121,12 @@ impl Aim {
             None if s == "cobblestone" => Some(Aim::Cobblestone),
             None if s == "stone-pickaxe" => Some(Aim::StonePickaxe),
             None if s == "stone-tools" => Some(Aim::StoneTools),
+            None if s == "furnace" => Some(Aim::Furnace),
+            None if s == "ingots" => Some(Aim::Ingots),
+            None if s == "iron-pickaxe" => Some(Aim::IronPickaxe),
+            None if s == "bucket" => Some(Aim::Bucket),
+            None if s == "flint-and-steel" => Some(Aim::FlintAndSteel),
+            None if s == "iron-kit" => Some(Aim::IronKit),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -108,6 +144,12 @@ impl Aim {
             Aim::Cobblestone => "cobblestone".to_owned(),
             Aim::StonePickaxe => "stone-pickaxe".to_owned(),
             Aim::StoneTools => "stone-tools".to_owned(),
+            Aim::Furnace => "furnace".to_owned(),
+            Aim::Ingots => "ingots".to_owned(),
+            Aim::IronPickaxe => "iron-pickaxe".to_owned(),
+            Aim::Bucket => "bucket".to_owned(),
+            Aim::FlintAndSteel => "flint-and-steel".to_owned(),
+            Aim::IronKit => "iron-kit".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -121,6 +163,12 @@ impl Aim {
             | Aim::Cobblestone
             | Aim::StonePickaxe
             | Aim::StoneTools
+            | Aim::Furnace
+            | Aim::Ingots
+            | Aim::IronPickaxe
+            | Aim::Bucket
+            | Aim::FlintAndSteel
+            | Aim::IronKit
             | Aim::Hold => true,
         }
     }
@@ -142,8 +190,14 @@ pub enum Task {
     Place(Place),
     /// Cutting stairs down (issue 11b).
     Stairs(Box<Stairs>),
+    /// A batch in a furnace, or the results of one left loaded (issue 13b).
+    Smelt(Box<smelt::Smelt>),
+    /// Place a block and dig it again for its chance drop (flint, issue 13b).
+    Redig(Box<redig::Redig>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
+    /// Across water to a far shore: a relocation off an island (issue 13b), and its start.
+    Swim(Box<escape::Escape>, u64),
     /// A hostile mob near: fight it or back away (issue 12d).
     Defend(Box<defend::Defend>),
     /// Eating something held (issue 12c).
@@ -162,7 +216,10 @@ impl Task {
             Task::Craft(_) => "craft",
             Task::Place(_) => "place",
             Task::Stairs(_) => "stairs",
+            Task::Smelt(_) => "smelt",
+            Task::Redig(_) => "redig",
             Task::Escape(_) => "escape",
+            Task::Swim(..) => "swim",
             Task::Defend(_) => "defend",
             Task::Eat(_) => "eat",
             Task::Hunt(_) => "hunt",
@@ -176,7 +233,10 @@ impl Task {
             | Task::Craft(_)
             | Task::Place(_)
             | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_)
             | Task::Escape(_)
+            | Task::Swim(..)
             | Task::Defend(_)
             | Task::Eat(_)
             | Task::Hunt(_) => None,
@@ -220,6 +280,12 @@ pub struct Plan {
     pub stuck: bool,
     /// Areas refused after a `NoPath`: their centre and until when.
     pub refused_areas: Vec<(Cell, u64)>,
+    /// Targets whose walks stopped getting closer (`NoProgress`), cleared on a relocation.
+    pub stalled: Vec<Cell>,
+    /// Where a `never_fight` mob was fled from, until when, and how far round it work waits.
+    pub dangers: Vec<(Cell, u64, f64)>,
+    /// Ranged foes a fight landed nothing on, and until when they are left alone (wall 30).
+    pub ignored_foes: Vec<(i32, u64)>,
     /// Events ever made (`events` keeps the last few): the shell records the new ones.
     pub event_count: u64,
     /// The goal table (issue 10), for a goal aim.
@@ -247,6 +313,33 @@ pub struct Plan {
     pub kills: u64,
     #[serde(default)]
     pub always_retry_at: u64,
+    /// A batch left cooking (issue 13b): the furnace, its result and how many. The planner goes
+    /// back for it before anything else, and never mines for what is already in it.
+    #[serde(default)]
+    pub batch: Option<(Cell, data::ItemKind, i32)>,
+    #[serde(default)]
+    pub smelts: u64,
+    /// Relocations made, and whether the next choice is one (issue 13b).
+    #[serde(default)]
+    pub relocations: u32,
+    /// The block a dig-toward heads for, the nearest it has come, and cuts made without coming
+    /// nearer (a progress invariant, issue 13b).
+    #[serde(default)]
+    pub toward: Option<(Cell, f64, u32)>,
+    /// The watchdog's mark: where the body was, how many items were held, the events made, and
+    /// when (issue 13b).
+    #[serde(default)]
+    pub mark: Option<([f64; 3], i64, u64, u64)>,
+    #[serde(default)]
+    pub stalls: u64,
+    /// Where the body has stood, every `TRAIL_EVERY` ticks, newest last: the way back out of a
+    /// dead end (issue 13b).
+    #[serde(default)]
+    pub trail: Vec<[f64; 3]>,
+    #[serde(default)]
+    pub relocate: bool,
+    /// Walks failed in a row with water beside the feet: the next relocation swims (wall 24).
+    pub maroon: bool,
     #[serde(default)]
     pub refused_prey: Vec<i32>,
     /// Acts made this tick, for the shell (`take_acts`).
@@ -272,6 +365,9 @@ impl Plan {
             failed_in_row: 0,
             stuck: false,
             refused_areas: Vec::new(),
+            stalled: Vec::new(),
+            dangers: Vec::new(),
+            ignored_foes: Vec::new(),
             event_count: 0,
             table: None,
             met: false,
@@ -282,6 +378,15 @@ impl Plan {
             meals: 0,
             kills: 0,
             always_retry_at: 0,
+            batch: None,
+            smelts: 0,
+            relocations: 0,
+            toward: None,
+            mark: None,
+            stalls: 0,
+            trail: Vec::new(),
+            relocate: false,
+            maroon: false,
             refused_prey: Vec::new(),
             acts: Vec::new(),
         }
@@ -332,6 +437,44 @@ impl Plan {
         let Some(body) = w.body else {
             return Controls::default();
         };
+        // The trail, the way back out of a dead end.
+        if tick.is_multiple_of(TRAIL_EVERY) {
+            let far = self.trail.last().is_none_or(|t| {
+                (0..3)
+                    .map(|i| (t[i] - body.pos[i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+                    >= TRAIL_STEP
+            });
+            if far {
+                self.trail.push(body.pos);
+                if self.trail.len() > TRAIL_KEPT {
+                    self.trail.remove(0);
+                }
+            }
+        }
+        // The watchdog: a task with no progress for STALL_TICKS is cut.
+        let items: i64 = w.inventory.slots.values().map(|(_, n)| i64::from(*n)).sum();
+        let moved = |m: [f64; 3]| (0..3).map(|i| (m[i] - body.pos[i]).powi(2)).sum::<f64>() > 1.0;
+        match self.mark {
+            Some((at, n, ev, since)) if !moved(at) && n == items && ev == self.event_count => {
+                if !matches!(self.task, Task::Idle) && tick.saturating_sub(since) > STALL_TICKS {
+                    let cut = self.task.name();
+                    self.stalls += 1;
+                    self.task = Task::Idle;
+                    self.retry_at = tick;
+                    self.failed_in_row += 1;
+                    *self.failures.entry("Stalled".to_owned()).or_default() += 1;
+                    self.note(
+                        tick,
+                        format!("{cut} stalled"),
+                        format!("no progress for {STALL_TICKS} ticks; choose again"),
+                    );
+                    self.mark = Some((body.pos, items, self.event_count, tick));
+                }
+            }
+            Some(_) | None => self.mark = Some((body.pos, items, self.event_count, tick)),
+        }
         // The always-rows come first, ahead of every goal and after the aim is met.
         if let Some(c) = self.always(w, &body, tick) {
             return c;
@@ -350,6 +493,12 @@ impl Plan {
                 | Aim::Pickaxe
                 | Aim::Cobblestone
                 | Aim::StonePickaxe
+                | Aim::Furnace
+                | Aim::Ingots
+                | Aim::IronPickaxe
+                | Aim::Bucket
+                | Aim::FlintAndSteel
+                | Aim::IronKit
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
@@ -377,6 +526,39 @@ impl Plan {
                 let (c, act, status) = st.step(w, tick);
                 self.acts.extend(act);
                 return self.after_stairs(c, status, tick);
+            }
+            Task::Smelt(sm) => {
+                let (c, act, status) = sm.step(w, tick);
+                self.acts.extend(act);
+                return self.after_smelt(c, status, tick);
+            }
+            Task::Redig(r) => {
+                let (c, act, status) = r.step(w, tick);
+                self.acts.extend(act);
+                return self.after_redig(c, status, tick);
+            }
+            Task::Swim(e, since) => {
+                let (c, act) = e.step(w, tick);
+                self.acts.extend(act);
+                let target = e.target;
+                let since = *since;
+                // Done on dry land at the far shore; over after SWIM_TICKS whatever.
+                let landed = target.zip(w.body).is_some_and(|(t, b)| {
+                    escape::dry_land(w, &b)
+                        && (f64::from(t.0) + 0.5 - b.pos[0]).abs() < 2.0
+                        && (f64::from(t.2) + 0.5 - b.pos[2]).abs() < 2.0
+                });
+                if landed || tick.saturating_sub(since) > SWIM_TICKS {
+                    self.task = Task::Idle;
+                    self.retry_at = tick;
+                    self.note(
+                        tick,
+                        if landed { "swum across" } else { "swim over" }.to_owned(),
+                        "plan again from here".to_owned(),
+                    );
+                    return Controls::default();
+                }
+                return c;
             }
             // `always` runs these (and ends them).
             Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
@@ -417,7 +599,10 @@ impl Plan {
                     | Task::Craft(_)
                     | Task::Place(_)
                     | Task::Stairs(_)
+                    | Task::Smelt(_)
+                    | Task::Redig(_)
                     | Task::Escape(_)
+                    | Task::Swim(..)
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
@@ -429,15 +614,18 @@ impl Plan {
                 *self.failures.entry(format!("{f:?}")).or_default() += 1;
                 self.retry_at = tick + RETRY_TICKS;
                 self.failed_in_row += 1;
-                if self.failed_in_row >= MAX_UNWALKABLE {
-                    self.stuck = true;
-                }
+                let give_up = self.failed_in_row >= MAX_UNWALKABLE;
                 match std::mem::replace(&mut self.task, Task::Idle) {
                     Task::ToLog(walk) => {
                         self.refuse(walk.target, tick);
-                        if f == walk::Failure::NoPath {
-                            self.refused_areas
-                                .push((walk.target, tick + FAILURE_MEMORY_TICKS));
+                        match f {
+                            walk::Failure::NoPath => self
+                                .refused_areas
+                                .push((walk.target, tick + FAILURE_MEMORY_TICKS)),
+                            // A way found and not followed is found again: the area, escalating
+                            // (a coal vein tried cell by cell held a bot 8,000 ticks: wall 25).
+                            walk::Failure::NoProgress => self.stalled_area(walk.target, tick),
+                            _ => {}
                         }
                         self.note(
                             tick,
@@ -458,15 +646,18 @@ impl Plan {
                     | Task::Craft(_)
                     | Task::Place(_)
                     | Task::Stairs(_)
+                    | Task::Smelt(_)
+                    | Task::Redig(_)
                     | Task::Escape(_)
+                    | Task::Swim(..)
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
                 }
-                if self.stuck {
-                    self.note(
+                if give_up {
+                    self.maroon = w.body.is_some_and(|b| wet(w, &b));
+                    self.give_up(
                         tick,
-                        "stuck".to_owned(),
                         format!("{MAX_UNWALKABLE} walks failed in a row with none done"),
                     );
                 }
@@ -487,6 +678,19 @@ impl Plan {
         }
         let trap = self.traps.tick(w, body);
         let rules = &table.survival;
+        let ignored: Vec<i32> = self
+            .ignored_foes
+            .iter()
+            .filter(|(_, until)| tick < *until)
+            .map(|(id, _)| *id)
+            .collect();
+        // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
+        // cuts it, and a foe or hunger waits for the far shore (wall 24).
+        if matches!(self.task, Task::Swim(..))
+            && matches!(trap, None | Some(escape::TrapKind::Water))
+        {
+            return None;
+        }
         // What is running: an escape whose trap holds, an eat or a hunt, else nothing.
         let running = match &self.task {
             Task::Escape(e) => Some(make::Always::Escape(e.kind)),
@@ -499,7 +703,10 @@ impl Plan {
             | Task::Dig(_)
             | Task::Craft(_)
             | Task::Place(_)
-            | Task::Stairs(_) => None,
+            | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_)
+            | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
         let mut chosen: Option<(String, make::Always)> = None;
@@ -508,7 +715,7 @@ impl Plan {
                 make::Always::Escape(k) => trap == Some(*k),
                 make::Always::Defend => {
                     running == Some(make::Always::Defend)
-                        || defend::nearest_foe(w, rules.defend_radius).is_some()
+                        || defend::foe(w, rules, &ignored).is_some()
                 }
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
@@ -549,6 +756,7 @@ impl Plan {
                 self.acts.push(world::Act::ReleaseUse);
             }
             self.finish_walk();
+            self.keep_batch();
             let cut = self.task.name();
             let task = match row {
                 make::Always::Escape(k) => {
@@ -556,20 +764,18 @@ impl Plan {
                     self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
                     Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
-                make::Always::Defend => {
-                    defend::nearest_foe(w, rules.defend_radius).map(|(foe, kind)| {
-                        let d = defend::Defend::new(w, foe, kind, rules, tick);
-                        self.note(
-                            tick,
-                            format!("defend {kind:?} {foe} ({:?})", d.stance),
-                            format!(
-                                "a hostile within {}; health {:?}; cut {cut}",
-                                rules.defend_radius, w.player.health
-                            ),
-                        );
-                        Task::Defend(Box::new(d))
-                    })
-                }
+                make::Always::Defend => defend::foe(w, rules, &ignored).map(|(foe, kind)| {
+                    let d = defend::Defend::new(w, foe, kind, rules, tick);
+                    self.note(
+                        tick,
+                        format!("defend {kind:?} {foe} ({:?})", d.stance),
+                        format!(
+                            "a hostile within {}; health {:?}; cut {cut}",
+                            rules.defend_radius, w.player.health
+                        ),
+                    );
+                    Task::Defend(Box::new(d))
+                }),
                 make::Always::Eat => eat::best_food(w, rules).map(|f| {
                     self.note(
                         tick,
@@ -609,6 +815,22 @@ impl Plan {
                 let ended = match status {
                     defend::DefendStatus::Running => None,
                     defend::DefendStatus::Done => {
+                        // Fled a creeper: its ground waits, or the next walk goes straight back
+                        // to it (wall 29).
+                        // A ranged foe no strike reached: left alone a while, or it is chosen
+                        // again at once (one bot fought one skeleton 51 times: wall 30).
+                        if rules.ranged.contains(&d.kind) && d.last_hit_at == d.started {
+                            self.ignored_foes.retain(|(_, until)| tick < *until);
+                            self.ignored_foes.push((d.foe, tick + FAILURE_MEMORY_TICKS));
+                        }
+                        if rules.never_fight.contains(&d.kind) {
+                            self.dangers.retain(|(_, until, _)| tick < *until);
+                            self.dangers.push((
+                                path::feet_cell(d.last_seen),
+                                tick + FAILURE_MEMORY_TICKS,
+                                rules.flee_clear,
+                            ));
+                        }
                         Some(Ok(format!("defended: {} swings, {:?}", d.swings, d.stance)))
                     }
                 };
@@ -641,7 +863,10 @@ impl Plan {
             | Task::Dig(_)
             | Task::Craft(_)
             | Task::Place(_)
-            | Task::Stairs(_) => return None,
+            | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_)
+            | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
         if let Some(end) = ended {
@@ -712,6 +937,28 @@ impl Plan {
         };
     }
 
+    /// A walk into the area around `c` stopped getting closer: every target within
+    /// `AREA_RADIUS` refused a while, and for good (until a relocation clears it) once walks
+    /// there have stalled `BLOCKED_AFTER` times, as a cell is.
+    fn stalled_area(&mut self, c: Cell, tick: u64) {
+        let near = |a: Cell| {
+            let (dx, dy, dz) = (
+                f64::from(a.0 - c.0),
+                f64::from(a.1 - c.1),
+                f64::from(a.2 - c.2),
+            );
+            (dx * dx + dy * dy + dz * dz).sqrt() <= AREA_RADIUS
+        };
+        self.stalled.push(c);
+        let n = self.stalled.iter().filter(|a| near(**a)).count();
+        let until = if n >= BLOCKED_AFTER as usize {
+            u64::MAX
+        } else {
+            tick + FAILURE_MEMORY_TICKS
+        };
+        self.refused_areas.push((c, until));
+    }
+
     fn refused_now(&self, c: Cell, tick: u64) -> bool {
         let near = |(a, b): (Cell, Cell)| {
             let (dx, dy, dz) = (
@@ -722,6 +969,16 @@ impl Plan {
             (dx * dx + dy * dy + dz * dz).sqrt() <= AREA_RADIUS
         };
         self.refused.get(&c).is_some_and(|(until, _)| tick < *until)
+            || self.dangers.iter().any(|(centre, until, r)| {
+                tick < *until && {
+                    let (dx, dy, dz) = (
+                        f64::from(centre.0 - c.0),
+                        f64::from(centre.1 - c.1),
+                        f64::from(centre.2 - c.2),
+                    );
+                    (dx * dx + dy * dy + dz * dz).sqrt() <= *r
+                }
+            })
             || self
                 .refused_areas
                 .iter()
@@ -741,6 +998,12 @@ impl Plan {
             | Aim::Cobblestone
             | Aim::StonePickaxe
             | Aim::StoneTools
+            | Aim::Furnace
+            | Aim::Ingots
+            | Aim::IronPickaxe
+            | Aim::Bucket
+            | Aim::FlintAndSteel
+            | Aim::IronKit
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -758,6 +1021,12 @@ impl Plan {
                 | Aim::Cobblestone
                 | Aim::StonePickaxe
                 | Aim::StoneTools
+                | Aim::Furnace
+                | Aim::Ingots
+                | Aim::IronPickaxe
+                | Aim::Bucket
+                | Aim::FlintAndSteel
+                | Aim::IronKit
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -809,10 +1078,8 @@ impl Plan {
         self.failed_in_row += 1;
         *self.failures.entry("NoWay".to_owned()).or_default() += 1;
         if self.failed_in_row >= MAX_UNWALKABLE {
-            self.stuck = true;
-            self.note(
+            self.give_up(
                 tick,
-                "stuck".to_owned(),
                 format!("{MAX_UNWALKABLE} choices in a row had no way"),
             );
         } else {
@@ -843,12 +1110,49 @@ impl Plan {
             );
             return Task::Idle;
         };
-        // Taken up front: the only block need so far is a crafting table.
+        // A relocation first: walk off on the turned heading, then plan from there (issue 13b).
+        if std::mem::take(&mut self.relocate)
+            && let Some(t) = self.explore_walk(w, tick, "relocate: plan again from elsewhere")
+        {
+            return t;
+        }
+        // A batch left cooking is collected before anything else (issue 13b).
+        if let Some((furnace, result, count)) = self.batch {
+            self.note(
+                tick,
+                format!("collect {count} {result:?} at {furnace:?}"),
+                "a batch was left cooking".to_owned(),
+            );
+            return Task::Smelt(Box::new(smelt::Smelt::collect(
+                w, furnace, result, count, tick,
+            )));
+        }
+        // Taken up front: the block needs are a crafting table and a furnace.
         let table_near = self
             .near_block(w, data::BlockKind::CraftingTable, tick)
             .is_some();
-        let near = move |b: data::BlockKind| b == data::BlockKind::CraftingTable && table_near;
-        match make::make(&table, &held(w), &near, goal) {
+        let furnace_near = self.near_block(w, data::BlockKind::Furnace, tick).is_some();
+        let near = move |b: data::BlockKind| match b {
+            data::BlockKind::CraftingTable => table_near,
+            data::BlockKind::Furnace => furnace_near,
+            _ => false,
+        };
+        // A spare is made by a gather only when a log can be started now.
+        // A spare is made by a gather only when a log can be started now: one remembered near
+        // the feet's height. A bot down a mine cannot walk to the trees it saw on the surface (it
+        // has no stairs up), and walks to them failed until the planner stopped
+        // (docs/problems/iron-kit.md wall 3).
+        let gather_now = self
+            .nearest_log(w, origin, 0.0, tick)
+            .zip(w.body)
+            .is_some_and(|((_, y, _), b)| (f64::from(y) - b.pos[1]).abs() <= GATHER_NOW_RISE);
+        let choice = make::make_with(&table, &held(w), &near, gather_now, goal);
+        if matches!(choice, make::Choice::Act(_))
+            && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
+        {
+            return t;
+        }
+        match choice {
             make::Choice::Done => {
                 self.met = true;
                 self.note(
@@ -904,12 +1208,58 @@ impl Plan {
                         Task::Idle
                     }
                 },
-                Some(make::Act::Mine(blocks)) => {
+                Some(make::Act::Mine { blocks, depth }) => {
                     if let Some(t) = self.carry_table(w, tick) {
                         return t;
                     }
-                    self.mine(w, blocks, tick)
+                    self.mine(w, blocks, depth, tick)
                 }
+                Some(make::Act::Smelt(r)) => {
+                    let Some(f) = self.near_block(w, data::BlockKind::Furnace, tick) else {
+                        self.retry_at = tick + RETRY_TICKS;
+                        self.note(
+                            tick,
+                            "wait".to_owned(),
+                            format!("smelt {} wants a furnace near and none is remembered", r.id),
+                        );
+                        return Task::Idle;
+                    };
+                    // The whole batch of the input held: one trip to the furnace for all the ore.
+                    let count = r
+                        .input
+                        .iter()
+                        .map(|i| craft::count(w, *i))
+                        .sum::<i32>()
+                        .min(64);
+                    match smelt::Smelt::new(w, f, r, count, tick) {
+                        Some(sm) => {
+                            self.note(
+                                tick,
+                                format!("smelt {count} for {} at {f:?}", r.id),
+                                format!("the needs planner's next step toward {}", goal.id),
+                            );
+                            Task::Smelt(Box::new(sm))
+                        }
+                        None => {
+                            self.retry_at = tick + RETRY_TICKS;
+                            Task::Idle
+                        }
+                    }
+                }
+                Some(make::Act::Redig(b)) => match redig::Redig::new(w, b, tick) {
+                    Some(r) => {
+                        self.note(
+                            tick,
+                            format!("redig {b:?}"),
+                            format!("its chance drop for {}", goal.id),
+                        );
+                        Task::Redig(Box::new(r))
+                    }
+                    None => {
+                        self.stuck = true;
+                        Task::Idle
+                    }
+                },
                 Some(make::Act::Gather) | None if self.carry_table(w, tick).is_some() => {
                     self.carry_table(w, tick).unwrap_or(Task::Idle)
                 }
@@ -957,10 +1307,8 @@ impl Plan {
                     );
                 }
                 if self.failed_in_row >= MAX_UNWALKABLE {
-                    self.stuck = true;
-                    self.note(
+                    self.give_up(
                         tick,
-                        "stuck".to_owned(),
                         format!("{MAX_UNWALKABLE} tasks failed in a row with none done"),
                     );
                 }
@@ -1002,7 +1350,13 @@ impl Plan {
 
     /// The mine act: the nearest exposed block of the kinds the bot can stand beside, routed
     /// first (at most `CANDIDATES_PER_TICK` + 1 tried); with none, stairs down on the held heading.
-    fn mine(&mut self, w: &World, blocks: &[data::BlockKind], tick: u64) -> Task {
+    fn mine(
+        &mut self,
+        w: &World,
+        blocks: &[data::BlockKind],
+        depth: Option<i32>,
+        tick: u64,
+    ) -> Task {
         let candidates: Vec<Cell> = exposed_near(w, blocks)
             .into_iter()
             .filter(|c| !self.refused_now(*c, tick))
@@ -1022,18 +1376,152 @@ impl Plan {
             self.expanded += walk.expanded;
             self.refuse(c, tick);
         }
+        // An exposed block seen with no walk to it (in a cave behind rock: 1,108 walks failed
+        // NoPath in one race) is dug toward: stairs if it is below the feet, else a level
+        // tunnel, six steps, then the planner looks again from nearer
+        // (docs/problems/iron-kit.md wall 11).
+        let aim = exposed_near(w, blocks)
+            .into_iter()
+            .find(|c| !self.refused_now(*c, tick));
+        if let (Some(aim), Some(body)) = (aim, w.body) {
+            let (fx, fy, fz) = path::feet_cell(body.pos);
+            // Three cuts toward it without coming nearer: refuse it (a bot cut toward one coal
+            // seam every 51 ticks for the last stretch of its run: wall 12).
+            let d =
+                f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
+            let (best, stalls) = match self.toward {
+                Some((c, b, n)) if c == aim => {
+                    if d < b - 0.5 {
+                        (d, 0)
+                    } else {
+                        (b, n + 1)
+                    }
+                }
+                Some(_) | None => (d, 0),
+            };
+            if stalls >= 3 {
+                self.toward = None;
+                self.refuse(aim, tick);
+                self.refused_areas.push((aim, tick + FAILURE_MEMORY_TICKS));
+                return self.mine(w, blocks, depth, tick);
+            }
+            self.toward = Some((aim, best, stalls));
+            let (dx, dz) = (aim.0 - fx, aim.2 - fz);
+            let dir = if dx.abs() >= dz.abs() {
+                (dx.signum(), 0)
+            } else {
+                (0, dz.signum())
+            };
+            if dir != (0, 0) {
+                let below = aim.1 < fy;
+                self.note(
+                    tick,
+                    format!("dig toward {:?} at {aim:?}", blocks.first()),
+                    "seen exposed, with no walk to it".to_owned(),
+                );
+                return Task::Stairs(Box::new(if below {
+                    Stairs::new(dir, tick)
+                } else {
+                    Stairs::level(dir, tick)
+                }));
+            }
+        }
         let dir = match (self.heading as i32).rem_euclid(360) {
             90 => (-1, 0),
             180 => (0, -1),
             270 => (1, 0),
             _ => (0, 1),
         };
+        // At the row's depth, the lowest feet height its stairs go to (clojurecraft's
+        // `:goal/depth`), tunnel along instead (issue 13b; docs/problems/iron-kit.md wall 1).
+        let deep = depth.is_some_and(|d| w.body.is_some_and(|b| b.pos[1] <= f64::from(d)));
+        if deep {
+            self.note(
+                tick,
+                "tunnel".to_owned(),
+                format!("no exposed {:?} in sight, at its depth", blocks.first()),
+            );
+            return Task::Stairs(Box::new(Stairs::level(dir, tick)));
+        }
         self.note(
             tick,
             "stairs down".to_owned(),
             format!("no exposed {:?} in sight with a route", blocks.first()),
         );
         Task::Stairs(Box::new(Stairs::new(dir, tick)))
+    }
+
+    /// A smelt cut with its batch loaded leaves it to be collected (issue 13b).
+    fn keep_batch(&mut self) {
+        if let Task::Smelt(sm) = &self.task
+            && sm.loaded()
+        {
+            self.batch = Some((sm.furnace, sm.result, sm.count));
+        }
+    }
+
+    fn after_smelt(&mut self, c: Controls, status: smelt::SmeltStatus, tick: u64) -> Controls {
+        match status {
+            smelt::SmeltStatus::Running => return c,
+            smelt::SmeltStatus::Done => {
+                self.smelts += 1;
+                self.failed_in_row = 0;
+                self.batch = None;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "smelted".to_owned(),
+                    "the batch's results are held".to_owned(),
+                );
+            }
+            smelt::SmeltStatus::Failed(f) => {
+                *self.failures.entry(format!("{f:?}")).or_default() += 1;
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.batch = None;
+                if let Task::Smelt(sm) = std::mem::replace(&mut self.task, Task::Idle)
+                    && f == smelt::SmeltFailure::Unopened
+                {
+                    self.refuse(sm.furnace, tick);
+                }
+                self.note(
+                    tick,
+                    format!("smelt failed: {f:?}"),
+                    "choose again".to_owned(),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
+    }
+
+    fn after_redig(&mut self, c: Controls, status: redig::RedigStatus, tick: u64) -> Controls {
+        match status {
+            redig::RedigStatus::Running => return c,
+            redig::RedigStatus::Done => {
+                self.digs += 1;
+                self.failed_in_row = 0;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "redug".to_owned(),
+                    "the needs planner looks again".to_owned(),
+                );
+            }
+            redig::RedigStatus::Failed(f) => {
+                *self.failures.entry(format!("Redig{f:?}")).or_default() += 1;
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("redig failed: {f:?}"),
+                    "choose again".to_owned(),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
     }
 
     fn after_place(&mut self, status: PlaceStatus, tick: u64) -> Controls {
@@ -1099,13 +1587,185 @@ impl Plan {
 
     fn check_stuck(&mut self, tick: u64) {
         if self.failed_in_row >= MAX_UNWALKABLE {
-            self.stuck = true;
-            self.note(
+            self.give_up(
                 tick,
-                "stuck".to_owned(),
                 format!("{MAX_UNWALKABLE} tasks failed in a row with none done"),
             );
         }
+    }
+
+    /// Too many failures in a row: a goal aim moves elsewhere (refusals forgotten, the heading
+    /// turned, the next choice an explore walk) up to `MAX_RELOCATIONS` times; then, or for issue
+    /// 09's log aim, the planner stops.
+    fn give_up(&mut self, tick: u64, why: String) {
+        if self.aim.is_goal() && self.relocations < MAX_RELOCATIONS {
+            self.relocations += 1;
+            self.relocate = true;
+            self.failed_in_row = 0;
+            self.refused.clear();
+            self.refused_areas.clear();
+            self.stalled.clear();
+            self.heading = (self.heading + 90.0) % 360.0;
+            self.note(
+                tick,
+                format!("relocate ({} of {MAX_RELOCATIONS})", self.relocations),
+                why,
+            );
+            return;
+        }
+        // A goal aim never stops for good: it rests, then starts relocating again (27 of 112 bots
+        // stopped at tick 4,000 to 8,000 and idled out the rest: docs/problems/iron-kit.md wall
+        // 19).
+        if self.aim.is_goal() {
+            self.relocations = 0;
+            self.failed_in_row = 0;
+            self.retry_at = tick + REST_TICKS;
+            self.note(tick, format!("rest {REST_TICKS} ticks"), why);
+            return;
+        }
+        self.stuck = true;
+        self.note(tick, "stuck".to_owned(), why);
+    }
+
+    /// An explore walk on the heading (issue 09's, also a relocation's).
+    /// A block one of the goal's provides will need dug, exposed within `OPPORTUNITY_RADIUS`
+    /// with a route: dug now rather than walked back for (issue 13b: bots passed gravel on the
+    /// way down for a pickaxe, then tunnelled for gravel at their depth). Each provide is planned
+    /// on its own; one whose next act is a mine row with such a block near wins.
+    fn opportunity(
+        &mut self,
+        w: &World,
+        table: &make::Table,
+        goal: &make::Row,
+        near: &dyn Fn(data::BlockKind) -> bool,
+        gather_now: bool,
+        tick: u64,
+    ) -> Option<Task> {
+        let body = w.body?;
+        let counts = held(w);
+        // The goal's provides, then what it wants up to their counts (less what is held).
+        let wanted = goal.provides.iter().cloned().chain(
+            goal.wants
+                .iter()
+                .filter(|(k, n)| k.have(&counts) < *n)
+                .cloned(),
+        );
+        for p in wanted.collect::<Vec<_>>().iter() {
+            let one = make::Row {
+                id: goal.id.clone(),
+                needs: Vec::new(),
+                provides: vec![p.clone()],
+                holds: Vec::new(),
+                spares: Vec::new(),
+                wants: Vec::new(),
+                act: None,
+            };
+            let make::Choice::Act(r) = make::make_with(table, &counts, near, gather_now, &one)
+            else {
+                continue;
+            };
+            let Some(make::Act::Mine { blocks, .. }) = r.act else {
+                continue;
+            };
+            let close = exposed_near(w, blocks).into_iter().find(|c| {
+                let d = [
+                    f64::from(c.0) + 0.5 - body.pos[0],
+                    f64::from(c.1) + 0.5 - body.pos[1],
+                    f64::from(c.2) + 0.5 - body.pos[2],
+                ];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= OPPORTUNITY_RADIUS
+                    && !self.refused_now(*c, tick)
+            });
+            let Some(c) = close else { continue };
+            let mut walk = Walk::to_dig(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk to {:?} at {c:?}", blocks.first()),
+                    format!("{} will need it, and it is exposed near", r.id),
+                );
+                return Some(Task::ToLog(walk));
+            }
+            self.refuse(c, tick);
+        }
+        None
+    }
+
+    fn explore_walk(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {
+        let body = w.body?;
+        // Marooned (every walk failed, water beside the feet): swim to a far shore
+        // (docs/problems/iron-kit.md wall 24).
+        if std::mem::take(&mut self.maroon)
+            && let Some(e) = escape::Escape::swim(w, tick)
+        {
+            self.note(tick, format!("swim to {:?}", e.target), why.to_owned());
+            return Some(Task::Swim(Box::new(e), tick));
+        }
+        // The full distance first, then shorter: a bot on a shore or a ledge may have only a
+        // short way off it (docs/problems/iron-kit.md wall 7).
+        for d in [f64::from(EXPLORE_DISTANCE), 16.0, 8.0]
+            .into_iter()
+            .flat_map(|d| std::iter::repeat_n(d, 4))
+        {
+            let (s, c) = self.heading.to_radians().sin_cos();
+            let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
+            let target = path::feet_cell(p);
+            let mut walk = Walk::new(
+                target,
+                Goal::Afar {
+                    pos: path::feet_cell(body.pos),
+                    range: d - 4.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(tick, format!("explore toward {target:?}"), why.to_owned());
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            self.heading = (self.heading + 90.0) % 360.0;
+        }
+        // No way out ahead: back along the trail, the newest mark far enough away that a route
+        // reaches (bots dug into dead ends by drops and water, every way ahead refused:
+        // docs/problems/iron-kit.md wall 18).
+        let marks: Vec<[f64; 3]> = self.trail.iter().rev().copied().collect();
+        for m in marks {
+            let d = (0..3)
+                .map(|i| (m[i] - body.pos[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if d < TRAIL_BACK {
+                continue;
+            }
+            let target = path::feet_cell(m);
+            let mut walk = Walk::new(
+                target,
+                Goal::Near {
+                    pos: target,
+                    range: 1.5,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(tick, format!("back to {target:?}"), why.to_owned());
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+        }
+        // No walk off at all with water beside the feet: swim (a relocation after boxed stairs
+        // on a lake shore never armed `maroon`, which walk failures set: wall 26).
+        if wet(w, &body)
+            && let Some(e) = escape::Escape::swim(w, tick)
+        {
+            self.note(tick, format!("swim to {:?}", e.target), why.to_owned());
+            return Some(Task::Swim(Box::new(e), tick));
+        }
+        None
     }
 
     fn after_craft(&mut self, status: CraftStatus, tick: u64) -> Controls {
@@ -1256,6 +1916,10 @@ pub fn crowded(w: &World, (x, y, z): Cell) -> bool {
 /// How far around the feet exposed blocks are looked for (clojurecraft's `search-radius` and
 /// `search-height`).
 pub const SEARCH_RADIUS: i32 = 24;
+/// A remembered log counts as one a gather can start on now only this near the feet's height.
+pub const GATHER_NOW_RISE: f64 = 6.0;
+/// A block a provide of the goal will need is dug now when exposed this near (blocks).
+pub const OPPORTUNITY_RADIUS: f64 = 6.0;
 pub const SEARCH_HEIGHT: i32 = 12;
 /// Exposed blocks found before the search stops (clojurecraft routes the nearest 3).
 pub const EXPOSED_WANTED: usize = 8;
@@ -1341,5 +2005,18 @@ pub fn log_in_view(w: &World, origin: [f64; 3], min: f64) -> bool {
                 + (origin[2] - (f64::from(s.pos.2) + 0.5)).powi(2))
             .sqrt()
                 >= min
+    })
+}
+
+/// Water beside the feet or under a cell beside them: a shore, or an island.
+fn wet(w: &World, body: &physics::Body) -> bool {
+    let (x, y, z) = path::feet_cell(body.pos);
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dz)| {
+        [y, y - 1].iter().any(|y| {
+            matches!(
+                w.block_at(world::BlockPos::new(x + dx, *y, z + dz)),
+                Some(data::BlockKind::Water)
+            )
+        })
     })
 }

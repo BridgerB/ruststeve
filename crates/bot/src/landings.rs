@@ -158,6 +158,12 @@ pub fn run_one(
         | plan::Aim::Cobblestone
         | plan::Aim::StonePickaxe
         | plan::Aim::StoneTools
+        | plan::Aim::Furnace
+        | plan::Aim::Ingots
+        | plan::Aim::IronPickaxe
+        | plan::Aim::Bucket
+        | plan::Aim::FlintAndSteel
+        | plan::Aim::IronKit
         | plan::Aim::Hold => 0.0,
     };
     let mut p = match table {

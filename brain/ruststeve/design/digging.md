@@ -5,8 +5,8 @@ type: reference
 tags: [plan, dig, gather, collect, pickup]
 aliases: [Dig, DigStage, DigFailure, Taken, Gone, crowded, CROWD_RADIUS, break_ticks, slowdown, FINISH margin, collect, pickup goal, Goal::Pickup, to_dig, DropUnreachable, DropWalkFailed, Uncollected, Refused]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
+lastUpdated: 2026-11-14
+verifiedAgainst: ruststeve@d040afa clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/dig.rs#pub fn held_item(w: &World) -> Option<ItemKind> {"
   - "ruststeve:crates/plan/src/dig.rs#pub fn slowdown(w: &World) -> f64 {"
@@ -35,13 +35,15 @@ Issue 10c. `plan::dig::Dig` breaks one block from where the bot stands and colle
 ## How it works
 - **Where to stand**: a log is walked to with clojurecraft's `:pickup` goal: a neighbouring column (diagonals too) with the log at the feet's height or up to 2 above, so the drop falls inside the player's touch box (grown 1 sideways, 0.5 up). Walking only "within reach" (eye to centre 4.0) left drops 2-3 blocks off, and a trunk's lowest log drops under the trunk, where no one can stand.
 - **Start**: `Act::Dig { Start }`; the break time comes from `data::dig` with the held item ([[tools-and-held-slot]]), the rule the server model uses too: a log by hand 60 ticks, 300 with the eyes in water; stone with a wooden pickaxe 23.
-- **Finish**: at `ticks × 1.15 × slowdown + 2` (clojurecraft's margin and its 100 ms); `slowdown` is our ticks over the server's once 200 server ticks are heard (20 per `set_time`), between 1 and 8. An early FINISH would still break the block later (a delayed destroy), but the task does not count on it.
+- **Finish**: at `ticks × 1.15 × slowdown + 2` (clojurecraft's margin and its 100 ms); `slowdown` is our ticks over the server's once 200 server ticks are heard (20 per `set_time`), between 1 and 8. An early FINISH would still break the block later (a delayed destroy), but the task does not count on it. The server judges a FINISH by the player's state at that moment times the ticks since the start (`handleBlockBreakAction`: progress × (ticks + 1) ≥ 0.7), so the wait is re-judged each tick with the body's state now: a dig started in the air (a stair's top cell) finishes at the on-ground time once the bot lands (issue 13b; it cost about 55 ticks a stair).
 - **Confirm**: the block update to air; past `waited + 60` ticks without it the dig is tried again, and the third try fails `Refused`.
 - **Collect**: done when the inventory holds more of what the block drops (its first sure loot). The drop is waited for 20 ticks where it fell; then the bot walks to beside it (`Near`, range 1); no route fails `DropUnreachable`, a failed walk `DropWalkFailed`, 300 ticks `Uncollected`. A failure notes where the drop and the feet were.
 - **Other players** (docs/problems/wood.md): a log with another player within 2 blocks of its column is not chosen (`crowded`); a drop that vanishes without this bot's own `take_item_entity` and with no rise in its count fails at once `Taken` (after 10 ticks for the bot's own pickup to show); a block already gone when the dig begins fails `Gone`, never "dug".
 - **Failures** go to the planner's failure memory: the block is refused a while.
 
 - A block counts as gone when it turns to air or to water: water flows into a block dug beside it at once (an escape's dig, [[escapes]]). An escape's dig collects nothing.
+
+- A dig collects the block's certain drop and its chance drops before it (gravel's flint): either ends the collect (issue 13b).
 
 ## Evidence
 - Sim, 320 captured landings, `--goal table`, 6,000 ticks: 193 of 200 qualifying made the kit. Before digging from beside, three of a landing's first four digs failed to collect; a drop that drifted sideways sank into the higher ground beside a trunk until the model collided items sideways ([[server-model]]).

@@ -82,12 +82,12 @@ fn cells(
 
 fn assert_out(e: &Ended, kind: TrapKind) {
     let w = &e.run.world;
+    // The escape counter, not the events: the planner keeps only its last 64 events, and one
+    // that goes on after the escape (relocating, issue 13b) scrolls it out.
     assert!(
-        e.plan
-            .events
-            .iter()
-            .any(|ev| ev.what == format!("escape-{}", kind.name())),
-        "never escaped: {:#?}",
+        e.plan.escapes >= 1,
+        "never escaped from {}: {:#?}",
+        kind.name(),
         e.plan.events
     );
     assert!(
@@ -186,4 +186,52 @@ fn a_pit_with_no_bank_is_notched_by_hand() {
     set.extend(cells(-1..=1, 59..=63, -1..=1, BlockKind::Air));
     let e = escape([0.5, 56.0, 0.5], &set, 4000);
     assert_out(&e, TrapKind::Water);
+}
+
+#[test]
+fn a_block_at_the_eyes_is_dug_out() {
+    // Gravel in the eyes' cell (fallen into a tunnel): in_wall damage until it is dug.
+    // With the stone pickaxe a miner holds: by hand, off the ground in a block, it takes 865.
+    let e = escape_with(
+        [0.5, 64.0, 0.5],
+        &[((0, 65, 0), BlockKind::Stone)],
+        &[(data::ItemKind::StonePickaxe, 1)],
+        300,
+    );
+    assert!(e.plan.escapes >= 1, "never escaped: {:#?}", e.plan.events);
+    assert!(!e.run.died);
+    // Out of it, whether by the dig or by being pushed clear of the block.
+    let body = e.run.world.body.unwrap();
+    assert!(
+        !plan::escape::eye_in_wall(&e.run.world, &body),
+        "still in the wall at {:?}: {:#?}",
+        body.pos,
+        e.plan.task
+    );
+}
+
+#[test]
+fn an_island_in_a_lake_is_swum_off() {
+    // A lake 41 wide and 3 deep with an island 3 wide at its middle, the bot on the island:
+    // no walk leaves it, so the planner swims to a far shore (issue 13b, iron-kit wall 24).
+    let mut set: Vec<_> = cells(-20..=20, 61..=63, -20..=20, BlockKind::Water)
+        .into_iter()
+        .filter(|((x, _, z), _)| x.abs() > 1 || z.abs() > 1)
+        .collect();
+    set.extend(cells(-20..=20, 60..=60, -20..=20, BlockKind::Dirt));
+    let e = escape([0.5, 64.0, 0.5], &set, 6000);
+    let body = e.run.world.body.unwrap();
+    assert!(!e.run.died, "died: {:#?}", e.plan.events);
+    assert!(
+        body.pos[0].abs() > 20.5 || body.pos[2].abs() > 20.5,
+        "still on the lake at {:?}: {:#?} {:#?}",
+        body.pos,
+        e.plan.task,
+        e.plan.events
+    );
+    assert!(
+        e.run.sim.violations.is_empty(),
+        "{:?}",
+        e.run.sim.violations
+    );
 }

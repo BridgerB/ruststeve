@@ -14,11 +14,24 @@ const CONFIG: Config = Config {
 };
 
 fn run(health: f32, mob: EntityKind, ticks: u64) -> (Plan, bot::lockstep::Run, i32) {
+    run_in(health, mob, ticks, &[])
+}
+
+fn run_in(
+    health: f32,
+    mob: EntityKind,
+    ticks: u64,
+    set: &[((i32, i32, i32), data::BlockKind)],
+) -> (Plan, bot::lockstep::Run, i32) {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
     let mut p = Plan::with_table(Aim::Hold, table);
     let mut m = flat_world(2, 63).unwrap();
     m.spawn = [0.5, 64.0, 0.5];
+    for ((x, y, z), k) in set {
+        m.set_block(*x, *y, *z, k.info().unwrap().default_state)
+            .unwrap();
+    }
     let mut sim = Sim::new(CONFIG, m).seeded(3);
     sim.health = health;
     sim.survival.give((ItemKind::StoneSword, 1));
@@ -59,4 +72,35 @@ fn a_creeper_is_never_fought() {
     let (p, run, _) = run(20.0, EntityKind::Creeper, 200);
     assert_eq!(run.world.kills, 0, "fought a creeper: {:#?}", p.events);
     assert!(run.world.body.unwrap().pos[0] < -3.0, "{:#?}", p.events);
+}
+
+#[test]
+fn a_creeper_is_fled_round_a_tunnel_corner() {
+    // An L-shaped tunnel two high in stone: the creeper east of the bot along one arm, the bot at
+    // the corner, a wall straight west of it; the way out is the arm going south (wall 28).
+    use data::BlockKind::{Air, Stone};
+    let mut set = Vec::new();
+    for x in -4..=6 {
+        for z in -4..=24 {
+            for y in 64..=66 {
+                set.push(((x, y, z), Stone));
+            }
+        }
+    }
+    for y in 64..=65 {
+        for x in 0..=4 {
+            set.push(((x, y, 0), Air));
+        }
+        for z in 0..=22 {
+            set.push(((0, y, z), Air));
+        }
+    }
+    let (p, run, _) = run_in(20.0, EntityKind::Creeper, 400, &set);
+    assert_eq!(run.world.kills, 0, "fought a creeper: {:#?}", p.events);
+    let z = run.world.body.unwrap().pos[2];
+    assert!(
+        z > 10.0,
+        "did not flee down the tunnel: z {z} {:#?}",
+        p.events
+    );
 }

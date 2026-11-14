@@ -93,6 +93,10 @@ pub struct Dig {
     pub drop_id: Option<i32>,
     #[serde(default)]
     pub drop_last: u64,
+    /// The block's chance drops besides `drop` (flint from gravel, issue 13b), with how many
+    /// were held before: either kind collected ends the collect.
+    #[serde(default)]
+    pub others: Vec<(ItemKind, i32)>,
 }
 
 fn pos((x, y, z): Cell) -> BlockPos {
@@ -135,11 +139,17 @@ fn held_of(w: &World, item: ItemKind) -> i32 {
 
 impl Dig {
     pub fn new(w: &World, target: Cell, tick: u64) -> Self {
-        let drop = w
+        let tries = w
             .block_at(pos(target))
-            .and_then(|k| data::generated::loot::drops_of(k).first())
-            .filter(|d| d.chance >= 1.0)
-            .map(|d| d.item);
+            .map_or(&[][..], data::generated::loot::drops_of);
+        // What it always drops when nothing rarer does (gravel's gravel); the rarer tries
+        // before it are its chance drops (gravel's flint).
+        let drop = tries.iter().find(|d| d.chance >= 1.0).map(|d| d.item);
+        let others: Vec<(ItemKind, i32)> = tries
+            .iter()
+            .take_while(|d| d.chance < 1.0)
+            .map(|d| (d.item, held_of(w, d.item)))
+            .collect();
         Self {
             target,
             stage: DigStage::Start,
@@ -151,6 +161,7 @@ impl Dig {
             feet: None,
             drop_id: None,
             drop_last: tick,
+            others,
         }
     }
 
@@ -167,12 +178,13 @@ impl Dig {
 
     /// The nearest item entity of the drop's kind within `DROP_RANGE` of the block.
     fn drop_entity(&self, w: &World) -> Option<(i32, [f64; 3])> {
-        let want = self.drop?;
+        let main = self.drop?;
+        let wanted = |k: ItemKind| k == main || self.others.iter().any(|(o, _)| *o == k);
         let (x, y, z) = self.target;
         let c = [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5];
         w.entities
             .iter()
-            .filter(|(_, e)| e.item().is_some_and(|(k, _)| k == want))
+            .filter(|(_, e)| e.item().is_some_and(|(k, _)| wanted(k)))
             .map(|(id, e)| (*id, e.pos))
             .filter(|(_, p)| {
                 (0..3).map(|i| (p[i] - c[i]).powi(2)).sum::<f64>().sqrt() <= DROP_RANGE
@@ -224,7 +236,16 @@ impl Dig {
                 };
                 // The fastest tool held that gets the block's drops goes in hand first, and the
                 // dig waits until the world shows it selected (issue 11b).
-                let items: Vec<ItemKind> = w.inventory.slots.values().map(|(k, _)| *k).collect();
+                // The cursor counts: a tool picked up on its way to the hotbar is still the best
+                // one. Leaving it out chose the next best mid-swap, put the first one back, and
+                // looped (a bot clicked one slot 19,000 times: docs/problems/iron-kit.md wall 6).
+                let items: Vec<ItemKind> = w
+                    .inventory
+                    .slots
+                    .values()
+                    .chain(w.inventory.carried.iter())
+                    .map(|(k, _)| *k)
+                    .collect();
                 if let Some(tool) = data::dig::best_tool(kind, items) {
                     match crate::hold::toward(w, tool) {
                         crate::hold::Hold::Held | crate::hold::Hold::Missing => {}
@@ -252,7 +273,19 @@ impl Dig {
                 (still, Some(act), DigStatus::Running)
             }
             DigStage::Finish { at, started } => {
-                if tick < *at {
+                // The server judges a FINISH by the player's state then, times the ticks since
+                // the start (`handleBlockBreakAction`: progress now * (ticks + 1) >= 0.7): a dig
+                // started in the air (a stair's top cell, just stepped down onto) finishes at the
+                // on-ground time once the bot has landed, not at five times it (wall 27).
+                let now = w
+                    .block_at(pos(self.target))
+                    .and_then(|k| break_ticks(k, held_item(w), body.eye_in_water, body.on_ground))
+                    .map(|t| {
+                        *started
+                            + (t as f64 * FINISH_MARGIN * slowdown(w)).ceil() as u64
+                            + FINISH_EXTRA_TICKS
+                    });
+                if tick < now.map_or(*at, |n| n.min(*at)) {
                     return (still, None, DigStatus::Running);
                 }
                 let waited = tick - *started;
@@ -287,7 +320,12 @@ impl Dig {
                 let Some(item) = self.drop else {
                     return (still, None, DigStatus::Done);
                 };
-                if held_of(w, item) > self.before {
+                if held_of(w, item) > self.before
+                    || self
+                        .others
+                        .iter()
+                        .any(|(k, before)| held_of(w, *k) > *before)
+                {
                     return (still, None, DigStatus::Done);
                 }
                 if taken_by_other {

@@ -18,6 +18,9 @@ use crate::dig::{Dig, DigStatus};
 use crate::path::{self, Cell, Goal};
 use crate::walk::{Arrive, TaskStatus, Walk};
 
+/// Cells a stair's landing may lie under its missing floor (a fall of at most 3 blocks).
+pub const MAX_DROP: i32 = 3;
+
 /// Stairs cut before the planner looks again (clojurecraft's `stair-depth`).
 pub const STAIR_DEPTH: u32 = 6;
 /// Level steps before a staircase fails `Boxed` (clojurecraft's `max-level-steps`).
@@ -72,6 +75,10 @@ pub struct Stairs {
     /// Stairs refused, by reason, for the case file.
     pub refusals: Vec<String>,
     pub started: u64,
+    /// Level steps only (issue 13b): a mine row at its depth tunnels along instead of down, each
+    /// step counted as a stair.
+    #[serde(default)]
+    pub level_only: bool,
 }
 
 fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
@@ -134,10 +141,50 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
             }
         }
     }
-    if !full(kind(w, floor)) {
+    if !full(kind(w, floor)) && !short_drop(w, floor) {
         return Some(format!("no floor at {floor:?}"));
     }
+    // Nothing that falls over what is opened: gravel or sand over a dug cell drops into it and
+    // buries the head (five bots suffocated tunnelling: docs/problems/iron-kit.md wall 10).
+    if let Some(top) = cells.iter().max_by_key(|c| c.1) {
+        let over = (top.0, top.1 + 1, top.2);
+        if falls(kind(w, over)) {
+            return Some(format!("falling block over {top:?}"));
+        }
+    }
     None
+}
+
+/// Under a missing floor, a landing a short fall down: open air (no fluid) to a full block at most
+/// `MAX_DROP` under the floor's cell, no lava beside the landing. A fall of three blocks does no
+/// damage (`fall_distance` over 3 hurts); 17 of 56 bots ended boxed in by cave floors and ledges
+/// a block or two down (docs/problems/iron-kit.md wall 17).
+fn short_drop(w: &World, floor: Cell) -> bool {
+    for j in 0..MAX_DROP {
+        let c = (floor.0, floor.1 - j, floor.2);
+        let k = kind(w, c);
+        if full(k) {
+            return j > 0
+                && SIDES.iter().all(|(dx, dy, dz)| {
+                    fluid(kind(w, (c.0 + dx, c.1 + 1 + dy, c.2 + dz))) != Some("lava")
+                });
+        }
+        if !open(k) {
+            return false;
+        }
+    }
+    false
+}
+
+/// Blocks that fall when what is under them opens: the blocks report's falling definitions
+/// (sand, gravel, concrete powder, the suspicious blocks).
+pub fn falls(k: Option<BlockKind>) -> bool {
+    k.and_then(|k| k.info()).is_some_and(|i| {
+        matches!(
+            i.definition,
+            "sand" | "colored_falling" | "concrete_powder" | "brushable" | "falling"
+        )
+    })
 }
 
 fn turn((dx, dz): (i32, i32)) -> (i32, i32) {
@@ -155,13 +202,22 @@ impl Stairs {
             dig: None,
             refusals: Vec::new(),
             started: tick,
+            level_only: false,
+        }
+    }
+
+    /// A tunnel at the feet's level: level steps only, `STAIR_DEPTH` of them.
+    pub fn level(dir: (i32, i32), tick: u64) -> Self {
+        Self {
+            level_only: true,
+            ..Self::new(dir, tick)
         }
     }
 
     /// The next stair from the feet, turning on refusals; a level step when all four refuse.
     fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {
         let (x, y, z) = feet;
-        for _ in 0..4 {
+        for _ in 0..if self.level_only { 0 } else { 4 } {
             let (dx, dz) = self.dir;
             let to = (x + dx, y - 1, z + dz);
             let cells = vec![(x + dx, y + 1, z + dz), (x + dx, y, z + dz), to];
@@ -180,7 +236,7 @@ impl Stairs {
                 }
             }
         }
-        if self.level_steps >= MAX_LEVEL_STEPS {
+        if self.level_steps >= MAX_LEVEL_STEPS && !self.level_only {
             return Err(StairsFailure::Boxed);
         }
         for _ in 0..4 {
@@ -253,7 +309,13 @@ impl Stairs {
                 }
                 match cells.iter().find(|c| !open(kind(w, **c))).copied() {
                     Some(c) => {
-                        self.dig = Some(Dig::new(w, c, tick));
+                        // No collect: the drop falls into the stair the bot steps onto next and
+                        // is picked up there. Waiting for it cost the full collect time (300
+                        // ticks) a stair: docs/problems/iron-kit.md wall 2.
+                        let mut d = Dig::new(w, c, tick);
+                        d.drop = None;
+                        d.others.clear();
+                        self.dig = Some(d);
                         (still, None, StairsStatus::Running)
                     }
                     None => {
@@ -274,8 +336,14 @@ impl Stairs {
                 since,
                 level,
             } => {
-                if feet == *to {
-                    if !*level {
+                // On the stair, or down a short drop under it.
+                if feet == *to
+                    || (feet.0 == to.0
+                        && feet.2 == to.2
+                        && feet.1 < to.1
+                        && feet.1 >= to.1 - MAX_DROP)
+                {
+                    if !*level || self.level_only {
                         self.stairs += 1;
                         self.turns = 0;
                     }

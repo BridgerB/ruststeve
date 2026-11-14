@@ -5,8 +5,8 @@ type: reference
 tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
+lastUpdated: 2026-11-14
+verifiedAgainst: ruststeve@1a3aaac clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -43,6 +43,13 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 
 ## Limits
 - Gravel or sand overhead is not checked (it falls on the bot); the stairs do not go up again (clojurecraft's stairs-up), nor lay a floor over a cave (its cast floor). Air underwater and drowning are issue 12.
+
+## Issue 13b
+- A mine row's `depth`: past it, `Stairs::level` tunnels along instead ([[veins-and-flint]]).
+
+- **Short drops** (wall 17): a stair may land up to 3 below where it was cut (a cave under it); the step is done where the feet land, deeper refused.
+- **Falling blocks**: a cell with gravel or sand over it is refused (it falls on the bot).
+- Stair digs collect nothing: the stairs never stop for a drop.
 
 ## See also
 - [[mc-water]] - why water and lava are refused.

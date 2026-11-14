@@ -65,6 +65,11 @@ pub struct Start {
     /// The cap for this start, in server ticks; the race config's when absent.
     #[serde(default)]
     pub cap_ticks: Option<u64>,
+    /// Each bot moved to a random surface spot within this many blocks of where it joined
+    /// (vanilla's `spreadplayers`): a lane's bots apart, so they do not dig up each other's tables
+    /// and furnaces (issue 13, docs/problems/iron-kit.md wall 4).
+    #[serde(default)]
+    pub spread: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -129,6 +134,12 @@ pub fn start_commands(start: &Start, bot: &str) -> Vec<String> {
         .collect();
     if let Place::At { dimension, x, y, z } = &start.place {
         out.push(format!("execute in {dimension} run tp {bot} {x} {y} {z}"));
+    }
+    if let Some(r) = start.spread {
+        out.push(format!(
+            "execute at {bot} run spreadplayers ~ ~ 0 {} false {bot}",
+            r.max(1)
+        ));
     }
     out
 }

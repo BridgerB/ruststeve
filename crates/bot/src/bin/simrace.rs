@@ -265,6 +265,12 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
         | plan::Aim::Cobblestone
         | plan::Aim::StonePickaxe
         | plan::Aim::StoneTools
+        | plan::Aim::Furnace
+        | plan::Aim::Ingots
+        | plan::Aim::IronPickaxe
+        | plan::Aim::Bucket
+        | plan::Aim::FlintAndSteel
+        | plan::Aim::IronKit
         | plan::Aim::Hold => Some(std::sync::Arc::new(bot::goals_table(&a.goals)?)),
     };
     let kit: Vec<(data::ItemKind, i32)> = match &a.start {

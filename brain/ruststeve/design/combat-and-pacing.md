@@ -5,8 +5,8 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
+lastUpdated: 2026-11-14
+verifiedAgainst: ruststeve@b7fec2e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -33,7 +33,7 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 ## How it works
 - **In force**: a live mob of the game's `monster` category within `defend_radius` of the feet, or a defence already running.
 - **Fight**: close in facing it; from 3 blocks (eye to its middle) hold the hardest-hitting weapon and strike when a full charge is ready (20 / (4 + the attack speed) ticks, by the slowdown, plus one), never in the first tick it is faced (the look goes out a tick before the swing: v1's lesson).
-- **Back away** (straight away from it, jumping what is in the way): at or under `danger_health` (two zombie hits on Normal and a margin), from a `never_fight` kind at any health, and when a fight lands nothing for 10 s or runs 30 s (the progress invariants).
+- **Back away** (along a route to beyond the reach plus the margin, `Goal::Away`, searched again when the foe moves 3 blocks; straight away from it, jumping, only when no route is found: issue 13b, a creeper fled into a tunnel's end): at or under `danger_health` (two zombie hits on Normal and a margin), from a `never_fight` kind at any health, and when a fight lands nothing for 10 s or runs 30 s (the progress invariants).
 - **Over**: the mob is dead, gone, or `defend_radius` + 4 away.
 
 ## Evidence
@@ -41,9 +41,14 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - Real, locally on Normal (`--goal hold`, a stone sword, a zombie and a husk with AI summoned 5 blocks off): both killed, the husk in 5 swings and the zombie in 3; the two together cost 9 health.
 
 ## Limits
-- Skeletons shoot from beyond `defend_radius`: no answer until one comes near.
 - No shelter yet: whether one is needed is read from the hour race's deaths (12e) before it is built.
 - The model's mobs neither move nor hit; the real race is the measure.
+
+## Issue 13b
+- **`flee_clear`** (20): a retreat from a `never_fight` kind holds until past it (a creeper follows from 16; retreats that stopped at 12 walked back to its ore, wall 29), and the planner keeps off its ground 600 ticks.
+- **Unreachable ranged foes**: one that a fight landed nothing on is left alone 600 ticks unless it comes within `defend_radius` (one bot fought one skeleton 51 times with no swing, wall 30).
+- **Ranged** kinds (`ranged`: skeleton, stray, bogged) are answered within `ranged_radius` (16), not only `defend_radius` (wall 16).
+- **`never_fight`** kinds (creeper) are answered first and from `flee_radius` (8), backed away from until past it and the margin: from 4 the fuse was already lit (wall 21).
 
 ## See also
 - [[food-and-hunting]] - the hunt's strikes, paced the same way.

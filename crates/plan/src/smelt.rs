@@ -86,6 +86,9 @@ pub struct Smelt {
     pub clicks: u32,
     pub misses: u32,
     pub started: u64,
+    /// Only take the results of a batch already loaded (issue 13b: a smelt the planner left).
+    #[serde(default)]
+    pub collect: bool,
 }
 
 /// The fuel the bot burns, hottest first: coal before wood. Logs, sticks and tools are kept for
@@ -102,6 +105,10 @@ pub fn fuels_held(w: &World) -> Vec<(ItemKind, u32)> {
         .filter_map(|(k, _)| data::generated::fuel::fuel_ticks(k).map(|t| (k, t)))
         .collect();
     v.sort_by_key(|(k, t)| (std::cmp::Reverse(*t), k.id()));
+    // Sticks over the reserve, last (make's `STICK_RESERVE`).
+    if crate::craft::count(w, ItemKind::Stick) > crate::make::STICK_RESERVE {
+        v.extend(data::generated::fuel::fuel_ticks(ItemKind::Stick).map(|t| (ItemKind::Stick, t)));
+    }
     v
 }
 
@@ -130,7 +137,32 @@ impl Smelt {
             clicks: 0,
             misses: 0,
             started: tick,
+            collect: false,
         })
+    }
+
+    /// Go back to a furnace loaded with `count` of a batch whose result is `result`, and take it.
+    pub fn collect(w: &World, furnace: Cell, result: ItemKind, count: i32, tick: u64) -> Self {
+        Self {
+            furnace,
+            input: result,
+            result,
+            count,
+            before: crate::craft::count(w, result),
+            cook_ticks: 200,
+            stage: SmeltStage::Approach,
+            walk: None,
+            opens: 0,
+            clicks: 0,
+            misses: 0,
+            started: tick,
+            collect: true,
+        }
+    }
+
+    /// The batch is in the furnace (the task is past its loads).
+    pub fn loaded(&self) -> bool {
+        matches!(self.stage, SmeltStage::Cook { .. })
     }
 
     fn slot(w: &World, s: i16) -> Option<(ItemKind, i32)> {
@@ -222,8 +254,13 @@ impl Smelt {
             return Err(SmeltFailure::Missing);
         };
         let n = (short + i64::from(ticks) - 1) / i64::from(ticks).max(1);
-        let held = crate::craft::count(w, fuel);
-        let n = i32::try_from(n).unwrap_or(i32::MAX).min(held);
+        let held = crate::craft::count(w, fuel)
+            - if fuel == ItemKind::Stick {
+                crate::make::STICK_RESERVE
+            } else {
+                0
+            };
+        let n = i32::try_from(n).unwrap_or(i32::MAX).min(held.max(0));
         Ok(Some((fuel, in_slot.map_or(0, |(_, h)| h) + n)))
     }
 
@@ -341,8 +378,23 @@ impl Smelt {
                 if w.inventory.carried.is_some() {
                     return self.put_down(w);
                 }
-                self.stage = SmeltStage::Fuel;
+                self.stage = if self.collect {
+                    SmeltStage::Cook { since: tick }
+                } else {
+                    SmeltStage::Fuel
+                };
                 self.stages(w, tick)
+            }
+            SmeltStage::Fuel
+                if Self::slot(w, FUEL).is_some_and(|(k, _)| {
+                    let held = fuels_held(w);
+                    !held.iter().any(|(h, _)| *h == k) && !held.is_empty()
+                }) && self.fuel_plan(w).is_err() =>
+            {
+                // A leftover of a fuel no longer held sits in the slot and the batch needs more:
+                // take it out, so the fuel held can go in (a furnace with a plank left and only
+                // sticks held: docs/problems/iron-kit.md wall 12).
+                self.click(FUEL, 0, 1)
             }
             SmeltStage::Fuel => match self.fuel_plan(w) {
                 Err(f) => (None, SmeltStatus::Failed(f)),
