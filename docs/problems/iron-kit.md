@@ -115,3 +115,8 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: 34% made the kit (about 19 a 56); 20 deaths (7 skeleton arrows); 28 of 112 `stuck`, still mostly `Boxed` (1,833): rs-l00-b11's stairs refused for no floor (deeper than 3) 37 times and water 28.
 - **Cause**: a relocation's explore walk needs a route 8 to 48 blocks ahead; a bot at the bottom of its own staircase, boxed by a ravine or water, has none ahead, though the way it came is open.
 - **Fix**: the planner keeps a trail of where the body stood (a mark every 200 ticks when it has moved 2, 60 kept); a relocation with no explore walk walks back to the newest mark at least 10 away that a route reaches, then plans again on the turned heading.
+
+### 19. Stopping for good after relocating (race 43583394116, 33a43ec, 8 lanes: 43 of 112, the stage 52)
+- **What happened**: 38% (from 34%); 11 deaths (from 20); still 27 bots `stuck`, for several causes: rs-l00-b02 had six relocations with no walk ahead and none back along the trail (just out of water: marooned), rs-l00-b11 54 stairs refused for a deep drop, rs-l00-b04 failed walks.
+- **Cause**: after its six relocations a goal aim stopped for good, at tick 4,000 to 8,000 of 36,000; water settles, mobs move and chunks load in the time left.
+- **Fix**: a goal aim never stops: after its relocations it rests 600 ticks and starts relocating again (issue 09's log aim still stops).

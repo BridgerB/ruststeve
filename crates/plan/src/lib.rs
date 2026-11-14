@@ -56,6 +56,8 @@ pub const MAX_UNWALKABLE: u32 = 12;
 /// explore walk on a turned heading) this many times before it stops (issue 13b: 13 of 56 bots
 /// stopped for good on a ledge, a lake or out of reach of the trees, and idled out the cap).
 pub const MAX_RELOCATIONS: u32 = 6;
+/// After its relocations, a goal aim rests this long and starts again.
+pub const REST_TICKS: u64 = 600;
 /// A task with no progress this long (the body not a block from where it was, the items held
 /// unchanged, no planner event) is cut: one hung a bot for 33,000 ticks after a stair's digs
 /// (docs/problems/iron-kit.md wall 14).
@@ -1492,6 +1494,16 @@ impl Plan {
                 format!("relocate ({} of {MAX_RELOCATIONS})", self.relocations),
                 why,
             );
+            return;
+        }
+        // A goal aim never stops for good: it rests, then starts relocating again (27 of 112 bots
+        // stopped at tick 4,000 to 8,000 and idled out the rest: docs/problems/iron-kit.md wall
+        // 19).
+        if self.aim.is_goal() {
+            self.relocations = 0;
+            self.failed_in_row = 0;
+            self.retry_at = tick + REST_TICKS;
+            self.note(tick, format!("rest {REST_TICKS} ticks"), why);
             return;
         }
         self.stuck = true;
