@@ -177,3 +177,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l03-b09 (lane 3) fled creeper 5095 four times in 140 ticks (read by event, not `--at`, whose ticks are the server's): it started each retreat with the creeper at 7.5 to 8 blocks, ended it at 12 (`flee_radius` + the margin), and the planner walked straight back at the same ore 2 to 6 blocks from the creeper. It died with the creeper 0.4 blocks off; rs-l03-b03 died to the same creeper in the same tunnel 120 ticks later.
 - **Cause**: a creeper follows its target from 16 blocks, so a retreat that ends at 12 never loses it, and nothing kept the planner's next target away from it.
 - **Fix**: `flee_clear` (20, data): a retreat from a `never_fight` kind holds until past it, routed to beyond it; when it ends, targets within it of where the mob was are refused 600 ticks.
+
+### 30. A skeleton fought 51 times with no swing (races 43624186703 and 43624195309, 4e04354: 53 and 54 of 112)
+- **What happened**: 47.8% over the pair; creeper deaths fell to 4 and 5 (from 6 to 12), deaths to 19 and 21, and the kit rate did not move. The largest group by far: 24 to 26 living bots a race with some iron and not enough.
+- **Read**: rs-l00-b06 (lane 0 of 43624195309) spent 15,214 of its 36,000 ticks in `defend Skeleton 2025`: 51 fights, each closing in, landing nothing for 200 ticks (`NO_HIT_TICKS`), backing off and ending, then the same skeleton chosen again. 9 of the lane's 14 bots fought ranged foes 8 to 51 times, about 280 ticks each.
+- **Cause**: a ranged foe within `ranged_radius` (16) is answered whether or not any strike can reach it (behind rock, across a ravine), and a fight that went nowhere left no memory of the foe.
+- **Fix**: a ranged foe that a fight landed nothing on is left alone 600 ticks, unless it comes within `defend_radius`.

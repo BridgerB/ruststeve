@@ -90,7 +90,9 @@ pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {
 
 /// The foe to answer: the nearest hostile within `defend_radius`, else the nearest mob that
 /// shoots within `ranged_radius`.
-pub fn foe(w: &World, rules: &SurvivalRules) -> Option<(i32, EntityKind)> {
+/// `ignored`: ranged foes a fight landed nothing on lately (out of reach behind rock), left alone
+/// unless they come within `defend_radius` (wall 30).
+pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, EntityKind)> {
     let body = w.body?;
     // A kind never fought (a creeper) first, from farther out: backed away from before its fuse.
     let flee = w
@@ -109,7 +111,7 @@ pub fn foe(w: &World, rules: &SurvivalRules) -> Option<(i32, EntityKind)> {
     }
     w.entities
         .iter()
-        .filter(|(_, e)| !e.dead && rules.ranged.contains(&e.kind))
+        .filter(|(id, e)| !e.dead && rules.ranged.contains(&e.kind) && !ignored.contains(id))
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= rules.ranged_radius)
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))

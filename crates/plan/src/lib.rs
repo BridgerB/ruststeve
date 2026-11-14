@@ -284,6 +284,8 @@ pub struct Plan {
     pub stalled: Vec<Cell>,
     /// Where a `never_fight` mob was fled from, until when, and how far round it work waits.
     pub dangers: Vec<(Cell, u64, f64)>,
+    /// Ranged foes a fight landed nothing on, and until when they are left alone (wall 30).
+    pub ignored_foes: Vec<(i32, u64)>,
     /// Events ever made (`events` keeps the last few): the shell records the new ones.
     pub event_count: u64,
     /// The goal table (issue 10), for a goal aim.
@@ -365,6 +367,7 @@ impl Plan {
             refused_areas: Vec::new(),
             stalled: Vec::new(),
             dangers: Vec::new(),
+            ignored_foes: Vec::new(),
             event_count: 0,
             table: None,
             met: false,
@@ -675,6 +678,12 @@ impl Plan {
         }
         let trap = self.traps.tick(w, body);
         let rules = &table.survival;
+        let ignored: Vec<i32> = self
+            .ignored_foes
+            .iter()
+            .filter(|(_, until)| tick < *until)
+            .map(|(id, _)| *id)
+            .collect();
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
         if matches!(self.task, Task::Swim(..))
@@ -705,7 +714,8 @@ impl Plan {
             let in_force = match row {
                 make::Always::Escape(k) => trap == Some(*k),
                 make::Always::Defend => {
-                    running == Some(make::Always::Defend) || defend::foe(w, rules).is_some()
+                    running == Some(make::Always::Defend)
+                        || defend::foe(w, rules, &ignored).is_some()
                 }
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
@@ -754,7 +764,7 @@ impl Plan {
                     self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
                     Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
-                make::Always::Defend => defend::foe(w, rules).map(|(foe, kind)| {
+                make::Always::Defend => defend::foe(w, rules, &ignored).map(|(foe, kind)| {
                     let d = defend::Defend::new(w, foe, kind, rules, tick);
                     self.note(
                         tick,
@@ -807,6 +817,12 @@ impl Plan {
                     defend::DefendStatus::Done => {
                         // Fled a creeper: its ground waits, or the next walk goes straight back
                         // to it (wall 29).
+                        // A ranged foe no strike reached: left alone a while, or it is chosen
+                        // again at once (one bot fought one skeleton 51 times: wall 30).
+                        if rules.ranged.contains(&d.kind) && d.last_hit_at == d.started {
+                            self.ignored_foes.retain(|(_, until)| tick < *until);
+                            self.ignored_foes.push((d.foe, tick + FAILURE_MEMORY_TICKS));
+                        }
                         if rules.never_fight.contains(&d.kind) {
                             self.dangers.retain(|(_, until, _)| tick < *until);
                             self.dangers.push((
