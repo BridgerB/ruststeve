@@ -143,3 +143,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l06-b09 (an iron pickaxe, a bucket, an ingot, 7 raw iron, 3 coal, 3 gravel) re-dug gravel from tick 13,037 to the end and never placed one: its re-dig's place, finding no free cell, dug the wall for room, and each wall cell came back as water (a block update to state 93); it stood at y 12 in an aquifer.
 - **Cause**: the make-room dig checked the wall cell for fluid and lava beside, not water beside.
 - **Fix**: a wall is dug for room only with no water, lava or bubble column on any side.
+
+### 24. Marooned on an island (race 43599248207, 22d3c15, 8 lanes: 43 of 112, the stage 55)
+- **What happened**: 38%, inside the plateau's spread; 24 of 112 bots never held iron.
+- **Read**: rs-l00-b12 stood at (27, 62, -88) the whole race: every explore and trail walk refused "water at" each neighbour (~310 refusals each); the spread had placed it on an islet a few blocks wide at sea level.
+- **Cause**: walks never swim and stairs refuse water, so a bot on an island has no way off; the escape row only swims out of water onto the nearest bank, which is the island.
+- **Fix**: when a goal aim gives up its walks (every walk failed in a row) with water beside its feet, the next relocation is a swim: the escape's own swimming, held on dry footing 10 to 32 blocks across the plane, done on that shore or after 1,200 ticks. The water escape row does not cut it; lava, fire or a wall do. Model test: an island 3 wide in a lake 41 wide is swum off.

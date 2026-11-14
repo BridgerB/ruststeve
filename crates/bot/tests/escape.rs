@@ -209,3 +209,29 @@ fn a_block_at_the_eyes_is_dug_out() {
         e.plan.task
     );
 }
+
+#[test]
+fn an_island_in_a_lake_is_swum_off() {
+    // A lake 41 wide and 3 deep with an island 3 wide at its middle, the bot on the island:
+    // no walk leaves it, so the planner swims to a far shore (issue 13b, iron-kit wall 24).
+    let mut set: Vec<_> = cells(-20..=20, 61..=63, -20..=20, BlockKind::Water)
+        .into_iter()
+        .filter(|((x, _, z), _)| x.abs() > 1 || z.abs() > 1)
+        .collect();
+    set.extend(cells(-20..=20, 60..=60, -20..=20, BlockKind::Dirt));
+    let e = escape([0.5, 64.0, 0.5], &set, 6000);
+    let body = e.run.world.body.unwrap();
+    assert!(!e.run.died, "died: {:#?}", e.plan.events);
+    assert!(
+        body.pos[0].abs() > 20.5 || body.pos[2].abs() > 20.5,
+        "still on the lake at {:?}: {:#?} {:#?}",
+        body.pos,
+        e.plan.task,
+        e.plan.events
+    );
+    assert!(
+        e.run.sim.violations.is_empty(),
+        "{:?}",
+        e.run.sim.violations
+    );
+}

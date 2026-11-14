@@ -51,6 +51,9 @@ pub const FLEE_RADIUS: i32 = 6;
 pub const FIRE_RADIUS: i32 = 2;
 /// How far up a column the water's surface is looked for.
 const SURFACE_SEARCH: i32 = 24;
+/// A swim off an island lands at least this far away, and at most this.
+pub const SWIM_FROM: i32 = 10;
+pub const SWIM_TO: i32 = 32;
 /// Banks refused before the list starts over.
 const MAX_REFUSED: usize = 8;
 
@@ -235,6 +238,20 @@ impl Escape {
             started: tick,
             yaw: w.player.yaw.into(),
         }
+    }
+
+    /// A swim off an island (issue 13b): the escape's swimming, held on dry footing across the
+    /// water, between `SWIM_FROM` and `SWIM_TO` blocks away on the plane, the nearest first.
+    pub fn swim(w: &World, tick: u64) -> Option<Self> {
+        let body = w.body?;
+        let feet = feet_cell(body.pos);
+        let mut e = Self::new(TrapKind::Water, w, tick);
+        let cells: Vec<Cell> = around(feet, SWIM_TO, feet.1 - 3..=feet.1 + 2)
+            .into_iter()
+            .filter(|(x, _, z)| (x - feet.0).pow(2) + (z - feet.2).pow(2) >= SWIM_FROM * SWIM_FROM)
+            .collect();
+        e.target = Some(e.footing(w, cells)?);
+        Some(e)
     }
 
     /// The nearest standable cell from `cells` not refused.

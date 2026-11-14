@@ -68,6 +68,8 @@ pub const TRAIL_EVERY: u64 = 200;
 pub const TRAIL_STEP: f64 = 2.0;
 pub const TRAIL_KEPT: usize = 60;
 pub const TRAIL_BACK: f64 = 10.0;
+/// The most a swim off an island takes.
+pub const SWIM_TICKS: u64 = 1200;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
 /// is not tried log by log (clojurecraft's `area-radius`).
 pub const AREA_RADIUS: f64 = 6.0;
@@ -194,6 +196,8 @@ pub enum Task {
     Redig(Box<redig::Redig>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
+    /// Across water to a far shore: a relocation off an island (issue 13b), and its start.
+    Swim(Box<escape::Escape>, u64),
     /// A hostile mob near: fight it or back away (issue 12d).
     Defend(Box<defend::Defend>),
     /// Eating something held (issue 12c).
@@ -215,6 +219,7 @@ impl Task {
             Task::Smelt(_) => "smelt",
             Task::Redig(_) => "redig",
             Task::Escape(_) => "escape",
+            Task::Swim(..) => "swim",
             Task::Defend(_) => "defend",
             Task::Eat(_) => "eat",
             Task::Hunt(_) => "hunt",
@@ -231,6 +236,7 @@ impl Task {
             | Task::Smelt(_)
             | Task::Redig(_)
             | Task::Escape(_)
+            | Task::Swim(..)
             | Task::Defend(_)
             | Task::Eat(_)
             | Task::Hunt(_) => None,
@@ -326,6 +332,8 @@ pub struct Plan {
     pub trail: Vec<[f64; 3]>,
     #[serde(default)]
     pub relocate: bool,
+    /// Walks failed in a row with water beside the feet: the next relocation swims (wall 24).
+    pub maroon: bool,
     #[serde(default)]
     pub refused_prey: Vec<i32>,
     /// Acts made this tick, for the shell (`take_acts`).
@@ -369,6 +377,7 @@ impl Plan {
             stalls: 0,
             trail: Vec::new(),
             relocate: false,
+            maroon: false,
             refused_prey: Vec::new(),
             acts: Vec::new(),
         }
@@ -519,6 +528,29 @@ impl Plan {
                 self.acts.extend(act);
                 return self.after_redig(c, status, tick);
             }
+            Task::Swim(e, since) => {
+                let (c, act) = e.step(w, tick);
+                self.acts.extend(act);
+                let target = e.target;
+                let since = *since;
+                // Done on dry land at the far shore; over after SWIM_TICKS whatever.
+                let landed = target.zip(w.body).is_some_and(|(t, b)| {
+                    escape::dry_land(w, &b)
+                        && (f64::from(t.0) + 0.5 - b.pos[0]).abs() < 2.0
+                        && (f64::from(t.2) + 0.5 - b.pos[2]).abs() < 2.0
+                });
+                if landed || tick.saturating_sub(since) > SWIM_TICKS {
+                    self.task = Task::Idle;
+                    self.retry_at = tick;
+                    self.note(
+                        tick,
+                        if landed { "swum across" } else { "swim over" }.to_owned(),
+                        "plan again from here".to_owned(),
+                    );
+                    return Controls::default();
+                }
+                return c;
+            }
             // `always` runs these (and ends them).
             Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
                 return Controls::default();
@@ -561,6 +593,7 @@ impl Plan {
                     | Task::Smelt(_)
                     | Task::Redig(_)
                     | Task::Escape(_)
+                    | Task::Swim(..)
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
@@ -602,11 +635,13 @@ impl Plan {
                     | Task::Smelt(_)
                     | Task::Redig(_)
                     | Task::Escape(_)
+                    | Task::Swim(..)
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
                 }
                 if give_up {
+                    self.maroon = w.body.is_some_and(|b| wet(w, &b));
                     self.give_up(
                         tick,
                         format!("{MAX_UNWALKABLE} walks failed in a row with none done"),
@@ -629,6 +664,13 @@ impl Plan {
         }
         let trap = self.traps.tick(w, body);
         let rules = &table.survival;
+        // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
+        // cuts it, and a foe or hunger waits for the far shore (wall 24).
+        if matches!(self.task, Task::Swim(..))
+            && matches!(trap, None | Some(escape::TrapKind::Water))
+        {
+            return None;
+        }
         // What is running: an escape whose trap holds, an eat or a hunt, else nothing.
         let running = match &self.task {
             Task::Escape(e) => Some(make::Always::Escape(e.kind)),
@@ -643,7 +685,8 @@ impl Plan {
             | Task::Place(_)
             | Task::Stairs(_)
             | Task::Smelt(_)
-            | Task::Redig(_) => None,
+            | Task::Redig(_)
+            | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
         let mut chosen: Option<(String, make::Always)> = None;
@@ -785,7 +828,8 @@ impl Plan {
             | Task::Place(_)
             | Task::Stairs(_)
             | Task::Smelt(_)
-            | Task::Redig(_) => return None,
+            | Task::Redig(_)
+            | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
         if let Some(end) = ended {
@@ -1580,6 +1624,14 @@ impl Plan {
 
     fn explore_walk(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {
         let body = w.body?;
+        // Marooned (every walk failed, water beside the feet): swim to a far shore
+        // (docs/problems/iron-kit.md wall 24).
+        if std::mem::take(&mut self.maroon)
+            && let Some(e) = escape::Escape::swim(w, tick)
+        {
+            self.note(tick, format!("swim to {:?}", e.target), why.to_owned());
+            return Some(Task::Swim(Box::new(e), tick));
+        }
         // The full distance first, then shorter: a bot on a shore or a ledge may have only a
         // short way off it (docs/problems/iron-kit.md wall 7).
         for d in [f64::from(EXPLORE_DISTANCE), 16.0, 8.0]
@@ -1875,5 +1927,18 @@ pub fn log_in_view(w: &World, origin: [f64; 3], min: f64) -> bool {
                 + (origin[2] - (f64::from(s.pos.2) + 0.5)).powi(2))
             .sqrt()
                 >= min
+    })
+}
+
+/// Water beside the feet or under a cell beside them: a shore, or an island.
+fn wet(w: &World, body: &physics::Body) -> bool {
+    let (x, y, z) = path::feet_cell(body.pos);
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dz)| {
+        [y, y - 1].iter().any(|y| {
+            matches!(
+                w.block_at(world::BlockPos::new(x + dx, *y, z + dz)),
+                Some(data::BlockKind::Water)
+            )
+        })
     })
 }
