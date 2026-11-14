@@ -60,6 +60,12 @@ pub const MAX_RELOCATIONS: u32 = 6;
 /// unchanged, no planner event) is cut: one hung a bot for 33,000 ticks after a stair's digs
 /// (docs/problems/iron-kit.md wall 14).
 pub const STALL_TICKS: u64 = 1200;
+/// The trail: a mark this often, when the body has moved `TRAIL_STEP` since the last; this many
+/// kept; a relocation walks back to one at least `TRAIL_BACK` blocks away.
+pub const TRAIL_EVERY: u64 = 200;
+pub const TRAIL_STEP: f64 = 2.0;
+pub const TRAIL_KEPT: usize = 60;
+pub const TRAIL_BACK: f64 = 10.0;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
 /// is not tried log by log (clojurecraft's `area-radius`).
 pub const AREA_RADIUS: f64 = 6.0;
@@ -309,6 +315,10 @@ pub struct Plan {
     pub mark: Option<([f64; 3], i64, u64, u64)>,
     #[serde(default)]
     pub stalls: u64,
+    /// Where the body has stood, every `TRAIL_EVERY` ticks, newest last: the way back out of a
+    /// dead end (issue 13b).
+    #[serde(default)]
+    pub trail: Vec<[f64; 3]>,
     #[serde(default)]
     pub relocate: bool,
     #[serde(default)]
@@ -352,6 +362,7 @@ impl Plan {
             toward: None,
             mark: None,
             stalls: 0,
+            trail: Vec::new(),
             relocate: false,
             refused_prey: Vec::new(),
             acts: Vec::new(),
@@ -403,6 +414,22 @@ impl Plan {
         let Some(body) = w.body else {
             return Controls::default();
         };
+        // The trail, the way back out of a dead end.
+        if tick.is_multiple_of(TRAIL_EVERY) {
+            let far = self.trail.last().is_none_or(|t| {
+                (0..3)
+                    .map(|i| (t[i] - body.pos[i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+                    >= TRAIL_STEP
+            });
+            if far {
+                self.trail.push(body.pos);
+                if self.trail.len() > TRAIL_KEPT {
+                    self.trail.remove(0);
+                }
+            }
+        }
         // The watchdog: a task with no progress for STALL_TICKS is cut.
         let items: i64 = w.inventory.slots.values().map(|(_, n)| i64::from(*n)).sum();
         let moved = |m: [f64; 3]| (0..3).map(|i| (m[i] - body.pos[i]).powi(2)).sum::<f64>() > 1.0;
@@ -1563,6 +1590,35 @@ impl Plan {
             }
             self.expanded += walk.expanded;
             self.heading = (self.heading + 90.0) % 360.0;
+        }
+        // No way out ahead: back along the trail, the newest mark far enough away that a route
+        // reaches (bots dug into dead ends by drops and water, every way ahead refused:
+        // docs/problems/iron-kit.md wall 18).
+        let marks: Vec<[f64; 3]> = self.trail.iter().rev().copied().collect();
+        for m in marks {
+            let d = (0..3)
+                .map(|i| (m[i] - body.pos[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if d < TRAIL_BACK {
+                continue;
+            }
+            let target = path::feet_cell(m);
+            let mut walk = Walk::new(
+                target,
+                Goal::Near {
+                    pos: target,
+                    range: 1.5,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(tick, format!("back to {target:?}"), why.to_owned());
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
         }
         None
     }
