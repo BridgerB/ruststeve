@@ -95,3 +95,8 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l02-b00 made its last decision at tick 2,502 (stairs down), dug three stair cells, and sent nothing more for 33,000 ticks, standing on stone at y 55; no window open, no click pending.
 - **Cause**: some task state waits with no deadline (not found from the recording); the planner had no watchdog of its own.
 - **Fix**: a planner watchdog: a task with no progress for 1,200 ticks (the body not a block from its mark, the items held unchanged, no planner event) is cut and counted (`Stalled`).
+
+### 15. Boxed in by water and drops (race 43567763309, 7bbcd52: 23 of 56, the stage 25)
+- **What happened**: 23 kits, 2 deaths; 15 bots ended `stuck`, most with about 80 `Boxed` stairs (rs-l00-b12 in a pit by a lake, every stair refused for water; rs-l00-b00 refused for no floor).
+- **Tried**: a boxed staircase filling the water or the missing floor with a held block (2d8de8c). Race 43571234795 got 14 of 56, with 212 `Stalled` and 181 `StepFailed` where race 43567763309 had almost none, and as many `Boxed` (983); reverted (ae1f54f).
+- **Open**: being boxed in is still the most common way to stop; race-to-race spread (14 to 23 kits on near code) is wide, so the next fix is judged on more than one race.
