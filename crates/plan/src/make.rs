@@ -604,8 +604,9 @@ pub fn burn_order() -> Vec<ItemKind> {
 
 /// Sticks kept for tool handles; sticks over this burn, last (ruststeve, not clojurecraft: its
 /// 24-stick spare turned the kit's logs into sticks before any smelt, leaving bots with raw iron,
-/// no coal, no planks and twenty sticks: docs/problems/iron-kit.md wall 12).
-pub const STICK_RESERVE: i32 = 8;
+/// no coal, no planks and twenty sticks: docs/problems/iron-kit.md wall 12). Two: one
+/// pickaxe's handle (a reserve of 8 kept a bot with 7 sticks from its last smelt: wall 20).
+pub const STICK_RESERVE: i32 = 2;
 
 fn burn_ticks(item: ItemKind) -> i32 {
     data::generated::fuel::fuel_ticks(item)

@@ -120,3 +120,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: 38% (from 34%); 11 deaths (from 20); still 27 bots `stuck`, for several causes: rs-l00-b02 had six relocations with no walk ahead and none back along the trail (just out of water: marooned), rs-l00-b11 54 stairs refused for a deep drop, rs-l00-b04 failed walks.
 - **Cause**: after its six relocations a goal aim stopped for good, at tick 4,000 to 8,000 of 36,000; water settles, mobs move and chunks load in the time left.
 - **Fix**: a goal aim never stops: after its relocations it rests 600 ticks and starts relocating again (issue 09's log aim still stops).
+
+### 20. One smelt short, sticks kept back (race 43586564109, 11ab4c8, 8 lanes: 48 of 112, the stage 61)
+- **What happened**: 43% (from 38%); 9 deaths; 13 bots had a pickaxe and a bucket and not flint and steel: some with flint and no seventh ingot, some with ingots and no gravel.
+- **Read**: rs-l05-b12 held an iron pickaxe, a bucket, 2 flint, 4 raw iron and 7 sticks, and tunnelled for coal at y 7 for its last 20,000 ticks.
+- **Cause**: wall 12's stick reserve of 8 kept all 7 sticks out of the furnace; coal is sparse that deep.
+- **Fix**: the reserve is 2, one pickaxe's handle (the differential's inventories hold at most 2 sticks and still equal clojurecraft's).
