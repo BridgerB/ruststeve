@@ -187,3 +187,25 @@ fn a_pit_with_no_bank_is_notched_by_hand() {
     let e = escape([0.5, 56.0, 0.5], &set, 4000);
     assert_out(&e, TrapKind::Water);
 }
+
+#[test]
+fn a_block_at_the_eyes_is_dug_out() {
+    // Gravel in the eyes' cell (fallen into a tunnel): in_wall damage until it is dug.
+    // With the stone pickaxe a miner holds: by hand, off the ground in a block, it takes 865.
+    let e = escape_with(
+        [0.5, 64.0, 0.5],
+        &[((0, 65, 0), BlockKind::Stone)],
+        &[(data::ItemKind::StonePickaxe, 1)],
+        300,
+    );
+    assert!(e.plan.escapes >= 1, "never escaped: {:#?}", e.plan.events);
+    assert!(!e.run.died);
+    // Out of it, whether by the dig or by being pushed clear of the block.
+    let body = e.run.world.body.unwrap();
+    assert!(
+        !plan::escape::eye_in_wall(&e.run.world, &body),
+        "still in the wall at {:?}: {:#?}",
+        body.pos,
+        e.plan.task
+    );
+}

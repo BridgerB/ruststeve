@@ -60,3 +60,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: rs-l00-b05 held an iron pickaxe, a bucket and two ingots by tick 26,100 and spent the rest tunnelling at y 14 for exposed gravel, though gravel had been in sight on the way down.
 - **Cause**: the needs planner plans the goal's provides in order (the pickaxe, the bucket, then flint), so a block only a later provide needs is not wanted while an earlier one is planned.
 - **Fix**: each provide is also planned on its own; a mine row it leads to whose block is exposed within 6 with a route is dug now.
+
+### 10. Buried by falling gravel (race 43534571094, 6e918dd: 12 of 56)
+- **What happened**: 12 deaths, 5 of them `in_wall` (suffocation); flint improved (16 bots held flint, 12 made flint and steel).
+- **Read**: rs-l00-b01 died tunnelling at y 12, its first hit `in_wall` at tick 22,300, with 13 gravel gained.
+- **Cause**: stairs and tunnels opened cells under gravel, which fell into the head's cell; nothing answered a block at the eyes.
+- **Fix**: a stair or tunnel step is refused when the block over its highest opened cell falls (sand, gravel, concrete powder, the suspicious blocks); an `escape-wall` always-row digs out a full block at the eyes, then at the feet.

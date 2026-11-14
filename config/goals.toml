@@ -193,6 +193,12 @@ doc = "off lava onto footing, before anything else"
 trap = "lava"
 
 [[always]]
+id = "escape-wall"
+priority = 0
+doc = "out of a block the eyes are in (a fallen gravel), dug out, before anything else"
+trap = "wall"
+
+[[always]]
 id = "escape-fire"
 priority = 0
 doc = "out of a fire block the body touches, before anything else"

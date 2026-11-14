@@ -61,6 +61,8 @@ pub enum TrapKind {
     Water,
     Lava,
     Fire,
+    /// The eyes inside a full block (in_wall damage: a fallen block, issue 13b).
+    Wall,
 }
 
 impl TrapKind {
@@ -69,6 +71,7 @@ impl TrapKind {
             "water" => Some(TrapKind::Water),
             "lava" => Some(TrapKind::Lava),
             "fire" => Some(TrapKind::Fire),
+            "wall" => Some(TrapKind::Wall),
             _ => None,
         }
     }
@@ -78,6 +81,7 @@ impl TrapKind {
             TrapKind::Water => "water",
             TrapKind::Lava => "lava",
             TrapKind::Fire => "fire",
+            TrapKind::Wall => "wall",
         }
     }
 }
@@ -131,6 +135,16 @@ pub fn dry_land(w: &World, body: &physics::Body) -> bool {
     body.on_ground && !body.in_water && !body.eye_in_water && full(kind_at(w, under))
 }
 
+/// The eyes in a full block (vanilla's `isInWall` takes the eye's cell).
+pub fn eye_in_wall(w: &World, body: &physics::Body) -> bool {
+    let eye = (
+        body.pos[0].floor() as i32,
+        (body.pos[1] + physics::EYE_HEIGHT).floor() as i32,
+        body.pos[2].floor() as i32,
+    );
+    full(kind_at(w, eye))
+}
+
 /// Off the ground with water in the body or in the cells at or under the feet.
 fn afloat(w: &World, body: &physics::Body) -> bool {
     let (x, y, z) = feet_cell(body.pos);
@@ -152,6 +166,8 @@ impl Traps {
             Some(TrapKind::Water)
         } else if touching_fire(w, body.pos) {
             Some(TrapKind::Fire)
+        } else if eye_in_wall(w, body) {
+            Some(TrapKind::Wall)
         } else {
             held
         };
@@ -345,6 +361,20 @@ impl Escape {
             self.start_dig(w, next, tick);
             return self.step(w, tick);
         }
+        // In a wall: dig the eye's cell, then the feet's, nothing collected.
+        if self.kind == TrapKind::Wall {
+            let eye = (
+                feet.0,
+                (body.pos[1] + physics::EYE_HEIGHT).floor() as i32,
+                feet.2,
+            );
+            let cell = [eye, feet].into_iter().find(|c| full(kind_at(w, *c)));
+            if let Some(c) = cell {
+                self.start_dig(w, c, tick);
+                return self.step(w, tick);
+            }
+            return (Controls::default(), None);
+        }
         if self.target.is_none() && tick >= self.next_search {
             self.next_search = tick + SEARCH_EVERY_TICKS;
             self.target = match self.kind {
@@ -355,6 +385,7 @@ impl Escape {
                 TrapKind::Fire => {
                     self.footing(w, around(feet, FIRE_RADIUS, feet.1 - 1..=feet.1 + 1))
                 }
+                TrapKind::Wall => None,
             };
             self.best = f64::MAX;
             self.best_at = tick;

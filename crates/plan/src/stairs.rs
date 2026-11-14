@@ -141,7 +141,26 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
     if !full(kind(w, floor)) {
         return Some(format!("no floor at {floor:?}"));
     }
+    // Nothing that falls over what is opened: gravel or sand over a dug cell drops into it and
+    // buries the head (five bots suffocated tunnelling: docs/problems/iron-kit.md wall 10).
+    if let Some(top) = cells.iter().max_by_key(|c| c.1) {
+        let over = (top.0, top.1 + 1, top.2);
+        if falls(kind(w, over)) {
+            return Some(format!("falling block over {top:?}"));
+        }
+    }
     None
+}
+
+/// Blocks that fall when what is under them opens: the blocks report's falling definitions
+/// (sand, gravel, concrete powder, the suspicious blocks).
+pub fn falls(k: Option<BlockKind>) -> bool {
+    k.and_then(|k| k.info()).is_some_and(|i| {
+        matches!(
+            i.definition,
+            "sand" | "colored_falling" | "concrete_powder" | "brushable" | "falling"
+        )
+    })
 }
 
 fn turn((dx, dz): (i32, i32)) -> (i32, i32) {
