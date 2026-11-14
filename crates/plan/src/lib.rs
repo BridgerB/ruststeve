@@ -280,6 +280,8 @@ pub struct Plan {
     pub stuck: bool,
     /// Areas refused after a `NoPath`: their centre and until when.
     pub refused_areas: Vec<(Cell, u64)>,
+    /// Targets whose walks stopped getting closer (`NoProgress`), cleared on a relocation.
+    pub stalled: Vec<Cell>,
     /// Events ever made (`events` keeps the last few): the shell records the new ones.
     pub event_count: u64,
     /// The goal table (issue 10), for a goal aim.
@@ -359,6 +361,7 @@ impl Plan {
             failed_in_row: 0,
             stuck: false,
             refused_areas: Vec::new(),
+            stalled: Vec::new(),
             event_count: 0,
             table: None,
             met: false,
@@ -609,9 +612,14 @@ impl Plan {
                 match std::mem::replace(&mut self.task, Task::Idle) {
                     Task::ToLog(walk) => {
                         self.refuse(walk.target, tick);
-                        if f == walk::Failure::NoPath {
-                            self.refused_areas
-                                .push((walk.target, tick + FAILURE_MEMORY_TICKS));
+                        match f {
+                            walk::Failure::NoPath => self
+                                .refused_areas
+                                .push((walk.target, tick + FAILURE_MEMORY_TICKS)),
+                            // A way found and not followed is found again: the area, escalating
+                            // (a coal vein tried cell by cell held a bot 8,000 ticks: wall 25).
+                            walk::Failure::NoProgress => self.stalled_area(walk.target, tick),
+                            _ => {}
                         }
                         self.note(
                             tick,
@@ -898,6 +906,28 @@ impl Plan {
         } else {
             tick + FAILURE_MEMORY_TICKS
         };
+    }
+
+    /// A walk into the area around `c` stopped getting closer: every target within
+    /// `AREA_RADIUS` refused a while, and for good (until a relocation clears it) once walks
+    /// there have stalled `BLOCKED_AFTER` times, as a cell is.
+    fn stalled_area(&mut self, c: Cell, tick: u64) {
+        let near = |a: Cell| {
+            let (dx, dy, dz) = (
+                f64::from(a.0 - c.0),
+                f64::from(a.1 - c.1),
+                f64::from(a.2 - c.2),
+            );
+            (dx * dx + dy * dy + dz * dz).sqrt() <= AREA_RADIUS
+        };
+        self.stalled.push(c);
+        let n = self.stalled.iter().filter(|a| near(**a)).count();
+        let until = if n >= BLOCKED_AFTER as usize {
+            u64::MAX
+        } else {
+            tick + FAILURE_MEMORY_TICKS
+        };
+        self.refused_areas.push((c, until));
     }
 
     fn refused_now(&self, c: Cell, tick: u64) -> bool {
@@ -1535,6 +1565,7 @@ impl Plan {
             self.failed_in_row = 0;
             self.refused.clear();
             self.refused_areas.clear();
+            self.stalled.clear();
             self.heading = (self.heading + 90.0) % 360.0;
             self.note(
                 tick,
