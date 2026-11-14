@@ -126,3 +126,8 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l05-b12 held an iron pickaxe, a bucket, 2 flint, 4 raw iron and 7 sticks, and tunnelled for coal at y 7 for its last 20,000 ticks.
 - **Cause**: wall 12's stick reserve of 8 kept all 7 sticks out of the furnace; coal is sparse that deep.
 - **Fix**: the reserve is 2, one pickaxe's handle (the differential's inventories hold at most 2 sticks and still equal clojurecraft's).
+
+### 21. Creepers met too close (race 43589713703, a27519b, 8 lanes: 50 of 112, the stage 60)
+- **What happened**: 45% (from 43%); 13 deaths, 7 of them creepers.
+- **Cause**: a creeper (`never_fight`) was backed away from only once within `defend_radius` (4); its fuse starts at 3, and a walk or a dig does not stop for it until then.
+- **Fix**: `never_fight` kinds are answered first and from `flee_radius` (8), backed away from until past it and the margin.

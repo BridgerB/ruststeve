@@ -81,10 +81,22 @@ pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {
 /// The foe to answer: the nearest hostile within `defend_radius`, else the nearest mob that
 /// shoots within `ranged_radius`.
 pub fn foe(w: &World, rules: &SurvivalRules) -> Option<(i32, EntityKind)> {
+    let body = w.body?;
+    // A kind never fought (a creeper) first, from farther out: backed away from before its fuse.
+    let flee = w
+        .entities
+        .iter()
+        .filter(|(_, e)| !e.dead && rules.never_fight.contains(&e.kind))
+        .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
+        .filter(|(d, _, _)| *d <= rules.flee_radius)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, id, k)| (id, k));
+    if flee.is_some() {
+        return flee;
+    }
     if let Some(f) = nearest_foe(w, rules.defend_radius) {
         return Some(f);
     }
-    let body = w.body?;
     w.entities
         .iter()
         .filter(|(_, e)| !e.dead && rules.ranged.contains(&e.kind))
@@ -139,7 +151,9 @@ impl Defend {
         };
         self.last_seen = pos;
         let d = distance(body.pos, pos);
-        let reach = if rules.ranged.contains(&self.kind) {
+        let reach = if rules.never_fight.contains(&self.kind) {
+            rules.flee_radius
+        } else if rules.ranged.contains(&self.kind) {
             rules.ranged_radius
         } else {
             rules.defend_radius

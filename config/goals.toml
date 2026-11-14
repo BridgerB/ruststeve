@@ -255,3 +255,6 @@ never_fight = ["creeper"]
 # the top killer underground in the iron races: docs/problems/iron-kit.md wall 16).
 ranged = ["skeleton", "stray", "bogged"]
 ranged_radius = 16.0
+# A never_fight kind is backed away from within this: a creeper's fuse starts at 3 blocks, and
+# backing away only within defend_radius let 7 creepers kill (docs/problems/iron-kit.md wall 21).
+flee_radius = 8.0

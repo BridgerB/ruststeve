@@ -242,6 +242,13 @@ pub struct Survival {
     pub ranged: Vec<String>,
     #[serde(default = "ranged_radius")]
     pub ranged_radius: f64,
+    /// A `never_fight` kind is backed away from within this (a creeper's fuse starts at 3).
+    #[serde(default = "flee_radius")]
+    pub flee_radius: f64,
+}
+
+fn flee_radius() -> f64 {
+    8.0
 }
 
 fn ranged_radius() -> f64 {
@@ -269,6 +276,7 @@ impl Default for Survival {
             never_fight: Vec::new(),
             ranged: Vec::new(),
             ranged_radius: ranged_radius(),
+            flee_radius: flee_radius(),
         }
     }
 }
@@ -298,6 +306,7 @@ pub struct SurvivalRules {
     pub never_fight: Vec<data::EntityKind>,
     pub ranged: Vec<data::EntityKind>,
     pub ranged_radius: f64,
+    pub flee_radius: f64,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -538,6 +547,7 @@ impl Table {
                 never_fight,
                 ranged,
                 ranged_radius: g.survival.ranged_radius,
+                flee_radius: g.survival.flee_radius,
             },
         })
     }
