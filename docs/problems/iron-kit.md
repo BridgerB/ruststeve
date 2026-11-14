@@ -89,3 +89,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: lane 0's milestones: rs-l00-b00 had its bucket at tick 7,504 and spent 8,000 ticks finding gravel; rs-l00-b03 had its bucket at 10,909 and found no gravel in the 25,000 left.
 - **Cause**: wall 9's opportunism took a block only when it was the next act on a provide's way; flint and steel smelts its ingot first, so gravel passed on the way was still not taken.
 - **Fix**: a goal row's `wants`: materials taken whenever exposed within 6, up to a count, whatever is being planned. The kit wants 3 gravel, 7 raw iron and 2 coal.
+
+### 14. A task hung for the rest of the run (race 43564489198, 64d1afc: 16 of 56)
+- **What happened**: 16 kits (the best yet), 18 the stage; 7 deaths (3 creepers); 16 bots never held any iron, several of them at the same few places in every lane (a seed and a spread place each bot index alike).
+- **Read**: rs-l02-b00 made its last decision at tick 2,502 (stairs down), dug three stair cells, and sent nothing more for 33,000 ticks, standing on stone at y 55; no window open, no click pending.
+- **Cause**: some task state waits with no deadline (not found from the recording); the planner had no watchdog of its own.
+- **Fix**: a planner watchdog: a task with no progress for 1,200 ticks (the body not a block from its mark, the items held unchanged, no planner event) is cut and counted (`Stalled`).

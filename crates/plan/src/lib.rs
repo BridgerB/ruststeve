@@ -56,6 +56,10 @@ pub const MAX_UNWALKABLE: u32 = 12;
 /// explore walk on a turned heading) this many times before it stops (issue 13b: 13 of 56 bots
 /// stopped for good on a ledge, a lake or out of reach of the trees, and idled out the cap).
 pub const MAX_RELOCATIONS: u32 = 6;
+/// A task with no progress this long (the body not a block from where it was, the items held
+/// unchanged, no planner event) is cut: one hung a bot for 33,000 ticks after a stair's digs
+/// (docs/problems/iron-kit.md wall 14).
+pub const STALL_TICKS: u64 = 1200;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
 /// is not tried log by log (clojurecraft's `area-radius`).
 pub const AREA_RADIUS: f64 = 6.0;
@@ -299,6 +303,12 @@ pub struct Plan {
     /// nearer (a progress invariant, issue 13b).
     #[serde(default)]
     pub toward: Option<(Cell, f64, u32)>,
+    /// The watchdog's mark: where the body was, how many items were held, the events made, and
+    /// when (issue 13b).
+    #[serde(default)]
+    pub mark: Option<([f64; 3], i64, u64, u64)>,
+    #[serde(default)]
+    pub stalls: u64,
     #[serde(default)]
     pub relocate: bool,
     #[serde(default)]
@@ -340,6 +350,8 @@ impl Plan {
             smelts: 0,
             relocations: 0,
             toward: None,
+            mark: None,
+            stalls: 0,
             relocate: false,
             refused_prey: Vec::new(),
             acts: Vec::new(),
@@ -391,6 +403,28 @@ impl Plan {
         let Some(body) = w.body else {
             return Controls::default();
         };
+        // The watchdog: a task with no progress for STALL_TICKS is cut.
+        let items: i64 = w.inventory.slots.values().map(|(_, n)| i64::from(*n)).sum();
+        let moved = |m: [f64; 3]| (0..3).map(|i| (m[i] - body.pos[i]).powi(2)).sum::<f64>() > 1.0;
+        match self.mark {
+            Some((at, n, ev, since)) if !moved(at) && n == items && ev == self.event_count => {
+                if !matches!(self.task, Task::Idle) && tick.saturating_sub(since) > STALL_TICKS {
+                    let cut = self.task.name();
+                    self.stalls += 1;
+                    self.task = Task::Idle;
+                    self.retry_at = tick;
+                    self.failed_in_row += 1;
+                    *self.failures.entry("Stalled".to_owned()).or_default() += 1;
+                    self.note(
+                        tick,
+                        format!("{cut} stalled"),
+                        format!("no progress for {STALL_TICKS} ticks; choose again"),
+                    );
+                    self.mark = Some((body.pos, items, self.event_count, tick));
+                }
+            }
+            Some(_) | None => self.mark = Some((body.pos, items, self.event_count, tick)),
+        }
         // The always-rows come first, ahead of every goal and after the aim is met.
         if let Some(c) = self.always(w, &body, tick) {
             return c;
