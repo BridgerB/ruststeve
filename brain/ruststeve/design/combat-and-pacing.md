@@ -6,7 +6,7 @@ tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
 lastUpdated: 2026-11-14
-verifiedAgainst: ruststeve@1a3aaac clojurecraft@be85a92
+verifiedAgainst: ruststeve@4a85676 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -33,7 +33,7 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 ## How it works
 - **In force**: a live mob of the game's `monster` category within `defend_radius` of the feet, or a defence already running.
 - **Fight**: close in facing it; from 3 blocks (eye to its middle) hold the hardest-hitting weapon and strike when a full charge is ready (20 / (4 + the attack speed) ticks, by the slowdown, plus one), never in the first tick it is faced (the look goes out a tick before the swing: v1's lesson).
-- **Back away** (straight away from it, jumping what is in the way): at or under `danger_health` (two zombie hits on Normal and a margin), from a `never_fight` kind at any health, and when a fight lands nothing for 10 s or runs 30 s (the progress invariants).
+- **Back away** (along a route to beyond the reach plus the margin, `Goal::Away`, searched again when the foe moves 3 blocks; straight away from it, jumping, only when no route is found: issue 13b, a creeper fled into a tunnel's end): at or under `danger_health` (two zombie hits on Normal and a margin), from a `never_fight` kind at any health, and when a fight lands nothing for 10 s or runs 30 s (the progress invariants).
 - **Over**: the mob is dead, gone, or `defend_radius` + 4 away.
 
 ## Evidence
