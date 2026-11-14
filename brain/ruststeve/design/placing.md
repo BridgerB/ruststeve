@@ -5,8 +5,8 @@ type: reference
 tags: [wire, place, use_item_on, model]
 aliases: [use_item_on, UseItemOn, Act::UseOn, place_held, BlockItem.place, handleUseItemOn, replaceable]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@7e42e00 clojurecraft@be85a92
+lastUpdated: 2026-11-14
+verifiedAgainst: ruststeve@1a3aaac clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/packets.rs#/// (a crafting table). Field order from the game's `ServerboundUseItemOnPacket`; the cursor is"
   - "ruststeve:crates/sim/src/survival.rs#pub(crate) fn on_use_item_on("
@@ -42,7 +42,7 @@ Issue 11a. `Act::UseOn { pos, face }` right-clicks a block's face with the main 
 
 ## Issue 13b
 - A table, furnace, chest or barrel is never the floor clicked to place on: the server opens it instead.
-- With no free cell, a wall block beside the feet is dug for room first, at most two ([[veins-and-flint]]).
+- With no free cell, a wall block beside the feet is dug for room first, at most two ([[veins-and-flint]]), and never one with water, lava or a bubble column on any side (an aquifer refills it, wall 23).
 
 ## See also
 - [[wire-actions]] - the other client actions.

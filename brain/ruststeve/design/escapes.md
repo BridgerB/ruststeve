@@ -5,8 +5,8 @@ type: reference
 tags: [plan, escape, survival, water, lava, fire, always-rows]
 aliases: [always-rows, escape-water, escape-lava, escape-fire, Escape, Traps, TrapKind, swim-out, flee, bank, notch, lid, Aim::Hold, plan:hold, dry land]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
+lastUpdated: 2026-11-14
+verifiedAgainst: ruststeve@1a3aaac clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/escape.rs#pub fn tick(&mut self, w: &World, body: &physics::Body) -> Option<TrapKind> {"
   - "ruststeve:crates/plan/src/escape.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>) {"
@@ -29,7 +29,7 @@ related:
 Issue 12b. clojurecraft's first three always-rows, as data and a small state machine: nothing is stored about the task they cut, since the needs planner re-derives it from what is held once the trap clears.
 
 ## Key files
-- `config/goals.toml`: the `[[always]]` rows (`escape-water`, `escape-lava`, `escape-fire`, priority 0), read into `plan::make::Table::always`.
+- `config/goals.toml`: the `[[always]]` rows (`escape-water`, `escape-lava`, `escape-wall`, `escape-fire`, priority 0), read into `plan::make::Table::always`.
 - `crates/plan/src/escape.rs`: `Traps`, `Escape`.
 - `crates/plan/src/lib.rs`: `Plan::always`, called every tick before the task and before the "finished" check, so it runs after the aim is met too.
 - `crates/bot/tests/escape.rs`: a pond, a shaft under a dirt lid, a pit with no bank (with a wooden pickaxe and by hand), lava and fire, each closed-loop against the model.
@@ -52,6 +52,10 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 - On fire with water near, the bot does not yet walk into it: burning runs out (8 s from a fire block, 15 s from lava).
 - An escaped trap leaves no fact for later routes; walks and stairs already refuse water and lava.
 - An escape has no timeout; its progress invariant changes the bank or digs, it never gives up while trapped.
+
+## Issue 13b
+- **A wall** (`TrapKind::Wall`): the eyes in a full block (gravel fallen into a tunnel, `in_wall` damage): the eye and feet cells are dug with the best tool held.
+- **A swim off an island** (`Escape::swim`, `Task::Swim`): the water escape's machinery with its bank preset to dry footing 10 to 32 blocks away, started by the planner when it gives up beside water ([[planner]]); the water row does not cut it (it is in water on purpose), lava, fire and a wall do. Model test: an island 3 wide in a lake 41 wide.
 
 ## See also
 - [[mc-water]] - the water physics the escape relies on.
