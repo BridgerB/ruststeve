@@ -1195,6 +1195,32 @@ impl Plan {
             self.expanded += walk.expanded;
             self.refuse(c, tick);
         }
+        // An exposed block seen with no walk to it (in a cave behind rock: 1,108 walks failed
+        // NoPath in one race) is dug toward: stairs if it is below the feet, else a level
+        // tunnel, six steps, then the planner looks again from nearer
+        // (docs/problems/iron-kit.md wall 11).
+        if let (Some(aim), Some(body)) = (exposed_near(w, blocks).into_iter().next(), w.body) {
+            let (fx, fy, fz) = path::feet_cell(body.pos);
+            let (dx, dz) = (aim.0 - fx, aim.2 - fz);
+            let dir = if dx.abs() >= dz.abs() {
+                (dx.signum(), 0)
+            } else {
+                (0, dz.signum())
+            };
+            if dir != (0, 0) {
+                let below = aim.1 < fy;
+                self.note(
+                    tick,
+                    format!("dig toward {:?} at {aim:?}", blocks.first()),
+                    "seen exposed, with no walk to it".to_owned(),
+                );
+                return Task::Stairs(Box::new(if below {
+                    Stairs::new(dir, tick)
+                } else {
+                    Stairs::level(dir, tick)
+                }));
+            }
+        }
         let dir = match (self.heading as i32).rem_euclid(360) {
             90 => (-1, 0),
             180 => (0, -1),
