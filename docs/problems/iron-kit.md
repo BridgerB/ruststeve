@@ -137,3 +137,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l00-b07 (raw iron, 3 coal, 20 sticks, at y 31) spent its last thousands of ticks walking at surface logs: it held no table, so the furnace (crafted at a table) led to a table, to planks, to logs.
 - **Cause**: a table or furnace counted as near only within 24 (clojurecraft's `table-search`); a miner that had gone further from the ones it placed planned new ones, and with its wood spent that meant the surface.
 - **Fix**: a remembered table or furnace counts within 64; the craft or smelt walks there, and one with no way to it fails `Unopened`, is refused, and a new one is placed.
+
+### 23. Room dug into an aquifer (race 43595942576, ac665f8, 8 lanes: 52 of 112, the stage 64)
+- **What happened**: 46% (the best yet); 12 deaths; 12 bots had the stage and not flint and steel, most of them holding gravel.
+- **Read**: rs-l06-b09 (an iron pickaxe, a bucket, an ingot, 7 raw iron, 3 coal, 3 gravel) re-dug gravel from tick 13,037 to the end and never placed one: its re-dig's place, finding no free cell, dug the wall for room, and each wall cell came back as water (a block update to state 93); it stood at y 12 in an aquifer.
+- **Cause**: the make-room dig checked the wall cell for fluid and lava beside, not water beside.
+- **Fix**: a wall is dug for room only with no water, lava or bubble column on any side.

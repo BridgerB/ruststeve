@@ -146,6 +146,17 @@ impl Place {
                 full(kind(w, *c))
                     && full(kind(w, (c.0, c.1 - 1, c.2)))
                     && crate::stairs::refusal(w, &[*c], (c.0, c.1 - 1, c.2)).is_none()
+                    // Never into an aquifer: a wall with water on any side floods when dug, and a
+                    // bot at y 12 dug flooding walls for 23,000 ticks (docs/problems/iron-kit.md
+                    // wall 23).
+                    && [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+                        .iter()
+                        .all(|(dx, dy, dz)| {
+                            !matches!(
+                                kind(w, (c.0 + dx, c.1 + dy, c.2 + dz)),
+                                Some(BlockKind::Water | BlockKind::Lava | BlockKind::BubbleColumn)
+                            )
+                        })
             })
     }
 
