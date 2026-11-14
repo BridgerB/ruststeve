@@ -18,6 +18,9 @@ use crate::dig::{Dig, DigStatus};
 use crate::path::{self, Cell, Goal};
 use crate::walk::{Arrive, TaskStatus, Walk};
 
+/// Cells a stair's landing may lie under its missing floor (a fall of at most 3 blocks).
+pub const MAX_DROP: i32 = 3;
+
 /// Stairs cut before the planner looks again (clojurecraft's `stair-depth`).
 pub const STAIR_DEPTH: u32 = 6;
 /// Level steps before a staircase fails `Boxed` (clojurecraft's `max-level-steps`).
@@ -138,7 +141,7 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
             }
         }
     }
-    if !full(kind(w, floor)) {
+    if !full(kind(w, floor)) && !short_drop(w, floor) {
         return Some(format!("no floor at {floor:?}"));
     }
     // Nothing that falls over what is opened: gravel or sand over a dug cell drops into it and
@@ -150,6 +153,27 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
         }
     }
     None
+}
+
+/// Under a missing floor, a landing a short fall down: open air (no fluid) to a full block at most
+/// `MAX_DROP` under the floor's cell, no lava beside the landing. A fall of three blocks does no
+/// damage (`fall_distance` over 3 hurts); 17 of 56 bots ended boxed in by cave floors and ledges
+/// a block or two down (docs/problems/iron-kit.md wall 17).
+fn short_drop(w: &World, floor: Cell) -> bool {
+    for j in 0..MAX_DROP {
+        let c = (floor.0, floor.1 - j, floor.2);
+        let k = kind(w, c);
+        if full(k) {
+            return j > 0
+                && SIDES.iter().all(|(dx, dy, dz)| {
+                    fluid(kind(w, (c.0 + dx, c.1 + 1 + dy, c.2 + dz))) != Some("lava")
+                });
+        }
+        if !open(k) {
+            return false;
+        }
+    }
+    false
 }
 
 /// Blocks that fall when what is under them opens: the blocks report's falling definitions
@@ -312,7 +336,13 @@ impl Stairs {
                 since,
                 level,
             } => {
-                if feet == *to {
+                // On the stair, or down a short drop under it.
+                if feet == *to
+                    || (feet.0 == to.0
+                        && feet.2 == to.2
+                        && feet.1 < to.1
+                        && feet.1 >= to.1 - MAX_DROP)
+                {
                     if !*level || self.level_only {
                         self.stairs += 1;
                         self.turns = 0;

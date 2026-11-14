@@ -105,3 +105,8 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: on race 43567763309's code again, 17 kits (23 before: the spread); 9 deaths, 5 of them skeleton arrows.
 - **Cause**: `defend` answered only mobs within 4 blocks; a skeleton shoots from up to 15.
 - **Fix**: `[survival] ranged` (skeleton, stray, bogged) are answered within `ranged_radius` (16): closed in on and fought, under the same danger line.
+
+### 17. Boxed in by short drops (race 43577176871, f13f394: 15 of 56, the stage 20)
+- **What happened**: no skeleton deaths (4 deaths in all); 17 of 56 bots ended `stuck`, at every height from y 1 to 62, most with 60 to 80 `Boxed` stairs, the refusal mostly "no floor".
+- **Cause**: a stair whose new feet had no full block under them was refused, however short the drop: cave floors and ledges a block or two down boxed bots in on every side.
+- **Fix**: a stair over a short drop is taken when the cells down to a full landing at most 3 under the floor are open air (no fluid) and no lava is beside the landing; the step is done where the feet land. Judged on an 8-lane race (112 bots).
