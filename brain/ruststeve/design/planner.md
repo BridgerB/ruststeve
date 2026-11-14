@@ -6,7 +6,7 @@ tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
 lastUpdated: 2026-11-14
-verifiedAgainst: ruststeve@1a3aaac clojurecraft@be85a92
+verifiedAgainst: ruststeve@b7fec2e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -61,7 +61,9 @@ Every tick, before its task and before checking whether the aim is met, the plan
 The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is a structure, not a threshold.
 - **Relocate**: a goal aim's 12 failed walks relocate it (at most 6): failures and refused areas are forgotten and it explores from elsewhere. After the sixth it rests 600 ticks and starts again; only the log aim stops for good (wall 19).
 - **Explore fallbacks**: 48, then 16, then 8 blocks on each of four headings (a bot on a ledge or a shore has only a short way off, wall 7); then back along the **trail**, a mark every 200 ticks (60 kept), the newest at least 10 blocks off that a route reaches (wall 18).
-- **Swim** (wall 24): giving up with water beside the feet makes the next relocation a swim to dry footing 10 to 32 blocks across (`Task::Swim`, the escape's own swimming, [[escapes]]), done on that shore or after 1,200 ticks.
+- **Swim** (walls 24, 26): giving up with water beside the feet, or an explore that finds no walk and no trail mark beside water, swims to dry footing 10 to 32 blocks across (`Task::Swim`, the escape's own swimming, [[escapes]]), done on that shore or after 1,200 ticks.
+- **Stalled areas** (wall 25): a walk that fails `NoProgress` refuses its target's area (6 blocks), for good after 3 stalls there until a relocation; `NoPath` refuses the area only a while (another log of the tree may still have a way).
+- **Dangers** (wall 29): when a retreat from a `never_fight` mob ends, targets within `flee_clear` of where it was are refused 600 ticks ([[combat-and-pacing]]).
 - **Opportunity**: a block a goal's provide (or a `wants` item) will need dug, exposed within 6 with a route, is dug now rather than walked back for (wall 9).
 - **Dig toward**: a mine row whose nearest exposed block has no route digs toward it, with a 3-cut stall invariant (wall 11).
 - **Watchdog**: no task done in 1,200 ticks ends the task in hand and plans again (wall 14).

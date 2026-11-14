@@ -6,7 +6,7 @@ tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
 lastUpdated: 2026-11-14
-verifiedAgainst: ruststeve@4a85676 clojurecraft@be85a92
+verifiedAgainst: ruststeve@b7fec2e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -45,6 +45,8 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - The model's mobs neither move nor hit; the real race is the measure.
 
 ## Issue 13b
+- **`flee_clear`** (20): a retreat from a `never_fight` kind holds until past it (a creeper follows from 16; retreats that stopped at 12 walked back to its ore, wall 29), and the planner keeps off its ground 600 ticks.
+- **Unreachable ranged foes**: one that a fight landed nothing on is left alone 600 ticks unless it comes within `defend_radius` (one bot fought one skeleton 51 times with no swing, wall 30).
 - **Ranged** kinds (`ranged`: skeleton, stray, bogged) are answered within `ranged_radius` (16), not only `defend_radius` (wall 16).
 - **`never_fight`** kinds (creeper) are answered first and from `flee_radius` (8), backed away from until past it and the margin: from 4 the fuse was already lit (wall 21).
 
