@@ -171,3 +171,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l05-b06, mining at y -9 with full health, backed away from a creeper at tick 27,891 and died to it at 28,140 with it 2.3 blocks off and a zombie beside it: straight away from it was the tunnel's wall.
 - **Cause**: a retreat walked straight away from the foe, jumping; underground the way out is the way the tunnels go.
 - **Fix**: a retreat routes to a cell beyond its reach plus the margin (`Goal::Away`), searched again when the foe moves 3 blocks; straight away only when no route is found. Model test: a creeper fled round a tunnel's corner.
+
+### 29. Back to the creeper's ore (races 43619411430 and 43619426558, 4a85676: 62 and 49 of 112)
+- **What happened**: 49.6% over the pair (48.6% over five races since wall 27); creepers still the top killer, 6 to 12 of about 25 deaths a race. The routed retreat of wall 28 did not lower them.
+- **Read**: rs-l03-b09 (lane 3) fled creeper 5095 four times in 140 ticks (read by event, not `--at`, whose ticks are the server's): it started each retreat with the creeper at 7.5 to 8 blocks, ended it at 12 (`flee_radius` + the margin), and the planner walked straight back at the same ore 2 to 6 blocks from the creeper. It died with the creeper 0.4 blocks off; rs-l03-b03 died to the same creeper in the same tunnel 120 ticks later.
+- **Cause**: a creeper follows its target from 16 blocks, so a retreat that ends at 12 never loses it, and nothing kept the planner's next target away from it.
+- **Fix**: `flee_clear` (20, data): a retreat from a `never_fight` kind holds until past it, routed to beyond it; when it ends, targets within it of where the mob was are refused 600 ticks.

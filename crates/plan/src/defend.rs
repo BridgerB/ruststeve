@@ -163,8 +163,9 @@ impl Defend {
         };
         self.last_seen = pos;
         let d = distance(body.pos, pos);
-        let reach = if rules.never_fight.contains(&self.kind) {
-            rules.flee_radius
+        let never = rules.never_fight.contains(&self.kind);
+        let reach = if never {
+            rules.flee_clear - CLEAR_MARGIN
         } else if rules.ranged.contains(&self.kind) {
             rules.ranged_radius
         } else {

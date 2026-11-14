@@ -282,6 +282,8 @@ pub struct Plan {
     pub refused_areas: Vec<(Cell, u64)>,
     /// Targets whose walks stopped getting closer (`NoProgress`), cleared on a relocation.
     pub stalled: Vec<Cell>,
+    /// Where a `never_fight` mob was fled from, until when, and how far round it work waits.
+    pub dangers: Vec<(Cell, u64, f64)>,
     /// Events ever made (`events` keeps the last few): the shell records the new ones.
     pub event_count: u64,
     /// The goal table (issue 10), for a goal aim.
@@ -362,6 +364,7 @@ impl Plan {
             stuck: false,
             refused_areas: Vec::new(),
             stalled: Vec::new(),
+            dangers: Vec::new(),
             event_count: 0,
             table: None,
             met: false,
@@ -802,6 +805,16 @@ impl Plan {
                 let ended = match status {
                     defend::DefendStatus::Running => None,
                     defend::DefendStatus::Done => {
+                        // Fled a creeper: its ground waits, or the next walk goes straight back
+                        // to it (wall 29).
+                        if rules.never_fight.contains(&d.kind) {
+                            self.dangers.retain(|(_, until, _)| tick < *until);
+                            self.dangers.push((
+                                path::feet_cell(d.last_seen),
+                                tick + FAILURE_MEMORY_TICKS,
+                                rules.flee_clear,
+                            ));
+                        }
                         Some(Ok(format!("defended: {} swings, {:?}", d.swings, d.stance)))
                     }
                 };
@@ -940,6 +953,16 @@ impl Plan {
             (dx * dx + dy * dy + dz * dz).sqrt() <= AREA_RADIUS
         };
         self.refused.get(&c).is_some_and(|(until, _)| tick < *until)
+            || self.dangers.iter().any(|(centre, until, r)| {
+                tick < *until && {
+                    let (dx, dy, dz) = (
+                        f64::from(centre.0 - c.0),
+                        f64::from(centre.1 - c.1),
+                        f64::from(centre.2 - c.2),
+                    );
+                    (dx * dx + dy * dy + dz * dz).sqrt() <= *r
+                }
+            })
             || self
                 .refused_areas
                 .iter()

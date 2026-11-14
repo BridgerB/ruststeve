@@ -258,3 +258,7 @@ ranged_radius = 16.0
 # A never_fight kind is backed away from within this: a creeper's fuse starts at 3 blocks, and
 # backing away only within defend_radius let 7 creepers kill (docs/problems/iron-kit.md wall 21).
 flee_radius = 8.0
+# A retreat from a never_fight kind holds until past this, and work within it of where the mob was
+# waits 600 ticks: a creeper follows its target from 16 blocks, and retreats that stopped at 12
+# walked back to the same ore beside it until it blew (docs/problems/iron-kit.md wall 29).
+flee_clear = 20.0
