@@ -1718,6 +1718,14 @@ impl Plan {
             }
             self.expanded += walk.expanded;
         }
+        // No walk off at all with water beside the feet: swim (a relocation after boxed stairs
+        // on a lake shore never armed `maroon`, which walk failures set: wall 26).
+        if wet(w, &body)
+            && let Some(e) = escape::Escape::swim(w, tick)
+        {
+            self.note(tick, format!("swim to {:?}", e.target), why.to_owned());
+            return Some(Task::Swim(Box::new(e), tick));
+        }
         None
     }
 

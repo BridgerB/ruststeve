@@ -155,3 +155,8 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l02-b00 went down its stairs to y 38 by tick 5,000 and was still there at tick 13,000, going up and down its own staircase between y 38 and 57: it walked at an exposed coal vein 4 blocks off, at (16 to 18, 42 to 43, 49 to 50), each walk failing `NoProgress` after 200 ticks partway back up the stairs, then walked back down them. Each of the vein's 4 cells was refused alone, 600 ticks at a time, 3 times each.
 - **Cause**: only `NoPath` refused a failed target's area; `NoProgress` refused the cell, so every cell of a vein had its own three tries. The route planner finds the same way each time, so a stall repeats.
 - **Fix**: a `NoProgress` walk refuses its target's area (6 blocks), and after 3 stalls in the same area refuses it until the next relocation. `NoPath` stays temporary: another log of the same tree may still have a way (the wood test's plains).
+
+### 26. Relocations that go nowhere beside water (race 43603187618, 1a3aaac)
+- **Read**: 9 of the 18 bots that never held iron failed `Boxed` 500 to 1,300 times. rs-l02-b04 stood on a lake shore at (-134, 63, 61) the whole race: every stair refused "no floor" (water under the next cell), each relocation found no explore walk and no trail mark, and the planner went straight back to stairs. rs-l02-b01 did the same at y 21 beside a cave's water.
+- **Cause**: the swim of wall 24 was armed only by walk failures; a goal aim that gave up on boxed stairs relocated with no walk and never swam.
+- **Fix**: an explore that finds no walk and no trail mark, with water beside the feet, swims (the same `Task::Swim`).
