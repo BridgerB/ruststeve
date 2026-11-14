@@ -77,3 +77,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: 1,108 walks failed `NoPath` in race 43523765895; the case files' unreachable targets were exposed ore and gravel in caves behind rock.
 - **Cause**: walks do not dig; a seen block with no walk to it was refused, and the stairs or tunnel then went off on the explore heading, away from it.
 - **Fix**: with no walk to any candidate, the stairs (if the nearest exposed block is below the feet) or a level tunnel head toward it, six steps at a time, and the planner looks again from nearer.
+
+### 12. Raw iron and no fuel; a dig toward a seam that never came nearer (race 43557818721, 862a118: 11 of 56)
+- **What happened**: 4 bots stuck (down from 11), 4 deaths; still 21 bots with raw iron. Three of lane 0's bots ended holding 3 raw iron, unsmelted.
+- **Read**: rs-l00-b00 held 3 raw iron, 23 sticks, no coal and no logs; its last stretch was a dig toward one unreachable coal seam every 51 ticks.
+- **Cause**: clojurecraft's 24-stick spare turned the kit's three logs (the planks that would have been the fuel) into sticks before any smelt, and sticks are never burned; the dig toward a block had no progress invariant. Then, with sticks allowed, a furnace holding a leftover plank refused any other fuel.
+- **Fix**: sticks over a reserve of 8 burn, last (a ruststeve rule; the differential's inventories hold at most 2 sticks and still equal clojurecraft's); three cuts toward a block without coming nearer refuse it; a leftover fuel no longer held is taken out of the slot so another can go in.

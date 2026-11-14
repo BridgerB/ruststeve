@@ -295,6 +295,10 @@ pub struct Plan {
     /// Relocations made, and whether the next choice is one (issue 13b).
     #[serde(default)]
     pub relocations: u32,
+    /// The block a dig-toward heads for, the nearest it has come, and cuts made without coming
+    /// nearer (a progress invariant, issue 13b).
+    #[serde(default)]
+    pub toward: Option<(Cell, f64, u32)>,
     #[serde(default)]
     pub relocate: bool,
     #[serde(default)]
@@ -335,6 +339,7 @@ impl Plan {
             batch: None,
             smelts: 0,
             relocations: 0,
+            toward: None,
             relocate: false,
             refused_prey: Vec::new(),
             acts: Vec::new(),
@@ -1199,8 +1204,32 @@ impl Plan {
         // NoPath in one race) is dug toward: stairs if it is below the feet, else a level
         // tunnel, six steps, then the planner looks again from nearer
         // (docs/problems/iron-kit.md wall 11).
-        if let (Some(aim), Some(body)) = (exposed_near(w, blocks).into_iter().next(), w.body) {
+        let aim = exposed_near(w, blocks)
+            .into_iter()
+            .find(|c| !self.refused_now(*c, tick));
+        if let (Some(aim), Some(body)) = (aim, w.body) {
             let (fx, fy, fz) = path::feet_cell(body.pos);
+            // Three cuts toward it without coming nearer: refuse it (a bot cut toward one coal
+            // seam every 51 ticks for the last stretch of its run: wall 12).
+            let d =
+                f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
+            let (best, stalls) = match self.toward {
+                Some((c, b, n)) if c == aim => {
+                    if d < b - 0.5 {
+                        (d, 0)
+                    } else {
+                        (b, n + 1)
+                    }
+                }
+                Some(_) | None => (d, 0),
+            };
+            if stalls >= 3 {
+                self.toward = None;
+                self.refuse(aim, tick);
+                self.refused_areas.push((aim, tick + FAILURE_MEMORY_TICKS));
+                return self.mine(w, blocks, depth, tick);
+            }
+            self.toward = Some((aim, best, stalls));
             let (dx, dz) = (aim.0 - fx, aim.2 - fz);
             let dir = if dx.abs() >= dz.abs() {
                 (dx.signum(), 0)
