@@ -273,7 +273,19 @@ impl Dig {
                 (still, Some(act), DigStatus::Running)
             }
             DigStage::Finish { at, started } => {
-                if tick < *at {
+                // The server judges a FINISH by the player's state then, times the ticks since
+                // the start (`handleBlockBreakAction`: progress now * (ticks + 1) >= 0.7): a dig
+                // started in the air (a stair's top cell, just stepped down onto) finishes at the
+                // on-ground time once the bot has landed, not at five times it (wall 27).
+                let now = w
+                    .block_at(pos(self.target))
+                    .and_then(|k| break_ticks(k, held_item(w), body.eye_in_water, body.on_ground))
+                    .map(|t| {
+                        *started
+                            + (t as f64 * FINISH_MARGIN * slowdown(w)).ceil() as u64
+                            + FINISH_EXTRA_TICKS
+                    });
+                if tick < now.map_or(*at, |n| n.min(*at)) {
                     return (still, None, DigStatus::Running);
                 }
                 let waited = tick - *started;

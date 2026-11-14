@@ -160,3 +160,8 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: 9 of the 18 bots that never held iron failed `Boxed` 500 to 1,300 times. rs-l02-b04 stood on a lake shore at (-134, 63, 61) the whole race: every stair refused "no floor" (water under the next cell), each relocation found no explore walk and no trail mark, and the planner went straight back to stairs. rs-l02-b01 did the same at y 21 beside a cave's water.
 - **Cause**: the swim of wall 24 was armed only by walk failures; a goal aim that gave up on boxed stairs relocated with no walk and never swam.
 - **Fix**: an explore that finds no walk and no trail mark, with water beside the feet, swims (the same `Task::Swim`).
+
+### 27. Stair tops dug at the airborne rate (race 43603187618, 1a3aaac)
+- **Read**: rs-l02-b00 took about 117 ticks a stair. Its digs, Start to Finish: two cells of each stair in 17 ticks, the top cell (the next column's head height) in 70 to 82. That cell's dig starts just after the step down, with the bot still in the air, and the dig's wait was fixed at its start: five times the on-ground time.
+- **Cause**: the server judges a FINISH by the player's state at that moment times the ticks since the start (`handleBlockBreakAction`, the model's `stop_destroy`), so the dig waited about 55 ticks it did not need on every stair.
+- **Fix**: the dig's Finish is judged each tick by the body's state now; the start's wait is only the latest it finishes.
