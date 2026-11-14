@@ -1456,13 +1456,21 @@ impl Plan {
     ) -> Option<Task> {
         let body = w.body?;
         let counts = held(w);
-        for p in &goal.provides {
+        // The goal's provides, then what it wants up to their counts (less what is held).
+        let wanted = goal.provides.iter().cloned().chain(
+            goal.wants
+                .iter()
+                .filter(|(k, n)| k.have(&counts) < *n)
+                .cloned(),
+        );
+        for p in wanted.collect::<Vec<_>>().iter() {
             let one = make::Row {
                 id: goal.id.clone(),
                 needs: Vec::new(),
                 provides: vec![p.clone()],
                 holds: Vec::new(),
                 spares: Vec::new(),
+                wants: Vec::new(),
                 act: None,
             };
             let make::Choice::Act(r) = make::make_with(table, &counts, near, gather_now, &one)

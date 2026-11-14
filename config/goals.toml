@@ -123,6 +123,9 @@ priority = 12
 until = "iron-kit"
 doc = "the iron kit: an iron pickaxe, a bucket, flint and steel"
 provides = [["item:iron_pickaxe", 1], ["item:bucket", 1], ["item:flint_and_steel", 1]]
+# Taken whenever exposed within 6, whatever is being planned: gravel for flint (ten tries on
+# average), the kit's seven raw iron, coal for the smelts (docs/problems/iron-kit.md wall 13).
+wants = [["item:gravel", 3], ["item:raw_iron", 7], ["item:coal", 2]]
 
 [[goal]]
 id = "place-furnace"

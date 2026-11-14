@@ -83,3 +83,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l00-b00 held 3 raw iron, 23 sticks, no coal and no logs; its last stretch was a dig toward one unreachable coal seam every 51 ticks.
 - **Cause**: clojurecraft's 24-stick spare turned the kit's three logs (the planks that would have been the fuel) into sticks before any smelt, and sticks are never burned; the dig toward a block had no progress invariant. Then, with sticks allowed, a furnace holding a leftover plank refused any other fuel.
 - **Fix**: sticks over a reserve of 8 burn, last (a ruststeve rule; the differential's inventories hold at most 2 sticks and still equal clojurecraft's); three cuts toward a block without coming nearer refuse it; a leftover fuel no longer held is taken out of the slot so another can go in.
+
+### 13. Flint's gravel searched for at the end (race 43561063288, 24b9737: 14 of 56, the stage 26)
+- **What happened**: 30 iron pickaxes, 23 buckets, 14 flint and steel; most of the 12 with the stage and not the kit were a step short at the cap (no gravel, gravel and no flint, or one smelt).
+- **Read**: lane 0's milestones: rs-l00-b00 had its bucket at tick 7,504 and spent 8,000 ticks finding gravel; rs-l00-b03 had its bucket at 10,909 and found no gravel in the 25,000 left.
+- **Cause**: wall 9's opportunism took a block only when it was the next act on a provide's way; flint and steel smelts its ingot first, so gravel passed on the way was still not taken.
+- **Fix**: a goal row's `wants`: materials taken whenever exposed within 6, up to a count, whatever is being planned. The kit wants 3 gravel, 7 raw iron and 2 coal.

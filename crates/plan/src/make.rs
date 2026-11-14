@@ -162,6 +162,8 @@ pub struct Row {
     /// One more of each it keeps than it holds, made when that can be started now (issue 13b,
     /// clojurecraft's `:goal/spares`).
     pub spares: Vec<(Need, i32)>,
+    /// Materials a goal takes whenever one is exposed near, up to these counts (issue 13b).
+    pub wants: Vec<(Need, i32)>,
     pub act: Option<Act>,
 }
 
@@ -191,6 +193,10 @@ pub struct GoalRow {
     /// Spares kept beside what it holds (issue 13b).
     #[serde(default)]
     pub spares: Vec<(String, i32)>,
+    /// Materials a goal takes whenever one is exposed near, up to these counts, whatever it is
+    /// planning (issue 13b: gravel passed on the way, then searched for at the end).
+    #[serde(default)]
+    pub wants: Vec<(String, i32)>,
     /// The lowest feet height a `mine` row cuts stairs to (issue 13b, clojurecraft's
     /// `:goal/depth`).
     #[serde(default)]
@@ -326,6 +332,7 @@ fn row_of(g: &GoalRow) -> Result<Row, String> {
         provides: g.provides.iter().map(need).collect::<Result<_, _>>()?,
         holds: g.holds.iter().map(need).collect::<Result<_, _>>()?,
         spares: g.spares.iter().map(need).collect::<Result<_, _>>()?,
+        wants: g.wants.iter().map(need).collect::<Result<_, _>>()?,
         act,
     })
 }
@@ -408,6 +415,7 @@ impl Table {
                 )],
                 holds: Vec::new(),
                 spares: Vec::new(),
+                wants: Vec::new(),
                 act: Some(Act::Craft(r)),
             }
         }));
@@ -448,6 +456,7 @@ impl Table {
             )],
             holds: Vec::new(),
             spares: Vec::new(),
+            wants: Vec::new(),
             act: Some(Act::Smelt(r)),
         }));
         let mut rows: Vec<&AlwaysRow> = g.always.iter().collect();
@@ -845,6 +854,7 @@ mod tests {
                     holds: Vec::new(),
                     blocks: Vec::new(),
                     spares: Vec::new(),
+                    wants: Vec::new(),
                     depth: None,
                 },
                 GoalRow {
@@ -858,6 +868,7 @@ mod tests {
                     holds: Vec::new(),
                     blocks: Vec::new(),
                     spares: Vec::new(),
+                    wants: Vec::new(),
                     depth: None,
                 },
             ],
