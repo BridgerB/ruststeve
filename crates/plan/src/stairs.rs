@@ -11,28 +11,12 @@
 //! planner looks again for what it wants. Each cell is dug by the dig task (its drop collected),
 //! and the descent is judged by the feet having gone down, never by a packet having been sent.
 
-use data::{BlockKind, ItemKind};
+use data::BlockKind;
 use world::{Act, BlockPos, World};
 
 use crate::dig::{Dig, DigStatus};
 use crate::path::{self, Cell, Goal};
 use crate::walk::{Arrive, TaskStatus, Walk};
-
-/// Cells a staircase fills to get out of being boxed in before it fails `Boxed`.
-pub const MAX_FILLS: u32 = 4;
-/// Ticks to wait for a fill's block update before trying again; tries before it fails.
-pub const FILL_TICKS: u64 = 40;
-pub const FILL_TRIES: u32 = 3;
-/// Blocks a staircase fills with, from what a miner carries (the first held is used).
-const FILLERS: &[ItemKind] = &[
-    ItemKind::Cobblestone,
-    ItemKind::CobbledDeepslate,
-    ItemKind::Dirt,
-    ItemKind::Andesite,
-    ItemKind::Diorite,
-    ItemKind::Granite,
-    ItemKind::Netherrack,
-];
 
 /// Stairs cut before the planner looks again (clojurecraft's `stair-depth`).
 pub const STAIR_DEPTH: u32 = 6;
@@ -62,13 +46,6 @@ pub enum StairsStatus {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum StairStage {
     Plan,
-    /// Boxed in: a held filler block put into `cell` (water a stair would open, or the missing
-    /// floor under one), then plan again (issue 13b).
-    Fill {
-        cell: Cell,
-        at: Option<u64>,
-        tries: u32,
-    },
     /// Opening `cells` (top first), then stepping onto `to`.
     Cut {
         cells: Vec<Cell>,
@@ -95,9 +72,6 @@ pub struct Stairs {
     /// Stairs refused, by reason, for the case file.
     pub refusals: Vec<String>,
     pub started: u64,
-    /// Cells filled to get out of being boxed in (issue 13b).
-    #[serde(default)]
-    pub fills: u32,
     /// Level steps only (issue 13b): a mine row at its depth tunnels along instead of down, each
     /// step counted as a stair.
     #[serde(default)]
@@ -204,7 +178,6 @@ impl Stairs {
             dig: None,
             refusals: Vec::new(),
             started: tick,
-            fills: 0,
             level_only: false,
         }
     }
@@ -237,36 +210,6 @@ impl Stairs {
                     self.dir = turn(self.dir);
                     self.turns += 1;
                 }
-            }
-        }
-        // Boxed in by water or a drop: fill the water a stair would open, or the floor it lacks,
-        // with a held block, and plan again (a bot in a pit by a lake used all its relocations on
-        // stairs refused for water on every side: docs/problems/iron-kit.md wall 15).
-        if self.fills < MAX_FILLS {
-            for _ in 0..4 {
-                let (dx, dz) = self.dir;
-                let to = (x + dx, y - 1, z + dz);
-                let cells = [(x + dx, y + 1, z + dz), (x + dx, y, z + dz), to];
-                let lava_near = cells.iter().any(|c| {
-                    fluid(kind(w, *c)) == Some("lava")
-                        || SIDES.iter().any(|(ox, oy, oz)| {
-                            fluid(kind(w, (c.0 + ox, c.1 + oy, c.2 + oz))) == Some("lava")
-                        })
-                });
-                let water = cells.iter().find(|c| fluid(kind(w, **c)) == Some("water"));
-                let floor = (to.0, to.1 - 1, to.2);
-                let target = water.copied().or_else(|| {
-                    (open(kind(w, floor)) && fluid(kind(w, floor)).is_none()).then_some(floor)
-                });
-                if let Some(cell) = target.filter(|_| !lava_near) {
-                    self.fills += 1;
-                    return Ok(StairStage::Fill {
-                        cell,
-                        at: None,
-                        tries: 0,
-                    });
-                }
-                self.dir = turn(self.dir);
             }
         }
         if self.level_steps >= MAX_LEVEL_STEPS && !self.level_only {
@@ -313,63 +256,6 @@ impl Stairs {
                     }
                     Err(f) => (still, None, StairsStatus::Failed(f)),
                 }
-            }
-            StairStage::Fill { cell, at, tries } => {
-                let cell = *cell;
-                if full(kind(w, cell)) {
-                    self.stage = StairStage::Plan;
-                    return (still, None, StairsStatus::Running);
-                }
-                if let Some(sent) = *at {
-                    if tick.saturating_sub(sent) < FILL_TICKS {
-                        return (still, None, StairsStatus::Running);
-                    }
-                    if *tries >= FILL_TRIES {
-                        return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
-                    }
-                }
-                let Some(item) = FILLERS
-                    .iter()
-                    .copied()
-                    .find(|i| crate::craft::count(w, *i) > 0)
-                else {
-                    return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
-                };
-                match crate::hold::toward(w, item) {
-                    crate::hold::Hold::Held => {}
-                    crate::hold::Hold::Act(a) => return (still, Some(a), StairsStatus::Running),
-                    crate::hold::Hold::Wait => return (still, None, StairsStatus::Running),
-                    crate::hold::Hold::Missing => {
-                        return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
-                    }
-                }
-                // Against a full neighbour's face toward the cell.
-                let faces = [
-                    ((0, -1, 0), 1),
-                    ((0, 1, 0), 0),
-                    ((0, 0, -1), 3),
-                    ((0, 0, 1), 2),
-                    ((-1, 0, 0), 5),
-                    ((1, 0, 0), 4),
-                ];
-                let Some((n, face)) = faces.iter().find_map(|((dx, dy, dz), f)| {
-                    let n = (cell.0 + dx, cell.1 + dy, cell.2 + dz);
-                    full(kind(w, n)).then_some((n, *f))
-                }) else {
-                    return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
-                };
-                if let StairStage::Fill { at, tries, .. } = &mut self.stage {
-                    *at = Some(tick);
-                    *tries += 1;
-                }
-                (
-                    still,
-                    Some(Act::UseOn {
-                        pos: BlockPos::new(n.0, n.1, n.2),
-                        face,
-                    }),
-                    StairsStatus::Running,
-                )
             }
             StairStage::Cut { cells, to, level } => {
                 let (to, level) = (*to, *level);
