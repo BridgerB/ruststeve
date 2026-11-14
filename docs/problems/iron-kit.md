@@ -131,3 +131,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: 45% (from 43%); 13 deaths, 7 of them creepers.
 - **Cause**: a creeper (`never_fight`) was backed away from only once within `defend_radius` (4); its fuse starts at 3, and a walk or a dig does not stop for it until then.
 - **Fix**: `never_fight` kinds are answered first and from `flee_radius` (8), backed away from until past it and the margin.
+
+### 22. A table left behind, and no wood for another (race 43592619219, f6d6de5, 8 lanes: 47 of 112, the stage 56)
+- **What happened**: 42% (45% before, inside the spread); 24 of 112 bots never held iron; several held 6 to 9 raw iron, coal and sticks and never smelted.
+- **Read**: rs-l00-b07 (raw iron, 3 coal, 20 sticks, at y 31) spent its last thousands of ticks walking at surface logs: it held no table, so the furnace (crafted at a table) led to a table, to planks, to logs.
+- **Cause**: a table or furnace counted as near only within 24 (clojurecraft's `table-search`); a miner that had gone further from the ones it placed planned new ones, and with its wood spent that meant the surface.
+- **Fix**: a remembered table or furnace counts within 64; the craft or smelt walks there, and one with no way to it fails `Unopened`, is refused, and a new one is placed.

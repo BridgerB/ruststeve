@@ -74,8 +74,11 @@ pub const AREA_RADIUS: f64 = 6.0;
 /// Targets the planner routes to in one tick before it waits: a choice is checked for a way
 /// before it is made, and the check is bounded (brain/ruststeve/design/progress-invariants.md).
 pub const CANDIDATES_PER_TICK: usize = 2;
-/// How far a remembered table counts as near (clojurecraft's `table-search`).
-pub const TABLE_SEARCH: f64 = 24.0;
+/// How far a remembered table or furnace counts as near: 64, where clojurecraft's `table-search`
+/// is 24. A miner 30 blocks from its table and with no wood left planned a new one from logs it
+/// could not reach; one too far to walk to fails `Unopened` and is refused, and a new one is
+/// placed (docs/problems/iron-kit.md wall 22).
+pub const TABLE_SEARCH: f64 = 64.0;
 /// Events kept for `why` and the case file.
 const EVENTS_KEPT: usize = 64;
 
