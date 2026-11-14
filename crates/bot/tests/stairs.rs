@@ -59,3 +59,35 @@ fn an_unloaded_column_refuses_a_stair() {
     .unwrap();
     assert!(far.starts_with("unloaded"), "{far}");
 }
+
+#[test]
+fn a_staircase_boxed_in_by_water_fills_its_way_out() {
+    use plan::stairs::{Stairs, StairsStatus};
+    // Water where the first stair's new feet would be, on all four sides.
+    let mut m = flat_world(2, 63).unwrap();
+    for (x, z) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        m.set_block(x, 63, z, state(BlockKind::Water)).unwrap();
+    }
+    m.spawn = [0.5, 64.0, 0.5];
+    let mut sim = Sim::new(CONFIG, m);
+    sim.survival.give((data::ItemKind::StonePickaxe, 1));
+    sim.survival.give((data::ItemKind::Cobblestone, 16));
+    let mut st = Stairs::new((1, 0), 0);
+    let mut ended = None;
+    let run = bot::lockstep::run_acting(sim, "rs-fill", 1, 2000, 20, |w, t| {
+        if ended.is_some() {
+            return (physics::Controls::default(), Vec::new());
+        }
+        let (c, act, status) = st.step(w, t);
+        if status != StairsStatus::Running {
+            ended = Some(status);
+        }
+        (c, act.into_iter().collect())
+    });
+    assert!(st.fills >= 1, "never filled: {st:#?}");
+    assert!(
+        st.stairs >= 1,
+        "no stair cut after filling: {ended:?} {st:#?}"
+    );
+    assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
+}
