@@ -45,3 +45,18 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **What happened**: rs-l01-b09, with three ingots, a bucket and an iron pickaxe in its main inventory, made one decision in its last 19,000 ticks; it stood still at y 19 and sent 19,080 acts, nearly all clicks on slot 13.
 - **Cause**: the dig chose its best tool from the inventory slots only; picking the iron pickaxe up to swap it into the hotbar took it out of the slots, the next best (a stone pickaxe) was chosen, and the cursor was put down in the first empty slot, the one it came from.
 - **Fix**: the cursor counts among the tools a dig chooses from.
+
+### 7. Relocations spent where there was no way off (race 43529108313, 489b9e6: 8 of 56)
+- **What happened**: 13 bots still ended `stuck`. rs-l00-b00 used all six relocations in 1,700 ticks: each one's explore walk found no route, so the next choice cut stairs again, refused for water on every side.
+- **Cause**: a relocation's explore walk tried only the full 48 blocks on two headings; on a shore or a ledge the way off is short.
+- **Fix**: four headings at 48, then 16, then 8 blocks.
+
+### 8. Flint's re-dig never counted its gravel back (race 43529108313)
+- **What happened**: of 17 bots with a bucket, 8 made flint and steel; several held gravel and no flint; 38 re-digs failed in their dig. The model test reproduced it: every re-dig failed `Uncollected`.
+- **Cause**: the dig counted the gravel held when it began, right after the place's block update; the slot update for the gravel put down can come after that, so the count already held the placed one and picking it back up never rose above it.
+- **Fix**: the re-dig counts the item held before the place, and the dig its pickup against one less.
+
+### 9. Gravel passed on the way down (race 43529108313)
+- **What happened**: rs-l00-b05 held an iron pickaxe, a bucket and two ingots by tick 26,100 and spent the rest tunnelling at y 14 for exposed gravel, though gravel had been in sight on the way down.
+- **Cause**: the needs planner plans the goal's provides in order (the pickaxe, the bucket, then flint), so a block only a later provide needs is not wanted while an earlier one is planned.
+- **Fix**: each provide is also planned on its own; a mine row it leads to whose block is exposed within 6 with a route is dug now.

@@ -9,13 +9,13 @@ use data::BlockKind;
 use physics::Controls;
 use world::{Act, World};
 
-use crate::dig::{Dig, DigStatus};
+use crate::dig::{Dig, DigFailure, DigStatus};
 use crate::place::{Place, PlaceStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RedigFailure {
     Place,
-    Dig,
+    Dig(DigFailure),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,15 +31,24 @@ pub struct Redig {
     pub place: Option<Place>,
     pub dig: Option<Dig>,
     pub started: u64,
+    /// How many of the block's item were held before it was put down: the dig counts its
+    /// pickup against one less (the slot update for the placed one can come after the block
+    /// update that ends the place, and a count taken then never rose: docs/problems/iron-kit.md
+    /// wall 8).
+    #[serde(default)]
+    pub held_before: i32,
 }
 
 impl Redig {
-    pub fn new(block: BlockKind, tick: u64) -> Option<Self> {
+    pub fn new(w: &World, block: BlockKind, tick: u64) -> Option<Self> {
+        let place = Place::new(block, tick)?;
+        let held_before = crate::craft::count(w, place.item);
         Some(Self {
             block,
-            place: Some(Place::new(block, tick)?),
+            place: Some(place),
             dig: None,
             started: tick,
+            held_before,
         })
     }
 
@@ -51,7 +60,9 @@ impl Redig {
                 PlaceStatus::Running => (still, act, RedigStatus::Running),
                 PlaceStatus::Done(cell) => {
                     self.place = None;
-                    self.dig = Some(Dig::new(w, cell, tick));
+                    let mut d = Dig::new(w, cell, tick);
+                    d.before = self.held_before - 1;
+                    self.dig = Some(d);
                     (still, act, RedigStatus::Running)
                 }
                 PlaceStatus::Failed(_) => (still, act, RedigStatus::Failed(RedigFailure::Place)),
@@ -64,7 +75,7 @@ impl Redig {
         match status {
             DigStatus::Running => (c, act, RedigStatus::Running),
             DigStatus::Done => (c, act, RedigStatus::Done),
-            DigStatus::Failed(_) => (c, act, RedigStatus::Failed(RedigFailure::Dig)),
+            DigStatus::Failed(f) => (c, act, RedigStatus::Failed(RedigFailure::Dig(f))),
         }
     }
 }

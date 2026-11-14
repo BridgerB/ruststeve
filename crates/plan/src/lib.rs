@@ -965,7 +965,13 @@ impl Plan {
             .nearest_log(w, origin, 0.0, tick)
             .zip(w.body)
             .is_some_and(|((_, y, _), b)| (f64::from(y) - b.pos[1]).abs() <= GATHER_NOW_RISE);
-        match make::make_with(&table, &held(w), &near, gather_now, goal) {
+        let choice = make::make_with(&table, &held(w), &near, gather_now, goal);
+        if matches!(choice, make::Choice::Act(_))
+            && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
+        {
+            return t;
+        }
+        match choice {
             make::Choice::Done => {
                 self.met = true;
                 self.note(
@@ -1059,7 +1065,7 @@ impl Plan {
                         }
                     }
                 }
-                Some(make::Act::Redig(b)) => match redig::Redig::new(b, tick) {
+                Some(make::Act::Redig(b)) => match redig::Redig::new(w, b, tick) {
                     Some(r) => {
                         self.note(
                             tick,
@@ -1380,11 +1386,71 @@ impl Plan {
     }
 
     /// An explore walk on the heading (issue 09's, also a relocation's).
+    /// A block one of the goal's provides will need dug, exposed within `OPPORTUNITY_RADIUS`
+    /// with a route: dug now rather than walked back for (issue 13b: bots passed gravel on the
+    /// way down for a pickaxe, then tunnelled for gravel at their depth). Each provide is planned
+    /// on its own; one whose next act is a mine row with such a block near wins.
+    fn opportunity(
+        &mut self,
+        w: &World,
+        table: &make::Table,
+        goal: &make::Row,
+        near: &dyn Fn(data::BlockKind) -> bool,
+        gather_now: bool,
+        tick: u64,
+    ) -> Option<Task> {
+        let body = w.body?;
+        let counts = held(w);
+        for p in &goal.provides {
+            let one = make::Row {
+                id: goal.id.clone(),
+                needs: Vec::new(),
+                provides: vec![p.clone()],
+                holds: Vec::new(),
+                spares: Vec::new(),
+                act: None,
+            };
+            let make::Choice::Act(r) = make::make_with(table, &counts, near, gather_now, &one)
+            else {
+                continue;
+            };
+            let Some(make::Act::Mine { blocks, .. }) = r.act else {
+                continue;
+            };
+            let close = exposed_near(w, blocks).into_iter().find(|c| {
+                let d = [
+                    f64::from(c.0) + 0.5 - body.pos[0],
+                    f64::from(c.1) + 0.5 - body.pos[1],
+                    f64::from(c.2) + 0.5 - body.pos[2],
+                ];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= OPPORTUNITY_RADIUS
+                    && !self.refused_now(*c, tick)
+            });
+            let Some(c) = close else { continue };
+            let mut walk = Walk::to_dig(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk to {:?} at {c:?}", blocks.first()),
+                    format!("{} will need it, and it is exposed near", r.id),
+                );
+                return Some(Task::ToLog(walk));
+            }
+            self.refuse(c, tick);
+        }
+        None
+    }
+
     fn explore_walk(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {
         let body = w.body?;
-        for _ in 0..CANDIDATES_PER_TICK {
+        // The full distance first, then shorter: a bot on a shore or a ledge may have only a
+        // short way off it (docs/problems/iron-kit.md wall 7).
+        for d in [f64::from(EXPLORE_DISTANCE), 16.0, 8.0]
+            .into_iter()
+            .flat_map(|d| std::iter::repeat_n(d, 4))
+        {
             let (s, c) = self.heading.to_radians().sin_cos();
-            let d = f64::from(EXPLORE_DISTANCE);
             let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
             let target = path::feet_cell(p);
             let mut walk = Walk::new(
@@ -1557,6 +1623,8 @@ pub fn crowded(w: &World, (x, y, z): Cell) -> bool {
 pub const SEARCH_RADIUS: i32 = 24;
 /// A remembered log counts as one a gather can start on now only this near the feet's height.
 pub const GATHER_NOW_RISE: f64 = 6.0;
+/// A block a provide of the goal will need is dug now when exposed this near (blocks).
+pub const OPPORTUNITY_RADIUS: f64 = 6.0;
 pub const SEARCH_HEIGHT: i32 = 12;
 /// Exposed blocks found before the search stops (clojurecraft routes the nearest 3).
 pub const EXPOSED_WANTED: usize = 8;
