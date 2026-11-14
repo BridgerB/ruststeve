@@ -66,3 +66,9 @@ At least 28 of 56 real bots hold an iron pickaxe, a bucket and flint and steel w
 - **Read**: rs-l00-b01 died tunnelling at y 12, its first hit `in_wall` at tick 22,300, with 13 gravel gained.
 - **Cause**: stairs and tunnels opened cells under gravel, which fell into the head's cell; nothing answered a block at the eyes.
 - **Fix**: a stair or tunnel step is refused when the block over its highest opened cell falls (sand, gravel, concrete powder, the suspicious blocks); an `escape-wall` always-row digs out a full block at the eyes, then at the feet.
+
+## Where it stands (race 43538864412, ee1f110: 9 of 56)
+- No suffocation since wall 10; 7 deaths (4 zombies, 2 skeleton arrows, a cave spider); 11 bots `stuck`.
+- The funnel: 31 bots held raw iron (106 in all, about 3 a finder against the 7 the kit needs), 18 an iron pickaxe, 14 a bucket, 9 flint and steel; 9,370 cobblestone dug.
+- Races 4 to 7 (12, 8, 12, 9 of 56) are a plateau: the fixes since removed losses (stuck, tool loops, flint, falling gravel) but not the main limit, **finding iron**. A bot sees only ore with an exposed face, and in a one-wide tunnel that is its own walls: a finder gets about 3 raw iron in 30 minutes.
+- Open: how the bot searches for ore (caves, branch tunnels, the surface's exposed ore) is the next decision; ranged mobs (skeletons) are not answered.
