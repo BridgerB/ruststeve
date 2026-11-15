@@ -18,3 +18,5 @@ toml = "1"
 proptest = "1"
 protocol = { path = "../protocol" }
 sim = { path = "../sim" }
+# The build differential's fixture is zstd text (issue 14c: 4.9 MB plain).
+zstd = "0.13"
