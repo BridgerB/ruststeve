@@ -319,7 +319,19 @@ impl Sim {
                 },
             ) => self.on_click(*window, *state_id, *slot, *button, *mode),
             (Phase::Play, C2s::ContainerClose { window }) => self.on_close(*window),
-            (Phase::Play, C2s::UseItem { sequence, .. }) => self.on_use_item(*sequence),
+            (
+                Phase::Play,
+                C2s::UseItem {
+                    sequence,
+                    yaw,
+                    pitch,
+                    ..
+                },
+            ) => {
+                // `handleUseItem`: the player snapped to the packet's rotation first.
+                self.look = (*yaw, *pitch);
+                self.on_use_item(*sequence)
+            }
             (Phase::Play, C2s::Attack { entity }) => self.on_attack(*entity),
             (
                 Phase::Play,

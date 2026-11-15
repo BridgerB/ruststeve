@@ -761,11 +761,14 @@ impl World {
             }
             Act::UseItem => {
                 self.sequence_sent += 1;
+                // The server snaps the player to this rotation before the use
+                // (`handleUseItem`): a bucket goes along it, so it carries the look's pitch
+                // (issue 14a parity found every real bucket use level at pitch 0).
                 vec![Effect::Send(C2s::UseItem {
                     hand: 0,
                     sequence: self.sequence_sent,
                     yaw: self.controls.yaw as f32,
-                    pitch: 0.0,
+                    pitch: self.controls.pitch.unwrap_or(self.player.pitch),
                 })]
             }
             Act::ReleaseUse => vec![Effect::Send(C2s::PlayerAction {
