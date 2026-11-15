@@ -5,7 +5,7 @@ type: decision
 tags: [history, perception, rules, no-xray]
 aliases: [x-ray, honest perception, exposed face, is_exposed, lava_seen, unexposed chunk data]
 status: verified
-lastUpdated: 2026-11-12
+lastUpdated: 2026-11-15
 verifiedAgainst: ruststeve-v1@9e1567f clojurecraft@be85a92 steve@46c1264
 sourceRefs:
   - "ruststeve-v1:CLAUDE.md#No X-ray: the bot may act only on blocks it has seen with an exposed face. This is enforced in code (see \"Honest perception\" below), not just policy."
@@ -33,6 +33,9 @@ The bot acts only on blocks it has seen with an exposed face (an air or see-thro
 
 ## How ruststeve enforces it
 In the type: a memory `Sighting` can only come from a `Seen`, and `Seen::check` is the only way to make one, requiring a loaded neighbour whose collision is not a full cube. An unloaded neighbour does not count, as v1 learned; a log inside stone stays out of memory until a face is opened ([[memory-sightings]]). Danger reads of unexposed blocks (refusing to dig into buried lava) are not decided yet.
+
+## Decided
+Bridger, 2026-11-15: strict. No read of an unexposed cell, even to refuse a site or a dig ([[strict-no-xray]]).
 
 ## What would change the answer
 Bridger's call only. Open in v1: danger-avoidance reads of unexposed lava (refusing to dig into it) were left for a decision; ruststeve should decide this explicitly and encode it, for example by giving perception a type that only exposed blocks can produce.

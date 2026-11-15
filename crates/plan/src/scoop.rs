@@ -25,9 +25,11 @@ pub const ANSWER_TICKS: u64 = 60;
 /// Scoops sent at one source before it fails (`max-tries`).
 pub const MAX_TRIES: u32 = 3;
 /// Blocks from the eye to the surface point a scoop is sent from: the game's 4.5 less a margin.
-pub const REACH: f64 = 4.0;
+/// A pool's sources further in are reached across the flowing fluid at its edge (a source-only
+/// ray passes over it): a cast's lava refills spent the edge first (issue 14c).
+pub const REACH: f64 = 4.4;
 /// Blocks from the source's cell a walk to it stops within.
-const WALK_RANGE: f64 = 2.5;
+const WALK_RANGE: f64 = 3.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ScoopFailure {
@@ -62,6 +64,20 @@ pub struct Scoop {
     pub target: Cell,
     stage: Stage,
     pub tries: u32,
+    /// Water (a scoop), or lava (a cast's refill at its pool, issue 14c).
+    #[serde(default = "water")]
+    pub fluid: memory::Fluid,
+}
+
+fn water() -> memory::Fluid {
+    memory::Fluid::Water
+}
+
+fn bucket_of(fluid: memory::Fluid) -> ItemKind {
+    match fluid {
+        memory::Fluid::Water => ItemKind::WaterBucket,
+        memory::Fluid::Lava => ItemKind::LavaBucket,
+    }
 }
 
 /// The surface water sources memory kept within `SEARCH_RADIUS` of the feet, nearest first.
@@ -98,10 +114,10 @@ fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
 }
 
-fn water_source(w: &World, c: Cell) -> bool {
+fn source_of(w: &World, c: Cell, fluid: memory::Fluid) -> bool {
     w.state_at(world::BlockPos::new(c.0, c.1, c.2))
-        .is_some_and(memory::fluid_source)
-        && w.block_at(world::BlockPos::new(c.0, c.1, c.2)) == Some(data::BlockKind::Water)
+        .and_then(memory::Memory::source_fluid)
+        == Some(fluid)
 }
 
 /// Whether the eye's ray to `to` crosses nothing solid before the cell `target` (cells read from
@@ -129,7 +145,13 @@ pub fn clear_ray(w: &World, from: [f64; 3], to: [f64; 3], target: Cell) -> bool 
 
 impl Scoop {
     pub fn new(target: Cell, tick: u64) -> Self {
+        Self::of(target, memory::Fluid::Water, tick)
+    }
+
+    /// A bucket filled at `target`, a source of `fluid`.
+    pub fn of(target: Cell, fluid: memory::Fluid, tick: u64) -> Self {
         Self {
+            fluid,
             target,
             stage: Stage::Approach(Walk::new(
                 target,
@@ -152,9 +174,9 @@ impl Scoop {
         }
     }
 
-    fn held_water(w: &World) -> i32 {
+    fn held_filled(&self, w: &World) -> i32 {
         crate::held(w)
-            .get(&ItemKind::WaterBucket)
+            .get(&bucket_of(self.fluid))
             .copied()
             .unwrap_or(0)
     }
@@ -165,11 +187,13 @@ impl Scoop {
             return (still, None, ScoopStatus::Running);
         };
         if let Stage::Sent { before, .. } = self.stage
-            && Self::held_water(w) > before
+            && self.held_filled(w) > before
         {
             return (still, None, ScoopStatus::Done);
         }
-        if !water_source(w, self.target) {
+        // Gone only before the use is sent: a scooped source's block update arrives a tick before
+        // the bucket's slot (and water forms again between two sources).
+        if !matches!(self.stage, Stage::Sent { .. }) && !source_of(w, self.target, self.fluid) {
             return (still, None, ScoopStatus::Failed(ScoopFailure::Gone));
         }
         let point = surface(self.target);
@@ -222,7 +246,7 @@ impl Scoop {
                 self.tries += 1;
                 self.stage = Stage::Sent {
                     at: tick,
-                    before: Self::held_water(w),
+                    before: self.held_filled(w),
                 };
                 (look, Some(Act::UseItem), ScoopStatus::Running)
             }

@@ -273,6 +273,7 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
         | plan::Aim::IronKit
         | plan::Aim::WaterBucket
         | plan::Aim::PortalKit
+        | plan::Aim::Portal
         | plan::Aim::Hold => Some(std::sync::Arc::new(bot::goals_table(&a.goals)?)),
     };
     let kit: Vec<(data::ItemKind, i32)> = match &a.start {

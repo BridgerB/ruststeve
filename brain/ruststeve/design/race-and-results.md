@@ -5,8 +5,8 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@757d9f7 clojurecraft@be85a92
+lastUpdated: 2026-11-15
+verifiedAgainst: ruststeve@da0e4fa clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -66,6 +66,9 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - A batch row carries the planner's aim and whether it was met (`Row::aim`), and `results summary` prints "aim <aim>: met k/n"; `race.yml` takes a `goal` input ([[planner]]).
 - Sim batches (`simrace`, [[parity-table]]) are the same files with `source = sim`, released as `race-sim-<run>`; scripts (`--walk square|straight:<yaw>|jump:<yaw>|still`) start after the start settles.
 - Swings are 0 until combat exists; the fields are there.
+
+## Issue 14
+- The `kit` start (Bridger, 2026-11-15: two buckets): an iron pickaxe, two buckets, flint and steel, a stone pickaxe and sword, a table, 8 sticks, 16 cobblestone, spread 128 ([[portal-cast]]).
 
 ## See also
 - [[observability]] - what every run produces.

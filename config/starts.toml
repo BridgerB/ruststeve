@@ -25,3 +25,13 @@ kit = [["stone_pickaxe", 1], ["stone_sword", 1], ["wooden_pickaxe", 1], ["crafti
 # Each bot to a random surface spot within 128 blocks of spawn: fourteen bots digging one patch
 # dug up each other's tables and took each other's drops (docs/problems/iron-kit.md wall 4).
 spread = 128
+
+# Issue 14's start (Bridger, 2026-11-15: two buckets, so the race measures water, lava and the cast,
+# not more iron): what an issue-13 bot holds with the kit, a second bucket, and the stone tools,
+# the table, sticks and cobblestone it kept; spread as the stone start.
+[[start]]
+name = "kit"
+stage = "iron_kit"
+place = "spawn"
+kit = [["iron_pickaxe", 1], ["bucket", 2], ["flint_and_steel", 1], ["stone_pickaxe", 1], ["stone_sword", 1], ["crafting_table", 1], ["stick", 8], ["cobblestone", 16]]
+spread = 128

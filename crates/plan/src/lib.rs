@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod build;
+pub mod cast;
 pub mod craft;
 pub mod defend;
 pub mod dig;
@@ -70,6 +71,9 @@ pub const TRAIL_EVERY: u64 = 200;
 pub const TRAIL_STEP: f64 = 2.0;
 pub const TRAIL_KEPT: usize = 60;
 pub const TRAIL_BACK: f64 = 10.0;
+/// The feet height the lava hunt goes down to: a block over the lava sea (clojurecraft's
+/// `lava-depth`; below y -54 the game fills its aquifers with lava).
+pub const LAVA_DEPTH: i32 = -50;
 /// The most a swim off an island takes.
 pub const SWIM_TICKS: u64 = 1200;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
@@ -113,6 +117,8 @@ pub enum Aim {
     /// and a bucket).
     WaterBucket,
     PortalKit,
+    /// Issue 14c's: a portal cast and lit.
+    Portal,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -135,6 +141,7 @@ impl Aim {
             None if s == "iron-kit" => Some(Aim::IronKit),
             None if s == "water-bucket" => Some(Aim::WaterBucket),
             None if s == "portal-kit" => Some(Aim::PortalKit),
+            None if s == "portal" => Some(Aim::Portal),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -160,6 +167,7 @@ impl Aim {
             Aim::IronKit => "iron-kit".to_owned(),
             Aim::WaterBucket => "water-bucket".to_owned(),
             Aim::PortalKit => "portal-kit".to_owned(),
+            Aim::Portal => "portal".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -181,6 +189,7 @@ impl Aim {
             | Aim::IronKit
             | Aim::WaterBucket
             | Aim::PortalKit
+            | Aim::Portal
             | Aim::Hold => true,
         }
     }
@@ -208,6 +217,8 @@ pub enum Task {
     Redig(Box<redig::Redig>),
     /// A bucket filled at a surface water source (issue 14b).
     Scoop(Box<scoop::Scoop>),
+    /// A portal cast at a site (issue 14c).
+    Cast(Box<cast::Cast>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
     /// Across water to a far shore: a relocation off an island (issue 13b), and its start.
@@ -233,6 +244,7 @@ impl Task {
             Task::Smelt(_) => "smelt",
             Task::Redig(_) => "redig",
             Task::Scoop(_) => "scoop",
+            Task::Cast(_) => "cast",
             Task::Escape(_) => "escape",
             Task::Swim(..) => "swim",
             Task::Defend(_) => "defend",
@@ -251,6 +263,7 @@ impl Task {
             | Task::Smelt(_)
             | Task::Redig(_)
             | Task::Scoop(_)
+            | Task::Cast(_)
             | Task::Escape(_)
             | Task::Swim(..)
             | Task::Defend(_)
@@ -300,6 +313,15 @@ pub struct Plan {
     pub stalled: Vec<Cell>,
     /// Where a `never_fight` mob was fled from, until when, and how far round it work waits.
     pub dangers: Vec<(Cell, u64, f64)>,
+    /// The cast's site, kept while it is worked (issue 14c).
+    #[serde(default)]
+    pub site: Option<cast::Site>,
+    /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
+    #[serde(default)]
+    pub given_up_sites: Vec<Cell>,
+    /// The lit portal's inside cell, once seen (issue 14c; issue 15 walks back to it).
+    #[serde(default)]
+    pub portal: Option<Cell>,
     /// Ranged foes a fight landed nothing on, and until when they are left alone (wall 30).
     pub ignored_foes: Vec<(i32, u64)>,
     /// Events ever made (`events` keeps the last few): the shell records the new ones.
@@ -383,6 +405,9 @@ impl Plan {
             refused_areas: Vec::new(),
             stalled: Vec::new(),
             dangers: Vec::new(),
+            site: None,
+            given_up_sites: Vec::new(),
+            portal: None,
             ignored_foes: Vec::new(),
             event_count: 0,
             table: None,
@@ -517,6 +542,7 @@ impl Plan {
                 | Aim::IronKit
                 | Aim::WaterBucket
                 | Aim::PortalKit
+                | Aim::Portal
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
@@ -560,6 +586,14 @@ impl Plan {
                 self.acts.extend(act);
                 let target = s.target;
                 return self.after_scoop(c, status, target, tick);
+            }
+            Task::Cast(k) => {
+                let (c, act, status) = k.step(w, tick);
+                self.acts.extend(act);
+                let site = k.site;
+                let ops = k.done_ops;
+                let at = k.current().map(build::op_text).unwrap_or_default();
+                return self.after_cast(c, status, site, ops, at, tick);
             }
             Task::Swim(e, since) => {
                 let (c, act) = e.step(w, tick);
@@ -626,6 +660,7 @@ impl Plan {
                     | Task::Smelt(_)
                     | Task::Redig(_)
                     | Task::Scoop(_)
+                    | Task::Cast(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -674,6 +709,7 @@ impl Plan {
                     | Task::Smelt(_)
                     | Task::Redig(_)
                     | Task::Scoop(_)
+                    | Task::Cast(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -733,6 +769,7 @@ impl Plan {
             | Task::Smelt(_)
             | Task::Redig(_)
             | Task::Scoop(_)
+            | Task::Cast(_)
             | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
@@ -894,6 +931,7 @@ impl Plan {
             | Task::Smelt(_)
             | Task::Redig(_)
             | Task::Scoop(_)
+            | Task::Cast(_)
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
@@ -1034,6 +1072,7 @@ impl Plan {
             | Aim::IronKit
             | Aim::WaterBucket
             | Aim::PortalKit
+            | Aim::Portal
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -1059,6 +1098,7 @@ impl Plan {
                 | Aim::IronKit
                 | Aim::WaterBucket
                 | Aim::PortalKit
+                | Aim::Portal
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -1183,6 +1223,20 @@ impl Plan {
             && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
         {
             return t;
+        }
+        // The portal (issue 14c): its kit held, the cast; met once a portal is lit.
+        if self.aim == Aim::Portal {
+            if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
+                self.portal = Some(site.frame.at((1, 1, 0)));
+            }
+            if self.portal.is_some() {
+                self.met = true;
+                self.note(tick, "portal met".to_owned(), "a portal is lit".to_owned());
+                return Task::Idle;
+            }
+            if choice == make::Choice::Done {
+                return self.cast_task(w, tick);
+            }
         }
         match choice {
             make::Choice::Done => {
@@ -1555,6 +1609,64 @@ impl Plan {
                 self.retry_at = tick + RETRY_TICKS;
                 Task::Idle
             })
+    }
+
+    /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
+    /// `lava-hunt`: stairs toward the lava sea, the lava they expose kept in memory).
+    fn cast_task(&mut self, w: &World, tick: u64) -> Task {
+        let site = self
+            .site
+            .or_else(|| cast::choose_site(w, &self.given_up_sites));
+        if let Some(site) = site {
+            self.site = Some(site);
+            self.note(
+                tick,
+                format!(
+                    "cast at {:?} facing {} (lava {:?})",
+                    site.frame.origin,
+                    site.frame.facing.name(),
+                    site.lava
+                ),
+                "a site beside lava seen exposed".to_owned(),
+            );
+            return Task::Cast(Box::new(cast::Cast::new(site, tick)));
+        }
+        self.mine(w, &[], Some(LAVA_DEPTH), tick)
+    }
+
+    fn after_cast(
+        &mut self,
+        c: Controls,
+        status: cast::CastStatus,
+        site: cast::Site,
+        ops: u32,
+        at: String,
+        tick: u64,
+    ) -> Controls {
+        match status {
+            cast::CastStatus::Running => return c,
+            cast::CastStatus::Done => {
+                self.portal = Some(site.frame.at((1, 1, 0)));
+                self.failed_in_row = 0;
+                self.task = Task::Idle;
+                self.note(tick, "portal lit".to_owned(), format!("{ops} ops done"));
+            }
+            cast::CastStatus::Failed(f) => {
+                *self.failures.entry(format!("Cast{f:?}")).or_default() += 1;
+                self.given_up_sites.push(site.frame.origin);
+                self.site = None;
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("cast failed: {f:?} after {ops} ops, at {at}"),
+                    format!("site given up; none within {} of it", cast::GIVE_UP_RADIUS),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
     }
 
     fn after_scoop(
