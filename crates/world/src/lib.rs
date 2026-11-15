@@ -627,8 +627,59 @@ impl World {
     /// A changed cell and its six neighbours: a change can expose a neighbour.
     fn observe_around(&mut self, pos: BlockPos) {
         self.observe(pos);
+        self.observe_source(pos);
         for (x, y, z) in memory::neighbours((pos.x, pos.y, pos.z)) {
             self.observe(BlockPos::new(x, y, z));
+            self.observe_source(BlockPos::new(x, y, z));
+        }
+    }
+
+    /// Keep or forget a fluid source at `pos` in memory's pools (issue 14b): kept only when
+    /// `SeenSource::check` finds it exposed; a cell that holds no source now is forgotten.
+    fn observe_source(&mut self, pos: BlockPos) {
+        let Some(dim) = self.dimension.as_ref().map(|d| d.name.clone()) else {
+            return;
+        };
+        let Some(state) = self.state_at(pos) else {
+            return;
+        };
+        let cell = (pos.x, pos.y, pos.z);
+        if !memory::fluid_source(state) {
+            self.memory.forget_source(&dim, cell);
+            return;
+        }
+        let neighbours =
+            memory::neighbours(cell).map(|(x, y, z)| self.state_at(BlockPos::new(x, y, z)));
+        if let Some(seen) = memory::SeenSource::check(&dim, cell, state, neighbours) {
+            self.memory.record_source(seen);
+        }
+    }
+
+    /// A column's fluid sources, top section first so a lake's surface fills its pool before
+    /// the water under it is read; a pool full stops the scan (issue 14b).
+    fn observe_column_sources(&mut self, at: ChunkPos, column: &Arc<protocol::chunk::Column>) {
+        let (bx, bz) = (at.x * 16, at.z * 16);
+        let Some(dim) = self.dimension.as_ref().map(|d| d.name.clone()) else {
+            return;
+        };
+        for (si, section) in column.sections.iter().enumerate().rev() {
+            if !section.blocks.may_contain(memory::fluid_source) {
+                continue;
+            }
+            let by = column.min_y + 16 * si as i32;
+            for i in (0..4096usize).rev() {
+                let Some(fluid) = section.blocks.get(i).and_then(memory::Memory::source_fluid)
+                else {
+                    continue;
+                };
+                if self.memory.pool_full(&dim, at.x, at.z, fluid) {
+                    continue;
+                }
+                {
+                    let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
+                    self.observe_source(BlockPos::new(bx + lx, by + ly, bz + lz));
+                }
+            }
         }
     }
 
@@ -639,6 +690,7 @@ impl World {
         let Some(column) = self.columns.get(&at).map(Arc::clone) else {
             return;
         };
+        self.observe_column_sources(at, &column);
         let (bx, bz) = (at.x * 16, at.z * 16);
         let mut cells = Vec::new();
         for (si, section) in column.sections.iter().enumerate() {

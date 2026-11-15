@@ -149,6 +149,8 @@ pub enum Act {
     /// Put a held block down and dig it again until it drops what the row provides (flint from
     /// gravel, issue 13b).
     Redig(data::BlockKind),
+    /// Fill a held bucket at a surface water source (issue 14b, clojurecraft's `:scoop`).
+    Scoop,
 }
 
 /// A row of the goal table, or a generated producer row.
@@ -357,6 +359,7 @@ fn row_of(g: &GoalRow) -> Result<Row, String> {
             depth: g.depth,
         }),
         (Some("redig"), Some(b)) => Some(Act::Redig(*b)),
+        (Some("scoop"), _) => Some(Act::Scoop),
         (Some(other), _) => return Err(format!("goal {}: no act {other} (or no blocks)", g.id)),
     };
     Ok(Row {
@@ -710,7 +713,7 @@ impl<'a> Planner<'a> {
                 .map_or(0, |(_, m)| *m);
             if let (_, Some(Ok(r))) = self.resolve_need(counts.clone(), k, n + held, path) {
                 let worth = match r.act {
-                    Some(Act::Mine { .. }) => false,
+                    Some(Act::Mine { .. } | Act::Scoop) => false,
                     Some(Act::Gather) => self.gather_now,
                     Some(Act::Place(_) | Act::Craft(_) | Act::Smelt(_) | Act::Redig(_)) | None => {
                         true

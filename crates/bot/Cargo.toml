@@ -28,6 +28,7 @@ path = "src/bin/simrace.rs"
 
 [dependencies]
 data = { path = "../data" }
+memory = { path = "../memory" }
 net = { path = "../net" }
 physics = { path = "../physics" }
 plan = { path = "../plan" }

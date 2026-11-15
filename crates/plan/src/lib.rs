@@ -19,6 +19,7 @@ pub mod make;
 pub mod path;
 pub mod place;
 pub mod redig;
+pub mod scoop;
 pub mod smelt;
 pub mod stairs;
 pub mod walk;
@@ -107,6 +108,10 @@ pub enum Aim {
     Bucket,
     FlintAndSteel,
     IronKit,
+    /// Issue 14b's rows: a water bucket filled, and what a portal cast spends (a water bucket
+    /// and a bucket).
+    WaterBucket,
+    PortalKit,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -127,6 +132,8 @@ impl Aim {
             None if s == "bucket" => Some(Aim::Bucket),
             None if s == "flint-and-steel" => Some(Aim::FlintAndSteel),
             None if s == "iron-kit" => Some(Aim::IronKit),
+            None if s == "water-bucket" => Some(Aim::WaterBucket),
+            None if s == "portal-kit" => Some(Aim::PortalKit),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -150,6 +157,8 @@ impl Aim {
             Aim::Bucket => "bucket".to_owned(),
             Aim::FlintAndSteel => "flint-and-steel".to_owned(),
             Aim::IronKit => "iron-kit".to_owned(),
+            Aim::WaterBucket => "water-bucket".to_owned(),
+            Aim::PortalKit => "portal-kit".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -169,6 +178,8 @@ impl Aim {
             | Aim::Bucket
             | Aim::FlintAndSteel
             | Aim::IronKit
+            | Aim::WaterBucket
+            | Aim::PortalKit
             | Aim::Hold => true,
         }
     }
@@ -194,6 +205,8 @@ pub enum Task {
     Smelt(Box<smelt::Smelt>),
     /// Place a block and dig it again for its chance drop (flint, issue 13b).
     Redig(Box<redig::Redig>),
+    /// A bucket filled at a surface water source (issue 14b).
+    Scoop(Box<scoop::Scoop>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
     /// Across water to a far shore: a relocation off an island (issue 13b), and its start.
@@ -218,6 +231,7 @@ impl Task {
             Task::Stairs(_) => "stairs",
             Task::Smelt(_) => "smelt",
             Task::Redig(_) => "redig",
+            Task::Scoop(_) => "scoop",
             Task::Escape(_) => "escape",
             Task::Swim(..) => "swim",
             Task::Defend(_) => "defend",
@@ -235,6 +249,7 @@ impl Task {
             | Task::Stairs(_)
             | Task::Smelt(_)
             | Task::Redig(_)
+            | Task::Scoop(_)
             | Task::Escape(_)
             | Task::Swim(..)
             | Task::Defend(_)
@@ -499,6 +514,8 @@ impl Plan {
                 | Aim::Bucket
                 | Aim::FlintAndSteel
                 | Aim::IronKit
+                | Aim::WaterBucket
+                | Aim::PortalKit
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
@@ -536,6 +553,12 @@ impl Plan {
                 let (c, act, status) = r.step(w, tick);
                 self.acts.extend(act);
                 return self.after_redig(c, status, tick);
+            }
+            Task::Scoop(s) => {
+                let (c, act, status) = s.step(w, tick);
+                self.acts.extend(act);
+                let target = s.target;
+                return self.after_scoop(c, status, target, tick);
             }
             Task::Swim(e, since) => {
                 let (c, act) = e.step(w, tick);
@@ -601,6 +624,7 @@ impl Plan {
                     | Task::Stairs(_)
                     | Task::Smelt(_)
                     | Task::Redig(_)
+                    | Task::Scoop(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -648,6 +672,7 @@ impl Plan {
                     | Task::Stairs(_)
                     | Task::Smelt(_)
                     | Task::Redig(_)
+                    | Task::Scoop(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -706,6 +731,7 @@ impl Plan {
             | Task::Stairs(_)
             | Task::Smelt(_)
             | Task::Redig(_)
+            | Task::Scoop(_)
             | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
@@ -866,6 +892,7 @@ impl Plan {
             | Task::Stairs(_)
             | Task::Smelt(_)
             | Task::Redig(_)
+            | Task::Scoop(_)
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
@@ -1004,6 +1031,8 @@ impl Plan {
             | Aim::Bucket
             | Aim::FlintAndSteel
             | Aim::IronKit
+            | Aim::WaterBucket
+            | Aim::PortalKit
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -1027,6 +1056,8 @@ impl Plan {
                 | Aim::Bucket
                 | Aim::FlintAndSteel
                 | Aim::IronKit
+                | Aim::WaterBucket
+                | Aim::PortalKit
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -1246,6 +1277,7 @@ impl Plan {
                         }
                     }
                 }
+                Some(make::Act::Scoop) => self.scoop(w, goal.id.clone(), tick),
                 Some(make::Act::Redig(b)) => match redig::Redig::new(w, b, tick) {
                     Some(r) => {
                         self.note(
@@ -1488,6 +1520,66 @@ impl Plan {
                     tick,
                     format!("smelt failed: {f:?}"),
                     "choose again".to_owned(),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
+    }
+
+    /// The nearest remembered surface source a walk reaches (issue 14b); none: explore for one.
+    fn scoop(&mut self, w: &World, goal: String, tick: u64) -> Task {
+        let candidates: Vec<Cell> = scoop::sources(w)
+            .into_iter()
+            .filter(|c| !self.refused_now(*c, tick))
+            .take(CANDIDATES_PER_TICK)
+            .collect();
+        for c in candidates {
+            let mut s = scoop::Scoop::new(c, tick);
+            if s.route_now(w, tick) {
+                self.note(
+                    tick,
+                    format!("scoop water at {c:?}"),
+                    format!(
+                        "a surface source within {} blocks, for {goal}",
+                        scoop::SEARCH_RADIUS
+                    ),
+                );
+                return Task::Scoop(Box::new(s));
+            }
+            self.refuse(c, tick);
+        }
+        self.explore_walk(w, tick, "no surface water in view with a way")
+            .unwrap_or_else(|| {
+                self.retry_at = tick + RETRY_TICKS;
+                Task::Idle
+            })
+    }
+
+    fn after_scoop(
+        &mut self,
+        c: Controls,
+        status: scoop::ScoopStatus,
+        target: Cell,
+        tick: u64,
+    ) -> Controls {
+        match status {
+            scoop::ScoopStatus::Running => return c,
+            scoop::ScoopStatus::Done => {
+                self.failed_in_row = 0;
+                self.task = Task::Idle;
+                self.note(tick, "scooped".to_owned(), "a water bucket held".to_owned());
+            }
+            scoop::ScoopStatus::Failed(f) => {
+                *self.failures.entry(format!("Scoop{f:?}")).or_default() += 1;
+                self.refuse(target, tick);
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("scoop failed: {f:?}"),
+                    "the source refused a while; choose again".to_owned(),
                 );
                 self.check_stuck(tick);
             }
