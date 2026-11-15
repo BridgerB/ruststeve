@@ -54,7 +54,8 @@ Left out, and why: waterlogged blocks; partial shapes occluding a flow; drops fr
 
 ## Evidence
 - `crates/bot/tests/buckets.rs`, all seven pass: a source scooped along the look, one of two buckets filled, water poured and flowing three blocks out and no further than seven, lava poured low against a hole's back wall staying a source, water against the wall over a lava source making obsidian, flint and steel lighting a 4x5 frame, and a portal block with no collision.
-- Parity rows `w00` to `w02`: scoop, pour, lava, obsidian and portal, five a landing, each with `watch` cells whose blocks join the outcome class (a `blocks` field). Their runner result is in the 14a PR.
+- Parity rows `w00` to `w02`: scoop, pour, lava, obsidian and portal, five a landing, each with `watch` cells whose blocks join the outcome class (a `blocks` field). **152 of 152** moments match in every field on the runners (run 43732515322, f39f801).
+- The first run (43730534618) found every real bucket use missing: `use_item` carries a rotation the server snaps the player to before the use (`handleUseItem`), and the world sent pitch 0. It now sends the look's pitch, and the model applies the packet's rotation.
 
 ## Gotchas
 - A pour aimed at a hole's floor from the bank hits the bank's top first and lands a block high: aim low against the hole's back wall, as clojurecraft's `side-aim` does.
