@@ -11,7 +11,7 @@ From the `kit` start (an iron pickaxe, two buckets, flint and steel, a stone pic
 ## Done, in world terms
 At least 28 of 56 real bots light a portal within 72,000 ticks of the `kit` start, confirmed by two 8-lane races pooling at least 50%.
 
-## Open
-- **Lava unaccounted in the model test** (14c, 12-source pool): nine cells cast and the pool spent, three buckets more than the cells took. A pour that misses (lava left somewhere the cast does not see), a refill sent twice, or the model's flow; not read yet. The test pool was made 18 sources; watch races for `NoRefill` endings.
+## Settled before the races
+- **No lava is lost** (14c model trace, 12-source pool): each refill takes one source and each cell spends one, 12 down to 2 over ten cells. The earlier "pool spent at cell nine" was the scoop's reach: the sources left lay four or more blocks from the bank (now reached at 4.4 across the flowing edge).
 
 ## Walls

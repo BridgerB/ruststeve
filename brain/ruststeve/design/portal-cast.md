@@ -56,7 +56,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - A site whose room fronts open ground needs its stair floors built on foundations: more than 8 blocks, so the chooser prefers rooms cut from rock, as clojurecraft's do.
 
 ## Limits
-- Three buckets of lava went unaccounted in the model test's 12-source run; the pool was enlarged and the loss is open (docs/problems/portal.md).
+- A cast spends one lava source a cell: a site's pool must hold ten (`spent`), and a pool's far sources are reached only across its flowing edge.
 
 ## See also
 - [[mc-portal-cast]] - the cast as the game plays it.
