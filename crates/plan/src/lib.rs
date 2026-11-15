@@ -509,6 +509,12 @@ impl Plan {
         match self.mark {
             Some((at, n, ev, since)) if !moved(at) && n == items && ev == self.event_count => {
                 if !matches!(self.task, Task::Idle) && tick.saturating_sub(since) > STALL_TICKS {
+                    // A cast cut here gives its site up, or the next choice resumes it stuck
+                    // (wall 6).
+                    if let Task::Cast(k) = &self.task {
+                        self.given_up_sites.push(k.site.frame.origin);
+                        self.site = None;
+                    }
                     let cut = self.task.name();
                     self.stalls += 1;
                     self.task = Task::Idle;
@@ -1231,7 +1237,15 @@ impl Plan {
             .nearest_log(w, origin, 0.0, tick)
             .zip(w.body)
             .is_some_and(|((_, y, _), b)| (f64::from(y) - b.pos[1]).abs() <= GATHER_NOW_RISE);
-        let choice = make::make_with(&table, &held(w), &near, gather_now, goal);
+        // A lava bucket is the cast's bucket: one held after a cast was cut is no bucket short
+        // (a bot tunnelled for coal to smelt iron for one: docs/problems/portal.md wall 6).
+        let mut counts = held(w);
+        if self.aim == Aim::Portal
+            && let Some(n) = counts.get(&data::ItemKind::LavaBucket).copied()
+        {
+            *counts.entry(data::ItemKind::Bucket).or_default() += n;
+        }
+        let choice = make::make_with(&table, &counts, &near, gather_now, goal);
         if matches!(choice, make::Choice::Act(_))
             && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
         {

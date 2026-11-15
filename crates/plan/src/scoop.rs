@@ -169,7 +169,11 @@ impl Scoop {
     /// Whether a walk reaches it now (the churn invariant: never start a scoop with no way).
     pub fn route_now(&mut self, w: &World, tick: u64) -> bool {
         match &mut self.stage {
-            Stage::Approach(walk) => walk.route_now(w, tick),
+            // A found route only: a partial one toward a lake's middle failed every walk, source
+            // after source along a shore (docs/problems/portal.md wall 6).
+            Stage::Approach(walk) => {
+                walk.route_now(w, tick) && walk.route == Some(crate::path::Status::Found)
+            }
             Stage::Aim { .. } | Stage::Sent { .. } => true,
         }
     }
