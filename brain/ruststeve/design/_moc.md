@@ -3,7 +3,7 @@ title: Design
 type: moc
 tags: [moc, design]
 status: verified
-lastUpdated: 2026-11-12
+lastUpdated: 2026-11-15
 related:
   - "[[ruststeve/_moc|ruststeve]]"
 ---
@@ -45,6 +45,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[escapes]] - the always-rows: out of water, lava and fire ahead of every goal.
 - [[food-and-hunting]] - eating when hungry, and hunting an animal when there is nothing to eat.
 - [[smelting]] - the furnace window, the model's furnace, the smelt task.
+- [[buckets-and-fluids]] - the look's pitch, buckets along the look, the model's fluids, obsidian, portal lighting.
 - [[fuel-and-smelt-needs]] - fuel as a need, smelt rows, spares, the batch.
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.

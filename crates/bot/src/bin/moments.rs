@@ -115,6 +115,7 @@ fn outcome(
     w: &World,
     teleports_at_script: Option<u64>,
     min_health: Option<f32>,
+    watch: &[(i32, i32, i32)],
 ) -> Option<Outcome> {
     let at = teleports_at_script?;
     let body = w.body?;
@@ -154,6 +155,15 @@ fn outcome(
         grid,
         food: w.player.food,
         kills: w.kills,
+        blocks: watch
+            .iter()
+            .map(|&(x, y, z)| {
+                w.block_at(world::BlockPos::new(x, y, z))
+                    .and_then(data::BlockKind::name)
+                    .unwrap_or("unknown")
+                    .to_owned()
+            })
+            .collect(),
     })
 }
 
@@ -171,6 +181,15 @@ fn chance_drop(k: data::ItemKind) -> bool {
             .iter()
             .flat_map(|b| b.tries)
             .any(|d| d.item == k && d.chance < 1.0)
+}
+
+/// A moment's watched cells, absolute.
+fn watched(start: [f64; 3], m: &Moment) -> Vec<(i32, i32, i32)> {
+    let (x, y, z) = feet_cell(start);
+    m.watch
+        .iter()
+        .map(|(dx, dy, dz)| (x + dx, y + dy, z + dz))
+        .collect()
 }
 
 /// The block cell the feet of a start stand in.
@@ -292,16 +311,22 @@ fn real(a: &Args) -> Result<(), String> {
                 hold_after_aim: false,
             };
             let id = m.id.clone();
-            handles.push((id, std::thread::spawn(move || bot::run(opts))));
+            let watch = watched(start, m);
+            handles.push((id, watch, std::thread::spawn(move || bot::run(opts))));
             std::thread::sleep(Duration::from_millis(500));
         }
-        for (id, h) in handles {
+        for (id, watch, h) in handles {
             let r = match h.join() {
                 Ok(Ok(o)) => MomentResult {
                     moment: id,
                     source: Source::Real,
                     commit: record::COMMIT.to_owned(),
-                    outcome: outcome(&o.world, o.teleports_at_script, o.min_health_in_script),
+                    outcome: outcome(
+                        &o.world,
+                        o.teleports_at_script,
+                        o.min_health_in_script,
+                        &watch,
+                    ),
                     corrections: o
                         .teleports_at_script
                         .map_or(0, |t| o.world.session.teleports.saturating_sub(t)),
@@ -411,6 +436,7 @@ fn sim(a: &Args) -> Result<(), String> {
                 &run.world,
                 run.teleports_at_script,
                 run.min_health_in_script,
+                &watched(start, m),
             ),
             corrections: run
                 .teleports_at_script

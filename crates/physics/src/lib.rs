@@ -130,6 +130,10 @@ pub struct Controls {
     pub sneak: bool,
     /// Degrees, Notchian (south 0, west +90).
     pub yaw: f64,
+    /// Degrees down (Notchian: +90 straight down), sent with the look when set (issue 14a: a
+    /// bucket is used along the look); `None` keeps the pitch the server last set.
+    #[serde(default)]
+    pub pitch: Option<f32>,
 }
 
 fn floor(v: f64) -> i32 {

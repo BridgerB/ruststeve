@@ -96,6 +96,16 @@ pub fn yaw_to(from: [f64; 3], to: [f64; 3]) -> f64 {
     (-dx).atan2(dz).to_degrees()
 }
 
+/// The look from an eye to a point (issue 14a: a bucket is used along it): the yaw, and the
+/// pitch in Notchian degrees, down positive (`calculateViewVector`'s inverse).
+pub fn look_at(eye: [f64; 3], to: [f64; 3]) -> (f64, f32) {
+    let (dx, dy, dz) = (to[0] - eye[0], to[1] - eye[1], to[2] - eye[2]);
+    let flat = (dx * dx + dz * dz).sqrt();
+    #[allow(clippy::cast_possible_truncation)]
+    let pitch = (-dy.atan2(flat).to_degrees()) as f32;
+    (yaw_to(eye, to), pitch)
+}
+
 impl Walk {
     pub fn new(target: Cell, goal: Goal, arrive: Arrive, tick: u64) -> Self {
         Self {
@@ -282,6 +292,7 @@ fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
         jump: body.horizontal_collision,
         sneak: false,
         yaw: yaw_to(body.pos, point),
+        pitch: None,
     }
 }
 

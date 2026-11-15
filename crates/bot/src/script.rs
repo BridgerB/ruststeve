@@ -114,6 +114,18 @@ pub enum Script {
     /// 0) placed east of the feet and opened; the fuel (hotbar 2) then the input (hotbar 1) put
     /// in whole; at script tick `take` the result shift-clicked out, then the window closed.
     Smelt { take: u64 },
+    /// Standing still looking along `yaw` and `pitch` from the start, use the held item at tick
+    /// `at` (issue 14a: a bucket): `use:<tick>:<yaw>:<pitch>`.
+    Use { at: u64, yaw: f64, pitch: f32 },
+    /// Standing still, use the held item on a face of the block `dx dy dz` from the feet cell at
+    /// tick `at` (issue 14a: flint and steel on a frame): `light:<tick>:<dx>:<dy>:<dz>:<face>`.
+    Light {
+        at: u64,
+        dx: i32,
+        dy: i32,
+        dz: i32,
+        face: i8,
+    },
 }
 
 impl Script {
@@ -127,6 +139,7 @@ impl Script {
                     jump: side % 2 == 1 && into_side < 6,
                     sneak: false,
                     yaw: [0.0, 90.0, 0.0, 90.0][side as usize],
+                    pitch: None,
                 }
             }
             Script::Straight { yaw } => Controls {
@@ -134,23 +147,32 @@ impl Script {
                 jump: false,
                 sneak: false,
                 yaw,
+                pitch: None,
             },
             Script::JumpForward { yaw } => Controls {
                 forward: true,
                 jump: true,
                 sneak: false,
                 yaw,
+                pitch: None,
             },
             Script::Still
             | Script::DigDown { .. }
             | Script::Craft(_)
             | Script::Eat { .. }
-            | Script::Smelt { .. } => Controls::default(),
+            | Script::Smelt { .. }
+            | Script::Light { .. } => Controls::default(),
+            Script::Use { yaw, pitch, .. } => Controls {
+                yaw,
+                pitch: Some(pitch),
+                ..Controls::default()
+            },
             Script::Attack { yaw, .. } => Controls {
                 forward: false,
                 jump: false,
                 sneak: false,
                 yaw,
+                pitch: None,
             },
         }
     }
@@ -276,12 +298,35 @@ impl Script {
                 near.map(|(_, id)| vec![Act::Attack { entity: id }])
                     .unwrap_or_default()
             }
-            Script::Eat { at } => {
+            Script::Eat { at } | Script::Use { at, .. } => {
                 if tick == at {
                     vec![Act::UseItem]
                 } else {
                     Vec::new()
                 }
+            }
+            Script::Light {
+                at,
+                dx,
+                dy,
+                dz,
+                face,
+            } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                if tick != at {
+                    return Vec::new();
+                }
+                let (fx, fy, fz) = (
+                    body.pos[0].floor() as i32,
+                    (body.pos[1] + 0.01).floor() as i32,
+                    body.pos[2].floor() as i32,
+                );
+                vec![Act::UseOn {
+                    pos: world::BlockPos::new(fx + dx, fy + dy, fz + dz),
+                    face,
+                }]
             }
             Script::WalkSquare
             | Script::Straight { .. }
@@ -302,6 +347,14 @@ impl Script {
             Script::Attack { every, yaw } => format!("attack:{every}:{yaw}"),
             Script::Eat { at } => format!("eat:{at}"),
             Script::Smelt { take } => format!("smelt:{take}"),
+            Script::Use { at, yaw, pitch } => format!("use:{at}:{yaw}:{pitch}"),
+            Script::Light {
+                at,
+                dx,
+                dy,
+                dz,
+                face,
+            } => format!("light:{at}:{dx}:{dy}:{dz}:{face}"),
         }
     }
 
@@ -318,8 +371,30 @@ impl Script {
             ("dig", Some(f)) if f >= 0.0 && f.fract() == 0.0 => {
                 Some(Script::DigDown { finish: f as u64 })
             }
-            _ => Self::parse_craft(s),
+            _ => Self::parse_use(s).or_else(|| Self::parse_craft(s)),
         }
+    }
+
+    fn parse_use(s: &str) -> Option<Script> {
+        if let Some(rest) = s.strip_prefix("use:") {
+            let mut p = rest.split(':');
+            let at = p.next()?.parse().ok()?;
+            let yaw = p.next()?.parse().ok()?;
+            let pitch = p.next()?.parse().ok()?;
+            return p.next().is_none().then_some(Script::Use { at, yaw, pitch });
+        }
+        let rest = s.strip_prefix("light:")?;
+        let v: Vec<&str> = rest.split(':').collect();
+        let [at, dx, dy, dz, face] = v.as_slice() else {
+            return None;
+        };
+        Some(Script::Light {
+            at: at.parse().ok()?,
+            dx: dx.parse().ok()?,
+            dy: dy.parse().ok()?,
+            dz: dz.parse().ok()?,
+            face: face.parse().ok()?,
+        })
     }
 
     fn parse_craft(s: &str) -> Option<Script> {

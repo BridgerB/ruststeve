@@ -540,10 +540,15 @@ impl World {
         let moved = physics::step(&solid, &fluid, &body, &self.controls);
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
-        // Physics and the movement packets use the controls' yaw; the server's look is kept.
+        // Physics and the movement packets use the controls' yaw; the pitch is the controls' when
+        // set (a bucket aimed, issue 14a), else the server's look is kept.
         #[allow(clippy::cast_possible_truncation)]
-        let look = (self.controls.yaw as f32, self.player.pitch);
+        let look = (
+            self.controls.yaw as f32,
+            self.controls.pitch.unwrap_or(self.player.pitch),
+        );
         self.player.yaw = look.0;
+        self.player.pitch = look.1;
         let flags = u8::from(moved.on_ground) | (u8::from(moved.horizontal_collision) << 1);
         if self.sent_pos != Some(moved.pos) || self.sent_look != Some(look) {
             self.sent_pos = Some(moved.pos);

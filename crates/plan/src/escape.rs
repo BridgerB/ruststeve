@@ -423,6 +423,7 @@ impl Escape {
                     jump: true,
                     sneak: false,
                     yaw: self.yaw,
+                    pitch: None,
                 },
                 None,
             );
@@ -461,6 +462,7 @@ impl Escape {
                 jump: body.in_water || body.in_lava || body.horizontal_collision,
                 sneak: false,
                 yaw: self.yaw,
+                pitch: None,
             },
             None,
         )

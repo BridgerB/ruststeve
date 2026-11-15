@@ -78,6 +78,7 @@ fn scenarios() -> Vec<Scenario> {
                     jump: w[3] == "1",
                     sneak: w[4] == "1",
                     yaw: w[5].parse().unwrap(),
+                    pitch: None,
                 };
                 cur.as_mut()
                     .unwrap()
