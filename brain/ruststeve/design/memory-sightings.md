@@ -5,10 +5,11 @@ type: reference
 tags: [memory, sightings, no-xray, facts, world]
 aliases: [Memory, Sighting, Seen, watched kinds, exposed face, memory crate, facts with time]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+lastUpdated: 2026-11-15
+verifiedAgainst: ruststeve@2e0cacd clojurecraft@be85a92
 sourceRefs:
-  - "ruststeve:crates/memory/src/lib.rs#pub fn check("
+  - "ruststeve:crates/memory/src/lib.rs#/// A block seen with an exposed face. Only `Seen::check` makes one."
+  - "ruststeve:crates/memory/src/lib.rs#pub fn record_source(&mut self, seen: SeenSource) -> bool {"
   - "ruststeve:crates/memory/src/lib.rs#pub fn record(&mut self, seen: Seen, at_tick: u64) -> bool {"
   - "ruststeve:crates/world/src/lib.rs#fn observe_column(&mut self, at: ChunkPos) {"
   - "ruststeve:crates/world/tests/properties.rs#fn a_buried_log_is_seen_only_once_uncovered() {"
@@ -37,6 +38,12 @@ The `memory` crate (core, no I/O) is clojurecraft's sighting store in Rust ([[cc
 ## Limits
 - Pools, intentions and server answers (clojurecraft's other facts) are not here yet.
 - A live 2-minute session recorded 339 sightings in 329 columns; no query uses them yet.
+
+## Issue 14b: fluid pools
+- Water and lava are kept as **pools**, not cells: per dimension, chunk column and fluid, at most `POOL_CELLS` (32) exposed sources, the first seen. One fact per fluid cell froze clojurecraft's forest run (600,000 water cells).
+- Only `SeenSource::check` makes one: **water** with air straight over it (a surface a bucket reaches; water under a ceiling is the aquifer trap), **lava** with an air neighbour. A source buried in rock never enters memory (strict no X-ray, Bridger 2026-11-15).
+- The world scans a column's fluid sections top first on arrival, stopping once a pool is full, and re-checks a cell and its neighbours on every block change; a cell that holds no source now is forgotten.
+- `sources_near` answers the scoop task ([[buckets-and-fluids]]) and, in 14c, the cast's site choice.
 
 ## See also
 - [[hist-no-xray]] - why the rule.

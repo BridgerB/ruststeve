@@ -5,8 +5,8 @@ type: reference
 tags: [plan, goals, needs, make, crafting]
 aliases: [block needs, holds, place-table, mine-stone, stone-tools, goals.toml, goal table, needs planner, plan::make, make, producer rows, craft rows, kit, wood, Aim::Table, --goal table, producer order, craft-now, make differential]
 status: verified
-lastUpdated: 2026-11-14
-verifiedAgainst: ruststeve@1a3aaac clojurecraft@be85a92
+lastUpdated: 2026-11-15
+verifiedAgainst: ruststeve@f8e4402 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/make.rs#pub fn make<'a>("
   - "ruststeve:crates/plan/src/make.rs#fn producer_order(counts: &Counts, row: &Row) -> (i32, i32) {"
@@ -50,6 +50,10 @@ Issue 10c. Goals are data; planning is a function. A goal row says what it provi
 
 ## Issue 13b: fuel, smelting and spares
 Smelt rows, the `fuel:ticks` need and `spares` are in [[fuel-and-smelt-needs]], with their own differential (12,288 of 12,288).
+
+## Issue 14b: water and the portal kit
+- Rows `water-bucket` (a bucket filled at surface water), `portal-kit` (a water bucket and a bucket, sparing 24 sticks) and the producer `fill-bucket` (needs a bucket, holds and spares a pickaxe, act `scoop`: [[buckets-and-fluids]]). Ids are clojurecraft's.
+- `make-expected-water.txt`: clojurecraft's `make/next-row` toward both, with its gather-log, place-table and fill-bucket rows, for 2,592 inventories of buckets, water buckets, ingots, planks, sticks, tables and stone pickaxes, with and without a remembered table: **2,592 of 2,592** equal.
 
 ## Checked against clojurecraft
 `make-expected.txt` is clojurecraft's own `make/next-row` (at be85a92, a one-off oracle in its flake shell, outside this repo) toward the kit with a table of the kit and gather-log rows, for all 480 inventories of oak logs 0-3, planks 0-4, sticks 0-5 and tables 0-1: **480 of 480** choices equal. `make-expected-stone.txt` (issue 11b): toward `stone-pickaxe` with the stone-pickaxe, gather-log, place-table and mine-stone rows, 1,920 inventories of logs, planks, sticks, tables, cobblestone and wooden pickaxes, with and without a remembered table: **1,920 of 1,920** equal.

@@ -122,6 +122,7 @@ name = "bot"
 version = "0.1.0"
 dependencies = [
  "data",
+ "memory",
  "net",
  "physics",
  "plan",

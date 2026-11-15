@@ -49,6 +49,72 @@ fn see_through(neighbour: Option<u32>) -> bool {
         .is_some_and(|c| c != Collision::Full)
 }
 
+/// A fluid memory keeps as pools (issue 14b).
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub enum Fluid {
+    Water,
+    Lava,
+}
+
+/// Exposed sources kept per chunk column per fluid: one fact per fluid cell froze clojurecraft's
+/// forest run (600,000 water cells), so a pool keeps at most this many, the first seen.
+pub const POOL_CELLS: usize = 32;
+
+fn source_of(state: u32) -> Option<Fluid> {
+    let kind = data::block_of_state(state)?;
+    let fluid = match kind {
+        BlockKind::Water => Fluid::Water,
+        BlockKind::Lava => Fluid::Lava,
+        _ => return None,
+    };
+    // Level 0 is a source; the fluid's states run level 0 to 15 from its default.
+    (kind.info().map(|i| i.default_state) == Some(state)).then_some(fluid)
+}
+
+/// Whether a cell may hold a fluid source memory keeps: water or lava, level 0.
+pub fn fluid_source(state: u32) -> bool {
+    source_of(state).is_some()
+}
+
+fn air(state: Option<u32>) -> bool {
+    state
+        .and_then(data::block_of_state)
+        .is_some_and(|k| matches!(k, BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir))
+}
+
+/// A fluid source seen exposed (issue 14b): water with air straight over it (a surface a bucket
+/// reaches; cave water under a ceiling is the aquifer trap), lava with an air neighbour. Only
+/// `SeenSource::check` makes one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeenSource {
+    dimension: String,
+    pos: Cell,
+    fluid: Fluid,
+}
+
+impl SeenSource {
+    /// `neighbours` in `neighbours`'s order: down, up, north, south, west, east.
+    pub fn check(
+        dimension: &str,
+        pos: Cell,
+        state: u32,
+        neighbours: [Option<u32>; 6],
+    ) -> Option<Self> {
+        let fluid = source_of(state)?;
+        let exposed = match fluid {
+            Fluid::Water => air(neighbours[1]),
+            Fluid::Lava => neighbours.iter().any(|n| air(*n)),
+        };
+        exposed.then(|| Self {
+            dimension: dimension.to_owned(),
+            pos,
+            fluid,
+        })
+    }
+}
+
 /// A block seen with an exposed face. Only `Seen::check` makes one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Seen {
@@ -114,6 +180,11 @@ pub struct Memory {
     /// checkpoints read it as empty.
     #[serde(default)]
     kinds: BTreeSet<BlockKind>,
+    /// Exposed fluid sources by dimension, chunk column and fluid, at most `POOL_CELLS` each
+    /// (issue 14b). A source gone (scooped, turned to obsidian) is dropped when its cell is seen
+    /// again.
+    #[serde(default)]
+    pools: BTreeMap<(String, i32, i32, Fluid), BTreeSet<Cell>>,
 }
 
 impl Memory {
@@ -146,6 +217,64 @@ impl Memory {
             at_tick,
         });
         true
+    }
+
+    /// Keep an exposed source in its pool (issue 14b); returns whether it was added.
+    pub fn record_source(&mut self, seen: SeenSource) -> bool {
+        let (x, _, z) = seen.pos;
+        let pool = self
+            .pools
+            .entry((seen.dimension, x >> 4, z >> 4, seen.fluid))
+            .or_default();
+        if pool.len() >= POOL_CELLS {
+            return false;
+        }
+        pool.insert(seen.pos)
+    }
+
+    /// Whether a column's pool of a fluid is full.
+    pub fn pool_full(&self, dimension: &str, cx: i32, cz: i32, fluid: Fluid) -> bool {
+        self.pools
+            .get(&(dimension.to_owned(), cx, cz, fluid))
+            .is_some_and(|p| p.len() >= POOL_CELLS)
+    }
+
+    /// The fluid of a source state, if it is one.
+    pub fn source_fluid(state: u32) -> Option<Fluid> {
+        source_of(state)
+    }
+
+    /// A cell no longer holds the source it was kept for: out of every pool.
+    pub fn forget_source(&mut self, dimension: &str, pos: Cell) {
+        let (x, _, z) = pos;
+        for fluid in [Fluid::Water, Fluid::Lava] {
+            if let Some(pool) = self
+                .pools
+                .get_mut(&(dimension.to_owned(), x >> 4, z >> 4, fluid))
+            {
+                pool.remove(&pos);
+            }
+        }
+    }
+
+    /// The kept sources of a fluid in the chunk columns within `radius` columns of `(cx, cz)`.
+    pub fn sources_near(
+        &self,
+        dimension: &str,
+        fluid: Fluid,
+        cx: i32,
+        cz: i32,
+        radius: i32,
+    ) -> Vec<Cell> {
+        let mut out = Vec::new();
+        for x in cx - radius..=cx + radius {
+            for z in cz - radius..=cz + radius {
+                if let Some(pool) = self.pools.get(&(dimension.to_owned(), x, z, fluid)) {
+                    out.extend(pool.iter().copied());
+                }
+            }
+        }
+        out
     }
 
     /// Whether a position is on record (so every later change there is followed).

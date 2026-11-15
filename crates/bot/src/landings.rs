@@ -164,6 +164,8 @@ pub fn run_one(
         | plan::Aim::Bucket
         | plan::Aim::FlintAndSteel
         | plan::Aim::IronKit
+        | plan::Aim::WaterBucket
+        | plan::Aim::PortalKit
         | plan::Aim::Hold => 0.0,
     };
     let mut p = match table {

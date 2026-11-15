@@ -157,3 +157,69 @@ fn fuel_smelting_and_spares_choose_what_clojurecraft_chooses() {
             .join("\n")
     );
 }
+
+/// Issue 14b: water-bucket and portal-kit with the fill-bucket (scoop) row, against
+/// clojurecraft's own answers for 2,592 inventories of buckets, water buckets, ingots, planks,
+/// sticks, tables and stone pickaxes, with and without a remembered table.
+#[test]
+fn water_and_the_portal_kit_choose_what_clojurecraft_chooses() {
+    let mut goals: Goals = toml::from_str(include_str!("../../../config/goals.toml")).unwrap();
+    // The oracle's table: gather, place-table and fill-bucket, and the two goals.
+    goals.goal.retain(|g| {
+        [
+            "gather",
+            "place-table",
+            "fill-bucket",
+            "water-bucket",
+            "portal-kit",
+        ]
+        .contains(&g.id.as_str())
+    });
+    let table = Table::new(&goals).unwrap();
+    let expected = include_str!("fixtures/make-expected-water.txt");
+    let mut checked = 0;
+    let mut wrong = Vec::new();
+    for line in expected.lines().filter(|l| !l.starts_with('#')) {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        let n = |i: usize| f[i].parse::<i32>().unwrap();
+        let counts: Counts = [
+            (ItemKind::Bucket, n(0)),
+            (ItemKind::WaterBucket, n(1)),
+            (ItemKind::IronIngot, n(2)),
+            (ItemKind::OakPlanks, n(3)),
+            (ItemKind::Stick, n(4)),
+            (ItemKind::CraftingTable, n(5)),
+            (ItemKind::StonePickaxe, n(6)),
+        ]
+        .into_iter()
+        .filter(|(_, c)| *c > 0)
+        .collect();
+        let table_near = n(7) == 1;
+        let near = move |b: data::BlockKind| b == data::BlockKind::CraftingTable && table_near;
+        let goal = table.until(f[8]).unwrap();
+        let got = match make_with(&table, &counts, &near, false, goal) {
+            Choice::Done => "done".to_owned(),
+            Choice::Stuck => "stuck".to_owned(),
+            Choice::Act(r) => match r.act {
+                Some(plan::make::Act::Gather) => "gather".to_owned(),
+                _ => r.id.clone(),
+            },
+        };
+        if got != f[9] {
+            wrong.push(format!("{line}: got {got}"));
+        }
+        checked += 1;
+    }
+    assert_eq!(checked, 2592);
+    assert!(
+        wrong.is_empty(),
+        "{} of 2592 differ:\n{}",
+        wrong.len(),
+        wrong
+            .iter()
+            .take(30)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}

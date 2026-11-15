@@ -127,6 +127,33 @@ provides = [["item:iron_pickaxe", 1], ["item:bucket", 1], ["item:flint_and_steel
 # average), the kit's seven raw iron, coal for the smelts (docs/problems/iron-kit.md wall 13).
 wants = [["item:gravel", 3], ["item:raw_iron", 7], ["item:coal", 2]]
 
+# Issue 14b (clojurecraft's goals.edn): a bucket filled at surface water, never cave water, and
+# what a portal cast spends that the iron kit does not hold.
+[[goal]]
+id = "water-bucket"
+priority = 10
+until = "water-bucket"
+doc = "a bucket filled at surface water, never cave water"
+provides = [["item:water_bucket", 1]]
+
+[[goal]]
+id = "portal-kit"
+priority = 13
+until = "portal-kit"
+doc = "what a portal cast spends that the iron kit does not hold"
+provides = [["item:water_bucket", 1], ["item:bucket", 1]]
+spares = [["item:stick", 24]]
+
+[[goal]]
+id = "fill-bucket"
+priority = 10
+doc = "scoop a surface water source with an empty bucket"
+holds = [["tag:pickaxes", 1]]
+spares = [["tag:pickaxes", 1]]
+needs = [["item:bucket", 1]]
+provides = [["item:water_bucket", 1]]
+act = "scoop"
+
 [[goal]]
 id = "place-furnace"
 priority = 10
