@@ -74,6 +74,9 @@ pub const TRAIL_BACK: f64 = 10.0;
 /// The feet height the lava hunt goes down to: a block over the lava sea (clojurecraft's
 /// `lava-depth`; below y -54 the game fills its aquifers with lava).
 pub const LAVA_DEPTH: i32 = -50;
+/// Explore targets reached that are kept, and how near a new one may aim to one of them.
+pub const EXPLORED_KEPT: usize = 24;
+pub const EXPLORED_NEAR: f64 = 12.0;
 /// The most a swim off an island takes.
 pub const SWIM_TICKS: u64 = 1200;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
@@ -319,6 +322,11 @@ pub struct Plan {
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
+    /// Explore targets reached, the newest `EXPLORED_KEPT`: a new explore never aims within
+    /// `EXPLORED_NEAR` of one (clojurecraft's hunt never walks back over its ground; two bots
+    /// cycled six targets a whole race looking for water: docs/problems/portal.md wall 3).
+    #[serde(default)]
+    pub explored: Vec<Cell>,
     /// The lit portal's inside cell, once seen (issue 14c; issue 15 walks back to it).
     #[serde(default)]
     pub portal: Option<Cell>,
@@ -407,6 +415,7 @@ impl Plan {
             dangers: Vec::new(),
             site: None,
             given_up_sites: Vec::new(),
+            explored: Vec::new(),
             portal: None,
             ignored_foes: Vec::new(),
             event_count: 0,
@@ -646,6 +655,10 @@ impl Plan {
                         );
                     }
                     Task::Explore(walk) => {
+                        self.explored.push(walk.target);
+                        if self.explored.len() > EXPLORED_KEPT {
+                            self.explored.remove(0);
+                        }
                         self.note(
                             tick,
                             format!("explored to {:?}", walk.target),
@@ -1604,11 +1617,20 @@ impl Plan {
             }
             self.refuse(c, tick);
         }
-        self.explore_walk(w, tick, "no surface water in view with a way")
-            .unwrap_or_else(|| {
-                self.retry_at = tick + RETRY_TICKS;
-                Task::Idle
-            })
+        if let Some(t) = self.explore_walk(w, tick, "no surface water in view with a way") {
+            return t;
+        }
+        // No source and no walk out: a failed choice, counted, so a dead end relocates (one bot
+        // idled 13,000 ticks without a note: docs/problems/portal.md wall 2).
+        self.failed_in_row += 1;
+        self.retry_at = tick + RETRY_TICKS;
+        self.note(
+            tick,
+            "no water to scoop".to_owned(),
+            "no surface source with a way and no explore walk".to_owned(),
+        );
+        self.check_stuck(tick);
+        Task::Idle
     }
 
     /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
@@ -1916,6 +1938,12 @@ impl Plan {
             let (s, c) = self.heading.to_radians().sin_cos();
             let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
             let target = path::feet_cell(p);
+            if self.explored.iter().any(|e| {
+                f64::from((e.0 - target.0).pow(2) + (e.2 - target.2).pow(2)).sqrt() < EXPLORED_NEAR
+            }) {
+                self.heading = (self.heading + 90.0) % 360.0;
+                continue;
+            }
             let mut walk = Walk::new(
                 target,
                 Goal::Afar {
