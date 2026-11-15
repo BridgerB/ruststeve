@@ -94,3 +94,39 @@ fn the_kit_casts_and_lights_a_portal_beside_lava() {
     assert!(!run.died, "died: {tail:#?}");
     assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
 }
+
+/// A cave under the ground, as the lava hunt finds one: a room of air 13 wide and 4 high cut
+/// into the stone at y 40, an 18-source lava pool in its floor, a pond on the surface over it
+/// reached by a shaft of stairs (here: the water bucket comes with the kit).
+#[test]
+fn a_cave_with_lava_casts_too() {
+    let mut m = flat_world(3, 63).unwrap();
+    for x in -6..=6 {
+        for y in 40..=43 {
+            for z in -6..=6 {
+                m.set_block(x, y, z, state(BlockKind::Air)).unwrap();
+            }
+        }
+    }
+    for x in 3..=5 {
+        for z in -3..=2 {
+            m.set_block(x, 39, z, state(BlockKind::Lava)).unwrap();
+        }
+    }
+    m.spawn = [-4.5, 40.0, -4.5];
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut p = Plan::with_table(Aim::Portal, table);
+    let mut sim = Sim::new(CONFIG, m).seeded(7);
+    for g in kit() {
+        sim.survival.give(g);
+    }
+    sim.survival.give((ItemKind::WaterBucket, 1));
+    let run = bot::lockstep::run_acting(sim, "rs-cave", 1, 24_000, 0, |w, _| {
+        let c = p.step(w);
+        (c, p.take_acts())
+    });
+    let tail: Vec<_> = p.events.iter().rev().take(25).collect();
+    assert!(p.met, "not met; last events: {tail:#?}");
+    assert!(!run.died, "died: {tail:#?}");
+}
