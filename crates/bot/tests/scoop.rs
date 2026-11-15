@@ -28,6 +28,8 @@ fn run(set: &[((i32, i32, i32), BlockKind)], aim: Aim, ticks: u64) -> (Plan, bot
     let mut p = Plan::with_table(aim, table);
     let mut sim = Sim::new(CONFIG, m);
     sim.survival.give((ItemKind::Bucket, 2));
+    // fill-bucket holds a pickaxe, as the kit start does.
+    sim.survival.give((ItemKind::StonePickaxe, 1));
     let run = bot::lockstep::run_acting(sim, "rs-scp", 1, ticks, 0, |w, _| {
         let c = p.step(w);
         (c, p.take_acts())
