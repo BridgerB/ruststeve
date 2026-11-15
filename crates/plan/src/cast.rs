@@ -664,6 +664,18 @@ fn lava_within(w: &World, radius: f64) -> Vec<Cell> {
 /// remembered lava source; the frame facing so the lava is in front of it. The nearest landing to
 /// the feet wins. `given_up`: origins whose radius is refused.
 pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {
+    site_choice(w, given_up).and_then(|c| c.routed.then_some(c.site))
+}
+
+/// The best site found and whether a walk reaches its landing: with none routed, the best
+/// unrouted one and its landing, for the planner to dig toward (wall 9).
+pub struct SiteChoice {
+    pub site: Site,
+    pub landing: Cell,
+    pub routed: bool,
+}
+
+pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
     let body = w.body?;
     let here = centre(feet(&body));
     let lava = lava_sources(w);
@@ -742,6 +754,11 @@ pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {
     // y -32 chose a landing at y -52 in another cave and failed its first dig: wall 4).
     found.sort_by(|a, b| a.0.0.cmp(&b.0.0).then(a.0.1.total_cmp(&b.0.1)));
     let from = feet(&body);
+    let best = found.first().map(|(_, s, l)| SiteChoice {
+        site: *s,
+        landing: *l,
+        routed: false,
+    });
     found
         .into_iter()
         .take(SITE_ROUTES)
@@ -755,7 +772,12 @@ pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {
             .status
                 == crate::path::Status::Found
         })
-        .map(|(_, s, _)| s)
+        .map(|(_, s, l)| SiteChoice {
+            site: s,
+            landing: l,
+            routed: true,
+        })
+        .or(best)
 }
 
 /// Whether the plan's light op holds: a portal block in the frame.

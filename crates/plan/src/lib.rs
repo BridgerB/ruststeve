@@ -1653,9 +1653,64 @@ impl Plan {
     /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
     /// `lava-hunt`: stairs toward the lava sea, the lava they expose kept in memory).
     fn cast_task(&mut self, w: &World, tick: u64) -> Task {
+        let choice = if self.site.is_some() {
+            None
+        } else {
+            cast::site_choice(w, &self.given_up_sites)
+        };
+        // A site whose landing no walk reaches yet: dig toward the landing (stairs when it is
+        // below, a level tunnel else), three cuts without coming nearer refusing it, as the mine
+        // task digs toward ore (docs/problems/portal.md wall 9).
+        if let (Some(c), Some(body)) = (choice.as_ref().filter(|c| !c.routed), w.body)
+            && !self.refused_now(c.landing, tick)
+        {
+            let aim = c.landing;
+            let (fx, fy, fz) = path::feet_cell(body.pos);
+            let d =
+                f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
+            let (best, stalls) = match self.toward {
+                Some((t, b, n)) if t == aim => {
+                    if d < b - 0.5 {
+                        (d, 0)
+                    } else {
+                        (b, n + 1)
+                    }
+                }
+                Some(_) | None => (d, 0),
+            };
+            if stalls >= 3 {
+                self.toward = None;
+                self.refuse(aim, tick);
+                self.given_up_sites.push(c.site.frame.origin);
+            } else {
+                self.toward = Some((aim, best, stalls));
+                let (dx, dz) = (aim.0 - fx, aim.2 - fz);
+                let dir = if dx.abs() >= dz.abs() {
+                    (dx.signum(), 0)
+                } else {
+                    (0, dz.signum())
+                };
+                if dir != (0, 0) {
+                    self.note(
+                        tick,
+                        format!("dig toward the landing {aim:?}"),
+                        format!(
+                            "site at {:?} facing {}, no walk to it",
+                            c.site.frame.origin,
+                            c.site.frame.facing.name()
+                        ),
+                    );
+                    return Task::Stairs(Box::new(if aim.1 < fy {
+                        Stairs::new(dir, tick)
+                    } else {
+                        Stairs::level(dir, tick)
+                    }));
+                }
+            }
+        }
         let site = self
             .site
-            .or_else(|| cast::choose_site(w, &self.given_up_sites));
+            .or_else(|| choice.filter(|c| c.routed).map(|c| c.site));
         if let Some(site) = site {
             self.site = Some(site);
             self.note(
