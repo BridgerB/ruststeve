@@ -48,3 +48,11 @@ At least 28 of 56 real bots light a portal within 72,000 ticks of the `kit` star
 - **Read**: rs-l00-b08 (lane 0): thirteen scoops at sources along one lake, each failing `NoWay` within 15 ticks; 111 tunnels for coal; seven casts cut by the planner's watchdog ("cast stalled") and resumed at the same site.
 - **Causes**: a scoop started on a partial route (accepted for explores), toward the lake's middle; the `portal` kit counts an empty bucket, and a lava bucket held after a cut cast left it one short, so the planner went for iron, smelting with coal; a cast the watchdog cut kept its site.
 - **Fixes**: a scoop starts only on a found route; a lava bucket counts as the cast's bucket; a cast the watchdog cuts gives its site up.
+
+### 7. Hunting lava by stairs in place (official race 43753607071, b49521a: 0 of 56)
+- **What happened**: 35 of 56 bots filled their water and never began a cast; 12 never held water; 9 casts failed (`NoRefill` 15).
+- **Read**: rs-l00-b00 stood at (-56, 4, 68 to 71) from tick 15,725 to the cap "hunting" lava at (-32, 3, 17), 58 blocks off: 1,239 hunts, each six stairs and a tunnel that left it where it was. rs-l00-b03 looped boxed stairs, relocations and swims (2,002 `Boxed`).
+- **Cause**: the hunt only cut stairs and tunnels on a heading set toward the lava; a diagonal heading turns a stair a quarter, so it paced. A walk was never tried, though lava seen 58 blocks off is often reachable over open ground.
+- **Fix**: the hunt first walks toward the lava (to within 9), the target refused a while once walked to; stairs only where no route gets nearer.
+
+Also fixed in cc60822's follow-up: a refill's route may be partial when it ends within reach of the source (the walker keeps off cells beside lava); the hunt skips lava within a given-up site's radius (it chased the pool it gave up, under it and out to the world's edge).

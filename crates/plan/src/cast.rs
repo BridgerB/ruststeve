@@ -632,8 +632,12 @@ pub fn lava_sources(w: &World) -> Vec<Cell> {
 
 /// The nearest lava source memory saw exposed within `FAR_RADIUS`: what a hunt heads for
 /// (clojurecraft's `far-radius`).
-pub fn far_lava(w: &World) -> Option<Cell> {
-    lava_within(w, FAR_RADIUS).into_iter().next()
+pub fn far_lava(w: &World, given_up: &[Cell]) -> Option<Cell> {
+    lava_within(w, FAR_RADIUS).into_iter().find(|c| {
+        !given_up
+            .iter()
+            .any(|g| dist(centre(*g), centre(*c)) <= GIVE_UP_RADIUS)
+    })
 }
 
 fn lava_within(w: &World, radius: f64) -> Vec<Cell> {

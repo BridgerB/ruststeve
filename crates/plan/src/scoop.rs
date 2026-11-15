@@ -171,8 +171,25 @@ impl Scoop {
         match &mut self.stage {
             // A found route only: a partial one toward a lake's middle failed every walk, source
             // after source along a shore (docs/problems/portal.md wall 6).
+            // A partial route counts when it ends within reach of the surface: the walker keeps
+            // off cells beside lava, so a pool's bank is reached only that way.
             Stage::Approach(walk) => {
-                walk.route_now(w, tick) && walk.route == Some(crate::path::Status::Found)
+                let target = self.target;
+                walk.route_now(w, tick)
+                    && (walk.route == Some(crate::path::Status::Found)
+                        || walk
+                            .waypoints
+                            .as_ref()
+                            .and_then(|wp| wp.last())
+                            .is_some_and(|end| {
+                                let e = [
+                                    f64::from(end.0) + 0.5,
+                                    f64::from(end.1) + physics::EYE_HEIGHT,
+                                    f64::from(end.2) + 0.5,
+                                ];
+                                let s = surface(target);
+                                (0..3).map(|i| (e[i] - s[i]).powi(2)).sum::<f64>().sqrt() <= REACH
+                            }))
             }
             Stage::Aim { .. } | Stage::Sent { .. } => true,
         }

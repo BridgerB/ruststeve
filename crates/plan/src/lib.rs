@@ -1670,10 +1670,34 @@ impl Plan {
         // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
         // (clojurecraft's lava hunt goes toward far sources); with none seen, down toward the lava
         // sea. Stairs down blind boxed in 25,652 times in one race (docs/problems/portal.md wall 5).
-        if let (Some(far), Some(body)) = (cast::far_lava(w), w.body) {
+        if let (Some(far), Some(body)) = (cast::far_lava(w, &self.given_up_sites), w.body) {
             let feet = path::feet_cell(body.pos);
             let to = [f64::from(far.0) + 0.5, body.pos[1], f64::from(far.2) + 0.5];
             self.heading = walk::yaw_to(body.pos, to).rem_euclid(360.0);
+            // A walk toward it first, where a route gets nearer (clojurecraft's hunt walks before
+            // it digs); stairs only where none does. A bot tunnelled in place 55,000 ticks toward
+            // lava 58 blocks off, its stairs turned by a diagonal heading (wall 7).
+            if !self.refused_now(far, tick) {
+                let mut walk = Walk::new(
+                    far,
+                    Goal::Near {
+                        pos: far,
+                        range: f64::from(cast::LANDING_FAR),
+                    },
+                    Arrive::Goal,
+                    tick,
+                );
+                if walk.route_now(w, tick) {
+                    self.refuse(far, tick);
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("walk toward lava at {far:?}"),
+                        format!("seen from {feet:?}, no site within {}", cast::LAVA_RADIUS),
+                    );
+                    return Task::Explore(walk);
+                }
+            }
             self.note(
                 tick,
                 format!("hunt lava at {far:?}"),
