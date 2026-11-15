@@ -26,6 +26,7 @@ fn controls() -> impl Strategy<Value = Controls> {
             jump,
             sneak,
             yaw,
+            pitch: None,
         })
 }
 

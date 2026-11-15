@@ -149,6 +149,11 @@ pub struct Sim {
     pub corrections: u64,
     /// Digging, item entities and window 0 (issue 10b).
     pub survival: survival::Survival,
+    /// The player's look from its last move with a rotation, (yaw, pitch) in degrees: what a
+    /// bucket is used along (issue 14a).
+    pub look: (f32, f32),
+    /// Scheduled fluid ticks (issue 14a).
+    pub(crate) fluids: fluid::Fluids,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -189,6 +194,8 @@ impl Sim {
             health: 20.0,
             corrections: 0,
             survival: survival::Survival::new(0),
+            look: (0.0, 0.0),
+            fluids: fluid::Fluids::default(),
         }
     }
 
@@ -261,12 +268,23 @@ impl Sim {
                 }
                 Ok(Vec::new())
             }
-            (Phase::Play, C2s::MovePlayerPosRot { x, y, z, flags, .. }) => {
+            (
+                Phase::Play,
+                C2s::MovePlayerPosRot {
+                    x,
+                    y,
+                    z,
+                    yaw,
+                    pitch,
+                    flags,
+                },
+            ) => {
                 // Until a teleport is accepted the server ignores the client's moves (vanilla's
                 // awaitingPositionFromClient).
                 if self.teleport_pending.is_some() {
                     return Ok(Vec::new());
                 }
+                self.look = (*yaw, *pitch);
                 let to = [*x, *y, *z];
                 if !to.iter().all(|v| v.is_finite()) {
                     return self.kick("invalid move player packet received");
@@ -301,7 +319,19 @@ impl Sim {
                 },
             ) => self.on_click(*window, *state_id, *slot, *button, *mode),
             (Phase::Play, C2s::ContainerClose { window }) => self.on_close(*window),
-            (Phase::Play, C2s::UseItem { sequence, .. }) => self.on_use_item(*sequence),
+            (
+                Phase::Play,
+                C2s::UseItem {
+                    sequence,
+                    yaw,
+                    pitch,
+                    ..
+                },
+            ) => {
+                // `handleUseItem`: the player snapped to the packet's rotation first.
+                self.look = (*yaw, *pitch);
+                self.on_use_item(*sequence)
+            }
             (Phase::Play, C2s::Attack { entity }) => self.on_attack(*entity),
             (
                 Phase::Play,
@@ -642,6 +672,8 @@ impl Sim {
         }
         // The game mode's tick, the item entities, then the player's touch and its menu's
         // changes (ServerPlayer.doTick's broadcastChanges).
+        // The level's fluid ticks come before the players' (ServerLevel.tick).
+        out.extend(self.tick_fluids()?);
         out.extend(self.tick_digging()?);
         out.extend(self.tick_items()?);
         out.extend(self.tick_life()?);
@@ -729,6 +761,7 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
     })
 }
 
+pub mod fluid;
 pub mod furnace;
 pub mod life;
 pub mod survival;

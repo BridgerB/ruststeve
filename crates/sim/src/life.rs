@@ -377,6 +377,12 @@ impl Sim {
 
     /// `use_item`: start eating the held food when there is room for it.
     pub(crate) fn on_use_item(&mut self, sequence: i32) -> Result<Vec<Wire>, EncodeError> {
+        // A bucket is used along the look (`BucketItem.use`, issue 14a).
+        if let Some(used) = self.use_bucket() {
+            let mut out = used?;
+            out.push(wire(State::Play, &S2c::BlockChangedAck { sequence })?);
+            return Ok(out);
+        }
         if let Some((item, _)) = self.survival.held_stack()
             && let Some(food) = data::generated::item_props::food_of(item)
             && (self.survival.life.food < 20 || food.always)

@@ -223,6 +223,27 @@ impl Survival {
         self.slots.get(self.held_menu_slot()).copied().flatten()
     }
 
+    /// `ItemUtils.createFilledResult` for the held stack (a bucket filled or emptied, issue
+    /// 14a): one held becomes `to`; of more, one goes and `to` is added as a pickup is (dropped
+    /// by the server when there is no room; here lost).
+    pub(crate) fn fill_held(&mut self, to: data::ItemKind) {
+        let s = self.held_menu_slot();
+        match self.slots.get(s).copied().flatten() {
+            Some((_, 1)) => {
+                if let Some(slot) = self.slots.get_mut(s) {
+                    *slot = Some((to, 1));
+                }
+            }
+            Some((k, n)) => {
+                if let Some(slot) = self.slots.get_mut(s) {
+                    *slot = Some((k, n - 1));
+                }
+                self.add((to, 1));
+            }
+            None => {}
+        }
+    }
+
     /// Give a stack (a checkpoint start's kit, a test): into the inventory as a pickup goes.
     pub fn give(&mut self, stack: Stack) -> i32 {
         self.add(stack)
@@ -1530,6 +1551,11 @@ impl Sim {
                 out.extend(self.open_table(pos)?);
             } else if block_kind(self, pos) == Some(BlockKind::Furnace) {
                 out.extend(self.open_furnace(pos)?);
+            } else if self.survival.held_stack().map(|(k, _)| k)
+                == Some(data::ItemKind::FlintAndSteel)
+            {
+                // `FlintAndSteelItem.useOn` (issue 14a).
+                out.extend(self.strike(pos, face)?);
             } else {
                 self.place_held(pos, beside)?;
             }

@@ -5,8 +5,8 @@ type: reference
 tags: [physics, movement, collision, water, packets, core]
 aliases: [physics crate, step, Body, Controls, move_player_pos_rot, movement packets, differential test, server corrections]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
+lastUpdated: 2026-11-15
+verifiedAgainst: ruststeve@61fdf54 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/physics/src/lib.rs#pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Controls) -> Body {"
   - "ruststeve:crates/physics/src/lib.rs#pub fn land_tick(solid: &impl Solid, pos: Vec3, [vx, vy, vz]: Vec3) -> (Vec3, Vec3, bool, bool) {"
@@ -47,6 +47,9 @@ The server does not move the player: the client simulates its own movement each 
 
 ## Limits
 - Collision shapes are default-state only: a slab or stair in another state collides as its default shape, as in clojurecraft. Routes avoid them.
+
+## Issue 14a
+- `Controls.pitch` (`Option<f32>`, `#[serde(default)]`): the look sent with the move when set, for a bucket used along it ([[buckets-and-fluids]]). The physics step ignores it.
 
 ## See also
 - [[cc-physics]] - the original.

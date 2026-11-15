@@ -540,10 +540,15 @@ impl World {
         let moved = physics::step(&solid, &fluid, &body, &self.controls);
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
-        // Physics and the movement packets use the controls' yaw; the server's look is kept.
+        // Physics and the movement packets use the controls' yaw; the pitch is the controls' when
+        // set (a bucket aimed, issue 14a), else the server's look is kept.
         #[allow(clippy::cast_possible_truncation)]
-        let look = (self.controls.yaw as f32, self.player.pitch);
+        let look = (
+            self.controls.yaw as f32,
+            self.controls.pitch.unwrap_or(self.player.pitch),
+        );
         self.player.yaw = look.0;
+        self.player.pitch = look.1;
         let flags = u8::from(moved.on_ground) | (u8::from(moved.horizontal_collision) << 1);
         if self.sent_pos != Some(moved.pos) || self.sent_look != Some(look) {
             self.sent_pos = Some(moved.pos);
@@ -756,11 +761,14 @@ impl World {
             }
             Act::UseItem => {
                 self.sequence_sent += 1;
+                // The server snaps the player to this rotation before the use
+                // (`handleUseItem`): a bucket goes along it, so it carries the look's pitch
+                // (issue 14a parity found every real bucket use level at pitch 0).
                 vec![Effect::Send(C2s::UseItem {
                     hand: 0,
                     sequence: self.sequence_sent,
                     yaw: self.controls.yaw as f32,
-                    pitch: 0.0,
+                    pitch: self.controls.pitch.unwrap_or(self.player.pitch),
                 })]
             }
             Act::ReleaseUse => vec![Effect::Send(C2s::PlayerAction {

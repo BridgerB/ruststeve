@@ -41,6 +41,10 @@ pub struct Moment {
     /// loot in real, and the same in the model.
     #[serde(default)]
     pub summon: Vec<(String, i32, i32, i32)>,
+    /// Cells from the feet cell whose blocks join the outcome class (issue 14a: a source
+    /// scooped, obsidian made, a portal lit).
+    #[serde(default)]
+    pub watch: Vec<(i32, i32, i32)>,
 }
 
 fn yes() -> bool {
@@ -107,6 +111,9 @@ pub struct Outcome {
     pub food: Option<i32>,
     #[serde(default)]
     pub kills: u64,
+    /// The blocks at the moment's `watch` cells, by name, at the end (issue 14a).
+    #[serde(default)]
+    pub blocks: Vec<String>,
 }
 
 /// One run of a moment.
@@ -155,6 +162,7 @@ pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
                     ("grid", a.grid != b.grid),
                     ("food", a.food != b.food),
                     ("kills", a.kills != b.kills),
+                    ("blocks", a.blocks != b.blocks),
                 ]
                 .into_iter()
                 .filter_map(|(n, d)| d.then_some(n))

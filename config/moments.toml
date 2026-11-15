@@ -1260,3 +1260,174 @@ script = "smelt:330"
 ticks = 400
 give = ["furnace 1", "raw_iron 2", "coal 1"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+# Issue 14a: buckets along the look and fluids (brain/ruststeve/design/buckets-and-fluids.md), five rows a
+# landing on 0 to 2, each facing east (yaw -90) from the start's eye: a water source in a stone pit
+# scooped; water poured on stone; lava poured low against a hole's back wall; water poured against
+# the wall over a lava source (obsidian); flint and steel on a frame's bottom (the portal lit).
+# `watch` puts the blocks that matter into the outcome class.
+
+[[moment]]
+id = "w00-scoop"
+landing = 0
+dx = 12
+dz = 0
+script = "use:20:-90:41.51"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["water", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["bucket 1"]
+watch = [[2, -1, 0]]
+
+[[moment]]
+id = "w00-pour"
+landing = 0
+dx = -12
+dz = 0
+script = "use:20:-90:39.01"
+ticks = 60
+set = [["stone", 2, -1, 0], ["stone", 0, -1, 0], ["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["water_bucket 1"]
+watch = [[2, 0, 0]]
+
+[[moment]]
+id = "w00-lava"
+landing = 0
+dx = 0
+dz = 12
+script = "use:20:-90:42.86"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["air", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["lava_bucket 1"]
+watch = [[2, -1, 0]]
+
+[[moment]]
+id = "w00-obsidian"
+landing = 0
+dx = 0
+dz = -12
+script = "use:20:-90:24.13"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["stone", 3, 0, 0], ["lava", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["water_bucket 1"]
+watch = [[2, -1, 0], [2, 0, 0]]
+
+[[moment]]
+id = "w00-portal"
+landing = 0
+dx = 12
+dz = 12
+script = "light:20:1:0:2:1"
+ticks = 60
+set = [["obsidian", 1, 0, 2], ["obsidian", 2, 0, 2], ["obsidian", 1, 4, 2], ["obsidian", 2, 4, 2], ["obsidian", 0, 1, 2], ["obsidian", 3, 1, 2], ["air", 1, 1, 2], ["air", 2, 1, 2], ["obsidian", 0, 2, 2], ["obsidian", 3, 2, 2], ["air", 1, 2, 2], ["air", 2, 2, 2], ["obsidian", 0, 3, 2], ["obsidian", 3, 3, 2], ["air", 1, 3, 2], ["air", 2, 3, 2]]
+give = ["flint_and_steel 1"]
+watch = [[1, 1, 2], [2, 1, 2], [1, 2, 2], [2, 2, 2], [1, 3, 2], [2, 3, 2]]
+
+[[moment]]
+id = "w01-scoop"
+landing = 1
+dx = 12
+dz = 0
+script = "use:20:-90:41.51"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["water", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["bucket 1"]
+watch = [[2, -1, 0]]
+
+[[moment]]
+id = "w01-pour"
+landing = 1
+dx = -12
+dz = 0
+script = "use:20:-90:39.01"
+ticks = 60
+set = [["stone", 2, -1, 0], ["stone", 0, -1, 0], ["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["water_bucket 1"]
+watch = [[2, 0, 0]]
+
+[[moment]]
+id = "w01-lava"
+landing = 1
+dx = 0
+dz = 12
+script = "use:20:-90:42.86"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["air", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["lava_bucket 1"]
+watch = [[2, -1, 0]]
+
+[[moment]]
+id = "w01-obsidian"
+landing = 1
+dx = 0
+dz = -12
+script = "use:20:-90:24.13"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["stone", 3, 0, 0], ["lava", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["water_bucket 1"]
+watch = [[2, -1, 0], [2, 0, 0]]
+
+[[moment]]
+id = "w01-portal"
+landing = 1
+dx = 12
+dz = 12
+script = "light:20:1:0:2:1"
+ticks = 60
+set = [["obsidian", 1, 0, 2], ["obsidian", 2, 0, 2], ["obsidian", 1, 4, 2], ["obsidian", 2, 4, 2], ["obsidian", 0, 1, 2], ["obsidian", 3, 1, 2], ["air", 1, 1, 2], ["air", 2, 1, 2], ["obsidian", 0, 2, 2], ["obsidian", 3, 2, 2], ["air", 1, 2, 2], ["air", 2, 2, 2], ["obsidian", 0, 3, 2], ["obsidian", 3, 3, 2], ["air", 1, 3, 2], ["air", 2, 3, 2]]
+give = ["flint_and_steel 1"]
+watch = [[1, 1, 2], [2, 1, 2], [1, 2, 2], [2, 2, 2], [1, 3, 2], [2, 3, 2]]
+
+[[moment]]
+id = "w02-scoop"
+landing = 2
+dx = 12
+dz = 0
+script = "use:20:-90:41.51"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["water", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["bucket 1"]
+watch = [[2, -1, 0]]
+
+[[moment]]
+id = "w02-pour"
+landing = 2
+dx = -12
+dz = 0
+script = "use:20:-90:39.01"
+ticks = 60
+set = [["stone", 2, -1, 0], ["stone", 0, -1, 0], ["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["water_bucket 1"]
+watch = [[2, 0, 0]]
+
+[[moment]]
+id = "w02-lava"
+landing = 2
+dx = 0
+dz = 12
+script = "use:20:-90:42.86"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["air", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["lava_bucket 1"]
+watch = [[2, -1, 0]]
+
+[[moment]]
+id = "w02-obsidian"
+landing = 2
+dx = 0
+dz = -12
+script = "use:20:-90:24.13"
+ticks = 60
+set = [["stone", 1, -1, 0], ["stone", 3, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, -1], ["stone", 2, -2, 0], ["stone", 0, -1, 0], ["stone", 3, 0, 0], ["lava", 2, -1, 0], ["air", 1, 0, 0], ["air", 2, 0, 0], ["air", 1, 1, 0], ["air", 2, 1, 0]]
+give = ["water_bucket 1"]
+watch = [[2, -1, 0], [2, 0, 0]]
+
+[[moment]]
+id = "w02-portal"
+landing = 2
+dx = 12
+dz = 12
+script = "light:20:1:0:2:1"
+ticks = 60
+set = [["obsidian", 1, 0, 2], ["obsidian", 2, 0, 2], ["obsidian", 1, 4, 2], ["obsidian", 2, 4, 2], ["obsidian", 0, 1, 2], ["obsidian", 3, 1, 2], ["air", 1, 1, 2], ["air", 2, 1, 2], ["obsidian", 0, 2, 2], ["obsidian", 3, 2, 2], ["air", 1, 2, 2], ["air", 2, 2, 2], ["obsidian", 0, 3, 2], ["obsidian", 3, 3, 2], ["air", 1, 3, 2], ["air", 2, 3, 2]]
+give = ["flint_and_steel 1"]
+watch = [[1, 1, 2], [2, 1, 2], [1, 2, 2], [2, 2, 2], [1, 3, 2], [2, 3, 2]]

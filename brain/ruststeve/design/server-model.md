@@ -5,8 +5,8 @@ type: reference
 tags: [sim, model, server, body, closed-loop]
 aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@3ee956a clojurecraft@be85a92
+lastUpdated: 2026-11-15
+verifiedAgainst: ruststeve@61fdf54 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -98,6 +98,9 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - `chunk_batch_start` goes out as its id with an empty body; the bot counts it unknown.
 - `ModelWorld::ground` and `placeable` place a player as vanilla does (under leaves, two free cells): found by issue 09's measure ([[planner]]).
 - Peaceful regeneration (`ServerPlayer.tickRegeneration`, 1 every 20 ticks below full) is modelled when `Config::peaceful`; found by the parity table.
+
+## Issue 14a
+- Fluids, buckets along the look, obsidian and portal lighting (`crates/sim/src/fluid.rs`), and the player's look kept from each move with rotation ([[buckets-and-fluids]]).
 
 ## See also
 - [[cc-sim]] - clojurecraft's model, the original.

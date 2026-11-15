@@ -5,8 +5,8 @@ type: reference
 tags: [parity, sim, measurement, capture, moments, real]
 aliases: [drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@3ee956a
+lastUpdated: 2026-11-15
+verifiedAgainst: ruststeve@61fdf54
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -71,6 +71,9 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - The server runs peaceful, which removes hostile mobs: zombie rows (their attacks and knockback) need a non-peaceful row and come with defence (12d). Rows other than the drowning ones still breathe.
 - Moments test movement, falls, the server's corrections, digging by hand, drops and pickup and the 2x2 grid; tools, placing and other windows add moments with their issues.
 - A dig row checks whether the block broke by the row's end, not the tick it broke on.
+
+## Issue 14a
+- Rows `w00` to `w02` (scoop, pour, lava, obsidian, portal) and the `watch` field: cells whose blocks join the outcome class as `blocks` ([[buckets-and-fluids]]).
 
 ## See also
 - [[server-model]] - what the model models.
