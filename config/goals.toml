@@ -142,11 +142,14 @@ priority = 13
 until = "portal-kit"
 doc = "what a portal cast spends that the iron kit does not hold"
 provides = [["item:water_bucket", 1], ["item:bucket", 1]]
+spares = [["item:stick", 24]]
 
 [[goal]]
-id = "fill-water"
+id = "fill-bucket"
 priority = 10
 doc = "scoop a surface water source with an empty bucket"
+holds = [["tag:pickaxes", 1]]
+spares = [["tag:pickaxes", 1]]
 needs = [["item:bucket", 1]]
 provides = [["item:water_bucket", 1]]
 act = "scoop"
