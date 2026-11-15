@@ -32,6 +32,8 @@ pub const STALL_TICKS: u64 = 2400;
 pub const REACH: f64 = 4.0;
 /// Blocks from the feet a lava source is looked at for a site (clojurecraft's `hunt-radius`).
 pub const LAVA_RADIUS: f64 = 48.0;
+/// Blocks from the feet lava seen is headed for when none is near (`far-radius`).
+pub const FAR_RADIUS: f64 = 160.0;
 /// A site's landing: this near the lava and no nearer, on the plane.
 pub const LANDING_NEAR: i32 = 4;
 pub const LANDING_FAR: i32 = 9;
@@ -625,18 +627,28 @@ impl Cast {
 
 /// The lava sources memory saw exposed within `LAVA_RADIUS` of the feet, nearest first.
 pub fn lava_sources(w: &World) -> Vec<Cell> {
+    lava_within(w, LAVA_RADIUS)
+}
+
+/// The nearest lava source memory saw exposed within `FAR_RADIUS`: what a hunt heads for
+/// (clojurecraft's `far-radius`).
+pub fn far_lava(w: &World) -> Option<Cell> {
+    lava_within(w, FAR_RADIUS).into_iter().next()
+}
+
+fn lava_within(w: &World, radius: f64) -> Vec<Cell> {
     let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
         return Vec::new();
     };
     let f = feet(&body);
-    let r = (LAVA_RADIUS as i32) / 16 + 1;
+    let r = (radius as i32) / 16 + 1;
     let fc = centre(f);
     let mut near: Vec<(f64, Cell)> = w
         .memory
         .sources_near(&dim.name, memory::Fluid::Lava, f.0 >> 4, f.2 >> 4, r)
         .into_iter()
         .map(|c| (dist(fc, centre(c)), c))
-        .filter(|(d, _)| *d <= LAVA_RADIUS)
+        .filter(|(d, _)| *d <= radius)
         .collect();
     near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     near.into_iter().map(|(_, c)| c).collect()

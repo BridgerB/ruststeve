@@ -1653,6 +1653,20 @@ impl Plan {
             );
             return Task::Cast(Box::new(cast::Cast::new(site, tick)));
         }
+        // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
+        // (clojurecraft's lava hunt goes toward far sources); with none seen, down toward the lava
+        // sea. Stairs down blind boxed in 25,652 times in one race (docs/problems/portal.md wall 5).
+        if let (Some(far), Some(body)) = (cast::far_lava(w), w.body) {
+            let feet = path::feet_cell(body.pos);
+            let to = [f64::from(far.0) + 0.5, body.pos[1], f64::from(far.2) + 0.5];
+            self.heading = walk::yaw_to(body.pos, to).rem_euclid(360.0);
+            self.note(
+                tick,
+                format!("hunt lava at {far:?}"),
+                format!("seen from {feet:?}, no site within {}", cast::LAVA_RADIUS),
+            );
+            return self.mine(w, &[], Some(far.1 + 2), tick);
+        }
         self.mine(w, &[], Some(LAVA_DEPTH), tick)
     }
 
