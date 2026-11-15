@@ -1540,10 +1540,13 @@ impl Plan {
                 }));
             }
         }
-        let dir = match (self.heading as i32).rem_euclid(360) {
-            90 => (-1, 0),
-            180 => (0, -1),
-            270 => (1, 0),
+        // The nearest cardinal to the heading: only exact quarters counted before, so the lava
+        // hunt's bearing (172 degrees, say) cut stairs south whatever it aimed at
+        // (docs/problems/portal.md wall 8).
+        let dir = match ((self.heading / 90.0).round() as i32).rem_euclid(4) {
+            1 => (-1, 0),
+            2 => (0, -1),
+            3 => (1, 0),
             _ => (0, 1),
         };
         // At the row's depth, the lowest feet height its stairs go to (clojurecraft's

@@ -56,3 +56,10 @@ At least 28 of 56 real bots light a portal within 72,000 ticks of the `kit` star
 - **Fix**: the hunt first walks toward the lava (to within 9), the target refused a while once walked to; stairs only where no route gets nearer.
 
 Also fixed in cc60822's follow-up: a refill's route may be partial when it ends within reach of the source (the walker keeps off cells beside lava); the hunt skips lava within a given-up site's radius (it chased the pool it gave up, under it and out to the world's edge).
+
+### 8. The lava hunt dug south whatever it aimed at (race 43761772012, e7ccfb0: 1 of 112; 1 of 112 and 0 of 56 beside it)
+- **What happened**: 73 of 112 bots filled their water and never began a cast; drownings rose to 11.
+- **Read**: rs-l00-b01 saw lava 60 blocks down at (-25, 3, 15), came within 43, 25 and 15 blocks of it on the way down with "no site within 48" each time, then spent ticks 13,229 to the cap at (-39, 3, 58), level with the lava and 41 blocks south of it, hunting.
+- **Cause**: the mine task turned its heading into a direction only for exact quarters (90, 180, 270), anything else meaning south; the hunt set the heading to the lava's bearing, so every hunt's stairs and tunnels went south.
+- **Fix**: the heading's nearest cardinal.
+- **Still open**: a site needs a found walk to its landing, and a bot in rock above or beside a lava cave has none; the hunt now has to bring it to the lava's cave before any site is taken.
