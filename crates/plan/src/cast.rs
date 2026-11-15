@@ -75,6 +75,10 @@ pub fn spent(w: &World, lava: Cell, frame: Frame) -> bool {
     pool < left
 }
 
+/// Sites that pass that are collected before the best is routed to.
+pub const SITE_CANDIDATES: usize = 12;
+/// Candidate sites a route to the landing is looked for, best first.
+pub const SITE_ROUTES: usize = 4;
 /// Blocks a site's cast may place at most (`site-blocks`): a handful.
 pub const SITE_BLOCKS: usize = 8;
 
@@ -653,7 +657,9 @@ pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {
             .any(|g| dist(centre(*g), centre(c)) <= GIVE_UP_RADIUS)
     };
     let mut cells = crate::path::Cells::new(w);
-    let mut best: Option<((usize, f64), Site)> = None;
+    // The standable landings first, nearest the feet first: a plan is built only for those, and
+    // the search stops at `SITE_CANDIDATES` sites that pass (an open cave has thousands).
+    let mut landings: Vec<(f64, Cell, Cell)> = Vec::new();
     for src in lava.iter().filter(|c| !refused(**c)).take(MAX_SOURCES) {
         for dy in 1..=3 {
             for dx in -LANDING_FAR..=LANDING_FAR {
@@ -663,61 +669,77 @@ pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {
                         continue;
                     }
                     let landing = (src.0 + dx, src.1 + dy, src.2 + dz);
-                    let d = dist(here, centre(landing));
-                    if best.as_ref().is_some_and(|((n, b), _)| *n == 0 && *b <= d) {
-                        continue;
-                    }
-                    if !cells.standable(landing) {
-                        continue;
-                    }
-                    for facing in Facing::ALL {
-                        let probe = Frame {
-                            origin: (0, 0, 0),
-                            facing,
-                        };
-                        let l0 = probe.at(crate::build::landing(0));
-                        let frame = Frame {
-                            origin: (landing.0 - l0.0, landing.1 - l0.1, landing.2 - l0.2),
-                            facing,
-                        };
-                        if refused(frame.origin) || spent(w, *src, frame) {
-                            continue;
-                        }
-                        // The lava in front: farther from the frame's cells than the landing.
-                        let back = frame.at((1, 0, 0));
-                        if dist(centre(*src), centre(back)) <= dist(centre(landing), centre(back)) {
-                            continue;
-                        }
-                        let plan = frame_plan(frame, false, 0);
-                        let foot = footprint(&plan);
-                        let ok = foot.iter().all(|c| {
-                            kind(w, *c).is_some()
-                                && !matches!(seen(w, *c), Some(BlockKind::Water | BlockKind::Lava))
-                                && !lava.iter().any(|l| {
-                                    (l.0 - c.0).abs() <= 1
-                                        && (l.1 - c.1).abs() <= 1
-                                        && (l.2 - c.2).abs() <= 1
-                                })
-                        });
-                        if !ok {
-                            continue;
-                        }
-                        let n = blocks_needed(w, &plan);
-                        if n > SITE_BLOCKS {
-                            continue;
-                        }
-                        if best
-                            .as_ref()
-                            .is_none_or(|((bn, bd), _)| (n, d) < (*bn, *bd))
-                        {
-                            best = Some(((n, d), Site { frame, lava: *src }));
-                        }
+                    if cells.standable(landing) {
+                        landings.push((dist(here, centre(landing)), landing, *src));
                     }
                 }
             }
         }
     }
-    best.map(|(_, s)| s)
+    landings.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    landings.dedup_by_key(|l| l.1);
+    let mut found: Vec<((usize, f64), Site, Cell)> = Vec::new();
+    for (d, landing, src) in landings {
+        if found.len() >= SITE_CANDIDATES {
+            break;
+        }
+        let src = &src;
+        for facing in Facing::ALL {
+            let probe = Frame {
+                origin: (0, 0, 0),
+                facing,
+            };
+            let l0 = probe.at(crate::build::landing(0));
+            let frame = Frame {
+                origin: (landing.0 - l0.0, landing.1 - l0.1, landing.2 - l0.2),
+                facing,
+            };
+            if refused(frame.origin) || spent(w, *src, frame) {
+                continue;
+            }
+            // The lava in front: farther from the frame's cells than the landing.
+            let back = frame.at((1, 0, 0));
+            if dist(centre(*src), centre(back)) <= dist(centre(landing), centre(back)) {
+                continue;
+            }
+            let plan = frame_plan(frame, false, 0);
+            let foot = footprint(&plan);
+            let ok = foot.iter().all(|c| {
+                kind(w, *c).is_some()
+                    && !matches!(seen(w, *c), Some(BlockKind::Water | BlockKind::Lava))
+                    && !lava.iter().any(|l| {
+                        (l.0 - c.0).abs() <= 1 && (l.1 - c.1).abs() <= 1 && (l.2 - c.2).abs() <= 1
+                    })
+            });
+            if !ok {
+                continue;
+            }
+            let n = blocks_needed(w, &plan);
+            if n > SITE_BLOCKS {
+                continue;
+            }
+            found.push(((n, d), Site { frame, lava: *src }, landing));
+            break;
+        }
+    }
+    // The churn invariant: a site is taken only when a walk to its landing is found (one bot at
+    // y -32 chose a landing at y -52 in another cave and failed its first dig: wall 4).
+    found.sort_by(|a, b| a.0.0.cmp(&b.0.0).then(a.0.1.total_cmp(&b.0.1)));
+    let from = feet(&body);
+    found
+        .into_iter()
+        .take(SITE_ROUTES)
+        .find(|(_, _, landing)| {
+            crate::path::plan(
+                w,
+                from,
+                &Goal::Block { pos: *landing },
+                crate::path::Budget::Far.expansions(),
+            )
+            .status
+                == crate::path::Status::Found
+        })
+        .map(|(_, s, _)| s)
 }
 
 /// Whether the plan's light op holds: a portal block in the frame.
