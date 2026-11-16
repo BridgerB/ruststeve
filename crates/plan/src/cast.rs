@@ -686,7 +686,16 @@ impl Cast {
         let print = footprint(&self.plan);
         let st = station::station_among(w, &sources, self.site.frame, &print, Some(self.site.h))?;
         let f = feet(&body);
-        let kept = station::kept(self.site.frame);
+        // The frame's rock and every cell the plan places, which a way never digs (clojurecraft's
+        // `kept` and `placed?`): a way dug through the room's floor undid its place op, and the
+        // cast went back to it 360 times (wall 20).
+        let mut kept = station::kept(self.site.frame);
+        kept.extend(
+            self.plan
+                .iter()
+                .filter(|op| op.kind == OpKind::Place)
+                .filter_map(|op| op.pos),
+        );
         let from = eye(&body);
         // A station source already in reach with a clear face: scooped from here.
         if body.on_ground

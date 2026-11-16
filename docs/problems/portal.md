@@ -118,3 +118,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **What happened**: rs-l00-b08 (race 43945845334) failed `dig :room` after 15 ops with no dig started; `why` at the failure showed two other players within 2.3 blocks and a dozen dropped items round it.
 - **Cause**: the `lava` start's twelve places sat round about five pools (three within 3 blocks at (169, 60, -80)), and bot i of lane L took place (14 L + i) mod 12: on each lane's one server three or four bots cast the same pool, digging each other's cells and taking each other's drops. The `kit` start spreads bots 128 apart and never had this.
 - **Fix**: fourteen places from `kit` race casts, their lava 32 blocks apart or more; bot i of every lane takes place i (one bot per pool per server, the same pools in every lane, so lanes pair).
+
+### 20. The station's way dug the room's floor (station races 43955186750 and 43956811013, 37d3b8c: 7 and 7 of 112)
+- **What happened**: the station refill lifted the pair to 14 of 224, but `place :floor` became the top failure in lane 0 (6 of 14), each cast going back to a floor op tens or hundreds of times (rs-l00-b02: 360 regressions).
+- **Read**: rs-l00-b06 at its site (47, 39, 61) placed cobblestone on (49, 40, 64) at event 196180; the world rebuilt at 196300 shows it at (49, 41, 64), and at 196304 the bot, standing at (48, 41, 64), began to dig it: the refill's straight way to its stand ran through the floor just placed. Place, dig, place, a dozen times.
+- **Cause**: `stance-block` in clojurecraft refuses the frame's rock and every cell the build places (`placed?`); the port kept only the frame's rock.
+- **Fix**: the way and the sight dig refuse every cell a place op of the plan names.
