@@ -173,6 +173,12 @@ pub struct Cast {
     last_done: u64,
     /// Ops done since the cast began, for the notes.
     pub done_ops: u32,
+    /// Times the first op not done moved back to an earlier one (a later op undid it), and the
+    /// last op that undid one with the op it undid, for the notes (wall 17).
+    #[serde(default)]
+    pub regressions: u32,
+    #[serde(default)]
+    pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
     #[serde(default)]
     tunnels: u32,
@@ -242,7 +248,28 @@ impl Cast {
             tries: 0,
             last_done: tick,
             done_ops: 0,
+            regressions: 0,
+            last_regression: None,
             tunnels: 0,
+        }
+    }
+
+    /// How the cast went back, for the notes: the count and the last op that undid an earlier one.
+    pub fn regression_text(&self) -> String {
+        match self.last_regression {
+            Some((was, to)) => format!(
+                "{} regressions, last from {} back to {}",
+                self.regressions,
+                self.plan
+                    .get(was)
+                    .map(crate::build::op_text)
+                    .unwrap_or_default(),
+                self.plan
+                    .get(to)
+                    .map(crate::build::op_text)
+                    .unwrap_or_default()
+            ),
+            None => "no regressions".to_owned(),
         }
     }
 
@@ -274,9 +301,14 @@ impl Cast {
             return (still, None, CastStatus::Done);
         };
         if self.op != Some(i) {
-            if self.op.is_some() {
-                self.done_ops += 1;
-                self.last_done = tick;
+            if let Some(was) = self.op {
+                if i < was {
+                    self.regressions += 1;
+                    self.last_regression = Some((was, i));
+                } else {
+                    self.done_ops += 1;
+                    self.last_done = tick;
+                }
             }
             self.op = Some(i);
             self.work = Work::Idle;

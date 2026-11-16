@@ -607,7 +607,11 @@ impl Plan {
                 self.acts.extend(act);
                 let site = k.site;
                 let ops = k.done_ops;
-                let at = k.current().map(build::op_text).unwrap_or_default();
+                let at = format!(
+                    "{}; {}",
+                    k.current().map(build::op_text).unwrap_or_default(),
+                    k.regression_text()
+                );
                 return self.after_cast(c, status, site, ops, at, tick);
             }
             Task::Swim(e, since) => {
