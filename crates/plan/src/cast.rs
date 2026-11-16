@@ -770,7 +770,7 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
     let mut landings: Vec<(f64, Cell, Cell)> = Vec::new();
     for src in lava.iter().filter(|c| !refused(**c)).take(MAX_SOURCES) {
         report.sources += 1;
-        for dy in 1..=3 {
+        for dy in -3..=3 {
             for dx in -LANDING_FAR..=LANDING_FAR {
                 for dz in -LANDING_FAR..=LANDING_FAR {
                     let plane = dx.abs().max(dz.abs());
