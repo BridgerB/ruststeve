@@ -32,6 +32,9 @@ pub const STALL_TICKS: u64 = 2400;
 pub const REACH: f64 = 4.0;
 /// Failed walks or digs toward the station before a cast refills from the nearest sources.
 const STATION_MISSES: u32 = 2;
+/// Blocks a way toward one op's stand may dig: the room is about ten wide, so a way longer than
+/// that is not the room's.
+const WAY_DIGS: u32 = 12;
 /// Blocks from the feet a lava source is looked at for a site (clojurecraft's `hunt-radius`).
 pub const LAVA_RADIUS: f64 = 48.0;
 /// Blocks from the feet lava seen is headed for when none is near (`far-radius`).
@@ -187,6 +190,9 @@ pub struct Cast {
     /// takes the nearest sources instead (a stand a step up the walk never reached, wall 18).
     #[serde(default)]
     station_misses: u32,
+    /// Blocks dug on straight ways toward the op's stand (reset with the op).
+    #[serde(default)]
+    way_digs: u32,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -260,6 +266,7 @@ impl Cast {
             done_ops: 0,
             regressions: 0,
             station_misses: 0,
+            way_digs: 0,
             last_regression: None,
             tunnels: 0,
         }
@@ -324,6 +331,7 @@ impl Cast {
             self.op = Some(i);
             self.work = Work::Idle;
             self.tries = 0;
+            self.way_digs = 0;
         }
         if tick.saturating_sub(self.last_done) > STALL_TICKS {
             return (still, None, CastStatus::Failed(CastFailure::Stalled));
@@ -354,6 +362,28 @@ impl Cast {
         self.tries <= OP_TRIES
     }
 
+    /// The first block of the straight way at the feet's height toward `to`'s column, when a way
+    /// may dig it and it is in reach; `None` past `WAY_DIGS` digs for one op.
+    fn way_block(&self, w: &World, body: &physics::Body, to: Cell) -> Option<Cell> {
+        if self.way_digs >= WAY_DIGS {
+            return None;
+        }
+        let f = feet(body);
+        let mut kept = crate::station::kept(self.site.frame);
+        kept.extend(
+            self.plan
+                .iter()
+                .filter(|op| op.kind == OpKind::Place)
+                .filter_map(|op| op.pos),
+        );
+        let level = (to.0, f.1, to.2);
+        let crate::station::Way::Dig(block) = crate::station::stance_block(w, f, level, &kept)
+        else {
+            return None;
+        };
+        (dist(eye(body), centre(block)) <= REACH).then_some(block)
+    }
+
     /// Walk to within reach of `target` (or onto `stand` when given), then `Ok`.
     fn approach(
         &mut self,
@@ -363,6 +393,24 @@ impl Cast {
         stand: Option<Cell>,
         tick: u64,
     ) -> Result<(), (Controls, Option<Act>, CastStatus)> {
+        if let Work::WayDig(d) = &mut self.work {
+            let (c, act, status) = d.step(w, tick);
+            return Err(match status {
+                DigStatus::Running => (c, act, CastStatus::Running),
+                DigStatus::Done => {
+                    self.work = Work::Idle;
+                    self.last_done = tick;
+                    (c, act, CastStatus::Running)
+                }
+                DigStatus::Failed(_) => {
+                    if self.try_again() {
+                        (c, act, CastStatus::Running)
+                    } else {
+                        self.fail()
+                    }
+                }
+            });
+        }
         let there = match stand {
             Some(s) => feet(body) == s && body.on_ground,
             None => dist(eye(body), centre(target)) <= REACH && body.on_ground,
@@ -383,6 +431,13 @@ impl Cast {
             };
             let mut walk = Walk::new(stand.unwrap_or(target), goal, Arrive::Goal, tick);
             if !walk.route_now(w, tick) {
+                // No walk: the straight way dug toward it (clojurecraft's `toward-stand`), its
+                // first block in reach, never the frame's rock or a cell the plan places (wall 22).
+                if let Some(block) = self.way_block(w, body, stand.unwrap_or(target)) {
+                    self.way_digs += 1;
+                    self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+                    return Err((Controls::default(), None, CastStatus::Running));
+                }
                 return Err(if self.try_again() {
                     (Controls::default(), None, CastStatus::Running)
                 } else {
