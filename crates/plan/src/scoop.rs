@@ -129,6 +129,32 @@ fn surface((x, y, z): Cell) -> [f64; 3] {
     ]
 }
 
+/// Where the look goes from `eye`: the first of the source's faces (the surface, the four sides,
+/// the underside, each a little inside) within `reach` with a clear ray. A bucket's ray takes a
+/// source through any face: a refill under a pool two blocks up found no stand aiming at the
+/// surface alone (docs/problems/portal.md wall 16).
+pub fn aim_for(w: &World, eye: [f64; 3], (x, y, z): Cell, reach: f64) -> Option<[f64; 3]> {
+    const FACES: [[f64; 3]; 6] = [
+        [0.5, SURFACE_HEIGHT, 0.5],
+        [0.1, 0.45, 0.5],
+        [0.9, 0.45, 0.5],
+        [0.5, 0.45, 0.1],
+        [0.5, 0.45, 0.9],
+        [0.5, 0.1, 0.5],
+    ];
+    FACES
+        .iter()
+        .map(|o| {
+            [
+                f64::from(x) + o[0],
+                f64::from(y) + o[1],
+                f64::from(z) + o[2],
+            ]
+        })
+        .filter(|p| (0..3).map(|i| (eye[i] - p[i]).powi(2)).sum::<f64>().sqrt() <= reach)
+        .find(|p| clear_ray(w, eye, *p, (x, y, z)))
+}
+
 fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
 }
@@ -152,26 +178,21 @@ pub fn stands(w: &World, target: Cell) -> Vec<Cell> {
         return Vec::new();
     };
     let feet = crate::path::feet_cell(body.pos);
-    let point = surface(target);
     let mut cells = crate::path::Cells::new(w);
     let mut out: Vec<(f64, Cell)> = Vec::new();
     for dx in -4..=4 {
         for dz in -4..=4 {
-            for dy in -1..=3 {
+            for dy in -4..=3 {
                 let c = (target.0 + dx, target.1 + dy, target.2 + dz);
                 let eye = [
                     f64::from(c.0) + 0.5,
                     f64::from(c.1) + physics::EYE_HEIGHT,
                     f64::from(c.2) + 0.5,
                 ];
-                let reach = (0..3)
-                    .map(|i| (eye[i] - point[i]).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                if reach > STAND_REACH || c == target || !cells.standable(c) {
+                if c == target || !cells.standable(c) {
                     continue;
                 }
-                if clear_ray(w, eye, point, target) {
+                if aim_for(w, eye, target, STAND_REACH).is_some() {
                     out.push((distance(feet, c), c));
                 }
             }
@@ -261,8 +282,7 @@ impl Scoop {
                                     f64::from(end.1) + physics::EYE_HEIGHT,
                                     f64::from(end.2) + 0.5,
                                 ];
-                                let s = surface(target);
-                                (0..3).map(|i| (e[i] - s[i]).powi(2)).sum::<f64>().sqrt() <= REACH
+                                aim_for(w, e, target, REACH).is_some()
                             }))
             }
             Stage::Aim { .. } | Stage::Sent { .. } => true,
@@ -291,8 +311,9 @@ impl Scoop {
         if !matches!(self.stage, Stage::Sent { .. }) && !source_of(w, self.target, self.fluid) {
             return (still, None, ScoopStatus::Failed(ScoopFailure::Gone));
         }
-        let point = surface(self.target);
         let from = eye(&body);
+        let aim = aim_for(w, from, self.target, REACH);
+        let point = aim.unwrap_or_else(|| surface(self.target));
         let in_reach = (0..3)
             .map(|i| (point[i] - from[i]).powi(2))
             .sum::<f64>()
@@ -300,7 +321,7 @@ impl Scoop {
             <= REACH;
         match &mut self.stage {
             Stage::Approach(walk) => {
-                if in_reach && body.on_ground && clear_ray(w, from, point, self.target) {
+                if aim.is_some() && body.on_ground {
                     self.stage = Stage::Aim { since: tick };
                     return (still, None, ScoopStatus::Running);
                 }

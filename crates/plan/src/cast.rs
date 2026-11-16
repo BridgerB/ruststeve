@@ -137,6 +137,10 @@ pub enum CastStatus {
 pub struct Site {
     pub frame: Frame,
     pub lava: Cell,
+    /// The lava's height over the room's floor, which the room's access steps climb to
+    /// (clojurecraft's `h`): a pool above the room is refilled from level with it (wall 16).
+    #[serde(default)]
+    pub h: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -232,7 +236,7 @@ impl Cast {
     pub fn new(site: Site, tick: u64) -> Self {
         Self {
             site,
-            plan: frame_plan(site.frame, false, 0),
+            plan: frame_plan(site.frame, false, site.h),
             op: None,
             work: Work::Idle,
             tries: 0,
@@ -818,7 +822,9 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
                 report.lava_behind += 1;
                 continue;
             }
-            let plan = frame_plan(frame, false, 0);
+            // Access steps up to a pool above the room: its surface one over the step's feet.
+            let h = (src.1 + 1 - landing.1).clamp(0, crate::build::MAX_ACCESS);
+            let plan = frame_plan(frame, false, h);
             let foot = footprint(&plan);
             let ok = foot.iter().all(|c| {
                 kind(w, *c).is_some()
@@ -846,7 +852,15 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
                 continue;
             }
             report.passed += 1;
-            found.push(((n, d), Site { frame, lava: *src }, landing));
+            found.push((
+                (n, d),
+                Site {
+                    frame,
+                    lava: *src,
+                    h,
+                },
+                landing,
+            ));
             break;
         }
     }
