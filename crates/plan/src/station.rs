@@ -170,41 +170,6 @@ pub fn station_among(
     None
 }
 
-/// The cells beside the cell over lava source `src` the feet can stand in once opened, the source
-/// diagonally below them (`stands-beside`): a firm floor, it and the head openable, no fluid
-/// round them but in the cell over the source, and the cell over the source openable with no
-/// fluid round it but the source.
-pub fn stands_beside(w: &World, (x, y, z): Cell) -> Vec<Cell> {
-    let src = (x, y, z);
-    let over = (x, y + 1, z);
-    let wet = |c: Cell| crate::cast::seen(w, c).is_some_and(fluid);
-    [(1, 0), (-1, 0), (0, 1), (0, -1)]
-        .into_iter()
-        .map(|(dx, dz)| (x + dx, y + 1, z + dz))
-        .filter(|stand| {
-            let head = (stand.0, stand.1 + 1, stand.2);
-            firm(w, (stand.0, stand.1 - 1, stand.2))
-                && openable(w, *stand)
-                && openable(w, head)
-                && openable(w, over)
-                && [*stand, head]
-                    .iter()
-                    .flat_map(|c| neighbours(*c))
-                    .filter(|n| *n != over)
-                    .all(|n| !wet(n))
-                && neighbours(over)
-                    .iter()
-                    .filter(|n| **n != src)
-                    .all(|n| !wet(*n))
-        })
-        .collect()
-}
-
-/// How far in front of the frame a site puts the lava's stand, and the heights over the room's
-/// floor it may be at (clojurecraft's `station-reach` and `station-spots`).
-pub const STATION_REACH: i32 = 7;
-pub const STATION_HEIGHTS: [i32; 3] = [1, 3, 6];
-
 /// The columns of the straight way from `from` to `to`, x first then z (or z first), ends
 /// included (`way-columns`).
 fn way_columns(from: Cell, to: Cell, z_first: bool) -> Vec<(i32, i32)> {
