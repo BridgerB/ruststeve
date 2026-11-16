@@ -135,3 +135,8 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **What happened**: `dig :landing` and `dig :room` fail after 0 to 3 ops within seconds of the cast's start (rs-l00-b03 of race 43945845334: 65 ticks; three of fourteen in lane 0 of 43960034706), and the site is given up.
 - **Cause**: the executor's approach walks to an op's stand and, with no route, spends a try at once: three ticks, three tries, the site given up. clojurecraft's `toward-stand` digs the straight way toward the stand when no walk reaches it (`stance-block`).
 - **Fix**: with no walk to an op, the first block of the straight way at the feet's height toward its column is dug when it is in reach, never the frame's rock or a cell the plan places, at most 12 such digs per op; then the walk is tried again.
+
+### 23. Landings over lava out of reach (wall-22 pair 43973361819 and 43973376039, c29153b: 26 and 27 of 112)
+- **What happened**: the way dig lifted the pair to 53 of 224 (23.7%), but places 1, 2, 7, 8, 9, 10 and 12 lit 0 of 16, most failing `NoRefill` at the first lava pour.
+- **Read**: their sites put the landing one to three over the lava (lava-sea pools at y -55 with landings at -53; rs-l00-b10 three over at (30, 43, 55)). A stand on the room's floor or over it has its eye 3.6 or more over a source two under the floor, and every stand is four or more in front of the frame: out of the 4.3 reach.
+- **Fix**: landings at most one over the lava (dy -3 to 1; wall 14 had widened it to 3).

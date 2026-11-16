@@ -1008,7 +1008,9 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
     let mut landings: Vec<(f64, Cell, Cell)> = Vec::new();
     for src in lava.iter().filter(|c| !refused(**c)).take(MAX_SOURCES) {
         report.sources += 1;
-        for dy in -3..=3 {
+        // The landing at most one over the lava (dy 1): from a stand on the room's floor or over
+        // it, lava two or more under the floor is out of a bucket's reach (wall 23).
+        for dy in -3..=1 {
             for dx in -LANDING_FAR..=LANDING_FAR {
                 for dz in -LANDING_FAR..=LANDING_FAR {
                     let plane = dx.abs().max(dz.abs());
