@@ -68,7 +68,7 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - Swings are 0 until combat exists; the fields are there.
 
 ## Issue 14
-- **Checkpoint places**: a start may list `places`, overworld feet positions; bot i of lane L takes place (14 L + i) mod n. The `lava` start puts bots at twelve landings where race bots chose cast sites on the race seed, the water bucket filled, cap 24,000: a race works the cast from its first tick (Bridger, 2026-11-16: start where the work is, not from scratch).
+- **Checkpoint places**: a start may list `places`, overworld feet positions; bot i of every lane takes place i mod n (a lane's bots share one server, so each needs its own; every lane takes the same, paired). The `lava` start puts bots at fourteen landings, 32 blocks apart or more, where `kit` race bots chose cast sites on the race seed, the water bucket filled, cap 24,000: a race works the cast from its first tick (Bridger, 2026-11-16: start where the work is, not from scratch).
 - The `kit` start (Bridger, 2026-11-15: two buckets): an iron pickaxe, two buckets, flint and steel, a stone pickaxe and sword, a table, 8 sticks, 16 cobblestone, spread 128 ([[portal-cast]]).
 
 ## See also

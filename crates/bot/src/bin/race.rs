@@ -131,7 +131,9 @@ fn race(a: &Args) -> Result<bool, String> {
             std::thread::sleep(Duration::from_millis(config.race.join_stagger_ms));
         }
         let name = bot_name(a.lane, i);
-        let commands = start_commands(&start, &name, a.lane as usize * bots as usize + i as usize);
+        // The bot's number in its lane: the lane's bots share one server, so each takes its own
+        // place, and every lane takes the same ones (paired lanes).
+        let commands = start_commands(&start, &name, i as usize);
         let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
         let password = password.clone();
         let apply: Option<bot::ApplyStart> = (!commands.is_empty()).then(|| {

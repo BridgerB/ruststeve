@@ -130,7 +130,7 @@ impl Starts {
 }
 
 /// The RCON commands that apply a start to a bot: the kit, then the place. `index` picks the
-/// bot's place from `places` (the lane's first bot and the lanes after it in turn).
+/// bot's place from `places`, by its number in its lane (bots on one server never share one).
 pub fn start_commands(start: &Start, bot: &str, index: usize) -> Vec<String> {
     let mut out: Vec<String> = start
         .kit
