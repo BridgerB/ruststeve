@@ -48,6 +48,8 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 
 - **Lava station** (`crates/plan/src/station.rs`, clojurecraft's `station-among`): a stand at h 1 to 6 over the room's floor, four to nine in front of the frame and up to eight aside of the landing's column, firm floor, dry round, lava below the feet in reach. A lava refill scoops any station source already in reach, else walks to the stand (off its height, to the landing at it; at its height, digs the straight way's first block), there scoops through a clear face or digs the line to a source below the feet. Two failed walks or digs and the cast refills from the nearest sources instead (docs/problems/portal.md wall 18).
 
+- **Site from its stand** (wall 21, clojurecraft's `choose-site`): for each of the nearest three lava sources, each cell beside the cell over it (`stands_beside`), each facing and h in {1, 3, 6}, the frame's origin seven behind the stand and h under it; kept only with a station, the footprint loaded and dry, the pool not spent and at most 16 blocks. Routed when a walk reaches within 3 of the landing (the room is cut under the stand). On the uncrowded `lava` checkpoint before this (0347960) the pair lit 38 of 224.
+
 ## Evidence
 - `build_differential`: 144 plans (cast-one, portal and nether; four facings; lava heights 0, 1, 3, 6; three origins), **32,124 of 32,124** op lines equal to clojurecraft's `plan-for` at be85a92 (a one-off oracle in its flake shell).
 - `tests/cast.rs`: from the kit, on a stone plateau with a corridor, an 18-source lava pool in its floor and a pond outside, the bot scoops its water, chooses a site, works 103 ops and lights the portal by tick 2,272.

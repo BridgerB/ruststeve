@@ -947,58 +947,43 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
             .iter()
             .any(|g| dist(centre(*g), centre(c)) <= GIVE_UP_RADIUS)
     };
-    let mut cells = crate::path::Cells::new(w);
-    // The standable landings first, nearest the feet first: a plan is built only for those, and
-    // the search stops at `SITE_CANDIDATES` sites that pass (an open cave has thousands).
-    let mut landings: Vec<(f64, Cell, Cell)> = Vec::new();
+    // clojurecraft's `choose-site`: the site built from its lava stand, a cell beside the cell
+    // over one of the nearest sources (`stands-beside`), the frame `STATION_REACH` behind it and
+    // h under it; so every site has its station by construction (wall 21: sites picked by their
+    // landing had lava below the room no stand reached, and every refill failed).
+    let mut candidates: Vec<(f64, Cell, Cell)> = Vec::new();
     for src in lava.iter().filter(|c| !refused(**c)).take(MAX_SOURCES) {
         report.sources += 1;
-        for dy in -3..=3 {
-            for dx in -LANDING_FAR..=LANDING_FAR {
-                for dz in -LANDING_FAR..=LANDING_FAR {
-                    let plane = dx.abs().max(dz.abs());
-                    if !(LANDING_NEAR..=LANDING_FAR).contains(&plane) {
-                        continue;
-                    }
-                    let landing = (src.0 + dx, src.1 + dy, src.2 + dz);
-                    if cells.standable(landing) {
-                        landings.push((dist(here, centre(landing)), landing, *src));
-                    }
-                }
-            }
+        for stand in crate::station::stands_beside(w, *src) {
+            candidates.push((dist(here, centre(stand)), stand, *src));
         }
     }
-    landings.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    landings.dedup_by_key(|l| l.1);
-    report.landings = landings.len();
+    candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    report.landings = candidates.len();
     let mut found: Vec<((usize, f64), Site, Cell)> = Vec::new();
-    for (d, landing, src) in landings {
+    for (d, stand, src) in candidates {
         if found.len() >= SITE_CANDIDATES {
             break;
         }
         let src = &src;
-        for facing in Facing::ALL {
+        for (facing, h) in Facing::ALL
+            .into_iter()
+            .flat_map(|f| crate::station::STATION_HEIGHTS.map(|h| (f, h)))
+        {
             let probe = Frame {
                 origin: (0, 0, 0),
                 facing,
             };
-            let l0 = probe.at(crate::build::landing(0));
+            let off = probe.at((crate::build::landing(h).0, h, crate::station::STATION_REACH));
             let frame = Frame {
-                origin: (landing.0 - l0.0, landing.1 - l0.1, landing.2 - l0.2),
+                origin: (stand.0 - off.0, stand.1 - off.1, stand.2 - off.2),
                 facing,
             };
+            let landing = frame.at(crate::build::landing(0));
             if refused(frame.origin) || spent(w, *src, frame) {
                 report.refused_or_spent += 1;
                 continue;
             }
-            // The lava in front: farther from the frame's cells than the landing.
-            let back = frame.at((1, 0, 0));
-            if dist(centre(*src), centre(back)) <= dist(centre(landing), centre(back)) {
-                report.lava_behind += 1;
-                continue;
-            }
-            // Access steps up to a pool above the room: its surface one over the step's feet.
-            let h = (src.1 + 1 - landing.1).clamp(0, crate::build::MAX_ACCESS);
             let plan = frame_plan(frame, false, h);
             let foot = footprint(&plan);
             let ok = foot.iter().all(|c| {
@@ -1019,10 +1004,8 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
                 report.blocks += 1;
                 continue;
             }
-            // A station (clojurecraft's): a walk from the landing to within a bucket's reach of
-            // the lava, or every refill fails (casts that cut their whole room failed their first
-            // pour: wall 10).
-            if !station(w, landing, *src) {
+            // A station (clojurecraft's `site-ok?`): every refill goes from it.
+            if crate::station::station_among(w, &lava, frame, &foot, Some(h)).is_none() {
                 report.no_station += 1;
                 continue;
             }
@@ -1055,7 +1038,10 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
             crate::path::plan(
                 w,
                 from,
-                &Goal::Block { pos: *landing },
+                &Goal::Near {
+                    pos: *landing,
+                    range: 3.0,
+                },
                 crate::path::Budget::Far.expansions(),
             )
             .status

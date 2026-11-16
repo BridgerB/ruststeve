@@ -124,3 +124,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Read**: rs-l00-b06 at its site (47, 39, 61) placed cobblestone on (49, 40, 64) at event 196180; the world rebuilt at 196300 shows it at (49, 41, 64), and at 196304 the bot, standing at (48, 41, 64), began to dig it: the refill's straight way to its stand ran through the floor just placed. Place, dig, place, a dozen times.
 - **Cause**: `stance-block` in clojurecraft refuses the frame's rock and every cell the build places (`placed?`); the port kept only the frame's rock.
 - **Fix**: the way and the sight dig refuse every cell a place op of the plan names.
+
+### 21. Sites with no station (uncrowded lava race 43960034706, 0347960: 20 of 112)
+- **What happened**: one bot per pool lifted the race to 20 of 112, but eight of the fourteen places lit 0 of 8, most failing `NoRefill` on the first lava pour (about 70 ops in).
+- **Read**: rs-l00-b10's site (30, 43, 55) faced lava at (35, 40, 61), three under the landing; a station stands one to six over the room's floor, its eye five or more over the lava, out of reach: no station could exist, and the site was taken anyway.
+- **Cause**: the port chose a site by its landing near the lava (dy -3 to 3) and asked for a station after. clojurecraft's `choose-site` builds the site from the station: a stand beside the cell over a source (`stands-beside`), the frame's origin `station-reach` (7) behind it and h (1, 3 or 6) under it, and `site-ok?` asks `station-among` for it.
+- **Fix**: `plan::station::stands_beside`; the site choice builds each candidate from a stand, every facing and h in {1, 3, 6}, and keeps it only with a station, the footprint loaded and dry, the pool not spent and at most 16 blocks. The room is cut under the stand, so a site counts as routed when a walk reaches within 3 of its landing (the cast's first op digs the landing).
