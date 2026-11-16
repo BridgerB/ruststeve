@@ -68,3 +68,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Read**: wall 8's rs-l00-b01, and others like it, came within 15 to 43 blocks of seen lava, inside the 48-block site radius, and took no site: every candidate's landing had no walk to it, the lava's cave being across rock and aquifer water.
 - **Cause**: a site was taken only with a found route to its landing (wall 4's churn rule), and nothing brought the bot to a landing it could not walk to; the hunt walked or cut stairs toward the lava itself.
 - **Fix**: with no routed site, the best unrouted candidate's landing is dug toward (stairs when it is below the feet, a level tunnel else), three cuts without coming nearer refusing it and giving its site up; once a walk reaches the landing, the site is taken.
+
+### 10. A site with no station (race 43772126260, c425dbd: 0 of 112; 0 of 112 and 0 of 56 beside it)
+- **What happened**: 24 bots began a cast and every one failed; casts now cut their whole room (66 to 75 ops) and failed at the first lava pour, `NoRefill` (27).
+- **Read**: rs-l00-b01's site at (29, 43, 55) facing south took lava at (31, 40, 63), three below the room and eight in front of the frame across rock; from the room no walk came within a bucket's reach of it (eye to surface 6.2 against 4.4).
+- **Cause**: a site checked its landing's route from the feet, never a way from the landing to its lava (clojurecraft's station: a stand beside the lava with a level way back).
+- **Fix**: a site is taken only when a walk from its landing ends within a bucket's reach of its lava source.

@@ -746,6 +746,12 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
             if n > SITE_BLOCKS {
                 continue;
             }
+            // A station (clojurecraft's): a walk from the landing to within a bucket's reach of
+            // the lava, or every refill fails (casts that cut their whole room failed their first
+            // pour: wall 10).
+            if !station(w, landing, *src) {
+                continue;
+            }
             found.push(((n, d), Site { frame, lava: *src }, landing));
             break;
         }
@@ -778,6 +784,31 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
             routed: true,
         })
         .or(best)
+}
+
+/// Whether a walk from `landing` ends within a bucket's reach of the lava source `src`.
+pub fn station(w: &World, landing: Cell, src: Cell) -> bool {
+    let route = crate::path::plan(
+        w,
+        landing,
+        &Goal::Near {
+            pos: src,
+            range: 3.5,
+        },
+        crate::path::Budget::Far.expansions(),
+    );
+    let surface = [
+        f64::from(src.0) + 0.5,
+        f64::from(src.1) + crate::scoop::SURFACE_HEIGHT,
+        f64::from(src.2) + 0.5,
+    ];
+    let end = route.waypoints.last().copied().unwrap_or(landing);
+    let eye = [
+        f64::from(end.0) + 0.5,
+        f64::from(end.1) + physics::EYE_HEIGHT,
+        f64::from(end.2) + 0.5,
+    ];
+    dist(eye, surface) <= crate::scoop::REACH
 }
 
 /// Whether the plan's light op holds: a portal block in the frame.
