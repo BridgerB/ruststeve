@@ -1686,10 +1686,10 @@ impl Plan {
     /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
     /// `lava-hunt`: stairs toward the lava sea, the lava they expose kept in memory).
     fn cast_task(&mut self, w: &World, tick: u64) -> Task {
-        let choice = if self.site.is_some() {
-            None
+        let (choice, report) = if self.site.is_some() {
+            (None, cast::SiteReport::default())
         } else {
-            cast::site_choice(w, &self.given_up_sites)
+            cast::site_choice_report(w, &self.given_up_sites)
         };
         // A site whose landing no walk reaches yet: dig toward the landing (stairs when it is
         // below, a level tunnel else), three cuts without coming nearer refusing it, as the mine
@@ -1784,7 +1784,11 @@ impl Plan {
                     self.note(
                         tick,
                         format!("walk toward lava at {far:?}"),
-                        format!("seen from {feet:?}, no site within {}", cast::LAVA_RADIUS),
+                        format!(
+                            "seen from {feet:?}, no site within {}: {}",
+                            cast::LAVA_RADIUS,
+                            report.text()
+                        ),
                     );
                     return Task::Explore(walk);
                 }
@@ -1792,7 +1796,11 @@ impl Plan {
             self.note(
                 tick,
                 format!("hunt lava at {far:?}"),
-                format!("seen from {feet:?}, no site within {}", cast::LAVA_RADIUS),
+                format!(
+                    "seen from {feet:?}, no site within {}: {}",
+                    cast::LAVA_RADIUS,
+                    report.text()
+                ),
             );
             return self.mine(w, &[], Some(far.1 + 2), tick);
         }

@@ -58,6 +58,8 @@ fn foundation(w: &World, pos: Cell) -> Option<Cell> {
         .find(|c| full(kind(w, (c.0, c.1 - 1, c.2))))
 }
 
+/// Tunnels a refill cuts toward its pool before it fails.
+pub const MAX_TUNNELS: u32 = 4;
 /// Sources a refill tries a walk to, nearest first.
 pub const REFILL_TRIES: usize = 4;
 /// Blocks from a site's lava its pool is counted within (clojurecraft's `pool-radius`).
@@ -82,7 +84,7 @@ pub const SITE_CANDIDATES: usize = 12;
 /// Candidate sites a route to the landing is looked for, best first.
 pub const SITE_ROUTES: usize = 4;
 /// Blocks a site's cast may place at most (`site-blocks`): a handful.
-pub const SITE_BLOCKS: usize = 8;
+pub const SITE_BLOCKS: usize = 16;
 
 /// The blocks a plan places where the eye sees the rock missing (`blocks-needed`, strict no
 /// X-ray: a cell inside rock counts as rock). Cells the plan digs (room, holes) are not counted.
@@ -142,10 +144,18 @@ enum Work {
     Idle,
     Walk(Walk),
     Dig(Box<Dig>),
-    Placed { at: u64 },
-    Aim { since: u64 },
-    Sent { at: u64 },
+    Placed {
+        at: u64,
+    },
+    Aim {
+        since: u64,
+    },
+    Sent {
+        at: u64,
+    },
     Refill(Box<Scoop>),
+    /// A level tunnel toward a pool no walk reaches, before the refill's scoop (wall 13).
+    Tunnel(Box<crate::stairs::Stairs>),
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -159,6 +169,9 @@ pub struct Cast {
     last_done: u64,
     /// Ops done since the cast began, for the notes.
     pub done_ops: u32,
+    /// Tunnels cut toward the pool for the refill in hand.
+    #[serde(default)]
+    tunnels: u32,
 }
 
 fn eye(b: &physics::Body) -> [f64; 3] {
@@ -183,7 +196,7 @@ fn full(k: Option<BlockKind>) -> bool {
 
 /// The kind at a cell when the eye could see it: a neighbour lets a face show (memory's rule).
 /// Strict no X-ray: a cell inside rock reads as `None`.
-fn seen(w: &World, c: Cell) -> Option<BlockKind> {
+pub fn seen(w: &World, c: Cell) -> Option<BlockKind> {
     let k = kind(w, c)?;
     let open = memory::neighbours(c)
         .into_iter()
@@ -196,7 +209,7 @@ fn feet(b: &physics::Body) -> Cell {
 }
 
 /// The cells of a plan's room and frame (its footprint).
-fn footprint(plan: &[Op]) -> Vec<Cell> {
+pub fn footprint(plan: &[Op]) -> Vec<Cell> {
     let mut out: Vec<Cell> = plan
         .iter()
         .filter_map(|o| o.pos)
@@ -225,6 +238,7 @@ impl Cast {
             tries: 0,
             last_done: tick,
             done_ops: 0,
+            tunnels: 0,
         }
     }
 
@@ -572,6 +586,16 @@ impl Cast {
         item: ItemKind,
         tick: u64,
     ) -> (Controls, Option<Act>, CastStatus) {
+        if let Work::Tunnel(st) = &mut self.work {
+            let (c, act, status) = st.step(w, tick);
+            if status == crate::stairs::StairsStatus::Running {
+                return (c, act, CastStatus::Running);
+            }
+            self.work = Work::Idle;
+            self.tunnels += 1;
+            self.last_done = tick;
+            return (c, act, CastStatus::Running);
+        }
         if !matches!(self.work, Work::Refill(_)) {
             let fluid = if item == ItemKind::LavaBucket {
                 memory::Fluid::Lava
@@ -590,16 +614,35 @@ impl Cast {
                 memory::Fluid::Water => crate::scoop::sources(w),
             };
             targets.truncate(REFILL_TRIES);
+            let nearest = targets.first().copied();
             let Some(s) = targets.into_iter().find_map(|t| {
                 let mut s = Scoop::of(t, fluid, tick);
                 s.route_now(w, tick).then_some(s)
             }) else {
+                // No walk to the pool: tunnel toward its nearest source (clojurecraft digs a way to
+                // its station); a tunnel refuses cells with lava in or beside them, so it stops
+                // short of it, within a bucket's reach (wall 13).
+                if let (Some(t), Some(body), true) = (nearest, w.body, self.tunnels < MAX_TUNNELS) {
+                    let f = feet(&body);
+                    let (dx, dz) = (t.0 - f.0, t.2 - f.2);
+                    let dir = if dx.abs() >= dz.abs() {
+                        (dx.signum(), 0)
+                    } else {
+                        (0, dz.signum())
+                    };
+                    if dir != (0, 0) {
+                        self.work = Work::Tunnel(Box::new(crate::stairs::Stairs::level(dir, tick)));
+                        self.last_done = tick;
+                        return (Controls::default(), None, CastStatus::Running);
+                    }
+                }
                 return (
                     Controls::default(),
                     None,
                     CastStatus::Failed(CastFailure::NoRefill),
                 );
             };
+            self.tunnels = 0;
             self.work = Work::Refill(Box::new(s));
             self.last_done = tick;
         }
@@ -675,8 +718,45 @@ pub struct SiteChoice {
     pub routed: bool,
 }
 
+/// Why sites were passed over, counted over one choice: the hunt's note carries it, so a race's
+/// case files say which rule kept a bot beside lava from casting (wall 13).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SiteReport {
+    pub sources: usize,
+    pub landings: usize,
+    pub refused_or_spent: usize,
+    pub lava_behind: usize,
+    pub footprint: usize,
+    pub blocks: usize,
+    pub no_station: usize,
+    pub passed: usize,
+}
+
+impl SiteReport {
+    pub fn text(&self) -> String {
+        format!(
+            "sources {} landings {} refused/spent {} behind {} footprint {} blocks {} station {} passed {}",
+            self.sources,
+            self.landings,
+            self.refused_or_spent,
+            self.lava_behind,
+            self.footprint,
+            self.blocks,
+            self.no_station,
+            self.passed
+        )
+    }
+}
+
 pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
-    let body = w.body?;
+    site_choice_report(w, given_up).0
+}
+
+pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, SiteReport) {
+    let mut report = SiteReport::default();
+    let Some(body) = w.body else {
+        return (None, report);
+    };
     let here = centre(feet(&body));
     let lava = lava_sources(w);
     let refused = |c: Cell| {
@@ -689,6 +769,7 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
     // the search stops at `SITE_CANDIDATES` sites that pass (an open cave has thousands).
     let mut landings: Vec<(f64, Cell, Cell)> = Vec::new();
     for src in lava.iter().filter(|c| !refused(**c)).take(MAX_SOURCES) {
+        report.sources += 1;
         for dy in 1..=3 {
             for dx in -LANDING_FAR..=LANDING_FAR {
                 for dz in -LANDING_FAR..=LANDING_FAR {
@@ -706,6 +787,7 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
     }
     landings.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     landings.dedup_by_key(|l| l.1);
+    report.landings = landings.len();
     let mut found: Vec<((usize, f64), Site, Cell)> = Vec::new();
     for (d, landing, src) in landings {
         if found.len() >= SITE_CANDIDATES {
@@ -723,11 +805,13 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
                 facing,
             };
             if refused(frame.origin) || spent(w, *src, frame) {
+                report.refused_or_spent += 1;
                 continue;
             }
             // The lava in front: farther from the frame's cells than the landing.
             let back = frame.at((1, 0, 0));
             if dist(centre(*src), centre(back)) <= dist(centre(landing), centre(back)) {
+                report.lava_behind += 1;
                 continue;
             }
             let plan = frame_plan(frame, false, 0);
@@ -735,23 +819,29 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
             let ok = foot.iter().all(|c| {
                 kind(w, *c).is_some()
                     && !matches!(seen(w, *c), Some(BlockKind::Water | BlockKind::Lava))
+                    // Lava flows into a cell through a face only: a source sharing one, not a
+                    // diagonal (wall 13: the diagonal rule refused 74 of 140 sites round one pool).
                     && !lava.iter().any(|l| {
-                        (l.0 - c.0).abs() <= 1 && (l.1 - c.1).abs() <= 1 && (l.2 - c.2).abs() <= 1
+                        (l.0 - c.0).abs() + (l.1 - c.1).abs() + (l.2 - c.2).abs() <= 1
                     })
             });
             if !ok {
+                report.footprint += 1;
                 continue;
             }
             let n = blocks_needed(w, &plan);
             if n > SITE_BLOCKS {
+                report.blocks += 1;
                 continue;
             }
             // A station (clojurecraft's): a walk from the landing to within a bucket's reach of
             // the lava, or every refill fails (casts that cut their whole room failed their first
             // pour: wall 10).
             if !station(w, landing, *src) {
+                report.no_station += 1;
                 continue;
             }
+            report.passed += 1;
             found.push(((n, d), Site { frame, lava: *src }, landing));
             break;
         }
@@ -765,7 +855,7 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
         landing: *l,
         routed: false,
     });
-    found
+    let choice = found
         .into_iter()
         .take(SITE_ROUTES)
         .find(|(_, _, landing)| {
@@ -783,7 +873,8 @@ pub fn site_choice(w: &World, given_up: &[Cell]) -> Option<SiteChoice> {
             landing: l,
             routed: true,
         })
-        .or(best)
+        .or(best);
+    (choice, report)
 }
 
 /// Whether a walk from `landing` ends within a bucket's reach of the lava source `src`.
@@ -808,7 +899,10 @@ pub fn station(w: &World, landing: Cell, src: Cell) -> bool {
         f64::from(end.1) + physics::EYE_HEIGHT,
         f64::from(end.2) + 0.5,
     ];
-    dist(eye, surface) <= crate::scoop::REACH
+    // Or a way to dig: lava no more than three below the landing nor one above it, which a
+    // refill's tunnel reaches (the walker keeps off cells beside lava, so a pool in rock has no
+    // walk to its bank: wall 13).
+    dist(eye, surface) <= crate::scoop::REACH || (-3..=1).contains(&(src.1 - landing.1))
 }
 
 /// Whether the plan's light op holds: a portal block in the frame.
