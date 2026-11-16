@@ -35,3 +35,15 @@ stage = "iron_kit"
 place = "spawn"
 kit = [["iron_pickaxe", 1], ["bucket", 2], ["flint_and_steel", 1], ["stone_pickaxe", 1], ["stone_sword", 1], ["crafting_table", 1], ["stick", 8], ["cobblestone", 16]]
 spread = 128
+
+# Issue 14's checkpoint for the cast: beside lava, the water held, the kit as `kit`; each bot at one
+# of `places` in turn: where race bots stood when they chose a cast site, on the race seed. A race
+# from here works the site, the cast and the light from its first tick, not after an hour's hunt
+# (Bridger, 2026-11-16: start where the work is).
+[[start]]
+name = "lava"
+stage = "iron_kit"
+place = "spawn"
+kit = [["iron_pickaxe", 1], ["bucket", 1], ["water_bucket", 1], ["flint_and_steel", 1], ["stone_pickaxe", 1], ["stone_sword", 1], ["crafting_table", 1], ["stick", 8], ["cobblestone", 16]]
+cap_ticks = 24000
+places = [[31.5, 43, 57.5], [-26.5, 6, 23.5], [88.5, 63, 82.5], [100.5, 63, 81.5], [169.5, 60, -80.5], [88.5, 63, 69.5], [96.5, 63, 80.5], [4.5, 58, 122.5], [170.5, 59, -80.5], [169.5, 59, -78.5], [4.5, 57, 128.5], [-36.5, 1, 11.5]]
