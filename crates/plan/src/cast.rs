@@ -63,7 +63,7 @@ pub const MAX_TUNNELS: u32 = 4;
 /// Sources a refill tries a walk to, nearest first.
 pub const REFILL_TRIES: usize = 4;
 /// Blocks from a site's lava its pool is counted within (clojurecraft's `pool-radius`).
-pub const POOL_RADIUS: f64 = 8.0;
+pub const POOL_RADIUS: f64 = 16.0;
 
 /// Whether the pool by `lava` holds fewer sources than the frame has cells left to cast
 /// (`spent?`): each cell spends one, and lava does not form again.
@@ -676,10 +676,14 @@ pub fn lava_sources(w: &World) -> Vec<Cell> {
 /// The nearest lava source memory saw exposed within `FAR_RADIUS`: what a hunt heads for
 /// (clojurecraft's `far-radius`).
 pub fn far_lava(w: &World, given_up: &[Cell]) -> Option<Cell> {
+    let here = w.body.map_or([0.0; 3], |b| centre(feet(&b)));
     lava_within(w, FAR_RADIUS).into_iter().find(|c| {
-        !given_up
-            .iter()
-            .any(|g| dist(centre(*g), centre(*c)) <= GIVE_UP_RADIUS)
+        // Lava within `LAVA_RADIUS` has been through the site choice already: a hunt toward it
+        // walked three bots back to a three-source pool for the whole race (wall 15).
+        dist(here, centre(*c)) > LAVA_RADIUS
+            && !given_up
+                .iter()
+                .any(|g| dist(centre(*g), centre(*c)) <= GIVE_UP_RADIUS)
     })
 }
 

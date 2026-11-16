@@ -97,3 +97,8 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Read**: rs-l00-b01 spent the race at (-37, 1, 11), two below lava at (-34, 3, 12); its world rebuilt from the recording gave `site_choice` no landing at all (the site report: sources 3, landings 0).
 - **Cause**: a landing was looked for one to three above the lava only, as if the frame had to stand over it; the lava need only be in a bucket's reach for the refills, and a room cell sharing a face with lava is refused anyway.
 - **Fix**: landings from three below the lava to three above. On b01's world 12 sites pass (the landing where it stood); on b04's, 12 of 65 landings.
+
+### 15. Hunting a pool too small to cast from (race 43898865876, 56ccec2)
+- **Read**: rs-l00-b05, b07 and b11 spent the race at (191, -1, -99 to -105), hunting lava 2 blocks off: 1,193 to 1,207 hunts each. Their worlds rebuilt from the recordings: memory held four lava sources within 48 (a pool of three and one at y -45); every site was refused as spent (164 each): a cast spends one source a cell, ten in all.
+- **Cause**: the hunt headed for the nearest lava seen within 160, though that lava, within 48, had been through the site choice and refused; the bot never left it.
+- **Fixes**: the hunt heads only for lava further than 48 (with none, down toward the lava sea); a pool's sources are counted within 16 of the site's lava (from 8), and a refill takes any of them.
