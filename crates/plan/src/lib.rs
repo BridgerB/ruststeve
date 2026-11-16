@@ -1634,6 +1634,39 @@ impl Plan {
             }
             self.refuse(c, tick);
         }
+        // A remembered pool further off is walked toward first (clojurecraft's `pool-radius`):
+        // bots on a plateau explored it whole and never went down to the water they had seen
+        // (docs/problems/portal.md wall 11).
+        let pools: Vec<Cell> = scoop::far_sources(w)
+            .into_iter()
+            .filter(|c| !self.refused_now(*c, tick))
+            .take(CANDIDATES_PER_TICK)
+            .collect();
+        for c in pools {
+            let mut walk = Walk::new(
+                c,
+                Goal::Near {
+                    pos: c,
+                    range: scoop::SEARCH_RADIUS / 2.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            self.refuse(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk toward water at {c:?}"),
+                    format!(
+                        "a pool within {}, none within {}",
+                        scoop::POOL_RADIUS,
+                        scoop::SEARCH_RADIUS
+                    ),
+                );
+                return Task::Explore(walk);
+            }
+        }
         if let Some(t) = self.explore_walk(w, tick, "no surface water in view with a way") {
             return t;
         }

@@ -16,6 +16,8 @@ use crate::walk::{Arrive, TaskStatus, Walk, look_at};
 
 /// Blocks from the feet a remembered source is scooped from (clojurecraft's `search-radius`).
 pub const SEARCH_RADIUS: f64 = 24.0;
+/// Blocks from the feet a remembered pool is walked toward from (`pool-radius`).
+pub const POOL_RADIUS: f64 = 96.0;
 /// Where a source's surface is aimed at: a source stands 8/9 of a block (`surface-height`).
 pub const SURFACE_HEIGHT: f64 = 0.85;
 /// Ticks the look is held still on the source before the use (clojurecraft's 300 ms).
@@ -82,16 +84,33 @@ fn bucket_of(fluid: memory::Fluid) -> ItemKind {
 
 /// The surface water sources memory kept within `SEARCH_RADIUS` of the feet, nearest first.
 pub fn sources(w: &World) -> Vec<Cell> {
+    sources_within(w, SEARCH_RADIUS)
+}
+
+/// The surface water memory kept within `POOL_RADIUS`: walked toward when none is within
+/// `SEARCH_RADIUS` (clojurecraft's `pool-radius`).
+pub fn far_sources(w: &World) -> Vec<Cell> {
+    sources_within(w, POOL_RADIUS)
+}
+
+fn sources_within(w: &World, radius: f64) -> Vec<Cell> {
     let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
         return Vec::new();
     };
     let feet = crate::path::feet_cell(body.pos);
+    let chunks = (radius as i32) / 16 + 1;
     let mut near: Vec<(f64, Cell)> = w
         .memory
-        .sources_near(&dim.name, memory::Fluid::Water, feet.0 >> 4, feet.2 >> 4, 2)
+        .sources_near(
+            &dim.name,
+            memory::Fluid::Water,
+            feet.0 >> 4,
+            feet.2 >> 4,
+            chunks,
+        )
         .into_iter()
         .map(|c| (distance(feet, c), c))
-        .filter(|(d, _)| *d <= SEARCH_RADIUS)
+        .filter(|(d, _)| *d <= radius)
         .collect();
     near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     near.into_iter().map(|(_, c)| c).collect()

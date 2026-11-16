@@ -74,3 +74,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Read**: rs-l00-b01's site at (29, 43, 55) facing south took lava at (31, 40, 63), three below the room and eight in front of the frame across rock; from the room no walk came within a bucket's reach of it (eye to surface 6.2 against 4.4).
 - **Cause**: a site checked its landing's route from the feet, never a way from the landing to its lava (clojurecraft's station: a stand beside the lava with a level way back).
 - **Fix**: a site is taken only when a walk from its landing ends within a bucket's reach of its lava source.
+
+### 11. A plateau explored whole, the water below never walked to (race 43779597490, 82de856: 0 of 112; 1 of 112 and 0 of 56 beside it)
+- **What happened**: 21 of 112 never held water; wall 9 raised the casts begun to 36, all failing their first pour (`NoRefill` 37, wall 10's).
+- **Read**: rs-l00-b00, b03 and b11 spent the race on a plateau at y 86, about 300 explore walks each, every target at y 86 (an explore aims at the feet's height), never going down off it.
+- **Cause**: the scoop looked for water within 24 blocks only, then explored; water memory had kept further off was never walked to (clojurecraft walks to a remembered pool within 96).
+- **Fix**: with no source within 24, a walk toward the nearest surface water memory kept within 96 (to within 12 of it), before any explore.
