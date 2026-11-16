@@ -80,3 +80,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Read**: rs-l00-b00, b03 and b11 spent the race on a plateau at y 86, about 300 explore walks each, every target at y 86 (an explore aims at the feet's height), never going down off it.
 - **Cause**: the scoop looked for water within 24 blocks only, then explored; water memory had kept further off was never walked to (clojurecraft walks to a remembered pool within 96).
 - **Fix**: with no source within 24, a walk toward the nearest surface water memory kept within 96 (to within 12 of it), before any explore.
+
+### 12. A refill aimed through rock (races 43898865876 and 43898882011, 56ccec2: 0 and 1 of 112)
+- **What happened**: wall 10's station check took sites whose lava a walk reaches, yet 33 casts still failed, `NoRefill` 20 at the first pour.
+- **Read**: rs-l00-b02 (lane 0 of 43898865876): its world rebuilt from the recording at the failure (a probe through `record::Folder`) showed the lava at (0, 57, 120) in memory, a found route to it, and the cast's own stand already within reach of its surface; the bot sent a hold and nothing more, the look from the stand to the lava crossing the stone at (1, 58, 121).
+- **Cause**: the scoop aimed from wherever it first came within reach, never checking the ray; from the cast's stand it had no clear look, failed `NoSight` three times and the cast ended.
+- **Fix**: a scoop chooses its stand: a standable cell within reach of the surface with a clear ray to it, nearest the feet with a found route (four tried), and aims only from a cell with a clear look.

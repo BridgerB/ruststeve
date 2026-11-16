@@ -139,6 +139,48 @@ fn source_of(w: &World, c: Cell, fluid: memory::Fluid) -> bool {
         == Some(fluid)
 }
 
+/// A stand's eye, from its cell's middle, within this of the surface: `REACH` less the body's
+/// drift off the middle when a walk ends (0.3 drift put one at 4.6 past the game's 4.5).
+const STAND_REACH: f64 = 4.0;
+/// Stands tried for a route, nearest the feet first.
+const STAND_TRIES: usize = 4;
+
+/// The cells a scoop of `target` can be sent from: standable, the eye within `REACH` of the
+/// surface with a clear ray to it; nearest the feet first.
+pub fn stands(w: &World, target: Cell) -> Vec<Cell> {
+    let Some(body) = w.body else {
+        return Vec::new();
+    };
+    let feet = crate::path::feet_cell(body.pos);
+    let point = surface(target);
+    let mut cells = crate::path::Cells::new(w);
+    let mut out: Vec<(f64, Cell)> = Vec::new();
+    for dx in -4..=4 {
+        for dz in -4..=4 {
+            for dy in -1..=3 {
+                let c = (target.0 + dx, target.1 + dy, target.2 + dz);
+                let eye = [
+                    f64::from(c.0) + 0.5,
+                    f64::from(c.1) + physics::EYE_HEIGHT,
+                    f64::from(c.2) + 0.5,
+                ];
+                let reach = (0..3)
+                    .map(|i| (eye[i] - point[i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                if reach > STAND_REACH || c == target || !cells.standable(c) {
+                    continue;
+                }
+                if clear_ray(w, eye, point, target) {
+                    out.push((distance(feet, c), c));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    out.into_iter().map(|(_, c)| c).collect()
+}
+
 /// Whether the eye's ray to `to` crosses nothing solid before the cell `target` (cells read from
 /// the loaded terrain, which the eye can see along).
 pub fn clear_ray(w: &World, from: [f64; 3], to: [f64; 3], target: Cell) -> bool {
@@ -185,8 +227,21 @@ impl Scoop {
         }
     }
 
-    /// Whether a walk reaches it now (the churn invariant: never start a scoop with no way).
+    /// Whether a walk reaches a stand for it now (the churn invariant: never start a scoop with no
+    /// way): a standable cell within reach of the surface with a clear look at it (`stands`),
+    /// nearest the feet first. Being within reach is not enough: a refill aimed from the cast's
+    /// own stand through a block beside it failed `NoSight` every try (docs/problems/portal.md
+    /// wall 12).
     pub fn route_now(&mut self, w: &World, tick: u64) -> bool {
+        if let Stage::Approach(_) = self.stage {
+            for st in stands(w, self.target).into_iter().take(STAND_TRIES) {
+                let mut walk = Walk::new(st, Goal::Block { pos: st }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(crate::path::Status::Found) {
+                    self.stage = Stage::Approach(walk);
+                    return true;
+                }
+            }
+        }
         match &mut self.stage {
             // A found route only: a partial one toward a lake's middle failed every walk, source
             // after source along a shore (docs/problems/portal.md wall 6).
@@ -245,14 +300,18 @@ impl Scoop {
             <= REACH;
         match &mut self.stage {
             Stage::Approach(walk) => {
-                if in_reach && body.on_ground {
+                if in_reach && body.on_ground && clear_ray(w, from, point, self.target) {
                     self.stage = Stage::Aim { since: tick };
                     return (still, None, ScoopStatus::Running);
                 }
                 let (c, status) = walk.step(w, tick);
                 match status {
                     TaskStatus::Running => (c, None, ScoopStatus::Running),
-                    TaskStatus::Done if in_reach => {
+                    // At the stand chosen for it (within reach, a clear look): aim from there,
+                    // the body a little off the cell's middle notwithstanding. A walk to within
+                    // range of the source (no stand the walker takes: a pool's sources further in,
+                    // beside flowing lava) aims only when it ended within reach.
+                    TaskStatus::Done if in_reach || matches!(walk.goal, Goal::Block { .. }) => {
                         self.stage = Stage::Aim { since: tick };
                         (still, None, ScoopStatus::Running)
                     }
