@@ -5,7 +5,7 @@ type: reference
 tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
-lastUpdated: 2026-11-15
+lastUpdated: 2026-11-16
 verifiedAgainst: ruststeve@da0e4fa clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
@@ -45,6 +45,8 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - **The lava hunt**: with no site, the mine task's stairs go down toward `LAVA_DEPTH` (feet at y -50, a block over the lava sea); the lava they expose enters memory's pools ([[memory-sightings]]).
 - **The aim**: `portal` holds the kit the cast spends (a water bucket, a bucket for the lava, flint and steel, a pickaxe); once held, the cast; met when a portal block shows in the frame. The lit frame is kept (`Plan.portal`) for issue 15 to walk back to.
 - **The `kit` start** (Bridger, 2026-11-15): an iron pickaxe, two buckets, flint and steel, a stone pickaxe and sword, a table, 8 sticks, 16 cobblestone, spread 128.
+
+- **Lava station** (`crates/plan/src/station.rs`, clojurecraft's `station-among`): a stand at h 1 to 6 over the room's floor, four to nine in front of the frame and up to eight aside of the landing's column, firm floor, dry round, lava below the feet in reach. A lava refill scoops any station source already in reach, else walks to the stand (off its height, to the landing at it; at its height, digs the straight way's first block), there scoops through a clear face or digs the line to a source below the feet. Two failed walks or digs and the cast refills from the nearest sources instead (docs/problems/portal.md wall 18).
 
 ## Evidence
 - `build_differential`: 144 plans (cast-one, portal and nether; four facings; lava heights 0, 1, 3, 6; three origins), **32,124 of 32,124** op lines equal to clojurecraft's `plan-for` at be85a92 (a one-off oracle in its flake shell).

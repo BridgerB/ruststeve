@@ -30,6 +30,8 @@ pub const OP_TRIES: u32 = 3;
 pub const STALL_TICKS: u64 = 2400;
 /// Eye to a block's centre a dig or a place is worked from (the game's 4.5 less a margin).
 pub const REACH: f64 = 4.0;
+/// Failed walks or digs toward the station before a cast refills from the nearest sources.
+const STATION_MISSES: u32 = 2;
 /// Blocks from the feet a lava source is looked at for a site (clojurecraft's `hunt-radius`).
 pub const LAVA_RADIUS: f64 = 48.0;
 /// Blocks from the feet lava seen is headed for when none is near (`far-radius`).
@@ -160,6 +162,10 @@ enum Work {
     Refill(Box<Scoop>),
     /// A level tunnel toward a pool no walk reaches, before the refill's scoop (wall 13).
     Tunnel(Box<crate::stairs::Stairs>),
+    /// A walk to the lava station's stand, or to the landing at its height (wall 18).
+    ToStation(Walk),
+    /// A dig on the way to the station's stand, or opening a source's sight from it (wall 18).
+    WayDig(Box<Dig>),
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -177,6 +183,10 @@ pub struct Cast {
     /// last op that undid one with the op it undid, for the notes (wall 17).
     #[serde(default)]
     pub regressions: u32,
+    /// Walks and digs toward the station that failed this cast; at `STATION_MISSES` the refill
+    /// takes the nearest sources instead (a stand a step up the walk never reached, wall 18).
+    #[serde(default)]
+    station_misses: u32,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -249,6 +259,7 @@ impl Cast {
             last_done: tick,
             done_ops: 0,
             regressions: 0,
+            station_misses: 0,
             last_regression: None,
             tunnels: 0,
         }
@@ -616,6 +627,124 @@ impl Cast {
     }
 
     /// Fill a bucket for a pour: lava at the site's pool, water at a remembered surface source.
+    /// The lava refill from the station (clojurecraft's `refill`): to the stand (walked, or the
+    /// landing at its height first, or the way dug at its height), there the scoop of the nearest
+    /// source with a clear face, else the block on the line to one dug. `None` when no station
+    /// stands: the refill falls back to the nearest sources.
+    fn station_refill(
+        &mut self,
+        w: &World,
+        tick: u64,
+    ) -> Option<(Controls, Option<Act>, CastStatus)> {
+        use crate::station;
+        let still = Controls::default();
+        match &mut self.work {
+            Work::Refill(_) | Work::Tunnel(_) => return None,
+            Work::WayDig(d) => {
+                let (c, act, status) = d.step(w, tick);
+                return Some(match status {
+                    DigStatus::Running => (c, act, CastStatus::Running),
+                    DigStatus::Done => {
+                        self.work = Work::Idle;
+                        self.last_done = tick;
+                        (c, act, CastStatus::Running)
+                    }
+                    DigStatus::Failed(_) => {
+                        self.work = Work::Idle;
+                        self.station_misses += 1;
+                        (c, act, CastStatus::Running)
+                    }
+                });
+            }
+            Work::ToStation(walk) => {
+                let (c, status) = walk.step(w, tick);
+                return Some(match status {
+                    TaskStatus::Running => (c, None, CastStatus::Running),
+                    TaskStatus::Done => {
+                        self.work = Work::Idle;
+                        self.last_done = tick;
+                        (still, None, CastStatus::Running)
+                    }
+                    TaskStatus::Failed(_) => {
+                        self.work = Work::Idle;
+                        self.station_misses += 1;
+                        (still, None, CastStatus::Running)
+                    }
+                });
+            }
+            _ => {}
+        }
+        if self.station_misses >= STATION_MISSES {
+            return None;
+        }
+        let body = w.body?;
+        let own = cast_cells(&self.plan);
+        let sources: Vec<Cell> = lava_sources(w)
+            .into_iter()
+            .filter(|c| !own.contains(c))
+            .collect();
+        let print = footprint(&self.plan);
+        let st = station::station_among(w, &sources, self.site.frame, &print, Some(self.site.h))?;
+        let f = feet(&body);
+        let kept = station::kept(self.site.frame);
+        let from = eye(&body);
+        // A station source already in reach with a clear face: scooped from here.
+        if body.on_ground
+            && let Some(src) = st
+                .sources
+                .iter()
+                .find(|src| crate::scoop::aim_for(w, from, **src, crate::scoop::REACH).is_some())
+        {
+            self.work = Work::Refill(Box::new(Scoop::of(*src, memory::Fluid::Lava, tick)));
+            self.last_done = tick;
+            return Some((still, None, CastStatus::Running));
+        }
+        if f == st.stand && body.on_ground {
+            if let Some(src) = st
+                .sources
+                .iter()
+                .find(|src| crate::scoop::aim_for(w, from, **src, crate::scoop::REACH).is_some())
+            {
+                self.work = Work::Refill(Box::new(Scoop::of(*src, memory::Fluid::Lava, tick)));
+                self.last_done = tick;
+                return Some((still, None, CastStatus::Running));
+            }
+            let block = st
+                .sources
+                .iter()
+                .find_map(|src| station::sight_block(w, from, *src, f.1, &kept))?;
+            self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+            return Some((still, None, CastStatus::Running));
+        }
+        let mut walk = Walk::new(st.stand, Goal::Block { pos: st.stand }, Arrive::Goal, tick);
+        if walk.route_now(w, tick) {
+            self.work = Work::ToStation(walk);
+            return Some((still, None, CastStatus::Running));
+        }
+        if f.1 != st.stand.1 {
+            // Off the stand's height: to the landing at it first (the room's access steps).
+            let landing = self.site.frame.at(crate::build::landing(st.h));
+            if landing == f {
+                return None;
+            }
+            let mut walk = Walk::new(landing, Goal::Block { pos: landing }, Arrive::Goal, tick);
+            if !walk.route_now(w, tick) {
+                return None;
+            }
+            self.work = Work::ToStation(walk);
+            return Some((still, None, CastStatus::Running));
+        }
+        // At its height: the first block on the straight way, dug when in reach.
+        let station::Way::Dig(block) = station::stance_block(w, f, st.stand, &kept) else {
+            return None;
+        };
+        if dist(eye(&body), centre(block)) > REACH {
+            return None;
+        }
+        self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+        Some((still, None, CastStatus::Running))
+    }
+
     fn refill(
         &mut self,
         w: &World,
@@ -631,6 +760,11 @@ impl Cast {
             self.tunnels += 1;
             self.last_done = tick;
             return (c, act, CastStatus::Running);
+        }
+        if item == ItemKind::LavaBucket
+            && let Some(r) = self.station_refill(w, tick)
+        {
+            return r;
         }
         if !matches!(self.work, Work::Refill(_)) {
             let fluid = if item == ItemKind::LavaBucket {

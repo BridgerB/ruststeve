@@ -69,8 +69,15 @@ fn run(ticks: u64) -> (Plan, bot::lockstep::Run) {
     for g in kit() {
         sim.survival.give(g);
     }
+    let mut seen = 0u64;
     let run = bot::lockstep::run_acting(sim, "rs-cast", 1, ticks, 0, |w, _| {
         let c = p.step(w);
+        if std::env::var("CAST_EVENTS").is_ok() {
+            for e in p.events_since(seen) {
+                println!("EV {} {}: {}", e.tick, e.what, e.why);
+            }
+            seen = p.event_count;
+        }
         (c, p.take_acts())
     });
     (p, run)
@@ -79,7 +86,12 @@ fn run(ticks: u64) -> (Plan, bot::lockstep::Run) {
 #[test]
 fn the_kit_casts_and_lights_a_portal_beside_lava() {
     let (p, run) = run(24_000);
-    let tail: Vec<_> = p.events.iter().rev().take(25).collect();
+    let tail: Vec<_> = p
+        .events
+        .iter()
+        .filter(|e| !e.what.contains("stairs") && !e.what.contains("tunnel"))
+        .take(20)
+        .collect();
     assert!(
         p.met,
         "not met; last events: {tail:#?}; task {:?}",
@@ -126,7 +138,12 @@ fn a_cave_with_lava_casts_too() {
         let c = p.step(w);
         (c, p.take_acts())
     });
-    let tail: Vec<_> = p.events.iter().rev().take(25).collect();
+    let tail: Vec<_> = p
+        .events
+        .iter()
+        .filter(|e| !e.what.contains("stairs") && !e.what.contains("tunnel"))
+        .take(20)
+        .collect();
     assert!(p.met, "not met; last events: {tail:#?}");
     assert!(!run.died, "died: {tail:#?}");
 }

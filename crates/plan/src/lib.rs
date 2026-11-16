@@ -24,6 +24,7 @@ pub mod redig;
 pub mod scoop;
 pub mod smelt;
 pub mod stairs;
+pub mod station;
 pub mod walk;
 
 use std::collections::BTreeMap;
