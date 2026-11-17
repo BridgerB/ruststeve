@@ -142,7 +142,26 @@ fn surface((x, y, z): Cell) -> [f64; 3] {
 /// the underside, each a little inside) within `reach` with a clear ray. A bucket's ray takes a
 /// source through any face: a refill under a pool two blocks up found no stand aiming at the
 /// surface alone (docs/problems/portal.md wall 16).
-pub fn aim_for(w: &World, eye: [f64; 3], (x, y, z): Cell, reach: f64) -> Option<[f64; 3]> {
+pub fn aim_for(w: &World, eye: [f64; 3], target: Cell, reach: f64) -> Option<[f64; 3]> {
+    aim_with(w, eye, target, reach, clear_ray)
+}
+
+/// `aim_for`, the face found by the exact line first: at the use itself a face the exact line
+/// reaches is taken over one only the sampled line reaches. The exact line agreed with the server
+/// in 603 of 604 uses (race 44165259286), and all 168 uses that filled nothing had it blocked;
+/// the sampled line still finds the stands and routes (letting the exact one decide those too
+/// lit 32 of 224 against 56, wall 27).
+pub fn aim_at_use(w: &World, eye: [f64; 3], target: Cell, reach: f64) -> Option<[f64; 3]> {
+    aim_with(w, eye, target, reach, exact_ray).or_else(|| aim_for(w, eye, target, reach))
+}
+
+fn aim_with(
+    w: &World,
+    eye: [f64; 3],
+    (x, y, z): Cell,
+    reach: f64,
+    clear: fn(&World, [f64; 3], [f64; 3], Cell) -> bool,
+) -> Option<[f64; 3]> {
     const FACES: [[f64; 3]; 6] = [
         [0.5, SURFACE_HEIGHT, 0.5],
         [0.1, 0.45, 0.5],
@@ -161,7 +180,7 @@ pub fn aim_for(w: &World, eye: [f64; 3], (x, y, z): Cell, reach: f64) -> Option<
             ]
         })
         .filter(|p| (0..3).map(|i| (eye[i] - p[i]).powi(2)).sum::<f64>().sqrt() <= reach)
-        .find(|p| clear_ray(w, eye, *p, (x, y, z)))
+        .find(|p| clear(w, eye, *p, (x, y, z)))
 }
 
 fn eye(body: &physics::Body) -> [f64; 3] {
@@ -418,7 +437,7 @@ impl Scoop {
             return (still, None, ScoopStatus::Failed(ScoopFailure::Gone));
         }
         let from = eye(&body);
-        let aim = aim_for(w, from, self.target, REACH);
+        let aim = aim_at_use(w, from, self.target, REACH);
         let point = aim.unwrap_or_else(|| surface(self.target));
         let in_reach = (0..3)
             .map(|i| (point[i] - from[i]).powi(2))
@@ -463,7 +482,9 @@ impl Scoop {
                     pitch: Some(pitch),
                     ..still
                 };
-                if !clear_ray(w, from, point, self.target) {
+                if !clear_ray(w, from, point, self.target)
+                    && !exact_ray(w, from, point, self.target)
+                {
                     return (still, None, ScoopStatus::Failed(ScoopFailure::NoSight));
                 }
                 if tick.saturating_sub(since) < SETTLE_TICKS {
