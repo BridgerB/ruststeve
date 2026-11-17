@@ -35,6 +35,8 @@ const STATION_MISSES: u32 = 2;
 /// Blocks a way toward one op's stand may dig: the room is about ten wide, so a way longer than
 /// that is not the room's.
 const WAY_DIGS: u32 = 12;
+/// Refill steps kept for the failure note.
+const REFILL_TRAIL: usize = 8;
 /// Blocks a cast may dig to open sight lines to lava with no station: a few per refill.
 const SIGHT_DIGS: u32 = 24;
 /// Blocks from the feet a lava source is looked at for a site (clojurecraft's `hunt-radius`).
@@ -195,6 +197,10 @@ pub struct Cast {
     /// Blocks dug on straight ways toward the op's stand (reset with the op).
     #[serde(default)]
     way_digs: u32,
+    /// The refill's last steps and why each ended, for the failure note (the recording holds no
+    /// planner state, and a refill that failed in 230 ticks left only a held bucket to read).
+    #[serde(default)]
+    refill_trail: Vec<String>,
     /// Blocks dug to open a refill's sight to lava with no station (wall 24).
     #[serde(default)]
     sight_digs: u32,
@@ -272,9 +278,26 @@ impl Cast {
             regressions: 0,
             station_misses: 0,
             way_digs: 0,
+            refill_trail: Vec::new(),
             sight_digs: 0,
             last_regression: None,
             tunnels: 0,
+        }
+    }
+
+    fn trail(&mut self, tick: u64, what: String) {
+        self.refill_trail.push(format!("{tick} {what}"));
+        if self.refill_trail.len() > REFILL_TRAIL {
+            self.refill_trail.remove(0);
+        }
+    }
+
+    /// The refill's last steps, for the failure note.
+    pub fn refill_text(&self) -> String {
+        if self.refill_trail.is_empty() {
+            "no refill".to_owned()
+        } else {
+            format!("refill: {}", self.refill_trail.join(" / "))
         }
     }
 
@@ -710,7 +733,8 @@ impl Cast {
                         self.last_done = tick;
                         (c, act, CastStatus::Running)
                     }
-                    DigStatus::Failed(_) => {
+                    DigStatus::Failed(e) => {
+                        self.trail(tick, format!("station dig failed {e:?}"));
                         self.work = Work::Idle;
                         self.station_misses += 1;
                         (c, act, CastStatus::Running)
@@ -726,7 +750,8 @@ impl Cast {
                         self.last_done = tick;
                         (still, None, CastStatus::Running)
                     }
-                    TaskStatus::Failed(_) => {
+                    TaskStatus::Failed(e) => {
+                        self.trail(tick, format!("station walk failed {e:?}"));
                         self.work = Work::Idle;
                         self.station_misses += 1;
                         (still, None, CastStatus::Running)
@@ -745,7 +770,18 @@ impl Cast {
             .filter(|c| !own.contains(c))
             .collect();
         let print = footprint(&self.plan);
-        let st = station::station_among(w, &sources, self.site.frame, &print, Some(self.site.h))?;
+        let Some(st) =
+            station::station_among(w, &sources, self.site.frame, &print, Some(self.site.h))
+        else {
+            if self
+                .refill_trail
+                .last()
+                .is_none_or(|t| !t.ends_with("no station"))
+            {
+                self.trail(tick, format!("{} sources, no station", sources.len()));
+            }
+            return None;
+        };
         let f = feet(&body);
         // The frame's rock and every cell the plan places, which a way never digs (clojurecraft's
         // `kept` and `placed?`): a way dug through the room's floor undid its place op, and the
@@ -903,12 +939,17 @@ impl Cast {
                         return (Controls::default(), None, CastStatus::Running);
                     }
                 }
+                self.trail(
+                    tick,
+                    format!("no route to {:?}, {} tunnels", nearest, self.tunnels),
+                );
                 return (
                     Controls::default(),
                     None,
                     CastStatus::Failed(CastFailure::NoRefill),
                 );
             };
+            self.trail(tick, format!("scoop {:?} routed", s.target));
             self.tunnels = 0;
             self.work = Work::Refill(Box::new(s));
             self.last_done = tick;
@@ -923,7 +964,9 @@ impl Cast {
                 self.work = Work::Idle;
                 (c, act, CastStatus::Running)
             }
-            ScoopStatus::Failed(_) => {
+            ScoopStatus::Failed(f) => {
+                let target = s.target;
+                self.trail(tick, format!("scoop {target:?} failed {f:?}"));
                 self.work = Work::Idle;
                 if self.try_again() {
                     (c, act, CastStatus::Running)

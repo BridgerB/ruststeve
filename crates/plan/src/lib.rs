@@ -609,9 +609,10 @@ impl Plan {
                 let site = k.site;
                 let ops = k.done_ops;
                 let at = format!(
-                    "{}; {}",
+                    "{}; {}; {}",
                     k.current().map(build::op_text).unwrap_or_default(),
-                    k.regression_text()
+                    k.regression_text(),
+                    k.refill_text()
                 );
                 return self.after_cast(c, status, site, ops, at, tick);
             }
