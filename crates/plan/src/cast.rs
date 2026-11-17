@@ -856,6 +856,32 @@ impl Cast {
             targets.truncate(REFILL_TRIES);
             let nearest = targets.first().copied();
             let sight = targets.clone();
+            // No source seen from here: a hole in the floor beside the feet over lava under the
+            // room comes first; a route found to a stand that never sees the lava spent the
+            // refill's tries (wall 25, rs-l00-b10 of 44026928299 never reached the hole).
+            if let (memory::Fluid::Lava, Some(body)) = (fluid, w.body)
+                && self.sight_digs < SIGHT_DIGS
+            {
+                let from = eye(&body);
+                let seen_one = sight
+                    .iter()
+                    .any(|t| crate::scoop::aim_for(w, from, *t, crate::scoop::REACH).is_some());
+                if !seen_one
+                    && let Some((hole, _)) = crate::station::floor_hole(
+                        w,
+                        feet(&body),
+                        from,
+                        &lava_sources(w),
+                        &crate::station::kept(self.site.frame),
+                        crate::scoop::REACH,
+                    )
+                {
+                    self.sight_digs += 1;
+                    self.work = Work::WayDig(Box::new(Dig::new(w, hole, tick)));
+                    self.last_done = tick;
+                    return (Controls::default(), None, CastStatus::Running);
+                }
+            }
             let Some(s) = targets.into_iter().find_map(|t| {
                 let mut s = Scoop::of(t, fluid, tick);
                 s.route_now(w, tick).then_some(s)
