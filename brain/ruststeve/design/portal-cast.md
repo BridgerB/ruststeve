@@ -51,6 +51,8 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
   3. else the first block on the eye's line to a source in reach is dug: under the feet, never kept or placed, no lava beside it at its height or over it (lava never flows up; wall 24), at most 24 a cast;
   4. else a level tunnel toward the pool's nearest source, at most 4.
   A water refill takes first the water sources seen within 7 of the frame's origin, the cast's own poured water (wall 28: a pour that made no obsidian left its water in the room, and memory keeps only surface water).
+- **A place** (walls 30, 31): steps out first when the player's box overlaps the cell (`overlaps`, the box from `physics::aabb`, not the feet's cell), and lays the op's block when held, else the first of `FILLERS` held (clojurecraft's `filler/fillers`: cobblestone, cobbled deepslate, the stones that drop themselves, dirt, the Nether's rock; never gravel or sand). Below y 0 a bot carries cobbled deepslate, and once the kit's 16 cobblestone were laid every place op had failed.
+- **The bucket's aim** at the use takes a face the exact line reaches first (`aim_at_use`); stands and routes keep the sampled line. The pair lit 62 of 210 (00c2c3a) against 58 of 224, and wasted uses fell from 168 to 84 a race.
 - **Defend beside lava** (wall 29): a fight's close-in and a retreat with no route step only where `safe_ahead` finds no lava seen ahead or under it down to 4 and a floor within 4; 15 of 19 lava deaths in one pair came within 300 ticks of a defend.
 - **The sight line** (wall 27): `clear_ray` samples forty points along the eye's line and decides; `exact_ray` (`ray_cells`, every cell the line enters, Amanatides and Woo) is computed beside it at every use and only measured. The exact line is right in the one case read (a sampled line stepped past a grazed corner and the bucket filled nothing), but the pair that let it decide lit 32 of 224 against 56. A cast counts its bucket uses four ways (filled or empty, exact clear or blocked) and names them in its notes, so a race says where the exact line and the server differ.
 - **The refill's trail**: a cast keeps its refill's last eight steps (station or none, walks and digs failed, scoops routed and failed with the reason, no route), and a failed cast's note names them.
@@ -75,7 +77,8 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 ## Not verified
 - `plan::station` has no differential against clojurecraft (the plan has one); its world-reading parts have no unit test.
 - Why the exact sight line lit fewer portals (wall 27): counted by the next race, not known.
-- Wall 28 (a water refill takes back the cast's own water first, `own_water`) and wall 29 (defend's raw steps ask `safe_ahead`) are not raced; their notes ("own water N", "steps held back") count their firings.
+- Walls 28 and 29 raced (1d4eae0, 62 of 224): own water fired in 2 bots; 1,410 steps held back, lava and fire deaths 3 a pair against 10 to 19. Wall 31 (fillers) is not raced.
+- `FILLERS` lays stone a spare pickaxe needs (clojurecraft's `stone-kept` is not ported).
 - Why a water pour sometimes makes no obsidian (wall 28's first cause): not read.
 - The thresholds added with walls 18 to 27 (`STATION_MISSES`, `WAY_DIGS`, `SIGHT_DIGS`, `REFILL_TRAIL`, the station's reach) are constants in the code, each with its source in a comment, not rows of a data file.
 
