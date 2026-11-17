@@ -139,3 +139,8 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 ### 23. Landings over lava out of reach (wall-22 pair 43973361819 and 43973376039, c29153b: 26 and 27 of 112)
 - **What happened**: places 1, 2, 7, 8, 9, 10 and 12 lit 0 of 16, most failing `NoRefill` at the first lava pour; their landings one to three over the lava.
 - **Tried and reverted** (914bf43, pair 43978974380 and 43978988790: 2 and 3 of 112 against 26 and 27): landings at most one over the lava. The places that lit 4 and 5 of 8 (4, 5, 6) lit none: their good sites are two or three over the lava, refilled from the room some way the station model here does not describe. The read was wrong; the next step is to read a lit cast's refills, not to reason about reach.
+
+### 24. Lava behind the frame (wall-22 pair, c29153b; the lit casts lit their second site)
+- **What happened**: in lane 0 of 43973361819 the casts that lit (rs-l00-b04) failed `NoRefill` at their first site too and lit a second one; rs-l00-b01 failed `NoRefill` after 100 ops and found no other site.
+- **Read**: rs-l00-b01's world rebuilt at its failure (event 95770): the frame at (-29, -53, -33) faces south, its room at z -32 and on, and the lava sea's edge at z -34 to -37, behind the frame's plane. Every line from the room to it crosses the frame's rock (`kept`), so no stand sees it and no dig may open it. The old test (lava farther than the landing from one frame cell) passed it.
+- **Fixes**: the lava must lie in front of the frame's plane (its dz in the frame's terms one or more); and with no station, the refill digs the first block on the eye's line to a source in reach (under the feet, not kept or placed, no lava beside it at its height or over it, at most 24 a cast).

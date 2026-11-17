@@ -246,6 +246,19 @@ pub fn stance_block(w: &World, feet: Cell, stand: Cell, kept: &[Cell]) -> Way {
         .map_or(Way::Open, Way::Dig)
 }
 
+/// Whether a sight dig may take `c`: solid, not obsidian, not kept, and no lava seen beside it at
+/// its height or over it: lava never flows up, so a lid over lava opens safely, while lava level
+/// with the block or higher would run in (clojurecraft's `safe-source?`; wall 24).
+fn sight_diggable(w: &World, c: Cell, kept: &[Cell]) -> bool {
+    kind(w, c).is_some_and(full)
+        && kind(w, c) != Some(BlockKind::Obsidian)
+        && !kept.contains(&c)
+        && neighbours(c)
+            .iter()
+            .filter(|n| n.1 >= c.1)
+            .all(|n| crate::cast::seen(w, *n) != Some(BlockKind::Lava))
+}
+
 /// The first solid block on the eye's ray to `src`'s centre that a refill may dig to open its
 /// sight (`source-in-sight`): below the feet's height only (lava let in there stays under the
 /// stand), never the frame's rock.
@@ -276,7 +289,7 @@ pub fn sight_block(
         }
         last = Some(c);
         if kind(w, c).is_some_and(full) {
-            return (c.1 < feet_y && diggable(w, c, kept)).then_some(c);
+            return (c.1 < feet_y && sight_diggable(w, c, kept)).then_some(c);
         }
     }
     None

@@ -35,6 +35,8 @@ const STATION_MISSES: u32 = 2;
 /// Blocks a way toward one op's stand may dig: the room is about ten wide, so a way longer than
 /// that is not the room's.
 const WAY_DIGS: u32 = 12;
+/// Blocks a cast may dig to open sight lines to lava with no station: a few per refill.
+const SIGHT_DIGS: u32 = 24;
 /// Blocks from the feet a lava source is looked at for a site (clojurecraft's `hunt-radius`).
 pub const LAVA_RADIUS: f64 = 48.0;
 /// Blocks from the feet lava seen is headed for when none is near (`far-radius`).
@@ -193,6 +195,9 @@ pub struct Cast {
     /// Blocks dug on straight ways toward the op's stand (reset with the op).
     #[serde(default)]
     way_digs: u32,
+    /// Blocks dug to open a refill's sight to lava with no station (wall 24).
+    #[serde(default)]
+    sight_digs: u32,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -267,6 +272,7 @@ impl Cast {
             regressions: 0,
             station_misses: 0,
             way_digs: 0,
+            sight_digs: 0,
             last_regression: None,
             tunnels: 0,
         }
@@ -849,10 +855,37 @@ impl Cast {
             };
             targets.truncate(REFILL_TRIES);
             let nearest = targets.first().copied();
+            let sight = targets.clone();
             let Some(s) = targets.into_iter().find_map(|t| {
                 let mut s = Scoop::of(t, fluid, tick);
                 s.route_now(w, tick).then_some(s)
             }) else {
+                // A source in reach but out of sight: the first block on the eye's line to it dug,
+                // under the feet, never the frame's rock or a placed cell (wall 24: the room's own
+                // floor hid a lava sea two under it, and no stand could see it).
+                if let (memory::Fluid::Lava, Some(body)) = (fluid, w.body) {
+                    let from = eye(&body);
+                    let mut kept = crate::station::kept(self.site.frame);
+                    kept.extend(
+                        self.plan
+                            .iter()
+                            .filter(|op| op.kind == OpKind::Place)
+                            .filter_map(|op| op.pos),
+                    );
+                    if let Some(block) = sight
+                        .iter()
+                        .filter(|t| dist(from, centre(**t)) <= crate::scoop::REACH)
+                        .find_map(|t| {
+                            crate::station::sight_block(w, from, *t, feet(&body).1, &kept)
+                        })
+                        && self.sight_digs < SIGHT_DIGS
+                    {
+                        self.sight_digs += 1;
+                        self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+                        self.last_done = tick;
+                        return (Controls::default(), None, CastStatus::Running);
+                    }
+                }
                 // No walk to the pool: tunnel toward its nearest source (clojurecraft digs a way to
                 // its station); a tunnel refuses cells with lava in or beside them, so it stops
                 // short of it, within a bucket's reach (wall 13).
@@ -1046,9 +1079,13 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
                 report.refused_or_spent += 1;
                 continue;
             }
-            // The lava in front: farther from the frame's cells than the landing.
-            let back = frame.at((1, 0, 0));
-            if dist(centre(*src), centre(back)) <= dist(centre(landing), centre(back)) {
+            // The lava in front of the frame's plane, on the room's side: lava behind it is reached
+            // only through the frame's own rock (wall 24: a pool two behind a south frame passed
+            // the old distance test, and no stand saw it).
+            let unit = frame.at((0, 0, 1));
+            let (ux, uz) = (unit.0 - frame.origin.0, unit.2 - frame.origin.2);
+            let ahead = (src.0 - frame.origin.0) * ux + (src.2 - frame.origin.2) * uz;
+            if ahead < 1 {
                 report.lava_behind += 1;
                 continue;
             }
