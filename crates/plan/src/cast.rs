@@ -13,7 +13,7 @@ use physics::Controls;
 use world::{Act, BlockPos, World};
 
 use crate::Cell;
-use crate::build::{Done, Facing, Frame, Op, OpKind, frame_plan, holds};
+use crate::build::{Done, Facing, Frame, Op, OpKind, frame_plan, holds, next_op};
 use crate::dig::{Dig, DigStatus};
 use crate::hold::{self, Hold};
 use crate::path::Goal;
@@ -198,9 +198,6 @@ pub struct Cast {
     /// Blocks dug to open a refill's sight to lava with no station (wall 24).
     #[serde(default)]
     sight_digs: u32,
-    /// The floor hole a refill opened, skipped by the op order until the lava bucket fills.
-    #[serde(default)]
-    open_hole: Option<Cell>,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -276,7 +273,6 @@ impl Cast {
             station_misses: 0,
             way_digs: 0,
             sight_digs: 0,
-            open_hole: None,
             last_regression: None,
             tunnels: 0,
         }
@@ -320,19 +316,12 @@ impl Cast {
         let Some(body) = w.body else {
             return (still, None, CastStatus::Running);
         };
-        // A floor hole dug for a refill stays open until the lava bucket is filled: the floor op
-        // that names it comes before the pour, and patched it before every scoop (wall 25).
-        if self.open_hole.is_some() && crate::craft::count(w, ItemKind::LavaBucket) > 0 {
-            self.open_hole = None;
-        }
-        let hole = self.open_hole;
-        let Some((i, op)) = self
-            .plan
-            .iter()
-            .enumerate()
-            .find(|(_, o)| !holds(w, &o.done) && (hole.is_none() || o.pos != hole))
-            .map(|(i, o)| (i, o.clone()))
-        else {
+        let Some((i, op)) = next_op(w, &self.plan).and_then(|o| {
+            self.plan
+                .iter()
+                .position(|p| std::ptr::eq(p, o))
+                .map(|i| (i, o.clone()))
+        }) else {
             return (still, None, CastStatus::Done);
         };
         if self.op != Some(i) {
@@ -867,33 +856,6 @@ impl Cast {
             targets.truncate(REFILL_TRIES);
             let nearest = targets.first().copied();
             let sight = targets.clone();
-            // No source seen from here: a hole in the floor beside the feet over lava under the
-            // room comes first; a route found to a stand that never sees the lava spent the
-            // refill's tries (wall 25, rs-l00-b10 of 44026928299 never reached the hole).
-            if let (memory::Fluid::Lava, Some(body)) = (fluid, w.body)
-                && self.sight_digs < SIGHT_DIGS
-            {
-                let from = eye(&body);
-                let seen_one = sight
-                    .iter()
-                    .any(|t| crate::scoop::aim_for(w, from, *t, crate::scoop::REACH).is_some());
-                if !seen_one
-                    && let Some((hole, _)) = crate::station::floor_hole(
-                        w,
-                        feet(&body),
-                        from,
-                        &lava_sources(w),
-                        &crate::station::kept(self.site.frame),
-                        crate::scoop::REACH,
-                    )
-                {
-                    self.sight_digs += 1;
-                    self.open_hole = Some(hole);
-                    self.work = Work::WayDig(Box::new(Dig::new(w, hole, tick)));
-                    self.last_done = tick;
-                    return (Controls::default(), None, CastStatus::Running);
-                }
-            }
             let Some(s) = targets.into_iter().find_map(|t| {
                 let mut s = Scoop::of(t, fluid, tick);
                 s.route_now(w, tick).then_some(s)
@@ -910,27 +872,6 @@ impl Cast {
                             .filter(|op| op.kind == OpKind::Place)
                             .filter_map(|op| op.pos),
                     );
-                    // A hole in the floor beside the feet over lava under the room (wall 25), else the
-                    // first block on a line to a source in reach. The hole's floor cell is the
-                    // plan's own, so it is not kept here; the frame's rock is.
-                    let frame_rock = crate::station::kept(self.site.frame);
-                    let lava = lava_sources(w);
-                    if self.sight_digs < SIGHT_DIGS
-                        && let Some((hole, _)) = crate::station::floor_hole(
-                            w,
-                            feet(&body),
-                            from,
-                            &lava,
-                            &frame_rock,
-                            crate::scoop::REACH,
-                        )
-                    {
-                        self.sight_digs += 1;
-                        self.open_hole = Some(hole);
-                        self.work = Work::WayDig(Box::new(Dig::new(w, hole, tick)));
-                        self.last_done = tick;
-                        return (Controls::default(), None, CastStatus::Running);
-                    }
                     if let Some(block) = sight
                         .iter()
                         .filter(|t| dist(from, centre(**t)) <= crate::scoop::REACH)
