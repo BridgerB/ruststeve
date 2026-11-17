@@ -201,6 +201,9 @@ pub struct Cast {
     /// planner state, and a refill that failed in 230 ticks left only a held bucket to read).
     #[serde(default)]
     refill_trail: Vec<String>,
+    /// The refills' bucket uses, summed (`Scoop::uses`).
+    #[serde(default)]
+    scoop_uses: [u32; 4],
     /// Blocks dug to open a refill's sight to lava with no station (wall 24).
     #[serde(default)]
     sight_digs: u32,
@@ -279,6 +282,7 @@ impl Cast {
             station_misses: 0,
             way_digs: 0,
             refill_trail: Vec::new(),
+            scoop_uses: [0; 4],
             sight_digs: 0,
             last_regression: None,
             tunnels: 0,
@@ -290,6 +294,21 @@ impl Cast {
         if self.refill_trail.len() > REFILL_TRAIL {
             self.refill_trail.remove(0);
         }
+    }
+
+    fn count_uses(&mut self, uses: [u32; 4]) {
+        for (mine, n) in self.scoop_uses.iter_mut().zip(uses) {
+            *mine += n;
+        }
+    }
+
+    /// The cast's refill bucket uses by outcome and by what the exact sight line said, for the
+    /// notes (`Scoop::uses`): a race's own count of where the exact line and the server differ.
+    pub fn uses_text(&self) -> String {
+        let [fe, fb, ee, eb] = self.scoop_uses;
+        format!(
+            "uses filled {fe} exact-clear {fb} exact-blocked, empty {ee} exact-clear {eb} exact-blocked"
+        )
     }
 
     /// The refill's last steps, for the failure note.
@@ -961,11 +980,14 @@ impl Cast {
         match status {
             ScoopStatus::Running => (c, act, CastStatus::Running),
             ScoopStatus::Done => {
+                let uses = s.uses;
+                self.count_uses(uses);
                 self.work = Work::Idle;
                 (c, act, CastStatus::Running)
             }
             ScoopStatus::Failed(f) => {
-                let target = s.target;
+                let (target, uses) = (s.target, s.uses);
+                self.count_uses(uses);
                 self.trail(tick, format!("scoop {target:?} failed {f:?}"));
                 self.work = Work::Idle;
                 if self.try_again() {

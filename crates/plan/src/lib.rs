@@ -94,6 +94,14 @@ pub const TABLE_SEARCH: f64 = 64.0;
 /// Events kept for `why` and the case file.
 const EVENTS_KEPT: usize = 64;
 
+/// A cast's account when it ends, for its note: the ops done, where it stood (the op, its
+/// regressions, the buckets held, the refill's last steps) and its bucket uses.
+struct CastAccount {
+    ops: u32,
+    at: String,
+    uses: String,
+}
+
 /// What the planner is for: issue 09's "reach a log at least `min_distance` blocks from where
 /// the planner began", or since issue 10 a goal row of the table put in play by its name
 /// (`table`: the `kit` row, four sticks and a crafting table).
@@ -608,13 +616,20 @@ impl Plan {
                 self.acts.extend(act);
                 let site = k.site;
                 let ops = k.done_ops;
+                let uses = k.uses_text();
+                // The buckets held when the cast ended: a cast that lost its water says so here.
+                let held = |i| craft::count(w, i);
                 let at = format!(
-                    "{}; {}; {}",
+                    "{}; {}; buckets water {} lava {} empty {}; {uses}; {}",
                     k.current().map(build::op_text).unwrap_or_default(),
                     k.regression_text(),
+                    held(data::ItemKind::WaterBucket),
+                    held(data::ItemKind::LavaBucket),
+                    held(data::ItemKind::Bucket),
                     k.refill_text()
                 );
-                return self.after_cast(c, status, site, ops, at, tick);
+                let account = CastAccount { ops, at, uses };
+                return self.after_cast(c, status, site, account, tick);
             }
             Task::Swim(e, since) => {
                 let (c, act) = e.step(w, tick);
@@ -1818,17 +1833,21 @@ impl Plan {
         c: Controls,
         status: cast::CastStatus,
         site: cast::Site,
-        ops: u32,
-        at: String,
+        account: CastAccount,
         tick: u64,
     ) -> Controls {
+        let CastAccount { ops, at, uses } = account;
         match status {
             cast::CastStatus::Running => return c,
             cast::CastStatus::Done => {
                 self.portal = Some(site.frame.at((1, 1, 0)));
                 self.failed_in_row = 0;
                 self.task = Task::Idle;
-                self.note(tick, "portal lit".to_owned(), format!("{ops} ops done"));
+                self.note(
+                    tick,
+                    "portal lit".to_owned(),
+                    format!("{ops} ops done; {uses}"),
+                );
             }
             cast::CastStatus::Failed(f) => {
                 *self.failures.entry(format!("Cast{f:?}")).or_default() += 1;

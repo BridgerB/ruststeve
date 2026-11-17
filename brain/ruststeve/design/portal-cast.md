@@ -50,7 +50,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
   2. else the nearest four sources of the site's pool, the first whose scoop routes; a scoop's route counts only when its end, or the eye when the bot is already there, sees a face of the source (wall 26);
   3. else the first block on the eye's line to a source in reach is dug: under the feet, never kept or placed, no lava beside it at its height or over it (lava never flows up; wall 24), at most 24 a cast;
   4. else a level tunnel toward the pool's nearest source, at most 4.
-- **The sight line is exact** (wall 27): `ray_cells` visits every cell the eye's line enters (Amanatides and Woo), as the server's ray does; a sampled line stepped past a grazed corner and the bucket filled nothing.
+- **The sight line** (wall 27): `clear_ray` samples forty points along the eye's line and decides; `exact_ray` (`ray_cells`, every cell the line enters, Amanatides and Woo) is computed beside it at every use and only measured. The exact line is right in the one case read (a sampled line stepped past a grazed corner and the bucket filled nothing), but the pair that let it decide lit 32 of 224 against 56. A cast counts its bucket uses four ways (filled or empty, exact clear or blocked) and names them in its notes, so a race says where the exact line and the server differ.
 - **The refill's trail**: a cast keeps its refill's last eight steps (station or none, walks and digs failed, scoops routed and failed with the reason, no route), and a failed cast's note names them.
 - **Progress invariants**: 3 tries an op; 2,400 ticks with no op done; lava seen in the room or the walls (not the cast's own holes) gives the site up; a given-up site refuses a new one within 16 blocks. A cast counts each time its first op not done moves back to an earlier one (a regression) and names the last in its note.
 - **The site** (`choose_site`): beside one of the 3 nearest lava sources memory saw exposed within 48 blocks; the room's landing an open standable cell 4 to 9 blocks from the lava on the plane, three under its height to three over; every footprint cell loaded, none **seen** holding fluid and none sharing a face with a remembered lava source; the lava in front of the frame's plane, on the room's side (wall 24); at most 16 blocks to place (counted only where the eye sees the rock missing, foundations included); a pool with at least as many sources as cells left within 16 (`spent`); a walk from the landing to within reach of the lava, or lava three under to one over the landing. Fewest blocks, then nearest the feet; of the best four, the first a walk reaches.
@@ -72,8 +72,9 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 
 ## Not verified
 - `plan::station` has no differential against clojurecraft (the plan has one); its world-reading parts have no unit test.
-- Wall 27 (the exact sight line) is not raced.
-- 15 to 24 of 112 bots die a race from `lava`, 4 to 11 of them in lava: not yet read.
+- Why the exact sight line lit fewer portals (wall 27): counted by the next race, not known.
+- Where a cast's water goes (wall 28): 27 casts in one race ended with no water and none to refill from; the plan never asks that the water bucket is held again.
+- 15 to 24 of 112 bots die a race from `lava`, 4 to 11 of them in lava, most at places 3 and 7: not yet read.
 - The thresholds added with walls 18 to 27 (`STATION_MISSES`, `WAY_DIGS`, `SIGHT_DIGS`, `REFILL_TRAIL`, the station's reach) are constants in the code, each with its source in a comment, not rows of a data file.
 
 ## Gotchas found on the way

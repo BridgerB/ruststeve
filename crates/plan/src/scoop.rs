@@ -69,6 +69,15 @@ pub struct Scoop {
     /// Water (a scoop), or lava (a cast's refill at its pool, issue 14c).
     #[serde(default = "water")]
     pub fluid: memory::Fluid,
+    /// Whether the exact line to the aim was clear when the last use was sent.
+    #[serde(default)]
+    sent_exact: Option<bool>,
+    /// The bucket's uses by how they ended and what the exact line said when each was sent:
+    /// filled and exact clear, filled and exact blocked, empty and exact clear, empty and exact
+    /// blocked. Every use had a clear sampled line. The second counts the exact line refusing
+    /// what the server took; the third, the exact line passing what the server refused.
+    #[serde(default)]
+    pub uses: [u32; 4],
 }
 
 fn water() -> memory::Fluid {
@@ -204,13 +213,41 @@ pub fn stands(w: &World, target: Cell) -> Vec<Cell> {
 
 /// Whether the eye's ray to `to` crosses nothing solid before the cell `target` (cells read from
 /// the loaded terrain, which the eye can see along).
+///
+/// Sampled, forty points along the line. The exact traversal (`exact_ray`) decided this for one
+/// pair of races (wall 27, 610fd87) and the pair lit 32 of 224 against 56: until a race's own
+/// counts say where the two disagree with the server (`Scoop::uses`), the sampled line decides
+/// and the exact one is measured beside it.
 pub fn clear_ray(w: &World, from: [f64; 3], to: [f64; 3], target: Cell) -> bool {
-    ray_cells(from, to).into_iter().all(|c| {
-        c == target
-            || w.block_at(world::BlockPos::new(c.0, c.1, c.2))
-                .and_then(data::generated::shapes::collision)
-                .is_some_and(|k| k == data::types::Collision::Empty)
+    let steps = 40;
+    (1..steps).all(|i| {
+        let t = f64::from(i) / f64::from(steps);
+        let p = [
+            from[0] + (to[0] - from[0]) * t,
+            from[1] + (to[1] - from[1]) * t,
+            from[2] + (to[2] - from[2]) * t,
+        ];
+        let c = (
+            p[0].floor() as i32,
+            p[1].floor() as i32,
+            p[2].floor() as i32,
+        );
+        c == target || open(w, c)
     })
+}
+
+/// A cell a bucket's ray passes: no collision shape.
+fn open(w: &World, c: Cell) -> bool {
+    w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+        .and_then(data::generated::shapes::collision)
+        .is_some_and(|k| k == data::types::Collision::Empty)
+}
+
+/// `clear_ray` by exact traversal: every cell the line enters before `target` is open.
+pub fn exact_ray(w: &World, from: [f64; 3], to: [f64; 3], target: Cell) -> bool {
+    ray_cells(from, to)
+        .into_iter()
+        .all(|c| c == target || open(w, c))
 }
 
 /// Every cell the segment `from` to `to` enters, in order, the first excluded (exact voxel
@@ -297,6 +334,8 @@ impl Scoop {
                 tick,
             )),
             tries: 0,
+            sent_exact: None,
+            uses: [0; 4],
         }
     }
 
@@ -358,6 +397,9 @@ impl Scoop {
         if let Stage::Sent { before, .. } = self.stage
             && self.held_filled(w) > before
         {
+            if let Some(exact) = self.sent_exact.take() {
+                self.uses[usize::from(!exact)] += 1;
+            }
             return (still, None, ScoopStatus::Done);
         }
         // Gone only before the use is sent: a scooped source's block update arrives a tick before
@@ -418,6 +460,7 @@ impl Scoop {
                     return (look, None, ScoopStatus::Running);
                 }
                 self.tries += 1;
+                self.sent_exact = Some(exact_ray(w, from, point, self.target));
                 self.stage = Stage::Sent {
                     at: tick,
                     before: self.held_filled(w),
@@ -433,6 +476,10 @@ impl Scoop {
                 };
                 if tick.saturating_sub(*at) < ANSWER_TICKS {
                     return (look, None, ScoopStatus::Running);
+                }
+                // No answer: the use filled nothing.
+                if let Some(exact) = self.sent_exact.take() {
+                    self.uses[2 + usize::from(!exact)] += 1;
                 }
                 if self.tries >= MAX_TRIES {
                     return (look, None, ScoopStatus::Failed(ScoopFailure::NoScoop));
