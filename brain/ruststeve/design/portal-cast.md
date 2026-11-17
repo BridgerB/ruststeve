@@ -50,6 +50,8 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
   2. else the nearest four sources of the site's pool, the first whose scoop routes; a scoop's route counts only when its end, or the eye when the bot is already there, sees a face of the source (wall 26);
   3. else the first block on the eye's line to a source in reach is dug: under the feet, never kept or placed, no lava beside it at its height or over it (lava never flows up; wall 24), at most 24 a cast;
   4. else a level tunnel toward the pool's nearest source, at most 4.
+  A water refill takes first the water sources seen within 7 of the frame's origin, the cast's own poured water (wall 28: a pour that made no obsidian left its water in the room, and memory keeps only surface water).
+- **Defend beside lava** (wall 29): a fight's close-in and a retreat with no route step only where `safe_ahead` finds no lava seen ahead or under it down to 4 and a floor within 4; 15 of 19 lava deaths in one pair came within 300 ticks of a defend.
 - **The sight line** (wall 27): `clear_ray` samples forty points along the eye's line and decides; `exact_ray` (`ray_cells`, every cell the line enters, Amanatides and Woo) is computed beside it at every use and only measured. The exact line is right in the one case read (a sampled line stepped past a grazed corner and the bucket filled nothing), but the pair that let it decide lit 32 of 224 against 56. A cast counts its bucket uses four ways (filled or empty, exact clear or blocked) and names them in its notes, so a race says where the exact line and the server differ.
 - **The refill's trail**: a cast keeps its refill's last eight steps (station or none, walks and digs failed, scoops routed and failed with the reason, no route), and a failed cast's note names them.
 - **Progress invariants**: 3 tries an op; 2,400 ticks with no op done; lava seen in the room or the walls (not the cast's own holes) gives the site up; a given-up site refuses a new one within 16 blocks. A cast counts each time its first op not done moves back to an earlier one (a regression) and names the last in its note.
@@ -73,8 +75,8 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 ## Not verified
 - `plan::station` has no differential against clojurecraft (the plan has one); its world-reading parts have no unit test.
 - Why the exact sight line lit fewer portals (wall 27): counted by the next race, not known.
-- Where a cast's water goes (wall 28): 27 casts in one race ended with no water and none to refill from; the plan never asks that the water bucket is held again.
-- 15 to 24 of 112 bots die a race from `lava`, 4 to 11 of them in lava, most at places 3 and 7: not yet read.
+- Wall 28 (a water refill takes back the cast's own water first, `own_water`) and wall 29 (defend's raw steps ask `safe_ahead`) are not raced; their notes ("own water N", "steps held back") count their firings.
+- Why a water pour sometimes makes no obsidian (wall 28's first cause): not read.
 - The thresholds added with walls 18 to 27 (`STATION_MISSES`, `WAY_DIGS`, `SIGHT_DIGS`, `REFILL_TRAIL`, the station's reach) are constants in the code, each with its source in a comment, not rows of a data file.
 
 ## Gotchas found on the way
