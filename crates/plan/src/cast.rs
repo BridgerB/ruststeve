@@ -67,6 +67,29 @@ fn foundation(w: &World, pos: Cell) -> Option<Cell> {
         .find(|c| full(kind(w, (c.0, c.1 - 1, c.2))))
 }
 
+/// The items a cast's floors and walls are laid from, in the order taken (clojurecraft's
+/// `filler/fillers` at be85a92): cobblestone, the stones that drop themselves, dirt, then the
+/// Nether's rock. Never gravel or sand, which fall out of a floor. Not ported yet: its
+/// `stone-kept`, the stone held back for a spare pickaxe.
+pub const FILLERS: [ItemKind; 11] = [
+    ItemKind::Cobblestone,
+    ItemKind::CobbledDeepslate,
+    ItemKind::Andesite,
+    ItemKind::Diorite,
+    ItemKind::Granite,
+    ItemKind::Tuff,
+    ItemKind::Dirt,
+    ItemKind::Netherrack,
+    ItemKind::SoulSoil,
+    ItemKind::Blackstone,
+    ItemKind::Basalt,
+];
+
+/// The first filler held, or none.
+pub fn filler(w: &World) -> Option<ItemKind> {
+    FILLERS.into_iter().find(|i| crate::craft::count(w, *i) > 0)
+}
+
 /// Whether the player's box overlaps cell `c` (strictly: a box touching a face does not).
 pub fn overlaps(body: &physics::Body, (x, y, z): Cell) -> bool {
     let b = physics::aabb(body.pos);
@@ -652,7 +675,15 @@ impl Cast {
         if let Err(r) = self.approach(w, body, pos, None, tick) {
             return r;
         }
-        match hold::toward(w, op.item.unwrap_or(ItemKind::Cobblestone)) {
+        // The op's block if held, else any filler held (wall 31: below y 0 the bot digs deepslate
+        // and carries cobbled deepslate; once the kit's 16 cobblestone were laid every place op
+        // failed with no click, rs-l05-b07 of race 44172568506 holding 55 cobbled deepslate).
+        let item = op
+            .item
+            .filter(|i| crate::craft::count(w, *i) > 0)
+            .or_else(|| filler(w))
+            .unwrap_or(ItemKind::Cobblestone);
+        match hold::toward(w, item) {
             Hold::Held => {}
             Hold::Act(a) => return (Controls::default(), Some(a), CastStatus::Running),
             Hold::Wait => return (Controls::default(), None, CastStatus::Running),
