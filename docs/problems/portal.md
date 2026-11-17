@@ -137,6 +137,5 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Fix**: with no walk to an op, the first block of the straight way at the feet's height toward its column is dug when it is in reach, never the frame's rock or a cell the plan places, at most 12 such digs per op; then the walk is tried again.
 
 ### 23. Landings over lava out of reach (wall-22 pair 43973361819 and 43973376039, c29153b: 26 and 27 of 112)
-- **What happened**: the way dig lifted the pair to 53 of 224 (23.7%), but places 1, 2, 7, 8, 9, 10 and 12 lit 0 of 16, most failing `NoRefill` at the first lava pour.
-- **Read**: their sites put the landing one to three over the lava (lava-sea pools at y -55 with landings at -53; rs-l00-b10 three over at (30, 43, 55)). A stand on the room's floor or over it has its eye 3.6 or more over a source two under the floor, and every stand is four or more in front of the frame: out of the 4.3 reach.
-- **Fix**: landings at most one over the lava (dy -3 to 1; wall 14 had widened it to 3).
+- **What happened**: places 1, 2, 7, 8, 9, 10 and 12 lit 0 of 16, most failing `NoRefill` at the first lava pour; their landings one to three over the lava.
+- **Tried and reverted** (914bf43, pair 43978974380 and 43978988790: 2 and 3 of 112 against 26 and 27): landings at most one over the lava. The places that lit 4 and 5 of 8 (4, 5, 6) lit none: their good sites are two or three over the lava, refilled from the room some way the station model here does not describe. The read was wrong; the next step is to read a lit cast's refills, not to reason about reach.
