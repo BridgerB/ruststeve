@@ -935,7 +935,10 @@ impl Plan {
                                 rules.flee_clear,
                             ));
                         }
-                        Some(Ok(format!("defended: {} swings, {:?}", d.swings, d.stance)))
+                        Some(Ok(format!(
+                            "defended: {} swings, {:?}, {} steps held back",
+                            d.swings, d.stance, d.held_back
+                        )))
                     }
                 };
                 (c, act, ended)

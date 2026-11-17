@@ -236,6 +236,33 @@ fn full(k: Option<BlockKind>) -> bool {
 
 /// The kind at a cell when the eye could see it: a neighbour lets a face show (memory's rule).
 /// Strict no X-ray: a cell inside rock reads as `None`.
+/// How far round the frame's origin a cast looks for its own poured water: the frame and room
+/// lie within six of it.
+const OWN_WATER: i32 = 7;
+
+/// Water sources seen within `OWN_WATER` of the frame's origin, nearest the origin first: water
+/// the cast poured and did not get back (wall 28). Strict no X-ray: a cell is read only when it
+/// has a see-through neighbour.
+pub fn own_water(w: &World, frame: Frame) -> Vec<Cell> {
+    let o = frame.origin;
+    let mut out: Vec<(i32, Cell)> = Vec::new();
+    for dx in -OWN_WATER..=OWN_WATER {
+        for dy in -OWN_WATER..=OWN_WATER {
+            for dz in -OWN_WATER..=OWN_WATER {
+                let c = (o.0 + dx, o.1 + dy, o.2 + dz);
+                let source = w
+                    .fluid(c.0, c.1, c.2)
+                    .is_some_and(|f| f.kind == physics::FluidKind::Water && f.level == 0);
+                if source && seen(w, c).is_some() {
+                    out.push((dx * dx + dy * dy + dz * dz, c));
+                }
+            }
+        }
+    }
+    out.sort();
+    out.into_iter().map(|(_, c)| c).collect()
+}
+
 pub fn seen(w: &World, c: Cell) -> Option<BlockKind> {
     let k = kind(w, c)?;
     let open = memory::neighbours(c)
@@ -906,7 +933,18 @@ impl Cast {
                     .filter(|c| !own.contains(c))
                     .filter(|c| dist(centre(*c), centre(self.site.lava)) <= POOL_RADIUS)
                     .collect(),
-                memory::Fluid::Water => crate::scoop::sources(w),
+                // The cast's own poured water first (wall 28): a pour that made no obsidian left
+                // its water in the room, the scoop back comes after the pour in the plan, and
+                // memory keeps only surface water; b05 walked 364 times toward pools no walk
+                // reached with its water a block away.
+                memory::Fluid::Water => {
+                    let mut near = own_water(w, self.site.frame);
+                    if !near.is_empty() {
+                        self.trail(tick, format!("own water {}", near.len()));
+                    }
+                    near.extend(crate::scoop::sources(w));
+                    near
+                }
             };
             targets.truncate(REFILL_TRIES);
             let nearest = targets.first().copied();
