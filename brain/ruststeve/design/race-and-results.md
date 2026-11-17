@@ -5,8 +5,8 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-16
-verifiedAgainst: ruststeve@da0e4fa clojurecraft@be85a92
+lastUpdated: 2026-11-17
+verifiedAgainst: ruststeve@610fd87 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -70,6 +70,8 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 ## Issue 14
 - **Checkpoint places**: a start may list `places`, overworld feet positions; bot i of every lane takes place i mod n (a lane's bots share one server, so each needs its own; every lane takes the same, paired). The `lava` start puts bots at fourteen landings, 32 blocks apart or more, where `kit` race bots chose cast sites on the race seed, the water bucket filled, cap 24,000: a race works the cast from its first tick (Bridger, 2026-11-16: start where the work is, not from scratch).
 - The `kit` start (Bridger, 2026-11-15: two buckets): an iron pickaxe, two buckets, flint and steel, a stone pickaxe and sword, a table, 8 sticks, 16 cobblestone, spread 128 ([[portal-cast]]).
+- **A case file carries the planner's notes** (`bot::Notes`, `PlanSummary.notes`): every note in order as "tick what (why)", but one whose `what` repeats either of the two kept before it is left out (a hunt's two notes alternate for an hour), and past 80 from the start and 160 from the end the middle is dropped; the notes left out are counted. A race is read from the release's `batches-<run>.tar.zst`: until 2026-11-17 it was read by exporting every recording, ten to twenty minutes a race, and a case said only "aim portal (the planner)".
+- **A race runs a commit whose `ci` is green**: `ci` runs the whole suite on every push in about four minutes, and a newer push cancels an older commit's run.
 
 ## See also
 - [[observability]] - what every run produces.
