@@ -205,24 +205,76 @@ pub fn stands(w: &World, target: Cell) -> Vec<Cell> {
 /// Whether the eye's ray to `to` crosses nothing solid before the cell `target` (cells read from
 /// the loaded terrain, which the eye can see along).
 pub fn clear_ray(w: &World, from: [f64; 3], to: [f64; 3], target: Cell) -> bool {
-    let steps = 40;
-    (1..steps).all(|i| {
-        let t = f64::from(i) / f64::from(steps);
-        let p = [
-            from[0] + (to[0] - from[0]) * t,
-            from[1] + (to[1] - from[1]) * t,
-            from[2] + (to[2] - from[2]) * t,
-        ];
-        let c = (
-            p[0].floor() as i32,
-            p[1].floor() as i32,
-            p[2].floor() as i32,
-        );
+    ray_cells(from, to).into_iter().all(|c| {
         c == target
             || w.block_at(world::BlockPos::new(c.0, c.1, c.2))
                 .and_then(data::generated::shapes::collision)
                 .is_some_and(|k| k == data::types::Collision::Empty)
     })
+}
+
+/// Every cell the segment `from` to `to` enters, in order, the first excluded (exact voxel
+/// traversal, Amanatides and Woo). The server's ray takes the first block it touches; forty
+/// samples along the line stepped past a block's corner the ray grazed, and a lava scoop aimed
+/// past deepslate filled nothing eight times (docs/problems/portal.md wall 27; clojurecraft
+/// issue #225).
+pub fn ray_cells(from: [f64; 3], to: [f64; 3]) -> Vec<Cell> {
+    let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let mut c = [
+        from[0].floor() as i32,
+        from[1].floor() as i32,
+        from[2].floor() as i32,
+    ];
+    let last = [
+        to[0].floor() as i32,
+        to[1].floor() as i32,
+        to[2].floor() as i32,
+    ];
+    let step = d.map(|v| {
+        if v > 0.0 {
+            1
+        } else if v < 0.0 {
+            -1
+        } else {
+            0
+        }
+    });
+    let mut t_max = [0.0f64; 3];
+    let mut t_delta = [f64::INFINITY; 3];
+    for i in 0..3 {
+        if step[i] == 0 {
+            t_max[i] = f64::INFINITY;
+        } else {
+            let edge = if step[i] > 0 {
+                f64::from(c[i]) + 1.0
+            } else {
+                f64::from(c[i])
+            };
+            t_max[i] = (edge - from[i]) / d[i];
+            t_delta[i] = (1.0 / d[i]).abs();
+        }
+    }
+    let mut out = Vec::new();
+    // At most the cells a segment of reach crosses, and a guard against a degenerate loop.
+    for _ in 0..64 {
+        if c == last {
+            break;
+        }
+        let axis = if t_max[0] <= t_max[1] && t_max[0] <= t_max[2] {
+            0
+        } else if t_max[1] <= t_max[2] {
+            1
+        } else {
+            2
+        };
+        if t_max[axis] > 1.0 {
+            break;
+        }
+        c[axis] += step[axis];
+        t_max[axis] += t_delta[axis];
+        out.push((c[0], c[1], c[2]));
+    }
+    out
 }
 
 impl Scoop {

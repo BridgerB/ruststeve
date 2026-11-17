@@ -153,3 +153,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **What happened**: with the refill's last steps in the failure note, lane 0's twelve `NoRefill` casts read: seven `scoop X routed` then `failed NoSight` one tick later, four times in four ticks on one source (rs-l00-b01, b02, b07, b09, b10, b00 and b13's twin); three `NoScoop` after 200 ticks each (b04, b12, b13); three water refills with no water route (b00, b05, b06).
 - **Cause**: the scoop's fallback walk goes to within 3.5 of the source; a route `Found` counted with no check of sight (only a partial one had to see it), so a bot already that near got an empty route, reached `Aim`, saw nothing and failed, and the refill took the same nearest source again.
 - **Fix**: a route counts only when its end (or the eye, when the bot is already there) sees a face of the source; the refill then tries the next source, the tunnel and the sight dig.
+
+### 27. The scoop's ray grazed a corner (trail pair, 71a7e20: `NoScoop` in rs-l00-b04, b12, b13)
+- **What happened**: three of lane 0's twelve `NoRefill` casts failed `NoScoop`: the bucket used eight times or more, 200 ticks a try, nothing filled.
+- **Read**: rs-l00-b04 rebuilt at its use at event 117544: the held item a bucket, the target (-114, -55, 32) lava at level 0, the look sent (yaw 90.08, pitch 66.3) exactly at the aim [-113.5, -54.15, 32.5], and forty samples along the line all air. Traversed exactly, the line enters (-113, -54, 32), deepslate, crossing x -113 at y -53.02, two hundredths inside its top corner; the server's ray takes the first block it touches.
+- **Cause**: `clear_ray` sampled forty points and stepped past the corner (clojurecraft issue #225, the same).
+- **Fix**: `scoop::ray_cells`, exact voxel traversal (Amanatides and Woo); `clear_ray` asks every cell the line enters. On b04's world the aim moves to a face the exact line reaches.
