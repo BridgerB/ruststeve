@@ -13,7 +13,7 @@ use physics::Controls;
 use world::{Act, BlockPos, World};
 
 use crate::Cell;
-use crate::build::{Done, Facing, Frame, Op, OpKind, frame_plan, holds, next_op};
+use crate::build::{Done, Facing, Frame, Op, OpKind, frame_plan, holds};
 use crate::dig::{Dig, DigStatus};
 use crate::hold::{self, Hold};
 use crate::path::Goal;
@@ -198,6 +198,9 @@ pub struct Cast {
     /// Blocks dug to open a refill's sight to lava with no station (wall 24).
     #[serde(default)]
     sight_digs: u32,
+    /// The floor hole a refill opened, skipped by the op order until the lava bucket fills.
+    #[serde(default)]
+    open_hole: Option<Cell>,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -273,6 +276,7 @@ impl Cast {
             station_misses: 0,
             way_digs: 0,
             sight_digs: 0,
+            open_hole: None,
             last_regression: None,
             tunnels: 0,
         }
@@ -316,12 +320,19 @@ impl Cast {
         let Some(body) = w.body else {
             return (still, None, CastStatus::Running);
         };
-        let Some((i, op)) = next_op(w, &self.plan).and_then(|o| {
-            self.plan
-                .iter()
-                .position(|p| std::ptr::eq(p, o))
-                .map(|i| (i, o.clone()))
-        }) else {
+        // A floor hole dug for a refill stays open until the lava bucket is filled: the floor op
+        // that names it comes before the pour, and patched it before every scoop (wall 25).
+        if self.open_hole.is_some() && crate::craft::count(w, ItemKind::LavaBucket) > 0 {
+            self.open_hole = None;
+        }
+        let hole = self.open_hole;
+        let Some((i, op)) = self
+            .plan
+            .iter()
+            .enumerate()
+            .find(|(_, o)| !holds(w, &o.done) && (hole.is_none() || o.pos != hole))
+            .map(|(i, o)| (i, o.clone()))
+        else {
             return (still, None, CastStatus::Done);
         };
         if self.op != Some(i) {
@@ -877,6 +888,7 @@ impl Cast {
                     )
                 {
                     self.sight_digs += 1;
+                    self.open_hole = Some(hole);
                     self.work = Work::WayDig(Box::new(Dig::new(w, hole, tick)));
                     self.last_done = tick;
                     return (Controls::default(), None, CastStatus::Running);
@@ -914,6 +926,7 @@ impl Cast {
                         )
                     {
                         self.sight_digs += 1;
+                        self.open_hole = Some(hole);
                         self.work = Work::WayDig(Box::new(Dig::new(w, hole, tick)));
                         self.last_done = tick;
                         return (Controls::default(), None, CastStatus::Running);
