@@ -80,6 +80,26 @@ fn a_stand_reaches_sources_under_its_feet_nearest_first() {
     }
 }
 
+/// Race 44159281696, rs-l00-b06 at event 31068: the feet in (-18, -51, -66), the box 0.16 into
+/// (-18, -50, -67) on z; the server refused a block there four times.
+#[test]
+fn the_box_of_race_44159281696_overlaps_the_cell_its_feet_are_not_in() {
+    let body = physics::Body {
+        pos: [-17.53, -51.0, -65.86],
+        ..physics::Body::default()
+    };
+    assert!(plan::cast::overlaps(&body, (-18, -50, -67)));
+    assert!(plan::cast::overlaps(&body, (-18, -51, -66)));
+    // A box touching a face does not overlap: standing on a block, beside a wall.
+    let on = physics::Body {
+        pos: [0.5, 1.0, 0.5],
+        ..physics::Body::default()
+    };
+    assert!(!plan::cast::overlaps(&on, (0, 0, 0)));
+    assert!(!plan::cast::overlaps(&on, (1, 1, 0)));
+    assert!(!plan::cast::overlaps(&on, (0, 3, 0)));
+}
+
 #[test]
 fn the_kept_rock_is_the_frames_plane_and_the_row_behind_it() {
     let frame = Frame {

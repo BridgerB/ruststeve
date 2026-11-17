@@ -67,6 +67,13 @@ fn foundation(w: &World, pos: Cell) -> Option<Cell> {
         .find(|c| full(kind(w, (c.0, c.1 - 1, c.2))))
 }
 
+/// Whether the player's box overlaps cell `c` (strictly: a box touching a face does not).
+pub fn overlaps(body: &physics::Body, (x, y, z): Cell) -> bool {
+    let b = physics::aabb(body.pos);
+    let lo = [f64::from(x), f64::from(y), f64::from(z)];
+    (0..3).all(|i| b[i] < lo[i] + 1.0 && b[i + 3] > lo[i])
+}
+
 /// Tunnels a refill cuts toward its pool before it fails.
 pub const MAX_TUNNELS: u32 = 4;
 /// Sources a refill tries a walk to, nearest first.
@@ -617,10 +624,12 @@ impl Cast {
                 return self.fail();
             }
         }
-        // Never place into the body: the server refuses a block where the player stands, so a
-        // place whose cell the feet or the head are in steps out of it first.
-        let f = feet(body);
-        if f == pos || (f.0, f.1 + 1, f.2) == pos {
+        // Never place into the body: the server refuses a block whose cell the player's box
+        // overlaps, so a place steps out of it first. The box, not the feet's cell: rs-l00-b06 of
+        // race 44159281696 stood at (-17.53, -51, -65.86), its box 0.16 into the cell
+        // (-18, -50, -67) on z, its feet in another cell, and placed into it four times for
+        // nothing (wall 30).
+        if overlaps(body, pos) {
             if !matches!(self.work, Work::Walk(_)) {
                 let mut walk = Walk::new(pos, Goal::Away { pos, range: 1.5 }, Arrive::Goal, tick);
                 if !walk.route_now(w, tick) {

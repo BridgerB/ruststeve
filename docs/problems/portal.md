@@ -177,3 +177,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Cause**: of the defend's moves, a retreat with a route walks it (the walker keeps off cells beside lava); but a fight's close-in and a retreat with no route are a raw step forward along a yaw, asking nothing of the cell ahead.
 - **Fix**: both raw steps ask `safe_ahead` first: no lava seen in the cell ahead at the feet or the head, nor under it down to 4, and a seen floor within 4 (an unseen cell counts as rock). A held step stands facing the foe (a fight) or away from it (a retreat), and the `defended` note counts the steps held back, so the next race counts its firings.
 - **Raced** (1d4eae0, race 44165259286: 31 of 112 lit): 1,410 steps held back in 13 defends; lava and fire deaths 1, against 6 to 11 a race before. Wall 28's own water fired in 2 bots; water `NoRefill` 9, against 12 and 27.
+
+### 30. A place refused under the bot's own box (b358407 pair: 26 casts failed `:place :floor`)
+- **What happened**: 26 casts in race 44159281696 failed `Op` at `:place :floor` with no regressions; the same cells failed in lane after lane ((-18, -50, -67) in eight lanes).
+- **Read** (probes 44170721317 and 44171254501 on rs-l00-b06's recording): the cast's place clicked the east face of (-19, -50, -67) four times to put cobblestone in (-18, -50, -67), and nothing appeared. `why` at three of the clicks: the player at (-17.53, -51.00, -65.86), its box z -66.16 to -65.56: 0.16 into the target cell on z, with its feet in (-18, -51, -66). The server refuses a block whose cell a player's box overlaps.
+- **Cause**: the place op stepped out of the cell only when the feet's cell or the head's was the target; a box overhanging a neighbouring cell was not checked.
+- **Fix**: `cast::overlaps` (the box from `physics::aabb` against the cell, strictly) decides the step out; a unit test holds b06's numbers.
