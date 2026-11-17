@@ -872,6 +872,26 @@ impl Cast {
                             .filter(|op| op.kind == OpKind::Place)
                             .filter_map(|op| op.pos),
                     );
+                    // A hole in the floor beside the feet over lava under the room (wall 25), else the
+                    // first block on a line to a source in reach. The hole's floor cell is the
+                    // plan's own, so it is not kept here; the frame's rock is.
+                    let frame_rock = crate::station::kept(self.site.frame);
+                    let lava = lava_sources(w);
+                    if self.sight_digs < SIGHT_DIGS
+                        && let Some((hole, _)) = crate::station::floor_hole(
+                            w,
+                            feet(&body),
+                            from,
+                            &lava,
+                            &frame_rock,
+                            crate::scoop::REACH,
+                        )
+                    {
+                        self.sight_digs += 1;
+                        self.work = Work::WayDig(Box::new(Dig::new(w, hole, tick)));
+                        self.last_done = tick;
+                        return (Controls::default(), None, CastStatus::Running);
+                    }
                     if let Some(block) = sight
                         .iter()
                         .filter(|t| dist(from, centre(**t)) <= crate::scoop::REACH)

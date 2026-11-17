@@ -259,6 +259,58 @@ fn sight_diggable(w: &World, c: Cell, kept: &[Cell]) -> bool {
             .all(|n| crate::cast::seen(w, *n) != Some(BlockKind::Lava))
 }
 
+/// A hole in the floor beside the feet over lava (wall 25): a floor cell one under the feet, within
+/// two of them on the plane but never their own column, solid and safe to open, with a lava
+/// source under it (air between) whose top is within `reach` of the eye. The scoop then aims down
+/// through it, and the cast's floor op patches it after. Nearest the feet first.
+pub fn floor_hole(
+    w: &World,
+    feet: Cell,
+    eye: [f64; 3],
+    sources: &[Cell],
+    kept: &[Cell],
+    reach: f64,
+) -> Option<(Cell, Cell)> {
+    let mut out: Vec<(i32, Cell, Cell)> = Vec::new();
+    for dx in -2..=2 {
+        for dz in -2..=2 {
+            if (dx, dz) == (0, 0) {
+                continue;
+            }
+            let hole = (feet.0 + dx, feet.1 - 1, feet.2 + dz);
+            if !sight_diggable(w, hole, kept) {
+                continue;
+            }
+            // Down the hole's column: air, then a source.
+            let src = (1..=3).find_map(|d| {
+                let c = (hole.0, hole.1 - d, hole.2);
+                if sources.contains(&c) {
+                    return Some(Some(c));
+                }
+                // Strict no X-ray: the air between seen, never read from unseen cells.
+                (!matches!(
+                    crate::cast::seen(w, c),
+                    Some(BlockKind::Air | BlockKind::CaveAir)
+                ))
+                .then_some(None)
+            });
+            let Some(Some(src)) = src else {
+                continue;
+            };
+            let top = [
+                f64::from(src.0) + 0.5,
+                f64::from(src.1) + 0.875,
+                f64::from(src.2) + 0.5,
+            ];
+            if dist(eye, top) <= reach {
+                out.push((dx.abs() + dz.abs(), hole, src));
+            }
+        }
+    }
+    out.sort();
+    out.first().map(|(_, h, s)| (*h, *s))
+}
+
 /// The first solid block on the eye's ray to `src`'s centre that a refill may dig to open its
 /// sight (`source-in-sight`): below the feet's height only (lava let in there stays under the
 /// stand), never the frame's rock.
