@@ -244,7 +244,7 @@ fn race(a: &Args) -> Result<bool, String> {
             plan: outcome
                 .plan
                 .as_ref()
-                .map(|p| bot::plan_summary(p, &outcome.plan_tick_us)),
+                .map(|p| bot::plan_summary(p, &outcome.plan_tick_us, &outcome.plan_notes)),
             stream: outcome.stream.map(|c| results::StreamCounts {
                 sent: c.sent,
                 dropped: c.dropped,
