@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod diagnose;
 pub mod parity;
 
 use std::collections::BTreeMap;
