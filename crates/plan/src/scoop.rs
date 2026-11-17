@@ -339,6 +339,16 @@ impl Scoop {
         }
     }
 
+    /// The uses, the one sent last counted as filled: a cast drops its refill the tick its
+    /// bucket shows full, before the scoop's own step would see it (race 44159281696 counted no
+    /// filled use in 21 lit casts).
+    pub fn uses_filled(&mut self) -> [u32; 4] {
+        if let Some(exact) = self.sent_exact.take() {
+            self.uses[usize::from(!exact)] += 1;
+        }
+        self.uses
+    }
+
     /// Whether a walk reaches a stand for it now (the churn invariant: never start a scoop with no
     /// way): a standable cell within reach of the surface with a clear look at it (`stands`),
     /// nearest the feet first. Being within reach is not enough: a refill aimed from the cast's

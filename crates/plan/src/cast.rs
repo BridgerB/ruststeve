@@ -694,7 +694,9 @@ impl Cast {
         if op.kind == OpKind::Pour && crate::craft::count(w, item) == 0 {
             return self.refill(w, item, tick);
         }
-        if let Work::Refill(_) = self.work {
+        if let Work::Refill(s) = &mut self.work {
+            let uses = s.uses_filled();
+            self.count_uses(uses);
             self.work = Work::Idle;
         }
         if let Err(r) = self.approach(w, body, op.stand, Some(op.stand), tick) {
