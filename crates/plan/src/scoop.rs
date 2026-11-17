@@ -268,22 +268,24 @@ impl Scoop {
             // after source along a shore (docs/problems/portal.md wall 6).
             // A partial route counts when it ends within reach of the surface: the walker keeps
             // off cells beside lava, so a pool's bank is reached only that way.
+            // Found or partial, the route's end must see the source: a bot already within the
+            // walk's range had an empty route Found, and the scoop failed `NoSight` four times in
+            // four ticks on one source (docs/problems/portal.md wall 26).
             Stage::Approach(walk) => {
                 let target = self.target;
+                let here = w.body.map(|b| eye(&b));
                 walk.route_now(w, tick)
-                    && (walk.route == Some(crate::path::Status::Found)
-                        || walk
-                            .waypoints
-                            .as_ref()
-                            .and_then(|wp| wp.last())
-                            .is_some_and(|end| {
-                                let e = [
-                                    f64::from(end.0) + 0.5,
-                                    f64::from(end.1) + physics::EYE_HEIGHT,
-                                    f64::from(end.2) + 0.5,
-                                ];
-                                aim_for(w, e, target, REACH).is_some()
-                            }))
+                    && match walk.waypoints.as_ref().and_then(|wp| wp.last()) {
+                        Some(end) => {
+                            let e = [
+                                f64::from(end.0) + 0.5,
+                                f64::from(end.1) + physics::EYE_HEIGHT,
+                                f64::from(end.2) + 0.5,
+                            ];
+                            aim_for(w, e, target, REACH).is_some()
+                        }
+                        None => here.is_some_and(|e| aim_for(w, e, target, REACH).is_some()),
+                    }
             }
             Stage::Aim { .. } | Stage::Sent { .. } => true,
         }

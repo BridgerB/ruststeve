@@ -148,3 +148,8 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 ### 25. A lava lake under the room's floor (wall-24 pair 44021913774 and 44021924959, 98e43ab: 28 and 24 of 112)
 - **Read**: rs-l00-b10's room floor (y 42) is the roof of a cave over a lava lake at y 40, in reach but seen only through the plan's own floor.
 - **Tried and reverted** (b4b1969, 3d58a40, 0f6ba8d: pairs 44 of 224, 49 and 46, against 52 on 98e43ab): a refill dug a hole in the floor beside the feet over the lake, then tried it before any route, then kept it open until the bucket filled. Place 10 lit none in every pair; the read of why the scoop through the hole still failed is the next step on it, not another patch.
+
+### 26. A scoop "routed" where it could not see (trail pair 44041169156 and 44041182079, 71a7e20: 23 and 33 of 112)
+- **What happened**: with the refill's last steps in the failure note, lane 0's twelve `NoRefill` casts read: seven `scoop X routed` then `failed NoSight` one tick later, four times in four ticks on one source (rs-l00-b01, b02, b07, b09, b10, b00 and b13's twin); three `NoScoop` after 200 ticks each (b04, b12, b13); three water refills with no water route (b00, b05, b06).
+- **Cause**: the scoop's fallback walk goes to within 3.5 of the source; a route `Found` counted with no check of sight (only a partial one had to see it), so a bot already that near got an empty route, reached `Aim`, saw nothing and failed, and the refill took the same nearest source again.
+- **Fix**: a route counts only when its end (or the eye, when the bot is already there) sees a face of the source; the refill then tries the next source, the tunnel and the sight dig.
