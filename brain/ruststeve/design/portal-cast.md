@@ -5,8 +5,8 @@ type: reference
 tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
-lastUpdated: 2026-11-17
-verifiedAgainst: ruststeve@610fd87 clojurecraft@be85a92
+lastUpdated: 2026-11-18
+verifiedAgainst: ruststeve@12a33bb clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
   - "ruststeve:crates/plan/src/station.rs#pub fn station_among("
@@ -39,7 +39,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - `crates/plan/src/lib.rs`: `Aim::Portal`, `cast_task`, `after_cast`, `LAVA_DEPTH`.
 - `config/goals.toml` row `portal`; `config/starts.toml` starts `kit` and `lava`.
 - Tests: `crates/plan/tests/build_differential.rs`, `crates/plan/tests/rays.rs`, `crates/bot/tests/cast.rs`.
-- The walls, each read from a recording before its fix: `docs/problems/portal.md` (1 to 27).
+- The walls, each read from a recording before its fix: `docs/problems/portal.md` (1 to 39).
 
 ## How it works
 - **The plan** (a port of `build.clj`): the room dug out in front of the face (the landing first, then every cell nearest the landing first, then firm floors), each frame cell in cast order (walls made firm where the rock is missing, hole and the cell over it dug, lava poured, water poured, water scooped back), the 2x3 inside dug, flint and steel on the bottom cell. Each op is done by a predicate over the world; a dig is done once its cell is obsidian, so **obsidian is never dug** (v1 dug its own frame and restarted forever). Positions are written for working from the south and turned for each facing.
@@ -72,7 +72,10 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - `tests/cast.rs`: from the kit, on a stone plateau with a corridor, an 18-source lava pool in its floor and a pond outside, the bot scoops its water, chooses a site, works 118 ops and lights the portal by tick 2,880.
 - `tests/rays.rs`: the exact sight line, with race 44041169156's grazed corner as a literal case.
 - **Real, from `kit`** (the issue's measure): never over 2% (walls 1 to 15).
-- **Real, from `lava`**, pairs of 8 lanes x 14 pooled over 224: the crowded checkpoint 10; the station refill 14; one bot a pool 38 (0347960); the way dig 53 (c29153b); walls 24 and 26 52 and 56 (98e43ab, 6d82b7b). Six of the fourteen places light none; the bots that light mostly light their second site.
+- **Real, from `lava`**, pairs of 8 lanes x 14 pooled over 224: the crowded checkpoint 10; the station refill 14; one bot a pool 38 (0347960); the way dig 53 (c29153b); walls 24 and 26 52 and 56 (98e43ab, 6d82b7b). Six of the fourteen places light none; the bots that light mostly light their second site. Walls 28 to 32 took it to 62, 58, 62, 83 and 100 (44.6%).
+- **Real, official from `kit`** (88c67e8, 44226112675): **1 of 56**. 36 of 56 filled water, 22 cast, 1 lit; the 20 without water walked pool to pool with every scoop route refused (wall 39).
+- **Real, from `kitlava`** (the 11 pools the official race's bots cast at, 8 lanes x 11, pairs over 176): 28 baseline, 50 (wall 34), 48 (wall 35: lava deaths 0 against 15), 45, 42, 44 (walls 36 to 38). A plateau at 24 to 28%; the top failure is a lava refill ending "no route, 4 tunnels".
+- **Prior art**: steve's cycle 7 lit 35% from a gym kit and 83% in an arena, with a fixed walkway to its refill stand and a site at lava level + 1; clojurecraft's pass rate was about 5% a stage. Neither reached 50% from a kit.
 
 ## Not verified
 - `plan::station` has no differential against clojurecraft (the plan has one); its world-reading parts have no unit test.
