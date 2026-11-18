@@ -47,3 +47,15 @@ place = "spawn"
 kit = [["iron_pickaxe", 1], ["bucket", 1], ["water_bucket", 1], ["flint_and_steel", 1], ["stone_pickaxe", 1], ["stone_sword", 1], ["crafting_table", 1], ["stick", 8], ["cobblestone", 16]]
 cap_ticks = 24000
 places = [[-76.5, -52, 122.5], [-26.5, -53, -25.5], [-168.5, -53, 36.5], [164.5, -53, 4.5], [-108.5, -53, 38.5], [169.5, 60, -80.5], [-16.5, -52, -66.5], [296.5, -54, 11.5], [4.5, 58, 122.5], [88.5, 63, 69.5], [31.5, 43, 57.5], [-26.5, 6, 23.5], [-30.5, 47, -245.5], [-23.5, -52, -123.5]]
+
+# The cast where kit bots cast (wall 33): the kit with the water bucket filled, at the eleven
+# distinct pools (32 apart or more) where bots of the official kit race 44226112675 chose cast
+# sites, most at the lava sea. Race it with 11 bots a lane, one a pool. The lava start's places
+# lit 45% while kit bots casting at their own sites lit 1 of 22.
+[[start]]
+name = "kitlava"
+stage = "iron_kit"
+place = "spawn"
+kit = [["iron_pickaxe", 1], ["bucket", 1], ["water_bucket", 1], ["flint_and_steel", 1], ["stone_pickaxe", 1], ["stone_sword", 1], ["crafting_table", 1], ["stick", 8], ["cobblestone", 16]]
+cap_ticks = 24000
+places = [[37.5, -52, -74.5], [195.5, 36, -165.5], [-32.5, 2, 5.5], [-64.5, -54, 23.5], [-16.5, -54, -87.5], [-63.5, -54, -96.5], [42.5, -55, -112.5], [61.5, -55, -178.5], [-147.5, -55, 88.5], [-26.5, -53, -119.5], [161.5, -49, -200.5]]

@@ -196,3 +196,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Cause**: `stands` judges a stand's sight from its cell's middle; `route_now` took a stand the bot already stood in without asking its real eye, which sits off the middle and saw no face. Every try chose the same stand.
 - **Fix**: a stand whose cell holds the feet counts only when `aim_at_use` from the real eye finds a face; else the scoop routes to the next stand, or the refill tries the next source.
 - **Raced** (88c67e8, pair 44220497092 and 44222358936: 55 and 45 of 112, 100 of 224, 44.6%, against 83 of 224 on 8d7a873): `NoSight` refills 11 and 9 a race against 40 and 43. Places 5 and 9 lit 8 of 8; 2, 8 and 10 lit none. The top failure is now lava `NoRefill` ending "no route, 4 tunnels" (31 a race).
+
+### 33. From `kit`, the cast is rarely reached and rarely lit (official race 44226112675, 88c67e8: 1 of 56)
+- **What happened**: the done-condition race, 4 lanes of 14 from `kit`, cap 72,000, lit 1 of 56 (1.8%), while the same commit lit 100 of 224 (44.6%) from the `lava` checkpoint.
+- **Read** (case notes, `results diagnose`): 36 of 56 scooped their water; 22 began a cast; 53 casts were begun in all and about 29 failed, the rest stalled or capped; the whole race spent its time in 1,510 `explore to`, 771 `relocate`, 781 `hunt lava`, 644 `walk toward lava` and 743 `walk toward water` notes. Of the 22 that cast, one lit.
+- **Known**: two walls stand before the cast from `kit` (water: 20 bots never scooped; the lava hunt: 14 more never began a cast), and the cast itself fails at the sites kit bots find (45 casts at eleven distinct pools, most at the lava sea at y -54 and -55, like the `lava` checkpoint's places 2, 8 and 10 that light none).
+- **Next**: the `kitlava` start, the kit with its water at those eleven pools (11 bots a lane, one a pool), measures the cast where kit bots cast; the water and the hunt get checkpoints of their own after.
