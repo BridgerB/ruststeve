@@ -242,6 +242,10 @@ pub struct Survival {
     /// arrows were the top killer underground, from beyond `defend_radius`).
     #[serde(default)]
     pub ranged: Vec<String>,
+    /// Mobs left alone until one of their kind hits the bot, by entity name (issue 15: a zombified
+    /// piglin struck angers its whole group).
+    #[serde(default)]
+    pub neutral: Vec<String>,
     #[serde(default = "ranged_radius")]
     pub ranged_radius: f64,
     /// A `never_fight` kind is backed away from within this (a creeper's fuse starts at 3).
@@ -285,6 +289,7 @@ impl Default for Survival {
             danger_health: danger_health(),
             never_fight: Vec::new(),
             ranged: Vec::new(),
+            neutral: Vec::new(),
             ranged_radius: ranged_radius(),
             flee_radius: flee_radius(),
             flee_clear: flee_clear(),
@@ -316,6 +321,8 @@ pub struct SurvivalRules {
     pub danger_health: f32,
     pub never_fight: Vec<data::EntityKind>,
     pub ranged: Vec<data::EntityKind>,
+    /// Fought only after one of their kind hits the bot (`defend::provoked`).
+    pub neutral: Vec<data::EntityKind>,
     pub ranged_radius: f64,
     pub flee_radius: f64,
     pub flee_clear: f64,
@@ -532,6 +539,12 @@ impl Table {
             .iter()
             .map(entity)
             .collect::<Result<_, _>>()?;
+        let neutral = g
+            .survival
+            .neutral
+            .iter()
+            .map(entity)
+            .collect::<Result<_, _>>()?;
         let never_fight = g
             .survival
             .never_fight
@@ -559,6 +572,7 @@ impl Table {
                 danger_health: g.survival.danger_health,
                 never_fight,
                 ranged,
+                neutral,
                 ranged_radius: g.survival.ranged_radius,
                 flee_radius: g.survival.flee_radius,
                 flee_clear: g.survival.flee_clear,

@@ -56,6 +56,8 @@ pub const RETRY_TICKS: u64 = 20;
 /// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
 /// water lost twice, never a site worked forever.
 pub const WATER_TRIPS: u32 = 2;
+/// Chunk columns round the feet a fortress walk looks for bricks in (16: a view's 256 blocks).
+const FORTRESS_CHUNKS: i32 = 16;
 /// Times a cast out of lava keeps its site to fetch lava from further off (wall 44).
 pub const LAVA_TRIPS: u32 = 2;
 /// Lava sources a fetch asks a scoop route of, nearest first.
@@ -1140,14 +1142,44 @@ impl Plan {
     /// Issue 15's aim: met once nether bricks have been seen with an exposed face; until then,
     /// explore (15a's baseline; the held-heading search is 15b).
     fn fortress_task(&mut self, w: &World, tick: u64) -> Task {
-        if w.memory.has_seen(data::BlockKind::NetherBricks) {
+        if world::stage::at_fortress(w) {
             self.met = true;
             self.note(
                 tick,
                 "fortress met".to_owned(),
-                "nether bricks seen with an exposed face".to_owned(),
+                format!(
+                    "within {} of nether bricks seen exposed",
+                    world::stage::FORTRESS_NEAR
+                ),
             );
             return Task::Idle;
+        }
+        // Bricks seen: walk toward the nearest a route gets nearer to, refusing each once tried.
+        let bricks: Vec<Cell> = world::stage::bricks_near(w, FORTRESS_CHUNKS)
+            .into_iter()
+            .filter(|c| !self.refused_now(*c, tick))
+            .take(CANDIDATES_PER_TICK)
+            .collect();
+        for c in bricks {
+            let mut walk = Walk::new(
+                c,
+                Goal::Near {
+                    pos: c,
+                    range: world::stage::FORTRESS_NEAR - 1.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            self.refuse(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk toward the fortress at {c:?}"),
+                    "nether bricks seen exposed".to_owned(),
+                );
+                return Task::Explore(walk);
+            }
         }
         if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
             return t;
