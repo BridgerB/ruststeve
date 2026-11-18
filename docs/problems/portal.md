@@ -207,3 +207,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **What happened**: from the `kitlava` start (the cast at the pools kit bots choose) the race lit 14 of 88; 32 casts failed `NoRefill` ending `scoop failed NoScoop`.
 - **Read** (the cast notes' use counts, summed over the race): filled with the exact line clear 317, filled with it blocked 0; empty with it clear 0, empty with it blocked 342. Every wasted use (200 ticks and a try each) was on a face only the sampled line passed; `aim_at_use` fell back to it when no face had an exact line.
 - **Fix**: the bucket is used only on a face the exact line reaches (`aim_at_use` takes no sampled fallback, and the aim stage fails `NoSight` without one); routes and stands keep the sampled line (wall 27). With no exact face the refill moves on at once instead of spending four 200-tick tries.
+
+### 35. The bot dug the floor it stood on (kitlava pair 44236062785 and 44236067105, 063e06e: place 0 died in lava in 13 of 16 lanes)
+- **What happened**: place 0, (35, -52, -77), the site kit bots chose most often, began a cast at (28, -52, -64) facing north and died in lava about 1,900 ticks in, in 13 of 16 lanes.
+- **Read** (probe 44239181756 on rs-l00-b00): the bot cut a two-high way along x 26 at y -51 and -52 from z -67 to -72; at event 119456 it stood at (26.50, -52.00, -71.44) on deepslate, then dug (26, -53, -72), the block under its feet; 250 events later it was at y -53.15 standing on air, and at y -55 with 16 health, in the lava sea's cave.
+- **Cause**: neither the sight dig (a block on the line to a source below the feet) nor the cast's dig op asked whether the body stands on the block; the probe does not show which sent it.
+- **Fix**: `station::sight_block` never takes a block one under the feet whose column the box overlaps, and the cast's dig op steps off a block it stands on before digging it (`cast::standing_on`); a unit test holds the probe's numbers.

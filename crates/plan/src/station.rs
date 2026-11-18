@@ -289,7 +289,17 @@ pub fn sight_block(
         }
         last = Some(c);
         if kind(w, c).is_some_and(full) {
-            return (c.1 < feet_y && sight_diggable(w, c, kept)).then_some(c);
+            // Never the floor the body stands on: a block one under the feet whose column the
+            // box overlaps (the eye's x and z are the body's). Place 0 of kitlava race
+            // 44236062785 dug (26, -53, -72) from (26.5, -52, -71.44), fell three blocks and
+            // died in the lava sea's cave, in 13 of 16 lanes (wall 35).
+            let half = physics::HALF_WIDTH;
+            let under = c.1 == feet_y - 1
+                && eye[0] + half > f64::from(c.0)
+                && eye[0] - half < f64::from(c.0) + 1.0
+                && eye[2] + half > f64::from(c.2)
+                && eye[2] - half < f64::from(c.2) + 1.0;
+            return (c.1 < feet_y && !under && sight_diggable(w, c, kept)).then_some(c);
         }
     }
     None

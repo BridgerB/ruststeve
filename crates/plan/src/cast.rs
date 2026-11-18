@@ -90,6 +90,11 @@ pub fn filler(w: &World) -> Option<ItemKind> {
     FILLERS.into_iter().find(|i| crate::craft::count(w, *i) > 0)
 }
 
+/// Whether the body stands on cell `c`: the feet one over it and the box over its column.
+pub fn standing_on(body: &physics::Body, c: Cell) -> bool {
+    feet(body).1 == c.1 + 1 && overlaps(body, (c.0, c.1 + 1, c.2))
+}
+
 /// Whether the player's box overlaps cell `c` (strictly: a box touching a face does not).
 pub fn overlaps(body: &physics::Body, (x, y, z): Cell) -> bool {
     let b = physics::aabb(body.pos);
@@ -592,6 +597,29 @@ impl Cast {
         let Some(pos) = op.pos else {
             return self.fail();
         };
+        // Never dig the floor the body stands on: step off it first, as a place steps out of its
+        // cell (wall 35: place 0 of kitlava race 44236062785 dug the block under its feet at the
+        // lava sea's level, fell three blocks and died in lava, in 13 of 16 lanes).
+        if !matches!(self.work, Work::Dig(_)) && standing_on(body, pos) {
+            if !matches!(self.work, Work::Walk(_)) {
+                let mut walk = Walk::new(pos, Goal::Away { pos, range: 1.5 }, Arrive::Goal, tick);
+                if !walk.route_now(w, tick) {
+                    return if self.try_again() {
+                        (Controls::default(), None, CastStatus::Running)
+                    } else {
+                        self.fail()
+                    };
+                }
+                self.work = Work::Walk(walk);
+            }
+            if let Work::Walk(walk) = &mut self.work {
+                let (c, status) = walk.step(w, tick);
+                if status != TaskStatus::Running {
+                    self.work = Work::Idle;
+                }
+                return (c, None, CastStatus::Running);
+            }
+        }
         if !matches!(self.work, Work::Dig(_))
             && let Err(r) = self.approach(w, body, pos, None, tick)
         {

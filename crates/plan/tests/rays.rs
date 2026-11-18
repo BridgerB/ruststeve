@@ -100,6 +100,19 @@ fn the_box_of_race_44159281696_overlaps_the_cell_its_feet_are_not_in() {
     assert!(!plan::cast::overlaps(&on, (0, 3, 0)));
 }
 
+/// Kitlava race 44236062785, place 0 at event 119456: the body at (26.5, -52, -71.44) stood on
+/// (26, -53, -72), dug it and fell into the lava sea's cave.
+#[test]
+fn the_body_of_race_44236062785_stands_on_the_block_it_dug() {
+    let body = physics::Body {
+        pos: [26.5, -52.0, -71.44],
+        ..physics::Body::default()
+    };
+    assert!(plan::cast::standing_on(&body, (26, -53, -72)));
+    assert!(!plan::cast::standing_on(&body, (26, -53, -74)));
+    assert!(!plan::cast::standing_on(&body, (26, -52, -72)));
+}
+
 #[test]
 fn the_kept_rock_is_the_frames_plane_and_the_row_behind_it() {
     let frame = Frame {
