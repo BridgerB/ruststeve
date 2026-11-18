@@ -206,6 +206,18 @@ fn source_of(w: &World, c: Cell, fluid: memory::Fluid) -> bool {
 const STAND_REACH: f64 = 4.0;
 /// Stands tried for a route, nearest the feet first.
 const STAND_TRIES: usize = 4;
+/// A bank cell's distance from the source on the plane: clojurecraft's `scoop-range` 1, the four
+/// cells beside it.
+const BANK_RANGE: f64 = 1.0;
+
+/// A cell's eye, from its middle.
+fn cell_eye(c: Cell) -> [f64; 3] {
+    [
+        f64::from(c.0) + 0.5,
+        f64::from(c.1) + physics::EYE_HEIGHT,
+        f64::from(c.2) + 0.5,
+    ]
+}
 
 /// The cells a scoop of `target` can be sent from: standable, the eye within `REACH` of the
 /// surface with a clear ray to it; nearest the feet first.
@@ -405,6 +417,33 @@ impl Scoop {
                     return true;
                 }
             }
+            // No chosen stand routed: let one search find any bank cell, the feet level with the
+            // surface or one above it, beside the source (clojurecraft's scoop walk, `:pickup`
+            // with range 1 and rise 1). The stands are four guesses walked one by one; the bank
+            // is every cell the walker can reach. 20 of 56 bots in the official kit race
+            // (44226112675) walked pool to pool with every stand refused (wall 39).
+            let mut bank = Walk::new(
+                target,
+                Goal::Pickup {
+                    pos: (target.0, target.1 + 1, target.2),
+                    range: BANK_RANGE,
+                    rise: 1,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            let sees_from_end = |walk: &Walk| match walk.waypoints.as_ref().and_then(|wp| wp.last())
+            {
+                Some(end) => aim_at_use(w, cell_eye(*end), target, REACH).is_some(),
+                None => here.is_some_and(|(_, e)| aim_at_use(w, e, target, REACH).is_some()),
+            };
+            if bank.route_now(w, tick)
+                && bank.route == Some(crate::path::Status::Found)
+                && sees_from_end(&bank)
+            {
+                self.stage = Stage::Approach(bank);
+                return true;
+            }
         }
         match &mut self.stage {
             // A found route only: a partial one toward a lake's middle failed every walk, source
@@ -480,12 +519,24 @@ impl Scoop {
                     // the body a little off the cell's middle notwithstanding. A walk to within
                     // range of the source (no stand the walker takes: a pool's sources further in,
                     // beside flowing lava) aims only when it ended within reach.
-                    TaskStatus::Done if in_reach || matches!(walk.goal, Goal::Block { .. }) => {
+                    TaskStatus::Done
+                        if in_reach
+                            || matches!(walk.goal, Goal::Block { .. } | Goal::Pickup { .. }) =>
+                    {
                         // At a stand chosen by its cell's middle, the real eye off it seeing no
                         // face: step to the middle first, sneaking so no edge is walked off,
                         // before aiming (wall 37: routed, then NoSight 5 to 14 ticks later, four
                         // times on one source, 27 casts a race).
-                        if let (None, Goal::Block { pos }) = (aim, walk.goal) {
+                        // A bank walk ends in the cell its route chose: centre in that one.
+                        let stand = match walk.goal {
+                            Goal::Block { pos } => Some(pos),
+                            Goal::Pickup { .. } => Some(crate::path::feet_cell(body.pos)),
+                            Goal::Near { .. }
+                            | Goal::Xz { .. }
+                            | Goal::Away { .. }
+                            | Goal::Afar { .. } => None,
+                        };
+                        if let (None, Some(pos)) = (aim, stand) {
                             let mid = [f64::from(pos.0) + 0.5, body.pos[1], f64::from(pos.2) + 0.5];
                             let off = (body.pos[0] - mid[0]).hypot(body.pos[2] - mid[2]);
                             if off > CENTRE_NEAR && self.centring < CENTRE_TICKS {
