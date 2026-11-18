@@ -295,3 +295,7 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 ### 49. High sites taken first (walls 46 and 48 both raced worse)
 - **Read**: the `dig :landing` casts read (walls 46 and 48) had h 3 and 4; low sites (h 0 to 2) reach their first stands from the room's floor. The site sort took the fewest blocks, then the nearest, with no regard to h.
 - **Fix**: the site sort prefers h up to `LOW_SITE` 2, then the fewest blocks, then the nearest. Nothing is refused: a bot with only high sites still takes one.
+- **Raced** (9f80853, kit pair 44369469091 and 44369475006): **18 and 16 of 112, 34 of 224** (15.2%), level with 33 of 210 and 42 of 224; `dig :landing` failures 3 and 7 against 20 and 7 (e1482c1) and 7 and 18 (7fdeaaa). Kept.
+
+## Closed (Bridger, 2026-11-18)
+Bridger accepted the kit pairs as enough for issue 14 and asked to move on: from `kit`, cap 72,000, pooled pairs of 224 lit 10 (41e4b9c), 25 (7a928ac), 22 (3ccd5d4), **42 (7fdeaaa, the best)**, 33 of 210 (e1482c1) and 34 (9f80853, the merged code), against the 50% bar planned. Water from `kit` holds at 109 of 112. The open walls carry on in the issues after it: the `kitlava` cast plateau (24 to 28%), lava `NoSight` refills, `dig :room` and `place :floor` ops, the swamp stairs (wall 42), and bots that never see lava.

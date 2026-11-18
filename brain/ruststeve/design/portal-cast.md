@@ -6,7 +6,7 @@ tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
 lastUpdated: 2026-11-18
-verifiedAgainst: ruststeve@12a33bb clojurecraft@be85a92
+verifiedAgainst: ruststeve@9f80853 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
   - "ruststeve:crates/plan/src/station.rs#pub fn station_among("
@@ -39,7 +39,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - `crates/plan/src/lib.rs`: `Aim::Portal`, `cast_task`, `after_cast`, `LAVA_DEPTH`.
 - `config/goals.toml` row `portal`; `config/starts.toml` starts `kit` and `lava`.
 - Tests: `crates/plan/tests/build_differential.rs`, `crates/plan/tests/rays.rs`, `crates/bot/tests/cast.rs`.
-- The walls, each read from a recording before its fix: `docs/problems/portal.md` (1 to 39).
+- The walls, each read from a recording before its fix: `docs/problems/portal.md` (1 to 49).
 
 ## How it works
 - **The plan** (a port of `build.clj`): the room dug out in front of the face (the landing first, then every cell nearest the landing first, then firm floors), each frame cell in cast order (walls made firm where the rock is missing, hole and the cell over it dug, lava poured, water poured, water scooped back), the 2x3 inside dug, flint and steel on the bottom cell. Each op is done by a predicate over the world; a dig is done once its cell is obsidian, so **obsidian is never dug** (v1 dug its own frame and restarted forever). Positions are written for working from the south and turned for each facing.
@@ -76,6 +76,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - **Real, official from `kit`** (88c67e8, 44226112675): **1 of 56**. 36 of 56 filled water, 22 cast, 1 lit; the 20 without water walked pool to pool with every scoop route refused (wall 39).
 - **Real, from `kitlava`** (the 11 pools the official race's bots cast at, 8 lanes x 11, pairs over 176): 28 baseline, 50 (wall 34), 48 (wall 35: lava deaths 0 against 15), 45, 42, 44 (walls 36 to 38). A plateau at 24 to 28%; the top failure is a lava refill ending "no route, 4 tunnels".
 - **Prior art**: steve's cycle 7 lit 35% from a gym kit and 83% in an arena, with a fixed walkway to its refill stand and a site at lava level + 1; clojurecraft's pass rate was about 5% a stage. Neither reached 50% from a kit.
+- **Real, from `kit` after walls 40 to 49** (pairs of 224, cap 72,000): 10 (41e4b9c, water solved by stairs to a bank), 25 (7a928ac, the stand-first site as a fallback), 22 (3ccd5d4, a cast out of water keeps its site), **42** (7fdeaaa, a cast out of lava keeps its site and fetches lava), 33 of 210 (e1482c1, fetch walks toward far lava), 34 (9f80853, low sites first). Pairs on near-equal code spread 22 to 42. Bridger accepted these for issue 14 on 2026-11-18 in place of 50%.
 
 ## Not verified
 - `plan::station` has no differential against clojurecraft (the plan has one); its world-reading parts have no unit test.
@@ -86,6 +87,8 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - The thresholds added with walls 18 to 27 (`STATION_MISSES`, `WAY_DIGS`, `SIGHT_DIGS`, `REFILL_TRAIL`, the station's reach) are constants in the code, each with its source in a comment, not rows of a data file.
 
 ## Gotchas found on the way
+- A site's first stands are at `landing(h)`, h over the room's floor, while the bot is routed to the floor (`landing(0)`): sites with h up to 2 dig up from the floor, higher ones fail their first op. Routing to `landing(h)` (wall 48) and climbing by dug steps (wall 46) both raced worse; the site sort prefers h up to `LOW_SITE` 2 (wall 49).
+- A cast out of water or lava keeps its site (`water_trips`, `lava_trips`, 2 each) and the planner fetches the fluid with the full scoop ladder; giving the site up threw away casts 70 to 108 ops in (walls 43, 44, 47).
 - A scoop's source shows gone a tick before the bucket shows filled, and water forms again between two sources: a scoop is judged gone only before its use.
 - A pool's edge sources go first; the rest lie four or more blocks from the bank, reached over the flowing lava (a source-only ray passes over it): the scoop reaches 4.4 and walks to within 3.5.
 - A site whose room fronts open ground needs its stair floors built on foundations, many blocks, so the chooser prefers rooms cut from rock, as clojurecraft's do.
