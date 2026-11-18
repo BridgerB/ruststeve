@@ -22,6 +22,11 @@ pub const POOL_RADIUS: f64 = 96.0;
 pub const SURFACE_HEIGHT: f64 = 0.85;
 /// Ticks the look is held still on the source before the use (clojurecraft's 300 ms).
 pub const SETTLE_TICKS: u64 = 6;
+/// A body within this of its stand's middle on the plane is at it; further off, a scoop with no
+/// face in sight steps to it (wall 37).
+const CENTRE_NEAR: f64 = 0.1;
+/// Ticks a scoop steps toward its stand's middle before it aims anyway.
+const CENTRE_TICKS: u32 = 20;
 /// Ticks a scoop waits for the water bucket before it is tried again (its 3 s).
 pub const ANSWER_TICKS: u64 = 60;
 /// Scoops sent at one source before it fails (`max-tries`).
@@ -69,6 +74,9 @@ pub struct Scoop {
     /// Water (a scoop), or lava (a cast's refill at its pool, issue 14c).
     #[serde(default = "water")]
     pub fluid: memory::Fluid,
+    /// Ticks spent stepping to a stand's middle (wall 37).
+    #[serde(default)]
+    centring: u32,
     /// Whether the exact line to the aim was clear when the last use was sent.
     #[serde(default)]
     sent_exact: Option<bool>,
@@ -354,6 +362,7 @@ impl Scoop {
             )),
             tries: 0,
             sent_exact: None,
+            centring: 0,
             uses: [0; 4],
         }
     }
@@ -472,6 +481,27 @@ impl Scoop {
                     // range of the source (no stand the walker takes: a pool's sources further in,
                     // beside flowing lava) aims only when it ended within reach.
                     TaskStatus::Done if in_reach || matches!(walk.goal, Goal::Block { .. }) => {
+                        // At a stand chosen by its cell's middle, the real eye off it seeing no
+                        // face: step to the middle first, sneaking so no edge is walked off,
+                        // before aiming (wall 37: routed, then NoSight 5 to 14 ticks later, four
+                        // times on one source, 27 casts a race).
+                        if let (None, Goal::Block { pos }) = (aim, walk.goal) {
+                            let mid = [f64::from(pos.0) + 0.5, body.pos[1], f64::from(pos.2) + 0.5];
+                            let off = (body.pos[0] - mid[0]).hypot(body.pos[2] - mid[2]);
+                            if off > CENTRE_NEAR && self.centring < CENTRE_TICKS {
+                                self.centring += 1;
+                                return (
+                                    Controls {
+                                        forward: true,
+                                        sneak: true,
+                                        yaw: crate::walk::yaw_to(body.pos, mid),
+                                        ..still
+                                    },
+                                    None,
+                                    ScoopStatus::Running,
+                                );
+                            }
+                        }
                         self.stage = Stage::Aim { since: tick };
                         (still, None, ScoopStatus::Running)
                     }

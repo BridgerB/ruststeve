@@ -219,3 +219,8 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Read** (the station trail, race 44243676244, rs-l00-b05 at place 5): `station at (-69, -53, -95) h 1 with 8 sources, feet (-70, -53, -96)`, then `scoop (-70, -55, -95) failed NoSight`, three ticks apart, again and again. The refill found a source "already in reach with a clear face" by the sampled line (`aim_for`); the scoop, since wall 34, uses only a face the exact line reaches, found none and failed; the refill chose the same source.
 - **Cause**: four checks that mean "a use from here would fill" (the station's two in-reach checks, and the end of a scoop's route) still asked the sampled line after the use itself asked the exact one.
 - **Fix**: all four ask `aim_at_use`; only `stands`, which finds places to walk to, keeps the sampled line (wall 27).
+- **Raced** (7b42f9d, kitlava pair 44248178757 and 44248183443: 22 and 23 of 88, 45 of 176 against 48): no change; `NoSight` still 25 and 29 a race.
+
+### 37. A stand reached off its middle (wall-36 pair: `NoSight` 25 and 29 a race)
+- **Read** (race 44248183443's trails): `scoop (-37, -55, -94) routed`, `failed NoSight` 14 ticks later, the same again twice; `scoop (-18, -56, -86) routed`, `failed NoSight` 4 to 11 ticks later, four times. The route's end is judged from the stand cell's middle (and since wall 36 by the exact line); the walk ends with the body off the middle, the real eye sees no face, and the next route picks the same stand.
+- **Fix**: when a walk to a stand ends and the eye has no face, the bot steps to the cell's middle, sneaking so no edge is walked off, for up to 20 ticks, then aims (`CENTRE_NEAR` 0.1, `CENTRE_TICKS` 20).
