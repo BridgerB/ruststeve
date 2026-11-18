@@ -30,3 +30,9 @@ From the checkpoint start `nether` (the Nether at (0, 0), where a portal near sp
 - **Cause**: the aim walks on partial routes; the Nether's open ground between is where ghasts, piglins and fire killed half the bots.
 - **Fix**: walk to bricks only on a found route; else tunnel toward the nearest brick (stairs down when it is below, a level tunnel else; `dig_toward`, shared with wall 40's stairs to a water bank), three without coming nearer refusing it. The stairs' refusals hold (no fluid in a cell opened, no lava beside one).
 - **Not yet**: piglins attack a bot wearing no gold (32 deaths); gold armour is not in any earlier stage's kit.
+- **Raced** (ca34f7c, pair 44413659356 and 44413666090, cap 24,000): **65 and 46 of 112, 111 of 224 reached a fortress (49.6%)**; median building blocks held 213 over all 224 bots (268 over those that reached it, none under 32: tunnels restock netherrack); deaths 20 and 37 against 57 and 56. Met bots ended at (25, 55, 130), (55, 57, 92) and the like, in the fortress round (48, ~, 176). The done-condition holds.
+
+## Not done in 15a (carried on)
+- Entering the bot's own portal from the overworld (15c): the `nether` stage is met here by the start's teleport.
+- Resources per unit of progress (digs per block, blocks placed against kept) are not reported per run; the building-block median is computed from the case files' items gained and lost.
+- Piglins (no gold worn), ghasts and hoglins still kill about a quarter of the bots.

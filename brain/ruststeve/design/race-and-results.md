@@ -5,8 +5,8 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-17
-verifiedAgainst: ruststeve@610fd87 clojurecraft@be85a92
+lastUpdated: 2026-11-18
+verifiedAgainst: ruststeve@ca34f7c clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -72,6 +72,11 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - The `kit` start (Bridger, 2026-11-15: two buckets): an iron pickaxe, two buckets, flint and steel, a stone pickaxe and sword, a table, 8 sticks, 16 cobblestone, spread 128 ([[portal-cast]]).
 - **A case file carries the planner's notes** (`bot::Notes`, `PlanSummary.notes`): every note in order as "tick what (why)", but one whose `what` repeats either of the two kept before it is left out (a hunt's two notes alternate for an hour), and past 80 from the start and 160 from the end the middle is dropped; the notes left out are counted. A race is read from the release's `batches-<run>.tar.zst`: until 2026-11-17 it was read by exporting every recording, ten to twenty minutes a race, and a case said only "aim portal (the planner)".
 - **A race runs a commit whose `ci` is green**: `ci` runs the whole suite on every push in about four minutes, and a newer push cancels an older commit's run.
+
+## Issue 15
+- The `nether` start: the post-cast kit, 64 cobblestone and food, `place` in `minecraft:the_nether` at (0, 0), `spread` 48 with `spread_under` 100 (`spreadplayers … under`, so never on the bedrock roof).
+- The `fortress` stage holds when the feet are within 6 of nether bricks on record, not when bricks are seen: seen-from-afar met it for 112 of 112 bots standing still (fortress wall 1).
+- **Evidence** (ca34f7c, pair 44413659356 and 44413666090, cap 24,000): **111 of 224 reached a fortress (49.6%)**, median building blocks held 213 (no bot under 32), deaths 57.
 
 ## See also
 - [[observability]] - what every run produces.
