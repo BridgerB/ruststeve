@@ -111,6 +111,81 @@ pub struct Outcome {
     /// The planner, when the run had an aim, and its time per tick in microseconds.
     pub plan: Option<plan::Plan>,
     pub plan_tick_us: Vec<u64>,
+    /// The planner's notes for the case file.
+    pub plan_notes: Notes,
+}
+
+/// Notes kept from a run's start, and from its end: a case file read in one screen. A race of
+/// 24,000 ticks made a few hundred notes a bot once alternating pairs were collapsed.
+pub const NOTES_HEAD: usize = 80;
+pub const NOTES_TAIL: usize = 160;
+
+/// Notes of one kind always kept before a run of that kind is collapsed: a cast's few sites and
+/// failures are never left out, a water search's hundreds of walks are.
+pub const KIND_KEPT: u32 = 8;
+
+/// The planner's notes for a case file: every note in order, but one whose `what` repeats either
+/// of the two kept before it is left out (a hunt's "cut 6 stairs" and "tunnel" alternate for an
+/// hour), and so is one whose kind (its `what` without the words holding a number or a bracket)
+/// is among the last four kept once `KIND_KEPT` of that kind are kept (a water search's walks
+/// differ only in their places: 526 of them filled a case file); past `NOTES_HEAD` +
+/// `NOTES_TAIL` the middle is dropped. Left-out notes are counted.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Notes {
+    head: Vec<String>,
+    tail: std::collections::VecDeque<String>,
+    /// The `what` of the last two notes kept.
+    last: [Option<String>; 2],
+    /// The kinds of the last four notes kept, and how many of each kind are kept.
+    kinds: std::collections::VecDeque<String>,
+    kept: BTreeMap<String, u32>,
+    pub dropped: u64,
+}
+
+/// A note's kind: its `what` without the words that hold a number or a bracket.
+fn note_kind(what: &str) -> String {
+    what.split_whitespace()
+        .filter(|w| {
+            !w.chars()
+                .any(|c| c.is_ascii_digit() || c == '(' || c == '[')
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+impl Notes {
+    pub fn push(&mut self, tick: u64, what: &str, why: &str) {
+        if self.last.iter().any(|w| w.as_deref() == Some(what)) {
+            self.dropped += 1;
+            return;
+        }
+        let kind = note_kind(what);
+        if self.kinds.contains(&kind) && self.kept.get(&kind).copied().unwrap_or(0) >= KIND_KEPT {
+            self.dropped += 1;
+            return;
+        }
+        *self.kept.entry(kind.clone()).or_default() += 1;
+        if self.kinds.len() == 4 {
+            self.kinds.pop_front();
+        }
+        self.kinds.push_back(kind);
+        self.last = [self.last[1].take(), Some(what.to_owned())];
+        let line = format!("{tick} {what} ({why})");
+        if self.head.len() < NOTES_HEAD {
+            self.head.push(line);
+            return;
+        }
+        if self.tail.len() == NOTES_TAIL {
+            self.tail.pop_front();
+            self.dropped += 1;
+        }
+        self.tail.push_back(line);
+    }
+
+    /// The notes kept, oldest first.
+    pub fn lines(&self) -> Vec<String> {
+        self.head.iter().chain(self.tail.iter()).cloned().collect()
+    }
 }
 
 impl Outcome {
@@ -345,6 +420,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     };
     let mut plan_seen: u64 = 0;
     let mut plan_tick_us: Vec<u64> = Vec::new();
+    let mut plan_notes = Notes::default();
     let mut last_controls: Option<physics::Controls> = None;
     let doing = if let Some(a) = aim {
         Doing {
@@ -497,6 +573,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 plan_tick_us.push(u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX));
                 teleports_at_script.get_or_insert(run.world.session.teleports);
                 for e in p.events_since(plan_seen) {
+                    plan_notes.push(e.tick, &e.what, &e.why);
                     if let Some(r) = &mut run.recorder {
                         let note = format!("plan tick {}: {} ({})", e.tick, e.what, e.why);
                         if let Err(err) = r.write(&Record::Note(note)) {
@@ -644,12 +721,13 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         min_health_in_script,
         plan: planner,
         plan_tick_us,
+        plan_notes,
     })
 }
 
 /// The planner's account for a case file: its aim and outcome, its walks and the brain's time
 /// per tick (mean, p99, max microseconds).
-pub fn plan_summary(p: &plan::Plan, tick_us: &[u64]) -> results::PlanSummary {
+pub fn plan_summary(p: &plan::Plan, tick_us: &[u64], notes: &Notes) -> results::PlanSummary {
     let mut sorted = tick_us.to_vec();
     sorted.sort_unstable();
     let tick = (!sorted.is_empty()).then(|| {
@@ -666,5 +744,81 @@ pub fn plan_summary(p: &plan::Plan, tick_us: &[u64]) -> results::PlanSummary {
         longest_stall: p.longest_stall,
         expanded: p.expanded,
         tick_us: tick,
+        notes: notes.lines(),
+        notes_dropped: notes.dropped,
+    }
+}
+
+#[cfg(test)]
+mod notes_tests {
+    use super::{KIND_KEPT, NOTES_HEAD, NOTES_TAIL, Notes};
+
+    #[test]
+    fn alternating_pairs_collapse_and_are_counted() {
+        let mut n = Notes::default();
+        n.push(1, "cast at (1, 2, 3)", "a site");
+        for t in 0..10 {
+            n.push(10 + t, "cut 6 stairs", "look again");
+            n.push(11 + t, "tunnel", "no lava in sight");
+        }
+        n.push(99, "cast failed: NoRefill", "site given up");
+        assert_eq!(
+            n.lines(),
+            [
+                "1 cast at (1, 2, 3) (a site)",
+                "10 cut 6 stairs (look again)",
+                "11 tunnel (no lava in sight)",
+                "99 cast failed: NoRefill (site given up)",
+            ]
+        );
+        assert_eq!(n.dropped, 18);
+    }
+
+    /// A word of letters only, a different one for each number: a note kind of its own.
+    fn word(i: usize) -> String {
+        let letter = |d: usize| char::from(b'a' + u8::try_from(d % 26).unwrap());
+        [letter(i / 676), letter(i / 26), letter(i)]
+            .iter()
+            .collect()
+    }
+
+    #[test]
+    fn the_middle_is_dropped_past_the_head_and_tail() {
+        let mut n = Notes::default();
+        let total = NOTES_HEAD + NOTES_TAIL + 25;
+        for i in 0..total {
+            n.push(i as u64, &format!("step {}", word(i)), "why");
+        }
+        let line = |i: usize| format!("{i} step {} (why)", word(i));
+        let lines = n.lines();
+        assert_eq!(lines.len(), NOTES_HEAD + NOTES_TAIL);
+        assert_eq!(lines[0], line(0));
+        assert_eq!(lines[NOTES_HEAD - 1], line(NOTES_HEAD - 1));
+        assert_eq!(lines[NOTES_HEAD], line(NOTES_HEAD + 25));
+        assert_eq!(lines.last().unwrap(), &line(total - 1));
+        assert_eq!(n.dropped, 25);
+    }
+
+    /// Race 44052157794, rs-l05-b05: a water search's walks, each to another place, filled the
+    /// case file (526 notes left out by the other rules, 240 kept).
+    #[test]
+    fn a_run_of_one_kind_collapses_after_its_first_eight() {
+        let mut n = Notes::default();
+        for i in 0..30u64 {
+            n.push(i, &format!("walk toward water at ({i}, 26, -90)"), "a pool");
+            n.push(
+                i,
+                &format!("explore to ({i}, 26, -90) failed: NoPath"),
+                "turn",
+            );
+        }
+        n.push(99, "cast at (1, 2, 3) facing south", "a site");
+        let lines = n.lines();
+        assert_eq!(lines.len(), 2 * KIND_KEPT as usize + 1);
+        assert_eq!(n.dropped, 60 - 2 * u64::from(KIND_KEPT));
+        assert_eq!(
+            lines.last().unwrap(),
+            "99 cast at (1, 2, 3) facing south (a site)"
+        );
     }
 }

@@ -999,6 +999,7 @@ dependencies = [
  "sim",
  "toml",
  "world",
+ "zstd",
 ]
 
 [[package]]

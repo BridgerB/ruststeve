@@ -102,7 +102,7 @@ fn race(a: &Args) -> Result<bool, String> {
         .ok_or_else(|| format!("no start {} in {}", a.start, a.starts))?
         .clone();
     let password = std::env::var("RUSTSTEVE_RCON_PASSWORD").unwrap_or_default();
-    let needs_rcon = !start_commands(&start, "x").is_empty();
+    let needs_rcon = !start_commands(&start, "x", 0).is_empty();
     if needs_rcon && password.is_empty() {
         return Err(format!(
             "start {} needs RCON: set RUSTSTEVE_RCON_PASSWORD to the server's",
@@ -131,7 +131,9 @@ fn race(a: &Args) -> Result<bool, String> {
             std::thread::sleep(Duration::from_millis(config.race.join_stagger_ms));
         }
         let name = bot_name(a.lane, i);
-        let commands = start_commands(&start, &name);
+        // The bot's number in its lane: the lane's bots share one server, so each takes its own
+        // place, and every lane takes the same ones (paired lanes).
+        let commands = start_commands(&start, &name, i as usize);
         let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
         let password = password.clone();
         let apply: Option<bot::ApplyStart> = (!commands.is_empty()).then(|| {
@@ -242,7 +244,7 @@ fn race(a: &Args) -> Result<bool, String> {
             plan: outcome
                 .plan
                 .as_ref()
-                .map(|p| bot::plan_summary(p, &outcome.plan_tick_us)),
+                .map(|p| bot::plan_summary(p, &outcome.plan_tick_us, &outcome.plan_notes)),
             stream: outcome.stream.map(|c| results::StreamCounts {
                 sent: c.sent,
                 dropped: c.dropped,

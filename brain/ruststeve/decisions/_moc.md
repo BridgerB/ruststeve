@@ -3,7 +3,7 @@ title: Decisions
 type: moc
 tags: [moc, decisions]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-15
 related:
   - "[[ruststeve/_moc|ruststeve]]"
 ---
@@ -12,6 +12,7 @@ related:
 
 Each says what was chosen, what was rejected with the reason, and what would change the answer.
 
+- [[strict-no-xray]] - never read an unexposed cell, not even to refuse (Bridger, 2026-11-15).
 - [[just-ruststeve]] - the name is ruststeve (not v2), a clean reset, Rust-only tooling.
 - [[runners-not-the-mac]] - all code runs on GitHub Actions runners (20 at once, 16 GB each); the Mac only edits.
 - [[agent-tools-over-mcp]] - agent tools (probes, CI runs, the brain) are one MCP server on the official Rust SDK, rmcp.

@@ -168,6 +168,8 @@ jobs:
         run: |
           set -euo pipefail
           cargo run -q --locked --release -p results -- summary lanes | tee summary.md
+          # The race's own diagnosis: by place, cast failures, note kinds (results::diagnose).
+          cargo run -q --locked --release -p results -- diagnose lanes | tee -a summary.md
           {
             echo "## race ${{ github.run_id }}: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, start ${{ inputs.start }}, cap ${{ inputs.cap }}"
             echo

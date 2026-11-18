@@ -70,6 +70,10 @@ pub struct Start {
     /// and furnaces (issue 13, docs/problems/iron-kit.md wall 4).
     #[serde(default)]
     pub spread: Option<u32>,
+    /// Overworld feet positions a checkpoint start puts its bots at, one each in turn (issue 14:
+    /// beside lava, so a race works the cast from its first tick instead of an hour's hunt).
+    #[serde(default)]
+    pub places: Vec<(f64, f64, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -125,8 +129,9 @@ impl Starts {
     }
 }
 
-/// The RCON commands that apply a start to a bot: the kit, then the place.
-pub fn start_commands(start: &Start, bot: &str) -> Vec<String> {
+/// The RCON commands that apply a start to a bot: the kit, then the place. `index` picks the
+/// bot's place from `places`, by its number in its lane (bots on one server never share one).
+pub fn start_commands(start: &Start, bot: &str, index: usize) -> Vec<String> {
     let mut out: Vec<String> = start
         .kit
         .iter()
@@ -134,6 +139,11 @@ pub fn start_commands(start: &Start, bot: &str) -> Vec<String> {
         .collect();
     if let Place::At { dimension, x, y, z } = &start.place {
         out.push(format!("execute in {dimension} run tp {bot} {x} {y} {z}"));
+    }
+    if let Some((x, y, z)) = start.places.get(index % start.places.len().max(1)) {
+        out.push(format!(
+            "execute in minecraft:overworld run tp {bot} {x} {y} {z}"
+        ));
     }
     if let Some(r) = start.spread {
         out.push(format!(

@@ -5,8 +5,8 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-14
-verifiedAgainst: ruststeve@b7fec2e clojurecraft@be85a92
+lastUpdated: 2026-11-15
+verifiedAgainst: ruststeve@da0e4fa clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -68,6 +68,9 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 - **Dig toward**: a mine row whose nearest exposed block has no route digs toward it, with a 3-cut stall invariant (wall 11).
 - **Watchdog**: no task done in 1,200 ticks ends the task in hand and plans again (wall 14).
 - **Table search**: a remembered table or furnace counts as near within 64, so a deep miner walks back to its own rather than planning a new one from surface wood (wall 22).
+
+## Issue 14
+- `Aim::WaterBucket`, `Aim::PortalKit` (the scoop task, [[buckets-and-fluids]]) and `Aim::Portal`: the kit held, then `Task::Cast` at a site in hand or chosen now, else stairs toward `LAVA_DEPTH`; a failed cast gives its site up ([[portal-cast]]).
 
 ## See also
 - [[phases-and-task-stack]] - the design this begins.

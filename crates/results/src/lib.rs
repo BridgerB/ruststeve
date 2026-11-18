@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod diagnose;
 pub mod parity;
 
 use std::collections::BTreeMap;
@@ -129,6 +130,14 @@ pub struct PlanSummary {
     /// The brain's time per tick in the shell's measure, microseconds: mean, p99 and max.
     #[serde(default)]
     pub tick_us: Option<[u64; 3]>,
+    /// The planner's notes in order ("tick what (why)"), runs of two alternating kinds
+    /// collapsed, the middle dropped past `bot::NOTES_KEPT`: what the bot decided and why, read
+    /// from the case file with no replay (a race was read by exporting every recording).
+    #[serde(default)]
+    pub notes: Vec<String>,
+    /// Notes left out of `notes` (collapsed repeats and the dropped middle).
+    #[serde(default)]
+    pub notes_dropped: u64,
 }
 
 /// The live stream's counts for one run (schema/snapshot-v1.md).
@@ -231,6 +240,12 @@ impl Case {
             ));
         }
         lines.extend(self.hits.iter().map(|h| format!("  hit {}", hit(h))));
+        if let Some(p) = &self.plan {
+            if p.notes_dropped > 0 {
+                lines.push(format!("notes left out: {}", p.notes_dropped));
+            }
+            lines.extend(p.notes.iter().map(|n| format!("  note {n}")));
+        }
         lines.join("\n") + "\n"
     }
 }

@@ -144,6 +144,18 @@ doc = "what a portal cast spends that the iron kit does not hold"
 provides = [["item:water_bucket", 1], ["item:bucket", 1]]
 spares = [["item:stick", 24]]
 
+# Issue 14c's done-condition (clojurecraft's portal row): the kit the cast spends (a water
+# bucket, a bucket for the lava, flint and steel) held, then the cast at a site beside lava
+# (plan::cast); met once a portal is lit.
+[[goal]]
+id = "portal"
+priority = 15
+until = "portal"
+doc = "a nether portal cast from lava and water into holes cut in the rock beside a lava pool"
+provides = [["item:water_bucket", 1], ["item:bucket", 1], ["item:flint_and_steel", 1]]
+holds = [["tag:pickaxes", 1]]
+spares = [["item:stick", 24]]
+
 [[goal]]
 id = "fill-bucket"
 priority = 10

@@ -1,6 +1,8 @@
 # The probe (issue #6): run one command on a runner, for any question that needs code run.
 #   gh workflow run probe.yml --ref <branch> -f command='cargo tree --workspace'
 #   gh run download <run id>      # probe.log and anything the command wrote to probe-out/
+# A recording read on a runner (the command may use gh: the job's token reads artifacts):
+#   -f command='gh run download <race run> -n race-<race run>-lane-0 -D lane && cargo run -q --release -p replay -- export lane/rs-l00-b05.rsr --force > probe-out/b05.txt'
 # workflow_dispatch needs this file on the default branch (main); --ref picks the code to run.
 name: probe
 run-name: "probe: ${{ inputs.command }}"
@@ -15,8 +17,11 @@ on:
         description: Minutes before the command is stopped
         default: "60"
 
+# actions: read lets a probe fetch a race's lane artifacts (its recordings) with
+# `gh run download`, so a recording is read on a runner and never on the Mac.
 permissions:
   contents: read
+  actions: read
 
 env:
   CARGO_INCREMENTAL: 0
@@ -45,6 +50,8 @@ jobs:
         env:
           PROBE_COMMAND: ${{ inputs.command }}
           PROBE_TIMEOUT: ${{ inputs.timeout }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -o pipefail
           mkdir -p probe-out

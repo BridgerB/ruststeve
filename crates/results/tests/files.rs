@@ -128,7 +128,7 @@ fn the_committed_config_and_starts_are_valid() {
     let starts = Starts::read(&root("config/starts.toml")).unwrap();
     let table = starts.find("table").unwrap();
     assert_eq!(
-        start_commands(table, "rs-001"),
+        start_commands(table, "rs-001", 0),
         [
             "give rs-001 minecraft:crafting_table 1",
             "give rs-001 minecraft:oak_log 4"

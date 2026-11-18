@@ -5,8 +5,8 @@ type: reference
 tags: [fluids, buckets, water, lava, obsidian, portal, look, sim, parity]
 aliases: [bucket, buckets, look_at, pitch, Controls.pitch, FlowingFluid, fluid tick, tick_fluids, use_bucket, obsidian, portal lighting, PortalShape, flint and steel, use script, light script, watch cells]
 status: verified
-lastUpdated: 2026-11-15
-verifiedAgainst: ruststeve@61fdf54 clojurecraft@be85a92
+lastUpdated: 2026-11-18
+verifiedAgainst: ruststeve@12a33bb clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn tick_fluids(&mut self) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn use_bucket(&mut self) -> Option<Result<Vec<Wire>, EncodeError>> {"
@@ -59,6 +59,11 @@ Left out, and why: waterlogged blocks; partial shapes occluding a flow; drops fr
 
 ## Gotchas
 - A pour aimed at a hole's floor from the bank hits the bank's top first and lands a block high: aim low against the hole's back wall, as clojurecraft's `side-aim` does.
+- The server's ray takes the first block it touches, so a sight line is checked cell by cell (`scoop::ray_cells`, exact voxel traversal), never by samples: forty samples along a line stepped past a deepslate corner it entered two hundredths deep, and a bucket aimed true at a lava source filled nothing eight times (race 44041169156, rs-l00-b04; clojurecraft issue #225; [[portal-cast]] wall 27).
+- A scoop aims at the first of a source's faces in reach with a clear line (the surface, the four sides, the underside): the ray takes a source through any face.
+- Two sight lines, two jobs: the sampled line (`aim_for`, `clear_ray`) finds stands and routes; the exact line (`aim_at_use`, `exact_ray`) decides the use and every "a use from here would fill" check. A use on a face only the sampled line passes filled nothing 342 times in one race ([[portal-cast]] walls 34 and 36).
+- A stand is judged from its cell's middle; a walk ends off it. When the real eye sees no face there the scoop centres, sneaking, for up to 20 ticks (wall 37).
+- A scoop walk tries the four nearest guessed stands, then one search for any bank cell beside the source with the feet level with the surface or one above (`Goal::Pickup`, range 1, rise 1: clojurecraft's scoop walk), then a `Near` walk (wall 39).
 
 ## See also
 - [[server-model]] - the model these rules join.

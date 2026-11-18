@@ -8,6 +8,8 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+pub mod build;
+pub mod cast;
 pub mod craft;
 pub mod defend;
 pub mod dig;
@@ -22,6 +24,7 @@ pub mod redig;
 pub mod scoop;
 pub mod smelt;
 pub mod stairs;
+pub mod station;
 pub mod walk;
 
 use std::collections::BTreeMap;
@@ -50,6 +53,15 @@ pub const SEARCH_COLUMNS: i32 = 8;
 /// After a failed task the planner waits this long before choosing again: a choice that fails at
 /// once must not be made every tick (the churn invariant).
 pub const RETRY_TICKS: u64 = 20;
+/// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
+/// water lost twice, never a site worked forever.
+pub const WATER_TRIPS: u32 = 2;
+/// Times a cast out of lava keeps its site to fetch lava from further off (wall 44).
+pub const LAVA_TRIPS: u32 = 2;
+/// Lava sources a fetch asks a scoop route of, nearest first.
+const LAVA_FETCH_TRIES: usize = 8;
+/// Walks toward lava a fetch takes for one site when no scoop routes (wall 47).
+const LAVA_FETCH_WALKS: u32 = 4;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
 /// said so, and the run ends there (clojurecraft's `max-unwalkable`, 12).
 pub const MAX_UNWALKABLE: u32 = 12;
@@ -69,6 +81,12 @@ pub const TRAIL_EVERY: u64 = 200;
 pub const TRAIL_STEP: f64 = 2.0;
 pub const TRAIL_KEPT: usize = 60;
 pub const TRAIL_BACK: f64 = 10.0;
+/// The feet height the lava hunt goes down to: a block over the lava sea (clojurecraft's
+/// `lava-depth`; below y -54 the game fills its aquifers with lava).
+pub const LAVA_DEPTH: i32 = -50;
+/// Explore targets reached that are kept, and how near a new one may aim to one of them.
+pub const EXPLORED_KEPT: usize = 24;
+pub const EXPLORED_NEAR: f64 = 12.0;
 /// The most a swim off an island takes.
 pub const SWIM_TICKS: u64 = 1200;
 /// A target that failed `NoPath` refuses every target within this of it: one unreachable tree
@@ -84,6 +102,17 @@ pub const CANDIDATES_PER_TICK: usize = 2;
 pub const TABLE_SEARCH: f64 = 64.0;
 /// Events kept for `why` and the case file.
 const EVENTS_KEPT: usize = 64;
+
+/// A cast's account when it ends, for its note: the ops done, where it stood (the op, its
+/// regressions, the buckets held, the refill's last steps) and its bucket uses.
+struct CastAccount {
+    ops: u32,
+    at: String,
+    uses: String,
+    /// Water and lava buckets held when the cast ended.
+    water: i32,
+    lava: i32,
+}
 
 /// What the planner is for: issue 09's "reach a log at least `min_distance` blocks from where
 /// the planner began", or since issue 10 a goal row of the table put in play by its name
@@ -112,6 +141,8 @@ pub enum Aim {
     /// and a bucket).
     WaterBucket,
     PortalKit,
+    /// Issue 14c's: a portal cast and lit.
+    Portal,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -134,6 +165,7 @@ impl Aim {
             None if s == "iron-kit" => Some(Aim::IronKit),
             None if s == "water-bucket" => Some(Aim::WaterBucket),
             None if s == "portal-kit" => Some(Aim::PortalKit),
+            None if s == "portal" => Some(Aim::Portal),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -159,6 +191,7 @@ impl Aim {
             Aim::IronKit => "iron-kit".to_owned(),
             Aim::WaterBucket => "water-bucket".to_owned(),
             Aim::PortalKit => "portal-kit".to_owned(),
+            Aim::Portal => "portal".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -180,6 +213,7 @@ impl Aim {
             | Aim::IronKit
             | Aim::WaterBucket
             | Aim::PortalKit
+            | Aim::Portal
             | Aim::Hold => true,
         }
     }
@@ -207,6 +241,8 @@ pub enum Task {
     Redig(Box<redig::Redig>),
     /// A bucket filled at a surface water source (issue 14b).
     Scoop(Box<scoop::Scoop>),
+    /// A portal cast at a site (issue 14c).
+    Cast(Box<cast::Cast>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
     /// Across water to a far shore: a relocation off an island (issue 13b), and its start.
@@ -232,6 +268,7 @@ impl Task {
             Task::Smelt(_) => "smelt",
             Task::Redig(_) => "redig",
             Task::Scoop(_) => "scoop",
+            Task::Cast(_) => "cast",
             Task::Escape(_) => "escape",
             Task::Swim(..) => "swim",
             Task::Defend(_) => "defend",
@@ -250,6 +287,7 @@ impl Task {
             | Task::Smelt(_)
             | Task::Redig(_)
             | Task::Scoop(_)
+            | Task::Cast(_)
             | Task::Escape(_)
             | Task::Swim(..)
             | Task::Defend(_)
@@ -299,6 +337,33 @@ pub struct Plan {
     pub stalled: Vec<Cell>,
     /// Where a `never_fight` mob was fled from, until when, and how far round it work waits.
     pub dangers: Vec<(Cell, u64, f64)>,
+    /// The cast's site, kept while it is worked (issue 14c).
+    #[serde(default)]
+    pub site: Option<cast::Site>,
+    /// Water fetched for the site in hand after a cast ran out of it (wall 43); at most
+    /// `WATER_TRIPS`, then the site is given up as before.
+    #[serde(default)]
+    pub water_trips: u32,
+    /// Lava fetched for the site in hand after its refill failed (wall 44), and whether a fetch
+    /// is due before the cast resumes.
+    #[serde(default)]
+    pub lava_trips: u32,
+    #[serde(default)]
+    pub fetch_lava: bool,
+    /// Walks toward lava taken for the site in hand (wall 47).
+    #[serde(default)]
+    pub fetch_walks: u32,
+    /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
+    #[serde(default)]
+    pub given_up_sites: Vec<Cell>,
+    /// Explore targets reached, the newest `EXPLORED_KEPT`: a new explore never aims within
+    /// `EXPLORED_NEAR` of one (clojurecraft's hunt never walks back over its ground; two bots
+    /// cycled six targets a whole race looking for water: docs/problems/portal.md wall 3).
+    #[serde(default)]
+    pub explored: Vec<Cell>,
+    /// The lit portal's inside cell, once seen (issue 14c; issue 15 walks back to it).
+    #[serde(default)]
+    pub portal: Option<Cell>,
     /// Ranged foes a fight landed nothing on, and until when they are left alone (wall 30).
     pub ignored_foes: Vec<(i32, u64)>,
     /// Events ever made (`events` keeps the last few): the shell records the new ones.
@@ -382,6 +447,14 @@ impl Plan {
             refused_areas: Vec::new(),
             stalled: Vec::new(),
             dangers: Vec::new(),
+            site: None,
+            water_trips: 0,
+            lava_trips: 0,
+            fetch_lava: false,
+            fetch_walks: 0,
+            given_up_sites: Vec::new(),
+            explored: Vec::new(),
+            portal: None,
             ignored_foes: Vec::new(),
             event_count: 0,
             table: None,
@@ -474,6 +547,12 @@ impl Plan {
         match self.mark {
             Some((at, n, ev, since)) if !moved(at) && n == items && ev == self.event_count => {
                 if !matches!(self.task, Task::Idle) && tick.saturating_sub(since) > STALL_TICKS {
+                    // A cast cut here gives its site up, or the next choice resumes it stuck
+                    // (wall 6).
+                    if let Task::Cast(k) = &self.task {
+                        self.given_up_sites.push(k.site.frame.origin);
+                        self.site = None;
+                    }
                     let cut = self.task.name();
                     self.stalls += 1;
                     self.task = Task::Idle;
@@ -516,6 +595,7 @@ impl Plan {
                 | Aim::IronKit
                 | Aim::WaterBucket
                 | Aim::PortalKit
+                | Aim::Portal
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
@@ -559,6 +639,34 @@ impl Plan {
                 self.acts.extend(act);
                 let target = s.target;
                 return self.after_scoop(c, status, target, tick);
+            }
+            Task::Cast(k) => {
+                let (c, act, status) = k.step(w, tick);
+                self.acts.extend(act);
+                let site = k.site;
+                let ops = k.done_ops;
+                let uses = k.uses_text();
+                // The buckets held when the cast ended: a cast that lost its water says so here.
+                let held = |i| craft::count(w, i);
+                let at = format!(
+                    "{}; {}; buckets water {} lava {} empty {}; {uses}; {}",
+                    k.current().map(build::op_text).unwrap_or_default(),
+                    k.regression_text(),
+                    held(data::ItemKind::WaterBucket),
+                    held(data::ItemKind::LavaBucket),
+                    held(data::ItemKind::Bucket),
+                    k.refill_text()
+                );
+                let water = held(data::ItemKind::WaterBucket);
+                let lava = held(data::ItemKind::LavaBucket);
+                let account = CastAccount {
+                    ops,
+                    at,
+                    uses,
+                    water,
+                    lava,
+                };
+                return self.after_cast(c, status, site, account, tick);
             }
             Task::Swim(e, since) => {
                 let (c, act) = e.step(w, tick);
@@ -611,6 +719,10 @@ impl Plan {
                         );
                     }
                     Task::Explore(walk) => {
+                        self.explored.push(walk.target);
+                        if self.explored.len() > EXPLORED_KEPT {
+                            self.explored.remove(0);
+                        }
                         self.note(
                             tick,
                             format!("explored to {:?}", walk.target),
@@ -625,6 +737,7 @@ impl Plan {
                     | Task::Smelt(_)
                     | Task::Redig(_)
                     | Task::Scoop(_)
+                    | Task::Cast(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -673,6 +786,7 @@ impl Plan {
                     | Task::Smelt(_)
                     | Task::Redig(_)
                     | Task::Scoop(_)
+                    | Task::Cast(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -732,6 +846,7 @@ impl Plan {
             | Task::Smelt(_)
             | Task::Redig(_)
             | Task::Scoop(_)
+            | Task::Cast(_)
             | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
@@ -857,7 +972,10 @@ impl Plan {
                                 rules.flee_clear,
                             ));
                         }
-                        Some(Ok(format!("defended: {} swings, {:?}", d.swings, d.stance)))
+                        Some(Ok(format!(
+                            "defended: {} swings, {:?}, {} steps held back",
+                            d.swings, d.stance, d.held_back
+                        )))
                     }
                 };
                 (c, act, ended)
@@ -893,6 +1011,7 @@ impl Plan {
             | Task::Smelt(_)
             | Task::Redig(_)
             | Task::Scoop(_)
+            | Task::Cast(_)
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
@@ -1033,6 +1152,7 @@ impl Plan {
             | Aim::IronKit
             | Aim::WaterBucket
             | Aim::PortalKit
+            | Aim::Portal
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -1058,6 +1178,7 @@ impl Plan {
                 | Aim::IronKit
                 | Aim::WaterBucket
                 | Aim::PortalKit
+                | Aim::Portal
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -1177,11 +1298,33 @@ impl Plan {
             .nearest_log(w, origin, 0.0, tick)
             .zip(w.body)
             .is_some_and(|((_, y, _), b)| (f64::from(y) - b.pos[1]).abs() <= GATHER_NOW_RISE);
-        let choice = make::make_with(&table, &held(w), &near, gather_now, goal);
+        // A lava bucket is the cast's bucket: one held after a cast was cut is no bucket short
+        // (a bot tunnelled for coal to smelt iron for one: docs/problems/portal.md wall 6).
+        let mut counts = held(w);
+        if self.aim == Aim::Portal
+            && let Some(n) = counts.get(&data::ItemKind::LavaBucket).copied()
+        {
+            *counts.entry(data::ItemKind::Bucket).or_default() += n;
+        }
+        let choice = make::make_with(&table, &counts, &near, gather_now, goal);
         if matches!(choice, make::Choice::Act(_))
             && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
         {
             return t;
+        }
+        // The portal (issue 14c): its kit held, the cast; met once a portal is lit.
+        if self.aim == Aim::Portal {
+            if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
+                self.portal = Some(site.frame.at((1, 1, 0)));
+            }
+            if self.portal.is_some() {
+                self.met = true;
+                self.note(tick, "portal met".to_owned(), "a portal is lit".to_owned());
+                return Task::Idle;
+            }
+            if choice == make::Choice::Done {
+                return self.cast_task(w, tick);
+            }
         }
         match choice {
             make::Choice::Done => {
@@ -1458,10 +1601,13 @@ impl Plan {
                 }));
             }
         }
-        let dir = match (self.heading as i32).rem_euclid(360) {
-            90 => (-1, 0),
-            180 => (0, -1),
-            270 => (1, 0),
+        // The nearest cardinal to the heading: only exact quarters counted before, so the lava
+        // hunt's bearing (172 degrees, say) cut stairs south whatever it aimed at
+        // (docs/problems/portal.md wall 8).
+        let dir = match ((self.heading / 90.0).round() as i32).rem_euclid(4) {
+            1 => (-1, 0),
+            2 => (0, -1),
+            3 => (1, 0),
             _ => (0, 1),
         };
         // At the row's depth, the lowest feet height its stairs go to (clojurecraft's
@@ -1527,6 +1673,61 @@ impl Plan {
         Controls::default()
     }
 
+    /// Stairs down, or a level tunnel, toward the bank over a source seen with no walk to it
+    /// (clojurecraft's `to-bank`): the water-bucket race 44263024772 left 28 of 112 bots 6 to 12
+    /// blocks over a pool they could see, a lake roofed with stone at sea level with no way down
+    /// (docs/problems/portal.md wall 40). Three stairs without coming nearer refuse the bank.
+    fn stairs_to_bank(&mut self, w: &World, source: Cell, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        let (fx, fy, fz) = path::feet_cell(body.pos);
+        let bank = (source.0, source.1 + 1, source.2);
+        // Water above the feet is not reached by stairs down; a level tunnel reaches its own
+        // height only.
+        if bank.1 > fy || self.refused_now(bank, tick) {
+            return None;
+        }
+        let d =
+            f64::from((bank.0 - fx).pow(2) + (bank.1 - fy).pow(2) + (bank.2 - fz).pow(2)).sqrt();
+        let (best, stalls) = match self.toward {
+            Some((c, b, n)) if c == bank => {
+                if d < b - 0.5 {
+                    (d, 0)
+                } else {
+                    (b, n + 1)
+                }
+            }
+            Some(_) | None => (d, 0),
+        };
+        if stalls >= 3 {
+            self.toward = None;
+            self.refuse(bank, tick);
+            return None;
+        }
+        self.toward = Some((bank, best, stalls));
+        let (dx, dz) = (bank.0 - fx, bank.2 - fz);
+        let down = bank.1 < fy;
+        let dir = match (dx.abs() >= dz.abs(), dx, dz) {
+            // Right over the bank: stairs need a heading; any one comes back down beside it.
+            (_, 0, 0) if down => (1, 0),
+            (_, 0, 0) => return None,
+            (true, _, _) => (dx.signum(), 0),
+            (false, _, _) => (0, dz.signum()),
+        };
+        self.note(
+            tick,
+            format!(
+                "{} toward the bank at {bank:?}",
+                if down { "stairs down" } else { "tunnel" }
+            ),
+            "water seen with no walk to a bank".to_owned(),
+        );
+        Some(Task::Stairs(Box::new(if down {
+            Stairs::new(dir, tick)
+        } else {
+            Stairs::level(dir, tick)
+        })))
+    }
+
     /// The nearest remembered surface source a walk reaches (issue 14b); none: explore for one.
     fn scoop(&mut self, w: &World, goal: String, tick: u64) -> Task {
         let candidates: Vec<Cell> = scoop::sources(w)
@@ -1534,6 +1735,11 @@ impl Plan {
             .filter(|c| !self.refused_now(*c, tick))
             .take(CANDIDATES_PER_TICK)
             .collect();
+        // Sources within reach of a search but no scoop routed to any: said, with the first, so
+        // a race tells "beside water and no way to scoop it" from "no water" (wall 39: 20 of 56
+        // kit bots walked from pool cell to pool cell a block apart and never scooped).
+        let near = candidates.first().copied();
+        let tried = candidates.len();
         for c in candidates {
             let mut s = scoop::Scoop::new(c, tick);
             if s.route_now(w, tick) {
@@ -1549,11 +1755,370 @@ impl Plan {
             }
             self.refuse(c, tick);
         }
-        self.explore_walk(w, tick, "no surface water in view with a way")
-            .unwrap_or_else(|| {
+        if let Some(c) = near {
+            self.note(
+                tick,
+                format!("no scoop routes: {tried} sources within 24, first {c:?}"),
+                "the stands round them unreachable or blind".to_owned(),
+            );
+            if let Some(t) = self.stairs_to_bank(w, c, tick) {
+                return t;
+            }
+        }
+        // A remembered pool further off is walked toward first (clojurecraft's `pool-radius`):
+        // bots on a plateau explored it whole and never went down to the water they had seen
+        // (docs/problems/portal.md wall 11).
+        let pools: Vec<Cell> = scoop::far_sources(w)
+            .into_iter()
+            .filter(|c| !self.refused_now(*c, tick))
+            .take(CANDIDATES_PER_TICK)
+            .collect();
+        for c in pools {
+            let mut walk = Walk::new(
+                c,
+                Goal::Near {
+                    pos: c,
+                    range: scoop::SEARCH_RADIUS / 2.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            self.refuse(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk toward water at {c:?}"),
+                    format!(
+                        "a pool within {}, none within {}",
+                        scoop::POOL_RADIUS,
+                        scoop::SEARCH_RADIUS
+                    ),
+                );
+                return Task::Explore(walk);
+            }
+        }
+        if let Some(t) = self.explore_walk(w, tick, "no surface water in view with a way") {
+            return t;
+        }
+        // No source and no walk out: a failed choice, counted, so a dead end relocates (one bot
+        // idled 13,000 ticks without a note: docs/problems/portal.md wall 2).
+        self.failed_in_row += 1;
+        self.retry_at = tick + RETRY_TICKS;
+        self.note(
+            tick,
+            "no water to scoop".to_owned(),
+            "no surface source with a way and no explore walk".to_owned(),
+        );
+        self.check_stuck(tick);
+        Task::Idle
+    }
+
+    /// A scoop of lava for the site in hand from the nearest source within `LAVA_RADIUS` a route
+    /// reaches (wall 44), never a cell of the frame or beside one: lava poured into a hole is the
+    /// cast's own.
+    fn lava_fetch(&mut self, w: &World, site: cast::Site, tick: u64) -> Option<Task> {
+        let frame: Vec<Cell> = build::FRAME_CELLS
+            .iter()
+            .map(|c| site.frame.at((c.0, c.1, 0)))
+            .collect();
+        let ours = |c: Cell| {
+            frame
+                .iter()
+                .any(|f| (f.0 - c.0).abs() + (f.1 - c.1).abs() + (f.2 - c.2).abs() <= 1)
+        };
+        let candidates: Vec<Cell> = cast::lava_within(w, cast::LAVA_RADIUS)
+            .into_iter()
+            .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
+            .take(LAVA_FETCH_TRIES)
+            .collect();
+        // Taken before the scoops refuse what they try: a source no scoop routes to now may be
+        // walked toward, where more of its pool shows.
+        let far: Vec<Cell> = cast::lava_within(w, cast::FAR_RADIUS)
+            .into_iter()
+            .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
+            .take(LAVA_FETCH_TRIES)
+            .collect();
+        for c in candidates {
+            let mut s = scoop::Scoop::of(c, memory::Fluid::Lava, tick);
+            if s.route_now(w, tick) {
+                self.note(
+                    tick,
+                    format!("fetch lava at {c:?}"),
+                    format!("for the site at {:?}", site.frame.origin),
+                );
+                return Some(Task::Scoop(Box::new(s)));
+            }
+            self.refuse(c, tick);
+        }
+        // No scoop routes: walk toward the nearest source a walk gets nearer to, the site kept and
+        // the fetch due again on arrival (wall 47: casts 71 to 86 ops in gave their site up with
+        // "no lava to fetch", 47 a pair).
+        if self.fetch_walks >= LAVA_FETCH_WALKS {
+            return None;
+        }
+        for c in far {
+            let mut walk = Walk::new(
+                c,
+                Goal::Near {
+                    pos: c,
+                    range: scoop::REACH,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            self.refuse(c, tick);
+            if walk.route_now(w, tick) {
+                self.fetch_walks += 1;
+                self.fetch_lava = true;
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk toward lava to fetch at {c:?}"),
+                    format!(
+                        "no scoop routes; walk {} of {LAVA_FETCH_WALKS}",
+                        self.fetch_walks
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+        }
+        None
+    }
+
+    /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
+    /// `lava-hunt`: stairs toward the lava sea, the lava they expose kept in memory).
+    fn cast_task(&mut self, w: &World, tick: u64) -> Task {
+        if self.fetch_lava
+            && let Some(site) = self.site
+        {
+            self.fetch_lava = false;
+            if let Some(t) = self.lava_fetch(w, site, tick) {
+                return t;
+            }
+            self.lava_trips = 0;
+            self.fetch_walks = 0;
+            self.given_up_sites.push(site.frame.origin);
+            self.site = None;
+            self.note(
+                tick,
+                "no lava to fetch".to_owned(),
+                format!(
+                    "no scoop routes to a source within {}; site given up",
+                    cast::LAVA_RADIUS
+                ),
+            );
+        }
+        let (choice, report) = if self.site.is_some() {
+            (None, cast::SiteReport::default())
+        } else {
+            cast::site_choice_report(w, &self.given_up_sites)
+        };
+        // A site whose landing no walk reaches yet: dig toward the landing (stairs when it is
+        // below, a level tunnel else), three cuts without coming nearer refusing it, as the mine
+        // task digs toward ore (docs/problems/portal.md wall 9).
+        if let (Some(c), Some(body)) = (choice.as_ref().filter(|c| !c.routed), w.body)
+            && !self.refused_now(c.landing, tick)
+        {
+            let aim = c.landing;
+            let (fx, fy, fz) = path::feet_cell(body.pos);
+            let d =
+                f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
+            let (best, stalls) = match self.toward {
+                Some((t, b, n)) if t == aim => {
+                    if d < b - 0.5 {
+                        (d, 0)
+                    } else {
+                        (b, n + 1)
+                    }
+                }
+                Some(_) | None => (d, 0),
+            };
+            if stalls >= 3 {
+                self.toward = None;
+                self.refuse(aim, tick);
+                self.given_up_sites.push(c.site.frame.origin);
+            } else {
+                self.toward = Some((aim, best, stalls));
+                let (dx, dz) = (aim.0 - fx, aim.2 - fz);
+                let dir = if dx.abs() >= dz.abs() {
+                    (dx.signum(), 0)
+                } else {
+                    (0, dz.signum())
+                };
+                if dir != (0, 0) {
+                    self.note(
+                        tick,
+                        format!("dig toward the landing {aim:?}"),
+                        format!(
+                            "site at {:?} facing {}, no walk to it",
+                            c.site.frame.origin,
+                            c.site.frame.facing.name()
+                        ),
+                    );
+                    return Task::Stairs(Box::new(if aim.1 < fy {
+                        Stairs::new(dir, tick)
+                    } else {
+                        Stairs::level(dir, tick)
+                    }));
+                }
+            }
+        }
+        let site = self
+            .site
+            .or_else(|| choice.filter(|c| c.routed).map(|c| c.site));
+        if let Some(site) = site {
+            self.site = Some(site);
+            self.note(
+                tick,
+                format!(
+                    "cast at {:?} facing {} (lava {:?})",
+                    site.frame.origin,
+                    site.frame.facing.name(),
+                    site.lava
+                ),
+                "a site beside lava seen exposed".to_owned(),
+            );
+            return Task::Cast(Box::new(cast::Cast::new(site, tick)));
+        }
+        // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
+        // (clojurecraft's lava hunt goes toward far sources); with none seen, down toward the lava
+        // sea. Stairs down blind boxed in 25,652 times in one race (docs/problems/portal.md wall 5).
+        if let (Some(far), Some(body)) = (cast::far_lava(w, &self.given_up_sites), w.body) {
+            let feet = path::feet_cell(body.pos);
+            let to = [f64::from(far.0) + 0.5, body.pos[1], f64::from(far.2) + 0.5];
+            self.heading = walk::yaw_to(body.pos, to).rem_euclid(360.0);
+            // A walk toward it first, where a route gets nearer (clojurecraft's hunt walks before
+            // it digs); stairs only where none does. A bot tunnelled in place 55,000 ticks toward
+            // lava 58 blocks off, its stairs turned by a diagonal heading (wall 7).
+            if !self.refused_now(far, tick) {
+                let mut walk = Walk::new(
+                    far,
+                    Goal::Near {
+                        pos: far,
+                        range: f64::from(cast::LANDING_FAR),
+                    },
+                    Arrive::Goal,
+                    tick,
+                );
+                if walk.route_now(w, tick) {
+                    self.refuse(far, tick);
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("walk toward lava at {far:?}"),
+                        format!(
+                            "seen from {feet:?}, no site within {}: {}",
+                            cast::LAVA_RADIUS,
+                            report.text()
+                        ),
+                    );
+                    return Task::Explore(walk);
+                }
+            }
+            self.note(
+                tick,
+                format!("hunt lava at {far:?}"),
+                format!(
+                    "seen from {feet:?}, no site within {}: {}",
+                    cast::LAVA_RADIUS,
+                    report.text()
+                ),
+            );
+            return self.mine(w, &[], Some(far.1 + 2), tick);
+        }
+        self.mine(w, &[], Some(LAVA_DEPTH), tick)
+    }
+
+    fn after_cast(
+        &mut self,
+        c: Controls,
+        status: cast::CastStatus,
+        site: cast::Site,
+        account: CastAccount,
+        tick: u64,
+    ) -> Controls {
+        let CastAccount {
+            ops,
+            at,
+            uses,
+            water,
+            lava,
+        } = account;
+        match status {
+            cast::CastStatus::Running => return c,
+            cast::CastStatus::Done => {
+                self.water_trips = 0;
+                self.lava_trips = 0;
+                self.fetch_walks = 0;
+                self.portal = Some(site.frame.at((1, 1, 0)));
+                self.failed_in_row = 0;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "portal lit".to_owned(),
+                    format!("{ops} ops done; {uses}"),
+                );
+            }
+            // Out of water: the site is kept and the water search (the scoop ladder, 109 of 112
+            // from `kit`) fills a bucket; the cast resumes at the first op not done. The cast's
+            // own refill tries only sources near the site, and gave up casts 108 ops in
+            // (wall 43: 27 casts a pair ended NoRefill at :pour :water, holding no water).
+            cast::CastStatus::Failed(cast::CastFailure::NoRefill)
+                if water == 0 && self.water_trips < WATER_TRIPS =>
+            {
+                self.water_trips += 1;
                 self.retry_at = tick + RETRY_TICKS;
-                Task::Idle
-            })
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("cast out of water after {ops} ops, at {at}"),
+                    format!(
+                        "site kept; fetch water ({} of {WATER_TRIPS})",
+                        self.water_trips
+                    ),
+                );
+            }
+            // Out of lava with water in hand: the site is kept and lava fetched from any source
+            // within `LAVA_RADIUS` a scoop routes to; the cast's own refill tries four sources
+            // within `POOL_RADIUS` of its pool, and stations with one source in reach ran dry
+            // (wall 44: 34 casts a pair ended NoRefill at :pour :lava, "no route … tunnels").
+            cast::CastStatus::Failed(cast::CastFailure::NoRefill)
+                if water > 0 && lava == 0 && self.lava_trips < LAVA_TRIPS =>
+            {
+                self.lava_trips += 1;
+                self.fetch_lava = true;
+                self.retry_at = tick + RETRY_TICKS;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("cast out of lava after {ops} ops, at {at}"),
+                    format!(
+                        "site kept; fetch lava ({} of {LAVA_TRIPS})",
+                        self.lava_trips
+                    ),
+                );
+            }
+            cast::CastStatus::Failed(f) => {
+                *self.failures.entry(format!("Cast{f:?}")).or_default() += 1;
+                self.water_trips = 0;
+                self.lava_trips = 0;
+                self.fetch_walks = 0;
+                self.fetch_lava = false;
+                self.given_up_sites.push(site.frame.origin);
+                self.site = None;
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("cast failed: {f:?} after {ops} ops, at {at}"),
+                    format!("site given up; none within {} of it", cast::GIVE_UP_RADIUS),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
     }
 
     fn after_scoop(
@@ -1568,7 +2133,7 @@ impl Plan {
             scoop::ScoopStatus::Done => {
                 self.failed_in_row = 0;
                 self.task = Task::Idle;
-                self.note(tick, "scooped".to_owned(), "a water bucket held".to_owned());
+                self.note(tick, "scooped".to_owned(), "a bucket filled".to_owned());
             }
             scoop::ScoopStatus::Failed(f) => {
                 *self.failures.entry(format!("Scoop{f:?}")).or_default() += 1;
@@ -1803,6 +2368,12 @@ impl Plan {
             let (s, c) = self.heading.to_radians().sin_cos();
             let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
             let target = path::feet_cell(p);
+            if self.explored.iter().any(|e| {
+                f64::from((e.0 - target.0).pow(2) + (e.2 - target.2).pow(2)).sqrt() < EXPLORED_NEAR
+            }) {
+                self.heading = (self.heading + 90.0) % 360.0;
+                continue;
+            }
             let mut walk = Walk::new(
                 target,
                 Goal::Afar {

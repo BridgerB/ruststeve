@@ -59,6 +59,46 @@ pub struct Defend {
     /// The tick the last flee route was searched (no route: straight away, a while).
     #[serde(default)]
     pub fled_at: Option<u64>,
+    /// Steps not taken: a fight's close-in or a retreat's straight-away step held because lava
+    /// was seen ahead or under the cell ahead, or the drop there was too deep (wall 29).
+    #[serde(default)]
+    pub held_back: u32,
+}
+
+/// A drop this deep or deeper ahead holds a step: three blocks of fall cost no health.
+const DROP_HELD: i32 = 4;
+
+/// Whether a step forward along `yaw` from `body` is safe: no lava seen in the cell ahead at the
+/// feet or the head, or in the cells under it down to `DROP_HELD`, and a seen floor within
+/// `DROP_HELD`. Strict no X-ray: an unseen cell counts as rock (a floor, no lava). The raw
+/// forward steps of a fight's close-in and a retreat with no route were the only moves that did
+/// not ask: 15 of 19 lava and fire deaths in races 44052153072 and 44052157794 came within 300
+/// ticks of a defend.
+fn safe_ahead(w: &World, body: &physics::Body, yaw: f64) -> bool {
+    let rad = yaw.to_radians();
+    let ahead = [
+        body.pos[0] - rad.sin() * 0.9,
+        body.pos[1],
+        body.pos[2] + rad.cos() * 0.9,
+    ];
+    let cell = crate::path::feet_cell(ahead);
+    let lava = |c: crate::path::Cell| crate::cast::seen(w, c) == Some(data::BlockKind::Lava);
+    if lava(cell) || lava((cell.0, cell.1 + 1, cell.2)) {
+        return false;
+    }
+    for down in 1..=DROP_HELD {
+        let c = (cell.0, cell.1 - down, cell.2);
+        if lava(c) {
+            return false;
+        }
+        let floor = crate::cast::seen(w, c).is_none_or(|k| {
+            data::generated::shapes::collision(k) != Some(data::types::Collision::Empty)
+        });
+        if floor {
+            return true;
+        }
+    }
+    false
 }
 
 /// Is this kind of mob hostile (the game's `monster` category)?
@@ -147,6 +187,7 @@ impl Defend {
             started: tick,
             flee: None,
             fled_at: None,
+            held_back: 0,
         }
     }
 
@@ -236,8 +277,13 @@ impl Defend {
                     }
                     self.flee = None;
                 }
-                // No route: straight away from it, jumping what is in the way.
+                // No route: straight away from it, jumping what is in the way, unless lava or a
+                // deep drop lies that way: then stand (wall 29).
                 let away = (toward + 180.0) % 360.0;
+                if !safe_ahead(w, &body, away) {
+                    self.held_back += 1;
+                    return (Controls { yaw: away, ..still }, None, DefendStatus::Running);
+                }
                 (
                     Controls {
                         forward: true,
@@ -257,8 +303,13 @@ impl Defend {
                     ..still
                 };
                 if distance(eye, target) > STRIKE_REACH {
-                    // Close in, facing it.
+                    // Close in, facing it, unless lava or a deep drop lies between: then wait for
+                    // it facing it (wall 29).
                     self.faced_at = None;
+                    if !safe_ahead(w, &body, toward) {
+                        self.held_back += 1;
+                        return (face, None, DefendStatus::Running);
+                    }
                     return (
                         Controls {
                             forward: true,
