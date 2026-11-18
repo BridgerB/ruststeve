@@ -243,41 +243,6 @@ fn diggable(w: &World, c: Cell, kept: &[Cell]) -> bool {
             .all(|n| crate::cast::seen(w, n) != Some(BlockKind::Lava))
 }
 
-/// The first solid cell of one step up from `feet` toward `to` (above the feet): the cell over the
-/// head (room to jump), then the step's body and head cells one column toward it along the longer
-/// axis, its floor the block at the feet's height. `Barred` when one may not be dug or the step
-/// has no floor; `Open` when the step is clear (the walker climbs it). Right under `to`, the step
-/// goes east (wall 46: an op six over the feet in rock, the way dug level only, three tries in 51
-/// ticks).
-pub fn stair_up_block(w: &World, feet: Cell, to: Cell, kept: &[Cell]) -> Way {
-    let step = stair_up_step(feet, to);
-    let floor = (step.0, feet.1, step.2);
-    if !kind(w, floor).is_some_and(full) {
-        return Way::Barred;
-    }
-    let cells = [
-        (feet.0, feet.1 + 2, feet.2),
-        step,
-        (step.0, step.1 + 1, step.2),
-    ];
-    let solid = |c: &Cell| kind(w, *c).is_some_and(full);
-    if cells.iter().any(|c| solid(c) && !diggable(w, *c, kept)) {
-        return Way::Barred;
-    }
-    cells.into_iter().find(solid).map_or(Way::Open, Way::Dig)
-}
-
-/// The feet's cell one step up from `feet` toward `to` (`stair_up_block`'s step).
-pub fn stair_up_step(feet: Cell, to: Cell) -> Cell {
-    let (dx, dz) = (to.0 - feet.0, to.2 - feet.2);
-    let (sx, sz) = match (dx, dz) {
-        (0, 0) => (1, 0),
-        _ if dx.abs() >= dz.abs() => (dx.signum(), 0),
-        _ => (0, dz.signum()),
-    };
-    (feet.0 + sx, feet.1 + 1, feet.2 + sz)
-}
-
 /// The straight way to a stand at its height.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Way {
