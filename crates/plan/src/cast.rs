@@ -937,7 +937,7 @@ impl Cast {
             && let Some(src) = st
                 .sources
                 .iter()
-                .find(|src| crate::scoop::aim_for(w, from, **src, crate::scoop::REACH).is_some())
+                .find(|src| crate::scoop::aim_at_use(w, from, **src, crate::scoop::REACH).is_some())
         {
             self.work = Work::Refill(Box::new(Scoop::of(*src, memory::Fluid::Lava, tick)));
             self.last_done = tick;
@@ -947,7 +947,7 @@ impl Cast {
             if let Some(src) = st
                 .sources
                 .iter()
-                .find(|src| crate::scoop::aim_for(w, from, **src, crate::scoop::REACH).is_some())
+                .find(|src| crate::scoop::aim_at_use(w, from, **src, crate::scoop::REACH).is_some())
             {
                 self.work = Work::Refill(Box::new(Scoop::of(*src, memory::Fluid::Lava, tick)));
                 self.last_done = tick;

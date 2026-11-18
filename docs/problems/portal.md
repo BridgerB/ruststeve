@@ -214,3 +214,8 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Cause**: neither the sight dig (a block on the line to a source below the feet) nor the cast's dig op asked whether the body stands on the block; the probe does not show which sent it.
 - **Fix**: `station::sight_block` never takes a block one under the feet whose column the box overlaps, and the cast's dig op steps off a block it stands on before digging it (`cast::standing_on`); a unit test holds the probe's numbers.
 - **Raced** (wall 34, 8693d2c, kitlava pair 44239909331 and 44239913230: 26 and 24 of 88, 50 of 176 against 28): `NoScoop` refills gone from the table. Wall 35 (a25046d, pair 44243676244 and 44243679788: 20 and 28 of 88, 48 of 176): lava deaths 0 against 15, the lit count level. Places 0, 1, 4, 5 and 7 light none, mostly at lava refills ending `NoSight` or "no route".
+
+### 36. "In reach" judged by one line, the use by another (wall-35 pair, a25046d: places 0, 1, 4, 5 and 7 light none)
+- **Read** (the station trail, race 44243676244, rs-l00-b05 at place 5): `station at (-69, -53, -95) h 1 with 8 sources, feet (-70, -53, -96)`, then `scoop (-70, -55, -95) failed NoSight`, three ticks apart, again and again. The refill found a source "already in reach with a clear face" by the sampled line (`aim_for`); the scoop, since wall 34, uses only a face the exact line reaches, found none and failed; the refill chose the same source.
+- **Cause**: four checks that mean "a use from here would fill" (the station's two in-reach checks, and the end of a scoop's route) still asked the sampled line after the use itself asked the exact one.
+- **Fix**: all four ask `aim_at_use`; only `stands`, which finds places to walk to, keeps the sampled line (wall 27).

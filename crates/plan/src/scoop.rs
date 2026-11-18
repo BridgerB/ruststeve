@@ -416,9 +416,9 @@ impl Scoop {
                                 f64::from(end.1) + physics::EYE_HEIGHT,
                                 f64::from(end.2) + 0.5,
                             ];
-                            aim_for(w, e, target, REACH).is_some()
+                            aim_at_use(w, e, target, REACH).is_some()
                         }
-                        None => here.is_some_and(|e| aim_for(w, e, target, REACH).is_some()),
+                        None => here.is_some_and(|e| aim_at_use(w, e, target, REACH).is_some()),
                     }
             }
             Stage::Aim { .. } | Stage::Sent { .. } => true,
