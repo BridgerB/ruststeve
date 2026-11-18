@@ -3,6 +3,9 @@
 #   gh run download <run id>      # probe.log and anything the command wrote to probe-out/
 # A recording read on a runner (the command may use gh: the job's token reads artifacts):
 #   -f command='gh run download <race run> -n race-<race run>-lane-0 -D lane && cargo run -q --release -p replay -- export lane/rs-l00-b05.rsr --force > probe-out/b05.txt'
+# A question about the race seed's world (issue 15: where its fortresses are) starts the race's own
+# server first, RCON on, a password for this run only; the command talks to it with the rcon binary:
+#   -f server=true -f command='cargo run -q -p rcon -- "execute in minecraft:the_nether run locate structure minecraft:fortress"'
 # workflow_dispatch needs this file on the default branch (main); --ref picks the code to run.
 name: probe
 run-name: "probe: ${{ inputs.command }}"
@@ -16,6 +19,9 @@ on:
       timeout:
         description: Minutes before the command is stopped
         default: "60"
+      server:
+        description: Start the race's server (the race seed, RCON on) before the command (true or false)
+        default: "false"
 
 # actions: read lets a probe fetch a race's lane artifacts (its recordings) with
 # `gh run download`, so a recording is read on a runner and never on the Mac.
@@ -28,6 +34,7 @@ env:
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
+  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
 
 jobs:
   probe:
@@ -45,6 +52,34 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+      - uses: actions/setup-java@v4
+        if: inputs.server == 'true'
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/cache/restore@v4
+        if: inputs.server == 'true'
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v1
+      - name: Start the race's server (RCON on, a password for this run only)
+        if: inputs.server == 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -f "$DATAGEN_WORK/server.jar" ]; then
+            cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out "$RUNNER_TEMP/generated"
+          fi
+          cargo build -q --locked --release -p xtask
+          pw="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+          echo "::add-mask::$pw"
+          echo "RUSTSTEVE_RCON_PASSWORD=$pw" >> "$GITHUB_ENV"
+          RUSTSTEVE_RCON_PASSWORD="$pw" nohup ./target/release/xtask server --jar "$DATAGEN_WORK/server.jar" > server.log 2>&1 &
+          for _ in $(seq 1 180); do
+            if grep -q 'Done (' server.log; then exit 0; fi
+            sleep 2
+          done
+          cat server.log
+          exit 1
       - name: Run the command
         # The command comes in through the environment, never interpolated into the script.
         env:

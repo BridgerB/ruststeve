@@ -5,8 +5,8 @@ type: how-to
 tags: [ci, runners, github-actions, probe, caching]
 aliases: [ci.yml, probe.yml, how to run code, rust-cache, nextest, workflow_dispatch, deps-boundary, xtask]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@b4d3e95
+lastUpdated: 2026-11-18
+verifiedAgainst: ruststeve@ca34f7c
 sourceRefs:
   - "ruststeve:.github/workflows/ci.yml## Incremental compilation only adds overhead and cache churn on a fresh runner."
   - "ruststeve:.github/workflows/ci.yml## Only main writes the cache; branches and PRs restore it."
@@ -45,6 +45,9 @@ gh run list -R BridgerB/ruststeve --workflow probe.yml --limit 1     # find the 
 gh run download <run id> -R BridgerB/ruststeve                      # probe.log and probe-out/
 ```
 The command arrives through an environment variable, never interpolated into the script. It runs under a timeout (default 60 minutes); anything written to `probe-out/` is uploaded with `probe.log`.
+
+## A probe with the race's server (issue 15)
+- `-f server=true` starts the race config's own server (the race seed, RCON on, a password for that run only) before the command; the `rcon` binary (`cargo run -q -p rcon -- "<command>" ...`) sends commands and prints each reply. First use: `locate structure minecraft:fortress` from seven points in the Nether (probe 44386934210), setup data for the `nether` start that the bot never reads.
 
 ## Gotchas
 - **`workflow_dispatch` only works for a workflow file on the default branch.** That is why the work moved to `main` ([[just-ruststeve]]). `--ref` then chooses which branch's code runs.

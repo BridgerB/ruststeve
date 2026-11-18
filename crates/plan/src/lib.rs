@@ -56,6 +56,8 @@ pub const RETRY_TICKS: u64 = 20;
 /// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
 /// water lost twice, never a site worked forever.
 pub const WATER_TRIPS: u32 = 2;
+/// Chunk columns round the feet a fortress walk looks for bricks in (16: a view's 256 blocks).
+const FORTRESS_CHUNKS: i32 = 16;
 /// Times a cast out of lava keeps its site to fetch lava from further off (wall 44).
 pub const LAVA_TRIPS: u32 = 2;
 /// Lava sources a fetch asks a scoop route of, nearest first.
@@ -143,6 +145,8 @@ pub enum Aim {
     PortalKit,
     /// Issue 14c's: a portal cast and lit.
     Portal,
+    /// Issue 15's: a fortress reached, nether bricks seen with an exposed face (strict no X-ray).
+    Fortress,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -166,6 +170,7 @@ impl Aim {
             None if s == "water-bucket" => Some(Aim::WaterBucket),
             None if s == "portal-kit" => Some(Aim::PortalKit),
             None if s == "portal" => Some(Aim::Portal),
+            None if s == "fortress" => Some(Aim::Fortress),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -192,6 +197,7 @@ impl Aim {
             Aim::WaterBucket => "water-bucket".to_owned(),
             Aim::PortalKit => "portal-kit".to_owned(),
             Aim::Portal => "portal".to_owned(),
+            Aim::Fortress => "fortress".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -214,6 +220,7 @@ impl Aim {
             | Aim::WaterBucket
             | Aim::PortalKit
             | Aim::Portal
+            | Aim::Fortress
             | Aim::Hold => true,
         }
     }
@@ -597,6 +604,7 @@ impl Plan {
                 | Aim::PortalKit
                 | Aim::Portal
                 | Aim::StoneTools => self.decide(w, origin, tick),
+                Aim::Fortress => self.fortress_task(w, tick),
                 Aim::Hold => Task::Idle,
             };
         }
@@ -1131,6 +1139,79 @@ impl Plan {
                 .any(|(centre, until)| tick < *until && near((*centre, c)))
     }
 
+    /// Issue 15's aim: met once nether bricks have been seen with an exposed face; until then,
+    /// explore (15a's baseline; the held-heading search is 15b).
+    fn fortress_task(&mut self, w: &World, tick: u64) -> Task {
+        if world::stage::at_fortress(w) {
+            self.met = true;
+            self.note(
+                tick,
+                "fortress met".to_owned(),
+                format!(
+                    "within {} of nether bricks seen exposed",
+                    world::stage::FORTRESS_NEAR
+                ),
+            );
+            return Task::Idle;
+        }
+        // Bricks seen: walk toward the nearest a route gets nearer to, refusing each once tried.
+        let bricks: Vec<Cell> = world::stage::bricks_near(w, FORTRESS_CHUNKS)
+            .into_iter()
+            .filter(|c| !self.refused_now(*c, tick))
+            .take(CANDIDATES_PER_TICK)
+            .collect();
+        for c in bricks {
+            let mut walk = Walk::new(
+                c,
+                Goal::Near {
+                    pos: c,
+                    range: world::stage::FORTRESS_NEAR - 1.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            // A found route only: partial ones ended in the open over lava, among ghasts and
+            // piglins, and 113 of 224 bots died (docs/problems/fortress.md wall 3).
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.refuse(c, tick);
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk toward the fortress at {c:?}"),
+                    "nether bricks seen exposed".to_owned(),
+                );
+                return Task::Explore(walk);
+            }
+        }
+        // No walk: tunnel toward the nearest brick (stairs down to it when it is below), the
+        // tunnel hiding the bot from ghasts; three without coming nearer refuse it.
+        if let Some(c) = world::stage::bricks_near(w, FORTRESS_CHUNKS)
+            .into_iter()
+            .find(|c| !self.refused_now(*c, tick))
+            && let Some(t) = self.dig_toward(
+                w,
+                c,
+                true,
+                ("the fortress", "nether bricks seen, no walk to them"),
+                tick,
+            )
+        {
+            return t;
+        }
+        if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
+            return t;
+        }
+        self.failed_in_row += 1;
+        self.retry_at = tick + RETRY_TICKS;
+        self.note(
+            tick,
+            "no explore walk".to_owned(),
+            "no fortress in view and no walk out".to_owned(),
+        );
+        self.check_stuck(tick);
+        Task::Idle
+    }
+
     /// The next task: the nearest log in view far enough from the origin, else explore.
     /// The next task: the nearest log in view far enough from the origin, else explore. Each
     /// candidate is routed before it is chosen, so a chosen walk always has a way (the churn
@@ -1153,6 +1234,7 @@ impl Plan {
             | Aim::WaterBucket
             | Aim::PortalKit
             | Aim::Portal
+            | Aim::Fortress
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -1179,6 +1261,7 @@ impl Plan {
                 | Aim::WaterBucket
                 | Aim::PortalKit
                 | Aim::Portal
+                | Aim::Fortress
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -1678,12 +1761,32 @@ impl Plan {
     /// blocks over a pool they could see, a lake roofed with stone at sea level with no way down
     /// (docs/problems/portal.md wall 40). Three stairs without coming nearer refuse the bank.
     fn stairs_to_bank(&mut self, w: &World, source: Cell, tick: u64) -> Option<Task> {
-        let body = w.body?;
-        let (fx, fy, fz) = path::feet_cell(body.pos);
         let bank = (source.0, source.1 + 1, source.2);
         // Water above the feet is not reached by stairs down; a level tunnel reaches its own
         // height only.
-        if bank.1 > fy || self.refused_now(bank, tick) {
+        self.dig_toward(
+            w,
+            bank,
+            false,
+            ("the bank", "water seen with no walk to a bank"),
+            tick,
+        )
+    }
+
+    /// Stairs down toward `target` when it is below the feet, else a level tunnel (only when
+    /// `above_ok`, for a target over the feet); three digs without coming nearer refuse it. The
+    /// note says `what` and `why`: "stairs down toward the bank at …".
+    fn dig_toward(
+        &mut self,
+        w: &World,
+        bank: Cell,
+        above_ok: bool,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        let body = w.body?;
+        let (fx, fy, fz) = path::feet_cell(body.pos);
+        if (bank.1 > fy && !above_ok) || self.refused_now(bank, tick) {
             return None;
         }
         let d =
@@ -1716,10 +1819,10 @@ impl Plan {
         self.note(
             tick,
             format!(
-                "{} toward the bank at {bank:?}",
+                "{} toward {what} at {bank:?}",
                 if down { "stairs down" } else { "tunnel" }
             ),
-            "water seen with no walk to a bank".to_owned(),
+            why.to_owned(),
         );
         Some(Task::Stairs(Box::new(if down {
             Stairs::new(dir, tick)

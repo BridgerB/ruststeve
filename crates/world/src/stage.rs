@@ -9,6 +9,60 @@ use data::generated::tags::item_tag;
 
 use crate::World;
 
+/// Within this of a nether-brick cell seen exposed, the bot is at a fortress (issue 15): seeing
+/// one counted at first, and 112 of 112 bots of the first nether race met it from where they
+/// stood, open bridges in view 180 blocks off (docs/problems/fortress.md wall 1).
+pub const FORTRESS_NEAR: f64 = 6.0;
+
+/// The nether-brick cells on record in the dimension the bot is in, within `chunks` chunk columns
+/// of the feet, nearest first.
+pub fn bricks_near(w: &World, chunks: i32) -> Vec<(i32, i32, i32)> {
+    let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
+        return Vec::new();
+    };
+    let f = [body.pos[0], body.pos[1], body.pos[2]];
+    let (cx, cz) = ((f[0].floor() as i32) >> 4, (f[2].floor() as i32) >> 4);
+    let mut out: Vec<(f64, (i32, i32, i32))> = Vec::new();
+    for dx in -chunks..=chunks {
+        for dz in -chunks..=chunks {
+            for s in w.memory.in_column(&dim.name, cx + dx, cz + dz) {
+                if data::block_of_state(s.state) == Some(data::BlockKind::NetherBricks) {
+                    let c = s.pos;
+                    let d = (0..3)
+                        .map(|i| {
+                            let v = [c.0, c.1, c.2][i];
+                            (f64::from(v) + 0.5 - f[i]).powi(2)
+                        })
+                        .sum::<f64>()
+                        .sqrt();
+                    out.push((d, c));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    out.into_iter().map(|(_, c)| c).collect()
+}
+
+/// Whether the feet are within `FORTRESS_NEAR` of a nether-brick cell on record.
+pub fn at_fortress(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    bricks_near(w, 1).first().is_some_and(|c| {
+        let d = [
+            f64::from(c.0) + 0.5,
+            f64::from(c.1) + 0.5,
+            f64::from(c.2) + 0.5,
+        ];
+        (0..3)
+            .map(|i| (d[i] - body.pos[i]).powi(2))
+            .sum::<f64>()
+            .sqrt()
+            <= FORTRESS_NEAR
+    })
+}
+
 /// A stage, lowest first. `Ord` is the ladder.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
@@ -84,7 +138,7 @@ impl Stage {
             Stage::StonePickaxe => has(ItemKind::StonePickaxe, 1),
             Stage::IronKit => has(ItemKind::IronPickaxe, 1) && has(ItemKind::Bucket, 1),
             Stage::Nether => dim == Some("minecraft:the_nether"),
-            Stage::Fortress => w.memory.has_seen(data::BlockKind::NetherBricks),
+            Stage::Fortress => at_fortress(w),
             Stage::Rods7 => has(ItemKind::BlazeRod, 7),
             Stage::Pearls12 => has(ItemKind::EnderPearl, 12),
             Stage::End => dim == Some("minecraft:the_end"),

@@ -146,8 +146,21 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
     if flee.is_some() {
         return flee;
     }
-    if let Some(f) = nearest_foe(w, rules.defend_radius) {
-        return Some(f);
+    // A neutral kind only once one of its kind has hit the bot: striking a zombified piglin
+    // angers its group, and 11 of 112 bots of the first nether race died to piglins after
+    // "defend ZombifiedPiglin" (docs/problems/fortress.md wall 2).
+    let near = w
+        .entities
+        .iter()
+        .filter(|(_, e)| {
+            !e.dead && hostile(e.kind) && (!rules.neutral.contains(&e.kind) || provoked(w, e.kind))
+        })
+        .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
+        .filter(|(d, _, _)| *d <= rules.defend_radius)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, id, k)| (id, k));
+    if near.is_some() {
+        return near;
     }
     w.entities
         .iter()
@@ -156,6 +169,18 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
         .filter(|(d, _, _)| *d <= rules.ranged_radius)
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
         .map(|(_, id, k)| (id, k))
+}
+
+/// Server ticks a hit from a neutral kind keeps it a foe: vanilla's anger lasts 20 to 39 seconds
+/// (`ZombifiedPiglin`'s persistent anger); the shortest, 400 ticks.
+pub const PROVOKED_TICKS: u64 = 400;
+
+/// Whether one of `kind` has hit the bot within `PROVOKED_TICKS`.
+pub fn provoked(w: &World, kind: EntityKind) -> bool {
+    let now = w.session.server_ticks;
+    w.hits
+        .iter()
+        .any(|h| h.cause == Some(kind) && h.at_tick + PROVOKED_TICKS >= now)
 }
 
 /// Under the danger line: health the next two hits and a margin would take (data).

@@ -5,8 +5,8 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-15
-verifiedAgainst: ruststeve@da0e4fa clojurecraft@be85a92
+lastUpdated: 2026-11-18
+verifiedAgainst: ruststeve@ca34f7c clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -71,6 +71,9 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 
 ## Issue 14
 - `Aim::WaterBucket`, `Aim::PortalKit` (the scoop task, [[buckets-and-fluids]]) and `Aim::Portal`: the kit held, then `Task::Cast` at a site in hand or chosen now, else stairs toward `LAVA_DEPTH`; a failed cast gives its site up ([[portal-cast]]).
+
+## Issue 15
+- The `fortress` aim (`Aim::Fortress`, a goal aim for its table and relocation): met when the feet are within `FORTRESS_NEAR` 6 of a nether-brick cell on record (`world::stage::at_fortress`); a walk to the nearest brick seen only on a found route, else `dig_toward` it (stairs down when below, a level tunnel else, three stalls refuse it), else explore. `dig_toward` is shared with the water bank's stairs (portal wall 40). Walking on partial routes across the Nether killed half the bots (fortress wall 3).
 
 ## See also
 - [[phases-and-task-stack]] - the design this begins.
