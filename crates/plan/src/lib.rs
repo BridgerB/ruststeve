@@ -1636,6 +1636,61 @@ impl Plan {
         Controls::default()
     }
 
+    /// Stairs down, or a level tunnel, toward the bank over a source seen with no walk to it
+    /// (clojurecraft's `to-bank`): the water-bucket race 44263024772 left 28 of 112 bots 6 to 12
+    /// blocks over a pool they could see, a lake roofed with stone at sea level with no way down
+    /// (docs/problems/portal.md wall 40). Three stairs without coming nearer refuse the bank.
+    fn stairs_to_bank(&mut self, w: &World, source: Cell, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        let (fx, fy, fz) = path::feet_cell(body.pos);
+        let bank = (source.0, source.1 + 1, source.2);
+        // Water above the feet is not reached by stairs down; a level tunnel reaches its own
+        // height only.
+        if bank.1 > fy || self.refused_now(bank, tick) {
+            return None;
+        }
+        let d =
+            f64::from((bank.0 - fx).pow(2) + (bank.1 - fy).pow(2) + (bank.2 - fz).pow(2)).sqrt();
+        let (best, stalls) = match self.toward {
+            Some((c, b, n)) if c == bank => {
+                if d < b - 0.5 {
+                    (d, 0)
+                } else {
+                    (b, n + 1)
+                }
+            }
+            Some(_) | None => (d, 0),
+        };
+        if stalls >= 3 {
+            self.toward = None;
+            self.refuse(bank, tick);
+            return None;
+        }
+        self.toward = Some((bank, best, stalls));
+        let (dx, dz) = (bank.0 - fx, bank.2 - fz);
+        let down = bank.1 < fy;
+        let dir = match (dx.abs() >= dz.abs(), dx, dz) {
+            // Right over the bank: stairs need a heading; any one comes back down beside it.
+            (_, 0, 0) if down => (1, 0),
+            (_, 0, 0) => return None,
+            (true, _, _) => (dx.signum(), 0),
+            (false, _, _) => (0, dz.signum()),
+        };
+        self.note(
+            tick,
+            format!(
+                "{} toward the bank at {bank:?}",
+                if down { "stairs down" } else { "tunnel" }
+            ),
+            "water seen with no walk to a bank".to_owned(),
+        );
+        Some(Task::Stairs(Box::new(if down {
+            Stairs::new(dir, tick)
+        } else {
+            Stairs::level(dir, tick)
+        })))
+    }
+
     /// The nearest remembered surface source a walk reaches (issue 14b); none: explore for one.
     fn scoop(&mut self, w: &World, goal: String, tick: u64) -> Task {
         let candidates: Vec<Cell> = scoop::sources(w)
@@ -1669,6 +1724,9 @@ impl Plan {
                 format!("no scoop routes: {tried} sources within 24, first {c:?}"),
                 "the stands round them unreachable or blind".to_owned(),
             );
+            if let Some(t) = self.stairs_to_bank(w, c, tick) {
+                return t;
+            }
         }
         // A remembered pool further off is walked toward first (clojurecraft's `pool-radius`):
         // bots on a plateau explored it whole and never went down to the water they had seen
