@@ -1643,6 +1643,11 @@ impl Plan {
             .filter(|c| !self.refused_now(*c, tick))
             .take(CANDIDATES_PER_TICK)
             .collect();
+        // Sources within reach of a search but no scoop routed to any: said, with the first, so
+        // a race tells "beside water and no way to scoop it" from "no water" (wall 39: 20 of 56
+        // kit bots walked from pool cell to pool cell a block apart and never scooped).
+        let near = candidates.first().copied();
+        let tried = candidates.len();
         for c in candidates {
             let mut s = scoop::Scoop::new(c, tick);
             if s.route_now(w, tick) {
@@ -1657,6 +1662,13 @@ impl Plan {
                 return Task::Scoop(Box::new(s));
             }
             self.refuse(c, tick);
+        }
+        if let Some(c) = near {
+            self.note(
+                tick,
+                format!("no scoop routes: {tried} sources within 24, first {c:?}"),
+                "the stands round them unreachable or blind".to_owned(),
+            );
         }
         // A remembered pool further off is walked toward first (clojurecraft's `pool-radius`):
         // bots on a plateau explored it whole and never went down to the water they had seen
