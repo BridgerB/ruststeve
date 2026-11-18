@@ -839,7 +839,14 @@ impl Cast {
                         (still, None, CastStatus::Running)
                     }
                     TaskStatus::Failed(e) => {
-                        self.trail(tick, format!("station walk failed {e:?}"));
+                        // The goal and the feet, so a race says which stand no walk reached
+                        // (places 2 and 12 failed two station walks NoPath a cast, wall 33).
+                        let what = format!(
+                            "station walk to {:?} failed {e:?} from {:?}",
+                            walk.goal,
+                            w.body.map(|b| feet(&b))
+                        );
+                        self.trail(tick, what);
                         self.work = Work::Idle;
                         self.station_misses += 1;
                         (still, None, CastStatus::Running)
@@ -871,6 +878,21 @@ impl Cast {
             return None;
         };
         let f = feet(&body);
+        if self
+            .refill_trail
+            .last()
+            .is_none_or(|t| !t.contains("station at"))
+        {
+            self.trail(
+                tick,
+                format!(
+                    "station at {:?} h {} with {} sources, feet {f:?}",
+                    st.stand,
+                    st.h,
+                    st.sources.len()
+                ),
+            );
+        }
         // The frame's rock and every cell the plan places, which a way never digs (clojurecraft's
         // `kept` and `placed?`): a way dug through the room's floor undid its place op, and the
         // cast went back to it 360 times (wall 20).
