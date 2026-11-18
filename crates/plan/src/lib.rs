@@ -56,6 +56,10 @@ pub const RETRY_TICKS: u64 = 20;
 /// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
 /// water lost twice, never a site worked forever.
 pub const WATER_TRIPS: u32 = 2;
+/// Times a cast out of lava keeps its site to fetch lava from further off (wall 44).
+pub const LAVA_TRIPS: u32 = 2;
+/// Lava sources a fetch asks a scoop route of, nearest first.
+const LAVA_FETCH_TRIES: usize = 8;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
 /// said so, and the run ends there (clojurecraft's `max-unwalkable`, 12).
 pub const MAX_UNWALKABLE: u32 = 12;
@@ -103,8 +107,9 @@ struct CastAccount {
     ops: u32,
     at: String,
     uses: String,
-    /// Water buckets held when the cast ended.
+    /// Water and lava buckets held when the cast ended.
     water: i32,
+    lava: i32,
 }
 
 /// What the planner is for: issue 09's "reach a log at least `min_distance` blocks from where
@@ -337,6 +342,12 @@ pub struct Plan {
     /// `WATER_TRIPS`, then the site is given up as before.
     #[serde(default)]
     pub water_trips: u32,
+    /// Lava fetched for the site in hand after its refill failed (wall 44), and whether a fetch
+    /// is due before the cast resumes.
+    #[serde(default)]
+    pub lava_trips: u32,
+    #[serde(default)]
+    pub fetch_lava: bool,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -433,6 +444,8 @@ impl Plan {
             dangers: Vec::new(),
             site: None,
             water_trips: 0,
+            lava_trips: 0,
+            fetch_lava: false,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -639,11 +652,13 @@ impl Plan {
                     k.refill_text()
                 );
                 let water = held(data::ItemKind::WaterBucket);
+                let lava = held(data::ItemKind::LavaBucket);
                 let account = CastAccount {
                     ops,
                     at,
                     uses,
                     water,
+                    lava,
                 };
                 return self.after_cast(c, status, site, account, tick);
             }
@@ -1793,9 +1808,61 @@ impl Plan {
         Task::Idle
     }
 
+    /// A scoop of lava for the site in hand from the nearest source within `LAVA_RADIUS` a route
+    /// reaches (wall 44), never a cell of the frame or beside one: lava poured into a hole is the
+    /// cast's own.
+    fn lava_fetch(&mut self, w: &World, site: cast::Site, tick: u64) -> Option<Task> {
+        let frame: Vec<Cell> = build::FRAME_CELLS
+            .iter()
+            .map(|c| site.frame.at((c.0, c.1, 0)))
+            .collect();
+        let ours = |c: Cell| {
+            frame
+                .iter()
+                .any(|f| (f.0 - c.0).abs() + (f.1 - c.1).abs() + (f.2 - c.2).abs() <= 1)
+        };
+        let candidates: Vec<Cell> = cast::lava_within(w, cast::LAVA_RADIUS)
+            .into_iter()
+            .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
+            .take(LAVA_FETCH_TRIES)
+            .collect();
+        for c in candidates {
+            let mut s = scoop::Scoop::of(c, memory::Fluid::Lava, tick);
+            if s.route_now(w, tick) {
+                self.note(
+                    tick,
+                    format!("fetch lava at {c:?}"),
+                    format!("for the site at {:?}", site.frame.origin),
+                );
+                return Some(Task::Scoop(Box::new(s)));
+            }
+            self.refuse(c, tick);
+        }
+        None
+    }
+
     /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
     /// `lava-hunt`: stairs toward the lava sea, the lava they expose kept in memory).
     fn cast_task(&mut self, w: &World, tick: u64) -> Task {
+        if self.fetch_lava
+            && let Some(site) = self.site
+        {
+            self.fetch_lava = false;
+            if let Some(t) = self.lava_fetch(w, site, tick) {
+                return t;
+            }
+            self.lava_trips = 0;
+            self.given_up_sites.push(site.frame.origin);
+            self.site = None;
+            self.note(
+                tick,
+                "no lava to fetch".to_owned(),
+                format!(
+                    "no scoop routes to a source within {}; site given up",
+                    cast::LAVA_RADIUS
+                ),
+            );
+        }
         let (choice, report) = if self.site.is_some() {
             (None, cast::SiteReport::default())
         } else {
@@ -1930,11 +1997,13 @@ impl Plan {
             at,
             uses,
             water,
+            lava,
         } = account;
         match status {
             cast::CastStatus::Running => return c,
             cast::CastStatus::Done => {
                 self.water_trips = 0;
+                self.lava_trips = 0;
                 self.portal = Some(site.frame.at((1, 1, 0)));
                 self.failed_in_row = 0;
                 self.task = Task::Idle;
@@ -1963,9 +2032,31 @@ impl Plan {
                     ),
                 );
             }
+            // Out of lava with water in hand: the site is kept and lava fetched from any source
+            // within `LAVA_RADIUS` a scoop routes to; the cast's own refill tries four sources
+            // within `POOL_RADIUS` of its pool, and stations with one source in reach ran dry
+            // (wall 44: 34 casts a pair ended NoRefill at :pour :lava, "no route … tunnels").
+            cast::CastStatus::Failed(cast::CastFailure::NoRefill)
+                if water > 0 && lava == 0 && self.lava_trips < LAVA_TRIPS =>
+            {
+                self.lava_trips += 1;
+                self.fetch_lava = true;
+                self.retry_at = tick + RETRY_TICKS;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("cast out of lava after {ops} ops, at {at}"),
+                    format!(
+                        "site kept; fetch lava ({} of {LAVA_TRIPS})",
+                        self.lava_trips
+                    ),
+                );
+            }
             cast::CastStatus::Failed(f) => {
                 *self.failures.entry(format!("Cast{f:?}")).or_default() += 1;
                 self.water_trips = 0;
+                self.lava_trips = 0;
+                self.fetch_lava = false;
                 self.given_up_sites.push(site.frame.origin);
                 self.site = None;
                 self.retry_at = tick + RETRY_TICKS;
@@ -1994,7 +2085,7 @@ impl Plan {
             scoop::ScoopStatus::Done => {
                 self.failed_in_row = 0;
                 self.task = Task::Idle;
-                self.note(tick, "scooped".to_owned(), "a water bucket held".to_owned());
+                self.note(tick, "scooped".to_owned(), "a bucket filled".to_owned());
             }
             scoop::ScoopStatus::Failed(f) => {
                 *self.failures.entry(format!("Scoop{f:?}")).or_default() += 1;

@@ -1154,7 +1154,7 @@ pub fn far_lava(w: &World, given_up: &[Cell]) -> Option<Cell> {
     })
 }
 
-fn lava_within(w: &World, radius: f64) -> Vec<Cell> {
+pub fn lava_within(w: &World, radius: f64) -> Vec<Cell> {
     let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
         return Vec::new();
     };
