@@ -53,6 +53,9 @@ pub const SEARCH_COLUMNS: i32 = 8;
 /// After a failed task the planner waits this long before choosing again: a choice that fails at
 /// once must not be made every tick (the churn invariant).
 pub const RETRY_TICKS: u64 = 20;
+/// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
+/// water lost twice, never a site worked forever.
+pub const WATER_TRIPS: u32 = 2;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
 /// said so, and the run ends there (clojurecraft's `max-unwalkable`, 12).
 pub const MAX_UNWALKABLE: u32 = 12;
@@ -100,6 +103,8 @@ struct CastAccount {
     ops: u32,
     at: String,
     uses: String,
+    /// Water buckets held when the cast ended.
+    water: i32,
 }
 
 /// What the planner is for: issue 09's "reach a log at least `min_distance` blocks from where
@@ -328,6 +333,10 @@ pub struct Plan {
     /// The cast's site, kept while it is worked (issue 14c).
     #[serde(default)]
     pub site: Option<cast::Site>,
+    /// Water fetched for the site in hand after a cast ran out of it (wall 43); at most
+    /// `WATER_TRIPS`, then the site is given up as before.
+    #[serde(default)]
+    pub water_trips: u32,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -423,6 +432,7 @@ impl Plan {
             stalled: Vec::new(),
             dangers: Vec::new(),
             site: None,
+            water_trips: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -628,7 +638,13 @@ impl Plan {
                     held(data::ItemKind::Bucket),
                     k.refill_text()
                 );
-                let account = CastAccount { ops, at, uses };
+                let water = held(data::ItemKind::WaterBucket);
+                let account = CastAccount {
+                    ops,
+                    at,
+                    uses,
+                    water,
+                };
                 return self.after_cast(c, status, site, account, tick);
             }
             Task::Swim(e, since) => {
@@ -1909,10 +1925,16 @@ impl Plan {
         account: CastAccount,
         tick: u64,
     ) -> Controls {
-        let CastAccount { ops, at, uses } = account;
+        let CastAccount {
+            ops,
+            at,
+            uses,
+            water,
+        } = account;
         match status {
             cast::CastStatus::Running => return c,
             cast::CastStatus::Done => {
+                self.water_trips = 0;
                 self.portal = Some(site.frame.at((1, 1, 0)));
                 self.failed_in_row = 0;
                 self.task = Task::Idle;
@@ -1922,8 +1944,28 @@ impl Plan {
                     format!("{ops} ops done; {uses}"),
                 );
             }
+            // Out of water: the site is kept and the water search (the scoop ladder, 109 of 112
+            // from `kit`) fills a bucket; the cast resumes at the first op not done. The cast's
+            // own refill tries only sources near the site, and gave up casts 108 ops in
+            // (wall 43: 27 casts a pair ended NoRefill at :pour :water, holding no water).
+            cast::CastStatus::Failed(cast::CastFailure::NoRefill)
+                if water == 0 && self.water_trips < WATER_TRIPS =>
+            {
+                self.water_trips += 1;
+                self.retry_at = tick + RETRY_TICKS;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("cast out of water after {ops} ops, at {at}"),
+                    format!(
+                        "site kept; fetch water ({} of {WATER_TRIPS})",
+                        self.water_trips
+                    ),
+                );
+            }
             cast::CastStatus::Failed(f) => {
                 *self.failures.entry(format!("Cast{f:?}")).or_default() += 1;
+                self.water_trips = 0;
                 self.given_up_sites.push(site.frame.origin);
                 self.site = None;
                 self.retry_at = tick + RETRY_TICKS;
