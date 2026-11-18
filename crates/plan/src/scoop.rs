@@ -146,13 +146,13 @@ pub fn aim_for(w: &World, eye: [f64; 3], target: Cell, reach: f64) -> Option<[f6
     aim_with(w, eye, target, reach, clear_ray)
 }
 
-/// `aim_for`, the face found by the exact line first: at the use itself a face the exact line
-/// reaches is taken over one only the sampled line reaches. The exact line agreed with the server
-/// in 603 of 604 uses (race 44165259286), and all 168 uses that filled nothing had it blocked;
-/// the sampled line still finds the stands and routes (letting the exact one decide those too
-/// lit 32 of 224 against 56, wall 27).
+/// `aim_for` by the exact line only: the face the bucket is used on. The exact line agreed with
+/// the server in every use counted (race 44165259286: 603 of 604; kitlava race 44236062785: no
+/// use filled with it blocked, and 342 uses with it blocked filled nothing, 200 ticks and a try
+/// each, wall 34). The sampled line still finds the stands and routes (letting the exact one
+/// decide those too lit 32 of 224 against 56, wall 27).
 pub fn aim_at_use(w: &World, eye: [f64; 3], target: Cell, reach: f64) -> Option<[f64; 3]> {
-    aim_with(w, eye, target, reach, exact_ray).or_else(|| aim_for(w, eye, target, reach))
+    aim_with(w, eye, target, reach, exact_ray)
 }
 
 fn aim_with(
@@ -496,9 +496,9 @@ impl Scoop {
                     pitch: Some(pitch),
                     ..still
                 };
-                if !clear_ray(w, from, point, self.target)
-                    && !exact_ray(w, from, point, self.target)
-                {
+                // Only a face the exact line reaches is used on (wall 34): a use along a line it
+                // calls blocked never filled, in every race counted.
+                if aim.is_none() {
                     return (still, None, ScoopStatus::Failed(ScoopFailure::NoSight));
                 }
                 if tick.saturating_sub(since) < SETTLE_TICKS {
