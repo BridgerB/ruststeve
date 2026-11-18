@@ -125,6 +125,9 @@ pub fn spent(w: &World, lava: Cell, frame: Frame) -> bool {
 
 /// Sites that pass that are collected before the best is routed to.
 pub const SITE_CANDIDATES: usize = 12;
+/// The highest first stand over the room's floor a site is preferred at (wall 49): the failing
+/// `dig :landing` casts read had h 3 and 4.
+pub const LOW_SITE: i32 = 2;
 /// Candidate sites a route to the landing is looked for, best first.
 pub const SITE_ROUTES: usize = 4;
 /// Blocks a site's cast may place at most (`site-blocks`): a handful.
@@ -1398,7 +1401,16 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
     }
     // The churn invariant: a site is taken only when a walk to its landing is found (one bot at
     // y -32 chose a landing at y -52 in another cave and failed its first dig: wall 4).
-    found.sort_by(|a, b| a.0.0.cmp(&b.0.0).then(a.0.1.total_cmp(&b.0.1)));
+    // Low sites first: a bot routed to the room's floor reaches the first stands of a site with h
+    // up to `LOW_SITE` by digging up from it, and fails a higher one's within a minute (wall 49:
+    // `dig :landing` failures at h 3 and 4; routing to `landing(h)` and climbing both raced worse,
+    // walls 46 and 48). Then the fewest blocks, then the nearest.
+    found.sort_by(|a, b| {
+        (a.1.h > LOW_SITE)
+            .cmp(&(b.1.h > LOW_SITE))
+            .then(a.0.0.cmp(&b.0.0))
+            .then(a.0.1.total_cmp(&b.0.1))
+    });
     let from = feet(&body);
     let best = found.first().map(|(_, s, l)| SiteChoice {
         site: *s,
