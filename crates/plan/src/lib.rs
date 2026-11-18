@@ -143,6 +143,8 @@ pub enum Aim {
     PortalKit,
     /// Issue 14c's: a portal cast and lit.
     Portal,
+    /// Issue 15's: a fortress reached, nether bricks seen with an exposed face (strict no X-ray).
+    Fortress,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -166,6 +168,7 @@ impl Aim {
             None if s == "water-bucket" => Some(Aim::WaterBucket),
             None if s == "portal-kit" => Some(Aim::PortalKit),
             None if s == "portal" => Some(Aim::Portal),
+            None if s == "fortress" => Some(Aim::Fortress),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -192,6 +195,7 @@ impl Aim {
             Aim::WaterBucket => "water-bucket".to_owned(),
             Aim::PortalKit => "portal-kit".to_owned(),
             Aim::Portal => "portal".to_owned(),
+            Aim::Fortress => "fortress".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -214,6 +218,7 @@ impl Aim {
             | Aim::WaterBucket
             | Aim::PortalKit
             | Aim::Portal
+            | Aim::Fortress
             | Aim::Hold => true,
         }
     }
@@ -597,6 +602,7 @@ impl Plan {
                 | Aim::PortalKit
                 | Aim::Portal
                 | Aim::StoneTools => self.decide(w, origin, tick),
+                Aim::Fortress => self.fortress_task(w, tick),
                 Aim::Hold => Task::Idle,
             };
         }
@@ -1131,6 +1137,32 @@ impl Plan {
                 .any(|(centre, until)| tick < *until && near((*centre, c)))
     }
 
+    /// Issue 15's aim: met once nether bricks have been seen with an exposed face; until then,
+    /// explore (15a's baseline; the held-heading search is 15b).
+    fn fortress_task(&mut self, w: &World, tick: u64) -> Task {
+        if w.memory.has_seen(data::BlockKind::NetherBricks) {
+            self.met = true;
+            self.note(
+                tick,
+                "fortress met".to_owned(),
+                "nether bricks seen with an exposed face".to_owned(),
+            );
+            return Task::Idle;
+        }
+        if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
+            return t;
+        }
+        self.failed_in_row += 1;
+        self.retry_at = tick + RETRY_TICKS;
+        self.note(
+            tick,
+            "no explore walk".to_owned(),
+            "no fortress in view and no walk out".to_owned(),
+        );
+        self.check_stuck(tick);
+        Task::Idle
+    }
+
     /// The next task: the nearest log in view far enough from the origin, else explore.
     /// The next task: the nearest log in view far enough from the origin, else explore. Each
     /// candidate is routed before it is chosen, so a chosen walk always has a way (the churn
@@ -1153,6 +1185,7 @@ impl Plan {
             | Aim::WaterBucket
             | Aim::PortalKit
             | Aim::Portal
+            | Aim::Fortress
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -1179,6 +1212,7 @@ impl Plan {
                 | Aim::WaterBucket
                 | Aim::PortalKit
                 | Aim::Portal
+                | Aim::Fortress
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {

@@ -70,6 +70,10 @@ pub struct Start {
     /// and furnaces (issue 13, docs/problems/iron-kit.md wall 4).
     #[serde(default)]
     pub spread: Option<u32>,
+    /// The highest floor `spread` may land a bot on (`spreadplayers … under`): in the Nether, under
+    /// the bedrock roof at y 127 (issue 15's `nether` start).
+    #[serde(default)]
+    pub spread_under: Option<u32>,
     /// Overworld feet positions a checkpoint start puts its bots at, one each in turn (issue 14:
     /// beside lava, so a race works the cast from its first tick instead of an hour's hunt).
     #[serde(default)]
@@ -146,8 +150,12 @@ pub fn start_commands(start: &Start, bot: &str, index: usize) -> Vec<String> {
         ));
     }
     if let Some(r) = start.spread {
+        let under = start
+            .spread_under
+            .map(|h| format!("under {h} "))
+            .unwrap_or_default();
         out.push(format!(
-            "execute at {bot} run spreadplayers ~ ~ 0 {} false {bot}",
+            "execute at {bot} run spreadplayers ~ ~ 0 {} {under}false {bot}",
             r.max(1)
         ));
     }
@@ -160,4 +168,26 @@ pub fn fnv_hex(bytes: &[u8]) -> String {
         (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
     });
     format!("{h:016x}")
+}
+
+#[cfg(test)]
+mod nether_start {
+    use super::*;
+
+    /// Issue 15: the `nether` start goes to the Nether, then spreads each bot to a floor under
+    /// the bedrock roof.
+    #[test]
+    fn a_nether_start_spreads_under_the_roof() {
+        let starts = Starts::read("../../config/starts.toml").expect("starts");
+        let nether = starts.find("nether").expect("a nether start");
+        let commands = start_commands(nether, "rs-l00-b00", 0);
+        assert!(
+            commands
+                .iter()
+                .any(|c| c.starts_with("execute in minecraft:the_nether run tp rs-l00-b00"))
+        );
+        assert!(commands.iter().any(
+            |c| c.contains("spreadplayers ~ ~ 0") && c.contains(" under 100 false rs-l00-b00")
+        ));
+    }
 }
