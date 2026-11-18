@@ -23,3 +23,10 @@ From the checkpoint start `nether` (the Nether at (0, 0), where a portal near sp
 - **What happened**: deaths to `mob zombified_piglin` 7, `spear zombified_piglin` 2, `mob piglin` 2; notes "defend ZombifiedPiglin" 14 times in 10 runs.
 - **Cause**: zombified piglins are in the game's `monster` category, so `defend::hostile` answers them on sight; a struck one angers its whole group.
 - **Fix**: `neutral` kinds in the survival rules (`zombified_piglin`, `enderman`) are fought only once one of their kind has hit the bot within `PROVOKED_TICKS` 400 (`defend::provoked`). Piglins stay foes: with no gold worn they attack.
+- **Raced** (walls 1 and 2, f810efa, pair 44405101661 and 44405107364): **0 of 224** within 6 of bricks; deaths 57 and 56 (against 15 standing still): piglins 32 (arrow, melee, spear), fire 22 (`inFire`), ghasts 21 (fireball, explosion, fire), hoglins 12, skeletons 6, endermen 4, lava 3, falls 5. Zombified piglins 1 (against 9).
+
+### 3. Walking to a fortress across the open (the f810efa pair: 0 of 224, half dead)
+- **Read** (race 44405101661's notes): "walk toward the fortress at …" 1,115 times in 104 runs, "explore to … failed" 1,529, "relocate" 540; no bot came within 6. The nearest fortress is about 180 blocks from the start across lava seas and open drops; a walk took a partial route, ended in the open short of it, and the next one did the same.
+- **Cause**: the aim walks on partial routes; the Nether's open ground between is where ghasts, piglins and fire killed half the bots.
+- **Fix**: walk to bricks only on a found route; else tunnel toward the nearest brick (stairs down when it is below, a level tunnel else; `dig_toward`, shared with wall 40's stairs to a water bank), three without coming nearer refusing it. The stairs' refusals hold (no fluid in a cell opened, no lava beside one).
+- **Not yet**: piglins attack a bot wearing no gold (32 deaths); gold armour is not in any earlier stage's kit.

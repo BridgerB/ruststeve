@@ -1170,8 +1170,10 @@ impl Plan {
                 Arrive::Goal,
                 tick,
             );
-            self.refuse(c, tick);
-            if walk.route_now(w, tick) {
+            // A found route only: partial ones ended in the open over lava, among ghasts and
+            // piglins, and 113 of 224 bots died (docs/problems/fortress.md wall 3).
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.refuse(c, tick);
                 self.walks += 1;
                 self.note(
                     tick,
@@ -1180,6 +1182,21 @@ impl Plan {
                 );
                 return Task::Explore(walk);
             }
+        }
+        // No walk: tunnel toward the nearest brick (stairs down to it when it is below), the
+        // tunnel hiding the bot from ghasts; three without coming nearer refuse it.
+        if let Some(c) = world::stage::bricks_near(w, FORTRESS_CHUNKS)
+            .into_iter()
+            .find(|c| !self.refused_now(*c, tick))
+            && let Some(t) = self.dig_toward(
+                w,
+                c,
+                true,
+                ("the fortress", "nether bricks seen, no walk to them"),
+                tick,
+            )
+        {
+            return t;
         }
         if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
             return t;
@@ -1744,12 +1761,32 @@ impl Plan {
     /// blocks over a pool they could see, a lake roofed with stone at sea level with no way down
     /// (docs/problems/portal.md wall 40). Three stairs without coming nearer refuse the bank.
     fn stairs_to_bank(&mut self, w: &World, source: Cell, tick: u64) -> Option<Task> {
-        let body = w.body?;
-        let (fx, fy, fz) = path::feet_cell(body.pos);
         let bank = (source.0, source.1 + 1, source.2);
         // Water above the feet is not reached by stairs down; a level tunnel reaches its own
         // height only.
-        if bank.1 > fy || self.refused_now(bank, tick) {
+        self.dig_toward(
+            w,
+            bank,
+            false,
+            ("the bank", "water seen with no walk to a bank"),
+            tick,
+        )
+    }
+
+    /// Stairs down toward `target` when it is below the feet, else a level tunnel (only when
+    /// `above_ok`, for a target over the feet); three digs without coming nearer refuse it. The
+    /// note says `what` and `why`: "stairs down toward the bank at …".
+    fn dig_toward(
+        &mut self,
+        w: &World,
+        bank: Cell,
+        above_ok: bool,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        let body = w.body?;
+        let (fx, fy, fz) = path::feet_cell(body.pos);
+        if (bank.1 > fy && !above_ok) || self.refused_now(bank, tick) {
             return None;
         }
         let d =
@@ -1782,10 +1819,10 @@ impl Plan {
         self.note(
             tick,
             format!(
-                "{} toward the bank at {bank:?}",
+                "{} toward {what} at {bank:?}",
                 if down { "stairs down" } else { "tunnel" }
             ),
-            "water seen with no walk to a bank".to_owned(),
+            why.to_owned(),
         );
         Some(Task::Stairs(Box::new(if down {
             Stairs::new(dir, tick)
