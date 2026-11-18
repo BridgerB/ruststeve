@@ -15,7 +15,28 @@ pub const VERSION: &str = "26.1.2";
 /// Mojang's list of every released version and where its metadata lives.
 const MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
+/// Tries a download gets: Mojang's CDN dropped a server.jar read mid-stream once ("peer closed
+/// connection without sending TLS close_notify", race 44337117350 lane 3) and the lane ran no bots.
+const GET_TRIES: u32 = 4;
+
 fn get_bytes(url: &str) -> Result<Vec<u8>> {
+    let mut last = None;
+    for attempt in 1..=GET_TRIES {
+        match get_once(url) {
+            Ok(bytes) => return Ok(bytes),
+            Err(e) => {
+                eprintln!("datagen: {url} try {attempt} of {GET_TRIES}: {e:#}");
+                last = Some(e);
+                if attempt < GET_TRIES {
+                    std::thread::sleep(std::time::Duration::from_secs(u64::from(attempt) * 5));
+                }
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| anyhow::anyhow!("GET {url}: no tries")))
+}
+
+fn get_once(url: &str) -> Result<Vec<u8>> {
     let response = ureq::get(url)
         .call()
         .with_context(|| format!("GET {url}"))?;
