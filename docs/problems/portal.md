@@ -244,3 +244,9 @@ Also fixed in cc60822's follow-up: a refill's route may be partial when it ends 
 - **Cause**: the water search has no rung for water seen with no walk to it; it walks toward the next pool, explores and comes back.
 - **Fix**: clojurecraft's `to-bank`: with sources in sight and no scoop routed, stairs down (or a level tunnel at the bank's height) toward the cell over the nearest, the bank; three stairs without coming nearer refuse it. The stairs' own refusals hold (no fluid in a cell opened, no lava beside one).
 - **Raced** (41e4b9c, water checkpoint 44265992297, same setup): **109 of 112** filled water (97.3%), 0 deaths; stairs toward a bank in 57 runs, a tunnel in 14. The water stage from `kit` holds.
+
+### 41. Lava seen, no site (kit pair 44268342346 and 44268348517, 41e4b9c: 3 and 7 of 112, 10 of 224)
+- **What happened**: water held (107 and 108 of 112 scooped) but 124 of 224 bots never began a cast. In race 44268348517, 67 never cast; 64 of them had seen lava ("hunt lava at … no site within").
+- **Read** (each non-caster's last site report): 15 saw no lava source at all; most of the rest had 3 sources and **1 to 7 landings**, every one refused by "behind" (lava behind the frame's plane) or "footprint". The landing must be an open standable cell 4 to 9 from the lava on the plane; lava in rock has few.
+- **Cause**: the site is found from its landing, which must already be open; clojurecraft's `choose-site` builds it from a stand beside the cell over a source and cuts the room from the rock, so lava in rock has sites.
+- **Fix**: when no landing site passes, the stand-first site (wall 21's port, `station::stands_beside`, the origin `STATION_REACH` 7 behind the stand and h 1, 3 or 6 under it), with the same footprint, blocks, spent and station checks. The landing site stays first, since wall 21 alone lit fewer; the way digs it lacked then (wall 22) are in now. The site report counts `beside` and `beside-passed`.

@@ -1201,12 +1201,16 @@ pub struct SiteReport {
     pub blocks: usize,
     pub no_station: usize,
     pub passed: usize,
+    /// Stand-first candidates (wall 41): stands beside a source, and the sites built from them
+    /// that passed.
+    pub beside: usize,
+    pub beside_passed: usize,
 }
 
 impl SiteReport {
     pub fn text(&self) -> String {
         format!(
-            "sources {} landings {} refused/spent {} behind {} footprint {} blocks {} station {} passed {}",
+            "sources {} landings {} refused/spent {} behind {} footprint {} blocks {} station {} passed {} beside {} beside-passed {}",
             self.sources,
             self.landings,
             self.refused_or_spent,
@@ -1214,7 +1218,9 @@ impl SiteReport {
             self.footprint,
             self.blocks,
             self.no_station,
-            self.passed
+            self.passed,
+            self.beside,
+            self.beside_passed
         )
     }
 }
@@ -1293,16 +1299,7 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
             let h = (src.1 + 1 - landing.1).clamp(0, crate::build::MAX_ACCESS);
             let plan = frame_plan(frame, false, h);
             let foot = footprint(&plan);
-            let ok = foot.iter().all(|c| {
-                kind(w, *c).is_some()
-                    && !matches!(seen(w, *c), Some(BlockKind::Water | BlockKind::Lava))
-                    // Lava flows into a cell through a face only: a source sharing one, not a
-                    // diagonal (wall 13: the diagonal rule refused 74 of 140 sites round one pool).
-                    && !lava.iter().any(|l| {
-                        (l.0 - c.0).abs() + (l.1 - c.1).abs() + (l.2 - c.2).abs() <= 1
-                    })
-            });
-            if !ok {
+            if !footprint_ok(w, &lava, &foot) {
                 report.footprint += 1;
                 continue;
             }
@@ -1329,6 +1326,71 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
                 landing,
             ));
             break;
+        }
+    }
+    // No landing site passed: clojurecraft's `choose-site`, the site built from a lava stand
+    // beside the cell over a source (`stands_beside`), the frame `STATION_REACH` behind it and h
+    // under it, the room cut from the rock. Lava in rock has few open landings: 64 of the 67 bots
+    // of kit race 44268348517 that never cast had seen lava, round 1 to 7 landings, none passing
+    // (wall 41). Alone it lit fewer (wall 21, before the way digs of wall 22), so it is the second
+    // choice here, never the first.
+    if found.is_empty() {
+        let mut stands: Vec<(f64, Cell, Cell)> = lava
+            .iter()
+            .filter(|c| !refused(**c))
+            .take(MAX_SOURCES)
+            .flat_map(|src| {
+                crate::station::stands_beside(w, *src)
+                    .into_iter()
+                    .map(|st| (dist(here, centre(st)), st, *src))
+            })
+            .collect();
+        stands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        report.beside = stands.len();
+        for (d, stand, src) in stands {
+            if found.len() >= SITE_CANDIDATES {
+                break;
+            }
+            for (facing, h) in Facing::ALL
+                .into_iter()
+                .flat_map(|f| crate::station::STATION_HEIGHTS.map(|h| (f, h)))
+            {
+                let probe = Frame {
+                    origin: (0, 0, 0),
+                    facing,
+                };
+                let off = probe.at((crate::build::landing(h).0, h, crate::station::STATION_REACH));
+                let frame = Frame {
+                    origin: (stand.0 - off.0, stand.1 - off.1, stand.2 - off.2),
+                    facing,
+                };
+                if refused(frame.origin) || spent(w, src, frame) {
+                    continue;
+                }
+                let plan = frame_plan(frame, false, h);
+                let foot = footprint(&plan);
+                if !footprint_ok(w, &lava, &foot) {
+                    continue;
+                }
+                let n = blocks_needed(w, &plan);
+                if n > SITE_BLOCKS {
+                    continue;
+                }
+                if crate::station::station_among(w, &lava, frame, &foot, Some(h)).is_none() {
+                    continue;
+                }
+                report.beside_passed += 1;
+                found.push((
+                    (n, d),
+                    Site {
+                        frame,
+                        lava: src,
+                        h,
+                    },
+                    frame.at(crate::build::landing(0)),
+                ));
+                break;
+            }
         }
     }
     // The churn invariant: a site is taken only when a walk to its landing is found (one bot at
@@ -1360,6 +1422,19 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
         })
         .or(best);
     (choice, report)
+}
+
+/// Every footprint cell loaded, none seen holding fluid, none sharing a face with a lava source.
+fn footprint_ok(w: &World, lava: &[Cell], foot: &[Cell]) -> bool {
+    foot.iter().all(|c| {
+        kind(w, *c).is_some()
+            && !matches!(seen(w, *c), Some(BlockKind::Water | BlockKind::Lava))
+            // Lava flows into a cell through a face only: a source sharing one, not a diagonal
+            // (wall 13: the diagonal rule refused 74 of 140 sites round one pool).
+            && !lava
+                .iter()
+                .any(|l| (l.0 - c.0).abs() + (l.1 - c.1).abs() + (l.2 - c.2).abs() <= 1)
+    })
 }
 
 /// Whether a walk from `landing` ends within a bucket's reach of the lava source `src`.
