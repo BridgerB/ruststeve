@@ -1387,7 +1387,10 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
                         lava: src,
                         h,
                     },
-                    frame.at(crate::build::landing(0)),
+                    // Entered at h, along the level way from the lava stand, the room dug down
+                    // from there (clojurecraft's `landing`): a bot routed to the room's floor
+                    // stood 4 under its first op's stand and failed it in 51 ticks (wall 45).
+                    frame.at(crate::build::landing(h)),
                 ));
                 break;
             }
