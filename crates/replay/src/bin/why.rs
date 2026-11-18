@@ -4,6 +4,7 @@
 //! ```text
 //! cargo run -p why -- <file.rsr> --at <server ticks> [--force]
 //! cargo run -p why -- <file.rsr> --event <n> [--force]
+//! cargo run -p why -- <file.rsr> --event <n> --blocks <x,y,z> [--force]   # and the blocks round a cell
 //! ```
 //!
 //! It starts from the last checkpoint before the moment, so a moment late in a long run is quick.
@@ -36,9 +37,22 @@ fn run() -> Result<(), String> {
     let force = args.iter().any(|a| a == "--force");
     let mut file = None;
     let mut at = None;
+    let mut blocks: Option<[i32; 3]> = None;
     let mut it = args.iter().filter(|a| a.as_str() != "--force");
     while let Some(a) = it.next() {
         match a.as_str() {
+            "--blocks" => {
+                let v: Vec<i32> = it
+                    .next()
+                    .ok_or("--blocks needs x,y,z")?
+                    .split(',')
+                    .map(|s| s.trim().parse().map_err(|e| format!("--blocks: {e}")))
+                    .collect::<Result<_, _>>()?;
+                let [x, y, z] = v[..] else {
+                    return Err("--blocks needs x,y,z".to_owned());
+                };
+                blocks = Some([x, y, z]);
+            }
             "--at" => {
                 at = Some(At::Ticks(
                     it.next()
@@ -101,6 +115,9 @@ fn run() -> Result<(), String> {
         }
     }
     print_world(&folder.world, folder.events);
+    if let Some(c) = blocks {
+        print_blocks(&folder.world, c);
+    }
     if notes.is_empty() {
         println!("planner: no decisions recorded (a run with no aim, or none made yet)");
     } else {
@@ -114,6 +131,34 @@ fn run() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The blocks round cell `c`, 7 by 7 on the plane, from 3 over it to 2 under, as the bot knew
+/// them: the first six letters of each name, `?` for an unloaded cell. Rows run north to south (z
+/// up), columns west to east (x up); the cell itself is marked with `*`.
+fn print_blocks(w: &World, [cx, cy, cz]: [i32; 3]) {
+    println!(
+        "blocks round ({cx}, {cy}, {cz}), x {} to {} across:",
+        cx - 3,
+        cx + 3
+    );
+    for y in (cy - 2..=cy + 3).rev() {
+        println!("y {y}");
+        for z in cz - 3..=cz + 3 {
+            let row: Vec<String> = (cx - 3..=cx + 3)
+                .map(|x| {
+                    let name = w
+                        .block_at(BlockPos::new(x, y, z))
+                        .and_then(data::BlockKind::name)
+                        .unwrap_or("?");
+                    let short: String = name.chars().take(6).collect();
+                    let mark = if (x, y, z) == (cx, cy, cz) { '*' } else { ' ' };
+                    format!("{mark}{short:<6}")
+                })
+                .collect();
+            println!("  z {z:>5} {}", row.join(" "));
+        }
+    }
 }
 
 fn print_world(w: &World, events: u64) {
