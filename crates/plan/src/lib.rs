@@ -60,6 +60,8 @@ pub const WATER_TRIPS: u32 = 2;
 pub const LAVA_TRIPS: u32 = 2;
 /// Lava sources a fetch asks a scoop route of, nearest first.
 const LAVA_FETCH_TRIES: usize = 8;
+/// Walks toward lava a fetch takes for one site when no scoop routes (wall 47).
+const LAVA_FETCH_WALKS: u32 = 4;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
 /// said so, and the run ends there (clojurecraft's `max-unwalkable`, 12).
 pub const MAX_UNWALKABLE: u32 = 12;
@@ -348,6 +350,9 @@ pub struct Plan {
     pub lava_trips: u32,
     #[serde(default)]
     pub fetch_lava: bool,
+    /// Walks toward lava taken for the site in hand (wall 47).
+    #[serde(default)]
+    pub fetch_walks: u32,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -446,6 +451,7 @@ impl Plan {
             water_trips: 0,
             lava_trips: 0,
             fetch_lava: false,
+            fetch_walks: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -1826,6 +1832,13 @@ impl Plan {
             .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
             .take(LAVA_FETCH_TRIES)
             .collect();
+        // Taken before the scoops refuse what they try: a source no scoop routes to now may be
+        // walked toward, where more of its pool shows.
+        let far: Vec<Cell> = cast::lava_within(w, cast::FAR_RADIUS)
+            .into_iter()
+            .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
+            .take(LAVA_FETCH_TRIES)
+            .collect();
         for c in candidates {
             let mut s = scoop::Scoop::of(c, memory::Fluid::Lava, tick);
             if s.route_now(w, tick) {
@@ -1837,6 +1850,38 @@ impl Plan {
                 return Some(Task::Scoop(Box::new(s)));
             }
             self.refuse(c, tick);
+        }
+        // No scoop routes: walk toward the nearest source a walk gets nearer to, the site kept and
+        // the fetch due again on arrival (wall 47: casts 71 to 86 ops in gave their site up with
+        // "no lava to fetch", 47 a pair).
+        if self.fetch_walks >= LAVA_FETCH_WALKS {
+            return None;
+        }
+        for c in far {
+            let mut walk = Walk::new(
+                c,
+                Goal::Near {
+                    pos: c,
+                    range: scoop::REACH,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            self.refuse(c, tick);
+            if walk.route_now(w, tick) {
+                self.fetch_walks += 1;
+                self.fetch_lava = true;
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk toward lava to fetch at {c:?}"),
+                    format!(
+                        "no scoop routes; walk {} of {LAVA_FETCH_WALKS}",
+                        self.fetch_walks
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
         }
         None
     }
@@ -1852,6 +1897,7 @@ impl Plan {
                 return t;
             }
             self.lava_trips = 0;
+            self.fetch_walks = 0;
             self.given_up_sites.push(site.frame.origin);
             self.site = None;
             self.note(
@@ -2004,6 +2050,7 @@ impl Plan {
             cast::CastStatus::Done => {
                 self.water_trips = 0;
                 self.lava_trips = 0;
+                self.fetch_walks = 0;
                 self.portal = Some(site.frame.at((1, 1, 0)));
                 self.failed_in_row = 0;
                 self.task = Task::Idle;
@@ -2056,6 +2103,7 @@ impl Plan {
                 *self.failures.entry(format!("Cast{f:?}")).or_default() += 1;
                 self.water_trips = 0;
                 self.lava_trips = 0;
+                self.fetch_walks = 0;
                 self.fetch_lava = false;
                 self.given_up_sites.push(site.frame.origin);
                 self.site = None;
