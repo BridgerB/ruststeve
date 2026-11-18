@@ -375,7 +375,21 @@ impl Scoop {
     /// wall 12).
     pub fn route_now(&mut self, w: &World, tick: u64) -> bool {
         if let Stage::Approach(_) = self.stage {
-            for st in stands(w, self.target).into_iter().take(STAND_TRIES) {
+            // A stand's sight is judged from its cell's middle; a bot already in that cell sees
+            // from where its eye is. That stand counts only if the real eye sees the source: the
+            // empty route to it reached Aim with no face in sight, and the scoop failed NoSight
+            // four times in four ticks on one source (83 casts in races 44184615869 and
+            // 44184621358, wall 32).
+            let here = w.body.map(|b| (crate::path::feet_cell(b.pos), eye(&b)));
+            let target = self.target;
+            let standing_blind = |st: Cell| {
+                here.is_some_and(|(f, e)| f == st && aim_at_use(w, e, target, REACH).is_none())
+            };
+            for st in stands(w, self.target)
+                .into_iter()
+                .filter(|st| !standing_blind(*st))
+                .take(STAND_TRIES)
+            {
                 let mut walk = Walk::new(st, Goal::Block { pos: st }, Arrive::Goal, tick);
                 if walk.route_now(w, tick) && walk.route == Some(crate::path::Status::Found) {
                     self.stage = Stage::Approach(walk);
