@@ -960,8 +960,13 @@ impl Cast {
             self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
             return Some((still, None, CastStatus::Running));
         }
+        // A found route only: a stand in the rock (andesite at (-34, 4, 9) and over it, race
+        // 44252670652) had a partial route toward it, the walk failed NoPath one block off, and
+        // the way was never dug (wall 38). With none, the landing at the stand's height first, or
+        // at that height the straight way dug (`stance-block`).
+        let found = |walk: &Walk| walk.route == Some(crate::path::Status::Found);
         let mut walk = Walk::new(st.stand, Goal::Block { pos: st.stand }, Arrive::Goal, tick);
-        if walk.route_now(w, tick) {
+        if walk.route_now(w, tick) && found(&walk) {
             self.work = Work::ToStation(walk);
             return Some((still, None, CastStatus::Running));
         }
@@ -972,7 +977,7 @@ impl Cast {
                 return None;
             }
             let mut walk = Walk::new(landing, Goal::Block { pos: landing }, Arrive::Goal, tick);
-            if !walk.route_now(w, tick) {
+            if !walk.route_now(w, tick) || !found(&walk) {
                 return None;
             }
             self.work = Work::ToStation(walk);
