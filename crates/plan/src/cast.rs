@@ -1323,10 +1323,7 @@ pub fn site_choice_report(w: &World, given_up: &[Cell]) -> (Option<SiteChoice>, 
                     lava: *src,
                     h,
                 },
-                // The plan's first stands are at `landing(h)`; a bot routed to the room's floor
-                // under them stood h under its third op's stand (rs-l01-b07 of race 44337111300:
-                // h 4, the stand (42, 41, 57) is `landing(4)`) and failed it: wall 48.
-                frame.at(crate::build::landing(h)),
+                landing,
             ));
             break;
         }
