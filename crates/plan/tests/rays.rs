@@ -129,3 +129,14 @@ fn the_kept_rock_is_the_frames_plane_and_the_row_behind_it() {
     assert!(!cells.contains(&frame.at((0, 0, 1))));
     assert!(!cells.contains(&frame.at((2, 0, 2))));
 }
+
+/// Wall 46: the step up toward an op over the feet goes one column along the longer axis, one up;
+/// right under it, east. The race's case: feet (3, 54, 112), op (3, 60, 114).
+#[test]
+fn a_step_up_goes_toward_the_op_along_the_longer_axis() {
+    use plan::station::stair_up_step;
+    assert_eq!(stair_up_step((3, 54, 112), (3, 60, 114)), (3, 55, 113));
+    assert_eq!(stair_up_step((0, 10, 0), (5, 14, -2)), (1, 11, 0));
+    assert_eq!(stair_up_step((0, 10, 0), (-1, 14, 4)), (0, 11, 1));
+    assert_eq!(stair_up_step((0, 10, 0), (0, 14, 0)), (1, 11, 0));
+}

@@ -33,8 +33,9 @@ pub const REACH: f64 = 4.0;
 /// Failed walks or digs toward the station before a cast refills from the nearest sources.
 const STATION_MISSES: u32 = 2;
 /// Blocks a way toward one op's stand may dig: the room is about ten wide, so a way longer than
-/// that is not the room's.
-const WAY_DIGS: u32 = 12;
+/// that is not the room's. Steps up count too: up to three a step, six steps to the highest
+/// access stand (wall 46), so 12 more.
+const WAY_DIGS: u32 = 24;
 /// Refill steps kept for the failure note.
 const REFILL_TRAIL: usize = 8;
 /// Blocks a cast may dig to open sight lines to lava with no station: a few per refill.
@@ -232,6 +233,9 @@ pub struct Cast {
     /// Blocks dug on straight ways toward the op's stand (reset with the op).
     #[serde(default)]
     way_digs: u32,
+    /// Steps up walked toward the op (wall 46; reset with the op).
+    #[serde(default)]
+    climbs: u32,
     /// The refill's last steps and why each ended, for the failure note (the recording holds no
     /// planner state, and a refill that failed in 230 ticks left only a held bucket to read).
     #[serde(default)]
@@ -343,6 +347,7 @@ impl Cast {
             regressions: 0,
             station_misses: 0,
             way_digs: 0,
+            climbs: 0,
             refill_trail: Vec::new(),
             scoop_uses: [0; 4],
             sight_digs: 0,
@@ -442,6 +447,7 @@ impl Cast {
             self.work = Work::Idle;
             self.tries = 0;
             self.way_digs = 0;
+            self.climbs = 0;
         }
         if tick.saturating_sub(self.last_done) > STALL_TICKS {
             return (still, None, CastStatus::Failed(CastFailure::Stalled));
@@ -474,6 +480,17 @@ impl Cast {
 
     /// The first block of the straight way at the feet's height toward `to`'s column, when a way
     /// may dig it and it is in reach; `None` past `WAY_DIGS` digs for one op.
+    /// The step up toward `to` when it is dug clear and `to` is more than a block over the feet.
+    fn open_step(&self, w: &World, body: &physics::Body, to: Cell) -> Option<Cell> {
+        let f = feet(body);
+        if to.1 <= f.1 + 1 || self.climbs >= WAY_DIGS {
+            return None;
+        }
+        let kept = crate::station::kept(self.site.frame);
+        (crate::station::stair_up_block(w, f, to, &kept) == crate::station::Way::Open)
+            .then(|| crate::station::stair_up_step(f, to))
+    }
+
     fn way_block(&self, w: &World, body: &physics::Body, to: Cell) -> Option<Cell> {
         if self.way_digs >= WAY_DIGS {
             return None;
@@ -486,9 +503,14 @@ impl Cast {
                 .filter(|op| op.kind == OpKind::Place)
                 .filter_map(|op| op.pos),
         );
-        let level = (to.0, f.1, to.2);
-        let crate::station::Way::Dig(block) = crate::station::stance_block(w, f, level, &kept)
-        else {
+        // An op more than a block over the feet is climbed to by steps dug up toward it; a level
+        // way never rises (wall 46).
+        let way = if to.1 > f.1 + 1 {
+            crate::station::stair_up_block(w, f, to, &kept)
+        } else {
+            crate::station::stance_block(w, f, (to.0, f.1, to.2), &kept)
+        };
+        let crate::station::Way::Dig(block) = way else {
             return None;
         };
         (dist(eye(body), centre(block)) <= REACH).then_some(block)
@@ -547,6 +569,15 @@ impl Cast {
                     self.way_digs += 1;
                     self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
                     return Err((Controls::default(), None, CastStatus::Running));
+                }
+                // A step up dug clear: onto it, and the next one is dug from there (wall 46).
+                if let Some(step) = self.open_step(w, body, stand.unwrap_or(target)) {
+                    let mut up = Walk::new(step, Goal::Block { pos: step }, Arrive::Goal, tick);
+                    if up.route_now(w, tick) {
+                        self.climbs += 1;
+                        self.work = Work::Walk(up);
+                        return Err((Controls::default(), None, CastStatus::Running));
+                    }
                 }
                 return Err(if self.try_again() {
                     (Controls::default(), None, CastStatus::Running)
