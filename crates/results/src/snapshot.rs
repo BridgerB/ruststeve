@@ -15,7 +15,7 @@ pub struct Snap {
     /// The stage reached (a `Stage` name).
     pub stage: String,
     pub bot: String,
-    /// The bot's offline UUID: its player file is `world/playerdata/<uuid>.dat`.
+    /// The bot's offline UUID: its player file is `world/players/data/<uuid>.dat` (26.1.2).
     pub uuid: String,
     pub server_ticks: u64,
     pub commit: String,

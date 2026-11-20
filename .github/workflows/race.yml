@@ -128,7 +128,7 @@ jobs:
           for i in $(seq 0 $((BOTS - 1))); do
             name="$(printf 'rs-l%02d-b%02d' "$LANE" "$i")"
             to="$(./target/release/results offline-uuid "$name")"
-            cp "target/server/world/playerdata/$from.dat" "target/server/world/playerdata/$to.dat"
+            cp "target/server/world/players/data/$from.dat" "target/server/world/players/data/$to.dat"
           done
           echo "SNAP_MEMORY=$dir/memory.rsw" >> "$GITHUB_ENV"
 
