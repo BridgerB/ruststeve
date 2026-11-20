@@ -17,3 +17,10 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **The `spawner` stage** (`world::stage::Stage::Spawner`, `at_spawner`): the feet within `SPAWNER_NEAR` 8 of a spawner seen exposed, between `fortress` and `rods_7`; the race snapshots it like any stage.
 - **`spawner_task`** (the `race` aim once the fortress is reached): 7 rods held is the aim met; a rod lying within 8 on a found route is picked up first; at the spawner the bot holds its ground; a spawner seen is walked to on a found route, else tunnelled toward; with none, the nearest brick not within 8 of the trail, else explore.
 - **Blazes as shooters**: `blaze` joins the `ranged` list, so `defend` answers one within 16, closes in and strikes; a shooter beyond `defend_radius` is engaged only at `engage_health` 18 or more.
+
+## Walls
+
+### 1. Under the spawner, no way up (race 44781414716, 44886cb, frontier fortress snapshot, 7 lanes x 1, cap 24,000)
+- **What happened**: 0 of 7 reached the spawner; 5 of 7 died (fire 2, `onFire.player blaze`, `fireball blaze`, `arrow piglin`). Every bot saw the spawner at (129, 64, 159) from its first ticks ("tunnel toward the spawner at (129, 64, 159)" 45 times), then "stairs failed: StepFailed" 29 times, explored off and came back.
+- **Read** (the case files' last positions): the bots ended at (130.5, 43, 159.7), (133.5, 43, 159.8), (140.7, 43, 156.4): right under the spawner, 21 blocks below it. `dig_toward` cut a level tunnel to a target above the feet, and stairs went only level or down.
+- **Fix**: `Stairs::up` (`stairs::up_step`): a step up along the heading opens the room over the head, then the next column's head and feet one up, its floor the block ahead at the feet's height; the same refusals (no fluid, no lava beside, nothing falling over the top). `dig_toward` takes stairs up for a target more than a block over the feet. A unit test holds the step's cells with the race's numbers.

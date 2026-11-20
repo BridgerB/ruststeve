@@ -79,6 +79,11 @@ pub struct Stairs {
     /// step counted as a stair.
     #[serde(default)]
     pub level_only: bool,
+    /// Stairs up (issue 16b): a step up toward the heading, its floor the block ahead at the
+    /// feet's height. Seven bots of race 44781414716 stood 21 under a spawner they had seen, the
+    /// tunnel toward it level or down only (docs/problems/blaze.md wall 1).
+    #[serde(default)]
+    pub up: bool,
 }
 
 fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
@@ -187,6 +192,14 @@ pub fn falls(k: Option<BlockKind>) -> bool {
     })
 }
 
+/// One step up from `feet` along `dir`: where the feet go, and the cells opened for it, top
+/// first: the room over the head (to jump), then the step's head and feet. Its floor is the block
+/// ahead at the feet's height (issue 16b).
+pub fn up_step((x, y, z): Cell, (dx, dz): (i32, i32)) -> (Cell, Vec<Cell>) {
+    let to = (x + dx, y + 1, z + dz);
+    (to, vec![(x, y + 2, z), (x + dx, y + 2, z + dz), to])
+}
+
 fn turn((dx, dz): (i32, i32)) -> (i32, i32) {
     (-dz, dx)
 }
@@ -203,6 +216,16 @@ impl Stairs {
             refusals: Vec::new(),
             started: tick,
             level_only: false,
+            up: false,
+        }
+    }
+
+    /// Stairs up: `STAIR_DEPTH` steps up along the heading (a level step where all four headings
+    /// refuse), each opening the room over the head, then the next column's head and feet one up.
+    pub fn up(dir: (i32, i32), tick: u64) -> Self {
+        Self {
+            up: true,
+            ..Self::new(dir, tick)
         }
     }
 
@@ -219,8 +242,12 @@ impl Stairs {
         let (x, y, z) = feet;
         for _ in 0..if self.level_only { 0 } else { 4 } {
             let (dx, dz) = self.dir;
-            let to = (x + dx, y - 1, z + dz);
-            let cells = vec![(x + dx, y + 1, z + dz), (x + dx, y, z + dz), to];
+            let (to, cells) = if self.up {
+                up_step(feet, self.dir)
+            } else {
+                let to = (x + dx, y - 1, z + dz);
+                (to, vec![(x + dx, y + 1, z + dz), (x + dx, y, z + dz), to])
+            };
             match refusal(w, &cells, (to.0, to.1 - 1, to.2)) {
                 None => {
                     return Ok(StairStage::Cut {

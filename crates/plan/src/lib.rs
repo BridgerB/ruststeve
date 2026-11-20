@@ -2132,9 +2132,11 @@ impl Plan {
         self.toward = Some((bank, best, stalls));
         let (dx, dz) = (bank.0 - fx, bank.2 - fz);
         let down = bank.1 < fy;
+        // More than a block over the feet: stairs up (issue 16b, blaze wall 1).
+        let up = above_ok && bank.1 > fy + 1;
         let dir = match (dx.abs() >= dz.abs(), dx, dz) {
-            // Right over the bank: stairs need a heading; any one comes back down beside it.
-            (_, 0, 0) if down => (1, 0),
+            // Right over or under it: stairs need a heading; any one comes round to it.
+            (_, 0, 0) if down || up => (1, 0),
             (_, 0, 0) => return None,
             (true, _, _) => (dx.signum(), 0),
             (false, _, _) => (0, dz.signum()),
@@ -2143,12 +2145,20 @@ impl Plan {
             tick,
             format!(
                 "{} toward {what} at {bank:?}",
-                if down { "stairs down" } else { "tunnel" }
+                if down {
+                    "stairs down"
+                } else if up {
+                    "stairs up"
+                } else {
+                    "tunnel"
+                }
             ),
             why.to_owned(),
         );
         Some(Task::Stairs(Box::new(if down {
             Stairs::new(dir, tick)
+        } else if up {
+            Stairs::up(dir, tick)
         } else {
             Stairs::level(dir, tick)
         })))

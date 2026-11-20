@@ -129,3 +129,13 @@ fn the_kept_rock_is_the_frames_plane_and_the_row_behind_it() {
     assert!(!cells.contains(&frame.at((0, 0, 1))));
     assert!(!cells.contains(&frame.at((2, 0, 2))));
 }
+
+/// Blaze wall 1: a step up east from (130, 43, 159) opens the room over the head, then the step's
+/// head and feet one up; the feet go to (131, 44, 159), on the block (131, 43, 159).
+#[test]
+fn a_step_up_opens_the_head_room_then_the_step() {
+    use plan::stairs::up_step;
+    let (to, cells) = up_step((130, 43, 159), (1, 0));
+    assert_eq!(to, (131, 44, 159));
+    assert_eq!(cells, vec![(130, 45, 159), (131, 45, 159), (131, 44, 159)]);
+}
