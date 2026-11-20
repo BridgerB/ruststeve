@@ -147,6 +147,19 @@ spares = [["item:stick", 24]]
 # Issue 14c's done-condition (clojurecraft's portal row): the kit the cast spends (a water
 # bucket, a bucket for the lava, flint and steel) held, then the cast at a site beside lava
 # (plan::cast); met once a portal is lit.
+# Issue 16's: iron armour and an iron sword before the Nether (Bridger, 2026-11-20: wither
+# skeletons killed 5 of 7 bare bots at the fortress, race 44789031743; clojurecraft's Nether
+# starts carried the same). Worn armour counts as held (window 0's slots 5 to 8).
+[[goal]]
+id = "gear"
+priority = 13
+until = "gear"
+doc = "an iron helmet, chestplate and leggings and an iron sword, before the Nether"
+provides = [["item:iron_helmet", 1], ["item:iron_chestplate", 1], ["item:iron_leggings", 1], ["item:iron_sword", 1]]
+holds = [["tag:pickaxes", 1]]
+# Twenty ingots of armour and two of sword, and coal to smelt them, taken whenever exposed near.
+wants = [["item:raw_iron", 22], ["item:coal", 6]]
+
 [[goal]]
 id = "portal"
 priority = 15
@@ -294,7 +307,9 @@ defend_radius = 4.0
 # Never fight at or under this health: two zombie hits on Normal (3 each) and a margin of 2.
 danger_health = 8.0
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
-never_fight = ["creeper"]
+# Wither skeletons too (Bridger, 2026-11-20): 8 a hit and the wither effect killed 5 of 7 bots at the
+# fortress (race 44789031743); backed away from, never fought.
+never_fight = ["creeper", "wither_skeleton"]
 # Mobs that shoot: answered within ranged_radius, closed in on and fought (skeleton arrows were
 # the top killer underground in the iron races: docs/problems/iron-kit.md wall 16).
 # Blazes too (issue 16): they shoot from up to 48, and are closed on and struck the same way.

@@ -111,6 +111,8 @@ impl Enter {
 const FORTRESS_CHUNKS: i32 = 16;
 /// Blaze rods the race wants (clojurecraft's `rods-wanted`: six for twelve eyes, one spare).
 pub const RODS_WANTED: i32 = 7;
+/// Ticks between putting on one piece of armour and the next.
+const EQUIP_TICKS: u64 = 20;
 /// Blocks from the feet a lying blaze rod is walked to (issue 16d).
 const ROD_REACH: f64 = 8.0;
 /// A brick within this of a trail mark has been visited (issue 16b, the spawner search).
@@ -435,6 +437,9 @@ pub struct Plan {
     /// Walks toward lava taken for the site in hand (wall 47).
     #[serde(default)]
     pub fetch_walks: u32,
+    /// When armour may next be put on (issue 16).
+    #[serde(default)]
+    pub equip_at: u64,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -534,6 +539,7 @@ impl Plan {
             lava_trips: 0,
             fetch_lava: false,
             fetch_walks: 0,
+            equip_at: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -1247,9 +1253,42 @@ impl Plan {
             && eat::food_points(w, rules) < rules.food_reserve
     }
 
+    /// Armour held but not worn goes on (issue 16): a quick move (shift-click) of the piece from the
+    /// inventory takes it to its armour slot. One a second, while window 0 is the open one.
+    fn equip(&mut self, w: &World, tick: u64) {
+        if tick < self.equip_at || w.window.is_some() {
+            return;
+        }
+        let worn = |slot: i16| w.inventory.slots.contains_key(&slot);
+        let piece = w.inventory.slots.iter().find_map(|(slot, (k, _))| {
+            let to = match k {
+                data::ItemKind::IronHelmet => 5,
+                data::ItemKind::IronChestplate => 6,
+                data::ItemKind::IronLeggings => 7,
+                data::ItemKind::IronBoots => 8,
+                _ => return None,
+            };
+            (*slot >= 9 && !worn(to)).then_some(*slot)
+        });
+        if let Some(slot) = piece {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(world::Act::Click {
+                slot,
+                button: 0,
+                mode: 1,
+            });
+            self.note(
+                tick,
+                format!("put on the armour in slot {slot}"),
+                "armour held, not worn".to_owned(),
+            );
+        }
+    }
+
     /// Issue 15c's aim: met in the Nether. A portal seen (or the one this bot lit) is walked into
     /// and stood in until the dimension changes; with none, the portal row casts one.
     fn nether_task(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {
+        self.equip(w, tick);
         if w.dimension
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
@@ -1652,6 +1691,8 @@ impl Plan {
         };
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
+            // The race gears up first (issue 16), then casts.
+            Aim::Race if !geared(w) => "gear".to_owned(),
             Aim::Nether | Aim::Race => "portal".to_owned(),
             _ => self.aim.name(),
         };
@@ -3147,4 +3188,17 @@ fn wet(w: &World, body: &physics::Body) -> bool {
             )
         })
     })
+}
+
+/// The race's gear (issue 16): an iron helmet, chestplate and leggings and an iron sword, worn or
+/// held.
+pub fn geared(w: &World) -> bool {
+    [
+        data::ItemKind::IronHelmet,
+        data::ItemKind::IronChestplate,
+        data::ItemKind::IronLeggings,
+        data::ItemKind::IronSword,
+    ]
+    .iter()
+    .all(|k| craft::count(w, *k) >= 1)
 }
