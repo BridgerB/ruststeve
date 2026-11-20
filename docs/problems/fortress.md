@@ -36,3 +36,10 @@ From the checkpoint start `nether` (the Nether at (0, 0), where a portal near sp
 - Entering the bot's own portal from the overworld (15c): the `nether` stage is met here by the start's teleport.
 - Resources per unit of progress (digs per block, blocks placed against kept) are not reported per run; the building-block median is computed from the case files' items gained and lost.
 - Piglins (no gold worn), ghasts and hoglins still kill about a quarter of the bots.
+
+## 15c: into the Nether through the bot's own portal (reopened 2026-11-18)
+- **Needs**: the issue's first scope line, never built: from a lit portal, walk to it without line of sight and step in; PR #60 met the fortress done-condition from the `nether` start, where bots are teleported in, so a run from spawn stopped at a lit portal.
+- **Done (world terms)**: from the `portal` checkpoint (a lit portal built beside each bot), bots arrive in the Nether; then a race from `spawn` with the `nether` aim says how far the whole chain gets.
+- **Built**: memory watches `nether_portal` blocks; `Aim::Nether` walks into the nearest portal seen (or the one this bot lit) on a found route and stands in it until the dimension changes (`Task::Enter`, 400 ticks at most), else casts one with the `portal` row; the `portal` start (`Start.setup`, commands run after placing the bot).
+- **Raced** (2820a63, `portal` start, aim `nether`, race 44656360133, 8 lanes x 14, cap 6,000): **94 of 112 arrived in the Nether (83.9%)**, each "enter the portal at …" then "through the portal"; no deaths. The 18 others logged no entry: no found route to the portal built round them (setup in rough ground), so the aim fell back to casting one.
+- **The marathon** (d701b19): one runner on the latest main plays the `race` aim (cast, enter, fortress) from spawn through deaths (`--revive`, `keep_inventory`), leg after leg; its first legs give the spawn-to-Nether number.

@@ -76,6 +76,9 @@ pub struct Opts {
     /// Keep living after the aim is met, to the cap: the planner's always-rows (escapes,
     /// defence, food) run on (issue 12e's hour).
     pub hold_after_aim: bool,
+    /// Respawn after a death and play on, to the cap (the marathon; its server keeps inventory):
+    /// the run's deaths are counted in the plan's notes instead of ending it.
+    pub revive: bool,
 }
 
 /// What the bot counts while it runs.
@@ -345,6 +348,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         case_path,
         model,
         hold_after_aim,
+        revive,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -439,9 +443,29 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         }
     };
 
+    let mut deaths: u32 = 0;
     let ending = loop {
         if let Some(d) = &run.world.death {
-            break Ending::Death { killer: killer(d) };
+            if !revive {
+                break Ending::Death { killer: killer(d) };
+            }
+            // The marathon plays through deaths: respawn, and the planner chooses again from
+            // wherever the server puts the body (its items kept by the server's keep_inventory).
+            deaths += 1;
+            let k = killer(d);
+            if let Some(p) = planner.as_mut() {
+                p.revived(run.world.session.server_ticks, &k, deaths);
+            }
+            if let Some(e) = run
+                .step(
+                    &conn,
+                    EventRecord::Act(world::Act::Respawn),
+                    Event::Act(world::Act::Respawn),
+                )
+                .err()
+            {
+                return Err(e);
+            }
         }
         if deadline.is_some_and(|d| Instant::now() >= d) {
             break Ending::Cut;

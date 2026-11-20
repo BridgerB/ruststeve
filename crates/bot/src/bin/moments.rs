@@ -309,6 +309,7 @@ fn real(a: &Args) -> Result<(), String> {
                 case_path: String::new(),
                 model: None,
                 hold_after_aim: false,
+                revive: false,
             };
             let id = m.id.clone();
             let watch = watched(start, m);

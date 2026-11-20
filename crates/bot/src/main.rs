@@ -37,6 +37,7 @@ fn opts() -> Result<bot::Opts, String> {
         case_path: String::new(),
         model: None,
         hold_after_aim: false,
+        revive: false,
     };
     let mut seconds = 600u64;
     let mut it = std::env::args().skip(1);
