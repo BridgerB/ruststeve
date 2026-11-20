@@ -964,8 +964,8 @@ impl Plan {
                 }
                 make::Always::Hunt => {
                     tick >= self.always_retry_at
-                        && eat::hungry(w, rules)
-                        && eat::best_food(w, rules).is_none()
+                        && ((eat::hungry(w, rules) && eat::best_food(w, rules).is_none())
+                            || self.provisioning(w, rules))
                         && !hunt::prey(w, rules, self.hunt_radius(w, rules), &self.refused_prey)
                             .is_empty()
                 }
@@ -1228,6 +1228,16 @@ impl Plan {
                 .any(|(centre, until)| tick < *until && near((*centre, c)))
     }
 
+    /// Short of the food reserve in the overworld on the way to the Nether (issue 16a): animals in
+    /// view are hunted then, not only when hungry.
+    fn provisioning(&self, w: &World, rules: &make::SurvivalRules) -> bool {
+        matches!(self.aim, Aim::Nether | Aim::Race)
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == "minecraft:overworld")
+            && eat::food_points(w, rules) < rules.food_reserve
+    }
+
     /// Issue 15c's aim: met in the Nether. A portal seen (or the one this bot lit) is walked into
     /// and stood in until the dimension changes; with none, the portal row casts one.
     fn nether_task(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {
@@ -1251,6 +1261,23 @@ impl Plan {
             .filter(|c| !self.refused_now(*c, tick))
             .take(CANDIDATES_PER_TICK)
             .collect();
+        // Food first, then the Nether (Bridger, 2026-11-20): with a portal to enter and the reserve
+        // short, look for animals (the hunt row takes those in view) before stepping in.
+        let short = self
+            .table
+            .clone()
+            .filter(|t| !cells.is_empty() && self.provisioning(w, &t.survival))
+            .map(|t| (eat::food_points(w, &t.survival), t.survival.food_reserve));
+        if let Some((have, want)) = short {
+            self.note(
+                tick,
+                format!("provisions {have} of {want}"),
+                "short of the food reserve before the portal".to_owned(),
+            );
+            if let Some(t) = self.explore_walk(w, tick, "look for animals before the Nether") {
+                return t;
+            }
+        }
         for c in cells {
             let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
             if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {

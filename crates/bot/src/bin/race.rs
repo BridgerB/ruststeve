@@ -134,6 +134,21 @@ fn snapshot(
             .dimension
             .as_ref()
             .map_or_else(String::new, |d| d.name.clone()),
+        items: up
+            .world
+            .inventory
+            .slots
+            .iter()
+            .filter(|(slot, _)| **slot >= 1)
+            .map(|(_, s)| *s)
+            .chain(up.world.inventory.carried)
+            .fold(std::collections::BTreeMap::new(), |mut m, (item, n)| {
+                let name = item
+                    .name()
+                    .map_or_else(|| format!("unknown:{}", item.id()), str::to_owned);
+                *m.entry(name).or_default() += i64::from(n);
+                m
+            }),
     };
     let text = toml::to_string(&snap).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("snap.toml"), text).map_err(|e| e.to_string())?;

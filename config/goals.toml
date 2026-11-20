@@ -276,6 +276,11 @@ act = "hunt"
 # Food under this is hunger to answer: six short of full, four below where health stops coming
 # back by itself at 18 (clojurecraft's eat/hungry-below).
 hungry_below = 14
+# Hunger points of safe food held before a portal is entered (issue 16a, Bridger 2026-11-20: food
+# first, then the Nether): the Nether has little to eat, and the heal between blaze fights needs
+# food over 18. 32 is eight raw beef or porkchop, or about five cooked (clojurecraft held four
+# items, blaze.clj food-reserve).
+food_reserve = 32
 # Never eaten: what poisons or makes hungry, what teleports, a random effect, and golden apples
 # (worth more than food) (clojurecraft's eat/unsafe).
 unsafe_foods = ["rotten_flesh", "spider_eye", "pufferfish", "poisonous_potato", "chicken", "chorus_fruit", "suspicious_stew", "golden_apple", "enchanted_golden_apple"]

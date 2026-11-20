@@ -44,6 +44,17 @@ pub fn hungry(w: &World, rules: &SurvivalRules) -> bool {
     w.player.food.is_some_and(|f| f < rules.hungry_below)
 }
 
+/// Hunger points of safe food held: what a reserve is counted in (issue 16a).
+pub fn food_points(w: &World, rules: &SurvivalRules) -> i32 {
+    crate::held(w)
+        .into_iter()
+        .filter(|(k, n)| *n > 0 && !rules.unsafe_foods.contains(k))
+        .filter_map(|(k, n)| {
+            data::generated::item_props::food_of(k).map(|f| i32::from(f.nutrition) * n)
+        })
+        .sum()
+}
+
 /// The food to eat: safe food in the inventory (hotbar and main, window 0's slots 9-44), the
 /// most nutritious first, ties by item id.
 pub fn best_food(w: &World, rules: &SurvivalRules) -> Option<ItemKind> {

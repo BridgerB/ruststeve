@@ -224,6 +224,10 @@ pub struct Survival {
     pub hungry_below: i32,
     /// Food the bot never eats, by item name (`unsafe`).
     pub unsafe_foods: Vec<String>,
+    /// Hunger points of safe food held before the portal is entered (issue 16a: the Nether has
+    /// little to eat and healing between blaze fights needs food); 0 for none.
+    #[serde(default)]
+    pub food_reserve: i32,
     /// Blocks from the feet an animal is hunted within (`hunt-radius`) ...
     pub hunt_radius: f64,
     /// ... and within this when starving: food at or under `starving_below`.
@@ -282,6 +286,7 @@ impl Default for Survival {
         Self {
             hungry_below: 14,
             unsafe_foods: Vec::new(),
+            food_reserve: 0,
             hunt_radius: 24.0,
             starving_below: 6,
             starving_radius: 48.0,
@@ -314,6 +319,7 @@ pub enum Always {
 pub struct SurvivalRules {
     pub hungry_below: i32,
     pub unsafe_foods: Vec<data::ItemKind>,
+    pub food_reserve: i32,
     pub hunt_radius: f64,
     pub starving_below: i32,
     pub starving_radius: f64,
@@ -564,6 +570,7 @@ impl Table {
             always,
             survival: SurvivalRules {
                 hungry_below: g.survival.hungry_below,
+                food_reserve: g.survival.food_reserve,
                 unsafe_foods,
                 hunt_radius: g.survival.hunt_radius,
                 starving_below: g.survival.starving_below,
