@@ -162,6 +162,10 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
     if near.is_some() {
         return near;
     }
+    // A shooter farther off only with the health for it (issue 16: blazes).
+    if w.player.health.is_some_and(|h| h < rules.engage_health) {
+        return None;
+    }
     w.entities
         .iter()
         .filter(|(id, e)| !e.dead && rules.ranged.contains(&e.kind) && !ignored.contains(id))

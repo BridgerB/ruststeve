@@ -69,6 +69,31 @@ pub fn at_fortress(w: &World) -> bool {
     })
 }
 
+/// Within this of a spawner cell seen exposed, the bot is at the spawner (issue 16b): clojurecraft's
+/// `camp-range` 8; a spawner wakes for a player within 16.
+pub const SPAWNER_NEAR: f64 = 8.0;
+
+/// Whether the feet are within `SPAWNER_NEAR` of a spawner cell on record.
+pub fn at_spawner(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    kind_near(w, data::BlockKind::Spawner, 1)
+        .first()
+        .is_some_and(|c| {
+            let d = [
+                f64::from(c.0) + 0.5,
+                f64::from(c.1) + 0.5,
+                f64::from(c.2) + 0.5,
+            ];
+            (0..3)
+                .map(|i| (d[i] - body.pos[i]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+                <= SPAWNER_NEAR
+        })
+}
+
 /// A stage, lowest first. `Ord` is the ladder.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
@@ -87,8 +112,11 @@ pub enum Stage {
     IronKit,
     /// In the Nether (issue 15's entry).
     Nether,
-    /// Has seen nether bricks with an exposed face (issue 15: "reach a fortress").
+    /// The feet within `FORTRESS_NEAR` of nether bricks seen exposed (issue 15: "reach a fortress").
     Fortress,
+    /// The feet within `SPAWNER_NEAR` of a blaze spawner seen exposed (issue 16b: the fight attempts
+    /// start in the spawner room, not at the fortress gate).
+    Spawner,
     /// Holds 7 blaze rods (issue 16: "reach 7 rods").
     Rods7,
     /// Holds 12 ender pearls (issue 18: "reach 12 pearls").
@@ -99,7 +127,7 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 10] = [
+    pub const ALL: [Stage; 11] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -107,6 +135,7 @@ impl Stage {
         Stage::IronKit,
         Stage::Nether,
         Stage::Fortress,
+        Stage::Spawner,
         Stage::Rods7,
         Stage::Pearls12,
         Stage::End,
@@ -122,6 +151,7 @@ impl Stage {
             Stage::IronKit => "iron_kit",
             Stage::Nether => "nether",
             Stage::Fortress => "fortress",
+            Stage::Spawner => "spawner",
             Stage::Rods7 => "rods_7",
             Stage::Pearls12 => "pearls_12",
             Stage::End => "end",
@@ -145,6 +175,7 @@ impl Stage {
             Stage::IronKit => has(ItemKind::IronPickaxe, 1) && has(ItemKind::Bucket, 1),
             Stage::Nether => dim == Some("minecraft:the_nether"),
             Stage::Fortress => at_fortress(w),
+            Stage::Spawner => at_spawner(w),
             Stage::Rods7 => has(ItemKind::BlazeRod, 7),
             Stage::Pearls12 => has(ItemKind::EnderPearl, 12),
             Stage::End => dim == Some("minecraft:the_end"),

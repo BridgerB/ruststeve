@@ -109,6 +109,15 @@ impl Enter {
 }
 /// Chunk columns round the feet a fortress walk looks for bricks in (16: a view's 256 blocks).
 const FORTRESS_CHUNKS: i32 = 16;
+/// Blaze rods the race wants (clojurecraft's `rods-wanted`: six for twelve eyes, one spare).
+pub const RODS_WANTED: i32 = 7;
+/// Blocks from the feet a lying blaze rod is walked to (issue 16d).
+const ROD_REACH: f64 = 8.0;
+/// A brick within this of a trail mark has been visited (issue 16b, the spawner search).
+const VISITED_NEAR: f64 = 8.0;
+/// Chunk columns a spawner search looks for bricks in: 48 blocks, farther is another fortress
+/// (clojurecraft's `corridor-reach`).
+const CORRIDOR_CHUNKS: i32 = 3;
 /// Times a cast out of lava keeps its site to fetch lava from further off (wall 44).
 pub const LAVA_TRIPS: u32 = 2;
 /// Lava sources a fetch asks a scoop route of, nearest first.
@@ -1245,8 +1254,13 @@ impl Plan {
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
         {
-            // The race goes on to the fortress from here.
+            // The race goes on to the fortress, then its spawner and the rods (issue 16).
             if self.aim == Aim::Race {
+                if w.stage_reached
+                    .is_some_and(|s| s >= world::stage::Stage::Fortress)
+                {
+                    return self.spawner_task(w, tick);
+                }
                 return self.fortress_task(w, tick);
             }
             self.met = true;
@@ -1296,6 +1310,143 @@ impl Plan {
             self.refuse(c, tick);
         }
         self.decide(w, origin, tick)
+    }
+
+    /// Issue 16: from the fortress to its blaze spawner, and there until 7 rods are held. A spawner
+    /// seen exposed is walked to on a found route, else tunnelled toward; with none seen, the nearest
+    /// nether brick not yet stood near is (clojurecraft's `unvisited-fortress-bricks`), else explore.
+    /// At the spawner the bot holds its ground: the `defend` row fights the blazes that come.
+    fn spawner_task(&mut self, w: &World, tick: u64) -> Task {
+        if craft::count(w, data::ItemKind::BlazeRod) >= RODS_WANTED {
+            self.met = true;
+            self.note(
+                tick,
+                "rods met".to_owned(),
+                format!("{RODS_WANTED} blaze rods held"),
+            );
+            return Task::Idle;
+        }
+        // A rod lying near is picked up first (a kill drops one half the time).
+        if let Some(body) = w.body {
+            let rod = w
+                .entities
+                .values()
+                .filter(|e| e.item().is_some_and(|(k, _)| k == data::ItemKind::BlazeRod))
+                .map(|e| path::feet_cell(e.pos))
+                .filter(|c| {
+                    let d = [
+                        f64::from(c.0) + 0.5 - body.pos[0],
+                        f64::from(c.1) - body.pos[1],
+                        f64::from(c.2) + 0.5 - body.pos[2],
+                    ];
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= ROD_REACH
+                })
+                .find(|c| !self.refused_now(*c, tick));
+            if let Some(c) = rod {
+                let mut walk = Walk::new(c, Goal::Near { pos: c, range: 1.0 }, Arrive::Goal, tick);
+                self.refuse(c, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("pick up a rod at {c:?}"),
+                        "a blaze rod lying near".to_owned(),
+                    );
+                    return Task::Explore(walk);
+                }
+            }
+        }
+        if world::stage::at_spawner(w) {
+            self.retry_at = tick + RETRY_TICKS;
+            return Task::Idle;
+        }
+        if let Some(sp) = world::stage::kind_near(w, data::BlockKind::Spawner, FORTRESS_CHUNKS)
+            .into_iter()
+            .find(|c| !self.refused_now(*c, tick))
+        {
+            let mut walk = Walk::new(
+                sp,
+                Goal::Near {
+                    pos: sp,
+                    range: world::stage::SPAWNER_NEAR - 2.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk to the spawner at {sp:?}"),
+                    "a blaze spawner seen exposed".to_owned(),
+                );
+                return Task::Explore(walk);
+            }
+            if let Some(t) = self.dig_toward(
+                w,
+                sp,
+                true,
+                ("the spawner", "a spawner seen, no walk to it"),
+                tick,
+            ) {
+                return t;
+            }
+        }
+        // No spawner seen: the fortress's corridors, the nearest brick not yet stood near first.
+        let visited = |c: Cell| {
+            self.trail.iter().any(|t| {
+                let d = [
+                    f64::from(c.0) + 0.5 - t[0],
+                    f64::from(c.1) + 0.5 - t[1],
+                    f64::from(c.2) + 0.5 - t[2],
+                ];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= VISITED_NEAR
+            })
+        };
+        let bricks: Vec<Cell> = world::stage::bricks_near(w, CORRIDOR_CHUNKS)
+            .into_iter()
+            .filter(|c| !visited(*c) && !self.refused_now(*c, tick))
+            .take(CANDIDATES_PER_TICK)
+            .collect();
+        for c in &bricks {
+            let mut walk = Walk::new(
+                *c,
+                Goal::Near {
+                    pos: *c,
+                    range: 2.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            self.refuse(*c, tick);
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk the fortress to {c:?}"),
+                    "no spawner seen; a brick not yet stood near".to_owned(),
+                );
+                return Task::Explore(walk);
+            }
+        }
+        if let Some(c) = bricks.first().copied()
+            && let Some(t) = self.dig_toward(
+                w,
+                c,
+                true,
+                ("the fortress", "no spawner seen, no walk to its bricks"),
+                tick,
+            )
+        {
+            return t;
+        }
+        if let Some(t) = self.explore_walk(w, tick, "no spawner and no unvisited bricks in view") {
+            return t;
+        }
+        self.failed_in_row += 1;
+        self.retry_at = tick + RETRY_TICKS;
+        self.check_stuck(tick);
+        Task::Idle
     }
 
     /// Issue 15's aim: met once nether bricks have been seen with an exposed face; until then,

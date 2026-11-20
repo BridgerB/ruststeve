@@ -250,6 +250,9 @@ pub struct Survival {
     /// piglin struck angers its whole group).
     #[serde(default)]
     pub neutral: Vec<String>,
+    /// A shooter beyond `defend_radius` is gone after only at this health or more (issue 16).
+    #[serde(default)]
+    pub engage_health: f32,
     #[serde(default = "ranged_radius")]
     pub ranged_radius: f64,
     /// A `never_fight` kind is backed away from within this (a creeper's fuse starts at 3).
@@ -295,6 +298,7 @@ impl Default for Survival {
             never_fight: Vec::new(),
             ranged: Vec::new(),
             neutral: Vec::new(),
+            engage_health: 0.0,
             ranged_radius: ranged_radius(),
             flee_radius: flee_radius(),
             flee_clear: flee_clear(),
@@ -329,6 +333,7 @@ pub struct SurvivalRules {
     pub ranged: Vec<data::EntityKind>,
     /// Fought only after one of their kind hits the bot (`defend::provoked`).
     pub neutral: Vec<data::EntityKind>,
+    pub engage_health: f32,
     pub ranged_radius: f64,
     pub flee_radius: f64,
     pub flee_clear: f64,
@@ -580,6 +585,7 @@ impl Table {
                 never_fight,
                 ranged,
                 neutral,
+                engage_health: g.survival.engage_health,
                 ranged_radius: g.survival.ranged_radius,
                 flee_radius: g.survival.flee_radius,
                 flee_clear: g.survival.flee_clear,

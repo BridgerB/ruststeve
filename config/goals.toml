@@ -297,7 +297,12 @@ danger_health = 8.0
 never_fight = ["creeper"]
 # Mobs that shoot: answered within ranged_radius, closed in on and fought (skeleton arrows were
 # the top killer underground in the iron races: docs/problems/iron-kit.md wall 16).
-ranged = ["skeleton", "stray", "bogged"]
+# Blazes too (issue 16): they shoot from up to 48, and are closed on and struck the same way.
+ranged = ["skeleton", "stray", "bogged", "blaze"]
+# A shooter beyond defend_radius is gone after only at this health or more: one fireball and the
+# fire it lights take 5 to 7 (clojurecraft blaze.clj engage-health; a blaze run began a fight at
+# 10.5 and died in it).
+engage_health = 18.0
 # Left alone until one of their kind hits the bot: a zombified piglin struck angers its whole group
 # (11 of 112 bots of the first nether race died to piglins after defending against one), an
 # enderman looked at or hit teleports in to fight (docs/problems/fortress.md wall 2).
