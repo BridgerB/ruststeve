@@ -44,6 +44,16 @@ pub fn hungry(w: &World, rules: &SurvivalRules) -> bool {
     w.player.food.is_some_and(|f| f < rules.hungry_below)
 }
 
+/// Food at or over this lets health come back by itself (vanilla's natural regeneration).
+pub const HEALS_FROM: i32 = 18;
+
+/// Hurt under the engage line with the food bar too low to heal (issue 16: eat to heal between
+/// blaze fights, not only when hungry).
+pub fn eat_to_heal(w: &World, rules: &SurvivalRules) -> bool {
+    w.player.health.is_some_and(|h| h < rules.engage_health)
+        && w.player.food.is_some_and(|f| f < HEALS_FROM)
+}
+
 /// Hunger points of safe food held: what a reserve is counted in (issue 16a).
 pub fn food_points(w: &World, rules: &SurvivalRules) -> i32 {
     crate::held(w)

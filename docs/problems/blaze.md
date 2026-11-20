@@ -29,3 +29,9 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 ### 2. Bare bots against wither skeletons (the same race: 5 of 7 dead)
 - **Read**: "defend WitherSkeleton" 8 times in 7 runs; the bots wear nothing and fight with a stone sword or the iron pickaxe; a wither skeleton hits 8 on Normal and withers.
 - **Fix** (Bridger, 2026-11-20: both): wither skeletons join `never_fight` (backed away from along a route, as creepers are); and a `gear` row before the Nether: an iron helmet, chestplate and leggings and an iron sword (22 raw iron, 6 coal wanted), the race aim working it before the portal row, the armour put on by a quick move (`Plan::equip`). The fresh frontier is a fortress snapshot of a bot that is geared and fed.
+
+### 3. Hurt, back to the spawner, dead (race 44804470273, 8d8c3c3, the lane-1 `spawner` snapshot of 44789031743, 7 x 1)
+- **What happened**: 7 of 7 died to `fireball blaze` within 16 to 20 seconds; 0 swings; 6 hits each in the last minute.
+- **Read** (the case notes): each bot began at 6 or 7 health (the snapshot bot had been hurt on its way in), backed off once ("defend Blaze … Retreat … health 6"), then "walk to the spawner" again, and was shot down.
+- **Cause**: nothing sends a hurt bot out of the blazes' sight to heal; the spawner walk resumes as soon as a retreat ends. (The snapshot lineage also has no food and no armour: the geared and fed spawn race is the real one.)
+- **Fix**: `plan::cover` (shooters within 16, `seen_at` by exact rays to the eye and the middle, `cover_cells` within 6): under `engage_health` the spawner task takes cover on a found route to the nearest unseen cell, else rests where it is unseen; the eat row also fires to heal (hurt, food under 18). A model test holds a cell behind a wall unseen and one in the open seen.

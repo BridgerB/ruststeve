@@ -10,6 +10,7 @@
 
 pub mod build;
 pub mod cast;
+pub mod cover;
 pub mod craft;
 pub mod defend;
 pub mod dig;
@@ -974,7 +975,7 @@ impl Plan {
                 make::Always::Eat => {
                     running != Some(make::Always::Hunt)
                         && tick >= self.always_retry_at
-                        && eat::hungry(w, rules)
+                        && (eat::hungry(w, rules) || eat::eat_to_heal(w, rules))
                         && eat::best_food(w, rules).is_some()
                 }
                 make::Always::Hunt => {
@@ -1351,6 +1352,50 @@ impl Plan {
         self.decide(w, origin, tick)
     }
 
+    /// Under the engage health in the Nether: the nearest cell no blaze in range sees, on a found
+    /// route; there, rest. `None` when not hurt.
+    fn take_cover(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let rules = self.table.as_ref().map(|t| t.survival.clone())?;
+        let body = w.body?;
+        if w.player.health.is_none_or(|h| h >= rules.engage_health) {
+            return None;
+        }
+        let eyes = cover::shooters(w, &[data::EntityKind::Blaze, data::EntityKind::Ghast]);
+        let feet = path::feet_cell(body.pos);
+        if eyes.is_empty() || !cover::seen_at(w, &eyes, feet) {
+            self.retry_at = tick + RETRY_TICKS;
+            self.note(
+                tick,
+                "rest".to_owned(),
+                format!(
+                    "health {:?} under {}; out of sight",
+                    w.player.health, rules.engage_health
+                ),
+            );
+            return Some(Task::Idle);
+        }
+        for c in cover::cover_cells(w, &eyes)
+            .into_iter()
+            .take(CANDIDATES_PER_TICK)
+        {
+            let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("take cover at {c:?}"),
+                    format!(
+                        "health {:?}; {} blazes see the bot",
+                        w.player.health,
+                        eyes.len()
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+        }
+        None
+    }
+
     /// Issue 16: from the fortress to its blaze spawner, and there until 7 rods are held. A spawner
     /// seen exposed is walked to on a found route, else tunnelled toward; with none seen, the nearest
     /// nether brick not yet stood near is (clojurecraft's `unvisited-fortress-bricks`), else explore.
@@ -1364,6 +1409,12 @@ impl Plan {
                 format!("{RODS_WANTED} blaze rods held"),
             );
             return Task::Idle;
+        }
+        // Hurt: out of every blaze's sight, and rest there until the health is back; the eat row
+        // feeds the heal (clojurecraft's heal and rest; blaze wall 3: resumed bots at 6 health
+        // walked back to the spawner and died to its fireballs, 7 of 7).
+        if let Some(t) = self.take_cover(w, tick) {
+            return t;
         }
         // A rod lying near is picked up first (a kill drops one half the time).
         if let Some(body) = w.body {
