@@ -1211,6 +1211,8 @@ name = "results"
 version = "0.1.0"
 dependencies = [
  "data",
+ "md-5",
+ "memory",
  "protocol",
  "rmp-serde",
  "serde",

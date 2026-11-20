@@ -119,8 +119,18 @@ jobs:
           set -euo pipefail
           [ -f summary.md ] || echo "no leg finished" > summary.md
           cp server.log legs/ 2>/dev/null || true
-          tar --zstd -cf "marathon-${{ github.run_id }}.tar.zst" legs marathon.log 2>/dev/null || tar --zstd -cf "marathon-${{ github.run_id }}.tar.zst" summary.md
-          gh release create "marathon-${{ github.run_id }}" "marathon-${{ github.run_id }}.tar.zst" summary.md \
+          tar --zstd -cf "marathon-${{ github.run_id }}.tar.zst" --exclude='snapshots' legs marathon.log 2>/dev/null || tar --zstd -cf "marathon-${{ github.run_id }}.tar.zst" summary.md
+          # Each lane's snapshots (one-bot-first): the first bot to reach each stage, as an asset.
+          snaps=()
+          for d in lanes/*/snapshots/* legs/*/snapshots/*; do
+            [ -f "$d/snap.toml" ] || continue
+            stage="$(basename "$d")"
+            src="$(basename "$(dirname "$(dirname "$d")")")"
+            f="snapshot-$stage-${{ github.run_id }}-$src.tar.zst"
+            tar --zstd -C "$(dirname "$d")" -cf "$f" "$stage"
+            snaps+=("$f")
+          done
+          gh release create "marathon-${{ github.run_id }}" "marathon-${{ github.run_id }}.tar.zst" summary.md "${snaps[@]}" \
             --target "${{ github.sha }}" --prerelease \
             --title "marathon ${{ github.run_id }} ($(git rev-parse --short HEAD))" \
             --notes-file summary.md

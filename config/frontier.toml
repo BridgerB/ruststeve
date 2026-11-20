@@ -1,0 +1,8 @@
+# The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
+# reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
+# a commit each time a bot first passes a stage. Empty until the first snapshot is published.
+stage = ""
+tag = ""
+asset = ""
+commit = ""
+how = ""

@@ -79,6 +79,19 @@ pub struct Opts {
     /// Respawn after a death and play on, to the cap (the marathon; its server keeps inventory):
     /// the run's deaths are counted in the plan's notes instead of ending it.
     pub revive: bool,
+    /// What the bot remembers from a snapshot (`one-bot-first`): seeded into the world at the
+    /// start, so a resumed bot knows the portal, the bricks and the rest the snapshot bot saw.
+    pub memory: Option<memory::Memory>,
+    /// Told each time the run reaches a stage higher than any it held, with the world then (the
+    /// race takes a snapshot of the first bot to reach each stage).
+    pub on_stage: Option<std::sync::mpsc::Sender<StageUp>>,
+}
+
+/// A run reaching a new stage, for the race's snapshot.
+pub struct StageUp {
+    pub bot: String,
+    pub stage: world::stage::Stage,
+    pub world: Box<World>,
 }
 
 /// What the bot counts while it runs.
@@ -349,6 +362,8 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         model,
         hold_after_aim,
         revive,
+        memory,
+        on_stage,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -399,6 +414,10 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         events: 0,
         next_checkpoint: CHECKPOINT_TICKS,
     };
+    if let Some(m) = memory {
+        run.world.memory = m;
+    }
+    let mut stage_told = run.world.stage_reached;
     let mut stats = Stats::default();
     let started = Instant::now();
     let mut play_since: Option<Instant> = None;
@@ -445,6 +464,16 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
 
     let mut deaths: u32 = 0;
     let ending = loop {
+        if run.world.stage_reached > stage_told {
+            stage_told = run.world.stage_reached;
+            if let (Some(tx), Some(stage)) = (on_stage.as_ref(), stage_told) {
+                let _ = tx.send(StageUp {
+                    bot: name.clone(),
+                    stage,
+                    world: Box::new(run.world.clone()),
+                });
+            }
+        }
         if let Some(d) = &run.world.death {
             if !revive {
                 break Ending::Death { killer: killer(d) };

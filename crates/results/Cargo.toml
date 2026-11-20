@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 data = { path = "../data" }
 protocol = { path = "../protocol" }
+md-5 = "0.10"
+memory = { path = "../memory" }
 rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "1"

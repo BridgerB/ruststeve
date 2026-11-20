@@ -41,6 +41,8 @@ fn the_bot_joins_the_model_and_walks() {
         model: Some(Box::new(sim)),
         hold_after_aim: false,
         revive: false,
+        memory: None,
+        on_stage: None,
     })
     .unwrap();
     let w = &out.world;

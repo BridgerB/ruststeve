@@ -215,3 +215,16 @@ mod portal_start {
         assert!(commands.iter().all(|c| !c.contains("{bot}")));
     }
 }
+
+#[cfg(test)]
+mod snapshot_start {
+    use super::*;
+
+    /// One-bot-first: the `snapshot` start gives nothing over RCON; the player file is the place.
+    #[test]
+    fn the_snapshot_start_sends_no_commands() {
+        let starts = Starts::read("../../config/starts.toml").expect("starts");
+        let snap = starts.find("snapshot").expect("a snapshot start");
+        assert!(start_commands(snap, "rs-l00-b00", 0).is_empty());
+    }
+}

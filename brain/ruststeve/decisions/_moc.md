@@ -12,6 +12,7 @@ related:
 
 Each says what was chosen, what was rejected with the reason, and what would change the answer.
 
+- [[one-bot-first]] - one bot to the dead dragon first: a stage is done when one real bot passes it from the last snapshot; resume from the frontier; rates later (Bridger, 2026-11-19).
 - [[strict-no-xray]] - never read an unexposed cell, not even to refuse (Bridger, 2026-11-15).
 - [[just-ruststeve]] - the name is ruststeve (not v2), a clean reset, Rust-only tooling.
 - [[runners-not-the-mac]] - all code runs on GitHub Actions runners (20 at once, 16 GB each); the Mac only edits.

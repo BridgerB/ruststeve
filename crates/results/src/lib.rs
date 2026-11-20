@@ -9,6 +9,7 @@
 pub mod config;
 pub mod diagnose;
 pub mod parity;
+pub mod snapshot;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};

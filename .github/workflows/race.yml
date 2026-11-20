@@ -28,6 +28,12 @@ on:
       hold:
         description: Keep each bot living after its aim is met, to the cap (true or false)
         default: "false"
+      snapshot:
+        description: Resume from a snapshot (one-bot-first) - frontier, or <release tag>/<asset> - or empty for the start's own place
+        default: ""
+      revive:
+        description: Respawn after a death and play on, to the cap (true or false)
+        default: "false"
       minutes:
         description: The lane job's timeout; bots still running 15 minutes before it end Cut (72,000 ticks, a game hour, needs over 60 of play)
         default: "60"
@@ -91,6 +97,41 @@ jobs:
       - name: Build
         run: cargo build -q --locked --release -p xtask -p bot -p results -p replay
 
+      - name: Restore the snapshot into the server's world
+        if: inputs.snapshot != ''
+        env:
+          SNAPSHOT: ${{ inputs.snapshot }}
+          LANE: ${{ matrix.lane }}
+          BOTS: ${{ inputs.bots }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # Every bot of the lane takes the snapshot bot's player file (items, position, dimension,
+        # health) under its own offline UUID; the race seeds each with the snapshot's memory.
+        run: |
+          set -euo pipefail
+          if [ "$SNAPSHOT" = frontier ]; then
+            tag="$(sed -n 's/^tag = "\(.*\)"$/\1/p' config/frontier.toml)"
+            asset="$(sed -n 's/^asset = "\(.*\)"$/\1/p' config/frontier.toml)"
+          else
+            tag="${SNAPSHOT%%/*}"
+            asset="${SNAPSHOT#*/}"
+          fi
+          echo "snapshot: $tag $asset"
+          mkdir -p snap target/server
+          gh release download "$tag" -p "$asset" -D snap
+          tar --zstd -xf "snap/$asset" -C snap
+          dir="$(dirname "$(find snap -name snap.toml | head -n 1)")"
+          cat "$dir/snap.toml"
+          rm -rf target/server/world
+          cp -r "$dir/world" target/server/world
+          from="$(sed -n 's/^uuid = "\(.*\)"$/\1/p' "$dir/snap.toml")"
+          for i in $(seq 0 $((BOTS - 1))); do
+            name="$(printf 'rs-l%02d-b%02d' "$LANE" "$i")"
+            to="$(./target/release/results offline-uuid "$name")"
+            cp "target/server/world/playerdata/$from.dat" "target/server/world/playerdata/$to.dat"
+          done
+          echo "SNAP_MEMORY=$dir/memory.rsw" >> "$GITHUB_ENV"
+
       - name: Start the server (RCON on, a password for this run only)
         run: |
           set -euo pipefail
@@ -113,16 +154,19 @@ jobs:
           CAP: ${{ inputs.cap }}
           GOAL: ${{ inputs.goal }}
           HOLD: ${{ inputs.hold }}
+          REVIVE: ${{ inputs.revive }}
           MINUTES: ${{ inputs.minutes }}
         # The wall limit is the job's end, not a cap: bots still running then end Cut (not counted).
         # 15 minutes of the job go to the build, the server and the release.
         run: |
           goal=()
           if [ -n "$GOAL" ]; then goal=(--goal "$GOAL"); fi
+          memory=()
+          if [ -n "${SNAP_MEMORY:-}" ]; then memory=(--memory "$SNAP_MEMORY"); fi
           wall=$(( (MINUTES - 15) * 60 ))
           ./target/release/race --lane "$LANE" --bots "$BOTS" --start "$START" --cap "$CAP" \
             --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit "$wall" \
-            --hold-after-aim "$HOLD" "${goal[@]}" 2>&1 | tee "race-$LANE.log"
+            --hold-after-aim "$HOLD" --revive "$REVIVE" "${goal[@]}" "${memory[@]}" 2>&1 | tee "race-$LANE.log"
 
       - name: Replay one recording at this commit
         if: always()
@@ -184,7 +228,17 @@ jobs:
           # Batches and cases only: recordings stay in the lane artifacts.
           find lanes \( -name 'batch.rsb' -o -name '*.case.rsc' -o -name '*.case.txt' \) -print0 \
             | tar --zstd --null -T - -cf "batches-${{ github.run_id }}.tar.zst"
-          gh release create "race-${{ github.run_id }}" "batches-${{ github.run_id }}.tar.zst" summary.md \
+          # Each lane's snapshots (one-bot-first): the first bot to reach each stage, as an asset.
+          snaps=()
+          for d in lanes/*/snapshots/* legs/*/snapshots/*; do
+            [ -f "$d/snap.toml" ] || continue
+            stage="$(basename "$d")"
+            src="$(basename "$(dirname "$(dirname "$d")")")"
+            f="snapshot-$stage-${{ github.run_id }}-$src.tar.zst"
+            tar --zstd -C "$(dirname "$d")" -cf "$f" "$stage"
+            snaps+=("$f")
+          done
+          gh release create "race-${{ github.run_id }}" "batches-${{ github.run_id }}.tar.zst" summary.md "${snaps[@]}" \
             --target "${{ github.sha }}" --prerelease \
             --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
             --notes-file summary.md

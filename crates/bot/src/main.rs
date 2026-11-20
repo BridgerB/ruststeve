@@ -38,6 +38,8 @@ fn opts() -> Result<bot::Opts, String> {
         model: None,
         hold_after_aim: false,
         revive: false,
+        memory: None,
+        on_stage: None,
     };
     let mut seconds = 600u64;
     let mut it = std::env::args().skip(1);

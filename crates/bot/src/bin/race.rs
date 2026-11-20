@@ -36,6 +36,10 @@ struct Args {
     /// Keep each bot living after its aim is met, to the cap (issue 12e).
     hold_after_aim: bool,
     revive: bool,
+    /// A snapshot's memory to seed every bot with (`--memory`).
+    memory: Option<PathBuf>,
+    /// The server's directory: its `world/` is what a snapshot copies.
+    server_dir: PathBuf,
     walk: Option<bot::Script>,
     goal: Option<plan::Aim>,
 }
@@ -56,6 +60,8 @@ fn args() -> Result<Args, String> {
         wall_limit: None,
         hold_after_aim: false,
         revive: false,
+        memory: None,
+        server_dir: PathBuf::from("target/server"),
         walk: None,
         goal: None,
     };
@@ -82,6 +88,8 @@ fn args() -> Result<Args, String> {
             "--wall-limit" => a.wall_limit = Some(num(&flag, &v)?),
             "--hold-after-aim" => a.hold_after_aim = v == "true",
             "--revive" => a.revive = v == "true",
+            "--memory" => a.memory = Some(PathBuf::from(v)),
+            "--server-dir" => a.server_dir = PathBuf::from(v),
             "--goal" => a.goal = Some(plan::Aim::parse(&v).ok_or(format!("--goal: no aim {v}"))?),
             "--walk" => {
                 a.walk = Some(bot::Script::parse(&v).ok_or(format!("--walk: no script {v}"))?)
@@ -90,6 +98,50 @@ fn args() -> Result<Args, String> {
         }
     }
     Ok(a)
+}
+
+/// Copy the server's world (after `save-all flush`), the bot's memory and a `snap.toml` into
+/// `<out>/<stage>/`: the moment a bot first reached the stage, for later attempts to resume from.
+fn snapshot(
+    up: &bot::StageUp,
+    server_world: &std::path::Path,
+    out: &std::path::Path,
+    rcon_addr: &str,
+    password: &str,
+    run: &str,
+    lane: u32,
+) -> Result<(), String> {
+    if password.is_empty() {
+        return Err("no RCON password: the world cannot be saved first".to_owned());
+    }
+    let mut r = rcon::Rcon::connect(rcon_addr, password)?;
+    let reply = r.command("save-all flush")?;
+    println!("snapshot {}: save-all flush -> {reply}", up.stage.name());
+    let dir = out.join(up.stage.name());
+    let files = results::snapshot::copy_dir(server_world, &dir.join("world"))?;
+    results::snapshot::write_memory(&dir.join("memory.rsw"), &up.world.memory)?;
+    let snap = results::snapshot::Snap {
+        stage: up.stage.name().to_owned(),
+        bot: up.bot.clone(),
+        uuid: results::snapshot::offline_uuid(&up.bot),
+        server_ticks: up.world.session.server_ticks,
+        commit: record::COMMIT.to_owned(),
+        run: run.to_owned(),
+        lane,
+        pos: up.world.body.map_or([0.0; 3], |b| b.pos),
+        dimension: up
+            .world
+            .dimension
+            .as_ref()
+            .map_or_else(String::new, |d| d.name.clone()),
+    };
+    let text = toml::to_string(&snap).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("snap.toml"), text).map_err(|e| e.to_string())?;
+    println!(
+        "snapshot {}: {} at {:?} in {}, {files} files",
+        snap.stage, snap.bot, snap.pos, snap.dimension
+    );
+    Ok(())
 }
 
 /// A bot's name: lane and index, within the 16 characters an offline name may have.
@@ -127,6 +179,46 @@ fn race(a: &Args) -> Result<bool, String> {
         a.port,
         record::COMMIT
     );
+
+    let memory = a
+        .memory
+        .as_deref()
+        .map(results::snapshot::read_memory)
+        .transpose()?;
+    // The snapshot taker: the first bot to reach each stage above the start's (one-bot-first).
+    let (tx, rx) = std::sync::mpsc::channel::<bot::StageUp>();
+    let snapper = {
+        // Resuming: the snapshot's own stage is the floor, so the resumed bots' first tick (already
+        // there) takes no second copy of it.
+        let resumed = a
+            .memory
+            .as_ref()
+            .and_then(|m| m.parent())
+            .map(|d| d.join("snap.toml"))
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| toml::from_str::<results::snapshot::Snap>(&t).ok())
+            .and_then(|snap| world::stage::Stage::from_name(&snap.stage));
+        let from = resumed.or_else(|| world::stage::Stage::from_name(&start.stage));
+        let server_world = a.server_dir.join("world");
+        let out = a.out.join("snapshots");
+        let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
+        let password = password.clone();
+        let (run, lane) = (a.run.clone(), a.lane);
+        std::thread::spawn(move || {
+            let mut best = from;
+            for up in rx {
+                if best.is_some_and(|b| up.stage <= b) {
+                    continue;
+                }
+                best = Some(up.stage);
+                if let Err(e) =
+                    snapshot(&up, &server_world, &out, &rcon_addr, &password, &run, lane)
+                {
+                    eprintln!("snapshot {}: {e}", up.stage.name());
+                }
+            }
+        })
+    };
 
     let mut handles = Vec::new();
     for i in 0..bots {
@@ -170,10 +262,17 @@ fn race(a: &Args) -> Result<bool, String> {
             model: None,
             hold_after_aim: a.hold_after_aim,
             revive: a.revive,
+            memory: memory.clone(),
+            on_stage: Some(tx.clone()),
         };
         handles.push((name, std::thread::spawn(move || bot::run(opts))));
     }
 
+    drop(tx);
+    // Every bot's sender gone when its thread ends: the snapshots finish before the batch.
+    if snapper.join().is_err() {
+        eprintln!("race: the snapshot thread panicked");
+    }
     let mut rows = Vec::new();
     let mut coverage = Coverage::default();
     let mut tick_rate = 0.0f64;

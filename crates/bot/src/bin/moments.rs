@@ -310,6 +310,8 @@ fn real(a: &Args) -> Result<(), String> {
                 model: None,
                 hold_after_aim: false,
                 revive: false,
+                memory: None,
+                on_stage: None,
             };
             let id = m.id.clone();
             let watch = watched(start, m);
