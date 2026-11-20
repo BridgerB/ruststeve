@@ -24,12 +24,14 @@ pub type Cell = (i32, i32, i32);
 /// furnaces, a fortress's bricks, a spawner, a portal's obsidian). A position on record is then
 /// followed through every change. Water and lava are not cells here: clojurecraft found one fact
 /// per fluid cell froze a forest run (600,000 water cells); fluids become per-chunk pools later.
-const WATCHED: [BlockKind; 5] = [
+const WATCHED: [BlockKind; 6] = [
     BlockKind::CraftingTable,
     BlockKind::Furnace,
     BlockKind::NetherBricks,
     BlockKind::Spawner,
     BlockKind::Obsidian,
+    // A lit portal, walked back to and stepped into (issue 15c).
+    BlockKind::NetherPortal,
 ];
 
 /// Whether a block state is a kind memory watches.

@@ -36,3 +36,8 @@ From the checkpoint start `nether` (the Nether at (0, 0), where a portal near sp
 - Entering the bot's own portal from the overworld (15c): the `nether` stage is met here by the start's teleport.
 - Resources per unit of progress (digs per block, blocks placed against kept) are not reported per run; the building-block median is computed from the case files' items gained and lost.
 - Piglins (no gold worn), ghasts and hoglins still kill about a quarter of the bots.
+
+## 15c: into the Nether through the bot's own portal (reopened 2026-11-18)
+- **Needs**: the issue's first scope line, never built: from a lit portal, walk to it without line of sight and step in; PR #60 met the fortress done-condition from the `nether` start, where bots are teleported in, so a run from spawn stopped at a lit portal.
+- **Done (world terms)**: from the `portal` checkpoint (a lit portal built beside each bot), bots arrive in the Nether; then a race from `spawn` with the `nether` aim says how far the whole chain gets.
+- **Built**: memory watches `nether_portal` blocks; `Aim::Nether` walks into the nearest portal seen (or the one this bot lit) on a found route and stands in it until the dimension changes (`Task::Enter`, 400 ticks at most), else casts one with the `portal` row; the `portal` start (`Start.setup`, commands run after placing the bot).

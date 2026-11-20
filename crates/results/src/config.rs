@@ -74,6 +74,10 @@ pub struct Start {
     /// the bedrock roof at y 127 (issue 15's `nether` start).
     #[serde(default)]
     pub spread_under: Option<u32>,
+    /// Commands run after the bot is placed, `{bot}` its name: what the checkpoint builds round
+    /// it (issue 15c: a lit portal beside it). Setup only; the bot reads the world it sees.
+    #[serde(default)]
+    pub setup: Vec<String>,
     /// Overworld feet positions a checkpoint start puts its bots at, one each in turn (issue 14:
     /// beside lava, so a race works the cast from its first tick instead of an hour's hunt).
     #[serde(default)]
@@ -159,6 +163,7 @@ pub fn start_commands(start: &Start, bot: &str, index: usize) -> Vec<String> {
             r.max(1)
         ));
     }
+    out.extend(start.setup.iter().map(|c| c.replace("{bot}", bot)));
     out
 }
 
@@ -189,5 +194,24 @@ mod nether_start {
         assert!(commands.iter().any(
             |c| c.contains("spreadplayers ~ ~ 0") && c.contains(" under 100 false rs-l00-b00")
         ));
+    }
+}
+
+#[cfg(test)]
+mod portal_start {
+    use super::*;
+
+    /// Issue 15c: the `portal` start builds a lit portal at the bot after spreading it.
+    #[test]
+    fn a_portal_start_builds_its_portal_after_the_spread() {
+        let starts = Starts::read("../../config/starts.toml").expect("starts");
+        let portal = starts.find("portal").expect("a portal start");
+        let commands = start_commands(portal, "rs-l00-b03", 3);
+        let spread = commands.iter().position(|c| c.contains("spreadplayers"));
+        let lit = commands
+            .iter()
+            .position(|c| c.contains("nether_portal") && c.contains("execute at rs-l00-b03"));
+        assert!(spread.is_some() && lit.is_some() && spread < lit);
+        assert!(commands.iter().all(|c| !c.contains("{bot}")));
     }
 }

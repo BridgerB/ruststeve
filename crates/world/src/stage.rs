@@ -17,6 +17,12 @@ pub const FORTRESS_NEAR: f64 = 6.0;
 /// The nether-brick cells on record in the dimension the bot is in, within `chunks` chunk columns
 /// of the feet, nearest first.
 pub fn bricks_near(w: &World, chunks: i32) -> Vec<(i32, i32, i32)> {
+    kind_near(w, data::BlockKind::NetherBricks, chunks)
+}
+
+/// The cells of `kind` on record in the dimension the bot is in, within `chunks` chunk columns of
+/// the feet, nearest first (memory's watched kinds only).
+pub fn kind_near(w: &World, kind: data::BlockKind, chunks: i32) -> Vec<(i32, i32, i32)> {
     let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
         return Vec::new();
     };
@@ -26,7 +32,7 @@ pub fn bricks_near(w: &World, chunks: i32) -> Vec<(i32, i32, i32)> {
     for dx in -chunks..=chunks {
         for dz in -chunks..=chunks {
             for s in w.memory.in_column(&dim.name, cx + dx, cz + dz) {
-                if data::block_of_state(s.state) == Some(data::BlockKind::NetherBricks) {
+                if data::block_of_state(s.state) == Some(kind) {
                     let c = s.pos;
                     let d = (0..3)
                         .map(|i| {

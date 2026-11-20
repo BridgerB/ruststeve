@@ -56,6 +56,57 @@ pub const RETRY_TICKS: u64 = 20;
 /// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
 /// water lost twice, never a site worked forever.
 pub const WATER_TRIPS: u32 = 2;
+/// Chunk columns round the feet a portal is looked for in (issue 15c).
+const PORTAL_CHUNKS: i32 = 8;
+/// Ticks stood in a portal before the walk into it counts as failed: a survival player crosses
+/// after 80 (`Player.getPortalWaitTime`), and the dimension's load takes a while more.
+const PORTAL_WAIT_TICKS: u64 = 400;
+
+/// Walking into a portal cell, then standing in it (issue 15c).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Enter {
+    walk: Walk,
+    cell: Cell,
+    /// The tick the feet were first in a portal block.
+    inside_since: Option<u64>,
+}
+
+impl Enter {
+    /// Done once the world is in another dimension than the portal's; while the feet are in a
+    /// portal block, stand still (a step out resets the game's count); else walk on.
+    fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {
+        if w.dimension
+            .as_ref()
+            .is_some_and(|d| d.name != "minecraft:overworld")
+        {
+            return (Controls::default(), TaskStatus::Done);
+        }
+        // Between dimensions the world holds no body: wait for it.
+        let Some(body) = w.body else {
+            return (Controls::default(), TaskStatus::Running);
+        };
+        let f = path::feet_cell(body.pos);
+        let in_portal = w
+            .block_at(world::BlockPos::new(f.0, f.1, f.2))
+            .is_some_and(|k| k == data::BlockKind::NetherPortal);
+        if in_portal {
+            let since = *self.inside_since.get_or_insert(tick);
+            if tick.saturating_sub(since) > PORTAL_WAIT_TICKS {
+                return (
+                    Controls::default(),
+                    TaskStatus::Failed(walk::Failure::Deadline),
+                );
+            }
+            return (Controls::default(), TaskStatus::Running);
+        }
+        let (c, status) = self.walk.step(w, tick);
+        match status {
+            // At the cell but not in a portal block (the frame went out): the portal is gone.
+            TaskStatus::Done => (c, TaskStatus::Failed(walk::Failure::TargetLost)),
+            TaskStatus::Running | TaskStatus::Failed(_) => (c, status),
+        }
+    }
+}
 /// Chunk columns round the feet a fortress walk looks for bricks in (16: a view's 256 blocks).
 const FORTRESS_CHUNKS: i32 = 16;
 /// Times a cast out of lava keeps its site to fetch lava from further off (wall 44).
@@ -147,6 +198,8 @@ pub enum Aim {
     Portal,
     /// Issue 15's: a fortress reached, nether bricks seen with an exposed face (strict no X-ray).
     Fortress,
+    /// Issue 15c's: in the Nether through a portal: the nearest seen walked into, else one cast.
+    Nether,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -171,6 +224,7 @@ impl Aim {
             None if s == "portal-kit" => Some(Aim::PortalKit),
             None if s == "portal" => Some(Aim::Portal),
             None if s == "fortress" => Some(Aim::Fortress),
+            None if s == "nether" => Some(Aim::Nether),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -198,6 +252,7 @@ impl Aim {
             Aim::PortalKit => "portal-kit".to_owned(),
             Aim::Portal => "portal".to_owned(),
             Aim::Fortress => "fortress".to_owned(),
+            Aim::Nether => "nether".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -221,6 +276,7 @@ impl Aim {
             | Aim::PortalKit
             | Aim::Portal
             | Aim::Fortress
+            | Aim::Nether
             | Aim::Hold => true,
         }
     }
@@ -250,6 +306,8 @@ pub enum Task {
     Scoop(Box<scoop::Scoop>),
     /// A portal cast at a site (issue 14c).
     Cast(Box<cast::Cast>),
+    /// Walking into a lit portal and standing in it until the dimension changes (issue 15c).
+    Enter(Box<Enter>),
     /// Out of water, lava or fire: an always-row in force (issue 12b).
     Escape(Box<escape::Escape>),
     /// Across water to a far shore: a relocation off an island (issue 13b), and its start.
@@ -276,6 +334,7 @@ impl Task {
             Task::Redig(_) => "redig",
             Task::Scoop(_) => "scoop",
             Task::Cast(_) => "cast",
+            Task::Enter(_) => "enter-portal",
             Task::Escape(_) => "escape",
             Task::Swim(..) => "swim",
             Task::Defend(_) => "defend",
@@ -295,6 +354,7 @@ impl Task {
             | Task::Redig(_)
             | Task::Scoop(_)
             | Task::Cast(_)
+            | Task::Enter(_)
             | Task::Escape(_)
             | Task::Swim(..)
             | Task::Defend(_)
@@ -605,6 +665,7 @@ impl Plan {
                 | Aim::Portal
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Fortress => self.fortress_task(w, tick),
+                Aim::Nether => self.nether_task(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
         }
@@ -647,6 +708,11 @@ impl Plan {
                 self.acts.extend(act);
                 let target = s.target;
                 return self.after_scoop(c, status, target, tick);
+            }
+            Task::Enter(e) => {
+                let (c, status) = e.step(w, tick);
+                let cell = e.cell;
+                return self.after_enter(c, status, cell, tick);
             }
             Task::Cast(k) => {
                 let (c, act, status) = k.step(w, tick);
@@ -746,6 +812,7 @@ impl Plan {
                     | Task::Redig(_)
                     | Task::Scoop(_)
                     | Task::Cast(_)
+                    | Task::Enter(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -795,6 +862,7 @@ impl Plan {
                     | Task::Redig(_)
                     | Task::Scoop(_)
                     | Task::Cast(_)
+                    | Task::Enter(_)
                     | Task::Escape(_)
                     | Task::Swim(..)
                     | Task::Defend(_)
@@ -855,6 +923,7 @@ impl Plan {
             | Task::Redig(_)
             | Task::Scoop(_)
             | Task::Cast(_)
+            | Task::Enter(_)
             | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
@@ -1020,6 +1089,7 @@ impl Plan {
             | Task::Redig(_)
             | Task::Scoop(_)
             | Task::Cast(_)
+            | Task::Enter(_)
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
@@ -1139,6 +1209,45 @@ impl Plan {
                 .any(|(centre, until)| tick < *until && near((*centre, c)))
     }
 
+    /// Issue 15c's aim: met in the Nether. A portal seen (or the one this bot lit) is walked into
+    /// and stood in until the dimension changes; with none, the portal row casts one.
+    fn nether_task(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {
+        if w.dimension
+            .as_ref()
+            .is_some_and(|d| d.name == "minecraft:the_nether")
+        {
+            self.met = true;
+            self.note(tick, "nether met".to_owned(), "through a portal".to_owned());
+            return Task::Idle;
+        }
+        let seen = world::stage::kind_near(w, data::BlockKind::NetherPortal, PORTAL_CHUNKS);
+        let cells: Vec<Cell> = self
+            .portal
+            .into_iter()
+            .chain(seen)
+            .filter(|c| !self.refused_now(*c, tick))
+            .take(CANDIDATES_PER_TICK)
+            .collect();
+        for c in cells {
+            let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("enter the portal at {c:?}"),
+                    "a lit portal seen".to_owned(),
+                );
+                return Task::Enter(Box::new(Enter {
+                    walk,
+                    cell: c,
+                    inside_since: None,
+                }));
+            }
+            self.refuse(c, tick);
+        }
+        self.decide(w, origin, tick)
+    }
+
     /// Issue 15's aim: met once nether bricks have been seen with an exposed face; until then,
     /// explore (15a's baseline; the held-heading search is 15b).
     fn fortress_task(&mut self, w: &World, tick: u64) -> Task {
@@ -1235,6 +1344,7 @@ impl Plan {
             | Aim::PortalKit
             | Aim::Portal
             | Aim::Fortress
+            | Aim::Nether
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -1262,6 +1372,7 @@ impl Plan {
                 | Aim::PortalKit
                 | Aim::Portal
                 | Aim::Fortress
+                | Aim::Nether
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -1336,7 +1447,12 @@ impl Plan {
             self.note(tick, "stuck".to_owned(), "no goal table".to_owned());
             return Task::Idle;
         };
-        let Some(goal) = table.until(&self.aim.name()) else {
+        // The nether aim casts with the portal row until a portal is seen (issue 15c).
+        let row = match self.aim {
+            Aim::Nether => "portal".to_owned(),
+            _ => self.aim.name(),
+        };
+        let Some(goal) = table.until(&row) else {
             self.stuck = true;
             self.note(
                 tick,
@@ -1384,7 +1500,7 @@ impl Plan {
         // A lava bucket is the cast's bucket: one held after a cast was cut is no bucket short
         // (a bot tunnelled for coal to smelt iron for one: docs/problems/portal.md wall 6).
         let mut counts = held(w);
-        if self.aim == Aim::Portal
+        if matches!(self.aim, Aim::Portal | Aim::Nether)
             && let Some(n) = counts.get(&data::ItemKind::LavaBucket).copied()
         {
             *counts.entry(data::ItemKind::Bucket).or_default() += n;
@@ -1396,9 +1512,13 @@ impl Plan {
             return t;
         }
         // The portal (issue 14c): its kit held, the cast; met once a portal is lit.
-        if self.aim == Aim::Portal {
+        if matches!(self.aim, Aim::Portal | Aim::Nether) {
             if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
                 self.portal = Some(site.frame.at((1, 1, 0)));
+            }
+            // Lit: the nether aim walks into it next (`nether_task`).
+            if self.portal.is_some() && self.aim == Aim::Nether {
+                return Task::Idle;
             }
             if self.portal.is_some() {
                 self.met = true;
@@ -2217,6 +2337,35 @@ impl Plan {
                     tick,
                     format!("cast failed: {f:?} after {ops} ops, at {at}"),
                     format!("site given up; none within {} of it", cast::GIVE_UP_RADIUS),
+                );
+                self.check_stuck(tick);
+            }
+        }
+        Controls::default()
+    }
+
+    fn after_enter(&mut self, c: Controls, status: TaskStatus, cell: Cell, tick: u64) -> Controls {
+        match status {
+            TaskStatus::Running => return c,
+            TaskStatus::Done => {
+                self.failed_in_row = 0;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "through the portal".to_owned(),
+                    "the dimension changed".to_owned(),
+                );
+            }
+            TaskStatus::Failed(f) => {
+                *self.failures.entry(format!("Enter{f:?}")).or_default() += 1;
+                self.refuse(cell, tick);
+                self.retry_at = tick + RETRY_TICKS;
+                self.failed_in_row += 1;
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    format!("enter failed: {f:?}"),
+                    "the portal cell refused a while; choose again".to_owned(),
                 );
                 self.check_stuck(tick);
             }
