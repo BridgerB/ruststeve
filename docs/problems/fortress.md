@@ -43,3 +43,7 @@ From the checkpoint start `nether` (the Nether at (0, 0), where a portal near sp
 - **Built**: memory watches `nether_portal` blocks; `Aim::Nether` walks into the nearest portal seen (or the one this bot lit) on a found route and stands in it until the dimension changes (`Task::Enter`, 400 ticks at most), else casts one with the `portal` row; the `portal` start (`Start.setup`, commands run after placing the bot).
 - **Raced** (2820a63, `portal` start, aim `nether`, race 44656360133, 8 lanes x 14, cap 6,000): **94 of 112 arrived in the Nether (83.9%)**, each "enter the portal at …" then "through the portal"; no deaths. The 18 others logged no entry: no found route to the portal built round them (setup in rough ground), so the aim fell back to casting one.
 - **The marathon** (d701b19): one runner on the latest main plays the `race` aim (cast, enter, fortress) from spawn through deaths (`--revive`, `keep_inventory`), leg after leg; its first legs give the spawn-to-Nether number.
+
+## One bot first (2026-11-19)
+- Spawn race 44662871756 (d0e92fc, 7 lanes x 14, aim nether, cap 144,000): **2 of 98 bots went from spawn into the Nether** in one run (table 85, stone pickaxe 45, iron kit 2, nether 2).
+- Snapshots: race 44678197603 (`portal` start, aim `race`) captured `nether` and `fortress` snapshots in all three lanes. Resumed from its lane-0 `nether` snapshot (race 44687236976), both bots that ran started in the Nether with the snapshot bot's items and reached the fortress. The frontier is its lane-0 `fortress` snapshot.
