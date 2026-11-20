@@ -52,7 +52,7 @@ pub fn kind_near(w: &World, kind: data::BlockKind, chunks: i32) -> Vec<(i32, i32
 
 /// Whether the feet are within `FORTRESS_NEAR` of a nether-brick cell on record.
 pub fn at_fortress(w: &World) -> bool {
-    let Some(body) = w.body else {
+    let Some(body) = w.body.filter(|_| in_nether(w)) else {
         return false;
     };
     bricks_near(w, 1).first().is_some_and(|c| {
@@ -73,9 +73,18 @@ pub fn at_fortress(w: &World) -> bool {
 /// `camp-range` 8; a spawner wakes for a player within 16.
 pub const SPAWNER_NEAR: f64 = 8.0;
 
+/// In the Nether: a fortress and its blaze spawner are nowhere else. A dungeon's monster spawner
+/// at y -21 in the overworld made a stone-tool bot `spawner`, and so every stage under it
+/// (race 44804466844; blaze wall 4).
+pub fn in_nether(w: &World) -> bool {
+    w.dimension
+        .as_ref()
+        .is_some_and(|d| d.name == "minecraft:the_nether")
+}
+
 /// Whether the feet are within `SPAWNER_NEAR` of a spawner cell on record.
 pub fn at_spawner(w: &World) -> bool {
-    let Some(body) = w.body else {
+    let Some(body) = w.body.filter(|_| in_nether(w)) else {
         return false;
     };
     kind_near(w, data::BlockKind::Spawner, 1)
@@ -107,6 +116,10 @@ pub enum Stage {
     Table,
     /// Holds a stone pickaxe (issue 11).
     StonePickaxe,
+    /// Holds (or wears) an iron helmet, chestplate and leggings and an iron sword (issue 16's gear,
+    /// made before the iron kit by the race aim; a geared bot is snapshotted, so the chain resumes
+    /// from it, not from spawn: 4 of 84 spawn bots geared in 3 game hours and got no further).
+    Gear,
     /// Holds an iron pickaxe and a bucket (issue 13's iron kit: the pickaxe for obsidian, the
     /// bucket for the cast, clojurecraft's kit).
     IronKit,
@@ -127,11 +140,12 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 11] = [
+    pub const ALL: [Stage; 12] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
         Stage::StonePickaxe,
+        Stage::Gear,
         Stage::IronKit,
         Stage::Nether,
         Stage::Fortress,
@@ -148,6 +162,7 @@ impl Stage {
             Stage::Log => "log",
             Stage::Table => "table",
             Stage::StonePickaxe => "stone_pickaxe",
+            Stage::Gear => "gear",
             Stage::IronKit => "iron_kit",
             Stage::Nether => "nether",
             Stage::Fortress => "fortress",
@@ -172,6 +187,14 @@ impl Stage {
                 .is_some_and(|logs| logs.iter().any(|item| w.inventory.count(*item) > 0)),
             Stage::Table => has(ItemKind::CraftingTable, 1),
             Stage::StonePickaxe => has(ItemKind::StonePickaxe, 1),
+            Stage::Gear => [
+                ItemKind::IronHelmet,
+                ItemKind::IronChestplate,
+                ItemKind::IronLeggings,
+                ItemKind::IronSword,
+            ]
+            .iter()
+            .all(|k| has(*k, 1)),
             Stage::IronKit => has(ItemKind::IronPickaxe, 1) && has(ItemKind::Bucket, 1),
             Stage::Nether => dim == Some("minecraft:the_nether"),
             Stage::Fortress => at_fortress(w),
