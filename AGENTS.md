@@ -36,7 +36,7 @@ Do these in order before writing any code, every session, and again after any co
 - **One issue at a time**, in order. Do not start the next until Bridger says "do the next one".
 - **No approval gate** (Bridger, 2026-11-12): on "do the next one", post the plan as a comment on the issue, then implement, open the PR and merge it when green, without stopping to ask. No plan-mode approval dialog for ruststeve issues.
 - Branch from `main` as `issue-NN-<slug>` (e.g. `issue-03-connect`). Committing, pushing the branch, opening its PR **into `main`** and merging it are authorized. Never push directly to `main`, never force-push, never `--no-verify`.
-- An issue closes only when **its done-condition holds on a runner**, measured as the issue states (real race, k/n, the named checkpoint start). Put the evidence (run ids, k/n, the commit) in the PR body, then merge into `main` and report.
+- **One bot first** (Bridger, 2026-11-19, `brain/ruststeve/decisions/one-bot-first.md`): the goal is one bot from spawn to the dead dragon. An issue closes when **one real bot passes its stage**, starting from the frontier (the furthest snapshot, `config/frontier.toml`; `race.yml -f snapshot=frontier`), and that bot's snapshot is published and becomes the new frontier. Rates are reported, never the bar; generalising and speed come after the win. Put the evidence (run id, bot, the snapshot asset, the commit) in the PR body, then merge into `main` and report.
 - **A failure inside an issue** gets a written problem statement in `docs/problems/<stage>.md` (needs, risks, done in world terms, the last recorded failure). Never open a new issue for a symptom. An issue too big splits into numbered sub-issues (`17a`, `17b`) so the plan stays one list.
 - Every change that touches a subsystem updates its brain note in the same PR, bumping `lastUpdated` and the `ruststeve@` pin; `cargo run -q -p brain-check -- touches ruststeve <paths>` lists the notes a diff affects.
 
@@ -44,7 +44,7 @@ Do these in order before writing any code, every session, and again after any co
 
 clojurecraft lost four weeks on its pearl stage, and most of its mistakes are just as easy in Rust (`brain/oracle/handoff/cc-stage18-lessons.md`). Before any behaviour fix:
 
-1. **Throughput first.** How many attempts did the stuck stage get on this commit, real and sim? Under a few hundred, fix the cap (a checkpoint start, lanes) before the bot.
+1. **Throughput first.** How many attempts did the stuck stage get on this commit? Every attempt starts at the frontier snapshot, one bot a lane, 15 lanes at once (the marathon holds the 16th runner); more attempts before a cleverer bot.
 2. **Coverage.** Every ended run must have a case file; under 1.0 is a blind spot fixed first.
 3. **Read the evidence yourself.** Rank the case signatures; read three case files of the top one; then replay the recording **at its own commit** and run `why` at the failing moment. A reason code is where a run ended, never why. A cause is a hypothesis until one bot's log lines confirm it.
 4. **Name the structural cause** in `docs/problems/`, then fix it. Prefer structure (a progress invariant, a held target, a kept reserve) over a threshold.

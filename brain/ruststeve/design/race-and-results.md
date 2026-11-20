@@ -5,7 +5,7 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-18
+lastUpdated: 2026-11-19
 verifiedAgainst: ruststeve@ca34f7c clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
@@ -81,6 +81,10 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 ## The marathon (Bridger, 2026-11-19)
 - `.github/workflows/marathon.yml`: one runner, always on the latest main (a push cancels it and starts it again), plays legs back to back: each a fresh bot at spawn with the `race` aim (every stage built so far, in order: a portal cast and entered, then a fortress), `--revive` (a death respawns the bot and play goes on; the server's `keep_inventory` is on), cap 216,000. Each leg's summary goes into the job summary as it ends; the job's legs are a release `marathon-<run>`; the job dispatches itself again at its end, with a 6-hourly schedule as a fallback. The other races keep to 15 runners.
 - Revive: `world::Act::Respawn` sends `client_command` 0 and clears the death; `Plan::revived` drops the task in hand and notes "died (…) and respawned".
+
+## Snapshots and the frontier ([[one-bot-first]])
+- `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor (the start's stage, or a resumed snapshot's): `save-all flush`, the server's `world/` copied to `<out>/snapshots/<stage>/` with `memory.rsw` (the bot's memory, `results::snapshot::write_memory`) and `snap.toml` (stage, bot, offline UUID, position, dimension, commit). Publish steps add each as a release asset `snapshot-<stage>-<run>-<lane>.tar.zst`.
+- `race.yml -f snapshot=frontier` (or `<tag>/<asset>`) restores it: the world unpacked into the server's before it starts, the snapshot bot's `players/data/<uuid>.dat` (26.1.2's place for it, not the older `playerdata/`) copied to every bot's own offline UUID (`results offline-uuid`), `--memory` seeding each bot; the `snapshot` start gives nothing more. `config/frontier.toml` names the furthest snapshot.
 
 ## See also
 - [[observability]] - what every run produces.

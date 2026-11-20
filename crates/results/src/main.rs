@@ -4,6 +4,7 @@
 //! cargo run -p results -- summary <dir or batch.rsb>...   # k/n per stage, coverage, endings (markdown)
 //! cargo run -p results -- diagnose <dir>...               # by place, note kinds, cast failures (markdown)
 //! cargo run -p results -- case <file.case.rsc>            # one case as text
+//! cargo run -p results -- offline-uuid <name>              # the player file's UUID (snapshots)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -59,13 +60,18 @@ fn run(args: &[String]) -> Result<(), String> {
             print!("{}", results::diagnose::diagnose(&cases));
             Ok(())
         }
+        Some("offline-uuid") => {
+            let name = args.get(1).ok_or("offline-uuid needs a name")?;
+            println!("{}", results::snapshot::offline_uuid(name));
+            Ok(())
+        }
         Some("case") => {
             let path = args.get(1).ok_or("case needs a file")?;
             print!("{}", results::read_case(Path::new(path))?.render());
             Ok(())
         }
         _ => Err(
-            "usage: results summary <paths>... | results diagnose <paths>... | results case <file>"
+            "usage: results summary <paths>... | results diagnose <paths>... | results case <file> | results offline-uuid <name>"
                 .to_owned(),
         ),
     }

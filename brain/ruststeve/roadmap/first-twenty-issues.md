@@ -5,7 +5,7 @@ type: reference
 tags: [roadmap, issues, plan, done-conditions]
 aliases: [issue plan, first 20 issues, done conditions, roadmap, what to build first]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-19
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#The order matters. Issues 1–8 build the machine (protocol, world, record, sim, CI, metric) before any gameplay depends on it."
@@ -34,6 +34,8 @@ The plan, one issue at a time; each issue's checkpoint start exists before its g
 8. **Case files and the data contract**: killer, first hit, intent and why for every ending; per-second senses; batch files and the snapshot-stream schema. *Done:* every ended run in a batch has a case (coverage 1.0). (The handoff's version wrote these to Postgres for steve; ruststeve writes files, [[data-out]].)
 
 ## The stages (9–20)
+**From 2026-11-19 ([[one-bot-first]])**: issues 16 to 20 are done when **one real bot passes the stage from the frontier snapshot** and its snapshot is saved; the % column below is the later generalising phase's bar, not the gate. Issues 9 to 15 closed on their % bars before the change.
+
 | # | Issue | Checkpoint start | Done (real race) |
 |---|---|---|---|
 | 9 | walk with a pathfinder, node budget, progress invariant | landings | 95% of 200 sim landings reach a log 30+ blocks away; no walk 60 s without progress |

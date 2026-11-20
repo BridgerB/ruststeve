@@ -93,3 +93,12 @@ setup = [
   "execute at {bot} run fill ~3 ~ ~1 ~6 ~2 ~2 minecraft:air",
   "execute at {bot} run fill ~4 ~ ~ ~5 ~2 ~ minecraft:nether_portal[axis=x]",
 ]
+
+# Resuming from a snapshot (one-bot-first, 2026-11-19): no kit and no place. The lane copies the
+# snapshot's world and gives every bot the snapshot bot's player file (items, position, dimension,
+# health) before the server starts, and the race seeds each bot with the snapshot's memory
+# (race.yml's `snapshot` input).
+[[start]]
+name = "snapshot"
+stage = "in_world"
+place = "spawn"
