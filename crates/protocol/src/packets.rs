@@ -588,6 +588,10 @@ pub enum C2s {
     SetCarriedItem {
         slot: i16,
     },
+    /// `client_command`: action 0 asks to respawn after a death (the marathon's revive).
+    ClientCommand {
+        action: i32,
+    },
     /// A click in a window, predicting nothing: no changed slots and an empty cursor, so the
     /// server answers with authoritative slots (brain/wire/wire-container-click.md).
     ContainerClick {
@@ -649,6 +653,7 @@ impl C2s {
             | C2s::MovePlayerStatusOnly { .. }
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
+            | C2s::ClientCommand { .. }
             | C2s::UseItemOn { .. }
             | C2s::Attack { .. }
             | C2s::UseItem { .. }
@@ -765,6 +770,10 @@ impl C2s {
             C2s::SetCarriedItem { slot } => {
                 w.i16(*slot);
                 PlayOut::SetCarriedItem.id()
+            }
+            C2s::ClientCommand { action } => {
+                w.varint(*action);
+                PlayOut::ClientCommand.id()
             }
             C2s::ContainerClick {
                 window,

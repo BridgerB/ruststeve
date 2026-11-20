@@ -1,0 +1,132 @@
+# The marathon (Bridger, 2026-11-19): one runner, always on the latest main, one bot at a time
+# playing every stage built so far (the `race` aim) from spawn, through deaths (the server keeps
+# inventory; the bot respawns and carries on). A leg ends when the bot finishes the chain or hits
+# the cap; the next leg starts a fresh bot at spawn. Each leg's summary goes into the job summary
+# as it ends; the job's legs are published as a release. When the job ends it dispatches itself
+# again, so it runs continuously.
+#
+# A push to main cancels the running marathon and starts one on the new code. The other races
+# keep to 15 runners so this one always has its own.
+name: marathon
+run-name: "marathon: ${{ github.event_name }} on ${{ github.sha }}"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # A fallback should the self-dispatch chain break.
+  schedule:
+    - cron: "17 */6 * * *"
+
+# A push cancels the marathon in progress; a dispatch or the schedule waits for it to end.
+concurrency:
+  group: marathon
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+  # A leg's cap in server ticks: three game hours, the whole chain from spawn with room to spare.
+  LEG_CAP: "216000"
+  # Minutes of the job kept for the summary, the release and the next dispatch.
+  RESERVE_MINUTES: "20"
+  JOB_MINUTES: "350"
+
+jobs:
+  marathon:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: When the job began (the legs end in time for the publish)
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - run: rustup show
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: datagen
+          save-if: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v1
+
+      - name: Get the server jar if the cache missed
+        run: |
+          if [ ! -f "$DATAGEN_WORK/server.jar" ]; then
+            cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out "$RUNNER_TEMP/generated"
+          fi
+
+      - name: Build
+        run: cargo build -q --locked --release -p xtask -p bot -p results -p replay -p rcon
+
+      - name: Start the server (RCON on, keep_inventory on)
+        run: |
+          set -euo pipefail
+          pw="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+          echo "::add-mask::$pw"
+          echo "RUSTSTEVE_RCON_PASSWORD=$pw" >> "$GITHUB_ENV"
+          RUSTSTEVE_RCON_PASSWORD="$pw" nohup ./target/release/xtask server --jar "$DATAGEN_WORK/server.jar" > server.log 2>&1 &
+          for _ in $(seq 1 180); do
+            if grep -q 'Done (' server.log; then
+              RUSTSTEVE_RCON_PASSWORD="$pw" ./target/release/rcon "gamerule keep_inventory true"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat server.log
+          exit 1
+
+      - name: Legs, one fresh bot each, until the job's end
+        run: |
+          set -uo pipefail
+          end=$(( JOB_START + (JOB_MINUTES - RESERVE_MINUTES) * 60 ))
+          leg=1
+          while [ $(( end - $(date +%s) )) -gt 600 ]; do
+            left=$(( end - $(date +%s) ))
+            echo "leg $leg: $left s left"
+            # The lane number names the bot (rs-l<leg>-b00), so every leg is a new player at spawn.
+            ./target/release/race --lane "$leg" --bots 1 --start spawn --goal race --cap "$LEG_CAP" \
+              --revive true --run "marathon-${{ github.run_id }}-$leg" --out "legs/leg-$leg" \
+              --wall-limit "$left" 2>&1 | tee -a marathon.log
+            {
+              echo "## marathon ${{ github.run_id }}, leg $leg ($(git rev-parse --short HEAD))"
+              echo
+              ./target/release/results summary "legs/leg-$leg" 2>&1 || true
+              echo
+              grep -h '^stage reached\|^ending\|^death message\|died (' legs/leg-$leg/*.case.txt 2>/dev/null | head -40 || true
+              echo
+            } | tee -a summary.md >> "$GITHUB_STEP_SUMMARY"
+            leg=$(( leg + 1 ))
+          done
+
+      - name: Publish the legs as a release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [ -f summary.md ] || echo "no leg finished" > summary.md
+          cp server.log legs/ 2>/dev/null || true
+          tar --zstd -cf "marathon-${{ github.run_id }}.tar.zst" legs marathon.log 2>/dev/null || tar --zstd -cf "marathon-${{ github.run_id }}.tar.zst" summary.md
+          gh release create "marathon-${{ github.run_id }}" "marathon-${{ github.run_id }}.tar.zst" summary.md \
+            --target "${{ github.sha }}" --prerelease \
+            --title "marathon ${{ github.run_id }} ($(git rev-parse --short HEAD))" \
+            --notes-file summary.md
+
+      - name: Go again
+        if: success() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run marathon.yml --ref main

@@ -35,6 +35,7 @@ struct Args {
     wall_limit: Option<u64>,
     /// Keep each bot living after its aim is met, to the cap (issue 12e).
     hold_after_aim: bool,
+    revive: bool,
     walk: Option<bot::Script>,
     goal: Option<plan::Aim>,
 }
@@ -54,6 +55,7 @@ fn args() -> Result<Args, String> {
         cap: None,
         wall_limit: None,
         hold_after_aim: false,
+        revive: false,
         walk: None,
         goal: None,
     };
@@ -79,6 +81,7 @@ fn args() -> Result<Args, String> {
             "--cap" => a.cap = Some(num(&flag, &v)?),
             "--wall-limit" => a.wall_limit = Some(num(&flag, &v)?),
             "--hold-after-aim" => a.hold_after_aim = v == "true",
+            "--revive" => a.revive = v == "true",
             "--goal" => a.goal = Some(plan::Aim::parse(&v).ok_or(format!("--goal: no aim {v}"))?),
             "--walk" => {
                 a.walk = Some(bot::Script::parse(&v).ok_or(format!("--walk: no script {v}"))?)
@@ -166,6 +169,7 @@ fn race(a: &Args) -> Result<bool, String> {
             case_path: a.out.join(format!("{name}.case.rsc")).display().to_string(),
             model: None,
             hold_after_aim: a.hold_after_aim,
+            revive: a.revive,
         };
         handles.push((name, std::thread::spawn(move || bot::run(opts))));
     }

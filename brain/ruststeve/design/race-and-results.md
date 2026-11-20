@@ -78,6 +78,10 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - The `fortress` stage holds when the feet are within 6 of nether bricks on record, not when bricks are seen: seen-from-afar met it for 112 of 112 bots standing still (fortress wall 1).
 - **Evidence** (ca34f7c, pair 44413659356 and 44413666090, cap 24,000): **111 of 224 reached a fortress (49.6%)**, median building blocks held 213 (no bot under 32), deaths 57.
 
+## The marathon (Bridger, 2026-11-19)
+- `.github/workflows/marathon.yml`: one runner, always on the latest main (a push cancels it and starts it again), plays legs back to back: each a fresh bot at spawn with the `race` aim (every stage built so far, in order: a portal cast and entered, then a fortress), `--revive` (a death respawns the bot and play goes on; the server's `keep_inventory` is on), cap 216,000. Each leg's summary goes into the job summary as it ends; the job's legs are a release `marathon-<run>`; the job dispatches itself again at its end, with a 6-hourly schedule as a fallback. The other races keep to 15 runners.
+- Revive: `world::Act::Respawn` sends `client_command` 0 and clears the death; `Plan::revived` drops the task in hand and notes "died (…) and respawned".
+
 ## See also
 - [[observability]] - what every run produces.
 - [[data-out]] - where the files go next (the insight store, 07b).

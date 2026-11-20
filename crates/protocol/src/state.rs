@@ -47,6 +47,7 @@ impl State {
             | C2s::MovePlayerStatusOnly { .. }
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
+            | C2s::ClientCommand { .. }
             | C2s::UseItemOn { .. }
             | C2s::Attack { .. }
             | C2s::UseItem { .. }

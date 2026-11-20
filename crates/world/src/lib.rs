@@ -258,6 +258,9 @@ pub enum Act {
     UseItem,
     /// Let go of the use key (`player_action` status 5).
     ReleaseUse,
+    /// Respawn after a death (`client_command` 0): the death is cleared and the body waits for
+    /// the server's next position (the marathon keeps playing through deaths).
+    Respawn,
 }
 
 /// A window the server opened (`open_screen`, issue 11a): its id, menu type (an index into
@@ -810,6 +813,11 @@ impl World {
                     e.struck = true;
                 }
                 vec![Effect::Send(C2s::Attack { entity })]
+            }
+            Act::Respawn => {
+                self.death = None;
+                self.body = None;
+                vec![Effect::Send(C2s::ClientCommand { action: 0 })]
             }
             Act::UseItem => {
                 self.sequence_sent += 1;

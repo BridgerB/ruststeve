@@ -200,6 +200,9 @@ pub enum Aim {
     Fortress,
     /// Issue 15c's: in the Nether through a portal: the nearest seen walked into, else one cast.
     Nether,
+    /// Every stage built so far, in order (the marathon's aim): a portal cast and entered, then a
+    /// fortress reached. Each issue that adds a stage extends it.
+    Race,
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -225,6 +228,7 @@ impl Aim {
             None if s == "portal" => Some(Aim::Portal),
             None if s == "fortress" => Some(Aim::Fortress),
             None if s == "nether" => Some(Aim::Nether),
+            None if s == "race" => Some(Aim::Race),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -253,6 +257,7 @@ impl Aim {
             Aim::Portal => "portal".to_owned(),
             Aim::Fortress => "fortress".to_owned(),
             Aim::Nether => "nether".to_owned(),
+            Aim::Race => "race".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -277,6 +282,7 @@ impl Aim {
             | Aim::Portal
             | Aim::Fortress
             | Aim::Nether
+            | Aim::Race
             | Aim::Hold => true,
         }
     }
@@ -554,6 +560,19 @@ impl Plan {
         p
     }
 
+    /// After a death and a respawn (the marathon's revive): drop the task in hand, whose targets
+    /// were where the body was, and say so; the aim and what memory holds carry on.
+    pub fn revived(&mut self, tick: u64, killer: &str, deaths: u32) {
+        self.task = Task::Idle;
+        self.retry_at = tick;
+        self.failed_in_row = 0;
+        self.note(
+            tick,
+            format!("died ({killer}) and respawned"),
+            format!("death {deaths}; items kept, the aim carries on"),
+        );
+    }
+
     /// The aim is met, or the planner has stopped.
     pub fn finished(&self) -> bool {
         self.reached.is_some() || self.met || self.stuck
@@ -665,7 +684,7 @@ impl Plan {
                 | Aim::Portal
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Fortress => self.fortress_task(w, tick),
-                Aim::Nether => self.nether_task(w, origin, tick),
+                Aim::Nether | Aim::Race => self.nether_task(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
         }
@@ -1216,6 +1235,10 @@ impl Plan {
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
         {
+            // The race goes on to the fortress from here.
+            if self.aim == Aim::Race {
+                return self.fortress_task(w, tick);
+            }
             self.met = true;
             self.note(tick, "nether met".to_owned(), "through a portal".to_owned());
             return Task::Idle;
@@ -1345,6 +1368,7 @@ impl Plan {
             | Aim::Portal
             | Aim::Fortress
             | Aim::Nether
+            | Aim::Race
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -1373,6 +1397,7 @@ impl Plan {
                 | Aim::Portal
                 | Aim::Fortress
                 | Aim::Nether
+                | Aim::Race
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
@@ -1449,7 +1474,7 @@ impl Plan {
         };
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
-            Aim::Nether => "portal".to_owned(),
+            Aim::Nether | Aim::Race => "portal".to_owned(),
             _ => self.aim.name(),
         };
         let Some(goal) = table.until(&row) else {
@@ -1500,7 +1525,7 @@ impl Plan {
         // A lava bucket is the cast's bucket: one held after a cast was cut is no bucket short
         // (a bot tunnelled for coal to smelt iron for one: docs/problems/portal.md wall 6).
         let mut counts = held(w);
-        if matches!(self.aim, Aim::Portal | Aim::Nether)
+        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race)
             && let Some(n) = counts.get(&data::ItemKind::LavaBucket).copied()
         {
             *counts.entry(data::ItemKind::Bucket).or_default() += n;
@@ -1512,12 +1537,12 @@ impl Plan {
             return t;
         }
         // The portal (issue 14c): its kit held, the cast; met once a portal is lit.
-        if matches!(self.aim, Aim::Portal | Aim::Nether) {
+        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race) {
             if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
                 self.portal = Some(site.frame.at((1, 1, 0)));
             }
             // Lit: the nether aim walks into it next (`nether_task`).
-            if self.portal.is_some() && self.aim == Aim::Nether {
+            if self.portal.is_some() && matches!(self.aim, Aim::Nether | Aim::Race) {
                 return Task::Idle;
             }
             if self.portal.is_some() {
