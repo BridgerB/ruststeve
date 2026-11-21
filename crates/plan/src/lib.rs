@@ -408,6 +408,12 @@ pub struct Plan {
     /// For the batch: walks started, how many failed and why, the longest stall of any walk,
     /// searches' expansions.
     pub walks: u64,
+    /// Swings sent and swings that took health off a foe, over every fight (issue 16: the case
+    /// file wrote 0 for both, so blaze wall 3's "0 swings" was no reading).
+    #[serde(default)]
+    pub swings_sent: u64,
+    #[serde(default)]
+    pub swings_landed: u64,
     pub failures: BTreeMap<String, u64>,
     pub longest_stall: u64,
     pub expanded: u64,
@@ -526,6 +532,8 @@ impl Plan {
             heading: 0.0,
             events: Vec::new(),
             walks: 0,
+            swings_sent: 0,
+            swings_landed: 0,
             failures: BTreeMap::new(),
             longest_stall: 0,
             expanded: 0,
@@ -1064,7 +1072,10 @@ impl Plan {
                 (c, act, None)
             }
             Task::Defend(d) => {
+                let (sent, landed) = (d.swings, d.landed);
                 let (c, act, status) = d.step(w, rules, tick);
+                self.swings_sent += u64::from(d.swings.saturating_sub(sent));
+                self.swings_landed += u64::from(d.landed.saturating_sub(landed));
                 let ended = match status {
                     defend::DefendStatus::Running => None,
                     defend::DefendStatus::Done => {

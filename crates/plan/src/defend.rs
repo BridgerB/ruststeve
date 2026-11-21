@@ -49,6 +49,9 @@ pub struct Defend {
     pub faced_at: Option<u64>,
     pub last_swing: Option<u64>,
     pub swings: u32,
+    /// Strikes that took health off the foe (issue 16: the case file's swings landed).
+    #[serde(default)]
+    pub landed: u32,
     /// The mob's health when last struck, and the tick a strike last took some off.
     pub last_health: Option<f32>,
     pub last_hit_at: u64,
@@ -211,6 +214,7 @@ impl Defend {
             faced_at: None,
             last_swing: None,
             swings: 0,
+            landed: 0,
             last_health: None,
             last_hit_at: tick,
             started: tick,
@@ -254,6 +258,7 @@ impl Defend {
                 .is_some_and(|(now, was)| now < was)
             {
                 self.last_hit_at = tick;
+                self.landed += 1;
             }
             self.last_health = health.or(self.last_health);
             if in_danger(w, rules)
