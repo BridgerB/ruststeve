@@ -80,6 +80,14 @@ impl Entity {
         }
     }
 
+    /// A blaze's charge flag: its own metadata index 16, bit 0, set 1.4 to 3.5 s before its
+    /// fireballs spawn, with no direction in it (clojurecraft dodge.clj, measured on 26.1.2;
+    /// docs/problems/blaze.md). False for anything else or when not yet sent.
+    pub fn blaze_charged(&self) -> bool {
+        self.kind == EntityKind::Blaze
+            && matches!(self.metadata.get(&16), Some(MetaValue::Byte(b)) if b & 1 == 1)
+    }
+
     /// The shared flags bitfield, metadata index 0 (on fire, sneaking, ...).
     pub fn flags(&self) -> u8 {
         match self.metadata.get(&0) {
@@ -1262,5 +1270,34 @@ impl World {
     pub fn block_under_player(&self) -> Option<BlockKind> {
         let [x, y, z] = self.player.pos?;
         self.block_at(BlockPos::containing(x, y - 0.01, z))
+    }
+}
+
+#[cfg(test)]
+mod blaze_charge {
+    use super::*;
+
+    fn entity(kind: EntityKind, flag: Option<u8>) -> Entity {
+        Entity {
+            kind,
+            pos: [0.0; 3],
+            metadata: flag
+                .map(|b| (16u8, MetaValue::Byte(b)))
+                .into_iter()
+                .collect(),
+            first_seen: 0,
+            last_seen: 0,
+            dead: false,
+            struck: false,
+        }
+    }
+
+    /// Issue 16: a blaze's charge flag is bit 0 of its metadata index 16; nothing else charges.
+    #[test]
+    fn the_charge_flag_is_bit_0_of_index_16_on_a_blaze() {
+        assert!(entity(EntityKind::Blaze, Some(1)).blaze_charged());
+        assert!(!entity(EntityKind::Blaze, Some(0)).blaze_charged());
+        assert!(!entity(EntityKind::Blaze, None).blaze_charged());
+        assert!(!entity(EntityKind::Zombie, Some(1)).blaze_charged());
     }
 }

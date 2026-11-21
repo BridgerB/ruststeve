@@ -52,6 +52,15 @@ pub struct Defend {
     /// Strikes that took health off the foe (issue 16: the case file's swings landed).
     #[serde(default)]
     pub landed: u32,
+    /// What the fight saw, for its note (the porting guide's CombatFrame, summed over the fight):
+    /// the bot's health when it began, the foe's highest point over the bot's eye, and the ticks
+    /// a blaze foe was charging a volley.
+    #[serde(default)]
+    pub health_start: Option<f32>,
+    #[serde(default)]
+    pub max_dy: f64,
+    #[serde(default)]
+    pub charged_ticks: u32,
     /// The mob's health when last struck, and the tick a strike last took some off.
     pub last_health: Option<f32>,
     pub last_hit_at: u64,
@@ -215,6 +224,9 @@ impl Defend {
             last_swing: None,
             swings: 0,
             landed: 0,
+            health_start: w.player.health,
+            max_dy: f64::NEG_INFINITY,
+            charged_ticks: 0,
             last_health: None,
             last_hit_at: tick,
             started: tick,
@@ -238,6 +250,14 @@ impl Defend {
             return (still, None, DefendStatus::Done);
         };
         self.last_seen = pos;
+        let eye_y = body.pos[1] + physics::EYE_HEIGHT;
+        self.max_dy = self.max_dy.max(pos[1] - eye_y);
+        if w.entities
+            .get(&self.foe)
+            .is_some_and(world::Entity::blaze_charged)
+        {
+            self.charged_ticks += 1;
+        }
         let d = distance(body.pos, pos);
         let never = rules.never_fight.contains(&self.kind);
         let reach = if never {

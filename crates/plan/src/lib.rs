@@ -1096,8 +1096,16 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {:?}, {} steps held back",
-                            d.swings, d.stance, d.held_back
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks",
+                            d.swings,
+                            d.landed,
+                            d.stance,
+                            d.held_back,
+                            d.kind,
+                            d.health_start,
+                            w.player.health,
+                            d.max_dy,
+                            d.charged_ticks
                         )))
                     }
                 };
