@@ -2196,12 +2196,12 @@ impl Plan {
     /// (docs/problems/portal.md wall 40). Three stairs without coming nearer refuse the bank.
     fn stairs_to_bank(&mut self, w: &World, source: Cell, tick: u64) -> Option<Task> {
         let bank = (source.0, source.1 + 1, source.2);
-        // Water above the feet is not reached by stairs down; a level tunnel reaches its own
-        // height only.
+        // Water above the feet takes stairs up (blaze.md wall 5: 11 of 13 geared bots held a
+        // bucket under a pool 20 blocks up and walked at it for three hours, refused here).
         self.dig_toward(
             w,
             bank,
-            false,
+            true,
             ("the bank", "water seen with no walk to a bank"),
             tick,
         )
@@ -3271,4 +3271,25 @@ pub fn geared(w: &World) -> bool {
     ]
     .iter()
     .all(|k| craft::count(w, *k) >= 1)
+}
+
+#[cfg(test)]
+mod bank_tests {
+    use super::*;
+
+    /// Blaze wall 5: a source 20 blocks over the feet is reached by stairs up, not refused.
+    #[test]
+    fn water_above_the_feet_takes_stairs_up() {
+        let mut w = World::new();
+        w.body = Some(physics::Body {
+            pos: [0.5, 5.0, 0.5],
+            ..physics::Body::default()
+        });
+        let mut p = Plan::new(Aim::Race);
+        let t = p.stairs_to_bank(&w, (20, 25, 0), 0);
+        assert!(
+            matches!(&t, Some(Task::Stairs(s)) if s.up),
+            "no stairs up toward water above: {t:?}"
+        );
+    }
 }
