@@ -5,8 +5,8 @@ type: reference
 tags: [data, tools, dig, items, components]
 aliases: [item_props, MAX_STACK, MAX_DAMAGE, TOOLS, Tool, tool_of, max_stack, data::dig, progress, harvests, best_tool, break_ticks, tool component, default components]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+lastUpdated: 2026-11-22
+verifiedAgainst: ruststeve@090854e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/model.rs#fn read_item_props("
   - "ruststeve:crates/data/src/dig.rs#pub fn progress("
@@ -35,7 +35,7 @@ Issue 11a. A tool's speed and drops, and every item's stack size, come from the 
 - Numbers: stone by hand 150 ticks and no drop; a wooden pickaxe 23 ticks, cobblestone; a stone pickaxe 12; a log by hand 60. A wooden pickaxe stacks to 1 and lasts 59 blocks; a stone one 131; an ender pearl stacks to 16.
 
 ## Holding (issue 11b)
-`plan::hold::toward(item)`: `Held` when the selected hotbar slot holds it; else the hotbar slot that does is selected (`Act::Hold`), or the item is swapped into the hotbar's last slot through the cursor; `Wait` while a click is in flight or a window is open. The dig task holds `data::dig::best_tool` (the fastest held tool that gets the block's drops) before START and waits for the world to show it.
+`plan::hold::toward(item)`: `Held` when the selected hotbar slot holds it; else the hotbar slot that does is selected (`Act::Hold`), or the item is swapped into the hotbar's last slot through the cursor (with a stack on the cursor and no empty slot, the item's own slot is clicked so the two swap: blaze wall 13, a full inventory left every scoop `NoBucket`); `Wait` while a click is in flight or a window is open. The dig task holds `data::dig::best_tool` (the fastest held tool that gets the block's drops) before START and waits for the world to show it.
 
 ## Limits
 - Enchantments, haste, mining fatigue and the `mining_efficiency` attribute are not modelled.

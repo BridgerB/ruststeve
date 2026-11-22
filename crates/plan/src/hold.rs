@@ -60,12 +60,46 @@ pub fn toward(w: &World, item: ItemKind) -> Hold {
     let source = (9i16..=35).find(|s| w.inventory.slots.get(s).is_some_and(|(k, _)| *k == item));
     match (w.inventory.carried, source) {
         (Some((k, _)), _) if k == item => click(SWAP_SLOT),
-        (Some(_), _) => match (9i16..=35).find(|s| !w.inventory.slots.contains_key(s)) {
+        (Some(_), _) => match (
+            (9i16..=35).find(|s| !w.inventory.slots.contains_key(s)),
+            source,
+        ) {
             // What the swap brought back goes down in an empty slot.
-            Some(s) => click(s),
-            None => Hold::Missing,
+            (Some(s), _) => click(s),
+            // No empty slot: click the item itself, which swaps it onto the cursor for the
+            // hotbar (blaze.md wall 13: a full inventory left a pickaxe on the cursor and every
+            // lava scoop failed NoBucket with the empty bucket in slot 34).
+            (None, Some(s)) => click(s),
+            (None, None) => Hold::Missing,
         },
         (None, Some(s)) => click(s),
         (None, None) => Hold::Missing,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Blaze wall 13: every main slot full, a pickaxe left on the cursor, the bucket in slot 34:
+    /// the bucket's own slot is clicked (a swap onto the cursor), never `Missing`.
+    #[test]
+    fn a_full_inventory_with_a_carried_stack_still_reaches_the_item() {
+        let mut w = World::new();
+        for s in 9i16..=44 {
+            w.inventory.slots.insert(s, (ItemKind::Cobblestone, 64));
+        }
+        w.inventory.slots.insert(34, (ItemKind::Bucket, 1));
+        w.inventory.carried = Some((ItemKind::WoodenPickaxe, 1));
+        assert_eq!(
+            toward(&w, ItemKind::Bucket),
+            Hold::Act(Act::Click {
+                slot: 34,
+                button: 0,
+                mode: 0
+            })
+        );
+        w.inventory.slots.remove(&34);
+        assert_eq!(toward(&w, ItemKind::Bucket), Hold::Missing);
     }
 }
