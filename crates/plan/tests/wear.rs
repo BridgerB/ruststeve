@@ -17,6 +17,7 @@ fn next(t: &Table, wear: &Wear) -> String {
         .goals
         .iter()
         .map(|g| &g.2)
+        .chain(&t.producers)
         .find(|g| g.id == "mine-iron")
         .unwrap();
     let counts: Counts = [(ItemKind::StonePickaxe, 1), (ItemKind::Cobblestone, 64)]
