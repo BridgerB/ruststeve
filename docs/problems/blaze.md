@@ -91,6 +91,14 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Cause**: the far-pool branch of `scoop` has no dig-toward fallback, the same gap walls 5 and 6 closed for a near source and a log.
 - **Fix**: before walking at a far pool, a bot under a rock roof with the pool more than 3 over the feet takes stairs up toward its bank (`roofed_below`, shared with `stairs_to_log`; three stalls refuse the bank and the walk is tried as before). Unit test `a_far_pool_over_a_roofed_bot_is_climbed_to`.
 
+- **Raced** (acd869c, race 45052846861, lane 7's snapshot, 14 x 1; read at 12 of 14 lanes): the stairs fired: every bucket bot cut "stairs up toward the bank at (52 to 56, 26, -154)" and came within 24 of the pool ("no scoop routes: 2 sources within 24"). Then six of twelve ended `no-progress` in `escape-water`, each about 24,000 ticks; two died (skeleton, zombie), three tunnelled for iron. That is wall 10.
+
+### 10. Into the pool from below, the bucket still empty (race 45052846861, acd869c, lanes 6, 8, 9, 10, 11, 12)
+- **What happened**: lane 9 cut stairs toward the bank at (56, 26, -154) from tick 4,220, heard a splash at 4,400, and from 4,420 held `escape-water` to the end of the run (24,780 ticks), at (57, 24, -152 to -154), holding the empty bucket.
+- **Read** (`why --at 4500` and `--at 8000 --blocks 57,24,-152` on lane 9, probe 45057543440): the pool is a small one under stone (sources at y 25, x 54 to 57, z -154; stone over x 57). The stair cut opened (57, 24, -153) beside it; water flowed into the bot's own one-wide shaft and down its stairs. The bot stands on water with stone on every side and over the head cells, no standable dry cell in the bank search, and a source next to its eye.
+- **Cause**: the scoop and the escape do not know each other. The bot came for this water; once in it, the always-row escape cuts the scoop and swims for a bank that is not there.
+- **Fix (first half)**: in a water trap, holding an empty bucket and no water bucket, the escape first fills the bucket from the nearest remembered source the eye has a clear use on (`Scoop::from_here`, then the escape as before). Unit test `an_empty_bucket_and_no_water_is_filled`. If bots then fill and stay trapped, the escape's shaft case (dig up and out of a flooded one-wide shaft) is next.
+
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
 - Case files counted no swings: `race` wrote `swings_sent` and `swings_landed` as a literal 0. They now come from the plan, summed over every fight.
 - Each `defend` ends in a note with what it saw: swings, swings landed, the stance, steps held back, the foe's kind, the bot's health at the start and end, the foe's highest point over the eye, and the ticks a blaze foe was charging (`world::Entity::blaze_charged`: its metadata index 16, bit 0, as clojurecraft read it on 26.1.2). The next blaze wall is read from these before any fix.

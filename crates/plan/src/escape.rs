@@ -196,6 +196,23 @@ pub struct Escape {
     pub digs: u32,
     pub started: u64,
     pub yaw: f64,
+    /// A bucket being filled before the swim out (wall 10), and whether one was tried.
+    #[serde(default)]
+    pub fill: Option<Box<crate::scoop::Scoop>>,
+    #[serde(default)]
+    pub fill_tried: bool,
+}
+
+/// Afloat with an empty bucket and no water bucket: the water the bot came for is here, so it
+/// fills one before swimming out (blaze.md wall 10).
+pub fn wants_fill(w: &World) -> bool {
+    fill_wanted(&crate::held(w))
+}
+
+/// The rule over what is held: an empty bucket, and no water bucket yet.
+pub fn fill_wanted(held: &crate::make::Counts) -> bool {
+    let n = |k: data::ItemKind| held.get(&k).copied().unwrap_or(0);
+    n(data::ItemKind::Bucket) >= 1 && n(data::ItemKind::WaterBucket) == 0
 }
 
 /// The cell `c`'s distance to the feet: on the plane, plus how far it is above them.
@@ -237,6 +254,8 @@ impl Escape {
             digs: 0,
             started: tick,
             yaw: w.player.yaw.into(),
+            fill: None,
+            fill_tried: false,
         }
     }
 
@@ -346,6 +365,24 @@ impl Escape {
             return (Controls::default(), None);
         };
         let feet = feet_cell(body.pos);
+        // In the water the bot wanted: fill the bucket first, once, then swim out.
+        if self.kind == TrapKind::Water && !self.fill_tried && wants_fill(w) {
+            self.fill_tried = true;
+            self.fill = crate::scoop::Scoop::from_here(w, tick).map(Box::new);
+        }
+        if let Some(s) = &mut self.fill {
+            let (mut c, act, status) = s.step(w, tick);
+            match status {
+                crate::scoop::ScoopStatus::Running => {
+                    // Keep the head up while aiming.
+                    c.jump = body.in_water;
+                    return (c, act);
+                }
+                crate::scoop::ScoopStatus::Done | crate::scoop::ScoopStatus::Failed(_) => {
+                    self.fill = None;
+                }
+            }
+        }
         if let Some(d) = &mut self.dig {
             let (mut c, act, status) = d.step(w, tick);
             // Keep the head up while digging out of water.
@@ -466,5 +503,23 @@ impl Escape {
             },
             None,
         )
+    }
+}
+
+#[cfg(test)]
+mod fill_tests {
+    use super::*;
+
+    /// Blaze wall 10: afloat with only an empty bucket, fill it; with water held, or no bucket,
+    /// just swim out (a second empty bucket is kept for lava).
+    #[test]
+    fn an_empty_bucket_and_no_water_is_filled() {
+        let c = |v: &[(data::ItemKind, i32)]| v.iter().copied().collect::<crate::make::Counts>();
+        assert!(fill_wanted(&c(&[(data::ItemKind::Bucket, 1)])));
+        assert!(!fill_wanted(&c(&[
+            (data::ItemKind::Bucket, 1),
+            (data::ItemKind::WaterBucket, 1)
+        ])));
+        assert!(!fill_wanted(&c(&[(data::ItemKind::StonePickaxe, 1)])));
     }
 }

@@ -358,6 +358,21 @@ impl Scoop {
         Self::of(target, memory::Fluid::Water, tick)
     }
 
+    /// A water fill from where the body is, no walk: the nearest remembered source the eye has
+    /// a clear use on within `REACH`, aimed at once. For a bot afloat in the pool it came for
+    /// (blaze.md wall 10: six of twelve climbed to the pool, fell in, and swam 24,000 ticks
+    /// holding the empty bucket).
+    pub fn from_here(w: &World, tick: u64) -> Option<Self> {
+        let body = w.body?;
+        let from = eye(&body);
+        let target = sources(w)
+            .into_iter()
+            .find(|c| aim_at_use(w, from, *c, REACH).is_some())?;
+        let mut s = Self::new(target, tick);
+        s.stage = Stage::Aim { since: tick };
+        Some(s)
+    }
+
     /// A bucket filled at `target`, a source of `fluid`.
     pub fn of(target: Cell, fluid: memory::Fluid, tick: u64) -> Self {
         Self {
