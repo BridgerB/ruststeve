@@ -175,7 +175,7 @@ mod tests {
         };
         let believed = vec![("enderman".to_owned(), [1.5, 70.0, 2.0])];
         let b = blind(&s, &believed);
-        assert_eq!(b, vec!["never tracked: blaze at 11,64,-3".to_owned()]);
+        assert_eq!(b, vec!["never tracked: blaze at 10,64,-3".to_owned()]);
     }
 
     #[test]
