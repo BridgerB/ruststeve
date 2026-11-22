@@ -10,7 +10,7 @@ use protocol::{S2c, State, decode};
 fn slot() -> impl Strategy<Value = protocol::slot::Slot> {
     prop_oneof![
         Just(protocol::slot::Slot::Empty),
-        (0u32..1500, 1i32..65).prop_map(|(item, count)| protocol::slot::Slot::Item { item, count }),
+        (0u32..1500, 1i32..65).prop_map(|(item, count)| protocol::slot::Slot::item(item, count)),
     ]
 }
 

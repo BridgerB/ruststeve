@@ -5,7 +5,7 @@ type: reference
 tags: [wire, entities, metadata]
 aliases: [set-entity-data, entity data serializers, read-metadata, index 255, health index 9]
 status: verified
-lastUpdated: 2026-11-12
+lastUpdated: 2026-11-22
 verifiedAgainst: clojurecraft@be85a92 steve@46c1264
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#\"How the metadata values the bot steps over are written, by serializer id: the game's"
@@ -37,6 +37,10 @@ related:
 
 ## Limits
 The full serializer list (components, particles, block positions, variants) is not here; clojurecraft never reads past them.
+
+## Issue 16e
+- Readers for COMPONENT and OPTIONAL_COMPONENT (network NBT, kept as plain text), ROTATIONS, BLOCK_POS, OPTIONAL_BLOCK_POS, OPTIONAL_LIVING_ENTITY_REFERENCE, BLOCK_STATE, OPTIONAL_UNSIGNED_INT, VILLAGER_DATA, the varint state enums (sniffer, armadillo, copper golem, weathering copper, humanoid arm), OPTIONAL_GLOBAL_POS, VECTOR3 and QUATERNION. Still unread on purpose: PARTICLE(S), RESOLVABLE_PROFILE and the mob variants held by registry or inline, whose widths were not confirmed.
+- A stop is no longer silent: the list ends with `MetaValue::Unread(serializer)`, and coverage counts stops by serializer.
 
 ## See also
 - [[entities-and-inventory]] - ruststeve's skim (`protocol::metadata`): serializers looked up by name in the generated table, stopping at the first without a reader.

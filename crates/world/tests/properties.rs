@@ -59,8 +59,13 @@ fn login() -> Event {
 fn slots() -> impl Strategy<Value = Slot> {
     prop_oneof![
         Just(Slot::Empty),
-        (0u32..1600, -3i32..100).prop_map(|(item, count)| Slot::Item { item, count }),
-        (0u32..1600, -3i32..100).prop_map(|(item, count)| Slot::Truncated { item, count }),
+        (0u32..1600, -3i32..100).prop_map(|(item, count)| Slot::item(item, count)),
+        (0u32..1600, -3i32..100).prop_map(|(item, count)| Slot::Truncated {
+            item,
+            count,
+            wear: protocol::slot::Wear::default(),
+            stopped_at: None,
+        }),
     ]
 }
 

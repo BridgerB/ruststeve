@@ -290,10 +290,7 @@ impl Survival {
 
 fn slot_of(s: Option<Stack>) -> Slot {
     match s {
-        Some((item, count)) => Slot::Item {
-            item: item.id(),
-            count,
-        },
+        Some((item, count)) => Slot::item(item.id(), count),
         None => Slot::Empty,
     }
 }

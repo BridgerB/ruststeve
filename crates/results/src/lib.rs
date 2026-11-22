@@ -286,9 +286,15 @@ pub struct Coverage {
     /// Inventory slots whose item components could not all be read (the rest of the frame lost).
     #[serde(default)]
     pub slots_truncated: u64,
+    /// The same, by the item component that stopped the read: the next reader to add.
+    #[serde(default)]
+    pub slots_truncated_by: BTreeMap<String, u64>,
     /// Entity data cut short at a serializer the bot cannot read.
     #[serde(default)]
     pub metadata_truncated: Option<u64>,
+    /// The same, by the serializer the read stopped at.
+    #[serde(default)]
+    pub metadata_truncated_by: BTreeMap<String, u64>,
     /// Runs with each of the files a run should leave (issue 16e phases C and D).
     #[serde(default)]
     pub ledgers: Option<u64>,
@@ -327,7 +333,13 @@ impl Coverage {
             *self.unknown_by_kind.entry(k.clone()).or_default() += n;
         }
         self.slots_truncated += b.slots_truncated;
+        for (k, n) in &b.slots_truncated_by {
+            *self.slots_truncated_by.entry(k.clone()).or_default() += n;
+        }
         self.metadata_truncated = add_opt(self.metadata_truncated, b.metadata_truncated);
+        for (k, n) in &b.metadata_truncated_by {
+            *self.metadata_truncated_by.entry(k.clone()).or_default() += n;
+        }
         self.ledgers = add_opt(self.ledgers, b.ledgers);
         self.senses = add_opt(self.senses, b.senses);
         self.moments = add_opt(self.moments, b.moments);
@@ -386,7 +398,13 @@ impl Coverage {
         lines.push(zero_opt("ledger events dropped", self.ledger_dropped));
         lines.push(zero("decode errors", self.events_dropped));
         lines.push(zero("item slots cut short", self.slots_truncated));
+        for (component, n) in &self.slots_truncated_by {
+            lines.push(format!("  - at component `{component}`: {n}"));
+        }
         lines.push(zero_opt("entity data cut short", self.metadata_truncated));
+        for (serializer, n) in &self.metadata_truncated_by {
+            lines.push(format!("  - at serializer `{serializer}`: {n}"));
+        }
         // Packets thrown away, by class then count.
         let class = |k: &str| observe.map_or(observe::Class::Unclassed, |o| o.class(k));
         let mut kinds: Vec<(observe::Class, &String, u64)> = self

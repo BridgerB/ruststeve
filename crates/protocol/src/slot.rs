@@ -1,6 +1,8 @@
 //! Item stacks on the wire (brain/wire/wire-slots.md): a count, an item id, then a data-component
 //! patch. A component this layer cannot step over ends what can be read of the frame, as
-//! clojurecraft's `read-slot` does.
+//! clojurecraft's `read-slot` does; which one is kept, so coverage can name the next to read.
+//! The tool's wear (`damage`, `max_damage`) is kept, not stepped over (issue 16e: a pickaxe
+//! wearing out was invisible to the planner, blaze wall 7).
 
 use data::generated::registries::DATA_COMPONENT_TYPE;
 
@@ -11,31 +13,85 @@ use crate::bytes::Reader;
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
     Empty,
-    /// An item and how many (always at least 1).
+    /// An item and how many (always at least 1), with its wear when the server sent it.
     Item {
         item: u32,
         count: i32,
+        #[serde(default)]
+        wear: Wear,
     },
-    /// An item whose components could not all be read: the item and count are right, but the
-    /// rest of the frame is unreadable after it.
+    /// An item whose components could not all be read: the item and count are right, the wear
+    /// is what was read before `stopped_at` (the component id with no reader), and the rest of
+    /// the frame is unreadable after it.
     Truncated {
         item: u32,
         count: i32,
+        #[serde(default)]
+        wear: Wear,
+        #[serde(default)]
+        stopped_at: Option<i32>,
     },
 }
 
+/// A stack's wear as its components say: `damage` used of `max_damage` (an absent component is
+/// the item's default: no damage, the generated `item_props::max_damage`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Wear {
+    pub damage: Option<i32>,
+    pub max_damage: Option<i32>,
+}
+
 impl Slot {
+    /// An item with no components, as most stacks are.
+    pub fn item(item: u32, count: i32) -> Self {
+        Slot::Item {
+            item,
+            count,
+            wear: Wear::default(),
+        }
+    }
+
     /// The item and count, if the slot holds anything.
     pub fn stack(self) -> Option<(u32, i32)> {
         match self {
             Slot::Empty => None,
-            Slot::Item { item, count } | Slot::Truncated { item, count } => Some((item, count)),
+            Slot::Item { item, count, .. } | Slot::Truncated { item, count, .. } => {
+                Some((item, count))
+            }
+        }
+    }
+
+    /// The stack's wear, if the slot holds anything.
+    pub fn wear(self) -> Option<Wear> {
+        match self {
+            Slot::Empty => None,
+            Slot::Item { wear, .. } | Slot::Truncated { wear, .. } => Some(wear),
         }
     }
 
     pub fn truncated(self) -> bool {
         matches!(self, Slot::Truncated { .. })
     }
+
+    /// The component that cut the slot short, by name.
+    pub fn stopped_at(self) -> Option<&'static str> {
+        match self {
+            Slot::Truncated {
+                stopped_at: Some(id),
+                ..
+            } => Some(component_name(id)),
+            Slot::Truncated { .. } | Slot::Empty | Slot::Item { .. } => None,
+        }
+    }
+}
+
+/// A component id's name (`unknown` when the generated table lacks it).
+pub fn component_name(id: i32) -> &'static str {
+    usize::try_from(id)
+        .ok()
+        .and_then(|i| DATA_COMPONENT_TYPE.get(i))
+        .copied()
+        .unwrap_or("unknown")
 }
 
 /// How a data component the bot can step over is written: a varint, or nothing (a unit). These
@@ -46,10 +102,7 @@ enum Codec {
 }
 
 fn codec(component_id: i32) -> Option<Codec> {
-    let name = usize::try_from(component_id)
-        .ok()
-        .and_then(|i| DATA_COMPONENT_TYPE.get(i))?;
-    match *name {
+    match component_name(component_id) {
         "max_stack_size" | "max_damage" | "damage" | "repair_cost" => Some(Codec::VarInt),
         "unbreakable" => Some(Codec::Unit),
         _ => None,
@@ -66,33 +119,65 @@ pub fn read_slot(r: &mut Reader<'_>) -> Result<Slot, ParseError> {
     let item = r.varint()? as u32;
     let added = r.length()?;
     let removed = r.length()?;
+    let mut wear = Wear::default();
     for _ in 0..added {
-        match codec(r.varint()?) {
+        let id = r.varint()?;
+        match codec(id) {
             Some(Codec::VarInt) => {
-                r.varint()?;
+                let v = r.varint()?;
+                match component_name(id) {
+                    "damage" => wear.damage = Some(v),
+                    "max_damage" => wear.max_damage = Some(v),
+                    _ => {}
+                }
             }
             Some(Codec::Unit) => {}
-            None => return Ok(Slot::Truncated { item, count }),
+            None => {
+                return Ok(Slot::Truncated {
+                    item,
+                    count,
+                    wear,
+                    stopped_at: Some(id),
+                });
+            }
         }
     }
     for _ in 0..removed {
         r.varint()?;
     }
-    Ok(Slot::Item { item, count })
+    Ok(Slot::Item { item, count, wear })
 }
 
-/// A slot as a server writes it, for the server model: count, item, and an empty component
-/// patch (the inverse of `read_slot` for the stacks the model makes).
+/// A slot as a server writes it, for the server model: count, item, and a component patch of
+/// its wear when it has any (the inverse of `read_slot` for the stacks the model makes).
 pub fn write_slot(w: &mut crate::bytes::Writer, s: Slot) {
     match s.stack() {
         None => w.varint(0),
         Some((item, count)) => {
             w.varint(count);
             w.varint(item as i32);
+            let wear = s.wear().unwrap_or_default();
+            let added: Vec<(&str, i32)> =
+                [("damage", wear.damage), ("max_damage", wear.max_damage)]
+                    .into_iter()
+                    .filter_map(|(n, v)| Some((n, v?)))
+                    .collect();
+            w.varint(i32::try_from(added.len()).unwrap_or(0));
             w.varint(0);
-            w.varint(0);
+            for (name, v) in added {
+                w.varint(component_id(name).unwrap_or(-1));
+                w.varint(v);
+            }
         }
     }
+}
+
+/// A component's id by name, from the generated table.
+pub fn component_id(name: &str) -> Option<i32> {
+    DATA_COMPONENT_TYPE
+        .iter()
+        .position(|n| *n == name)
+        .and_then(|i| i32::try_from(i).ok())
 }
 
 /// A slot as a client writes it in a click (a "hashed" slot): present, item, count, no
@@ -117,15 +202,12 @@ mod tests {
     use crate::bytes::Writer;
 
     fn component(name: &str) -> i32 {
-        DATA_COMPONENT_TYPE
-            .iter()
-            .position(|n| *n == name)
-            .and_then(|i| i32::try_from(i).ok())
-            .unwrap()
+        component_id(name).unwrap()
     }
 
+    /// Blaze wall 7: a stone pickaxe's damage is kept, not stepped over.
     #[test]
-    fn a_worn_tool_reads_whole() {
+    fn a_worn_tool_reads_whole_and_keeps_its_wear() {
         let mut w = Writer::new();
         w.varint(1);
         w.varint(820);
@@ -139,14 +221,18 @@ mod tests {
             read_slot(&mut r),
             Ok(Slot::Item {
                 item: 820,
-                count: 1
+                count: 1,
+                wear: Wear {
+                    damage: Some(17),
+                    max_damage: None
+                },
             })
         );
         assert_eq!(r.u8(), Ok(0xAB));
     }
 
     #[test]
-    fn an_unknown_component_truncates() {
+    fn an_unknown_component_truncates_and_is_named() {
         let mut w = Writer::new();
         w.varint(3);
         w.varint(5);
@@ -154,7 +240,36 @@ mod tests {
         w.varint(0);
         w.varint(component("custom_name"));
         let mut r = Reader::new(&w.buf);
-        assert_eq!(read_slot(&mut r), Ok(Slot::Truncated { item: 5, count: 3 }));
+        let s = read_slot(&mut r).unwrap();
+        assert_eq!(
+            s,
+            Slot::Truncated {
+                item: 5,
+                count: 3,
+                wear: Wear::default(),
+                stopped_at: Some(component("custom_name")),
+            }
+        );
+        assert_eq!(s.stopped_at(), Some("custom_name"));
+    }
+
+    #[test]
+    fn a_written_worn_slot_reads_back() {
+        let s = Slot::Item {
+            item: 820,
+            count: 1,
+            wear: Wear {
+                damage: Some(40),
+                max_damage: Some(131),
+            },
+        };
+        let mut w = Writer::new();
+        write_slot(&mut w, s);
+        assert_eq!(read_slot(&mut Reader::new(&w.buf)), Ok(s));
+        let plain = Slot::item(7, 64);
+        let mut w = Writer::new();
+        write_slot(&mut w, plain);
+        assert_eq!(read_slot(&mut Reader::new(&w.buf)), Ok(plain));
     }
 
     #[test]

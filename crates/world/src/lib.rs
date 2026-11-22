@@ -20,7 +20,7 @@ use physics::{Body, Controls, Fluid, FluidKind};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::nbt::Death;
-use protocol::slot::Slot;
+use protocol::slot::{Slot, Wear};
 use protocol::{C2s, Out, S2c, Session};
 
 pub mod stage;
@@ -61,6 +61,34 @@ pub struct Entity {
     /// The bot has sent it an `attack`: its death counts as a kill.
     #[serde(default)]
     pub struck: bool,
+    /// Its UUID, from `add_entity` (truth files name mobs by it).
+    #[serde(default)]
+    pub uuid: Option<[u8; 16]>,
+    /// Its velocity as the server last set it, blocks per tick (a fireball's heading).
+    #[serde(default)]
+    pub velocity: Option<[f64; 3]>,
+    /// The newest entity-event statuses with their server tick (`ENTITY_STATUSES_KEPT`).
+    #[serde(default)]
+    pub statuses: Vec<(u64, i8)>,
+    /// The newest damage events on it: tick, damage type, and whether the bot dealt it
+    /// (`ENTITY_HURTS_KEPT`). A real server sends no hurt animation for a mob, so this is how
+    /// a swing is known to have landed (clojurecraft hear.clj).
+    #[serde(default)]
+    pub hurts: Vec<Hurt>,
+}
+
+/// Entity-event statuses kept per entity.
+pub const ENTITY_STATUSES_KEPT: usize = 4;
+/// Damage events kept per entity.
+pub const ENTITY_HURTS_KEPT: usize = 4;
+
+/// A damage event on another entity.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct Hurt {
+    pub at_tick: u64,
+    pub damage_type: String,
+    /// The bot was the cause (its swing or its arrow).
+    pub by_bot: bool,
 }
 
 impl Entity {
@@ -109,6 +137,13 @@ pub struct Inventory {
     pub carried: Option<(ItemKind, i32)>,
     /// Slots whose components could not all be read (the rest of that frame was lost).
     pub truncated: u64,
+    /// The same, by the component that stopped the read (what to read next, issue 16e).
+    #[serde(default)]
+    pub truncated_by: BTreeMap<String, u64>,
+    /// The wear of each slot whose stack carries damage or a max damage (issue 16e: a pickaxe
+    /// wearing out was invisible, blaze wall 7). A slot not here is unworn.
+    #[serde(default)]
+    pub wear: BTreeMap<i16, Wear>,
 }
 
 impl Inventory {
@@ -120,6 +155,10 @@ impl Inventory {
     fn put(&mut self, slot: i16, s: Slot) {
         if s.truncated() {
             self.truncated += 1;
+            *self
+                .truncated_by
+                .entry(s.stopped_at().unwrap_or("unknown").to_owned())
+                .or_default() += 1;
         }
         match Self::stack(s) {
             Some(stack) => {
@@ -129,6 +168,34 @@ impl Inventory {
                 self.slots.remove(&slot);
             }
         }
+        match s
+            .wear()
+            .filter(|w| w.damage.is_some() || w.max_damage.is_some())
+        {
+            Some(w) if self.slots.contains_key(&slot) => {
+                self.wear.insert(slot, w);
+            }
+            Some(_) | None => {
+                self.wear.remove(&slot);
+            }
+        }
+    }
+
+    /// Every slot emptied (a whole-window refresh).
+    fn clear(&mut self) {
+        self.slots.clear();
+        self.wear.clear();
+    }
+
+    /// Uses left on the stack in `slot`: its max damage (the component, else the item's
+    /// default) less its damage. `None` for an empty slot or an item that does not wear.
+    pub fn uses_left(&self, slot: i16) -> Option<i32> {
+        let (item, _) = self.slots.get(&slot)?;
+        let wear = self.wear.get(&slot).copied().unwrap_or_default();
+        let max = wear
+            .max_damage
+            .unwrap_or_else(|| data::generated::item_props::max_damage(*item));
+        (max > 0).then(|| max - wear.damage.unwrap_or(0))
     }
 
     /// The menu slot of a player-inventory index: 0-8 hotbar → 36-44, 9-35 main stay, 36-39
@@ -402,6 +469,9 @@ pub struct World {
     pub entities: BTreeMap<i32, Entity>,
     /// Moves and data for ids the world does not hold: counted, never invented.
     pub unknown_entity_updates: u64,
+    /// Entity-data reads cut short, by the serializer they stopped at (issue 16e).
+    #[serde(default)]
+    pub metadata_unread: BTreeMap<String, u64>,
     /// Window 0, the player's own inventory.
     pub inventory: Inventory,
     /// Sightings of watched blocks seen with an exposed face, all dimensions, never retracted.
@@ -903,6 +973,13 @@ impl World {
         }
     }
 
+    /// Counts an entity-data read that stopped early, by its serializer.
+    fn count_unread(&mut self, entries: &[(u8, MetaValue)]) {
+        if let Some(s) = protocol::metadata::unread(entries) {
+            *self.metadata_unread.entry(s.to_owned()).or_default() += 1;
+        }
+    }
+
     fn fold(&mut self, p: &S2c) {
         match p {
             S2c::Login {
@@ -942,7 +1019,12 @@ impl World {
                 }
             }
             S2c::AddEntity {
-                id, kind, x, y, z, ..
+                id,
+                uuid,
+                kind,
+                x,
+                y,
+                z,
             } => {
                 if Some(*id) != self.player.entity_id && [x, y, z].iter().all(|v| v.is_finite()) {
                     let tick = self.session.server_ticks;
@@ -956,6 +1038,10 @@ impl World {
                             last_seen: tick,
                             dead: false,
                             struck: false,
+                            uuid: Some(*uuid),
+                            velocity: None,
+                            statuses: Vec::new(),
+                            hurts: Vec::new(),
                         },
                     );
                 }
@@ -990,6 +1076,7 @@ impl World {
                 self.place_entity(*id, [*x, *y, *z], *flags)
             }
             S2c::SetEntityData { id, entries } if Some(*id) == self.player.entity_id => {
+                self.count_unread(entries);
                 for (index, value) in entries {
                     match (index, value) {
                         (1, MetaValue::Int(air)) => self.player.air = Some(*air),
@@ -999,11 +1086,16 @@ impl World {
                 }
             }
             S2c::SetEntityData { id, entries } => {
+                self.count_unread(entries);
                 let tick = self.session.server_ticks;
                 match self.entities.get_mut(id) {
                     Some(e) => {
+                        // An `Unread` entry marks where the read stopped; the value it would
+                        // replace is kept rather than lost.
                         for (index, value) in entries {
-                            e.metadata.insert(*index, value.clone());
+                            if !matches!(value, MetaValue::Unread(_)) {
+                                e.metadata.insert(*index, value.clone());
+                            }
                         }
                         e.last_seen = tick;
                     }
@@ -1038,7 +1130,7 @@ impl World {
                 } else if *window == 0 {
                     self.window_moved(0, *state_id);
                     self.inventory.state_id = *state_id;
-                    self.inventory.slots.clear();
+                    self.inventory.clear();
                     for (i, s) in slots.iter().enumerate() {
                         if let Ok(i) = i16::try_from(i) {
                             self.inventory.put(i, *s);
@@ -1151,9 +1243,20 @@ impl World {
                     && velocity.iter().all(|v| v.is_finite())
                 {
                     b.vel = *velocity;
+                } else if let Some(e) = self.entities.get_mut(id)
+                    && velocity.iter().all(|v| v.is_finite())
+                {
+                    // Any other entity's velocity is kept: a fireball's heading (issue 16e).
+                    e.velocity = Some(*velocity);
                 }
             }
             S2c::EntityEvent { id, status } => {
+                let tick = self.session.server_ticks;
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.statuses.push((tick, *status));
+                    let over = e.statuses.len().saturating_sub(ENTITY_STATUSES_KEPT);
+                    e.statuses.drain(..over);
+                }
                 if Some(*id) == self.player.entity_id {
                     if *status == 9 {
                         self.player.uses_finished += 1;
@@ -1214,6 +1317,25 @@ impl World {
                     };
                     self.hits.retain(|h| h.at_tick + HITS_KEPT_TICKS >= tick);
                     self.hits.push(hit);
+                } else {
+                    // Damage on another entity was dropped before issue 16e: it is how a swing
+                    // is known to land, and what wears a blaze down.
+                    let tick = self.session.server_ticks;
+                    let by_bot = self.player.entity_id.is_some()
+                        && (*cause == self.player.entity_id || *direct == self.player.entity_id);
+                    let damage_type = usize::try_from(*source_type)
+                        .ok()
+                        .and_then(|i| data::generated::registries::DAMAGE_TYPE.get(i))
+                        .map_or_else(|| format!("unknown:{source_type}"), |n| (*n).to_owned());
+                    if let Some(e) = self.entities.get_mut(entity_id) {
+                        e.hurts.push(Hurt {
+                            at_tick: tick,
+                            damage_type,
+                            by_bot,
+                        });
+                        let over = e.hurts.len().saturating_sub(ENTITY_HURTS_KEPT);
+                        e.hurts.drain(..over);
+                    }
                 }
             }
             S2c::SetHealth {
@@ -1289,6 +1411,10 @@ mod blaze_charge {
             last_seen: 0,
             dead: false,
             struck: false,
+            uuid: None,
+            velocity: None,
+            statuses: Vec::new(),
+            hurts: Vec::new(),
         }
     }
 
@@ -1299,5 +1425,107 @@ mod blaze_charge {
         assert!(!entity(EntityKind::Blaze, Some(0)).blaze_charged());
         assert!(!entity(EntityKind::Blaze, None).blaze_charged());
         assert!(!entity(EntityKind::Zombie, Some(1)).blaze_charged());
+    }
+}
+
+#[cfg(test)]
+mod wear_tests {
+    use super::*;
+    use protocol::slot::Wear;
+
+    fn set(w: &mut World, slot: i16, s: Slot) {
+        w.inventory.put(slot, s);
+    }
+
+    /// Blaze wall 7: the uses left on a worn stone pickaxe come from its damage component, and
+    /// an unworn one from the item's default; an item that does not wear has none.
+    #[test]
+    fn uses_left_reads_the_wear_and_the_default() {
+        let mut w = World::new();
+        let pick = ItemKind::StonePickaxe;
+        set(
+            &mut w,
+            36,
+            Slot::Item {
+                item: pick.id(),
+                count: 1,
+                wear: Wear {
+                    damage: Some(120),
+                    max_damage: None,
+                },
+            },
+        );
+        assert_eq!(w.inventory.uses_left(36), Some(11));
+        set(&mut w, 37, Slot::item(pick.id(), 1));
+        assert_eq!(w.inventory.uses_left(37), Some(131));
+        set(&mut w, 38, Slot::item(ItemKind::Cobblestone.id(), 64));
+        assert_eq!(w.inventory.uses_left(38), None);
+        // The slot emptied, its wear goes with it.
+        set(&mut w, 36, Slot::Empty);
+        assert!(!w.inventory.wear.contains_key(&36));
+        assert_eq!(w.inventory.uses_left(36), None);
+    }
+}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::*;
+
+    /// Issue 16e: a mob keeps its uuid and velocity, and damage on it is kept with whether the
+    /// bot dealt it (before, damage on anything but the bot was dropped).
+    #[test]
+    fn a_mob_keeps_its_uuid_velocity_and_the_damage_on_it() {
+        let mut w = World::new();
+        w.player.entity_id = Some(1);
+        w.fold(&S2c::AddEntity {
+            id: 7,
+            uuid: [9; 16],
+            kind: EntityKind::Blaze.id(),
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+        });
+        w.fold(&S2c::SetEntityMotion {
+            id: 7,
+            velocity: [0.1, 0.0, -0.2],
+        });
+        w.fold(&S2c::DamageEvent {
+            entity_id: 7,
+            source_type: 0,
+            cause: Some(1),
+            direct: Some(1),
+        });
+        w.fold(&S2c::EntityEvent { id: 7, status: 2 });
+        let e = &w.entities[&7];
+        assert_eq!(e.uuid, Some([9; 16]));
+        assert_eq!(e.velocity, Some([0.1, 0.0, -0.2]));
+        assert_eq!(e.hurts.len(), 1);
+        assert!(e.hurts[0].by_bot);
+        assert_eq!(e.statuses, vec![(0, 2)]);
+    }
+
+    /// An entity-data read that stopped early is counted by serializer, and the value it would
+    /// have replaced is kept.
+    #[test]
+    fn a_cut_short_entity_data_read_is_counted_and_keeps_the_old_value() {
+        let mut w = World::new();
+        w.fold(&S2c::AddEntity {
+            id: 7,
+            uuid: [0; 16],
+            kind: EntityKind::Blaze.id(),
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+        });
+        w.fold(&S2c::SetEntityData {
+            id: 7,
+            entries: vec![(9, MetaValue::Float(20.0))],
+        });
+        w.fold(&S2c::SetEntityData {
+            id: 7,
+            entries: vec![(9, MetaValue::Unread("PARTICLE".to_owned()))],
+        });
+        assert_eq!(w.entities[&7].health(), Some(20.0));
+        assert_eq!(w.metadata_unread.get("PARTICLE"), Some(&1));
     }
 }

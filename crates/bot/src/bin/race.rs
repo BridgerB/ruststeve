@@ -329,6 +329,13 @@ fn race(a: &Args) -> Result<bool, String> {
                 .or_default() += n;
         }
         coverage.slots_truncated += w.inventory.truncated;
+        for (k, n) in &w.inventory.truncated_by {
+            *coverage.slots_truncated_by.entry(k.clone()).or_default() += n;
+        }
+        *coverage.metadata_truncated.get_or_insert(0) += w.metadata_unread.values().sum::<u64>();
+        for (k, n) in &w.metadata_unread {
+            *coverage.metadata_truncated_by.entry(k.clone()).or_default() += n;
+        }
         let recording = format!("{name}.rsr");
         if outcome.recorded {
             coverage.recordings += 1;

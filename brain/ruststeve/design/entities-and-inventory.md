@@ -5,8 +5,8 @@ type: reference
 tags: [world, entities, metadata, inventory, slots]
 aliases: [kills, struck, air, on fire, uses_finished, Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@8a59f07 clojurecraft@be85a92
+lastUpdated: 2026-11-22
+verifiedAgainst: ruststeve@1e438d8 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -54,6 +54,11 @@ related:
 ## Limits
 - A live session so far ran with an empty inventory (a fresh player); inventory folding is shown by the tests.
 - Other windows (tables, furnaces) are later issues; the model's side of digging, drops and window 0 is issue 10b.
+
+## Issue 16e: what the world keeps that it used to drop
+- **Wear**: `Inventory.wear` holds each slot's `damage`/`max_damage` from its components, and `Inventory::uses_left(slot)` is max damage (the component, else `item_props::max_damage`) less damage; `None` for an item that does not wear. A pickaxe wearing out was invisible to the planner before (blaze wall 7). `Inventory.truncated_by` counts slots cut short by the component that stopped them.
+- **Entities** keep their `uuid`, the `velocity` the server last set (a fireball's heading), the newest 4 entity-event `statuses`, and the newest 4 damage events on them (`hurts`: type, and whether the bot dealt it). A real server sends no hurt animation for a mob, so a damage event naming the bot is how a swing is known to land.
+- **Entity data cut short** ends the packet's entries with `MetaValue::Unread(serializer)`; the world counts it in `metadata_unread` and keeps the value the entry would have replaced.
 
 ## See also
 - [[world-value]] - the world these live in.

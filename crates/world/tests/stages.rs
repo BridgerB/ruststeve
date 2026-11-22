@@ -32,10 +32,7 @@ fn teleport() -> Event {
 fn give(slot: i32, item: ItemKind, count: i32) -> Event {
     Event::Packet(S2c::SetPlayerInventory {
         slot,
-        item: Slot::Item {
-            item: item.id(),
-            count,
-        },
+        item: Slot::item(item.id(), count),
     })
 }
 
