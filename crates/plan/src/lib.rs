@@ -2210,12 +2210,18 @@ impl Plan {
         )
     }
 
-    /// Stairs up toward a log seen well over the feet with no walk to it: a bot in a cave with
-    /// the trees 40 blocks up explored level for three hours (blaze.md wall 6). A log within 3
-    /// blocks of the feet keeps the old way (refused, explore): a ledge or water, not a roof.
+    /// Stairs up toward a log seen well over the feet with no walk to it, from under a rock
+    /// roof: a bot in a cave with the trees 40 blocks up explored level for three hours
+    /// (blaze.md wall 6). Under the open sky (a tall tree up a hill) the old way stands.
     fn stairs_to_log(&mut self, w: &World, log: Cell, tick: u64) -> Option<Task> {
-        let (_, fy, _) = path::feet_cell(w.body?.pos);
-        if log.1 <= fy + 3 {
+        let (fx, fy, fz) = path::feet_cell(w.body?.pos);
+        // The first block over the head that is not air: its underside faces the bot's air, so
+        // it is seen (no X-ray). Leaves and logs are a tree, not a roof.
+        let roof = ((fy + 2)..log.1)
+            .map(|y| w.block_at(world::BlockPos::new(fx, y, fz)))
+            .find(|k| !matches!(k, Some(data::BlockKind::Air | data::BlockKind::CaveAir)))
+            .flatten();
+        if !climb_to_log(fy, log.1, roof) {
             return None;
         }
         self.dig_toward(
@@ -3183,6 +3189,19 @@ pub const SEARCH_HEIGHT: i32 = 12;
 /// Exposed blocks found before the search stops (clojurecraft routes the nearest 3).
 pub const EXPOSED_WANTED: usize = 8;
 
+/// Whether a log at height `log_y` with no walk to it is worth stairs up from feet at `feet_y`:
+/// more than 3 over the feet (nearer is a ledge or a bank, explored round), with `roof`, the
+/// first block over the head, rock rather than open sky or a tree (blaze.md wall 6).
+fn climb_to_log(feet_y: i32, log_y: i32, roof: Option<data::BlockKind>) -> bool {
+    let tree = |k: data::BlockKind| {
+        ["leaves", "logs"]
+            .iter()
+            .filter_map(|t| block_tag(t))
+            .any(|ks| ks.contains(&k))
+    };
+    log_y > feet_y + 3 && roof.is_some_and(|k| !tree(k))
+}
+
 /// Blocks of the kinds within `SEARCH_RADIUS` (and `SEARCH_HEIGHT` up or down) that show a face
 /// to the air, nearest first: read from the loaded terrain (stone is most of the world; only what
 /// is exposed now is worth a route), never a block with no open face (no X-ray).
@@ -3306,23 +3325,26 @@ mod bank_tests {
         w
     }
 
-    /// Blaze wall 6: a log 40 blocks over a cave bot's feet is reached by stairs up.
+    /// Blaze wall 6: a log 40 blocks over a cave bot's feet, stone over its head, is climbed to.
     #[test]
-    fn a_log_far_over_the_feet_takes_stairs_up() {
-        let mut p = Plan::new(Aim::Race);
-        let t = p.stairs_to_log(&at(26.0), (5, 68, -6), 0);
-        assert!(
-            matches!(&t, Some(Task::Stairs(s)) if s.up),
-            "no stairs up toward a log far above: {t:?}"
-        );
+    fn a_log_far_over_a_roofed_bot_is_climbed_to() {
+        assert!(climb_to_log(26, 68, Some(data::BlockKind::Stone)));
     }
 
-    /// A log within 3 blocks of the feet keeps the old way: refused, then explore.
+    /// Under the open sky or a tree (a tall tree up a hill), or a log near the feet: no stairs.
     #[test]
-    fn a_log_at_the_feet_is_not_dug_toward() {
+    fn open_sky_a_tree_or_a_near_log_is_not_climbed_to() {
+        assert!(!climb_to_log(72, 84, None));
+        assert!(!climb_to_log(72, 84, Some(data::BlockKind::OakLeaves)));
+        assert!(!climb_to_log(64, 66, Some(data::BlockKind::Stone)));
+    }
+
+    /// With no terrain loaded there is no roof to see: the old way stands.
+    #[test]
+    fn no_terrain_no_stairs_to_a_log() {
         let mut p = Plan::new(Aim::Race);
-        let t = p.stairs_to_log(&at(64.0), (5, 66, -6), 0);
-        assert!(t.is_none(), "dug toward a log near the feet: {t:?}");
+        let t = p.stairs_to_log(&at(26.0), (5, 68, -6), 0);
+        assert!(t.is_none(), "stairs toward a log with no roof seen: {t:?}");
     }
 
     /// Blaze wall 5: a source 20 blocks over the feet is reached by stairs up, not refused.

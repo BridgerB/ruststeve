@@ -56,4 +56,4 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 - [[digging]] - the dig each cell is.
 
 ## Issue 16: stairs up toward what was seen
-- `Plan::dig_toward` cuts `Stairs::up` toward a target more than a block over the feet, three digs without coming nearer refusing it. Two callers send a bot underground up to what it saw: the scoop's bank over the feet (`stairs_to_bank`, blaze wall 5) and a log more than 3 blocks over the feet with no walk (`stairs_to_log`, blaze wall 6: a cave bot with the trees 40 blocks up explored level for three hours).
+- `Plan::dig_toward` cuts `Stairs::up` toward a target more than a block over the feet, three digs without coming nearer refusing it. Two callers send a bot underground up to what it saw: the scoop's bank over the feet (`stairs_to_bank`, blaze wall 5) and a log more than 3 blocks over the feet with no walk, under a rock roof (`stairs_to_log`, blaze wall 6: a cave bot with the trees 40 blocks up explored level for three hours).
