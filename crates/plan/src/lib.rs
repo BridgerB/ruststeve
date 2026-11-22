@@ -2382,14 +2382,7 @@ impl Plan {
     /// roof: a bot in a cave with the trees 40 blocks up explored level for three hours
     /// (blaze.md wall 6). Under the open sky (a tall tree up a hill) the old way stands.
     fn stairs_to_log(&mut self, w: &World, log: Cell, tick: u64) -> Option<Task> {
-        let (fx, fy, fz) = path::feet_cell(w.body?.pos);
-        // The first block over the head that is not air: its underside faces the bot's air, so
-        // it is seen (no X-ray). Leaves and logs are a tree, not a roof.
-        let roof = ((fy + 2)..log.1)
-            .map(|y| w.block_at(world::BlockPos::new(fx, y, fz)))
-            .find(|k| !matches!(k, Some(data::BlockKind::Air | data::BlockKind::CaveAir)))
-            .flatten();
-        if !climb_to_log(fy, log.1, roof) {
+        if !roofed_below(w, log.1) {
             return None;
         }
         self.dig_toward(
@@ -2515,6 +2508,15 @@ impl Plan {
             .take(CANDIDATES_PER_TICK)
             .collect();
         for c in pools {
+            // From under rock, a pool well over the feet is cut to by stairs up to its bank
+            // before any walk: four of seven geared cave bots (race 45046883124) walked at the
+            // same three pools 20 to 57 blocks up 96 to 174 times each, every walk failing
+            // NoPath, and never dug (blaze.md wall 9). Three stalls refuse the bank as before.
+            if roofed_below(w, c.1 + 1)
+                && let Some(t) = self.stairs_to_bank(w, c, tick)
+            {
+                return t;
+            }
             let mut walk = Walk::new(
                 c,
                 Goal::Near {
@@ -3360,6 +3362,21 @@ pub const EXPOSED_WANTED: usize = 8;
 /// Whether a log at height `log_y` with no walk to it is worth stairs up from feet at `feet_y`:
 /// more than 3 over the feet (nearer is a ledge or a bank, explored round), with `roof`, the
 /// first block over the head, rock rather than open sky or a tree (blaze.md wall 6).
+/// The bot stands under rock with `top_y` more than 3 over its feet: the first block over the
+/// head that is not air (its underside faces the bot's air, so it is seen: no X-ray) is not a
+/// tree. Then a log or a pool up there is cut to by stairs, not walked at (blaze walls 6 and 9).
+fn roofed_below(w: &World, top_y: i32) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let (fx, fy, fz) = path::feet_cell(body.pos);
+    let roof = ((fy + 2)..top_y)
+        .map(|y| w.block_at(world::BlockPos::new(fx, y, fz)))
+        .find(|k| !matches!(k, Some(data::BlockKind::Air | data::BlockKind::CaveAir)))
+        .flatten();
+    climb_to_log(fy, top_y, roof)
+}
+
 fn climb_to_log(feet_y: i32, log_y: i32, roof: Option<data::BlockKind>) -> bool {
     let tree = |k: data::BlockKind| {
         ["leaves", "logs"]
@@ -3587,6 +3604,15 @@ mod bank_tests {
         let mut p = Plan::new(Aim::Race);
         let t = p.stairs_to_log(&at(26.0), (5, 68, -6), 0);
         assert!(t.is_none(), "stairs toward a log with no roof seen: {t:?}");
+    }
+
+    /// Blaze wall 9: the pool's bank 22 over a cave bot at y 4, stone overhead, is climbed to;
+    /// with no terrain seen there is no roof, so the far pool is walked at as before.
+    #[test]
+    fn a_far_pool_over_a_roofed_bot_is_climbed_to() {
+        assert!(climb_to_log(4, 26, Some(data::BlockKind::Stone)));
+        assert!(!climb_to_log(4, 26, None));
+        assert!(!roofed_below(&at(4.0), 26));
     }
 
     /// Blaze wall 5: a source 20 blocks over the feet is reached by stairs up, not refused.

@@ -5,8 +5,8 @@ type: reference
 tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
-lastUpdated: 2026-11-21
-verifiedAgainst: ruststeve@a7f4a64 clojurecraft@be85a92
+lastUpdated: 2026-11-22
+verifiedAgainst: ruststeve@41dd59b clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -56,4 +56,4 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 - [[digging]] - the dig each cell is.
 
 ## Issue 16: stairs up toward what was seen
-- `Plan::dig_toward` cuts `Stairs::up` toward a target more than a block over the feet, three digs without coming nearer refusing it. Two callers send a bot underground up to what it saw: the scoop's bank over the feet (`stairs_to_bank`, blaze wall 5) and a log more than 3 blocks over the feet with no walk, under a rock roof (`stairs_to_log`, blaze wall 6: a cave bot with the trees 40 blocks up explored level for three hours).
+- `Plan::dig_toward` cuts `Stairs::up` toward a target more than a block over the feet, three digs without coming nearer refusing it. Two callers send a bot underground up to what it saw: the scoop's bank over the feet (`stairs_to_bank`, blaze wall 5) and a log more than 3 blocks over the feet with no walk, under a rock roof (`stairs_to_log`, blaze wall 6: a cave bot with the trees 40 blocks up explored level for three hours). A third: a far pool (24 to 96 blocks) more than 3 over the feet, from under rock, gets stairs up to its bank before any walk (`roofed_below`, blaze wall 9: cave bots walked at the same three pools over a hundred times each, every walk NoPath).
