@@ -88,3 +88,40 @@ fn a_creeper_fusing_is_a_sign_and_in_the_senses_row() {
     assert!(row.hostiles[0].signs.fuse);
     assert_eq!(row.task, "stairs");
 }
+
+/// Issue 16 (blaze rods): a fireball's closest pass is kept while it flies and told when it is
+/// gone (clojurecraft's 24 of 212 that hit all passed within 1.4 blocks).
+#[test]
+fn a_fireballs_closest_pass_is_told_when_it_goes() {
+    let mut w = World::new();
+    w.player.pos = Some([0.0, 0.0, 0.0]);
+    let at = |w: &mut World, x: f64| {
+        w.step(&Event::Packet(S2c::AddEntity {
+            id: 5,
+            uuid: [0; 16],
+            kind: EntityKind::SmallFireball.id(),
+            x,
+            y: 0.0,
+            z: 0.0,
+        }));
+    };
+    at(&mut w, 6.0);
+    let mut a = snapshot(&w);
+    at(&mut w, 1.2);
+    let mut b = snapshot(&w);
+    diff(&a, &mut b, &w);
+    a = b;
+    at(&mut w, 4.0);
+    let mut c = snapshot(&w);
+    diff(&a, &mut c, &w);
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![5] }));
+    let mut d = snapshot(&w);
+    let facts: Vec<Fact> = diff(&c, &mut d, &w).into_iter().map(|s| s.fact).collect();
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::Shot { kind: EntityKind::SmallFireball, closest } if (*closest - 1.2).abs() < 1e-9
+        )),
+        "{facts:?}"
+    );
+}

@@ -63,6 +63,27 @@ pub struct Seen {
     pub announced: bool,
 }
 
+/// A projectile near the bot: its kind and the closest it has come.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Flying {
+    pub kind: EntityKind,
+    pub closest: f64,
+}
+
+/// Projectiles watched (blocks): clojurecraft's senses list those within 16.
+pub const PROJECTILE_WATCH: f64 = 16.0;
+
+fn projectile(kind: EntityKind) -> bool {
+    matches!(
+        kind,
+        EntityKind::SmallFireball
+            | EntityKind::Fireball
+            | EntityKind::Arrow
+            | EntityKind::WitherSkull
+            | EntityKind::DragonFireball
+    )
+}
+
 /// The parts of the world the ledger compares from tick to tick: cheap to take every tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -83,6 +104,13 @@ pub struct Snapshot {
     pub effects: Vec<String>,
     /// How many hits, sounds, level events and chat lines the world had taken in (their lists
     /// are capped, so the newest past these are new).
+    /// Projectiles within `PROJECTILE_WATCH`, by id, with the closest each came (carried from
+    /// tick to tick by `diff`).
+    #[serde(default)]
+    pub projectiles: BTreeMap<i32, Flying>,
+    /// Blows the bot landed on each watched mob (damage events it dealt).
+    #[serde(default)]
+    pub landed: BTreeMap<i32, usize>,
     pub hits: usize,
     pub sounds: usize,
     pub level_events: usize,
@@ -154,6 +182,17 @@ pub enum Fact {
         d: f64,
     },
     Gone {
+        id: i32,
+        kind: EntityKind,
+    },
+    /// A projectile near the bot is gone: its kind and the closest it came (the 24 of 212
+    /// blaze fireballs that hit clojurecraft's bots all passed within 1.4 blocks).
+    Shot {
+        kind: EntityKind,
+        closest: f64,
+    },
+    /// The bot's blow landed on a mob (a damage event it dealt).
+    Landed {
         id: i32,
         kind: EntityKind,
     },
@@ -251,6 +290,28 @@ pub fn snapshot(w: &World) -> Snapshot {
             })
         })
         .collect();
+    let projectiles = w
+        .entities
+        .iter()
+        .filter(|(_, e)| projectile(e.kind))
+        .filter_map(|(id, e)| {
+            let d = dist(e.pos, bot);
+            (d <= PROJECTILE_WATCH).then_some((
+                *id,
+                Flying {
+                    kind: e.kind,
+                    closest: d,
+                },
+            ))
+        })
+        .collect();
+    let landed = w
+        .entities
+        .iter()
+        .filter(|(_, e)| hostile(e.kind))
+        .map(|(id, e)| (*id, e.hurts.iter().filter(|h| h.by_bot).count()))
+        .filter(|(_, n)| *n > 0)
+        .collect();
     Snapshot {
         at,
         health: w.player.health,
@@ -264,6 +325,8 @@ pub fn snapshot(w: &World) -> Snapshot {
         tools,
         mobs,
         effects: w.player.effects.keys().cloned().collect(),
+        projectiles,
+        landed,
         hits: w.hits.len(),
         sounds: w.sounds.len(),
         level_events: w.level_events.len(),
@@ -469,6 +532,30 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
             });
         }
     }
+    for (id, f) in &mut next.projectiles {
+        if let Some(p) = prev.projectiles.get(id) {
+            f.closest = f.closest.min(p.closest);
+        }
+    }
+    for (id, p) in &prev.projectiles {
+        if !next.projectiles.contains_key(id) {
+            out.push(Fact::Shot {
+                kind: p.kind,
+                closest: p.closest,
+            });
+        }
+    }
+    for (id, n) in &next.landed {
+        let was = prev.landed.get(id).copied().unwrap_or(0);
+        if *n > was
+            && let Some(m) = w.entities.get(id)
+        {
+            out.push(Fact::Landed {
+                id: *id,
+                kind: m.kind,
+            });
+        }
+    }
     out.into_iter().map(|fact| Stamped { at, fact }).collect()
 }
 
@@ -627,6 +714,8 @@ impl Fact {
                 sign,
                 d,
             } => format!("{}#{id} {sign} at {d:.0}", kind(k)),
+            Fact::Shot { kind: k, closest } => format!("{} passed within {closest:.1}", kind(k)),
+            Fact::Landed { id, kind: k } => format!("blow landed on {}#{id}", kind(k)),
         }
     }
 }
