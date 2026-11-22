@@ -99,7 +99,8 @@ mod tests {
                 mode: 0
             })
         );
-        w.inventory.slots.remove(&34);
+        // No bucket anywhere and no empty slot: nothing to reach.
+        w.inventory.slots.insert(34, (ItemKind::Cobblestone, 64));
         assert_eq!(toward(&w, ItemKind::Bucket), Hold::Missing);
     }
 }
