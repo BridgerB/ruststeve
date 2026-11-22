@@ -384,6 +384,27 @@ fn race(a: &Args) -> Result<bool, String> {
                 connects: c.connects,
             }),
         };
+        // The ledger (issue 16e): every task with its reason and outcome, beside the case.
+        let ledger = results::Ledger {
+            format_version: FORMAT_VERSION,
+            run: a.run.clone(),
+            bot: name.clone(),
+            commit: record::COMMIT.to_owned(),
+            tasks: outcome.ledger.clone(),
+            dropped: 0,
+        };
+        match results::write(&a.out.join(format!("{name}.ledger.rsl")), &ledger) {
+            Ok(()) => {
+                *coverage.ledgers.get_or_insert(0) += 1;
+                *coverage.ledger_dropped.get_or_insert(0) += ledger.dropped;
+            }
+            Err(e) => eprintln!("race: {name}: the ledger: {e}"),
+        }
+        if let Some(p) = &outcome.plan {
+            *coverage.tasks_started.get_or_insert(0) += p.task_counts.started;
+            *coverage.tasks_with_reason.get_or_insert(0) += p.task_counts.with_reason;
+            *coverage.tasks_ended.get_or_insert(0) += p.task_counts.ended;
+        }
         let row = write_case(&a.out, &case, &mut coverage)?;
         rows.push(row);
     }

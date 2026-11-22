@@ -18,6 +18,7 @@ pub mod eat;
 pub mod escape;
 pub mod hold;
 pub mod hunt;
+pub mod ledger;
 pub mod make;
 pub mod path;
 pub mod place;
@@ -383,6 +384,8 @@ impl Task {
     }
 }
 
+pub use ledger::{Open, TaskCounts, TaskRecord};
+
 /// What happened, with why: the planner's decisions as data (brain/ruststeve/design/brain-events.md).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlanEvent {
@@ -462,6 +465,16 @@ pub struct Plan {
     pub ignored_foes: Vec<(i32, u64)>,
     /// Events ever made (`events` keeps the last few): the shell records the new ones.
     pub event_count: u64,
+    /// The task ledger (issue 16e): the serial `begin` gives each task, the one open, the records
+    /// not yet taken by the shell, and the counts coverage reads.
+    #[serde(default)]
+    pub task_serial: u64,
+    #[serde(default)]
+    pub open: Option<Open>,
+    #[serde(skip)]
+    pub records: Vec<TaskRecord>,
+    #[serde(default)]
+    pub task_counts: TaskCounts,
     /// The goal table (issue 10), for a goal aim.
     #[serde(skip)]
     pub table: Option<Arc<make::Table>>,
@@ -554,6 +567,10 @@ impl Plan {
             portal: None,
             ignored_foes: Vec::new(),
             event_count: 0,
+            task_serial: 0,
+            open: None,
+            records: Vec::new(),
+            task_counts: TaskCounts::default(),
             table: None,
             met: false,
             digs: 0,
@@ -629,8 +646,91 @@ impl Plan {
             .map_or_else(|| "no task yet".to_owned(), |e| e.why.clone())
     }
 
-    /// One tick: the controls to press. The world is read, never changed.
+    /// One tick: the controls to press. The world is read, never changed. Every task begun or
+    /// dropped in the tick goes into the task ledger (issue 16e).
     pub fn step(&mut self, w: &World) -> Controls {
+        let notes_before = self.event_count;
+        let c = self.step_inner(w);
+        self.track(w.session.server_ticks, notes_before);
+        c
+    }
+
+    /// The task records made since the last call, oldest first: the shell writes them.
+    pub fn take_records(&mut self) -> Vec<TaskRecord> {
+        std::mem::take(&mut self.records)
+    }
+
+    /// Ends the open task with the run (the ledger then holds an end for every start).
+    pub fn close(&mut self, at: u64, why: &str) {
+        if let Some(o) = self.open.take() {
+            self.task_counts.ended += 1;
+            self.records.push(TaskRecord::Ended {
+                id: o.id,
+                at,
+                task: o.task,
+                ticks: at.saturating_sub(o.at),
+                outcome: Some("the run ended".to_owned()),
+                why: Some(why.to_owned()),
+            });
+        }
+    }
+
+    /// Sets a task the planner has chosen, numbering it for the ledger. `Idle` is no task.
+    fn begin(&mut self, task: Task) {
+        if !matches!(task, Task::Idle) {
+            self.task_serial += 1;
+        }
+        self.task = task;
+    }
+
+    /// Closes the open task if it was dropped or replaced this tick, and opens the one begun. The
+    /// notes made this tick give the outcome (the one before a start, when both happened) and
+    /// the reason (the last).
+    fn track(&mut self, at: u64, notes_before: u64) {
+        let made = usize::try_from(self.event_count.saturating_sub(notes_before)).unwrap_or(0);
+        let notes: Vec<PlanEvent> = self.events.iter().rev().take(made).rev().cloned().collect();
+        let idle = matches!(self.task, Task::Idle);
+        let begun = !idle && self.open.as_ref().is_none_or(|o| o.id != self.task_serial);
+        let ended = self.open.is_some() && (idle || begun);
+        if ended && let Some(o) = self.open.take() {
+            let note = if begun {
+                notes.len().checked_sub(2).and_then(|i| notes.get(i))
+            } else {
+                notes.last()
+            };
+            self.task_counts.ended += 1;
+            self.records.push(TaskRecord::Ended {
+                id: o.id,
+                at,
+                task: o.task,
+                ticks: at.saturating_sub(o.at),
+                outcome: note.map(|n| n.what.clone()),
+                why: note.map(|n| n.why.clone()),
+            });
+        }
+        if begun {
+            let note = notes.last();
+            let name = self.task.name().to_owned();
+            self.task_counts.started += 1;
+            if note.is_some() {
+                self.task_counts.with_reason += 1;
+            }
+            self.records.push(TaskRecord::Started {
+                id: self.task_serial,
+                at,
+                task: name.clone(),
+                what: note.map(|n| n.what.clone()),
+                why: note.map(|n| n.why.clone()),
+            });
+            self.open = Some(Open {
+                id: self.task_serial,
+                task: name,
+                at,
+            });
+        }
+    }
+
+    fn step_inner(&mut self, w: &World) -> Controls {
         let tick = w.ticks;
         let Some(body) = w.body else {
             return Controls::default();
@@ -691,7 +791,7 @@ impl Plan {
             if tick < self.retry_at {
                 return Controls::default();
             }
-            self.task = match self.aim {
+            let chosen = match self.aim {
                 Aim::ReachLog { .. } => self.choose(w, origin, tick),
                 Aim::Table
                 | Aim::Pickaxe
@@ -711,6 +811,7 @@ impl Plan {
                 Aim::Nether | Aim::Race => self.nether_task(w, origin, tick),
                 Aim::Hold => Task::Idle,
             };
+            self.begin(chosen);
         }
         let (controls, status) = match &mut self.task {
             Task::Idle => (Controls::default(), TaskStatus::Running),
@@ -825,7 +926,7 @@ impl Plan {
                             format!("dig {:?}", walk.target),
                             "beside the block the needs planner gathers or mines".to_owned(),
                         );
-                        self.task = Task::Dig(Dig::new(w, walk.target, tick));
+                        self.begin(Task::Dig(Dig::new(w, walk.target, tick)));
                     }
                     Task::ToLog(walk) => {
                         self.reached = Some(walk.target);
@@ -1064,7 +1165,7 @@ impl Plan {
                 self.always_retry_at = tick + RETRY_TICKS;
                 return None;
             };
-            self.task = task;
+            self.begin(task);
         }
         let (c, act, ended) = match &mut self.task {
             Task::Escape(e) => {

@@ -129,6 +129,8 @@ pub struct Outcome {
     pub plan_tick_us: Vec<u64>,
     /// The planner's notes for the case file.
     pub plan_notes: Notes,
+    /// Every task the planner started and ended, with its reason and outcome (issue 16e).
+    pub ledger: Vec<plan::TaskRecord>,
 }
 
 /// Notes kept from a run's start, and from its end: a case file read in one screen. A race of
@@ -444,6 +446,8 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut plan_seen: u64 = 0;
     let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut plan_notes = Notes::default();
+    // The task ledger, every record of the run, unsampled (issue 16e).
+    let mut ledger: Vec<plan::TaskRecord> = Vec::new();
     let mut last_controls: Option<physics::Controls> = None;
     let mut doing = if let Some(a) = aim {
         Doing {
@@ -635,6 +639,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     }
                 }
                 plan_seen = p.event_count;
+                ledger.extend(p.take_records());
                 if Some(c) != last_controls {
                     last_controls = Some(c);
                     if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
@@ -755,6 +760,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         "bot {name}: ended {ending:?} after {} server ticks, stage {:?}, {} events",
         run.world.session.server_ticks, run.world.stage_reached, stats.events
     );
+    // The task still running ends with the run, so every start has an end in the ledger.
+    if let Some(p) = planner.as_mut() {
+        p.close(run.world.session.server_ticks, &format!("{ending:?}"));
+        ledger.extend(p.take_records());
+    }
     // The signature names what the planner was doing at the end, as a kind (no cells or counts),
     // not the aim it started with: every run of a race had the same signature (issue 16e).
     if let Some(e) = planner.as_ref().and_then(|p| p.events.last()) {
@@ -783,6 +793,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         plan: planner,
         plan_tick_us,
         plan_notes,
+        ledger,
     })
 }
 

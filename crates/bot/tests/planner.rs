@@ -109,3 +109,39 @@ fn aims_parse_and_name_back() {
     }
     assert_eq!(Aim::parse("tree"), None);
 }
+
+/// Issue 16e: the task ledger over a real-terrain run. Every task started has a reason (the note
+/// made as it was chosen) and a distinct id, and once the run closes, every start has exactly one
+/// end, after it.
+#[test]
+fn every_task_has_a_reason_and_one_end() {
+    let mut p = Plan::new(Aim::ReachLog { min_distance: 30.0 });
+    let mut records = Vec::new();
+    let run = bot::lockstep::run(Sim::new(CONFIG, plains()), "rs-l", 1, 3000, 20, |w, _| {
+        let c = p.step(w);
+        records.extend(p.take_records());
+        c
+    });
+    p.close(run.world.session.server_ticks, "the test ended");
+    records.extend(p.take_records());
+    let counts = p.task_counts;
+    assert!(counts.started > 0, "no task started");
+    assert_eq!(counts.with_reason, counts.started, "a task with no reason");
+    assert_eq!(counts.ended, counts.started, "a task never ended");
+    let mut open = std::collections::BTreeMap::new();
+    for r in &records {
+        match r {
+            plan::TaskRecord::Started { id, at, why, .. } => {
+                assert!(why.is_some(), "task {id} has no reason");
+                assert!(open.insert(*id, *at).is_none(), "task {id} started twice");
+            }
+            plan::TaskRecord::Ended { id, at, .. } => {
+                let start = open
+                    .remove(id)
+                    .unwrap_or_else(|| panic!("task {id} ended unstarted"));
+                assert!(*at >= start, "task {id} ended before it began");
+            }
+        }
+    }
+    assert!(open.is_empty(), "tasks never ended: {open:?}");
+}

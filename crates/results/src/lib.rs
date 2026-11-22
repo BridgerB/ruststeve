@@ -477,6 +477,20 @@ pub struct Batch {
     pub coverage: Coverage,
 }
 
+/// A run's ledger (issue 16e): every task the planner started and ended, unsampled, with its
+/// reason and outcome. Written beside the case as `<bot>.ledger.rsl`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Ledger {
+    pub format_version: u32,
+    pub run: String,
+    pub bot: String,
+    pub commit: String,
+    pub tasks: Vec<plan::TaskRecord>,
+    /// Records the bot could not keep (must be 0).
+    #[serde(default)]
+    pub dropped: u64,
+}
+
 /// What a file holds, so one reader opens either.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ResultFile {
