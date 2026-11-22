@@ -45,11 +45,12 @@ Do these in order before writing any code, every session, and again after any co
 clojurecraft lost four weeks on its pearl stage, and most of its mistakes are just as easy in Rust (`brain/oracle/handoff/cc-stage18-lessons.md`). Before any behaviour fix:
 
 1. **Throughput first.** How many attempts did the stuck stage get on this commit? Every attempt starts at the frontier snapshot, one bot a lane, 15 lanes at once (the marathon holds the 16th runner); more attempts before a cleverer bot.
-2. **Coverage.** Every ended run must have a case file; under 1.0 is a blind spot fixed first.
-3. **Read the evidence yourself.** Rank the case signatures; read three case files of the top one; then replay the recording **at its own commit** and run `why` at the failing moment. A reason code is where a run ended, never why. A cause is a hypothesis until one bot's log lines confirm it.
-4. **Name the structural cause** in `docs/problems/`, then fix it. Prefer structure (a progress invariant, a held target, a kept reserve) over a threshold.
-5. **Judge the fix** on tens of paired runs (same worlds, same seeds), count the new code path's firings, and confirm a passing stage did not drop.
-6. **Sim numbers count only after the parity table** says sim and real agree (`brain/ruststeve/decisions/measurement-rules.md`). The real race is the metric.
+2. **Coverage is the gate** (`brain/ruststeve/decisions/observe-first.md`, issue 16e). The race summary prints the coverage row first: every run's case, recording, ledger, senses, moments and server truth; tasks with a reason and an end; ledger drops; slots and entity data cut short; packets the stages need thrown away (`config/observe.toml`). Any `!!` is a blind spot fixed before any behaviour PR.
+3. **Read the evidence yourself, from the files.** Rank the signatures (the summary names three bots to read for each); read their case files: the story (stages, each tool worn or broken with the task running, when the bot starved, went without a pickaxe, burned, the longest tasks, server truth's blind lines) and the last two minutes. Then the bot's `.ledger.txt` (every task with its reason and outcome, every fact: hits, items, tools, sounds, mobs' signs) and `.senses.txt` (a row every 10 s). MCP `race_summary` and `race_read` read them without running code; `replay ledger <rsr> --force` re-reads any recording, old ones included, with today's decoders. A probe with `why` is for what the files cannot answer. A reason code is where a run ended, never why. A cause is a hypothesis until one bot's ledger lines confirm it.
+4. **While a race runs**, read the release's `progress-lane-N.txt` (updated every 10 minutes); a bot with no progress for 20 game minutes ends `no-progress` with its case instead of sitting to the cap.
+5. **Name the structural cause** in `docs/problems/`, then fix it. Prefer structure (a progress invariant, a held target, a kept reserve) over a threshold.
+6. **Judge the fix** on tens of paired runs (same worlds, same seeds), count the new code path's firings in the ledger, and confirm a passing stage did not drop.
+7. **Sim numbers count only after the parity table** says sim and real agree (`brain/ruststeve/decisions/measurement-rules.md`). The real race is the metric.
 
 Use SurrealDB (the `ingest` binary's insight store) for questions across many runs; use the recording and `why` for one run.
 
