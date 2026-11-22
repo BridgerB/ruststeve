@@ -201,6 +201,48 @@ pub struct Escape {
     pub fill: Option<Box<crate::scoop::Scoop>>,
     #[serde(default)]
     pub fill_tried: bool,
+    /// Seals sent over the head against water pouring down a shaft (wall 11), and the last one.
+    #[serde(default)]
+    pub seals: u32,
+    #[serde(default)]
+    pub sealed_at: u64,
+}
+
+/// Seals tried before the escape goes on without one.
+pub const MAX_SEALS: u32 = 6;
+/// Ticks between two seals: the block update arrives in a tick or two.
+pub const SEAL_EVERY_TICKS: u64 = 10;
+/// Blocks a seal is made of, the commonest first: what a digging bot carries.
+const SEAL_BLOCKS: &[data::ItemKind] = &[
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+    data::ItemKind::Dirt,
+    data::ItemKind::Andesite,
+    data::ItemKind::Granite,
+    data::ItemKind::Diorite,
+    data::ItemKind::Netherrack,
+];
+
+/// Water over the cell, or past it on the far side from the bot (`away`, a unit step): digging
+/// it lets more in (wall 11). The bot's own wet cells on the near side do not count.
+fn holds_back_water(w: &World, (x, y, z): Cell, (ax, ay, az): Cell) -> bool {
+    is_water(w, (x, y + 1, z)) || is_water(w, (x + ax, y + ay, z + az))
+}
+
+/// A full block beside `target` to click, and the face of it that looks at `target` (faces as
+/// the protocol numbers them: 0 down, 1 up, 2 north, 3 south, 4 west, 5 east). Never the cell
+/// under `target`: that is the head.
+pub fn against(target: Cell, full_at: impl Fn(Cell) -> bool) -> Option<(Cell, i8)> {
+    let (x, y, z) = target;
+    [
+        ((x, y + 1, z), 0),
+        ((x + 1, y, z), 4),
+        ((x - 1, y, z), 5),
+        ((x, y, z + 1), 2),
+        ((x, y, z - 1), 3),
+    ]
+    .into_iter()
+    .find(|(c, _)| full_at(*c))
 }
 
 /// Afloat with an empty bucket and no water bucket: the water the bot came for is here, so it
@@ -256,6 +298,8 @@ impl Escape {
             yaw: w.player.yaw.into(),
             fill: None,
             fill_tried: false,
+            seals: 0,
+            sealed_at: 0,
         }
     }
 
@@ -349,14 +393,20 @@ impl Escape {
     fn in_the_way(&self, w: &World, body: &physics::Body, target: Cell) -> Option<Cell> {
         let (x, y, z) = feet_cell(body.pos);
         let lid = (x, y + 2, z);
-        if body.eye_in_water && full(kind_at(w, lid)) {
+        // Never a block with water on it: a stair cut into an aquifer pours down the shaft, and
+        // digging the lid let more in until the bot drowned (blaze.md wall 11: 4 of 12).
+        if body.eye_in_water && full(kind_at(w, lid)) && !holds_back_water(w, lid, (0, 1, 0)) {
             return Some(lid);
         }
         let dx = (target.0 - x).signum();
         let dz = (target.2 - z).signum();
         [(x + dx, target.1 + 1, z + dz), (x + dx, y + 1, z + dz)]
             .into_iter()
-            .find(|c| full(kind_at(w, *c)) && *c != (target.0, target.1 - 1, target.2))
+            .find(|c| {
+                full(kind_at(w, *c))
+                    && *c != (target.0, target.1 - 1, target.2)
+                    && !holds_back_water(w, *c, (dx, 0, dz))
+            })
     }
 
     /// One tick: the controls and the act to send.
@@ -381,6 +431,39 @@ impl Escape {
                 crate::scoop::ScoopStatus::Done | crate::scoop::ScoopStatus::Failed(_) => {
                     self.fill = None;
                 }
+            }
+        }
+        // Water pouring down onto the head (a stair cut into an aquifer): put a held block into
+        // the cell over the head, so the shaft drains instead of filling (blaze.md wall 11).
+        let over = (feet.0, feet.1 + 2, feet.2);
+        if self.kind == TrapKind::Water
+            && body.eye_in_water
+            && is_water(w, over)
+            && self.seals < MAX_SEALS
+            && tick.saturating_sub(self.sealed_at) >= SEAL_EVERY_TICKS
+            && let Some(item) = SEAL_BLOCKS
+                .iter()
+                .copied()
+                .find(|k| crate::held(w).get(k).copied().unwrap_or(0) > 0)
+            && let Some((click, face)) = against(over, |c| full(kind_at(w, c)))
+        {
+            // Still: a jump lifts the body into the cell sealed, and the server refuses it.
+            let up = Controls::default();
+            match crate::hold::toward(w, item) {
+                crate::hold::Hold::Held => {
+                    self.seals += 1;
+                    self.sealed_at = tick;
+                    return (
+                        up,
+                        Some(Act::UseOn {
+                            pos: BlockPos::new(click.0, click.1, click.2),
+                            face,
+                        }),
+                    );
+                }
+                crate::hold::Hold::Act(a) => return (up, Some(a)),
+                crate::hold::Hold::Wait => return (up, None),
+                crate::hold::Hold::Missing => {}
             }
         }
         if let Some(d) = &mut self.dig {
@@ -521,5 +604,25 @@ mod fill_tests {
             (data::ItemKind::WaterBucket, 1)
         ])));
         assert!(!fill_wanted(&c(&[(data::ItemKind::StonePickaxe, 1)])));
+    }
+
+    /// Blaze wall 11: water over the head in a shaft is sealed by clicking the stone over it
+    /// (its down face), else a wall beside it on the face that looks at it; never the head below.
+    #[test]
+    fn a_seal_clicks_the_stone_round_the_cell_over_the_head() {
+        let over = (57, 26, -152);
+        assert_eq!(
+            against(over, |c| c == (57, 27, -152)),
+            Some(((57, 27, -152), 0))
+        );
+        assert_eq!(
+            against(over, |c| c == (58, 26, -152)),
+            Some(((58, 26, -152), 4))
+        );
+        assert_eq!(
+            against(over, |c| c == (57, 26, -153)),
+            Some(((57, 26, -153), 3))
+        );
+        assert_eq!(against(over, |c| c == (57, 25, -152)), None);
     }
 }
