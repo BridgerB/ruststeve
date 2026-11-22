@@ -488,3 +488,19 @@ why = "light changes: the plan reads no light yet; spawnable cells come with iss
 [[skipped]]
 packet = "play/block_event"
 why = "chests opening, pistons, note blocks: nothing the stages need"
+
+[[skipped]]
+packet = "play/debug/block_value"
+why = "debug-renderer values, sent only to a subscribed developer client"
+
+[[skipped]]
+packet = "play/debug/chunk_value"
+why = "debug-renderer values, sent only to a subscribed developer client"
+
+[[skipped]]
+packet = "play/debug/entity_value"
+why = "debug-renderer values, sent only to a subscribed developer client"
+
+[[skipped]]
+packet = "play/debug/event"
+why = "debug-renderer events, sent only to a subscribed developer client"
