@@ -63,7 +63,10 @@ fn value_after<'a>(s: &'a str, key: &str) -> Option<&'a str> {
 }
 
 fn number(v: &str) -> Option<f64> {
-    v.trim_end_matches(['d', 'f', 's', 'b', 'L']).parse().ok()
+    v.trim()
+        .trim_end_matches(['d', 'f', 's', 'b', 'L'])
+        .parse()
+        .ok()
 }
 
 /// One entity's SNBT as `data get entity` prints it.
