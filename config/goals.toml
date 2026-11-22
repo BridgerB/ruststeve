@@ -306,6 +306,14 @@ starving_radius = 48.0
 defend_radius = 4.0
 # Never fight at or under this health: two zombie hits on Normal (3 each) and a margin of 2.
 danger_health = 8.0
+# A tool with fewer uses left is worn and no spare (clojurecraft window/spare-uses: a tunnel's twelve
+# level steps dig about thirty). Blaze wall 7: a stone pickaxe with 13 uses counted as the spare.
+spare_uses = 40
+# Digs held (pickaxes' uses left, and 131 for each stone pickaxe the held wood and stone make) under
+# this and the bot goes for wood from anywhere, while it can still dig its way to the trees
+# (clojurecraft pearls.edn travel-reserve-digs: a stone pickaxe's uses). Blaze wall 7: every bot of
+# race 45000585321 mined on underground until both pickaxes broke, 40 blocks of stone from a log.
+travel_reserve_digs = 131
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
 # Wither skeletons too (Bridger, 2026-11-20): 8 a hit and the wither effect killed 5 of 7 bots at the
 # fortress (race 44789031743); backed away from, never fought.

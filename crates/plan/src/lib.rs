@@ -475,6 +475,9 @@ pub struct Plan {
     pub records: Vec<TaskRecord>,
     #[serde(default)]
     pub task_counts: TaskCounts,
+    /// The "low on digs" note was made (once a run).
+    #[serde(default)]
+    pub low_digs_noted: bool,
     /// The goal table (issue 10), for a goal aim.
     #[serde(skip)]
     pub table: Option<Arc<make::Table>>,
@@ -571,6 +574,7 @@ impl Plan {
             open: None,
             records: Vec::new(),
             task_counts: TaskCounts::default(),
+            low_digs_noted: false,
             table: None,
             met: false,
             digs: 0,
@@ -672,6 +676,24 @@ impl Plan {
                 outcome: Some("the run ended".to_owned()),
                 why: Some(why.to_owned()),
             });
+        }
+    }
+
+    /// The held tools' wear for the needs planner: the worn tools (fewer than `spare_uses` left)
+    /// and whether the digs held are under the travel reserve (blaze wall 7).
+    fn wear(&self, w: &World, rules: &make::SurvivalRules, table_near: bool) -> make::Wear {
+        let mut worn = make::Counts::new();
+        for (slot, (k, _)) in &w.inventory.slots {
+            if *slot >= 1
+                && let Some(u) = w.inventory.uses_left(*slot)
+                && u < rules.spare_uses
+            {
+                *worn.entry(*k).or_default() += 1;
+            }
+        }
+        make::Wear {
+            worn,
+            low_on_digs: dig_budget(w, table_near) < rules.travel_reserve_digs,
         }
     }
 
@@ -1923,7 +1945,20 @@ impl Plan {
         {
             *counts.entry(data::ItemKind::Bucket).or_default() += n;
         }
-        let choice = make::make_with(&table, &counts, &near, gather_now, goal);
+        let wear = self.wear(w, &table.survival, table_near);
+        if wear.low_on_digs && !self.low_digs_noted {
+            self.low_digs_noted = true;
+            self.note(
+                tick,
+                "low on digs".to_owned(),
+                format!(
+                    "{} digs held, under the travel reserve {}: a spare's gather is worth it from anywhere",
+                    dig_budget(w, table_near),
+                    table.survival.travel_reserve_digs
+                ),
+            );
+        }
+        let choice = make::make_with_wear(&table, &counts, &near, gather_now, &wear, goal);
         if matches!(choice, make::Choice::Act(_))
             && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
         {
@@ -3351,6 +3386,58 @@ pub fn exposed_near(w: &World, kinds: &[data::BlockKind]) -> Vec<Cell> {
     }
     found.sort();
     found.into_iter().map(|(_, c)| c).collect()
+}
+
+/// A stone pickaxe's uses: what each pickaxe the held wood and stone make adds to the budget.
+const STONE_PICKAXE_USES: i32 = 131;
+
+/// Sticks the held wood makes: a stick each, two a plank, eight a log or stem (clojurecraft's
+/// `pupkeep/wood-sticks`).
+fn wood_sticks(w: &World) -> i32 {
+    let tag = |t: &str| data::generated::tags::item_tag(t).unwrap_or(&[]);
+    let (planks, logs) = (tag("planks"), tag("logs"));
+    held(w)
+        .iter()
+        .map(|(k, n)| {
+            if *k == data::ItemKind::Stick {
+                *n
+            } else if planks.contains(k) {
+                2 * n
+            } else if logs.contains(k) {
+                8 * n
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
+/// The digs held: every pickaxe's uses left, and a stone pickaxe's for each one the held wood
+/// (two sticks) and stone (three) make, when a table is held or near (clojurecraft's
+/// `picks/dig-budget`; blaze wall 7).
+pub fn dig_budget(w: &World, table_near: bool) -> i32 {
+    let picks = data::generated::tags::item_tag("pickaxes").unwrap_or(&[]);
+    let held_uses: i32 = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(slot, (k, _))| **slot >= 1 && picks.contains(k))
+        .filter_map(|(slot, _)| w.inventory.uses_left(*slot))
+        .sum();
+    let c = held(w);
+    let table = table_near || c.get(&data::ItemKind::CraftingTable).copied().unwrap_or(0) > 0;
+    let stone_kinds = data::generated::tags::item_tag("stone_tool_materials").unwrap_or(&[]);
+    let stone: i32 = c
+        .iter()
+        .filter(|(k, _)| stone_kinds.contains(k))
+        .map(|(_, n)| *n)
+        .sum();
+    let makeable = if table {
+        (wood_sticks(w) / 2).min(stone / 3)
+    } else {
+        0
+    };
+    held_uses + makeable * STONE_PICKAXE_USES
 }
 
 /// What the player holds, by item: window 0's slots from 1 (the grid, armour, inventory,

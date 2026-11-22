@@ -233,6 +233,13 @@ pub struct Survival {
     /// ... and within this when starving: food at or under `starving_below`.
     pub starving_below: i32,
     pub starving_radius: f64,
+    /// A tool with fewer uses left is worn: no spare (clojurecraft's `window/spare-uses`).
+    #[serde(default = "spare_uses")]
+    pub spare_uses: i32,
+    /// Digs held under this (pickaxes' uses left, and those the held wood and stone make) and a
+    /// spare that needs a gather is worth it from anywhere (clojurecraft's `travel-reserve-digs`).
+    #[serde(default = "travel_reserve_digs")]
+    pub travel_reserve_digs: i32,
     /// A hostile mob this near is answered (`defend`, issue 12d) ...
     #[serde(default = "defend_radius")]
     pub defend_radius: f64,
@@ -284,6 +291,14 @@ fn danger_health() -> f32 {
     8.0
 }
 
+fn spare_uses() -> i32 {
+    40
+}
+
+fn travel_reserve_digs() -> i32 {
+    131
+}
+
 impl Default for Survival {
     fn default() -> Self {
         Self {
@@ -294,6 +309,8 @@ impl Default for Survival {
             starving_below: 6,
             starving_radius: 48.0,
             defend_radius: defend_radius(),
+            spare_uses: spare_uses(),
+            travel_reserve_digs: travel_reserve_digs(),
             danger_health: danger_health(),
             never_fight: Vec::new(),
             ranged: Vec::new(),
@@ -329,6 +346,8 @@ pub struct SurvivalRules {
     pub starving_radius: f64,
     pub defend_radius: f64,
     pub danger_health: f32,
+    pub spare_uses: i32,
+    pub travel_reserve_digs: i32,
     pub never_fight: Vec<data::EntityKind>,
     pub ranged: Vec<data::EntityKind>,
     /// Fought only after one of their kind hits the bot (`defend::provoked`).
@@ -582,6 +601,8 @@ impl Table {
                 starving_radius: g.survival.starving_radius,
                 defend_radius: g.survival.defend_radius,
                 danger_health: g.survival.danger_health,
+                spare_uses: g.survival.spare_uses,
+                travel_reserve_digs: g.survival.travel_reserve_digs,
                 never_fight,
                 ranged,
                 neutral,
@@ -633,6 +654,12 @@ struct Planner<'a> {
     /// Whether a gather can be started now (a log with a way to it): the world, read by the
     /// shell; a spare is made by a gather only then (clojurecraft's `spare-worth?`).
     gather_now: bool,
+    /// Worn tools held (fewer than `spare_uses` uses left): no spare, so a spare is counted
+    /// without them (clojurecraft's `without-worn`; blaze wall 7).
+    worn: Counts,
+    /// Digs held are under the travel reserve: a spare's gather is worth it from anywhere, while
+    /// the bot can still dig to the trees (clojurecraft's `tunnel-budget?`; blaze wall 7).
+    low_on_digs: bool,
 }
 
 /// What fuel burns, in the order the smelt burns it: the `coals` tag then the `planks` tag,
@@ -738,10 +765,11 @@ impl<'a> Planner<'a> {
                 .iter()
                 .find(|(h, _)| h.key == k.key)
                 .map_or(0, |(_, m)| *m);
-            if let (_, Some(Ok(r))) = self.resolve_need(counts.clone(), k, n + held, path) {
+            let unworn = without(&counts, &self.worn);
+            if let (_, Some(Ok(r))) = self.resolve_need(unworn, k, n + held, path) {
                 let worth = match r.act {
                     Some(Act::Mine { .. } | Act::Scoop) => false,
-                    Some(Act::Gather) => self.gather_now,
+                    Some(Act::Gather) => self.gather_now || self.low_on_digs,
                     Some(Act::Place(_) | Act::Craft(_) | Act::Smelt(_) | Act::Redig(_)) | None => {
                         true
                     }
@@ -899,10 +927,44 @@ pub fn make_with<'a>(
     gather_now: bool,
     goal: &'a Row,
 ) -> Choice<'a> {
+    make_with_wear(table, counts, near, gather_now, &Wear::default(), goal)
+}
+
+/// What the held tools have left, for the needs planner (blaze wall 7).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Wear {
+    /// Tools held with fewer than `spare_uses` uses left, by item.
+    pub worn: Counts,
+    /// The digs held are under `travel_reserve_digs`.
+    pub low_on_digs: bool,
+}
+
+/// `counts` less the worn tools: what a spare is counted from.
+pub fn without(counts: &Counts, worn: &Counts) -> Counts {
+    let mut c = counts.clone();
+    for (k, n) in worn {
+        if let Some(v) = c.get_mut(k) {
+            *v = (*v - n).max(0);
+        }
+    }
+    c
+}
+
+/// `make_with`, knowing the held tools' wear.
+pub fn make_with_wear<'a>(
+    table: &'a Table,
+    counts: &Counts,
+    near: &'a dyn Fn(data::BlockKind) -> bool,
+    gather_now: bool,
+    wear: &Wear,
+    goal: &'a Row,
+) -> Choice<'a> {
     let p = Planner {
         table,
         near,
         gather_now,
+        worn: wear.worn.clone(),
+        low_on_digs: wear.low_on_digs,
     };
     let mut c = counts.clone();
     for (k, n) in goal.provides.iter().chain(&goal.needs) {
