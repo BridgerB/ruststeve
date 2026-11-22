@@ -757,17 +757,29 @@ pub fn render_summary(
             100.0 * ratio(*k, *n)
         ));
     }
-    let mut endings: BTreeMap<[String; 4], u64> = BTreeMap::new();
-    for row in batches.iter().flat_map(|b| &b.rows) {
-        *endings.entry(row.signature.clone()).or_default() += 1;
+    // Endings ranked, each with the first three bots to read (AGENTS.md section 4: three case
+    // files of the top signature, issue 16e).
+    let mut endings: BTreeMap<[String; 4], (u64, Vec<String>)> = BTreeMap::new();
+    for (b, row) in batches
+        .iter()
+        .flat_map(|b| b.rows.iter().map(move |r| (b, r)))
+    {
+        let e = endings.entry(row.signature.clone()).or_default();
+        e.0 += 1;
+        if e.1.len() < 3 {
+            e.1.push(format!("lane {} {}", b.lane, row.bot));
+        }
     }
     let mut ranked: Vec<_> = endings.into_iter().collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ranked.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
     lines.push(String::new());
-    lines.push("| runs | ending | killer | doing | why |".to_owned());
-    lines.push("|---|---|---|---|---|".to_owned());
-    for ([ending, killer, doing, why], n) in ranked {
-        lines.push(format!("| {n} | {ending} | {killer} | {doing} | {why} |"));
+    lines.push("| runs | ending | killer | doing | why | read first |".to_owned());
+    lines.push("|---|---|---|---|---|---|".to_owned());
+    for ([ending, killer, doing, why], (n, bots)) in ranked {
+        lines.push(format!(
+            "| {n} | {ending} | {killer} | {doing} | {why} | {} |",
+            bots.join(", ")
+        ));
     }
     lines.join("\n") + "\n"
 }

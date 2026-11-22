@@ -412,6 +412,10 @@ fn race(a: &Args) -> Result<bool, String> {
             dropped: 0,
             facts: outcome.facts.clone(),
         };
+        // The same as text, to read without running anything (`results ledger` prints it too).
+        if let Err(e) = std::fs::write(a.out.join(format!("{name}.ledger.txt")), ledger.render()) {
+            eprintln!("race: {name}: the ledger text: {e}");
+        }
         match results::write(&a.out.join(format!("{name}.ledger.rsl")), &ledger) {
             Ok(()) => {
                 *coverage.ledgers.get_or_insert(0) += 1;
@@ -425,6 +429,10 @@ fn race(a: &Args) -> Result<bool, String> {
             bot: name.clone(),
             rows: outcome.senses.clone(),
         };
+        if let Err(e) = std::fs::write(a.out.join(format!("{name}.senses.txt")), senses.render(10))
+        {
+            eprintln!("race: {name}: the senses text: {e}");
+        }
         match results::write(&a.out.join(format!("{name}.senses.rss")), &senses) {
             Ok(()) => *coverage.senses.get_or_insert(0) += 1,
             Err(e) => eprintln!("race: {name}: the senses: {e}"),
