@@ -17,6 +17,9 @@ use world::World;
 
 /// How far a mob is watched for the ledger (blocks): clojurecraft's ledger notes each within 32.
 pub const WATCH: f64 = 32.0;
+/// A watched mob is gone only past `WATCH` and this margin, so one at the edge does not flicker
+/// in and out (a bat at 32 blocks filled the first re-read ledger, issue 16e).
+pub const WATCH_MARGIN: f64 = 4.0;
 /// Hostiles in a senses row, nearest first (clojurecraft's six).
 pub const HOSTILES: usize = 6;
 /// A sound or level event within this is in the ledger; farther, only the loud kinds.
@@ -54,6 +57,10 @@ pub struct Seen {
     pub kind: EntityKind,
     pub d: f64,
     pub signs: Signs,
+    /// It has come within `WATCH` since it was first seen (its appearance is in the ledger); it
+    /// stays so until it leaves `WATCH` and the margin.
+    #[serde(default)]
+    pub announced: bool,
 }
 
 /// The parts of the world the ledger compares from tick to tick: cheap to take every tick.
@@ -71,7 +78,7 @@ pub struct Snapshot {
     pub items: BTreeMap<String, i32>,
     /// Each slot's wearing item: its name and uses left.
     pub tools: BTreeMap<i16, (String, i32)>,
-    /// Mobs within `WATCH`, by entity id.
+    /// Monsters within `WATCH` and its margin, by entity id.
     pub mobs: BTreeMap<i32, Seen>,
     pub effects: Vec<String>,
     /// How many hits, sounds, level events and chat lines the world had taken in (their lists
@@ -228,16 +235,17 @@ pub fn snapshot(w: &World) -> Snapshot {
     let mobs = w
         .entities
         .iter()
-        .filter(|(_, e)| !e.dead && mob(e.kind).is_some())
+        .filter(|(_, e)| !e.dead && hostile(e.kind))
         .filter_map(|(id, e)| {
             let d = dist(e.pos, bot);
-            (d <= WATCH).then(|| {
+            (d <= WATCH + WATCH_MARGIN).then(|| {
                 (
                     *id,
                     Seen {
                         kind: e.kind,
                         d,
                         signs: signs(e, bot),
+                        announced: d <= WATCH,
                     },
                 )
             })
@@ -274,7 +282,7 @@ fn loud(name: &str) -> bool {
 }
 
 /// The facts between two snapshots of the same run, `w` being the world at `next`.
-pub fn diff(prev: &Snapshot, next: &Snapshot, w: &World) -> Vec<Stamped> {
+pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
     let at = next.at;
     let mut out: Vec<Fact> = Vec::new();
     let bot = feet(w).unwrap_or([0.0; 3]);
@@ -424,13 +432,16 @@ pub fn diff(prev: &Snapshot, next: &Snapshot, w: &World) -> Vec<Stamped> {
             text: c.text.clone(),
         });
     }
-    for (id, m) in &next.mobs {
-        match prev.mobs.get(id) {
-            None => out.push(Fact::Appear {
+    for (id, m) in &mut next.mobs {
+        let before = prev.mobs.get(id).filter(|p| p.announced);
+        m.announced = before.is_some() || m.d <= WATCH;
+        match before {
+            None if m.announced => out.push(Fact::Appear {
                 id: *id,
                 kind: m.kind,
                 d: m.d,
             }),
+            None => {}
             Some(p) => {
                 for (sign, now, was) in [
                     ("fuse", m.signs.fuse, p.signs.fuse),
@@ -451,7 +462,7 @@ pub fn diff(prev: &Snapshot, next: &Snapshot, w: &World) -> Vec<Stamped> {
         }
     }
     for (id, m) in &prev.mobs {
-        if !next.mobs.contains_key(id) {
+        if m.announced && !next.mobs.contains_key(id) {
             out.push(Fact::Gone {
                 id: *id,
                 kind: m.kind,

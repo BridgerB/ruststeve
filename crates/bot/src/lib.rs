@@ -705,8 +705,8 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 break Ending::Error { why: e };
             }
             world_ticks += 1;
-            let snap = observe::snapshot(&run.world);
-            let new_facts = observe::diff(&last_snap, &snap, &run.world);
+            let mut snap = observe::snapshot(&run.world);
+            let new_facts = observe::diff(&last_snap, &mut snap, &run.world);
             last_snap = snap;
             let now_tick = run.world.session.server_ticks;
             let gained = new_facts.iter().any(|f| {

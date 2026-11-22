@@ -66,8 +66,8 @@ fn run() -> Result<(), String> {
                 let tick = matches!(e, EventRecord::Tick { .. });
                 folder.step(&e)?;
                 if tick {
-                    let snap = observe::snapshot(&folder.world);
-                    for f in observe::diff(&last, &snap, &folder.world) {
+                    let mut snap = observe::snapshot(&folder.world);
+                    for f in observe::diff(&last, &mut snap, &folder.world) {
                         if f.at >= from && f.at <= to {
                             println!("{:>8} {}", f.at, f.fact.line());
                         }

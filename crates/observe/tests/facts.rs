@@ -30,8 +30,8 @@ fn a_pickaxe_wearing_out_and_breaking_is_in_the_ledger() {
     put(&mut w, 0, worn(ItemKind::StonePickaxe, 60));
     let a = snapshot(&w);
     put(&mut w, 0, worn(ItemKind::StonePickaxe, 70));
-    let b = snapshot(&w);
-    let facts: Vec<Fact> = diff(&a, &b, &w).into_iter().map(|s| s.fact).collect();
+    let mut b = snapshot(&w);
+    let facts: Vec<Fact> = diff(&a, &mut b, &w).into_iter().map(|s| s.fact).collect();
     assert!(
         facts.iter().any(
             |f| matches!(f, Fact::ToolWorn { item, uses_left: 61 } if item == "stone_pickaxe")
@@ -41,8 +41,8 @@ fn a_pickaxe_wearing_out_and_breaking_is_in_the_ledger() {
     put(&mut w, 0, worn(ItemKind::StonePickaxe, 129));
     let c = snapshot(&w);
     put(&mut w, 0, Slot::Empty);
-    let d = snapshot(&w);
-    let facts: Vec<Fact> = diff(&c, &d, &w).into_iter().map(|s| s.fact).collect();
+    let mut d = snapshot(&w);
+    let facts: Vec<Fact> = diff(&c, &mut d, &w).into_iter().map(|s| s.fact).collect();
     assert!(
         facts
             .iter()
@@ -75,8 +75,8 @@ fn a_creeper_fusing_is_a_sign_and_in_the_senses_row() {
         id: 9,
         entries: vec![(16, MetaValue::Int(1))],
     }));
-    let b = snapshot(&w);
-    let facts: Vec<Fact> = diff(&a, &b, &w).into_iter().map(|s| s.fact).collect();
+    let mut b = snapshot(&w);
+    let facts: Vec<Fact> = diff(&a, &mut b, &w).into_iter().map(|s| s.fact).collect();
     assert!(
         facts.iter().any(
             |f| matches!(f, Fact::Sign { sign, kind: EntityKind::Creeper, .. } if sign == "fuse")
