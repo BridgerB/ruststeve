@@ -85,6 +85,12 @@ pub struct Opts {
     /// Told each time the run reaches a stage higher than any it held, with the world then (the
     /// race takes a snapshot of the first bot to reach each stage).
     pub on_stage: Option<std::sync::mpsc::Sender<StageUp>>,
+    /// End the run `NoProgress` after this many server ticks with no stage, no item gained and
+    /// no new place (issue 16e); `None` never does.
+    pub no_progress_ticks: Option<u64>,
+    /// A file rewritten every `PROGRESS_EVERY_TICKS` with where the run stands, for a look while
+    /// the race runs (issue 16e).
+    pub progress: Option<PathBuf>,
 }
 
 /// A run reaching a new stage, for the race's snapshot.
@@ -110,6 +116,11 @@ pub struct Stats {
 
 /// Ticks between senses rows: one a second (clojurecraft's senses line).
 pub const SENSES_EVERY_TICKS: u64 = 20;
+/// Ticks between progress files: ten minutes.
+pub const PROGRESS_EVERY_TICKS: u64 = 12_000;
+/// A place is a 16-block cube: entering one not seen before is progress.
+pub const REGION_SHIFT: i32 = 4;
+
 /// Ticks between moments: one a minute.
 pub const MOMENT_EVERY_TICKS: u64 = 1200;
 /// Moments kept: the last five minutes, then the end.
@@ -386,6 +397,8 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         revive,
         memory,
         on_stage,
+        no_progress_ticks,
+        progress,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -474,6 +487,10 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut senses_rows: Vec<observe::Senses> = Vec::new();
     let mut moments: std::collections::VecDeque<Moment> = std::collections::VecDeque::new();
     let mut last_snap = observe::snapshot(&run.world);
+    // Progress (issue 16e): the server tick of the last stage, item gained or new place.
+    let mut last_progress: Option<u64> = None;
+    let mut regions: std::collections::BTreeSet<(i32, i32, i32)> =
+        std::collections::BTreeSet::new();
     let mut last_controls: Option<physics::Controls> = None;
     let mut doing = if let Some(a) = aim {
         Doing {
@@ -689,8 +706,60 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             }
             world_ticks += 1;
             let snap = observe::snapshot(&run.world);
-            facts.extend(observe::diff(&last_snap, &snap, &run.world));
+            let new_facts = observe::diff(&last_snap, &snap, &run.world);
             last_snap = snap;
+            let now_tick = run.world.session.server_ticks;
+            let gained = new_facts.iter().any(|f| {
+                matches!(f.fact, observe::Fact::Stage { .. })
+                    || matches!(f.fact, observe::Fact::Item { from, to, .. } if to > from)
+            });
+            let place = run.world.body.map(|b| {
+                (
+                    (b.pos[0].floor() as i32) >> REGION_SHIFT,
+                    (b.pos[1].floor() as i32) >> REGION_SHIFT,
+                    (b.pos[2].floor() as i32) >> REGION_SHIFT,
+                )
+            });
+            let new_place = place.is_some_and(|p| regions.insert(p));
+            if gained || new_place || last_progress.is_none() {
+                last_progress = Some(now_tick);
+            }
+            facts.extend(new_facts);
+            if let (Some(n), Some(since)) = (no_progress_ticks, last_progress)
+                && run.world.body.is_some()
+                && now_tick.saturating_sub(since) >= n
+            {
+                let task = planner
+                    .as_ref()
+                    .map_or("none", |p| p.task.name())
+                    .to_owned();
+                break Ending::NoProgress {
+                    for_ticks: now_tick.saturating_sub(since),
+                    task,
+                };
+            }
+            if let Some(path) = &progress
+                && world_ticks.is_multiple_of(PROGRESS_EVERY_TICKS)
+            {
+                let (task, why) = planner
+                    .as_ref()
+                    .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
+                let r = observe::senses(&run.world, task, &why, plan_tick_us.last().copied());
+                let line = format!(
+                    "{name}\ttick {now_tick}\tstage {}\thp {}\tfood {}\theld {} ({} uses)\ttask {task} ({why})\tno progress for {} ticks\n",
+                    run.world.stage_reached.map_or("none", world::Stage::name),
+                    r.health
+                        .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
+                    r.food.map_or_else(|| "-".to_owned(), |f| f.to_string()),
+                    r.held.as_deref().unwrap_or("nothing"),
+                    r.held_uses
+                        .map_or_else(|| "-".to_owned(), |u| u.to_string()),
+                    last_progress.map_or(0, |s| now_tick.saturating_sub(s)),
+                );
+                if let Err(e) = std::fs::write(path, line) {
+                    eprintln!("bot {name}: progress: {e}");
+                }
+            }
             if world_ticks.is_multiple_of(SENSES_EVERY_TICKS) {
                 let (task, why) = planner
                     .as_ref()

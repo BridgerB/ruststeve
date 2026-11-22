@@ -50,6 +50,9 @@ pub enum Ending {
     Error { why: String },
     /// The job's end stopped it: not counted in n (brain/ruststeve/design/race-and-results.md).
     Cut,
+    /// No progress (no stage, no item gained, no new place) for `for_ticks`: the bot was ended
+    /// with its case rather than left to the cap (issue 16e). Counted: a stuck run is a result.
+    NoProgress { for_ticks: u64, task: String },
 }
 
 impl Ending {
@@ -62,6 +65,7 @@ impl Ending {
             Ending::Lost { .. } => "lost",
             Ending::Error { .. } => "error",
             Ending::Cut => "cut",
+            Ending::NoProgress { .. } => "no-progress",
         }
     }
 
@@ -164,6 +168,7 @@ impl Case {
             Ending::Death { killer } => killer.clone(),
             Ending::Kicked { reason } => reason.clone(),
             Ending::Lost { why } | Ending::Error { why } => why.clone(),
+            Ending::NoProgress { task, .. } => task.clone(),
             Ending::Cap | Ending::Cut => String::new(),
         };
         [

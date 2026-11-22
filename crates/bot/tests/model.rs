@@ -43,6 +43,8 @@ fn the_bot_joins_the_model_and_walks() {
         revive: false,
         memory: None,
         on_stage: None,
+        no_progress_ticks: None,
+        progress: None,
     })
     .unwrap();
     let w = &out.world;

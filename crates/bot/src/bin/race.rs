@@ -284,6 +284,8 @@ fn race(a: &Args) -> Result<bool, String> {
             revive: a.revive,
             memory: memory.clone(),
             on_stage: Some(tx.clone()),
+            no_progress_ticks: config.race.no_progress_ticks,
+            progress: Some(a.out.join(format!("progress-{name}.txt"))),
         };
         let watch = Watch::start(
             format!("{}:{}", a.host, a.rcon_port),

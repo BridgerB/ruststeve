@@ -51,22 +51,45 @@ jobs:
   lanes:
     name: lanes
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
     steps:
       - id: m
         env:
           LANES: ${{ inputs.lanes }}
+          CAP: ${{ inputs.cap }}
+          MINUTES: ${{ inputs.minutes }}
         run: |
           set -euo pipefail
           if ! [[ "$LANES" =~ ^[0-9]+$ ]] || [ "$LANES" -lt 1 ] || [ "$LANES" -gt 20 ]; then
             echo "lanes must be 1 to 20, got $LANES"; exit 1
           fi
+          # Pre-flight (issue 16e): the cap must fit the job. 20 server ticks a second at best, 5
+          # minutes to build and start the server, 15 kept for the end (race 44942537213 left
+          # minutes at 60 under a 3-hour cap and every lane was cut).
+          need=$(( CAP / 20 / 60 + 5 + 15 ))
+          if [ "$MINUTES" -lt "$need" ]; then
+            echo "cap $CAP needs minutes >= $need (got $MINUTES): every bot would be cut"; exit 1
+          fi
           echo "matrix=$(seq 0 $((LANES - 1)) | paste -sd, | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+      # The release opens now, so each lane's progress is readable while the race runs (16e).
+      - name: Open the release for progress
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "race-${{ github.run_id }}" --target "${{ github.sha }}" --prerelease \
+            --title "race ${{ github.run_id }} (running)" \
+            --notes "Running. Each lane uploads progress-lane-N.txt every 10 minutes: a line per bot (stage, health, food, held item and uses, task and reason, ticks without progress)."
 
   lane:
     needs: lanes
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     timeout-minutes: ${{ fromJSON(inputs.minutes) }}
     strategy:
       fail-fast: false
@@ -151,6 +174,8 @@ jobs:
 
       - name: Race the lane
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           LANE: ${{ matrix.lane }}
           BOTS: ${{ inputs.bots }}
           START: ${{ inputs.start }}
@@ -167,9 +192,19 @@ jobs:
           memory=()
           if [ -n "${SNAP_MEMORY:-}" ]; then memory=(--memory "$SNAP_MEMORY"); fi
           wall=$(( (MINUTES - 15) * 60 ))
+          # Progress while the race runs (issue 16e): every 10 minutes the bots' progress lines go
+          # to the release as progress-lane-N.txt.
+          (
+            while sleep 600; do
+              cat "lane-$LANE"/progress-*.txt > "progress-lane-$LANE.txt" 2>/dev/null || continue
+              gh release upload "race-${{ github.run_id }}" "progress-lane-$LANE.txt" --clobber || true
+            done
+          ) &
+          uploader=$!
           ./target/release/race --lane "$LANE" --bots "$BOTS" --start "$START" --cap "$CAP" \
             --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit "$wall" \
             --hold-after-aim "$HOLD" --revive "$REVIVE" "${goal[@]}" "${memory[@]}" 2>&1 | tee "race-$LANE.log"
+          kill "$uploader" 2>/dev/null || true
 
       - name: Replay one recording at this commit
         if: always()
@@ -241,9 +276,13 @@ jobs:
             tar --zstd -C "$(dirname "$d")" -cf "$f" "$stage"
             snaps+=("$f")
           done
-          gh release create "race-${{ github.run_id }}" "batches-${{ github.run_id }}.tar.zst" summary.md "${snaps[@]}" \
-            --target "${{ github.sha }}" --prerelease \
-            --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
+          # The release was opened by the lanes job (issue 16e); an older run without it is made here.
+          tag="race-${{ github.run_id }}"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --target "${{ github.sha }}" --prerelease --notes "publishing"
+          fi
+          gh release upload "$tag" "batches-${{ github.run_id }}.tar.zst" summary.md "${snaps[@]}" --clobber
+          gh release edit "$tag" --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
             --notes-file summary.md
 
   # The insight store: add this race to the published store (ingest.yml).

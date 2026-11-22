@@ -312,6 +312,8 @@ fn real(a: &Args) -> Result<(), String> {
                 revive: false,
                 memory: None,
                 on_stage: None,
+                no_progress_ticks: None,
+                progress: None,
             };
             let id = m.id.clone();
             let watch = watched(start, m);

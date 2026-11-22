@@ -22,6 +22,10 @@ bots_per_server = 14
 join_stagger_ms = 2000
 # 6,000 server ticks = 5 game minutes: the default when a start names no cap.
 cap_ticks = 6000
+# 24,000 server ticks (20 game minutes) with no stage, no item gained and no new 16-block place
+# ends a bot `NoProgress`, counted, with its case (issue 16e): in race 44947909226 11 of 12 bots
+# sat stuck for about 2.5 hours, found only when the race ended.
+no_progress_ticks = 24000
 
 [budget]
 # The brain's CPU per bot per tick (issue 09; brain/ruststeve/design/progress-invariants.md):
