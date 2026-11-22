@@ -1427,6 +1427,30 @@ impl Plan {
         if tick < self.equip_at || w.window.is_some() {
             return;
         }
+        // A nearly full inventory drops a stack of junk first, by the same quick-move clock.
+        let junk = self
+            .table
+            .as_ref()
+            .map(|t| t.survival.junk.clone())
+            .unwrap_or_default();
+        if w.click.is_none()
+            && w.inventory.carried.is_none()
+            && let Some((slot, kind)) = junk_slot(&w.inventory.slots, &junk)
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            // Mode 4 button 1: drop the whole stack (the client's ctrl+Q over the slot).
+            self.acts.push(world::Act::Click {
+                slot,
+                button: 1,
+                mode: 4,
+            });
+            self.note(
+                tick,
+                format!("drop {kind:?} from slot {slot}"),
+                format!("fewer than {JUNK_FREE_SLOTS} main slots free"),
+            );
+            return;
+        }
         let worn = |slot: i16| w.inventory.slots.contains_key(&slot);
         let piece = w.inventory.slots.iter().find_map(|(slot, (k, _))| {
             let to = match k {
@@ -3558,6 +3582,35 @@ fn wet(w: &World, body: &physics::Body) -> bool {
     })
 }
 
+/// Main slots (9 to 44) kept free: under this a stack of junk is dropped (blaze wall 13: every
+/// slot full, digs failed `Uncollected` and the bucket could not be held).
+pub const JUNK_FREE_SLOTS: usize = 2;
+
+/// The main slot to drop, with its kind, when fewer than `JUNK_FREE_SLOTS` are free: the first
+/// stack of a junk kind whose drop still leaves that kind's `keep` held. None with room to spare.
+pub fn junk_slot(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+    junk: &[(data::ItemKind, i32)],
+) -> Option<(i16, data::ItemKind)> {
+    let main = |s: &i16| (9..=44).contains(s);
+    let free = (9i16..=44).filter(|s| !slots.contains_key(s)).count();
+    if free >= JUNK_FREE_SLOTS {
+        return None;
+    }
+    slots
+        .iter()
+        .filter(|(s, _)| main(s))
+        .find_map(|(s, (k, n))| {
+            let keep = junk.iter().find(|(j, _)| j == k)?.1;
+            let total: i32 = slots
+                .iter()
+                .filter(|(s2, (k2, _))| main(s2) && k2 == k)
+                .map(|(_, (_, n2))| n2)
+                .sum();
+            (total - n >= keep).then_some((*s, *k))
+        })
+}
+
 /// The race's gear (issue 16): an iron helmet, chestplate and leggings and an iron sword, worn or
 /// held.
 pub fn geared(w: &World) -> bool {
@@ -3613,6 +3666,31 @@ mod bank_tests {
         assert!(climb_to_log(4, 26, Some(data::BlockKind::Stone)));
         assert!(!climb_to_log(4, 26, None));
         assert!(!roofed_below(&at(4.0), 26));
+    }
+
+    /// Blaze wall 13: a full inventory drops a junk stack that leaves its keep; one with room, a
+    /// kind not junk, or a drop that would go under the keep is left alone.
+    #[test]
+    fn a_full_inventory_drops_junk_above_its_keep() {
+        use data::ItemKind::{Andesite, Bucket, Cobblestone};
+        let junk = [(Cobblestone, 64), (Andesite, 0)];
+        let mut slots = std::collections::BTreeMap::new();
+        for s in 9i16..=44 {
+            slots.insert(s, (Bucket, 1));
+        }
+        slots.insert(10, (Cobblestone, 64));
+        assert_eq!(
+            junk_slot(&slots, &junk),
+            None,
+            "the only cobblestone is the keep"
+        );
+        slots.insert(11, (Cobblestone, 64));
+        assert_eq!(junk_slot(&slots, &junk), Some((10, Cobblestone)));
+        slots.insert(9, (Andesite, 12));
+        assert_eq!(junk_slot(&slots, &junk), Some((9, Andesite)));
+        slots.remove(&20);
+        slots.remove(&21);
+        assert_eq!(junk_slot(&slots, &junk), None, "two slots free");
     }
 
     /// Blaze wall 5: a source 20 blocks over the feet is reached by stairs up, not refused.

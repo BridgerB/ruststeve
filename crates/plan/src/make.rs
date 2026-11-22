@@ -240,6 +240,10 @@ pub struct Survival {
     /// spare that needs a gather is worth it from anywhere (clojurecraft's `travel-reserve-digs`).
     #[serde(default = "travel_reserve_digs")]
     pub travel_reserve_digs: i32,
+    /// Items dropped when the main inventory is nearly full, each with how many to keep (blaze
+    /// wall 13: 700 blocks of stone filled every slot, and digs and scoops failed).
+    #[serde(default)]
+    pub junk: Vec<(String, i32)>,
     /// A hostile mob this near is answered (`defend`, issue 12d) ...
     #[serde(default = "defend_radius")]
     pub defend_radius: f64,
@@ -311,6 +315,7 @@ impl Default for Survival {
             defend_radius: defend_radius(),
             spare_uses: spare_uses(),
             travel_reserve_digs: travel_reserve_digs(),
+            junk: Vec::new(),
             danger_health: danger_health(),
             never_fight: Vec::new(),
             ranged: Vec::new(),
@@ -356,6 +361,8 @@ pub struct SurvivalRules {
     pub ranged_radius: f64,
     pub flee_radius: f64,
     pub flee_clear: f64,
+    /// Kinds dropped when the main inventory is nearly full, each with how many to keep.
+    pub junk: Vec<(data::ItemKind, i32)>,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -549,6 +556,16 @@ impl Table {
                 })
             })
             .collect::<Result<_, _>>()?;
+        let junk = g
+            .survival
+            .junk
+            .iter()
+            .map(|(n, keep)| {
+                data::ItemKind::from_name(n)
+                    .map(|k| (k, *keep))
+                    .ok_or_else(|| format!("survival: no junk item {n}"))
+            })
+            .collect::<Result<_, _>>()?;
         let unsafe_foods = g
             .survival
             .unsafe_foods
@@ -603,6 +620,7 @@ impl Table {
                 danger_health: g.survival.danger_health,
                 spare_uses: g.survival.spare_uses,
                 travel_reserve_digs: g.survival.travel_reserve_digs,
+                junk,
                 never_fight,
                 ranged,
                 neutral,
