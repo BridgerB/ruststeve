@@ -84,5 +84,5 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 - `dig_budget`: every held pickaxe's uses left, plus 131 for each stone pickaxe the held wood and stone make with a table held or near. Under `travel_reserve_digs` (131) a spare's gather is worth it from anywhere (`make::Wear::low_on_digs`), so a bot underground turns to the trees while it can still dig to them; the ledger notes "low on digs" once.
 
 ## Blaze wall 8: the goal keeps its tools
-- `make_with_wear` resolves the goal row's own `holds` and `spares` first (`Planner::keep`, shared with producer rows): the portal goal holds a pickaxe, and with none it answered Done and cast by hand.
+- `make_with_wear` resolves the goal row's own `holds` first (its tool; its spares stay a producer row's, as the clojurecraft differential test holds): the portal goal holds a pickaxe, and with none it answered Done and cast by hand.
 - A running cast with no pickaxe left (`holds_pickaxe`) pauses: the task ends, the site is kept, the needs planner makes a pickaxe, the cast resumes.
