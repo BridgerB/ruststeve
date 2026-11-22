@@ -1697,6 +1697,9 @@ impl Plan {
                 return Task::ToLog(walk);
             }
             self.expanded += walk.expanded;
+            if let Some(t) = self.stairs_to_log(w, log, tick) {
+                return t;
+            }
             self.refuse(log, tick);
             self.refused_areas.push((log, tick + FAILURE_MEMORY_TICKS));
         }
@@ -2203,6 +2206,23 @@ impl Plan {
             bank,
             true,
             ("the bank", "water seen with no walk to a bank"),
+            tick,
+        )
+    }
+
+    /// Stairs up toward a log seen well over the feet with no walk to it: a bot in a cave with
+    /// the trees 40 blocks up explored level for three hours (blaze.md wall 6). A log within 3
+    /// blocks of the feet keeps the old way (refused, explore): a ledge or water, not a roof.
+    fn stairs_to_log(&mut self, w: &World, log: Cell, tick: u64) -> Option<Task> {
+        let (_, fy, _) = path::feet_cell(w.body?.pos);
+        if log.1 <= fy + 3 {
+            return None;
+        }
+        self.dig_toward(
+            w,
+            log,
+            true,
+            ("the log", "a log over the feet with no walk to it"),
             tick,
         )
     }
@@ -3276,6 +3296,34 @@ pub fn geared(w: &World) -> bool {
 #[cfg(test)]
 mod bank_tests {
     use super::*;
+
+    fn at(y: f64) -> World {
+        let mut w = World::new();
+        w.body = Some(physics::Body {
+            pos: [0.5, y, 0.5],
+            ..physics::Body::default()
+        });
+        w
+    }
+
+    /// Blaze wall 6: a log 40 blocks over a cave bot's feet is reached by stairs up.
+    #[test]
+    fn a_log_far_over_the_feet_takes_stairs_up() {
+        let mut p = Plan::new(Aim::Race);
+        let t = p.stairs_to_log(&at(26.0), (5, 68, -6), 0);
+        assert!(
+            matches!(&t, Some(Task::Stairs(s)) if s.up),
+            "no stairs up toward a log far above: {t:?}"
+        );
+    }
+
+    /// A log within 3 blocks of the feet keeps the old way: refused, then explore.
+    #[test]
+    fn a_log_at_the_feet_is_not_dug_toward() {
+        let mut p = Plan::new(Aim::Race);
+        let t = p.stairs_to_log(&at(64.0), (5, 66, -6), 0);
+        assert!(t.is_none(), "dug toward a log near the feet: {t:?}");
+    }
 
     /// Blaze wall 5: a source 20 blocks over the feet is reached by stairs up, not refused.
     #[test]
