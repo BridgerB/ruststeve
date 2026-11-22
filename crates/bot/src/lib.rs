@@ -445,7 +445,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut plan_notes = Notes::default();
     let mut last_controls: Option<physics::Controls> = None;
-    let doing = if let Some(a) = aim {
+    let mut doing = if let Some(a) = aim {
         Doing {
             task: format!("aim {}", a.name()),
             why: "the planner (issue 09)".to_owned(),
@@ -755,6 +755,14 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         "bot {name}: ended {ending:?} after {} server ticks, stage {:?}, {} events",
         run.world.session.server_ticks, run.world.stage_reached, stats.events
     );
+    // The signature names what the planner was doing at the end, as a kind (no cells or counts),
+    // not the aim it started with: every run of a race had the same signature (issue 16e).
+    if let Some(e) = planner.as_ref().and_then(|p| p.events.last()) {
+        doing = Doing {
+            task: note_kind(&e.what),
+            why: note_kind(&e.why),
+        };
+    }
     let stream_counts = sink.map(|s| {
         s.send(
             run.world.session.server_ticks,

@@ -44,7 +44,11 @@ fn run(args: &[String]) -> Result<(), String> {
                 .collect::<Result<Vec<_>, _>>()?;
             print!(
                 "{}",
-                results::render_summary(&results::summarize(&batches), &batches)
+                results::render_summary(
+                    &results::summarize(&batches),
+                    &batches,
+                    results::observe::Observe::from_repo().as_ref(),
+                )
             );
             Ok(())
         }

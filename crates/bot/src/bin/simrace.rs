@@ -242,7 +242,8 @@ fn simrace(a: &Args) -> Result<bool, String> {
         "{}",
         results::render_summary(
             &results::summarize(std::slice::from_ref(&batch)),
-            std::slice::from_ref(&batch)
+            std::slice::from_ref(&batch),
+            results::observe::Observe::from_repo().as_ref(),
         )
     );
     Ok(batch.coverage.cases == batch.coverage.runs)

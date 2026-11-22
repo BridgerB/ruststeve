@@ -517,6 +517,36 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
     })
 }
 
+/// The server's packet `id` in `state`, named `state/name` as the generated tables spell it
+/// (`play/sound`); an id the tables lack is `state/<id>`. What coverage counts unknown packets by.
+pub fn packet_name(state: State, id: u32) -> String {
+    let (prefix, name) = match state {
+        State::Handshake => ("handshake", None),
+        State::Login => ("login", LoginIn::from_id(id).map(LoginIn::name)),
+        State::Configuration => ("configuration", ConfIn::from_id(id).map(ConfIn::name)),
+        State::Play => ("play", PlayIn::from_id(id).map(PlayIn::name)),
+    };
+    match name {
+        Some(n) => format!("{prefix}/{n}"),
+        None => format!("{prefix}/{id}"),
+    }
+}
+
+/// Whether this layer decodes the server's packet `id` in `state`: anything else is
+/// `S2c::Unknown`. An empty body is enough to tell: a modelled packet fails to read or decodes,
+/// an unmodelled one is Unknown before any field is read.
+pub fn decodes(state: State, id: u32) -> bool {
+    !matches!(decode(state, id, &[]), Ok(S2c::Unknown { .. }))
+}
+
+/// Every clientbound packet the generated tables know, as `(state, id)`, in state then id order.
+pub fn clientbound() -> Vec<(State, u32)> {
+    let login = LoginIn::ALL.iter().map(|p| (State::Login, p.id()));
+    let conf = ConfIn::ALL.iter().map(|p| (State::Configuration, p.id()));
+    let play = PlayIn::ALL.iter().map(|p| (State::Play, p.id()));
+    login.chain(conf).chain(play).collect()
+}
+
 /// A packet to the server.
 #[derive(Clone, Debug, PartialEq)]
 pub enum C2s {

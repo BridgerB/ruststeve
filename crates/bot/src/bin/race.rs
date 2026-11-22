@@ -322,6 +322,13 @@ fn race(a: &Args) -> Result<bool, String> {
         }
         coverage.events_dropped += outcome.stats.decode_errors;
         coverage.unknown_packets += outcome.stats.unknown.values().sum::<u64>();
+        for ((state, id), n) in &outcome.stats.unknown {
+            *coverage
+                .unknown_by_kind
+                .entry(protocol::packet_name(*state, *id))
+                .or_default() += n;
+        }
+        coverage.slots_truncated += w.inventory.truncated;
         let recording = format!("{name}.rsr");
         if outcome.recorded {
             coverage.recordings += 1;
@@ -392,7 +399,8 @@ fn race(a: &Args) -> Result<bool, String> {
         "{}",
         results::render_summary(
             &results::summarize(std::slice::from_ref(&batch)),
-            std::slice::from_ref(&batch)
+            std::slice::from_ref(&batch),
+            results::observe::Observe::from_repo().as_ref(),
         )
     );
     println!("server tick rate {tick_rate:.1} ticks/s");

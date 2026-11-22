@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod diagnose;
+pub mod observe;
 pub mod parity;
 pub mod snapshot;
 
@@ -268,7 +269,8 @@ pub struct Row {
     pub aim: Option<(String, bool)>,
 }
 
-/// What a batch could see: full sight is every ratio 1.0 and the counts 0.
+/// What a batch could see: full sight is every ratio 1.0 and the counts 0 (issue 16e). A column
+/// that is `None` is not measured yet, which the summary marks as blind: it never reads as fine.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Coverage {
     pub runs: u64,
@@ -278,6 +280,150 @@ pub struct Coverage {
     pub events_dropped: u64,
     /// Packets with an id the protocol layer does not model, summed over runs.
     pub unknown_packets: u64,
+    /// The same, by `state/name` (`protocol::packet_name`).
+    #[serde(default)]
+    pub unknown_by_kind: BTreeMap<String, u64>,
+    /// Inventory slots whose item components could not all be read (the rest of the frame lost).
+    #[serde(default)]
+    pub slots_truncated: u64,
+    /// Entity data cut short at a serializer the bot cannot read.
+    #[serde(default)]
+    pub metadata_truncated: Option<u64>,
+    /// Runs with each of the files a run should leave (issue 16e phases C and D).
+    #[serde(default)]
+    pub ledgers: Option<u64>,
+    #[serde(default)]
+    pub senses: Option<u64>,
+    #[serde(default)]
+    pub moments: Option<u64>,
+    #[serde(default)]
+    pub truths: Option<u64>,
+    /// Tasks the planner started, those that carried a reason, and those that ended.
+    #[serde(default)]
+    pub tasks_started: Option<u64>,
+    #[serde(default)]
+    pub tasks_with_reason: Option<u64>,
+    #[serde(default)]
+    pub tasks_ended: Option<u64>,
+    /// Ledger events the bot could not write (must be 0).
+    #[serde(default)]
+    pub ledger_dropped: Option<u64>,
+}
+
+/// Adds an optional count: unmeasured anywhere stays unmeasured.
+fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    Some(a? + b?)
+}
+
+impl Coverage {
+    /// Two batches' coverage, summed.
+    pub fn add(&mut self, b: &Coverage) {
+        self.runs += b.runs;
+        self.cases += b.cases;
+        self.recordings += b.recordings;
+        self.events_dropped += b.events_dropped;
+        self.unknown_packets += b.unknown_packets;
+        for (k, n) in &b.unknown_by_kind {
+            *self.unknown_by_kind.entry(k.clone()).or_default() += n;
+        }
+        self.slots_truncated += b.slots_truncated;
+        self.metadata_truncated = add_opt(self.metadata_truncated, b.metadata_truncated);
+        self.ledgers = add_opt(self.ledgers, b.ledgers);
+        self.senses = add_opt(self.senses, b.senses);
+        self.moments = add_opt(self.moments, b.moments);
+        self.truths = add_opt(self.truths, b.truths);
+        self.tasks_started = add_opt(self.tasks_started, b.tasks_started);
+        self.tasks_with_reason = add_opt(self.tasks_with_reason, b.tasks_with_reason);
+        self.tasks_ended = add_opt(self.tasks_ended, b.tasks_ended);
+        self.ledger_dropped = add_opt(self.ledger_dropped, b.ledger_dropped);
+    }
+
+    /// The coverage block of a summary: one line a column, `!!` on each blind spot, then the
+    /// packets thrown away by kind, wanted (blind) before skipped.
+    pub fn render(&self, observe: Option<&observe::Observe>) -> Vec<String> {
+        const BLIND: &str = " !!";
+        let runs = self.runs;
+        let have = |name: &str, n: u64, want: u64| {
+            let mark = if n < want { BLIND } else { "" };
+            format!("- {name}: {n}/{want}{mark}")
+        };
+        let have_opt = |name: &str, n: Option<u64>, want: u64| match n {
+            Some(n) => have(name, n, want),
+            None => format!("- {name}: not measured{BLIND}"),
+        };
+        let zero = |name: &str, n: u64| {
+            let mark = if n > 0 { BLIND } else { "" };
+            format!("- {name}: {n}{mark}")
+        };
+        let zero_opt = |name: &str, n: Option<u64>| match n {
+            Some(n) => zero(name, n),
+            None => format!("- {name}: not measured{BLIND}"),
+        };
+        let mut lines = vec![
+            "### coverage (`!!` is a blind spot, fixed before any bot change)".to_owned(),
+            String::new(),
+            have("cases", self.cases, runs),
+            have("recordings", self.recordings, runs),
+            have_opt("ledgers", self.ledgers, runs),
+            have_opt("senses lines", self.senses, runs),
+            have_opt("moments", self.moments, runs),
+            have_opt("server truth", self.truths, runs),
+        ];
+        match self.tasks_started {
+            Some(started) => {
+                lines.push(have_opt(
+                    "tasks with a reason",
+                    self.tasks_with_reason,
+                    started,
+                ));
+                lines.push(have_opt("tasks ended", self.tasks_ended, started));
+            }
+            None => {
+                lines.push(format!("- tasks with a reason: not measured{BLIND}"));
+                lines.push(format!("- tasks ended: not measured{BLIND}"));
+            }
+        }
+        lines.push(zero_opt("ledger events dropped", self.ledger_dropped));
+        lines.push(zero("decode errors", self.events_dropped));
+        lines.push(zero("item slots cut short", self.slots_truncated));
+        lines.push(zero_opt("entity data cut short", self.metadata_truncated));
+        // Packets thrown away, by class then count.
+        let class = |k: &str| observe.map_or(observe::Class::Unclassed, |o| o.class(k));
+        let mut kinds: Vec<(observe::Class, &String, u64)> = self
+            .unknown_by_kind
+            .iter()
+            .map(|(k, n)| (class(k), k, *n))
+            .collect();
+        kinds.sort_by(|a, b| a.0.cmp(&b.0).then(b.2.cmp(&a.2)).then(a.1.cmp(b.1)));
+        let blind: u64 = kinds.iter().filter(|k| k.0.blind()).map(|k| k.2).sum();
+        let skipped: u64 = kinds.iter().filter(|k| !k.0.blind()).map(|k| k.2).sum();
+        let per_run = |n: u64| n as f64 / runs.max(1) as f64;
+        lines.push(zero("packets thrown away that the stages need", blind));
+        lines.push(format!(
+            "- packets thrown away on purpose: {skipped} ({})",
+            observe::PATH
+        ));
+        if self.unknown_by_kind.is_empty() && self.unknown_packets > 0 {
+            lines.push(format!(
+                "- unknown packets not broken down by kind (an older batch): {}{BLIND}",
+                self.unknown_packets
+            ));
+        }
+        if !kinds.is_empty() {
+            lines.push(String::new());
+            lines.push("| packet thrown away | class | total | per run |".to_owned());
+            lines.push("|---|---|---|---|".to_owned());
+            for (c, k, n) in &kinds {
+                let label = match c {
+                    observe::Class::Wanted => "wanted !!",
+                    observe::Class::Unclassed => "unclassed !!",
+                    observe::Class::Skipped => "skipped",
+                };
+                lines.push(format!("| {k} | {label} | {n} | {:.1} |", per_run(*n)));
+            }
+        }
+        lines
+    }
 }
 
 impl Coverage {
@@ -394,12 +540,25 @@ pub fn summarize(batches: &[Batch]) -> Summary {
     out
 }
 
-/// The summary as a markdown table, for a job summary.
-pub fn render_summary(s: &Summary, batches: &[Batch]) -> String {
-    let mut lines = vec![
-        "| commit | start | source | stage | k/n | rate |".to_owned(),
-        "|---|---|---|---|---|---|".to_owned(),
-    ];
+/// The summary as markdown, for a job summary: coverage first (a blind spot is read before any
+/// rate), then k/n per stage, the aims and the endings ranked.
+pub fn render_summary(
+    s: &Summary,
+    batches: &[Batch],
+    observe: Option<&observe::Observe>,
+) -> String {
+    // From the first batch: an unmeasured column stays unmeasured only if some batch lacks it.
+    let mut total = batches
+        .first()
+        .map(|b| b.coverage.clone())
+        .unwrap_or_default();
+    for b in batches.iter().skip(1) {
+        total.add(&b.coverage);
+    }
+    let mut lines = total.render(observe);
+    lines.push(String::new());
+    lines.push("| commit | start | source | stage | k/n | rate |".to_owned());
+    lines.push("|---|---|---|---|---|---|".to_owned());
     for ((commit, start, source), stages) in s {
         let short = commit.get(..7).unwrap_or(commit);
         for (stage, kn) in stages {
@@ -412,26 +571,6 @@ pub fn render_summary(s: &Summary, batches: &[Batch]) -> String {
             ));
         }
     }
-    let total = batches.iter().fold(Coverage::default(), |mut c, b| {
-        c.runs += b.coverage.runs;
-        c.cases += b.coverage.cases;
-        c.recordings += b.coverage.recordings;
-        c.events_dropped += b.coverage.events_dropped;
-        c.unknown_packets += b.coverage.unknown_packets;
-        c
-    });
-    lines.push(String::new());
-    lines.push(format!(
-        "coverage: cases {}/{} ({:.2}), recordings {}/{} ({:.2}), events dropped {}, unknown packets {}",
-        total.cases,
-        total.runs,
-        total.cases_ratio(),
-        total.recordings,
-        total.runs,
-        total.recordings_ratio(),
-        total.events_dropped,
-        total.unknown_packets
-    ));
     // The planner's aims, when runs had one: met over counted runs, per aim.
     let mut aims: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for row in batches
@@ -464,4 +603,74 @@ pub fn render_summary(s: &Summary, batches: &[Batch]) -> String {
         lines.push(format!("| {n} | {ending} | {killer} | {doing} | {why} |"));
     }
     lines.join("\n") + "\n"
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    /// Issue 16e: a column not measured, a wanted packet thrown away and a missing case each
+    /// read as blind (`!!`); a skipped packet does not.
+    #[test]
+    fn blind_spots_are_marked_and_unmeasured_never_reads_as_fine() {
+        let mut c = Coverage {
+            runs: 2,
+            cases: 1,
+            recordings: 2,
+            ..Coverage::default()
+        };
+        c.unknown_by_kind.insert("play/sound".to_owned(), 10);
+        c.unknown_by_kind
+            .insert("play/bundle_delimiter".to_owned(), 4);
+        let o = observe::Observe {
+            wanted: vec![observe::Entry {
+                packet: "play/sound".to_owned(),
+                why: "hearing".to_owned(),
+            }],
+            skipped: vec![observe::Entry {
+                packet: "play/bundle_delimiter".to_owned(),
+                why: "framing".to_owned(),
+            }],
+        };
+        let text = c.render(Some(&o)).join("\n");
+        assert!(text.contains("- cases: 1/2 !!"), "{text}");
+        assert!(text.contains("- recordings: 2/2\n"), "{text}");
+        assert!(text.contains("- ledgers: not measured !!"), "{text}");
+        assert!(
+            text.contains("- tasks with a reason: not measured !!"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- packets thrown away that the stages need: 10 !!"),
+            "{text}"
+        );
+        assert!(
+            text.contains("| play/sound | wanted !! | 10 | 5.0 |"),
+            "{text}"
+        );
+        assert!(
+            text.contains("| play/bundle_delimiter | skipped | 4 | 2.0 |"),
+            "{text}"
+        );
+    }
+
+    /// Summing keeps a column unmeasured when any batch did not measure it.
+    #[test]
+    fn an_unmeasured_batch_keeps_the_sum_unmeasured() {
+        let mut a = Coverage {
+            ledgers: Some(3),
+            ..Coverage::default()
+        };
+        a.add(&Coverage::default());
+        assert_eq!(a.ledgers, None);
+        let mut b = Coverage {
+            ledgers: Some(3),
+            ..Coverage::default()
+        };
+        b.add(&Coverage {
+            ledgers: Some(2),
+            ..Coverage::default()
+        });
+        assert_eq!(b.ledgers, Some(5));
+    }
 }

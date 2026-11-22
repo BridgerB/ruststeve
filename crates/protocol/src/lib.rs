@@ -21,7 +21,7 @@ pub mod uuid;
 
 pub use bytes::{Reader, Writer};
 pub use frame::{FrameDecoder, encode_frame, split_id};
-pub use packets::{C2s, S2c, decode};
+pub use packets::{C2s, S2c, clientbound, decode, decodes, packet_name};
 pub use session::{Out, Session};
 pub use state::State;
 

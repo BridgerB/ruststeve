@@ -5,8 +5,8 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-19
-verifiedAgainst: ruststeve@ca34f7c clojurecraft@be85a92
+lastUpdated: 2026-11-21
+verifiedAgainst: ruststeve@a45d012 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
