@@ -81,6 +81,12 @@ fn spans(rows: &[Senses], on: impl Fn(&Senses) -> bool) -> Vec<(u64, u64)> {
 
 pub fn story(l: &Ledger, rows: &[Senses]) -> Story {
     let mut s = Story::default();
+    // Rows before the inventory first arrives (every slot free) say nothing about tools.
+    let first = rows
+        .iter()
+        .position(|r| r.free_slots < 36)
+        .unwrap_or(rows.len());
+    let rows = rows.get(first..).unwrap_or_default();
     for f in &l.facts {
         match &f.fact {
             Fact::Stage { reached } => s.stages.push(format!("{} {reached}", f.at)),

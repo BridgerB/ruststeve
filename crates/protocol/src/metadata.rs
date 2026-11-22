@@ -43,6 +43,8 @@ pub enum MetaValue {
     Villager([i32; 3]),
     /// A small enum by ordinal (sniffer, armadillo, copper golem states; the main arm).
     Enum(i32),
+    /// A data-driven mob variant or sound variant, by its registry id.
+    Variant(i32),
     /// A dimension and a position (a recovery compass's death spot).
     GlobalPos(Option<(String, (i32, i32, i32))>),
     Vector3([f32; 3]),
@@ -113,6 +115,23 @@ pub fn read_metadata(r: &mut Reader<'_>) -> Result<Vec<(u8, MetaValue)>, ParseEr
                 MetaValue::OptUnsigned((v != 0).then(|| (v - 1) as u32))
             }
             Some("VILLAGER_DATA") => MetaValue::Villager([r.varint()?, r.varint()?, r.varint()?]),
+            // Data-driven mob variants and their sound variants are registry holders sent by id
+            // only (`ByteBufCodecs.holderRegistry`): one varint. Race 45000585321 stopped 906
+            // entity-data reads at four of them. The painting variant may be inline: not read.
+            Some(
+                "CAT_VARIANT"
+                | "CAT_SOUND_VARIANT"
+                | "COW_VARIANT"
+                | "COW_SOUND_VARIANT"
+                | "WOLF_VARIANT"
+                | "WOLF_SOUND_VARIANT"
+                | "FROG_VARIANT"
+                | "PIG_VARIANT"
+                | "PIG_SOUND_VARIANT"
+                | "CHICKEN_VARIANT"
+                | "CHICKEN_SOUND_VARIANT"
+                | "ZOMBIE_NAUTILUS_VARIANT",
+            ) => MetaValue::Variant(r.varint()?),
             Some(
                 "SNIFFER_STATE"
                 | "ARMADILLO_STATE"
@@ -263,6 +282,10 @@ pub fn write_metadata(
                 w.varint(serializer_id("HUMANOID_ARM"));
                 w.varint(*v);
             }
+            MetaValue::Variant(v) => {
+                w.varint(serializer_id("COW_VARIANT"));
+                w.varint(*v);
+            }
             MetaValue::GlobalPos(g) => {
                 w.varint(serializer_id("OPTIONAL_GLOBAL_POS"));
                 w.bool(g.is_some());
@@ -352,6 +375,7 @@ mod tests {
             (8, MetaValue::OptUnsigned(Some(4))),
             (9, MetaValue::Villager([1, 2, 3])),
             (10, MetaValue::Enum(1)),
+            (15, MetaValue::Variant(3)),
             (
                 11,
                 MetaValue::GlobalPos(Some(("minecraft:the_nether".to_owned(), (1, 2, 3)))),
