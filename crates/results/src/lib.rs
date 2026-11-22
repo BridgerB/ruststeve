@@ -11,6 +11,7 @@ pub mod diagnose;
 pub mod observe;
 pub mod parity;
 pub mod snapshot;
+pub mod story;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -115,6 +116,10 @@ pub struct Case {
     /// The planner's account, when the run had an aim (issue 09).
     #[serde(default)]
     pub plan: Option<PlanSummary>,
+    /// The run's story from its ledger and senses (issue 16e): when present the case prints it
+    /// in place of the cut notes.
+    #[serde(default)]
+    pub story: Option<story::Story>,
 }
 
 /// What the planner did in a run: its aim, whether it was met or the planner stopped stuck,
@@ -242,7 +247,9 @@ impl Case {
             ));
         }
         lines.extend(self.hits.iter().map(|h| format!("  hit {}", hit(h))));
-        if let Some(p) = &self.plan {
+        if let Some(s) = &self.story {
+            lines.extend(s.render());
+        } else if let Some(p) = &self.plan {
             if p.notes_dropped > 0 {
                 lines.push(format!("notes left out: {}", p.notes_dropped));
             }

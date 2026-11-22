@@ -348,7 +348,7 @@ fn race(a: &Args) -> Result<bool, String> {
             .cloned()
             .collect();
         let (items_gained, items_lost) = outcome.items_changed();
-        let case = Case {
+        let mut case = Case {
             format_version: FORMAT_VERSION,
             run: a.run.clone(),
             bot: name.clone(),
@@ -383,6 +383,7 @@ fn race(a: &Args) -> Result<bool, String> {
                 failed: c.failed,
                 connects: c.connects,
             }),
+            story: None,
         };
         // The ledger (issue 16e): every task with its reason and outcome, beside the case.
         let ledger = results::Ledger {
@@ -420,6 +421,8 @@ fn race(a: &Args) -> Result<bool, String> {
             *coverage.tasks_with_reason.get_or_insert(0) += p.task_counts.with_reason;
             *coverage.tasks_ended.get_or_insert(0) += p.task_counts.ended;
         }
+        // The case tells the run's story from its ledger and senses, never cut.
+        case.story = Some(results::story::story(&ledger, &outcome.senses));
         let row = write_case(&a.out, &case, &mut coverage)?;
         rows.push(row);
     }
@@ -510,6 +513,7 @@ fn never_connected(
         replay: "-".to_owned(),
         stream: None,
         plan: None,
+        story: None,
     };
     write_case(&a.out, &case, coverage)
 }

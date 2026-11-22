@@ -41,6 +41,7 @@ fn case(bot: &str, stage: Option<Stage>, ending: Ending) -> Case {
         replay: format!("cargo run -p replay -- verify {bot}.rsr"),
         stream: None,
         plan: None,
+        story: None,
     }
 }
 

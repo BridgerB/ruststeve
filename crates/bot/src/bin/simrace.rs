@@ -168,6 +168,7 @@ fn one(a: &Args, config: sim::Config, seed: u64) -> Result<Case, String> {
         ),
         stream: None,
         plan: None,
+        story: None,
     })
 }
 

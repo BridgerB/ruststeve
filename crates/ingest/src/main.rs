@@ -381,6 +381,7 @@ mod tests {
             replay: "-".to_owned(),
             stream: None,
             plan: None,
+            story: None,
         }
     }
 
