@@ -33,6 +33,9 @@ pub struct Story {
     pub kinds: Vec<String>,
     /// The last two minutes of the ledger, one line each.
     pub last: Vec<String>,
+    /// What the server held that the bot did not, at the end (`truth::blind`).
+    #[serde(default)]
+    pub blind: Vec<String>,
 }
 
 /// The task open at `at`, as `#id task: what`.
@@ -186,6 +189,7 @@ impl Story {
             ("onsets", &self.onsets),
             ("longest tasks", &self.longest),
             ("tasks by time", &self.kinds),
+            ("blind (server truth at the end)", &self.blind),
             ("the last two minutes", &self.last),
         ] {
             if lines.is_empty() {

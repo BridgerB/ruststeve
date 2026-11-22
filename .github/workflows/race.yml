@@ -229,7 +229,7 @@ jobs:
         run: |
           set -euo pipefail
           # Batches, cases, ledgers, senses and moments (all small): recordings stay in the lane artifacts.
-          find lanes \( -name 'batch.rsb' -o -name '*.case.rsc' -o -name '*.case.txt' -o -name '*.ledger.rsl' -o -name '*.senses.rss' -o -name '*.moments.rsm' \) -print0 \
+          find lanes \( -name 'batch.rsb' -o -name '*.case.rsc' -o -name '*.case.txt' -o -name '*.ledger.rsl' -o -name '*.senses.rss' -o -name '*.moments.rsm' -o -name '*.truth.rst' \) -print0 \
             | tar --zstd --null -T - -cf "batches-${{ github.run_id }}.tar.zst"
           # Each lane's snapshots (one-bot-first): the first bot to reach each stage, as an asset.
           snaps=()

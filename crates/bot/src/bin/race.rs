@@ -13,8 +13,12 @@
 //! `--wall-limit` is the job's end, never a cap on behaviour: bots still running then end `Cut`
 //! and are not counted.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use results::config::{RaceConfig, Starts, start_commands};
@@ -246,6 +250,7 @@ fn race(a: &Args) -> Result<bool, String> {
         let commands = start_commands(&start, &name, i as usize);
         let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
         let password = password.clone();
+        let watch_password = password.clone();
         let apply: Option<bot::ApplyStart> = (!commands.is_empty()).then(|| {
             Box::new(move || {
                 let mut r = rcon::Rcon::connect(&rcon_addr, &password)?;
@@ -280,7 +285,12 @@ fn race(a: &Args) -> Result<bool, String> {
             memory: memory.clone(),
             on_stage: Some(tx.clone()),
         };
-        handles.push((name, std::thread::spawn(move || bot::run(opts))));
+        let watch = Watch::start(
+            format!("{}:{}", a.host, a.rcon_port),
+            watch_password,
+            name.clone(),
+        );
+        handles.push((name, std::thread::spawn(move || bot::run(opts)), watch));
     }
 
     drop(tx);
@@ -291,17 +301,19 @@ fn race(a: &Args) -> Result<bool, String> {
     let mut rows = Vec::new();
     let mut coverage = Coverage::default();
     let mut tick_rate = 0.0f64;
-    for (name, h) in handles {
+    for (name, h, watch) in handles {
         coverage.runs += 1;
         let outcome = match h.join() {
             Ok(Ok(o)) => o,
             Ok(Err(e)) => {
                 // Never connected: still a run, with a case saying so.
                 eprintln!("race: {name}: {e}");
+                watch.finish(&name, None);
                 rows.push(never_connected(a, &start.name, &name, &e, &mut coverage)?);
                 continue;
             }
             Err(_) => {
+                watch.finish(&name, None);
                 rows.push(never_connected(
                     a,
                     &start.name,
@@ -312,6 +324,9 @@ fn race(a: &Args) -> Result<bool, String> {
                 continue;
             }
         };
+        // Server truth (issue 16e): the last minutes' samples and the end's, and what the bot
+        // was blind to at the end.
+        let truth_samples = watch.finish(&name, outcome.world.player.pos);
         let w = &outcome.world;
         let ticks = w
             .session
@@ -423,6 +438,33 @@ fn race(a: &Args) -> Result<bool, String> {
         }
         // The case tells the run's story from its ledger and senses, never cut.
         case.story = Some(results::story::story(&ledger, &outcome.senses));
+        let believed: Vec<(String, [f64; 3])> = w
+            .entities
+            .values()
+            .map(|e| (e.kind.name().unwrap_or("unknown").to_owned(), e.pos))
+            .collect();
+        let blind = truth_samples
+            .last()
+            .map(|s| results::truth::blind(s, &believed))
+            .unwrap_or_default();
+        if let Some(s) = case.story.as_mut() {
+            s.blind.clone_from(&blind);
+        }
+        let truth = results::truth::TruthFile {
+            format_version: FORMAT_VERSION,
+            run: a.run.clone(),
+            bot: name.clone(),
+            samples: truth_samples,
+            blind,
+        };
+        if !truth.samples.is_empty() {
+            match results::write(&a.out.join(format!("{name}.truth.rst")), &truth) {
+                Ok(()) => *coverage.truths.get_or_insert(0) += 1,
+                Err(e) => eprintln!("race: {name}: the truth: {e}"),
+            }
+        } else {
+            coverage.truths.get_or_insert(0);
+        }
         let row = write_case(&a.out, &case, &mut coverage)?;
         rows.push(row);
     }
@@ -537,4 +579,96 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Truth samples kept per bot: the last five minutes (issue 16e, phase D).
+const TRUTH_KEPT: usize = 5;
+/// Wall seconds between truth samples (a minute: the server ticks near 20 a second).
+const TRUTH_EVERY_S: u64 = 60;
+
+/// A bot's truth watcher: once a minute it asks the lane's own server, over RCON, what it holds
+/// about the bot and the entities near it. Shell only: nothing it learns reaches the planner.
+struct Watch {
+    stop: Arc<AtomicBool>,
+    thread: JoinHandle<VecDeque<results::truth::TruthSample>>,
+    addr: String,
+    password: String,
+}
+
+impl Watch {
+    fn start(addr: String, password: String, bot: String) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (stop, addr, password) = (stop.clone(), addr.clone(), password.clone());
+            std::thread::spawn(move || {
+                let mut ring = VecDeque::new();
+                let mut last = Instant::now();
+                while !stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_secs(1));
+                    if last.elapsed() < Duration::from_secs(TRUTH_EVERY_S) {
+                        continue;
+                    }
+                    last = Instant::now();
+                    let near = results::truth::near_command(&bot);
+                    if let Ok(s) = truth_sample(&addr, &password, &near, &bot) {
+                        ring.push_back(s);
+                        if ring.len() > TRUTH_KEPT {
+                            ring.pop_front();
+                        }
+                    }
+                }
+                ring
+            })
+        };
+        Watch {
+            stop,
+            thread,
+            addr,
+            password,
+        }
+    }
+
+    /// Stops the watcher and takes the end sample around the bot's last position (the bot has
+    /// left the server, so its name no longer anchors the search).
+    fn finish(self, bot: &str, pos: Option<[f64; 3]>) -> Vec<results::truth::TruthSample> {
+        self.stop.store(true, Ordering::Relaxed);
+        let mut samples: Vec<_> = self.thread.join().unwrap_or_default().into_iter().collect();
+        if let Some(p) = pos {
+            let near = format!(
+                "execute positioned {} {} {} as @e[distance=..32,limit=12,sort=nearest,type=!player,type=!item,type=!experience_orb] run data get entity @s",
+                p[0], p[1], p[2]
+            );
+            match truth_sample(&self.addr, &self.password, &near, bot) {
+                Ok(s) => samples.push(s),
+                Err(e) => eprintln!("race: {bot}: the end's truth: {e}"),
+            }
+        }
+        samples
+    }
+}
+
+/// One truth sample: the game time, the entities near, and the bot as the server holds it.
+fn truth_sample(
+    addr: &str,
+    password: &str,
+    near: &str,
+    bot: &str,
+) -> Result<results::truth::TruthSample, String> {
+    let mut r = rcon::Rcon::connect(addr, password)?;
+    let time = r.command("time query gametime")?;
+    let at_tick = time
+        .split_whitespace()
+        .last()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let reply = r.command(near)?;
+    let me = r.command(&results::truth::self_command(bot))?;
+    let bot_entity = results::truth::parse_reply(&me).into_iter().next();
+    Ok(results::truth::TruthSample {
+        at_tick,
+        entities: results::truth::parse_reply(&reply),
+        bot: bot_entity,
+        bot_items: results::truth::bot_items(&me),
+        raw: format!("{reply}\n{me}"),
+    })
 }

@@ -12,6 +12,7 @@ pub mod observe;
 pub mod parity;
 pub mod snapshot;
 pub mod story;
+pub mod truth;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
