@@ -1212,6 +1212,7 @@ name = "replay"
 version = "0.1.0"
 dependencies = [
  "data",
+ "observe",
  "protocol",
  "record",
  "world",

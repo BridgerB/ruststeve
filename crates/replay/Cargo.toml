@@ -14,8 +14,13 @@ path = "src/bin/replay.rs"
 name = "why"
 path = "src/bin/why.rs"
 
+[[bin]]
+name = "ledger"
+path = "src/bin/ledger.rs"
+
 [dependencies]
 data = { path = "../data" }
 protocol = { path = "../protocol" }
+observe = { path = "../observe" }
 record = { path = "../record" }
 world = { path = "../world" }

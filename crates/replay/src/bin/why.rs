@@ -196,7 +196,10 @@ fn print_world(w: &World, events: u64) {
     }
     println!("inventory: {} stacks", w.inventory.slots.len());
     for (slot, (item, n)) in &w.inventory.slots {
-        println!("  slot {slot}: {item:?} x{n}");
+        match w.inventory.uses_left(*slot) {
+            Some(u) => println!("  slot {slot}: {item:?} x{n}, {u} uses left"),
+            None => println!("  slot {slot}: {item:?} x{n}"),
+        }
     }
     if let Some(dim) = w.dimension.as_ref().map(|d| d.name.as_str()) {
         let at = BlockPos::containing(x, y, z).chunk();
