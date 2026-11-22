@@ -56,3 +56,32 @@ fn a_worn_tool_is_not_counted_as_a_spare() {
         Some(&1)
     );
 }
+
+/// Blaze wall 8 (race 45017249540): the portal goal holds a pickaxe. With its kit held but no
+/// pickaxe, and the sticks, stone and a table for one, it asks for the craft (it answered Done
+/// and cast by hand); with a pickaxe held it is Done.
+#[test]
+fn the_portal_goal_with_no_pickaxe_crafts_one() {
+    let t = real_table();
+    let goal = t.until("portal").unwrap();
+    let mut counts: Counts = [
+        (ItemKind::WaterBucket, 1),
+        (ItemKind::Bucket, 1),
+        (ItemKind::FlintAndSteel, 1),
+        (ItemKind::Stick, 24),
+        (ItemKind::CobbledDeepslate, 64),
+    ]
+    .into_iter()
+    .collect();
+    let table_near = |k: data::BlockKind| k == data::BlockKind::CraftingTable;
+    let id = |c: Choice| match c {
+        Choice::Act(r) => r.id.clone(),
+        Choice::Done => "done".to_owned(),
+        Choice::Stuck => "stuck".to_owned(),
+    };
+    let none = make_with_wear(&t, &counts, &table_near, false, &Wear::default(), goal);
+    assert!(id(none).contains("pickaxe"), "no pickaxe asked for");
+    counts.insert(ItemKind::StonePickaxe, 1);
+    let held = make_with_wear(&t, &counts, &table_near, false, &Wear::default(), goal);
+    assert_eq!(id(held), "done");
+}

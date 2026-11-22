@@ -880,6 +880,17 @@ impl Plan {
                 let cell = e.cell;
                 return self.after_enter(c, status, cell, tick);
             }
+            // No pickaxe left mid-cast: pause it, the site kept, so the needs planner makes one
+            // and the cast resumes there (blaze wall 8: one cast ran 104,600 ticks by hand).
+            Task::Cast(_) if !holds_pickaxe(w) => {
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "cast paused: no pickaxe".to_owned(),
+                    "the site is kept; make a pickaxe, then cast again".to_owned(),
+                );
+                return Controls::default();
+            }
             Task::Cast(k) => {
                 let (c, act, status) = k.step(w, tick);
                 self.acts.extend(act);
@@ -3386,6 +3397,14 @@ pub fn exposed_near(w: &World, kinds: &[data::BlockKind]) -> Vec<Cell> {
     }
     found.sort();
     found.into_iter().map(|(_, c)| c).collect()
+}
+
+/// Whether a pickaxe with uses left is held (blaze wall 8).
+pub fn holds_pickaxe(w: &World) -> bool {
+    let picks = data::generated::tags::item_tag("pickaxes").unwrap_or(&[]);
+    w.inventory.slots.iter().any(|(slot, (k, _))| {
+        *slot >= 1 && picks.contains(k) && w.inventory.uses_left(*slot).is_none_or(|u| u > 0)
+    })
 }
 
 /// A stone pickaxe's uses: what each pickaxe the held wood and stone make adds to the budget.

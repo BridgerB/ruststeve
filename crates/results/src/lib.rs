@@ -329,6 +329,27 @@ pub struct Coverage {
     pub ledger_dropped: Option<u64>,
 }
 
+/// Entity-data serializers left unread on purpose, with why: a stop at one is counted apart and
+/// is no blind spot (issue 16e).
+pub const SKIPPED_SERIALIZERS: [(&str, &str); 4] = [
+    (
+        "PARTICLES",
+        "a living entity's effect particles, each type laid out its own way; after them only arrow and stinger counts and a sleeping place",
+    ),
+    (
+        "PARTICLE",
+        "an area cloud's particle, its last entry; the cloud's radius comes before it",
+    ),
+    (
+        "RESOLVABLE_PROFILE",
+        "a mannequin's or a head's player profile",
+    ),
+    (
+        "PAINTING_VARIANT",
+        "a painting's variant, which may be written inline",
+    ),
+];
+
 /// Adds an optional count: unmeasured anywhere stays unmeasured.
 fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     Some(a? + b?)
@@ -414,9 +435,25 @@ impl Coverage {
         for (component, n) in &self.slots_truncated_by {
             lines.push(format!("  - at component `{component}`: {n}"));
         }
-        lines.push(zero_opt("entity data cut short", self.metadata_truncated));
+        // Stops at a serializer left unread on purpose are counted apart, with the reason.
+        let on_purpose = |s: &str| SKIPPED_SERIALIZERS.iter().find(|(n, _)| *n == s);
+        let blind_stops: u64 = self
+            .metadata_truncated_by
+            .iter()
+            .filter(|(s, _)| on_purpose(s).is_none())
+            .map(|(_, n)| n)
+            .sum();
+        lines.push(zero_opt(
+            "entity data cut short",
+            self.metadata_truncated.map(|_| blind_stops),
+        ));
         for (serializer, n) in &self.metadata_truncated_by {
-            lines.push(format!("  - at serializer `{serializer}`: {n}"));
+            match on_purpose(serializer) {
+                Some((_, why)) => {
+                    lines.push(format!("  - at `{serializer}`, on purpose ({why}): {n}"));
+                }
+                None => lines.push(format!("  - at serializer `{serializer}`: {n}")),
+            }
         }
         // Packets thrown away, by class then count.
         let class = |k: &str| observe.map_or(observe::Class::Unclassed, |o| o.class(k));

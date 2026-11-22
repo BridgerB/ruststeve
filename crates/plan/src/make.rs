@@ -742,30 +742,28 @@ type Resolved<'a> = (Counts, Option<Result<&'a Row, ()>>);
 impl<'a> Planner<'a> {
     /// `resolve-row`: try to get `times` runs of a row done: `None` when its needs are met (act
     /// on it), `Some(Ok(row))` a producer further down to act on, `Some(Err(()))` stuck.
-    fn resolve_row(
+    /// What a row holds, resolved once and handed back unconsumed (`resolve-holds`), then its
+    /// spares (`resolve-spares`): one more than it holds, counted without worn tools, planned
+    /// only when the producer is worth it now (never a mine; a gather only with a log to start
+    /// on, or when low on digs). `None` when the row keeps all it should.
+    fn keep(
         &self,
-        counts: Counts,
+        counts: &Counts,
         row: &'a Row,
-        times: i32,
         path: &[Vec<ItemKind>],
-    ) -> Resolved<'a> {
-        // What the row holds is resolved once and handed back unconsumed (`resolve-holds`).
+    ) -> Option<Result<&'a Row, ()>> {
         for (k, n) in &row.holds {
-            match self.resolve_need(counts.clone(), k, *n, path) {
-                (_, Some(Err(()))) => return (counts, Some(Err(()))),
-                (c2, Some(Ok(r))) => return (c2, Some(Ok(r))),
-                (_, None) => {}
+            if let (_, Some(r)) = self.resolve_need(counts.clone(), k, *n, path) {
+                return Some(r);
             }
         }
-        // Then its spares (`resolve-spares`): one more than it holds, planned only when the
-        // producer is worth it now (never a mine; a gather only with a log to start on).
         for (k, n) in &row.spares {
             let held = row
                 .holds
                 .iter()
                 .find(|(h, _)| h.key == k.key)
                 .map_or(0, |(_, m)| *m);
-            let unworn = without(&counts, &self.worn);
+            let unworn = without(counts, &self.worn);
             if let (_, Some(Ok(r))) = self.resolve_need(unworn, k, n + held, path) {
                 let worth = match r.act {
                     Some(Act::Mine { .. } | Act::Scoop) => false,
@@ -775,9 +773,22 @@ impl<'a> Planner<'a> {
                     }
                 };
                 if worth {
-                    return (counts, Some(Ok(r)));
+                    return Some(Ok(r));
                 }
             }
+        }
+        None
+    }
+
+    fn resolve_row(
+        &self,
+        counts: Counts,
+        row: &'a Row,
+        times: i32,
+        path: &[Vec<ItemKind>],
+    ) -> Resolved<'a> {
+        if let Some(r) = self.keep(&counts, row, path) {
+            return (counts, Some(r));
         }
         let mut c = counts.clone();
         for (k, n) in &row.needs {
@@ -967,6 +978,14 @@ pub fn make_with_wear<'a>(
         low_on_digs: wear.low_on_digs,
     };
     let mut c = counts.clone();
+    // The goal's own holds and spares first, as a producer row's are: the portal goal holds a
+    // pickaxe, and with none it still answered Done and cast by hand (blaze wall 8).
+    if let Some(r) = p.keep(counts, goal, &[]) {
+        return match r {
+            Ok(row) => Choice::Act(row),
+            Err(()) => Choice::Stuck,
+        };
+    }
     for (k, n) in goal.provides.iter().chain(&goal.needs) {
         match p.resolve_need(c, k, *n, &[]) {
             (_, Some(Ok(row))) => return Choice::Act(row),

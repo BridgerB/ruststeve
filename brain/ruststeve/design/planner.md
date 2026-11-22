@@ -6,7 +6,7 @@ tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
 lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@2acc083 clojurecraft@be85a92
+verifiedAgainst: ruststeve@a56eb0a clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -82,3 +82,7 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 ## Blaze wall 7: worn tools and the dig budget
 - A tool with fewer than `spare_uses` (40) uses left is worn and no spare (`make::without`, clojurecraft's `without-worn`).
 - `dig_budget`: every held pickaxe's uses left, plus 131 for each stone pickaxe the held wood and stone make with a table held or near. Under `travel_reserve_digs` (131) a spare's gather is worth it from anywhere (`make::Wear::low_on_digs`), so a bot underground turns to the trees while it can still dig to them; the ledger notes "low on digs" once.
+
+## Blaze wall 8: the goal keeps its tools
+- `make_with_wear` resolves the goal row's own `holds` and `spares` first (`Planner::keep`, shared with producer rows): the portal goal holds a pickaxe, and with none it answered Done and cast by hand.
+- A running cast with no pickaxe left (`holds_pickaxe`) pauses: the task ends, the site is kept, the needs planner makes a pickaxe, the cast resumes.
