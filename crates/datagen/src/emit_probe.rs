@@ -295,3 +295,46 @@ pub fn metadata_rs(p: &Probe) -> Result<String> {
     writeln!(s, "];")?;
     Ok(s)
 }
+
+/// `LevelEvent` and `ClientboundGameEventPacket.Type` ids with their constant names, lower-cased
+/// (`sound_blaze_fireball` is 1018): what the `level_event` and `game_event` packets name.
+pub fn events_rs(p: &Probe) -> Result<String> {
+    let mut s = probe_header();
+    for (table, lookup, doc, rows) in [
+        (
+            "LEVEL_EVENTS",
+            "level_event_name",
+            "The `LevelEvent` constants by id: a blaze's or ghast's shot, the dragon's breath and \
+             death, a block broken (the `level_event` packet's type).",
+            &p.level_events,
+        ),
+        (
+            "GAME_EVENTS",
+            "game_event_name",
+            "The `ClientboundGameEventPacket` types by id: rain, the win after the dragon, and \
+             others (the `game_event` packet's type).",
+            &p.game_events,
+        ),
+    ] {
+        let mut rows: Vec<(i64, String)> =
+            rows.iter().map(|(n, id)| (*id, n.to_lowercase())).collect();
+        rows.sort_unstable();
+        writeln!(s, "/// {doc}")?;
+        writeln!(s, "pub static {table}: [(i32, &str); {}] = [", rows.len())?;
+        for (id, name) in &rows {
+            writeln!(s, "    ({id}, {name:?}),")?;
+        }
+        writeln!(s, "];\n")?;
+        writeln!(
+            s,
+            "/// The constant's name for an id (the first, when two share it)."
+        )?;
+        writeln!(s, "pub fn {lookup}(id: i32) -> Option<&'static str> {{")?;
+        writeln!(
+            s,
+            "    {table}.iter().find(|(i, _)| *i == id).map(|(_, n)| *n)"
+        )?;
+        writeln!(s, "}}\n")?;
+    }
+    Ok(s)
+}

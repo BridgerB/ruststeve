@@ -937,6 +937,7 @@ pub fn write_all(g: &Game, p: &Probe, out: &Path) -> Result<()> {
         ("fuel", crate::emit_probe::fuel_rs(g, p)?),
         ("mobs", crate::emit_probe::mobs_rs(g, p)?),
         ("metadata", crate::emit_probe::metadata_rs(p)?),
+        ("events", crate::emit_probe::events_rs(p)?),
         ("item_props", item_props_rs(g)?),
     ];
     let mut modules: Vec<&str> = files.iter().map(|(n, _)| *n).collect();
