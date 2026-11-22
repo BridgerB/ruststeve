@@ -108,6 +108,14 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Fix**: in a water trap with the eyes under and water in the cell over the head, the escape puts a held block (cobblestone first) into that cell, clicking the stone over or beside it (`escape::against`), up to 6 tries 10 ticks apart, so the shaft drains. And it never digs a lid with water over it, or a wall with water over it or behind it (`holds_back_water`). Unit test `a_seal_clicks_the_stone_round_the_cell_over_the_head`.
 - **Also seen**: the ledger logs a hotbar swap as an item lost and found (`water_bucket 1 -> 0` then `0 -> 1`, and a false "tool broke" in the same tick). An observability bug, for after this wall.
 
+- **Raced** (721fcab, race 45066716305, lane 7's snapshot, 14 x 1): no bot drowned (4 of 12 before). None passed `gear`: 12 of 14 died to mobs (skeleton arrows 6, creepers 4, zombies 2), 2 `no-progress`. That is wall 12.
+
+### 12. No food, so no healing: worn down by cave mobs (race 45066716305, 721fcab, lane 7's snapshot)
+- **What happened**: 12 of 14 dead within 2,100 to 22,900 ticks. No bot started a hunt (0 of 14) and one ate once; food stayed 14 to 17, under the 18 that health comes back from. Lane 2 took a creeper's blast at tick 2,240 (20 to 2), then lived at 2 to 3 health for 14,000 ticks until one skeleton arrow; lanes 3 and 7 were worn down fight by fight (zombies, spiders, skeletons) from 12 to 1.
+- **Read**: lane 7's snapshot holds no food. The hunt row looks within `hunt_radius` 24 of the feet (48 only when starving at food 6), and the bots work at y 5 to 20 under the animals on the surface, so no prey is ever in range with a route. Creepers (lane 12): the retreat ran 200 ticks through the cave with the creeper following, its fuse heard at 3, and it blew.
+- **Cause**: the start again: an underground bot with no food never heals, and every cave fight is paid for out of a health bar that does not come back. Lane 6's snapshot holds 6 beef and 6 porkchops (36 hunger points, over the 32 reserve), and its bots ate (19 meals in race 45046881098); its two drownings there were wall 11's.
+- **Fix**: race from lane 6's snapshot now that walls 9 to 11 are fixed. Not yet fixed: hunting from underground (prey on the surface, out of `hunt_radius`), and creepers that follow a retreat through a cave.
+
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
 - Case files counted no swings: `race` wrote `swings_sent` and `swings_landed` as a literal 0. They now come from the plan, summed over every fight.
 - Each `defend` ends in a note with what it saw: swings, swings landed, the stance, steps held back, the foe's kind, the bot's health at the start and end, the foe's highest point over the eye, and the ticks a blaze foe was charging (`world::Entity::blaze_charged`: its metadata index 16, bit 0, as clojurecraft read it on 26.1.2). The next blaze wall is read from these before any fix.
