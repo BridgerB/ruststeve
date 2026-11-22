@@ -91,6 +91,12 @@ pub struct Entity {
     /// What rides it (`set_passengers`).
     #[serde(default)]
     pub passengers: Vec<i32>,
+    /// Effects on it by name, with their amplifier.
+    #[serde(default)]
+    pub effects: BTreeMap<String, i32>,
+    /// Its attributes as the server sent them (base plus add-value modifiers).
+    #[serde(default)]
+    pub attributes: BTreeMap<String, f64>,
 }
 
 /// Sounds and level events kept (the newest): a minute of a fight is well under this.
@@ -115,6 +121,23 @@ pub struct LevelEventSeen {
     pub name: Option<String>,
     pub pos: (i32, i32, i32),
     pub data: i32,
+}
+
+/// A registry entry's name by id, or `id:<n>` when the table lacks it.
+fn registry_name(table: &[&str], id: i32) -> String {
+    usize::try_from(id)
+        .ok()
+        .and_then(|i| table.get(i))
+        .map_or_else(|| format!("id:{id}"), |n| (*n).to_owned())
+}
+
+/// A line of chat or screen text and where it came from.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct ChatLine {
+    pub at_tick: u64,
+    /// `system`, `action_bar`, `title` or `subtitle`.
+    pub via: String,
+    pub text: String,
 }
 
 /// A blast: where, when, and the knockback it gave the bot.
@@ -506,6 +529,19 @@ pub struct Player {
     /// Items finished using (an eat: entity event 9 for the bot), counted.
     #[serde(default)]
     pub uses_finished: u64,
+    /// Effects on the bot by name: amplifier and the server tick it ends (issue 16e).
+    #[serde(default)]
+    pub effects: BTreeMap<String, (i32, u64)>,
+    /// Its attributes as the server holds them (`armor`, `max_health`): base plus the
+    /// add-value modifiers.
+    #[serde(default)]
+    pub attributes: BTreeMap<String, f64>,
+    /// The server thinks it is in a fight (`player_combat_enter` until `_end`).
+    #[serde(default)]
+    pub in_combat: bool,
+    /// Experience: level and total points.
+    #[serde(default)]
+    pub experience: Option<(i32, i32)>,
 }
 
 /// The world value.
@@ -571,6 +607,32 @@ pub struct World {
     /// The bot's last hurt flash: server tick and the yaw the blow came from.
     #[serde(default)]
     pub hurt_from: Option<(u64, f32)>,
+    /// Item cooldowns by group (`ender_pearl`): the server tick each ends.
+    #[serde(default)]
+    pub cooldowns: BTreeMap<String, u64>,
+    /// Game events, newest last (`SOUNDS_KEPT`): server tick, id, its name, parameter.
+    #[serde(default)]
+    pub game_events: Vec<(u64, u8, Option<String>, f32)>,
+    /// The game said the run is won (`win_game`, after the dragon).
+    #[serde(default)]
+    pub won: bool,
+    /// Chat and the screen's text, newest last (`SOUNDS_KEPT`).
+    #[serde(default)]
+    pub chat: Vec<ChatLine>,
+    /// Boss bars by uuid: name and health 0 to 1 (the dragon's, issue 20).
+    #[serde(default)]
+    pub bosses: BTreeMap<[u8; 16], (String, f32)>,
+    /// The chunk the server centres the view on, the view radius, and the simulation distance
+    /// (mobs beyond it do not move: issue 17's frozen endermen).
+    #[serde(default)]
+    pub chunk_center: Option<(i32, i32)>,
+    #[serde(default)]
+    pub view_radius: Option<i32>,
+    #[serde(default)]
+    pub simulation_distance: Option<i32>,
+    /// Chunks whose biomes the server changed since the run began.
+    #[serde(default)]
+    pub biome_updates: u64,
     /// The server's account of the bot's death (`player_combat_kill`); the run ends there.
     #[serde(default)]
     pub death: Option<Death>,
@@ -1051,6 +1113,17 @@ impl World {
         }
     }
 
+    /// A line of chat or screen text, kept with the newest `SOUNDS_KEPT`.
+    fn say(&mut self, via: &str, text: &str) {
+        self.chat.push(ChatLine {
+            at_tick: self.session.server_ticks,
+            via: via.to_owned(),
+            text: text.to_owned(),
+        });
+        let over = self.chat.len().saturating_sub(SOUNDS_KEPT);
+        self.chat.drain(..over);
+    }
+
     /// A sound heard, kept with the newest `SOUNDS_KEPT`.
     fn hear(&mut self, h: Heard) {
         self.sounds.push(h);
@@ -1071,10 +1144,14 @@ impl World {
                 entity_id,
                 dimension_type,
                 dimension,
+                view_distance,
+                simulation_distance,
                 ..
             } => {
                 self.player.entity_id = Some(*entity_id);
                 self.enter(*dimension_type, dimension);
+                self.simulation_distance = Some(*simulation_distance);
+                self.view_radius = Some(*view_distance);
             }
             S2c::Respawn {
                 dimension_type,
@@ -1132,6 +1209,8 @@ impl World {
                             swung_at: None,
                             power: None,
                             passengers: Vec::new(),
+                            effects: BTreeMap::new(),
+                            attributes: BTreeMap::new(),
                         },
                     );
                 }
@@ -1531,6 +1610,103 @@ impl World {
                     self.spawner_mobs.insert(*pos, m.clone());
                 }
             }
+            S2c::UpdateMobEffect {
+                id,
+                effect,
+                amplifier,
+                duration,
+            } => {
+                let name =
+                    registry_name(data::generated::registries::MOB_EFFECT.as_slice(), *effect);
+                if Some(*id) == self.player.entity_id {
+                    // A duration of -1 is infinite.
+                    let until = u64::try_from(*duration)
+                        .map_or(u64::MAX, |d| self.session.server_ticks.saturating_add(d));
+                    self.player.effects.insert(name, (*amplifier, until));
+                } else if let Some(e) = self.entities.get_mut(id) {
+                    e.effects.insert(name, *amplifier);
+                }
+            }
+            S2c::RemoveMobEffect { id, effect } => {
+                let name =
+                    registry_name(data::generated::registries::MOB_EFFECT.as_slice(), *effect);
+                if Some(*id) == self.player.entity_id {
+                    self.player.effects.remove(&name);
+                } else if let Some(e) = self.entities.get_mut(id) {
+                    e.effects.remove(&name);
+                }
+            }
+            S2c::UpdateAttributes { id, attributes } => {
+                let values = attributes.iter().map(|(a, base, add)| {
+                    (
+                        registry_name(data::generated::registries::ATTRIBUTE.as_slice(), *a),
+                        base + add,
+                    )
+                });
+                if Some(*id) == self.player.entity_id {
+                    self.player.attributes.extend(values);
+                } else if let Some(e) = self.entities.get_mut(id) {
+                    e.attributes.extend(values);
+                }
+            }
+            S2c::PlayerCombatEnter => self.player.in_combat = true,
+            S2c::PlayerCombatEnd { .. } => self.player.in_combat = false,
+            S2c::SetExperience { level, total, .. } => {
+                self.player.experience = Some((*level, *total));
+            }
+            S2c::Cooldown { group, ticks } => {
+                let group = group.trim_start_matches("minecraft:").to_owned();
+                if *ticks > 0 {
+                    let until = self.session.server_ticks + u64::try_from(*ticks).unwrap_or(0);
+                    self.cooldowns.insert(group, until);
+                } else {
+                    self.cooldowns.remove(&group);
+                }
+            }
+            S2c::GameEvent { event, param } => {
+                let name = data::generated::events::game_event_name(i32::from(*event));
+                if name == Some("win_game") {
+                    self.won = true;
+                }
+                self.game_events.push((
+                    self.session.server_ticks,
+                    *event,
+                    name.map(str::to_owned),
+                    *param,
+                ));
+                let over = self.game_events.len().saturating_sub(SOUNDS_KEPT);
+                self.game_events.drain(..over);
+            }
+            S2c::SystemChat { text, overlay } => {
+                let via = if *overlay { "action_bar" } else { "system" };
+                self.say(via, text);
+            }
+            S2c::ActionBar { text } => self.say("action_bar", text),
+            S2c::Title { text } => self.say("title", text),
+            S2c::Subtitle { text } => self.say("subtitle", text),
+            S2c::BossEvent { uuid, op } => match op {
+                protocol::BossOp::Add { name, progress } => {
+                    self.bosses.insert(*uuid, (name.clone(), *progress));
+                }
+                protocol::BossOp::Remove => {
+                    self.bosses.remove(uuid);
+                }
+                protocol::BossOp::Progress(p) => {
+                    if let Some(b) = self.bosses.get_mut(uuid) {
+                        b.1 = *p;
+                    }
+                }
+                protocol::BossOp::Name(n) => {
+                    if let Some(b) = self.bosses.get_mut(uuid) {
+                        b.0.clone_from(n);
+                    }
+                }
+                protocol::BossOp::Style => {}
+            },
+            S2c::ChunksBiomes { chunks } => self.biome_updates += chunks.len() as u64,
+            S2c::SetChunkCacheCenter { x, z } => self.chunk_center = Some((*x, *z)),
+            S2c::SetChunkCacheRadius { radius } => self.view_radius = Some(*radius),
+            S2c::SetSimulationDistance { distance } => self.simulation_distance = Some(*distance),
             S2c::BlockDestruction {
                 breaker,
                 pos,
@@ -1625,6 +1801,8 @@ mod blaze_charge {
             swung_at: None,
             power: None,
             passengers: Vec::new(),
+            effects: BTreeMap::new(),
+            attributes: BTreeMap::new(),
         }
     }
 
@@ -1835,5 +2013,64 @@ mod sight_tests {
         assert_eq!(e.faces([0.0, 64.0, 5.0], 12.0), Some(false));
         w.fold(&S2c::RotateHead { id: 4, yaw: 0.0 });
         assert_eq!(w.entities[&4].faces([0.0, 64.0, 5.0], 12.0), Some(true));
+    }
+}
+
+#[cfg(test)]
+mod body_tests {
+    use super::*;
+    use protocol::BossOp;
+
+    /// Issue 16e: effects, attributes, chat, the boss bar and the win reach the world by name.
+    #[test]
+    fn effects_chat_bosses_and_the_win_are_kept() {
+        let mut w = World::new();
+        w.player.entity_id = Some(1);
+        let wither = data::generated::registries::MOB_EFFECT
+            .iter()
+            .position(|n| *n == "wither")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap();
+        w.fold(&S2c::UpdateMobEffect {
+            id: 1,
+            effect: wither,
+            amplifier: 0,
+            duration: 200,
+        });
+        assert_eq!(w.player.effects.get("wither").map(|e| e.0), Some(0));
+        let armor = data::generated::registries::ATTRIBUTE
+            .iter()
+            .position(|n| *n == "armor")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap();
+        w.fold(&S2c::UpdateAttributes {
+            id: 1,
+            attributes: vec![(armor, 0.0, 15.0)],
+        });
+        assert_eq!(w.player.attributes.get("armor"), Some(&15.0));
+        w.fold(&S2c::SystemChat {
+            text: "rs-l01-b00 was slain by Blaze".to_owned(),
+            overlay: false,
+        });
+        assert_eq!(w.chat.last().map(|c| c.via.as_str()), Some("system"));
+        w.fold(&S2c::BossEvent {
+            uuid: [3; 16],
+            op: BossOp::Add {
+                name: "Ender Dragon".to_owned(),
+                progress: 1.0,
+            },
+        });
+        w.fold(&S2c::BossEvent {
+            uuid: [3; 16],
+            op: BossOp::Progress(0.5),
+        });
+        assert_eq!(w.bosses.get(&[3; 16]).map(|b| b.1), Some(0.5));
+        w.fold(&S2c::GameEvent {
+            event: 4,
+            param: 1.0,
+        });
+        assert!(w.won);
+        w.fold(&S2c::SetSimulationDistance { distance: 3 });
+        assert_eq!(w.simulation_distance, Some(3));
     }
 }

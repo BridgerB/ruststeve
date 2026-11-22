@@ -111,3 +111,73 @@ fn the_sight_packets_read_back() {
         assert_eq!(round_trip(&p), p);
     }
 }
+
+/// Issue 16e, the body, language and the world: each packet reads back what a server writes.
+#[test]
+fn the_body_language_and_world_packets_read_back() {
+    use protocol::BossOp;
+    for p in [
+        S2c::UpdateMobEffect {
+            id: 1,
+            effect: 3,
+            amplifier: 1,
+            duration: 200,
+        },
+        S2c::RemoveMobEffect { id: 1, effect: 3 },
+        S2c::UpdateAttributes {
+            id: 1,
+            attributes: vec![(0, 20.0, 0.0), (1, 0.0, 15.0)],
+        },
+        S2c::PlayerCombatEnter,
+        S2c::PlayerCombatEnd { duration: 40 },
+        S2c::SetExperience {
+            progress: 0.5,
+            level: 3,
+            total: 27,
+        },
+        S2c::Cooldown {
+            group: "minecraft:ender_pearl".to_owned(),
+            ticks: 20,
+        },
+        S2c::GameEvent {
+            event: 4,
+            param: 1.0,
+        },
+        S2c::SystemChat {
+            text: "rs-l01-b00 was slain by Blaze".to_owned(),
+            overlay: false,
+        },
+        S2c::ActionBar {
+            text: "You may not rest now".to_owned(),
+        },
+        S2c::Title {
+            text: "title".to_owned(),
+        },
+        S2c::Subtitle {
+            text: "subtitle".to_owned(),
+        },
+        S2c::BossEvent {
+            uuid: [3; 16],
+            op: BossOp::Add {
+                name: "Ender Dragon".to_owned(),
+                progress: 1.0,
+            },
+        },
+        S2c::BossEvent {
+            uuid: [3; 16],
+            op: BossOp::Progress(0.25),
+        },
+        S2c::BossEvent {
+            uuid: [3; 16],
+            op: BossOp::Remove,
+        },
+        S2c::ChunksBiomes {
+            chunks: vec![(-3, 7), (12, -40)],
+        },
+        S2c::SetChunkCacheCenter { x: -4, z: 9 },
+        S2c::SetChunkCacheRadius { radius: 8 },
+        S2c::SetSimulationDistance { distance: 3 },
+    ] {
+        assert_eq!(round_trip(&p), p);
+    }
+}

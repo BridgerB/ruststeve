@@ -10,74 +10,8 @@
 # biggest blank) and its `deliberate` list.
 
 # ---- wanted: the facts issues 16 to 20 need, still thrown away ----
-
-[[wanted]]
-packet = "play/update_mob_effect"
-why = "effects on the bot and on mobs: wither, poison, fire resistance"
-
-[[wanted]]
-packet = "play/remove_mob_effect"
-why = "an effect ended"
-
-[[wanted]]
-packet = "play/update_attributes"
-why = "the bot's armour and max health as the server holds them; mobs' speed"
-
-[[wanted]]
-packet = "play/player_combat_enter"
-why = "when the server thinks a fight began"
-
-[[wanted]]
-packet = "play/player_combat_end"
-why = "when the server thinks a fight ended, and its length"
-
-[[wanted]]
-packet = "play/set_experience"
-why = "experience gained: a kill credited to the bot"
-
-[[wanted]]
-packet = "play/cooldown"
-why = "when an ender pearl can be thrown again (issues 18 to 20)"
-
-[[wanted]]
-packet = "play/game_event"
-why = "rain and thunder, the win (credits after the dragon), respawn-screen and other state changes"
-
-[[wanted]]
-packet = "play/system_chat"
-why = "the server's word: death messages for every player, warnings"
-
-[[wanted]]
-packet = "play/set_action_bar_text"
-why = "action-bar messages (a bed you cannot sleep in, and others)"
-
-[[wanted]]
-packet = "play/set_title_text"
-why = "titles the server shows"
-
-[[wanted]]
-packet = "play/set_subtitle_text"
-why = "subtitles the server shows"
-
-[[wanted]]
-packet = "play/boss_event"
-why = "the dragon's (and wither's) boss bar: health, add and remove (issue 20)"
-
-[[wanted]]
-packet = "play/chunks_biomes"
-why = "biome changes in loaded chunks: the warped forest for issue 17"
-
-[[wanted]]
-packet = "play/set_chunk_cache_center"
-why = "the chunk the server centres the view on: which entities tick"
-
-[[wanted]]
-packet = "play/set_chunk_cache_radius"
-why = "a changed view distance: what can be seen"
-
-[[wanted]]
-packet = "play/set_simulation_distance"
-why = "a changed simulation distance: which mobs move at all (issue 17: frozen endermen)"
+# (none: every packet the stages need is decoded since issue 16e, phase B. A new one is added
+# here, as `[[wanted]]` with `packet` and `why`, until it is decoded.)
 
 # ---- skipped: thrown away on purpose ----
 

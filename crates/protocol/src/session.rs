@@ -174,6 +174,23 @@ impl Session {
             | S2c::Explode { .. }
             | S2c::BlockEntityData { .. }
             | S2c::BlockDestruction { .. }
+            | S2c::UpdateMobEffect { .. }
+            | S2c::RemoveMobEffect { .. }
+            | S2c::UpdateAttributes { .. }
+            | S2c::PlayerCombatEnter
+            | S2c::PlayerCombatEnd { .. }
+            | S2c::SetExperience { .. }
+            | S2c::Cooldown { .. }
+            | S2c::GameEvent { .. }
+            | S2c::SystemChat { .. }
+            | S2c::ActionBar { .. }
+            | S2c::Title { .. }
+            | S2c::Subtitle { .. }
+            | S2c::BossEvent { .. }
+            | S2c::ChunksBiomes { .. }
+            | S2c::SetChunkCacheCenter { .. }
+            | S2c::SetChunkCacheRadius { .. }
+            | S2c::SetSimulationDistance { .. }
             | S2c::Unknown { .. } => Vec::new(),
         };
         self.state = self.state.after_receive(p);

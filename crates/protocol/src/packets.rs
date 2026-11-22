@@ -309,6 +309,75 @@ pub enum S2c {
         pos: (i32, i32, i32),
         stage: i8,
     },
+    // The body, language and the world (issue 16e).
+    UpdateMobEffect {
+        id: i32,
+        effect: i32,
+        amplifier: i32,
+        duration: i32,
+    },
+    RemoveMobEffect {
+        id: i32,
+        effect: i32,
+    },
+    /// Attribute values: (registry id, base, the sum of the add-value modifiers).
+    UpdateAttributes {
+        id: i32,
+        attributes: Vec<(i32, f64, f64)>,
+    },
+    PlayerCombatEnter,
+    PlayerCombatEnd {
+        duration: i32,
+    },
+    SetExperience {
+        progress: f32,
+        level: i32,
+        total: i32,
+    },
+    /// An item cooldown by its group (`minecraft:ender_pearl`), in ticks.
+    Cooldown {
+        group: String,
+        ticks: i32,
+    },
+    /// A game event (`data::generated::events::GAME_EVENTS`): 4 the win, 1 rain.
+    GameEvent {
+        event: u8,
+        param: f32,
+    },
+    /// Chat and the screen's text, as plain text: system chat (`overlay` is the action bar),
+    /// the action bar, titles and subtitles.
+    SystemChat {
+        text: String,
+        overlay: bool,
+    },
+    ActionBar {
+        text: String,
+    },
+    Title {
+        text: String,
+    },
+    Subtitle {
+        text: String,
+    },
+    /// A boss bar: added (with its name and health), removed, or changed.
+    BossEvent {
+        uuid: [u8; 16],
+        op: BossOp,
+    },
+    /// Chunks whose biomes changed (the data itself is not read yet).
+    ChunksBiomes {
+        chunks: Vec<(i32, i32)>,
+    },
+    SetChunkCacheCenter {
+        x: i32,
+        z: i32,
+    },
+    SetChunkCacheRadius {
+        radius: i32,
+    },
+    SetSimulationDistance {
+        distance: i32,
+    },
     Unknown {
         state: State,
         id: u32,
@@ -334,6 +403,31 @@ impl SoundRef {
             SoundRef::Inline(n) => n.trim_start_matches("minecraft:").to_owned(),
         }
     }
+}
+
+/// What a boss-bar packet does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BossOp {
+    Add {
+        name: String,
+        progress: f32,
+    },
+    Remove,
+    Progress(f32),
+    Name(String),
+    /// Colour, overlay or flags changed: nothing the bot reads.
+    Style,
+}
+
+/// A text component (network NBT) as one line of plain text.
+fn read_text(r: &mut Reader<'_>) -> Result<String, ParseError> {
+    Ok(crate::nbt::plain(&crate::nbt::read_root(r)?))
+}
+
+fn write_text(w: &mut Writer, s: &str) {
+    w.bytes(&crate::nbt::write_root(&crate::nbt::Nbt::String(
+        s.to_owned(),
+    )));
 }
 
 /// A byte angle (256 to the turn) in degrees.
@@ -740,6 +834,110 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 breaker: r.varint()?,
                 pos: r.position()?,
                 stage: r.i8()?,
+            },
+            Some(PlayIn::UpdateMobEffect) => {
+                let id = r.varint()?;
+                let effect = r.varint()?;
+                let amplifier = r.varint()?;
+                let duration = r.varint()?;
+                S2c::UpdateMobEffect {
+                    id,
+                    effect,
+                    amplifier,
+                    duration,
+                }
+            }
+            Some(PlayIn::RemoveMobEffect) => S2c::RemoveMobEffect {
+                id: r.varint()?,
+                effect: r.varint()?,
+            },
+            Some(PlayIn::UpdateAttributes) => {
+                let id = r.varint()?;
+                let n = r.length()?;
+                let mut attributes = Vec::with_capacity(n.min(64));
+                for _ in 0..n {
+                    let attr = r.varint()?;
+                    let base = r.f64()?;
+                    let mods = r.length()?;
+                    let mut add = 0.0;
+                    for _ in 0..mods {
+                        let _id = r.string()?;
+                        let amount = r.f64()?;
+                        // Operation 0 adds its amount; the multiplying ones are left out, as
+                        // clojurecraft's hear.clj does.
+                        if r.varint()? == 0 {
+                            add += amount;
+                        }
+                    }
+                    attributes.push((attr, base, add));
+                }
+                S2c::UpdateAttributes { id, attributes }
+            }
+            Some(PlayIn::PlayerCombatEnter) => S2c::PlayerCombatEnter,
+            Some(PlayIn::PlayerCombatEnd) => S2c::PlayerCombatEnd {
+                duration: r.varint()?,
+            },
+            Some(PlayIn::SetExperience) => S2c::SetExperience {
+                progress: r.f32()?,
+                level: r.varint()?,
+                total: r.varint()?,
+            },
+            Some(PlayIn::Cooldown) => S2c::Cooldown {
+                group: r.string()?,
+                ticks: r.varint()?,
+            },
+            Some(PlayIn::GameEvent) => S2c::GameEvent {
+                event: r.u8()?,
+                param: r.f32()?,
+            },
+            Some(PlayIn::SystemChat) => S2c::SystemChat {
+                text: read_text(&mut r)?,
+                overlay: r.bool()?,
+            },
+            Some(PlayIn::SetActionBarText) => S2c::ActionBar {
+                text: read_text(&mut r)?,
+            },
+            Some(PlayIn::SetTitleText) => S2c::Title {
+                text: read_text(&mut r)?,
+            },
+            Some(PlayIn::SetSubtitleText) => S2c::Subtitle {
+                text: read_text(&mut r)?,
+            },
+            Some(PlayIn::BossEvent) => {
+                let uuid = r.uuid()?;
+                let op = match r.varint()? {
+                    0 => BossOp::Add {
+                        name: read_text(&mut r)?,
+                        progress: r.f32()?,
+                    },
+                    1 => BossOp::Remove,
+                    2 => BossOp::Progress(r.f32()?),
+                    3 => BossOp::Name(read_text(&mut r)?),
+                    _ => BossOp::Style,
+                };
+                S2c::BossEvent { uuid, op }
+            }
+            Some(PlayIn::ChunksBiomes) => {
+                let n = r.length()?;
+                let mut chunks = Vec::with_capacity(n.min(64));
+                for _ in 0..n {
+                    // ChunkPos as a long: x in the low 32 bits, z in the high.
+                    let packed = r.i64()?;
+                    chunks.push((packed as i32, (packed >> 32) as i32));
+                    let len = r.length()?;
+                    r.take(len)?;
+                }
+                S2c::ChunksBiomes { chunks }
+            }
+            Some(PlayIn::SetChunkCacheCenter) => S2c::SetChunkCacheCenter {
+                x: r.varint()?,
+                z: r.varint()?,
+            },
+            Some(PlayIn::SetChunkCacheRadius) => S2c::SetChunkCacheRadius {
+                radius: r.varint()?,
+            },
+            Some(PlayIn::SetSimulationDistance) => S2c::SetSimulationDistance {
+                distance: r.varint()?,
             },
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {
@@ -1549,6 +1747,131 @@ impl S2c {
                 w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
                 w.i8(*stage);
                 PlayIn::BlockDestruction.id()
+            }
+            S2c::UpdateMobEffect {
+                id,
+                effect,
+                amplifier,
+                duration,
+            } => {
+                w.varint(*id);
+                w.varint(*effect);
+                w.varint(*amplifier);
+                w.varint(*duration);
+                w.u8(0); // flags: not ambient, no particles, no icon
+                PlayIn::UpdateMobEffect.id()
+            }
+            S2c::RemoveMobEffect { id, effect } => {
+                w.varint(*id);
+                w.varint(*effect);
+                PlayIn::RemoveMobEffect.id()
+            }
+            S2c::UpdateAttributes { id, attributes } => {
+                w.varint(*id);
+                w.varint(i32::try_from(attributes.len()).unwrap_or(0));
+                for (attr, base, add) in attributes {
+                    w.varint(*attr);
+                    w.f64(*base);
+                    if *add == 0.0 {
+                        w.varint(0);
+                    } else {
+                        w.varint(1);
+                        w.string("ruststeve:model")?;
+                        w.f64(*add);
+                        w.varint(0);
+                    }
+                }
+                PlayIn::UpdateAttributes.id()
+            }
+            S2c::PlayerCombatEnter => PlayIn::PlayerCombatEnter.id(),
+            S2c::PlayerCombatEnd { duration } => {
+                w.varint(*duration);
+                PlayIn::PlayerCombatEnd.id()
+            }
+            S2c::SetExperience {
+                progress,
+                level,
+                total,
+            } => {
+                w.f32(*progress);
+                w.varint(*level);
+                w.varint(*total);
+                PlayIn::SetExperience.id()
+            }
+            S2c::Cooldown { group, ticks } => {
+                w.string(group)?;
+                w.varint(*ticks);
+                PlayIn::Cooldown.id()
+            }
+            S2c::GameEvent { event, param } => {
+                w.u8(*event);
+                w.f32(*param);
+                PlayIn::GameEvent.id()
+            }
+            S2c::SystemChat { text, overlay } => {
+                write_text(&mut w, text);
+                w.bool(*overlay);
+                PlayIn::SystemChat.id()
+            }
+            S2c::ActionBar { text } => {
+                write_text(&mut w, text);
+                PlayIn::SetActionBarText.id()
+            }
+            S2c::Title { text } => {
+                write_text(&mut w, text);
+                PlayIn::SetTitleText.id()
+            }
+            S2c::Subtitle { text } => {
+                write_text(&mut w, text);
+                PlayIn::SetSubtitleText.id()
+            }
+            S2c::BossEvent { uuid, op } => {
+                w.uuid(uuid);
+                match op {
+                    BossOp::Add { name, progress } => {
+                        w.varint(0);
+                        write_text(&mut w, name);
+                        w.f32(*progress);
+                        w.varint(0); // colour
+                        w.varint(0); // overlay
+                        w.u8(0); // flags
+                    }
+                    BossOp::Remove => w.varint(1),
+                    BossOp::Progress(p) => {
+                        w.varint(2);
+                        w.f32(*p);
+                    }
+                    BossOp::Name(n) => {
+                        w.varint(3);
+                        write_text(&mut w, n);
+                    }
+                    BossOp::Style => {
+                        w.varint(5);
+                        w.u8(0);
+                    }
+                }
+                PlayIn::BossEvent.id()
+            }
+            S2c::ChunksBiomes { chunks } => {
+                w.varint(i32::try_from(chunks.len()).unwrap_or(0));
+                for (x, z) in chunks {
+                    w.i64((i64::from(*x) & 0xffff_ffff) | (i64::from(*z) << 32));
+                    w.varint(0);
+                }
+                PlayIn::ChunksBiomes.id()
+            }
+            S2c::SetChunkCacheCenter { x, z } => {
+                w.varint(*x);
+                w.varint(*z);
+                PlayIn::SetChunkCacheCenter.id()
+            }
+            S2c::SetChunkCacheRadius { radius } => {
+                w.varint(*radius);
+                PlayIn::SetChunkCacheRadius.id()
+            }
+            S2c::SetSimulationDistance { distance } => {
+                w.varint(*distance);
+                PlayIn::SetSimulationDistance.id()
             }
             S2c::Unknown { .. } => return Err(EncodeError::NotModelled("an unknown packet")),
         };
