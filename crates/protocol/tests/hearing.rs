@@ -70,3 +70,44 @@ fn a_level_event_and_a_stop_sound_read_back() {
         Some("sound_blaze_fireball")
     );
 }
+
+/// Issue 16e, sight of mobs: each packet reads back what a server writes.
+#[test]
+fn the_sight_packets_read_back() {
+    use protocol::slot::Slot;
+    for p in [
+        S2c::RotateHead { id: 3, yaw: 90.0 },
+        S2c::SetEquipment {
+            id: 3,
+            items: vec![(0, Slot::item(841, 1)), (5, Slot::Empty)],
+        },
+        S2c::Animate { id: 3, action: 0 },
+        S2c::HurtAnimation { id: 1, yaw: 45.0 },
+        S2c::ProjectilePower { id: 9, power: 0.1 },
+        S2c::SetPassengers {
+            vehicle: 4,
+            passengers: vec![5, 6],
+        },
+        S2c::Explode {
+            center: [1.5, 64.0, -2.5],
+            knockback: Some([0.3, 0.1, 0.0]),
+        },
+        S2c::BlockEntityData {
+            pos: (100, 60, -20),
+            kind: 9,
+            spawns: Some("blaze".to_owned()),
+        },
+        S2c::BlockEntityData {
+            pos: (1, 2, 3),
+            kind: 9,
+            spawns: None,
+        },
+        S2c::BlockDestruction {
+            breaker: 12,
+            pos: (5, 70, 5),
+            stage: 4,
+        },
+    ] {
+        assert_eq!(round_trip(&p), p);
+    }
+}

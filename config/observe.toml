@@ -12,42 +12,6 @@
 # ---- wanted: the facts issues 16 to 20 need, still thrown away ----
 
 [[wanted]]
-packet = "play/set_equipment"
-why = "what each mob holds and wears: a wither skeleton's sword, a piglin's crossbow, armour on a zombie"
-
-[[wanted]]
-packet = "play/rotate_head"
-why = "where a mob looks: an enderman facing the bot, a skeleton or blaze turned to aim"
-
-[[wanted]]
-packet = "play/projectile_power"
-why = "a fireball's acceleration: where it will be, not only where it is"
-
-[[wanted]]
-packet = "play/hurt_animation"
-why = "the bot's own hurt flash, with its direction"
-
-[[wanted]]
-packet = "play/animate"
-why = "a mob's arm swing (a strike coming); the bot's swings seen by the server"
-
-[[wanted]]
-packet = "play/explode"
-why = "a creeper's or ghast fireball's blast and the knockback the server computed"
-
-[[wanted]]
-packet = "play/block_entity_data"
-why = "a spawner's mob: which spawner is the blaze one, without a blaze in sight (blaze wall 4)"
-
-[[wanted]]
-packet = "play/block_destruction"
-why = "block cracking: who else is digging near"
-
-[[wanted]]
-packet = "play/set_passengers"
-why = "riders and mounts: a spider or chicken jockey, a strider ridden"
-
-[[wanted]]
 packet = "play/update_mob_effect"
 why = "effects on the bot and on mobs: wither, poison, fire resistance"
 

@@ -165,6 +165,15 @@ impl Session {
             | S2c::SoundEntity { .. }
             | S2c::LevelEvent { .. }
             | S2c::StopSound { .. }
+            | S2c::RotateHead { .. }
+            | S2c::SetEquipment { .. }
+            | S2c::Animate { .. }
+            | S2c::HurtAnimation { .. }
+            | S2c::ProjectilePower { .. }
+            | S2c::SetPassengers { .. }
+            | S2c::Explode { .. }
+            | S2c::BlockEntityData { .. }
+            | S2c::BlockDestruction { .. }
             | S2c::Unknown { .. } => Vec::new(),
         };
         self.state = self.state.after_receive(p);

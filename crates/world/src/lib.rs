@@ -75,6 +75,22 @@ pub struct Entity {
     /// a swing is known to have landed (clojurecraft hear.clj).
     #[serde(default)]
     pub hurts: Vec<Hurt>,
+    /// Where its head points, degrees (`rotate_head`): an enderman facing the bot.
+    #[serde(default)]
+    pub head_yaw: Option<f32>,
+    /// What it holds and wears, by equipment slot (0 main hand, 1 off hand, 2 to 5 feet to
+    /// head, 6 body, 7 saddle): a wither skeleton's sword, a piglin's crossbow.
+    #[serde(default)]
+    pub equipment: BTreeMap<u8, ItemKind>,
+    /// Its last main-hand swing (`animate` 0), server tick: a strike coming.
+    #[serde(default)]
+    pub swung_at: Option<u64>,
+    /// A fireball's acceleration power (`projectile_power`).
+    #[serde(default)]
+    pub power: Option<f64>,
+    /// What rides it (`set_passengers`).
+    #[serde(default)]
+    pub passengers: Vec<i32>,
 }
 
 /// Sounds and level events kept (the newest): a minute of a fight is well under this.
@@ -99,6 +115,14 @@ pub struct LevelEventSeen {
     pub name: Option<String>,
     pub pos: (i32, i32, i32),
     pub data: i32,
+}
+
+/// A blast: where, when, and the knockback it gave the bot.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct Blast {
+    pub at_tick: u64,
+    pub center: [f64; 3],
+    pub knockback: Option<[f64; 3]>,
 }
 
 /// Entity-event statuses kept per entity.
@@ -138,6 +162,17 @@ impl Entity {
     pub fn blaze_charged(&self) -> bool {
         self.kind == EntityKind::Blaze
             && matches!(self.metadata.get(&16), Some(MetaValue::Byte(b)) if b & 1 == 1)
+    }
+
+    /// Whether its head points at `target` within `degrees` on the plane (`None` before any
+    /// `rotate_head`): an enderman staring, a skeleton turned to aim. Yaw 0 faces +z, 90 faces
+    /// -x, as the game counts it; clojurecraft takes 12 degrees as a stare.
+    pub fn faces(&self, target: [f64; 3], degrees: f64) -> Option<bool> {
+        let yaw = f64::from(self.head_yaw?);
+        let (dx, dz) = (target[0] - self.pos[0], target[2] - self.pos[2]);
+        let toward = (-dx).atan2(dz).to_degrees();
+        let diff = (yaw - toward).rem_euclid(360.0);
+        Some(diff.min(360.0 - diff) <= degrees)
     }
 
     /// The shared flags bitfield, metadata index 0 (on fire, sneaking, ...).
@@ -523,6 +558,19 @@ pub struct World {
     /// Level events, newest last (`SOUNDS_KEPT`): 1018 a blaze shooting, 1015 a ghast's warning.
     #[serde(default)]
     pub level_events: Vec<LevelEventSeen>,
+    /// Blasts heard and felt, newest last (`SOUNDS_KEPT`).
+    #[serde(default)]
+    pub explosions: Vec<Blast>,
+    /// Each spawner's mob from its block-entity data (`blaze`): which spawner is the blaze one,
+    /// with no blaze in sight (blaze wall 4 took a dungeon spawner for it).
+    #[serde(default)]
+    pub spawner_mobs: BTreeMap<(i32, i32, i32), String>,
+    /// Blocks cracking under another's digging, by position: (breaker, stage, server tick).
+    #[serde(default)]
+    pub cracks: BTreeMap<(i32, i32, i32), (i32, i8, u64)>,
+    /// The bot's last hurt flash: server tick and the yaw the blow came from.
+    #[serde(default)]
+    pub hurt_from: Option<(u64, f32)>,
     /// The server's account of the bot's death (`player_combat_kill`); the run ends there.
     #[serde(default)]
     pub death: Option<Death>,
@@ -1079,6 +1127,11 @@ impl World {
                             velocity: None,
                             statuses: Vec::new(),
                             hurts: Vec::new(),
+                            head_yaw: None,
+                            equipment: BTreeMap::new(),
+                            swung_at: None,
+                            power: None,
+                            passengers: Vec::new(),
                         },
                     );
                 }
@@ -1419,6 +1472,77 @@ impl World {
             }
             // A sound stopped: nothing the bot keeps is playing (sounds are instants here).
             S2c::StopSound { .. } => {}
+            S2c::RotateHead { id, yaw } => {
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.head_yaw = Some(*yaw);
+                }
+            }
+            S2c::SetEquipment { id, items } => {
+                if let Some(e) = self.entities.get_mut(id) {
+                    for (slot, item) in items {
+                        match item.stack() {
+                            Some((i, n)) if n > 0 => {
+                                e.equipment.insert(*slot, ItemKind::from_id(i));
+                            }
+                            Some(_) | None => {
+                                e.equipment.remove(slot);
+                            }
+                        }
+                    }
+                }
+            }
+            S2c::Animate { id, action } => {
+                let tick = self.session.server_ticks;
+                if *action == 0
+                    && let Some(e) = self.entities.get_mut(id)
+                {
+                    e.swung_at = Some(tick);
+                }
+            }
+            S2c::HurtAnimation { id, yaw } => {
+                if Some(*id) == self.player.entity_id {
+                    self.hurt_from = Some((self.session.server_ticks, *yaw));
+                }
+            }
+            S2c::ProjectilePower { id, power } => {
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.power = Some(*power);
+                }
+            }
+            S2c::SetPassengers {
+                vehicle,
+                passengers,
+            } => {
+                if let Some(e) = self.entities.get_mut(vehicle) {
+                    e.passengers.clone_from(passengers);
+                }
+            }
+            S2c::Explode { center, knockback } => {
+                self.explosions.push(Blast {
+                    at_tick: self.session.server_ticks,
+                    center: *center,
+                    knockback: *knockback,
+                });
+                let over = self.explosions.len().saturating_sub(SOUNDS_KEPT);
+                self.explosions.drain(..over);
+            }
+            S2c::BlockEntityData { pos, spawns, .. } => {
+                if let Some(m) = spawns {
+                    self.spawner_mobs.insert(*pos, m.clone());
+                }
+            }
+            S2c::BlockDestruction {
+                breaker,
+                pos,
+                stage,
+            } => {
+                if (0..=9).contains(stage) {
+                    self.cracks
+                        .insert(*pos, (*breaker, *stage, self.session.server_ticks));
+                } else {
+                    self.cracks.remove(pos);
+                }
+            }
             S2c::SetHealth {
                 health,
                 food,
@@ -1496,6 +1620,11 @@ mod blaze_charge {
             velocity: None,
             statuses: Vec::new(),
             hurts: Vec::new(),
+            head_yaw: None,
+            equipment: BTreeMap::new(),
+            swung_at: None,
+            power: None,
+            passengers: Vec::new(),
         }
     }
 
@@ -1659,5 +1788,52 @@ mod hearing_tests {
             });
         }
         assert_eq!(w.sounds.len(), SOUNDS_KEPT);
+    }
+}
+
+#[cfg(test)]
+mod sight_tests {
+    use super::*;
+
+    fn add(w: &mut World, id: i32, kind: EntityKind, pos: [f64; 3]) {
+        w.fold(&S2c::AddEntity {
+            id,
+            uuid: [0; 16],
+            kind: kind.id(),
+            x: pos[0],
+            y: pos[1],
+            z: pos[2],
+        });
+    }
+
+    /// Issue 16e: a spawner's mob comes from its block-entity data (blaze wall 4), a mob's gear
+    /// and gaze are kept, and `faces` reads the game's yaw (0 toward +z, 90 toward -x).
+    #[test]
+    fn spawner_mob_gear_and_gaze_are_kept() {
+        let mut w = World::new();
+        w.fold(&S2c::BlockEntityData {
+            pos: (10, 60, 10),
+            kind: 9,
+            spawns: Some("blaze".to_owned()),
+        });
+        assert_eq!(
+            w.spawner_mobs.get(&(10, 60, 10)).map(String::as_str),
+            Some("blaze")
+        );
+        add(&mut w, 4, EntityKind::WitherSkeleton, [0.0, 64.0, 0.0]);
+        w.fold(&S2c::SetEquipment {
+            id: 4,
+            items: vec![(0, protocol::slot::Slot::item(ItemKind::StoneSword.id(), 1))],
+        });
+        assert_eq!(
+            w.entities[&4].equipment.get(&0),
+            Some(&ItemKind::StoneSword)
+        );
+        w.fold(&S2c::RotateHead { id: 4, yaw: 90.0 });
+        let e = &w.entities[&4];
+        assert_eq!(e.faces([-5.0, 64.0, 0.0], 12.0), Some(true));
+        assert_eq!(e.faces([0.0, 64.0, 5.0], 12.0), Some(false));
+        w.fold(&S2c::RotateHead { id: 4, yaw: 0.0 });
+        assert_eq!(w.entities[&4].faces([0.0, 64.0, 5.0], 12.0), Some(true));
     }
 }

@@ -261,6 +261,54 @@ pub enum S2c {
         source: Option<i32>,
         sound: Option<String>,
     },
+    // Sight of mobs (issue 16e).
+    /// Where a mob's head points, in degrees (the wire's byte angle).
+    RotateHead {
+        id: i32,
+        yaw: f32,
+    },
+    /// What a mob holds and wears: (slot, item) pairs; slot 0 main hand, 1 off hand, 2 to 5
+    /// feet to head, 6 body, 7 saddle.
+    SetEquipment {
+        id: i32,
+        items: Vec<(u8, Slot)>,
+    },
+    /// An arm swing or other animation (0 main hand, 3 off hand, 4 and 5 critical hits).
+    Animate {
+        id: i32,
+        action: u8,
+    },
+    /// The bot's own hurt flash, with the direction the blow came from.
+    HurtAnimation {
+        id: i32,
+        yaw: f32,
+    },
+    /// A fireball's acceleration power.
+    ProjectilePower {
+        id: i32,
+        power: f64,
+    },
+    SetPassengers {
+        vehicle: i32,
+        passengers: Vec<i32>,
+    },
+    /// A blast: its centre, and the knockback it gives the bot when it does.
+    Explode {
+        center: [f64; 3],
+        knockback: Option<[f64; 3]>,
+    },
+    /// A block entity's data: for a spawner, the mob it spawns (`SpawnData.entity.id`).
+    BlockEntityData {
+        pos: (i32, i32, i32),
+        kind: i32,
+        spawns: Option<String>,
+    },
+    /// A block cracking under someone's digging (stage 0 to 9; anything else clears it).
+    BlockDestruction {
+        breaker: i32,
+        pos: (i32, i32, i32),
+        stage: i8,
+    },
     Unknown {
         state: State,
         id: u32,
@@ -286,6 +334,11 @@ impl SoundRef {
             SoundRef::Inline(n) => n.trim_start_matches("minecraft:").to_owned(),
         }
     }
+}
+
+/// A byte angle (256 to the turn) in degrees.
+fn angle(b: u8) -> f32 {
+    f32::from(b) * 360.0 / 256.0
 }
 
 /// `Holder<SoundEvent>`: a varint, 0 for an inline event (its id and an optional fixed range),
@@ -620,6 +673,74 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 };
                 S2c::StopSound { source, sound }
             }
+            Some(PlayIn::RotateHead) => S2c::RotateHead {
+                id: r.varint()?,
+                yaw: angle(r.u8()?),
+            },
+            Some(PlayIn::SetEquipment) => {
+                let id = r.varint()?;
+                let mut items = Vec::new();
+                loop {
+                    let slot = r.u8()?;
+                    let item = read_slot(&mut r)?;
+                    items.push((slot & 0x7f, item));
+                    // A cut-short stack ends what can be read; the top bit says more follow.
+                    if item.truncated() || slot & 0x80 == 0 {
+                        break;
+                    }
+                }
+                S2c::SetEquipment { id, items }
+            }
+            Some(PlayIn::Animate) => S2c::Animate {
+                id: r.varint()?,
+                action: r.u8()?,
+            },
+            Some(PlayIn::HurtAnimation) => S2c::HurtAnimation {
+                id: r.varint()?,
+                yaw: r.f32()?,
+            },
+            Some(PlayIn::ProjectilePower) => S2c::ProjectilePower {
+                id: r.varint()?,
+                power: r.f64()?,
+            },
+            Some(PlayIn::SetPassengers) => {
+                let vehicle = r.varint()?;
+                let n = r.length()?;
+                let mut passengers = Vec::with_capacity(n.min(16));
+                for _ in 0..n {
+                    passengers.push(r.varint()?);
+                }
+                S2c::SetPassengers {
+                    vehicle,
+                    passengers,
+                }
+            }
+            // The centre and the knockback; the particles and sound after them are not read.
+            Some(PlayIn::Explode) => S2c::Explode {
+                center: [r.f64()?, r.f64()?, r.f64()?],
+                knockback: if r.bool()? {
+                    Some([r.f64()?, r.f64()?, r.f64()?])
+                } else {
+                    None
+                },
+            },
+            Some(PlayIn::BlockEntityData) => {
+                let pos = r.position()?;
+                let kind = r.varint()?;
+                let tag = crate::nbt::read_root(&mut r)?;
+                let spawns = tag
+                    .get("SpawnData")
+                    .and_then(|s| s.get("entity"))
+                    .and_then(|e| e.get("id"))
+                    .and_then(crate::nbt::Nbt::as_str)
+                    .map(|s| s.trim_start_matches("minecraft:").to_owned());
+                S2c::BlockEntityData { pos, kind, spawns }
+            }
+            Some(PlayIn::BlockDestruction) => S2c::BlockDestruction {
+                breaker: r.varint()?,
+                pos: r.position()?,
+                stage: r.i8()?,
+            },
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {
                 reason: r.rest().to_vec(),
@@ -1348,6 +1469,86 @@ impl S2c {
                     w.string(s)?;
                 }
                 PlayIn::StopSound.id()
+            }
+            S2c::RotateHead { id, yaw } => {
+                w.varint(*id);
+                w.u8((yaw.rem_euclid(360.0) * 256.0 / 360.0).round() as u8);
+                PlayIn::RotateHead.id()
+            }
+            S2c::SetEquipment { id, items } => {
+                w.varint(*id);
+                for (i, (slot, item)) in items.iter().enumerate() {
+                    let more = if i + 1 < items.len() { 0x80 } else { 0 };
+                    w.u8(slot | more);
+                    crate::slot::write_slot(&mut w, *item);
+                }
+                PlayIn::SetEquipment.id()
+            }
+            S2c::Animate { id, action } => {
+                w.varint(*id);
+                w.u8(*action);
+                PlayIn::Animate.id()
+            }
+            S2c::HurtAnimation { id, yaw } => {
+                w.varint(*id);
+                w.f32(*yaw);
+                PlayIn::HurtAnimation.id()
+            }
+            S2c::ProjectilePower { id, power } => {
+                w.varint(*id);
+                w.f64(*power);
+                PlayIn::ProjectilePower.id()
+            }
+            S2c::SetPassengers {
+                vehicle,
+                passengers,
+            } => {
+                w.varint(*vehicle);
+                w.varint(i32::try_from(passengers.len()).unwrap_or(0));
+                for p in passengers {
+                    w.varint(*p);
+                }
+                PlayIn::SetPassengers.id()
+            }
+            // The model writes the fields the bot reads; a real server follows them with the
+            // particles and sound, which the decoder does not read.
+            S2c::Explode { center, knockback } => {
+                center.iter().for_each(|v| w.f64(*v));
+                w.bool(knockback.is_some());
+                if let Some(k) = knockback {
+                    k.iter().for_each(|v| w.f64(*v));
+                }
+                PlayIn::Explode.id()
+            }
+            S2c::BlockEntityData { pos, kind, spawns } => {
+                use crate::nbt::Nbt;
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.varint(*kind);
+                let tag = match spawns {
+                    Some(m) => Nbt::Compound(vec![(
+                        "SpawnData".to_owned(),
+                        Nbt::Compound(vec![(
+                            "entity".to_owned(),
+                            Nbt::Compound(vec![(
+                                "id".to_owned(),
+                                Nbt::String(format!("minecraft:{m}")),
+                            )]),
+                        )]),
+                    )]),
+                    None => Nbt::Compound(Vec::new()),
+                };
+                w.bytes(&crate::nbt::write_root(&tag));
+                PlayIn::BlockEntityData.id()
+            }
+            S2c::BlockDestruction {
+                breaker,
+                pos,
+                stage,
+            } => {
+                w.varint(*breaker);
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.i8(*stage);
+                PlayIn::BlockDestruction.id()
             }
             S2c::Unknown { .. } => return Err(EncodeError::NotModelled("an unknown packet")),
         };
