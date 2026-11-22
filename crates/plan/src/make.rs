@@ -978,17 +978,6 @@ pub fn make_with_wear<'a>(
         low_on_digs: wear.low_on_digs,
     };
     let mut c = counts.clone();
-    // The goal's own holds first (its tool, not its spares: those stay a producer row's, as
-    // clojurecraft's differential says): the portal goal holds a pickaxe, and with none it
-    // answered Done and cast by hand (blaze wall 8).
-    for (k, n) in &goal.holds {
-        if let (_, Some(r)) = p.resolve_need(counts.clone(), k, *n, &[]) {
-            return match r {
-                Ok(row) => Choice::Act(row),
-                Err(()) => Choice::Stuck,
-            };
-        }
-    }
     for (k, n) in goal.provides.iter().chain(&goal.needs) {
         match p.resolve_need(c, k, *n, &[]) {
             (_, Some(Ok(row))) => return Choice::Act(row),

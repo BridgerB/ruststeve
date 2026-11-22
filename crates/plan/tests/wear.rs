@@ -57,31 +57,25 @@ fn a_worn_tool_is_not_counted_as_a_spare() {
     );
 }
 
-/// Blaze wall 8 (race 45017249540): the portal goal holds a pickaxe. With its kit held but no
-/// pickaxe, and the sticks, stone and a table for one, it asks for the craft (it answered Done
-/// and cast by hand); with a pickaxe held it is Done.
+/// Blaze wall 8 (race 45017249540): a pickaxe is makeable where the bot stands from held sticks
+/// and stone with a table held or near, and not without the table or the wood.
 #[test]
-fn the_portal_goal_with_no_pickaxe_crafts_one() {
-    let t = real_table();
-    let goal = t.until("portal").unwrap();
-    let mut counts: Counts = [
-        (ItemKind::WaterBucket, 1),
-        (ItemKind::Bucket, 1),
-        (ItemKind::FlintAndSteel, 1),
-        (ItemKind::Stick, 24),
-        (ItemKind::CobbledDeepslate, 64),
-    ]
-    .into_iter()
-    .collect();
-    let table_near = |k: data::BlockKind| k == data::BlockKind::CraftingTable;
-    let id = |c: Choice| match c {
-        Choice::Act(r) => r.id.clone(),
-        Choice::Done => "done".to_owned(),
-        Choice::Stuck => "stuck".to_owned(),
+fn a_pickaxe_is_makeable_from_held_sticks_stone_and_a_table() {
+    use protocol::S2c;
+    use protocol::slot::Slot;
+    let give = |w: &mut world::World, slot: i32, item: ItemKind, n: i32| {
+        w.step(&world::Event::Packet(S2c::SetPlayerInventory {
+            slot,
+            item: Slot::item(item.id(), n),
+        }));
     };
-    let none = make_with_wear(&t, &counts, &table_near, false, &Wear::default(), goal);
-    assert!(id(none).contains("pickaxe"), "no pickaxe asked for");
-    counts.insert(ItemKind::StonePickaxe, 1);
-    let held = make_with_wear(&t, &counts, &table_near, false, &Wear::default(), goal);
-    assert_eq!(id(held), "done");
+    let mut w = world::World::new();
+    give(&mut w, 0, ItemKind::Stick, 24);
+    give(&mut w, 1, ItemKind::CobbledDeepslate, 49);
+    assert!(!plan::pickaxe_makeable(&w, false), "no table held or near");
+    assert!(plan::pickaxe_makeable(&w, true));
+    give(&mut w, 2, ItemKind::CraftingTable, 1);
+    assert!(plan::pickaxe_makeable(&w, false), "a table held");
+    give(&mut w, 0, ItemKind::Stick, 1);
+    assert!(!plan::pickaxe_makeable(&w, true), "one stick is not two");
 }

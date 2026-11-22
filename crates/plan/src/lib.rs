@@ -664,6 +664,15 @@ impl Plan {
         std::mem::take(&mut self.records)
     }
 
+    /// The makings of a stone pickaxe held: two sticks' worth of wood, three stone, and a table
+    /// held or remembered near (clojurecraft's `build/pickaxe-at-hand?`; blaze wall 8).
+    fn pickaxe_at_hand(&self, w: &World, tick: u64) -> bool {
+        let table_near = self
+            .near_block(w, data::BlockKind::CraftingTable, tick)
+            .is_some();
+        pickaxe_makeable(w, table_near)
+    }
+
     /// Ends the open task with the run (the ledger then holds an end for every start).
     pub fn close(&mut self, at: u64, why: &str) {
         if let Some(o) = self.open.take() {
@@ -835,6 +844,10 @@ impl Plan {
             };
             self.begin(chosen);
         }
+        // Read before the task is borrowed: a cast with no pickaxe and the makings of one pauses.
+        let remake = matches!(self.task, Task::Cast(_))
+            && !holds_pickaxe(w)
+            && self.pickaxe_at_hand(w, tick);
         let (controls, status) = match &mut self.task {
             Task::Idle => (Controls::default(), TaskStatus::Running),
             Task::ToLog(walk) | Task::Explore(walk) => walk.step(w, tick),
@@ -880,9 +893,10 @@ impl Plan {
                 let cell = e.cell;
                 return self.after_enter(c, status, cell, tick);
             }
-            // No pickaxe left mid-cast: pause it, the site kept, so the needs planner makes one
-            // and the cast resumes there (blaze wall 8: one cast ran 104,600 ticks by hand).
-            Task::Cast(_) if !holds_pickaxe(w) => {
+            // No pickaxe left mid-cast but the makings of one held: pause it, the site kept, so the
+            // planner crafts one and the cast resumes there (blaze wall 8: one cast ran 104,600
+            // ticks by hand with 24 sticks and 49 stone held).
+            Task::Cast(_) if remake => {
                 self.task = Task::Idle;
                 self.note(
                     tick,
@@ -1900,6 +1914,13 @@ impl Plan {
         let row = match self.aim {
             // The race gears up first (issue 16), then casts.
             Aim::Race if !geared(w) => "gear".to_owned(),
+            // No pickaxe, but the makings of one held: craft it before casting or digging to a
+            // site, never a trip for wood (clojurecraft's `pickaxe-at-hand?`; blaze wall 8).
+            Aim::Portal | Aim::Nether | Aim::Race
+                if !holds_pickaxe(w) && self.pickaxe_at_hand(w, tick) =>
+            {
+                "stone-pickaxe".to_owned()
+            }
             Aim::Nether | Aim::Race => "portal".to_owned(),
             _ => self.aim.name(),
         };
@@ -3397,6 +3418,20 @@ pub fn exposed_near(w: &World, kinds: &[data::BlockKind]) -> Vec<Cell> {
     }
     found.sort();
     found.into_iter().map(|(_, c)| c).collect()
+}
+
+/// Whether held wood (two sticks' worth) and stone (three) make a stone pickaxe, with a table
+/// held or near (blaze wall 8).
+pub fn pickaxe_makeable(w: &World, table_near: bool) -> bool {
+    let c = held(w);
+    let table = table_near || c.get(&data::ItemKind::CraftingTable).copied().unwrap_or(0) > 0;
+    let stone_kinds = data::generated::tags::item_tag("stone_tool_materials").unwrap_or(&[]);
+    let stone: i32 = c
+        .iter()
+        .filter(|(k, _)| stone_kinds.contains(k))
+        .map(|(_, n)| *n)
+        .sum();
+    table && wood_sticks(w) >= 2 && stone >= 3
 }
 
 /// Whether a pickaxe with uses left is held (blaze wall 8).
