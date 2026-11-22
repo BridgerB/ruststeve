@@ -76,12 +76,16 @@ jobs:
           echo "matrix=$(seq 0 $((LANES - 1)) | paste -sd, | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
 
       # The release opens now, so each lane's progress is readable while the race runs (16e).
+      # Its tag points at the default branch: the workflow token may not tag a commit that changes
+      # workflow files (race 44998112179's publish failed 403 so); each batch and case records
+      # the commit it ran.
       - name: Open the release for progress
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "race-${{ github.run_id }}" --target "${{ github.sha }}" --prerelease \
+          gh release create "race-${{ github.run_id }}" --target "${{ github.event.repository.default_branch }}" --prerelease \
             --title "race ${{ github.run_id }} (running)" \
             --notes "Running. Each lane uploads progress-lane-N.txt every 10 minutes: a line per bot (stage, health, food, held item and uses, task and reason, ticks without progress)."
 
@@ -279,7 +283,7 @@ jobs:
           # The release was opened by the lanes job (issue 16e); an older run without it is made here.
           tag="race-${{ github.run_id }}"
           if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" --target "${{ github.sha }}" --prerelease --notes "publishing"
+            gh release create "$tag" --target "${{ github.event.repository.default_branch }}" --prerelease --notes "publishing"
           fi
           gh release upload "$tag" "batches-${{ github.run_id }}.tar.zst" summary.md "${snaps[@]}" --clobber
           gh release edit "$tag" --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
