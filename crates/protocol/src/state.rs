@@ -109,6 +109,10 @@ impl State {
             | S2c::OpenScreen { .. }
             | S2c::SetEntityMotion { .. }
             | S2c::EntityEvent { .. }
+            | S2c::Sound { .. }
+            | S2c::SoundEntity { .. }
+            | S2c::LevelEvent { .. }
+            | S2c::StopSound { .. }
             | S2c::Unknown { .. } => self,
         }
     }

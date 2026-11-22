@@ -4,6 +4,7 @@
 pub mod blocks;
 pub mod dimensions;
 pub mod entities;
+pub mod events;
 pub mod fuel;
 pub mod hardness;
 pub mod harvest;

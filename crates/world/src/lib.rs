@@ -77,6 +77,30 @@ pub struct Entity {
     pub hurts: Vec<Hurt>,
 }
 
+/// Sounds and level events kept (the newest): a minute of a fight is well under this.
+pub const SOUNDS_KEPT: usize = 64;
+
+/// A sound the bot heard: by name, where (or on which entity), and when.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct Heard {
+    pub at_tick: u64,
+    /// `entity.blaze.shoot`, from the generated sound registry.
+    pub name: String,
+    pub pos: Option<[f64; 3]>,
+    pub entity: Option<i32>,
+    pub volume: f32,
+}
+
+/// A level event: its id, its constant's name from the game, and where.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct LevelEventSeen {
+    pub at_tick: u64,
+    pub id: i32,
+    pub name: Option<String>,
+    pub pos: (i32, i32, i32),
+    pub data: i32,
+}
+
 /// Entity-event statuses kept per entity.
 pub const ENTITY_STATUSES_KEPT: usize = 4;
 /// Damage events kept per entity.
@@ -493,6 +517,12 @@ pub struct World {
     /// Hits on the bot in the last `HITS_KEPT_TICKS` server ticks, oldest first.
     #[serde(default)]
     pub hits: Vec<Hit>,
+    /// Sounds heard, newest last (`SOUNDS_KEPT`): what the bot hears out of sight (issue 16e).
+    #[serde(default)]
+    pub sounds: Vec<Heard>,
+    /// Level events, newest last (`SOUNDS_KEPT`): 1018 a blaze shooting, 1015 a ghast's warning.
+    #[serde(default)]
+    pub level_events: Vec<LevelEventSeen>,
     /// The server's account of the bot's death (`player_combat_kill`); the run ends there.
     #[serde(default)]
     pub death: Option<Death>,
@@ -973,6 +1003,13 @@ impl World {
         }
     }
 
+    /// A sound heard, kept with the newest `SOUNDS_KEPT`.
+    fn hear(&mut self, h: Heard) {
+        self.sounds.push(h);
+        let over = self.sounds.len().saturating_sub(SOUNDS_KEPT);
+        self.sounds.drain(..over);
+    }
+
     /// Counts an entity-data read that stopped early, by its serializer.
     fn count_unread(&mut self, entries: &[(u8, MetaValue)]) {
         if let Some(s) = protocol::metadata::unread(entries) {
@@ -1338,6 +1375,50 @@ impl World {
                     }
                 }
             }
+            S2c::Sound {
+                sound, pos, volume, ..
+            } => {
+                let tick = self.session.server_ticks;
+                self.hear(Heard {
+                    at_tick: tick,
+                    name: sound.name(),
+                    pos: Some(*pos),
+                    entity: None,
+                    volume: *volume,
+                });
+            }
+            S2c::SoundEntity {
+                sound,
+                entity,
+                volume,
+                ..
+            } => {
+                let tick = self.session.server_ticks;
+                let pos = self.entities.get(entity).map(|e| e.pos);
+                self.hear(Heard {
+                    at_tick: tick,
+                    name: sound.name(),
+                    pos,
+                    entity: Some(*entity),
+                    volume: *volume,
+                });
+            }
+            S2c::LevelEvent {
+                event, pos, data, ..
+            } => {
+                let tick = self.session.server_ticks;
+                self.level_events.push(LevelEventSeen {
+                    at_tick: tick,
+                    id: *event,
+                    name: data::generated::events::level_event_name(*event).map(str::to_owned),
+                    pos: *pos,
+                    data: *data,
+                });
+                let over = self.level_events.len().saturating_sub(SOUNDS_KEPT);
+                self.level_events.drain(..over);
+            }
+            // A sound stopped: nothing the bot keeps is playing (sounds are instants here).
+            S2c::StopSound { .. } => {}
             S2c::SetHealth {
                 health,
                 food,
@@ -1527,5 +1608,56 @@ mod entity_tests {
         });
         assert_eq!(w.entities[&7].health(), Some(20.0));
         assert_eq!(w.metadata_unread.get("PARTICLE"), Some(&1));
+    }
+}
+
+#[cfg(test)]
+mod hearing_tests {
+    use super::*;
+    use protocol::SoundRef;
+
+    /// Issue 16e: a blaze's shot is heard as a level event named from the game's table, and a
+    /// sound on an entity is placed where the entity stands.
+    #[test]
+    fn the_world_keeps_what_it_hears_by_name() {
+        let mut w = World::new();
+        w.fold(&S2c::LevelEvent {
+            event: 1018,
+            pos: (1, 70, 2),
+            data: 0,
+            global: false,
+        });
+        assert_eq!(
+            w.level_events.last().and_then(|e| e.name.as_deref()),
+            Some("sound_blaze_fireball")
+        );
+        w.fold(&S2c::AddEntity {
+            id: 5,
+            uuid: [0; 16],
+            kind: EntityKind::Enderman.id(),
+            x: 3.0,
+            y: 64.0,
+            z: 4.0,
+        });
+        w.fold(&S2c::SoundEntity {
+            sound: SoundRef::Inline("entity.enderman.stare".to_owned()),
+            source: 5,
+            entity: 5,
+            volume: 2.5,
+            pitch: 1.0,
+        });
+        let h = w.sounds.last().unwrap();
+        assert_eq!(h.name, "entity.enderman.stare");
+        assert_eq!(h.pos, Some([3.0, 64.0, 4.0]));
+        for i in 0..(SOUNDS_KEPT + 5) {
+            w.fold(&S2c::Sound {
+                sound: SoundRef::Registry(u32::try_from(i).unwrap_or(0)),
+                source: 0,
+                pos: [0.0; 3],
+                volume: 1.0,
+                pitch: 1.0,
+            });
+        }
+        assert_eq!(w.sounds.len(), SOUNDS_KEPT);
     }
 }

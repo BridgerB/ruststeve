@@ -12,22 +12,6 @@
 # ---- wanted: the facts issues 16 to 20 need, still thrown away ----
 
 [[wanted]]
-packet = "play/sound"
-why = "every positioned sound: a blaze breathing and shooting, a creeper's fuse, piglin and hoglin anger, footsteps out of sight"
-
-[[wanted]]
-packet = "play/sound_entity"
-why = "sounds on an entity: an enderman's stare and scream (it is angry), its teleport (where it went)"
-
-[[wanted]]
-packet = "play/stop_sound"
-why = "ends a sound the ledger holds as playing"
-
-[[wanted]]
-packet = "play/level_event"
-why = "1018 blaze shoot, 1015/1016 ghast warn and shoot, 1017 dragon shoot, 2006 dragon breath, 1028 dragon death, 2001 block broken: shots fired out of sight"
-
-[[wanted]]
 packet = "play/set_equipment"
 why = "what each mob holds and wears: a wither skeleton's sword, a piglin's crossbow, armour on a zombie"
 

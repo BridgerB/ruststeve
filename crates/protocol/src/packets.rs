@@ -233,11 +233,86 @@ pub enum S2c {
         reason: Vec<u8>,
     },
     /// An id this layer does not model: counted, never an error.
+    // Hearing (issue 16e).
+    /// A sound at a place: positions on the wire are eighths of a block.
+    Sound {
+        sound: SoundRef,
+        source: i32,
+        pos: [f64; 3],
+        volume: f32,
+        pitch: f32,
+    },
+    /// A sound on an entity (an enderman's stare and scream).
+    SoundEntity {
+        sound: SoundRef,
+        source: i32,
+        entity: i32,
+        volume: f32,
+        pitch: f32,
+    },
+    /// A level event (`data::generated::events::LEVEL_EVENTS`): 1018 a blaze shooting.
+    LevelEvent {
+        event: i32,
+        pos: (i32, i32, i32),
+        data: i32,
+        global: bool,
+    },
+    StopSound {
+        source: Option<i32>,
+        sound: Option<String>,
+    },
     Unknown {
         state: State,
         id: u32,
         len: usize,
     },
+}
+
+/// A sound event as the wire holds it: a registry id, or one written inline by name.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SoundRef {
+    Registry(u32),
+    Inline(String),
+}
+
+impl SoundRef {
+    /// The sound's name (`entity.blaze.shoot`); `sound:<id>` for an id the table lacks.
+    pub fn name(&self) -> String {
+        match self {
+            SoundRef::Registry(id) => usize::try_from(*id)
+                .ok()
+                .and_then(|i| data::generated::registries::SOUND_EVENT.get(i))
+                .map_or_else(|| format!("sound:{id}"), |n| (*n).to_owned()),
+            SoundRef::Inline(n) => n.trim_start_matches("minecraft:").to_owned(),
+        }
+    }
+}
+
+/// `Holder<SoundEvent>`: a varint, 0 for an inline event (its id and an optional fixed range),
+/// else the registry id plus one.
+fn read_sound(r: &mut Reader<'_>) -> Result<SoundRef, ParseError> {
+    let v = r.varint()?;
+    if v == 0 {
+        let name = r.string()?;
+        if r.bool()? {
+            r.f32()?;
+        }
+        Ok(SoundRef::Inline(name))
+    } else {
+        Ok(SoundRef::Registry((v - 1) as u32))
+    }
+}
+
+fn write_sound(w: &mut Writer, s: &SoundRef) -> Result<(), EncodeError> {
+    match s {
+        SoundRef::Registry(id) => w.varint(*id as i32 + 1),
+        SoundRef::Inline(name) => {
+            w.varint(0);
+            w.string(name)?;
+            w.bool(false);
+        }
+    }
+    Ok(())
 }
 
 /// The server's packet `id` in `state`, decoded from its fields.
@@ -508,6 +583,43 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
             Some(PlayIn::ContainerClose) => S2c::ContainerClose {
                 window: r.varint()?,
             },
+            Some(PlayIn::Sound) => S2c::Sound {
+                sound: read_sound(&mut r)?,
+                source: r.varint()?,
+                pos: {
+                    let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
+                    [f64::from(x) / 8.0, f64::from(y) / 8.0, f64::from(z) / 8.0]
+                },
+                volume: r.f32()?,
+                pitch: r.f32()?,
+            },
+            Some(PlayIn::SoundEntity) => S2c::SoundEntity {
+                sound: read_sound(&mut r)?,
+                source: r.varint()?,
+                entity: r.varint()?,
+                volume: r.f32()?,
+                pitch: r.f32()?,
+            },
+            Some(PlayIn::LevelEvent) => S2c::LevelEvent {
+                event: r.i32()?,
+                pos: r.position()?,
+                data: r.i32()?,
+                global: r.bool()?,
+            },
+            Some(PlayIn::StopSound) => {
+                let flags = r.u8()?;
+                let source = if flags & 1 != 0 {
+                    Some(r.varint()?)
+                } else {
+                    None
+                };
+                let sound = if flags & 2 != 0 {
+                    Some(r.string()?)
+                } else {
+                    None
+                };
+                S2c::StopSound { source, sound }
+            }
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {
                 reason: r.rest().to_vec(),
@@ -1182,6 +1294,60 @@ impl S2c {
             S2c::Disconnect { reason } => {
                 w.bytes(reason);
                 PlayIn::Disconnect.id()
+            }
+            S2c::Sound {
+                sound,
+                source,
+                pos,
+                volume,
+                pitch,
+            } => {
+                write_sound(&mut w, sound)?;
+                w.varint(*source);
+                for v in pos {
+                    w.i32((v * 8.0).floor() as i32);
+                }
+                w.f32(*volume);
+                w.f32(*pitch);
+                w.i64(0); // the seed: the bot draws nothing from it
+                PlayIn::Sound.id()
+            }
+            S2c::SoundEntity {
+                sound,
+                source,
+                entity,
+                volume,
+                pitch,
+            } => {
+                write_sound(&mut w, sound)?;
+                w.varint(*source);
+                w.varint(*entity);
+                w.f32(*volume);
+                w.f32(*pitch);
+                w.i64(0);
+                PlayIn::SoundEntity.id()
+            }
+            S2c::LevelEvent {
+                event,
+                pos,
+                data,
+                global,
+            } => {
+                w.i32(*event);
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.i32(*data);
+                w.bool(*global);
+                PlayIn::LevelEvent.id()
+            }
+            S2c::StopSound { source, sound } => {
+                w.u8(u8::from(source.is_some()) | (u8::from(sound.is_some()) << 1));
+                if let Some(s) = source {
+                    w.varint(*s);
+                }
+                if let Some(s) = sound {
+                    w.string(s)?;
+                }
+                PlayIn::StopSound.id()
             }
             S2c::Unknown { .. } => return Err(EncodeError::NotModelled("an unknown packet")),
         };
