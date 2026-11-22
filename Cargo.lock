@@ -124,6 +124,7 @@ dependencies = [
  "data",
  "memory",
  "net",
+ "observe",
  "physics",
  "plan",
  "protocol",
@@ -949,6 +950,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "observe"
+version = "0.1.0"
+dependencies = [
+ "data",
+ "protocol",
+ "serde",
+ "world",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1213,6 +1224,7 @@ dependencies = [
  "data",
  "md-5",
  "memory",
+ "observe",
  "plan",
  "protocol",
  "rmp-serde",

@@ -69,13 +69,31 @@ fn run(args: &[String]) -> Result<(), String> {
             println!("{}", results::snapshot::offline_uuid(name));
             Ok(())
         }
+        Some("ledger") => {
+            let path = args.get(1).ok_or("ledger needs a file")?;
+            let l: results::Ledger = results::read(Path::new(path))?;
+            print!("{}", l.render());
+            Ok(())
+        }
+        Some("senses") => {
+            let path = args.get(1).ok_or("senses needs a file")?;
+            let every = args
+                .iter()
+                .position(|a| a == "--every")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10);
+            let s: results::SensesFile = results::read(Path::new(path))?;
+            print!("{}", s.render(every));
+            Ok(())
+        }
         Some("case") => {
             let path = args.get(1).ok_or("case needs a file")?;
             print!("{}", results::read_case(Path::new(path))?.render());
             Ok(())
         }
         _ => Err(
-            "usage: results summary <paths>... | results diagnose <paths>... | results case <file> | results offline-uuid <name>"
+            "usage: results summary <paths>... | results diagnose <paths>... | results case <file> | results ledger <file> | results senses <file> [--every N] | results offline-uuid <name>"
                 .to_owned(),
         ),
     }

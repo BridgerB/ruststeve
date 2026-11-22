@@ -489,6 +489,128 @@ pub struct Ledger {
     /// Records the bot could not keep (must be 0).
     #[serde(default)]
     pub dropped: u64,
+    /// What the bot sensed, in order: health, hits, items and tools, sounds, mobs and their
+    /// signs (`observe::diff`).
+    #[serde(default)]
+    pub facts: Vec<::observe::Stamped>,
+}
+
+impl SensesFile {
+    /// One line every `every` rows (1 is every second).
+    pub fn render(&self, every: usize) -> String {
+        let mut out = format!(
+            "senses {} / {}: {} rows\n",
+            self.run,
+            self.bot,
+            self.rows.len()
+        );
+        for r in self.rows.iter().step_by(every.max(1)) {
+            let pos = r.pos.map_or_else(
+                || "-".to_owned(),
+                |p| format!("{:.0},{:.0},{:.0}", p[0], p[1], p[2]),
+            );
+            let near: Vec<String> = r
+                .hostiles
+                .iter()
+                .take(3)
+                .map(|h| {
+                    let mut s = format!("{} at {:.0}", h.kind.name().unwrap_or("?"), h.d);
+                    for (on, sign) in [
+                        (h.signs.fuse, "fuse"),
+                        (h.signs.charge, "charge"),
+                        (h.signs.angry, "angry"),
+                        (h.signs.facing, "facing"),
+                    ] {
+                        if on {
+                            s.push_str(&format!(" +{sign}"));
+                        }
+                    }
+                    s
+                })
+                .collect();
+            out.push_str(&format!(
+                "{:>8} {pos} hp {} food {} held {}{} | {} ({}) | {}\n",
+                r.at,
+                r.health
+                    .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
+                r.food.map_or_else(|| "-".to_owned(), |f| f.to_string()),
+                r.held.as_deref().unwrap_or("nothing"),
+                r.held_uses
+                    .map_or_else(String::new, |u| format!(" ({u} uses)")),
+                r.task,
+                r.why,
+                near.join(", ")
+            ));
+        }
+        out
+    }
+}
+
+impl Ledger {
+    /// Every task start and end and every fact, in order, one line each.
+    pub fn render(&self) -> String {
+        let mut lines: Vec<(u64, u8, String)> = Vec::new();
+        for t in &self.tasks {
+            match t {
+                plan::TaskRecord::Started {
+                    id,
+                    at,
+                    task,
+                    what,
+                    why,
+                } => lines.push((
+                    *at,
+                    1,
+                    format!(
+                        "start #{id} {task}: {} ({})",
+                        what.as_deref().unwrap_or("-"),
+                        why.as_deref().unwrap_or("no reason")
+                    ),
+                )),
+                plan::TaskRecord::Ended {
+                    id,
+                    at,
+                    task,
+                    ticks,
+                    outcome,
+                    why,
+                } => lines.push((
+                    *at,
+                    0,
+                    format!(
+                        "end #{id} {task} after {ticks} ticks: {} ({})",
+                        outcome.as_deref().unwrap_or("-"),
+                        why.as_deref().unwrap_or("-")
+                    ),
+                )),
+            }
+        }
+        for f in &self.facts {
+            lines.push((f.at, 2, f.fact.line()));
+        }
+        lines.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut out = format!(
+            "ledger {} / {}: {} task records, {} facts, {} dropped\n",
+            self.run,
+            self.bot,
+            self.tasks.len(),
+            self.facts.len(),
+            self.dropped
+        );
+        for (at, _, l) in lines {
+            out.push_str(&format!("{at:>8} {l}\n"));
+        }
+        out
+    }
+}
+
+/// A run's senses: one row a second (`<bot>.senses.rss`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SensesFile {
+    pub format_version: u32,
+    pub run: String,
+    pub bot: String,
+    pub rows: Vec<::observe::Senses>,
 }
 
 /// What a file holds, so one reader opens either.

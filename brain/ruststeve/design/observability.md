@@ -5,8 +5,8 @@ type: reference
 tags: [observability, case-files, events, snapshots]
 aliases: [case files, senses, ledger, snapshot stream, coverage, flight recorder, tracing]
 status: verified
-lastUpdated: 2026-11-21
-verifiedAgainst: ruststeve@a45d012 clojurecraft@be85a92
+lastUpdated: 2026-11-22
+verifiedAgainst: ruststeve@3f7b5d8 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#Observability here means one thing: at any tick, a human can see what the bot believed, what it decided, why, and what actually happened, and compare them."
   - "clojurecraft:LOOP.md#Full observability is the rule (Bridger, Nov 6: \"otherwise you are a ship in the night\")."
@@ -43,6 +43,13 @@ At any tick a human must be able to see what the bot believed, what it decided, 
 - `Coverage` counts thrown-away packets by `state/name` (`protocol::packet_name`), item slots cut short, and has a column for each output a run should leave (ledger, senses, moments, truth, tasks with a reason, tasks ended, ledger drops). A column not measured yet is `None` and prints `not measured !!`: it never reads as fine.
 - The summary prints the coverage block first, `!!` on each blind spot, then k/n. A case signature now names what the planner was doing at the end (its last event, as a kind), not the aim it began with.
 - What phase A found is the backlog: the wanted packets, and every `not measured` column, are phases B to D of `docs/problems/observability.md`.
+
+## Issue 16e: the ledger, senses and moments (phase C)
+- **Tasks** (`plan::ledger`): the planner numbers each task where it begins (`Plan::begin`: a choice, a dig after a walk, an always-row cutting in) and records `Started` with the note that chose it and `Ended` with the note that closed it; `Plan::close` ends the one running with the run. A real-terrain test holds every task to a reason and exactly one end.
+- **Facts** (`crates/observe`, pure): `snapshot` takes the parts of the world the ledger compares each tick; `diff` gives health, food, each hit and what dealt it, catching fire and the likely cause, item changes, a tool falling under a half, a quarter and a tenth of its uses and breaking, dimension, stage, death, the win, effects, sounds and level events (within 16, or loud), chat, mobs within 32 appearing and going and showing a sign (fuse, charge, angry, facing).
+- **Senses** (`observe::senses`): a row a second: position, health, food, saturation, air, fire, the held item and its uses, every tool's uses, free slots, the task and its reason, the six nearest hostiles with their signs and held item, endermen within 128, the newest sound, the planner's tick time.
+- **Moments**: the planner whole with that second's senses, once a minute for the last five and at the end; the world of the same minute is the recording's checkpoint.
+- **Files**: `<bot>.ledger.rsl` (tasks and facts), `<bot>.senses.rss`, `<bot>.moments.rsm`, beside the case and in the release's batches bundle; `results ledger <file>` and `results senses <file> [--every N]` print them.
 
 ## What was dropped
 Rerun and an in-process axum debug endpoint (`FUNCTIONAL.md`): ruststeve ships no viewer; steve is the front end, reading the SurrealDB insight store ([[data-out]]). Replays and the `why` binary are the REPL substitute.

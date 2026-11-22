@@ -392,6 +392,7 @@ fn race(a: &Args) -> Result<bool, String> {
             commit: record::COMMIT.to_owned(),
             tasks: outcome.ledger.clone(),
             dropped: 0,
+            facts: outcome.facts.clone(),
         };
         match results::write(&a.out.join(format!("{name}.ledger.rsl")), &ledger) {
             Ok(()) => {
@@ -399,6 +400,20 @@ fn race(a: &Args) -> Result<bool, String> {
                 *coverage.ledger_dropped.get_or_insert(0) += ledger.dropped;
             }
             Err(e) => eprintln!("race: {name}: the ledger: {e}"),
+        }
+        let senses = results::SensesFile {
+            format_version: FORMAT_VERSION,
+            run: a.run.clone(),
+            bot: name.clone(),
+            rows: outcome.senses.clone(),
+        };
+        match results::write(&a.out.join(format!("{name}.senses.rss")), &senses) {
+            Ok(()) => *coverage.senses.get_or_insert(0) += 1,
+            Err(e) => eprintln!("race: {name}: the senses: {e}"),
+        }
+        match results::write(&a.out.join(format!("{name}.moments.rsm")), &outcome.moments) {
+            Ok(()) => *coverage.moments.get_or_insert(0) += 1,
+            Err(e) => eprintln!("race: {name}: the moments: {e}"),
         }
         if let Some(p) = &outcome.plan {
             *coverage.tasks_started.get_or_insert(0) += p.task_counts.started;

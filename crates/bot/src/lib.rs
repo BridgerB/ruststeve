@@ -108,6 +108,22 @@ pub struct Stats {
     pub play_ticks_from: u64,
 }
 
+/// Ticks between senses rows: one a second (clojurecraft's senses line).
+pub const SENSES_EVERY_TICKS: u64 = 20;
+/// Ticks between moments: one a minute.
+pub const MOMENT_EVERY_TICKS: u64 = 1200;
+/// Moments kept: the last five minutes, then the end.
+pub const MOMENTS_KEPT: usize = 5;
+
+/// A moment: the planner whole, with the senses row of that second (the world itself is in the
+/// recording's checkpoint of the same minute).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Moment {
+    pub at: u64,
+    pub senses: observe::Senses,
+    pub plan: Option<plan::Plan>,
+}
+
 /// How a run went.
 pub struct Outcome {
     pub world: World,
@@ -131,6 +147,10 @@ pub struct Outcome {
     pub plan_notes: Notes,
     /// Every task the planner started and ended, with its reason and outcome (issue 16e).
     pub ledger: Vec<plan::TaskRecord>,
+    /// World facts in order, a senses row a second, and the last moments (issue 16e).
+    pub facts: Vec<observe::Stamped>,
+    pub senses: Vec<observe::Senses>,
+    pub moments: Vec<Moment>,
 }
 
 /// Notes kept from a run's start, and from its end: a case file read in one screen. A race of
@@ -448,6 +468,12 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut plan_notes = Notes::default();
     // The task ledger, every record of the run, unsampled (issue 16e).
     let mut ledger: Vec<plan::TaskRecord> = Vec::new();
+    // What the bot sensed (issue 16e): world facts every tick, a senses row a second, and a
+    // moment (the plan, its senses) a minute for the last few minutes.
+    let mut facts: Vec<observe::Stamped> = Vec::new();
+    let mut senses_rows: Vec<observe::Senses> = Vec::new();
+    let mut moments: std::collections::VecDeque<Moment> = std::collections::VecDeque::new();
+    let mut last_snap = observe::snapshot(&run.world);
     let mut last_controls: Option<physics::Controls> = None;
     let mut doing = if let Some(a) = aim {
         Doing {
@@ -662,6 +688,26 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 break Ending::Error { why: e };
             }
             world_ticks += 1;
+            let snap = observe::snapshot(&run.world);
+            facts.extend(observe::diff(&last_snap, &snap, &run.world));
+            last_snap = snap;
+            if world_ticks.is_multiple_of(SENSES_EVERY_TICKS) {
+                let (task, why) = planner
+                    .as_ref()
+                    .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
+                let row = observe::senses(&run.world, task, &why, plan_tick_us.last().copied());
+                if world_ticks.is_multiple_of(MOMENT_EVERY_TICKS) {
+                    moments.push_back(Moment {
+                        at: run.world.session.server_ticks,
+                        senses: row.clone(),
+                        plan: planner.clone(),
+                    });
+                    if moments.len() > MOMENTS_KEPT {
+                        moments.pop_front();
+                    }
+                }
+                senses_rows.push(row);
+            }
             if let Some(sink) = &sink {
                 let tick = run.world.session.server_ticks;
                 if world_ticks.is_multiple_of(live::SELF_EVERY_TICKS)
@@ -765,6 +811,17 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         p.close(run.world.session.server_ticks, &format!("{ending:?}"));
         ledger.extend(p.take_records());
     }
+    // The moment at the end, after the last five minutes.
+    {
+        let (task, why) = planner
+            .as_ref()
+            .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
+        moments.push_back(Moment {
+            at: run.world.session.server_ticks,
+            senses: observe::senses(&run.world, task, &why, plan_tick_us.last().copied()),
+            plan: planner.clone(),
+        });
+    }
     // The signature names what the planner was doing at the end, as a kind (no cells or counts),
     // not the aim it started with: every run of a race had the same signature (issue 16e).
     if let Some(e) = planner.as_ref().and_then(|p| p.events.last()) {
@@ -794,6 +851,9 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         plan_tick_us,
         plan_notes,
         ledger,
+        facts,
+        senses: senses_rows,
+        moments: moments.into_iter().collect(),
     })
 }
 
