@@ -141,6 +141,7 @@ fn every_task_has_a_reason_and_one_end() {
                     .unwrap_or_else(|| panic!("task {id} ended unstarted"));
                 assert!(*at >= start, "task {id} ended before it began");
             }
+            plan::TaskRecord::Note { .. } => {}
         }
     }
     assert!(open.is_empty(), "tasks never ended: {open:?}");

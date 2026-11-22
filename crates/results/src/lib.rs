@@ -600,6 +600,16 @@ impl Ledger {
     /// Every task start and end and every fact, in order, one line each.
     pub fn render(&self) -> String {
         let mut lines: Vec<(u64, u8, String)> = Vec::new();
+        // A note that only repeats a task's start or end at the same tick is not shown twice.
+        let told: std::collections::BTreeSet<(u64, &str)> = self
+            .tasks
+            .iter()
+            .filter_map(|t| match t {
+                plan::TaskRecord::Started { at, what, .. } => what.as_deref().map(|w| (*at, w)),
+                plan::TaskRecord::Ended { at, outcome, .. } => outcome.as_deref().map(|o| (*at, o)),
+                plan::TaskRecord::Note { .. } => None,
+            })
+            .collect();
         for t in &self.tasks {
             match t {
                 plan::TaskRecord::Started {
@@ -633,6 +643,11 @@ impl Ledger {
                         why.as_deref().unwrap_or("-")
                     ),
                 )),
+                plan::TaskRecord::Note { at, what, why } => {
+                    if !told.contains(&(*at, what.as_str())) {
+                        lines.push((*at, 1, format!("note {what} ({why})")));
+                    }
+                }
             }
         }
         for f in &self.facts {

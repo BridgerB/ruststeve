@@ -674,6 +674,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 teleports_at_script.get_or_insert(run.world.session.teleports);
                 for e in p.events_since(plan_seen) {
                     plan_notes.push(e.tick, &e.what, &e.why);
+                    ledger.push(plan::TaskRecord::Note {
+                        at: run.world.session.server_ticks,
+                        what: e.what.clone(),
+                        why: e.why.clone(),
+                    });
                     if let Some(r) = &mut run.recorder {
                         let note = format!("plan tick {}: {} ({})", e.tick, e.what, e.why);
                         if let Err(err) = r.write(&Record::Note(note)) {

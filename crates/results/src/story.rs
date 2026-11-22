@@ -53,7 +53,9 @@ fn running_at(l: &Ledger, at: u64) -> Option<String> {
                 open = Some(format!("#{id} {task}: {}", what.as_deref().unwrap_or("-")));
             }
             plan::TaskRecord::Ended { at: e, .. } if *e < at => open = None,
-            plan::TaskRecord::Started { .. } | plan::TaskRecord::Ended { .. } => {}
+            plan::TaskRecord::Started { .. }
+            | plan::TaskRecord::Ended { .. }
+            | plan::TaskRecord::Note { .. } => {}
         }
     }
     open
@@ -133,7 +135,9 @@ pub fn story(l: &Ledger, rows: &[Senses]) -> Story {
                 .iter()
                 .find_map(|x| match x {
                     plan::TaskRecord::Started { id: i, what, .. } if i == id => what.clone(),
-                    plan::TaskRecord::Started { .. } | plan::TaskRecord::Ended { .. } => None,
+                    plan::TaskRecord::Started { .. }
+                    | plan::TaskRecord::Ended { .. }
+                    | plan::TaskRecord::Note { .. } => None,
                 })
                 .unwrap_or_default();
             ended.push((*ticks, *id, task.clone(), what));
@@ -160,7 +164,9 @@ pub fn story(l: &Ledger, rows: &[Senses]) -> Story {
         .map(|f| f.at)
         .into_iter()
         .chain(l.tasks.iter().map(|t| match t {
-            plan::TaskRecord::Started { at, .. } | plan::TaskRecord::Ended { at, .. } => *at,
+            plan::TaskRecord::Started { at, .. }
+            | plan::TaskRecord::Ended { at, .. }
+            | plan::TaskRecord::Note { at, .. } => *at,
         }))
         .max()
         .unwrap_or(0);

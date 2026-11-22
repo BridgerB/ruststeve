@@ -29,6 +29,9 @@ pub enum TaskRecord {
         outcome: Option<String>,
         why: Option<String>,
     },
+    /// Every planner note, whether or not it began or ended a task: waits, refusals, "low on
+    /// digs", "cast paused" (the first races with a ledger left these out: blaze wall 8).
+    Note { at: u64, what: String, why: String },
 }
 
 /// The task open now: its id, name and start.
