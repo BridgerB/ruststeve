@@ -7,6 +7,15 @@ name = "spawn"
 stage = "in_world"
 place = "spawn"
 
+# A fresh start with nothing given (issue 16's clean flow, 2026-11-22): spawn, then each bot to
+# a random surface spot within 128 blocks, so a lane's bots do not fell the same trees and dig up
+# each other's tables (docs/problems/iron-kit.md wall 4). No kit and no place: not a checkpoint.
+[[start]]
+name = "fresh"
+stage = "in_world"
+place = "spawn"
+spread = 128
+
 # Proves the kit path (issue 07a): the table stage's kit at spawn.
 [[start]]
 name = "table"

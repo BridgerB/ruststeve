@@ -171,6 +171,17 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **The snapshots** (each `snap.toml`): five `fortress` (race 44678197603 lanes 0 to 2, 44687236976 lanes 1 and 2) and three `spawner` (44789031743 lanes 1, 2, 4). No bot has armour or food; the spawner bots hold a stone sword, a stone pickaxe, a water bucket, 28 cobblestone and 270 netherrack, and start at 6 to 7 health (wall 3). The frontier `fortress` snapshot is the cleanest start.
 - **Never raced from it**: wall 2's `never_fight` for wither skeletons and wall 3's cover from blazes when hurt; the loop left for the overworld as they landed. Race 45124122633 (50677e5, `snapshot=frontier`, 15 x 1, cap 72,000) races them as they are.
 
+## The clean flow (2026-11-22, late: Bridger chose none of A, B or C)
+- **Bridger**: "go back even further … fix … then we take a snapshot that is super clean." Not the cave leg patched wall by wall, not the bare Nether saves, not a made-up start: the flow itself fixed from before the first descent, and a snapshot only of a bot that is whole.
+- **The cause, in the goal table**: the race aim went one log, a table, a stone pickaxe, then straight down for 22 iron. No row stocked wood or food above ground, and nothing brought the bot back up, so every `gear` snapshot was a poor bot in a cave. Walls 5 to 16 are that one fact.
+- **The flow** (`Plan::clean_flow`, race aim, overworld):
+  1. **Stock before the first descent**: 12 logs (the `stock` row; `[survival] stock_logs`), then animals while they are found, to the food reserve of 32. A clock bounds it: logs for up to 12,000 ticks, animals to 18,000 in all (`provision_ticks` 6,000), so a treeless place costs minutes.
+  2. **Gear and the kit** as before: armour and sword, bucket, flint and steel, water.
+  3. **Back up before the cast**: with the kit held, stairs up to the open sky (`stairs_to_surface`, 24 blocks a target, the next heading when one is refused, eight refusals end it), then logs to 4 and food to 32 again on the same clock.
+  4. **`ready`**, a new stage between `gear` and `iron_kit` (`world::stage::Stage::Ready`): the gear, a water bucket, an empty bucket, flint and steel, a pickaxe, 4 logs, 32 hunger points of safe food, under the open sky. The race snapshots the first bot of a lane to hold it. That snapshot is the clean one: every race after resumes from it.
+- **Raced from spawn** with the `fresh` start (nothing given; each bot spread to its own surface spot within 128 blocks).
+- **Unit tests**: `ready_needs_the_kit_the_stock_and_the_open_sky` (world). The flow itself is judged by its notes in the ledger: "stocked", "stairs up toward the surface", "ready".
+
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
 - Case files counted no swings: `race` wrote `swings_sent` and `swings_landed` as a literal 0. They now come from the plan, summed over every fight.
 - Each `defend` ends in a note with what it saw: swings, swings landed, the stance, steps held back, the foe's kind, the bot's health at the start and end, the foe's highest point over the eye, and the ticks a blaze foe was charging (`world::Entity::blaze_charged`: its metadata index 16, bit 0, as clojurecraft read it on 26.1.2). The next blaze wall is read from these before any fix.

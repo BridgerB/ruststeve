@@ -144,6 +144,17 @@ doc = "what a portal cast spends that the iron kit does not hold"
 provides = [["item:water_bucket", 1], ["item:bucket", 1]]
 spares = [["item:stick", 24]]
 
+# Issue 16's clean flow (Bridger, 2026-11-22): the race stocks logs above ground before it first
+# goes down for iron, and again before the cast (plan::Plan::clean_flow). Every gear snapshot of
+# race 44840801185 was a bot 40 to 70 blocks underground with 1 to 23 sticks and no logs, and walls
+# 5 to 16 of docs/problems/blaze.md followed from it.
+[[goal]]
+id = "stock"
+priority = 5
+until = "stock"
+doc = "logs held before going underground: sticks, tables and pickaxes for the whole trip"
+provides = [["tag:logs", 12]]
+
 # Issue 14c's done-condition (clojurecraft's portal row): the kit the cast spends (a water
 # bucket, a bucket for the lava, flint and steel) held, then the cast at a site beside lava
 # (plan::cast); met once a portal is lit.
@@ -314,6 +325,13 @@ spare_uses = 40
 # (clojurecraft pearls.edn travel-reserve-digs: a stone pickaxe's uses). Blaze wall 7: every bot of
 # race 45000585321 mined on underground until both pickaxes broke, 40 blocks of stone from a log.
 travel_reserve_digs = 131
+# The clean flow's numbers (issue 16). stock_logs: 12 logs are 48 planks, a table and the sticks
+# for some twenty stone pickaxes (2,600 digs: the gear and kit trip of race 45071679507 broke 3 to
+# 6 pickaxes a bot). provision_ticks: the clock for each stocking phase: logs for up to twice it,
+# then animals for up to three times it in all (6,000 ticks is five game minutes; a treeless or
+# empty place costs minutes, never the run).
+stock_logs = 12
+provision_ticks = 6000
 # Dropped a stack at a time when fewer than two main slots are free, each kept to its count (blaze
 # wall 13: lane 11 of race 45071679507 held eleven stacks of cobblestone and deepslate, dirt,
 # granite, andesite and diorite in every slot, so a dig's drop went uncollected and the bucket

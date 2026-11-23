@@ -6,7 +6,7 @@ tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
 lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@15d7060 clojurecraft@be85a92
+verifiedAgainst: ruststeve@92fdb59 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -87,3 +87,5 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 - With no pickaxe held and its makings held (`pickaxe_makeable`: two sticks' worth of wood, three stone, a table held or near), the portal flow works the `stone-pickaxe` row first, and a running cast pauses with its site kept (clojurecraft's `pickaxe-at-hand?`). Resolving the goal's own holds at the top raced worse (race 45032717811) and was reverted.
 
 - **Junk** (blaze wall 13): with fewer than `JUNK_FREE_SLOTS` (2) of the main slots free, the planner drops a stack of a `[survival] junk` kind that leaves its keep (`junk_slot`, a mode-4 click), one a second between tasks, beside putting armour on: a full inventory left digs `Uncollected` and the bucket unholdable at the cast.
+
+- **The clean flow** (issue 16, Bridger 2026-11-22; `Plan::clean_flow`): the race aim stocks 12 logs (the `stock` row) and food to the reserve above ground before its first descent, and with its kit made (gear, both buckets, flint and steel) climbs back under the open sky (`stairs_to_surface`) and stocks again before the cast; each phase is bounded by `[survival] provision_ticks`. `world::stage::Stage::Ready` (between `gear` and `iron_kit`) reads the result, and its snapshot is the clean one later races resume from. Before it every `gear` snapshot was a bot in a cave with a stick or two (blaze walls 5 to 16).

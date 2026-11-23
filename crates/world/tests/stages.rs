@@ -161,3 +161,37 @@ fn hits_on_the_bot_are_named_and_kept_a_minute() {
     w.step(&hit(7, mob_attack));
     assert_eq!(w.hits.len(), 1, "older than a minute is dropped");
 }
+
+/// Issue 16's clean checkpoint: the whole kit, logs and safe food held is still not `ready`
+/// underground or with no terrain seen (the sky is part of it), and unsafe food never counts.
+#[test]
+fn ready_needs_the_kit_the_stock_and_the_open_sky() {
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    let kit = [
+        (ItemKind::IronHelmet, 1),
+        (ItemKind::IronChestplate, 1),
+        (ItemKind::IronLeggings, 1),
+        (ItemKind::IronSword, 1),
+        (ItemKind::WaterBucket, 1),
+        (ItemKind::Bucket, 1),
+        (ItemKind::FlintAndSteel, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::OakLog, 4),
+        (ItemKind::RottenFlesh, 20),
+        (ItemKind::Beef, 11),
+    ];
+    for (slot, (item, n)) in kit.into_iter().enumerate() {
+        w.step(&give(slot as i32, item, n));
+    }
+    w.step(&tick());
+    // Eleven raw beef are 33 points; the rotten flesh adds nothing.
+    assert_eq!(world::stage::safe_food(&w), 33);
+    assert!(
+        !world::stage::open_sky(&w),
+        "no column is loaded: no sky seen"
+    );
+    assert!(!Stage::Ready.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Gear));
+}

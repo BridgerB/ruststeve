@@ -103,6 +103,71 @@ pub fn at_spawner(w: &World) -> bool {
         })
 }
 
+/// Logs a ready bot holds: a table and sticks for a dozen stone pickaxes (a log is four planks,
+/// a pickaxe two sticks; blaze walls 6 to 8 were bots with no wood under 40 blocks of stone).
+pub const READY_LOGS: i64 = 4;
+/// Hunger points of safe food a ready bot holds: `[survival] food_reserve` in goals.toml.
+pub const READY_FOOD: i64 = 32;
+/// How far over the head the sky is checked for.
+pub const SKY_CHECK: i32 = 48;
+/// Food never counted: `[survival] unsafe_foods` in goals.toml (what poisons, starves or is worth
+/// more than a meal).
+const UNSAFE_FOOD: [ItemKind; 9] = [
+    ItemKind::RottenFlesh,
+    ItemKind::SpiderEye,
+    ItemKind::Pufferfish,
+    ItemKind::PoisonousPotato,
+    ItemKind::Chicken,
+    ItemKind::ChorusFruit,
+    ItemKind::SuspiciousStew,
+    ItemKind::GoldenApple,
+    ItemKind::EnchantedGoldenApple,
+];
+
+/// How many items of an item tag are held.
+fn tagged(w: &World, tag: &str) -> i64 {
+    item_tag(tag).map_or(0, |items| items.iter().map(|k| w.inventory.count(*k)).sum())
+}
+
+/// Hunger points of safe food held.
+pub fn safe_food(w: &World) -> i64 {
+    w.inventory
+        .slots
+        .values()
+        .filter(|(k, _)| !UNSAFE_FOOD.contains(k))
+        .filter_map(|(k, n)| {
+            data::generated::item_props::food_of(*k).map(|f| i64::from(f.nutrition) * i64::from(*n))
+        })
+        .sum()
+}
+
+/// Nothing but air (or a tree) in the loaded column over the head for `SKY_CHECK` blocks: the
+/// bot is above ground. Each cell read is over the bot's own column, seen from below.
+pub fn open_sky(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let (x, y, z) = (
+        body.pos[0].floor() as i32,
+        body.pos[1].floor() as i32,
+        body.pos[2].floor() as i32,
+    );
+    let tree = |k: data::BlockKind| {
+        ["leaves", "logs"]
+            .iter()
+            .filter_map(|t| data::generated::tags::block_tag(t))
+            .any(|ks| ks.contains(&k))
+    };
+    ((y + 2)..(y + 2 + SKY_CHECK)).all(|yy| {
+        match w.block_at(crate::BlockPos::new(x, yy, z)) {
+            Some(data::BlockKind::Air | data::BlockKind::CaveAir) => true,
+            Some(k) => tree(k),
+            // Over the top of the loaded column: nothing there.
+            None => yy > 319,
+        }
+    })
+}
+
 /// A stage, lowest first. `Ord` is the ladder.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
@@ -120,6 +185,11 @@ pub enum Stage {
     /// made before the iron kit by the race aim; a geared bot is snapshotted, so the chain resumes
     /// from it, not from spawn: 4 of 84 spawn bots geared in 3 game hours and got no further).
     Gear,
+    /// Ready for the portal, above ground (issue 16, Bridger 2026-11-22: "a snapshot that is super
+    /// clean"): the gear, a water bucket, an empty bucket, flint and steel, a pickaxe,
+    /// `READY_LOGS` logs and `READY_FOOD` hunger points of safe food, under the open sky. Every
+    /// gear snapshot before it was a bot deep in a cave with a stick or two (blaze walls 5 to 16).
+    Ready,
     /// Holds an iron pickaxe and a bucket (issue 13's iron kit: the pickaxe for obsidian, the
     /// bucket for the cast, clojurecraft's kit).
     IronKit,
@@ -140,12 +210,13 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 12] = [
+    pub const ALL: [Stage; 13] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
         Stage::StonePickaxe,
         Stage::Gear,
+        Stage::Ready,
         Stage::IronKit,
         Stage::Nether,
         Stage::Fortress,
@@ -163,6 +234,7 @@ impl Stage {
             Stage::Table => "table",
             Stage::StonePickaxe => "stone_pickaxe",
             Stage::Gear => "gear",
+            Stage::Ready => "ready",
             Stage::IronKit => "iron_kit",
             Stage::Nether => "nether",
             Stage::Fortress => "fortress",
@@ -195,6 +267,16 @@ impl Stage {
             ]
             .iter()
             .all(|k| has(*k, 1)),
+            Stage::Ready => {
+                Stage::Gear.holds(w)
+                    && has(ItemKind::WaterBucket, 1)
+                    && has(ItemKind::Bucket, 1)
+                    && has(ItemKind::FlintAndSteel, 1)
+                    && tagged(w, "pickaxes") >= 1
+                    && tagged(w, "logs") >= READY_LOGS
+                    && safe_food(w) >= READY_FOOD
+                    && open_sky(w)
+            }
             Stage::IronKit => has(ItemKind::IronPickaxe, 1) && has(ItemKind::Bucket, 1),
             Stage::Nether => dim == Some("minecraft:the_nether"),
             Stage::Fortress => at_fortress(w),

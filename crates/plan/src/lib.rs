@@ -496,6 +496,20 @@ pub struct Plan {
     pub traps: escape::Traps,
     #[serde(default)]
     pub escapes: u64,
+    /// The clean flow (issue 16, Bridger 2026-11-22): wood and food stocked on the surface before
+    /// the first descent; then, the kit made, back up under the open sky and stocked again before
+    /// the cast (`world::stage::Stage::Ready`). Each is done once; the clocks bound the food hunt.
+    #[serde(default)]
+    pub stocked: bool,
+    #[serde(default)]
+    pub readied: bool,
+    #[serde(default)]
+    pub provision_since: Option<u64>,
+    /// The cell the climb to the surface heads for, and how many headings were refused.
+    #[serde(default)]
+    pub surface_target: Option<Cell>,
+    #[serde(default)]
+    pub surface_tries: u8,
     /// Meals eaten and hunts that ended in a kill (issue 12c); an eat or hunt row is not
     /// chosen again before `always_retry_at` after it failed, and animals a hunt failed on are
     /// refused until then too.
@@ -583,6 +597,11 @@ impl Plan {
             crafts: 0,
             traps: escape::Traps::default(),
             escapes: 0,
+            stocked: false,
+            readied: false,
+            provision_since: None,
+            surface_target: None,
+            surface_tries: 0,
             meals: 0,
             kills: 0,
             always_retry_at: 0,
@@ -1968,6 +1987,131 @@ impl Plan {
         Task::Idle
     }
 
+    /// The race's clean flow (issue 16, Bridger 2026-11-22: fix the flow from further back, then a
+    /// clean snapshot). Twice the race stocks up above ground: before its first descent (logs,
+    /// then food while animals are found), and once its kit is made (the gear, both buckets, flint
+    /// and steel), when it first climbs back under the open sky. Each phase has a clock, so a
+    /// treeless or empty place costs minutes, never the run. `Stage::Ready` reads the result.
+    fn clean_flow(&mut self, w: &World, rules: &make::SurvivalRules, tick: u64) -> Flow {
+        if rules.stock_logs <= 0 || self.readied {
+            return Flow::On;
+        }
+        let n = |k: data::ItemKind| craft::count(w, k);
+        let logs = logs_held(w);
+        let food = eat::food_points(w, rules);
+        let kit = geared(w)
+            && n(data::ItemKind::WaterBucket) >= 1
+            && n(data::ItemKind::Bucket) >= 1
+            && n(data::ItemKind::FlintAndSteel) >= 1;
+        let first = !self.stocked && !geared(w);
+        if !first && !kit {
+            return Flow::On;
+        }
+        if !first {
+            if world::stage::Stage::Ready.holds(w) {
+                self.readied = true;
+                self.note(
+                    tick,
+                    "ready".to_owned(),
+                    format!("the kit, {logs} logs and {food} food points held under the open sky"),
+                );
+                return Flow::On;
+            }
+            if !world::stage::open_sky(w) {
+                if let Some(t) = self.stairs_to_surface(w, tick) {
+                    return Flow::Task(Box::new(t));
+                }
+                self.readied = true;
+                self.note(
+                    tick,
+                    "not ready".to_owned(),
+                    "no way up to the surface: on to the cast as it is".to_owned(),
+                );
+                return Flow::On;
+            }
+        }
+        let since = *self.provision_since.get_or_insert(tick);
+        let spent = tick.saturating_sub(since);
+        let want = if first {
+            rules.stock_logs
+        } else {
+            world::stage::READY_LOGS as i32
+        };
+        if logs < want && spent < rules.provision_ticks * 2 {
+            return Flow::Stock;
+        }
+        if food < rules.food_reserve && spent < rules.provision_ticks * 3 {
+            let why = format!(
+                "provisions {food} of {}: look for animals",
+                rules.food_reserve
+            );
+            if let Some(t) = self.explore_walk(w, tick, &why) {
+                return Flow::Task(Box::new(t));
+            }
+        }
+        self.provision_since = None;
+        if first {
+            self.stocked = true;
+        } else {
+            self.readied = true;
+        }
+        self.note(
+            tick,
+            if first { "stocked" } else { "stocked again" }.to_owned(),
+            format!("{logs} logs and {food} food points held after {spent} ticks"),
+        );
+        Flow::On
+    }
+
+    /// Stairs up toward the open sky, 24 blocks at a time along one heading; a heading refused
+    /// (three stalls, or its stairs cut into water) gives way to the next, and eight refusals
+    /// end the climb.
+    fn stairs_to_surface(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let (fx, fy, fz) = path::feet_cell(w.body?.pos);
+        for _ in 0..2 {
+            let live = self
+                .surface_target
+                .filter(|t| !self.refused_now(*t, tick) && fy < t.1 - 1);
+            let target = match live {
+                Some(t) => t,
+                None => {
+                    if self
+                        .surface_target
+                        .is_some_and(|t| self.refused_now(t, tick))
+                    {
+                        self.surface_tries += 1;
+                    }
+                    if self.surface_tries >= SURFACE_TRIES {
+                        return None;
+                    }
+                    let (dx, dz) =
+                        [(1, 0), (0, 1), (-1, 0), (0, -1)][usize::from(self.surface_tries % 4)];
+                    let t = (
+                        fx + dx * SURFACE_RISE,
+                        fy + SURFACE_RISE,
+                        fz + dz * SURFACE_RISE,
+                    );
+                    self.surface_target = Some(t);
+                    t
+                }
+            };
+            if let Some(t) = self.dig_toward(
+                w,
+                target,
+                true,
+                (
+                    "the surface",
+                    "the kit is made: up under the open sky before the cast",
+                ),
+                tick,
+            ) {
+                return Some(t);
+            }
+            self.refuse(target, tick);
+        }
+        None
+    }
+
     /// A goal aim's next task, from the needs planner over what is held (re-derived each time
     /// the planner is idle; nothing stored): met, a craft, or a gather (a walk to the nearest
     /// log in view with a way, or an explore).
@@ -1977,8 +2121,19 @@ impl Plan {
             self.note(tick, "stuck".to_owned(), "no goal table".to_owned());
             return Task::Idle;
         };
+        // The clean flow first (issue 16): stock up above ground before the first descent, and
+        // come back up, stocked, before the cast.
+        let mut stock_row = false;
+        if self.aim == Aim::Race {
+            match self.clean_flow(w, &table.survival, tick) {
+                Flow::Task(t) => return *t,
+                Flow::Stock => stock_row = true,
+                Flow::On => {}
+            }
+        }
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
+            Aim::Race if stock_row => "stock".to_owned(),
             // The race gears up first (issue 16), then casts.
             Aim::Race if !geared(w) => "gear".to_owned(),
             // No pickaxe, but the makings of one held: craft it before casting or digging to a
@@ -3623,6 +3778,26 @@ fn wet(w: &World, body: &physics::Body) -> bool {
             )
         })
     })
+}
+
+/// What the clean flow asks of this tick's choice.
+enum Flow {
+    /// A task of its own: a climb, or a walk looking for animals.
+    Task(Box<Task>),
+    /// Work the `stock` row (logs).
+    Stock,
+    /// Nothing: the race goes on.
+    On,
+}
+
+/// Blocks a climb to the surface rises per target, and headings refused before it is given up.
+const SURFACE_RISE: i32 = 24;
+const SURFACE_TRIES: u8 = 8;
+
+/// Logs held, of every kind.
+pub fn logs_held(w: &World) -> i32 {
+    data::generated::tags::item_tag("logs")
+        .map_or(0, |ks| ks.iter().map(|k| craft::count(w, *k)).sum())
 }
 
 /// Main slots (9 to 44) kept free: under this a stack of junk is dropped (blaze wall 13: every

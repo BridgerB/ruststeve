@@ -244,6 +244,12 @@ pub struct Survival {
     /// wall 13: 700 blocks of stone filled every slot, and digs and scoops failed).
     #[serde(default)]
     pub junk: Vec<(String, i32)>,
+    /// Logs the race holds before it first goes underground, and again before the cast.
+    #[serde(default)]
+    pub stock_logs: i32,
+    /// Ticks the race looks for animals on the surface to fill the food reserve, each time.
+    #[serde(default)]
+    pub provision_ticks: u64,
     /// A hostile mob this near is answered (`defend`, issue 12d) ...
     #[serde(default = "defend_radius")]
     pub defend_radius: f64,
@@ -316,6 +322,8 @@ impl Default for Survival {
             spare_uses: spare_uses(),
             travel_reserve_digs: travel_reserve_digs(),
             junk: Vec::new(),
+            stock_logs: 0,
+            provision_ticks: 0,
             danger_health: danger_health(),
             never_fight: Vec::new(),
             ranged: Vec::new(),
@@ -363,6 +371,8 @@ pub struct SurvivalRules {
     pub flee_clear: f64,
     /// Kinds dropped when the main inventory is nearly full, each with how many to keep.
     pub junk: Vec<(data::ItemKind, i32)>,
+    pub stock_logs: i32,
+    pub provision_ticks: u64,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -621,6 +631,8 @@ impl Table {
                 spare_uses: g.survival.spare_uses,
                 travel_reserve_digs: g.survival.travel_reserve_digs,
                 junk,
+                stock_logs: g.survival.stock_logs,
+                provision_ticks: g.survival.provision_ticks,
                 never_fight,
                 ranged,
                 neutral,
