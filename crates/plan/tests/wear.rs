@@ -129,3 +129,31 @@ fn the_nether_kit_makes_pickaxes_and_a_table() {
     let bare: Counts = [(ItemKind::Cobblestone, 64)].into_iter().collect();
     assert_ne!(act(&bare, &no_table), "done");
 }
+
+/// Blaze wall 19: a bot that left its table still makes a pickaxe from a log and sticks, or from
+/// two logs; sticks alone, or three planks, make no table.
+#[test]
+fn held_wood_makes_the_table_and_the_sticks() {
+    assert!(plan::wood_makes(23, 0, 1));
+    assert!(plan::wood_makes(0, 1, 1));
+    assert!(plan::wood_makes(0, 0, 2));
+    assert!(!plan::wood_makes(0, 0, 1), "a table and no sticks");
+    assert!(!plan::wood_makes(24, 0, 0), "sticks make no table");
+    assert!(!plan::wood_makes(24, 3, 0));
+}
+
+/// Blaze wall 19: two landings looked at in turn each keep their own stalls, so both are refused
+/// after three looks that came no nearer; a look that comes nearer starts the count again.
+#[test]
+fn a_landing_keeps_its_stalls_across_a_flip() {
+    let (a, b) = ((124, -53, -102), (129, -52, -105));
+    let mut kept = Vec::new();
+    assert_eq!(plan::landing_stalls(&mut kept, a, 6.0), (6.0, 0));
+    assert_eq!(plan::landing_stalls(&mut kept, b, 6.5), (6.5, 0));
+    assert_eq!(plan::landing_stalls(&mut kept, a, 6.2), (6.0, 1));
+    assert_eq!(plan::landing_stalls(&mut kept, b, 6.4), (6.5, 1));
+    assert_eq!(plan::landing_stalls(&mut kept, a, 5.8), (6.0, 2));
+    assert_eq!(plan::landing_stalls(&mut kept, a, 6.0), (6.0, 3));
+    assert_eq!(plan::landing_stalls(&mut kept, b, 5.0), (5.0, 0));
+    assert_eq!(kept.len(), 2);
+}

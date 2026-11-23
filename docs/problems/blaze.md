@@ -198,6 +198,19 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Cause**: no tool reserve for the Nether. The Nether has no wood, so what the bot carries through the portal is all the digging it will ever do there.
 - **Fix**: a `nether-kit` row (`config/goals.toml`: 4 stone pickaxes and a crafting table held), run by the needs planner once a portal is there to enter and before the bot steps in (`Plan::nether_task`, `kit_done`). A kit that cannot be made (no wood) is noted and the bot goes in as before. In the Nether the dig takes the next pickaxe when one breaks.
 - **Unit test**: `the_nether_kit_makes_pickaxes_and_a_table` (plan, on the real goal table).
+- **Raced** (race 45175708203, 9cf10b6, the clean snapshot, 10 x 1): not yet judged: no bot had lit a portal 45 minutes in. Five of the ten died in their first 1,240 to 4,040 ticks, to the mobs of the cave under the snapshot's spot (see wall 20).
+
+### 19. Under the landing with no pickaxe, a table's wood in the pack (races 45164371770 and 45175708203, lanes 0, 3, 5, 10, 11, 12 and 1, 5, 6, 9)
+- **What happened**: ten of the bots that outlived the cave ended or sit on "dig toward the landing ... (site at ..., no walk to it)" for 10,000 to 20,000 ticks at 18 to 20 health. Lane 11 began 485 such digs, 236 toward (124, -53, -102) and 238 toward (129, -52, -105), each ended "cut 6 stairs" in 40 to 60 ticks, pacing x 124 to 127 at (y -57, z -106).
+- **Read** (three ledgers, senses and tool stories: lanes 0, 10, 11 of 45164371770): each bot stands at y -57 to -59 and its landings are at y -52 to -54, four or five blocks over the feet. Lanes 0 and 10 hold no pickaxe (lane 10 for 38,000 ticks), lane 11 one with 2 uses. All three placed their crafting table earlier and walked on ("items lost: crafting_table 1") and hold 4 logs, 21 to 23 sticks and stacks of stone.
+- **Cause**, three parts: (1) `pickaxe_makeable` wants a table held or near, so a bot that left its table makes no pickaxe though it holds the logs for a new table; it digs deepslate by hand. (2) A landing over the feet is dug toward with a level tunnel, which never rises to it. (3) The three-stalls refusal is kept for one landing only: the site choice flips between two landings as the bot paces, each flip forgets the other's count, and neither is ever refused.
+- **Fix**: (1) a table the held wood makes counts (`wood_makes`: four planks' worth for the table and two sticks' worth beyond it); (2) a landing more than a block over the feet gets stairs up; (3) the stall count is kept for each landing looked at (`Plan::landings`, the last 8).
+- **Unit tests**: `held_wood_makes_the_table_and_the_sticks`, `a_landing_keeps_its_stalls_across_a_flip` (plan).
+
+### 20. The cave under the clean snapshot (races 45164371770 and 45175708203: 9 of 25 dead within 7,400 ticks)
+- **What happened**: 4 of 15 and then 5 of 10 bots died soon after resuming: 7 to creepers, 1 to a zombie, 1 to a skeleton. Lane 4 of 45175708203 lived 1,240 ticks.
+- **Read** (lane 4's whole ledger): from (55, 70, -133) the lava hunt walks down the bot's own stairs to (50, 25, -87) in 1,000 ticks; at tick 340 to 400 five creepers, a zombie and two endermen appear at 32 blocks, all in that cave. "defend Creeper (Retreat)" starts with the creeper within 4, "entity.creeper.primed" is heard at 3 blocks 60 ticks later, and the retreat ends "0 steps held back".
+- **Cause**: open. A retreat that starts at 4 blocks from a creeper that primes at 3 has no room, and the hunt's first walk leads every bot of this snapshot into the same cave. Not fixed in this commit: the bots that pass the cave are the ones wall 19 stops.
 
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
 - Case files counted no swings: `race` wrote `swings_sent` and `swings_landed` as a literal 0. They now come from the plan, summed over every fight.

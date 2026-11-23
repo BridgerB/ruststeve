@@ -539,6 +539,10 @@ pub struct Plan {
     /// nearer (a progress invariant, issue 13b).
     #[serde(default)]
     pub toward: Option<(Cell, f64, u32)>,
+    /// The same count for each cast landing looked at, the newest last (blaze.md wall 19: the
+    /// site choice flipped between two landings and each flip forgot the other).
+    #[serde(default)]
+    pub landings: Vec<(Cell, f64, u32)>,
     /// The watchdog's mark: where the body was, how many items were held, the events made, and
     /// when (issue 13b).
     #[serde(default)]
@@ -618,6 +622,7 @@ impl Plan {
             smelts: 0,
             relocations: 0,
             toward: None,
+            landings: Vec::new(),
             mark: None,
             stalls: 0,
             trail: Vec::new(),
@@ -2928,16 +2933,7 @@ impl Plan {
             let (fx, fy, fz) = path::feet_cell(body.pos);
             let d =
                 f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
-            let (best, stalls) = match self.toward {
-                Some((t, b, n)) if t == aim => {
-                    if d < b - 0.5 {
-                        (d, 0)
-                    } else {
-                        (b, n + 1)
-                    }
-                }
-                Some(_) | None => (d, 0),
-            };
+            let (best, stalls) = landing_stalls(&mut self.landings, aim, d);
             if stalls >= 3 {
                 self.toward = None;
                 self.refuse(aim, tick);
@@ -2960,8 +2956,12 @@ impl Plan {
                             c.site.frame.facing.name()
                         ),
                     );
+                    // More than a block over the feet: stairs up, as `dig_toward` has them. A
+                    // level tunnel never rose to a landing four over the feet (wall 19).
                     return Task::Stairs(Box::new(if aim.1 < fy {
                         Stairs::new(dir, tick)
+                    } else if aim.1 > fy + 1 {
+                        Stairs::up(dir, tick)
                     } else {
                         Stairs::level(dir, tick)
                     }));
@@ -3698,11 +3698,53 @@ pub fn exposed_near(w: &World, kinds: &[data::BlockKind]) -> Vec<Cell> {
     found.into_iter().map(|(_, c)| c).collect()
 }
 
+/// The distance and stalls kept for a cast landing: a look that comes no nearer than its best is
+/// a stall, counted for that landing whatever was looked at between (the last `LANDINGS_KEPT`).
+pub fn landing_stalls(kept: &mut Vec<(Cell, f64, u32)>, aim: Cell, d: f64) -> (f64, u32) {
+    let was = kept
+        .iter()
+        .position(|(c, _, _)| *c == aim)
+        .map(|i| kept.remove(i));
+    let now = match was {
+        Some((_, best, n)) if d >= best - 0.5 => (best, n + 1),
+        Some(_) | None => (d, 0),
+    };
+    kept.push((aim, now.0, now.1));
+    if kept.len() > LANDINGS_KEPT {
+        kept.remove(0);
+    }
+    now
+}
+
+/// Landings whose stalls are kept: a lava lake offers a handful of sites at once.
+const LANDINGS_KEPT: usize = 8;
+
+/// Whether sticks, planks and logs make a crafting table (four planks' worth) and two sticks
+/// beyond it: a log is four planks, a plank two sticks' worth.
+pub fn wood_makes(sticks: i32, planks: i32, logs: i32) -> bool {
+    let planks = planks + 4 * logs;
+    planks >= 4 && sticks + 2 * (planks - 4) >= 2
+}
+
 /// Whether held wood (two sticks' worth) and stone (three) make a stone pickaxe, with a table
-/// held or near (blaze wall 8).
+/// held or near (blaze wall 8), or the wood for a table held too (wall 19: bots that had left
+/// their table dug by hand with four logs in the pack).
 pub fn pickaxe_makeable(w: &World, table_near: bool) -> bool {
     let c = held(w);
-    let table = table_near || c.get(&data::ItemKind::CraftingTable).copied().unwrap_or(0) > 0;
+    let tag = |t: &str| data::generated::tags::item_tag(t).unwrap_or(&[]);
+    let sum = |kinds: &[data::ItemKind]| -> i32 {
+        c.iter()
+            .filter(|(k, _)| kinds.contains(k))
+            .map(|(_, n)| *n)
+            .sum()
+    };
+    let table = table_near
+        || c.get(&data::ItemKind::CraftingTable).copied().unwrap_or(0) > 0
+        || wood_makes(
+            sum(&[data::ItemKind::Stick]),
+            sum(tag("planks")),
+            sum(tag("logs")),
+        );
     let stone_kinds = data::generated::tags::item_tag("stone_tool_materials").unwrap_or(&[]);
     let stone: i32 = c
         .iter()
