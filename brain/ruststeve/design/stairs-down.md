@@ -1,118 +1,60 @@
 ---
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 title: Stairs down
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 description: How the bot goes underground safely (plan::stairs, a port of the core of clojurecraft's stairs.clj) - a stair opens three cells one block ahead and down and is walked onto, the block under the feet is never dug, every cell is checked for water, lava, an unloaded column and a floor before anything is dug, refusals turn a quarter, level steps when boxed in, done after six stairs.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 type: reference
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 tags: [plan, stairs, mine, safety, underground]
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 status: verified
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 lastUpdated: 2026-11-23
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
-verifiedAgainst: ruststeve@4c6fee4 clojurecraft@be85a92
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
+verifiedAgainst: ruststeve@4b214ac clojurecraft@be85a92
 sourceRefs:
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "ruststeve:crates/plan/src/lib.rs#pub fn exposed_near(w: &World, kinds: &[data::BlockKind]) -> Vec<Cell> {"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "ruststeve:crates/bot/tests/stairs.rs#fn water_lava_and_drops_refuse_a_stair() {"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "clojurecraft:src/clojurecraft/stairs.clj#Going down safely: the :stairs-down intent, which cuts a staircase one stair at a time in the"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "clojurecraft:src/clojurecraft/stone.clj#(def search-radius 24)"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 related:
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "[[ruststeve/design/_moc|Design]]"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "[[mc-water]]"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "[[digging]]"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
   - "[[goal-table-and-needs]]"
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ---
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 # Stairs down
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its kinds the bot can stand beside, and when none is in sight cuts stairs down. Blind drops into lava killed clojurecraft's siblings, so the stairs never dig under the feet.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ## Key files
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - `crates/plan/src/stairs.rs`: `Stairs`, `refusal`.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - `crates/plan/src/lib.rs`: `exposed_near`, `Plan::mine`.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - `crates/bot/tests/stairs.rs`, `crates/bot/tests/stone.rs`.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ## How it works
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - **Exposed** means a face open to air, read from the loaded terrain within 24 blocks and 12 up or down (clojurecraft's `search-radius`, `search-height`): stone is most of the world, and only what is exposed now is worth a route. The search goes ring by ring outward and stops at 8 found (a whole-radius scan cost 0.4 s in one tick); the nearest 3 not refused are routed with the pickup goal and the first with a way is dug ([[digging]]). No block without an open face is ever chosen: no X-ray.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - **A stair**: from the feet F along the heading (dx, dz), open (F+dx, y+1), (F+dx, y) and the new feet (F+dx, y−1), top first, each by the dig task (its drop collected: digging stone stairs gives cobblestone), then walk onto the new feet. The block under the feet is never dug.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - **Before any cell is dug** (`refusal`): an unloaded column, water or lava in a cell, lava beside a cell, or no full block under the new feet refuses the stair; the heading turns a quarter. All four refused: a level step (two cells along, a floor under them), at most 3, then `Boxed`.
 - A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - **Done** after 6 stairs (`stair-depth`): the planner looks again. Judged by the feet having moved, never by a packet sent.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - A stair that fails makes the planner turn its heading for the next.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ## Evidence
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - `crates/bot/tests/stairs.rs`: a clear stair is taken; water in a cell, lava beside one, a missing floor and an unloaded column each refuse it.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - Sim measure from the `table` start: 195 of 200 landings make a stone pickaxe and sword in 12,000 ticks.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ## Limits
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - Gravel or sand overhead is not checked (it falls on the bot); the stairs do not go up again (clojurecraft's stairs-up), nor lay a floor over a cave (its cast floor). Air underwater and drowning are issue 12.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ## Issue 13b
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - A mine row's `depth`: past it, `Stairs::level` tunnels along instead ([[veins-and-flint]]).
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - **Short drops** (wall 17): a stair may land up to 3 below where it was cut (a cave under it); the step is done where the feet land, deeper refused.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - **Falling blocks**: a cell with gravel or sand over it is refused (it falls on the bot).
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - Stair digs collect nothing: the stairs never stop for a drop.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ## See also
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - [[mc-water]] - why water and lava are refused.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - [[digging]] - the dig each cell is.
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 ## Issue 16: stairs up toward what was seen
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
 - `Plan::dig_toward` cuts `Stairs::up` toward a target more than a block over the feet, three digs without coming nearer refusing it. Two callers send a bot underground up to what it saw: the scoop's bank over the feet (`stairs_to_bank`, blaze wall 5) and a log more than 3 blocks over the feet with no walk, under a rock roof (`stairs_to_log`, blaze wall 6: a cave bot with the trees 40 blocks up explored level for three hours). A third: a far pool (24 to 96 blocks) more than 3 over the feet, from under rock, gets stairs up to its bank before any walk (`roofed_below`, blaze wall 9: cave bots walked at the same three pools over a hundred times each, every walk NoPath).
-- A magma block is no floor (blaze wall 23): `refusal` answers "magma under" for it and a short drop never lands on it, as `path::classify` never stands on it. Stairs planned onto magma in the Nether failed `StepFailed after 0 stairs` for ever, nothing refused and no heading turned.
