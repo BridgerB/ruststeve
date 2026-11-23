@@ -33,12 +33,29 @@ pub enum Hold {
     Missing,
 }
 
+/// An empty slot for a stack on the cursor: the main inventory first, then the hotbar.
+fn put_down_slot(w: &World) -> Option<i16> {
+    (9i16..=44).find(|s| !w.inventory.slots.contains_key(s))
+}
+
 /// The next step toward holding `item`.
 pub fn toward(w: &World, item: ItemKind) -> Hold {
+    let busy = w.click.is_some() || w.window.is_some();
     if held_item(w) == Some(item) {
-        return Hold::Held;
+        // The swap's last click: what came back on the cursor goes down before the item counts
+        // as held (blaze.md wall 17: a pickaxe swapped out for the bucket stayed on the cursor,
+        // in no slot, and the cast paused for want of it for ever).
+        return match (w.inventory.carried, put_down_slot(w)) {
+            (Some(_), _) if busy => Hold::Wait,
+            (Some(_), Some(slot)) => Hold::Act(Act::Click {
+                slot,
+                button: 0,
+                mode: 0,
+            }),
+            _ => Hold::Held,
+        };
     }
-    if w.click.is_some() || w.window.is_some() {
+    if busy {
         return Hold::Wait;
     }
     if let Some(i) = (0u8..9).find(|i| {
@@ -102,5 +119,30 @@ mod tests {
         // No bucket anywhere and no empty slot: nothing to reach.
         w.inventory.slots.insert(34, (ItemKind::Cobblestone, 64));
         assert_eq!(toward(&w, ItemKind::Bucket), Hold::Missing);
+    }
+
+    /// Blaze wall 17: the bucket swapped into the hand, the pickaxe still on the cursor: it goes
+    /// down in an empty slot first; with no empty slot the bucket is held as it is.
+    #[test]
+    fn a_stack_left_on_the_cursor_is_put_down_before_held() {
+        let mut w = World::new();
+        for s in (9i16..=43).filter(|s| *s != 16) {
+            w.inventory.slots.insert(s, (ItemKind::Cobblestone, 64));
+        }
+        w.inventory.slots.insert(44, (ItemKind::Bucket, 1));
+        w.held = 8;
+        w.inventory.carried = Some((ItemKind::StonePickaxe, 1));
+        assert_eq!(
+            toward(&w, ItemKind::Bucket),
+            Hold::Act(Act::Click {
+                slot: 16,
+                button: 0,
+                mode: 0
+            })
+        );
+        w.inventory.slots.insert(16, (ItemKind::Gravel, 7));
+        assert_eq!(toward(&w, ItemKind::Bucket), Hold::Held);
+        w.inventory.carried = None;
+        assert_eq!(toward(&w, ItemKind::Bucket), Hold::Held);
     }
 }

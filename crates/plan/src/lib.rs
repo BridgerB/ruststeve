@@ -3676,9 +3676,12 @@ pub fn pickaxe_makeable(w: &World, table_near: bool) -> bool {
 /// Whether a pickaxe with uses left is held (blaze wall 8).
 pub fn holds_pickaxe(w: &World) -> bool {
     let picks = data::generated::tags::item_tag("pickaxes").unwrap_or(&[]);
-    w.inventory.slots.iter().any(|(slot, (k, _))| {
-        *slot >= 1 && picks.contains(k) && w.inventory.uses_left(*slot).is_none_or(|u| u > 0)
-    })
+    // One on the cursor counts, as `held` counts it: a hold brings it back to the hand (blaze.md
+    // wall 17: the two disagreed, and the cast paused for a pickaxe the planner saw as made).
+    w.inventory.carried.is_some_and(|(k, _)| picks.contains(&k))
+        || w.inventory.slots.iter().any(|(slot, (k, _))| {
+            *slot >= 1 && picks.contains(k) && w.inventory.uses_left(*slot).is_none_or(|u| u > 0)
+        })
 }
 
 /// A stone pickaxe's uses: what each pickaxe the held wood and stone make adds to the budget.

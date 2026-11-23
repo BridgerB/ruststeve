@@ -79,3 +79,14 @@ fn a_pickaxe_is_makeable_from_held_sticks_stone_and_a_table() {
     give(&mut w, 0, ItemKind::Stick, 1);
     assert!(!plan::pickaxe_makeable(&w, true), "one stick is not two");
 }
+
+/// Blaze wall 17 (race 45128866973): a pickaxe left on the cursor by a swap is still a pickaxe
+/// held, as the needs planner's counts have it, so a cast does not pause for it.
+#[test]
+fn a_carried_pickaxe_is_held() {
+    let mut w = world::World::new();
+    assert!(!plan::holds_pickaxe(&w));
+    w.inventory.carried = Some((ItemKind::StonePickaxe, 1));
+    assert!(plan::holds_pickaxe(&w));
+    assert_eq!(plan::held(&w).get(&ItemKind::StonePickaxe), Some(&1));
+}
