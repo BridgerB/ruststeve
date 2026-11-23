@@ -343,7 +343,7 @@ travel_reserve_digs = 131
 # empty place costs minutes, never the run).
 stock_logs = 12
 provision_ticks = 6000
-# Dropped a stack at a time when fewer than two main slots are free, each kept to its count (blaze
+# Dropped a stack at a time when fewer than six main slots (two until wall 21) are free, each kept to its count (blaze
 # wall 13: lane 11 of race 45071679507 held eleven stacks of cobblestone and deepslate, dirt,
 # granite, andesite and diorite in every slot, so a dig's drop went uncollected and the bucket
 # could not be held for the cast). 64 cobblestone and deepslate cover stone tools, stairs' floors,

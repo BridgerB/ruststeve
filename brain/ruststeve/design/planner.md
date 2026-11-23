@@ -6,7 +6,7 @@ tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@9cf10b6 clojurecraft@be85a92
+verifiedAgainst: ruststeve@77b1328 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -88,6 +88,6 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 - Before the portal is entered (race aim, a portal seen or lit), `Plan::nether_task` asks the needs planner for the `nether-kit` row once: 4 stone pickaxes and a crafting table held (`kit_done`; notes "nether kit held" or "nether kit not makeable"). The Nether has no wood: blaze wall 18, a bot in view of a fortress whose one pickaxe broke 800 ticks in.
 - `pickaxe_makeable` also counts a table the held wood makes (`wood_makes`: four planks' worth and two sticks' worth beyond), and the cast's dig toward a landing takes stairs up when the landing is more than a block over the feet and keeps each landing's stalls (`landing_stalls`, `Plan::landings`) so two landings looked at in turn are both refused: blaze wall 19.
 
-- **Junk** (blaze wall 13): with fewer than `JUNK_FREE_SLOTS` (2) of the main slots free, the planner drops a stack of a `[survival] junk` kind that leaves its keep (`junk_slot`, a mode-4 click), one a second between tasks, beside putting armour on: a full inventory left digs `Uncollected` and the bucket unholdable at the cast.
+- **Junk** (blaze wall 13): with fewer than `JUNK_FREE_SLOTS` (6 since wall 21; a stack on the cursor with no slot free is swapped onto a junk stack and that dropped outside the window, `cursor_step`; the Nether kit is given up after `KIT_TASKS` 16) of the main slots free, the planner drops a stack of a `[survival] junk` kind that leaves its keep (`junk_slot`, a mode-4 click), one a second between tasks, beside putting armour on: a full inventory left digs `Uncollected` and the bucket unholdable at the cast.
 
 - **The clean flow** (issue 16, Bridger 2026-11-22; `Plan::clean_flow`): the race aim stocks 12 logs (the `stock` row) and food to the reserve above ground before its first descent, and with its kit made (gear, both buckets, flint and steel) climbs back under the open sky (`stairs_to_surface`) and stocks again before the cast; each phase is bounded by `[survival] provision_ticks`. `world::stage::Stage::Ready` (between `gear` and `iron_kit`) reads the result, and its snapshot is the clean one later races resume from. Before it every `gear` snapshot was a bot in a cave with a stick or two (blaze walls 5 to 16).

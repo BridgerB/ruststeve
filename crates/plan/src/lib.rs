@@ -517,6 +517,9 @@ pub struct Plan {
     pub kit_done: bool,
     #[serde(skip)]
     kit_row: bool,
+    /// Tasks begun for the kit: past `KIT_TASKS` it is given up.
+    #[serde(default)]
+    pub kit_tasks: u32,
     /// Meals eaten and hunts that ended in a kill (issue 12c); an eat or hunt row is not
     /// chosen again before `always_retry_at` after it failed, and animals a hunt failed on are
     /// refused until then too.
@@ -612,6 +615,7 @@ impl Plan {
             readied: false,
             kit_done: false,
             kit_row: false,
+            kit_tasks: 0,
             provision_since: None,
             surface_target: None,
             surface_tries: 0,
@@ -1509,6 +1513,24 @@ impl Plan {
             .as_ref()
             .map(|t| t.survival.junk.clone())
             .unwrap_or_default();
+        // A stack on the cursor and no slot for it: out it goes if it is junk, else onto a junk
+        // stack's slot, which comes back on the cursor for the next look (blaze.md wall 21).
+        if w.click.is_none()
+            && let Some(slot) = cursor_step(&w.inventory.slots, w.inventory.carried, &junk)
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(world::Act::Click {
+                slot,
+                button: 0,
+                mode: 0,
+            });
+            self.note(
+                tick,
+                format!("cursor stack to slot {slot}"),
+                "a stack on the cursor and no main slot free".to_owned(),
+            );
+            return;
+        }
         if w.click.is_none()
             && w.inventory.carried.is_none()
             && let Some((slot, kind)) = junk_slot(&w.inventory.slots, &junk)
@@ -1605,6 +1627,16 @@ impl Plan {
             self.kit_row = true;
             let t = self.decide(w, origin, tick);
             self.kit_row = false;
+            // A bound on the kit (wall 21: its crafts failed until the planner was stuck).
+            self.kit_tasks += 1;
+            if self.kit_tasks > KIT_TASKS && !self.kit_done {
+                self.kit_done = true;
+                self.note(
+                    tick,
+                    "nether kit given up".to_owned(),
+                    format!("{KIT_TASKS} tasks begun for it"),
+                );
+            }
             if !self.kit_done {
                 return t;
             }
@@ -3886,7 +3918,34 @@ pub fn logs_held(w: &World) -> i32 {
 
 /// Main slots (9 to 44) kept free: under this a stack of junk is dropped (blaze wall 13: every
 /// slot full, digs failed `Uncollected` and the bucket could not be held).
-pub const JUNK_FREE_SLOTS: usize = 2;
+/// Tasks the Nether kit may begin before it is given up: four pickaxes, planks, a table and its
+/// placing are seven, so sixteen leaves each a retry.
+const KIT_TASKS: u32 = 16;
+
+/// Six since blaze wall 21: the Nether kit's four pickaxes and table had no slot to land in with
+/// two, and a dig's drops take the rest.
+pub const JUNK_FREE_SLOTS: usize = 6;
+
+/// The window slot that drops what the cursor holds (a click outside the window).
+pub const OUTSIDE: i16 = -999;
+
+/// What to click with a stack on the cursor and no main slot free: outside the window when the
+/// stack is junk, else the first junk stack's slot (a swap: the junk comes onto the cursor and
+/// goes out on the next look). None with an empty cursor, a free slot, or no junk held.
+pub fn cursor_step(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+    carried: Option<(data::ItemKind, i32)>,
+    junk: &[(data::ItemKind, i32)],
+) -> Option<i16> {
+    let (kind, _) = carried?;
+    if (9i16..=44).any(|s| !slots.contains_key(&s)) {
+        return None;
+    }
+    if junk.iter().any(|(j, _)| *j == kind) {
+        return Some(OUTSIDE);
+    }
+    junk_stack(slots, junk).map(|(s, _)| s)
+}
 
 /// The main slot to drop, with its kind, when fewer than `JUNK_FREE_SLOTS` are free: the first
 /// stack of a junk kind whose drop still leaves that kind's `keep` held. None with room to spare.
@@ -3894,11 +3953,19 @@ pub fn junk_slot(
     slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
     junk: &[(data::ItemKind, i32)],
 ) -> Option<(i16, data::ItemKind)> {
-    let main = |s: &i16| (9..=44).contains(s);
     let free = (9i16..=44).filter(|s| !slots.contains_key(s)).count();
     if free >= JUNK_FREE_SLOTS {
         return None;
     }
+    junk_stack(slots, junk)
+}
+
+/// The first main-slot stack of a junk kind whose drop still leaves that kind's `keep` held.
+fn junk_stack(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+    junk: &[(data::ItemKind, i32)],
+) -> Option<(i16, data::ItemKind)> {
+    let main = |s: &i16| (9..=44).contains(s);
     slots
         .iter()
         .filter(|(s, _)| main(s))
@@ -3990,9 +4057,33 @@ mod bank_tests {
         assert_eq!(junk_slot(&slots, &junk), Some((10, Cobblestone)));
         slots.insert(9, (Andesite, 12));
         assert_eq!(junk_slot(&slots, &junk), Some((9, Andesite)));
-        slots.remove(&20);
-        slots.remove(&21);
-        assert_eq!(junk_slot(&slots, &junk), None, "two slots free");
+        slots.retain(|s, _| !(20..=24).contains(s));
+        assert_eq!(junk_slot(&slots, &junk), Some((9, Andesite)), "five free");
+        slots.retain(|s, _| *s != 25);
+        assert_eq!(junk_slot(&slots, &junk), None, "six slots free");
+    }
+
+    /// Blaze wall 21: every slot full and a pickaxe on the cursor: it is swapped onto a junk
+    /// stack's slot, and the junk then on the cursor is dropped outside the window.
+    #[test]
+    fn a_cursor_stack_with_no_slot_free_is_swapped_for_junk_and_dropped() {
+        use data::ItemKind::{Bucket, Cobblestone, StonePickaxe};
+        let junk = [(Cobblestone, 64)];
+        let mut slots = std::collections::BTreeMap::new();
+        for s in 9i16..=44 {
+            slots.insert(s, (Bucket, 1));
+        }
+        slots.insert(12, (Cobblestone, 64));
+        slots.insert(13, (Cobblestone, 64));
+        let pick = Some((StonePickaxe, 1));
+        assert_eq!(cursor_step(&slots, pick, &junk), Some(12));
+        assert_eq!(
+            cursor_step(&slots, Some((Cobblestone, 64)), &junk),
+            Some(OUTSIDE)
+        );
+        assert_eq!(cursor_step(&slots, None, &junk), None);
+        slots.retain(|s, _| *s != 30);
+        assert_eq!(cursor_step(&slots, pick, &junk), None, "a slot is free");
     }
 
     /// Blaze wall 5: a source 20 blocks over the feet is reached by stairs up, not refused.
