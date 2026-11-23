@@ -120,7 +120,7 @@ fn the_nether_kit_makes_pickaxes_and_a_table() {
     .into_iter()
     .collect();
     assert_eq!(act(&held, &no_table), "place-table");
-    assert_eq!(act(&held, &table_near), "stone-pickaxe");
+    assert_eq!(act(&held, &table_near), "craft:stone_pickaxe");
     let made: Counts = [(ItemKind::StonePickaxe, 4), (ItemKind::CraftingTable, 1)]
         .into_iter()
         .collect();
