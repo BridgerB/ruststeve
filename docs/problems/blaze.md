@@ -179,7 +179,8 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
   2. **Gear and the kit** as before: armour and sword, bucket, flint and steel, water.
   3. **Back up before the cast**: with the kit held, stairs up to the open sky (`stairs_to_surface`, 24 blocks a target, the next heading when one is refused, eight refusals end it), then logs to 4 and food to 32 again on the same clock.
   4. **`ready`**, a new stage between `gear` and `iron_kit` (`world::stage::Stage::Ready`): the gear, a water bucket, an empty bucket, flint and steel, a pickaxe, 4 logs, 32 hunger points of safe food, under the open sky. The race snapshots the first bot of a lane to hold it. That snapshot is the clean one: every race after resumes from it.
-- **Raced from spawn** with the `fresh` start (nothing given; each bot spread to its own surface spot within 128 blocks).
+- **The Nether race agrees** (race 45124122633, 50677e5, `snapshot=frontier`, 15 x 1): 0 of 15 reached the spawner and none died: all 15 ended `no-progress` on "rest (health under the engage line, out of sight)". Wall 3's cover works, and a bot with no food then rests for good. The bot has to arrive fed.
+- **Raced from spawn** with the `fresh` start (nothing given; each bot spread to its own surface spot within 128 blocks): race 45128866973, dfea7f1, 15 x 6, cap 216,000.
 - **Unit tests**: `ready_needs_the_kit_the_stock_and_the_open_sky` (world). The flow itself is judged by its notes in the ledger: "stocked", "stairs up toward the surface", "ready".
 
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
