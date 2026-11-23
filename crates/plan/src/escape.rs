@@ -235,6 +235,24 @@ fn holds_back_water(w: &World, (x, y, z): Cell, (ax, ay, az): Cell) -> bool {
     is_water(w, (x, y + 1, z)) || is_water(w, (x + ax, y + ay, z + az))
 }
 
+/// The cell to steer at on the way to `target` from `feet`: the target itself when it is straight
+/// along x or z, else the cardinal neighbour toward it that `open` passes (the larger step first),
+/// so a diagonal is taken round a corner. Neither open: the target, as before.
+pub fn waypoint(feet: Cell, target: Cell, open: impl Fn(Cell) -> bool) -> Cell {
+    let (dx, dz) = (target.0 - feet.0, target.2 - feet.2);
+    if dx == 0 || dz == 0 {
+        return target;
+    }
+    let along_x = (feet.0 + dx.signum(), feet.1, feet.2);
+    let along_z = (feet.0, feet.1, feet.2 + dz.signum());
+    let order = if dx.abs() >= dz.abs() {
+        [along_x, along_z]
+    } else {
+        [along_z, along_x]
+    };
+    order.into_iter().find(|c| open(*c)).unwrap_or(target)
+}
+
 /// A full block beside `target` to click, and the face of it that looks at `target` (faces as
 /// the protocol numbers them: 0 down, 1 up, 2 north, 3 south, 4 west, 5 east). Never the cell
 /// under `target`: that is the head.
@@ -598,7 +616,15 @@ impl Escape {
             f64::from(target.1),
             f64::from(target.2) + 0.5,
         ];
-        self.yaw = yaw_to(body.pos, centre);
+        // Round a corner, not into it: a diagonal target is steered at through the open cardinal
+        // cell first (wall 14: a bot pressed into the stone corner between it and a dry cell one
+        // diagonal step away and refused every bank for 25,000 ticks).
+        let open = |c: Cell| !full(kind_at(w, c)) && !full(kind_at(w, (c.0, c.1 + 1, c.2)));
+        let aim = waypoint(feet, target, open);
+        self.yaw = yaw_to(
+            body.pos,
+            [f64::from(aim.0) + 0.5, centre[1], f64::from(aim.2) + 0.5],
+        );
         let flat = ((centre[0] - body.pos[0]).powi(2) + (centre[2] - body.pos[2]).powi(2)).sqrt();
         // On footing over the target's centre: stand still and let the trap clear.
         let there = flat < 0.2 && body.on_ground;
@@ -650,5 +676,16 @@ mod fill_tests {
             Some(((57, 26, -153), 3))
         );
         assert_eq!(against(over, |c| c == (57, 25, -152)), None);
+    }
+
+    /// Blaze wall 14 (race 45091345688, lane 1): from (13, 31, 2) the dry cell (14, 31, 3) is a
+    /// diagonal step past the stone at (13, 31, 3): steer through (14, 31, 2), the open one.
+    #[test]
+    fn a_diagonal_bank_is_reached_round_the_corner() {
+        let stone = (13, 31, 3);
+        let open = |c: Cell| c != stone && c != (13, 32, 3);
+        assert_eq!(waypoint((13, 31, 2), (14, 31, 3), open), (14, 31, 2));
+        assert_eq!(waypoint((13, 31, 2), (16, 30, 2), open), (16, 30, 2));
+        assert_eq!(waypoint((13, 31, 2), (14, 31, 3), |_| false), (14, 31, 3));
     }
 }
