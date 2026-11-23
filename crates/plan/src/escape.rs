@@ -212,6 +212,9 @@ pub struct Escape {
     /// held 25,000 ticks beside a dry cell with nothing in the ledger to say why: race 45085497535).
     #[serde(default)]
     pub trail: Vec<String>,
+    /// How many long-escape reports the planner has written (one each `ESCAPE_REPORT_TICKS`).
+    #[serde(default)]
+    pub reports: u64,
 }
 
 /// Seals tried before the escape goes on without one.
@@ -347,6 +350,7 @@ impl Escape {
             seals: 0,
             sealed_at: 0,
             trail: Vec::new(),
+            reports: 0,
         }
     }
 

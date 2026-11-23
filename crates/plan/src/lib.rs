@@ -115,6 +115,8 @@ const FORTRESS_CHUNKS: i32 = 16;
 pub const RODS_WANTED: i32 = 7;
 /// Ticks between putting on one piece of armour and the next.
 const EQUIP_TICKS: u64 = 20;
+/// An escape this long writes its trail to the ledger, and again each time as long (16e).
+const ESCAPE_REPORT_TICKS: u64 = 2400;
 /// Blocks from the feet a lying blaze rod is walked to (issue 16d).
 const ROD_REACH: f64 = 8.0;
 /// A brick within this of a trail mark has been visited (issue 16b, the spawner search).
@@ -1178,6 +1180,20 @@ impl Plan {
                 make::Always::Escape(k) => {
                     self.escapes += 1;
                     self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
+                    // Stairs that cut into water: their target waits, or the next choice cuts the
+                    // same stairs into the same water (blaze wall 16: 72 escapes in one run, each
+                    // after "stairs up toward the log at (36, 88, 7)").
+                    if k == escape::TrapKind::Water
+                        && matches!(self.task, Task::Stairs(_))
+                        && let Some((target, _, _)) = self.toward.take()
+                    {
+                        self.refuse(target, tick);
+                        self.note(
+                            tick,
+                            format!("refused {target:?}"),
+                            "its stairs cut into water".to_owned(),
+                        );
+                    }
                     Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
                 make::Always::Defend => defend::foe(w, rules, &ignored).map(|(foe, kind)| {
@@ -1224,6 +1240,17 @@ impl Plan {
         let (c, act, ended) = match &mut self.task {
             Task::Escape(e) => {
                 let (c, act) = e.step(w, tick);
+                // A long escape says what it tries, though it never stalls (16e: two ran 23,000
+                // ticks, moving, with nothing in the ledger).
+                let ran = tick.saturating_sub(e.started);
+                let due = ran >= ESCAPE_REPORT_TICKS * (e.reports + 1);
+                if due {
+                    e.reports += 1;
+                }
+                let say = due.then(|| format!("{} ticks; trail: {}", ran, e.trail.join(" / ")));
+                if let Some(why) = say {
+                    self.note(tick, "escape still trapped".to_owned(), why);
+                }
                 (c, act, None)
             }
             Task::Defend(d) => {
