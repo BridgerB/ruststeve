@@ -795,6 +795,13 @@ impl Plan {
                         self.site = None;
                     }
                     let cut = self.task.name();
+                    // An escape says what it tried (16e: an escape held 25,000 ticks beside a
+                    // dry cell with nothing in the ledger to say why).
+                    let trail = if let Task::Escape(e) = &self.task {
+                        format!("; trail: {}", e.trail.join(" / "))
+                    } else {
+                        String::new()
+                    };
                     self.stalls += 1;
                     self.task = Task::Idle;
                     self.retry_at = tick;
@@ -803,7 +810,7 @@ impl Plan {
                     self.note(
                         tick,
                         format!("{cut} stalled"),
-                        format!("no progress for {STALL_TICKS} ticks; choose again"),
+                        format!("no progress for {STALL_TICKS} ticks; choose again{trail}"),
                     );
                     self.mark = Some((body.pos, items, self.event_count, tick));
                 }

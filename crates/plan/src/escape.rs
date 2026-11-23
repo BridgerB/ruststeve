@@ -54,6 +54,8 @@ const SURFACE_SEARCH: i32 = 24;
 /// A swim off an island lands at least this far away, and at most this.
 pub const SWIM_FROM: i32 = 10;
 pub const SWIM_TO: i32 = 32;
+/// Trail entries kept.
+const TRAIL: usize = 12;
 /// Banks refused before the list starts over.
 const MAX_REFUSED: usize = 8;
 
@@ -206,6 +208,10 @@ pub struct Escape {
     pub seals: u32,
     #[serde(default)]
     pub sealed_at: u64,
+    /// What the escape chose and why, the last `TRAIL` entries: printed when it stalls (an escape
+    /// held 25,000 ticks beside a dry cell with nothing in the ledger to say why: race 45085497535).
+    #[serde(default)]
+    pub trail: Vec<String>,
 }
 
 /// Seals tried before the escape goes on without one.
@@ -300,6 +306,7 @@ impl Escape {
             fill_tried: false,
             seals: 0,
             sealed_at: 0,
+            trail: Vec::new(),
         }
     }
 
@@ -380,7 +387,15 @@ impl Escape {
             .map(|(_, _, cell, dig)| (cell, dig))
     }
 
+    fn trail(&mut self, tick: u64, what: String) {
+        self.trail.push(format!("{tick} {what}"));
+        if self.trail.len() > TRAIL {
+            self.trail.remove(0);
+        }
+    }
+
     fn start_dig(&mut self, w: &World, cell: Cell, tick: u64) {
+        self.trail(tick, format!("dig {cell:?}"));
         let mut d = Dig::new(w, cell, tick);
         // Nothing is collected on the way out.
         d.drop = None;
@@ -452,6 +467,7 @@ impl Escape {
             match crate::hold::toward(w, item) {
                 crate::hold::Hold::Held => {
                     self.seals += 1;
+                    self.trail(tick, format!("seal {over:?} on {click:?} face {face}"));
                     self.sealed_at = tick;
                     return (
                         up,
@@ -479,6 +495,7 @@ impl Escape {
                         && let Some(t) = self.target.take()
                     {
                         self.refused.push(t);
+                        self.trail(tick, format!("dig failed; refused {t:?}"));
                         self.queue.clear();
                         self.next_search = tick;
                     }
@@ -534,6 +551,11 @@ impl Escape {
                 // Popped from the end: the head-height cell first, then the feet's.
                 self.queue = dig;
             }
+            let found = match self.target {
+                Some(t) => format!("target {t:?} from {feet:?}, {} queued", self.queue.len()),
+                None => format!("no bank or notch from {feet:?}"),
+            };
+            self.trail(tick, found);
         }
         let Some(target) = self.target else {
             // Nowhere yet: rise, and keep going the way the body faces.
@@ -557,6 +579,10 @@ impl Escape {
                 Some(cell) if self.kind == TrapKind::Water => self.start_dig(w, cell, tick),
                 Some(_) | None => {
                     self.refused.push(target);
+                    self.trail(
+                        tick,
+                        format!("no nearer in {STUCK_TICKS}; refused {target:?}"),
+                    );
                     if self.refused.len() > MAX_REFUSED {
                         self.refused.clear();
                     }
