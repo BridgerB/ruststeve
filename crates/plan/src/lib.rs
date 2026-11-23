@@ -1238,7 +1238,16 @@ impl Plan {
                         // to it (wall 29).
                         // A ranged foe no strike reached: left alone a while, or it is chosen
                         // again at once (one bot fought one skeleton 51 times: wall 30).
-                        if rules.ranged.contains(&d.kind) && d.last_hit_at == d.started {
+                        // Any foe never struck that never hurt the bot, too: a spider in a pit
+                        // under the eye was fought 96 times in one run (blaze wall 15).
+                        let unhurt = d
+                            .health_start
+                            .zip(w.player.health)
+                            .is_some_and(|(was, now)| now >= was);
+                        if !rules.never_fight.contains(&d.kind)
+                            && d.last_hit_at == d.started
+                            && (rules.ranged.contains(&d.kind) || unhurt)
+                        {
                             self.ignored_foes.retain(|(_, until)| tick < *until);
                             self.ignored_foes.push((d.foe, tick + FAILURE_MEMORY_TICKS));
                         }

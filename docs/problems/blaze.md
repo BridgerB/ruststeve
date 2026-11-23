@@ -144,6 +144,13 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Fix, second try**: on a diagonal target with no dig in the way, the stone over a cardinal cell the feet fit is dug, making the way round the corner two high (`escape::corner_head`, never a block holding water back). Unit test `the_one_high_way_round_a_corner_is_dug_two_high`.
 - **Also**: lane 7 cast 23 times, every one "paused: no pickaxe": 0 digs held, no wood, the trees 17 up, and stairs without a pickaxe fail at once, so the portal flow chose the cast again every 80 ticks. The wood economy (wall 7) at the cast site; next after water.
 
+- **Raced** (cc510b6, race 45102450333, lane 6's snapshot, 11 x 1; read at 9 of 11): the corner dig held: 1 of 9 in `escape-water` (5 of 9 before), and that one got out 18 times. 4 dead (skeletons 2, creepers 2); no cast.
+
+### 15. A spider in a pit, fought 96 times (race 45102450333, lanes 2 and 5)
+- **What happened**: lane 5 at (-37, -4, 43), health 20, started "defend Spider 95" 96 times from tick ~10,000 to its `no-progress` end at 33,720; 95 of them ended "0 swings, 0 landed, Retreat … foe up to -4.5 over the eye", each followed by a walk to its ore that came back within 4 of the spider. Lane 2 the same.
+- **Read**: the spider sits in a pit 4.5 under the eye, out of reach both ways. Wall 30's rule (a foe no strike reached is left alone a while) covered only `ranged` kinds beyond `defend_radius`; a melee foe within 4 is always answered.
+- **Fix**: a defend that never struck its foe, with the bot no worse than when it began, leaves that foe alone for `FAILURE_MEMORY_TICKS`, for any kind but a `never_fight` one; and an ignored foe within `defend_radius` is answered again only once its kind hits the bot (`defend::provoked`). Test `a_spider_within_reach_is_answered_unless_ignored` (`crates/plan/tests/foe.rs`).
+
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
 - Case files counted no swings: `race` wrote `swings_sent` and `swings_landed` as a literal 0. They now come from the plan, summed over every fight.
 - Each `defend` ends in a note with what it saw: swings, swings landed, the stance, steps held back, the foe's kind, the bot's health at the start and end, the foe's highest point over the eye, and the ticks a blaze foe was charging (`world::Entity::blaze_charged`: its metadata index 16, bit 0, as clojurecraft read it on 26.1.2). The next blaze wall is read from these before any fix.

@@ -5,8 +5,8 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-18
-verifiedAgainst: ruststeve@ca34f7c clojurecraft@be85a92
+lastUpdated: 2026-11-22
+verifiedAgainst: ruststeve@cc510b6 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -55,3 +55,5 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 
 ## See also
 - [[food-and-hunting]] - the hunt's strikes, paced the same way.
+
+- **A foe no strike reaches** (blaze wall 15): a defend that never struck its foe, the bot no worse than at its start, leaves that foe alone for `FAILURE_MEMORY_TICKS` (any kind but `never_fight`; wall 30 had covered only shooters), and within `defend_radius` it is answered again only once its kind hits the bot.

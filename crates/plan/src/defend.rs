@@ -164,8 +164,13 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
     let near = w
         .entities
         .iter()
-        .filter(|(_, e)| {
-            !e.dead && hostile(e.kind) && (!rules.neutral.contains(&e.kind) || provoked(w, e.kind))
+        .filter(|(id, e)| {
+            !e.dead
+                && hostile(e.kind)
+                && (!rules.neutral.contains(&e.kind) || provoked(w, e.kind))
+                // A foe a fight never struck nor was hurt by (a spider in a pit 4.5 under the eye,
+                // fought 96 times: blaze wall 15) waits, unless its kind hits the bot.
+                && (!ignored.contains(id) || provoked(w, e.kind))
         })
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= rules.defend_radius)
