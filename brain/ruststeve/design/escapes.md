@@ -5,10 +5,10 @@ type: reference
 tags: [plan, escape, survival, water, lava, fire, always-rows]
 aliases: [always-rows, escape-water, escape-lava, escape-fire, Escape, Traps, TrapKind, swim-out, flee, bank, notch, lid, Aim::Hold, plan:hold, dry land]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@9ce1105 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@e6a22b2 clojurecraft@be85a92
 sourceRefs:
-  - "ruststeve:crates/plan/src/escape.rs#pub fn tick(&mut self, w: &World, body: &physics::Body) -> Option<TrapKind> {"
+  - "ruststeve:crates/plan/src/escape.rs#pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {"
   - "ruststeve:crates/plan/src/escape.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>) {"
   - "ruststeve:crates/plan/src/lib.rs#fn always(&mut self, w: &World, body: &physics::Body, tick: u64) -> Option<Controls> {"
   - "ruststeve:config/goals.toml#id = \"escape-water\""
@@ -30,6 +30,7 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 
 ## Key files
 - `config/goals.toml`: the `[[always]]` rows (`escape-water`, `escape-lava`, `escape-wall`, `escape-fire`, priority 0), read into `plan::make::Table::always`.
+- **Lava at the door** (blaze wall 22): `Traps::tick(w, body, door)` also answers lava over the head or beside the head or feet (`escape::lava_door`) as the lava trap, unless the task is a cast or a scoop. The escape seals that cell with a held block (`MAX_LAVA_SEALS` 16, clicked on a full block beside or under it) before it flees. Nether lava ran down three bots' own stairs and killed each in 80 ticks.
 - `crates/plan/src/escape.rs`: `Traps`, `Escape`.
 - `crates/plan/src/lib.rs`: `Plan::always`, called every tick before the task and before the "finished" check, so it runs after the aim is met too.
 - `crates/bot/tests/escape.rs`: a pond, a shaft under a dirt lid, a pit with no bank (with a wooden pickaxe and by hand), lava and fire, each closed-loop against the model.

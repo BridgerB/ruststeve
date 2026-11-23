@@ -1128,7 +1128,9 @@ impl Plan {
         if table.always.is_empty() {
             return None;
         }
-        let trap = self.traps.tick(w, body);
+        // A cast and a scoop stand beside lava on purpose; anything else answers lava at the door.
+        let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_));
+        let trap = self.traps.tick(w, body, door);
         let rules = &table.survival;
         let ignored: Vec<i32> = self
             .ignored_foes

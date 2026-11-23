@@ -111,6 +111,25 @@ fn is_water(w: &World, c: Cell) -> bool {
     )
 }
 
+fn is_lava(w: &World, c: Cell) -> bool {
+    kind_at(w, c) == Some(BlockKind::Lava)
+}
+
+/// Lava at the door: over the head, or beside the head or the feet, the first such cell. It is
+/// in the body's cells within a second (blaze.md wall 22: Nether lava ran down a bot's own
+/// stairs and took 20 health in 80 ticks, the trap firing only once the body was in it).
+pub fn lava_door(feet: Cell, lava_at: impl Fn(Cell) -> bool) -> Option<Cell> {
+    let (x, y, z) = feet;
+    let beside = |h: i32| [(x + 1, h, z), (x - 1, h, z), (x, h, z + 1), (x, h, z - 1)];
+    std::iter::once((x, y + 2, z))
+        .chain(beside(y + 1))
+        .chain(beside(y))
+        .find(|c| lava_at(*c))
+}
+
+/// Seals tried against lava at the door before the escape flees without one.
+pub const MAX_LAVA_SEALS: u32 = 16;
+
 fn full(k: Option<BlockKind>) -> bool {
     k.and_then(data::generated::shapes::collision) == Some(data::types::Collision::Full)
 }
@@ -158,14 +177,15 @@ fn afloat(w: &World, body: &physics::Body) -> bool {
 
 impl Traps {
     /// The trap this tick (clojurecraft's `trapped-tick`).
-    pub fn tick(&mut self, w: &World, body: &physics::Body) -> Option<TrapKind> {
+    pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {
+        let at_door = door && lava_door(feet_cell(body.pos), |c| is_lava(w, c)).is_some();
         self.wet = if body.eye_in_water { self.wet + 1 } else { 0 };
         self.afloat = if afloat(w, body) { self.afloat + 1 } else { 0 };
         self.dry = if dry_land(w, body) { self.dry + 1 } else { 0 };
         let held = self
             .kind
             .filter(|k| *k != TrapKind::Fire && self.dry < DRY_TICKS_TO_CLEAR);
-        self.kind = if body.in_lava {
+        self.kind = if body.in_lava || at_door {
             Some(TrapKind::Lava)
         } else if self.wet >= TRAP_AFTER_TICKS || self.afloat >= AFLOAT_AFTER_TICKS {
             Some(TrapKind::Water)
@@ -534,6 +554,43 @@ impl Escape {
                 crate::hold::Hold::Missing => {}
             }
         }
+        // Lava at the door and the body not yet in it: a held block into that cell (wall 22).
+        if self.kind == TrapKind::Lava
+            && !body.in_lava
+            && self.seals < MAX_LAVA_SEALS
+            && let Some(door) = lava_door(feet, |c| is_lava(w, c))
+            && let Some(item) = SEAL_BLOCKS
+                .iter()
+                .copied()
+                .find(|k| crate::held(w).get(k).copied().unwrap_or(0) > 0)
+            && let Some((click, face)) = against(door, |c| full(kind_at(w, c))).or_else(|| {
+                let under = (door.0, door.1 - 1, door.2);
+                (under != (feet.0, feet.1 + 1, feet.2) && full(kind_at(w, under)))
+                    .then_some((under, 1))
+            })
+        {
+            let still = Controls::default();
+            if tick.saturating_sub(self.sealed_at) < SEAL_EVERY_TICKS {
+                return (still, None);
+            }
+            match crate::hold::toward(w, item) {
+                crate::hold::Hold::Held => {
+                    self.seals += 1;
+                    self.trail(tick, format!("seal lava {door:?} on {click:?} face {face}"));
+                    self.sealed_at = tick;
+                    return (
+                        still,
+                        Some(Act::UseOn {
+                            pos: BlockPos::new(click.0, click.1, click.2),
+                            face,
+                        }),
+                    );
+                }
+                crate::hold::Hold::Act(a) => return (still, Some(a)),
+                crate::hold::Hold::Wait => return (still, None),
+                crate::hold::Hold::Missing => {}
+            }
+        }
         if let Some(d) = &mut self.dig {
             let (mut c, act, status) = d.step(w, tick);
             // Keep the head up while digging out of water.
@@ -739,5 +796,22 @@ mod fill_tests {
             None
         );
         assert_eq!(corner_head((13, 31, 2), (16, 31, 2), full, dry), None);
+    }
+
+    /// Blaze wall 22: lava over the head, beside the head or beside the feet is at the door;
+    /// lava under a neighbour's floor, or two cells off, is not.
+    #[test]
+    fn lava_at_the_door_is_seen_over_and_beside_the_body() {
+        let feet = (30, 31, -18);
+        let at = |cells: &'static [Cell]| move |c: Cell| cells.contains(&c);
+        assert_eq!(lava_door(feet, at(&[(30, 33, -18)])), Some((30, 33, -18)));
+        assert_eq!(lava_door(feet, at(&[(30, 32, -19)])), Some((30, 32, -19)));
+        assert_eq!(lava_door(feet, at(&[(30, 31, -19)])), Some((30, 31, -19)));
+        // Over the head first, then the head's height, then the feet's.
+        assert_eq!(
+            lava_door(feet, at(&[(30, 31, -19), (31, 32, -18), (30, 33, -18)])),
+            Some((30, 33, -18))
+        );
+        assert_eq!(lava_door(feet, at(&[(30, 30, -19), (30, 31, -20)])), None);
     }
 }
