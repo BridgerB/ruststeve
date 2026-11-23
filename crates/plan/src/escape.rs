@@ -253,6 +253,28 @@ pub fn waypoint(feet: Cell, target: Cell, open: impl Fn(Cell) -> bool) -> Cell {
     order.into_iter().find(|c| open(*c)).unwrap_or(target)
 }
 
+/// On the way to a diagonal `target`, a cardinal cell toward it the feet fit (not full) but the
+/// head does not: its head-height block, to dig so the way round the corner is two high, never
+/// one holding water back (blaze wall 14: the only way to the dry cell was a one-high stream).
+pub fn corner_head(
+    feet: Cell,
+    target: Cell,
+    full_at: impl Fn(Cell) -> bool,
+    holds_back: impl Fn(Cell, Cell) -> bool,
+) -> Option<Cell> {
+    let (x, y, z) = feet;
+    let (sx, sz) = ((target.0 - x).signum(), (target.2 - z).signum());
+    if sx == 0 || sz == 0 {
+        return None;
+    }
+    [((x + sx, y, z), (sx, 0, 0)), ((x, y, z + sz), (0, 0, sz))]
+        .into_iter()
+        .find_map(|(c, away)| {
+            let head = (c.0, c.1 + 1, c.2);
+            (!full_at(c) && full_at(head) && !holds_back(head, away)).then_some(head)
+        })
+}
+
 /// A full block beside `target` to click, and the face of it that looks at `target` (faces as
 /// the protocol numbers them: 0 down, 1 up, 2 north, 3 south, 4 west, 5 east). Never the cell
 /// under `target`: that is the head.
@@ -439,6 +461,14 @@ impl Escape {
                 full(kind_at(w, *c))
                     && *c != (target.0, target.1 - 1, target.2)
                     && !holds_back_water(w, *c, (dx, 0, dz))
+            })
+            .or_else(|| {
+                corner_head(
+                    (x, y, z),
+                    target,
+                    |c| full(kind_at(w, c)),
+                    |c, away| holds_back_water(w, c, away),
+                )
             })
     }
 
@@ -687,5 +717,23 @@ mod fill_tests {
         assert_eq!(waypoint((13, 31, 2), (14, 31, 3), open), (14, 31, 2));
         assert_eq!(waypoint((13, 31, 2), (16, 30, 2), open), (16, 30, 2));
         assert_eq!(waypoint((13, 31, 2), (14, 31, 3), |_| false), (14, 31, 3));
+    }
+
+    /// Blaze wall 14 again (race 45096903034, lanes 2, 8, 9, 10 at (13, 31, 2)): the cardinal cell
+    /// (14, 31, 2) is a one-high stream under stone, so the stone over it is dug; (13, 31, 3) is
+    /// stone at the feet, no way. Holding water back, or a straight target: nothing.
+    #[test]
+    fn the_one_high_way_round_a_corner_is_dug_two_high() {
+        let full = |c: Cell| matches!(c, (14, 32, 2) | (13, 31, 3) | (13, 32, 3));
+        let dry = |_: Cell, _: Cell| false;
+        assert_eq!(
+            corner_head((13, 31, 2), (14, 31, 3), full, dry),
+            Some((14, 32, 2))
+        );
+        assert_eq!(
+            corner_head((13, 31, 2), (14, 31, 3), full, |_, _| true),
+            None
+        );
+        assert_eq!(corner_head((13, 31, 2), (16, 31, 2), full, dry), None);
     }
 }
