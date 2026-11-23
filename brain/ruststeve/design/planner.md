@@ -5,8 +5,8 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@92fdb59 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@f71c3ab clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -85,6 +85,7 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 
 ## Blaze wall 8: a pickaxe made where the bot stands
 - With no pickaxe held and its makings held (`pickaxe_makeable`: two sticks' worth of wood, three stone, a table held or near), the portal flow works the `stone-pickaxe` row first, and a running cast pauses with its site kept (clojurecraft's `pickaxe-at-hand?`). Resolving the goal's own holds at the top raced worse (race 45032717811) and was reverted.
+- Before the portal is entered (race aim, a portal seen or lit), `Plan::nether_task` asks the needs planner for the `nether-kit` row once: 4 stone pickaxes and a crafting table held (`kit_done`; notes "nether kit held" or "nether kit not makeable"). The Nether has no wood: blaze wall 18, a bot in view of a fortress whose one pickaxe broke 800 ticks in.
 
 - **Junk** (blaze wall 13): with fewer than `JUNK_FREE_SLOTS` (2) of the main slots free, the planner drops a stack of a `[survival] junk` kind that leaves its keep (`junk_slot`, a mode-4 click), one a second between tasks, beside putting armour on: a full inventory left digs `Uncollected` and the bucket unholdable at the cast.
 

@@ -144,6 +144,17 @@ doc = "what a portal cast spends that the iron kit does not hold"
 provides = [["item:water_bucket", 1], ["item:bucket", 1]]
 spares = [["item:stick", 24]]
 
+# The tools taken through the portal (blaze.md wall 18: race 45164371770 lane 4 stood in view of a
+# fortress 110 blocks off when its one pickaxe broke, and the Nether has no wood). 4 stone pickaxes
+# are some 520 digs: the stairs to a fortress and a cut around its spawner. The table is for the
+# next pickaxe from sticks and blackstone over there.
+[[goal]]
+id = "nether-kit"
+priority = 14
+until = "nether-kit"
+doc = "spare stone pickaxes and a crafting table held before the portal is entered"
+provides = [["item:stone_pickaxe", 4], ["item:crafting_table", 1]]
+
 # Issue 16's clean flow (Bridger, 2026-11-22): the race stocks logs above ground before it first
 # goes down for iron, and again before the cast (plan::Plan::clean_flow). Every gear snapshot of
 # race 44840801185 was a bot 40 to 70 blocks underground with 1 to 23 sticks and no logs, and walls

@@ -510,6 +510,13 @@ pub struct Plan {
     pub surface_target: Option<Cell>,
     #[serde(default)]
     pub surface_tries: u8,
+    /// The Nether kit (the `nether-kit` row: spare pickaxes and a table) was made, or could not
+    /// be, before the portal was entered (blaze.md wall 18); `kit_row` is set while the needs
+    /// planner is asked for that row.
+    #[serde(default)]
+    pub kit_done: bool,
+    #[serde(skip)]
+    kit_row: bool,
     /// Meals eaten and hunts that ended in a kill (issue 12c); an eat or hunt row is not
     /// chosen again before `always_retry_at` after it failed, and animals a hunt failed on are
     /// refused until then too.
@@ -599,6 +606,8 @@ impl Plan {
             escapes: 0,
             stocked: false,
             readied: false,
+            kit_done: false,
+            kit_row: false,
             provision_since: None,
             surface_target: None,
             surface_tries: 0,
@@ -1585,6 +1594,16 @@ impl Plan {
                 return t;
             }
         }
+        // Tools next (blaze.md wall 18): the Nether has no wood, so the spare pickaxes and a table
+        // are made on this side, once, before the first step in.
+        if self.aim == Aim::Race && !cells.is_empty() && !self.kit_done {
+            self.kit_row = true;
+            let t = self.decide(w, origin, tick);
+            self.kit_row = false;
+            if !self.kit_done {
+                return t;
+            }
+        }
         for c in cells {
             let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
             if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
@@ -2124,7 +2143,7 @@ impl Plan {
         // The clean flow first (issue 16): stock up above ground before the first descent, and
         // come back up, stocked, before the cast.
         let mut stock_row = false;
-        if self.aim == Aim::Race {
+        if self.aim == Aim::Race && !self.kit_row {
             match self.clean_flow(w, &table.survival, tick) {
                 Flow::Task(t) => return *t,
                 Flow::Stock => stock_row = true,
@@ -2133,6 +2152,8 @@ impl Plan {
         }
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
+            // A portal stands and the bot is about to go in: the tools for the Nether first.
+            _ if self.kit_row => "nether-kit".to_owned(),
             Aim::Race if stock_row => "stock".to_owned(),
             // The race gears up first (issue 16), then casts.
             Aim::Race if !geared(w) => "gear".to_owned(),
@@ -2219,7 +2240,25 @@ impl Plan {
             return t;
         }
         // The portal (issue 14c): its kit held, the cast; met once a portal is lit.
-        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race) {
+        // The Nether kit ends here: made, or not makeable (no wood), the bot goes in either way.
+        if self.kit_row && !matches!(choice, make::Choice::Act(_)) {
+            self.kit_done = true;
+            self.note(
+                tick,
+                if choice == make::Choice::Done {
+                    "nether kit held".to_owned()
+                } else {
+                    "nether kit not makeable".to_owned()
+                },
+                format!(
+                    "{} pickaxes and {} tables held before the portal",
+                    craft::count(w, data::ItemKind::StonePickaxe),
+                    craft::count(w, data::ItemKind::CraftingTable)
+                ),
+            );
+            return Task::Idle;
+        }
+        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race) && !self.kit_row {
             if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
                 self.portal = Some(site.frame.at((1, 1, 0)));
             }

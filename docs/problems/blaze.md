@@ -190,6 +190,14 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Cause**: `hold::toward` swaps an item in through the cursor (pick it up, click slot 44, put what came back down) but answers `Held` the moment slot 44 holds the item, so the third click is never sent and the old tool stays carried. Nothing puts it down until another hold asks. Then two readers disagree: `holds_pickaxe` reads slots only (no pickaxe: pause the cast), `held` counts the carried stack (a stone pickaxe is held: the `stone-pickaxe` row is done: cast). Neither yields.
 - **Fix**: (1) `hold::toward` puts a carried stack down in an empty slot before it answers `Held`; (2) `holds_pickaxe` counts a carried pickaxe, as `held` and the dig's tool check do, so the cast runs and its own hold brings the pickaxe back to the hand.
 - **Unit tests**: `a_stack_left_on_the_cursor_is_put_down_before_held` (hold), `a_carried_pickaxe_is_held` (plan).
+- **Raced** (race 45164371770, f71c3ab, the clean `ready` snapshot, 15 x 1): the cast runs to its end. Lane 4 lit its portal at tick 17,620 ("portal lit (122 ops done)") and lanes 4 and 14 stood in the Nether at 18 to 20 health with food held: the first fed Nether bots. "cast paused: no pickaxe" fell from 23,982 a bot to 3 and 1 (a pause, a craft, the cast again).
+
+### 18. Into the Nether with a spent pickaxe (race 45164371770, lane 4)
+- **What happened**: rs-l04-b00 came out of its portal at tick 35,840, saw nether bricks at (61, 34, 95), about 110 blocks off, and started "stairs down toward the fortress". Its only pickaxe broke at tick 36,660. Every stair after failed `StepFailed after 0 stairs` (630 of them), the planner rested, and the run ended `no-progress` at 18.3 health with 16 food, the fortress in view.
+- **Read** (the case's tool story and the ledger): the stone pickaxe it cast with had 13 uses left at tick 16,900, 700 ticks before the portal lit. It held 23 sticks and stacks of stone, and had left its table by the cast site. Nothing between "portal lit" and "enter the portal" looks at tools: the only gate there is food ("provisions 30 of 32").
+- **Cause**: no tool reserve for the Nether. The Nether has no wood, so what the bot carries through the portal is all the digging it will ever do there.
+- **Fix**: a `nether-kit` row (`config/goals.toml`: 4 stone pickaxes and a crafting table held), run by the needs planner once a portal is there to enter and before the bot steps in (`Plan::nether_task`, `kit_done`). A kit that cannot be made (no wood) is noted and the bot goes in as before. In the Nether the dig takes the next pickaxe when one breaks.
+- **Unit test**: `the_nether_kit_makes_pickaxes_and_a_table` (plan, on the real goal table).
 
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
 - Case files counted no swings: `race` wrote `swings_sent` and `swings_landed` as a literal 0. They now come from the plan, summed over every fight.

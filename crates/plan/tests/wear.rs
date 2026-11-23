@@ -90,3 +90,42 @@ fn a_carried_pickaxe_is_held() {
     assert!(plan::holds_pickaxe(&w));
     assert_eq!(plan::held(&w).get(&ItemKind::StonePickaxe), Some(&1));
 }
+
+/// Blaze wall 18 (race 45164371770, lane 4): before the portal the needs planner makes the Nether
+/// kit from what the clean snapshot holds, and is done at four stone pickaxes and a table.
+#[test]
+fn the_nether_kit_makes_pickaxes_and_a_table() {
+    let t = real_table();
+    let goal = t.until("nether-kit").unwrap();
+    let no_table = |_: data::BlockKind| false;
+    let table_near = |k: data::BlockKind| k == data::BlockKind::CraftingTable;
+    let act = |counts: &Counts, near: &dyn Fn(data::BlockKind) -> bool| match make_with_wear(
+        &t,
+        counts,
+        near,
+        false,
+        &Wear::default(),
+        goal,
+    ) {
+        Choice::Act(r) => r.id.clone(),
+        Choice::Done => "done".to_owned(),
+        Choice::Stuck => "stuck".to_owned(),
+    };
+    let held: Counts = [
+        (ItemKind::Cobblestone, 64),
+        (ItemKind::Stick, 23),
+        (ItemKind::OakLog, 4),
+        (ItemKind::CraftingTable, 1),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(act(&held, &no_table), "place-table");
+    assert_eq!(act(&held, &table_near), "stone-pickaxe");
+    let made: Counts = [(ItemKind::StonePickaxe, 4), (ItemKind::CraftingTable, 1)]
+        .into_iter()
+        .collect();
+    assert_eq!(act(&made, &no_table), "done");
+    // No wood, no sticks: nothing to make them from where the bot stands.
+    let bare: Counts = [(ItemKind::Cobblestone, 64)].into_iter().collect();
+    assert_ne!(act(&bare, &no_table), "done");
+}
