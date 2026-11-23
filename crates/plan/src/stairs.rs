@@ -146,6 +146,11 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
             }
         }
     }
+    // A floor the walk takes: magma is a full block the route never stands on (blaze.md wall 23:
+    // stairs planned onto magma failed their step at once, for ever, with nothing refused).
+    if hot(kind(w, floor)) {
+        return Some(format!("magma under {floor:?}"));
+    }
     if !full(kind(w, floor)) && !short_drop(w, floor) {
         return Some(format!("no floor at {floor:?}"));
     }
@@ -170,6 +175,7 @@ fn short_drop(w: &World, floor: Cell) -> bool {
         let k = kind(w, c);
         if full(k) {
             return j > 0
+                && !hot(k)
                 && SIDES.iter().all(|(dx, dy, dz)| {
                     fluid(kind(w, (c.0 + dx, c.1 + 1 + dy, c.2 + dz))) != Some("lava")
                 });
@@ -179,6 +185,11 @@ fn short_drop(w: &World, floor: Cell) -> bool {
         }
     }
     false
+}
+
+/// A full block that burns what stands on it: `path::classify` never takes it as a floor.
+fn hot(k: Option<BlockKind>) -> bool {
+    k == Some(BlockKind::MagmaBlock)
 }
 
 /// Blocks that fall when what is under them opens: the blocks report's falling definitions

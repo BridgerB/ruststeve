@@ -222,6 +222,14 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Cause**: the lava trap fires only once the body is in lava (`body.in_lava`), and Nether lava flows a block every 10 ticks and takes 20 health in 80. A bot in a one-wide cut has lava beside its head for a second or more before that and does nothing with it.
 - **Fix**: lava at the door is the lava trap too: lava over the head, or beside the head or feet (`escape::lava_door`), outside a cast or a scoop (which stand beside lava on purpose). The escape answers it with a seal: a held block placed into that cell, as it seals water over the head (wall 11), up to 16 a trap; with no block or nothing to click it flees as before.
 - **Unit tests**: `lava_at_the_door_is_seen_over_and_beside_the_body` (escape).
+- **Wall 22 raced** (race 45204423376, 4c6fee4, 11 x 1; read at 48,000 ticks, six lanes still running): no Nether lava death so far. Lanes 3 and 7 stand in the Nether at 20 health with food, idle on "12 tasks failed in a row with none done" for 16,000 and 20,000 ticks. Lane 4 of race 45194253932 has stood the same way at "stairs (nether bricks seen, no walk to them)" from tick 48,000 to 108,000.
+
+### 23. A stair onto magma that the walk will not take (races 45194253932 lanes 0, 4, 5, 10; 45204423376 lanes 3, 7)
+- **What happened**: in the Nether every "stairs down toward the fortress" ends "stairs failed: StepFailed after 0 stairs (last refusal: ; turn the heading)" within 0 to 20 ticks, again and again from the same cell: nothing is refused and nothing is cut. The bot never leaves the foot of its first three steps. That is where wall 22's lava found it.
+- **Read** (probe 45202757009's block view at lane 5; `stairs.rs` and `path.rs`): the feet are at (30, 31, -18), the next step's cell (30, 30, -18) is already open, and its floor (30, 29, -18) is a magma block, as is most of y 29 there. `stairs::refusal` takes any full block as a floor. The walk does not: `path::classify` holds magma `Awkward` (it burns the feet), never a floor. So the stair plans the step, finds nothing to dig, and its walk onto the cell fails at once: `StepFailed`, with no refusal noted and so no turn.
+- **Cause**: the stair and the walk disagree on what a floor is.
+- **Fix**: a magma floor refuses a stair ("magma under"), as a landing a short drop down; the stair then turns its heading like any other refusal.
+- **Unit test**: `a_magma_floor_refuses_a_stair` (bot/tests/stairs.rs).
 
 ### 20. The cave under the clean snapshot (races 45164371770 and 45175708203: 9 of 25 dead within 7,400 ticks)
 - **What happened**: 4 of 15 and then 5 of 10 bots died soon after resuming: 7 to creepers, 1 to a zombie, 1 to a skeleton. Lane 4 of 45175708203 lived 1,240 ticks.

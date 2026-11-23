@@ -52,6 +52,20 @@ fn water_lava_and_drops_refuse_a_stair() {
     assert_eq!(stair(&world_with(&[((1, 62, 0), BlockKind::Air)])), None);
 }
 
+/// Blaze wall 23: magma under the new feet, or as the landing of a short drop, refuses the stair:
+/// the walk never stands on it.
+#[test]
+fn a_magma_floor_refuses_a_stair() {
+    let magma = stair(&world_with(&[((1, 62, 0), BlockKind::MagmaBlock)])).unwrap();
+    assert!(magma.starts_with("magma under"), "{magma}");
+    let landing = stair(&world_with(&[
+        ((1, 62, 0), BlockKind::Air),
+        ((1, 61, 0), BlockKind::MagmaBlock),
+    ]))
+    .unwrap();
+    assert!(landing.starts_with("no floor"), "{landing}");
+}
+
 #[test]
 fn an_unloaded_column_refuses_a_stair() {
     let w = world_with(&[]);
