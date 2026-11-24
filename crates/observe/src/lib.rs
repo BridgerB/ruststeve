@@ -1,7 +1,8 @@
 //! What the bot senses, as data (issue 16e, phase C). Pure: the bot keeps a [`Snapshot`] of the
 //! world each tick, [`diff`] turns two of them into the [`Fact`]s of the ledger (health, food, a
 //! hit and what dealt it, items and tools worn or broken, sounds, mobs appearing, turning angry,
-//! fusing, charging or facing the bot), and [`senses`] gives one [`Senses`] row a second. Nothing
+//! fusing, charging or facing the bot), and [`senses`] gives one [`Senses`] row a second (with the
+//! feet's cell, what it stands on and any lava or water against the body). Nothing
 //! here reads anything the bot was not sent: no X-ray, and no server truth.
 
 #![forbid(unsafe_code)]
@@ -9,11 +10,11 @@
 
 use std::collections::BTreeMap;
 
-use data::EntityKind;
 use data::generated::mobs::{MobCategory, mob};
+use data::{BlockKind, EntityKind};
 use protocol::metadata::MetaValue;
 use serde::{Deserialize, Serialize};
-use world::World;
+use world::{BlockPos, World};
 
 /// How far a mob is watched for the ledger (blocks): clojurecraft's ledger notes each within 32.
 pub const WATCH: f64 = 32.0;
@@ -28,6 +29,14 @@ pub const HEAR: f64 = 16.0;
 pub const WEAR_MARKS: [f64; 3] = [0.5, 0.25, 0.1];
 /// Degrees off the line to the bot that count as facing it (clojurecraft's stare, 12).
 pub const FACING: f64 = 12.0;
+/// Client ticks a click is waited on before the holdings are read again: until the server
+/// answers, the stack the click moved is in no slot and not on the cursor (the world forgets the
+/// cursor as it clicks), so every count would dip and come back. A third of the planner's
+/// patience with a click (`plan::craft::CLICK_PATIENCE_TICKS`, 60): an answer takes two or three.
+pub const CLICK_SETTLE: u64 = 20;
+/// Uses left at which a tool gone from its slot is said to have broken: its last use (issue 16,
+/// observability gaps wall 2: under 4 was called a break, and a moved or dropped tool read so).
+pub const BREAK_AT: i32 = 1;
 
 // Entity-data indexes read here, from the game's class layout on 26.1.2 (Entity 0 to 7,
 // LivingEntity 8 to 14, Mob 15, then each class's own): the creeper's swell direction and
@@ -95,8 +104,15 @@ pub struct Snapshot {
     pub stage: Option<String>,
     pub died: bool,
     pub won: bool,
-    /// Items held, by name, summed over slots.
+    /// Items held, by name, summed over slots and the cursor's stack.
     pub items: BTreeMap<String, i32>,
+    /// The stack on the cursor (counted in `items`): a stack left there is in no slot the bot
+    /// can use.
+    #[serde(default)]
+    pub cursor: Option<(String, i32)>,
+    /// Client ticks since a click the server has not answered, when one waits.
+    #[serde(default)]
+    pub click_age: Option<u64>,
     /// Each slot's wearing item: its name and uses left.
     pub tools: BTreeMap<i16, (String, i32)>,
     /// Monsters within `WATCH` and its margin, by entity id.
@@ -151,6 +167,16 @@ pub enum Fact {
     /// A tool is gone from its slot with its uses run out (it broke).
     ToolBroke {
         item: String,
+    },
+    /// A tool is gone from the holdings with uses left: dropped, thrown or lost, not worn out.
+    ToolGone {
+        item: String,
+        uses_left: i32,
+    },
+    /// The cursor's stack changed: what it holds now (`None` is an empty cursor).
+    Cursor {
+        item: Option<String>,
+        count: i32,
     },
     Dimension {
         to: String,
@@ -261,6 +287,11 @@ pub fn snapshot(w: &World) -> Snapshot {
     for (item, n) in w.inventory.slots.values() {
         *items.entry(item_name(*item)).or_default() += n;
     }
+    // The cursor's stack is held too: a pickaxe on the cursor is not a pickaxe lost.
+    let cursor = w.inventory.carried.map(|(item, n)| (item_name(item), n));
+    if let Some((item, n)) = &cursor {
+        *items.entry(item.clone()).or_default() += n;
+    }
     let tools = w
         .inventory
         .slots
@@ -322,6 +353,8 @@ pub fn snapshot(w: &World) -> Snapshot {
         died: w.death.is_some(),
         won: w.won,
         items,
+        cursor,
+        click_age: w.click.map(|c| w.ticks.saturating_sub(c.at_tick)),
         tools,
         mobs,
         effects: w.player.effects.keys().cloned().collect(),
@@ -386,6 +419,18 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
             .map_or_else(|| "unknown".to_owned(), |h| h.damage_type.clone());
         out.push(Fact::Alight { cause });
     }
+    // A click not yet answered: the holdings are as they last settled (see `CLICK_SETTLE`).
+    if next.click_age.is_some_and(|a| a <= CLICK_SETTLE) {
+        next.items.clone_from(&prev.items);
+        next.tools.clone_from(&prev.tools);
+        next.cursor.clone_from(&prev.cursor);
+    }
+    if next.cursor != prev.cursor {
+        out.push(Fact::Cursor {
+            item: next.cursor.as_ref().map(|(i, _)| i.clone()),
+            count: next.cursor.as_ref().map_or(0, |(_, n)| *n),
+        });
+    }
     for (item, n) in &next.items {
         let was = prev.items.get(item).copied().unwrap_or(0);
         if *n != was {
@@ -425,13 +470,29 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
         }
     }
     for (slot, (item, left)) in &prev.tools {
-        let gone = next.tools.get(slot).is_none_or(|(i, _)| i != item);
-        // A tool with a few uses left gone from its slot, and one fewer held: it broke (a tool
-        // moved or dropped keeps its count).
-        let fewer =
-            next.items.get(item).copied().unwrap_or(0) < prev.items.get(item).copied().unwrap_or(0);
-        if gone && fewer && *left <= 3 {
-            out.push(Fact::ToolBroke { item: item.clone() });
+        match next.tools.get(slot).filter(|(i, _)| i == item) {
+            // Still in its slot: broken only if its uses ran out there.
+            Some((_, now)) => {
+                if *now <= 0 && *left > 0 {
+                    out.push(Fact::ToolBroke { item: item.clone() });
+                }
+            }
+            // Gone from its slot, and one fewer held in every slot and on the cursor (a tool
+            // moved to another slot or to the cursor keeps the count): broken if it was on its
+            // last use, else gone with uses left, which is said as such and never as a break.
+            None => {
+                let held = |s: &Snapshot| s.items.get(item).copied().unwrap_or(0);
+                if held(next) < held(prev) {
+                    out.push(if *left <= BREAK_AT {
+                        Fact::ToolBroke { item: item.clone() }
+                    } else {
+                        Fact::ToolGone {
+                            item: item.clone(),
+                            uses_left: *left,
+                        }
+                    });
+                }
+            }
         }
     }
     if next.dimension != prev.dimension
@@ -599,12 +660,113 @@ pub struct Senses {
     pub sound: Option<String>,
     /// The planner's time for its last tick, microseconds.
     pub tick_us: Option<u64>,
+    /// The cell the feet are in: the position floored, as the planner's `plan::path::feet_cell`
+    /// has it (a rounded position reads one cell off: -18.3 is cell -19, not -18).
+    #[serde(default)]
+    pub cell: Option<[i32; 3]>,
+    /// The block in the feet's cell (air on a full block; soul sand, a slab or a fluid when the
+    /// feet are inside its cell) and the block under that cell. `None` where no column is loaded.
+    #[serde(default)]
+    pub feet_block: Option<String>,
+    #[serde(default)]
+    pub under: Option<String>,
+    /// Lava and water in the body's two cells or against them.
+    #[serde(default)]
+    pub lava: Touch,
+    #[serde(default)]
+    pub water: Touch,
+    /// The stack on the cursor, when there is one.
+    #[serde(default)]
+    pub cursor: Option<(String, i32)>,
+}
+
+/// How a fluid touches the body (the feet's cell and the one over it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Touch {
+    /// In neither cell and in no cell against them.
+    #[default]
+    No,
+    /// In a cell against the body: one of the four beside either cell, the one under the feet or
+    /// the one over the head.
+    Beside,
+    /// In the feet's cell or the head's.
+    In,
+}
+
+/// The cell a position's feet are in: each coordinate floored. The same as the planner's
+/// `plan::path::feet_cell` (a test in `results` holds the two together).
+pub fn feet_cell(pos: [f64; 3]) -> [i32; 3] {
+    [
+        pos[0].floor() as i32,
+        pos[1].floor() as i32,
+        pos[2].floor() as i32,
+    ]
+}
+
+/// How `fluid` touches a body whose feet are in `cell`.
+fn touch(w: &World, cell: [i32; 3], fluid: BlockKind) -> Touch {
+    let is = |dx: i32, dy: i32, dz: i32| {
+        w.block_at(BlockPos::new(cell[0] + dx, cell[1] + dy, cell[2] + dz)) == Some(fluid)
+    };
+    if is(0, 0, 0) || is(0, 1, 0) {
+        return Touch::In;
+    }
+    let beside = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .iter()
+        .any(|(dx, dz)| is(*dx, 0, *dz) || is(*dx, 1, *dz));
+    if beside || is(0, -1, 0) || is(0, 2, 0) {
+        Touch::Beside
+    } else {
+        Touch::No
+    }
+}
+
+fn block_name(w: &World, x: i32, y: i32, z: i32) -> Option<String> {
+    w.block_at(BlockPos::new(x, y, z))
+        .map(|b| b.name().unwrap_or("unknown").to_owned())
+}
+
+/// Blocks a body's cell holds when nothing is in it.
+const AIRS: [&str; 3] = ["air", "cave_air", "void_air"];
+
+impl Senses {
+    /// The feet's cell: as recorded, else the position floored (rows from before the cell was
+    /// kept).
+    pub fn feet(&self) -> Option<[i32; 3]> {
+        self.cell.or_else(|| self.pos.map(feet_cell))
+    }
+
+    /// Where the bot stands, in plain terms: `cell 30,31,-19 on netherrack, lava beside`, or
+    /// `cell 30,31,-19 in soul_sand over netherrack` when the feet's own cell is not empty.
+    /// Rows from before the blocks were kept give the cell alone.
+    pub fn standing(&self) -> String {
+        let Some([x, y, z]) = self.feet() else {
+            return "cell -".to_owned();
+        };
+        let mut s = format!("cell {x},{y},{z}");
+        let under = self.under.as_deref().unwrap_or("?");
+        match self.feet_block.as_deref() {
+            Some(b) if AIRS.contains(&b) => s.push_str(&format!(" on {under}")),
+            Some(b) => s.push_str(&format!(" in {b} over {under}")),
+            None if self.under.is_some() => s.push_str(&format!(" in ? over {under}")),
+            None => {}
+        }
+        for (name, t) in [("lava", self.lava), ("water", self.water)] {
+            match t {
+                Touch::In => s.push_str(&format!(", in {name}")),
+                Touch::Beside => s.push_str(&format!(", {name} beside")),
+                Touch::No => {}
+            }
+        }
+        s
+    }
 }
 
 /// The senses row for `w`, with the task and its reason as the planner holds them.
 pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses {
     let bot = feet(w);
     let here = bot.unwrap_or([0.0; 3]);
+    let cell = bot.map(feet_cell);
     let held_slot = 36 + i16::from(w.held);
     let held = w
         .inventory
@@ -662,6 +824,12 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
         endermen,
         sound: w.sounds.last().map(|s| s.name.clone()),
         tick_us,
+        cell,
+        feet_block: cell.and_then(|[x, y, z]| block_name(w, x, y, z)),
+        under: cell.and_then(|[x, y, z]| block_name(w, x, y - 1, z)),
+        lava: cell.map_or(Touch::No, |c| touch(w, c, BlockKind::Lava)),
+        water: cell.map_or(Touch::No, |c| touch(w, c, BlockKind::Water)),
+        cursor: w.inventory.carried.map(|(item, n)| (item_name(item), n)),
     }
 }
 
@@ -693,6 +861,13 @@ impl Fact {
                 format!("tool worn: {item}, {uses_left} uses left")
             }
             Fact::ToolBroke { item } => format!("tool broke: {item}"),
+            Fact::ToolGone { item, uses_left } => format!(
+                "tool gone: {item} with {uses_left} uses left (dropped or lost, not broken)"
+            ),
+            Fact::Cursor { item, count } => match item {
+                Some(i) => format!("on cursor: {i} {count}"),
+                None => "cursor empty".to_owned(),
+            },
             Fact::Dimension { to } => format!("dimension {to}"),
             Fact::Stage { reached } => format!("stage {reached}"),
             Fact::Death => "died".to_owned(),
