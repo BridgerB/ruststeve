@@ -1702,8 +1702,11 @@ impl Plan {
                         && (eat::hungry(w, rules) || eat::eat_to_heal(w, rules))
                         && eat::best_food(w, rules).is_some()
                 }
+                // Never into a cast, a scoop or a portal's entry (a lava bucket in hand, a frame
+                // half built): the review of 2026-11-24 found a hunt could cut them.
                 make::Always::Hunt => {
-                    tick >= self.always_retry_at
+                    hunt_may_cut(&self.task)
+                        && tick >= self.always_retry_at
                         && ((eat::hungry(w, rules) && eat::best_food(w, rules).is_none())
                             || self.provisioning(w, rules))
                         && !hunt::prey(w, rules, self.hunt_radius(w, rules), &self.refused_prey)
@@ -2233,7 +2236,7 @@ impl Plan {
         if let Some((have, want, clock)) = short {
             let since = *self.portal_food_since.get_or_insert(tick);
             let spent = tick.saturating_sub(since);
-            if world::stage::open_sky(w) && spent < clock {
+            if portal_food_look(self.readied, spent, clock, world::stage::open_sky(w)) {
                 self.note(
                     tick,
                     format!("provisions {have} of {want}"),
@@ -5541,6 +5544,20 @@ pub fn fuel_batch(fuel_ticks: Option<u32>, held: i32, cook_ticks: u32, count: i3
     let burns = i64::from(t) * i64::from(held.max(0));
     let fits = i32::try_from(burns / i64::from(cook_ticks.max(1))).unwrap_or(i32::MAX);
     count.min(fits).max(1)
+}
+
+/// Whether a hunt may cut the task running: never a cast, a scoop or a portal's entry, each with
+/// a bucket or a frame half done.
+pub fn hunt_may_cut(task: &Task) -> bool {
+    !matches!(task, Task::Cast(_) | Task::Scoop(_) | Task::Enter(_))
+}
+
+/// Whether the portal's food check looks for animals: never once the surface stocking is over
+/// (`readied`: it hunted there on its own clock), else under the open sky for `clock` ticks
+/// from the first look (overworld-leg wall 3; the review of 2026-11-24: with no clock a bot
+/// walked 48-block legs away from its lit portal for the whole run).
+pub fn portal_food_look(readied: bool, spent: u64, clock: u64, open_sky: bool) -> bool {
+    !readied && open_sky && spent < clock
 }
 
 /// The hunger points a portal is entered with: `portal_food`, or the whole reserve when unset.

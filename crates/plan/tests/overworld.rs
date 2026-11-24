@@ -263,3 +263,27 @@ fn a_chicken_is_hunted_and_never_eaten_raw() {
     assert!(plan::eat::cooks(ItemKind::Chicken).is_some());
     assert!(plan::eat::cooks(ItemKind::CookedBeef).is_none());
 }
+
+/// The review of 2026-11-24: a hunt never cuts a scoop (a bucket in hand) or the walk into a lit
+/// portal, and does cut a staircase or an explore.
+#[test]
+fn a_hunt_never_cuts_a_scoop() {
+    use plan::{Task, hunt_may_cut};
+    let scoop = Task::Scoop(Box::new(plan::scoop::Scoop::new((0, 64, 0), 0)));
+    assert!(!hunt_may_cut(&scoop));
+    let stairs = Task::Stairs(Box::new(plan::stairs::Stairs::new((1, 0), 0)));
+    assert!(hunt_may_cut(&stairs));
+    assert!(hunt_may_cut(&Task::Idle));
+}
+
+/// The review of 2026-11-24: the portal's food check looks for animals only before the surface
+/// stocking is over, under the open sky, and on its clock; a bot readied with its cooked meat
+/// never walks away from its lit portal.
+#[test]
+fn the_portal_food_look_is_bounded() {
+    use plan::portal_food_look;
+    assert!(portal_food_look(false, 0, 6000, true));
+    assert!(!portal_food_look(false, 6000, 6000, true), "the clock");
+    assert!(!portal_food_look(false, 0, 6000, false), "under rock");
+    assert!(!portal_food_look(true, 0, 6000, true), "readied");
+}

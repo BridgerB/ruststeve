@@ -150,3 +150,8 @@ The cast needs ten lava sources at one site. Carried up they are ten trips of 12
 
 - **Read**: from tick 16,600 to about 24,600 the bot alternated "explore to (-31, 46, -253) failed: NoProgress" toward a pool of ten near the surface and stairs of 40 to 60 ticks over steps already cut, coming no nearer.
 - **Fix**, a progress invariant: each look at the hunt's far target (the far pool, else the nearest far lava) keeps the nearest the feet came; four looks no nearer give it up ("lava at … given up"), and the hunt takes another target or the sea.
+
+## 14. Two from the review of 2026-11-24 (agent R)
+
+- **The portal's food check**: it is bounded by `provision_ticks` from its first look on this branch (wall 3), and now never looks once the surface stocking is over (`readied`): a readied bot holds its cooked meat and does not walk away from its lit portal. `portal_food_look`, test `the_portal_food_look_is_bounded`.
+- **A hunt cutting a cast**: the hunt row was in force whenever food was short and prey near, whatever ran; it never cuts a cast, a scoop or a portal's entry now (`hunt_may_cut`, test `a_hunt_never_cuts_a_scoop`).
