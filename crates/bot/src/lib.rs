@@ -451,6 +451,16 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     };
     if let Some(m) = memory {
         run.world.memory = m;
+        // The seeded memory is the run's start state and no event carries it: recorded as a
+        // checkpoint before the first event, so a fold begins where the run did (`replay verify`
+        // counted every checkpoint of every resumed run a mismatch without it).
+        if let Some(r) = &mut run.recorder {
+            r.write(&Record::Checkpoint {
+                event_index: 0,
+                server_ticks: 0,
+                world: Box::new(run.world.clone()),
+            })?;
+        }
     }
     let mut stage_told = run.world.stage_reached;
     let mut stats = Stats::default();

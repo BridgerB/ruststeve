@@ -24,3 +24,6 @@ protocol = { path = "../protocol" }
 observe = { path = "../observe" }
 record = { path = "../record" }
 world = { path = "../world" }
+
+[dev-dependencies]
+memory = { path = "../memory" }
