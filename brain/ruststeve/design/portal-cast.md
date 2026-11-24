@@ -5,8 +5,8 @@ type: reference
 tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@c073b1a clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
   - "ruststeve:crates/plan/src/station.rs#pub fn station_among("
@@ -43,13 +43,14 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 
 ## How it works
 - **The plan** (a port of `build.clj`): the room dug out in front of the face (the landing first, then every cell nearest the landing first, then firm floors), each frame cell in cast order (walls made firm where the rock is missing, hole and the cell over it dug, lava poured, water poured, water scooped back), the 2x3 inside dug, flint and steel on the bottom cell. Each op is done by a predicate over the world; a dig is done once its cell is obsidian, so **obsidian is never dug** (v1 dug its own frame and restarted forever). Positions are written for working from the south and turned for each facing.
-- **The executor** works the first op not done, so a death or a reload resumes from the world. A dig is worked from wherever the bot reaches the block (a walk to within 2.5 when not). A place clicks a solid neighbour's face toward the cell, the block under first, after stepping out of the cell if the body is in it; a cell no neighbour holds gets a foundation built up through the air under it, at most 4 deep. A pour, a scoop and the light are worked from the op's own stand with the look on its aim, held 6 ticks before the use.
+- **The executor** works the first op not done, so a death or a reload resumes from the world. A dig is worked from wherever the bot reaches the block, by the eye's distance to the cell's box, not its centre (cast.md wall 3: the server takes a dig or a click within 5.5 of the box, and the wall behind the frame's top cells lay 4.1 from the top stand's eye to its centre); a walk to within 2.5 when not. A place clicks a solid neighbour's face toward the cell, the block under first, after stepping out of the cell if the body is in it; a cell no neighbour holds gets a foundation built up through the air under it, at most 4 deep. A pour, a scoop and the light are worked from the op's own stand with the look on its aim, held 6 ticks before the use.
 - **No walk to an op** (wall 22): the approach digs the first block of the straight way at the feet's height toward the op, when it is in reach, never the frame's rock or a cell the plan places, at most 12 an op (clojurecraft's `toward-stand`). Before, three tries went in three ticks and the site was given up.
 - **Refills**: a pour whose bucket is empty fills it first, water at a remembered surface source ([[buckets-and-fluids]]), lava in this order:
   1. the station (below), when one stands;
   2. else the nearest four sources of the site's pool, the first whose scoop routes; a scoop's route counts only when its end, or the eye when the bot is already there, sees a face of the source (wall 26);
   3. else the first block on the eye's line to a source in reach is dug: under the feet, never kept or placed, no lava beside it at its height or over it (lava never flows up; wall 24), at most 24 a cast;
-  4. else a level tunnel toward the pool's nearest source, at most 4.
+  4. else a level tunnel toward the pool's nearest source, stairs down when it lies two or more under the feet (cast.md wall 2: a floor three over the lava sea), at most 4.
+  A source whose scoop failed is never chosen again by that cast, nor by the planner's lava fetch for a while (cast.md wall 1: one source chosen fourteen times, each "routed" then `NoSight`); a scoop routes to stands the exact line sees from first, the sampled ones after. The fetch never walks toward a source already within reach (the walk ended at once and the site went in the same tick).
   A water refill takes first the water sources seen within 7 of the frame's origin, the cast's own poured water (wall 28: a pour that made no obsidian left its water in the room, and memory keeps only surface water).
 - **A place** (walls 30, 31): steps out first when the player's box overlaps the cell (`overlaps`, the box from `physics::aabb`, not the feet's cell), and lays the op's block when held, else the first of `FILLERS` held (clojurecraft's `filler/fillers`: cobblestone, cobbled deepslate, the stones that drop themselves, dirt, the Nether's rock; never gravel or sand). Below y 0 a bot carries cobbled deepslate, and once the kit's 16 cobblestone were laid every place op had failed.
 - **The bucket's aim** at the use takes a face the exact line reaches first (`aim_at_use`); stands and routes keep the sampled line. The pair lit 62 of 210 (00c2c3a) against 58 of 224, and wasted uses fell from 168 to 84 a race.
