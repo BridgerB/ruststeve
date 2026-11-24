@@ -57,6 +57,13 @@ The overworld leg's portal cast, for a real bot from the clean `ready` snapshot 
 - **Read**: every lava scoop routed to a "stand sampled" failed `NoSight` (15 of 15 by tick 11,860; the trail names each), and wall 1's refusal then moved to the next source with the same result. Wall 2's stairs went six down: "feet (-69, -58, -101)", under the sea's surface.
 - **Fix** (34352b8): a lava scoop routes only to stands the exact line sees from (water keeps the sampled ones, 109 of 112 filled); the trail counts "sampled skipped". The stairs down stop with the feet one over the source.
 
+## Raced: wall 5 (race 45358066420, 34352b8)
+
+**20 of 27 lit** again, in 61 casts. By place: 0 0/3, 1 3/3, 2 3/3, 3 1/3, 4 2/3, 5 3/3, 6 3/3, 7 2/3, 8 3/3. "cast out of lava" 12, "no lava to fetch" 7; no lava scoop routed to a sampled stand; "tunnel down ended" 13 by mid-race. Casts failed: `place :floor` 4 (place 0's churn, wall 4), `dig :room` 3 (place 7), `pour :lava` 3, `NoRefill` 1.
+
+A real cast beside it (agent O's race 45354021804 lane 0, 9966559, without these fixes): from the `ready` snapshot, a site reached through a shaft the bot dug itself at y -53, lit in one cast of 6,340 ticks (124 ops, 10 fills).
+
 ## Status
 
-- c073b1a (walls 1 to 3): 20 of 27 against 15 of 27. 34352b8 (wall 5, with 0810be2 merged, CI green): `sealava` race running. 291ba59 (wall 4): written, clippy clean, not raced.
+- Walls 1 to 3 and 5: 20 of 27 twice running (c073b1a, 34352b8) against 15 of 27. 291ba59 (wall 4) racing in 45361499544 on a316d36. 78e6f05: bba8161 merged on top.
+- Open: place 0 (wall 4's race says), place 7's `dig :room` 0 ops in ("walk to the stand failed NoProgress" four times), place 3 lights 1 of 3.
