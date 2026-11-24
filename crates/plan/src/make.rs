@@ -250,6 +250,14 @@ pub struct Survival {
     /// Ticks the race looks for animals on the surface to fill the food reserve, each time.
     #[serde(default)]
     pub provision_ticks: u64,
+    /// Hunger points of safe food a portal is entered with; under it the race looks for animals
+    /// first, under the open sky only (overworld-leg wall 3). 0: the whole `food_reserve`.
+    #[serde(default)]
+    pub portal_food: i32,
+    /// Stone pickaxes with `spare_uses` left held under this and the race makes more from what
+    /// it holds, before the next task (overworld-leg wall 2). 0: never.
+    #[serde(default)]
+    pub spare_pickaxes: i32,
     /// A hostile mob this near is answered (`defend`, issue 12d) ...
     #[serde(default = "defend_radius")]
     pub defend_radius: f64,
@@ -324,6 +332,8 @@ impl Default for Survival {
             junk: Vec::new(),
             stock_logs: 0,
             provision_ticks: 0,
+            portal_food: 0,
+            spare_pickaxes: 0,
             danger_health: danger_health(),
             never_fight: Vec::new(),
             ranged: Vec::new(),
@@ -373,6 +383,8 @@ pub struct SurvivalRules {
     pub junk: Vec<(data::ItemKind, i32)>,
     pub stock_logs: i32,
     pub provision_ticks: u64,
+    pub portal_food: i32,
+    pub spare_pickaxes: i32,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -633,6 +645,8 @@ impl Table {
                 junk,
                 stock_logs: g.survival.stock_logs,
                 provision_ticks: g.survival.provision_ticks,
+                portal_food: g.survival.portal_food,
+                spare_pickaxes: g.survival.spare_pickaxes,
                 never_fight,
                 ranged,
                 neutral,

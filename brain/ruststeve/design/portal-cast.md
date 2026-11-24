@@ -5,8 +5,8 @@ type: reference
 tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
-lastUpdated: 2026-11-18
-verifiedAgainst: ruststeve@9f80853 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
   - "ruststeve:crates/plan/src/station.rs#pub fn station_among("
@@ -101,3 +101,5 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 ## See also
 - [[mc-portal-cast]] - the cast as the game plays it.
 - [[buckets-and-fluids]] - the look, buckets and the model's fluids.
+
+- **The overworld leg** (docs/problems/overworld-leg.md, 2026-11-23): with no site and the feet over the lava sea, the lava hunt goes down by its own stairs (`Plan::own_stairs`), six a leg, on the heading whose cut holds the fewest open cells (`own_leg`; toward a far pool of ten sources when one is known, `cast::far_pool`, else a spiral), to feet y -54 (`SEA_FEET`), and never walks toward a far pool from more than `DESCENT_WALK` over it: 7 of 16 bots died in the caves those walks led through. Spare stone pickaxes are made from the pack whenever fewer than `spare_pickaxes` with uses to spare are held (`spares_due`, the `nether-kit` row; the table comes along): every bot that reached a cast had spent 1,940 to 58,960 ticks with no pickaxe. The portal is entered with `portal_food` hunger points; under it animals are looked for only under the open sky, for `provision_ticks` at most.

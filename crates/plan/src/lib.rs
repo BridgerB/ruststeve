@@ -520,6 +520,21 @@ pub struct Plan {
     /// Tasks begun for the kit: past `KIT_TASKS` it is given up.
     #[serde(default)]
     pub kit_tasks: u32,
+    /// Spare pickaxes are being made (overworld-leg wall 2): the `nether-kit` row is worked
+    /// until its pickaxes are held; not asked again before `spares_retry_at` once it could not be.
+    #[serde(default)]
+    pub sparing: bool,
+    #[serde(default)]
+    pub spares_retry_at: u64,
+    /// Legs of the lava hunt's own stairs cut so far: the spiral's next heading (wall 1).
+    #[serde(default)]
+    pub descent_legs: u32,
+    /// When the portal's food check first found the bot short, and whether it has said the bot
+    /// goes in short (wall 3).
+    #[serde(default)]
+    pub portal_food_since: Option<u64>,
+    #[serde(default)]
+    pub portal_food_noted: bool,
     /// Meals eaten and hunts that ended in a kill (issue 12c); an eat or hunt row is not
     /// chosen again before `always_retry_at` after it failed, and animals a hunt failed on are
     /// refused until then too.
@@ -616,6 +631,11 @@ impl Plan {
             kit_done: false,
             kit_row: false,
             kit_tasks: 0,
+            sparing: false,
+            spares_retry_at: 0,
+            descent_legs: 0,
+            portal_food_since: None,
+            portal_food_noted: false,
             provision_since: None,
             surface_target: None,
             surface_tries: 0,
@@ -1608,19 +1628,48 @@ impl Plan {
             .collect();
         // Food first, then the Nether (Bridger, 2026-11-20): with a portal to enter and the reserve
         // short, look for animals (the hunt row takes those in view) before stepping in.
+        // Proportionate (overworld-leg wall 3): the bot goes in with `portal_food` or more; under
+        // it, animals are looked for only under the open sky and for `provision_ticks` at most.
+        // Two bots with lit portals explored for animals at y -53 for 24,000 ticks, at 24 and 21
+        // of 32.
         let short = self
             .table
             .clone()
             .filter(|t| !cells.is_empty() && self.provisioning(w, &t.survival))
-            .map(|t| (eat::food_points(w, &t.survival), t.survival.food_reserve));
-        if let Some((have, want)) = short {
-            self.note(
-                tick,
-                format!("provisions {have} of {want}"),
-                "short of the food reserve before the portal".to_owned(),
-            );
-            if let Some(t) = self.explore_walk(w, tick, "look for animals before the Nether") {
-                return t;
+            .map(|t| {
+                (
+                    eat::food_points(w, &t.survival),
+                    portal_food(&t.survival),
+                    t.survival.provision_ticks,
+                )
+            })
+            .filter(|(have, want, _)| have < want);
+        if let Some((have, want, clock)) = short {
+            let since = *self.portal_food_since.get_or_insert(tick);
+            let spent = tick.saturating_sub(since);
+            if world::stage::open_sky(w) && spent < clock {
+                self.note(
+                    tick,
+                    format!("provisions {have} of {want}"),
+                    "short of the portal's food under the open sky".to_owned(),
+                );
+                if let Some(t) = self.explore_walk(w, tick, "look for animals before the Nether") {
+                    return t;
+                }
+            } else if !self.portal_food_noted {
+                self.portal_food_noted = true;
+                self.note(
+                    tick,
+                    "into the Nether short of food".to_owned(),
+                    format!(
+                        "provisions {have} of {want}; {}",
+                        if spent >= clock {
+                            format!("{spent} ticks looked")
+                        } else {
+                            "no animal lives under rock".to_owned()
+                        }
+                    ),
+                );
             }
         }
         // Tools next (blaze.md wall 18): the Nether has no wood, so the spare pickaxes and a table
@@ -2189,6 +2238,8 @@ impl Plan {
                 Flow::On => {}
             }
         }
+        // Spare pickaxes ahead of need (overworld-leg wall 2).
+        let spare_row = !stock_row && self.spares_wanted(w, &table.survival, tick);
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
             // A portal stands and the bot is about to go in: the tools for the Nether first.
@@ -2196,6 +2247,7 @@ impl Plan {
             Aim::Race if stock_row => "stock".to_owned(),
             // The race gears up first (issue 16), then casts.
             Aim::Race if !geared(w) => "gear".to_owned(),
+            Aim::Race if spare_row => "nether-kit".to_owned(),
             // No pickaxe, but the makings of one held: craft it before casting or digging to a
             // site, never a trip for wood (clojurecraft's `pickaxe-at-hand?`; blaze wall 8).
             Aim::Portal | Aim::Nether | Aim::Race
@@ -2278,6 +2330,38 @@ impl Plan {
         {
             return t;
         }
+        // The spare pickaxes end here: the row's pickaxes held, or its next step no craft (a trip
+        // for wood is never made for a spare). The table comes along.
+        if spare_row {
+            let fresh = fresh_pickaxes(w, table.survival.spare_uses);
+            let pick: make::Counts = [(data::ItemKind::StonePickaxe, 1)].into_iter().collect();
+            let want = goal
+                .provides
+                .iter()
+                .find(|(n, _)| n.have(&pick) > 0)
+                .map_or(0, |(_, n)| *n);
+            let crafts = matches!(
+                &choice,
+                make::Choice::Act(r)
+                    if matches!(r.act, Some(make::Act::Craft(_) | make::Act::Place(_)))
+            );
+            if fresh >= want || !crafts {
+                self.sparing = false;
+                if fresh < table.survival.spare_pickaxes {
+                    self.spares_retry_at = tick + SPARES_RETRY_TICKS;
+                }
+                self.note(
+                    tick,
+                    if fresh >= want {
+                        "spare pickaxes held".to_owned()
+                    } else {
+                        "spare pickaxes not makeable".to_owned()
+                    },
+                    format!("{fresh} of {want} stone pickaxes with uses to spare"),
+                );
+                return self.carry_table(w, tick).unwrap_or(Task::Idle);
+            }
+        }
         // The portal (issue 14c): its kit held, the cast; met once a portal is lit.
         // The Nether kit ends here: made, or not makeable (no wood), the bot goes in either way.
         if self.kit_row && !matches!(choice, make::Choice::Act(_)) {
@@ -2297,7 +2381,8 @@ impl Plan {
             );
             return Task::Idle;
         }
-        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race) && !self.kit_row {
+        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race) && !self.kit_row && !spare_row
+        {
             if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
                 self.portal = Some(site.frame.at((1, 1, 0)));
             }
@@ -2929,6 +3014,95 @@ impl Plan {
         None
     }
 
+    /// Whether the race makes spare pickaxes now (overworld-leg wall 2): from `ready` on, in the
+    /// overworld, before a portal is lit, with fewer than `spare_pickaxes` stone pickaxes with
+    /// uses to spare and the makings of one in the pack. Once begun it holds until the row's
+    /// pickaxes are held. Nine bots of races 45194253932 and 45204423376 spent 1,940 to 58,960
+    /// ticks with no pickaxe, 21 to 25 sticks and a table in the pack.
+    fn spares_wanted(&mut self, w: &World, rules: &make::SurvivalRules, tick: u64) -> bool {
+        let overworld = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == "minecraft:overworld");
+        if self.aim != Aim::Race
+            || !self.readied
+            || self.kit_row
+            || self.portal.is_some()
+            || !overworld
+            || tick < self.spares_retry_at
+        {
+            self.sparing = false;
+            return false;
+        }
+        if self.sparing {
+            return true;
+        }
+        let table_near = self
+            .near_block(w, data::BlockKind::CraftingTable, tick)
+            .is_some();
+        if !spares_due(w, rules, table_near) {
+            return false;
+        }
+        self.sparing = true;
+        self.note(
+            tick,
+            "spare pickaxes".to_owned(),
+            format!(
+                "{} stone pickaxes with {} uses or more held, under {}: made now, from the pack",
+                fresh_pickaxes(w, rules.spare_uses),
+                rules.spare_uses,
+                rules.spare_pickaxes
+            ),
+        );
+        true
+    }
+
+    /// The lava hunt's own stairs (overworld-leg wall 1): six steps down in rock on the heading
+    /// whose cut holds the fewest cells seen open, toward `pool` first when one is known, else
+    /// the next of a spiral; never below `SEA_FEET`. Seven of sixteen bots died in the caves the
+    /// hunt's walks led through before any cast.
+    fn own_stairs(&mut self, w: &World, feet: Cell, pool: Option<Cell>, tick: u64) -> Task {
+        let mut prefer: Vec<(i32, i32)> = Vec::new();
+        if let Some(p) = pool {
+            let (dx, dz) = (p.0 - feet.0, p.2 - feet.2);
+            let (major, minor) = if dx.abs() >= dz.abs() {
+                ((dx.signum(), 0), (0, dz.signum()))
+            } else {
+                ((0, dz.signum()), (dx.signum(), 0))
+            };
+            // Over it already (within a leg): the spiral holds the place.
+            if dx.abs().max(dz.abs()) > stairs::STAIR_DEPTH as i32 {
+                prefer.extend([major, minor].into_iter().filter(|d| *d != (0, 0)));
+            }
+        }
+        let turn = self.descent_legs as usize;
+        prefer.extend((0..4).map(|i| SPIRAL[(turn + i) % 4]));
+        let (dir, open) = own_leg(w, feet, &prefer);
+        self.descent_legs += 1;
+        let steps = u32::try_from(feet.1 - SEA_FEET)
+            .unwrap_or(0)
+            .min(stairs::STAIR_DEPTH);
+        self.note(
+            tick,
+            format!(
+                "own stairs down, leg {} heading {dir:?}, {steps} steps",
+                self.descent_legs
+            ),
+            format!(
+                "no site, the feet at y {} over {}: stairs in rock, no walk through caves; {open} cells seen open that way",
+                feet.1,
+                pool.map_or_else(
+                    || format!("the lava sea (feet y {SEA_FEET})"),
+                    |p| format!("a pool of ten at {p:?}")
+                )
+            ),
+        );
+        let mut st = Stairs::new(dir, tick);
+        // The last leg stops at the sea's level: the count starts short of a full leg.
+        st.stairs = stairs::STAIR_DEPTH - steps;
+        Task::Stairs(Box::new(st))
+    }
+
     /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
     /// `lava-hunt`: stairs toward the lava sea, the lava they expose kept in memory).
     fn cast_task(&mut self, w: &World, tick: u64) -> Task {
@@ -3018,6 +3192,20 @@ impl Plan {
                 "a site beside lava seen exposed".to_owned(),
             );
             return Task::Cast(Box::new(cast::Cast::new(site, tick)));
+        }
+        // No site, and over the lava sea's level: down by its own stairs (overworld-leg wall 1),
+        // unless a pool of ten sources is known near the feet's height, which is walked to as
+        // before. A far pool of fewer is one the site choice refuses on arrival (`spent`).
+        if let Some(body) = w.body {
+            let feet = path::feet_cell(body.pos);
+            let pool = cast::far_pool(w, &self.given_up_sites);
+            let overworld = w
+                .dimension
+                .as_ref()
+                .is_some_and(|d| d.name == "minecraft:overworld");
+            if overworld && feet.1 > SEA_FEET && pool.is_none_or(|p| feet.1 - p.1 > DESCENT_WALK) {
+                return self.own_stairs(w, feet, pool, tick);
+            }
         }
         // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
         // (clojurecraft's lava hunt goes toward far sources); with none seen, down toward the lava
@@ -3730,6 +3918,98 @@ pub fn exposed_near(w: &World, kinds: &[data::BlockKind]) -> Vec<Cell> {
     }
     found.sort();
     found.into_iter().map(|(_, c)| c).collect()
+}
+
+/// The feet height the lava hunt's own stairs stop at: vanilla fills every cave below y -54 with
+/// lava, so y -54 is the lowest air and a tunnel there opens onto the lakes at their own level,
+/// with no sea lava beside or over it (the sites the bots of races 45194253932 and 45204423376
+/// cast at had their lava at y -55 and landings at y -52 to -55).
+pub const SEA_FEET: i32 = -54;
+/// A known pool of ten within this many blocks under the feet is walked to; deeper, the bot
+/// goes down by its own stairs first (a stair's leg and two: the cave walks that killed seven
+/// bots each went down 20 to 90 blocks).
+pub const DESCENT_WALK: i32 = 8;
+/// The spiral's headings, a quarter turn a leg: east, south, west, north.
+pub const SPIRAL: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+/// Ticks before spare pickaxes are asked for again once they could not be made.
+const SPARES_RETRY_TICKS: u64 = 2400;
+
+/// The cells a leg of `STAIR_DEPTH` stairs down from `feet` along `dir` opens: three a step (the
+/// head room, the head and the feet of the step, as `Stairs` cuts them).
+pub fn leg_cells((x, y, z): Cell, (dx, dz): (i32, i32)) -> Vec<Cell> {
+    (1..=stairs::STAIR_DEPTH as i32)
+        .flat_map(|i| {
+            let (cx, cz) = (x + i * dx, z + i * dz);
+            [(cx, y - i + 2, cz), (cx, y - i + 1, cz), (cx, y - i, cz)]
+        })
+        .collect()
+}
+
+/// The heading of `prefer` (first wins a tie) whose leg from `feet` holds the fewest cells
+/// already open, in the cut or beside it, and that count: a leg through rock keeps the cave's
+/// mobs out. The feet's own column (where the bot came down) is not counted. Read as the
+/// stairs' own refusals read a cell: the loaded column, an open cell being its own open face.
+pub fn own_leg(w: &World, feet: Cell, prefer: &[(i32, i32)]) -> ((i32, i32), usize) {
+    let open = |c: Cell| {
+        w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+            .is_some_and(|k| {
+                data::generated::shapes::collision(k) == Some(data::types::Collision::Empty)
+            })
+    };
+    let count = |dir: (i32, i32)| {
+        let cut = leg_cells(feet, dir);
+        let mut seen: Vec<Cell> = cut
+            .iter()
+            .flat_map(|c| memory::neighbours(*c).into_iter().chain([*c]))
+            .filter(|c| (c.0, c.2) != (feet.0, feet.2) && open(*c))
+            .collect();
+        seen.sort_unstable();
+        seen.dedup();
+        seen.len()
+    };
+    prefer
+        .iter()
+        .map(|d| (*d, count(*d)))
+        .min_by_key(|(_, n)| *n)
+        .unwrap_or(((1, 0), 0))
+}
+
+/// Stone pickaxes held with at least `spare_uses` uses left (one on the cursor counts).
+pub fn fresh_pickaxes(w: &World, spare_uses: i32) -> i32 {
+    let slots = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(slot, (k, _))| {
+            **slot >= 1
+                && *k == data::ItemKind::StonePickaxe
+                && w.inventory
+                    .uses_left(**slot)
+                    .is_none_or(|u| u >= spare_uses)
+        })
+        .count();
+    let carried = w
+        .inventory
+        .carried
+        .is_some_and(|(k, _)| k == data::ItemKind::StonePickaxe);
+    i32::try_from(slots).unwrap_or(i32::MAX) + i32::from(carried)
+}
+
+/// Whether spare pickaxes are due: fewer than `spare_pickaxes` fresh ones held and the makings
+/// of one in the pack (overworld-leg wall 2).
+pub fn spares_due(w: &World, rules: &make::SurvivalRules, table_near: bool) -> bool {
+    rules.spare_pickaxes > 0
+        && fresh_pickaxes(w, rules.spare_uses) < rules.spare_pickaxes
+        && pickaxe_makeable(w, table_near)
+}
+
+/// The hunger points a portal is entered with: `portal_food`, or the whole reserve when unset.
+pub fn portal_food(rules: &make::SurvivalRules) -> i32 {
+    if rules.portal_food > 0 {
+        rules.portal_food.min(rules.food_reserve)
+    } else {
+        rules.food_reserve
+    }
 }
 
 /// The distance and stalls kept for a cast landing: a look that comes no nearer than its best is

@@ -104,3 +104,33 @@ fn a_creeper_is_fled_round_a_tunnel_corner() {
         p.events
     );
 }
+
+/// Overworld-leg wall 1: under the danger line in a dead end, the zombie in the bot's face, the
+/// retreat has nowhere to go; it strikes back with what it holds instead of taking every hit.
+#[test]
+fn a_cornered_retreat_strikes_back() {
+    use data::BlockKind::Stone;
+    // A corridor one wide and two long, closed at both ends: the bot at x 0, the zombie at x 2.
+    let mut set = Vec::new();
+    for y in 64..=65 {
+        for x in -1..=3 {
+            set.push(((x, y, -1), Stone));
+            set.push(((x, y, 1), Stone));
+        }
+        set.push(((-1, y, 0), Stone));
+        set.push(((3, y, 0), Stone));
+    }
+    let (p, run, _) = run_in(6.0, EntityKind::Zombie, 400, &set);
+    assert!(
+        p.events
+            .iter()
+            .any(|e| e.what.starts_with("defend Zombie") && e.what.contains("Retreat")),
+        "{:#?}",
+        p.events
+    );
+    assert!(
+        run.world.kills >= 1,
+        "a cornered retreat never struck: {:#?}",
+        p.events
+    );
+}

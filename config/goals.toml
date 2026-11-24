@@ -343,6 +343,17 @@ travel_reserve_digs = 131
 # empty place costs minutes, never the run).
 stock_logs = 12
 provision_ticks = 6000
+# The portal is entered with this much safe food or more; under it the bot looks for animals only
+# under the open sky and for provision_ticks at most (docs/problems/overworld-leg.md wall 3). 24 is
+# the eight raw beef or porkchop the reserve was first counted as: the snapshot bot holds 36 and
+# the bots of race 45204423376 stood at their portals with 21 to 30, two of them hunting at y -53
+# for 24,000 ticks at 24 and 21.
+portal_food = 24
+# Fewer stone pickaxes than this with spare_uses left and more are made from the pack before the
+# next task, up to the nether-kit row's four (overworld-leg wall 2). Two: one in the hand and one
+# for when it breaks inside a task (a cast digs up to 131 times; every bot of races 45194253932
+# and 45204423376 that reached a cast spent 1,940 to 58,960 ticks holding no pickaxe).
+spare_pickaxes = 2
 # Dropped a stack at a time when fewer than six main slots (two until wall 21) are free, each kept to its count (blaze
 # wall 13: lane 11 of race 45071679507 held eleven stacks of cobblestone and deepslate, dirt,
 # granite, andesite and diorite in every slot, so a dig's drop went uncollected and the bucket
