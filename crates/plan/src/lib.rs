@@ -15,6 +15,7 @@ pub mod craft;
 pub mod defend;
 pub mod dig;
 pub mod eat;
+pub mod endermen;
 pub mod escape;
 // >>> heading (E2, issue 17d)
 pub mod heading;
@@ -22,6 +23,7 @@ pub mod heading;
 pub mod hold;
 pub mod hunt;
 pub mod ledger;
+pub mod look;
 pub mod make;
 pub mod path;
 pub mod place;
@@ -569,6 +571,9 @@ pub struct Plan {
     /// Walks away from the spawner begun with 7 rods held.
     #[serde(default)]
     pub leave_tries: u32,
+    /// Issue 17: after the rods, on to an enderman (`endermen`; E3's state, one field).
+    #[serde(default)]
+    pub ender: endermen::EnderState,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -822,6 +827,7 @@ impl Plan {
             unposted_at: 0,
             cover_none_until: 0,
             leave_tries: 0,
+            ender: endermen::EnderState::default(),
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -962,6 +968,8 @@ impl Plan {
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
+        // Never stare (issue 17e): every look the planner sends leaves here, kept off endermen.
+        let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
         c
     }
@@ -1424,6 +1432,10 @@ impl Plan {
         }
         // The always-rows come first, ahead of every goal and after the aim is met.
         if let Some(c) = self.always(w, &body, tick) {
+            return c;
+        }
+        // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
+        if let Some(c) = self.ender_threat(w, tick) {
             return c;
         }
         if self.finished() {
@@ -2325,13 +2337,20 @@ impl Plan {
         {
             // The race goes on to the fortress, then its spawner and the rods (issue 16).
             if self.aim == Aim::Race {
+                // Issue 17: the leave walk is over; on to an enderman.
+                if self.ender.left {
+                    return self.endermen_task(w, tick);
+                }
                 // >>> shield (docs/problems/shield.md): a shield first, from what is held.
                 if let Some(t) = self.nether_shield(w, origin, tick) {
                     return t;
                 }
                 // <<< shield
+                // Seven rods held is past the fortress whatever the stage clock has read yet
+                // (issue 17: the leave walk, then the endermen).
                 if w.stage_reached
                     .is_some_and(|s| s >= world::stage::Stage::Fortress)
+                    || craft::count(w, data::ItemKind::BlazeRod) >= RODS_WANTED
                 {
                     return self.spawner_task(w, tick);
                 }
@@ -2716,13 +2735,17 @@ impl Plan {
                     return Task::Explore(walk);
                 }
             }
-            self.met = true;
+            // Issue 17: the race no longer ends at the rods; the endermen task takes over.
+            self.ender.left = true;
             self.note(
                 tick,
-                "rods met".to_owned(),
-                format!("{RODS_WANTED} blaze rods held"),
+                "rods held: on to the endermen".to_owned(),
+                format!(
+                    "{RODS_WANTED} blaze rods held; the leave walk is over after {} walks",
+                    self.leave_tries
+                ),
             );
-            return Task::Idle;
+            return self.endermen_task(w, tick);
         }
         // Hurt: out of every blaze's sight, and rest there until the health is back; the eat row
         // feeds the heal (clojurecraft's heal and rest; blaze wall 3: resumed bots at 6 health

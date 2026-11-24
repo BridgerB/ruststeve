@@ -451,3 +451,35 @@ fn the_axis_points_away_from_the_explored_and_else_to_the_unseen() {
     assert_eq!(heading::turn_dir((1, 0), (0, 0), &none, 0), ((0, -1), 1));
     assert_eq!(heading::turn_dir((1, 0), (0, 0), &none, 1), ((0, 1), -1));
 }
+
+/// A heading's tunnel never cuts a stair down inside a fortress's footprint (clojurecraft #715:
+/// thin floors over the lava sea); outside it, it does.
+#[test]
+fn no_stair_down_is_cut_in_a_fortress_footprint() {
+    let (w, _, _) = joined();
+    let target = [(30, 56, 0)];
+    let none = BTreeSet::new();
+    let free = plan::tunnel::route(&w, (0, 64, 0), &target, &none, false, 20_000).unwrap();
+    assert!(
+        free.cells.windows(2).any(|p| p[1].1 < p[0].1),
+        "{:?}",
+        free.cells
+    );
+    let kept = plan::tunnel::route_keeping(
+        &w,
+        (0, 64, 0),
+        &target,
+        &none,
+        false,
+        20_000,
+        Some((-40, -40, 60, 40)),
+    );
+    if let Some(r) = kept {
+        assert!(
+            r.cells.windows(2).all(|p| p[1].1 >= p[0].1),
+            "{:?}",
+            r.cells
+        );
+        assert!(r.down_refused > 0);
+    }
+}

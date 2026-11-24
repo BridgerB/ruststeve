@@ -250,17 +250,14 @@ fn soul_signs_in_column(w: &World, cx: i32, cz: i32) -> u32 {
     u32::try_from(w.memory.biome_signs_in_column(cx, cz).soul).unwrap_or(u32::MAX)
 }
 
-// >>> stubs (agreed signatures; the real calls replace these at merge, BRIEF.md): E3's
-// `crate::endermen::pickaxe_uses_left` and `rules.pickaxe_reserve`.
+// E3's (issue 17c): the pickaxe uses held, and the reserve kept for issue 18's burrow.
 fn pickaxe_uses_left(w: &World) -> i32 {
-    crate::dig_budget(w, false)
+    crate::endermen::pickaxe_uses_left(w)
 }
 
-/// The pickaxe uses kept for issue 18's burrow (the plan's 40).
-fn pickaxe_reserve(_p: &Plan) -> i32 {
-    40
+fn pickaxe_reserve(p: &Plan) -> i32 {
+    p.table.as_ref().map_or(0, |t| t.survival.pickaxe_reserve)
 }
-// <<< stubs
 
 /// The seen columns with soul signs, and how many.
 fn soul_columns(w: &World, seen: &BTreeSet<(i32, i32)>) -> BTreeMap<(i32, i32), u32> {

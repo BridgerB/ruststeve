@@ -21,15 +21,21 @@ use bot::Script;
 use bot::captured::CapturedWorld;
 use results::Source;
 use results::config::RaceConfig;
-use results::parity::{Health, Landings, Moment, MomentResult, Moments, Outcome, compare, render};
+use results::parity::{
+    Health, Landings, MobOutcome, Moment, MomentResult, Moments, Outcome, compare, render,
+};
 use world::World;
 
 /// Server ticks a start settles before the script, the same in real and sim (bot::run's).
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows).
-const TOLERANCE: usize = 158;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows).
+const TOLERANCE: usize = 162;
+/// A placed mob that ends farther than this from where it was put moved (it ticked).
+const MOB_MOVED: f64 = 0.5;
+/// An enderman's creepy flag (`EnderMan.DATA_CREEPY`, entity data 17).
+const CREEPY: u8 = 17;
 
 struct Args {
     cmd: String,
@@ -116,6 +122,7 @@ fn outcome(
     teleports_at_script: Option<u64>,
     min_health: Option<f32>,
     watch: &[(i32, i32, i32)],
+    mobs: &[(String, [f64; 3])],
 ) -> Option<Outcome> {
     let at = teleports_at_script?;
     let body = w.body?;
@@ -164,7 +171,50 @@ fn outcome(
                     .to_owned()
             })
             .collect(),
+        mobs: mobs
+            .iter()
+            .map(|(kind, at)| mob_outcome(w, kind, *at))
+            .collect(),
     })
+}
+
+/// A placed mob's outcome: the entity of its kind nearest where it was put.
+fn mob_outcome(w: &World, kind: &str, at: [f64; 3]) -> MobOutcome {
+    let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - at[i]).powi(2)).sum::<f64>().sqrt();
+    let found = w
+        .entities
+        .values()
+        .filter(|e| e.kind.name() == Some(kind) && !e.dead)
+        .min_by(|a, b| d(a.pos).total_cmp(&d(b.pos)));
+    MobOutcome {
+        kind: kind.to_owned(),
+        seen: found.is_some(),
+        moved: found.is_some_and(|e| d(e.pos) > MOB_MOVED),
+        creepy: found.is_some_and(|e| {
+            matches!(
+                e.metadata.get(&CREEPY),
+                Some(protocol::metadata::MetaValue::Bool(true))
+            )
+        }),
+    }
+}
+
+/// Where a moment's placed mobs go, absolute: the cell's middle on x and z.
+fn mob_spots(start: [f64; 3], m: &Moment) -> Vec<(String, [f64; 3])> {
+    let (x, y, z) = feet_cell(start);
+    m.mobs
+        .iter()
+        .map(|(e, dx, dy, dz)| {
+            (
+                e.clone(),
+                [
+                    f64::from(x + dx) + 0.5,
+                    f64::from(y + dy),
+                    f64::from(z + dz) + 0.5,
+                ],
+            )
+        })
+        .collect()
 }
 
 /// Whether some block drops this item only by chance (a sapling from leaves, a seed from grass,
@@ -234,17 +284,61 @@ fn real(a: &Args) -> Result<(), String> {
         std::env::var("RUSTSTEVE_RCON_PASSWORD").map_err(|_| "set RUSTSTEVE_RCON_PASSWORD")?;
     let nonce = bot::now_ms() & 0xffff;
     std::fs::create_dir_all(&a.out).map_err(|e| e.to_string())?;
-    for (w, wave) in moments.moment.chunks(a.wave.max(1)).enumerate() {
+    // The peaceful rows first, then those with a difficulty, the server's set for them by RCON
+    // and put back after (issue 17: endermen are removed on peaceful).
+    let (plain, hard): (Vec<Moment>, Vec<Moment>) = moments
+        .moment
+        .iter()
+        .cloned()
+        .partition(|m| m.difficulty.is_none());
+    let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
+    let groups = [(None, plain), (Some("normal"), hard)];
+    let mut w = 0;
+    for (difficulty, rows) in &groups {
+        if rows.is_empty() {
+            continue;
+        }
+        if let Some(d) = difficulty {
+            let mut r = rcon::Rcon::connect(&rcon_addr, &password)?;
+            println!(
+                "moments real: difficulty {d}: {}",
+                r.command(&format!("difficulty {d}"))?
+            );
+        }
+        real_waves(a, &landings, rows, &password, nonce, &mut w)?;
+        if difficulty.is_some() {
+            let mut r = rcon::Rcon::connect(&rcon_addr, &password)?;
+            r.command("difficulty peaceful")?;
+        }
+    }
+    Ok(())
+}
+
+/// The real side's waves of `rows`, numbered on from `w`.
+fn real_waves(
+    a: &Args,
+    landings: &Landings,
+    rows: &[Moment],
+    password: &str,
+    nonce: u64,
+    w: &mut usize,
+) -> Result<(), String> {
+    for wave in rows.chunks(a.wave.max(1)) {
+        let w = {
+            let n = *w;
+            *w += 1;
+            n
+        };
         println!("moments real: wave {w}, {} moments", wave.len());
         let mut handles = Vec::new();
         for (i, m) in wave.iter().enumerate() {
-            let (_, start) = start_of(a, &landings, m)?;
+            let (_, start) = start_of(a, landings, m)?;
             let (script, aim) = script_or_aim(m)?;
             // A fresh player per run: the server saves a player's place, health and effects by
             // name, so a reused name would start where the last run left it.
             let name = format!("rs-m{:02}-{:04x}", w * a.wave + i, nonce);
             let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
-            let password = password.clone();
+            let password = password.to_owned();
             let tp = format!("tp {name} {} {} {}", start[0], start[1], start[2]);
             // The model has no air supply yet (issue 12, survival): a real bot waiting under
             // water for its chunks would drown on a clock the model does not keep, so the real
@@ -271,6 +365,13 @@ fn real(a: &Args) -> Result<(), String> {
                         f64::from(z + dz) + 0.5
                     )
                 }))
+                .chain(mob_spots(start, m).into_iter().map(|(e, p)| {
+                    // With its AI: kept, no loot (issue 17).
+                    format!(
+                        "summon minecraft:{e} {} {} {} {{DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b}}",
+                        p[0], p[1], p[2]
+                    )
+                }))
                 .collect();
             let opts = bot::Opts {
                 host: a.host.clone(),
@@ -293,7 +394,9 @@ fn real(a: &Args) -> Result<(), String> {
                     gives.iter().try_for_each(|g| {
                         for _ in 0..80 {
                             let reply = r.command(g)?;
-                            if !reply.contains("not loaded") {
+                            // A summon into a chunk not loaded yet says "Invalid position".
+                            if !reply.contains("not loaded") && !reply.contains("Invalid position")
+                            {
                                 return Ok(());
                             }
                             std::thread::sleep(Duration::from_millis(250));
@@ -318,10 +421,11 @@ fn real(a: &Args) -> Result<(), String> {
             };
             let id = m.id.clone();
             let watch = watched(start, m);
-            handles.push((id, watch, std::thread::spawn(move || bot::run(opts))));
+            let mobs = mob_spots(start, m);
+            handles.push((id, watch, mobs, std::thread::spawn(move || bot::run(opts))));
             std::thread::sleep(Duration::from_millis(500));
         }
-        for (id, watch, h) in handles {
+        for (id, watch, mobs, h) in handles {
             let r = match h.join() {
                 Ok(Ok(o)) => MomentResult {
                     moment: id,
@@ -332,6 +436,7 @@ fn real(a: &Args) -> Result<(), String> {
                         o.teleports_at_script,
                         o.min_health_in_script,
                         &watch,
+                        &mobs,
                     ),
                     corrections: o
                         .teleports_at_script
@@ -383,6 +488,11 @@ fn sim(a: &Args) -> Result<(), String> {
                 .set_block(x + dx, y + dy, z + dz, state)
                 .map_err(|e| e.to_string())?;
         }
+        // A row with a difficulty runs off peaceful (issue 17).
+        let config = sim::Config {
+            peaceful: m.difficulty.is_none(),
+            ..config
+        };
         let mut model = sim::Sim::new(config, world).seeded(i as u64 + 1);
         for g in &m.give {
             model
@@ -418,6 +528,17 @@ fn sim(a: &Args) -> Result<(), String> {
                 m.loot = false;
             }
         }
+        for (e, p) in mob_spots(start, m) {
+            match e.as_str() {
+                "enderman" => {
+                    let id = model.summon_enderman(p);
+                    if let Some(mob) = model.survival.life.mobs.get_mut(&id) {
+                        mob.loot = false;
+                    }
+                }
+                other => return Err(format!("{}: the model places no {other} with its AI", m.id)),
+            }
+        }
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
         let run = bot::lockstep::run_acting(
             model,
@@ -443,6 +564,7 @@ fn sim(a: &Args) -> Result<(), String> {
                 run.teleports_at_script,
                 run.min_health_in_script,
                 &watched(start, m),
+                &mob_spots(start, m),
             ),
             corrections: run
                 .teleports_at_script

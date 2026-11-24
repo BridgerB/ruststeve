@@ -186,6 +186,14 @@ fn full(w: &World, c: Cell) -> bool {
         == Some(data::types::Collision::Full)
 }
 
+/// Any block with a collision shape: one a block can be placed against, and a floor (soul sand,
+/// 14/16 high, is both; issue 17's nook in a soul sand valley had nothing to click on).
+fn solid(w: &World, c: Cell) -> bool {
+    w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+        .and_then(data::generated::shapes::collision)
+        .is_some_and(|k| k != data::types::Collision::Empty)
+}
+
 /// The two points of a body at `pos` a shooter aims at: its eye and its middle.
 fn aims(pos: [f64; 3]) -> [[f64; 3]; 2] {
     [
@@ -238,7 +246,7 @@ fn click_for(w: &World, (x, y, z): Cell) -> Option<(Cell, i8)> {
     // Never a furnace or table: a right-click opens it and places nothing (overworld-leg wall
     // 11: a hut block clicked onto the cook's furnace opened it, and the hut waited for ever).
     .find(|(c, _)| {
-        full(w, *c)
+        solid(w, *c)
             && !w
                 .block_at(world::BlockPos::new(c.0, c.1, c.2))
                 .is_some_and(|k| crate::place::OPENS.contains(&k))
@@ -275,6 +283,60 @@ fn support(w: &World, c: Cell, body: &[Cell], depth: u32) -> Option<(Cell, Cell,
 /// head, each open one filled; the cell to fill, the full block to click and its face. `None` when
 /// the hut is closed or nothing can be clicked. Only cells beside the body are read.
 pub fn hut_block(w: &World, pos: [f64; 3]) -> Option<(Cell, Cell, i8)> {
+    pocket_block(w, pos, None)
+}
+
+/// `hut_block` with the walls nearest `threat` first (issue 17: a provoked enderman walks in
+/// while the pocket goes up, and the side it comes from is shut before the far side); the roof
+/// is always last.
+pub fn pocket_block(
+    w: &World,
+    pos: [f64; 3],
+    threat: Option<[f64; 3]>,
+) -> Option<(Cell, Cell, i8)> {
+    shell_block(w, pos, threat, None)
+}
+
+/// A nook (issue 17, the soul sand valley wait): the pocket with the side `open` (a step on the
+/// plane, as `open_side` gives it) left open at the feet and the head, so the bot looks out over
+/// open ground with a roof and three walls between it and the arrows and fireballs from the rest.
+pub fn nook_block(w: &World, pos: [f64; 3], open: (i32, i32)) -> Option<(Cell, Cell, i8)> {
+    shell_block(w, pos, None, Some(open))
+}
+
+/// Cells along each side of the feet counted for `open_side`.
+pub const OPEN_RUN: i32 = 8;
+
+/// Each side of `feet` (east, west, south, north) with its run of open standing cells (both
+/// cells open, a full floor), up to `OPEN_RUN`. Only cells in a straight line from the feet are
+/// read.
+pub fn open_runs(w: &World, feet: Cell) -> [((i32, i32), usize); 4] {
+    let run = |(dx, dz): (i32, i32)| {
+        (1..=OPEN_RUN)
+            .take_while(|k| {
+                let c = (feet.0 + dx * k, feet.1, feet.2 + dz * k);
+                open(w, c) && open(w, (c.0, c.1 + 1, c.2)) && solid(w, (c.0, c.1 - 1, c.2))
+            })
+            .count()
+    };
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|d| (d, run(d)))
+}
+
+/// The side of `feet` with the longest open run; ties in the order east, west, south, north.
+pub fn open_side(w: &World, feet: Cell) -> (i32, i32) {
+    open_runs(w, feet)
+        .into_iter()
+        .rev()
+        .max_by_key(|(_, n)| *n)
+        .map_or((1, 0), |(d, _)| d)
+}
+
+fn shell_block(
+    w: &World,
+    pos: [f64; 3],
+    threat: Option<[f64; 3]>,
+    open: Option<(i32, i32)>,
+) -> Option<(Cell, Cell, i8)> {
     let body = occupied(pos);
     let top = body.iter().map(|c| c.1).max()?;
     let low = body.iter().map(|c| c.1).min()?;
@@ -282,12 +344,22 @@ pub fn hut_block(w: &World, pos: [f64; 3]) -> Option<(Cell, Cell, i8)> {
     for y in low..=top {
         for (x, _, z) in body.iter().filter(|c| c.1 == y) {
             for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                if open == Some((dx, dz)) {
+                    continue;
+                }
                 let c = (x + dx, y, z + dz);
                 if !body.contains(&c) && !shell.contains(&c) {
                     shell.push(c);
                 }
             }
         }
+    }
+    if let Some(t) = threat {
+        let d = |c: &Cell| {
+            let (dx, dz) = (f64::from(c.0) + 0.5 - t[0], f64::from(c.2) + 0.5 - t[2]);
+            dx * dx + dz * dz
+        };
+        shell.sort_by(|a, b| d(a).total_cmp(&d(b)).then(a.cmp(b)));
     }
     for (x, _, z) in body.iter().filter(|c| c.1 == top) {
         let c = (*x, top + 1, *z);

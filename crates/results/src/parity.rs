@@ -45,6 +45,16 @@ pub struct Moment {
     /// scooped, obsidian made, a portal lit).
     #[serde(default)]
     pub watch: Vec<(i32, i32, i32)>,
+    /// Mobs placed with their AI, as `[entity, dx, dy, dz]` from the feet cell (issue 17:
+    /// endermen frozen or ticking, a stare): `summon` with no loot and kept in real; the model's
+    /// own brain in sim. Their outcome joins the class as `mobs`.
+    #[serde(default)]
+    pub mobs: Vec<(String, i32, i32, i32)>,
+    /// The difficulty the row runs at (`normal`); none is the table's peaceful. Rows with one run
+    /// after the others, the real server's difficulty set by RCON for them (an enderman is a
+    /// monster: peaceful removes it at once).
+    #[serde(default)]
+    pub difficulty: Option<String>,
 }
 
 fn yes() -> bool {
@@ -90,6 +100,20 @@ pub enum Health {
     Dead,
 }
 
+/// What became of a placed mob (`Moment::mobs`), as the bot's world saw it: the entity of its
+/// kind nearest the place it was put.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobOutcome {
+    pub kind: String,
+    /// The bot's world was told of it.
+    pub seen: bool,
+    /// It ended more than half a block from where it was put (it ticked: fell, walked,
+    /// teleported).
+    pub moved: bool,
+    /// An enderman's creepy flag (entity data 17): it has a target.
+    pub creepy: bool,
+}
+
 /// The outcome class of a moment: what the table compares, field by field.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Outcome {
@@ -114,6 +138,9 @@ pub struct Outcome {
     /// The blocks at the moment's `watch` cells, by name, at the end (issue 14a).
     #[serde(default)]
     pub blocks: Vec<String>,
+    /// The placed mobs' outcomes, in the moment's order (issue 17).
+    #[serde(default)]
+    pub mobs: Vec<MobOutcome>,
 }
 
 /// One run of a moment.
@@ -163,6 +190,7 @@ pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
                     ("food", a.food != b.food),
                     ("kills", a.kills != b.kills),
                     ("blocks", a.blocks != b.blocks),
+                    ("mobs", a.mobs != b.mobs),
                 ]
                 .into_iter()
                 .filter_map(|(n, d)| d.then_some(n))
@@ -193,7 +221,20 @@ pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
                 (None, k) if k > 0 => format!(" kills {k}"),
                 _ => String::new(),
             };
-            let held = held + &life;
+            let mobs: String = o
+                .mobs
+                .iter()
+                .map(|m| {
+                    format!(
+                        " {}{}{}{}",
+                        m.kind,
+                        if m.seen { "" } else { " unseen" },
+                        if m.moved { " moved" } else { " still" },
+                        if m.creepy { " creepy" } else { "" }
+                    )
+                })
+                .collect();
+            let held = held + &life + &mobs;
             format!(
                 "{:?} {} {} {} {:?}{held}",
                 o.cell,
