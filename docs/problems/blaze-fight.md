@@ -145,3 +145,13 @@ A bot at a blaze spawner with the gear a real bot holds ends with 7 blaze rods (
 ### 13. The retreat line with nothing to heal with (spawner wall 7's other half)
 - **Read**: since spawner wall 7 the spawner task takes no rest that cannot heal (no safe food held, the food bar under 18). The fight still turned to a retreat to cover at 13: a bot at 9 to 13 with nothing to eat would be handed from the fight's retreat (cover) to the spawner task (no rest: to the post) and back, with nothing coming back.
 - **Fix** (`defend::retreat_line`): a shooter's retreat line is `shooter_retreat_health` while a rest can heal (`plan::can_heal`), else the danger line of 8: the bot fights on with what it has and never under the danger line. Counted in "shooter fight given up: health … (line N)" and in fights begun under 13. Unit test `with_nothing_to_heal_with_the_blaze_line_is_the_danger_line` (`crates/plan/tests/foe.rs`).
+
+### The whole-stage model at 0ee129a (probe 45350488562; the post, strike in passing, spawner walls 6 and 7)
+- Raw kit: dead at 4,680, 9 kills (1.92 per 1,000 ticks), 5.5 health a kill. Shield: dead at 8,080, 18 kills (2.23), 11.8 a kill. 30 cooked beef: dead at 11,480, 19 kills (1.66), 15.2 a kill. Sorties were 0.5 to 1.3 kills per 1,000 ticks at about 19 health a kill.
+- **Rods 0 in every run**: not the bot's. The model's blaze drops nothing: `data::generated::loot::MOB_DROPS` has no blaze row (its rod pool is conditioned on a player's kill, and the datagen keeps unconditioned drops only), so `sim::life::drop_loot` spawns no rod. For the model's owner. Kills are the model's measure until then.
+- Two of three deaths at (128 to 129, 61, 176): spawner wall 8 (the leave walk met at once), fixed in 4323494.
+
+### 14. Hurt, no cover found, and back to the post (the model above, raw kit, ticks 4,440 to 4,620)
+- **What happened**: a fight turned to a retreat at 12.7; "fight post at (129, 64, 161)" 20 ticks later; at 4,620 health 2.9 and "leave the spawner … to heal"; dead.
+- **Read**: `take_cover` returns nothing when it finds no cover cell, no leave route and no shelter to build; `spawner_task` then goes on to the post walk, which asks nothing of health.
+- **Fix** (`spawner_task`): hurt under `engage_health` with a way to heal and a spawner within 24, the bot does not walk to the post (or to the spawner) but waits where it is, the eat row healing it (note "no fight post: hurt, no cover found", once per 600 ticks).

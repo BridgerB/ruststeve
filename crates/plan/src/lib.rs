@@ -524,6 +524,9 @@ pub struct Plan {
     /// When "no rest: nothing to heal with" may next be noted.
     #[serde(default)]
     pub unhealed_at: u64,
+    /// When "no fight post: hurt, no cover found" may next be noted.
+    #[serde(default)]
+    pub unposted_at: u64,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -679,6 +682,7 @@ impl Plan {
             shelter_at: 0,
             shelter_blocks: 0,
             unhealed_at: 0,
+            unposted_at: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -2029,6 +2033,31 @@ impl Plan {
         // --- the fight post (docs/problems/blaze-fight.md wall 10; defend.rs owns the rule) ---
         // Healthy at the spawner with no fight on, the bot stands on the spawner's deck, where
         // every blaze spawns within a strike, not on the bridge under it.
+        // Hurt with a way to heal, the post waits even when the cover found no cell, no way out
+        // of the spawner's range and no shelter: at 12.7 health, the leave walk with no route, the
+        // bot walked back onto the deck and was at 2.9 160 ticks later (the whole-stage model,
+        // probe 45350488562, ticks 4,440 to 4,620). The eat row heals it where it stands.
+        let hurt = self.table.as_ref().is_some_and(|t| {
+            w.player.health.is_some_and(|h| {
+                h < t.survival.engage_health
+                    && can_heal(w.player.food, eat::best_food(w, &t.survival).is_some())
+            })
+        });
+        if hurt && defend::spawner_near(w).is_some() {
+            if tick >= self.unposted_at {
+                self.unposted_at = tick + FAILURE_MEMORY_TICKS;
+                self.note(
+                    tick,
+                    "no fight post: hurt, no cover found".to_owned(),
+                    format!(
+                        "health {:?}; it can heal, so it waits off the deck",
+                        w.player.health
+                    ),
+                );
+            }
+            self.retry_at = tick + RETRY_TICKS;
+            return Task::Idle;
+        }
         if let Some(body) = w.body
             && let Some(sp) = defend::spawner_near(w)
             && !defend::on_post(path::feet_cell(body.pos), sp)
