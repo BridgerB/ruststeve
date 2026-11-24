@@ -172,6 +172,7 @@ fn key_of(f: &Fact) -> Key {
         | Fact::ToolWorn { .. }
         | Fact::ToolBroke { .. }
         | Fact::ToolGone { .. }
+        | Fact::HealthDrop { .. }
         | Fact::Dimension { .. }
         | Fact::Stage { .. }
         | Fact::Death

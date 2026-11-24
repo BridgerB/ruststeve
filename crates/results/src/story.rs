@@ -106,6 +106,11 @@ pub struct Story {
     /// Every planner note of the run by kind (`note_kinds`): a new code path's firings.
     #[serde(default)]
     pub note_kinds: Vec<NoteKind>,
+    /// Every fall in health that had no damage event of its own (`Fact::HealthDrop`): `tick
+    /// health dropped 5.0 to 12.0 with no damage event; nearest hostile blaze at 2.1; on fire
+    /// no`. The heading counts them.
+    #[serde(default)]
+    pub silent_drops: Vec<String>,
     /// Every note that carries an escape's trail, whole: `tick what (why)`.
     #[serde(default)]
     pub trails: Vec<String>,
@@ -233,6 +238,7 @@ pub fn story(l: &Ledger, rows: &[Senses]) -> Story {
     for f in &l.facts {
         match &f.fact {
             Fact::Stage { reached } => s.stages.push(format!("{} {reached}", f.at)),
+            Fact::HealthDrop { .. } => s.silent_drops.push(format!("{} {}", f.at, f.fact.line())),
             Fact::ToolWorn { .. } | Fact::ToolBroke { .. } | Fact::ToolGone { .. } => {
                 let during =
                     running_at(l, f.at).map_or_else(String::new, |t| format!(" (during {t})"));
@@ -376,9 +382,14 @@ impl Story {
             .iter()
             .map(|k| format!("{:>6} x {} (ticks {} to {})", k.n, k.kind, k.first, k.last))
             .collect();
+        let drops = format!(
+            "health lost with no damage event ({} times)",
+            self.silent_drops.len()
+        );
         for (head, lines) in [
             ("stages", &self.stages),
             ("tools", &self.tools),
+            (drops.as_str(), &self.silent_drops),
             ("onsets", &self.onsets),
             ("longest tasks", &self.longest),
             ("tasks by time", &self.kinds),

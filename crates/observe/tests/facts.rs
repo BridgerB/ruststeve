@@ -352,3 +352,107 @@ fn a_senses_row_carries_the_feet_cell_what_it_stands_on_and_lava_beside() {
     assert_eq!(old.feet(), Some([30, 31, -19]));
     assert_eq!(old.standing(), "cell 30,31,-19");
 }
+
+fn health(w: &mut World, health: f32) {
+    w.step(&Event::Packet(S2c::SetHealth {
+        health,
+        food: 20,
+        saturation: 5.0,
+    }));
+}
+
+fn damage(w: &mut World) {
+    w.step(&Event::Packet(S2c::DamageEvent {
+        entity_id: 1,
+        source_type: 0,
+        cause: None,
+        direct: None,
+    }));
+}
+
+/// Race 45335627948 (lanes 1 and 2): health fell by 5 with no hit in the ledger. A fall with a
+/// damage event of its own is a hit; one without is a fact of its own, with what was nearest
+/// and whether the bot burned; a second fall does not borrow the first one's event.
+#[test]
+fn a_fall_in_health_with_no_damage_event_is_a_fact_of_its_own() {
+    let mut w = World::new();
+    w.player.entity_id = Some(1);
+    w.player.pos = Some([0.0, 0.0, 0.0]);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 9,
+        uuid: [0; 16],
+        kind: EntityKind::Blaze.id(),
+        x: 2.0,
+        y: 0.0,
+        z: 0.0,
+    }));
+    health(&mut w, 20.0);
+    let a = snapshot(&w);
+    // A blow with its event: a hit, and no silent fall.
+    w.ticks = 10;
+    damage(&mut w);
+    health(&mut w, 17.0);
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        facts.iter().any(|f| matches!(f, Fact::Hit { .. })),
+        "{facts:?}"
+    );
+    assert!(
+        !facts.iter().any(|f| matches!(f, Fact::HealthDrop { .. })),
+        "{facts:?}"
+    );
+    // Health falls again a tick later with no event: told, with the blaze beside.
+    w.ticks = 11;
+    health(&mut w, 12.0);
+    let (c, facts) = facts_between(&b, &w);
+    let drop = facts
+        .iter()
+        .find(|f| matches!(f, Fact::HealthDrop { .. }))
+        .map(Fact::line);
+    assert_eq!(
+        drop.as_deref(),
+        Some(
+            "health dropped 5.0 to 12.0 with no damage event; nearest hostile blaze at 2.0; on fire no"
+        ),
+        "{facts:?}"
+    );
+    // The event a tick before its health (two packets, two ticks) still answers it.
+    w.ticks = 40;
+    damage(&mut w);
+    let (d, facts) = facts_between(&c, &w);
+    assert!(facts.iter().any(|f| matches!(f, Fact::Hit { .. })));
+    w.ticks = 41;
+    health(&mut w, 9.0);
+    let (_, facts) = facts_between(&d, &w);
+    assert!(
+        !facts.iter().any(|f| matches!(f, Fact::HealthDrop { .. })),
+        "{facts:?}"
+    );
+}
+
+/// The world prunes its list of blows as it grows: in a long fight the list's length stands
+/// still, and a blow told by the length alone went unseen. Each new blow is a fact.
+#[test]
+fn a_blow_is_seen_when_the_list_of_blows_does_not_grow() {
+    let mut w = World::new();
+    w.player.entity_id = Some(1);
+    damage(&mut w);
+    let a = snapshot(&w);
+    // The old blow pruned and a new one pushed in one tick: one in the list before and after.
+    w.hits.clear();
+    w.session.server_ticks += 20;
+    damage(&mut w);
+    assert_eq!(w.hits.len(), 1);
+    let (b, facts) = facts_between(&a, &w);
+    assert_eq!(
+        facts
+            .iter()
+            .filter(|f| matches!(f, Fact::Hit { .. }))
+            .count(),
+        1,
+        "{facts:?}"
+    );
+    // Nothing new: nothing told twice.
+    let (_, facts) = facts_between(&b, &w);
+    assert!(facts.is_empty(), "{facts:?}");
+}

@@ -5,8 +5,8 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@92fdb59 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@e4e2305 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -85,6 +85,12 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 ## Snapshots and the frontier ([[one-bot-first]])
 - `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor (the start's stage, or a resumed snapshot's): `save-all flush`, the server's `world/` copied to `<out>/snapshots/<stage>/` with `memory.rsw` (the bot's memory, `results::snapshot::write_memory`) and `snap.toml` (stage, bot, offline UUID, position, dimension, commit). Publish steps add each as a release asset `snapshot-<stage>-<run>-<lane>.tar.zst`.
 - `race.yml -f snapshot=frontier` (or `<tag>/<asset>`) restores it: the world unpacked into the server's before it starts, the snapshot bot's `players/data/<uuid>.dat` (26.1.2's place for it, not the older `playerdata/`) copied to every bot's own offline UUID (`results offline-uuid`), `--memory` seeding each bot; the `snapshot` start gives nothing more. `config/frontier.toml` names the furthest snapshot.
+
+## Reading the text files (issue 16, [[observability]])
+- `.senses.txt`: `tick x,y,z cell cx,cy,cz on <block>[, lava beside] hp … held … [cursor …] | task (why) | hostiles`; the position has one decimal, the cell is floored (the planner's). A line `tick in <dimension>` when it changes.
+- `.ledger.txt`: planner lines in the planner's order, then that second's facts; `[xN, to tick T (#id)]` closes a line told once for a run; `item x 164 -> 177 (3 changes)` is one second. The header counts the file's records and facts, and the lines they are told in.
+- `.case.txt`: `where:` under the ending; `notes by kind` (every note of the ledger, with first and last tick: a fix's firings); `escape trails (whole)`; `tasks by time` with those that ended within the second they began.
+- `summary.md`: the diagnosis's "notes by kind" table is the race's total over every note of every ledger (it was built from each case's kept notes, which leave repeats out); it says for how many runs it had the whole ledger.
 
 ## See also
 - [[observability]] - what every run produces.

@@ -8,15 +8,18 @@
 //! with its count, one second's changes to an item are one line. `--raw` prints one line a fact
 //! and a note, as they come. `--senses <every>` adds the senses rows (the feet's cell, what it
 //! stands on, lava and water against the body), `--story` the case's head and story.
+//! `--packets` prints each damage event, hurt flash and health packet as it was received, with
+//! the server tick and the client tick, for a fall in health the ledger cannot name.
 //!
 //! ```text
 //! cargo run -p replay --bin ledger -- <file.rsr> [--force] [--from <ticks>] [--to <ticks>]
-//!     [--raw] [--senses <every>] [--story]
+//!     [--raw] [--senses <every>] [--story] [--packets]
 //! ```
 
 use std::path::Path;
 use std::process::ExitCode;
 
+use protocol::S2c;
 use record::{COMMIT, EventRecord, Folder, Record, Recording, check_commit};
 use results::TaskRecord;
 
@@ -58,6 +61,7 @@ fn run() -> Result<(), String> {
     let from = arg(&args, "--from").unwrap_or(0);
     let to = arg(&args, "--to").unwrap_or(u64::MAX);
     let senses_every = arg(&args, "--senses");
+    let packets = has("--packets");
     let file = args
         .iter()
         .enumerate()
@@ -101,6 +105,22 @@ fn run() -> Result<(), String> {
         match rec {
             Record::Event(e) => {
                 let tick = matches!(e, EventRecord::Tick { .. });
+                let at = folder.world.session.server_ticks;
+                if packets
+                    && at >= from
+                    && at <= to
+                    && let EventRecord::Packet { state, id, body } = &e
+                    && let Ok(
+                        p @ (S2c::DamageEvent { .. }
+                        | S2c::HurtAnimation { .. }
+                        | S2c::SetHealth { .. }),
+                    ) = protocol::decode(*state, *id, body)
+                {
+                    println!(
+                        "{at:>8} packet (client tick {ticks}, the bot is entity {:?}) {p:?}",
+                        folder.world.player.entity_id
+                    );
+                }
                 folder.step(&e)?;
                 if tick {
                     ticks += 1;

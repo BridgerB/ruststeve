@@ -50,5 +50,11 @@ The text of `.ledger.txt`, `.senses.txt` and `.case.txt` changes shape, so anyth
   - A senses row `idle (last refusal: ; turn the heading)`: the reason printed for `idle` is the last note's, from the task before (`Plan::why`).
   - The progress line prints `held beef (- uses)` and no position (`crates/bot/src/lib.rs`).
 
+## Wall 8: health lost with no hit in the ledger
+- **What happened** (agent A4, race 45335627948, the `dev-spawner` start). Health fell by 5 with no hit fact in the ledger and none in the case's hit list: lane 1 at ticks 140, 160 and 180, lane 2 at tick 140. A4's guess, not confirmed: a blaze's melee blow inside the invulnerability window of a fire tick sends no damage event.
+- **The read.** `observe::diff` wrote a `Hit` only for a damage event, and `health a -> b` for the fall: a fall with no event was a health line with no cause, and nothing counted such falls. A second cause was in the code whatever the first turns out to be: new blows were counted by how much `World::hits` grew, and the world prunes that list as it grows (`HITS_KEPT_TICKS`, 1,200), so once blows come for a minute the list's length stands still and every blow after goes unseen ("a list pruned in the same tick shows none new" was the comment).
+- **The fix.** New blows are told from the newest blow's stamp and the count at that stamp (`Snapshot::hit_mark`), never from the list's length. A fall in health is answered by a damage event that came with it or within `HIT_WINDOW` (10 client ticks) before it and that no earlier fall took; a fall with none is `Fact::HealthDrop`: `health dropped 5.0 to 12.0 with no damage event; nearest hostile blaze at 2.1; on fire no`. The case lists them under `health lost with no damage event (N times)`.
+- **What the packets are** at those ticks is read on the probe below (`replay export` of lane 1 round ticks 120 to 200: `DamageEvent`, `HurtAnimation`, `SetHealth`).
+
 ## Probe
 (Filled in from the probe at the end: before and after for each wall.)

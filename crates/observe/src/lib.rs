@@ -34,6 +34,10 @@ pub const FACING: f64 = 12.0;
 /// cursor as it clicks), so every count would dip and come back. A third of the planner's
 /// patience with a click (`plan::craft::CLICK_PATIENCE_TICKS`, 60): an answer takes two or three.
 pub const CLICK_SETTLE: u64 = 20;
+/// Client ticks a damage event stands for a fall in health that follows it: the server sends the
+/// event as the blow lands and the health at the end of that tick or the next, so the two can
+/// come a tick or two apart. Half a second; past it a fall in health has no event of its own.
+pub const HIT_WINDOW: u64 = 10;
 /// Uses left at which a tool gone from its slot is said to have broken: its last use (issue 16,
 /// observability gaps wall 2: under 4 was called a break, and a moved or dropped tool read so).
 pub const BREAK_AT: i32 = 1;
@@ -113,6 +117,20 @@ pub struct Snapshot {
     /// Client ticks since a click the server has not answered, when one waits.
     #[serde(default)]
     pub click_age: Option<u64>,
+    /// The world's client tick.
+    #[serde(default)]
+    pub ticks: u64,
+    /// The newest blow's server tick and how many blows carry it: what is new is told from this,
+    /// not from the list's length (the list is pruned as it grows, so in a long fight its length
+    /// stands still and every blow would go unseen).
+    #[serde(default)]
+    pub hit_mark: Option<(u64, usize)>,
+    /// Damage events no fall in health has answered yet, and the client tick the newest came
+    /// (carried from tick to tick by `diff`; they lapse after `HIT_WINDOW`).
+    #[serde(default)]
+    pub hits_unanswered: u32,
+    #[serde(default)]
+    pub hit_tick: u64,
     /// Each slot's wearing item: its name and uses left.
     pub tools: BTreeMap<i16, (String, i32)>,
     /// Monsters within `WATCH` and its margin, by entity id.
@@ -172,6 +190,15 @@ pub enum Fact {
     ToolGone {
         item: String,
         uses_left: i32,
+    },
+    /// Health fell with no damage event of its own (none in the `HIT_WINDOW` ticks before it that
+    /// another fall had not answered): what was nearest and whether the bot burned, so no loss
+    /// of health is silent.
+    HealthDrop {
+        by: f32,
+        to: f32,
+        hostile: Option<(String, f64)>,
+        on_fire: bool,
     },
     /// The cursor's stack changed: what it holds now (`None` is an empty cursor).
     Cursor {
@@ -355,6 +382,15 @@ pub fn snapshot(w: &World) -> Snapshot {
         items,
         cursor,
         click_age: w.click.map(|c| w.ticks.saturating_sub(c.at_tick)),
+        ticks: w.ticks,
+        hit_mark: w.hits.last().map(|h| {
+            (
+                h.at_tick,
+                w.hits.iter().filter(|x| x.at_tick == h.at_tick).count(),
+            )
+        }),
+        hits_unanswered: 0,
+        hit_tick: 0,
         tools,
         mobs,
         effects: w.player.effects.keys().cloned().collect(),
@@ -398,9 +434,43 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
             to: f,
         });
     }
-    // New blows: the world keeps a capped list, so take as many from its end as it grew by (a
-    // list pruned in the same tick shows none new, and the next blow is seen).
-    let new_hits = next.hits.saturating_sub(prev.hits);
+    // New blows: those stamped after the newest seen before, and any more at that same stamp.
+    // The world prunes its list as it grows, so the list's length says nothing in a long fight.
+    let new_hits = match prev.hit_mark {
+        Some((t, n)) => {
+            let after = w.hits.iter().filter(|h| h.at_tick > t).count();
+            let same = w.hits.iter().filter(|h| h.at_tick == t).count();
+            after + same.saturating_sub(n)
+        }
+        None => w.hits.len(),
+    };
+    // A fall in health is answered by a damage event that came with it or just before it.
+    let lapsed = next.ticks.saturating_sub(prev.hit_tick) > HIT_WINDOW;
+    next.hits_unanswered = if lapsed { 0 } else { prev.hits_unanswered };
+    next.hit_tick = prev.hit_tick;
+    if new_hits > 0 {
+        next.hits_unanswered += u32::try_from(new_hits).unwrap_or(u32::MAX);
+        next.hit_tick = next.ticks;
+    }
+    if let (Some(was), Some(now)) = (prev.health, next.health)
+        && now < was
+    {
+        if next.hits_unanswered > 0 {
+            next.hits_unanswered -= 1;
+        } else {
+            let hostile = next
+                .mobs
+                .values()
+                .min_by(|a, b| a.d.total_cmp(&b.d))
+                .map(|m| (m.kind.name().unwrap_or("unknown").to_owned(), m.d));
+            out.push(Fact::HealthDrop {
+                by: was - now,
+                to: now,
+                hostile,
+                on_fire: next.on_fire,
+            });
+        }
+    }
     for h in w.hits.iter().rev().take(new_hits).rev() {
         out.push(Fact::Hit {
             damage_type: h.damage_type.clone(),
@@ -863,6 +933,18 @@ impl Fact {
             Fact::ToolBroke { item } => format!("tool broke: {item}"),
             Fact::ToolGone { item, uses_left } => format!(
                 "tool gone: {item} with {uses_left} uses left (dropped or lost, not broken)"
+            ),
+            Fact::HealthDrop {
+                by,
+                to,
+                hostile,
+                on_fire,
+            } => format!(
+                "health dropped {by:.1} to {to:.1} with no damage event; nearest hostile {}; on fire {}",
+                hostile
+                    .as_ref()
+                    .map_or_else(|| "none".to_owned(), |(k, d)| format!("{k} at {d:.1}")),
+                if *on_fire { "yes" } else { "no" }
             ),
             Fact::Cursor { item, count } => match item {
                 Some(i) => format!("on cursor: {i} {count}"),
