@@ -80,7 +80,7 @@ impl State {
             | S2c::KeepAlive { .. }
             | S2c::Ping { .. }
             | S2c::PlayerPosition { .. }
-            | S2c::SetTime
+            | S2c::SetTime { .. }
             | S2c::LevelChunkWithLight { .. }
             | S2c::ForgetLevelChunk { .. }
             | S2c::BlockUpdate { .. }

@@ -26,6 +26,7 @@ use protocol::slot::{Slot, Wear};
 use protocol::{C2s, Out, S2c, Session};
 
 pub mod stage;
+pub mod time;
 pub use stage::Stage;
 
 /// How long hits are kept: a minute of server ticks (a case file's "first hit in the last
@@ -681,6 +682,22 @@ pub struct World {
     /// other deaths in view (another player's kill, a player in lava) are not the bot's.
     #[serde(default)]
     pub kills: u64,
+    /// The level's game time from the newest `set_time`.
+    #[serde(default)]
+    pub game_time: Option<i64>,
+    /// The overworld clock from the newest `set_time` that carried it: its total ticks, the
+    /// game time it came with and its rate. `day_time` runs it on from there.
+    #[serde(default)]
+    pub day_clock: Option<DayClock>,
+}
+
+/// The overworld clock as last told (`protocol::OVERWORLD_CLOCK`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct DayClock {
+    pub total_ticks: i64,
+    pub game_time: i64,
+    /// Clock ticks per game tick: 1, or 0 with the day cycle stopped.
+    pub rate: f32,
 }
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
@@ -689,6 +706,24 @@ const STATUS_ONLY_EVERY: u64 = 20;
 impl World {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The time of day, 0 to 23,999 (`time`'s helpers read it): the overworld clock as last
+    /// told, run on by the game ticks since at its rate, so a `set_time` that leaves the clock
+    /// out still moves it. `None` before any `set_time` with the overworld clock.
+    pub fn day_time(&self) -> Option<i64> {
+        let c = self.day_clock?;
+        let since = self
+            .game_time
+            .unwrap_or(c.game_time)
+            .saturating_sub(c.game_time);
+        let ran = (since as f64 * f64::from(c.rate)).floor() as i64;
+        Some(time::of_day(c.total_ticks.saturating_add(ran)))
+    }
+
+    /// Night now (`time::is_night`); `None` while the time is unknown.
+    pub fn is_night(&self) -> Option<bool> {
+        self.day_time().map(time::is_night)
     }
 
     /// Fold one event; return what the shell must do, in order.
@@ -1790,6 +1825,16 @@ impl World {
                     self.cracks.remove(pos);
                 }
             }
+            S2c::SetTime { game_time, clocks } => {
+                self.game_time = Some(*game_time);
+                if let Some(c) = clocks.iter().find(|c| c.clock == protocol::OVERWORLD_CLOCK) {
+                    self.day_clock = Some(DayClock {
+                        total_ticks: c.total_ticks,
+                        game_time: *game_time,
+                        rate: c.rate,
+                    });
+                }
+            }
             S2c::SetHealth {
                 health,
                 food,
@@ -1809,7 +1854,6 @@ impl World {
             | S2c::ConfigDisconnect { .. }
             | S2c::KeepAlive { .. }
             | S2c::Ping { .. }
-            | S2c::SetTime
             | S2c::ChunkBatchFinished { .. }
             | S2c::StartConfiguration
             | S2c::Disconnect { .. }

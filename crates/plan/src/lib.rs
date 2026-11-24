@@ -146,6 +146,25 @@ const SHELTER_EVERY_TICKS: u64 = 10;
 /// Shelter blocks in one run before the bot stops building: a closed box round one cell is 10
 /// (eight wall cells, one more for the roof to hang on, the roof); eight boxes.
 const SHELTER_MAX: u32 = 80;
+/// Blocks a cook's hut may take: ten round a body in one column (eight walls and a roof, the
+/// table and furnace among the walls), more where the body spans two columns or a floor is
+/// missing (overworld-leg wall 11).
+const HUT_MAX: u32 = 24;
+/// Ticks after a junk drop in which its kind coming back counts as the drop picked up again: the
+/// 40 ticks of a thrown stack's pick-up delay and the walk back over it.
+const REPICKUP_TICKS: u64 = 200;
+/// Stone over the junk keep at which the carried table is put down to press it: a stack, a slot
+/// (wall 12).
+const PRESS_AT: i32 = 64;
+/// Looks at one far lava target that come no nearer than the best before it is given up: a leg
+/// of stairs or a walk each (overworld-leg wall 13).
+const LAVA_AIM_STALLS: u32 = 4;
+/// Items of the dropped kind coming back at once that count as the stack picked up again: a dig
+/// brings one.
+const REPICKUP_JUMP: i32 = 4;
+/// Ticks a full pack holds tasks back while its junk is dropped: three drops at `EQUIP_TICKS`
+/// and their resyncs, with room (overworld-leg wall 10).
+const FULL_WAIT_TICKS: u64 = 200;
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
 pub const TRAIL_TOWARD: f64 = 4.0;
@@ -199,6 +218,10 @@ const CORRIDOR_CHUNKS: i32 = 3;
 pub const LAVA_TRIPS: u32 = 2;
 /// Lava sources a fetch asks a scoop route of, nearest first.
 const LAVA_FETCH_TRIES: usize = 8;
+/// Eye to a source's centre within which a fetch walks toward it no more: a walk to within
+/// `scoop::REACH` of it ends at once (cast.md wall 2). A block over the reach, for the walk's
+/// own range measured from the feet.
+const FETCH_NEAR: f64 = scoop::REACH + 1.0;
 /// Walks toward lava a fetch takes for one site when no scoop routes (wall 47).
 const LAVA_FETCH_WALKS: u32 = 4;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
@@ -608,6 +631,68 @@ pub struct Plan {
     /// Tasks begun for the kit: past `KIT_TASKS` it is given up.
     #[serde(default)]
     pub kit_tasks: u32,
+    /// Spare pickaxes are being made (overworld-leg wall 2): the `nether-kit` row is worked
+    /// until its pickaxes are held; not asked again before `spares_retry_at` once it could not be.
+    #[serde(default)]
+    pub sparing: bool,
+    #[serde(default)]
+    pub spares_retry_at: u64,
+    /// Legs of the lava hunt's own stairs cut so far: the spiral's next heading (wall 1).
+    #[serde(default)]
+    pub descent_legs: u32,
+    /// The cook phase (overworld-leg wall 4): tasks begun for it, whether it is over (done or
+    /// given up), and whether its end was noted.
+    #[serde(default)]
+    pub cook_tasks: u32,
+    #[serde(default)]
+    pub cook_over: bool,
+    /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
+    /// (closed, or none could be built).
+    #[serde(default)]
+    pub hut_blocks: u32,
+    #[serde(default)]
+    pub hut_done: bool,
+    /// Furnaces pressed from junk stone (wall 12), and junk stacks picked up again after a drop:
+    /// the kind, the count left after the drop, and when.
+    #[serde(default)]
+    pub pressed: u32,
+    /// Far lava targets of the hunt with the nearest the feet came and the looks since that came
+    /// no nearer (wall 13).
+    #[serde(default)]
+    pub lava_aims: Vec<(Cell, f64, u32)>,
+    /// A table put down to press stone at, to be taken along after (wall 12).
+    #[serde(default)]
+    pub press_table: bool,
+    #[serde(default)]
+    pub repickups: u32,
+    #[serde(default)]
+    pub dropped: Option<(data::ItemKind, i32, u64)>,
+    /// When the pack was first seen with no main slot free (wall 10).
+    #[serde(default)]
+    pub full_since: Option<u64>,
+    /// The second stocking's look for animals is over: its walks failed `HUNT_WALK_FAILS` times
+    /// running (overworld-leg wall 4: twelve failed walks cost a relocation, and six end the run).
+    #[serde(default)]
+    pub hunt_over: bool,
+    /// The feet cell the last leg of own stairs began from, and legs begun from it since: a leg
+    /// that leaves the feet where they were made no way down (wall 1).
+    #[serde(default)]
+    pub own_from: Option<(Cell, u32)>,
+    /// The last leg of own stairs begun (its feet cell and heading), the leg that led to the
+    /// cell the feet are on, and a cell walked back to with the heading it must not take again
+    /// (wall 9: a leg cut onto a ledge over a cave, every heading's floor air).
+    #[serde(default)]
+    pub own_leg: Option<(Cell, (i32, i32))>,
+    #[serde(default)]
+    pub own_into: Option<(Cell, (i32, i32))>,
+    #[serde(default)]
+    pub own_back: Option<(Cell, (i32, i32))>,
+    /// When the portal's food check first found the bot short, and whether it has said the bot
+    /// goes in short (wall 3).
+    #[serde(default)]
+    pub portal_food_since: Option<u64>,
+    #[serde(default)]
+    pub portal_food_noted: bool,
     /// Meals eaten and hunts that ended in a kill (issue 12c); an eat or hunt row is not
     /// chosen again before `always_retry_at` after it failed, and animals a hunt failed on are
     /// refused until then too.
@@ -745,6 +830,26 @@ impl Plan {
             kit_done: false,
             kit_row: false,
             kit_tasks: 0,
+            sparing: false,
+            spares_retry_at: 0,
+            descent_legs: 0,
+            portal_food_since: None,
+            portal_food_noted: false,
+            cook_tasks: 0,
+            cook_over: false,
+            hut_blocks: 0,
+            hut_done: false,
+            full_since: None,
+            pressed: 0,
+            lava_aims: Vec::new(),
+            press_table: false,
+            repickups: 0,
+            dropped: None,
+            hunt_over: false,
+            own_from: None,
+            own_leg: None,
+            own_into: None,
+            own_back: None,
             provision_since: None,
             surface_target: None,
             surface_tries: 0,
@@ -837,10 +942,52 @@ impl Plan {
         // swing count before the tick: a strike the raised shield drops is given back.
         let swings_before = self.swing_count();
         let c = self.step_inner(w);
+        self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
         self.track(w.session.server_ticks, notes_before);
         c
+    }
+
+    /// A junk stack dropped and its kind back by `REPICKUP_JUMP` or more at once within
+    /// `REPICKUP_TICKS`: a
+    /// pick-up of the drop, noted and counted (overworld-leg wall 12; the run's count is to be 0).
+    fn count_repickup(&mut self, w: &World) {
+        let Some((kind, left, at)) = self.dropped else {
+            return;
+        };
+        let tick = w.session.server_ticks;
+        if tick.saturating_sub(at) > REPICKUP_TICKS {
+            self.dropped = None;
+            return;
+        }
+        // `left` is negative until the drop shows (minus one less the count it must fall to); then the
+        // lowest count seen since. A stack back in one look, not a block or two dug since (a
+        // stair's digs come one by one), is the drop picked up again.
+        let now = craft::count(w, kind);
+        if left < 0 {
+            if now < -left {
+                self.dropped = Some((kind, now, at));
+            }
+            return;
+        }
+        if now < left + REPICKUP_JUMP {
+            self.dropped = Some((kind, now.min(left), at));
+            return;
+        }
+        {
+            self.dropped = None;
+            self.repickups += 1;
+            self.note(
+                tick,
+                format!("junk picked up again: {kind:?}"),
+                format!(
+                    "{now} held, {left} after the drop {} ticks before; {} in the run",
+                    tick.saturating_sub(at),
+                    self.repickups
+                ),
+            );
+        }
     }
 
     /// A shield made in the Nether from what the bot holds (docs/problems/shield.md): a real bot
@@ -1372,16 +1519,26 @@ impl Plan {
                 // The buckets held when the cast ended: a cast that lost its water says so here.
                 let held = |i| craft::count(w, i);
                 let at = format!(
-                    "{}; {}; buckets water {} lava {} empty {}; {uses}; {}",
+                    "{}; {}; {}; buckets water {} lava {} empty {}; {uses}; {}; {}",
                     k.current().map(build::op_text).unwrap_or_default(),
+                    k.tries_text(),
                     k.regression_text(),
                     held(data::ItemKind::WaterBucket),
                     held(data::ItemKind::LavaBucket),
                     held(data::ItemKind::Bucket),
+                    k.refused_text(),
                     k.refill_text()
                 );
+                let refused = k.refused_sources().to_vec();
                 let water = held(data::ItemKind::WaterBucket);
                 let lava = held(data::ItemKind::LavaBucket);
+                // A source the cast's scoop failed at is refused for the fetch too: the fetch
+                // took the very source the refill had failed at four times (cast.md wall 1).
+                if !matches!(status, cast::CastStatus::Running) {
+                    for c in refused {
+                        self.refuse(c, tick);
+                    }
+                }
                 let account = CastAccount {
                     ops,
                     at,
@@ -1647,8 +1804,11 @@ impl Plan {
                         && (eat::hungry(w, rules) || eat::eat_to_heal(w, rules))
                         && eat::best_food(w, rules).is_some()
                 }
+                // Never into a cast, a scoop or a portal's entry (a lava bucket in hand, a frame
+                // half built): the review of 2026-11-24 found a hunt could cut them.
                 make::Always::Hunt => {
-                    tick >= self.always_retry_at
+                    hunt_may_cut(&self.task)
+                        && tick >= self.always_retry_at
                         && ((eat::hungry(w, rules) && eat::best_food(w, rules).is_none())
                             || self.provisioning(w, rules))
                         && !hunt::prey(w, rules, self.hunt_radius(w, rules), &self.refused_prey)
@@ -1664,7 +1824,22 @@ impl Plan {
             if let Some(make::Always::Escape(k)) = running {
                 let said = match std::mem::replace(&mut self.task, Task::Idle) {
                     Task::Escape(e) => e.report(),
-                    _ => String::new(),
+                    Task::Idle
+                    | Task::ToLog(_)
+                    | Task::Explore(_)
+                    | Task::Dig(_)
+                    | Task::Craft(_)
+                    | Task::Place(_)
+                    | Task::Stairs(_)
+                    | Task::Smelt(_)
+                    | Task::Redig(_)
+                    | Task::Scoop(_)
+                    | Task::Cast(_)
+                    | Task::Enter(_)
+                    | Task::Swim(..)
+                    | Task::Defend(_)
+                    | Task::Eat(_)
+                    | Task::Hunt(_) => String::new(),
                 };
                 self.retry_at = tick;
                 self.note(
@@ -1989,11 +2164,18 @@ impl Plan {
     /// Short of the food reserve in the overworld on the way to the Nether (issue 16a): animals in
     /// view are hunted then, not only when hungry.
     fn provisioning(&self, w: &World, rules: &make::SurvivalRules) -> bool {
-        matches!(self.aim, Aim::Nether | Aim::Race)
+        // Walled in for the cook (wall 11): no animal is gone after from the hut.
+        let walled = self.hut_done && self.hut_blocks > 0 && !self.readied;
+        !walled
+            && matches!(self.aim, Aim::Nether | Aim::Race)
             && w.dimension
                 .as_ref()
                 .is_some_and(|d| d.name == "minecraft:overworld")
-            && eat::food_points(w, rules) < rules.food_reserve
+            && if rules.meat_stock > 0 {
+                eat::meat_pieces(&held(w), rules) < rules.meat_stock
+            } else {
+                eat::food_points(w, rules) < rules.food_reserve
+            }
     }
 
     /// Armour held but not worn goes on (issue 16): a quick move (shift-click) of the piece from the
@@ -2008,6 +2190,27 @@ impl Plan {
             .as_ref()
             .map(|t| t.survival.junk.clone())
             .unwrap_or_default();
+        // A click no reply came to, with the pack full of junk: window 0 asked for again, so the
+        // drop below can go (overworld-leg wall 10: a craft's take into a full pack drew no
+        // reply, the click stayed pending, and no junk was dropped for 1,600 ticks until the
+        // planner was stuck).
+        if let Some(c) = w.click
+            && tick.saturating_sub(c.at_tick) > craft::CLICK_PATIENCE_TICKS
+            && w.inventory.carried.is_none()
+            && junk_slot(&w.inventory.slots, &junk).is_some()
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(world::Act::Resync);
+            self.note(
+                tick,
+                "resync a stale click".to_owned(),
+                format!(
+                    "a click unanswered {} ticks and fewer than {JUNK_FREE_SLOTS} main slots free: the junk drop goes next",
+                    tick.saturating_sub(c.at_tick)
+                ),
+            );
+            return;
+        }
         // A stack on the cursor and no slot for it: out it goes if it is junk, else onto a junk
         // stack's slot, which comes back on the cursor for the next look (blaze.md wall 21).
         if w.click.is_none()
@@ -2031,6 +2234,9 @@ impl Plan {
             && let Some((slot, kind)) = junk_slot(&w.inventory.slots, &junk)
         {
             self.equip_at = tick + EQUIP_TICKS;
+            // Kept to count a pick-up of it again (wall 12).
+            let stack = w.inventory.slots.get(&slot).map_or(0, |(_, n)| *n);
+            self.dropped = Some((kind, -(craft::count(w, kind) - stack).max(0) - 1, tick));
             // Mode 4 button 1: drop the whole stack (the client's ctrl+Q over the slot).
             self.acts.push(world::Act::Click {
                 slot,
@@ -2074,6 +2280,28 @@ impl Plan {
     /// and stood in until the dimension changes; with none, the portal row casts one.
     fn nether_task(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {
         self.equip(w, tick);
+        // No main slot free and junk to drop: nothing begun until a stack is out (wall 10: a
+        // craft into a full pack failed twelve times running and the run ended stuck), for
+        // `FULL_WAIT_TICKS` at most: a stack thrown at the feet is picked up again 40 ticks later,
+        // and a bot that waited on it idled 14,700 ticks (race 45354021804 lane 1).
+        let full = (9i16..=44).all(|s| w.inventory.slots.contains_key(&s));
+        let since = if full {
+            *self.full_since.get_or_insert(tick)
+        } else {
+            self.full_since = None;
+            tick
+        };
+        if full
+            && tick.saturating_sub(since) < FULL_WAIT_TICKS
+            && w.window.is_none()
+            && w.inventory.carried.is_none()
+            && self
+                .table
+                .as_ref()
+                .is_some_and(|t| junk_slot(&w.inventory.slots, &t.survival.junk).is_some())
+        {
+            return Task::Idle;
+        }
         if w.dimension
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
@@ -2106,19 +2334,48 @@ impl Plan {
             .collect();
         // Food first, then the Nether (Bridger, 2026-11-20): with a portal to enter and the reserve
         // short, look for animals (the hunt row takes those in view) before stepping in.
+        // Proportionate (overworld-leg wall 3): the bot goes in with `portal_food` or more; under
+        // it, animals are looked for only under the open sky and for `provision_ticks` at most.
+        // Two bots with lit portals explored for animals at y -53 for 24,000 ticks, at 24 and 21
+        // of 32.
         let short = self
             .table
             .clone()
             .filter(|t| !cells.is_empty() && self.provisioning(w, &t.survival))
-            .map(|t| (eat::food_points(w, &t.survival), t.survival.food_reserve));
-        if let Some((have, want)) = short {
-            self.note(
-                tick,
-                format!("provisions {have} of {want}"),
-                "short of the food reserve before the portal".to_owned(),
-            );
-            if let Some(t) = self.explore_walk(w, tick, "look for animals before the Nether") {
-                return t;
+            .map(|t| {
+                (
+                    eat::food_points(w, &t.survival),
+                    portal_food(&t.survival),
+                    t.survival.provision_ticks,
+                )
+            })
+            .filter(|(have, want, _)| have < want);
+        if let Some((have, want, clock)) = short {
+            let since = *self.portal_food_since.get_or_insert(tick);
+            let spent = tick.saturating_sub(since);
+            if portal_food_look(self.readied, spent, clock, world::stage::open_sky(w)) {
+                self.note(
+                    tick,
+                    format!("provisions {have} of {want}"),
+                    "short of the portal's food under the open sky".to_owned(),
+                );
+                if let Some(t) = self.explore_walk(w, tick, "look for animals before the Nether") {
+                    return t;
+                }
+            } else if !self.portal_food_noted {
+                self.portal_food_noted = true;
+                self.note(
+                    tick,
+                    "into the Nether short of food".to_owned(),
+                    format!(
+                        "provisions {have} of {want}; {}",
+                        if spent >= clock {
+                            format!("{spent} ticks looked")
+                        } else {
+                            "no animal lives under rock".to_owned()
+                        }
+                    ),
+                );
             }
         }
         // Tools next (blaze.md wall 18): the Nether has no wood, so the spare pickaxes and a table
@@ -2328,6 +2585,79 @@ impl Plan {
             }
             hold::Hold::Wait => Some(Task::Idle),
             hold::Hold::Missing => None,
+        }
+    }
+
+    /// The cook's hut (overworld-leg wall 11): before the first smelt on the surface, the bot
+    /// walls itself in with held blocks where it stands, beside its table and furnace, and roofs
+    /// it over, a block a look; the cook then runs to dusk and after with no mob able to reach it.
+    /// `None` once the hut is closed or cannot be built (noted once).
+    fn hut_step(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.hut_done {
+            return None;
+        }
+        let body = w.body?;
+        let item = SHELTER_BLOCKS
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0);
+        let next = cover::hut_block(w, body.pos);
+        let end = match (item, next) {
+            _ if self.hut_blocks == 0 && !world::stage::open_sky(w) => {
+                Some("not under the open sky: no hut")
+            }
+            (_, None) => Some("hut closed"),
+            (None, Some(_)) => Some("no block held for a hut"),
+            _ if self.hut_blocks >= HUT_MAX => Some("hut given up"),
+            _ => None,
+        };
+        if let Some(why) = end {
+            self.hut_done = true;
+            self.note(
+                tick,
+                format!("{why} ({} blocks placed)", self.hut_blocks),
+                "the cook walled in before its first smelt".to_owned(),
+            );
+            return None;
+        }
+        let (item, (cell, click, face)) = item.zip(next)?;
+        self.retry_at = tick + 1;
+        // A window open under the hut (a furnace or table clicked by mistake): closed first.
+        if w.window.is_some() && w.click.is_none() && self.acts.is_empty() {
+            self.acts.push(world::Act::CloseWindow);
+            return Some(Task::Idle);
+        }
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match hold::toward(w, item) {
+            hold::Hold::Held => {
+                self.shelter_at = tick + SHELTER_EVERY_TICKS;
+                self.hut_blocks += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("hut block {} at {cell:?}", self.hut_blocks),
+                    format!("the cook walled in; on {click:?} face {face}"),
+                );
+                Some(Task::Idle)
+            }
+            hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            hold::Hold::Wait => Some(Task::Idle),
+            hold::Hold::Missing => {
+                self.hut_done = true;
+                None
+            }
         }
     }
 
@@ -2656,6 +2986,11 @@ impl Plan {
     /// Issue 15's aim: met once nether bricks have been seen with an exposed face; until then,
     /// explore (15a's baseline; the held-heading search is 15b).
     fn fortress_task(&mut self, w: &World, tick: u64) -> Task {
+        // The race goes on from the fortress: a brick seen between the tick that sets the stage
+        // and this choice must not end the run there (met ends a run with no hold).
+        if self.aim == Aim::Race && world::stage::at_fortress(w) {
+            return self.spawner_task(w, tick);
+        }
         if world::stage::at_fortress(w) {
             self.met = true;
             self.note(
@@ -2937,6 +3272,11 @@ impl Plan {
         let n = |k: data::ItemKind| craft::count(w, k);
         let logs = logs_held(w);
         let food = eat::food_points(w, rules);
+        let counts = held(w);
+        let pieces = eat::meat_pieces(&counts, rules);
+        let raw: i32 = eat::raw_held(&counts, rules).iter().map(|r| r.1).sum();
+        // Something left for the cook phase: raw meat, or the kit's ingots still to smelt.
+        let to_cook = cook_goal(&counts, rules).is_some();
         let kit = geared(w)
             && n(data::ItemKind::WaterBucket) >= 1
             && n(data::ItemKind::Bucket) >= 1
@@ -2946,7 +3286,16 @@ impl Plan {
             return Flow::On;
         }
         if !first {
-            if world::stage::Stage::Ready.holds(w) {
+            // The stage's own bar and the whole reserve (overworld-leg wall 4): a bot resumed
+            // from a `ready` snapshot with less than the reserve hunts on the surface again, on
+            // the clock below, before it goes down.
+            if world::stage::Stage::Ready.holds(w)
+                && if rules.meat_stock > 0 {
+                    self.cook_over || (pieces >= rules.meat_stock && !to_cook)
+                } else {
+                    food >= rules.food_reserve
+                }
+            {
                 self.readied = true;
                 self.note(
                     tick,
@@ -2955,7 +3304,9 @@ impl Plan {
                 );
                 return Flow::On;
             }
-            if !world::stage::open_sky(w) {
+            // Under its own hut's roof the bot is at the surface: no stairs up through it (wall
+            // 11: a bot roofed itself in and cut stairs up onto its hut, race 45357148484).
+            if !world::stage::open_sky(w) && self.hut_blocks == 0 {
                 if let Some(t) = self.stairs_to_surface(w, tick) {
                     return Flow::Task(Box::new(t));
                 }
@@ -2975,10 +3326,82 @@ impl Plan {
         } else {
             world::stage::READY_LOGS as i32
         };
+        // The second stocking, with a meat stock set (overworld-leg wall 4): animals first, for
+        // one `provision_ticks` (it begins with a dozen pieces held, and a bot resumed at noon
+        // that looked for three would still be hunting after dark); then all the raw meat cooked;
+        // then the logs the cook burned.
+        if !first && rules.meat_stock > 0 {
+            if !self.hunt_over && self.failed_in_row >= HUNT_WALK_FAILS {
+                self.hunt_over = true;
+                self.note(
+                    tick,
+                    "the look for animals is over".to_owned(),
+                    format!(
+                        "{} walks failed running; {pieces} of {} pieces held after {spent} ticks",
+                        self.failed_in_row, rules.meat_stock
+                    ),
+                );
+            }
+            if pieces < rules.meat_stock && spent < rules.provision_ticks && !self.hunt_over {
+                let why = format!(
+                    "provisions {pieces} of {} pieces: look for animals",
+                    rules.meat_stock
+                );
+                if let Some(t) = self.explore_walk(w, tick, &why) {
+                    return Flow::Task(Box::new(t));
+                }
+            }
+            if to_cook && !self.cook_over {
+                return Flow::Cook;
+            }
+            if !self.cook_over {
+                self.cook_over = true;
+                self.note(
+                    tick,
+                    "cooked".to_owned(),
+                    format!(
+                        "{pieces} pieces and {food} food points held, {raw} raw, {} iron ingots, {} shields, after {} cook tasks",
+                        craft::count(w, data::ItemKind::IronIngot),
+                        craft::count(w, data::ItemKind::Shield),
+                        self.cook_tasks
+                    ),
+                );
+                // The spare pickaxes first, at the cook's table (wall 15: a bot took its table
+                // along, lost it in a dig, had no wood for another after the shields, and dug
+                // 10,000 ticks by hand with both pickaxes broken, race 45357148484): the spares'
+                // row takes the table along after.
+                let spares = fresh_pickaxes(w, rules.spare_uses) >= rules.spare_pickaxes;
+                if spares && let Some(t) = self.carry_table(w, tick) {
+                    return Flow::Task(Box::new(t));
+                }
+            }
+            // The logs were for the shields' planks: with the shields made at the cook site, none
+            // are gathered (wall 10: a bot cooked until dusk, walked to far trees after dark for
+            // its four logs, and a creeper killed it there).
+            let shields_made = rules.kit_shields > 0
+                && craft::count(w, data::ItemKind::Shield) >= rules.kit_shields;
+            if logs < want && spent < rules.provision_ticks * 4 && !shields_made {
+                return Flow::Stock;
+            }
+            self.provision_since = None;
+            self.readied = true;
+            self.note(
+                tick,
+                "stocked again".to_owned(),
+                format!(
+                    "{logs} logs, {pieces} pieces of meat and {food} food points held after {spent} ticks"
+                ),
+            );
+            return Flow::On;
+        }
         if logs < want && spent < rules.provision_ticks * 2 {
             return Flow::Stock;
         }
-        if food < rules.food_reserve && spent < rules.provision_ticks * 3 {
+        // The second stocking looks for one `provision_ticks` only: it begins with most of the
+        // reserve held, and a bot resumed at noon that looked for three would still be on the
+        // surface after dark.
+        let look = rules.provision_ticks * if first { 3 } else { 1 };
+        if food < rules.food_reserve && spent < look {
             let why = format!(
                 "provisions {food} of {}: look for animals",
                 rules.food_reserve
@@ -3062,13 +3485,17 @@ impl Plan {
         // The clean flow first (issue 16): stock up above ground before the first descent, and
         // come back up, stocked, before the cast.
         let mut stock_row = false;
+        let mut cook_row = false;
         if self.aim == Aim::Race && !self.kit_row {
             match self.clean_flow(w, &table.survival, tick) {
                 Flow::Task(t) => return *t,
                 Flow::Stock => stock_row = true,
+                Flow::Cook => cook_row = true,
                 Flow::On => {}
             }
         }
+        // Spare pickaxes ahead of need (overworld-leg wall 2).
+        let spare_row = !stock_row && !cook_row && self.spares_wanted(w, &table.survival, tick);
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
             // A portal stands and the bot is about to go in: the tools for the Nether first.
@@ -3077,6 +3504,7 @@ impl Plan {
             Aim::Race if stock_row => "stock".to_owned(),
             // The race gears up first (issue 16), then casts.
             Aim::Race if !geared(w) => "gear".to_owned(),
+            Aim::Race if spare_row => "nether-kit".to_owned(),
             // No pickaxe, but the makings of one held: craft it before casting or digging to a
             // site, never a trip for wood (clojurecraft's `pickaxe-at-hand?`; blaze wall 8).
             Aim::Portal | Aim::Nether | Aim::Race
@@ -3087,7 +3515,12 @@ impl Plan {
             Aim::Nether | Aim::Race => "portal".to_owned(),
             _ => self.aim.name(),
         };
-        let Some(goal) = table.until(&row) else {
+        let cook_goal = if cook_row {
+            cook_goal(&held(w), &table.survival)
+        } else {
+            None
+        };
+        let Some(goal) = cook_goal.as_ref().or_else(|| table.until(&row)) else {
             self.stuck = true;
             self.note(
                 tick,
@@ -3113,11 +3546,67 @@ impl Plan {
                 w, furnace, result, count, tick,
             )));
         }
-        // Taken up front: the block needs are a crafting table and a furnace.
-        let table_near = self
-            .near_block(w, data::BlockKind::CraftingTable, tick)
-            .is_some();
-        let furnace_near = self.near_block(w, data::BlockKind::Furnace, tick).is_some();
+        // Stone over the junk keep, with a table at hand: eight pressed into a furnace, a slot
+        // for 512, instead of a stack thrown down and picked up again 40 ticks later (wall 12:
+        // a bot idled 14,700 ticks on one pile, race 45354021804 lane 1).
+        if self.aim == Aim::Race
+            && let Some(t) = self.at_hand(w, data::BlockKind::CraftingTable, tick)
+            && let Some(r) = press_recipe(w, &table.survival)
+        {
+            self.pressed += 1;
+            self.note(
+                tick,
+                format!("press stone into a furnace at the table {t:?}"),
+                format!(
+                    "{} stone held over the junk keep, {} pressed so far",
+                    stone_over_keep(w, &table.survival),
+                    self.pressed
+                ),
+            );
+            return Task::Craft(Craft::at_table(r, t, tick));
+        }
+        // A stack of stone over the keep and the table in the pack: it is put down to press at,
+        // and taken along again once the stone is pressed (wall 12).
+        if self.aim == Aim::Race && !cook_row {
+            let over = stone_over_keep(w, &table.survival);
+            let carried = craft::count(w, data::ItemKind::CraftingTable) > 0;
+            if over >= PRESS_AT
+                && carried
+                && press_recipe(w, &table.survival).is_some()
+                && let Some(p) = Place::new(data::BlockKind::CraftingTable, tick)
+            {
+                self.press_table = true;
+                self.note(
+                    tick,
+                    "place CraftingTable to press stone".to_owned(),
+                    format!("{over} stone held over the junk keep"),
+                );
+                return Task::Place(p);
+            }
+            if self.press_table && press_recipe(w, &table.survival).is_none() {
+                self.press_table = false;
+                if let Some(t) = self.carry_table(w, tick) {
+                    return t;
+                }
+            }
+        }
+        // Taken up front: the block needs are a crafting table and a furnace. The spares and the
+        // Nether kit are made where the bot stands: a table remembered 44 blocks off, down the
+        // old stairs in a cave, walked a bot to it for 600 ticks and it died there (race
+        // 45337088346 lane 0).
+        let table_cell = if spare_row || self.kit_row || cook_row {
+            self.at_hand(w, data::BlockKind::CraftingTable, tick)
+        } else {
+            self.near_block(w, data::BlockKind::CraftingTable, tick)
+        };
+        let table_near = table_cell.is_some();
+        // The cook's furnace too is one where the bot stands: the one remembered is down a mine.
+        let furnace_cell = if cook_row {
+            self.at_hand(w, data::BlockKind::Furnace, tick)
+        } else {
+            self.near_block(w, data::BlockKind::Furnace, tick)
+        };
+        let furnace_near = furnace_cell.is_some();
         let near = move |b: data::BlockKind| match b {
             data::BlockKind::CraftingTable => table_near,
             data::BlockKind::Furnace => furnace_near,
@@ -3187,6 +3676,113 @@ impl Plan {
         {
             return t;
         }
+        // The cook phase takes only what can be done where the bot stands: a craft, a placing,
+        // a smelt, or a log gathered for fuel; never a mine. It is bounded by its tasks.
+        if cook_row {
+            // The first smelt waits for the hut (wall 11): table and furnace placed, the fuel
+            // made, the bot walls itself in before the long cook.
+            if let make::Choice::Act(r) = &choice
+                && matches!(r.act, Some(make::Act::Smelt(_)))
+                && let Some(t) = self.hut_step(w, tick)
+            {
+                return t;
+            }
+            let ok = matches!(
+                &choice,
+                make::Choice::Act(r)
+                    if matches!(
+                        r.act,
+                        Some(
+                            make::Act::Craft(_)
+                                | make::Act::Place(_)
+                                | make::Act::Smelt(_)
+                                | make::Act::Gather
+                        )
+                    )
+            );
+            self.cook_tasks += 1;
+            if !ok || self.cook_tasks > COOK_TASKS {
+                self.cook_over = true;
+                self.note(
+                    tick,
+                    "cooking given up".to_owned(),
+                    format!(
+                        "{} tasks begun; the next step toward {} was {}",
+                        self.cook_tasks,
+                        goal.id,
+                        match &choice {
+                            make::Choice::Act(r) => r.id.clone(),
+                            make::Choice::Done => "done".to_owned(),
+                            make::Choice::Stuck => "stuck".to_owned(),
+                        }
+                    ),
+                );
+                return Task::Idle;
+            }
+            if let make::Choice::Act(r) = &choice
+                && let Some(make::Act::Smelt(s)) = r.act
+            {
+                self.note(
+                    tick,
+                    format!("cook {}", s.id),
+                    format!(
+                        "{} raw pieces held, {} food points; a batch of all of this kind",
+                        eat::raw_held(&counts, &table.survival)
+                            .iter()
+                            .map(|r| r.1)
+                            .sum::<i32>(),
+                        eat::food_points(w, &table.survival)
+                    ),
+                );
+            }
+            // The shields at the cook's table (wall 8): each step says so.
+            if goal.id == "cook-shield"
+                && let make::Choice::Act(r) = &choice
+            {
+                self.note(
+                    tick,
+                    format!("shields at the cook site: {}", r.id),
+                    format!(
+                        "{} of {} shields held, {} iron ingots",
+                        craft::count(w, data::ItemKind::Shield),
+                        table.survival.kit_shields,
+                        craft::count(w, data::ItemKind::IronIngot)
+                    ),
+                );
+            }
+        }
+        // The spare pickaxes end here: the row's pickaxes held, or its next step no craft (a trip
+        // for wood is never made for a spare). The table comes along.
+        if spare_row {
+            let fresh = fresh_pickaxes(w, table.survival.spare_uses);
+            let pick: make::Counts = [(data::ItemKind::StonePickaxe, 1)].into_iter().collect();
+            let want = goal
+                .provides
+                .iter()
+                .find(|(n, _)| n.have(&pick) > 0)
+                .map_or(0, |(_, n)| *n);
+            let crafts = matches!(
+                &choice,
+                make::Choice::Act(r)
+                    if matches!(r.act, Some(make::Act::Craft(_) | make::Act::Place(_)))
+            );
+            if fresh >= want || !crafts {
+                self.sparing = false;
+                if fresh < table.survival.spare_pickaxes {
+                    self.spares_retry_at = tick + SPARES_RETRY_TICKS;
+                }
+                self.note(
+                    tick,
+                    if fresh >= want {
+                        "spare pickaxes held".to_owned()
+                    } else {
+                        "spare pickaxes not makeable".to_owned()
+                    },
+                    format!("{fresh} of {want} stone pickaxes with uses to spare"),
+                );
+                return self.carry_table(w, tick).unwrap_or(Task::Idle);
+            }
+        }
         // The portal (issue 14c): its kit held, the cast; met once a portal is lit.
         // The Nether kit ends here: made, or not makeable (no wood), the bot goes in either way.
         if self.kit_row && !matches!(choice, make::Choice::Act(_)) {
@@ -3206,7 +3802,11 @@ impl Plan {
             );
             return Task::Idle;
         }
-        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race) && !self.kit_row {
+        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race)
+            && !self.kit_row
+            && !spare_row
+            && !cook_row
+        {
             if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
                 self.portal = Some(site.frame.at((1, 1, 0)));
             }
@@ -3244,7 +3844,7 @@ impl Plan {
             }
             make::Choice::Act(row) => match row.act {
                 Some(make::Act::Craft(r)) if !make::fits_grid(r) => {
-                    let Some(t) = self.near_block(w, data::BlockKind::CraftingTable, tick) else {
+                    let Some(t) = table_cell else {
                         self.retry_at = tick + RETRY_TICKS;
                         self.note(
                             tick,
@@ -3286,7 +3886,7 @@ impl Plan {
                     self.mine(w, blocks, depth, tick)
                 }
                 Some(make::Act::Smelt(r)) => {
-                    let Some(f) = self.near_block(w, data::BlockKind::Furnace, tick) else {
+                    let Some(f) = furnace_cell else {
                         self.retry_at = tick + RETRY_TICKS;
                         self.note(
                             tick,
@@ -3302,6 +3902,27 @@ impl Plan {
                         .map(|i| craft::count(w, *i))
                         .sum::<i32>()
                         .min(64);
+                    // A cook's batch is what the first fuel held burns for: the furnace takes one
+                    // kind of fuel, and a batch needing two kinds of planks loaded the one, took
+                    // it out again for the other, and failed `TooManyClicks` 24 times in race
+                    // 45343519424 (overworld-leg wall 4).
+                    let count = if cook_row {
+                        let first = smelt::fuels_held(w).first().copied();
+                        let held = first.map_or(0, |(k, _)| craft::count(w, k));
+                        // No more than the goal is short of (three ingots, not all the ore).
+                        let short = goal
+                            .provides
+                            .first()
+                            .map_or(count, |(_, n)| n - craft::count(w, r.result));
+                        fuel_batch(
+                            first.map(|(_, t)| t),
+                            held,
+                            r.ticks,
+                            count.min(short.max(1)),
+                        )
+                    } else {
+                        count
+                    };
                     // >>> shield: a shield's smelt cooks the ingots it is short of and no more;
                     // the whole batch would burn the planks the shield is made of.
                     let count =
@@ -3798,13 +4419,31 @@ impl Plan {
             .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
             .take(LAVA_FETCH_TRIES)
             .collect();
+        // A source the eye is already within a bucket's reach of is no walk's target: the walk
+        // ends at once and the fetch, due again, finds it refused and gives the site up in the
+        // same tick (cast.md wall 2: "walk toward lava to fetch" then "no lava to fetch" at
+        // tick 29,920, 286 sources seen).
+        let eye = w
+            .body
+            .map(|b| [b.pos[0], b.pos[1] + physics::EYE_HEIGHT, b.pos[2]]);
+        let near = |c: &Cell| {
+            eye.is_some_and(|e| {
+                let p = [
+                    f64::from(c.0) + 0.5,
+                    f64::from(c.1) + 0.5,
+                    f64::from(c.2) + 0.5,
+                ];
+                (0..3).map(|i| (e[i] - p[i]).powi(2)).sum::<f64>().sqrt() <= FETCH_NEAR
+            })
+        };
         // Taken before the scoops refuse what they try: a source no scoop routes to now may be
         // walked toward, where more of its pool shows.
-        let far: Vec<Cell> = cast::lava_within(w, cast::FAR_RADIUS)
+        let (close, far): (Vec<Cell>, Vec<Cell>) = cast::lava_within(w, cast::FAR_RADIUS)
             .into_iter()
             .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
-            .take(LAVA_FETCH_TRIES)
-            .collect();
+            .partition(near);
+        let skipped = close.len();
+        let far: Vec<Cell> = far.into_iter().take(LAVA_FETCH_TRIES).collect();
         for c in candidates {
             let mut s = scoop::Scoop::of(c, memory::Fluid::Lava, tick);
             if s.route_now(w, tick) {
@@ -3842,7 +4481,7 @@ impl Plan {
                     tick,
                     format!("walk toward lava to fetch at {c:?}"),
                     format!(
-                        "no scoop routes; walk {} of {LAVA_FETCH_WALKS}",
+                        "no scoop routes; walk {} of {LAVA_FETCH_WALKS}; {skipped} sources within reach skipped",
                         self.fetch_walks
                     ),
                 );
@@ -3850,6 +4489,112 @@ impl Plan {
             }
         }
         None
+    }
+
+    /// A block of `kind` (a crafting table, a furnace) remembered within `TABLE_AT_HAND` of the
+    /// eye: one to work at with no walk to speak of.
+    fn at_hand(&self, w: &World, kind: data::BlockKind, tick: u64) -> Option<Cell> {
+        let t = self.near_block(w, kind, tick)?;
+        let b = w.body?;
+        let eye = [b.pos[0], b.pos[1] + physics::EYE_HEIGHT, b.pos[2]];
+        let c = [
+            f64::from(t.0) + 0.5,
+            f64::from(t.1) + 0.5,
+            f64::from(t.2) + 0.5,
+        ];
+        let d = (0..3).map(|i| (eye[i] - c[i]).powi(2)).sum::<f64>().sqrt();
+        (d <= TABLE_AT_HAND).then_some(t)
+    }
+
+    /// Whether the race makes spare pickaxes now (overworld-leg wall 2): from `ready` on, in the
+    /// overworld, before a portal is lit, with fewer than `spare_pickaxes` stone pickaxes with
+    /// uses to spare and the makings of one in the pack. Once begun it holds until the row's
+    /// pickaxes are held. Nine bots of races 45194253932 and 45204423376 spent 1,940 to 58,960
+    /// ticks with no pickaxe, 21 to 25 sticks and a table in the pack.
+    fn spares_wanted(&mut self, w: &World, rules: &make::SurvivalRules, tick: u64) -> bool {
+        let overworld = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == "minecraft:overworld");
+        if self.aim != Aim::Race
+            || !self.readied
+            || self.kit_row
+            || self.portal.is_some()
+            || !overworld
+            || tick < self.spares_retry_at
+        {
+            self.sparing = false;
+            return false;
+        }
+        if self.sparing {
+            return true;
+        }
+        let table_near = self
+            .at_hand(w, data::BlockKind::CraftingTable, tick)
+            .is_some();
+        if !spares_due(w, rules, table_near) {
+            return false;
+        }
+        self.sparing = true;
+        self.note(
+            tick,
+            "spare pickaxes".to_owned(),
+            format!(
+                "{} stone pickaxes with {} uses or more held, under {}: made now, from the pack",
+                fresh_pickaxes(w, rules.spare_uses),
+                rules.spare_uses,
+                rules.spare_pickaxes
+            ),
+        );
+        true
+    }
+
+    /// The lava hunt's own stairs (overworld-leg wall 1): six steps down in rock, toward `pool`
+    /// when one is known and not yet under the feet, else the next heading of a spiral; never
+    /// below `SEA_FEET`. No terrain is read to choose the heading (strict no X-ray): each stair's
+    /// own refusal turns it. Seven of sixteen bots died in the caves the hunt's walks led through
+    /// before any cast.
+    fn own_stairs(&mut self, feet: Cell, pool: Option<Cell>, tick: u64) -> Task {
+        let mut dir = own_heading(feet, pool, self.descent_legs);
+        // Walked back from a ledge (wall 9): the heading that led there is not taken again.
+        let back = self.own_back.filter(|(c, _)| *c == feet);
+        if let Some((_, bad)) = back
+            && dir == bad
+        {
+            dir = (-bad.1, bad.0);
+            self.note(
+                tick,
+                format!("own stairs turned from {bad:?} to {dir:?}"),
+                format!("walked back to {feet:?} from a ledge that heading led to"),
+            );
+        }
+        self.own_leg = Some((feet, dir));
+        self.descent_legs += 1;
+        let steps = u32::try_from(feet.1 - SEA_FEET)
+            .unwrap_or(0)
+            .min(stairs::STAIR_DEPTH);
+        self.note(
+            tick,
+            format!(
+                "own stairs down, leg {} heading {dir:?}, {steps} steps",
+                self.descent_legs
+            ),
+            format!(
+                "no site, the feet at y {} over {}: stairs in rock, no walk through caves",
+                feet.1,
+                pool.map_or_else(
+                    || format!("the lava sea (feet y {SEA_FEET})"),
+                    |p| format!("a pool of ten at {p:?}")
+                )
+            ),
+        );
+        let mut st = Stairs::new(dir, tick);
+        // The last leg stops at the sea's level: the count starts short of a full leg.
+        st.stairs = stairs::STAIR_DEPTH - steps;
+        // Never a stair cut beside water (wall 7: a leg at y 55 let an aquifer in and the bot
+        // was held in it to the cap).
+        st.dry = true;
+        Task::Stairs(Box::new(st))
     }
 
     /// A cast at the site in hand, or one chosen now; with none, go down for lava (clojurecraft's
@@ -3941,6 +4686,88 @@ impl Plan {
                 "a site beside lava seen exposed".to_owned(),
             );
             return Task::Cast(Box::new(cast::Cast::new(site, tick)));
+        }
+        // No site, and over the lava sea's level: down by its own stairs (overworld-leg wall 1),
+        // unless a pool of ten sources is known near the feet's height, which is walked to as
+        // before. A far pool of fewer is one the site choice refuses on arrival (`spent`).
+        // A far lava target the hunt comes no nearer to is given up (wall 13, a progress
+        // invariant: lane 0 of race 45354021804 circled a pool of ten at (-30, 46, -254) for 8,000
+        // ticks, its walks failing and its stairs re-walking cut steps).
+        if let Some(body) = w.body
+            && let Some(aim) = cast::far_pool(w, &self.given_up_sites)
+                .or_else(|| cast::far_lava(w, &self.given_up_sites))
+        {
+            let (fx, fy, fz) = path::feet_cell(body.pos);
+            let d =
+                f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
+            let (best, stalls) = landing_stalls(&mut self.lava_aims, aim, d);
+            if stalls >= LAVA_AIM_STALLS {
+                self.lava_aims.retain(|(c, _, _)| *c != aim);
+                self.given_up_sites.push(aim);
+                self.note(
+                    tick,
+                    format!("lava at {aim:?} given up"),
+                    format!("{stalls} looks came no nearer than {best:.1}: another target"),
+                );
+            }
+        }
+        if let Some(body) = w.body {
+            let feet = path::feet_cell(body.pos);
+            let pool = cast::far_pool(w, &self.given_up_sites);
+            let overworld = w
+                .dimension
+                .as_ref()
+                .is_some_and(|d| d.name == "minecraft:overworld");
+            // Legs begun from this same cell: two that left the feet where they were (every
+            // heading refused: a ledge over a cave, its floors air) and the old hunt takes over
+            // from here, a walk where one goes.
+            let legs_here = match self.own_from {
+                Some((c, n)) if c == feet => n + 1,
+                Some(_) | None => 0,
+            };
+            if overworld && feet.1 > SEA_FEET && pool.is_none_or(|p| feet.1 - p.1 > DESCENT_WALK) {
+                self.own_from = Some((feet, legs_here));
+                if legs_here == 0 {
+                    // A new cell: the leg that led here, kept for a walk back from it.
+                    // Not at a cell walked back to: the leg into it is the ledge's.
+                    self.own_into = self
+                        .own_leg
+                        .filter(|(c, _)| *c != feet)
+                        .filter(|_| self.own_back.is_none_or(|(b, _)| b != feet));
+                }
+                if legs_here < OWN_LEGS_STUCK {
+                    return self.own_stairs(feet, pool, tick);
+                }
+                // Boxed on a ledge (wall 9: every heading's floor air over a cave, the old hunt's
+                // stairs boxed too, relocations spent on walks with no path): back up the leg's
+                // own stairs to where it began, once, and from there another heading.
+                if let Some((start, dir)) = self.own_into.take()
+                    && !self.refused_now(start, tick)
+                {
+                    let mut walk = Walk::new(start, Goal::Block { pos: start }, Arrive::Goal, tick);
+                    if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                        self.own_back = Some((start, dir));
+                        self.own_from = None;
+                        self.walks += 1;
+                        self.note(
+                            tick,
+                            format!("own stairs back to {start:?}"),
+                            format!(
+                                "{legs_here} legs begun from {feet:?} left the feet there: back up the leg that came {dir:?}, another heading from there"
+                            ),
+                        );
+                        return Task::Explore(walk);
+                    }
+                    self.refuse(start, tick);
+                }
+                if legs_here == OWN_LEGS_STUCK {
+                    self.note(
+                        tick,
+                        "own stairs make no way here".to_owned(),
+                        format!("{legs_here} legs begun from {feet:?} left the feet there: the old hunt from here"),
+                    );
+                }
+            }
         }
         // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
         // (clojurecraft's lava hunt goes toward far sources); with none seen, down toward the lava
@@ -4216,7 +5043,7 @@ impl Plan {
                     };
                     self.note(
                         tick,
-                        format!("cut {} stairs{extra}", st.stairs),
+                        format!("cut {} stairs{extra}{}", st.stairs, water_turns(&st)),
                         "look again for what to mine".to_owned(),
                     );
                 }
@@ -4231,7 +5058,11 @@ impl Plan {
                     let last = st.refusals.last().cloned().unwrap_or_default();
                     self.note(
                         tick,
-                        format!("stairs failed: {f:?} after {} stairs", st.stairs),
+                        format!(
+                            "stairs failed: {f:?} after {} stairs{}",
+                            st.stairs,
+                            water_turns(&st)
+                        ),
                         format!("last refusal: {last}; turn the heading"),
                     );
                 }
@@ -4664,6 +5495,238 @@ pub fn exposed_near(w: &World, kinds: &[data::BlockKind]) -> Vec<Cell> {
     found.into_iter().map(|(_, c)| c).collect()
 }
 
+/// The feet height the lava hunt's own stairs stop at: vanilla fills every cave below y -54 with
+/// lava, so y -54 is the lowest air and a tunnel there opens onto the lakes at their own level,
+/// with no sea lava beside or over it (the sites the bots of races 45194253932 and 45204423376
+/// cast at had their lava at y -55 and landings at y -52 to -55).
+pub const SEA_FEET: i32 = -54;
+/// A known pool of ten within this many blocks under the feet is walked to; deeper, the bot
+/// goes down by its own stairs first (a stair's leg and two: the cave walks that killed seven
+/// bots each went down 20 to 90 blocks).
+pub const DESCENT_WALK: i32 = 8;
+/// The spiral's headings, a quarter turn a leg: east, south, west, north.
+pub const SPIRAL: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+/// Blocks from the eye a table counts as at hand for the spares and the Nether kit: a placed
+/// table lands within two or three of the feet, and a walk of a few blocks stays in the bot's
+/// own cut.
+const TABLE_AT_HAND: f64 = 6.0;
+/// Failed walks running that end the second stocking's look for animals: half the twelve that
+/// cost a relocation.
+const HUNT_WALK_FAILS: u32 = 6;
+/// Legs of own stairs begun from one cell before the old hunt takes over there: a leg turns
+/// through all four headings itself, so the second failure is no accident.
+const OWN_LEGS_STUCK: u32 = 2;
+/// Ticks before spare pickaxes are asked for again once they could not be made.
+const SPARES_RETRY_TICKS: u64 = 2400;
+
+/// The heading of the lava hunt's next leg of own stairs: toward `pool` along the longer axis
+/// while it is more than a leg away on the plane, else the spiral's heading for leg `legs`. It
+/// reads no terrain.
+pub fn own_heading(feet: Cell, pool: Option<Cell>, legs: u32) -> (i32, i32) {
+    let spiral = SPIRAL[legs as usize % 4];
+    let Some(p) = pool else {
+        return spiral;
+    };
+    let (dx, dz) = (p.0 - feet.0, p.2 - feet.2);
+    if dx.abs().max(dz.abs()) <= stairs::STAIR_DEPTH as i32 {
+        spiral
+    } else if dx.abs() >= dz.abs() {
+        (dx.signum(), 0)
+    } else {
+        (0, dz.signum())
+    }
+}
+
+/// A dry staircase's turns from water, for its ending note (overworld-leg wall 7); empty for
+/// any other staircase or none.
+fn water_turns(st: &Stairs) -> String {
+    match st.water_refusals() {
+        0 => String::new(),
+        n => format!(" ({n} turned from water beside)"),
+    }
+}
+
+/// Junk stone (cobblestone and cobbled deepslate, what a furnace is made of) held over the
+/// cobblestone keep of the junk list.
+pub fn stone_over_keep(w: &World, rules: &make::SurvivalRules) -> i32 {
+    let keep = rules
+        .junk
+        .iter()
+        .find(|(k, _)| *k == data::ItemKind::Cobblestone)
+        .map_or(64, |(_, n)| *n);
+    craft::count(w, data::ItemKind::Cobblestone) + craft::count(w, data::ItemKind::CobbledDeepslate)
+        - keep
+}
+
+/// The furnace recipe, when eight stone over the keep are held and fewer than 64 furnaces
+/// (one slot): junk pressed eight to one (overworld-leg wall 12).
+fn press_recipe(w: &World, rules: &make::SurvivalRules) -> Option<&'static data::types::Recipe> {
+    if stone_over_keep(w, rules) < 8 || craft::count(w, data::ItemKind::Furnace) >= 64 {
+        return None;
+    }
+    data::generated::recipes::RECIPES
+        .iter()
+        .find(|r| r.id == "furnace")
+}
+
+/// Stone pickaxes held with at least `spare_uses` uses left (one on the cursor counts).
+pub fn fresh_pickaxes(w: &World, spare_uses: i32) -> i32 {
+    let slots = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(slot, (k, _))| {
+            **slot >= 1
+                && *k == data::ItemKind::StonePickaxe
+                && w.inventory
+                    .uses_left(**slot)
+                    .is_none_or(|u| u >= spare_uses)
+        })
+        .count();
+    let carried = w
+        .inventory
+        .carried
+        .is_some_and(|(k, _)| k == data::ItemKind::StonePickaxe);
+    i32::try_from(slots).unwrap_or(i32::MAX) + i32::from(carried)
+}
+
+/// Whether spare pickaxes are due: fewer than `spare_pickaxes` fresh ones held and the makings
+/// of one in the pack (overworld-leg wall 2).
+pub fn spares_due(w: &World, rules: &make::SurvivalRules, table_near: bool) -> bool {
+    rules.spare_pickaxes > 0
+        && fresh_pickaxes(w, rules.spare_uses) < rules.spare_pickaxes
+        && pickaxe_makeable(w, table_near)
+}
+
+/// Tasks the cook phase may begin: planks from five logs, a table and a furnace made and placed,
+/// a batch a kind of meat and a log or two gathered are under twenty; the shields' wood and
+/// crafts add up to twenty more (race 45354021804 lane 1 gave up at task 41 on its first shield
+/// craft, wall 8); sixty leaves each a retry.
+const COOK_TASKS: u32 = 60;
+
+/// The goal the cook phase hands the needs planner (overworld-leg wall 4), from what is held:
+/// while the coal and planks held burn for less than all the raw meat's cook time, the planks
+/// that cover it (crafted from logs; with no log, a gather); then, for the first raw kind, all
+/// of it cooked. `None` with nothing raw to cook.
+pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<make::Row> {
+    let raw = eat::raw_held(counts, rules);
+    // The kit's ingots (the shields'), from held raw iron, once the meat is done; a shield made
+    // counts as the ingot it took.
+    let ingots = counts.get(&data::ItemKind::IronIngot).copied().unwrap_or(0);
+    let shields = counts.get(&data::ItemKind::Shield).copied().unwrap_or(0);
+    let raw_iron = counts.get(&data::ItemKind::RawIron).copied().unwrap_or(0);
+    let iron = (rules.kit_ingots - ingots - shields).clamp(0, raw_iron.max(0));
+    // Then the shields themselves, at the cook's table, from the ingots held (overworld-leg
+    // wall 8): crafted under the open sky, not at a portal down a mine.
+    let shield_more = (rules.kit_shields - shields).clamp(0, ingots.max(0));
+    if raw.is_empty() && iron == 0 {
+        if shield_more == 0 {
+            return None;
+        }
+        return Some(make::Row {
+            id: "cook-shield".to_owned(),
+            needs: Vec::new(),
+            provides: vec![(make::Need::parse("item:shield")?, shields + shield_more)],
+            holds: Vec::new(),
+            spares: Vec::new(),
+            wants: Vec::new(),
+            act: None,
+        });
+    }
+    let need: i32 = raw
+        .iter()
+        .map(|(_, n, r)| n * i32::try_from(r.ticks).unwrap_or(200))
+        .sum::<i32>()
+        + iron * 200
+        // The shields' planks too, six a shield at a plank's 300 ticks, so the wood is held
+        // before the hut is closed (wall 11): no walk to the trees from inside it.
+        + 6 * 300 * (rules.kit_shields - shields).clamp(0, ingots + iron);
+    let planks = data::generated::tags::item_tag("planks").unwrap_or(&[]);
+    let coals = data::generated::tags::item_tag("coals").unwrap_or(&[]);
+    let burns = |k: &data::ItemKind| {
+        data::generated::fuel::fuel_ticks(*k)
+            .and_then(|t| i32::try_from(t).ok())
+            .unwrap_or(0)
+    };
+    let have: i32 = counts
+        .iter()
+        .filter(|(k, _)| planks.contains(k) || coals.contains(k))
+        .map(|(k, n)| n * burns(k))
+        .sum();
+    let row = |id: &str, need: make::Need, count: i32| make::Row {
+        id: id.to_owned(),
+        needs: Vec::new(),
+        provides: vec![(need, count)],
+        holds: Vec::new(),
+        spares: Vec::new(),
+        wants: Vec::new(),
+        act: None,
+    };
+    if have < need {
+        let plank = burns(&data::ItemKind::OakPlanks).max(1);
+        let held: i32 = counts
+            .iter()
+            .filter(|(k, _)| planks.contains(k))
+            .map(|(_, n)| *n)
+            .sum();
+        let more = (need - have + plank - 1) / plank;
+        return Some(row(
+            "cook-fuel",
+            make::Need::parse("tag:planks")?,
+            held + more,
+        ));
+    }
+    let Some((_, n, recipe)) = raw.first().copied() else {
+        return Some(row(
+            "cook-iron",
+            make::Need::parse("item:iron_ingot")?,
+            ingots + iron,
+        ));
+    };
+    let cooked = counts.get(&recipe.result).copied().unwrap_or(0);
+    let name = recipe.result.name()?;
+    Some(row(
+        "cook",
+        make::Need::parse(&format!("item:{name}"))?,
+        cooked + n,
+    ))
+}
+
+/// The most of a batch of `count` that `held` items of a fuel burning `fuel_ticks` each cook, at
+/// `cook_ticks` an item; the whole batch when no fuel is known (the smelt then says what is
+/// missing), and never under one.
+pub fn fuel_batch(fuel_ticks: Option<u32>, held: i32, cook_ticks: u32, count: i32) -> i32 {
+    let Some(t) = fuel_ticks else {
+        return count;
+    };
+    let burns = i64::from(t) * i64::from(held.max(0));
+    let fits = i32::try_from(burns / i64::from(cook_ticks.max(1))).unwrap_or(i32::MAX);
+    count.min(fits).max(1)
+}
+
+/// Whether a hunt may cut the task running: never a cast, a scoop or a portal's entry, each with
+/// a bucket or a frame half done.
+pub fn hunt_may_cut(task: &Task) -> bool {
+    !matches!(task, Task::Cast(_) | Task::Scoop(_) | Task::Enter(_))
+}
+
+/// Whether the portal's food check looks for animals: never once the surface stocking is over
+/// (`readied`: it hunted there on its own clock), else under the open sky for `clock` ticks
+/// from the first look (overworld-leg wall 3; the review of 2026-11-24: with no clock a bot
+/// walked 48-block legs away from its lit portal for the whole run).
+pub fn portal_food_look(readied: bool, spent: u64, clock: u64, open_sky: bool) -> bool {
+    !readied && open_sky && spent < clock
+}
+
+/// The hunger points a portal is entered with: `portal_food`, or the whole reserve when unset.
+pub fn portal_food(rules: &make::SurvivalRules) -> i32 {
+    if rules.portal_food > 0 {
+        rules.portal_food.min(rules.food_reserve)
+    } else {
+        rules.food_reserve
+    }
+}
+
 /// The distance and stalls kept for a cast landing: a look that comes no nearer than its best is
 /// a stall, counted for that landing whatever was looked at between (the last `LANDINGS_KEPT`).
 pub fn landing_stalls(kept: &mut Vec<(Cell, f64, u32)>, aim: Cell, d: f64) -> (f64, u32) {
@@ -4836,6 +5899,8 @@ enum Flow {
     Task(Box<Task>),
     /// Work the `stock` row (logs).
     Stock,
+    /// Cook the raw meat held (`cook_goal`).
+    Cook,
     /// Nothing: the race goes on.
     On,
 }

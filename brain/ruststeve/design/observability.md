@@ -5,8 +5,8 @@ type: reference
 tags: [observability, case-files, events, snapshots]
 aliases: [case files, senses, ledger, snapshot stream, coverage, flight recorder, tracing]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@a5ae696 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@064c33e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#Observability here means one thing: at any tick, a human can see what the bot believed, what it decided, why, and what actually happened, and compare them."
   - "clojurecraft:LOOP.md#Full observability is the rule (Bridger, Nov 6: \"otherwise you are a ship in the night\")."
@@ -63,6 +63,7 @@ The files were whole and were still misread twice in one night (race 45204423376
 - **The case** opens with `where:` (dimension, position and cell, what the feet stand on, lava or water, held item and cursor, the task and its reason, the last stage and the ticks since), counts every note of the ledger by kind (`story::note_kind`: leading words to the first number or bracket, an item's name as `*`), lists every note carrying `trail:` whole, says how many tasks of a kind ended within the second they began, and tells the last two minutes as the ledger does.
 - **No loss of health is silent.** A fall in health with no damage event of its own (none within `HIT_WINDOW`, 10 client ticks, that an earlier fall had not taken) is `Fact::HealthDrop` with the nearest hostile and whether the bot burned; the case counts them. New blows are told from the newest blow's stamp (`Snapshot::hit_mark`), not from the length of `World::hits`, which stands still once the world prunes it.
 - `replay ledger <rsr> --force [--raw] [--senses N] [--story]` prints all of it for any recording.
+- **The day clock** (issue 16, `docs/problems/day-clock.md`): the ledger says `night fell (day time T)` at dusk (or when a bot joins at night) and `day broke (day time T)` at dawn (`Fact::Night`, `Fact::Day`), and each senses row keeps `day_time` and prints `day T` (` night` added after dusk). An old recording read with `replay ledger` gets both, since the time is decoded from the recorded `set_time` bytes.
 
 ## What was dropped
 Rerun and an in-process axum debug endpoint (`FUNCTIONAL.md`): ruststeve ships no viewer; steve is the front end, reading the SurrealDB insight store ([[data-out]]). Replays and the `why` binary are the REPL substitute.

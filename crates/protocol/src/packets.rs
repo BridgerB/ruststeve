@@ -70,8 +70,14 @@ pub enum S2c {
         pitch: f32,
         flags: u32,
     },
-    /// The clock, sent every 20 server ticks; its arrival is what matters.
-    SetTime,
+    /// The clock, sent every 20 server ticks: the level's game time and the world clocks it
+    /// updates (26.1.2's `ClientboundSetTimePacket`: a long, then a map of
+    /// `Holder<WorldClock>` to `ClockNetworkState`). Its arrival is what the session counts;
+    /// the overworld clock's ticks are the day time (`World::day_time`).
+    SetTime {
+        game_time: i64,
+        clocks: Vec<ClockUpdate>,
+    },
     /// A chunk column, its sections decoded on the reader thread (heightmaps and light skipped).
     LevelChunkWithLight {
         x: i32,
@@ -385,6 +391,26 @@ pub enum S2c {
     },
 }
 
+/// One world clock in a `set_time`, in wire order (26.1.2's `ClockNetworkState`: a var-long,
+/// two floats, after the clock's `holderRegistry` varint).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClockUpdate {
+    /// The `world_clock` registry id: synced registries are sent sorted by name, so 0 is
+    /// `minecraft:overworld` and 1 `minecraft:the_end` (`OVERWORLD_CLOCK`).
+    pub clock: i32,
+    /// The clock's ticks since the world began: the overworld's, taken mod 24,000, is the day
+    /// time (`data/minecraft/timeline/day.json`, `period_ticks`).
+    pub total_ticks: i64,
+    /// How far into the next tick the clock is, 0 to 1.
+    pub partial_tick: f32,
+    /// Clock ticks per server tick: 1 normally, 0 with the day cycle stopped.
+    pub rate: f32,
+}
+
+/// The `world_clock` registry id of `minecraft:overworld` (registry entries `overworld`,
+/// `the_end` in the 26.1.2 jar's `data/minecraft/world_clock/`, sent sorted by name).
+pub const OVERWORLD_CLOCK: i32 = 0;
+
 /// A sound event as the wire holds it: a registry id, or one written inline by name.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SoundRef {
@@ -542,7 +568,20 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                     flags: r.u32()?,
                 }
             }
-            Some(PlayIn::SetTime) => S2c::SetTime,
+            Some(PlayIn::SetTime) => {
+                let game_time = r.i64()?;
+                let n = r.length()?;
+                let mut clocks = Vec::new();
+                for _ in 0..n {
+                    clocks.push(ClockUpdate {
+                        clock: r.varint()?,
+                        total_ticks: r.varlong()?,
+                        partial_tick: r.f32()?,
+                        rate: r.f32()?,
+                    });
+                }
+                S2c::SetTime { game_time, clocks }
+            }
             Some(PlayIn::LevelChunkWithLight) => {
                 let (x, z) = (r.i32()?, r.i32()?);
                 for _ in 0..r.length()? {
@@ -1414,11 +1453,15 @@ impl S2c {
                 w.i32(*flags as i32);
                 PlayIn::PlayerPosition.id()
             }
-            S2c::SetTime => {
-                // The bot counts the packet, not its fields; game time and day time, ticking.
-                w.i64(0);
-                w.i64(0);
-                w.bool(true);
+            S2c::SetTime { game_time, clocks } => {
+                w.i64(*game_time);
+                w.varint(i32::try_from(clocks.len()).map_err(|_| EncodeError::TooLong)?);
+                for c in clocks {
+                    w.varint(c.clock);
+                    w.varlong(c.total_ticks);
+                    w.f32(c.partial_tick);
+                    w.f32(c.rate);
+                }
                 PlayIn::SetTime.id()
             }
             S2c::ForgetLevelChunk { x, z } => {
