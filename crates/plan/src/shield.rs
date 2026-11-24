@@ -52,6 +52,119 @@ pub const NEAR_END: f64 = 3.5;
 /// Server ticks after a fireball ended before it is judged (the damage event and the block
 /// sound come in the same tick or the next).
 pub const JUDGE_TICKS: u64 = 4;
+/// Eye to a fought mob's box within which the shield yields to the fight's strike: the strike's
+/// own reach (`defend::STRIKE_REACH`) and a block for the step that closes it. A shield raised
+/// toward a charged blaze turned the bot from a wither skeleton in reach and dropped its strikes
+/// (review of bba8161); a raised shield dropped 27 of 30 swings with blazes in touch (race
+/// 45359254088).
+pub const YIELD_REACH: f64 = crate::defend::STRIKE_REACH + 1.0;
+/// A shield already up stays up through a fight in reach for a fireball in front that lands
+/// within this many ticks: a raise made now would not block it (5 ticks), one made already does.
+pub const LAND_TICKS: f64 = 6.0;
+/// Blocks a tick a fireball whose velocity the server has not sent is taken to close at (a small
+/// fireball's power is 0.1 a tick, drag 0.95: about 0.5 after its first second).
+pub const ASSUMED_SPEED: f64 = 0.5;
+/// Ticks the server needs a shield up before it blocks (`block_delay_seconds` 0.25).
+pub const BLOCK_DELAY: u64 = 5;
+
+/// What the tick asks of the hands, for the shield to weigh (`Shield::step`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Duty {
+    /// No escape, no meal, no window or other work of the hands; a strike, a held-slot change or
+    /// a click to place a block may still be in the tick.
+    pub free: bool,
+    /// The tick clicks to place a block (a shelter block, a bridge block).
+    pub placing: bool,
+    /// The fight has a mob in reach and strikes it (what, for the ledger).
+    pub striking: Option<String>,
+}
+
+/// Ticks until a fireball at `pos` moving at `velocity` reaches `mid`, `None` when it is not
+/// closing. One with no velocity yet closes at `ASSUMED_SPEED`.
+pub fn landing_in(pos: [f64; 3], velocity: Option<[f64; 3]>, mid: [f64; 3]) -> Option<f64> {
+    let d = distance(pos, mid);
+    let closing = match velocity {
+        Some(v) if d > 1e-6 => (0..3).map(|i| v[i] * (mid[i] - pos[i])).sum::<f64>() / d,
+        Some(_) => 1.0,
+        None => ASSUMED_SPEED,
+    };
+    (closing > 1e-6).then(|| d / closing)
+}
+
+/// What a defend has in the reach of its strike, for the shield to yield to: a blaze in touch
+/// (`defend::blaze_in_touch`: the keep-off step and the strike go first, blaze-fight wall 19), or
+/// in a fight, its foe or a mob of its kind (the ones it strikes) when that kind is a hostile
+/// melee one (not of `ranged`), within `YIELD_REACH` of the eye by the box: a mob the fight does
+/// not strike is no reason to lower the shield.
+/// A blaze in reach but not in touch is not yielded to: yielding to it cost the model's eight
+/// shield seeds 0.30 to 0.66 fireballs landed a thousand ticks and 522 to 658 health lost
+/// (probes 45361576927 and 45362273722). `None` otherwise.
+pub fn striking(w: &World, d: &crate::defend::Defend, ranged: &[EntityKind]) -> Option<String> {
+    if crate::defend::blaze_in_touch(w) {
+        return Some("a blaze in touch".to_owned());
+    }
+    if d.stance != crate::defend::Stance::Fight {
+        return None;
+    }
+    let body = w.body?;
+    let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+    w.entities
+        .iter()
+        .filter(|(id, e)| {
+            !e.dead
+                && (**id == d.foe || e.kind == d.kind)
+                && crate::defend::hostile(e.kind)
+                && !ranged.contains(&e.kind)
+        })
+        .map(|(id, e)| (crate::defend::box_distance(eye, e.pos), *id, e.kind))
+        .filter(|(r, _, _)| *r <= YIELD_REACH)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(r, id, kind)| format!("{kind:?} {id} in reach at {r:.1}"))
+}
+
+/// A defend's swing count before a tick: a strike the raised shield drops is given back to it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SwingCount {
+    pub started: u64,
+    pub swings: u32,
+    pub passing: u32,
+    pub falling: u32,
+    pub last_swing: Option<u64>,
+}
+
+impl SwingCount {
+    pub fn of(d: &crate::defend::Defend) -> Self {
+        Self {
+            started: d.started,
+            swings: d.swings,
+            passing: d.passing_swings,
+            falling: d.falling_swings,
+            last_swing: d.last_swing,
+        }
+    }
+
+    /// Put the count back on `d` (the same defend, or a new one: from nothing); the swings
+    /// given back.
+    pub fn restore(self, d: &mut crate::defend::Defend) -> u32 {
+        let was = if self.started == d.started {
+            self
+        } else {
+            Self::default()
+        };
+        let back = d.swings.saturating_sub(was.swings);
+        d.swings = was.swings.min(d.swings);
+        d.passing_swings = was.passing.min(d.passing_swings);
+        d.falling_swings = was.falling.min(d.falling_swings);
+        d.last_swing = was.last_swing;
+        back
+    }
+}
+
+/// Whether `at` lies within the shield's 90 degrees either side of `yaw`, seen from `from`.
+pub fn in_front(from: [f64; 3], at: [f64; 3], yaw: f64) -> bool {
+    let d = (crate::walk::yaw_to(from, at) - yaw).rem_euclid(360.0);
+    d.min(360.0 - d) < 90.0
+}
 
 /// What the shield goes up against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -306,6 +419,8 @@ pub struct Step {
     pub yaw: Option<f64>,
     /// `UseOffHand` to raise, `ReleaseUse` to lower.
     pub act: Option<Act>,
+    /// A click to place a block waits: a threat is due and the shield goes up instead.
+    pub hold_place: bool,
     /// For the ledger.
     pub notes: Vec<String>,
 }
@@ -351,6 +466,18 @@ pub struct Shield {
     pub heard_there: u32,
     /// The worn note was written for the shield in hand.
     pub worn_noted: bool,
+    /// Ticks a due threat was left to the fight's strike (a mob in reach), the episodes of it,
+    /// and whether one runs now.
+    pub yield_ticks: u32,
+    pub yields: u32,
+    pub yielding: bool,
+    /// Ticks the shield stayed up through a fight in reach for a fireball in front about to land.
+    pub kept_for_ball: u32,
+    /// Clicks to place a block held for the shield, in all and since the raise.
+    pub places_held: u32,
+    pub places_held_up: u32,
+    /// Strikes the defend counted that the raised shield dropped (given back to the defend).
+    pub strikes_held: u32,
 }
 
 impl Shield {
@@ -505,9 +632,43 @@ impl Shield {
         }
     }
 
-    /// One tick. `free`: the hands and the feet can be spared (no escape, no meal, no window
-    /// work); when not, a raised shield comes down.
-    pub fn step(&mut self, w: &World, tick: u64, free: bool) -> Step {
+    /// Whether the shield is up against a threat due now: a click to place a block waits for it
+    /// (`Step::hold_place`). For a task that would rather not click at all.
+    pub fn guarding(&self, tick: u64) -> bool {
+        self.raised_at.is_some() && tick.saturating_sub(self.threat_at) <= 1
+    }
+
+    /// The nearest fireball due that a shield raised at `raised` blocks before it lands within
+    /// `LAND_TICKS`, coming from within 90 degrees of the look: its id and ticks to land.
+    fn ball_in_front(
+        &self,
+        w: &World,
+        due: &[Threat],
+        tick: u64,
+        raised: u64,
+    ) -> Option<(i32, f64)> {
+        let body = w.body?;
+        let mid = middle(w)?;
+        let ready = raised + BLOCK_DELAY;
+        due.iter()
+            .filter(|t| t.kind == ThreatKind::Fireball)
+            .filter_map(|t| {
+                let e = w.entities.get(&t.id)?;
+                let eta = landing_in(e.pos, e.velocity, mid)?;
+                (eta <= LAND_TICKS
+                    && (tick as f64 + eta) >= ready as f64
+                    && in_front(body.pos, e.pos, w.controls.yaw))
+                .then_some((t.id, eta))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+    }
+
+    /// One tick. `duty.free`: the hands and the feet can be spared (no escape, no meal, no
+    /// window work); when not, a raised shield comes down. A click to place a block waits while a
+    /// threat is due (`Step::hold_place`), else it is made with the shield down. A mob in the
+    /// fight's reach is struck, the shield down, unless a fireball the shield already blocks
+    /// lands in front within `LAND_TICKS`.
+    pub fn step(&mut self, w: &World, tick: u64, duty: &Duty) -> Step {
         let mut step = Step::default();
         self.judge(w, tick, &mut step.notes);
         self.wear(w, &mut step.notes);
@@ -515,7 +676,68 @@ impl Shield {
         let Some(body) = w.body else {
             return step;
         };
-        let usable = free && held(w) && w.window.is_none();
+        let mut usable = duty.free && held(w) && w.window.is_none();
+        // A placing click: held while a threat is due (the shield is what the tick needs, and a
+        // shield lowered for each click every 6 or 10 ticks is never up the 5 the server asks),
+        // else placed with the shield down.
+        if duty.placing && usable {
+            if due.is_empty() {
+                usable = false;
+            } else {
+                step.hold_place = true;
+                self.places_held += 1;
+                self.places_held_up += 1;
+                if self.places_held_up == 1 {
+                    step.notes.push(format!(
+                        "placing held for the shield: {} threats due ({} held in all)",
+                        due.len(),
+                        self.places_held
+                    ));
+                }
+            }
+        }
+        // A mob in the fight's reach: the strike, not the shield (a raise turns the bot from it
+        // and drops the strike), unless a fireball the raised shield already blocks lands in
+        // front within a few ticks.
+        if let Some(why) = duty.striking.as_ref().filter(|_| usable && !due.is_empty()) {
+            if let Some(at) = self.raised_at
+                && let Some((id, eta)) = self.ball_in_front(w, &due, tick, at)
+            {
+                self.threat_at = tick;
+                self.kept_for_ball += 1;
+                step.yaw = Some(w.controls.yaw);
+                if self.kept_for_ball == 1 || self.yielding {
+                    step.notes.push(format!(
+                        "shield kept up for fireball {id} landing in {eta:.0} ticks in front ({why}); {} such ticks",
+                        self.kept_for_ball
+                    ));
+                }
+                self.yielding = false;
+                return step;
+            }
+            self.yield_ticks += 1;
+            if !self.yielding {
+                self.yielding = true;
+                self.yields += 1;
+                step.notes.push(format!(
+                    "shield yields to the strike: {why}, {} threats due ({} yields)",
+                    due.len(),
+                    self.yields
+                ));
+            }
+            if let Some(at) = self.raised_at.take() {
+                self.places_held_up = 0;
+                step.act = Some(Act::ReleaseUse);
+                step.notes.push(format!(
+                    "shield lowered after {} ticks (the fight strikes; {} blocks heard in all; health {:?})",
+                    tick.saturating_sub(at),
+                    self.blocks_heard,
+                    w.player.health
+                ));
+            }
+            return step;
+        }
+        self.yielding = false;
         if let Some(first) = due.first().filter(|_| usable) {
             self.threat_at = tick;
             step.yaw = Some(crate::walk::yaw_to(body.pos, first.pos));
@@ -550,23 +772,26 @@ impl Shield {
         };
         // No threat due (or no hands for it): held a moment for a fireball between two
         // packets, then lowered.
-        if usable && tick.saturating_sub(self.threat_at) < HOLD_TICKS {
+        // Not with a mob in the fight's reach: it is struck at once.
+        if usable && duty.striking.is_none() && tick.saturating_sub(self.threat_at) < HOLD_TICKS {
             step.yaw = Some(w.controls.yaw);
             return step;
         }
         self.raised_at = None;
         step.act = Some(Act::ReleaseUse);
         step.notes.push(format!(
-            "shield lowered after {} ticks ({}; {} blocks heard in all; health {:?})",
+            "shield lowered after {} ticks ({}; {} placing clicks held; {} blocks heard in all; health {:?})",
             tick.saturating_sub(at),
-            if usable {
-                "no threat left"
-            } else {
-                "the hands are needed"
+            match (usable, duty.placing && duty.free) {
+                (true, _) => "no threat left",
+                (false, true) => "a block to place",
+                (false, false) => "the hands are needed",
             },
+            self.places_held_up,
             self.blocks_heard,
             w.player.health
         ));
+        self.places_held_up = 0;
         step
     }
 }

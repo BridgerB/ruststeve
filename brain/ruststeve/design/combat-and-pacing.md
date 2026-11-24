@@ -6,7 +6,7 @@ tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@abbda55 clojurecraft@be85a92
+verifiedAgainst: ruststeve@99ba4b8 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -83,3 +83,4 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **In the Nether** (shield wall 3): a bot that came through before the kit made shields, holding iron and wood for one, makes it on arrival (`Plan::nether_shield`, fenced in `nether_task`): the needs planner asked for the shield row alone, work where it stands only, at most 12 tasks; then the fuel left cooks the raw meat held (`shield::cook_choice`, two rounds), the table is dug again, and the note "shield stop over: …" ends it.
 - **Measured** (development start, races 45343415088 and 45345386828): 0.4 fireball hits a thousand ticks behind the shield against 3.1 after it broke; with the timed raise 5 rods in 12,000 bot-ticks, both bots alive.
 - **Seven rods, fire, touch and safe ground** (blaze-fight walls 17 to 20): with 7 rods held blazes are no foe and the bot walks to `LEAVE_RANGE` 50 from the spawner before the aim is met; a deck cell with fire in or beside it is no post (`defend::fire_near`); a blaze in touch keeps the tick from the shield (`defend::blaze_in_touch`); the Nether shield is made only where `cover::unsafe_to_work` is `None`.
+- **The shield and the fight** (shield wall 4): `Shield::step` takes a `Duty`. It yields to the strike (lowered at once, "shield yields to the strike") while `shield::striking` names a blaze in touch or, in a fight, the foe or a mob of its kind within 4 of the eye when that kind is melee; a shield up already stays up for a fireball landing in front within 6 ticks. A strike the raised shield drops is given back to the defend (`shield::SwingCount`: its count and cooldown). A click to place a block waits while a threat is due ("placing held for the shield") and is made with the shield down otherwise. Model, 32 seeds: shield loop 29 to 30 alive with 7 rods, wither-skeleton loop 23 to 26 (probe 45364552425).

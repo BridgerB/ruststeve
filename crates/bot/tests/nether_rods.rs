@@ -76,6 +76,9 @@ struct Stage {
     blaze_ticks: u64,
     ledger: Vec<String>,
     ticks: u64,
+    /// The planner's shield at the end, its counts as `Debug` prints them (so the loops build
+    /// against any version of it, for a before and after on one runner).
+    shield: String,
 }
 
 fn line(r: TaskRecord) -> String {
@@ -166,6 +169,7 @@ fn stage_with(kit: &[(ItemKind, i32)], shield: bool, seed: u64, more: impl Fn(&m
         }
         (c, plan.take_acts())
     });
+    let shield = format!("{:?}", plan.shield);
     let rods = run.world.inventory.count(ItemKind::BlazeRod);
     let ticks = run.world.session.server_ticks;
     Stage {
@@ -179,6 +183,7 @@ fn stage_with(kit: &[(ItemKind, i32)], shield: bool, seed: u64, more: impl Fn(&m
         blaze_ticks,
         ledger,
         ticks,
+        shield,
     }
 }
 
@@ -330,10 +335,20 @@ fn seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving() {
 /// One variant over the eight seeds: a line a seed and the count that end alive with 7 rods.
 /// A report: it fails only if no seed passes.
 fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
+    over_seeds_with(name, kit, shield, |_| {});
+}
+
+/// The same, with what `more` adds to the model first.
+fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl Fn(&mut Sim)) {
     let mut passed = 0;
     let (mut all_ticks, mut all_kills, mut all_landed, mut all_rods) = (0u64, 0u64, 0u64, 0i64);
-    for seed in SEEDS {
-        let s = stage_with(kit, shield, seed, |_| {});
+    // `RODS_SEEDS=N` runs seeds 1 to N instead of the eight.
+    let seeds: Vec<u64> = std::env::var("RODS_SEEDS")
+        .ok()
+        .and_then(|n| n.parse::<u64>().ok())
+        .map_or_else(|| SEEDS.to_vec(), |n| (1..=n).collect());
+    for &seed in &seeds {
+        let s = stage_with(kit, shield, seed, &more);
         let life = &s.run.sim.survival.life;
         let ok = !s.run.died && s.rods >= 7;
         passed += u32::from(ok);
@@ -361,6 +376,8 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
             life.mobs_knocked,
             s.meals,
         );
+        // The shield's counts (docs/problems/shield.md wall 4).
+        println!("SHIELD {name} seed {seed}: {}", s.shield);
         // A seed that died: how it ended (blaze-fight walls 17 and 19).
         if s.run.died {
             let from = s.ledger.len().saturating_sub(30);
@@ -373,11 +390,11 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
     println!(
         "SEEDS {name}: {passed} of {} alive with 7 rods; {all_rods} rods in all, {:.2} kills \
          and {:.2} fireballs landed per 1,000 ticks over {all_ticks} ticks",
-        SEEDS.len(),
+        seeds.len(),
         per(all_kills),
         per(all_landed),
     );
-    assert!(passed > 0, "{name}: no seed of {} passed", SEEDS.len());
+    assert!(passed > 0, "{name}: no seed of {} passed", seeds.len());
 }
 
 #[test]
@@ -396,6 +413,26 @@ fn eight_seeds_of_seven_rods_with_thirty_cooked_beef() {
 #[ignore = "blaze stage, eight seeds: a report, minutes long; owners A11, A4"]
 fn eight_seeds_of_seven_rods_with_a_shield() {
     over_seeds("shield", &[(ItemKind::CookedBeef, 30)], true);
+}
+
+/// The shield variant with a wither skeleton walking in from the bridge (as
+/// `seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving`): the shield and a melee
+/// fight in reach (docs/problems/shield.md wall 4).
+#[test]
+#[ignore = "blaze stage, eight seeds: a report, minutes long; owners S2 (shield), F"]
+fn eight_seeds_of_seven_rods_with_a_shield_and_a_wither_skeleton() {
+    over_seeds_with(
+        "shield+wither",
+        &[(ItemKind::CookedBeef, 30)],
+        true,
+        |sim| {
+            sim.summon_with(
+                EntityKind::WitherSkeleton,
+                [128.5, 61.0, 176.5],
+                Brain::Melee(sim::life::Melee::wither_skeleton()),
+            );
+        },
+    );
 }
 
 /// The frontier bot's own situation for the next race: what the Nether snapshot's bot holds
