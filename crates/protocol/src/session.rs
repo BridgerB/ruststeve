@@ -133,6 +133,7 @@ impl Session {
             S2c::StartConfiguration => vec![Out::Send(C2s::ConfigurationAcknowledged)],
             S2c::LoginDisconnect { .. }
             | S2c::ConfigDisconnect { .. }
+            | S2c::RegistryData { .. }
             | S2c::Disconnect { .. }
             | S2c::LevelChunkWithLight { .. }
             | S2c::ForgetLevelChunk { .. }

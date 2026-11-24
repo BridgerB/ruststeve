@@ -76,6 +76,7 @@ impl State {
             | S2c::ConfigKeepAlive { .. }
             | S2c::ConfigPing { .. }
             | S2c::ConfigDisconnect { .. }
+            | S2c::RegistryData { .. }
             | S2c::Login { .. }
             | S2c::KeepAlive { .. }
             | S2c::Ping { .. }

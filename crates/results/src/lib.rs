@@ -615,7 +615,7 @@ impl SensesFile {
                 })
                 .collect();
             out.push_str(&format!(
-                "{:>8} {pos} {} hp {} food {} held {}{}{}{} | {} ({}) | {}\n",
+                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{} | {} ({}) | {}\n",
                 r.at,
                 r.standing(),
                 r.health
@@ -635,6 +635,7 @@ impl SensesFile {
                         ""
                     }
                 )),
+                r.travel(),
                 r.task,
                 r.why,
                 near.join(", ")
@@ -938,6 +939,11 @@ mod text_tests {
             water: ::observe::Touch::No,
             cursor: None,
             day_time: None,
+            biome: None,
+            enderman_ticking: None,
+            enderman_frozen: None,
+            pickaxe_uses: None,
+            filler: None,
         }
     }
 
@@ -955,6 +961,12 @@ mod text_tests {
             let (x, y, z) = plan::path::feet_cell(pos);
             assert_eq!(::observe::feet_cell(pos), [x, y, z], "{pos:?}");
         }
+    }
+
+    /// The senses row's filler counts what the planner bridges with (issue 17b).
+    #[test]
+    fn the_senses_filler_is_the_planners_bridge_blocks() {
+        assert_eq!(::observe::FILLER, plan::path::BRIDGE_BLOCKS);
     }
 
     /// Wall 1 as the senses text has it: an old row (no cell kept) prints the position to one

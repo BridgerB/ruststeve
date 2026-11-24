@@ -25,8 +25,10 @@ use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT};
 use protocol::slot::{Slot, Wear};
 use protocol::{C2s, Out, S2c, Session};
 
+pub mod biome;
 pub mod stage;
 pub mod time;
+pub use biome::{BIOME_REGISTRY, ticks};
 pub use stage::Stage;
 
 /// How long hits are kept: a minute of server ticks (a case file's "first hit in the last
@@ -643,6 +645,11 @@ pub struct World {
     /// Chunks whose biomes the server changed since the run began.
     #[serde(default)]
     pub biome_updates: u64,
+    /// The biome registry's names in the server's order (`registry_data`, issue 17b): a
+    /// chunk's biome ids index it. Empty until it comes; `biome` then falls back to the
+    /// generated table.
+    #[serde(default)]
+    pub biome_registry: Vec<String>,
     /// The server's account of the bot's death (`player_combat_kill`); the run ends there.
     #[serde(default)]
     pub death: Option<Death>,
@@ -920,7 +927,8 @@ impl World {
     }
 
     /// Record the block at `pos` in memory if it is watched (or already on record) and has an
-    /// exposed face now: the only way a sighting is made (no X-ray, memory's `Seen`).
+    /// exposed face now: the only way a sighting is made (no X-ray, memory's `Seen`). A biome
+    /// sign with an exposed face is kept in memory's sign record too (issue 17b).
     fn observe(&mut self, pos: BlockPos) {
         let Some(dim) = self.dimension.as_ref().map(|d| d.name.clone()) else {
             return;
@@ -929,13 +937,74 @@ impl World {
             return;
         };
         let cell = (pos.x, pos.y, pos.z);
-        if !memory::watched(state) && !self.memory.on_record(&dim, cell) {
+        let sign = memory::is_sign(state);
+        let watched = memory::watched(state) || self.memory.on_record(&dim, cell);
+        if !sign && !watched {
             return;
         }
         let neighbours =
             memory::neighbours(cell).map(|(x, y, z)| self.state_at(BlockPos::new(x, y, z)));
         if let Some(seen) = Seen::check(&dim, cell, state, neighbours) {
-            self.memory.record(seen, self.session.server_ticks);
+            if sign {
+                self.memory.record_sign(&seen);
+            }
+            if watched {
+                self.memory.record(seen, self.session.server_ticks);
+            }
+        }
+    }
+
+    /// A column's biome signs with an exposed face (issue 17b), sections tested by palette
+    /// first; a sign whose record in the column is full (`memory::SIGNS_KEPT`) is skipped, so a
+    /// soul sand valley column costs a palette test and a few hundred face checks. Neighbours
+    /// inside the section are read from it directly.
+    fn observe_column_signs(&mut self, at: ChunkPos, column: &Arc<protocol::chunk::Column>) {
+        let Some(dim) = self.dimension.as_ref().map(|d| d.name.clone()) else {
+            return;
+        };
+        const SIGNS: [memory::Sign; 4] = [
+            memory::Sign::Warped,
+            memory::Sign::Crimson,
+            memory::Sign::Soul,
+            memory::Sign::Basalt,
+        ];
+        let ix = |s: memory::Sign| SIGNS.iter().position(|x| *x == s).unwrap_or(0);
+        let mut full = SIGNS.map(|s| self.memory.signs_full(&dim, at.x, at.z, s));
+        let (bx, bz) = (at.x * 16, at.z * 16);
+        for (si, section) in column.sections.iter().enumerate() {
+            if full.iter().all(|f| *f) {
+                return;
+            }
+            if !section.blocks.may_contain(memory::is_sign) {
+                continue;
+            }
+            let by = column.min_y + 16 * si as i32;
+            for i in 0..4096usize {
+                let Some(state) = section.blocks.get(i) else {
+                    continue;
+                };
+                let Some(sign) = data::block_of_state(state).and_then(memory::sign_of) else {
+                    continue;
+                };
+                if full[ix(sign)] {
+                    continue;
+                }
+                let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
+                let cell = (bx + lx, by + ly, bz + lz);
+                let neighbours = memory::neighbours(cell).map(|(x, y, z)| {
+                    let (nx, ny, nz) = (x - bx, y - by, z - bz);
+                    if (0..16).contains(&nx) && (0..16).contains(&ny) && (0..16).contains(&nz) {
+                        section.blocks.get(protocol::chunk::block_index(nx, ny, nz))
+                    } else {
+                        self.state_at(BlockPos::new(x, y, z))
+                    }
+                });
+                if let Some(seen) = Seen::check(&dim, cell, state, neighbours)
+                    && self.memory.record_sign(&seen)
+                {
+                    full[ix(sign)] = self.memory.signs_full(&dim, at.x, at.z, sign);
+                }
+            }
         }
     }
 
@@ -1006,6 +1075,7 @@ impl World {
             return;
         };
         self.observe_column_sources(at, &column);
+        self.observe_column_signs(at, &column);
         let (bx, bz) = (at.x * 16, at.z * 16);
         let mut cells = Vec::new();
         for (si, section) in column.sections.iter().enumerate() {
@@ -1846,6 +1916,11 @@ impl World {
                 self.player.health = Some(*health);
                 self.player.food = Some(*food);
                 self.player.saturation = Some(*saturation);
+            }
+            S2c::RegistryData { registry, entries } => {
+                if registry == biome::BIOME_REGISTRY {
+                    self.biome_registry.clone_from(entries);
+                }
             }
             S2c::LoginCompression { .. }
             | S2c::LoginFinished { .. }

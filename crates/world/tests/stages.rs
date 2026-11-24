@@ -238,3 +238,77 @@ fn the_keys_held_are_reported_when_they_change() {
     w.step(&Event::Controls(Controls::default()));
     assert_eq!(inputs(&w.step(&tick())), [0], "let go");
 }
+
+fn enderman(id: i32, x: f64, z: f64) -> Event {
+    Event::Packet(S2c::AddEntity {
+        id,
+        uuid: [id as u8; 16],
+        kind: data::EntityKind::Enderman.id(),
+        x,
+        y: 64.0,
+        z,
+    })
+}
+
+/// Issue 17's stage: 7 rods held and the feet within 32 of an enderman that ticks. The bot
+/// stands at (0.5, 64, 0.5), chunk (0, 0), simulation distance 3: chunks -3 to 3 tick.
+#[test]
+fn endermen_holds_within_32_of_one_that_ticks() {
+    let mut w = World::new();
+    w.step(&login("minecraft:the_nether"));
+    w.step(&teleport());
+    w.step(&give(0, ItemKind::BlazeRod, 7));
+    w.step(&tick());
+    assert_eq!(w.stage_reached, Some(Stage::Rods7));
+    // 32.5 off: beyond the edge.
+    w.step(&enderman(40, 33.0, 0.5));
+    w.step(&tick());
+    assert!(!Stage::Endermen.holds(&w));
+    // 31.5 off, chunk 2: holds.
+    w.step(&enderman(41, 32.0, 0.5));
+    w.step(&tick());
+    assert_eq!(world::stage::enderman_near(&w).map(|(id, _)| id), Some(41));
+    assert_eq!(w.stage_reached, Some(Stage::Endermen));
+    assert_eq!(Stage::from_name("endermen"), Some(Stage::Endermen));
+    assert_eq!(Stage::ALL.len(), 14);
+}
+
+/// An enderman near but frozen (its chunk beyond the simulation distance) does not count, and
+/// neither does one near a bot without the rods.
+#[test]
+fn a_frozen_enderman_or_no_rods_is_not_the_stage() {
+    let mut w = World::new();
+    w.step(&login("minecraft:the_nether"));
+    w.step(&teleport());
+    w.step(&Event::Packet(S2c::SetSimulationDistance { distance: 1 }));
+    w.step(&give(0, ItemKind::BlazeRod, 7));
+    // 31.5 off on x: chunk 2, beyond distance 1.
+    w.step(&enderman(41, 32.0, 0.5));
+    w.step(&tick());
+    assert!(!world::ticks(&w, [32.0, 64.0, 0.5]));
+    assert!(world::ticks(&w, [31.9, 64.0, -16.0]));
+    assert!(!world::ticks(&w, [0.5, 64.0, -16.1]));
+    assert!(!Stage::Endermen.holds(&w));
+    w.step(&Event::Packet(S2c::SetSimulationDistance { distance: 3 }));
+    assert!(Stage::Endermen.holds(&w));
+    w.step(&give(0, ItemKind::BlazeRod, 6));
+    assert!(
+        !Stage::Endermen.holds(&w),
+        "an enderman before rod 7 is not the stage"
+    );
+}
+
+#[test]
+fn nothing_ticks_with_no_body_or_distance() {
+    let mut w = World::new();
+    assert!(!world::ticks(&w, [0.0, 64.0, 0.0]));
+    w.step(&Event::Packet(S2c::Respawn {
+        dimension_type: 3,
+        dimension: "minecraft:the_nether".to_owned(),
+    }));
+    w.step(&teleport());
+    assert!(
+        !world::ticks(&w, [0.0, 64.0, 0.0]),
+        "no simulation distance told"
+    );
+}

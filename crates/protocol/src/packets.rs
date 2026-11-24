@@ -44,6 +44,13 @@ pub enum S2c {
     ConfigDisconnect {
         reason: Vec<u8>,
     },
+    /// `registry_data`: one registry's entry names in the server's order (an id is a position;
+    /// a chunk's biome palette holds these ids). Entry data (NBT, sent only for packs the client
+    /// lacks) is read past, not kept (issue 17b: the biome names).
+    RegistryData {
+        registry: String,
+        entries: Vec<String>,
+    },
     // play
     /// The play login: the player's entity id, the server's distances, and the start of
     /// `CommonPlayerSpawnInfo` (dimension type and name, game type); the rest is an unread tail.
@@ -517,6 +524,18 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
             Some(ConfIn::KeepAlive) => S2c::ConfigKeepAlive { id: r.i64()? },
             Some(ConfIn::Ping) => S2c::ConfigPing { id: r.i32()? },
             Some(ConfIn::FinishConfiguration) => S2c::FinishConfiguration,
+            Some(ConfIn::RegistryData) => {
+                let registry = r.string()?;
+                let n = r.length()?;
+                let mut entries = Vec::with_capacity(n.min(1024));
+                for _ in 0..n {
+                    entries.push(r.string()?);
+                    if r.bool()? {
+                        crate::nbt::read_root(&mut r)?;
+                    }
+                }
+                S2c::RegistryData { registry, entries }
+            }
             Some(ConfIn::Disconnect) => S2c::ConfigDisconnect {
                 reason: r.rest().to_vec(),
             },
@@ -1396,6 +1415,15 @@ impl S2c {
                 ConfIn::KeepAlive.id()
             }
             S2c::FinishConfiguration => ConfIn::FinishConfiguration.id(),
+            S2c::RegistryData { registry, entries } => {
+                w.string(registry)?;
+                w.varint(i32::try_from(entries.len()).map_err(|_| EncodeError::TooLong)?);
+                for e in entries {
+                    w.string(e)?;
+                    w.bool(false);
+                }
+                ConfIn::RegistryData.id()
+            }
             S2c::Login {
                 entity_id,
                 view_distance,

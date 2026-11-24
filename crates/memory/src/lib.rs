@@ -197,6 +197,17 @@ pub struct Memory {
     /// answers `None` and the caller scans, as before.
     #[serde(default = "unindexed")]
     unindexed: bool,
+    /// Biome signs seen exposed (issue 17b), by dimension, chunk column and sign: at most
+    /// `SIGNS_KEPT` cells each, so a soul sand valley's thousands of faces stay a small record.
+    /// Never retracted: a sign is evidence of the biome where it grew, dug or not.
+    #[serde(default)]
+    signs: BTreeMap<(String, i32, i32, Sign), BTreeSet<Cell>>,
+    /// Nether columns with `FOREST_SIGNS` warped signs seen, in the order each became known.
+    #[serde(default)]
+    forests: Vec<(i32, i32)>,
+    /// Nether columns with `SOUL_SIGNS` soul sand or soul soil seen, in the order each became known.
+    #[serde(default)]
+    soul_valleys: Vec<(i32, i32)>,
 }
 
 /// Kinds kept in `Memory::by_kind`.
@@ -208,6 +219,68 @@ pub const INDEXED: &[BlockKind] = &[
 
 fn unindexed() -> bool {
     true
+}
+/// The Nether, where biome signs are read.
+const NETHER: &str = "minecraft:the_nether";
+
+/// A biome a block is a sign of (issue 17b; Bridger 2026-11-24: the bot may know biomes
+/// evidenced by blocks it has seen exposed, never the biome of an unseen column). Each kind
+/// grows naturally only in its biome's surface and features (the 26.1.2 biome JSONs'
+/// `features`: `warped_forest_vegetation`, `crimson_forest_vegetation`; the surface rules'
+/// nylium, soul sand and soil, basalt and blackstone).
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub enum Sign {
+    /// Warped forest: warped nylium, warped wart block, warped stem and hyphae.
+    Warped,
+    /// Crimson forest: crimson nylium, nether wart block.
+    Crimson,
+    /// Soul sand valley: soul sand, soul soil.
+    Soul,
+    /// Basalt deltas: basalt, blackstone.
+    Basalt,
+}
+
+/// The biome sign a block kind is, if any.
+pub fn sign_of(kind: BlockKind) -> Option<Sign> {
+    match kind {
+        BlockKind::WarpedNylium
+        | BlockKind::WarpedWartBlock
+        | BlockKind::WarpedStem
+        | BlockKind::WarpedHyphae => Some(Sign::Warped),
+        BlockKind::CrimsonNylium | BlockKind::NetherWartBlock => Some(Sign::Crimson),
+        BlockKind::SoulSand | BlockKind::SoulSoil => Some(Sign::Soul),
+        BlockKind::Basalt | BlockKind::Blackstone => Some(Sign::Basalt),
+        _ => None,
+    }
+}
+
+/// Whether a state is a biome sign (the cheap palette test before a section scan).
+pub fn is_sign(state: u32) -> bool {
+    data::block_of_state(state).and_then(sign_of).is_some()
+}
+
+/// Warped signs seen in one chunk column that make it a known forest: clojurecraft's threshold
+/// (12 `warped_nylium` seen in a chunk, `pearls-rules.edn` `:forest-min-nylium`), kept until a
+/// race says otherwise.
+pub const FOREST_SIGNS: usize = 12;
+/// Cells kept per column and sign: more than `FOREST_SIGNS`, few enough that a column of
+/// soul soil costs at most 64 cells.
+pub const SIGNS_KEPT: usize = 64;
+/// Soul signs seen in one Nether column that make it a known soul sand valley: the forest's
+/// threshold, by analogy (soul soil and soul sand also lie under fortresses and in nether wastes
+/// patches; 12 exposed in one column is a floor, not a stray block), kept until a race says
+/// otherwise.
+pub const SOUL_SIGNS: usize = 12;
+
+/// The signs seen in one column, counted (capped at `SIGNS_KEPT` each).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BiomeSigns {
+    pub warped: usize,
+    pub crimson: usize,
+    pub soul: usize,
+    pub basalt: usize,
 }
 
 impl Memory {
@@ -415,6 +488,94 @@ impl Memory {
     pub fn latest_index(&self) -> &BTreeMap<(String, Cell), usize> {
         &self.latest
     }
+
+    /// Whether a column's record of a sign is full (a scan of its sections can skip it).
+    pub fn signs_full(&self, dimension: &str, cx: i32, cz: i32, sign: Sign) -> bool {
+        self.signs
+            .get(&(dimension.to_owned(), cx, cz, sign))
+            .is_some_and(|s| s.len() >= SIGNS_KEPT)
+    }
+
+    /// Record a biome sign. Only a `Seen` (an exposed face) can be one: no X-ray. Returns
+    /// whether the cell was new; a Nether column reaching `FOREST_SIGNS` warped signs becomes a
+    /// known forest.
+    pub fn record_sign(&mut self, seen: &Seen) -> bool {
+        let Some(sign) = data::block_of_state(seen.state).and_then(sign_of) else {
+            return false;
+        };
+        let (x, _, z) = seen.pos;
+        let (cx, cz) = (x >> 4, z >> 4);
+        let cells = self
+            .signs
+            .entry((seen.dimension.clone(), cx, cz, sign))
+            .or_default();
+        if cells.len() >= SIGNS_KEPT || !cells.insert(seen.pos) {
+            return false;
+        }
+        if sign == Sign::Warped
+            && seen.dimension == NETHER
+            && cells.len() >= FOREST_SIGNS
+            && !self.forests.contains(&(cx, cz))
+        {
+            self.forests.push((cx, cz));
+        }
+        if sign == Sign::Soul
+            && seen.dimension == NETHER
+            && cells.len() >= SOUL_SIGNS
+            && !self.soul_valleys.contains(&(cx, cz))
+        {
+            self.soul_valleys.push((cx, cz));
+        }
+        true
+    }
+
+    /// The signs seen in a Nether chunk column.
+    pub fn biome_signs_in_column(&self, cx: i32, cz: i32) -> BiomeSigns {
+        let n = |sign| {
+            self.signs
+                .get(&(NETHER.to_owned(), cx, cz, sign))
+                .map_or(0, BTreeSet::len)
+        };
+        BiomeSigns {
+            warped: n(Sign::Warped),
+            crimson: n(Sign::Crimson),
+            soul: n(Sign::Soul),
+            basalt: n(Sign::Basalt),
+        }
+    }
+
+    /// The first Nether column known as a warped forest from signs seen, kept after it unloads.
+    pub fn forest_known(&self) -> Option<(i32, i32)> {
+        self.forests.first().copied()
+    }
+
+    /// Every Nether column known as a warped forest, in the order each became known.
+    pub fn forests(&self) -> &[(i32, i32)] {
+        &self.forests
+    }
+
+    /// The first Nether column known as a soul sand valley from signs seen (issue 17: the valley
+    /// 32 blocks from the frontier's spawner spawns endermen, 1 in 71 of its monster weight).
+    pub fn soul_valley_known(&self) -> Option<(i32, i32)> {
+        self.soul_valleys.first().copied()
+    }
+
+    /// Every Nether column known as a soul sand valley, in the order each became known.
+    pub fn soul_valleys(&self) -> &[(i32, i32)] {
+        &self.soul_valleys
+    }
+
+    /// The chunk columns with any position on record in a dimension, in key order: a range of
+    /// the column index, never a scan of the sightings (issue 17d's heading counts seen columns).
+    pub fn seen_columns(&self, dimension: &str) -> Vec<(i32, i32)> {
+        let lo = (dimension.to_owned(), i32::MIN, i32::MIN);
+        let hi = (dimension.to_owned(), i32::MAX, i32::MAX);
+        self.by_column
+            .range(lo..=hi)
+            .filter(|(_, cells)| !cells.is_empty())
+            .map(|((_, cx, cz), _)| (*cx, *cz))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -453,6 +614,84 @@ mod tests {
             None,
             "scan the old store"
         );
+    }
+
+    /// Twelve warped signs seen exposed in one Nether column make it a known forest, kept with
+    /// no column loaded; signs are capped per column and counted by biome; an overworld column
+    /// never becomes one.
+    #[test]
+    fn warped_signs_seen_make_a_known_forest() {
+        let nether = "minecraft:the_nether";
+        let air = Some(state(BlockKind::Air));
+        let seen = |dim: &str, pos: Cell, kind: BlockKind| {
+            Seen::check(dim, pos, state(kind), [air; 6]).unwrap()
+        };
+        let mut m = Memory::new();
+        for x in 0..11 {
+            assert!(m.record_sign(&seen(nether, (x, 40, 5), BlockKind::WarpedNylium)));
+        }
+        assert!(
+            !m.record_sign(&seen(nether, (0, 40, 5), BlockKind::WarpedNylium)),
+            "once a cell"
+        );
+        assert_eq!(m.forest_known(), None, "11 signs are not a forest");
+        assert!(m.record_sign(&seen(nether, (3, 41, 5), BlockKind::WarpedWartBlock)));
+        assert_eq!(m.forest_known(), Some((0, 0)));
+        assert!(
+            !m.record_sign(&seen(nether, (5, 40, 5), BlockKind::Netherrack)),
+            "not a sign"
+        );
+        for z in 0..16 {
+            for x in 0..16 {
+                m.record_sign(&seen(nether, (x + 32, 30, z), BlockKind::SoulSoil));
+            }
+        }
+        let signs = m.biome_signs_in_column(2, 0);
+        assert_eq!(signs.soul, SIGNS_KEPT, "capped");
+        assert_eq!(m.soul_valley_known(), Some((2, 0)));
+        assert_eq!(m.soul_valleys(), &[(2, 0)]);
+        assert_eq!(m.biome_signs_in_column(0, 0).warped, 12);
+        for x in 0..16 {
+            m.record_sign(&seen(
+                "minecraft:overworld",
+                (x, 70, 100),
+                BlockKind::WarpedNylium,
+            ));
+        }
+        assert_eq!(m.forests(), &[(0, 0)], "the overworld has no warped forest");
+        let mut buried = [Some(state(BlockKind::Netherrack)); 6];
+        assert_eq!(
+            Seen::check(nether, (0, 0, 0), state(BlockKind::WarpedNylium), buried),
+            None
+        );
+        buried[1] = air;
+        assert!(Seen::check(nether, (0, 0, 0), state(BlockKind::WarpedNylium), buried).is_some());
+    }
+
+    /// The columns on record in one dimension, from the column index's range only.
+    #[test]
+    fn seen_columns_are_one_dimensions() {
+        let rec = |m: &mut Memory, dim: &str, pos: Cell| {
+            m.record(
+                Seen {
+                    dimension: dim.to_owned(),
+                    pos,
+                    state: state(BlockKind::NetherBricks),
+                },
+                1,
+            )
+        };
+        let mut m = Memory::new();
+        rec(&mut m, "minecraft:the_nether", (-1, 64, 0));
+        rec(&mut m, "minecraft:the_nether", (40, 64, -20));
+        rec(&mut m, "minecraft:the_nether", (41, 64, -21));
+        rec(&mut m, "minecraft:overworld", (500, 64, 500));
+        assert_eq!(
+            m.seen_columns("minecraft:the_nether"),
+            vec![(-1, 0), (2, -2)]
+        );
+        assert_eq!(m.seen_columns("minecraft:overworld"), vec![(31, 31)]);
+        assert!(m.seen_columns("minecraft:the_end").is_empty());
     }
 
     #[test]
