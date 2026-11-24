@@ -774,3 +774,241 @@ fn a_fire_on_bricks_goes_out_and_one_on_netherrack_burns_on() {
     assert_eq!(kind(&sim, (-3, 41, 0)), Some(BlockKind::Fire));
     assert_eq!(sim.survival.life.fires_out, 1);
 }
+
+/// A model joined on `stage` with a mob summoned first; with it, the mob's id.
+fn with_mob(
+    stage: &Stage,
+    kind: data::EntityKind,
+    at: [f64; 3],
+    brain: sim::life::Brain,
+) -> (Sim, i32) {
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    let id = sim.summon_with(kind, at, brain);
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    (sim, id)
+}
+
+/// Raise the held shield facing `yaw` (east is -90).
+fn raise(sim: &mut Sim, yaw: f32) {
+    send(
+        sim,
+        C2s::UseItem {
+            hand: 0,
+            sequence: 1,
+            yaw,
+            pitch: 0.0,
+        },
+    );
+}
+
+/// The `damage` a slot packet told the client for menu slot `slot`, the last one sent.
+fn told_damage(out: &[S2c], slot: i16) -> Option<i32> {
+    out.iter().rev().find_map(|p| match p {
+        S2c::ContainerSetSlot { slot: s, item, .. } if *s == slot => {
+            item.wear().and_then(|w| w.damage)
+        }
+        _ => None,
+    })
+}
+
+/// `BlocksAttacks$ItemDamageFunction.apply` with the shield's (3, 1, 1): a blocked fireball (5)
+/// wears it 6, told the client as the slot's `damage`; at the shield's 336 it breaks and the
+/// next fireball hits.
+#[test]
+fn a_shield_wears_six_a_fireball_and_breaks_at_its_durability() {
+    let mut sim = blazed(&[data::ItemKind::Shield]);
+    let slot = sim.survival.life.blocking_slot;
+    raise(&mut sim, -90.0);
+    let slot_now = sim.survival.life.blocking_slot;
+    assert!(slot_now == 36 || slot_now == slot, "slot {slot_now}");
+    let mut told = None;
+    for _ in 0..100 {
+        let out = tick(&mut sim);
+        told = told.or(told_damage(&out, slot_now as i16));
+        if sim.survival.life.fireballs_blocked > 0 {
+            break;
+        }
+    }
+    let life = &sim.survival.life;
+    assert_eq!(life.fireballs_blocked, 1);
+    assert_eq!(life.shield_wear.get(&slot_now), Some(&6));
+    assert_eq!(told, Some(6), "the wear was not told");
+    // Worn to 330: the next blocked fireball breaks it.
+    sim.survival.life.shield_wear.insert(slot_now, 330);
+    for _ in 0..30 {
+        tick(&mut sim);
+        if sim.survival.life.shields_broken > 0 {
+            break;
+        }
+    }
+    assert_eq!(sim.survival.life.shields_broken, 1);
+    assert_eq!(sim.survival.slots[slot_now], None);
+    assert!(sim.survival.life.blocking_since.is_none());
+    for _ in 0..400 {
+        tick(&mut sim);
+    }
+    assert!(
+        sim.survival.life.fireballs_hit >= 1,
+        "no fireball hit after the break"
+    );
+}
+
+/// A blaze's touch (`mob_attack`, 6 every 20 ticks) sets nothing alight (`Mob.doHurtTarget`),
+/// and a raised shield facing it stops it whole, wears 7 and knocks the blaze 0.5 back
+/// (`blockedByItem`).
+#[test]
+fn a_blaze_touch_burns_nothing_and_a_shield_stops_it() {
+    let stage = Stage::new(1, 40, 60);
+    let (mut sim, _) = with_mob(
+        &stage,
+        data::EntityKind::Blaze,
+        [1.6, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for _ in 0..30 {
+        tick(&mut sim);
+    }
+    assert!(sim.health < 20.0, "no touch in 30 ticks");
+    assert_eq!(
+        sim.survival.life.fire_ticks, 0,
+        "a touch set the player alight"
+    );
+    assert!(sim.survival.life.hurt_by.contains_key("mob_attack"));
+
+    let (mut sim, id) = with_mob(
+        &stage,
+        data::EntityKind::Blaze,
+        [1.6, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    sim.survival.give((data::ItemKind::Shield, 1));
+    raise(&mut sim, -90.0);
+    let mut farthest = 0.0f64;
+    for _ in 0..30 {
+        tick(&mut sim);
+        farthest = farthest.max(sim.survival.life.mobs[&id].pos[0]);
+    }
+    let life = &sim.survival.life;
+    assert!(life.blows_blocked >= 1, "no blow blocked");
+    // The first touch came at tick 1, inside the raise's 5 ticks: only it landed.
+    assert_eq!(life.hurt_by.get("mob_attack"), Some(&6.0));
+    assert_eq!(
+        life.shield_wear.values().copied().max(),
+        Some(7 * life.blows_blocked as i32)
+    );
+    assert!(
+        farthest > 2.0,
+        "the blaze was not knocked back: x {farthest}"
+    );
+}
+
+/// `BlocksAttacks.disable`: a blow from an axe on a raised shield stops the use and cools it
+/// down 100 ticks, in which it cannot be raised again; the blow itself is stopped.
+#[test]
+fn an_axes_blow_disables_a_raised_shield_for_five_seconds() {
+    let stage = Stage::new(1, 40, 60);
+    let (mut sim, _) = with_mob(
+        &stage,
+        data::EntityKind::PiglinBrute,
+        [1.5, 41.0, 0.5],
+        sim::life::Brain::Melee(sim::life::Melee::piglin_brute()),
+    );
+    sim.survival.give((data::ItemKind::Shield, 1));
+    raise(&mut sim, -90.0);
+    for _ in 0..6 {
+        tick(&mut sim);
+    }
+    // The first blow came at tick 1, inside the raise's 5 ticks: it landed.
+    let hurt = 20.0 - sim.health;
+    assert!(hurt > 0.0);
+    raise(&mut sim, -90.0);
+    let at = sim.ticks;
+    for _ in 0..25 {
+        tick(&mut sim);
+        if sim.survival.life.blows_blocked > 0 {
+            break;
+        }
+    }
+    let life = &sim.survival.life;
+    assert_eq!(life.blows_blocked, 1, "the second blow was not blocked");
+    assert!(life.blocking_since.is_none(), "the shield stayed up");
+    assert!(life.shield_cooldown_until >= at + 100);
+    raise(&mut sim, -90.0);
+    assert!(
+        sim.survival.life.blocking_since.is_none(),
+        "raised while cooling down"
+    );
+}
+
+/// `LivingEntity.knockback` lifts a walker and carries it over an edge: a wither skeleton hit
+/// at a deck's edge rises about 1.1, falls about 11 to the floor and takes `ceil(fallen - 3)`,
+/// 8 or 9 (`calculateFallDamage`).
+#[test]
+fn a_wither_skeleton_knocked_off_a_deck_falls_and_is_hurt() {
+    let mut stage = Stage::new(1, 40, 70);
+    // A deck at y 50 from x -3 to 1: the skeleton at its east edge, the player west of it.
+    stage.bridge((-3, 1), (0, 0), 50).spawn((-1, 51, 0));
+    let (mut sim, id) = with_mob(
+        &stage,
+        data::EntityKind::WitherSkeleton,
+        [1.6, 51.0, 0.5],
+        sim::life::Brain::Melee(sim::life::Melee::wither_skeleton()),
+    );
+    sim.survival.life.fire_resistance = true;
+    sim.survival.give((data::ItemKind::DiamondSword, 1));
+    for _ in 0..13 {
+        tick_alive(&mut sim);
+    }
+    let before = sim.survival.life.mobs[&id].health;
+    send(&mut sim, C2s::Attack { entity: id });
+    let hit = before - sim.survival.life.mobs[&id].health;
+    let mut highest = 0.0f64;
+    for _ in 0..60 {
+        tick_alive(&mut sim);
+        highest = highest.max(sim.survival.life.mobs[&id].pos[1]);
+    }
+    let m = sim.survival.life.mobs[&id];
+    assert!((41.0..41.01).contains(&m.pos[1]), "it is at y {}", m.pos[1]);
+    assert!(highest > 51.3, "no lift: highest {highest}");
+    assert_eq!(sim.survival.life.mobs_fell, 1);
+    let fell = before - hit - m.health;
+    assert!((8.0..=9.0).contains(&fell), "the fall took {fell}");
+}
+
+/// A fire a stage laid on nether bricks ages from the first tick (`Sim::wake_fires`) and goes
+/// out; one on netherrack burns on.
+#[test]
+fn a_stages_own_fire_on_bricks_goes_out() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage
+        .bricks((3, 3), (40, 40), (0, 0))
+        .set((3, 41, 0), BlockKind::Fire)
+        .set((-3, 41, 0), BlockKind::Fire);
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    for _ in 0..2400 {
+        tick_alive(&mut sim);
+    }
+    assert_ne!(kind(&sim, 3, 41, 0), Some(BlockKind::Fire));
+    assert_eq!(kind(&sim, -3, 41, 0), Some(BlockKind::Fire));
+    assert_eq!(sim.survival.life.fires_out, 1);
+}
+
+/// `in_fire` is not in `#bypasses_armor`: 13 of armour halves a fire block's 1.
+#[test]
+fn armour_cuts_a_fire_blocks_burn() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage.set((0, 41, 0), BlockKind::Fire);
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.armor = 13.0;
+    tick(&mut sim);
+    assert_eq!(sim.health, 19.5);
+    assert_eq!(sim.survival.life.hurt_by.get("in_fire"), Some(&0.5));
+}

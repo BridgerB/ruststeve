@@ -359,7 +359,8 @@ fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl
         println!(
             "SEED {name} seed {seed}: rods {}, alive {}, seventh at {:?}, ticks {}, kills {} \
              ({:.2} per 1,000), fireballs {} fired {} hit {} landed ({:.2} landed per 1,000) \
-             {} blocked, health lost {:.1} ({}), blazes knocked {}, meals {}",
+             {} blocked, health lost {:.1} ({}), blazes knocked {}, meals {}, blows blocked {}, \
+             shields broken {}, mobs fell {}",
             s.rods,
             !s.run.died,
             s.seven_at,
@@ -375,6 +376,9 @@ fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl
             damage_by_type(life),
             life.mobs_knocked,
             s.meals,
+            life.blows_blocked,
+            life.shields_broken,
+            life.mobs_fell,
         );
         // The shield's counts (docs/problems/shield.md wall 4).
         println!("SHIELD {name} seed {seed}: {}", s.shield);
