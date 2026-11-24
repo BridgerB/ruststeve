@@ -186,6 +186,14 @@ fn full(w: &World, c: Cell) -> bool {
         == Some(data::types::Collision::Full)
 }
 
+/// Any block with a collision shape: one a block can be placed against, and a floor (soul sand,
+/// 14/16 high, is both; issue 17's nook in a soul sand valley had nothing to click on).
+fn solid(w: &World, c: Cell) -> bool {
+    w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+        .and_then(data::generated::shapes::collision)
+        .is_some_and(|k| k != data::types::Collision::Empty)
+}
+
 /// The two points of a body at `pos` a shooter aims at: its eye and its middle.
 fn aims(pos: [f64; 3]) -> [[f64; 3]; 2] {
     [
@@ -238,7 +246,7 @@ fn click_for(w: &World, (x, y, z): Cell) -> Option<(Cell, i8)> {
     // Never a furnace or table: a right-click opens it and places nothing (overworld-leg wall
     // 11: a hut block clicked onto the cook's furnace opened it, and the hut waited for ever).
     .find(|(c, _)| {
-        full(w, *c)
+        solid(w, *c)
             && !w
                 .block_at(world::BlockPos::new(c.0, c.1, c.2))
                 .is_some_and(|k| crate::place::OPENS.contains(&k))
@@ -307,7 +315,7 @@ pub fn open_runs(w: &World, feet: Cell) -> [((i32, i32), usize); 4] {
         (1..=OPEN_RUN)
             .take_while(|k| {
                 let c = (feet.0 + dx * k, feet.1, feet.2 + dz * k);
-                open(w, c) && open(w, (c.0, c.1 + 1, c.2)) && full(w, (c.0, c.1 - 1, c.2))
+                open(w, c) && open(w, (c.0, c.1 + 1, c.2)) && solid(w, (c.0, c.1 - 1, c.2))
             })
             .count()
     };

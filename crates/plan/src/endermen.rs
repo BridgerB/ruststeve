@@ -539,7 +539,9 @@ impl Plan {
         let Some(body) = w.body else {
             return Pocket::Building;
         };
-        let feet = path::feet_cell(body.pos);
+        // On soul sand the feet sink into its cell: the body is counted from the cell over it.
+        let feet = path::stand_cell(w, body.pos);
+        let pos = [body.pos[0], f64::from(feet.1), body.pos[2]];
         if self.ender.pocket_cell != Some(feet) {
             self.ender.pocket_cell = Some(feet);
             self.ender.pocket_blocks = 0;
@@ -550,8 +552,8 @@ impl Plan {
             .and_then(|id| w.entities.get(&id))
             .map(|e| e.pos);
         let next = match open {
-            Some(side) => cover::nook_block(w, body.pos, side),
-            None => cover::pocket_block(w, body.pos, threat),
+            Some(side) => cover::nook_block(w, pos, side),
+            None => cover::pocket_block(w, pos, threat),
         };
         let Some((cell, click, face)) = next else {
             return Pocket::Closed;
@@ -991,7 +993,7 @@ impl Plan {
     /// `wait` ticks pass. `None` once the wait is over.
     fn valley_wait(&mut self, w: &World, tick: u64, wait: u64) -> Option<Task> {
         let body = w.body?;
-        let feet = path::feet_cell(body.pos);
+        let feet = path::stand_cell(w, body.pos);
         let since = *self.ender.valley_since.get_or_insert(tick);
         let spent = tick.saturating_sub(since);
         if spent >= wait {
