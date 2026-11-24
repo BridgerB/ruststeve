@@ -174,6 +174,13 @@ pub struct More {
     /// Acts to send and notes to write, taken by the planner each tick (`take_out`).
     pub acts: Vec<Act>,
     pub said: Vec<(String, String)>,
+    /// A heading's leg (docs/problems/heading.md): the blocks a far walk keeps unspent before it
+    /// may bridge (`None`: `path::BRIDGE_RESERVE`; `i64::MAX`: never), and the cells its
+    /// searches never enter (the heading's cut cells behind the feet).
+    #[serde(default)]
+    pub keep: Option<i64>,
+    #[serde(default)]
+    pub blocked: std::collections::BTreeSet<Cell>,
 }
 
 fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -347,11 +354,14 @@ impl Walk {
         } else {
             (Budget::Far.expansions(), 1.0)
         };
-        let r = if self.more.far {
-            path::plan_far(w, path::feet_cell(pos), &self.goal, nodes, weight)
+        // The cells it never enters are read by its searches only (a route's waypoints are
+        // checked every tick, and a heading's cut set runs to thousands of cells).
+        let cells = if self.more.blocked.is_empty() {
+            self.cells(w)
         } else {
-            path::plan_weighted(w, path::feet_cell(pos), &self.goal, nodes, weight)
+            self.cells(w).blocking(self.more.blocked.clone())
         };
+        let r = path::plan_over(cells, path::feet_cell(pos), &self.goal, nodes, weight);
         self.expanded += u64::from(r.expanded);
         self.waypoints = Some(r.waypoints);
         self.more.kinds = r.kinds;
@@ -377,13 +387,22 @@ impl Walk {
         self.best_tick = tick;
     }
 
+    /// The cells this walk reads: a far walk's bridge and shun, with its own keep.
+    fn cells<'a>(&self, w: &'a World) -> path::Cells<'a> {
+        match (self.more.far, self.more.keep) {
+            (false, _) => path::Cells::new(w),
+            (true, None) => path::Cells::far(w),
+            (true, Some(keep)) => path::Cells::far_keeping(w, keep),
+        }
+    }
+
     /// A far walk's own reason to plan again: a mob its route keeps clear of (`path::SHUN_KINDS`)
     /// has come within its radius of the next `SHUN_AHEAD` waypoints.
     fn foe_ahead(&self, w: &World) -> bool {
         if !self.more.far {
             return false;
         }
-        let cells = path::Cells::far(w);
+        let cells = self.cells(w);
         let from = self.more.from.unwrap_or(self.target);
         self.waypoints
             .as_ref()
@@ -401,11 +420,7 @@ impl Walk {
             return true;
         };
         let ahead = wps.get(self.at..).unwrap_or_default();
-        let mut cells = if self.more.far {
-            path::Cells::far(w)
-        } else {
-            path::Cells::new(w)
-        };
+        let mut cells = self.cells(w);
         self.foe_ahead(w)
             || ahead.iter().enumerate().any(|(i, c)| {
                 let kind = self

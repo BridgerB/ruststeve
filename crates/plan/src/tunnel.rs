@@ -484,6 +484,10 @@ pub struct Travel {
     pub routes: u32,
     pub segments: u32,
     pub refused: u32,
+    /// A heading's cut cells behind the feet (docs/problems/heading.md): blocked for the route
+    /// as `blocked` is, set by `heading_tunnel` and cleared by every other tunnel.
+    #[serde(default)]
+    pub paced: BTreeSet<Cell>,
 }
 
 /// What a stretch of route does, for the note: "stairs up", "level" or "stairs down".
@@ -562,7 +566,23 @@ impl Plan {
         (what, why): (&str, &str),
         tick: u64,
     ) -> Option<Task> {
+        self.travel.paced.clear();
         self.tunnel(w, target, true, (what, why), tick)
+    }
+
+    /// A heading's leg by tunnel (docs/problems/heading.md): as `tunnel_toward`, its route never
+    /// stepping into `paced` (the heading's cut cells behind the feet).
+    pub fn heading_tunnel(
+        &mut self,
+        w: &World,
+        target: Cell,
+        paced: BTreeSet<Cell>,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        self.travel.exploring = false;
+        self.travel.paced = paced;
+        self.tunnel(w, target, false, (what, why), tick)
     }
 
     /// The travel tunnel to one cell (a spawner, a place): as `travel_tunnel`, but the route ends
@@ -576,6 +596,7 @@ impl Plan {
         tick: u64,
     ) -> Option<Task> {
         self.travel.exploring = false;
+        self.travel.paced.clear();
         self.tunnel(w, target, false, (what, why), tick)
     }
 
@@ -691,7 +712,14 @@ impl Plan {
                     )
                     .collect();
                 let lay = stairs::lay_item(w).is_some();
-                let Some(r) = route(w, feet, &goals, &self.travel.blocked, lay, MAX_NODES) else {
+                let blocked = if self.travel.paced.is_empty() {
+                    std::borrow::Cow::Borrowed(&self.travel.blocked)
+                } else {
+                    let mut all = self.travel.blocked.clone();
+                    all.extend(self.travel.paced.iter().filter(|c| **c != feet));
+                    std::borrow::Cow::Owned(all)
+                };
+                let Some(r) = route(w, feet, &goals, &blocked, lay, MAX_NODES) else {
                     self.note(
                         tick,
                         format!("no tunnel route toward {what} at {target:?}"),

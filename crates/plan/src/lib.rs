@@ -16,6 +16,9 @@ pub mod defend;
 pub mod dig;
 pub mod eat;
 pub mod escape;
+// >>> heading (E2, issue 17d)
+pub mod heading;
+// <<< heading
 pub mod hold;
 pub mod hunt;
 pub mod ledger;
@@ -776,6 +779,10 @@ pub struct Plan {
     pub shield_wait_at: u64,
     #[serde(skip)]
     shield_only: bool,
+    // >>> heading (E2, issue 17d): the heading held (docs/problems/heading.md).
+    #[serde(default)]
+    pub headed: Option<heading::Heading>,
+    // <<< heading
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -885,6 +892,9 @@ impl Plan {
             shield_over: false,
             shield_wait_at: 0,
             shield_only: false,
+            // >>> heading (E2)
+            headed: None,
+            // <<< heading
             acts: Vec::new(),
         }
     }
