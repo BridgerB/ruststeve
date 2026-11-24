@@ -1300,6 +1300,8 @@ impl Plan {
             };
             self.begin(task);
         }
+        // What a defend did this tick, for the ledger (blaze-fight walls 2 and 3).
+        let mut said: Vec<String> = Vec::new();
         let (c, act, ended) = match &mut self.task {
             Task::Escape(e) => {
                 let (c, act) = e.step(w, tick);
@@ -1319,6 +1321,7 @@ impl Plan {
             Task::Defend(d) => {
                 let (sent, landed) = (d.swings, d.landed);
                 let (c, act, status) = d.step(w, rules, tick);
+                said = std::mem::take(&mut d.notes);
                 self.swings_sent += u64::from(d.swings.saturating_sub(sent));
                 self.swings_landed += u64::from(d.landed.saturating_sub(landed));
                 let ended = match status {
@@ -1401,6 +1404,9 @@ impl Plan {
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
+        for what in said {
+            self.note(tick, what, "defend".to_owned());
+        }
         if let Some(end) = ended {
             match (&self.task, &end) {
                 (Task::Eat(_), Ok(_)) => self.meals += 1,
