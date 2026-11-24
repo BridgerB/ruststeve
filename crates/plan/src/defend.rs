@@ -866,6 +866,15 @@ impl Defend {
             self.cover = None;
             self.no_way = 0;
         }
+        // Seven rods held: a blaze is fought no longer; the spawner task walks the bot away
+        // (two model seeds held 7 and died at the spawner afterwards).
+        if self.kind == EntityKind::Blaze
+            && crate::craft::count(w, data::ItemKind::BlazeRod) >= crate::RODS_WANTED
+        {
+            self.notes
+                .push(format!("rods held: Blaze {} left alone", self.foe));
+            return (still, None, DefendStatus::Done);
+        }
         let Some(pos) = w.entities.get(&self.foe).filter(|e| !e.dead).map(|e| e.pos) else {
             return (still, None, DefendStatus::Done);
         };

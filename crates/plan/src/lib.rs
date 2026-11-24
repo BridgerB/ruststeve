@@ -1266,12 +1266,21 @@ impl Plan {
         let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_));
         let trap = self.traps.tick(w, body, door);
         let rules = &table.survival;
-        let ignored: Vec<i32> = self
+        let mut ignored: Vec<i32> = self
             .ignored_foes
             .iter()
             .filter(|(_, until)| tick < *until)
             .map(|(id, _)| *id)
             .collect();
+        // Seven rods held: no blaze is gone after any more (the spawner task walks away).
+        if craft::count(w, data::ItemKind::BlazeRod) >= RODS_WANTED {
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| e.kind == data::EntityKind::Blaze)
+                    .map(|(id, _)| *id),
+            );
+        }
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
         if matches!(self.task, Task::Swim(..))
@@ -1987,6 +1996,32 @@ impl Plan {
     /// At the spawner the bot holds its ground: the `defend` row fights the blazes that come.
     fn spawner_task(&mut self, w: &World, tick: u64) -> Task {
         if craft::count(w, data::ItemKind::BlazeRod) >= RODS_WANTED {
+            // Held: out of the blazes' reach before the aim is met, not stood among them (in the
+            // whole-stage model two seeds held 7 rods at ticks 2,537 and 2,099 and died at 3,440
+            // and 10,540, still at the spawner; the defend row leaves blazes alone from now).
+            // The goal is by the route's measure, met at the feet is no walk (spawner wall 8).
+            if let Some(body) = w.body
+                && let Some(sp) = defend::spawner_near(w)
+            {
+                let feet = path::feet_cell(body.pos);
+                let range = defend::POST_RANGE + 2.0;
+                let goal = Goal::Away { pos: sp, range };
+                let mut walk = Walk::new(sp, goal, Arrive::Goal, tick);
+                if !goal.done(feet)
+                    && !self.refused_now(sp, tick)
+                    && walk.route_now(w, tick)
+                    && walk.route == Some(path::Status::Found)
+                {
+                    self.refuse(sp, tick);
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("rods held: away from the spawner at {sp:?}"),
+                        format!("{RODS_WANTED} blaze rods held; to {range:.0} by the route"),
+                    );
+                    return Task::Explore(walk);
+                }
+            }
             self.met = true;
             self.note(
                 tick,
