@@ -1,5 +1,43 @@
 # Issue 16: blaze rods (one bot first)
 
+**Status: open.** No bot has held a blaze rod. The current wall is the Nether walk (portal exit to the fortress). The dated story of how the work got here is in [`blaze-log.md`](blaze-log.md); the stages before this one are in [`fortress.md`](fortress.md) (issue 15) and [`portal.md`](portal.md) (issue 14).
+
+## State of issue 16 (2026-11-23 night, at ddae609)
+
+**What a bot can do today, by where it starts** (real bots only; every number is from the race named):
+
+| Start | How far it gets | Race |
+|---|---|---|
+| Bare spawn (`fresh` start) | 1 of 90 reached `ready` (armour, sword, both buckets, flint and steel, pickaxes, food, under the open sky); 7 reached `gear` | 45128866973 |
+| The clean `ready` snapshot | Lights a portal (5 of 7 in one race), makes the Nether kit (4 pickaxes and a table), and stands in the Nether at 18 to 20 health with food: 13 bots over six races. About one in three dies in its first minutes in the cave under the snapshot (wall 20: 9 of 25). | 45184354015, 45194253932 |
+| Just inside the Nether (where every `ready` bot comes out) | Nothing. Every bot stood at the foot of its first three stairs until it ended `no-progress`, or died in lava within 900 ticks. None moved toward the fortress. | 45194253932, 45204423376 |
+| The old frontier `fortress` snapshot (a bare, unfed bot) | 3 of 7 reached the spawner and all 7 died (44789031743); with cover from blazes, 15 of 15 rested out of sight for good, having no food to heal with (45124122633). | as named |
+
+The stage chain is `gear`, `ready`, (`iron_kit`, which the race plan skips: it casts its portal), `nether`, `fortress`, `spawner`, `rods_7`. The last stage a whole bot gained was `nether`, about 5:20 AM Denver on 2026-11-23.
+
+**The one current wall: the Nether walk.** In the clean snapshot's world the portal comes out at lava-sea level, about 110 blocks from the nether bricks the bot sees at (61, 30 to 34, 95). No route is found, so the bot cuts stairs toward the bricks, beside lava and over magma, and never leaves its first steps. The causes, read from the code, are in [Why the Nether walk fails](#why-the-nether-walk-fails-2026-11-23-reassessment). It is being worked two ways, each in its own file (in progress, each on its own branch): by route in `nether-walk.md`, by tunnel in `nether-tunnel.md`.
+
+**Assets** (each a release asset; resume with `race.yml -f snapshot=<tag>/<asset>`):
+
+| What | Release tag / asset | Holds |
+|---|---|---|
+| Clean `ready` snapshot | `race-45128866973/snapshot-ready-45128866973-race-45128866973-lane-6.tar.zst` | rs-l06-b00 on the surface at (55, 70, -132): armour, sword, both buckets, flint and steel, 2 pickaxes, 12 meat |
+| Equipped `nether` snapshot | `race-45194253932/snapshot-nether-45194253932-race-45194253932-lane-5.tar.zst` | rs-l05-b00 at (22, 34, -19) in the Nether: armour, sword, 4 stone pickaxes, a table, both buckets, 11 meat |
+| Old frontier `fortress` snapshot (still what `config/frontier.toml` names) | `race-44678197603/snapshot-fortress-44678197603-race-44678197603-lane-0.tar.zst` | a bare bot at the fortress round (48, ~, 176), from the `portal` start |
+
+A snapshot holds the server world, the bot's memory and its player file; the planner's state is not kept. Every race from one snapshot is one world: one cave, one portal exit.
+
+**Proven** (a later race's files show the fix working; run ids in the index below): the clean flow from a bare spawn to `ready`; the portal cast to a lit portal from `ready` (walls 8, 17, 19); the Nether kit held before the portal (walls 18, 21); the water walls of the cave leg (walls 5, 9, 10, 11, 14); stairs up to a spawner over the feet (wall 1).
+
+**Not proven**: the lava seal (wall 22: it fired 5 times and 2 of 3 bots lived, but it writes no ledger note of its own and one bot died after one seal); the magma refusal (wall 23: raced once, the Nether bots' files lost); wither skeletons left alone (wall 2: never counted); a hurt bot healing behind cover and coming back (wall 3: the cover fires, no fed bot has tried it); anything at all about an armoured, fed bot against a blaze. The cave under the clean snapshot (wall 20) is open with no fix.
+
+**Not reached yet, so unknown**: the fortress to the spawner with a whole bot (`spawner.md`), the blaze fight (`blaze-fight.md`). Also in progress tonight, each in its own file on its own branch: `overworld-leg.md` (wall 20, the cast, the food check), `race-tooling.md` (the lost lane files), `nether-testbed.md` (Nether worlds for closed-loop tests).
+
+**Three rules for reading this file's evidence**, each learned by getting it wrong here:
+- A senses row prints a rounded position; a cell is the floor of each coordinate. "30,31,-18" in a senses row can be the feet cell (30, 31, -19). Ask `why` for the exact position before naming a cell.
+- A fix with no ledger note of its own cannot be counted. "Fired 0 times" may mean "writes nothing" (the lava seal).
+- A development start (a made-up kit at a place) never counts as this issue's evidence and never becomes the frontier (`brain/ruststeve/decisions/development-starts.md`). The issue closes on one real bot from a real snapshot.
+
 ## Needs
 From the frontier fortress snapshot, one real bot holds 7 blaze rods (`rods_7`), its snapshot published and made the frontier (`brain/ruststeve/decisions/one-bot-first.md`). Races run `revive=false`: a death ends the attempt (Bridger, 2026-11-20: the compute stays in the Nether).
 
@@ -9,16 +47,79 @@ One case file from a race resumed at the frontier shows `stage reached: rods_7`,
 ## Risks
 Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water in the Nether); volleys in the open (9 of 20 of clojurecraft's deaths); the fortress maze between the gate and the spawner; tick-paced swings bunching on a loaded server; no food to heal with.
 
-## 16a: food first, then a fresh frontier
+## Index of walls
+
+Status words: **proven** means the wall's own text names a later race whose files show the fix working (the run id is given); **shipped, unproven** means the fix is on the branch and no race's files confirm it; **open** means no fix; **reverted** means the fix was taken out. A status was written from the wall's text, not from memory.
+
+| # | Wall | Status |
+|---|---|---|
+| 1 | Under the spawner, no way up | proven (44789031743: "stairs up toward the spawner" 21 times, 3 of 7 at the spawner) |
+| 2 | Bare bots against wither skeletons | the `gear` row proven (45128866973: 7 bots at `gear`); `never_fight` for wither skeletons shipped, unproven (never counted in a race) |
+| 3 | Hurt, back to the spawner, dead | the cover fires (45124122633: 15 of 15 "rest ... out of sight", none died); healing and returning unproven: those bots had no food and rested for good |
+| 4 | A dungeon spawner counted as the blaze spawner | shipped, unproven by a named race (the `gear` stage it added was snapshotted by 44840801185) |
+| 5 | A bucket under the pool, three hours, starving | proven (44942537213: 13 of 14 held a water bucket, 0 of 13 before) |
+| 6 | A cave bot with a broken pickaxe, the trees 40 blocks up | proven to fire (44970722653: "stairs up toward the log" 6 to 8 times a bot, each reached a log); it led to wall 7 |
+| 7 | No pickaxe, no table in reach, not enough wood | proven by outcome (45017249540: new stone pickaxes, four bots to a cast site); its "low on digs" note was not counted |
+| 8 | The portal cast with no pickaxe | first fix **reverted** (45032717811: raced worse); second try proven with wall 17 (45164371770: "cast paused" 3 and 1 times, a craft, then the cast) |
+| 9 | A bucket underground, the pools far and high | proven (45052846861: every bucket bot cut "stairs up toward the bank") |
+| 10 | Into the pool from below, the bucket still empty | proven by outcome (45057932282: 9 of 12 held a water bucket, most by the ordinary scoop) |
+| 11 | A stair cut into hidden water, then the escape digs it open | proven by outcome (45066716305: no bot drowned, 4 of 12 before) |
+| 12 | No food, so no healing | the fed start proven (45071679507: 2 of 14 dead); hunting from underground and creepers that follow a retreat left open; overtaken by the clean flow |
+| 13 | A full inventory, a stack on the cursor | the junk drop proven to fire (45091345688: lane 2 dropped seven stacks); the cursor swap shipped, unproven; see walls 17 and 21 |
+| 14 | Out of the water and back in | the trail (a blind spot) proven (45091345688); first fix never fired (45096903034); second try proven (45102450333: 1 of 9 in `escape-water`, 5 of 9 before) |
+| 15 | A spider in a pit, fought 96 times | proven (45108165242: at most one spider defend a lane) |
+| 16 | Water again, three new ways | the stairs refusal proven to fire (45113891386: lane 5 refused 82 targets; water ended 1 of 14); the "escape still trapped" note unread |
+| 17 | A pickaxe left on the cursor, a cast that pauses for ever | proven (45164371770: first portal lit from `ready`; "cast paused" from 23,982 to 3 and 1) |
+| 18 | Into the Nether with a spent pickaxe | proven with wall 21 (45194253932: "nether kit held (4 pickaxes and 1 tables ...)" in lanes 0, 5, 10) |
+| 19 | Under the landing with no pickaxe | proven by outcome (45184354015: 5 of 7 lit a portal, 1 or 2 of 15 before); firings not counted |
+| 20 | The cave under the clean snapshot | **open**, cause open, no fix (`overworld-leg.md`, in progress) |
+| 21 | The Nether kit's craft in a full inventory | proven (45194253932: the kit made, no bot `stuck` on a craft) |
+| 22 | Nether lava down the bot's own stairs | fired, not proven (45204423376: 5 seals, 2 of 3 bots lived, 1 died after one seal; no ledger note of its own) (`nether-walk.md`, in progress) |
+| 23 | A stair onto magma that the walk will not take | shipped, unproven (45214273869: the Nether bots' files lost) (`nether-tunnel.md`, in progress) |
+| - | **The Nether walk** (the current wall) | **open**: see [Why the Nether walk fails](#why-the-nether-walk-fails-2026-11-23-reassessment) |
+
+## Why the Nether walk fails (2026-11-23 reassessment)
+
+Read from the code at ddae609 after walls 22 and 23 had each been fixed where they showed, a race apart. Line numbers are that commit's. The walk does not fail for one reason; four rules that are each right in the overworld leave the bot with no move at a lava-sea portal exit.
+
+- **The ground.** This world's portal comes out near (20 to 30, 31 to 35, -22 to -17), at lava-sea level, on netherrack mixed with soul sand, soul soil, gravel, lava and magma (most of y 29). The bricks seen are at about (61, 30 to 34, 95), roughly 110 blocks away. The earlier fortress bots (issue 15, [`fortress.md`](fortress.md) wall 3) started at y 64 from another start and tunnelled through solid netherrack to the fortress round (48, ~, 176); none ever walked, and none ever stood here.
+- **Soul sand and magma are not a floor.** `path::classify` (`crates/plan/src/path.rs:175-206`) returns `Awkward` for any block in the `AWKWARD` list or with a tall partial shape: soul sand is both (line 136; its collision is a partial 0.875 high) and magma is listed (line 88). `Cells::floor` (line 253) takes only `Solid`, so a cell over soul sand or magma is never `standable` (line 266).
+- **Beside lava is not clear.** `Cells::lava_near` (`path.rs:246-251`) is true for lava in any of the four horizontal neighbours or below, and `Cells::clear` (lines 257-265) is false for such a cell.
+- **So the search has no start.** `start_cell` (`path.rs:642-659`) wants a standable cell among the feet, the cells under the body's box and the 26 round it; standing on soul sand or beside lava there is none, and `plan` (lines 662-690) returns `Status::None`: no route, not even a partial one.
+- **No move places a block.** `MoveKind` (`path.rs:313-318`) is `Walk`, `JumpUp`, `Drop` and `Diagonal`. Nothing bridges a gap, covers lava or lays a floor over soul sand, with 300 cobblestone in the pack.
+- **With no route, only the tunnel is left, and it goes down.** `fortress_task` (`crates/plan/src/lib.rs:1855-1924`) walks to bricks only on `Status::Found` within `Budget::Far` (6,000 expansions, `path.rs:52`); otherwise `dig_toward` (`lib.rs:2700-2763`) cuts stairs down whenever the target is lower than the feet (`down = bank.1 < fy`), a level tunnel when it is level, stairs up when it is more than a block higher. The bricks at y 30 are under feet at y 31 to 34, so the bot cuts down, toward the lava sea and the magma at y 29, for a target 110 blocks away across. Three stalls refuse that brick cell and the next cell of the same wall is tried, on the same heading.
+- **The stairs are refused on nearly every heading there.** `stairs::refusal` (`crates/plan/src/stairs.rs:129-166`) refuses lava in any of the six neighbours of a cut cell, magma under (since wall 23), no full floor, and a falling block over the top.
+- **Exploring does not aim at the bricks.** `explore_walk` (`lib.rs:3419`) tries the held heading at 48, 16 and 8 blocks and turns a quarter on each failure; it needs a route like any walk, so from a cell with no start it finds none.
+- **Why a bot can stand there for an hour.** `NoProgress` (`crates/bot/src/lib.rs:716-745`) restarts its 24,000-tick clock on any item count going up, a new stage, or a new 16-block cube: a bot that digs and picks up netherrack in place can hold it off (lane 4 of race 45194253932 stood from tick 48,000 to 108,000).
+- **Why it was hard to see.** The lava seal writes only to `Escape::trail` (`crates/plan/src/escape.rs`, `lava_door`), which reaches the ledger in a stall note (`lib.rs:839-852`) or the "escape still trapped" note (`lib.rs:1276-1292`), never on "out of the lava" (`lib.rs:1199`) or at the run's end. The stairs failed with an empty refusal ("last refusal: ;"). And senses rows round positions, so the block views were centred a cell off (wall 22's correction).
+
+What follows from it, not yet built when this was written: a floor rule for soul sand and a narrower lava rule in the route (`nether-walk.md`), a move that places a block, and a tunnel that holds its height above the lava sea and a heading to the bricks (`nether-tunnel.md`). Whichever gets one real bot to the fortress is judged on its ledger notes, counted.
+
+## The log
+
+The dated narratives that used to sit between the walls are in [`blaze-log.md`](blaze-log.md), in order, with nothing cut:
+
+- [The start was the wall (2026-11-22)](blaze-log.md#the-start-was-the-wall-2026-11-22): walls 5 to 8 all raced from the poorest of six `gear` snapshots; between walls 8 and 9.
+- [Stopped (2026-11-22, 10:45 PM Denver)](blaze-log.md#stopped-2026-11-22-1045-pm-denver-the-loops-rules-fired): no stage past `gear` in 36 hours; three choices put to Bridger; after wall 16.
+- [Back to the Nether (2026-11-22, 11:26 PM Denver)](blaze-log.md#back-to-the-nether-2026-11-22-1126-pm-denver): the bare Nether snapshots raced as they were.
+- [The clean flow (2026-11-22, late)](blaze-log.md#the-clean-flow-2026-11-22-late-bridger-chose-none-of-a-b-or-c): Bridger chose none of the three; stock, gear, back up, `ready`; the clean snapshot; before wall 17.
+- [Stopped (2026-11-23, 4:30 PM Denver)](blaze-log.md#stopped-2026-11-23-430-pm-denver-no-advance-in-12-hours-and-a-decision-is-bridgers): no advance in 12 hours at the Nether walk; three of its claims are corrected there.
+- [The reassessment (2026-11-23 night)](blaze-log.md#the-reassessment-2026-11-23-night): the corrections, the root causes above, development starts allowed, the wall split by stage.
+
+## What was built before the walls
+
+### 16a: food first, then a fresh frontier
 - **Why**: the frontier fortress snapshot (race 44678197603) came from a bot that started beside a built portal with no food; healing between blaze fights needs food over 18. Bridger (2026-11-20): the bot gathers enough food before the Nether, and a fresh snapshot is taken once it is ready.
 - **Built**: `food_reserve` 32 hunger points in the survival rules; `eat::food_points`; the `hunt` row also fires while the `race`/`nether` aim is short of the reserve in the overworld; with a portal to enter and the reserve short, the bot explores for animals before stepping in ("provisions N of 32"); `snap.toml` lists the held items.
 
-## 16b to 16d: the first cut
+### 16b to 16d: the first cut
 - **The `spawner` stage** (`world::stage::Stage::Spawner`, `at_spawner`): the feet within `SPAWNER_NEAR` 8 of a spawner seen exposed, between `fortress` and `rods_7`; the race snapshots it like any stage.
 - **`spawner_task`** (the `race` aim once the fortress is reached): 7 rods held is the aim met; a rod lying within 8 on a found route is picked up first; at the spawner the bot holds its ground; a spawner seen is walked to on a found route, else tunnelled toward; with none, the nearest brick not within 8 of the trail, else explore.
 - **Blazes as shooters**: `blaze` joins the `ranged` list, so `defend` answers one within 16, closes in and strikes; a shooter beyond `defend_radius` is engaged only at `engage_health` 18 or more.
 
 ## Walls
+
+Walls 1 to 4 raced from the bare Nether snapshots (2026-11-20); 5 to 8 from lane 2's `gear` snapshot; 9 to 16 from lanes 7 and 6's `gear` snapshots (2026-11-22); 17 to 23 from the clean `ready` snapshot (2026-11-23). A "Raced" line under a wall is the race that judged its fix.
 
 ### 1. Under the spawner, no way up (race 44781414716, 44886cb, frontier fortress snapshot, 7 lanes x 1, cap 24,000)
 - **What happened**: 0 of 7 reached the spawner; 5 of 7 died (fire 2, `onFire.player blaze`, `fireball blaze`, `arrow piglin`). Every bot saw the spawner at (129, 64, 159) from its first ticks ("tunnel toward the spawner at (129, 64, 159)" 45 times), then "stairs failed: StepFailed" 29 times, explored off and came back.
@@ -76,14 +177,6 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Fix**: `make_with_wear` resolves the goal's own `holds` before its provides (not its spares: resolving those at the top changed 408 of 2,592 choices against clojurecraft's, which keeps the tool through its build planner), so with no pickaxe the portal goal crafts one from held sticks and stone (placing a held table first). A running cast with no pickaxe left pauses: the task ends with its site kept, the planner makes a pickaxe, and the cast resumes at the same site. Unit test: the portal goal with no pickaxe and the makings for one asks for the craft.
 - **Raced worse, reverted** (3cbff0a and its follow-up, race 45032717811, the same snapshot, 14 x 1): no bot reached a cast (four had, a race before); 7 ended `stuck` after 12 failed tasks in a row, 4 `no-progress` on log walks, 2 dead to creepers. The likely cause: with the goal's holds enforced, a bot with no pickaxe stopped everything for one, and with no wood held it went for logs it could not reach, where before it dug on by hand (lane 5 of the race before reached its cast site after 67,760 ticks without a pickaxe). The top-level holds and the unconditional cast pause are reverted; the ledger now keeps every planner note (f17b7d0), since this race's ledgers could not show whether "low on digs" fired.
 - **Fix, second try** (clojurecraft's `build/pickaxe-at-hand?`, narrower): only when no pickaxe is held and the makings of one are (two sticks' worth of wood, three stone, a table held or near: `pickaxe_makeable`), the portal flow works the `stone-pickaxe` row before the cast, and a running cast pauses, its site kept, for that craft. With no makings it goes on as before. Test: makeable from held sticks, stone and a table; not without the table or with one stick.
-
-## The start was the wall (2026-11-22)
-- **What happened**: walls 5 to 8 all raced from one snapshot, lane 2's `gear` of race 44840801185, and each was a shortage of the same two things: food (wall 5) and pickaxes (walls 6, 7, 8). That race published six `gear` snapshots; only lane 2's was ever raced.
-- **Read** (each snapshot's `snap.toml`): all six bots stand underground (y -6 to 20), since gear's iron is mined there. Lane 2 is the poorest: one stone pickaxe, one stick, one plank, three raw beef. Lane 6 (rs-l06-b00, y -6, 25 blocks from spawn) holds two stone pickaxes, a wooden one, 5 sticks, 10 coal, 6 beef and 6 porkchops; lane 7 (rs-l07-b04, y 5) two stone pickaxes, a wooden one, 23 sticks and 4 coal. Lanes 5, 12 and 13 sit between.
-- **Cause**: four walls were found and fixed one at a time on a start short of what every later step needs, and the start was never questioned. A made-up kit start is ruled out (one-bot-first: never a made-up checkpoint), but these are real snapshots of real bots.
-- **Fix**: the lane-2 race of 89c9f2e (45044341229) was cancelled after 26 minutes; the same commit races 7 x 1 from lane 6's snapshot and 7 x 1 from lane 7's. The wall-8 fix is judged there, and the next race resumes from the furthest snapshot either gives.
-
-- **Raced** (89c9f2e): lane 6's start, race 45046881098, 7 x 1: 6 of 7 dead within 38 minutes (drowned 2 in `escape-water`, skeleton arrows 2, zombies 2), one `no-progress` tunnelling for iron. It sits at y -6 in a dark cave beside water. Lane 7's start, race 45046883124, 7 x 1: no deaths, every bot made new stone pickaxes (10 crafts), 5 of 7 made a bucket, and all ended `no-progress` or stuck in 53 minutes: the water wall below. Lane 7 is the start to race from.
 
 ### 9. A bucket underground, the pools far and high (race 45046883124, 89c9f2e, lane 7's `gear` snapshot, 7 x 1)
 - **What happened**: lanes 1, 3, 4 and 5 made the bucket (lane 1 at tick 6,780) and then spent the rest of the run, about 27,000 ticks, on "walk toward water at" the same three pools, (52 to 54, 25, -154) and (-6 to -7, 62, -162 to -163): 96 to 174 walks a bot, each failing NoPath within 20 to 440 ticks, then "explore toward … (no surface water in view with a way)" failing NoProgress, and `no-progress` at 24,000 ticks. Not one "toward the bank".
@@ -148,7 +241,7 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 
 ### 15. A spider in a pit, fought 96 times (race 45102450333, lanes 2 and 5)
 - **What happened**: lane 5 at (-37, -4, 43), health 20, started "defend Spider 95" 96 times from tick ~10,000 to its `no-progress` end at 33,720; 95 of them ended "0 swings, 0 landed, Retreat … foe up to -4.5 over the eye", each followed by a walk to its ore that came back within 4 of the spider. Lane 2 the same.
-- **Read**: the spider sits in a pit 4.5 under the eye, out of reach both ways. Wall 30's rule (a foe no strike reached is left alone a while) covered only `ranged` kinds beyond `defend_radius`; a melee foe within 4 is always answered.
+- **Read**: the spider sits in a pit 4.5 under the eye, out of reach both ways. [`iron-kit.md`](iron-kit.md) wall 30's rule (a foe no strike reached is left alone a while) covered only `ranged` kinds beyond `defend_radius`; a melee foe within 4 is always answered.
 - **Fix**: a defend that never struck its foe, with the bot no worse than when it began, leaves that foe alone for `FAILURE_MEMORY_TICKS`, for any kind but a `never_fight` one; and an ignored foe within `defend_radius` is answered again only once its kind hits the bot (`defend::provoked`). Test `a_spider_within_reach_is_answered_unless_ignored` (`crates/plan/tests/foe.rs`).
 
 - **Raced** (caa4a75, race 45108165242, lane 6's snapshot, 12 x 1): the spider loop is gone (at most one spider defend a lane); 2 dead (creeper, zombie), the fewest yet; 3 bots cast (6 casts), none lit; 2 `no-progress` on "redig Gravel" for flint. Water still ended 4 of 12, each a new way (wall 16).
@@ -159,30 +252,6 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Fix**: when a water escape cuts a stairs task, that stairs' target is refused for a while ("refused … its stairs cut into water"). And a blind spot closed: an escape writes its trail to the ledger every 2,400 ticks it lasts ("escape still trapped"), so lanes 0 and 5 and lane 1's far banks can be read next race. (The escape's three fixes, walls 10, 11 and 14, each closed the mode they targeted: no drownings, no 24,000-tick fills, the (13, 31, 2) stream cleared; these are new modes.)
 
 - **Raced** (de44721, race 45113891386, lane 6's snapshot, 15 x 1; read at 14 of 15): water 1 of 14, but 8 dead (creepers 5, zombies 2, spider 1), no cast. Lane 5 refused 82 log targets "its stairs cut into water" and still ended on "stairs up toward the log".
-
-## Stopped (2026-11-22, 10:45 PM Denver): the loop's rules fired
-- **No stage has advanced** past `gear` since race 44840801185 (about 36 hours), and the water wall took fixes 10, 11, 14 and 16. Each fix closed what it aimed at, measured in the next race, but every race from a `gear` snapshot uncovers another overworld wall before any bot lights a portal.
-- **Races from lane 6's snapshot, 2026-11-22** (lanes ended / dead / in water / reached a cast): 45071679507 14 / 2 / 0 / 3; 45079898347 11 / 6 / 0 / 1; 45085497535 11 / 2 / 3 / 0; 45091345688 11 / 4 / 2 / 1; 45096903034 9 / 3 / 5 / 2; 45102450333 9 / 4 / 1 / 0; 45108165242 12 / 2 / 4 / 3; 45113891386 14 / 8 / 1 / 0. No portal lit in any.
-- **What the overworld leg costs**: the gear bot starts underground with 5 sticks and no bucket; it mines iron for a bucket and flint and steel, climbs toward trees for wood, finds water and lava, and casts, for 30,000 to 60,000 ticks in caves, meeting about five creepers a run. Every hour there is a fresh chance to die or stick, and the cast at the end has its own walls (pickaxe pauses, a failed first pour).
-- **The choice for Bridger**: (a) keep working the overworld leg from `gear` snapshots, wall by wall, as today; (b) resume issue 16's blaze work from the existing Nether snapshots (the frontier `fortress` of race 44678197603 and the `spawner` snapshots of 44789031743), with no armour or food, as walls 1 to 3 did, while the overworld leg is worked separately; or (c) allow a checkpoint start for this one issue (the `portal` start's kit plus the gear and food a `gear` bot holds), which one-bot-first rules out as written.
-
-## Back to the Nether (2026-11-22, 11:26 PM Denver)
-- **The choice**: Bridger restarted the loop without choosing; (b) is taken: issue 16's own work, from the Nether snapshots that exist. The overworld leg's fixes (walls 9 to 16) stay on the branch for when a `gear` bot is raced again.
-- **The snapshots** (each `snap.toml`): five `fortress` (race 44678197603 lanes 0 to 2, 44687236976 lanes 1 and 2) and three `spawner` (44789031743 lanes 1, 2, 4). No bot has armour or food; the spawner bots hold a stone sword, a stone pickaxe, a water bucket, 28 cobblestone and 270 netherrack, and start at 6 to 7 health (wall 3). The frontier `fortress` snapshot is the cleanest start.
-- **Never raced from it**: wall 2's `never_fight` for wither skeletons and wall 3's cover from blazes when hurt; the loop left for the overworld as they landed. Race 45124122633 (50677e5, `snapshot=frontier`, 15 x 1, cap 72,000) races them as they are.
-
-## The clean flow (2026-11-22, late: Bridger chose none of A, B or C)
-- **Bridger**: "go back even further … fix … then we take a snapshot that is super clean." Not the cave leg patched wall by wall, not the bare Nether saves, not a made-up start: the flow itself fixed from before the first descent, and a snapshot only of a bot that is whole.
-- **The cause, in the goal table**: the race aim went one log, a table, a stone pickaxe, then straight down for 22 iron. No row stocked wood or food above ground, and nothing brought the bot back up, so every `gear` snapshot was a poor bot in a cave. Walls 5 to 16 are that one fact.
-- **The flow** (`Plan::clean_flow`, race aim, overworld):
-  1. **Stock before the first descent**: 12 logs (the `stock` row; `[survival] stock_logs`), then animals while they are found, to the food reserve of 32. A clock bounds it: logs for up to 12,000 ticks, animals to 18,000 in all (`provision_ticks` 6,000), so a treeless place costs minutes.
-  2. **Gear and the kit** as before: armour and sword, bucket, flint and steel, water.
-  3. **Back up before the cast**: with the kit held, stairs up to the open sky (`stairs_to_surface`, 24 blocks a target, the next heading when one is refused, eight refusals end it), then logs to 4 and food to 32 again on the same clock.
-  4. **`ready`**, a new stage between `gear` and `iron_kit` (`world::stage::Stage::Ready`): the gear, a water bucket, an empty bucket, flint and steel, a pickaxe, 4 logs, 32 hunger points of safe food, under the open sky. The race snapshots the first bot of a lane to hold it. That snapshot is the clean one: every race after resumes from it.
-- **The Nether race agrees** (race 45124122633, 50677e5, `snapshot=frontier`, 15 x 1): 0 of 15 reached the spawner and none died: all 15 ended `no-progress` on "rest (health under the engage line, out of sight)". Wall 3's cover works, and a bot with no food then rests for good. The bot has to arrive fed.
-- **Raced from spawn** with the `fresh` start (nothing given; each bot spread to its own surface spot within 128 blocks): race 45128866973, dfea7f1, 15 x 6, cap 216,000.
-- **Unit tests**: `ready_needs_the_kit_the_stock_and_the_open_sky` (world). The flow itself is judged by its notes in the ledger: "stocked", "stairs up toward the surface", "ready".
-- **It worked** (race 45128866973, 90 bots from spawn): 87 a log, 69 a stone pickaxe, 7 `gear`, 1 `ready`. rs-l06-b00 noted "stocked (12 logs and 36 food points held after 4955 ticks)", made its gear and kit at full health, took "stairs up toward the surface" from tick 48,720 (three headings refused, the fourth climbed) and held `ready` at tick 53,840 at (55, 70, -132): 20 health, 12 safe food items, 4 logs, 25 sticks, a table, two pickaxes, both buckets, flint and steel. Its `snapshot-ready` (lane 6) is the clean snapshot; race 45162265185 resumes 15 bots from it. The 7 `gear` bots all stood at 19.7 to 20 health. 39 bots died to mobs, 28 ran to the cap (17 of them smelting) and 23 ended `no-progress`: rates, not this issue's bar.
 
 ### 17. A pickaxe left on the cursor, and a cast that pauses for ever (race 45128866973, lanes 6 and 9)
 - **What happened**: both bots that reached a cast site ended `no-progress` on "cast paused: no pickaxe (the site is kept; make a pickaxe, then cast again)", 23,982 and 23,984 times: a cast chosen and paused once a tick for 20 minutes, with 23 sticks, over 500 cobblestone and a table held.
@@ -208,6 +277,11 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Unit tests**: `held_wood_makes_the_table_and_the_sticks`, `a_landing_keeps_its_stalls_across_a_flip` (plan).
 - **Wall 19 raced** (race 45184354015, 77b1328, the clean snapshot, 7 x 1): 5 of 7 bots lit a portal, at ticks 14,080 to 44,440 (1 or 2 of 15 before). Two went through: lane 2 stands in the Nether with nether bricks in view, lane 4 died in Nether lava.
 
+### 20. The cave under the clean snapshot (races 45164371770 and 45175708203: 9 of 25 dead within 7,400 ticks)
+- **What happened**: 4 of 15 and then 5 of 10 bots died soon after resuming: 7 to creepers, 1 to a zombie, 1 to a skeleton. Lane 4 of 45175708203 lived 1,240 ticks.
+- **Read** (lane 4's whole ledger): from (55, 70, -133) the lava hunt walks down the bot's own stairs to (50, 25, -87) in 1,000 ticks; at tick 340 to 400 five creepers, a zombie and two endermen appear at 32 blocks, all in that cave. "defend Creeper (Retreat)" starts with the creeper within 4, "entity.creeper.primed" is heard at 3 blocks 60 ticks later, and the retreat ends "0 steps held back".
+- **Cause**: open. A retreat that starts at 4 blocks from a creeper that primes at 3 has no room, and the hunt's first walk leads every bot of this snapshot into the same cave. Not fixed in this commit: the bots that pass the cave are the ones wall 19 stops.
+
 ### 21. The Nether kit's craft in a full inventory (race 45184354015, lanes 0, 3, 5, 6)
 - **What happened**: four of the five bots with a lit portal ended `stuck` ("12 tasks failed in a row with none done") within 2,000 ticks of "portal lit", beside the portal, at 18 to 20 health. Each crafted one or two of the kit's pickaxes, then "craft stone_pickaxe failed: Missing" or "StaleWindow" twelve times.
 - **Read** (two ledgers; probe 45192463596, `why` at lane 5 tick 26,400 and lane 3 tick 25,500): 39 stacks held, every main slot from 9 to 44 full: eight stacks of cobblestone, five of cobbled deepslate, granite, diorite, tuff, dirt. The last junk drop is 100 ticks before the first failed craft.
@@ -219,10 +293,12 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 ### 22. Nether lava down the bot's own stairs (races 45184354015 lane 4, 45194253932 lanes 0, 5, 10)
 - **What happened**: all three kit bots died to lava 700 to 900 ticks after entering the Nether, at 18 to 20 health, at (30, 31, -18) twice and (20, 34, -18) once. Each had cut "stairs down toward the fortress at (61, 33, 95)" two or three steps, the stairs then failed `StepFailed after 0 stairs` five to eight times, and the lava came while it stood there: 20 health to 0 in 80 ticks, the lava escape starting with the first hit.
 - **Read** (three ledgers; probe 45202757009, `why --blocks` at lane 5 tick 25,762): the stair runs (30, 34, -20), (30, 33, -19), (30, 32, -18) down to the feet at (30, 31, -18). Lava is at (30, 34, -21) and (27 to 28, 34, -21), beside the stair's top cell, and in the stair itself at (30, 33, -20), (30, 32, -20), (30, 32, -19) and (30, 31, -19): it ran down the steps behind the bot.
+- **Correction (2026-11-23 night)**: the feet cell was (30, 31, -19), not (30, 31, -18). The same probe's `why --at 25700` prints the player at (30.50, 31.00, -18.30) standing on netherrack; `path::feet_cell` floors each coordinate (z -18.30 is cell -19), while a senses row prints the position rounded (`{:.0}` in `crates/results/src/lib.rs`, so the row reads "30,31,-18"). The block view was centred one cell off. The lava it shows "in the stair" at (30, 31, -19) and (30, 32, -19) was in the bot's own feet and head cells, not beside or behind it; at tick 25,600 the bot stood at (30.50, 32.00, -19.30), cell (30, 32, -20), also a cell the view shows as lava by tick 25,780. Every "(30, 31, -18)" and "(20, 34, -18)" below is a rounded senses position, not a cell.
 - **Cause**: the lava trap fires only once the body is in lava (`body.in_lava`), and Nether lava flows a block every 10 ticks and takes 20 health in 80. A bot in a one-wide cut has lava beside its head for a second or more before that and does nothing with it.
 - **Fix**: lava at the door is the lava trap too: lava over the head, or beside the head or feet (`escape::lava_door`), outside a cast or a scoop (which stand beside lava on purpose). The escape answers it with a seal: a held block placed into that cell, as it seals water over the head (wall 11), up to 16 a trap; with no block or nothing to click it flees as before.
 - **Unit tests**: `lava_at_the_door_is_seen_over_and_beside_the_body` (escape).
 - **Wall 22 raced** (race 45204423376, 4c6fee4, 11 x 1; read at 48,000 ticks, six lanes still running): no Nether lava death so far. Lanes 3 and 7 stand in the Nether at 20 health with food, idle on "12 tasks failed in a row with none done" for 16,000 and 20,000 ticks. Lane 4 of race 45194253932 has stood the same way at "stairs (nether bricks seen, no walk to them)" from tick 48,000 to 108,000.
+- **Correction (2026-11-23 night): the seal fired; evidence state "fired, not proven enough".** Read from the lane files of race 45204423376 once it ended (4c6fee4): three bots entered the Nether (lanes 3, 5, 7) and `escape-lava` started five times: lane 3 at ticks 32,020 and 32,040, lane 7 at 26,800 and 26,820, lane 5 at 22,700. In each of those ledger steps one cobblestone left the inventory (252 -> 251 -> 250; 329 -> 328 -> 327; 256 -> 255): the seal's block. Lanes 3 and 7 took no damage, noted "out of the lava (dry land held; back to the goal)" and lived at 20 health until they ended `no-progress` at ticks 55,920 and 51,380, still at the foot of their first steps (wall 23: 640 and 454 `StepFailed after 0 stairs`). Lane 5 placed one block at 22,700, its first lava hit is in the same ledger step, and it died at 22,780. So: 5 firings, 2 of 3 bots lived, 1 died after one seal. The firings looked like zero because the seal writes only to `Escape::trail`, and the trail reaches the ledger only in a stall note or the 2,400-tick "escape still trapped" note (`crates/plan/src/lib.rs`), never on "out of the lava" or at the run's end: no ledger line says "seal" (0 matches in all ten lanes). Not proven: that the seal is why lanes 3 and 7 lived, and why lane 5's one seal was not enough. The seal needs its own ledger note before it is judged again.
 
 ### 23. A stair onto magma that the walk will not take (races 45194253932 lanes 0, 4, 5, 10; 45204423376 lanes 3, 7)
 - **What happened**: in the Nether every "stairs down toward the fortress" ends "stairs failed: StepFailed after 0 stairs (last refusal: ; turn the heading)" within 0 to 20 ticks, again and again from the same cell: nothing is refused and nothing is cut. The bot never leaves the foot of its first three steps. That is where wall 22's lava found it.
@@ -230,20 +306,7 @@ Blazes hover out of reach; burning (45% of clojurecraft's lost health; no water 
 - **Cause**: the stair and the walk disagree on what a floor is.
 - **Fix**: a magma floor refuses a stair ("magma under"), as a landing a short drop down; the stair then turns its heading like any other refusal.
 - **Unit test**: `a_magma_floor_refuses_a_stair` (bot/tests/stairs.rs).
-
-### 20. The cave under the clean snapshot (races 45164371770 and 45175708203: 9 of 25 dead within 7,400 ticks)
-- **What happened**: 4 of 15 and then 5 of 10 bots died soon after resuming: 7 to creepers, 1 to a zombie, 1 to a skeleton. Lane 4 of 45175708203 lived 1,240 ticks.
-- **Read** (lane 4's whole ledger): from (55, 70, -133) the lava hunt walks down the bot's own stairs to (50, 25, -87) in 1,000 ticks; at tick 340 to 400 five creepers, a zombie and two endermen appear at 32 blocks, all in that cave. "defend Creeper (Retreat)" starts with the creeper within 4, "entity.creeper.primed" is heard at 3 blocks 60 ticks later, and the retreat ends "0 steps held back".
-- **Cause**: open. A retreat that starts at 4 blocks from a creeper that primes at 3 has no room, and the hunt's first walk leads every bot of this snapshot into the same cave. Not fixed in this commit: the bots that pass the cave are the ones wall 19 stops.
-
-## Stopped (2026-11-23, 4:30 PM Denver): no advance in 12 hours, and a decision is Bridger's
-- **Where it stands**: the clean flow works to the Nether. One bot of 90 from a bare spawn made the clean `ready` snapshot; 63 bots resumed from it in six races; portals lit went from none to 5 of 7 in a race; 13 bots stood in the Nether fed, at 18 to 20 health, most with four pickaxes. None reached the fortress. The last stage gained was `nether`, at about 5:20 AM.
-- **The wall: the Nether walk.** The portal of this snapshot's world comes out about 110 blocks from nether bricks the bot sees at (61, 30 to 34, 95). The bot does not walk there: no route is found, so it digs stairs toward the bricks, beside lava and over magma. Five died in lava at (30, 31, -18) and (20, 34, -18); six or more stood at the foot of their first steps to the end of their run.
-- **Fixes shipped and not proven**: the lava seal (wall 22) fired 0 times in race 45204423376 and lane 5 died in lava at the same cell, its escape starting only once it was in lava: why the door check missed it is unread. The magma refusal (wall 23) raced once (45214273869): both Nether bots lived to the end and neither reached the fortress, and their files were lost (below).
-- **A blind spot found**: a lane that lives to the 240-minute job limit is cancelled and uploads nothing. The race servers ran about 14 ticks a second, so a cap of 216,000 does not fit. Race 45214273869 lost both Nether bots' ledgers this way. Until the workflow is fixed, dispatch with a cap of 150,000.
-- **Other blockers**: every race resumes one world (one cave under the snapshot, with five creepers: about one bot in four dies in its first minutes, wall 20; one Nether portal exit that every Nether fix is tuned to). The food check before the portal sends bots at 30 of 32 hunting underground for up to 18,000 ticks and two ended there. No armoured, fed bot has yet fought a blaze.
-- **Ready to race from**: `race-45194253932/snapshot-nether-45194253932-race-45194253932-lane-5.tar.zst`, a real bot just inside the Nether with armour, a sword, four stone pickaxes, a table, both buckets and 11 meat.
-- **Options put to Bridger** (10:15 AM): 1 keep on, a wall a race; 2 race from the Nether snapshot above; 3 several clean snapshots in different worlds; 4 cross the Nether by walking and bridging over lava with blocks, not by stairs; 5 a portal near the surface; 6 seal the stairs behind the bot against cave mobs; 7 fight creepers with the sword; 8 drop the portal's food check when nearly full. No behaviour change and no race since, waiting on the choice.
+- **Evidence state (2026-11-23 night): shipped (4b214ac), unproven.** Raced once, race 45214273869 (d7ca5dc, 9 x 1, cap 216,000); the two Nether bots' files were lost (lanes 0 and 4, see the correction under [Stopped (2026-11-23)](blaze-log.md#stopped-2026-11-23-430-pm-denver-no-advance-in-12-hours-and-a-decision-is-bridgers)). All that is left is each lane's last progress line, at tick 204,000: lane 4 alive at 20 health on "last refusal: lava beside (33, 28, -1); turn the heading" (a refusal named, about 18 blocks from the first steps: it had moved); lane 0 alive at 18.5 health still on "last refusal: ; turn the heading", the empty refusal this fix was meant to end. No ledger, so "magma under" was never counted. Neither reached the fortress.
 
 ## The fight record (2026-11-21, the porting guide's CombatFrame, summed per fight)
 - Case files counted no swings: `race` wrote `swings_sent` and `swings_landed` as a literal 0. They now come from the plan, summed over every fight.
