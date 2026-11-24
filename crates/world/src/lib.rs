@@ -697,8 +697,13 @@ impl World {
             Event::Tick { now_ms, seed } => {
                 self.now_ms = *now_ms;
                 self.seed = *seed;
-                if let Some(s) = Stage::highest(self)
-                    && self.stage_reached.is_none_or(|r| s > r)
+                // Once a second, and only the stages above the one reached: the fortress and spawner
+                // tests scan every sighting in 25 chunk columns, and run every tick in a fortress
+                // they cost 132 ms a tick (replan on race 45350933958 lane 1 at tick 9,690,
+                // callgrind: `Stage::highest` -> `kind_near` -> `Memory::in_column`); the bot fell
+                // behind the server and was dropped.
+                if self.ticks.is_multiple_of(stage::STAGE_EVERY_TICKS)
+                    && let Some(s) = Stage::highest_above(self, self.stage_reached)
                 {
                     self.stage_reached = Some(s);
                 }

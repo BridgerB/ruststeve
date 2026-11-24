@@ -20,6 +20,9 @@ pub fn bricks_near(w: &World, chunks: i32) -> Vec<(i32, i32, i32)> {
     kind_near(w, data::BlockKind::NetherBricks, chunks)
 }
 
+/// World ticks between two looks at the stages (a second).
+pub const STAGE_EVERY_TICKS: u64 = 20;
+
 /// The cells of `kind` on record in the dimension the bot is in, within `chunks` chunk columns of
 /// the feet, nearest first (memory's watched kinds only).
 pub fn kind_near(w: &World, kind: data::BlockKind, chunks: i32) -> Vec<(i32, i32, i32)> {
@@ -291,5 +294,15 @@ impl Stage {
     /// reached is the highest this has ever been (items get spent), kept by the world.
     pub fn highest(w: &World) -> Option<Stage> {
         Stage::ALL.into_iter().rev().find(|s| s.holds(w))
+    }
+
+    /// The highest stage that holds of those above `reached` (all of them when `None`): the
+    /// stages at or under it are not looked at again.
+    pub fn highest_above(w: &World, reached: Option<Stage>) -> Option<Stage> {
+        Stage::ALL
+            .into_iter()
+            .rev()
+            .take_while(|s| reached.is_none_or(|r| *s > r))
+            .find(|s| s.holds(w))
     }
 }
