@@ -52,6 +52,10 @@ pub const FORTRESS_PAD: i32 = 4;
 const NOTE_EVERY: u64 = 600;
 /// Ticks between two "look kept off" notes (the count is in each).
 const LOOK_NOTE_EVERY: u64 = 200;
+/// Ticks after a fruitless search for a way to a known place before the next is made.
+const GO_EVERY: u64 = 100;
+/// Ticks a valley target search is kept before it is made again.
+const VALLEY_EVERY: u64 = 100;
 /// Ticks between two progress notes of the valley wait.
 const VALLEY_NOTE_EVERY: u64 = 1200;
 /// Ticks the fortress footprint is kept before it is read again from memory's brick index.
@@ -114,9 +118,18 @@ pub struct EnderState {
     pub nook_open: Option<(Cell, (i32, i32))>,
     #[serde(default)]
     pub valley_noted_at: Option<u64>,
-    /// Soul sand columns refused as a fortress's wart rooms.
+    /// Soul sand columns refused as a fortress's wart rooms (no longer written; kept for old
+    /// state), and when soul cells refused for bricks were last noted.
     #[serde(default)]
     pub valleys_refused: Vec<(i32, i32)>,
+    #[serde(default)]
+    pub valley_refused_at: Option<u64>,
+    /// No search for a way to a known place before this tick (`GO_EVERY` after a fruitless one).
+    #[serde(default)]
+    pub go_next: u64,
+    /// The last valley target found and when.
+    #[serde(default)]
+    pub valley_cache: Option<(u64, Option<Cell>)>,
     /// The pocket being sealed: where the feet were, blocks placed, when the next may go.
     #[serde(default)]
     pub pocket_cell: Option<Cell>,
@@ -268,28 +281,6 @@ pub fn in_forest(w: &World) -> bool {
 pub const FOREST_KINDS: &[BlockKind] = &[BlockKind::WarpedNylium];
 pub const VALLEY_KINDS: &[BlockKind] = &[BlockKind::SoulSand, BlockKind::SoulSoil];
 
-/// Whether a chunk column overlaps a fortress footprint (padded), or holds nether bricks on
-/// record: a fortress's nether-wart rooms stand on soul sand, and are no valley.
-pub fn column_in_fortress(
-    w: &World,
-    bounds: Option<(i32, i32, i32, i32)>,
-    (cx, cz): (i32, i32),
-) -> bool {
-    let (x0, z0, x1, z1) = (cx * 16, cz * 16, cx * 16 + 15, cz * 16 + 15);
-    let overlaps = bounds.is_some_and(|(ax, az, bx, bz)| {
-        x1 >= ax - FORTRESS_PAD
-            && x0 <= bx + FORTRESS_PAD
-            && z1 >= az - FORTRESS_PAD
-            && z0 <= bz + FORTRESS_PAD
-    });
-    let bricks = w.dimension.as_ref().is_some_and(|d| {
-        w.memory
-            .indexed_in_column(&d.name, cx, cz, BlockKind::NetherBricks)
-            .is_some_and(|v| !v.is_empty())
-    });
-    overlaps || bricks
-}
-
 /// Where to walk for a known column: over the seen sign of `kinds` in it nearest the feet (the
 /// cell above it, where a body stands); with none on record, the column's centre at the feet's
 /// height.
@@ -316,11 +307,11 @@ pub fn column_target(w: &World, (cx, cz): (i32, i32), kinds: &[BlockKind]) -> Op
 
 /// Whether the bot stands in a soul sand valley: the biome at its feet, soul sand or soul soil
 /// under them, or a known valley's column; never inside a fortress's footprint.
-pub fn in_valley(w: &World, bounds: Option<(i32, i32, i32, i32)>) -> bool {
+pub fn in_valley(w: &World) -> bool {
     let Some(body) = w.body else {
         return false;
     };
-    let f = path::feet_cell(body.pos);
+    let f = path::stand_cell(w, body.pos);
     let column = (f.0 >> 4, f.2 >> 4);
     let valley = w.feet_biome() == Some("soul_sand_valley")
         || matches!(
@@ -328,8 +319,97 @@ pub fn in_valley(w: &World, bounds: Option<(i32, i32, i32, i32)>) -> bool {
             Some(BlockKind::SoulSand | BlockKind::SoulSoil)
         )
         || w.memory.soul_valleys().contains(&column);
-    valley && !bounds.is_some_and(|b| in_footprint(b, f))
+    valley && !bricks_beside(w, (f.0, f.1 - 1, f.2))
 }
+
+/// Blocks round a soul cell within which a nether brick seen makes it a fortress's (a nether-wart
+/// room's floor, a bridge over the valley), not the valley's.
+pub const BRICK_NEAR: i32 = 4;
+/// Blocks a valley target may lie above or below the feet: the valley's floor at the bot's level,
+/// not soul sand seen down at the lava sea under the fortress (race 45481633896: three bots walked
+/// at soul cells at y 23 from y 61, NoProgress and NoPath, into wither skeletons).
+pub const VALLEY_DY: i32 = 12;
+/// Known valley columns looked through for a target, nearest first.
+pub const VALLEY_COLUMNS: usize = 32;
+
+/// Whether a nether brick on record lies within `BRICK_NEAR` of `c` (memory's brick index for
+/// the columns round it).
+pub fn bricks_beside(w: &World, c: Cell) -> bool {
+    let Some(dim) = w.dimension.as_ref() else {
+        return false;
+    };
+    let (x0, x1) = ((c.0 - BRICK_NEAR) >> 4, (c.0 + BRICK_NEAR) >> 4);
+    let (z0, z1) = ((c.2 - BRICK_NEAR) >> 4, (c.2 + BRICK_NEAR) >> 4);
+    (x0..=x1).any(|cx| {
+        (z0..=z1).any(|cz| {
+            // An old store has no index (`None`): its sightings are scanned, as `kind_near` does.
+            w.memory
+                .indexed_in_column(&dim.name, cx, cz, BlockKind::NetherBricks)
+                .unwrap_or_else(|| {
+                    w.memory
+                        .in_column(&dim.name, cx, cz)
+                        .into_iter()
+                        .filter(|s| data::block_of_state(s.state) == Some(BlockKind::NetherBricks))
+                        .map(|s| s.pos)
+                        .collect()
+                })
+                .iter()
+                .any(|b| {
+                    (b.0 - c.0).abs() <= BRICK_NEAR
+                        && (b.1 - c.1).abs() <= BRICK_NEAR
+                        && (b.2 - c.2).abs() <= BRICK_NEAR
+                })
+        })
+    })
+}
+
+/// The valley cell to walk to: over the seen soul sand or soul soil, in a known valley column,
+/// within `VALLEY_DY` of the feet's height, with no nether brick seen within `BRICK_NEAR`, not
+/// in `skip`'s reach, nearest the feet. With how many seen soul cells were refused for bricks.
+pub fn valley_target(w: &World, skip: &[Cell]) -> (Option<Cell>, usize) {
+    let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
+        return (None, 0);
+    };
+    let feet = path::stand_cell(w, body.pos);
+    let d2 = |c: Cell| (c.0 - feet.0).pow(2) + (c.1 - feet.1).pow(2) + (c.2 - feet.2).pow(2);
+    let mut columns = w.memory.soul_valleys().to_vec();
+    columns.sort_by_key(|k| {
+        (
+            (k.0 * 16 + 8 - feet.0).pow(2) + (k.1 * 16 + 8 - feet.2).pow(2),
+            *k,
+        )
+    });
+    let mut walled = 0;
+    let mut best: Option<Cell> = None;
+    for k in columns.into_iter().take(VALLEY_COLUMNS) {
+        for kind in VALLEY_KINDS {
+            for c in w
+                .memory
+                .indexed_in_column(&dim.name, k.0, k.1, *kind)
+                .unwrap_or_default()
+            {
+                let at = (c.0, c.1 + 1, c.2);
+                if (at.1 - feet.1).abs() > VALLEY_DY
+                    || skip
+                        .iter()
+                        .any(|s| path::flat_distance(*s, at) <= PLACE_SAME)
+                    || best.is_some_and(|b| (d2(b), b) <= (d2(at), at))
+                {
+                    continue;
+                }
+                if bricks_beside(w, c) {
+                    walled += 1;
+                    continue;
+                }
+                best = Some(at);
+            }
+        }
+    }
+    (best, walled)
+}
+
+/// Targets of `go_toward` within this (by the route's measure) are one place: its tries add up.
+pub const PLACE_SAME: f64 = 8.0;
 
 /// The kinds a nook's open side must not face at build time while another side is open.
 pub const NOOK_SHOOTERS: &[EntityKind] = &[EntityKind::Ghast, EntityKind::Skeleton];
@@ -781,14 +861,12 @@ impl Plan {
         // A soul sand valley known (seen soul sand and soul soil), or stood in: there, in a nook,
         // wait for an enderman (docs/problems/endermen.md, the decision of 2026-11-24).
         if !self.ender.valley_over {
-            if in_valley(w, bounds) {
+            if in_valley(w) {
                 let wait = rules.as_ref().map_or(0, |r| r.valley_wait_ticks);
                 if let Some(t) = self.valley_wait(w, tick, wait) {
                     return t;
                 }
-            } else if let Some(c) = self
-                .valley_column(w, tick, bounds)
-                .and_then(|k| column_target(w, k, VALLEY_KINDS))
+            } else if let Some(c) = self.valley_cell(w, tick)
                 && let Some(t) = self.go_toward(w, tick, c, "the soul sand valley")
             {
                 return t;
@@ -822,15 +900,18 @@ impl Plan {
         self.travel_on(w, tick, rules.as_ref().map_or(0, |r| r.pickaxe_reserve))
     }
 
-    /// The approach (17e.1): a ticking enderman within `APPROACH_FROM`, else a frozen one seen
-    /// within `SIGHTING_RANGE`, walked to within `APPROACH_GOAL` by a plain route, else the far
+    /// The approach (17e.1): an enderman seen within `SIGHTING_RANGE`, ticking ones first,
+    /// walked to within `APPROACH_GOAL` by a plain route, else the far
     /// walk; never tunnelled. Each given up after `CHASE_TRIES` walks or `CHASE_TICKS`.
     fn approach(&mut self, w: &World, tick: u64) -> Option<Task> {
         let candidates: Vec<Sighting> = endermen(w)
             .into_iter()
             .filter(|s| !self.ender.given_up.contains(&s.id))
             .filter(|s| {
-                (s.ticking && s.dist <= APPROACH_FROM) || (!s.ticking && s.dist <= SIGHTING_RANGE)
+                // Ticking or frozen, any seen within `SIGHTING_RANGE` (ticking ones first): a
+                // ticking enderman 64.9 off was left alone for 2,000 ticks by a bot waiting in
+                // its nook, the rule then being 64 for a ticking one (race 45487204794 lane 1).
+                s.dist <= SIGHTING_RANGE
             })
             .collect();
         // Ticking ones first, each nearest first.
@@ -905,36 +986,53 @@ impl Plan {
         None
     }
 
-    /// The first soul sand valley column memory knows that is not inside the fortress (its wart
-    /// rooms stand on soul sand); each refused one noted once.
-    fn valley_column(
-        &mut self,
-        w: &World,
-        tick: u64,
-        bounds: Option<(i32, i32, i32, i32)>,
-    ) -> Option<(i32, i32)> {
-        let valleys = w.memory.soul_valleys().to_vec();
-        for k in valleys {
-            if !column_in_fortress(w, bounds, k) {
-                return Some(k);
-            }
-            if !self.ender.valleys_refused.contains(&k) {
-                self.ender.valleys_refused.push(k);
-                self.note(
-                    tick,
-                    format!("soul sand column {k:?} refused"),
-                    "inside the fortress's footprint or with nether bricks seen: a nether-wart room, no valley".to_owned(),
-                );
-            }
+    /// The soul sand valley cell to go to (`valley_target`), skipping places given up; the soul
+    /// cells refused for bricks beside them noted at most once a `NOTE_EVERY`.
+    fn valley_cell(&mut self, w: &World, tick: u64) -> Option<Cell> {
+        let skip: Vec<Cell> = self
+            .ender
+            .place_tries
+            .iter()
+            .filter(|p| p.1 >= CHASE_TRIES)
+            .map(|p| p.0)
+            .collect();
+        // The search reads memory's sign and brick records for up to 32 columns: once a
+        // `VALLEY_EVERY`, the answer kept between.
+        if let Some((at, cell)) = self.ender.valley_cache
+            && tick < at + VALLEY_EVERY
+        {
+            return cell;
         }
-        None
+        let (cell, walled) = valley_target(w, &skip);
+        self.ender.valley_cache = Some((tick, cell));
+        if walled > 0
+            && self
+                .ender
+                .valley_refused_at
+                .is_none_or(|t| tick >= t + NOTE_EVERY)
+        {
+            self.ender.valley_refused_at = Some(tick);
+            self.note(
+                tick,
+                format!("{walled} soul cells refused"),
+                format!(
+                    "nether bricks seen within {BRICK_NEAR}: a fortress's wart rooms or bridges, no valley; the target {cell:?}"
+                ),
+            );
+        }
+        cell
     }
 
     /// A walk toward a known place: a plain route, else the far walk, else (above the pickaxe
     /// reserve) the travel tunnel; at most `CHASE_TRIES` begun for one place, then it is noted
     /// given up and `None` from then on.
     fn go_toward(&mut self, w: &World, tick: u64, c: Cell, what: &str) -> Option<Task> {
-        let i = match self.ender.place_tries.iter().position(|p| p.0 == c) {
+        let i = match self
+            .ender
+            .place_tries
+            .iter()
+            .position(|p| path::flat_distance(p.0, c) <= PLACE_SAME)
+        {
             Some(i) => i,
             None => {
                 self.ender.place_tries.push((c, 0));
@@ -945,29 +1043,44 @@ impl Plan {
         if tries >= CHASE_TRIES {
             return None;
         }
+        // One search a look, and none sooner than `GO_EVERY` after a fruitless one: a far
+        // search on the frontier recording took about 516 ms (E2's replan probe 45483359193), and
+        // a plain search, a far one and a tunnel's in one step stalls the bot's loop. The bot
+        // holds where it is between tries.
+        if tick < self.ender.go_next {
+            self.retry_at = self.ender.go_next;
+            return Some(Task::Idle);
+        }
         self.ender.place_tries[i].1 += 1;
         let goal = Goal::Near { pos: c, range: 4.0 };
-        let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
-        let how = if walk.route_now(w, tick) {
-            Some("a plain route")
-        } else {
-            walk = Walk::far_to(c, goal, tick);
-            walk.route_now(w, tick).then_some("the far walk")
-        };
-        if let Some(how) = how {
-            self.walks += 1;
-            self.note(
-                tick,
-                format!("to {what} at {c:?}"),
-                format!("by {how}, walk {} of {CHASE_TRIES}", tries + 1),
-            );
-            return Some(Task::Explore(walk));
-        }
         let reserve = self
             .table
             .as_ref()
             .map_or(0, |t| t.survival.pickaxe_reserve);
-        if pickaxe_uses_left(w) > reserve
+        // The first try a plain route, the second the far walk (bridging), the third the travel
+        // tunnel above the pickaxe reserve.
+        let found = match tries {
+            0 => {
+                let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
+                walk.route_now(w, tick).then_some((walk, "a plain route"))
+            }
+            1 => {
+                let mut walk = Walk::far_to(c, goal, tick);
+                walk.route_now(w, tick).then_some((walk, "the far walk"))
+            }
+            _ => None,
+        };
+        if let Some((walk, how)) = found {
+            self.walks += 1;
+            self.note(
+                tick,
+                format!("to {what} at {c:?}"),
+                format!("by {how}, try {} of {CHASE_TRIES}", tries + 1),
+            );
+            return Some(Task::Explore(walk));
+        }
+        if tries >= 2
+            && pickaxe_uses_left(w) > reserve
             && let Some(t) = self.tunnel_toward(w, c, (what, "no walk to it"), tick)
         {
             return Some(t);
@@ -983,8 +1096,11 @@ impl Plan {
                 format!("{what} given up"),
                 format!("{CHASE_TRIES} tries with no way"),
             );
+            return None;
         }
-        None
+        self.ender.go_next = tick + GO_EVERY;
+        self.retry_at = self.ender.go_next;
+        Some(Task::Idle)
     }
 
     /// The wait in a soul sand valley: a nook built round the feet (its open side toward the most
@@ -1004,6 +1120,12 @@ impl Plan {
                 format!("no ticking enderman came within {ENDERMAN_NEAR} in {spent} ticks; on"),
             );
             return None;
+        }
+        // Falling (a ghast's fireball knocked a bot off its ledge, race 45487204794 lane 2: a
+        // nook chosen at every cell of the fall): the nook waits for the ground.
+        if !body.on_ground {
+            self.retry_at = tick + 1;
+            return Some(Task::Idle);
         }
         let side = match self.ender.nook_open {
             Some((at, side)) if at == feet => side,

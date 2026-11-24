@@ -259,3 +259,56 @@ fn a_provoked_enderman_is_answered_by_the_pocket_never_a_swing() {
         plan.events
     );
 }
+
+const NETHER: &str = "minecraft:the_nether";
+
+fn state(k: data::BlockKind) -> u32 {
+    k.info().unwrap().default_state
+}
+
+/// A block seen exposed (air above it) in memory, as the world records one.
+fn seen(w: &mut World, pos: (i32, i32, i32), k: data::BlockKind) {
+    let air = Some(state(data::BlockKind::Air));
+    let s =
+        memory::Seen::check(NETHER, pos, state(k), [None, air, None, None, None, None]).unwrap();
+    w.memory.record_sign(&s);
+    w.memory.record(s, 0);
+}
+
+/// Race 45481633896: three bots at the spawner's bridge (y 61) walked at soul cells seen at y 22
+/// under the fortress and into wither skeletons; the valley west of the spawner, at their own
+/// level, was refused whole for the fortress's bounding box. The target is the soul cell nearest
+/// the feet within 12 of their height, never one with nether bricks seen beside it.
+#[test]
+fn the_valley_target_is_soul_ground_at_the_bots_level_away_from_bricks() {
+    let mut w = bare();
+    w.dimension = Some(world::Dimension {
+        type_id: 3,
+        name: NETHER.to_owned(),
+        min_y: Some(0),
+        height: Some(256),
+    });
+    // Column (2, 0): soul soil at the lava sea's level (y 22), 13 cells (a known valley).
+    for x in 32..45 {
+        seen(&mut w, (x, 22, 3), data::BlockKind::SoulSoil);
+    }
+    // Column (-2, 0): a wart room: soul sand at y 63 beside nether bricks.
+    for x in -32..-19 {
+        seen(&mut w, (x, 63, 3), data::BlockKind::SoulSand);
+    }
+    for x in -32..-19 {
+        seen(&mut w, (x, 64, 5), data::BlockKind::NetherBricks);
+    }
+    let (none, walled) = endermen::valley_target(&w, &[]);
+    assert_eq!(none, None, "deep soil and a wart room are no target");
+    assert_eq!(walled, 13);
+    // Column (0, 3): valley floor at y 60, no bricks: the target, over the nearest cell.
+    for x in 0..13 {
+        seen(&mut w, (x, 60, 50), data::BlockKind::SoulSand);
+    }
+    let (target, _) = endermen::valley_target(&w, &[]);
+    assert_eq!(target, Some((0, 61, 50)));
+    // A place given up is skipped, and the cells near it with it.
+    let (next, _) = endermen::valley_target(&w, &[(0, 61, 50)]);
+    assert_eq!(next, Some((9, 61, 50)));
+}
