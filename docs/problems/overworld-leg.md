@@ -160,3 +160,7 @@ The cast needs ten lava sources at one site. Carried up they are ten trips of 12
 
 - **What happened**: after the shields (tick 9,320) the bot dug its table to take along; the dig failed "Uncollected" (the drop fell to y 62 under the hut's blocks), the shields had taken the last planks (0 logs, 1 plank), so no table and no spare pickaxes. The stone pickaxe broke at 11,480, the wooden one at 13,920, and the bot dug own stairs by hand for 10,000 ticks (case onset "no pickaxe: from tick 13920").
 - **Fix**: after the cook, the table is taken along only once `spare_pickaxes` fresh stone pickaxes are held; else the spares' row runs first at the cook's table (it takes the table along after).
+
+## 16. Dusk stops the surface walks (with agent D's day clock, 2026-11-24)
+
+- With the server's day time read (`world.day_time()`), the second stocking's walks out for animals and for logs stop once dusk is under `DUSK_MARGIN` (1,200) ticks away or night has fallen ("dusk near: no walk out", noted once); the cook then runs in its hut. Not unit-tested; counted in the next race by its note.
