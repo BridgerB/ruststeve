@@ -6,7 +6,7 @@ tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@99ba4b8 clojurecraft@be85a92
+verifiedAgainst: ruststeve@5657899 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -52,7 +52,7 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **`never_fight`** kinds (creeper) are answered first and from `flee_radius` (8), backed away from until past it and the margin: from 4 the fuse was already lit (wall 21).
 
 ## Issue 15: neutral mobs
-- `neutral` kinds in the survival rules (`zombified_piglin`, `enderman`) are fought only once one of their kind has hit the bot within `PROVOKED_TICKS` 400 (`defend::provoked`, from the world's hit record): defending against a zombified piglin angered its group (9 of 112 deaths in the first nether race, 1 of 224 after). Piglins stay foes: with no gold worn they attack (32 of 224 deaths before the tunnels).
+- `neutral` kinds in the survival rules (`zombified_piglin`, `enderman`) are fought only once one of their kind has hit the bot within `PROVOKED_TICKS` 400 (`defend::provoked`, from the world's hit record): defending against a zombified piglin angered its group (9 of 112 deaths in the first nether race, 1 of 224 after). Piglins stay foes: with no gold worn they attack (32 of 224 deaths before the tunnels). Issue 17: an enderman is never a foe, provoked or not (`defend::NEVER_FOE`, in `foe` and `pressing`): 40 health and 7 a hit beat the bot in the open, and a provoked one is answered by a sealed pocket (`Plan::ender_threat`, [[planner]]).
 
 ## See also
 - [[food-and-hunting]] - the hunt's strikes, paced the same way.

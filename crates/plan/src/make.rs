@@ -314,6 +314,20 @@ pub struct Survival {
     /// the mob was waits a while (a creeper follows from 16).
     #[serde(default = "flee_clear")]
     pub flee_clear: f64,
+    /// Issue 17 (docs/problems/endermen-leave.md): under this health, with a ticking blaze or
+    /// ghast seeing the bot, it rests in cover before the next leg of travel (0: never).
+    #[serde(default)]
+    pub travel_health: f32,
+    /// Pickaxe uses (summed over the held pickaxes) a leg of travel never spends below: kept for
+    /// issue 18's burrow and for getting out of trouble. Read by the heading too.
+    #[serde(default)]
+    pub pickaxe_reserve: i32,
+    /// Ticks the bot waits in a warped forest for an enderman to spawn before it goes on.
+    #[serde(default)]
+    pub forest_wait_ticks: u64,
+    /// Ticks the bot waits in its nook in a soul sand valley before it goes on.
+    #[serde(default)]
+    pub valley_wait_ticks: u64,
 }
 
 fn flee_radius() -> f64 {
@@ -386,6 +400,10 @@ impl Default for Survival {
             shooter_crit: true,
             flee_radius: flee_radius(),
             flee_clear: flee_clear(),
+            travel_health: 0.0,
+            pickaxe_reserve: 0,
+            forest_wait_ticks: 0,
+            valley_wait_ticks: 0,
         }
     }
 }
@@ -428,6 +446,11 @@ pub struct SurvivalRules {
     pub shooter_crit: bool,
     pub flee_radius: f64,
     pub flee_clear: f64,
+    /// Issue 17: the travel health, the pickaxe reserve and the forest wait (config/goals.toml).
+    pub travel_health: f32,
+    pub pickaxe_reserve: i32,
+    pub forest_wait_ticks: u64,
+    pub valley_wait_ticks: u64,
     /// Kinds dropped when the main inventory is nearly full, each with how many to keep.
     pub junk: Vec<(data::ItemKind, i32)>,
     pub stock_logs: i32,
@@ -714,6 +737,10 @@ impl Table {
                 shooter_crit: g.survival.shooter_crit,
                 flee_radius: g.survival.flee_radius,
                 flee_clear: g.survival.flee_clear,
+                travel_health: g.survival.travel_health,
+                pickaxe_reserve: g.survival.pickaxe_reserve,
+                forest_wait_ticks: g.survival.forest_wait_ticks,
+                valley_wait_ticks: g.survival.valley_wait_ticks,
             },
         })
     }
