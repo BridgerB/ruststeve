@@ -900,15 +900,18 @@ impl Plan {
         self.travel_on(w, tick, rules.as_ref().map_or(0, |r| r.pickaxe_reserve))
     }
 
-    /// The approach (17e.1): a ticking enderman within `APPROACH_FROM`, else a frozen one seen
-    /// within `SIGHTING_RANGE`, walked to within `APPROACH_GOAL` by a plain route, else the far
+    /// The approach (17e.1): an enderman seen within `SIGHTING_RANGE`, ticking ones first,
+    /// walked to within `APPROACH_GOAL` by a plain route, else the far
     /// walk; never tunnelled. Each given up after `CHASE_TRIES` walks or `CHASE_TICKS`.
     fn approach(&mut self, w: &World, tick: u64) -> Option<Task> {
         let candidates: Vec<Sighting> = endermen(w)
             .into_iter()
             .filter(|s| !self.ender.given_up.contains(&s.id))
             .filter(|s| {
-                (s.ticking && s.dist <= APPROACH_FROM) || (!s.ticking && s.dist <= SIGHTING_RANGE)
+                // Ticking or frozen, any seen within `SIGHTING_RANGE` (ticking ones first): a
+                // ticking enderman 64.9 off was left alone for 2,000 ticks by a bot waiting in
+                // its nook, the rule then being 64 for a ticking one (race 45487204794 lane 1).
+                s.dist <= SIGHTING_RANGE
             })
             .collect();
         // Ticking ones first, each nearest first.
@@ -1117,6 +1120,12 @@ impl Plan {
                 format!("no ticking enderman came within {ENDERMAN_NEAR} in {spent} ticks; on"),
             );
             return None;
+        }
+        // Falling (a ghast's fireball knocked a bot off its ledge, race 45487204794 lane 2: a
+        // nook chosen at every cell of the fall): the nook waits for the ground.
+        if !body.on_ground {
+            self.retry_at = tick + 1;
+            return Some(Task::Idle);
         }
         let side = match self.ender.nook_open {
             Some((at, side)) if at == feet => side,
