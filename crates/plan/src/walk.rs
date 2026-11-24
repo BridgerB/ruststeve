@@ -480,9 +480,10 @@ impl Walk {
         if horizontal(pos, wc) <= WAYPOINT_REACH && (pos[1] - f64::from(wy)).abs() <= 0.5 {
             self.at += 1;
             self.best_tick = tick;
-            // On a found route a waypoint reached is progress, though the route leads round
-            // (a way over a lava sea goes away from its goal before it comes back).
-            if self.route == Some(Status::Found) {
+            // On a far walk's found route a waypoint reached is progress, though the route leads
+            // round (a way over a lava sea goes away from its goal before it comes back). A far
+            // walk only: on every walk it broke the overworld's log walk (probe 45351964250).
+            if self.more.far && self.route == Some(Status::Found) {
                 self.best_distance_at = tick;
             }
             return (Controls::default(), TaskStatus::Running);

@@ -86,11 +86,13 @@ Read with `navmap` (crate `navprobe`, probes 45334641630 and 45334717081) on `rs
 - **Cause**: mine. Fix 1 made `feet_cell` add 0.2 before flooring y, for every task. The stairs, the senses and every other reader of the feet's cell got a different cell on soul sand and in the top fifth of any jump.
 - **Fix**: `feet_cell` floors again. Soul sand is handled where a route is made and walked: `plan` searches from the cell over soul sand, the walk's arrival reads `stand_cell`, `follow` knows feet at y + 0.875 are not a cell under their waypoint.
 
-## Fix 6: soul sand is read from the block, not from the fraction of y
+## Fix 6: the overworld's log walk, found by bisection
 
-- **What happened** (probe 45349492975, the whole suite on fc9bed7, 363 of 364): `the_planner_reaches_a_log_thirty_blocks_out_on_real_terrain` still failed NoProgress, three walks to the log at (189, 75, 24) each failing after about 440 ticks; on `origin/issue-16e-observability` it passes.
-- **Cause**: `follow` took a body with y's fraction at 0.865 or more to be on soul sand, and then let go of the jump for a rise of a step or less and read "a cell up" a block higher. Any body whose y sits a hair under a whole block, or is in the top of a jump, read as on soul sand: the overworld's walk was changed.
-- **Fix**: the walk passes `follow` whether the feet's cell is soul sand (the block, from the world); both soul sand rules apply only then. Off soul sand `follow` is clojurecraft's again, line for line.
+- **What happened** (probe 45349492975, the whole suite on fc9bed7, 363 of 364; probe 45350890077 on 070578d, 366 of 367): `the_planner_reaches_a_log_thirty_blocks_out_on_real_terrain` failed NoProgress, three walks to the log at (189, 75, 24) each failing about 440 ticks in; on `origin/issue-16e-observability` it passes.
+- **First guess, wrong** (0eee250): `follow` read "on soul sand" from y's fraction. It now reads the block (the feet's cell is soul sand), which is right and kept, but the test still failed.
+- **Bisected** (probe 45351964250: the test on 070578d with one change of this branch taken out at a time): it passes only with the waypoint rule taken out. Taking out soul sand's pace, the lava ring, soul sand as ground, the jump rule or the piglin rule each leaves it failing.
+- **Cause**: fix 1 made every waypoint reached on a found route reset the walk's progress clock, for every walk; meant for the far walk's route round a lava sea.
+- **Fix**: the reset is a far walk's only. Every other walk keeps clojurecraft's progress invariant as it was.
 
 ## The escape out of an aquifer (A1's stall, owned here with escape.rs)
 
