@@ -39,7 +39,7 @@ Issue 09a: clojurecraft's `path.clj` in Rust (`plan::path`), constant for consta
 - A 6,000-node search costs tens of milliseconds; the planner asks at most a few per tick (the CPU budget, [[planner]]).
 
 ## Issue 16: the Nether walk (docs/problems/nether-walk.md)
-- **Soul sand is ground**: `classify` answers `Solid` for it (a box 0.875 high the physics stands on). `feet_cell` adds `FEET_LIFT` (0.2) before it floors y, so feet resting at y + 0.875 are in the cell over the soul sand, the cell a route gives them. Magma stays `Awkward`.
+- **Soul sand is ground**: `classify` answers `Solid` for it (a box 0.875 high the physics stands on). Feet resting on it floor to the soul sand's own cell, so `plan` searches from the cell over it and the walk reads its node with `stand_cell`; `feet_cell` is unchanged for every other task (a global lift of the feet's cell broke the tunnel's stairs on soul sand and was taken out). Magma stays `Awkward`.
 - **The bridge move** (`MoveKind::Bridge`, a far search's alone (`plan_far`, `Cells::far`), Nether only, with `BRIDGE_RESERVE` of the `BRIDGE_BLOCKS` held): one cell on the level whose floor is air or lava, laid first by the walk. Its cost is a walk plus `BRIDGE_COST` 3. Its feet cell may have lava under (`clear_over`), never beside. The overworld is not bridged and water is never laid in.
 - **A far search keeps clear of mobs that kill on sight** (`SHUN_KINDS`: piglins, brutes, hoglins): no cell within `SHUN_RADIUS` 20 of one, except within `SHUN_FREE` 6 of the start. Two piglins killed a bot in iron in 100 ticks on its first bridged route (race 45337580375).
 - **A route keeps its moves** (`Route::kinds`, one a waypoint).

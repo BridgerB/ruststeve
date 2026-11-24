@@ -44,6 +44,8 @@ pub const FAR_WEIGHT: f64 = 4.0;
 pub const FAR_RETRY_TICKS: u64 = 200;
 /// After a far route was found, the least ticks before the planner searches the next.
 pub const FAR_AGAIN_TICKS: u64 = 20;
+/// Where feet rest on soul sand, over its cell's floor line (its collision box's top).
+pub const SOUL_SAND_TOP: f64 = 0.875;
 /// Waypoints ahead a far walk watches for a mob to keep clear of.
 pub const SHUN_AHEAD: usize = 12;
 /// Ticks between two clicks laying one bridge block: the block update arrives in a tick or two.
@@ -285,7 +287,7 @@ impl Walk {
         )
     }
 
-    fn arrived(&self, pos: [f64; 3]) -> bool {
+    fn arrived(&self, w: &World, pos: [f64; 3]) -> bool {
         match self.arrive {
             Arrive::Reach => {
                 let eye = [pos[0], pos[1] + physics::EYE_HEIGHT, pos[2]];
@@ -295,7 +297,7 @@ impl Walk {
                         .sqrt();
                 d <= REACH && self.target.1 - pos[1].floor() as i32 <= PICKUP_RISE
             }
-            Arrive::Goal => self.goal.done(path::feet_cell(pos)),
+            Arrive::Goal => self.goal.done(path::stand_cell(w, pos)),
         }
     }
 
@@ -429,7 +431,7 @@ impl Walk {
         }
         let stall = tick.saturating_sub(self.best_distance_at);
         self.longest_stall = self.longest_stall.max(stall);
-        if self.arrived(pos) {
+        if self.arrived(w, pos) {
             return (Controls::default(), TaskStatus::Done);
         }
         if stall > PATIENCE_TICKS {
@@ -617,9 +619,10 @@ fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
         return Controls::default();
     }
     let near = horizontal([px, 0.0, pz], centre) < JUMP_NEAR;
-    // A cell up, read from the cell the feet stand in (`FEET_LIFT`): on soul sand, feet at
-    // y + 0.875, the next cell's floor line is an eighth up, a step and no jump.
-    let up = f64::from(wy) > (py + path::FEET_LIFT).floor() + 0.5;
+    // A cell up. On soul sand, feet at y + 0.875, the next cell's floor line is an eighth up:
+    // a step and no jump (`SOUL_SAND_TOP`); everywhere else as clojurecraft has it.
+    let on_soul_sand = py - py.floor() >= SOUL_SAND_TOP - 0.01;
+    let up = f64::from(wy) > py.floor() + if on_soul_sand { 1.5 } else { 0.5 };
     // That eighth is stepped, never jumped: under a two-high roof a jump hits the lintel, comes
     // down on the soul sand still blocked by the eighth, and jumps again (the model's kit bot
     // hopped at (61, 46.88, 79.7) for 8,000 ticks: docs/problems/nether-walk.md).
@@ -645,7 +648,8 @@ mod body_tests {
             .collect();
         let mut bricks = pillar.clone();
         bricks.extend(corridor);
-        assert_eq!(brick_in_the_body(&bricks), Some((100, 64, 150)));
+        // The first corridor brick with 200 columns in its nine squares (x 100 to 143, five wide).
+        assert_eq!(brick_in_the_body(&bricks), Some((112, 64, 150)));
         assert_eq!(brick_in_the_body(&pillar), None);
     }
 }

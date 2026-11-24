@@ -194,8 +194,8 @@ pub fn classify(state: Option<u32>) -> Class {
         return Class::Solid;
     }
     // Soul sand is ground (docs/problems/nether-walk.md): a box 0.875 high the physics stands
-    // on, lining every Nether shore. The feet rest at y + 0.875, which `feet_cell` reads as the
-    // cell over it.
+    // on, lining every Nether shore. The feet rest at y + 0.875, in the soul sand's own cell:
+    // `stand_cell` and `plan` read the cell over it.
     if kind == BlockKind::SoulSand {
         return Class::Solid;
     }
@@ -802,25 +802,33 @@ pub fn search_weighted(
     }
 }
 
-/// Feet this far under a cell's floor line stand in that cell: on soul sand the feet rest at
-/// y + 0.875, an eighth under the cell a route gives them (docs/problems/nether-walk.md).
-pub const FEET_LIFT: f64 = 0.2;
-
-/// The node a player at feet position `pos` stands in: the cell of the feet, or the one over it
-/// when they rest on a box just short of a full block (soul sand).
+/// The node a player at feet position `pos` stands in: each coordinate floored.
 pub fn feet_cell([x, y, z]: [f64; 3]) -> Cell {
-    (
-        x.floor() as i32,
-        (y + FEET_LIFT).floor() as i32,
-        z.floor() as i32,
-    )
+    (x.floor() as i32, y.floor() as i32, z.floor() as i32)
+}
+
+/// The node a body stands in for a route: its feet's cell, or the cell over it when the feet
+/// rest in soul sand's own cell (a box 0.875 high: feet at y + 0.875 floor to the soul sand, and
+/// the node a route gives them is the cell over it). `feet_cell` itself is not changed: every
+/// other task reads it as it always has (docs/problems/nether-walk.md, fix 5).
+pub fn stand_cell(w: &World, pos: [f64; 3]) -> Cell {
+    over_soul_sand(w, feet_cell(pos))
+}
+
+/// `c`, or the cell over it when `c` is soul sand.
+fn over_soul_sand(w: &World, c: Cell) -> Cell {
+    if w.block_at(BlockPos::new(c.0, c.1, c.2)) == Some(BlockKind::SoulSand) {
+        (c.0, c.1 + 1, c.2)
+    } else {
+        c
+    }
 }
 
 /// The cells at the feet's height whose columns the body's box overlaps, the one under most of
 /// it first (clojurecraft's `rests`): a box over a ledge's edge rests on the block beside.
 fn rests(pos: [f64; 3]) -> Vec<Cell> {
     let [px, py, pz] = pos;
-    let y = (py + FEET_LIFT).floor() as i32;
+    let y = py.floor() as i32;
     let lo = |v: f64| (v - physics::HALF_WIDTH).floor() as i32;
     let hi = |v: f64| (v + physics::HALF_WIDTH).floor() as i32;
     let mut xs = vec![lo(px), hi(px)];
@@ -878,10 +886,13 @@ pub fn plan_far(world: &World, from: Cell, goal: &Goal, max_nodes: u32, weight: 
 
 fn plan_over(mut cells: Cells<'_>, from: Cell, goal: &Goal, max_nodes: u32, weight: f64) -> Route {
     let world = cells.world;
+    // Feet resting in soul sand's own cell search from the cell over it.
+    let asked = from;
+    let from = over_soul_sand(world, from);
     let under_box = world
         .player
         .pos
-        .filter(|p| feet_cell(*p) == from)
+        .filter(|p| feet_cell(*p) == asked)
         .map(rests)
         .unwrap_or_default();
     let (x, y, z) = from;
