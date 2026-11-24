@@ -5,8 +5,8 @@ type: reference
 tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@beb29ac clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@3c8b108 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -73,3 +73,7 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 - **Suspect rock**: a step into rock within 3 of a blocked cell costs 8 more, so a route leaves a bad face instead of trying it cell by cell.
 - **`Plan::tunnel_toward`** (pub): the tunnel to one cell, ending only at it; `dig_toward` hands it any Nether target more than 8 blocks off (`TUNNEL_FROM`).
 - **Every failure names its reason**: a step (the cells, the walk's failure, the floor's block), a dig, and `Boxed` (each heading's refusal).
+- **Laid stairs need ground**: only with ground within 6 under the step (`LAY_OVER`), never out over a drop; a block that has shown leaves the list and the next gets its own click.
+- **A staircase is bounded**: one stair's cells take at most 8 digs (`MAX_CUT_TRIES`) and the feet stay in one cell at most 1,200 ticks (`STAND_TICKS`); a travel tunnel's step whose walk fails is steered straight (the end note counts blocks laid and steps steered).
+- **No bricks seen, in the Nether**: `Plan::explore_tunnel`, a search tunnel on a held compass heading, 48 blocks a leg, before any explore walk.
+- **Raced again** (race 45344386490, d4422d4): 2 of 3 at `fortress`, refusals 7 a bot (22 before); the third died to a ghast on the portal ledge at tick 240, before its first stretch.

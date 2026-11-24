@@ -60,6 +60,10 @@ pub enum StairStage {
         walk: Walk,
         since: u64,
         level: bool,
+        /// A travel tunnel's step whose walk failed (the route has no start beside lava or on
+        /// soul sand): the feet are steered straight at the cell just cut, one block away.
+        #[serde(default)]
+        direct: bool,
     },
     /// A travel tunnel's stair up with no block to step onto (a cavern's floor, the air under a
     /// roof): held blocks are laid first, each `(cell, the block clicked, its face)`, then the
@@ -106,7 +110,27 @@ pub struct Stairs {
     pub dug: u32,
     #[serde(default)]
     pub from: Option<Cell>,
+    /// Steps of a travel tunnel steered straight after their walk failed, and blocks laid: said
+    /// in the task's end note.
+    #[serde(default)]
+    pub steered: u32,
+    #[serde(default)]
+    pub laid: u32,
+    /// Digs begun for the stair being cut, and the feet's cell with the tick it was last seen to
+    /// change: a staircase that neither opens its cells nor moves ends, with the reason
+    /// (docs/problems/nether-tunnel.md wall 6: one stairs task ran 19,900 ticks).
+    #[serde(default)]
+    pub cut_tries: u32,
+    #[serde(default)]
+    pub stood: Option<(Cell, u64)>,
 }
+
+/// Digs one stair's cells may take before the staircase fails: three cells, each dug once, with
+/// room for a block that falls in.
+pub const MAX_CUT_TRIES: u32 = 8;
+/// Ticks the feet may stay in one cell before the staircase fails: a stair is three digs and a
+/// step, under 200 ticks by hand in netherrack and 900 in deepslate.
+pub const STAND_TICKS: u64 = 1200;
 
 /// Blocks a stair is laid with, the first held: what a tunnel leaves in the pack.
 pub const LAY_ITEMS: [data::ItemKind; 3] = [
@@ -114,6 +138,9 @@ pub const LAY_ITEMS: [data::ItemKind; 3] = [
     data::ItemKind::Cobblestone,
     data::ItemKind::CobbledDeepslate,
 ];
+/// A laid stair has ground this near under it (open cells only between). Race 45340444298: a
+/// route laid stairs up from a cliff's edge out over a cavern, and the bot ended its run there.
+pub const LAY_OVER: i32 = 6;
 /// Ticks a laid block may take to show before the step fails.
 pub const LAY_TICKS: u64 = 40;
 
@@ -125,11 +152,18 @@ pub fn lay_item(w: &World) -> Option<data::ItemKind> {
 /// What a stair up from `from` to `to` must lay first, when the block it steps onto is missing:
 /// the cell under that block (clicked onto the side of the block the feet stand on) when it is
 /// open too, then the block itself (clicked onto the top of the one under it). Empty when the
-/// step has its floor or is not a stair up.
+/// step has its floor, is not a stair up, or has no ground within `LAY_OVER` under it: stairs
+/// are laid over a cavern's floor, never out over a drop or a lava sea.
 pub fn lays(w: &World, from: Cell, to: Cell) -> Vec<(Cell, Cell, i8)> {
     let (dx, dz) = (to.0 - from.0, to.2 - from.2);
     let floor = (to.0, to.1 - 1, to.2);
     if to.1 != from.1 + 1 || !open(kind(w, floor)) {
+        return Vec::new();
+    }
+    let ground = (1..=LAY_OVER)
+        .map(|d| kind(w, (floor.0, floor.1 - d, floor.2)))
+        .find(|k| !open(*k));
+    if !full(ground.flatten()) {
         return Vec::new();
     }
     let under = (floor.0, floor.1 - 1, floor.2);
@@ -297,6 +331,10 @@ impl Stairs {
             route: Vec::new(),
             dug: 0,
             from: None,
+            steered: 0,
+            laid: 0,
+            cut_tries: 0,
+            stood: None,
         }
     }
 
@@ -443,6 +481,18 @@ impl Stairs {
         };
         let feet = path::feet_cell(body.pos);
         let from = *self.from.get_or_insert(feet);
+        match self.stood {
+            Some((c, since)) if c == feet => {
+                if tick.saturating_sub(since) > STAND_TICKS {
+                    self.refusals.push(format!(
+                        "the feet stayed at {feet:?} for {STAND_TICKS} ticks ({} digs begun for this stair)",
+                        self.cut_tries
+                    ));
+                    return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
+                }
+            }
+            Some(_) | None => self.stood = Some((feet, tick)),
+        }
         match &mut self.stage {
             StairStage::Lay {
                 lays,
@@ -450,9 +500,16 @@ impl Stairs {
                 to,
                 sent,
             } => {
-                let Some((c, against, face)) =
-                    lays.iter().find(|(c, _, _)| open(kind(w, *c))).copied()
-                else {
+                // A block that has shown is done, and the next gets its own click: with two to
+                // lay, the wait for the first was held against the second, which was never
+                // clicked ("a block laid at … did not show", with the first block spent: races
+                // 45337739022 and 45344386490).
+                let before = lays.len();
+                lays.retain(|(c, _, _)| open(kind(w, *c)));
+                if lays.len() != before {
+                    *sent = None;
+                }
+                let Some((c, against, face)) = lays.first().copied() else {
                     let (cells, to) = (cells.clone(), *to);
                     return match refusal(w, &cells, (to.0, to.1 - 1, to.2)) {
                         None => {
@@ -477,6 +534,33 @@ impl Stairs {
                         .push(format!("a block laid at {c:?} did not show"));
                     return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
                 }
+                // Never into the body's own box: a server refuses a block that would overlap the
+                // player, and a step is done the moment the feet cross into its cell, 0.3 of the
+                // body still in the cell behind. 53 laid blocks "did not show" in race
+                // 45337739022, each where the route turned back over the cell just left. Walk to
+                // the middle of the cell first.
+                let b = physics::aabb(body.pos);
+                let cell = [
+                    f64::from(c.0),
+                    f64::from(c.1),
+                    f64::from(c.2),
+                    f64::from(c.0) + 1.0,
+                    f64::from(c.1) + 1.0,
+                    f64::from(c.2) + 1.0,
+                ];
+                if (0..3).all(|a| physics::overlaps(&b, &cell, a)) {
+                    let middle = [
+                        f64::from(feet.0) + 0.5,
+                        body.pos[1],
+                        f64::from(feet.2) + 0.5,
+                    ];
+                    let c = physics::Controls {
+                        forward: true,
+                        yaw: crate::walk::yaw_to(body.pos, middle),
+                        ..still
+                    };
+                    return (c, None, StairsStatus::Running);
+                }
                 let Some(item) = lay_item(w) else {
                     self.refusals.push(format!("no block to lay at {c:?}"));
                     return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
@@ -484,6 +568,7 @@ impl Stairs {
                 match crate::hold::toward(w, item) {
                     crate::hold::Hold::Held => {
                         *sent = Some(tick);
+                        self.laid += 1;
                         let act = Act::UseOn {
                             pos: BlockPos::new(against.0, against.1, against.2),
                             face,
@@ -569,7 +654,15 @@ impl Stairs {
                     };
                 }
                 match cells.iter().find(|c| !open(kind(w, **c))).copied() {
+                    Some(c) if self.cut_tries >= MAX_CUT_TRIES => {
+                        self.refusals.push(format!(
+                            "{:?} at {c:?} is still there after {MAX_CUT_TRIES} digs for one stair",
+                            kind(w, c)
+                        ));
+                        (still, None, StairsStatus::Failed(StairsFailure::DigFailed))
+                    }
                     Some(c) => {
+                        self.cut_tries += 1;
                         // No collect: the drop falls into the stair the bot steps onto next and
                         // is picked up there. Waiting for it cost the full collect time (300
                         // ticks) a stair: docs/problems/iron-kit.md wall 2.
@@ -587,6 +680,7 @@ impl Stairs {
                             walk,
                             since: tick,
                             level,
+                            direct: false,
                         };
                         (still, None, StairsStatus::Running)
                     }
@@ -597,6 +691,7 @@ impl Stairs {
                 walk,
                 since,
                 level,
+                direct,
             } => {
                 // On the stair, or down a short drop under it.
                 if feet == *to
@@ -609,6 +704,7 @@ impl Stairs {
                         self.stairs += 1;
                         self.turns = 0;
                     }
+                    self.cut_tries = 0;
                     self.stage = StairStage::Plan;
                     return (still, None, StairsStatus::Running);
                 }
@@ -621,9 +717,25 @@ impl Stairs {
                     ));
                     return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
                 }
+                if *direct {
+                    let middle = [f64::from(to.0) + 0.5, body.pos[1], f64::from(to.2) + 0.5];
+                    let c = physics::Controls {
+                        forward: true,
+                        jump: to.1 > feet.1,
+                        yaw: crate::walk::yaw_to(body.pos, middle),
+                        ..still
+                    };
+                    return (c, None, StairsStatus::Running);
+                }
                 match walk.step(w, tick) {
                     (c, TaskStatus::Running) => (c, None, StairsStatus::Running),
                     (_, TaskStatus::Done) => (still, None, StairsStatus::Running),
+                    (_, TaskStatus::Failed(_)) if !self.route.is_empty() => {
+                        *direct = true;
+                        *since = tick;
+                        self.steered += 1;
+                        (still, None, StairsStatus::Running)
+                    }
                     (_, TaskStatus::Failed(f)) => {
                         let under = kind(w, (to.0, to.1 - 1, to.2));
                         self.refusals.push(format!(
