@@ -323,9 +323,14 @@ fn a_senses_row_carries_the_feet_cell_what_it_stands_on_and_lava_beside() {
     block(&mut w, (30, 31, -19), BlockKind::Lava);
     let row = senses(&w, "idle", "", None);
     assert_eq!(row.lava, Touch::In);
+    assert_eq!(row.standing(), "cell 30,31,-19 in lava over netherrack");
+    // Nothing under the cell (a jump, a fall, or the box resting on the block beside).
+    block(&mut w, (30, 31, -19), BlockKind::Air);
+    block(&mut w, (30, 30, -19), BlockKind::Air);
+    let row = senses(&w, "idle", "", None);
     assert_eq!(
         row.standing(),
-        "cell 30,31,-19 in lava over netherrack, in lava"
+        "cell 30,31,-19 over air (in the air or on an edge), lava beside"
     );
     // On soul sand the feet (y 31.875) are inside the soul sand's own cell: the planner's feet
     // cell is that block, which the row says outright.

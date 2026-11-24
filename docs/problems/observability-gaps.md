@@ -56,5 +56,80 @@ The text of `.ledger.txt`, `.senses.txt` and `.case.txt` changes shape, so anyth
 - **The fix.** New blows are told from the newest blow's stamp and the count at that stamp (`Snapshot::hit_mark`), never from the list's length. A fall in health is answered by a damage event that came with it or within `HIT_WINDOW` (10 client ticks) before it and that no earlier fall took; a fall with none is `Fact::HealthDrop`: `health dropped 5.0 to 12.0 with no damage event; nearest hostile blaze at 2.1; on fire no`. The case lists them under `health lost with no damage event (N times)`.
 - **What the packets are** at those ticks is read on the probe below (`replay export` of lane 1 round ticks 120 to 200: `DamageEvent`, `HurtAnimation`, `SetHealth`).
 
-## Probe
-(Filled in from the probe at the end: before and after for each wall.)
+## Probe 45337303782 (commit 67f3c42): before and after
+One probe re-read two recordings with this build: lane 5 of race 45204423376 (`ledger rs-l05-b00.rsr --force --senses 10 --story`) and lane 1 of race 45335627948 (`--raw --packets --to 600`, and `--senses 10 --story`). "Before" is the race's own file. A recording holds the planner's notes and no task records, so the re-read shows notes where the race's ledger shows starts and ends; the task order of wall 7a is held by its unit test.
+
+**Wall 1** (senses, tick 22600, the cell the orchestrator read one off):
+```
+before   22600 30,31,-18 hp 20.0 food 15 held stone_pickaxe (85 uses) | idle (last refusal: ; turn the heading) | …
+after    22600 30.5,31.0,-18.3 cell 30,31,-19 on netherrack hp 20.0 food 15 held stone_pickaxe (85 uses) | …
+after    22000 in minecraft:the_nether
+```
+The case's end: before `at Some([29.7, 36.42181483855212, -20.65643210844759])`; after, in the head, `in minecraft:the_nether at 29.70,36.10,-20.70: cell 29,36,-21 in lava over lava, in lava` (the words were then tidied to say a fluid once, and `over air (in the air or on an edge)` where nothing is under the cell: row 220 read `on air`; unit tests hold both).
+
+**Wall 2** (tick 1060, a sword and pickaxe swap; ticks 14040 to 14160):
+```
+before    1060 item iron_sword 1 -> 0
+          1060 item iron_sword 0 -> 1
+          1060 item stone_pickaxe 1 -> 0
+          1060 item stone_pickaxe 0 -> 1
+after     (no item line at 1060)
+after     1200 cursor empty (2 changes: iron_sword 1, empty)
+```
+`item stone_pickaxe`, `item bucket` and `item water_bucket` lines: 218 before, 78 after (those left are real: a bucket filled is `bucket 1 -> 0`, `lava_bucket 0 -> 1`). The four real breaks still read `tool broke` under the stricter rule: 4260 and 14520 and 19340 `stone_pickaxe`, 7540 `wooden_pickaxe`; no `tool gone` in the run.
+
+**Wall 3** (tick 14240; the death's second, 22720):
+```
+before   14240 item cobbled_deepslate 164 -> 170
+         14240 item cobbled_deepslate 170 -> 173
+         14240 item cobbled_deepslate 173 -> 177
+after    14240 item cobbled_deepslate 164 -> 177 (3 changes)
+after    22720 health 17.8 -> 13.3 (2 changes)
+         22720 heard entity.generic.burn at 0 x2
+```
+The whole ledger: 1,161 lines before; 882 after (172 notes, 801 facts).
+
+**Wall 4** (runs told once; this recording has no long run, the 23,982-copy case is the unit test):
+```
+after    22580 note stairs down toward the fortress at (61, 30, 95) (nether bricks seen, no walk to them)  [x3, to tick 22620]
+         22580 note stairs failed: StepFailed after 0 stairs (last refusal: ; turn the heading)  [x3, to tick 22640]
+```
+
+**Wall 5** (the case's head and the kinds; before, neither existed):
+```
+where:
+  in minecraft:the_nether at 29.70,36.10,-20.70: cell 29,36,-21 in lava over lava, in lava
+  health 4.3, food 15, held cobblestone, 6 free slots
+  task last note (escape-lava (trapped in lava; cut idle)) at tick 22780
+  last stage nether at tick 21940, 840 ticks before the end (tick 22780)
+notes by kind (every note of the ledger; a fix's firings are counted here):
+      12 x stairs failed: StepFailed after (ticks 2660 to 22640)
+       8 x stairs down toward the fortress (ticks 22080 to 22620)
+       2 x cast paused: no pickaxe (ticks 14520 to 19340)
+       1 x escape-lava (ticks 22700 to 22700)
+       1 x nether kit held (ticks 21820 to 21820)
+```
+(37 kinds in all; `drop Cobblestone from slot` and `drop Diorite from slot` are kinds apart: an item's name in capitals is not told from a word.)
+
+**Wall 6**: no trail note is in either recording (the planner did not write one at these commits); the unit test stands for it.
+
+**Wall 8** (lane 1 of race 45335627948, the packets as received and the new fact):
+```
+     140 packet (client tick 133, the bot is entity Some(45)) DamageEvent { entity_id: 45, source_type: 31, cause: None, direct: None }
+     140 packet (client tick 133, …) SetHealth { health: 17.0, food: 20, saturation: 14.0 }
+     140 hit on_fire, health 17.0
+     140 packet (client tick 138, …) SetHealth { health: 12.0, food: 20, saturation: 14.0 }
+     140 health dropped 5.0 to 12.0 with no damage event; nearest hostile blaze at 1.4; on fire yes
+```
+The same at client ticks 158 (13 to 8, a blaze at 0.6) and 178 (9 to 4, a blaze at 1.8). Confirmed from the packets: each 5-point fall is a `SetHealth` alone, with no `DamageEvent` and no `HurtAnimation` for the bot, 5 client ticks after an `on_fire` damage event of 1. That fits A4's reading (a blow of 6 landing inside the invulnerable time of the fire tick takes the difference, 5, and the server tells nobody); what dealt it is not in any packet, so the fact names the nearest hostile and leaves the cause to the reader. The case now says:
+```
+health lost with no damage event (3 times):
+  140 health dropped 5.0 to 12.0 with no damage event; nearest hostile blaze at 1.4; on fire yes
+  160 health dropped 5.0 to 8.0 with no damage event; nearest hostile blaze at 0.6; on fire yes
+  180 health dropped 5.0 to 4.0 with no damage event; nearest hostile blaze at 1.8; on fire yes
+```
+
+## Not proven
+- No race has run with these changes: the click hold (`CLICK_SETTLE`) and the cursor facts are proven on a re-read recording and unit tests, not on a live bot; the bot's no-progress clock reads item facts and now sees them up to 20 ticks later.
+- `Fact::ToolGone` did not fire in either recording.
+- The race's `summary.md` table needs a race to be seen; `results diagnose` has no new test beyond the story's counts.

@@ -806,7 +806,8 @@ impl Senses {
         self.cell.or_else(|| self.pos.map(feet_cell))
     }
 
-    /// Where the bot stands, in plain terms: `cell 30,31,-19 on netherrack, lava beside`, or
+    /// Where the bot stands, in plain terms: `cell 30,31,-19 on netherrack, lava beside`,
+    /// `cell 56,59,-115 over air (in the air or on an edge)`, or
     /// `cell 30,31,-19 in soul_sand over netherrack` when the feet's own cell is not empty.
     /// Rows from before the blocks were kept give the cell alone.
     pub fn standing(&self) -> String {
@@ -816,6 +817,10 @@ impl Senses {
         let mut s = format!("cell {x},{y},{z}");
         let under = self.under.as_deref().unwrap_or("?");
         match self.feet_block.as_deref() {
+            // Nothing under the cell: in the air, or the body's box rests on a block beside.
+            Some(b) if AIRS.contains(&b) && AIRS.contains(&under) => {
+                s.push_str(" over air (in the air or on an edge)");
+            }
             Some(b) if AIRS.contains(&b) => s.push_str(&format!(" on {under}")),
             Some(b) => s.push_str(&format!(" in {b} over {under}")),
             None if self.under.is_some() => s.push_str(&format!(" in ? over {under}")),
@@ -823,6 +828,8 @@ impl Senses {
         }
         for (name, t) in [("lava", self.lava), ("water", self.water)] {
             match t {
+                // Said already when the feet's own cell is the fluid.
+                Touch::In if self.feet_block.as_deref() == Some(name) => {}
                 Touch::In => s.push_str(&format!(", in {name}")),
                 Touch::Beside => s.push_str(&format!(", {name} beside")),
                 Touch::No => {}
