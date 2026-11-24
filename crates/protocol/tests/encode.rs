@@ -251,6 +251,30 @@ fn a_click_predicts_nothing() {
 }
 
 #[test]
+fn the_keys_held_are_one_byte_of_flags() {
+    use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT, INPUT_SPRINT};
+    // The game's `Input` record: forward 1, jump 16, shift 32, sprint 64, in one byte.
+    assert_eq!(
+        (INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT, INPUT_SPRINT),
+        (0x01, 0x10, 0x20, 0x40)
+    );
+    let p = protocol::C2s::PlayerInput {
+        flags: INPUT_FORWARD | INPUT_SHIFT,
+    };
+    assert_eq!(p.state(), State::Play);
+    let (id, body) = p.encode().unwrap();
+    // `player_input` is serverbound play packet 43 (0x2b) in 26.1.2's packet report.
+    assert_eq!(id, 43);
+    assert_eq!(
+        id,
+        data::generated::packets::PlayServerbound::PlayerInput.id()
+    );
+    assert_eq!(body, [0x21]);
+    let (_, none) = protocol::C2s::PlayerInput { flags: 0 }.encode().unwrap();
+    assert_eq!(none, [0]);
+}
+
+#[test]
 fn a_dig_carries_its_sequence() {
     let (_, body) = protocol::C2s::PlayerAction {
         status: 2,

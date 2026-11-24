@@ -100,6 +100,10 @@ pub enum Script {
     JumpForward { yaw: f64 },
     /// Nothing pressed.
     Still,
+    /// Forward along one yaw, sneaking: the walk stops at an edge (`sneak:<yaw>`).
+    SneakForward { yaw: f64 },
+    /// Standing still, sneaking: the server holds the shift key (`crouch`; magma does not burn).
+    Crouch,
     /// Standing still, dig the block under the feet: START at tick 0, FINISH at `finish`.
     DigDown { finish: u64 },
     /// Standing still, craft in window 0: one click per round trip (the next only once the
@@ -155,6 +159,17 @@ impl Script {
                 sneak: false,
                 yaw,
                 pitch: None,
+            },
+            Script::SneakForward { yaw } => Controls {
+                forward: true,
+                jump: false,
+                sneak: true,
+                yaw,
+                pitch: None,
+            },
+            Script::Crouch => Controls {
+                sneak: true,
+                ..Controls::default()
             },
             Script::Still
             | Script::DigDown { .. }
@@ -331,6 +346,8 @@ impl Script {
             Script::WalkSquare
             | Script::Straight { .. }
             | Script::JumpForward { .. }
+            | Script::SneakForward { .. }
+            | Script::Crouch
             | Script::Still => Vec::new(),
         }
     }
@@ -342,6 +359,8 @@ impl Script {
             Script::Straight { yaw } => format!("straight:{yaw}"),
             Script::JumpForward { yaw } => format!("jump:{yaw}"),
             Script::Still => "still".to_owned(),
+            Script::SneakForward { yaw } => format!("sneak:{yaw}"),
+            Script::Crouch => "crouch".to_owned(),
             Script::DigDown { finish } => format!("dig:{finish}"),
             Script::Craft(c) => format!("craft:{}", c.name()),
             Script::Attack { every, yaw } => format!("attack:{every}:{yaw}"),
@@ -368,6 +387,8 @@ impl Script {
             ("still", None) => Some(Script::Still),
             ("straight", Some(yaw)) => Some(Script::Straight { yaw }),
             ("jump", Some(yaw)) => Some(Script::JumpForward { yaw }),
+            ("sneak", Some(yaw)) => Some(Script::SneakForward { yaw }),
+            ("crouch", None) => Some(Script::Crouch),
             ("dig", Some(f)) if f >= 0.0 && f.fract() == 0.0 => {
                 Some(Script::DigDown { finish: f as u64 })
             }
@@ -437,6 +458,8 @@ mod tests {
             Script::Still,
             Script::Straight { yaw: 90.0 },
             Script::JumpForward { yaw: -45.0 },
+            Script::SneakForward { yaw: 90.0 },
+            Script::Crouch,
             Script::DigDown { finish: 30 },
             Script::Craft(Craft::Planks),
             Script::Craft(Craft::Sticks),
