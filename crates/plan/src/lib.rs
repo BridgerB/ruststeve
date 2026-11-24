@@ -833,9 +833,11 @@ impl Plan {
     /// dropped in the tick goes into the task ledger (issue 16e).
     pub fn step(&mut self, w: &World) -> Controls {
         let notes_before = self.event_count;
+        // >>> shield (docs/problems/shield.md): the one call site of `plan::shield`. The defend's
+        // swing count before the tick: a strike the raised shield drops is given back.
+        let swings_before = self.swing_count();
         let c = self.step_inner(w);
-        // >>> shield (docs/problems/shield.md): the one call site of `plan::shield`.
-        let c = self.shield_step(w, c);
+        let c = self.shield_step(w, c, swings_before);
         // <<< shield
         self.track(w.session.server_ticks, notes_before);
         c
@@ -970,7 +972,12 @@ impl Plan {
     /// fireball coming or a blaze about to shoot it is raised, and while it is up the bot strikes
     /// nothing and walks slowed, toward the threat only (`shield::controls`: what a client using
     /// an item can do). An escape, a meal or any work of the hands comes first.
-    fn shield_step(&mut self, w: &World, c: Controls) -> Controls {
+    fn shield_step(
+        &mut self,
+        w: &World,
+        c: Controls,
+        swings_before: Option<shield::SwingCount>,
+    ) -> Controls {
         let tick = w.ticks;
         if self.acts.is_empty()
             && tick >= self.equip_at
@@ -986,10 +993,7 @@ impl Plan {
             return c;
         }
         let task_free = match &self.task {
-            // A blaze in touch: the defend's keep-off and strike, not the shield (blaze-fight
-            // wall 19).
-            Task::Defend(_) => !defend::blaze_in_touch(w),
-            Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
+            Task::Defend(_) | Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
             Task::Escape(_)
             | Task::Eat(_)
             | Task::Hunt(_)
@@ -1004,20 +1008,63 @@ impl Plan {
             | Task::Enter(_)
             | Task::Swim(..) => false,
         };
-        // A strike or a change of the held slot waits for the shield; any other act is work.
+        // A strike, a change of the held slot or a click to place a block is weighed by the
+        // shield; any other act is work.
         let hands_free = self.acts.iter().all(|a| {
             matches!(
                 a,
-                world::Act::Attack { .. } | world::Act::Swing | world::Act::Hold { .. }
+                world::Act::Attack { .. }
+                    | world::Act::Swing
+                    | world::Act::Hold { .. }
+                    | world::Act::UseOn { .. }
             )
         });
-        let step = self.shield.step(w, tick, task_free && hands_free);
+        let placing = self
+            .acts
+            .iter()
+            .any(|a| matches!(a, world::Act::UseOn { .. }));
+        let duty = shield::Duty {
+            free: task_free && hands_free,
+            placing,
+            striking: match &self.task {
+                Task::Defend(d) => shield::striking(w, d),
+                _ => None,
+            },
+        };
+        let step = self.shield.step(w, tick, &duty);
         for what in step.notes {
             self.note(tick, what, "shield".to_owned());
         }
+        // A placing click held for the shield is not sent: its try is given back to the task
+        // that made it (the shelter's count, the bridge's tries), which clicks again.
+        if step.hold_place {
+            self.acts.retain(|a| !matches!(a, world::Act::UseOn { .. }));
+            match &mut self.task {
+                Task::Idle => self.shelter_blocks = self.shelter_blocks.saturating_sub(1),
+                Task::Explore(walk) if walk.more.place_tick == tick => {
+                    walk.more.place_tries = walk.more.place_tries.saturating_sub(1);
+                }
+                _ => {}
+            }
+        }
         if step.yaw.is_some() {
+            let dropped = self
+                .acts
+                .iter()
+                .filter(|a| matches!(a, world::Act::Attack { .. }))
+                .count();
             self.acts
                 .retain(|a| !matches!(a, world::Act::Attack { .. } | world::Act::Swing));
+            // The defend counted the swing and set its cooldown when it chose it: the strike
+            // was never sent, so both are put back (the fight's swing evidence, and the next
+            // swing at once when the shield lowers, not a full cooldown later).
+            if dropped > 0
+                && let Task::Defend(d) = &mut self.task
+            {
+                let back = swings_before.unwrap_or_default().restore(d);
+                self.swings_sent = self.swings_sent.saturating_sub(u64::from(back));
+                self.shield.strikes_held += back;
+            }
         }
         // First: a lowering goes ahead of a meal's own `use_item` in the same tick.
         if let Some(act) = step.act {
@@ -1026,6 +1073,14 @@ impl Plan {
         match step.yaw {
             Some(yaw) => shield::controls(c, yaw, tick),
             None => c,
+        }
+    }
+
+    /// The defend's swing count, for `shield_step` to give a dropped strike back.
+    fn swing_count(&self) -> Option<shield::SwingCount> {
+        match &self.task {
+            Task::Defend(d) => Some(shield::SwingCount::of(d)),
+            _ => None,
         }
     }
 
