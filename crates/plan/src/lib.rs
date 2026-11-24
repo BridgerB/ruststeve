@@ -121,6 +121,33 @@ const ESCAPE_REPORT_TICKS: u64 = 2400;
 const ROD_REACH: f64 = 8.0;
 /// A brick within this of a trail mark has been visited (issue 16b, the spawner search).
 const VISITED_NEAR: f64 = 8.0;
+/// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
+/// feet are (two trail steps: a mark beside the bot is no way on).
+pub const TRAIL_TOWARD: f64 = 4.0;
+/// Ticks between looks while a spawner on record is refused and no trail mark is nearer (a
+/// refusal lasts `FAILURE_MEMORY_TICKS` 600: six looks).
+const SPAWNER_WAIT_TICKS: u64 = 100;
+
+/// The trail marks at least `TRAIL_TOWARD` nearer to `target` than `feet`, the nearest to the
+/// target first: where the bot itself has stood, so no cell it has not seen.
+pub fn trail_toward(trail: &[[f64; 3]], feet: [f64; 3], target: Cell) -> Vec<[f64; 3]> {
+    let to = |p: [f64; 3]| {
+        let d = [
+            f64::from(target.0) + 0.5 - p[0],
+            f64::from(target.1) + 0.5 - p[1],
+            f64::from(target.2) + 0.5 - p[2],
+        ];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    };
+    let here = to(feet);
+    let mut marks: Vec<(f64, [f64; 3])> = trail
+        .iter()
+        .map(|m| (to(*m), *m))
+        .filter(|(d, _)| *d + TRAIL_TOWARD <= here)
+        .collect();
+    marks.sort_by(|a, b| a.0.total_cmp(&b.0));
+    marks.into_iter().map(|(_, m)| m).collect()
+}
 /// Chunk columns a spawner search looks for bricks in: 48 blocks, farther is another fortress
 /// (clojurecraft's `corridor-reach`).
 const CORRIDOR_CHUNKS: i32 = 3;
@@ -1761,10 +1788,8 @@ impl Plan {
             self.retry_at = tick + RETRY_TICKS;
             return Task::Idle;
         }
-        if let Some(sp) = world::stage::kind_near(w, data::BlockKind::Spawner, FORTRESS_CHUNKS)
-            .into_iter()
-            .find(|c| !self.refused_now(*c, tick))
-        {
+        let known = world::stage::kind_near(w, data::BlockKind::Spawner, FORTRESS_CHUNKS);
+        if let Some(sp) = known.iter().copied().find(|c| !self.refused_now(*c, tick)) {
             let mut walk = Walk::new(
                 sp,
                 Goal::Near {
@@ -1791,6 +1816,49 @@ impl Plan {
                 tick,
             ) {
                 return t;
+            }
+        }
+        // A spawner known and no way on from here (spawner wall 2: a bot pushed back down its own
+        // tunnel refused the spawner after three stalls, explored 60 blocks the other way and dug
+        // two pickaxes away from there): back along the trail to the mark nearest the spawner,
+        // and there wait out the refusal. Never an explore away from a spawner on record.
+        if let Some((sp, body)) = known.first().copied().zip(w.body) {
+            for m in trail_toward(&self.trail, body.pos, sp)
+                .into_iter()
+                .take(CANDIDATES_PER_TICK)
+            {
+                let target = path::feet_cell(m);
+                let mut walk = Walk::new(
+                    target,
+                    Goal::Near {
+                        pos: target,
+                        range: 1.5,
+                    },
+                    Arrive::Goal,
+                    tick,
+                );
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("back toward the spawner at {sp:?} by the trail mark {target:?}"),
+                        "a spawner on record, no walk or dig to it from here".to_owned(),
+                    );
+                    return Task::Explore(walk);
+                }
+            }
+            let for_good = self
+                .refused
+                .get(&sp)
+                .is_some_and(|(until, _)| *until == u64::MAX);
+            if !for_good {
+                self.retry_at = tick + SPAWNER_WAIT_TICKS;
+                self.note(
+                    tick,
+                    format!("wait for the spawner at {sp:?}"),
+                    "refused a while, no trail mark nearer; not exploring away from it".to_owned(),
+                );
+                return Task::Idle;
             }
         }
         // No spawner seen: the fortress's corridors, the nearest brick not yet stood near first.
