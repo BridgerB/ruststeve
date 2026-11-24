@@ -233,3 +233,72 @@ fn magma_burns_the_feet_each_ten_ticks_unless_sneaking_or_fire_resistant() {
     beside.magma((1, 1), (0, 0), 40);
     assert_eq!(burns(&beside, 25, |_| {}), 0);
 }
+
+/// Lava laid in a stage rests, as captured columns hold a lava fall still; `wake_fluids` sets
+/// what can run running, and only in the chunks that tick: within the simulation distance (2
+/// here) of the player. A spring four chunks off waits.
+#[test]
+fn woken_lava_runs_where_the_chunks_tick_and_waits_where_they_do_not() {
+    let mut stage = Stage::new(5, 40, 60);
+    stage
+        .set((2, 41, 2), BlockKind::Lava)
+        .set((70, 41, 2), BlockKind::Lava)
+        .lava_lake((-20, -16), (-20, -16), 40, 2)
+        .spawn((12, 41, 12));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    for _ in 0..30 {
+        tick(&mut sim);
+    }
+    assert_eq!(lava(&sim, 3, 41, 2), 0, "lava at rest ran");
+    // The two springs; the lake sunk in the floor has nowhere to go and is left asleep.
+    assert_eq!(sim.wake_fluids(), 2);
+    for _ in 0..10 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 3, 41, 2), lava(&sim, 71, 41, 2)), (7, 0));
+    for _ in 0..60 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 8, 41, 2), lava(&sim, 71, 41, 2)), (2, 0));
+}
+
+/// `BlockItem.place` into lava: water and lava are replaceable, so a held block goes into a
+/// lava cell (the bridge's move and the seal's), the lava is gone from it, and the flow it cut
+/// off from its source drains.
+#[test]
+fn a_block_is_placed_into_lava_and_the_flow_behind_it_drains() {
+    let mut stage = Stage::new(1, 40, 60);
+    // A trench in the floor east of the player, a source set at its far end.
+    stage.air((3, 5), (40, 40), (0, 0)).spawn((2, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.give((data::ItemKind::Cobblestone, 64));
+    sim.setblock((6, 40, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    let trench = |sim: &Sim| [3, 4, 5, 6].map(|x| lava(sim, x, 40, 0));
+    assert_eq!(trench(&sim), [5, 6, 7, 8]);
+    // The trench's floor under (4, 40, 0), clicked on its top face.
+    let out = send(
+        &mut sim,
+        C2s::UseItemOn {
+            hand: 0,
+            pos: (4, 39, 0),
+            face: 1,
+            cursor: [0.5, 1.0, 0.5],
+            inside: false,
+            sequence: 1,
+        },
+    );
+    assert_eq!(kind(&sim, 4, 40, 0), Some(BlockKind::Cobblestone));
+    assert_eq!(
+        sim.survival.held_stack(),
+        Some((data::ItemKind::Cobblestone, 63))
+    );
+    assert_eq!(out.last(), Some(&S2c::BlockChangedAck { sequence: 1 }));
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    assert_eq!(trench(&sim), [0, 0, 7, 8], "the cut-off flow did not drain");
+    assert_eq!(sim.health, 20.0);
+}
