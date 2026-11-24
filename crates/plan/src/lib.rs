@@ -121,6 +121,20 @@ const ESCAPE_REPORT_TICKS: u64 = 2400;
 const ROD_REACH: f64 = 8.0;
 /// A brick within this of a trail mark has been visited (issue 16b, the spawner search).
 const VISITED_NEAR: f64 = 8.0;
+/// What a shelter is made of, the first held: cobblestone does not burn on; netherrack burns for
+/// ever once a fireball lights it, so it is the last.
+const SHELTER_BLOCKS: &[data::ItemKind] = &[
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+    data::ItemKind::NetherBricks,
+    data::ItemKind::Netherrack,
+];
+/// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
+/// `SEAL_EVERY_TICKS`).
+const SHELTER_EVERY_TICKS: u64 = 10;
+/// Shelter blocks in one run before the bot stops building: a closed box round one cell is 10
+/// (eight wall cells, one more for the roof to hang on, the roof); eight boxes.
+const SHELTER_MAX: u32 = 80;
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
 pub const TRAIL_TOWARD: f64 = 4.0;
@@ -479,6 +493,11 @@ pub struct Plan {
     /// When armour may next be put on (issue 16).
     #[serde(default)]
     pub equip_at: u64,
+    /// When the next shelter block may be placed, and how many have been (spawner wall 3).
+    #[serde(default)]
+    pub shelter_at: u64,
+    #[serde(default)]
+    pub shelter_blocks: u32,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -622,6 +641,8 @@ impl Plan {
             fetch_lava: false,
             fetch_walks: 0,
             equip_at: 0,
+            shelter_at: 0,
+            shelter_blocks: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -1690,30 +1711,40 @@ impl Plan {
         self.decide(w, origin, tick)
     }
 
-    /// Under the engage health in the Nether: the nearest cell no blaze in range sees, on a found
-    /// route; there, rest. `None` when not hurt.
+    /// Under the engage health in the Nether: rest where no shooter in range sees the body and
+    /// nothing burns; seen or burning, the nearest cell out of sight on a found route; with none,
+    /// a held block into each cell a line of sight comes in through, until none does
+    /// (`cover::shelter_block`, spawner wall 3). `None` when not hurt, or when none of it can be
+    /// done.
     fn take_cover(&mut self, w: &World, tick: u64) -> Option<Task> {
         let rules = self.table.as_ref().map(|t| t.survival.clone())?;
         let body = w.body?;
         if w.player.health.is_none_or(|h| h >= rules.engage_health) {
             return None;
         }
-        let eyes = cover::shooters(w, &[data::EntityKind::Blaze, data::EntityKind::Ghast]);
-        let feet = path::feet_cell(body.pos);
-        if eyes.is_empty() || !cover::seen_at(w, &eyes, feet) {
+        let eyes = cover::shooters(w);
+        let burning = escape::touching_fire(w, body.pos);
+        if !burning && !cover::seen_body(w, &eyes, body.pos) {
             self.retry_at = tick + RETRY_TICKS;
             self.note(
                 tick,
                 "rest".to_owned(),
                 format!(
-                    "health {:?} under {}; out of sight",
-                    w.player.health, rules.engage_health
+                    "health {:?} under {}; out of sight of {} shooters within {}",
+                    w.player.health,
+                    rules.engage_health,
+                    eyes.len(),
+                    cover::COVER_RANGE
                 ),
             );
             return Some(Task::Idle);
         }
+        // Not the cell it stands in: seen there by where the body really is, a walk to it is over
+        // at once and the shelter never starts.
+        let feet = path::feet_cell(body.pos);
         for c in cover::cover_cells(w, &eyes)
             .into_iter()
+            .filter(|c| *c != feet)
             .take(CANDIDATES_PER_TICK)
         {
             let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
@@ -1723,7 +1754,7 @@ impl Plan {
                     tick,
                     format!("take cover at {c:?}"),
                     format!(
-                        "health {:?}; {} blazes see the bot",
+                        "health {:?}; {} shooters in range, burning {burning}",
                         w.player.health,
                         eyes.len()
                     ),
@@ -1731,7 +1762,51 @@ impl Plan {
                 return Some(Task::Explore(walk));
             }
         }
-        None
+        // No cell out of sight to walk to (an open bridge): make one where the bot stands.
+        if burning || !body.on_ground {
+            return None;
+        }
+        let item = SHELTER_BLOCKS
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        let (cell, click, face) = cover::shelter_block(w, &eyes, body.pos)?;
+        if self.shelter_blocks >= SHELTER_MAX {
+            return None;
+        }
+        // One click a look; a window open or a click not yet answered waits.
+        self.retry_at = tick + 1;
+        if w.window.is_some() || w.click.is_some() || !self.acts.is_empty() {
+            return Some(Task::Idle);
+        }
+        if tick < self.shelter_at {
+            return Some(Task::Idle);
+        }
+        match hold::toward(w, item) {
+            hold::Hold::Held => {
+                self.shelter_at = tick + SHELTER_EVERY_TICKS;
+                self.shelter_blocks += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("shelter block {} at {cell:?}", self.shelter_blocks),
+                    format!(
+                        "health {:?}; seen by a shooter, no cover cell with a route; on {click:?} face {face}",
+                        w.player.health
+                    ),
+                );
+                Some(Task::Idle)
+            }
+            hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            hold::Hold::Wait => Some(Task::Idle),
+            hold::Hold::Missing => None,
+        }
     }
 
     /// Issue 16: from the fortress to its blaze spawner, and there until 7 rods are held. A spawner
