@@ -86,6 +86,11 @@ pub struct Scoop {
     /// what the server took; the third, the exact line passing what the server refused.
     #[serde(default)]
     pub uses: [u32; 4],
+    /// Whether the stand routed to sees a face of the source by the exact line from its middle
+    /// (`Some(true)`), by the sampled line only (`Some(false)`), or no stand was routed (`None`):
+    /// the trail says which, so a race counts the exact-first stands (cast.md wall 1).
+    #[serde(default)]
+    pub stand_exact: Option<bool>,
 }
 
 fn water() -> memory::Fluid {
@@ -391,6 +396,7 @@ impl Scoop {
             sent_exact: None,
             centring: 0,
             uses: [0; 4],
+            stand_exact: None,
         }
     }
 
@@ -421,14 +427,22 @@ impl Scoop {
             let standing_blind = |st: Cell| {
                 here.is_some_and(|(f, e)| f == st && aim_at_use(w, e, target, REACH).is_none())
             };
-            for st in stands(w, self.target)
+            // Stands the exact line sees from first, nearest first within each (a stable sort):
+            // a stand the sampled line alone passes is walked to and the use refused there, the
+            // refill failing `NoSight` source after source (cast.md wall 1). The sampled ones stay,
+            // after: deciding stands by the exact line alone lit fewer (portal.md wall 27).
+            let exact = |st: Cell| aim_at_use(w, cell_eye(st), target, STAND_REACH).is_some();
+            let mut tried: Vec<(bool, Cell)> = stands(w, self.target)
                 .into_iter()
                 .filter(|st| !standing_blind(*st))
-                .take(STAND_TRIES)
-            {
+                .map(|st| (exact(st), st))
+                .collect();
+            tried.sort_by_key(|(e, _)| !*e);
+            for (e, st) in tried.into_iter().take(STAND_TRIES) {
                 let mut walk = Walk::new(st, Goal::Block { pos: st }, Arrive::Goal, tick);
                 if walk.route_now(w, tick) && walk.route == Some(crate::path::Status::Found) {
                     self.stage = Stage::Approach(walk);
+                    self.stand_exact = Some(e);
                     return true;
                 }
             }
