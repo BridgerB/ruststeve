@@ -150,6 +150,9 @@ fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
     for stack in KIT {
         assert_eq!(sim.survival.give(stack), 0, "{stack:?} did not fit");
     }
+    // The lava falls beside the portal run once the bot's arrival sets the chunks ticking: the
+    // ledge floods 700 to 900 ticks in (docs/problems/nether-walk.md).
+    let woken = sim.wake_fluids();
     let mut ledger = Vec::new();
     let mut reached_at = None;
     let mut track = Vec::new();
@@ -172,7 +175,7 @@ fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
         (&ledger[..], &ledger[..0])
     };
     let story = format!(
-        "at {:?}, health {:?} (lowest {:?}), died {}, reached at {reached_at:?}, escapes {}, \
+        "{woken} fluid cells woken; at {:?}, health {:?} (lowest {:?}), died {}, reached at {reached_at:?}, escapes {}, \
          violations {:?}\nevery 600 ticks:\n{}\nledger ({n} lines):\n{}\n  ...\n{}",
         run.world.body.map(|b| b.pos),
         run.world.player.health,
