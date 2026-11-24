@@ -187,6 +187,27 @@ pub struct Memory {
     /// again.
     #[serde(default)]
     pools: BTreeMap<(String, i32, i32, Fluid), BTreeSet<Cell>>,
+    /// The positions whose latest sighting is one of `INDEXED`, by dimension, chunk column and
+    /// kind: the stage ladder and the planner look for spawners, nether bricks and portals in 25
+    /// to 289 columns, and a scan of every sighting there took about 130 ms a look inside a
+    /// fortress (a real bot fell behind the server and was dropped: race 45350933958 lane 1).
+    #[serde(default)]
+    by_kind: BTreeMap<(String, i32, i32, BlockKind), BTreeSet<Cell>>,
+    /// Set on a store read from before `by_kind` (its index is empty): `indexed_in_column` then
+    /// answers `None` and the caller scans, as before.
+    #[serde(default = "unindexed")]
+    unindexed: bool,
+}
+
+/// Kinds kept in `Memory::by_kind`.
+pub const INDEXED: &[BlockKind] = &[
+    BlockKind::Spawner,
+    BlockKind::NetherBricks,
+    BlockKind::NetherPortal,
+];
+
+fn unindexed() -> bool {
+    true
 }
 
 impl Memory {
@@ -210,6 +231,27 @@ impl Memory {
             .insert(seen.pos);
         if let Some(kind) = data::block_of_state(seen.state) {
             self.kinds.insert(kind);
+        }
+        let was = self
+            .latest
+            .get(&key)
+            .and_then(|i| self.log.get(*i))
+            .and_then(|s| data::block_of_state(s.state));
+        let now = data::block_of_state(seen.state);
+        if was != now {
+            if let Some(k) = was.filter(|k| INDEXED.contains(k))
+                && let Some(set) =
+                    self.by_kind
+                        .get_mut(&(seen.dimension.clone(), x >> 4, z >> 4, k))
+            {
+                set.remove(&seen.pos);
+            }
+            if let Some(k) = now.filter(|k| INDEXED.contains(k)) {
+                self.by_kind
+                    .entry((seen.dimension.clone(), x >> 4, z >> 4, k))
+                    .or_default()
+                    .insert(seen.pos);
+            }
         }
         self.latest.insert(key, self.log.len());
         self.log.push(Sighting {
@@ -319,6 +361,47 @@ impl Memory {
             .collect()
     }
 
+    /// Build the kind index from the latest sightings, for a store read from before it (a replay
+    /// of an old recording asked about the planner's speed today).
+    pub fn reindex(&mut self) {
+        let mut by_kind: BTreeMap<(String, i32, i32, BlockKind), BTreeSet<Cell>> = BTreeMap::new();
+        for ((dim, pos), i) in &self.latest {
+            if let Some(k) = self
+                .log
+                .get(*i)
+                .and_then(|s| data::block_of_state(s.state))
+                .filter(|k| INDEXED.contains(k))
+            {
+                by_kind
+                    .entry((dim.clone(), pos.0 >> 4, pos.2 >> 4, k))
+                    .or_default()
+                    .insert(*pos);
+            }
+        }
+        self.by_kind = by_kind;
+        self.unindexed = false;
+    }
+
+    /// The positions in one chunk column whose latest sighting is `kind`, from the index: `None`
+    /// when `kind` is not one of `INDEXED` or the store predates the index (scan `in_column`).
+    pub fn indexed_in_column(
+        &self,
+        dimension: &str,
+        cx: i32,
+        cz: i32,
+        kind: BlockKind,
+    ) -> Option<Vec<Cell>> {
+        if self.unindexed || !INDEXED.contains(&kind) {
+            return None;
+        }
+        Some(
+            self.by_kind
+                .get(&(dimension.to_owned(), cx, cz, kind))
+                .map(|set| set.iter().copied().collect())
+                .unwrap_or_default(),
+        )
+    }
+
     /// The latest index rebuilt by folding the log: equal to `latest` when the store is sound.
     pub fn refold_latest(&self) -> BTreeMap<(String, Cell), usize> {
         self.log
@@ -340,6 +423,36 @@ mod tests {
 
     fn state(kind: BlockKind) -> u32 {
         kind.info().map(|i| i.default_state).unwrap()
+    }
+
+    /// The kind index follows the latest sighting: a spawner seen is listed in its column, the
+    /// same cell seen as air is not; a store from before the index answers `None`.
+    #[test]
+    fn the_kind_index_follows_the_latest_sighting() {
+        let nether = "minecraft:the_nether";
+        let seen = |pos: Cell, kind: BlockKind| Seen {
+            dimension: nether.to_owned(),
+            pos,
+            state: state(kind),
+        };
+        let mut m = Memory::new();
+        assert!(m.record(seen((129, 64, 159), BlockKind::Spawner), 1));
+        assert!(m.record(seen((130, 64, 159), BlockKind::NetherBricks), 1));
+        let col = |m: &Memory, k| m.indexed_in_column(nether, 8, 9, k);
+        assert_eq!(col(&m, BlockKind::Spawner), Some(vec![(129, 64, 159)]));
+        assert_eq!(col(&m, BlockKind::Stone), None, "not an indexed kind");
+        assert!(m.record(seen((129, 64, 159), BlockKind::Air), 2));
+        assert_eq!(col(&m, BlockKind::Spawner), Some(vec![]));
+        assert_eq!(col(&m, BlockKind::NetherBricks), Some(vec![(130, 64, 159)]));
+        let old = Memory {
+            unindexed: true,
+            ..m.clone()
+        };
+        assert_eq!(
+            col(&old, BlockKind::NetherBricks),
+            None,
+            "scan the old store"
+        );
     }
 
     #[test]

@@ -492,6 +492,9 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     };
     if let Some(m) = memory {
         run.world.memory = m;
+        // A snapshot's memory from before the kind index: built here, or every spawner and
+        // fortress look scans the sightings (about 130 ms in a fortress, race 45350933958 lane 1).
+        run.world.memory.reindex();
         // The seeded memory is the run's start state and no event carries it: recorded as a
         // checkpoint before the first event, so a fold begins where the run did (`replay verify`
         // counted every checkpoint of every resumed run a mismatch without it).

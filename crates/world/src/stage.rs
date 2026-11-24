@@ -34,9 +34,19 @@ pub fn kind_near(w: &World, kind: data::BlockKind, chunks: i32) -> Vec<(i32, i32
     let mut out: Vec<(f64, (i32, i32, i32))> = Vec::new();
     for dx in -chunks..=chunks {
         for dz in -chunks..=chunks {
-            for s in w.memory.in_column(&dim.name, cx + dx, cz + dz) {
-                if data::block_of_state(s.state) == Some(kind) {
-                    let c = s.pos;
+            let cells = w
+                .memory
+                .indexed_in_column(&dim.name, cx + dx, cz + dz, kind)
+                .unwrap_or_else(|| {
+                    w.memory
+                        .in_column(&dim.name, cx + dx, cz + dz)
+                        .into_iter()
+                        .filter(|s| data::block_of_state(s.state) == Some(kind))
+                        .map(|s| s.pos)
+                        .collect()
+                });
+            for c in cells {
+                {
                     let d = (0..3)
                         .map(|i| {
                             let v = [c.0, c.1, c.2][i];
