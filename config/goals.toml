@@ -383,6 +383,10 @@ junk = [
   ["andesite", 0], ["diorite", 0], ["granite", 0], ["tuff", 0], ["calcite", 0],
   ["smooth_basalt", 0], ["raw_copper", 0], ["lapis_lazuli", 0], ["glow_ink_sac", 0],
   ["rotten_flesh", 0], ["spider_eye", 0], ["bone", 0], ["leaf_litter", 0],
+  # The hunt's by-products (overworld-leg wall 10: a cook-site bot's pack held eggs, feathers,
+  # leather and three colours of wool when it filled and its crafts failed).
+  ["egg", 0], ["feather", 0], ["leather", 0], ["string", 0], ["white_wool", 0],
+  ["light_gray_wool", 0], ["gray_wool", 0], ["black_wool", 0], ["brown_wool", 0],
 ]
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
 # Wither skeletons were here from 2026-11-20 (8 a hit and the wither effect killed 5 of 7 bare bots,

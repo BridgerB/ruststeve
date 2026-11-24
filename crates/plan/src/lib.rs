@@ -1662,6 +1662,27 @@ impl Plan {
             .as_ref()
             .map(|t| t.survival.junk.clone())
             .unwrap_or_default();
+        // A click no reply came to, with the pack full of junk: window 0 asked for again, so the
+        // drop below can go (overworld-leg wall 10: a craft's take into a full pack drew no
+        // reply, the click stayed pending, and no junk was dropped for 1,600 ticks until the
+        // planner was stuck).
+        if let Some(c) = w.click
+            && tick.saturating_sub(c.at_tick) > craft::CLICK_PATIENCE_TICKS
+            && w.inventory.carried.is_none()
+            && junk_slot(&w.inventory.slots, &junk).is_some()
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(world::Act::Resync);
+            self.note(
+                tick,
+                "resync a stale click".to_owned(),
+                format!(
+                    "a click unanswered {} ticks and fewer than {JUNK_FREE_SLOTS} main slots free: the junk drop goes next",
+                    tick.saturating_sub(c.at_tick)
+                ),
+            );
+            return;
+        }
         // A stack on the cursor and no slot for it: out it goes if it is junk, else onto a junk
         // stack's slot, which comes back on the cursor for the next look (blaze.md wall 21).
         if w.click.is_none()
@@ -1728,6 +1749,19 @@ impl Plan {
     /// and stood in until the dimension changes; with none, the portal row casts one.
     fn nether_task(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {
         self.equip(w, tick);
+        // No main slot free and junk to drop: nothing begun until a stack is out (wall 10: a
+        // craft into a full pack failed twelve times running and the run ended stuck).
+        let full = (9i16..=44).all(|s| w.inventory.slots.contains_key(&s));
+        if full
+            && w.window.is_none()
+            && w.inventory.carried.is_none()
+            && self
+                .table
+                .as_ref()
+                .is_some_and(|t| junk_slot(&w.inventory.slots, &t.survival.junk).is_some())
+        {
+            return Task::Idle;
+        }
         if w.dimension
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
@@ -2438,7 +2472,12 @@ impl Plan {
                     return Flow::Task(Box::new(t));
                 }
             }
-            if logs < want && spent < rules.provision_ticks * 4 {
+            // The logs were for the shields' planks: with the shields made at the cook site, none
+            // are gathered (wall 10: a bot cooked until dusk, walked to far trees after dark for
+            // its four logs, and a creeper killed it there).
+            let shields_made = rules.kit_shields > 0
+                && craft::count(w, data::ItemKind::Shield) >= rules.kit_shields;
+            if logs < want && spent < rules.provision_ticks * 4 && !shields_made {
                 return Flow::Stock;
             }
             self.provision_since = None;

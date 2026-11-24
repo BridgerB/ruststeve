@@ -119,3 +119,11 @@ The cast needs ten lava sources at one site. Carried up they are ten trips of 12
 - **Cause**: the own-stairs bound handed a ledge to the old hunt, which only digs down or walks; neither goes back up.
 - **Fix**: the leg that led to a cell is kept (`own_into`). When two legs from one cell left the feet there, the bot walks back to that leg's start once ("own stairs back to …"), and the next leg from there does not take the heading that led to the ledge ("own stairs turned from … to …", `own_back`). With no route back, the old hunt as before.
 - **Not unit-tested**: the planner's state machine needs a model world with a cave; counted in the next race by its two notes.
+
+## 10. A full pack, and the logs walk after dark (race 45349387912 lanes 2 and 0)
+
+- **Lane 2, stuck at tick 22,160** (y -35, 20 health, 21 cooked pieces, 3 ingots): the spare pickaxes' row placed its table, made two pickaxes, then crafted a table to take along; the pack had no main slot free (448 cobblestone in 7 stacks from the snapshot, granite 90, diorite 45, dirt 53, andesite, eggs, feathers, leather). The craft's take into the full pack drew no reply, "craft crafting_table failed: StaleWindow" twelve times running, and the planner was stuck: the run's end. No junk was dropped in those 1,600 ticks: `equip` drops only with no click pending, and each failed craft left its last click pending.
+- **Fix**: a click unanswered past `CLICK_PATIENCE_TICKS` with junk to drop sends a resync first ("resync a stale click"), so the next look drops; with no main slot free and junk held, no task is begun until a stack is out. The hunt's by-products are junk now (egg, feather, leather, string, wool).
+- **Also read**: drops are thrown at the feet and picked up again by a bot that stays ("drop LeafLitter" ten times in lane 2, the litter back 40 ticks later each time). Not fixed.
+- **Lane 0, dead at tick 15,780** to a creeper at (-121, 64, 98): it hunted 5,800 ticks and cooked to 12,760 (26 pieces, 192 points, 3 ingots), then went for its four logs, walking to trees 40 to 70 blocks off after dark: zombies, a spider, a skeleton and two creepers in 1,000 ticks, the second blast at 18 health.
+- **Fix**: the logs phase after the cook is skipped once the shields are made at the cook site (wall 8): the logs were for their planks.
