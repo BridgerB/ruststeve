@@ -6,7 +6,7 @@ tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@77b1328 clojurecraft@be85a92
+verifiedAgainst: ruststeve@fd63b30 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -91,3 +91,4 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 - **Junk** (blaze wall 13): with fewer than `JUNK_FREE_SLOTS` (6 since wall 21; a stack on the cursor with no slot free is swapped onto a junk stack and that dropped outside the window, `cursor_step`; the Nether kit is given up after `KIT_TASKS` 16) of the main slots free, the planner drops a stack of a `[survival] junk` kind that leaves its keep (`junk_slot`, a mode-4 click), one a second between tasks, beside putting armour on: a full inventory left digs `Uncollected` and the bucket unholdable at the cast.
 
 - **The clean flow** (issue 16, Bridger 2026-11-22; `Plan::clean_flow`): the race aim stocks 12 logs (the `stock` row) and food to the reserve above ground before its first descent, and with its kit made (gear, both buckets, flint and steel) climbs back under the open sky (`stairs_to_surface`) and stocks again before the cast; each phase is bounded by `[survival] provision_ticks`. `world::stage::Stage::Ready` (between `gear` and `iron_kit`) reads the result, and its snapshot is the clean one later races resume from. Before it every `gear` snapshot was a bot in a cave with a stick or two (blaze walls 5 to 16).
+- **The spawner leg** (`Plan::spawner_task`, `docs/problems/spawner.md`): hurt, cover first (`take_cover`, [[combat-and-pacing]]); a rod lying near; at the spawner, hold. To a spawner on record: a plain walk on a found route; else one far search (`Walk::far`, every `FAR_RETRY_TICKS`); else `dig_toward`, its stall count started again when the bot stands 6 or more behind the nearest the dig came (`pushed_back`: a retreat is not a stall); refused all the same, back along the trail to the mark nearest the spawner (`trail_toward`) and wait there. It explores only with no spawner on record, or one refused for good.
