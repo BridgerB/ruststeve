@@ -96,6 +96,9 @@ pub struct Defend {
     pub dodged: Vec<i32>,
     #[serde(default)]
     pub dodges: u32,
+    /// Of those, the fireballs whose velocity the server had sent.
+    #[serde(default)]
+    pub dodges_known: u32,
     /// Ticks in a row a shooter's fight has had no way to its foe.
     #[serde(default)]
     pub no_way: u32,
@@ -437,6 +440,7 @@ impl Defend {
             dodging: None,
             dodged: Vec::new(),
             dodges: 0,
+            dodges_known: 0,
             no_way: 0,
             sweeps_held: 0,
             notes: Vec::new(),
@@ -542,17 +546,21 @@ impl Defend {
             self.dodging = None;
         }
         let mid = middle(body.pos);
-        let seen = &self.dodged;
+        let seen = self.dodged.clone();
         let (id, side) = w
             .entities
             .iter()
             .filter(|(id, e)| !e.dead && e.kind == EntityKind::SmallFireball && !seen.contains(id))
             .filter(|(_, e)| distance(e.pos, mid) <= DODGE_RANGE)
             .filter_map(|(id, e)| {
-                dodge_side(mid, e.pos, e.velocity).map(|s| (distance(e.pos, mid), *id, s))
+                dodge_side(mid, e.pos, e.velocity)
+                    .map(|s| (distance(e.pos, mid), *id, s, e.velocity.is_some()))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
-            .map(|(_, id, s)| (id, s))?;
+            .map(|(_, id, s, known)| {
+                self.dodges_known += u32::from(known);
+                (id, s)
+            })?;
         self.dodged.push(id);
         if self.dodged.len() > 64 {
             self.dodged.remove(0);
