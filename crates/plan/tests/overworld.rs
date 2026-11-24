@@ -217,7 +217,11 @@ fn the_shields_are_made_at_the_cook_site() {
     assert!(step.ends_with("planks"), "{step}");
     let planks = [(CookedPorkchop, 30), (IronIngot, 3), (OakPlanks, 16)];
     assert_eq!(cook_step(&planks, true, true), "craft:shield");
-    assert_eq!(cook_step(&planks, false, true), "place-table");
+    // No table near: the held one is put down (none held: one is made).
+    let mut carried = planks.to_vec();
+    carried.push((ItemKind::CraftingTable, 1));
+    assert_eq!(cook_step(&carried, false, true), "place-table");
+    assert_eq!(cook_step(&planks, false, true), "craft:crafting_table");
     // One made: one more, from the two ingots left, with no smelt for the one spent.
     let one = [
         (CookedPorkchop, 30),
