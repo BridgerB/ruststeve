@@ -675,6 +675,9 @@ pub struct Plan {
     pub shield_carries: u32,
     #[serde(default)]
     pub shield_over: bool,
+    /// When "shield waits for safe ground" may next be noted.
+    #[serde(default)]
+    pub shield_wait_at: u64,
     #[serde(skip)]
     shield_only: bool,
     /// Acts made this tick, for the shell (`take_acts`).
@@ -762,6 +765,7 @@ impl Plan {
             shield_cooks: 0,
             shield_carries: 0,
             shield_over: false,
+            shield_wait_at: 0,
             shield_only: false,
             acts: Vec::new(),
         }
@@ -838,6 +842,21 @@ impl Plan {
     /// tasks; then the table is taken along again.
     fn nether_shield(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Option<Task> {
         if self.shield_over {
+            return None;
+        }
+        // Never beside a spawner or in a shooter's sight: the shield waits for safe ground (the
+        // travel tunnel, a rest out of sight beyond the spawner's range), and the leg goes on.
+        if !self.shield_done
+            && let Some(why) = cover::unsafe_to_work(w)
+        {
+            if tick >= self.shield_wait_at {
+                self.shield_wait_at = tick + FAILURE_MEMORY_TICKS;
+                self.note(
+                    tick,
+                    "shield waits for safe ground".to_owned(),
+                    format!("{why}; made where neither holds"),
+                );
+            }
             return None;
         }
         if !self.shield_done {
