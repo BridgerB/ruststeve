@@ -477,6 +477,33 @@ impl Stairs {
                         .push(format!("a block laid at {c:?} did not show"));
                     return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
                 }
+                // Never into the body's own box: a server refuses a block that would overlap the
+                // player, and a step is done the moment the feet cross into its cell, 0.3 of the
+                // body still in the cell behind. 53 laid blocks "did not show" in race
+                // 45337739022, each where the route turned back over the cell just left. Walk to
+                // the middle of the cell first.
+                let b = physics::aabb(body.pos);
+                let cell = [
+                    f64::from(c.0),
+                    f64::from(c.1),
+                    f64::from(c.2),
+                    f64::from(c.0) + 1.0,
+                    f64::from(c.1) + 1.0,
+                    f64::from(c.2) + 1.0,
+                ];
+                if (0..3).all(|a| physics::overlaps(&b, &cell, a)) {
+                    let middle = [
+                        f64::from(feet.0) + 0.5,
+                        body.pos[1],
+                        f64::from(feet.2) + 0.5,
+                    ];
+                    let c = physics::Controls {
+                        forward: true,
+                        yaw: crate::walk::yaw_to(body.pos, middle),
+                        ..still
+                    };
+                    return (c, None, StairsStatus::Running);
+                }
                 let Some(item) = lay_item(w) else {
                     self.refusals.push(format!("no block to lay at {c:?}"));
                     return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
