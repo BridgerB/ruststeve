@@ -362,7 +362,7 @@ fn a_fireball_burns_a_player_in_sight_and_none_flies_at_one_behind_a_wall() {
     assert!(lowest <= 15.0 && alight, "lowest {lowest}, alight {alight}");
 
     let mut sim = blazed(&[]);
-    for y in 41..=43 {
+    for y in 41..=59 {
         for z in -1..=1 {
             sim.setblock((3, y, z), state(BlockKind::NetherBricks))
                 .unwrap();
@@ -464,4 +464,105 @@ fn gravel_falls_into_a_cell_that_comes_free() {
             Some(BlockKind::Air)
         ]
     );
+}
+
+/// A tick that answers the server's keep-alives, for runs past 600 ticks.
+fn tick_alive(sim: &mut Sim) {
+    for p in tick(sim) {
+        if let S2c::KeepAlive { id } = p {
+            send(sim, C2s::KeepAlive { id });
+        }
+    }
+}
+
+/// A spawner on a pedestal at (0, 42, 0), the player `away` blocks east of it on the floor,
+/// fire resistant so the blazes it spawns do not end the run.
+fn spawner(away: i32) -> Sim {
+    let mut stage = Stage::new(4, 40, 60);
+    stage
+        .bricks((0, 0), (41, 41), (0, 0))
+        .set((0, 42, 0), BlockKind::Spawner)
+        .spawn((away, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    sim.add_spawner(
+        (0, 42, 0),
+        data::EntityKind::Blaze,
+        sim::life::Brain::blaze(),
+    );
+    sim
+}
+
+/// `BaseSpawner`: the first delay is 20 ticks with a player within 16; a cycle spawns 1 to 4
+/// within 4 blocks; later cycles come 200 to 799 ticks apart; with 6 of its mob near, none.
+#[test]
+fn a_spawner_spawns_blazes_for_a_player_within_sixteen() {
+    let mut sim = spawner(8);
+    for _ in 0..19 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(sim.survival.life.mobs.len(), 0, "before the first delay");
+    tick_alive(&mut sim);
+    let first = sim.survival.life.mobs.len();
+    assert!((1..=4).contains(&first), "the first cycle spawned {first}");
+    for m in sim.survival.life.mobs.values() {
+        assert!((m.pos[0] - 0.5).abs() <= 4.0 && (m.pos[2] - 0.5).abs() <= 4.0);
+        assert!((41.0..=43.0).contains(&m.pos[1]), "{:?}", m.pos);
+    }
+    for _ in 0..199 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(
+        sim.survival.life.mobs.len(),
+        first,
+        "a second cycle within 200 ticks"
+    );
+    for _ in 0..6000 {
+        tick_alive(&mut sim);
+    }
+    let alive = sim.survival.life.mobs.len();
+    // The cap is checked before a cycle of up to 4: 5 near and 4 more at the most.
+    assert!((6..=9).contains(&alive), "{alive} blazes after 6,000 ticks");
+    assert!(sim.open(), "{:?}", sim.closed);
+}
+
+#[test]
+fn a_spawner_sleeps_with_no_player_within_sixteen() {
+    let mut sim = spawner(20);
+    for _ in 0..500 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(sim.survival.life.mobs.len(), 0);
+}
+
+/// `Blaze.customServerAiStep`: a blaze rises while the player's eye is over its own plus its
+/// offset, and never sinks through the floor. Under a player 12 up on a pillar, a blaze on the
+/// floor has climbed within a few seconds.
+#[test]
+fn a_blaze_rises_toward_a_player_above_it() {
+    let mut stage = Stage::new(1, 40, 75);
+    stage.bricks((0, 0), (41, 52), (0, 0)).spawn((0, 53, 0));
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    sim.survival.life.fire_resistance = true;
+    let id = sim.summon_with(
+        data::EntityKind::Blaze,
+        [5.5, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    let mut lowest = f64::MAX;
+    for _ in 0..90 {
+        tick_alive(&mut sim);
+        lowest = lowest.min(sim.survival.life.mobs[&id].pos[1]);
+    }
+    let y = sim.survival.life.mobs[&id].pos[1];
+    assert!(y > 44.0, "the blaze is at y {y}");
+    assert!(lowest >= 41.0, "it sank to {lowest}");
 }

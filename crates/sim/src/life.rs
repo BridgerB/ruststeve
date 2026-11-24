@@ -30,7 +30,16 @@
 //!   leaving the wither effect. No navigation, no knockback.
 //! - a blaze with `Brain::Blaze` (`Blaze$BlazeAttackGoal.tick`, javap): with the player in
 //!   sight and within its follow range 48, it charges 60 ticks, looses three small fireballs 6
-//!   ticks apart, and rests 100; within 2 blocks it hits for 6 every 20. It never moves here.
+//!   ticks apart, and rests 100; within 2 blocks it hits for 6 every 20.
+//!   It flies only up and down (`Blaze.customServerAiStep`, `aiStep`): while the player's eye is
+//!   over its own plus an offset (`triangle(0.5, 6.891)`, drawn again every
+//!   100 ticks) it rises, `vy += (0.3 - vy) × 0.3`; else it sinks, its fall cut to 0.6 a tick.
+//!   It does not come after a player it cannot see.
+//! - a spawner (`BaseSpawner`, javap): with the player within 16 it counts down (20 at first,
+//!   then 200 plus up to 599); at 0, unless 6 of its mob are alive within 4 of it, it tries 4
+//!   places (`(rand - rand) × 4` on x and z, -1 to 1 on y) and spawns where the body is free.
+//!   The model holds no light, so no light rule is applied (a blaze's spawn placement asks
+//!   for any light; not read from the jar here).
 //! - a small fireball (`AbstractHurtingProjectile`, `SmallFireball`): from rest it gains 0.1 a
 //!   tick along its aim and keeps 0.95 of its speed; the aim is at the player's middle with
 //!   a triangular spread of `2.297 × sqrt(sqrt(distance²)) × 0.5` on x and z; a hit takes 5
@@ -120,6 +129,9 @@ pub enum Brain {
     Blaze {
         attack_time: i32,
         step: u8,
+        /// Its upward speed, and the height over its own eye it lets the player's eye be.
+        vy: f64,
+        offset: f64,
     },
 }
 
@@ -129,6 +141,8 @@ impl Brain {
         Brain::Blaze {
             attack_time: 0,
             step: 0,
+            vy: 0.0,
+            offset: 0.5,
         }
     }
 }
@@ -154,6 +168,37 @@ const BLAZE_MELEE_EVERY: i32 = 20;
 /// A blaze's `follow_range` and `attack_damage` (`Blaze.createAttributes`).
 const BLAZE_RANGE: f64 = 48.0;
 const BLAZE_MELEE: f32 = 6.0;
+/// `Blaze.customServerAiStep`: the rise's target speed and gain (both 0.3), the cut to a fall
+/// (`aiStep`: 0.6), how often the height offset is drawn again, and its eye over its feet
+/// (0.85 of 1.8).
+const BLAZE_RISE: f64 = 0.3;
+const BLAZE_FALL: f64 = 0.6;
+const BLAZE_OFFSET_EVERY: u64 = 100;
+/// The spread of its height offset (`triangle(0.5, 6.891)`; read from the jar in probe
+/// 45344729907).
+const BLAZE_OFFSET_SPREAD: f64 = 6.891;
+const BLAZE_EYE: f64 = 1.53;
+/// `BaseSpawner`: the first delay, the least and the span of the later ones, tries a cycle,
+/// the most of its mob near, how near a player must be, and the spawn range.
+const SPAWNER_FIRST: i32 = 20;
+const SPAWNER_MIN: i32 = 200;
+const SPAWNER_SPAN: f64 = 600.0;
+const SPAWNER_TRIES: u32 = 4;
+const SPAWNER_NEARBY: usize = 6;
+const SPAWNER_PLAYER: f64 = 16.0;
+const SPAWNER_RANGE: f64 = 4.0;
+
+/// A spawner block's own state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spawner {
+    pub pos: (i32, i32, i32),
+    pub kind: EntityKind,
+    pub brain: Brain,
+    pub delay: i32,
+    /// Mobs it has spawned.
+    pub spawned: u64,
+}
+
 /// The fireball's spread factor (`2.297` in the goal).
 const BLAZE_SPREAD: f64 = 2.297;
 /// `AbstractHurtingProjectile`: `accelerationPower` and `getInertia`.
@@ -219,12 +264,16 @@ pub struct Life {
     pub wither_ticks: u32,
     /// Small fireballs in flight.
     pub fireballs: Vec<Fireball>,
+    /// The spawners that run (`Sim::add_spawner`).
+    pub spawners: Vec<Spawner>,
     /// The tick a shield went up (`use_item` with a shield in either hand), until the use key
     /// is let go.
     pub blocking_since: Option<u64>,
     /// Fireballs a shield stopped, and fireballs that hit.
     pub fireballs_blocked: u64,
     pub fireballs_hit: u64,
+    /// Fireballs loosed.
+    pub fireballs_fired: u64,
     /// Ticks since the last swing (`attackStrengthTicker`).
     pub attack_ticker: u32,
     pub mobs: std::collections::BTreeMap<i32, Mob>,
@@ -254,9 +303,11 @@ impl Default for Life {
             armor: 0.0,
             wither_ticks: 0,
             fireballs: Vec::new(),
+            spawners: Vec::new(),
             blocking_since: None,
             fireballs_blocked: 0,
             fireballs_hit: 0,
+            fireballs_fired: 0,
             attack_ticker: 0,
             mobs: std::collections::BTreeMap::new(),
             sent: (20.0, 20, false),
@@ -312,6 +363,102 @@ impl Sim {
         id
     }
 
+    /// Make the spawner block at `pos` run: it spawns `kind` with `brain` by `BaseSpawner`'s
+    /// rules.
+    pub fn add_spawner(&mut self, pos: (i32, i32, i32), kind: EntityKind, brain: Brain) {
+        self.survival.life.spawners.push(Spawner {
+            pos,
+            kind,
+            brain,
+            delay: SPAWNER_FIRST,
+            spawned: 0,
+        });
+    }
+
+    /// The spawners' tick (`BaseSpawner.serverTick`).
+    fn tick_spawners(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        for i in 0..self.survival.life.spawners.len() {
+            let Some(sp) = self.survival.life.spawners.get(i).copied() else {
+                continue;
+            };
+            let centre = [
+                f64::from(sp.pos.0) + 0.5,
+                f64::from(sp.pos.1) + 0.5,
+                f64::from(sp.pos.2) + 0.5,
+            ];
+            let near = (0..3)
+                .map(|a| (self.pos[a] - centre[a]).powi(2))
+                .sum::<f64>()
+                < SPAWNER_PLAYER * SPAWNER_PLAYER;
+            if !near || self.health <= 0.0 || kind_at(self, sp.pos) != Some(BlockKind::Spawner) {
+                continue;
+            }
+            let mut delay = sp.delay - 1;
+            let mut spawned = 0;
+            if delay <= 0 {
+                let crowd = self
+                    .survival
+                    .life
+                    .mobs
+                    .values()
+                    .filter(|m| m.kind == sp.kind && m.dead_at.is_none())
+                    .filter(|m| (0..3).all(|a| (m.pos[a] - centre[a]).abs() <= SPAWNER_RANGE + 0.5))
+                    .count();
+                if crowd < SPAWNER_NEARBY {
+                    for _ in 0..SPAWNER_TRIES {
+                        let mut tri = || self.survival.next_double() - self.survival.next_double();
+                        let x = centre[0] + tri() * SPAWNER_RANGE;
+                        let z = centre[2] + tri() * SPAWNER_RANGE;
+                        let y =
+                            f64::from(sp.pos.1) + (self.survival.next_double() * 3.0).floor() - 1.0;
+                        // `noCollision` for a body 0.6 wide and 1.8 high, by its corners.
+                        let free = [-0.3, 0.3].iter().all(|dx| {
+                            [-0.3, 0.3].iter().all(|dz| {
+                                [0.0, 0.9, 1.79].iter().all(|dy| {
+                                    self.solid(
+                                        (x + dx).floor() as i32,
+                                        (y + dy).floor() as i32,
+                                        (z + dz).floor() as i32,
+                                    )
+                                    .is_none()
+                                })
+                            })
+                        });
+                        if !free {
+                            continue;
+                        }
+                        let id = self.summon_with(sp.kind, [x, y, z], sp.brain);
+                        let mut uuid = [0u8; 16];
+                        uuid[12..].copy_from_slice(&id.to_be_bytes());
+                        out.push(wire(
+                            State::Play,
+                            &S2c::AddEntity {
+                                id,
+                                uuid,
+                                kind: sp.kind.id(),
+                                x,
+                                y,
+                                z,
+                            },
+                        )?);
+                        spawned += 1;
+                    }
+                }
+                // A cycle that spawned, or met a crowd, waits again; one that found no room
+                // tries the next tick.
+                if spawned > 0 || crowd >= SPAWNER_NEARBY {
+                    delay = SPAWNER_MIN + (self.survival.next_double() * SPAWNER_SPAN) as i32;
+                }
+            }
+            if let Some(s) = self.survival.life.spawners.get_mut(i) {
+                s.delay = delay;
+                s.spawned += spawned;
+            }
+        }
+        Ok(out)
+    }
+
     /// A mob's hit after armour (`CombatRules.getDamageAfterArmorAbsorb`, toughness 0).
     fn after_armor(&self, damage: f32) -> f32 {
         let armor = self.survival.life.armor;
@@ -352,7 +499,13 @@ impl Sim {
             let Some(m) = self.survival.life.mobs.get(&id).copied() else {
                 continue;
             };
-            let Brain::Blaze { attack_time, step } = m.brain else {
+            let Brain::Blaze {
+                attack_time,
+                step,
+                vy,
+                offset,
+            } = m.brain
+            else {
                 continue;
             };
             if m.dead_at.is_some() || self.health <= 0.0 {
@@ -393,6 +546,7 @@ impl Sim {
                     let len = aim.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
                     let fid = self.survival.next_id();
                     let pos = [from[0], from[1] + 0.5, from[2]];
+                    self.survival.life.fireballs_fired += 1;
                     self.survival.life.fireballs.push(Fireball {
                         id: fid,
                         pos,
@@ -416,8 +570,51 @@ impl Sim {
                     )?);
                 }
             }
+            // The flight, up and down only.
+            let offset = if self.ticks.is_multiple_of(BLAZE_OFFSET_EVERY) {
+                // `triangle(0.5, 6.891)`: the mode plus the spread times (rand - rand).
+                0.5 + BLAZE_OFFSET_SPREAD
+                    * (self.survival.next_double() - self.survival.next_double())
+            } else {
+                offset
+            };
+            let eye = m.pos[1] + BLAZE_EYE;
+            let mut vy = if self.pos[1] + physics::EYE_HEIGHT > eye + offset {
+                vy + (BLAZE_RISE - vy) * BLAZE_RISE
+            } else {
+                vy
+            };
+            vy = (vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
+            if vy < 0.0 {
+                vy *= BLAZE_FALL;
+            }
+            let to = [m.pos[0], m.pos[1] + vy, m.pos[2]];
+            let at =
+                |y: f64| self.solid(to[0].floor() as i32, y.floor() as i32, to[2].floor() as i32);
+            let blocked = at(to[1]).is_some() || at(to[1] + 1.79).is_some();
+            let pos = if blocked { m.pos } else { to };
+            if blocked {
+                vy = 0.0;
+            }
+            if pos != m.pos {
+                out.push(wire(
+                    State::Play,
+                    &S2c::EntityPositionSync {
+                        id,
+                        x: pos[0],
+                        y: pos[1],
+                        z: pos[2],
+                    },
+                )?);
+            }
             if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
-                mob.brain = Brain::Blaze { attack_time, step };
+                mob.pos = pos;
+                mob.brain = Brain::Blaze {
+                    attack_time,
+                    step,
+                    vy,
+                    offset,
+                };
             }
         }
         Ok(out)
@@ -726,6 +923,7 @@ impl Sim {
             self.survival.life.wither_ticks -= 1;
         }
         out.extend(self.tick_mobs()?);
+        out.extend(self.tick_spawners()?);
         out.extend(self.tick_blazes()?);
         out.extend(self.tick_fireballs()?);
         // Eating.
