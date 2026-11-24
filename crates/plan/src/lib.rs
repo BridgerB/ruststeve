@@ -997,8 +997,9 @@ impl Plan {
                 // The buckets held when the cast ended: a cast that lost its water says so here.
                 let held = |i| craft::count(w, i);
                 let at = format!(
-                    "{}; {}; buckets water {} lava {} empty {}; {uses}; {}",
+                    "{}; {}; {}; buckets water {} lava {} empty {}; {uses}; {}",
                     k.current().map(build::op_text).unwrap_or_default(),
+                    k.tries_text(),
                     k.regression_text(),
                     held(data::ItemKind::WaterBucket),
                     held(data::ItemKind::LavaBucket),
