@@ -5,8 +5,8 @@ type: reference
 tags: [world, entities, metadata, inventory, slots]
 aliases: [kills, struck, air, on fire, uses_finished, Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@1e438d8 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -53,12 +53,13 @@ related:
 
 ## Limits
 - A live session so far ran with an empty inventory (a fresh player); inventory folding is shown by the tests.
-- Other windows (tables, furnaces) are later issues; the model's side of digging, drops and window 0 is issue 10b.
 
 ## Issue 16e: what the world keeps that it used to drop
 - **Wear**: `Inventory.wear` holds each slot's `damage`/`max_damage` from its components, and `Inventory::uses_left(slot)` is max damage (the component, else `item_props::max_damage`) less damage; `None` for an item that does not wear. A pickaxe wearing out was invisible to the planner before (blaze wall 7). `Inventory.truncated_by` counts slots cut short by the component that stopped them.
 - **Entities** keep their `uuid`, the `velocity` the server last set (a fireball's heading), the newest 4 entity-event `statuses`, and the newest 4 damage events on them (`hurts`: type, and whether the bot dealt it). A real server sends no hurt animation for a mob, so a damage event naming the bot is how a swing is known to land.
 - **Entity data cut short** ends the packet's entries with `MetaValue::Unread(serializer)`; the world counts it in `metadata_unread` and keeps the value the entry would have replaced.
+- **What a mob shows**: `head_yaw` (`rotate_head`; `Entity::faces(target, degrees)` asks whether the head points at a position, yaw 0 toward +z, 90 toward -x), `equipment` by slot (`set_equipment`: 0 main hand, 1 off hand, 2-5 feet to head), `swung_at` (`animate` 0, the main-hand swing's tick), `power` (`projectile_power`, a fireball's), `passengers`, and `effects` and `attributes` by name (an attribute is its base plus the add-value modifiers). `Entity::blaze_charged` reads a blaze's metadata index 16, bit 0.
+- **The bot's own**: `Player.effects` (amplifier and the server tick it ends; a duration of -1 never ends), `attributes`, `in_combat`, `experience`; `World::hurt_from` is its last hurt flash (tick and the yaw the blow came from).
 
 ## See also
 - [[world-value]] - the world these live in.

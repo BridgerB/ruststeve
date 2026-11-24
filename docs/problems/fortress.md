@@ -1,5 +1,7 @@
 # Issue 15: Nether entry and the fortress
 
+**Status: done** (issue 15, closed: 111 of 224 reached a fortress from the `nether` start; 15c took bots through their own portal). The story continues in [`blaze.md`](blaze.md) (issue 16), where a bot from the clean `ready` snapshot has not yet reached a fortress: see "Why the Nether walk fails" there. The fortress bots here tunnelled from y 64 through solid netherrack; none walked.
+
 ## Needs
 From the checkpoint start `nether` (the Nether at (0, 0), where a portal near spawn leads; the post-cast kit, 64 cobblestone, food; each bot spread 48 under y 100), reach a fortress, keeping the building blocks to get anywhere.
 
@@ -28,7 +30,7 @@ From the checkpoint start `nether` (the Nether at (0, 0), where a portal near sp
 ### 3. Walking to a fortress across the open (the f810efa pair: 0 of 224, half dead)
 - **Read** (race 44405101661's notes): "walk toward the fortress at …" 1,115 times in 104 runs, "explore to … failed" 1,529, "relocate" 540; no bot came within 6. The nearest fortress is about 180 blocks from the start across lava seas and open drops; a walk took a partial route, ended in the open short of it, and the next one did the same.
 - **Cause**: the aim walks on partial routes; the Nether's open ground between is where ghasts, piglins and fire killed half the bots.
-- **Fix**: walk to bricks only on a found route; else tunnel toward the nearest brick (stairs down when it is below, a level tunnel else; `dig_toward`, shared with wall 40's stairs to a water bank), three without coming nearer refusing it. The stairs' refusals hold (no fluid in a cell opened, no lava beside one).
+- **Fix**: walk to bricks only on a found route; else tunnel toward the nearest brick (stairs down when it is below, a level tunnel else; `dig_toward`, shared with [`portal.md`](portal.md) wall 40's stairs to a water bank), three without coming nearer refusing it. The stairs' refusals hold (no fluid in a cell opened, no lava beside one).
 - **Not yet**: piglins attack a bot wearing no gold (32 deaths); gold armour is not in any earlier stage's kit.
 - **Raced** (ca34f7c, pair 44413659356 and 44413666090, cap 24,000): **65 and 46 of 112, 111 of 224 reached a fortress (49.6%)**; median building blocks held 213 over all 224 bots (268 over those that reached it, none under 32: tunnels restock netherrack); deaths 20 and 37 against 57 and 56. Met bots ended at (25, 55, 130), (55, 57, 92) and the like, in the fortress round (48, ~, 176). The done-condition holds.
 

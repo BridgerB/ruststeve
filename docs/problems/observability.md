@@ -1,5 +1,7 @@
 # Issue 16e: full observability (the one major change)
 
+**Status: the gate is in** (phases A to I below; `brain/ruststeve/decisions/observe-first.md`). It is a sub-issue of issue 16, whose story is in [`blaze.md`](blaze.md); what the gate still missed on 2026-11-23 (a fix with no ledger note, rounded senses positions) is in `brain/ruststeve/decisions/stage-loop-lessons.md`.
+
 ## Needs
 Any failure of any remaining stage (issues 16 to 20) is explained from one race's files in minutes, without a probe; and the bot can sense what those stages need (tool wear, sounds, gaze, fuse, the dragon's phases). `brain/ruststeve/design/observability.md` has promised this since issue 07; on 2026-11-21 most of it did not exist.
 
