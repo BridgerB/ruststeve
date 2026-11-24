@@ -21,6 +21,8 @@ struct Ended {
     run: bot::lockstep::Run,
     /// The tick the trap last cleared, if it did.
     out_at: Option<u64>,
+    /// Every note of the run ("what (why)"): the planner keeps only its last 64 events.
+    notes: Vec<String>,
 }
 
 /// The bot spawns at `spawn` in the flat world (grass at y 63) with `set` laid, a planner for
@@ -46,6 +48,8 @@ fn escape_with(
     let mut p = Plan::with_table(Aim::Table, table);
     let mut out_at = None;
     let mut was = false;
+    let mut notes = Vec::new();
+    let mut seen = 0;
     let mut sim = Sim::new(CONFIG, m);
     for g in give {
         sim.survival.give(*g);
@@ -57,12 +61,19 @@ fn escape_with(
             out_at = Some(t);
         }
         was = now;
+        notes.extend(
+            p.events_since(seen)
+                .iter()
+                .map(|e| format!("{} {} ({})", e.tick, e.what, e.why)),
+        );
+        seen = p.event_count;
         (c, p.take_acts())
     });
     Ended {
         plan: p,
         run,
         out_at,
+        notes,
     }
 }
 
@@ -258,12 +269,11 @@ fn water_far_from_any_bank_is_notched_beside_the_body() {
     assert_out(&e, TrapKind::Water);
     let body = e.run.world.body.unwrap();
     assert!(body.pos[0] > -1.0, "went west at {:?}", body.pos);
+    let escape: Vec<&String> = e.notes.iter().filter(|n| n.contains("water")).collect();
     assert!(
-        e.plan
-            .events
+        e.notes
             .iter()
-            .any(|ev| ev.why.contains("notch before another bank")),
-        "{:#?}",
-        e.plan.events
+            .any(|n| n.contains("notch before another bank")),
+        "{escape:#?}"
     );
 }
