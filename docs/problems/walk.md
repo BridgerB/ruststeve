@@ -1,5 +1,7 @@
 # Problem: reaching a log that walking cannot reach
 
+**Status: done** (issue 09, closed). The landings with no walkable log were left to issues 11 (stairs) and 12 (escaping water); the story continues in [`wood.md`](wood.md).
+
 Issue 09's measure (`simrace --landings-file config/landings-grid.toml --goal log:30`, the `walk`
 job in ci.yml) runs the planner in 320 landings captured on the race seed. On the first run of
 the full grid, 13 to 15 landings with a log 30+ blocks away in view never reached one.

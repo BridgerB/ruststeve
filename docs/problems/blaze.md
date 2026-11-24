@@ -241,7 +241,7 @@ Walls 1 to 4 raced from the bare Nether snapshots (2026-11-20); 5 to 8 from lane
 
 ### 15. A spider in a pit, fought 96 times (race 45102450333, lanes 2 and 5)
 - **What happened**: lane 5 at (-37, -4, 43), health 20, started "defend Spider 95" 96 times from tick ~10,000 to its `no-progress` end at 33,720; 95 of them ended "0 swings, 0 landed, Retreat … foe up to -4.5 over the eye", each followed by a walk to its ore that came back within 4 of the spider. Lane 2 the same.
-- **Read**: the spider sits in a pit 4.5 under the eye, out of reach both ways. Wall 30's rule (a foe no strike reached is left alone a while) covered only `ranged` kinds beyond `defend_radius`; a melee foe within 4 is always answered.
+- **Read**: the spider sits in a pit 4.5 under the eye, out of reach both ways. [`iron-kit.md`](iron-kit.md) wall 30's rule (a foe no strike reached is left alone a while) covered only `ranged` kinds beyond `defend_radius`; a melee foe within 4 is always answered.
 - **Fix**: a defend that never struck its foe, with the bot no worse than when it began, leaves that foe alone for `FAILURE_MEMORY_TICKS`, for any kind but a `never_fight` one; and an ignored foe within `defend_radius` is answered again only once its kind hits the bot (`defend::provoked`). Test `a_spider_within_reach_is_answered_unless_ignored` (`crates/plan/tests/foe.rs`).
 
 - **Raced** (caa4a75, race 45108165242, lane 6's snapshot, 12 x 1): the spider loop is gone (at most one spider defend a lane); 2 dead (creeper, zombie), the fewest yet; 3 bots cast (6 casts), none lit; 2 `no-progress` on "redig Gravel" for flint. Water still ended 4 of 12, each a new way (wall 16).
