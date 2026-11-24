@@ -197,11 +197,12 @@ pub struct Memory {
     /// answers `None` and the caller scans, as before.
     #[serde(default = "unindexed")]
     unindexed: bool,
-    /// Biome signs seen exposed (issue 17b), by dimension, chunk column and sign: at most
+    /// Biome signs seen exposed (issue 17b), by dimension, chunk column and block kind: at most
     /// `SIGNS_KEPT` cells each, so a soul sand valley's thousands of faces stay a small record.
-    /// Never retracted: a sign is evidence of the biome where it grew, dug or not.
+    /// A cell leaves when it is seen to hold something else (`forget_sign`); the columns known
+    /// as a forest or a valley stay known. `indexed_in_column` answers sign kinds from here.
     #[serde(default)]
-    signs: BTreeMap<(String, i32, i32, Sign), BTreeSet<Cell>>,
+    signs: BTreeMap<(String, i32, i32, BlockKind), BTreeSet<Cell>>,
     /// Nether columns with `FOREST_SIGNS` warped signs seen, in the order each became known.
     #[serde(default)]
     forests: Vec<(i32, i32)>,
@@ -243,6 +244,20 @@ pub enum Sign {
 }
 
 /// The biome sign a block kind is, if any.
+/// Every sign kind (`sign_of` is `Some` for exactly these).
+pub const SIGN_KINDS: [BlockKind; 10] = [
+    BlockKind::WarpedNylium,
+    BlockKind::WarpedWartBlock,
+    BlockKind::WarpedStem,
+    BlockKind::WarpedHyphae,
+    BlockKind::CrimsonNylium,
+    BlockKind::NetherWartBlock,
+    BlockKind::SoulSand,
+    BlockKind::SoulSoil,
+    BlockKind::Basalt,
+    BlockKind::Blackstone,
+];
+
 pub fn sign_of(kind: BlockKind) -> Option<Sign> {
     match kind {
         BlockKind::WarpedNylium
@@ -464,6 +479,16 @@ impl Memory {
         cz: i32,
         kind: BlockKind,
     ) -> Option<Vec<Cell>> {
+        // Sign kinds (soul sand, soul soil, warped nylium ...) from the sign record: exposed
+        // cells, at most `SIGNS_KEPT` a kind (issue 17: the walk to a valley).
+        if sign_of(kind).is_some() {
+            return Some(
+                self.signs
+                    .get(&(dimension.to_owned(), cx, cz, kind))
+                    .map(|set| set.iter().copied().collect())
+                    .unwrap_or_default(),
+            );
+        }
         if self.unindexed || !INDEXED.contains(&kind) {
             return None;
         }
@@ -489,53 +514,76 @@ impl Memory {
         &self.latest
     }
 
-    /// Whether a column's record of a sign is full (a scan of its sections can skip it).
-    pub fn signs_full(&self, dimension: &str, cx: i32, cz: i32, sign: Sign) -> bool {
+    /// Whether a column's record of a sign kind is full (a scan of its sections can skip it).
+    pub fn signs_full(&self, dimension: &str, cx: i32, cz: i32, kind: BlockKind) -> bool {
         self.signs
-            .get(&(dimension.to_owned(), cx, cz, sign))
+            .get(&(dimension.to_owned(), cx, cz, kind))
             .is_some_and(|s| s.len() >= SIGNS_KEPT)
+    }
+
+    /// The exposed cells of one sign kind on record in a column.
+    fn sign_count(&self, dimension: &str, cx: i32, cz: i32, sign: Sign) -> usize {
+        SIGN_KINDS
+            .iter()
+            .filter(|k| sign_of(**k) == Some(sign))
+            .filter_map(|k| self.signs.get(&(dimension.to_owned(), cx, cz, *k)))
+            .map(BTreeSet::len)
+            .sum()
     }
 
     /// Record a biome sign. Only a `Seen` (an exposed face) can be one: no X-ray. Returns
     /// whether the cell was new; a Nether column reaching `FOREST_SIGNS` warped signs becomes a
-    /// known forest.
+    /// known forest, `SOUL_SIGNS` soul signs a known soul sand valley (both kept for good).
     pub fn record_sign(&mut self, seen: &Seen) -> bool {
-        let Some(sign) = data::block_of_state(seen.state).and_then(sign_of) else {
+        let Some(kind) = data::block_of_state(seen.state) else {
+            return false;
+        };
+        let Some(sign) = sign_of(kind) else {
             return false;
         };
         let (x, _, z) = seen.pos;
         let (cx, cz) = (x >> 4, z >> 4);
         let cells = self
             .signs
-            .entry((seen.dimension.clone(), cx, cz, sign))
+            .entry((seen.dimension.clone(), cx, cz, kind))
             .or_default();
         if cells.len() >= SIGNS_KEPT || !cells.insert(seen.pos) {
             return false;
         }
-        if sign == Sign::Warped
-            && seen.dimension == NETHER
-            && cells.len() >= FOREST_SIGNS
-            && !self.forests.contains(&(cx, cz))
-        {
-            self.forests.push((cx, cz));
+        if seen.dimension != NETHER {
+            return true;
         }
-        if sign == Sign::Soul
-            && seen.dimension == NETHER
-            && cells.len() >= SOUL_SIGNS
-            && !self.soul_valleys.contains(&(cx, cz))
+        let n = self.sign_count(NETHER, cx, cz, sign);
+        let known = match sign {
+            Sign::Warped if n >= FOREST_SIGNS => Some(&mut self.forests),
+            Sign::Soul if n >= SOUL_SIGNS => Some(&mut self.soul_valleys),
+            Sign::Warped | Sign::Soul | Sign::Crimson | Sign::Basalt => None,
+        };
+        if let Some(list) = known
+            && !list.contains(&(cx, cz))
         {
-            self.soul_valleys.push((cx, cz));
+            list.push((cx, cz));
         }
         true
     }
 
+    /// A cell no longer holds the sign kind it was kept for (dug, or something placed): out of
+    /// the record of every other kind. What a column became known as stays known.
+    pub fn forget_sign(&mut self, dimension: &str, pos: Cell, now: Option<BlockKind>) {
+        let (x, _, z) = pos;
+        // One key, reused: this runs for every cell the world looks at again.
+        let mut key = (dimension.to_owned(), x >> 4, z >> 4, BlockKind::Air);
+        for k in SIGN_KINDS.iter().filter(|k| Some(**k) != now) {
+            key.3 = *k;
+            if let Some(cells) = self.signs.get_mut(&key) {
+                cells.remove(&pos);
+            }
+        }
+    }
+
     /// The signs seen in a Nether chunk column.
     pub fn biome_signs_in_column(&self, cx: i32, cz: i32) -> BiomeSigns {
-        let n = |sign| {
-            self.signs
-                .get(&(NETHER.to_owned(), cx, cz, sign))
-                .map_or(0, BTreeSet::len)
-        };
+        let n = |sign| self.sign_count(NETHER, cx, cz, sign);
         BiomeSigns {
             warped: n(Sign::Warped),
             crimson: n(Sign::Crimson),
@@ -650,6 +698,29 @@ mod tests {
         assert_eq!(signs.soul, SIGNS_KEPT, "capped");
         assert_eq!(m.soul_valley_known(), Some((2, 0)));
         assert_eq!(m.soul_valleys(), &[(2, 0)]);
+        // Exact exposed cells of a sign kind come from the index, no scan; a cell seen to hold
+        // something else leaves it, and the valley stays known.
+        let soil = m
+            .indexed_in_column(nether, 2, 0, BlockKind::SoulSoil)
+            .unwrap();
+        assert_eq!(soil.len(), SIGNS_KEPT);
+        assert_eq!(
+            m.indexed_in_column(nether, 2, 0, BlockKind::SoulSand),
+            Some(vec![])
+        );
+        m.forget_sign(nether, soil[0], Some(BlockKind::Air));
+        assert_eq!(
+            m.indexed_in_column(nether, 2, 0, BlockKind::SoulSoil)
+                .map(|c| c.len()),
+            Some(SIGNS_KEPT - 1)
+        );
+        m.forget_sign(nether, soil[1], Some(BlockKind::SoulSoil));
+        assert_eq!(
+            m.biome_signs_in_column(2, 0).soul,
+            SIGNS_KEPT - 1,
+            "still soul soil"
+        );
+        assert_eq!(m.soul_valley_known(), Some((2, 0)));
         assert_eq!(m.biome_signs_in_column(0, 0).warped, 12);
         for x in 0..16 {
             m.record_sign(&seen(

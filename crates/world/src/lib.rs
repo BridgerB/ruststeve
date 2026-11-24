@@ -937,6 +937,8 @@ impl World {
             return;
         };
         let cell = (pos.x, pos.y, pos.z);
+        self.memory
+            .forget_sign(&dim, cell, data::block_of_state(state));
         let sign = memory::is_sign(state);
         let watched = memory::watched(state) || self.memory.on_record(&dim, cell);
         if !sign && !watched {
@@ -962,14 +964,9 @@ impl World {
         let Some(dim) = self.dimension.as_ref().map(|d| d.name.clone()) else {
             return;
         };
-        const SIGNS: [memory::Sign; 4] = [
-            memory::Sign::Warped,
-            memory::Sign::Crimson,
-            memory::Sign::Soul,
-            memory::Sign::Basalt,
-        ];
-        let ix = |s: memory::Sign| SIGNS.iter().position(|x| *x == s).unwrap_or(0);
-        let mut full = SIGNS.map(|s| self.memory.signs_full(&dim, at.x, at.z, s));
+        let kinds = memory::SIGN_KINDS;
+        let ix = |k: data::BlockKind| kinds.iter().position(|x| *x == k).unwrap_or(0);
+        let mut full = kinds.map(|k| self.memory.signs_full(&dim, at.x, at.z, k));
         let (bx, bz) = (at.x * 16, at.z * 16);
         for (si, section) in column.sections.iter().enumerate() {
             if full.iter().all(|f| *f) {
@@ -983,10 +980,12 @@ impl World {
                 let Some(state) = section.blocks.get(i) else {
                     continue;
                 };
-                let Some(sign) = data::block_of_state(state).and_then(memory::sign_of) else {
+                let Some(kind) =
+                    data::block_of_state(state).filter(|k| memory::sign_of(*k).is_some())
+                else {
                     continue;
                 };
-                if full[ix(sign)] {
+                if full[ix(kind)] {
                     continue;
                 }
                 let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
@@ -1002,7 +1001,7 @@ impl World {
                 if let Some(seen) = Seen::check(&dim, cell, state, neighbours)
                     && self.memory.record_sign(&seen)
                 {
-                    full[ix(sign)] = self.memory.signs_full(&dim, at.x, at.z, sign);
+                    full[ix(kind)] = self.memory.signs_full(&dim, at.x, at.z, kind);
                 }
             }
         }
