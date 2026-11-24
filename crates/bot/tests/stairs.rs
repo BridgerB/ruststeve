@@ -94,3 +94,31 @@ fn a_dry_staircase_turns_from_water_beside() {
     assert_ne!(dry.dir, (1, 0), "{:?}", dry.refusals);
     assert_eq!(dry.water_refusals(), 1, "{:?}", dry.refusals);
 }
+
+/// Overworld-leg wall 11: the cook's hut on open ground is ten blocks, the eight beside the body
+/// (the feet's ring on the ground, the head's ring on it), a block over a wall and the roof; a
+/// closed hut has nothing more to place.
+#[test]
+fn a_hut_walls_in_the_body_then_roofs_it() {
+    use plan::cover::hut_block;
+    let pos = [0.5, 64.0, 0.5];
+    let first = hut_block(&world_with(&[]), pos).unwrap();
+    assert_eq!(first, ((1, 64, 0), (1, 63, 0), 1));
+    let ring: Vec<_> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .flat_map(|(dx, dz)| {
+            [
+                ((dx, 64, dz), BlockKind::Cobblestone),
+                ((dx, 65, dz), BlockKind::Cobblestone),
+            ]
+        })
+        .collect();
+    let walled = hut_block(&world_with(&ring), pos).unwrap();
+    // The roof hangs from a block over a wall, then fills the cell over the head.
+    assert_eq!(walled, ((1, 66, 0), (1, 65, 0), 1));
+    let mut all = ring.clone();
+    all.push(((1, 66, 0), BlockKind::Cobblestone));
+    assert_eq!(hut_block(&world_with(&all), pos).unwrap().0, (0, 66, 0));
+    all.push(((0, 66, 0), BlockKind::Cobblestone));
+    assert_eq!(hut_block(&world_with(&all), pos), None);
+}

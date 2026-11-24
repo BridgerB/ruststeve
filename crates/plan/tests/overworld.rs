@@ -175,7 +175,15 @@ fn raw_meat_is_cooked_through_the_needs_planner() {
         "nothing raw"
     );
     // The kit's ingots after the meat: three of the eight raw iron, in the same furnace.
-    let ore = [(CookedPorkchop, 12), (OakPlanks, 4), (ItemKind::RawIron, 8)];
+    // Four planks are short of the shields' twelve and the iron's fuel: planks first.
+    let short = [(CookedPorkchop, 12), (OakPlanks, 4), (ItemKind::RawIron, 8)];
+    let fuel = plan::cook_goal(&short.iter().copied().collect(), &r).unwrap();
+    assert_eq!((fuel.id.as_str(), fuel.provides[0].1), ("cook-fuel", 14));
+    let ore = [
+        (CookedPorkchop, 12),
+        (OakPlanks, 16),
+        (ItemKind::RawIron, 8),
+    ];
     assert_eq!(r.kit_ingots, 3);
     let iron = plan::cook_goal(&ore.iter().copied().collect(), &r).unwrap();
     assert_eq!((iron.id.as_str(), iron.provides[0].1), ("cook-iron", 3));

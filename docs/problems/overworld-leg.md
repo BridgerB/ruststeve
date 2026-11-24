@@ -127,3 +127,11 @@ The cast needs ten lava sources at one site. Carried up they are ten trips of 12
 - **Also read**: drops are thrown at the feet and picked up again by a bot that stays ("drop LeafLitter" ten times in lane 2, the litter back 40 ticks later each time). Not fixed.
 - **Lane 0, dead at tick 15,780** to a creeper at (-121, 64, 98): it hunted 5,800 ticks and cooked to 12,760 (26 pieces, 192 points, 3 ingots), then went for its four logs, walking to trees 40 to 70 blocks off after dark: zombies, a spider, a skeleton and two creepers in 1,000 ticks, the second blast at 18 health.
 - **Fix**: the logs phase after the cook is skipped once the shields are made at the cook site (wall 8): the logs were for their planks.
+
+## 11. The cook walled in (the orchestrator's read of lane 0, 2026-11-24)
+
+- **What happened**: the surface phase (hunt and cook) takes 10,000 to 12,700 ticks, about half a day from the snapshot's noon, and lane 0 died to night mobs on the surface after it. A player cooks by day or behind walls.
+- **The clock**: the bot does not read the day's time (`S2c::SetTime` is counted, not decoded: `crates/protocol/src/packets.rs`), so the leg is made safe without it.
+- **Fix**: before the first smelt (table and furnace placed, the fuel made) the bot walls itself in where it stands with held cobblestone: the cells beside the body at the feet and the head, a block over a wall and the roof, the table and furnace among the walls (`cover::hut_block`, `Plan::hut_step`, at most `HUT_MAX` 24 blocks, one a look). While walled in, no animal is gone after. The fuel row now holds the shields' planks too (six a shield), so no walk to the trees is wanted from inside. Ledger: "hut block N at …", then "hut closed (N blocks placed)" (or "not under the open sky: no hut", "no block held for a hut", "hut given up").
+- **Unit test**: `a_hut_walls_in_the_body_then_roofs_it` (bot, on the model).
+- **Not built**: no surface walk is stopped by the clock (no clock). The junk thrown at the feet and picked up again (wall 10) is not answered.

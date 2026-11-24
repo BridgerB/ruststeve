@@ -139,6 +139,10 @@ const SHELTER_EVERY_TICKS: u64 = 10;
 /// Shelter blocks in one run before the bot stops building: a closed box round one cell is 10
 /// (eight wall cells, one more for the roof to hang on, the roof); eight boxes.
 const SHELTER_MAX: u32 = 80;
+/// Blocks a cook's hut may take: ten round a body in one column (eight walls and a roof, the
+/// table and furnace among the walls), more where the body spans two columns or a floor is
+/// missing (overworld-leg wall 11).
+const HUT_MAX: u32 = 24;
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
 pub const TRAIL_TOWARD: f64 = 4.0;
@@ -585,6 +589,12 @@ pub struct Plan {
     pub cook_tasks: u32,
     #[serde(default)]
     pub cook_over: bool,
+    /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
+    /// (closed, or none could be built).
+    #[serde(default)]
+    pub hut_blocks: u32,
+    #[serde(default)]
+    pub hut_done: bool,
     /// The second stocking's look for animals is over: its walks failed `HUNT_WALK_FAILS` times
     /// running (overworld-leg wall 4: twelve failed walks cost a relocation, and six end the run).
     #[serde(default)]
@@ -717,6 +727,8 @@ impl Plan {
             portal_food_noted: false,
             cook_tasks: 0,
             cook_over: false,
+            hut_blocks: 0,
+            hut_done: false,
             hunt_over: false,
             own_from: None,
             own_leg: None,
@@ -1639,7 +1651,10 @@ impl Plan {
     /// Short of the food reserve in the overworld on the way to the Nether (issue 16a): animals in
     /// view are hunted then, not only when hungry.
     fn provisioning(&self, w: &World, rules: &make::SurvivalRules) -> bool {
-        matches!(self.aim, Aim::Nether | Aim::Race)
+        // Walled in for the cook (wall 11): no animal is gone after from the hut.
+        let walled = self.hut_done && self.hut_blocks > 0 && !self.readied;
+        !walled
+            && matches!(self.aim, Aim::Nether | Aim::Race)
             && w.dimension
                 .as_ref()
                 .is_some_and(|d| d.name == "minecraft:overworld")
@@ -1968,6 +1983,72 @@ impl Plan {
             }
             hold::Hold::Wait => Some(Task::Idle),
             hold::Hold::Missing => None,
+        }
+    }
+
+    /// The cook's hut (overworld-leg wall 11): before the first smelt on the surface, the bot
+    /// walls itself in with held blocks where it stands, beside its table and furnace, and roofs
+    /// it over, a block a look; the cook then runs to dusk and after with no mob able to reach it.
+    /// `None` once the hut is closed or cannot be built (noted once).
+    fn hut_step(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.hut_done {
+            return None;
+        }
+        let body = w.body?;
+        let item = SHELTER_BLOCKS
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0);
+        let next = cover::hut_block(w, body.pos);
+        let end = match (item, next) {
+            _ if !world::stage::open_sky(w) => Some("not under the open sky: no hut"),
+            (_, None) => Some("hut closed"),
+            (None, Some(_)) => Some("no block held for a hut"),
+            _ if self.hut_blocks >= HUT_MAX => Some("hut given up"),
+            _ => None,
+        };
+        if let Some(why) = end {
+            self.hut_done = true;
+            self.note(
+                tick,
+                format!("{why} ({} blocks placed)", self.hut_blocks),
+                "the cook walled in before its first smelt".to_owned(),
+            );
+            return None;
+        }
+        let (item, (cell, click, face)) = item.zip(next)?;
+        self.retry_at = tick + 1;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match hold::toward(w, item) {
+            hold::Hold::Held => {
+                self.shelter_at = tick + SHELTER_EVERY_TICKS;
+                self.hut_blocks += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("hut block {} at {cell:?}", self.hut_blocks),
+                    format!("the cook walled in; on {click:?} face {face}"),
+                );
+                Some(Task::Idle)
+            }
+            hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            hold::Hold::Wait => Some(Task::Idle),
+            hold::Hold::Missing => {
+                self.hut_done = true;
+                None
+            }
         }
     }
 
@@ -2703,6 +2784,14 @@ impl Plan {
         // The cook phase takes only what can be done where the bot stands: a craft, a placing,
         // a smelt, or a log gathered for fuel; never a mine. It is bounded by its tasks.
         if cook_row {
+            // The first smelt waits for the hut (wall 11): table and furnace placed, the fuel
+            // made, the bot walls itself in before the long cook.
+            if let make::Choice::Act(r) = &choice
+                && matches!(r.act, Some(make::Act::Smelt(_)))
+                && let Some(t) = self.hut_step(w, tick)
+            {
+                return t;
+            }
             let ok = matches!(
                 &choice,
                 make::Choice::Act(r)
@@ -4575,7 +4664,10 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
         .iter()
         .map(|(_, n, r)| n * i32::try_from(r.ticks).unwrap_or(200))
         .sum::<i32>()
-        + iron * 200;
+        + iron * 200
+        // The shields' planks too, six a shield at a plank's 300 ticks, so the wood is held
+        // before the hut is closed (wall 11): no walk to the trees from inside it.
+        + 6 * 300 * (rules.kit_shields - shields).clamp(0, ingots + iron);
     let planks = data::generated::tags::item_tag("planks").unwrap_or(&[]);
     let coals = data::generated::tags::item_tag("coals").unwrap_or(&[]);
     let burns = |k: &data::ItemKind| {
