@@ -125,6 +125,47 @@ const ESCAPE_REPORT_TICKS: u64 = 2400;
 const ROD_REACH: f64 = 8.0;
 /// A brick within this of a trail mark has been visited (issue 16b, the spawner search).
 const VISITED_NEAR: f64 = 8.0;
+/// What a shelter is made of, the first held: cobblestone does not burn on; netherrack burns for
+/// ever once a fireball lights it, so it is the last.
+const SHELTER_BLOCKS: &[data::ItemKind] = &[
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+    data::ItemKind::NetherBricks,
+    data::ItemKind::Netherrack,
+];
+/// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
+/// `SEAL_EVERY_TICKS`).
+const SHELTER_EVERY_TICKS: u64 = 10;
+/// Shelter blocks in one run before the bot stops building: a closed box round one cell is 10
+/// (eight wall cells, one more for the roof to hang on, the roof); eight boxes.
+const SHELTER_MAX: u32 = 80;
+/// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
+/// feet are (two trail steps: a mark beside the bot is no way on).
+pub const TRAIL_TOWARD: f64 = 4.0;
+/// Ticks between looks while a spawner on record is refused and no trail mark is nearer (a
+/// refusal lasts `FAILURE_MEMORY_TICKS` 600: six looks).
+const SPAWNER_WAIT_TICKS: u64 = 100;
+
+/// The trail marks at least `TRAIL_TOWARD` nearer to `target` than `feet`, the nearest to the
+/// target first: where the bot itself has stood, so no cell it has not seen.
+pub fn trail_toward(trail: &[[f64; 3]], feet: [f64; 3], target: Cell) -> Vec<[f64; 3]> {
+    let to = |p: [f64; 3]| {
+        let d = [
+            f64::from(target.0) + 0.5 - p[0],
+            f64::from(target.1) + 0.5 - p[1],
+            f64::from(target.2) + 0.5 - p[2],
+        ];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    };
+    let here = to(feet);
+    let mut marks: Vec<(f64, [f64; 3])> = trail
+        .iter()
+        .map(|m| (to(*m), *m))
+        .filter(|(d, _)| *d + TRAIL_TOWARD <= here)
+        .collect();
+    marks.sort_by(|a, b| a.0.total_cmp(&b.0));
+    marks.into_iter().map(|(_, m)| m).collect()
+}
 /// Chunk columns a spawner search looks for bricks in: 48 blocks, farther is another fortress
 /// (clojurecraft's `corridor-reach`).
 const CORRIDOR_CHUNKS: i32 = 3;
@@ -456,6 +497,11 @@ pub struct Plan {
     /// When armour may next be put on (issue 16).
     #[serde(default)]
     pub equip_at: u64,
+    /// When the next shelter block may be placed, and how many have been (spawner wall 3).
+    #[serde(default)]
+    pub shelter_at: u64,
+    #[serde(default)]
+    pub shelter_blocks: u32,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -603,6 +649,8 @@ impl Plan {
             fetch_lava: false,
             fetch_walks: 0,
             equip_at: 0,
+            shelter_at: 0,
+            shelter_blocks: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -1137,6 +1185,30 @@ impl Plan {
         if table.always.is_empty() {
             return None;
         }
+        // Armour held and not worn goes on here in the Nether, ahead of the rows: `equip` runs
+        // only when a task is chosen, and a defend cuts in before that (blaze-fight wall 1: three
+        // bots fought their first blazes bare and put the armour on 220 ticks later).
+        if tick >= self.equip_at
+            && w.window.is_none()
+            && w.click.is_none()
+            && w.inventory.carried.is_none()
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == "minecraft:the_nether")
+            && let Some(slot) = unworn_armour(&w.inventory.slots)
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(world::Act::Click {
+                slot,
+                button: 0,
+                mode: 1,
+            });
+            self.note(
+                tick,
+                format!("armour on from slot {slot}"),
+                "armour held, not worn; ahead of the always-rows".to_owned(),
+            );
+        }
         // A cast and a scoop stand beside lava on purpose; anything else answers lava at the door.
         let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_));
         let trap = self.traps.tick(w, body, door);
@@ -1285,6 +1357,8 @@ impl Plan {
             };
             self.begin(task);
         }
+        // What a defend did this tick, for the ledger (blaze-fight walls 2 and 3).
+        let mut said: Vec<String> = Vec::new();
         let (c, act, ended) = match &mut self.task {
             Task::Escape(e) => {
                 let (c, act) = e.step(w, tick);
@@ -1304,6 +1378,7 @@ impl Plan {
             Task::Defend(d) => {
                 let (sent, landed) = (d.swings, d.landed);
                 let (c, act, status) = d.step(w, rules, tick);
+                said = std::mem::take(&mut d.notes);
                 self.swings_sent += u64::from(d.swings.saturating_sub(sent));
                 self.swings_landed += u64::from(d.landed.saturating_sub(landed));
                 let ended = match status {
@@ -1335,7 +1410,7 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks",
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling",
                             d.swings,
                             d.landed,
                             d.stance,
@@ -1344,7 +1419,12 @@ impl Plan {
                             d.health_start,
                             w.player.health,
                             d.max_dy,
-                            d.charged_ticks
+                            d.charged_ticks,
+                            d.kept_off,
+                            d.sweeps_held,
+                            d.dodges,
+                            d.dodges_known,
+                            d.falling_swings
                         )))
                     }
                 };
@@ -1386,6 +1466,9 @@ impl Plan {
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
+        for what in said {
+            self.note(tick, what, "defend".to_owned());
+        }
         if let Some(end) = ended {
             match (&self.task, &end) {
                 (Task::Eat(_), Ok(_)) => self.meals += 1,
@@ -1672,30 +1755,40 @@ impl Plan {
         self.decide(w, origin, tick)
     }
 
-    /// Under the engage health in the Nether: the nearest cell no blaze in range sees, on a found
-    /// route; there, rest. `None` when not hurt.
+    /// Under the engage health in the Nether: rest where no shooter in range sees the body and
+    /// nothing burns; seen or burning, the nearest cell out of sight on a found route; with none,
+    /// a held block into each cell a line of sight comes in through, until none does
+    /// (`cover::shelter_block`, spawner wall 3). `None` when not hurt, or when none of it can be
+    /// done.
     fn take_cover(&mut self, w: &World, tick: u64) -> Option<Task> {
         let rules = self.table.as_ref().map(|t| t.survival.clone())?;
         let body = w.body?;
         if w.player.health.is_none_or(|h| h >= rules.engage_health) {
             return None;
         }
-        let eyes = cover::shooters(w, &[data::EntityKind::Blaze, data::EntityKind::Ghast]);
-        let feet = path::feet_cell(body.pos);
-        if eyes.is_empty() || !cover::seen_at(w, &eyes, feet) {
+        let eyes = cover::shooters(w);
+        let burning = escape::touching_fire(w, body.pos);
+        if !burning && !cover::seen_body(w, &eyes, body.pos) {
             self.retry_at = tick + RETRY_TICKS;
             self.note(
                 tick,
                 "rest".to_owned(),
                 format!(
-                    "health {:?} under {}; out of sight",
-                    w.player.health, rules.engage_health
+                    "health {:?} under {}; out of sight of {} shooters within {}",
+                    w.player.health,
+                    rules.engage_health,
+                    eyes.len(),
+                    cover::COVER_RANGE
                 ),
             );
             return Some(Task::Idle);
         }
+        // Not the cell it stands in: seen there by where the body really is, a walk to it is over
+        // at once and the shelter never starts.
+        let feet = path::feet_cell(body.pos);
         for c in cover::cover_cells(w, &eyes)
             .into_iter()
+            .filter(|c| *c != feet)
             .take(CANDIDATES_PER_TICK)
         {
             let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
@@ -1705,7 +1798,7 @@ impl Plan {
                     tick,
                     format!("take cover at {c:?}"),
                     format!(
-                        "health {:?}; {} blazes see the bot",
+                        "health {:?}; {} shooters in range, burning {burning}",
                         w.player.health,
                         eyes.len()
                     ),
@@ -1713,7 +1806,51 @@ impl Plan {
                 return Some(Task::Explore(walk));
             }
         }
-        None
+        // No cell out of sight to walk to (an open bridge): make one where the bot stands.
+        if burning || !body.on_ground {
+            return None;
+        }
+        let item = SHELTER_BLOCKS
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        let (cell, click, face) = cover::shelter_block(w, &eyes, body.pos)?;
+        if self.shelter_blocks >= SHELTER_MAX {
+            return None;
+        }
+        // One click a look; a window open or a click not yet answered waits.
+        self.retry_at = tick + 1;
+        if w.window.is_some() || w.click.is_some() || !self.acts.is_empty() {
+            return Some(Task::Idle);
+        }
+        if tick < self.shelter_at {
+            return Some(Task::Idle);
+        }
+        match hold::toward(w, item) {
+            hold::Hold::Held => {
+                self.shelter_at = tick + SHELTER_EVERY_TICKS;
+                self.shelter_blocks += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("shelter block {} at {cell:?}", self.shelter_blocks),
+                    format!(
+                        "health {:?}; seen by a shooter, no cover cell with a route; on {click:?} face {face}",
+                        w.player.health
+                    ),
+                );
+                Some(Task::Idle)
+            }
+            hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            hold::Hold::Wait => Some(Task::Idle),
+            hold::Hold::Missing => None,
+        }
     }
 
     /// Issue 16: from the fortress to its blaze spawner, and there until 7 rods are held. A spawner
@@ -1770,10 +1907,8 @@ impl Plan {
             self.retry_at = tick + RETRY_TICKS;
             return Task::Idle;
         }
-        if let Some(sp) = world::stage::kind_near(w, data::BlockKind::Spawner, FORTRESS_CHUNKS)
-            .into_iter()
-            .find(|c| !self.refused_now(*c, tick))
-        {
+        let known = world::stage::kind_near(w, data::BlockKind::Spawner, FORTRESS_CHUNKS);
+        if let Some(sp) = known.iter().copied().find(|c| !self.refused_now(*c, tick)) {
             let mut walk = Walk::new(
                 sp,
                 Goal::Near {
@@ -1800,6 +1935,49 @@ impl Plan {
                 tick,
             ) {
                 return t;
+            }
+        }
+        // A spawner known and no way on from here (spawner wall 2: a bot pushed back down its own
+        // tunnel refused the spawner after three stalls, explored 60 blocks the other way and dug
+        // two pickaxes away from there): back along the trail to the mark nearest the spawner,
+        // and there wait out the refusal. Never an explore away from a spawner on record.
+        if let Some((sp, body)) = known.first().copied().zip(w.body) {
+            for m in trail_toward(&self.trail, body.pos, sp)
+                .into_iter()
+                .take(CANDIDATES_PER_TICK)
+            {
+                let target = path::feet_cell(m);
+                let mut walk = Walk::new(
+                    target,
+                    Goal::Near {
+                        pos: target,
+                        range: 1.5,
+                    },
+                    Arrive::Goal,
+                    tick,
+                );
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("back toward the spawner at {sp:?} by the trail mark {target:?}"),
+                        "a spawner on record, no walk or dig to it from here".to_owned(),
+                    );
+                    return Task::Explore(walk);
+                }
+            }
+            let for_good = self
+                .refused
+                .get(&sp)
+                .is_some_and(|(until, _)| *until == u64::MAX);
+            if !for_good {
+                self.retry_at = tick + SPAWNER_WAIT_TICKS;
+                self.note(
+                    tick,
+                    format!("wait for the spawner at {sp:?}"),
+                    "refused a while, no trail mark nearer; not exploring away from it".to_owned(),
+                );
+                return Task::Idle;
             }
         }
         // No spawner seen: the fortress's corridors, the nearest brick not yet stood near first.
@@ -3991,6 +4169,23 @@ pub fn cursor_step(
     junk_stack(slots, junk).map(|(s, _)| s)
 }
 
+/// The first main or hotbar slot holding an iron armour piece whose own armour slot (5 to 8 of
+/// window 0) is empty: the piece a quick move puts on.
+pub fn unworn_armour(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+) -> Option<i16> {
+    slots.iter().find_map(|(slot, (k, _))| {
+        let to = match k {
+            data::ItemKind::IronHelmet => 5,
+            data::ItemKind::IronChestplate => 6,
+            data::ItemKind::IronLeggings => 7,
+            data::ItemKind::IronBoots => 8,
+            _ => return None,
+        };
+        (*slot >= 9 && !slots.contains_key(&to)).then_some(*slot)
+    })
+}
+
 /// The main slot to drop, with its kind, when fewer than `JUNK_FREE_SLOTS` are free: the first
 /// stack of a junk kind whose drop still leaves that kind's `keep` held. None with room to spare.
 pub fn junk_slot(
@@ -4079,6 +4274,24 @@ mod bank_tests {
         assert!(climb_to_log(4, 26, Some(data::BlockKind::Stone)));
         assert!(!climb_to_log(4, 26, None));
         assert!(!roofed_below(&at(4.0), 26));
+    }
+
+    /// Blaze-fight wall 1: a held piece whose armour slot is empty is the one put on; a worn kind
+    /// and anything that is not armour are left.
+    #[test]
+    fn held_armour_with_its_slot_empty_is_put_on() {
+        use data::ItemKind::{Cobblestone, IronChestplate, IronHelmet, IronLeggings};
+        let mut slots = std::collections::BTreeMap::new();
+        slots.insert(9, (Cobblestone, 64));
+        assert_eq!(unworn_armour(&slots), None);
+        slots.insert(17, (IronHelmet, 1));
+        slots.insert(18, (IronChestplate, 1));
+        assert_eq!(unworn_armour(&slots), Some(17));
+        slots.insert(5, (IronHelmet, 1));
+        assert_eq!(unworn_armour(&slots), Some(18), "the helmet is worn");
+        slots.insert(6, (IronChestplate, 1));
+        slots.insert(7, (IronLeggings, 1));
+        assert_eq!(unworn_armour(&slots), None);
     }
 
     /// Blaze wall 13: a full inventory drops a junk stack that leaves its keep; one with room, a
