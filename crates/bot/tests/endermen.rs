@@ -7,7 +7,7 @@
 
 use data::{BlockKind, EntityKind, ItemKind};
 use plan::{Aim, Plan, TaskRecord};
-use sim::life::{Brain, Melee};
+use sim::life::Brain;
 use sim::nether::{LAVA_SEA, Stage};
 use sim::{Config, Sim};
 
@@ -108,6 +108,28 @@ fn cavern_on(aim: Aim, ticks: u64, soul: bool, summon: impl Fn(&mut Sim)) -> Run
     Run { plan, run, ledger }
 }
 
+/// The model's endermen (E4's `sim::enderman`, the jar's stare): placed with no loot.
+fn summon_enderman(sim: &mut Sim, at: [f64; 3]) -> i32 {
+    let id = sim.summon_enderman(at);
+    if let Some(m) = sim.survival.life.mobs.get_mut(&id) {
+        m.loot = false;
+    }
+    id
+}
+
+/// Whether any of the model's endermen was ever stared at (metadata 18) or angered.
+fn stared_or_angry(r: &Run) -> Vec<(i32, bool, bool)> {
+    r.run
+        .sim
+        .survival
+        .life
+        .mobs
+        .keys()
+        .filter_map(|id| r.run.sim.ender(*id).map(|e| (*id, e.stared_at, e.angry)))
+        .filter(|(_, s, a)| *s || *a)
+        .collect()
+}
+
 /// Every cell beside the feet and the head, and over the head, is a block: the pocket is shut.
 fn sealed(r: &Run) -> bool {
     let b = r.run.world.body.unwrap();
@@ -155,9 +177,10 @@ fn seven_rods_held_go_on_to_the_endermen() {
 #[test]
 fn a_ticking_enderman_near_is_met_in_a_sealed_pocket() {
     let r = cavern(Aim::Race, 600, |sim| {
-        sim.summon(EntityKind::Enderman, [20.5, f64::from(FLOOR + 1), 0.5]);
+        summon_enderman(sim, [20.5, f64::from(FLOOR + 1), 0.5]);
     });
     let story = r.story();
+    assert_eq!(stared_or_angry(&r), Vec::new(), "never stared at:\n{story}");
     assert!(r.has("endermen reached") >= 1, "{story}");
     assert!(r.has("pocket block") >= 5, "{story}");
     assert!(r.has("endermen met") >= 1, "{story}");
@@ -170,38 +193,37 @@ fn a_ticking_enderman_near_is_met_in_a_sealed_pocket() {
 #[test]
 fn a_ticking_enderman_at_44_is_walked_to() {
     let r = cavern(Aim::Race, 1500, |sim| {
-        sim.summon(EntityKind::Enderman, [44.5, f64::from(FLOOR + 1), 0.5]);
+        summon_enderman(sim, [44.5, f64::from(FLOOR + 1), 0.5]);
     });
     let story = r.story();
+    assert_eq!(
+        stared_or_angry(&r),
+        Vec::new(),
+        "walked at, never stared at:\n{story}"
+    );
     assert!(r.has("approach enderman") >= 1, "{story}");
     assert!(r.has("endermen reached") >= 1, "{story}");
     assert!(r.plan.met, "{story}");
 }
 
-/// A provoked enderman (17e.3): one that strikes the bot is answered with a sealed pocket, never
-/// a swing. The aim met in the Nether leaves nothing else to do, so the threat is the only row.
+/// A provoked enderman (17e.3): one angered (here set so in the model: it chases and strikes) is
+/// answered with a sealed pocket, never a swing. The aim met in the Nether leaves nothing else to
+/// do, so the threat is the only row.
 #[test]
 fn a_provoked_enderman_is_answered_by_the_pocket_never_a_swing() {
     let r = cavern(Aim::Nether, 600, |sim| {
-        sim.summon_with(
-            EntityKind::Enderman,
-            [5.5, f64::from(FLOOR + 1), 0.5],
-            Brain::Melee(Melee {
-                speed: 0.2,
-                damage: 7.0,
-                reach: 1.5,
-                wither_ticks: 0,
-                disables_shield: 0,
-            }),
-        );
+        let id = summon_enderman(sim, [5.5, f64::from(FLOOR + 1), 0.5]);
+        if let Some(m) = sim.survival.life.mobs.get_mut(&id)
+            && let Brain::Enderman(e) = &mut m.brain
+        {
+            e.angry = true;
+        }
     });
     let story = r.story();
     assert!(r.has("provoked enderman") >= 1, "{story}");
     assert!(r.has("pocket block") >= 1, "{story}");
     assert_eq!(r.has("defend Enderman"), 0, "{story}");
     assert_eq!(r.plan.swings_sent, 0, "never a swing:\n{story}");
-    // Health is printed, not judged: the model's melee strikes with no line of sight (vanilla's
-    // needs one), so a sealed pocket does not stop it here.
     println!("health at the end {:?}", r.run.world.player.health);
 }
 
