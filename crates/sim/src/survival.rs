@@ -1083,6 +1083,45 @@ impl Sim {
         *s
     }
 
+    /// A menu slot as it goes on the wire: in the inventory's own menu a worn shield carries its
+    /// `damage` (life.rs, `shield_wear`).
+    fn slot_wire(&self, i: usize, s: Option<Stack>) -> Slot {
+        let worn = (self.menu_id() == 0)
+            .then(|| self.survival.life.shield_wear.get(&i).copied())
+            .flatten();
+        match (s, worn) {
+            (Some((item, count)), Some(d)) if item == ItemKind::Shield => Slot::Item {
+                item: item.id(),
+                count,
+                wear: protocol::slot::Wear {
+                    damage: Some(d),
+                    max_damage: None,
+                },
+            },
+            _ => slot_of(s),
+        }
+    }
+
+    /// A worn shield's slot told at once (`broadcastChanges` sends a changed component as a
+    /// changed slot), when the inventory's own menu is open.
+    pub(crate) fn wear_sent(&mut self, slot: usize) -> Result<Vec<Wire>, EncodeError> {
+        if self.menu_id() != 0 {
+            return Ok(Vec::new());
+        }
+        let now = self.survival.slots.get(slot).copied().flatten();
+        let item = self.slot_wire(slot, now);
+        let state_id = self.next_state_id();
+        Ok(vec![wire(
+            State::Play,
+            &S2c::ContainerSetSlot {
+                window: 0,
+                state_id,
+                slot: i16::try_from(slot).unwrap_or(0),
+                item,
+            },
+        )?])
+    }
+
     /// The open menu's changes since the client was last told (`broadcastChanges`): one slot
     /// packet per changed slot, each with a new state id, and the cursor when it differs.
     pub(crate) fn broadcast_changes(&mut self) -> Result<Vec<Wire>, EncodeError> {
@@ -1101,7 +1140,7 @@ impl Sim {
                     window,
                     state_id,
                     slot: i16::try_from(i).unwrap_or(0),
-                    item: slot_of(now),
+                    item: self.slot_wire(i, now),
                 },
             )?);
         }
@@ -1163,7 +1202,11 @@ impl Sim {
             &S2c::ContainerSetContent {
                 window,
                 state_id,
-                slots: view.iter().map(|s| slot_of(*s)).collect(),
+                slots: view
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| self.slot_wire(i, *s))
+                    .collect(),
                 carried: Some(slot_of(self.survival.carried)),
             },
         )

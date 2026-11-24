@@ -329,7 +329,8 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
         println!(
             "SEED {name} seed {seed}: rods {}, alive {}, seventh at {:?}, ticks {}, kills {} \
              ({:.2} per 1,000), fireballs {} fired {} hit {} landed ({:.2} landed per 1,000) \
-             {} blocked, health lost {:.1} ({}), blazes knocked {}, meals {}",
+             {} blocked, health lost {:.1} ({}), blazes knocked {}, meals {}, blows blocked {}, \
+             shields broken {}, mobs fell {}",
             s.rods,
             !s.run.died,
             s.seven_at,
@@ -345,6 +346,9 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
             damage_by_type(life),
             life.mobs_knocked,
             s.meals,
+            life.blows_blocked,
+            life.shields_broken,
+            life.mobs_fell,
         );
     }
     let per = |n: u64| n as f64 * 1000.0 / all_ticks.max(1) as f64;
