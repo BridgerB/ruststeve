@@ -5,13 +5,14 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@071c346 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@abbda55 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
   - "ruststeve:crates/plan/src/hunt.rs#pub fn swing_ticks(w: &World) -> f64 {"
   - "ruststeve:config/goals.toml#danger_health = 8.0"
+  - "ruststeve:crates/plan/src/shield.rs#pub fn should_raise(w: &World) -> bool {"
   - "ruststeve:crates/bot/tests/defend.rs#fn under_the_danger_line_it_backs_away_instead() {"
   - "clojurecraft:resources/clojurecraft/goals.edn#:goal/doc \"answer a hostile mob within 4 blocks\""
 related:
@@ -69,3 +70,15 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **Its notes** reach the ledger through `Defend::notes`: "struck N in reach, not M", "shooter fight given up", "retreat to cover at", "in cover at", "defend switched to"; the fight's closing note counts ticks kept off, sweeps held and fireballs dodged.
 - **Wither skeletons are fought** (spawner wall 1, `docs/problems/spawner.md`): they were `never_fight` from 2026-11-20, chosen for bare bots; a wither skeleton walks as fast as the bot, so a retreat from one never reaches `flee_clear`, and two armoured bots backed away 700 and 900 ticks and died with no swing (race 45334573113). `never_fight` is the creeper alone again.
 - **Cover and shelter** (`plan::cover`, `Plan::take_cover`; spawner wall 3): under `engage_health` in the Nether the bot rests only where no shooter sees its body (blazes and ghasts within 48, piglins and skeletons within 16; lines to its eye and middle) and nothing burns. Seen, it walks to the nearest cell out of sight within 8 on a found route; with none it builds cover where it stands, a held block into each cell a line of sight comes in through (`cover::shelter_block`, one every 10 ticks, cobblestone first). The range was 16 until three armoured bots rested on an open bridge 16 to 24 blocks from blazes and died there (race 45335627948).
+- **Heal beyond the spawner's range** (spawner wall 5): a spawner runs only with a player within 16 blocks, so no rest and no cover cell lies within `cover::SPAWNER_QUIET` (18) of a spawner on record; a hurt bot inside it walks away from the spawner on a found route first ("leave the spawner at … to heal"). A cover cell stands on a full block, passes `seen_body` for a body standing in it, and is refused for 600 ticks once walked to.
+- **Cover is never beside a drop, and a rest must be able to heal** (spawner walls 6 and 7): `cover::beside_drop` keeps cells at a bridge's edge out of `cover_cells` (two bots fell 17 blocks heading for one); `take_cover` rests only while `can_heal` holds (safe food held, or the food bar at 18+), else the bot goes on over `danger_health` (two bots sat 7,400 and 7,900 ticks at 16 health with their meat eaten).
+- **The leave walk and the retreat line agree with the rest** (spawner wall 8, blaze-fight wall 13): the leave walk out of a spawner's range takes its goal 2 past the feet by the route's measure (octile plus height runs longer than the straight line `awake_at` uses; a goal of 20 was met at once 300 times while the spawner was 17.2 off); and a shooter's retreat line is `defend::retreat_line`: `shooter_retreat_health` while a rest can heal, else the danger line.
+
+## Issue 16: the shield (docs/problems/shield.md)
+- **What it is**: `plan::shield`. A shield in the off hand (window slot 45) is raised with `Act::UseOffHand` (`use_item`, hand 1) and lowered with `Act::ReleaseUse`. Raised 5 ticks or more it stops what comes from the front half of the look, a blaze's fireball whole: no damage and no fire.
+- **When**: `threats` lists charged blazes within 48 that see the bot and small fireballs within 24 not flying away; `should_raise` and `facing` read it. The holder `Shield::step` raises `RAISE_AFTER` 45 ticks after a blaze's charge flag is first seen (the wind-up is 60; at 15 the shield never came down among three blazes) or at once for a fireball, faces fireballs first and then the blaze charged longest, sends `use_item` again every 20 ticks, and lowers 6 ticks after the last threat.
+- **The call site**: `Plan::shield_step`, called once from `Plan::step` after the tick's choice. While the shield is up that tick's strike is dropped and the bot walks on only toward the threat (within 60 degrees), forward one tick in five (`shield::controls`: a client using an item cannot attack and moves at a fifth of its speed); else it stands and faces the threat; an escape, a meal, a hunt, a dig, a window or a block to place lowers it. A shield held elsewhere is swapped into the off hand first (`to_off_hand`: click mode 2, button 40).
+- **Its notes**: "shield raised against blaze N / fireball N", "shield lowered after N ticks", and each fireball that ended within 3.5 blocks judged: "vanished with no damage, the shield up / down" or "hit the bot with the shield up / down", with running counts; "shield worn: N of 336 uses left" under a fifth.
+- **The kit**: after the `nether-kit` row's tools, the `shields` or `shield` row (`shield::kit_row`: what the held iron and wood make) is worked where the bot stands; an act that would be a trip skips it with a note (`shield::kit_act`). A blocked fireball takes 6 of a shield's 336 uses.
+- **In the Nether** (shield wall 3): a bot that came through before the kit made shields, holding iron and wood for one, makes it on arrival (`Plan::nether_shield`, fenced in `nether_task`): the needs planner asked for the shield row alone, work where it stands only, at most 12 tasks; then the fuel left cooks the raw meat held (`shield::cook_choice`, two rounds), the table is dug again, and the note "shield stop over: …" ends it.
+- **Measured** (development start, races 45343415088 and 45345386828): 0.4 fireball hits a thousand ticks behind the shield against 3.1 after it broke; with the timed raise 5 rods in 12,000 bot-ticks, both bots alive.

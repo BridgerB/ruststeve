@@ -118,13 +118,24 @@ fn is_lava(w: &World, c: Cell) -> bool {
 /// Lava at the door: over the head, or beside the head or the feet, the first such cell. It is
 /// in the body's cells within a second (blaze.md wall 22: Nether lava ran down a bot's own
 /// stairs and took 20 health in 80 ticks, the trap firing only once the body was in it).
+///
+/// And lava one cell higher beside the head's column (the ring at y + 2), last: it falls beside
+/// the head in 10 ticks and is on the feet in 30 (nether-walk.md: race 45204423376 lane 5 stood
+/// at (29, 34, -22) with lava spreading at y 36 over (30, 36, -22) and (29, 36, -21); the check
+/// saw nothing until it was beside the head, and the body burned 20 ticks later).
 pub fn lava_door(feet: Cell, lava_at: impl Fn(Cell) -> bool) -> Option<Cell> {
     let (x, y, z) = feet;
     let beside = |h: i32| [(x + 1, h, z), (x - 1, h, z), (x, h, z + 1), (x, h, z - 1)];
     std::iter::once((x, y + 2, z))
         .chain(beside(y + 1))
         .chain(beside(y))
+        .chain(beside(y + 2))
         .find(|c| lava_at(*c))
+}
+
+/// `lava_door` on the world.
+pub fn lava_door_at(w: &World, feet: Cell) -> Option<Cell> {
+    lava_door(feet, |c| is_lava(w, c))
 }
 
 /// Seals tried against lava at the door before the escape flees without one.
@@ -156,7 +167,9 @@ pub fn touching_fire(w: &World, pos: [f64; 3]) -> bool {
 pub fn dry_land(w: &World, body: &physics::Body) -> bool {
     let [x, y, z] = body.pos;
     let under = (x.floor() as i32, (y - 0.5).floor() as i32, z.floor() as i32);
-    body.on_ground && !body.in_water && !body.eye_in_water && full(kind_at(w, under))
+    // Soul sand is land too (a box 0.875 high): a bot out of Nether lava onto it is out.
+    let land = full(kind_at(w, under)) || kind_at(w, under) == Some(BlockKind::SoulSand);
+    body.on_ground && !body.in_water && !body.eye_in_water && land
 }
 
 /// The eyes in a full block (vanilla's `isInWall` takes the eye's cell).
@@ -429,7 +442,16 @@ impl Escape {
                     is_water(w, (x + dx, y, z + dz)) || is_water(w, (x + dx, y - 1, z + dz))
                 });
                 let cells = [(x, y, z), (x, y + 1, z)];
+                // Never a cell holding water back: over it, or beside it on the level. Dug, it
+                // floods the notch, and a body in water on the notch's floor is never on dry land
+                // (race 45343519424 lane 2: the aquifer round (42, 55, -136) stood at three heights).
+                let wet = |(kx, ky, kz): Cell| {
+                    [(0, 1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
+                        .iter()
+                        .any(|(dx, dy, dz)| is_water(w, (kx + dx, ky + dy, kz + dz)))
+                };
                 let ok = beside_water
+                    && !cells.iter().any(|k| wet(*k))
                     && c.floor((x, y - 1, z))
                     && cells
                         .iter()
@@ -449,6 +471,21 @@ impl Escape {
             .into_iter()
             .next()
             .map(|(_, _, cell, dig)| (cell, dig))
+    }
+
+    /// What the escape did, for the note at its end: how long, its seals and digs, its trail.
+    pub fn report(&self) -> String {
+        format!(
+            "{} seals, {} digs, {} refused; trail: {}",
+            self.seals,
+            self.digs,
+            self.refused.len(),
+            if self.trail.is_empty() {
+                "nothing chosen".to_owned()
+            } else {
+                self.trail.join(" / ")
+            }
+        )
     }
 
     fn trail(&mut self, tick: u64, what: String) {
@@ -640,7 +677,25 @@ impl Escape {
         }
         if self.target.is_none() && tick >= self.next_search {
             self.next_search = tick + SEARCH_EVERY_TICKS;
+            // A bank refused (no nearer, nothing on the way it may dig) is past a swim's reach:
+            // a notch beside the body comes before the next bank. With a bank within reach on
+            // record the list never ran out, and the notch was never cut (race 45343519424 lane
+            // 2: nine banks 12 blocks off through stone holding water back, refused in turn
+            // and the list cleared, from tick 14,780 to the run's end).
+            let notch_first = (self.kind == TrapKind::Water && !self.refused.is_empty())
+                .then(|| self.notch(w, feet))
+                .flatten();
+            if let Some((cell, _)) = &notch_first {
+                self.trail(
+                    tick,
+                    format!(
+                        "notch before another bank at {cell:?}: {} banks refused",
+                        self.refused.len()
+                    ),
+                );
+            }
             self.target = match self.kind {
+                TrapKind::Water if notch_first.is_some() => None,
                 TrapKind::Water => self.bank(w, feet),
                 TrapKind::Lava => {
                     self.footing(w, around(feet, FLEE_RADIUS, feet.1 - 1..=feet.1 + 2))
@@ -654,7 +709,7 @@ impl Escape {
             self.best_at = tick;
             if self.target.is_none()
                 && self.kind == TrapKind::Water
-                && let Some((cell, dig)) = self.notch(w, feet)
+                && let Some((cell, dig)) = notch_first.or_else(|| self.notch(w, feet))
             {
                 self.target = Some(cell);
                 // Popped from the end: the head-height cell first, then the feet's.
@@ -813,5 +868,12 @@ mod fill_tests {
             Some((30, 33, -18))
         );
         assert_eq!(lava_door(feet, at(&[(30, 30, -19), (30, 31, -20)])), None);
+        // Lava a cell over the head's height, beside its column, is seen, and last.
+        assert_eq!(lava_door(feet, at(&[(31, 33, -18)])), Some((31, 33, -18)));
+        assert_eq!(
+            lava_door(feet, at(&[(31, 33, -18), (30, 31, -19)])),
+            Some((30, 31, -19))
+        );
+        assert_eq!(lava_door(feet, at(&[(31, 33, -19), (30, 34, -18)])), None);
     }
 }

@@ -155,6 +155,28 @@ until = "nether-kit"
 doc = "spare stone pickaxes and a crafting table held before the portal is entered"
 provides = [["item:stone_pickaxe", 4], ["item:crafting_table", 1]]
 
+# >>> shield (docs/problems/shield.md): shields for the blaze fight, made after the Nether kit's
+# tools and only from what is held (`plan::shield::kit_row` picks the row by what the held iron
+# and wood make; an act that would be a trip skips them with a note). One iron ingot and six
+# planks each, at a table: a blaze's fireball that a raised shield meets deals nothing and lights
+# nothing, where one that lands costs 6 to 9 health in iron armour. Two: a shield is 336 uses and
+# a blocked fireball takes 6; with the timed raise one lasted about 5,000 ticks among three blazes
+# (race 45345386828). In the off hand a shield still counts as held (window slot 45).
+[[goal]]
+id = "shield"
+priority = 14
+until = "shield"
+doc = "one shield held before the portal is entered"
+provides = [["item:shield", 1]]
+
+[[goal]]
+id = "shields"
+priority = 14
+until = "shields"
+doc = "two shields held before the portal is entered"
+provides = [["item:shield", 2]]
+# <<< shield
+
 # Issue 16's clean flow (Bridger, 2026-11-22): the race stocks logs above ground before it first
 # goes down for iron, and again before the cast (plan::Plan::clean_flow). Every gear snapshot of
 # race 44840801185 was a bot 40 to 70 blocks underground with 1 to 23 sticks and no logs, and walls
@@ -415,6 +437,13 @@ shooter_patience = 100
 # takes 4 to 5 more after the hit, so the danger line of 8 is met from 13 (a fight ended at 9.7 and
 # the fire took it to 7.0: blaze-fight wall 3).
 shooter_retreat_health = 13.0
+# The parts of a shooter's fight, each on: stepping off a shooter within 2.4 (a blaze's touch is
+# 3.6 in iron armour), stepping out of a fireball's line, and striking on the way down from a jump
+# (9 for 6). Switched here so the whole-stage model can judge each alone
+# (docs/problems/blaze-fight.md).
+shooter_keep_off = true
+shooter_dodge = true
+shooter_crit = true
 # A never_fight kind is backed away from within this: a creeper's fuse starts at 3 blocks, and
 # backing away only within defend_radius let 7 creepers kill (docs/problems/iron-kit.md wall 21).
 flee_radius = 8.0

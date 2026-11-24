@@ -10,7 +10,7 @@
 use data::EntityKind;
 use world::World;
 
-use crate::path::{Cell, Cells, feet_cell};
+use crate::path::{Cell, Cells, Class, feet_cell};
 
 /// Blocks within which a blaze's or a ghast's line of sight counts: a blaze follows and shoots
 /// from 48 (its `FOLLOW_RANGE`), a ghast from 64. It was 16 until three armoured bots rested "out
@@ -68,19 +68,73 @@ pub fn seen_at(w: &World, eyes: &[[f64; 3]], c: Cell) -> bool {
     })
 }
 
-/// The standable cells within `COVER_RADIUS` that none of `eyes` sees, nearest the feet first.
+/// Blocks from a spawner beyond which a hurt bot rests, shelters and heals. A spawner runs only
+/// with a player within 16 blocks of it (vanilla's `requiredPlayerRange`): bots resting 14 to 17
+/// from the blaze spawner saw the shooters in range go 3, 5, 7, 8, 12 in one rest (races
+/// 45337168104 and 45338756013). Two more than 16, for where in its cell the body stands.
+pub const SPAWNER_QUIET: f64 = 18.0;
+
+/// The spawners on record within `SPAWNER_QUIET` of `pos` (two chunk columns round the feet
+/// hold every one that near).
+pub fn spawners_awake(w: &World, pos: [f64; 3]) -> Vec<Cell> {
+    world::stage::kind_near(w, data::BlockKind::Spawner, 2)
+        .into_iter()
+        .filter(|c| awake_at(*c, pos))
+        .collect()
+}
+
+/// Whether a spawner in `c` is within `SPAWNER_QUIET` of a body at `pos`.
+pub fn awake_at(c: Cell, pos: [f64; 3]) -> bool {
+    let mid = [
+        f64::from(c.0) + 0.5,
+        f64::from(c.1) + 0.5,
+        f64::from(c.2) + 0.5,
+    ];
+    distance(mid, pos) < SPAWNER_QUIET
+}
+
+/// A fall this deep or deeper beside a cell keeps it from being cover: three blocks of fall cost
+/// no health, as the fight's own step rule has it.
+pub const DROP_BESIDE: i32 = 4;
+
+/// Whether an open cell beside `c` has no floor within `DROP_BESIDE` under it: the edge of a
+/// bridge, or the top of its low wall. Two real bots heading for a cover cell at (128, 61, 183 to
+/// 184) went over the bridge's side and fell 17 blocks, one to its death (race 45346418004).
+pub fn beside_drop(cells: &mut Cells, (x, y, z): Cell) -> bool {
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dz)| {
+        let n = (x + dx, y, z + dz);
+        matches!(cells.at(n), Class::Clear | Class::Lava)
+            && (1..=DROP_BESIDE).all(|d| cells.at((n.0, n.1 - d, n.2)) != Class::Solid)
+    })
+}
+
+/// The cells to rest in: standable on a full block, within `COVER_RADIUS`, where none of `eyes`
+/// sees a body standing (`seen_body`, the same test the rest itself is judged by) and no spawner
+/// on record is within `SPAWNER_QUIET`, and no drop beside (`beside_drop`); nearest the feet
+/// first. The floor must be a full block
+/// (on a stair the body stands higher than its cell says). One bot walked eleven times to a cell
+/// on a bridge's low wall that it was still seen in (race 45338756013): the planner also refuses
+/// a cover cell once it has walked to it.
 pub fn cover_cells(w: &World, eyes: &[[f64; 3]]) -> Vec<Cell> {
     let Some(body) = w.body else {
         return Vec::new();
     };
     let f = feet_cell(body.pos);
     let mut cells = Cells::new(w);
+    // Every spawner that could be within the quiet range of a cell in the search.
+    let spawners = world::stage::kind_near(w, data::BlockKind::Spawner, 3);
     let mut out: Vec<(i32, Cell)> = Vec::new();
     for dx in -COVER_RADIUS..=COVER_RADIUS {
         for dy in -2..=2 {
             for dz in -COVER_RADIUS..=COVER_RADIUS {
                 let c = (f.0 + dx, f.1 + dy, f.2 + dz);
-                if cells.standable(c) && !seen_at(w, eyes, c) {
+                let pos = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+                if cells.standable(c)
+                    && full(w, (c.0, c.1 - 1, c.2))
+                    && !beside_drop(&mut cells, c)
+                    && !seen_body(w, eyes, pos)
+                    && !spawners.iter().any(|s| awake_at(*s, pos))
+                {
                     out.push((dx * dx + dy * dy + dz * dz, c));
                 }
             }
