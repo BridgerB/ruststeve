@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod census;
 pub mod config;
 pub mod diagnose;
 pub mod observe;
