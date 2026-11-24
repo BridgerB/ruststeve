@@ -5,8 +5,8 @@ type: reference
 tags: [wire, windows, crafting, clicks]
 aliases: [container-click, state id, changed slots, predict nothing, set-cursor-item, container-set-content]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@3ee956a
+lastUpdated: 2026-11-23
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@ddae609
 sourceRefs:
   - "ruststeve:crates/protocol/src/packets.rs#w.varint(0); // no changed slots: nothing predicted"
   - "ruststeve:crates/world/src/lib.rs#fn window_moved(&mut self, window: i32, state_id: i32) {"
@@ -30,7 +30,7 @@ A click is `container-click`: window id, **state id**, slot (i16), button (i8), 
 ## Key files
 - clojurecraft `src/clojurecraft/packet.clj` (the spec) and `window.clj` (`click`).
 - ruststeve v1 `src/bot/inventory.rs` (`click_window`, `wait_for_inventory_ack`).
-- ruststeve `crates/protocol/src/packets.rs` (`C2s::ContainerClick`: `varint 0` changed slots and an empty hashed cursor, checked byte for byte by `a_click_predicts_nothing`) and `crates/world/src/lib.rs` (`Act::Click` stamps the window's last state id and holds a `PendingClick`; `window_moved` clears it when a window-0 content or slot packet brings a new state id).
+- ruststeve `crates/protocol/src/packets.rs` (`C2s::ContainerClick`: `varint 0` changed slots and an empty hashed cursor, checked byte for byte by `a_click_predicts_nothing`) and `crates/world/src/lib.rs` (`Act::Click` stamps the window's last state id and holds a `PendingClick`; `window_moved` clears it when a content or slot packet for the click's window brings a new state id).
 
 ## How it works
 - The server stamps every window update (`container-set-content`, `container-set-slot`) with a state id; the client echoes the last one it saw in each click.

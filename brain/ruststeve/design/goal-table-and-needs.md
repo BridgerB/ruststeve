@@ -5,8 +5,8 @@ type: reference
 tags: [plan, goals, needs, make, crafting]
 aliases: [block needs, holds, place-table, mine-stone, stone-tools, goals.toml, goal table, needs planner, plan::make, make, producer rows, craft rows, kit, wood, Aim::Table, --goal table, producer order, craft-now, make differential]
 status: verified
-lastUpdated: 2026-11-15
-verifiedAgainst: ruststeve@f8e4402 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/make.rs#pub fn make<'a>("
   - "ruststeve:crates/plan/src/make.rs#fn producer_order(counts: &Counts, row: &Row) -> (i32, i32) {"
@@ -54,6 +54,11 @@ Smelt rows, the `fuel:ticks` need and `spares` are in [[fuel-and-smelt-needs]], 
 ## Issue 14b: water and the portal kit
 - Rows `water-bucket` (a bucket filled at surface water), `portal-kit` (a water bucket and a bucket, sparing 24 sticks) and the producer `fill-bucket` (needs a bucket, holds and spares a pickaxe, act `scoop`: [[buckets-and-fluids]]). Ids are clojurecraft's.
 - `make-expected-water.txt`: clojurecraft's `make/next-row` toward both, with its gather-log, place-table and fill-bucket rows, for 2,592 inventories of buckets, water buckets, ingots, planks, sticks, tables and stone pickaxes, with and without a remembered table: **2,592 of 2,592** equal.
+
+## Issues 14c to 16: the portal, gear, stock and the Nether kit
+- Rows `portal` (a water bucket, a bucket, flint and steel; holds a pickaxe, spares 24 sticks), `gear` (an iron helmet, chestplate, leggings and sword; holds a pickaxe; worn armour counts as held), `stock` (`tag:logs 12`, held before going underground) and `nether-kit` (4 stone pickaxes and a crafting table, held before the portal is entered: the Nether has no wood, blaze wall 18).
+- The race does not plan toward one `until`: `Plan::decide` picks the row each time it is idle (`nether-kit` with a portal standing, `stock` while the clean flow stocks, `gear` until geared, else `portal`).
+- `[survival]` also carries the planner's numbers that are not always-rows': `spare_uses` and `travel_reserve_digs` ([[fuel-and-smelt-needs]]), `stock_logs`, `provision_ticks`, and `junk` (item and how many to keep, dropped when the main inventory is nearly full; an unknown item name fails `Table::new`).
 
 ## Checked against clojurecraft
 `make-expected.txt` is clojurecraft's own `make/next-row` (at be85a92, a one-off oracle in its flake shell, outside this repo) toward the kit with a table of the kit and gather-log rows, for all 480 inventories of oak logs 0-3, planks 0-4, sticks 0-5 and tables 0-1: **480 of 480** choices equal. `make-expected-stone.txt` (issue 11b): toward `stone-pickaxe` with the stone-pickaxe, gather-log, place-table and mine-stone rows, 1,920 inventories of logs, planks, sticks, tables, cobblestone and wooden pickaxes, with and without a remembered table: **1,920 of 1,920** equal.
