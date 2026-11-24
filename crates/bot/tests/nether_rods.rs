@@ -76,8 +76,9 @@ struct Stage {
     blaze_ticks: u64,
     ledger: Vec<String>,
     ticks: u64,
-    /// The planner's shield at the end: its counts.
-    shield: plan::shield::Shield,
+    /// The planner's shield at the end, its counts as `Debug` prints them (so the loops build
+    /// against any version of it, for a before and after on one runner).
+    shield: String,
 }
 
 fn line(r: TaskRecord) -> String {
@@ -168,7 +169,7 @@ fn stage_with(kit: &[(ItemKind, i32)], shield: bool, seed: u64, more: impl Fn(&m
         }
         (c, plan.take_acts())
     });
-    let shield = plan.shield.clone();
+    let shield = format!("{:?}", plan.shield);
     let rods = run.world.inventory.count(ItemKind::BlazeRod);
     let ticks = run.world.session.server_ticks;
     Stage {
@@ -341,7 +342,12 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
 fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl Fn(&mut Sim)) {
     let mut passed = 0;
     let (mut all_ticks, mut all_kills, mut all_landed, mut all_rods) = (0u64, 0u64, 0u64, 0i64);
-    for seed in SEEDS {
+    // `RODS_SEEDS=N` runs seeds 1 to N instead of the eight.
+    let seeds: Vec<u64> = std::env::var("RODS_SEEDS")
+        .ok()
+        .and_then(|n| n.parse::<u64>().ok())
+        .map_or_else(|| SEEDS.to_vec(), |n| (1..=n).collect());
+    for &seed in &seeds {
         let s = stage_with(kit, shield, seed, &more);
         let life = &s.run.sim.survival.life;
         let ok = !s.run.died && s.rods >= 7;
@@ -371,21 +377,7 @@ fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl
             s.meals,
         );
         // The shield's counts (docs/problems/shield.md wall 4).
-        let sh = &s.shield;
-        println!(
-            "SHIELD {name} seed {seed}: raised {}, blocked {}, hit up {}, hit down {}, yields to \
-             the strike {} ({} ticks), kept up for a fireball {} ticks, placing held {}, strikes \
-             given back {}",
-            sh.raises,
-            sh.blocked,
-            sh.hits_up,
-            sh.hits_down,
-            sh.yields,
-            sh.yield_ticks,
-            sh.kept_for_ball,
-            sh.places_held,
-            sh.strikes_held,
-        );
+        println!("SHIELD {name} seed {seed}: {}", s.shield);
         // A seed that died: how it ended (blaze-fight walls 17 and 19).
         if s.run.died {
             let from = s.ledger.len().saturating_sub(30);
@@ -398,11 +390,11 @@ fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl
     println!(
         "SEEDS {name}: {passed} of {} alive with 7 rods; {all_rods} rods in all, {:.2} kills \
          and {:.2} fireballs landed per 1,000 ticks over {all_ticks} ticks",
-        SEEDS.len(),
+        seeds.len(),
         per(all_kills),
         per(all_landed),
     );
-    assert!(passed > 0, "{name}: no seed of {} passed", SEEDS.len());
+    assert!(passed > 0, "{name}: no seed of {} passed", seeds.len());
 }
 
 #[test]

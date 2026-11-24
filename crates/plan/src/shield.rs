@@ -93,7 +93,9 @@ pub fn landing_in(pos: [f64; 3], velocity: Option<[f64; 3]>, mid: [f64; 3]) -> O
 
 /// What a defend has in the reach of its strike, for the shield to yield to: a blaze in touch
 /// (`defend::blaze_in_touch`: the keep-off step and the strike go first, blaze-fight wall 19), or
-/// in a fight, a hostile melee mob (not of `ranged`) within `YIELD_REACH` of the eye by the box.
+/// in a fight, its foe or a mob of its kind (the ones it strikes) when that kind is a hostile
+/// melee one (not of `ranged`), within `YIELD_REACH` of the eye by the box: a mob the fight does
+/// not strike is no reason to lower the shield.
 /// A blaze in reach but not in touch is not yielded to: yielding to it cost the model's eight
 /// shield seeds 0.30 to 0.66 fireballs landed a thousand ticks and 522 to 658 health lost
 /// (probes 45361576927 and 45362273722). `None` otherwise.
@@ -108,7 +110,12 @@ pub fn striking(w: &World, d: &crate::defend::Defend, ranged: &[EntityKind]) -> 
     let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
     w.entities
         .iter()
-        .filter(|(_, e)| !e.dead && crate::defend::hostile(e.kind) && !ranged.contains(&e.kind))
+        .filter(|(id, e)| {
+            !e.dead
+                && (**id == d.foe || e.kind == d.kind)
+                && crate::defend::hostile(e.kind)
+                && !ranged.contains(&e.kind)
+        })
         .map(|(id, e)| (crate::defend::box_distance(eye, e.pos), *id, e.kind))
         .filter(|(r, _, _)| *r <= YIELD_REACH)
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
