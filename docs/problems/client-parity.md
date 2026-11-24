@@ -1,6 +1,6 @@
 # Problem: the bot's client is not a vanilla client (sneaking, block speed)
 
-**Status: open** (issue 16). Two differences between what the bot's client does and what a vanilla 26.1.2 client does, found by the Nether test bed ([`nether-testbed.md`](nether-testbed.md), "Found on the way"). Both matter on the Nether walk: bridging at an edge over lava, standing on magma, walking soul sand.
+**Status: fixed, one gap left open (friction)** (issue 16). Two differences between what the bot's client does and what a vanilla 26.1.2 client does, found by the Nether test bed ([`nether-testbed.md`](nether-testbed.md), "Found on the way"). Both matter on the Nether walk: bridging at an edge over lava, standing on magma, walking soul sand.
 
 ## What the bot needs
 - When the planner presses sneak, the server must know it (magma does not burn a sneaking player) and the body must behave as a sneaking body does (it stops at an edge, it is slow).
@@ -42,4 +42,19 @@ Left out, on purpose:
 - The one-tick lag of the crouching pose behind the shift key on a client (the first sneaking tick moves at full input).
 
 ## Evidence
-See the table at the end; filled in as runs finish.
+- **Unit tests in CI** (ci 45341986093 on 8b6a90a, ci 45342562410 on b72980e, both green): the packet's bytes (id 43, one byte); the world reports the keys once, on change, before the move; the model's shift key spares the feet on magma; a sneak stops within 0.05 of an edge and walks at 0.3 of the pace (1.295 blocks a second); soul sand's pace is `0.098 / (1 - 0.4 × 0.546)` a tick, 2.508 blocks a second; honey halves the jump; the supporting block is asked at an edge; water at the feet hides the sand. The differential against clojurecraft stays bit-equal.
+- **The table from the jar** (datagen 45342562476, green): the regenerated `movement.rs` equals the committed one. Seven blocks differ from the default: soul sand, honey block, ice, packed ice, frosted ice, blue ice, slime block.
+- **The parity table on a real 26.1.2 server** (parity 45343474603 on 85ab170, release `parity-45343474603`): 159 of 160 rows match, the eight new rows all match:
+
+| row | real | model | reads as |
+|---|---|---|---|
+| p00-magma, p01-magma | on the ground, not corrected, Hurt | the same | a walk over magma burns |
+| p00-magma-sneak, p01-magma-sneak | 8 blocks along the magma, not corrected, Full | the same | the server held the shift key: `player_input` works |
+| p00-edge, p01-edge | feet cell 3 north of the start (the first pit cell) at the floor's height, on the ground, not corrected | the same | the sneak stopped on the last block, hanging over the pit |
+| p00-soul, p01-soul | 8 blocks from the start after 60 ticks (a plain walk makes 13), not corrected | the same | the slowed walk is accepted |
+
+- The one row that differs, `f01-coal` (a furnace row: the real bot ended with its coal, furnace and raw iron, nothing smelted), presses no key and walks nowhere, so it sends none of the new packets; it is inside the stated tolerance and was not looked into.
+- **Not shown by any run**: a real bot of the planner's own choosing sneaking (only the scoop's centring step presses sneak), and a Nether race on the new code. A server never checks a client's speed, so no race can show the soul sand pace is the game's: that rests on the read of the jar and the unit tests.
+
+## For route costs
+`physics::pace_factor(speed_factor)` gives a block's steady walking pace as a share of the plain walk's (0.581 on soul sand and honey); the factor is `data::generated::movement::movement(block).speed_factor` or `World::surface(x, y, z).speed_factor`.
