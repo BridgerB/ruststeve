@@ -5,8 +5,8 @@ type: reference
 tags: [fluids, buckets, water, lava, obsidian, portal, look, sim, parity]
 aliases: [bucket, buckets, look_at, pitch, Controls.pitch, FlowingFluid, fluid tick, tick_fluids, use_bucket, obsidian, portal lighting, PortalShape, flint and steel, use script, light script, watch cells]
 status: verified
-lastUpdated: 2026-11-18
-verifiedAgainst: ruststeve@12a33bb clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn tick_fluids(&mut self) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn use_bucket(&mut self) -> Option<Result<Vec<Wire>, EncodeError>> {"
@@ -44,7 +44,7 @@ Issue 14a, the first part of the portal cast ([[mc-portal-cast]]). A bucket is u
 
 ## The model's rules (26.1.2, read with CFR)
 - **Bucket use** (`BucketItem.use`): the eye ray to `blockInteractionRange` 4.5, clipped to sources for an empty bucket, to blocks for a full one. An empty bucket takes a source (`LiquidBlock.pickupBlock`: level 0 only) and becomes the filled bucket; a full one places a source in the cell beside the hit face when that cell is air, a fluid or a block that does not block motion, and becomes a bucket. Of a stack of two buckets one is filled and added as a pickup is.
-- **Fluid ticks** (`FlowingFluid.tick`, `spread`, `getNewLiquid`, `getSpread`, `getSlopeDistance`): water every 5 ticks, overworld lava every 30; drop-off 1 for water, 2 for lava; slope search 4 and 2; a new water source between two sources over a solid or a source (the default game rule; lava never). Ticks are kept in the model's own queue by due tick and order scheduled, run before the players' tick as `ServerLevel` does.
+- **Fluid ticks** (`FlowingFluid.tick`, `spread`, `getNewLiquid`, `getSpread`, `getSlopeDistance`): water every 5 ticks, overworld lava every 30; drop-off 1 for water, 2 for lava; slope search 4 and 2; in the Nether (the dimension type's `gameplay/fast_lava`, `ModelWorld::fast_lava`) lava ticks every 10 with drop-off 1 and slope search 4, so it runs 7 cells from a source, not 3 ([[server-model]]); a new water source between two sources over a solid or a source (the default game rule; lava never). Ticks are kept in the model's own queue by due tick and order scheduled, run before the players' tick as `ServerLevel` does.
 - **Updates** (`Level.setBlock` with flag 3): a change tells every liquid neighbour, which converts or schedules its tick, and a placed fluid schedules its own (`onPlace`).
 - **Obsidian** (`LiquidBlock.shouldSpreadLiquid`): lava with water above or beside it becomes obsidian when a source, cobblestone when flowing; lava falling into water makes stone (`LavaFluid.spreadTo`).
 - **Fire and the portal** (`FlintAndSteelItem.useOn`, `BaseFireBlock`, `PortalShape`): fire goes beside the clicked face when that cell is air and has a sturdy floor or an empty frame round it; fire placed in an empty frame fills it with `nether_portal` (the X axis tried first, right to the west, then Z). Frames 2 to 21 wide and 3 to 21 high.

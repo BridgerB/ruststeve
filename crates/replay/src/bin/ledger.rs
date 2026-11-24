@@ -163,7 +163,15 @@ fn run() -> Result<(), String> {
                 text.clone_into(&mut last_note);
                 notes += 1;
             }
-            Record::Header(_) | Record::Effects(_) | Record::Checkpoint { .. } => {}
+            // A resumed run's start state (its snapshot's memory) comes before its first event.
+            Record::Checkpoint {
+                event_index, world, ..
+            } => {
+                if folder.take_start(event_index, &world) {
+                    last = observe::snapshot(&folder.world);
+                }
+            }
+            Record::Header(_) | Record::Effects(_) => {}
         }
         if folder.world.session.server_ticks > to {
             break;

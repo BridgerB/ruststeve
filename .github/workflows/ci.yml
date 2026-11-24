@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+      DATAGEN_WORK: /home/runner/work/datagen-work
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
@@ -155,7 +155,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.DATAGEN_WORK }}
-          key: datagen-work-26.1.2-v1
+          key: datagen-work-26.1.2-v2
       - name: Capture the landings (cache miss only)
         if: steps.worlds.outputs.cache-hit != 'true'
         run: |
