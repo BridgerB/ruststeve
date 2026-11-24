@@ -37,7 +37,7 @@ fn kind(sim: &Sim, (x, y, z): (i32, i32, i32)) -> Option<BlockKind> {
 }
 
 /// The fortress with its spawner running; with it, where the spawner is.
-fn fortress() -> (Sim, (i32, i32, i32)) {
+fn fortress(seed: u64) -> (Sim, (i32, i32, i32)) {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/nether-fortress.rsw"
@@ -48,7 +48,7 @@ fn fortress() -> (Sim, (i32, i32, i32)) {
         .unwrap();
     world.dimension = NETHER.to_owned();
     world.dimension_type = nether_type();
-    let mut sim = Sim::new(CONFIG, world).seeded(7);
+    let mut sim = Sim::new(CONFIG, world).seeded(seed);
     let (sx, sy, sz) = NEAR_SPAWNER;
     let spawner = (-8..=8)
         .flat_map(|dx| {
@@ -109,18 +109,24 @@ fn line(r: TaskRecord) -> String {
 /// The frontier bot (armour 13, an iron sword) with `food` and, when `shield`, a shield in the
 /// off hand, the race's aim, for `TICKS`.
 fn stage(food: (ItemKind, i32), shield: bool) -> Stage {
-    stage_with(food, shield, |_| {})
+    stage_with(&[food], shield, SEED, |_| {})
 }
 
+/// The seed the single runs use, and the eight the loops use.
+const SEED: u64 = 7;
+const SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
 /// The same, with what `more` adds to the model first.
-fn stage_with(food: (ItemKind, i32), shield: bool, more: impl Fn(&mut Sim)) -> Stage {
+fn stage_with(kit: &[(ItemKind, i32)], shield: bool, seed: u64, more: impl Fn(&mut Sim)) -> Stage {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
     let mut plan = Plan::with_table(Aim::Race, table);
-    let (mut sim, spawner) = fortress();
+    let (mut sim, spawner) = fortress(seed);
     sim.survival.life.armor = IRON;
     sim.survival.give((ItemKind::IronSword, 1));
-    sim.survival.give(food);
+    for stack in kit {
+        sim.survival.give(*stack);
+    }
     sim.survival.give((ItemKind::Cobblestone, 64));
     if shield {
         // The off hand is menu slot 45.
@@ -131,7 +137,7 @@ fn stage_with(food: (ItemKind, i32), shield: bool, more: impl Fn(&mut Sim)) -> S
     let (mut meals, mut health_lost, mut last) = (0u64, 0.0f32, 20.0f32);
     let (mut level_ticks, mut blaze_ticks) = (0u64, 0u64);
     let mut seven_at = None;
-    let run = bot::lockstep::run_acting(sim, "rs-rods", 1, TICKS, 20, |w, t| {
+    let run = bot::lockstep::run_acting(sim, "rs-rods", seed, TICKS, 20, |w, t| {
         let c = plan.step(w);
         for r in plan.take_records() {
             if matches!(&r, TaskRecord::Started { task, .. } if task == "eat") {
@@ -239,7 +245,7 @@ impl Stage {
 /// bot within the spawner's first cycles.
 #[test]
 fn the_spawner_of_the_real_fortress_spawns_blazes_by_the_bot() {
-    let (sim, spawner) = fortress();
+    let (sim, spawner) = fortress(SEED);
     let run = bot::lockstep::run(sim, "rs-rods", 1, 900, 20, |_, _| {
         physics::Controls::default()
     });
@@ -277,7 +283,7 @@ fn seven_rods_are_taken_at_the_spawner_with_a_shield() {
 #[test]
 #[ignore = "blaze stage: unread; owner A4"]
 fn seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving() {
-    stage_with((ItemKind::CookedBeef, 30), true, |sim| {
+    stage_with(&[(ItemKind::CookedBeef, 30)], true, SEED, |sim| {
         sim.summon_with(
             EntityKind::WitherSkeleton,
             [128.5, 61.0, 176.5],
@@ -285,4 +291,94 @@ fn seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving() {
         );
     })
     .assert_seven();
+}
+
+/// One variant over the eight seeds: a line a seed and the count that end alive with 7 rods.
+/// A report: it fails only if no seed passes.
+fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
+    let mut passed = 0;
+    for seed in SEEDS {
+        let s = stage_with(kit, shield, seed, |_| {});
+        let life = &s.run.sim.survival.life;
+        let ok = !s.run.died && s.rods >= 7;
+        passed += u32::from(ok);
+        println!(
+            "SEED {name} seed {seed}: rods {}, alive {}, seventh at {:?}, ticks {}, kills {} \
+             ({:.2} per 1,000), fireballs {} fired {} hit {} blocked, health lost {:.1}, meals {}",
+            s.rods,
+            !s.run.died,
+            s.seven_at,
+            s.ticks,
+            life.kills,
+            life.kills as f64 * 1000.0 / s.ticks.max(1) as f64,
+            life.fireballs_fired,
+            life.fireballs_hit,
+            life.fireballs_blocked,
+            s.health_lost,
+            s.meals,
+        );
+    }
+    println!(
+        "SEEDS {name}: {passed} of {} alive with 7 rods",
+        SEEDS.len()
+    );
+    assert!(passed > 0, "{name}: no seed of {} passed", SEEDS.len());
+}
+
+#[test]
+#[ignore = "blaze stage, eight seeds: a report, minutes long; owners A4, A3"]
+fn eight_seeds_of_seven_rods_with_raw_beef() {
+    over_seeds("raw beef", &[(ItemKind::Beef, 8)], false);
+}
+
+#[test]
+#[ignore = "blaze stage, eight seeds: a report, minutes long; owners A4, A3"]
+fn eight_seeds_of_seven_rods_with_thirty_cooked_beef() {
+    over_seeds("cooked beef", &[(ItemKind::CookedBeef, 30)], false);
+}
+
+#[test]
+#[ignore = "blaze stage, eight seeds: a report, minutes long; owners A11, A4"]
+fn eight_seeds_of_seven_rods_with_a_shield() {
+    over_seeds("shield", &[(ItemKind::CookedBeef, 30)], true);
+}
+
+/// The frontier bot's own situation for the next race: what the Nether snapshot's bot holds
+/// (its `snap.toml`: 8 raw iron, two logs, a plank, a crafting table, 11 raw meat, 13 sticks,
+/// cobblestone, four stone pickaxes; no shield), at the fortress. A shield is 6 planks and an
+/// iron ingot: it has to be made from this, and then the rods taken.
+#[test]
+#[ignore = "blaze stage: a shield crafted from the snapshot kit, then 7 rods; unread; owner A11"]
+fn a_shield_is_made_from_the_snapshot_kit_and_seven_rods_taken() {
+    let kit = [
+        (ItemKind::RawIron, 8),
+        (ItemKind::OakLog, 1),
+        (ItemKind::BirchLog, 1),
+        (ItemKind::BirchPlanks, 1),
+        (ItemKind::CraftingTable, 1),
+        (ItemKind::Beef, 6),
+        (ItemKind::Porkchop, 5),
+        (ItemKind::Stick, 13),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::Cobblestone, 326),
+    ];
+    let s = stage_with(&kit, false, SEED, |_| {});
+    let shields = s.run.world.inventory.count(ItemKind::Shield);
+    let made: Vec<&String> = s
+        .ledger
+        .iter()
+        .filter(|l| l.contains("shield") || l.contains("furnace") || l.contains("smelt"))
+        .take(20)
+        .collect();
+    println!("SHIELD: {shields} held at the end; ledger lines of it: {made:#?}");
+    s.assert_seven();
+    let blocked = s.run.sim.survival.life.fireballs_blocked;
+    assert!(
+        shields >= 1 || blocked > 0,
+        "no shield was made or used\n{}",
+        s.story()
+    );
 }
