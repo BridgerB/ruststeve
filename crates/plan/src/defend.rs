@@ -115,6 +115,9 @@ pub struct Defend {
     pub spawner: Option<Option<crate::path::Cell>>,
     #[serde(default)]
     pub walking_post: bool,
+    /// Swings sent in passing, outside the fight's own swing (wall 12).
+    #[serde(default)]
+    pub passing_swings: u32,
     /// Steps held because fire lay ahead (wall 11).
     #[serde(default)]
     pub fire_held: u32,
@@ -569,6 +572,7 @@ impl Defend {
             posted_at: None,
             spawner: None,
             walking_post: false,
+            passing_swings: 0,
             fire_held: 0,
             given_up: false,
             crit_wait: 0,
@@ -709,6 +713,38 @@ impl Defend {
         Some(yaw)
     }
 
+    /// A swing at a mob of the foe's kind in reach, when the weapon is in hand (or the step that
+    /// brings it there) and a full swing is ready; no neutral mob in the sweep.
+    fn strike_in_passing(&mut self, w: &World, rules: &SurvivalRules, tick: u64) -> Option<Act> {
+        let body = w.body?;
+        let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+        let id = self.in_reach(w, eye)?;
+        let at = w.entities.get(&id)?.pos;
+        if w.entities.values().any(|e| {
+            !e.dead && rules.neutral.contains(&e.kind) && distance(e.pos, at) <= SWEEP_NEAR
+        }) {
+            return None;
+        }
+        if let Some(wp) = crate::hunt::weapon(w) {
+            match hold::toward(w, wp) {
+                Hold::Held | Hold::Missing => {}
+                Hold::Act(a) => return Some(a),
+                Hold::Wait => return None,
+            }
+        }
+        let ready = (crate::hunt::swing_ticks(w) * crate::dig::slowdown(w)).ceil() as u64 + 1;
+        if self
+            .last_swing
+            .is_some_and(|t| tick.saturating_sub(t) < ready)
+        {
+            return None;
+        }
+        self.last_swing = Some(tick);
+        self.swings += 1;
+        self.passing_swings += 1;
+        Some(Act::Attack { entity: id })
+    }
+
     /// One tick of the defence. A shooter's fight steps out of a fireball's line first, its
     /// strikes going on (the server judges a strike by where the bot stands, not where it looks).
     pub fn step(
@@ -722,6 +758,16 @@ impl Defend {
         // close-in): the fire escape moves the body out and the defend walked it back in every
         // other tick, 14 escapes and 18.5 to 0 in 220 ticks (race 45343411709), the same in the
         // whole-stage model (probe 45347050872, ticks 6,100 to 6,160). Wall 11.
+        // A shooter in reach is struck whatever the defend is doing (walking to its post or to
+        // cover, backing off): a blaze within 2 blocks follows its target and touches it every
+        // second, and a bot walked 100 ticks with one at its back, 17.8 to 0, without a swing
+        // (race 45346899542, ticks 3,120 to 3,220). Wall 12.
+        let act = match act {
+            None if status == DefendStatus::Running && rules.ranged.contains(&self.kind) => {
+                self.strike_in_passing(w, rules, tick)
+            }
+            other => other,
+        };
         let c = match w.body {
             Some(body) if c.forward && fire_ahead(w, body.pos, c.yaw) => {
                 self.fire_held += 1;
