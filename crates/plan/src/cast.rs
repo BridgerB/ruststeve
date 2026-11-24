@@ -26,6 +26,8 @@ pub const SETTLE_TICKS: u64 = 6;
 pub const ANSWER_TICKS: u64 = 60;
 /// Tries at one op before the cast fails it (each a walk, dig, place or use begun).
 pub const OP_TRIES: u32 = 3;
+/// Failed tries kept for the note.
+pub const OP_TRAIL: usize = 6;
 /// Ticks with no op done before the cast gives its site up (the progress invariant).
 pub const STALL_TICKS: u64 = 2400;
 /// Eye to a block's centre a dig or a place is worked from (the game's 4.5 less a margin).
@@ -250,6 +252,10 @@ pub struct Cast {
     /// Tunnels cut toward the pool for the refill in hand.
     #[serde(default)]
     tunnels: u32,
+    /// Why each try at the op in hand failed, for the failure note (overworld-leg wall 5: a cast
+    /// ended "Op after 13 ops, at :dig :room" with nothing to say what the dig met).
+    #[serde(default)]
+    op_trail: Vec<String>,
 }
 
 fn eye(b: &physics::Body) -> [f64; 3] {
@@ -341,6 +347,7 @@ impl Cast {
             op: None,
             work: Work::Idle,
             tries: 0,
+            op_trail: Vec::new(),
             last_done: tick,
             done_ops: 0,
             regressions: 0,
@@ -369,6 +376,15 @@ impl Cast {
 
     /// The cast's refill bucket uses by outcome and by what the exact sight line said, for the
     /// notes (`Scoop::uses`): a race's own count of where the exact line and the server differ.
+    /// Why the tries at the op in hand failed, oldest first.
+    pub fn tries_text(&self) -> String {
+        if self.op_trail.is_empty() {
+            "no failed try".to_owned()
+        } else {
+            format!("tries: {}", self.op_trail.join(" / "))
+        }
+    }
+
     pub fn uses_text(&self) -> String {
         let [fe, fb, ee, eb] = self.scoop_uses;
         format!(
@@ -444,6 +460,7 @@ impl Cast {
             self.op = Some(i);
             self.work = Work::Idle;
             self.tries = 0;
+            self.op_trail.clear();
             self.way_digs = 0;
         }
         if tick.saturating_sub(self.last_done) > STALL_TICKS {
@@ -469,7 +486,11 @@ impl Cast {
     }
 
     /// A new try at the op: counted; over `OP_TRIES` the cast fails.
-    fn try_again(&mut self) -> bool {
+    fn try_again(&mut self, why: String) -> bool {
+        self.op_trail.push(why);
+        if self.op_trail.len() > OP_TRAIL {
+            self.op_trail.remove(0);
+        }
         self.tries += 1;
         self.work = Work::Idle;
         self.tries <= OP_TRIES
@@ -515,8 +536,8 @@ impl Cast {
                     self.last_done = tick;
                     (c, act, CastStatus::Running)
                 }
-                DigStatus::Failed(_) => {
-                    if self.try_again() {
+                DigStatus::Failed(f) => {
+                    if self.try_again(format!("way dig failed {f:?}")) {
                         (c, act, CastStatus::Running)
                     } else {
                         self.fail()
@@ -551,11 +572,15 @@ impl Cast {
                     self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
                     return Err((Controls::default(), None, CastStatus::Running));
                 }
-                return Err(if self.try_again() {
-                    (Controls::default(), None, CastStatus::Running)
-                } else {
-                    self.fail()
-                });
+                return Err(
+                    if self
+                        .try_again("no walk to the stand and no block of a way to dig".to_owned())
+                    {
+                        (Controls::default(), None, CastStatus::Running)
+                    } else {
+                        self.fail()
+                    },
+                );
             }
             self.work = Work::Walk(walk);
         }
@@ -569,11 +594,13 @@ impl Cast {
                 self.work = Work::Idle;
                 Err((Controls::default(), None, CastStatus::Running))
             }
-            TaskStatus::Failed(_) => Err(if self.try_again() {
-                (Controls::default(), None, CastStatus::Running)
-            } else {
-                self.fail()
-            }),
+            TaskStatus::Failed(f) => Err(
+                if self.try_again(format!("walk to the stand failed {f:?}")) {
+                    (Controls::default(), None, CastStatus::Running)
+                } else {
+                    self.fail()
+                },
+            ),
         }
     }
 
@@ -607,7 +634,7 @@ impl Cast {
             if !matches!(self.work, Work::Walk(_)) {
                 let mut walk = Walk::new(pos, Goal::Away { pos, range: 1.5 }, Arrive::Goal, tick);
                 if !walk.route_now(w, tick) {
-                    return if self.try_again() {
+                    return if self.try_again("no step off the floor to be dug".to_owned()) {
                         (Controls::default(), None, CastStatus::Running)
                     } else {
                         self.fail()
@@ -643,12 +670,12 @@ impl Cast {
                 self.work = Work::Idle;
                 (c, act, CastStatus::Running)
             }
-            DigStatus::Failed(_) => {
+            DigStatus::Failed(f) => {
                 if holds(w, &op.done) {
                     self.work = Work::Idle;
                     return (c, act, CastStatus::Running);
                 }
-                if self.try_again() {
+                if self.try_again(format!("dig failed {f:?}")) {
                     (c, act, CastStatus::Running)
                 } else {
                     self.fail()
@@ -674,7 +701,7 @@ impl Cast {
             if tick.saturating_sub(at) < ANSWER_TICKS / 3 {
                 return (Controls::default(), None, CastStatus::Running);
             }
-            if !self.try_again() {
+            if !self.try_again("a placed block not shown".to_owned()) {
                 return self.fail();
             }
         }
@@ -687,7 +714,7 @@ impl Cast {
             if !matches!(self.work, Work::Walk(_)) {
                 let mut walk = Walk::new(pos, Goal::Away { pos, range: 1.5 }, Arrive::Goal, tick);
                 if !walk.route_now(w, tick) {
-                    return if self.try_again() {
+                    return if self.try_again("no step out of the cell to place in".to_owned()) {
                         (Controls::default(), None, CastStatus::Running)
                     } else {
                         self.fail()
@@ -734,7 +761,7 @@ impl Cast {
             let n = (pos.0 + dx, pos.1 + dy, pos.2 + dz);
             full(kind(w, n)).then_some((n, *face))
         }) else {
-            return if self.try_again() {
+            return if self.try_again("no full block to place against".to_owned()) {
                 (Controls::default(), None, CastStatus::Running)
             } else {
                 self.fail()
@@ -820,7 +847,7 @@ impl Cast {
                 (look, None, CastStatus::Running)
             }
             _ => {
-                if self.try_again() {
+                if self.try_again("a use not answered".to_owned()) {
                     (look, None, CastStatus::Running)
                 } else {
                     self.fail()
@@ -1128,7 +1155,7 @@ impl Cast {
                 self.count_uses(uses);
                 self.trail(tick, format!("scoop {target:?} failed {f:?}"));
                 self.work = Work::Idle;
-                if self.try_again() {
+                if self.try_again(format!("scoop failed {f:?}")) {
                     (c, act, CastStatus::Running)
                 } else {
                     (c, act, CastStatus::Failed(CastFailure::NoRefill))
@@ -1154,6 +1181,26 @@ pub fn far_lava(w: &World, given_up: &[Cell]) -> Option<Cell> {
             && !given_up
                 .iter()
                 .any(|g| dist(centre(*g), centre(*c)) <= GIVE_UP_RADIUS)
+    })
+}
+
+/// The nearest far source whose pool, as seen, holds the sources a whole frame needs: the only
+/// far lava worth a trip (overworld-leg wall 1). The nearest far source of races 45194253932 and
+/// 45204423376 was a pool of one, refused as `spent` by the site choice once the bot stood by it.
+pub fn far_pool(w: &World, given_up: &[Cell]) -> Option<Cell> {
+    let here = w.body.map_or([0.0; 3], |b| centre(feet(&b)));
+    let all = lava_within(w, FAR_RADIUS);
+    let frame = crate::build::FRAME_CELLS.len();
+    all.iter().copied().find(|c| {
+        dist(here, centre(*c)) > LAVA_RADIUS
+            && !given_up
+                .iter()
+                .any(|g| dist(centre(*g), centre(*c)) <= GIVE_UP_RADIUS)
+            && all
+                .iter()
+                .filter(|o| dist(centre(**o), centre(*c)) <= POOL_RADIUS)
+                .count()
+                >= frame
     })
 }
 

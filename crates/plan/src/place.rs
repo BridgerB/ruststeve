@@ -66,7 +66,8 @@ fn empty(k: Option<BlockKind>) -> bool {
 
 /// Blocks a right-click opens instead of placing against (the server opens their menu): never a
 /// floor to place on (issue 13b: a furnace clicked onto the table opened it).
-const OPENS: &[BlockKind] = &[
+/// Blocks a right-click opens instead of placing against (never clicked to put a block).
+pub const OPENS: &[BlockKind] = &[
     BlockKind::CraftingTable,
     BlockKind::Furnace,
     BlockKind::BlastFurnace,

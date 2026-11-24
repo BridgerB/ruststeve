@@ -110,6 +110,11 @@ pub struct Stairs {
     pub dug: u32,
     #[serde(default)]
     pub from: Option<Cell>,
+    /// Water beside a cut cell refuses the stair too (overworld-leg wall 7): the lava hunt's own
+    /// stairs cut at y 55 into a cell beside water, the water ran in, and the bot was held in it
+    /// 20,000 ticks (race 45343519424 lane 2). Lava beside is refused for every staircase.
+    #[serde(default)]
+    pub dry: bool,
     /// Steps of a travel tunnel steered straight after their walk failed, and blocks laid: said
     /// in the task's end note.
     #[serde(default)]
@@ -210,6 +215,9 @@ fn open(k: Option<BlockKind>) -> bool {
 fn full(k: Option<BlockKind>) -> bool {
     k.and_then(data::generated::shapes::collision) == Some(data::types::Collision::Full)
 }
+
+/// The head of a dry staircase's water refusal, counted for the ledger.
+pub const WATER_BESIDE: &str = "water beside";
 
 const SIDES: [(i32, i32, i32); 6] = [
     (1, 0, 0),
@@ -331,11 +339,37 @@ impl Stairs {
             route: Vec::new(),
             dug: 0,
             from: None,
+            dry: false,
             steered: 0,
             laid: 0,
             cut_tries: 0,
             stood: None,
         }
+    }
+
+    /// `refusal`, and for a dry staircase water beside a cut cell as well.
+    fn refused(&self, w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
+        refusal(w, cells, floor).or_else(|| {
+            if !self.dry {
+                return None;
+            }
+            cells
+                .iter()
+                .find(|c| {
+                    SIDES.iter().any(|(dx, dy, dz)| {
+                        fluid(kind(w, (c.0 + dx, c.1 + dy, c.2 + dz))) == Some("water")
+                    })
+                })
+                .map(|c| format!("{WATER_BESIDE} {c:?}"))
+        })
+    }
+
+    /// How many of this staircase's refusals were water beside a cut cell.
+    pub fn water_refusals(&self) -> usize {
+        self.refusals
+            .iter()
+            .filter(|r| r.starts_with(WATER_BESIDE))
+            .count()
     }
 
     /// A stretch of a travel tunnel: the steps that lead along `route`, as far as it goes.
@@ -433,7 +467,7 @@ impl Stairs {
                 let to = (x + dx, y - 1, z + dz);
                 (to, vec![(x + dx, y + 1, z + dz), (x + dx, y, z + dz), to])
             };
-            match refusal(w, &cells, (to.0, to.1 - 1, to.2)) {
+            match self.refused(w, &cells, (to.0, to.1 - 1, to.2)) {
                 None => {
                     return Ok(StairStage::Cut {
                         cells,
@@ -455,7 +489,7 @@ impl Stairs {
             let (dx, dz) = self.dir;
             let to = (x + dx, y, z + dz);
             let cells = vec![(x + dx, y + 1, z + dz), to];
-            match refusal(w, &cells, (to.0, to.1 - 1, to.2)) {
+            match self.refused(w, &cells, (to.0, to.1 - 1, to.2)) {
                 None => {
                     self.level_steps += 1;
                     return Ok(StairStage::Cut {
