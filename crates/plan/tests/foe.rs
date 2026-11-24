@@ -41,3 +41,47 @@ fn a_spider_within_reach_is_answered_unless_ignored() {
         "an ignored spider that never hit waits"
     );
 }
+
+fn zombie_in_reach(health: f32) -> World {
+    let mut w = World::new();
+    w.body = Some(physics::Body {
+        pos: [0.5, 0.0, 0.5],
+        ..physics::Body::default()
+    });
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 7,
+        uuid: [0; 16],
+        kind: EntityKind::Zombie.id(),
+        x: 2.5,
+        y: 0.0,
+        z: 0.5,
+    }));
+    w.step(&Event::Packet(S2c::SetHealth {
+        health,
+        food: 20,
+        saturation: 0.0,
+    }));
+    w
+}
+
+/// Never fight under danger health (overworld-leg wall 1): a retreat under the line sends no
+/// swing at the zombie in its face; the same retreat with its health back over the line does.
+#[test]
+fn a_retreat_strikes_only_over_the_danger_line() {
+    use plan::defend::{Defend, Stance};
+    let r = rules();
+    let hurt = zombie_in_reach(6.0);
+    let mut d = Defend::new(&hurt, 7, EntityKind::Zombie, &r, 0);
+    assert_eq!(d.stance, Stance::Retreat);
+    for tick in 1..=60 {
+        let (_, act, _) = d.step(&hurt, &r, tick);
+        assert!(act.is_none(), "an act under the danger line: {act:?}");
+    }
+    assert_eq!(d.swings, 0);
+    let well = zombie_in_reach(20.0);
+    for tick in 61..=120 {
+        d.step(&well, &r, tick);
+    }
+    assert_eq!(d.stance, Stance::Retreat);
+    assert!(d.swings >= 1, "a retreat over the line never struck");
+}
