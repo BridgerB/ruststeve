@@ -6,7 +6,7 @@ tags: [datagen, data, tables, ci, packets]
 aliases: [use_remainder, FOODS, WEAPONS, crates/data, generated tables, JNI probe, jar probe, hardness, fuel values, collision shapes, entity data serializers, --oracle, datagen.yml, verify-stream, regenerate the tables, BlockKind, ItemKind, packet enums]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+verifiedAgainst: ruststeve@b72980e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/main.rs#//! datagen: the game's tables, generated from the vanilla server itself and committed as Rust in"
   - "ruststeve:crates/datagen/src/fetch.rs#pub fn server_jar(work: &Path) -> Result<PathBuf> {"
@@ -56,6 +56,8 @@ From the same item components: `FOODS` (`food`: nutrition, saturation as the nea
 Hardness, needs-correct-tool, collision shapes, tool materials, fuel, mob health and category, and the entity-data serializer ids are in no data file. `probe.rs` starts a JVM from Rust (`jni` 0.21, `invocation`: libjvm is found through `JAVA_HOME` and loaded at run time, so the crate builds without Java) with the inner jar and the bundler's `libraries/` on its class path, bootstraps the game and reads them by reflection, mirroring clojurecraft's `jar_probe.clj`. Only JDK methods are called by JNI signature; each game method is found by name, argument count and argument types at run time and cached, so a renamed return type cannot break it. `--oracle <clojurecraft>/resources/clojurecraft` then compares every probe table with clojurecraft's EDN entry by entry and fails on any difference.
 
 Since issue 16e the probe also reads the `LevelEvent` int constants and the `ClientboundGameEventPacket` types with their ids, written to `events.rs` (`LEVEL_EVENTS`, `GAME_EVENTS`, `level_event_name`, `game_event_name`): level event 1018 is a blaze shooting, game event 4 the win.
+
+Since issue 16 it reads `Block.getSpeedFactor`, `getJumpFactor` and `getFriction` too; `movement.rs` holds the seven blocks that differ from the default (1, 1, 0.6) as `MOVEMENT`, with `movement(block)` giving the default for the rest ([[physics]]).
 
 ## Regenerating
 On a runner only. Push a change under `crates/datagen`, `crates/data` or `crates/verify-stream` (or dispatch `datagen`); download the `generated-<run id>` artifact with `gh run download` and copy it over `crates/data/src/generated/`. The last step of the workflow fails while the committed files differ from the regenerated ones.

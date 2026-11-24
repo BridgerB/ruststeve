@@ -39,3 +39,90 @@ fn a_cell_behind_a_wall_is_out_of_sight() {
     );
     assert!(plan::cover::seen_at(&w, &eyes, (5, 64, 0)), "in the open");
 }
+
+fn joined(m: sim::ModelWorld) -> world::World {
+    bot::lockstep::run(Sim::new(CONFIG, m), "rs-cv", 1, 30, 20, |_, _| {
+        physics::Controls::default()
+    })
+    .world
+}
+
+fn with_mob(mut w: world::World, id: i32, kind: data::EntityKind, at: [f64; 3]) -> world::World {
+    w.step(&world::Event::Packet(protocol::S2c::AddEntity {
+        id,
+        uuid: [0; 16],
+        kind: kind.id(),
+        x: at[0],
+        y: at[1],
+        z: at[2],
+    }));
+    w
+}
+
+/// Spawner wall 3 (race 45335627948): three hurt bots rested "out of sight" on an open bridge
+/// with blazes 16 to 24 blocks off, and a piglin's crossbow 5 to 7 off, and were shot dead. A
+/// blaze counts from 48 blocks, a piglin from 16.
+#[test]
+fn a_blaze_twenty_blocks_off_is_a_shooter() {
+    let w = joined(flat_world(2, 63).unwrap());
+    let w = with_mob(w, 9, data::EntityKind::Blaze, [20.5, 66.0, 0.5]);
+    let w = with_mob(w, 10, data::EntityKind::Piglin, [0.5, 64.0, 6.5]);
+    let w = with_mob(w, 11, data::EntityKind::Piglin, [0.5, 64.0, 30.5]);
+    let w = with_mob(w, 12, data::EntityKind::Blaze, [60.5, 66.0, 0.5]);
+    let eyes = plan::cover::shooters(&w);
+    assert_eq!(eyes.len(), 2, "the blaze at 20 and the piglin at 6");
+    let pos = w.body.unwrap().pos;
+    assert!(plan::cover::seen_body(&w, &eyes, pos), "on open ground");
+}
+
+/// A bot seen on open ground builds its cover: the block that stops the line to its middle
+/// first, then the one over it for the line to its eye, each clicked on the block under it;
+/// behind both it is out of sight.
+#[test]
+fn a_shelter_is_built_where_the_line_of_sight_comes_in() {
+    // A shooter's eye level with the bot's, eight blocks east.
+    let eyes = [[8.5, 65.0, 0.5]];
+    let w = joined(flat_world(2, 63).unwrap());
+    let pos = w.body.unwrap().pos;
+    assert_eq!(
+        plan::cover::shelter_block(&w, &eyes, pos),
+        Some(((1, 64, 0), (1, 63, 0), 1)),
+        "the head's line comes in over a cell with nothing under it: the foot of the wall first"
+    );
+    let mut m = flat_world(2, 63).unwrap();
+    m.set_block(1, 64, 0, state(BlockKind::Stone)).unwrap();
+    let w = joined(m);
+    assert_eq!(
+        plan::cover::shelter_block(&w, &eyes, pos),
+        Some(((1, 65, 0), (1, 64, 0), 1))
+    );
+    let mut m = flat_world(2, 63).unwrap();
+    m.set_block(1, 64, 0, state(BlockKind::Stone)).unwrap();
+    m.set_block(1, 65, 0, state(BlockKind::Stone)).unwrap();
+    let w = joined(m);
+    assert!(!plan::cover::seen_body(&w, &eyes, pos));
+    assert_eq!(plan::cover::shelter_block(&w, &eyes, pos), None);
+}
+
+/// A blaze overhead: the roof cell has nothing to click until a wall stands three high beside
+/// the head, so the wall's foot comes first and the roof last.
+#[test]
+fn a_roof_hangs_on_a_wall_three_high() {
+    let eyes = [[0.5, 75.0, 0.5]];
+    let w = joined(flat_world(2, 63).unwrap());
+    let pos = w.body.unwrap().pos;
+    assert_eq!(
+        plan::cover::shelter_block(&w, &eyes, pos),
+        Some(((1, 64, 0), (1, 63, 0), 1))
+    );
+    let mut m = flat_world(2, 63).unwrap();
+    for y in 64..=66 {
+        m.set_block(1, y, 0, state(BlockKind::Stone)).unwrap();
+    }
+    let w = joined(m);
+    assert_eq!(
+        plan::cover::shelter_block(&w, &eyes, pos),
+        Some(((0, 66, 0), (1, 66, 0), 4)),
+        "the roof, on the west face of the wall's top"
+    );
+}

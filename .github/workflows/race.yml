@@ -34,6 +34,9 @@ on:
       revive:
         description: Respawn after a death and play on, to the cap (true or false)
         default: "false"
+      snapshot_at:
+        description: Take a snapshot once a bot has played this many server ticks (not a stage's - named snapshot-at-<ticks>), or empty
+        default: ""
       minutes:
         description: The lane job's timeout; bots still running 10 minutes before it end Cut (72,000 ticks, a game hour, needs over 60 of play)
         default: "60"
@@ -176,6 +179,11 @@ jobs:
             echo "::error::the frontier ($tag/$asset) is a development snapshot: refused"
             exit 1
           fi
+          # Nor a snapshot on request or of a stuck spot (kind = "at" or "stuck"): not a stage's.
+          if [ "$SNAPSHOT" = frontier ] && grep -q '^kind = ' "$dir/snap.toml"; then
+            echo "::error::the frontier ($tag/$asset) is not a stage's snapshot: refused"
+            exit 1
+          fi
           if grep -q '^dev = true' "$dir/snap.toml"; then
             echo "::notice::lane $LANE resumes a development snapshot: its own snapshots are marked dev and never count as evidence"
           fi
@@ -221,6 +229,7 @@ jobs:
           GOAL: ${{ inputs.goal }}
           HOLD: ${{ inputs.hold }}
           REVIVE: ${{ inputs.revive }}
+          SNAPSHOT_AT: ${{ inputs.snapshot_at }}
           MINUTES: ${{ inputs.minutes }}
         # The wall limit is the job's end, not a cap: bots still running 10 minutes before it end
         # Cut (not counted) and write their files; 7 minutes before it the race is killed. Both
@@ -233,6 +242,7 @@ jobs:
           if [ -n "$GOAL" ]; then goal=(--goal "$GOAL"); fi
           memory=()
           if [ -n "${SNAP_MEMORY:-}" ]; then memory=(--memory "$SNAP_MEMORY"); fi
+          if [ -n "$SNAPSHOT_AT" ]; then memory+=(--snapshot-at "$SNAPSHOT_AT"); fi
           now="$(date +%s)"
           echo "RACE_START=$now" >> "$GITHUB_ENV"
           end=$(( JOB_START + MINUTES * 60 ))
@@ -249,23 +259,27 @@ jobs:
           # reached is a start for the next race at once and survives a lane that never ends.
           every=300
           if [ "$LANES" -gt 8 ]; then every=600; fi
+          # Snapshots not yet sent, packed and added to `files`.
+          new_snapshots() {
+            for d in "lane-$LANE"/snapshots/*; do
+              [ -f "$d/snap.toml" ] || continue
+              stage="$(basename "$d")"
+              [ -e ".sent-$stage" ] && continue
+              prefix=""
+              if grep -q '^dev = true' "$d/snap.toml"; then prefix="dev-"; fi
+              f="${prefix}snapshot-$stage-${{ github.run_id }}-race-${{ github.run_id }}-lane-$LANE.tar.zst"
+              if tar --zstd -C "$(dirname "$d")" -cf "$f" "$stage"; then
+                files+=("$f")
+                touch ".sent-$stage"
+              fi
+            done
+          }
           (
             waited=0
             while sleep 30; do
               waited=$(( waited + 30 ))
               files=()
-              for d in "lane-$LANE"/snapshots/*; do
-                [ -f "$d/snap.toml" ] || continue
-                stage="$(basename "$d")"
-                [ -e ".sent-$stage" ] && continue
-                prefix=""
-                if grep -q '^dev = true' "$d/snap.toml"; then prefix="dev-"; fi
-                f="${prefix}snapshot-$stage-${{ github.run_id }}-race-${{ github.run_id }}-lane-$LANE.tar.zst"
-                if tar --zstd -C "$(dirname "$d")" -cf "$f" "$stage"; then
-                  files+=("$f")
-                  touch ".sent-$stage"
-                fi
-              done
+              new_snapshots
               if [ $(( waited % every )) -eq 0 ]; then
                 if cat "lane-$LANE"/progress-*.txt > "progress-lane-$LANE.txt" 2>/dev/null; then
                   files+=("progress-lane-$LANE.txt")
@@ -287,6 +301,14 @@ jobs:
             --hold-after-aim "$HOLD" --revive "$REVIVE" "${goal[@]}" "${memory[@]}" 2>&1 | tee "race-$LANE.log"
           code=$?
           kill "$uploader" 2>/dev/null || true
+          wait "$uploader" 2>/dev/null
+          # A snapshot of the race's last half minute leaves with this lane, not with the last
+          # lane of the race (publish waits for every lane).
+          files=()
+          new_snapshots
+          if [ "${#files[@]}" -gt 0 ]; then
+            gh release upload "race-${{ github.run_id }}" "${files[@]}" --clobber || true
+          fi
           echo "RACE_END=$(date +%s)" >> "$GITHUB_ENV"
           echo "RACE_EXIT=$code" >> "$GITHUB_ENV"
           # The race's exit never fails the lane (coverage under 1.0 is read in the summary); a

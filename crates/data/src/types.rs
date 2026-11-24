@@ -155,6 +155,28 @@ pub enum Collision {
     Partial { top: f64 },
 }
 
+/// What a block does to a body moving on it, read from the game (`Block.getSpeedFactor`,
+/// `getJumpFactor`, `getFriction`; the game's own floats).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Movement {
+    /// The horizontal velocity is multiplied by this after each move of a body standing in or
+    /// on the block (soul sand and honey 0.4).
+    pub speed_factor: f32,
+    /// A jump's velocity is multiplied by this (honey 0.5).
+    pub jump_factor: f32,
+    /// The slipperiness of the block underfoot (ice 0.98, slime 0.8).
+    pub friction: f32,
+}
+
+impl Movement {
+    /// Every block that sets none of them (`BlockBehaviour.Properties`' defaults).
+    pub const DEFAULT: Movement = Movement {
+        speed_factor: 1.0,
+        jump_factor: 1.0,
+        friction: 0.6,
+    };
+}
+
 /// A tool material (`ToolMaterial`): mining speed, durability, and the block tag it cannot drop.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolMaterial {

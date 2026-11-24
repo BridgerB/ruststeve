@@ -12,14 +12,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use data::generated::dimensions::DIMENSION_TYPES;
+use data::generated::movement::movement;
 use data::generated::shapes::collision;
 use data::types::Collision;
 use data::{BlockKind, EntityKind, ItemKind};
 use memory::{Memory, Seen};
-use physics::{Body, Controls, Fluid, FluidKind};
+use physics::{Body, Controls, Fluid, FluidKind, Surface};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::nbt::Death;
+use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT};
 use protocol::slot::{Slot, Wear};
 use protocol::{C2s, Out, S2c, Session};
 
@@ -585,6 +587,10 @@ pub struct World {
     pub sent_pos: Option<[f64; 3]>,
     pub sent_look: Option<(f32, f32)>,
     pub sent_tick: u64,
+    /// The keys last reported to the server (`C2s::PlayerInput`'s bits): a new report goes out
+    /// only when they change, as the client's `lastSentInput` does.
+    #[serde(default)]
+    pub sent_input: u8,
     /// Hits on the bot in the last `HITS_KEPT_TICKS` server ticks, oldest first.
     #[serde(default)]
     pub hits: Vec<Hit>,
@@ -724,6 +730,24 @@ impl World {
         }
     }
 
+    /// What the block at a cell does to a body moving on it, for physics: its speed and jump
+    /// factors from the generated table (soul sand 0.4, honey 0.4 and 0.5), and whether it is
+    /// water or a bubble column. An unloaded block is plain.
+    pub fn surface(&self, x: i32, y: i32, z: i32) -> Surface {
+        let Some(block) = self
+            .state_at(BlockPos::new(x, y, z))
+            .and_then(data::block_of_state)
+        else {
+            return Surface::PLAIN;
+        };
+        let m = movement(block);
+        Surface {
+            speed_factor: f64::from(m.speed_factor),
+            jump_factor: f64::from(m.jump_factor),
+            wet: matches!(block, BlockKind::Water | BlockKind::BubbleColumn),
+        }
+    }
+
     /// The fluid at a block, for physics: water or lava and its level (the block state's
     /// `level` property; unloaded is no fluid).
     pub fn fluid(&self, x: i32, y: i32, z: i32) -> Option<Fluid> {
@@ -738,12 +762,40 @@ impl World {
         Some(Fluid { kind, level })
     }
 
-    /// One tick of the body: physics, then the movement packet vanilla would send.
+    /// The keys held, as the server is told them: forward, jump and shift from the controls.
+    /// The bot has no backward, strafe or sprint key (it walks; sprinting is never reported).
+    pub fn input_flags(controls: &Controls) -> u8 {
+        (if controls.forward { INPUT_FORWARD } else { 0 })
+            | (if controls.jump { INPUT_JUMP } else { 0 })
+            | (if controls.sneak { INPUT_SHIFT } else { 0 })
+    }
+
+    /// One tick of the body: the keys when they changed, physics, then the movement packet
+    /// vanilla would send.
     fn tick(&mut self) -> Vec<Effect> {
         self.ticks += 1;
         let Some(body) = self.body else {
             return Vec::new();
         };
+        let mut out = self.report_input();
+        out.extend(self.move_body(body));
+        out
+    }
+
+    /// The keys, when they differ from the last report: vanilla's `LocalPlayer.tick` sends
+    /// `player_input` after the body's tick and before its position whenever the pressed keys
+    /// are not the last ones sent. This is the only way a server learns the bot sneaks: its
+    /// shift key spares it on magma (`MagmaBlock.stepOn`) and gives it the crouching pose.
+    fn report_input(&mut self) -> Vec<Effect> {
+        let flags = Self::input_flags(&self.controls);
+        if flags == self.sent_input {
+            return Vec::new();
+        }
+        self.sent_input = flags;
+        vec![Effect::Send(C2s::PlayerInput { flags })]
+    }
+
+    fn move_body(&mut self, body: Body) -> Vec<Effect> {
         let at = BlockPos::containing(body.pos[0], body.pos[1], body.pos[2]).chunk();
         if !self.columns.contains_key(&at) {
             // No physics without the ground, but still the once-a-second status: the server
@@ -758,7 +810,8 @@ impl World {
         }
         let solid = |x, y, z| self.solid(x, y, z);
         let fluid = |x, y, z| self.fluid(x, y, z);
-        let moved = physics::step(&solid, &fluid, &body, &self.controls);
+        let surface = |x, y, z| self.surface(x, y, z);
+        let moved = physics::step_on(&solid, &fluid, &surface, &body, &self.controls);
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
         // Physics and the movement packets use the controls' yaw; the pitch is the controls' when
@@ -1156,7 +1209,13 @@ impl World {
             S2c::Respawn {
                 dimension_type,
                 dimension,
-            } => self.enter(*dimension_type, dimension),
+            } => {
+                self.enter(*dimension_type, dimension);
+                // A respawn makes the client a new player whose last sent keys are none
+                // (`LocalPlayer`'s `lastSentInput` starts empty), and after a death the server's
+                // new player holds no shift key: keys still held are reported again.
+                self.sent_input = 0;
+            }
             S2c::LevelChunkWithLight { x, z, column } => {
                 let at = ChunkPos { x: *x, z: *z };
                 self.overlay.remove(&at);
