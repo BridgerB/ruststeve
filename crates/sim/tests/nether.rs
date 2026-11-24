@@ -390,9 +390,20 @@ fn a_fireball_burns_a_player_in_sight_and_none_flies_at_one_behind_a_wall() {
     assert!(lowest <= 15.0 && alight, "lowest {lowest}, alight {alight}");
 
     let mut sim = blazed(&[]);
-    for y in 41..=43 {
-        for z in -1..=1 {
-            sim.setblock((3, y, z), state(BlockKind::NetherBricks))
+    // Walled in on every side to the ceiling: a blaze with no target strolls, and would
+    // come round a single wall.
+    for y in 41..=59 {
+        for (x, z) in [
+            (4, -1),
+            (4, 0),
+            (4, 1),
+            (5, -1),
+            (5, 1),
+            (6, -1),
+            (6, 0),
+            (6, 1),
+        ] {
+            sim.setblock((x, y, z), state(BlockKind::NetherBricks))
                 .unwrap();
         }
     }
@@ -492,4 +503,245 @@ fn gravel_falls_into_a_cell_that_comes_free() {
             Some(BlockKind::Air)
         ]
     );
+}
+
+/// A tick that answers the server's keep-alives, for runs past 600 ticks.
+fn tick_alive(sim: &mut Sim) {
+    for p in tick(sim) {
+        if let S2c::KeepAlive { id } = p {
+            send(sim, C2s::KeepAlive { id });
+        }
+    }
+}
+
+/// A spawner on a pedestal at (0, 42, 0), the player `away` blocks east of it on the floor,
+/// fire resistant so the blazes it spawns do not end the run.
+fn spawner(away: i32) -> Sim {
+    let mut stage = Stage::new(4, 40, 60);
+    stage
+        .bricks((0, 0), (41, 41), (0, 0))
+        .set((0, 42, 0), BlockKind::Spawner)
+        .spawn((away, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    sim.add_spawner(
+        (0, 42, 0),
+        data::EntityKind::Blaze,
+        sim::life::Brain::blaze(),
+    );
+    sim
+}
+
+/// `BaseSpawner`: the first delay is 20 ticks with a player within 16; a cycle spawns 1 to 4
+/// within 4 blocks; later cycles come 200 to 799 ticks apart; with 6 of its mob near, none.
+#[test]
+fn a_spawner_spawns_blazes_for_a_player_within_sixteen() {
+    let mut sim = spawner(8);
+    for _ in 0..19 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(sim.survival.life.mobs.len(), 0, "before the first delay");
+    tick_alive(&mut sim);
+    let first = sim.survival.life.mobs.len();
+    assert!((1..=4).contains(&first), "the first cycle spawned {first}");
+    for m in sim.survival.life.mobs.values() {
+        assert!((m.pos[0] - 0.5).abs() <= 4.0 && (m.pos[2] - 0.5).abs() <= 4.0);
+        assert!((41.0..=43.0).contains(&m.pos[1]), "{:?}", m.pos);
+    }
+    for _ in 0..199 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(
+        sim.survival.life.mobs.len(),
+        first,
+        "a second cycle within 200 ticks"
+    );
+    for _ in 0..6000 {
+        tick_alive(&mut sim);
+    }
+    let alive = sim.survival.life.mobs.len();
+    // The cap is checked before a cycle of up to 4: 5 near and 4 more at the most.
+    assert!((6..=9).contains(&alive), "{alive} blazes after 6,000 ticks");
+    assert!(sim.open(), "{:?}", sim.closed);
+}
+
+#[test]
+fn a_spawner_sleeps_with_no_player_within_sixteen() {
+    let mut sim = spawner(20);
+    for _ in 0..500 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(sim.survival.life.mobs.len(), 0);
+}
+
+/// `Blaze.customServerAiStep`: a blaze rises while the player's eye is over its own plus its
+/// offset, and never sinks through the floor. The rise is slow: each tick it gains
+/// `(0.3 - vy) × 0.3` and loses gravity's 0.08, which settles near 0.03 blocks a tick. Under a
+/// player 12 up on a pillar, a blaze on the floor is 2 to 3 blocks up after 90 ticks.
+#[test]
+fn a_blaze_rises_toward_a_player_above_it() {
+    let mut stage = Stage::new(1, 40, 75);
+    stage.bricks((0, 0), (41, 52), (0, 0)).spawn((0, 53, 0));
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    sim.survival.life.fire_resistance = true;
+    let id = sim.summon_with(
+        data::EntityKind::Blaze,
+        [5.5, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    let mut lowest = f64::MAX;
+    for _ in 0..90 {
+        tick_alive(&mut sim);
+        lowest = lowest.min(sim.survival.life.mobs[&id].pos[1]);
+    }
+    let y = sim.survival.life.mobs[&id].pos[1];
+    assert!((43.0..44.5).contains(&y), "the blaze is at y {y}");
+    assert!(lowest >= 41.0, "it sank to {lowest}");
+}
+
+/// `loot_table/entities/blaze.json`: a blaze killed by the player drops 0 or 1 rod. Of 40
+/// blazes killed, some drop one and some none, and never more than one each.
+#[test]
+fn a_blaze_killed_by_the_player_drops_a_rod_or_none() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage.spawn((0, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    sim.survival.give((data::ItemKind::DiamondSword, 1));
+    let mut rods = 0;
+    for _ in 0..40 {
+        let id = sim.summon(data::EntityKind::Blaze, [1.0, 41.0, 0.5]);
+        let mut killed = false;
+        for _ in 0..12 {
+            for _ in 0..13 {
+                tick_alive(&mut sim);
+            }
+            let out = send(&mut sim, C2s::Attack { entity: id });
+            if out
+                .iter()
+                .any(|p| matches!(p, S2c::EntityEvent { status: 3, .. }))
+            {
+                killed = true;
+                break;
+            }
+        }
+        assert!(killed, "a blaze outlived twelve swings");
+        for _ in 0..40 {
+            tick_alive(&mut sim);
+        }
+        let held: i32 = sim
+            .survival
+            .slots
+            .iter()
+            .flatten()
+            .filter(|(k, _)| *k == data::ItemKind::BlazeRod)
+            .map(|(_, n)| *n)
+            .sum();
+        assert!(held - rods <= 1, "more than one rod from a blaze");
+        rods = held;
+    }
+    assert!((8..=32).contains(&rods), "{rods} rods of 40 blazes");
+}
+
+/// `LivingEntity.knockback`: a mob's hit sends the player's motion as 0.4 away from the mob on
+/// the plane and 0.4 up from the ground.
+#[test]
+fn a_mobs_hit_knocks_the_player_away_and_up() {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    sim.summon_with(
+        data::EntityKind::WitherSkeleton,
+        [1.5, 41.0, 0.5],
+        sim::life::Brain::Melee(sim::life::Melee::wither_skeleton()),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    let motion = tick(&mut sim).into_iter().find_map(|p| match p {
+        S2c::SetEntityMotion { id: 1, velocity } => Some(velocity),
+        _ => None,
+    });
+    let v = motion.unwrap();
+    // The packet's velocity is quantised on the wire (-0.39998779 for -0.4), so the bound is
+    // a thousandth, not a millionth.
+    assert!(
+        (v[0] + 0.4).abs() < 1e-3 && (v[1] - 0.4).abs() < 1e-3 && v[2].abs() < 1e-3,
+        "{v:?}"
+    );
+    assert_eq!(sim.health, 12.0, "8 unarmoured");
+}
+
+/// `BlazeAttackGoal`: a blaze moves at a target it sees within 2 blocks, and holds its place
+/// with one in sight farther off.
+#[test]
+fn a_blaze_closes_on_a_target_within_two_blocks_and_holds_beyond() {
+    let run = |x: f64| {
+        let stage = Stage::new(1, 40, 60);
+        let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+        let id = sim.summon_with(
+            data::EntityKind::Blaze,
+            [x, 41.0, 0.5],
+            sim::life::Brain::blaze(),
+        );
+        for p in protocol::session::opening(775, "model", 0, "rs-test") {
+            send(&mut sim, p);
+        }
+        send(&mut sim, C2s::LoginAcknowledged);
+        send(&mut sim, C2s::SelectKnownPacks);
+        send(&mut sim, C2s::FinishConfiguration);
+        send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+        send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+        for _ in 0..10 {
+            tick_alive(&mut sim);
+        }
+        sim.survival.life.mobs[&id].pos[0]
+    };
+    let near = run(2.3);
+    assert!(near < 2.0, "within 2 blocks it stayed at x {near}");
+    assert_eq!(run(6.5), 6.5, "in sight beyond 2 blocks it moved");
+}
+
+/// `hurtServer` → `knockback(0.4)`: the player's hit knocks a blaze on the ground 0.4 away
+/// and lifts it; 11 ticks aloft at the air's 0.91, then the floor's 0.546: about 3.2 blocks
+/// in all. Once more than 2 off with the player in sight it holds there.
+#[test]
+fn the_players_hit_knocks_a_blaze_away() {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    let id = sim.summon_with(
+        data::EntityKind::Blaze,
+        [2.3, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    send(&mut sim, C2s::Attack { entity: id });
+    assert_eq!(sim.survival.life.mobs_knocked, 1);
+    tick_alive(&mut sim);
+    let first = sim.survival.life.mobs[&id].pos[0];
+    assert!(first > 2.5, "one tick after the hit it is at x {first}");
+    for _ in 0..20 {
+        tick_alive(&mut sim);
+    }
+    let x = sim.survival.life.mobs[&id].pos[0];
+    assert!((5.3..5.6).contains(&x), "twenty ticks on it is at x {x}");
 }

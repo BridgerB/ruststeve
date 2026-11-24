@@ -698,7 +698,15 @@ impl Sim {
                 State::Play,
                 &S2c::SetEntityMotion {
                     id: PLAYER_ID,
-                    velocity: [0.0, self.server_vy, 0.0],
+                    // A mob's hit knocks; any other hurt sends the server's own motion.
+                    velocity: self
+                        .survival
+                        .life
+                        .knock
+                        .take()
+                        .map_or([0.0, self.server_vy, 0.0], |k| {
+                            [k[0], if k[1] > 0.0 { k[1] } else { self.server_vy }, k[2]]
+                        }),
                 },
             )?);
         }

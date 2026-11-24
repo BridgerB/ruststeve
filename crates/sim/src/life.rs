@@ -27,10 +27,39 @@
 //! - mobs here are placed by a start (a moment's `summon`): no AI, no loot, unless given a
 //!   `Brain` (issue 16's fight arenas): `Melee` walks straight at the player over ground that
 //!   holds it and hits in reach every 20 ticks (`MeleeAttackGoal`), a wither skeleton's hit
-//!   leaving the wither effect. No navigation, no knockback.
+//!   leaving the wither effect. No navigation.
 //! - a blaze with `Brain::Blaze` (`Blaze$BlazeAttackGoal.tick`, javap): with the player in
 //!   sight and within its follow range 48, it charges 60 ticks, looses three small fireballs 6
-//!   ticks apart, and rests 100; within 2 blocks it hits for 6 every 20. It never moves here.
+//!   ticks apart, and rests 100; within 2 blocks it hits for 6 every 20.
+//!   It flies only up and down (`Blaze.customServerAiStep`, `aiStep`): while the player's eye is
+//!   over its own plus an offset (`triangle(0.5, 6.891)`, drawn again every
+//!   100 ticks) it rises, `vy += (0.3 - vy) × 0.3`; else it sinks, its fall cut to 0.6 a tick.
+//!   Sideways it moves as its goals say (`Blaze.registerGoals`): at a seen target within 2
+//!   blocks, and at one lost from sight for under 5 ticks (`BlazeAttackGoal`); with no target
+//!   (none seen for 60 ticks, `TargetGoal`'s memory) it strolls now and then to a place
+//!   within 10 blocks (`WaterAvoidingRandomStrollGoal` at probability 0: a land position
+//!   10 out and 7 up or down, one start in 120 ticks). While it has a target in sight
+//!   farther than 2 blocks it does not move: the attack goal holds the move flag. It goes in
+//!   a straight line at 0.1165 blocks a tick with ground under it and 0.051 in the air (its
+//!   0.23 speed through `LivingEntity.travel`: squared over 0.454 on the ground, 0.02 of
+//!   flying speed over 0.09 in the air); the game finds a path.
+//! - knockback (`LivingEntity.knockback`, strength 0.4): a mob's hit or a fireball's sends the
+//!   player's motion as 0.4 away from it on the plane and 0.4 up when on the ground. The
+//!   player's fresh hit (not one inside the invulnerable half) knocks a mob the same way:
+//!   half its motion kept plus 0.4 away on the plane, then moved a tick at a time and cut by
+//!   0.91 in the air or 0.546 on a 0.6 floor (`LivingEntity.travel`), zeroed under 0.003. A
+//!   knock from the ground lifts the mob 0.4 (`min(0.4, vy / 2 + 0.4)`), which under gravity
+//!   0.08 and drag 0.98 keeps it aloft 11 ticks: the air's drag holds that long, so a walker
+//!   goes about 3 blocks in 11 ticks (clojurecraft measured the same, brain mc-mob-facts) and
+//!   a blaze in the air about 4.4. The lift itself is not drawn (a mob's height is unchanged);
+//!   a walker stops at a floor's edge rather than fall. A `Still` mob is not moved. A sprint's
+//!   extra knock is not modelled.
+//! - `Life::hurt_by` sums the damage each type dealt, for a test to name what a death was.
+//! - a spawner (`BaseSpawner`, javap): with the player within 16 it counts down (20 at first,
+//!   then 200 plus up to 599); at 0, unless 6 of its mob are alive within 4 of it, it tries 4
+//!   places (`(rand - rand) × 4` on x and z, -1 to 1 on y) and spawns where the body is free.
+//!   The model holds no light, so no light rule is applied (a blaze's spawn placement asks
+//!   for any light; not read from the jar here).
 //! - a small fireball (`AbstractHurtingProjectile`, `SmallFireball`): from rest it gains 0.1 a
 //!   tick along its aim and keeps 0.95 of its speed; the aim is at the player's middle with
 //!   a triangular spread of `2.297 × sqrt(sqrt(distance²)) × 0.5` on x and z; a hit takes 5
@@ -120,6 +149,12 @@ pub enum Brain {
     Blaze {
         attack_time: i32,
         step: u8,
+        /// Its upward speed, and the height over its own eye it lets the player's eye be.
+        vy: f64,
+        offset: f64,
+        /// Ticks since it last saw the player, and where a stroll is taking it (x, z).
+        unseen: u32,
+        stroll: Option<[f64; 2]>,
     },
 }
 
@@ -129,6 +164,10 @@ impl Brain {
         Brain::Blaze {
             attack_time: 0,
             step: 0,
+            vy: 0.0,
+            offset: 0.5,
+            unseen: 0,
+            stroll: None,
         }
     }
 }
@@ -154,6 +193,58 @@ const BLAZE_MELEE_EVERY: i32 = 20;
 /// A blaze's `follow_range` and `attack_damage` (`Blaze.createAttributes`).
 const BLAZE_RANGE: f64 = 48.0;
 const BLAZE_MELEE: f32 = 6.0;
+/// `Blaze.customServerAiStep`: the rise's target speed and gain (both 0.3), the cut to a fall
+/// (`aiStep`: 0.6), how often the height offset is drawn again, and its eye over its feet
+/// (0.85 of 1.8).
+const BLAZE_RISE: f64 = 0.3;
+const BLAZE_FALL: f64 = 0.6;
+const BLAZE_OFFSET_EVERY: u64 = 100;
+/// The spread of its height offset (`triangle(0.5, 6.891)`; read from the jar in probe
+/// 45344729907).
+const BLAZE_OFFSET_SPREAD: f64 = 6.891;
+const BLAZE_EYE: f64 = 1.53;
+/// A blaze's sideways movement: how long a target unseen is remembered (`TargetGoal`: 60),
+/// how long it is still come after (`BlazeAttackGoal`: `lastSeen < 5`), a stroll's chance a
+/// tick (`RandomStrollGoal`: 1 in 120) and reach (`LandRandomPos.getPos(mob, 10, 7)`), and its
+/// pace on the ground and in the air (derived from its 0.23 speed; the module's note).
+const BLAZE_MEMORY: u32 = 60;
+const BLAZE_CHASE: u32 = 5;
+const BLAZE_STROLL_EVERY: f64 = 120.0;
+const BLAZE_STROLL: f64 = 10.0;
+const BLAZE_WALK: f64 = 0.1165;
+const BLAZE_FLY: f64 = 0.051;
+/// `LivingEntity.knockback`'s strength from a mob's hit.
+const KNOCKBACK: f64 = 0.4;
+/// `LivingEntity.travel`: horizontal motion kept a tick in the air (0.91), and on a floor of
+/// friction 0.6 (netherrack, nether bricks: 0.6 × 0.91); motion under 0.003 is zeroed
+/// (`LivingEntity.aiStep`).
+const DRAG_AIR: f64 = 0.91;
+const DRAG_GROUND: f64 = 0.546;
+const MOTION_FLOOR: f64 = 0.003;
+/// Ticks a knock's 0.4 lift keeps a mob off the floor: y 0.4, 0.71, 0.94, 1.09, 1.15, 1.14,
+/// 1.05, 0.88, 0.63, 0.31, then below 0 on the 11th (vy -= 0.08, × 0.98 a tick).
+const KNOCK_ALOFT: u32 = 11;
+/// `BaseSpawner`: the first delay, the least and the span of the later ones, tries a cycle,
+/// the most of its mob near, how near a player must be, and the spawn range.
+const SPAWNER_FIRST: i32 = 20;
+const SPAWNER_MIN: i32 = 200;
+const SPAWNER_SPAN: f64 = 600.0;
+const SPAWNER_TRIES: u32 = 4;
+const SPAWNER_NEARBY: usize = 6;
+const SPAWNER_PLAYER: f64 = 16.0;
+const SPAWNER_RANGE: f64 = 4.0;
+
+/// A spawner block's own state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spawner {
+    pub pos: (i32, i32, i32),
+    pub kind: EntityKind,
+    pub brain: Brain,
+    pub delay: i32,
+    /// Mobs it has spawned.
+    pub spawned: u64,
+}
+
 /// The fireball's spread factor (`2.297` in the goal).
 const BLAZE_SPREAD: f64 = 2.297;
 /// `AbstractHurtingProjectile`: `accelerationPower` and `getInertia`.
@@ -185,6 +276,10 @@ pub struct Mob {
     pub dead_at: Option<u64>,
     /// Whether its death drops its loot table (a parity row's mob is summoned without).
     pub loot: bool,
+    /// The sideways motion a player's hit left it with (`LivingEntity.knockback`), x and z,
+    /// spent a tick at a time and cut by friction, and the ticks the knock keeps it aloft.
+    pub push: [f64; 2],
+    pub aloft: u32,
 }
 
 /// The player's body as the server keeps it (issue 12a).
@@ -217,12 +312,18 @@ pub struct Life {
     pub wither_ticks: u32,
     /// Small fireballs in flight.
     pub fireballs: Vec<Fireball>,
+    /// The spawners that run (`Sim::add_spawner`).
+    pub spawners: Vec<Spawner>,
     /// The tick a shield went up (`use_item` with a shield in either hand), until the use key
     /// is let go.
     pub blocking_since: Option<u64>,
     /// Fireballs a shield stopped, and fireballs that hit.
     pub fireballs_blocked: u64,
     pub fireballs_hit: u64,
+    /// Fireballs loosed.
+    pub fireballs_fired: u64,
+    /// The motion a hit this tick knocks the player with, sent in place of the server's own.
+    pub knock: Option<[f64; 3]>,
     /// Ticks since the last swing (`attackStrengthTicker`).
     pub attack_ticker: u32,
     pub mobs: std::collections::BTreeMap<i32, Mob>,
@@ -231,6 +332,11 @@ pub struct Life {
     sent_air: i32,
     sent_fire: bool,
     pub kills: u64,
+    /// Fresh hits on mobs that knocked them back.
+    pub mobs_knocked: u64,
+    /// Damage dealt to the player by damage type (after armour and invulnerability), so a
+    /// test can say what a death was made of.
+    pub hurt_by: std::collections::BTreeMap<String, f32>,
 }
 
 impl Default for Life {
@@ -252,15 +358,20 @@ impl Default for Life {
             armor: 0.0,
             wither_ticks: 0,
             fireballs: Vec::new(),
+            spawners: Vec::new(),
             blocking_since: None,
             fireballs_blocked: 0,
             fireballs_hit: 0,
+            fireballs_fired: 0,
+            knock: None,
             attack_ticker: 0,
             mobs: std::collections::BTreeMap::new(),
             sent: (20.0, 20, false),
             sent_air: MAX_AIR,
             sent_fire: false,
             kills: 0,
+            mobs_knocked: 0,
+            hurt_by: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -296,6 +407,8 @@ impl Sim {
                 loot: true,
                 brain: Brain::Still,
                 next_hit: 0,
+                push: [0.0; 2],
+                aloft: 0,
             },
         );
         id
@@ -310,11 +423,132 @@ impl Sim {
         id
     }
 
+    /// Make the spawner block at `pos` run: it spawns `kind` with `brain` by `BaseSpawner`'s
+    /// rules.
+    pub fn add_spawner(&mut self, pos: (i32, i32, i32), kind: EntityKind, brain: Brain) {
+        self.survival.life.spawners.push(Spawner {
+            pos,
+            kind,
+            brain,
+            delay: SPAWNER_FIRST,
+            spawned: 0,
+        });
+    }
+
+    /// The spawners' tick (`BaseSpawner.serverTick`).
+    fn tick_spawners(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        for i in 0..self.survival.life.spawners.len() {
+            let Some(sp) = self.survival.life.spawners.get(i).copied() else {
+                continue;
+            };
+            let centre = [
+                f64::from(sp.pos.0) + 0.5,
+                f64::from(sp.pos.1) + 0.5,
+                f64::from(sp.pos.2) + 0.5,
+            ];
+            let near = (0..3)
+                .map(|a| (self.pos[a] - centre[a]).powi(2))
+                .sum::<f64>()
+                < SPAWNER_PLAYER * SPAWNER_PLAYER;
+            if !near || self.health <= 0.0 || kind_at(self, sp.pos) != Some(BlockKind::Spawner) {
+                continue;
+            }
+            let mut delay = sp.delay - 1;
+            let mut spawned = 0;
+            if delay <= 0 {
+                let crowd = self
+                    .survival
+                    .life
+                    .mobs
+                    .values()
+                    .filter(|m| m.kind == sp.kind && m.dead_at.is_none())
+                    .filter(|m| (0..3).all(|a| (m.pos[a] - centre[a]).abs() <= SPAWNER_RANGE + 0.5))
+                    .count();
+                if crowd < SPAWNER_NEARBY {
+                    for _ in 0..SPAWNER_TRIES {
+                        let mut tri = || self.survival.next_double() - self.survival.next_double();
+                        let x = centre[0] + tri() * SPAWNER_RANGE;
+                        let z = centre[2] + tri() * SPAWNER_RANGE;
+                        let y =
+                            f64::from(sp.pos.1) + (self.survival.next_double() * 3.0).floor() - 1.0;
+                        // `noCollision` for a body 0.6 wide and 1.8 high, by its corners.
+                        let free = [-0.3, 0.3].iter().all(|dx| {
+                            [-0.3, 0.3].iter().all(|dz| {
+                                [0.0, 0.9, 1.79].iter().all(|dy| {
+                                    self.solid(
+                                        (x + dx).floor() as i32,
+                                        (y + dy).floor() as i32,
+                                        (z + dz).floor() as i32,
+                                    )
+                                    .is_none()
+                                })
+                            })
+                        });
+                        if !free {
+                            continue;
+                        }
+                        let id = self.summon_with(sp.kind, [x, y, z], sp.brain);
+                        let mut uuid = [0u8; 16];
+                        uuid[12..].copy_from_slice(&id.to_be_bytes());
+                        out.push(wire(
+                            State::Play,
+                            &S2c::AddEntity {
+                                id,
+                                uuid,
+                                kind: sp.kind.id(),
+                                x,
+                                y,
+                                z,
+                            },
+                        )?);
+                        spawned += 1;
+                    }
+                }
+                // A cycle that spawned, or met a crowd, waits again; one that found no room
+                // tries the next tick.
+                if spawned > 0 || crowd >= SPAWNER_NEARBY {
+                    delay = SPAWNER_MIN + (self.survival.next_double() * SPAWNER_SPAN) as i32;
+                }
+            }
+            if let Some(s) = self.survival.life.spawners.get_mut(i) {
+                s.delay = delay;
+                s.spawned += spawned;
+            }
+        }
+        Ok(out)
+    }
+
     /// A mob's hit after armour (`CombatRules.getDamageAfterArmorAbsorb`, toughness 0).
     fn after_armor(&self, damage: f32) -> f32 {
         let armor = self.survival.life.armor;
         let cut = ARMOR_CAP.min((armor / 5.0).max(armor - 4.0 * damage / 8.0)) / 25.0;
         damage * (1.0 - cut.max(0.0))
+    }
+
+    /// A hit by a mob or its projectile from `from`: the damage after armour and, when it lands,
+    /// the knock (`LivingEntity.knockback`, strength 0.4): the motion the player is sent this
+    /// tick is 0.4 away from `from` on the plane, and 0.4 up when it stands on the ground.
+    fn hit_from(
+        &mut self,
+        damage: f32,
+        damage_type: &str,
+        death_key: &str,
+        from: [f64; 3],
+    ) -> Result<Vec<Wire>, EncodeError> {
+        let dealt = self.after_armor(damage);
+        let out = self.hurt_player(dealt, damage_type, death_key)?;
+        if !out.is_empty() {
+            let (dx, dz) = (self.pos[0] - from[0], self.pos[2] - from[2]);
+            let len = (dx * dx + dz * dz).sqrt().max(1e-9);
+            let up = if self.survival.on_ground {
+                KNOCKBACK
+            } else {
+                0.0
+            };
+            self.survival.life.knock = Some([dx / len * KNOCKBACK, up, dz / len * KNOCKBACK]);
+        }
+        Ok(out)
     }
 
     /// Whether nothing that collides lies between two points (sampled; a partial block counts
@@ -350,7 +584,15 @@ impl Sim {
             let Some(m) = self.survival.life.mobs.get(&id).copied() else {
                 continue;
             };
-            let Brain::Blaze { attack_time, step } = m.brain else {
+            let Brain::Blaze {
+                attack_time,
+                step,
+                vy,
+                offset,
+                unseen,
+                stroll,
+            } = m.brain
+            else {
                 continue;
             };
             if m.dead_at.is_some() || self.health <= 0.0 {
@@ -370,8 +612,12 @@ impl Sim {
             if dist2 < 4.0 {
                 if seen && attack_time <= 0 {
                     attack_time = BLAZE_MELEE_EVERY;
-                    let dealt = self.after_armor(BLAZE_MELEE);
-                    out.extend(self.hurt_player(dealt, "mob_attack", "death.attack.mob")?);
+                    out.extend(self.hit_from(
+                        BLAZE_MELEE,
+                        "mob_attack",
+                        "death.attack.mob",
+                        m.pos,
+                    )?);
                 }
             } else if dist2 < BLAZE_RANGE * BLAZE_RANGE && seen && attack_time <= 0 {
                 step += 1;
@@ -391,6 +637,7 @@ impl Sim {
                     let len = aim.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
                     let fid = self.survival.next_id();
                     let pos = [from[0], from[1] + 0.5, from[2]];
+                    self.survival.life.fireballs_fired += 1;
                     self.survival.life.fireballs.push(Fireball {
                         id: fid,
                         pos,
@@ -414,8 +661,114 @@ impl Sim {
                     )?);
                 }
             }
+            // Sideways, as the goals say.
+            let unseen = if seen { 0 } else { unseen.saturating_add(1) };
+            let targeted = unseen < BLAZE_MEMORY && dist2 < BLAZE_RANGE * BLAZE_RANGE;
+            let mut stroll = stroll;
+            let player = [self.pos[0], self.pos[2]];
+            let goal = if (seen && dist2 < 4.0) || (!seen && targeted && unseen < BLAZE_CHASE) {
+                stroll = None;
+                Some(player)
+            } else if targeted {
+                stroll = None;
+                None
+            } else {
+                if stroll.is_none() && self.survival.next_double() < 1.0 / BLAZE_STROLL_EVERY {
+                    let x = m.pos[0] + (self.survival.next_double() * 2.0 - 1.0) * BLAZE_STROLL;
+                    let z = m.pos[2] + (self.survival.next_double() * 2.0 - 1.0) * BLAZE_STROLL;
+                    // A land position: a floor with two free cells over it within 7 up or down.
+                    let land = (-7..=7).any(|dy| {
+                        let y = m.pos[1].floor() as i32 + dy;
+                        let c = |yy: i32| self.solid(x.floor() as i32, yy, z.floor() as i32);
+                        c(y - 1).is_some() && c(y).is_none() && c(y + 1).is_none()
+                    });
+                    if land {
+                        stroll = Some([x, z]);
+                    }
+                }
+                stroll
+            };
+            let mut xz = [m.pos[0], m.pos[2]];
+            if let Some(g) = goal {
+                let (gx, gz) = (g[0] - xz[0], g[1] - xz[1]);
+                let far = (gx * gx + gz * gz).sqrt();
+                let grounded = self
+                    .solid(
+                        xz[0].floor() as i32,
+                        (m.pos[1] - 0.05).floor() as i32,
+                        xz[1].floor() as i32,
+                    )
+                    .is_some();
+                let speed = if grounded { BLAZE_WALK } else { BLAZE_FLY };
+                if far > 0.5 {
+                    let next = [xz[0] + gx / far * speed, xz[1] + gz / far * speed];
+                    let c = |dy: f64| {
+                        self.solid(
+                            next[0].floor() as i32,
+                            (m.pos[1] + dy).floor() as i32,
+                            next[1].floor() as i32,
+                        )
+                    };
+                    if c(0.0).is_none() && c(1.79).is_none() {
+                        xz = next;
+                    } else {
+                        stroll = None;
+                    }
+                } else {
+                    stroll = None;
+                }
+            }
+            // The flight, up and down.
+            let offset = if self.ticks.is_multiple_of(BLAZE_OFFSET_EVERY) {
+                // `triangle(0.5, 6.891)`: the mode plus the spread times (rand - rand).
+                0.5 + BLAZE_OFFSET_SPREAD
+                    * (self.survival.next_double() - self.survival.next_double())
+            } else {
+                offset
+            };
+            let eye = m.pos[1] + BLAZE_EYE;
+            let mut vy = if self.pos[1] + physics::EYE_HEIGHT > eye + offset {
+                vy + (BLAZE_RISE - vy) * BLAZE_RISE
+            } else {
+                vy
+            };
+            vy = (vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
+            if vy < 0.0 {
+                vy *= BLAZE_FALL;
+            }
+            let to = [xz[0], m.pos[1] + vy, xz[1]];
+            let at =
+                |y: f64| self.solid(to[0].floor() as i32, y.floor() as i32, to[2].floor() as i32);
+            let blocked = at(to[1]).is_some() || at(to[1] + 1.79).is_some();
+            let pos = if blocked {
+                [xz[0], m.pos[1], xz[1]]
+            } else {
+                to
+            };
+            if blocked {
+                vy = 0.0;
+            }
+            if pos != m.pos {
+                out.push(wire(
+                    State::Play,
+                    &S2c::EntityPositionSync {
+                        id,
+                        x: pos[0],
+                        y: pos[1],
+                        z: pos[2],
+                    },
+                )?);
+            }
             if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
-                mob.brain = Brain::Blaze { attack_time, step };
+                mob.pos = pos;
+                mob.brain = Brain::Blaze {
+                    attack_time,
+                    step,
+                    vy,
+                    offset,
+                    unseen,
+                    stroll,
+                };
             }
         }
         Ok(out)
@@ -471,8 +824,12 @@ impl Sim {
                             self.survival.life.fire_ticks =
                                 self.survival.life.fire_ticks.max(FIREBALL_FIRE_TICKS);
                         }
-                        let dealt = self.after_armor(FIREBALL_DAMAGE);
-                        out.extend(self.hurt_player(dealt, "fireball", "death.attack.fireball")?);
+                        out.extend(self.hit_from(
+                            FIREBALL_DAMAGE,
+                            "fireball",
+                            "death.attack.fireball",
+                            b.from,
+                        )?);
                     }
                     ended = true;
                 } else if self.state_at(cell.0, cell.1, cell.2).is_none() {
@@ -524,6 +881,66 @@ impl Sim {
         Ok(out)
     }
 
+    /// The knocks the player's hits left: each knocked mob moves by its motion while its body
+    /// fits where it goes (a walker also needs a floor there), and the motion is cut by the
+    /// air's or the floor's drag. A blow into a wall stops.
+    fn tick_pushes(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let ids: Vec<i32> = self.survival.life.mobs.keys().copied().collect();
+        for id in ids {
+            let Some(m) = self.survival.life.mobs.get(&id).copied() else {
+                continue;
+            };
+            // A `Still` mob stands where it was put (a parity row's or a placed target): only
+            // mobs that act are knocked.
+            if m.dead_at.is_some() || m.push == [0.0; 2] || matches!(m.brain, Brain::Still) {
+                continue;
+            }
+            let to = [m.pos[0] + m.push[0], m.pos[1], m.pos[2] + m.push[1]];
+            let cell = |p: [f64; 3], dy: f64| {
+                self.solid(
+                    p[0].floor() as i32,
+                    (p[1] + dy).floor() as i32,
+                    p[2].floor() as i32,
+                )
+            };
+            let walker = matches!(m.brain, Brain::Melee(_));
+            let fits = cell(to, 0.0).is_none()
+                && cell(to, 1.79).is_none()
+                && (!walker || cell(to, -0.05).is_some());
+            let grounded = m.aloft == 0 && cell(m.pos, -0.05).is_some();
+            let drag = if grounded { DRAG_GROUND } else { DRAG_AIR };
+            let push = if fits {
+                m.push.map(|v| v * drag)
+            } else {
+                [0.0; 2]
+            };
+            let push = if push[0].hypot(push[1]) < MOTION_FLOOR {
+                [0.0; 2]
+            } else {
+                push
+            };
+            let pos = if fits { to } else { m.pos };
+            if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
+                mob.pos = pos;
+                mob.push = push;
+                mob.aloft = m.aloft.saturating_sub(1);
+            }
+            if pos != m.pos {
+                out.push(wire(
+                    State::Play,
+                    &S2c::EntityPositionSync {
+                        id,
+                        x: pos[0],
+                        y: pos[1],
+                        z: pos[2],
+                    },
+                )?);
+            }
+        }
+        Ok(out)
+    }
+
     /// The melee mobs' tick: each comes straight at the player while the ground ahead holds it
     /// and the way is open, and hits in reach.
     fn tick_mobs(&mut self) -> Result<Vec<Wire>, EncodeError> {
@@ -542,7 +959,9 @@ impl Sim {
             let (dx, dz) = (self.pos[0] - m.pos[0], self.pos[2] - m.pos[2]);
             let flat = (dx * dx + dz * dz).sqrt();
             let level = (self.pos[1] - m.pos[1]).abs() < 2.0;
-            if flat > melee.reach * 0.8 {
+            // Aloft from a knock it has no footing to walk with (its air control, 0.02 a
+            // tick, is left out).
+            if flat > melee.reach * 0.8 && m.aloft == 0 {
                 let step = melee.speed.min(flat);
                 let to = [
                     m.pos[0] + dx / flat * step,
@@ -575,8 +994,7 @@ impl Sim {
                 if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
                     mob.next_hit = self.ticks + MELEE_EVERY;
                 }
-                let dealt = self.after_armor(melee.damage);
-                out.extend(self.hurt_player(dealt, "mob_attack", "death.attack.mob")?);
+                out.extend(self.hit_from(melee.damage, "mob_attack", "death.attack.mob", m.pos)?);
                 let life = &mut self.survival.life;
                 life.wither_ticks = life.wither_ticks.max(melee.wither_ticks);
             }
@@ -651,6 +1069,7 @@ impl Sim {
         };
         life.last_hurt = damage;
         life.exhaustion += EXHAUSTION_HURT;
+        *life.hurt_by.entry(damage_type.to_owned()).or_insert(0.0) += dealt;
         self.hurt(dealt, damage_type, death_key)
     }
 
@@ -723,7 +1142,9 @@ impl Sim {
             }
             self.survival.life.wither_ticks -= 1;
         }
+        out.extend(self.tick_pushes()?);
         out.extend(self.tick_mobs()?);
+        out.extend(self.tick_spawners()?);
         out.extend(self.tick_blazes()?);
         out.extend(self.tick_fireballs()?);
         // Eating.
@@ -911,6 +1332,17 @@ impl Sim {
             damage - m.last_hurt
         } else {
             m.invulnerable = INVULNERABLE_TICKS;
+            // A fresh hit knocks the mob 0.4 away from the player on the plane, half its
+            // motion kept (`hurtServer` → `knockback(0.4, …)`; a hit inside the invulnerable
+            // half knocks nothing). Blazes and wither skeletons resist none.
+            let (dx, dz) = (m.pos[0] - self.pos[0], m.pos[2] - self.pos[2]);
+            let len = (dx * dx + dz * dz).sqrt().max(1e-9);
+            m.push = [
+                m.push[0] / 2.0 + dx / len * KNOCKBACK,
+                m.push[1] / 2.0 + dz / len * KNOCKBACK,
+            ];
+            m.aloft = KNOCK_ALOFT;
+            life.mobs_knocked += 1;
             damage
         };
         m.last_hurt = damage;
@@ -946,9 +1378,24 @@ impl Sim {
     /// random sideways push of up to 0.1, 0.2 up, the default pickup delay of 10 ticks).
     fn drop_loot(&mut self, kind: EntityKind, at: [f64; 3]) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
-        for d in data::generated::loot::mob_drops_of(kind) {
-            let span = (d.max - d.min + 1).max(1) as f64;
-            let n = d.min + (self.survival.next_double() * span).floor() as i64;
+        // The generated table holds the unconditioned pools. A pool that asks for
+        // `killed_by_player` is added here, since every kill in the model is the player's: a
+        // blaze's rod, 0 or 1 (`loot_table/entities/blaze.json` in the 26.1.2 jar).
+        let by_player: &[(EntityKind, ItemKind, i64, i64)] =
+            &[(EntityKind::Blaze, ItemKind::BlazeRod, 0, 1)];
+        let drops: Vec<(ItemKind, i64, i64)> = data::generated::loot::mob_drops_of(kind)
+            .iter()
+            .map(|d| (d.item, d.min, d.max))
+            .chain(
+                by_player
+                    .iter()
+                    .filter(|(k, ..)| *k == kind)
+                    .map(|(_, item, min, max)| (*item, *min, *max)),
+            )
+            .collect();
+        for (item, min, max) in drops {
+            let span = (max - min + 1).max(1) as f64;
+            let n = min + (self.survival.next_double() * span).floor() as i64;
             let Ok(count) = i32::try_from(n) else {
                 continue;
             };
@@ -957,7 +1404,7 @@ impl Sim {
             }
             let vx = self.survival.next_double() * 0.2 - 0.1;
             let vz = self.survival.next_double() * 0.2 - 0.1;
-            out.extend(self.spawn_item((d.item, count), at, [vx, 0.2, vz], 10)?);
+            out.extend(self.spawn_item((item, count), at, [vx, 0.2, vz], 10)?);
         }
         Ok(out)
     }
