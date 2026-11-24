@@ -233,3 +233,235 @@ fn magma_burns_the_feet_each_ten_ticks_unless_sneaking_or_fire_resistant() {
     beside.magma((1, 1), (0, 0), 40);
     assert_eq!(burns(&beside, 25, |_| {}), 0);
 }
+
+/// Lava laid in a stage rests, as captured columns hold a lava fall still; `wake_fluids` sets
+/// what can run running, and only in the chunks that tick: within the simulation distance (2
+/// here) of the player. A spring four chunks off waits.
+#[test]
+fn woken_lava_runs_where_the_chunks_tick_and_waits_where_they_do_not() {
+    let mut stage = Stage::new(5, 40, 60);
+    stage
+        .set((2, 41, 2), BlockKind::Lava)
+        .set((70, 41, 2), BlockKind::Lava)
+        .lava_lake((-20, -16), (-20, -16), 40, 2)
+        .spawn((12, 41, 12));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    for _ in 0..30 {
+        tick(&mut sim);
+    }
+    assert_eq!(lava(&sim, 3, 41, 2), 0, "lava at rest ran");
+    // The two springs; the lake sunk in the floor has nowhere to go and is left asleep.
+    assert_eq!(sim.wake_fluids(), 2);
+    for _ in 0..10 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 3, 41, 2), lava(&sim, 71, 41, 2)), (7, 0));
+    for _ in 0..60 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 8, 41, 2), lava(&sim, 71, 41, 2)), (2, 0));
+}
+
+/// `BlockItem.place` into lava: water and lava are replaceable, so a held block goes into a
+/// lava cell (the bridge's move and the seal's), the lava is gone from it, and the flow it cut
+/// off from its source drains.
+#[test]
+fn a_block_is_placed_into_lava_and_the_flow_behind_it_drains() {
+    let mut stage = Stage::new(1, 40, 60);
+    // A trench in the floor east of the player, a source set at its far end.
+    stage.air((3, 5), (40, 40), (0, 0)).spawn((2, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.give((data::ItemKind::Cobblestone, 64));
+    sim.setblock((6, 40, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    let trench = |sim: &Sim| [3, 4, 5, 6].map(|x| lava(sim, x, 40, 0));
+    assert_eq!(trench(&sim), [5, 6, 7, 8]);
+    // The trench's floor under (4, 40, 0), clicked on its top face.
+    let out = send(
+        &mut sim,
+        C2s::UseItemOn {
+            hand: 0,
+            pos: (4, 39, 0),
+            face: 1,
+            cursor: [0.5, 1.0, 0.5],
+            inside: false,
+            sequence: 1,
+        },
+    );
+    assert_eq!(kind(&sim, 4, 40, 0), Some(BlockKind::Cobblestone));
+    assert_eq!(
+        sim.survival.held_stack(),
+        Some((data::ItemKind::Cobblestone, 63))
+    );
+    assert_eq!(out.last(), Some(&S2c::BlockChangedAck { sequence: 1 }));
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    assert_eq!(trench(&sim), [0, 0, 7, 8], "the cut-off flow did not drain");
+    assert_eq!(sim.health, 20.0);
+}
+
+/// A blaze five blocks east of the player on an open floor, and the model joined.
+fn blazed(give: &[data::ItemKind]) -> Sim {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    for k in give {
+        sim.survival.give((*k, 1));
+    }
+    sim.summon_with(
+        data::EntityKind::Blaze,
+        [5.5, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    sim
+}
+
+/// `Blaze$BlazeAttackGoal.tick`: a charge of 60 ticks, three small fireballs 6 ticks apart, a
+/// rest of 100, and again: fireballs on ticks 61, 67 and 73, then 239.
+#[test]
+fn a_blaze_charges_sixty_ticks_and_looses_three_fireballs_six_apart() {
+    let mut sim = blazed(&[]);
+    let small = data::EntityKind::SmallFireball.id();
+    let mut loosed = Vec::new();
+    for t in 1..=250u32 {
+        for p in tick(&mut sim) {
+            if matches!(p, S2c::AddEntity { kind, .. } if kind == small) {
+                loosed.push(t);
+            }
+        }
+    }
+    assert_eq!(loosed, [61, 67, 73, 239, 245]);
+}
+
+/// `SmallFireball.onHitEntity`: 5 and alight. Over three volleys at five blocks a still player
+/// is hit; behind a wall the blaze has no sight and looses nothing.
+#[test]
+fn a_fireball_burns_a_player_in_sight_and_none_flies_at_one_behind_a_wall() {
+    let mut sim = blazed(&[]);
+    let mut lowest = 20.0f32;
+    let mut alight = false;
+    for _ in 0..500 {
+        tick(&mut sim);
+        lowest = lowest.min(sim.health);
+        alight |= sim.survival.life.fire_ticks > 0;
+    }
+    assert!(
+        sim.survival.life.fireballs_hit >= 1,
+        "nine fireballs missed"
+    );
+    assert!(lowest <= 15.0 && alight, "lowest {lowest}, alight {alight}");
+
+    let mut sim = blazed(&[]);
+    for y in 41..=43 {
+        for z in -1..=1 {
+            sim.setblock((3, y, z), state(BlockKind::NetherBricks))
+                .unwrap();
+        }
+    }
+    for _ in 0..500 {
+        tick(&mut sim);
+    }
+    assert_eq!(sim.survival.life.fireballs_hit, 0);
+    assert_eq!(sim.health, 20.0);
+}
+
+/// A shield up for 5 ticks stops what comes from the side the player faces, and nothing from
+/// behind.
+#[test]
+fn a_shield_stops_fireballs_from_the_side_it_faces() {
+    let hits = |yaw: f32| {
+        let mut sim = blazed(&[data::ItemKind::Shield]);
+        send(
+            &mut sim,
+            C2s::UseItem {
+                hand: 0,
+                sequence: 1,
+                yaw,
+                pitch: 0.0,
+            },
+        );
+        for _ in 0..500 {
+            tick(&mut sim);
+        }
+        let life = &sim.survival.life;
+        (life.fireballs_hit, life.fireballs_blocked)
+    };
+    // East is yaw -90 (south 0, west +90): the blaze's side.
+    let (hit, blocked) = hits(-90.0);
+    assert!(
+        hit == 0 && blocked >= 1,
+        "facing it: {hit} hit, {blocked} blocked"
+    );
+    let (hit, blocked) = hits(90.0);
+    assert!(
+        hit >= 1 && blocked == 0,
+        "back to it: {hit} hit, {blocked} blocked"
+    );
+}
+
+/// A block dug is set with its updates (`Level.setBlock`): the lava behind a bank the player
+/// digs runs into the cut at the Nether's pace.
+#[test]
+fn digging_a_lakes_bank_lets_the_lava_out() {
+    let mut stage = Stage::new(1, 40, 60);
+    // The player at (0, 41, 0); a cut at (1, 40, 0), the bank at (2, 40, 0), the lake beyond.
+    stage
+        .air((1, 1), (40, 40), (0, 0))
+        .lava_lake((3, 5), (0, 0), 40, 1);
+    let (mut sim, _) = joined(stage.build().unwrap());
+    let dig = |sim: &mut Sim, status, sequence| {
+        send(
+            sim,
+            C2s::PlayerAction {
+                status,
+                pos: (2, 40, 0),
+                face: 4,
+                sequence,
+            },
+        )
+    };
+    dig(&mut sim, 0, 1);
+    // Netherrack by hand: hardness 0.4 with no pickaxe, 1 / 0.4 / 100 a tick, 40 ticks.
+    for _ in 0..45 {
+        tick(&mut sim);
+    }
+    dig(&mut sim, 2, 2);
+    assert_eq!(kind(&sim, 2, 40, 0), Some(BlockKind::Air), "not dug");
+    for _ in 0..25 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 2, 40, 0), lava(&sim, 1, 40, 0)), (7, 6));
+    assert_eq!(sim.health, 20.0);
+}
+
+/// `FallingBlock`: gravel over a cell that comes free falls into it, and the gravel on it
+/// follows.
+#[test]
+fn gravel_falls_into_a_cell_that_comes_free() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage
+        .fill((6, 6), (41, 42), (6, 6), BlockKind::Gravel)
+        .spawn((0, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.setblock((6, 40, 6), state(BlockKind::Air)).unwrap();
+    let column: Vec<Option<BlockKind>> = (39..=42).map(|y| kind(&sim, 6, y, 6)).collect();
+    assert_eq!(
+        column,
+        [
+            Some(BlockKind::Netherrack),
+            Some(BlockKind::Gravel),
+            Some(BlockKind::Gravel),
+            Some(BlockKind::Air)
+        ]
+    );
+}
