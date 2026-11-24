@@ -62,7 +62,7 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 - An escape's end is written with what it did (`Escape::report`: seals, digs, refusals, the trail): on "out of the lava" and when the run ends with the escape running ("escape-lava ended with the run"). Its start says whether the lava was at the door, and where.
 - `lava_door` also sees lava one cell over the head's height beside its column (the ring at y + 2), last in its order.
 - Soul sand is dry land for a trap to clear on.
-- **A step out of lava** (`lava_step`, `Escape::step_out`): in lava with a block held and no bank the feet can climb (beside a bridge one block over the sea; the lift out of a liquid is half a block), the escape lays a block under the bridge and a step against it on the body's side, and makes the step's top its target; up to `MAX_LAVA_STEPS`, swimming all the while.
+
 
 ## See also
 - [[mc-water]] - the water physics the escape relies on.

@@ -617,11 +617,16 @@ fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
         return Controls::default();
     }
     let near = horizontal([px, 0.0, pz], centre) < JUMP_NEAR;
-    // More than a step up: from soul sand (feet at y + 0.875) the next cell's floor line is an
-    // eighth up, a step and no jump.
-    let up = f64::from(wy) - py > physics::STEP_HEIGHT;
+    // A cell up, read from the cell the feet stand in (`FEET_LIFT`): on soul sand, feet at
+    // y + 0.875, the next cell's floor line is an eighth up, a step and no jump.
+    let up = f64::from(wy) > (py + path::FEET_LIFT).floor() + 0.5;
+    // That eighth is stepped, never jumped: under a two-high roof a jump hits the lintel, comes
+    // down on the soul sand still blocked by the eighth, and jumps again (the model's kit bot
+    // hopped at (61, 46.88, 79.7) for 8,000 ticks: docs/problems/nether-walk.md).
+    let rise = f64::from(wy) - py;
+    let low_step = body.on_ground && rise > 0.0 && rise <= physics::STEP_HEIGHT;
     let mut c = toward(body, centre);
-    c.jump = c.jump || (up && near);
+    c.jump = (c.jump && !low_step) || (up && near);
     c
 }
 

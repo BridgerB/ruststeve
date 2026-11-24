@@ -219,7 +219,6 @@ fn a_lava_lake_under_a_hill_is_tunnelled_over_to_the_bricks() {
 
 /// (d) Lava down the bot's own stairs: sealed out, then on to the bricks.
 #[test]
-#[ignore = "blaze wall 22: the head cell sealed at ticks 61 and 71, then dead in the lava; owners A2, A7"]
 fn lava_at_the_door_of_a_stair_cut_is_sealed_out() {
     let c = cross(walls::stair_cut(), &KIT, 2400);
     c.assert_reached();
