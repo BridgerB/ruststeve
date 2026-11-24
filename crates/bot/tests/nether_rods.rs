@@ -292,7 +292,7 @@ fn seven_rods_are_taken_at_the_spawner_with_thirty_cooked_beef() {
 
 /// The same with a shield in the off hand.
 #[test]
-#[ignore = "blaze stage: unread; owners A11 (shield), A4"]
+#[ignore = "blaze stage: passes at 68353e3 (seed 7; 2 of 8 seeds), kept ignored as seed-sensitive; owners A11 (shield), A4"]
 fn seven_rods_are_taken_at_the_spawner_with_a_shield() {
     stage((ItemKind::CookedBeef, 30), true).assert_seven();
 }
