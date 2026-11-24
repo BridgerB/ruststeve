@@ -150,6 +150,9 @@ const SHELTER_MAX: u32 = 80;
 /// table and furnace among the walls), more where the body spans two columns or a floor is
 /// missing (overworld-leg wall 11).
 const HUT_MAX: u32 = 24;
+/// Ticks before dusk at which the surface walks stop: a walk back of up to 48 blocks and a hut
+/// of ten blocks, with room (overworld-leg wall 16).
+const DUSK_MARGIN: i64 = 1200;
 /// Ticks after a junk drop in which its kind coming back counts as the drop picked up again: the
 /// 40 ticks of a thrown stack's pick-up delay and the walk back over it.
 const REPICKUP_TICKS: u64 = 200;
@@ -667,6 +670,9 @@ pub struct Plan {
     pub repickups: u32,
     #[serde(default)]
     pub dropped: Option<(data::ItemKind, i32, u64)>,
+    /// Whether dusk has stopped the surface walks, noted (wall 16).
+    #[serde(default)]
+    pub dusk_noted: bool,
     /// When the pack was first seen with no main slot free (wall 10).
     #[serde(default)]
     pub full_since: Option<u64>,
@@ -840,6 +846,7 @@ impl Plan {
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
+            dusk_noted: false,
             pressed: 0,
             lava_aims: Vec::new(),
             press_table: false,
@@ -3281,7 +3288,14 @@ impl Plan {
                     ),
                 );
             }
-            if pieces < rules.meat_stock && spent < rules.provision_ticks && !self.hunt_over {
+            // Dusk near: no more walks out for animals or trees (wall 16: lane 0 of race
+            // 45349387912 walked to trees after dark and a creeper killed it).
+            let dusk = self.dusk_near(w, tick);
+            if pieces < rules.meat_stock
+                && spent < rules.provision_ticks
+                && !self.hunt_over
+                && !dusk
+            {
                 let why = format!(
                     "provisions {pieces} of {} pieces: look for animals",
                     rules.meat_stock
@@ -3319,7 +3333,7 @@ impl Plan {
             // its four logs, and a creeper killed it there).
             let shields_made = rules.kit_shields > 0
                 && craft::count(w, data::ItemKind::Shield) >= rules.kit_shields;
-            if logs < want && spent < rules.provision_ticks * 4 && !shields_made {
+            if logs < want && spent < rules.provision_ticks * 4 && !shields_made && !dusk {
                 return Flow::Stock;
             }
             self.provision_since = None;
@@ -3361,6 +3375,25 @@ impl Plan {
             format!("{logs} logs and {food} food points held after {spent} ticks"),
         );
         Flow::On
+    }
+
+    /// Whether dusk is within `DUSK_MARGIN` ticks (or night has fallen), by the server's day
+    /// clock; noted once a day when it first stops the surface walks.
+    fn dusk_near(&mut self, w: &World, tick: u64) -> bool {
+        let Some(t) = w.day_time() else {
+            return false;
+        };
+        let left = world::time::ticks_to_dusk(t);
+        let near = left < DUSK_MARGIN;
+        if near && !self.dusk_noted {
+            self.dusk_noted = true;
+            self.note(
+                tick,
+                "dusk near: no walk out".to_owned(),
+                format!("day time {t}, {left} ticks to dusk: the surface walks for animals and trees stop"),
+            );
+        }
+        near
     }
 
     /// Stairs up toward the open sky, 24 blocks at a time along one heading; a heading refused
