@@ -168,7 +168,6 @@ fn a_wither_skeleton_walks_the_bridge_and_kills_an_idle_bot() {
 /// (a) A blaze hovers 17 over the eye, out of any reach, and a wither skeleton comes along the
 /// bridge: the bot fights the foe it can hit and kills it.
 #[test]
-#[ignore = "blaze fight (a): 'defend WitherSkeleton (Retreat)', 0 swings, dead on the bridge; owner A4"]
 fn the_melee_foe_in_reach_is_fought_under_a_blaze_out_of_reach() {
     let wall = walls::fortress_bridge(3, true);
     let f = fight(&wall, Aim::Hold, 20.0, 1200, |sim| {
@@ -190,7 +189,6 @@ fn the_melee_foe_in_reach_is_fought_under_a_blaze_out_of_reach() {
 
 /// (b) The same foe on a bridge one wide with no rails: the fight never leaves the deck.
 #[test]
-#[ignore = "blaze fight (b): stays on the deck but retreats with 0 swings and dies there; owner A4"]
 fn a_fight_on_a_one_wide_bridge_never_ends_in_lava() {
     let wall = walls::fortress_bridge(1, false);
     let f = fight(&wall, Aim::Hold, 20.0, 1200, |sim| {
@@ -213,7 +211,6 @@ fn a_fight_on_a_one_wide_bridge_never_ends_in_lava() {
 /// (b) again, three wide and open-edged, the foe coming at an angle: a fight that backs or
 /// circles has an edge on each side.
 #[test]
-#[ignore = "blaze fight (b): stays on the deck but retreats with 0 swings and dies there; owner A4"]
 fn a_fight_on_an_open_bridge_never_ends_in_lava() {
     let wall = walls::fortress_bridge(3, false);
     let f = fight(&wall, Aim::Hold, 20.0, 1200, |sim| {

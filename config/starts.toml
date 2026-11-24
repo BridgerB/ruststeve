@@ -111,3 +111,66 @@ setup = [
 name = "snapshot"
 stage = "in_world"
 place = "spawn"
+
+# A development start for the blaze fight (issue 16, 2026-11-23): never issue-16 evidence and never
+# the frontier (a made-up kit). Race it with
+# `-f snapshot=race-44789031743/snapshot-spawner-44789031743-race-44789031743-lane-1.tar.zst`:
+# that snapshot's world, memory and player file put the bot at (129.5, 61, 166.4) in the Nether, 7
+# blocks from the blaze spawner at (129, 64, 159), up the stairs the snapshot bot cut. That bot was
+# bare (a stone sword and pickaxe, a table, a bucket and a water bucket, flint and steel, 8 sticks,
+# 28 cobblestone, 270 netherrack) at 6 to 7 health. The kit tops it up to what the equipped Nether
+# snapshot of race 45194253932 holds (armour, an iron sword, four stone pickaxes, both buckets, 11
+# meat), and the setup heals and feeds it, as a bot that arrives whole would be. No place: the
+# snapshot's own.
+[[start]]
+name = "dev-spawner"
+stage = "spawner"
+place = "spawn"
+kit = [["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_sword", 1], ["stone_pickaxe", 3], ["water_bucket", 1], ["beef", 6], ["porkchop", 5], ["stick", 5], ["cobblestone", 36]]
+setup = [
+  "effect give {bot} minecraft:instant_health 1 5",
+  "effect give {bot} minecraft:saturation 1 10",
+]
+
+# A DEVELOPMENT start (2026-11-23; never issue-16 evidence, never the frontier): the old frontier
+# fortress bot's world and place with the kit a real bot holds on arrival in the Nether. Race it
+# only with `snapshot=race-44678197603/snapshot-fortress-44678197603-race-44678197603-lane-0.tar.zst`:
+# the snapshot puts the bot at (22, 55, 129) in the Nether, in the tunnel a real bot dug to the
+# fortress round (48, ~, 176), with that bot's memory, at 17 health and 17 food; the commands
+# here then swap its bare kit for what rs-l05-b00 held in the equipped Nether snapshot of race
+# 45194253932 (its `snap.toml`), less the overworld's stone. The planner puts the armour on
+# (`Plan::equip`). No place: without the snapshot the bot would stand at the overworld spawn.
+[[start]]
+name = "dev-fortress"
+stage = "fortress"
+place = "spawn"
+setup = [
+  "clear {bot}",
+  "give {bot} minecraft:iron_helmet 1",
+  "give {bot} minecraft:iron_chestplate 1",
+  "give {bot} minecraft:iron_leggings 1",
+  "give {bot} minecraft:iron_sword 1",
+  "give {bot} minecraft:stone_pickaxe 4",
+  "give {bot} minecraft:crafting_table 1",
+  "give {bot} minecraft:bucket 1",
+  "give {bot} minecraft:water_bucket 2",
+  "give {bot} minecraft:flint_and_steel 1",
+  "give {bot} minecraft:beef 6",
+  "give {bot} minecraft:porkchop 5",
+  "give {bot} minecraft:stick 13",
+  "give {bot} minecraft:cobblestone 64",
+  "give {bot} minecraft:oak_log 2",
+]
+
+# A DEVELOPMENT start (2026-11-23; never issue-16 evidence, never the frontier): the blaze fight
+# with the food ceiling taken away. Race it only with
+# `snapshot=race-45336326999/snapshot-spawner-45336326999-race-45336326999-lane-2.tar.zst` (a bot
+# that walked to the spawner with the real kit, armour worn, 20 health): its 10 raw meat healed
+# about 26 health and one bot sat at 3.9 health with nothing to eat for 3,100 ticks (race
+# 45338756013 lane 1; docs/problems/blaze-fight.md). 32 cooked beef on top says what the fight
+# does when fed, and what its next wall is.
+[[start]]
+name = "dev-spawner-fed"
+stage = "spawner"
+place = "spawn"
+kit = [["cooked_beef", 32]]
