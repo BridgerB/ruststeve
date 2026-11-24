@@ -418,6 +418,9 @@ pub enum Act {
     /// Respawn after a death (`client_command` 0): the death is cleared and the body waits for
     /// the server's next position (the marathon keeps playing through deaths).
     Respawn,
+    /// Start using the off-hand item (`use_item` with hand 1), aimed by the body's look: a
+    /// shield is raised and stays up until `ReleaseUse` (docs/problems/shield.md).
+    UseOffHand,
 }
 
 /// A window the server opened (`open_screen`, issue 11a): its id, menu type (an index into
@@ -1044,6 +1047,15 @@ impl World {
                 // (issue 14a parity found every real bucket use level at pitch 0).
                 vec![Effect::Send(C2s::UseItem {
                     hand: 0,
+                    sequence: self.sequence_sent,
+                    yaw: self.controls.yaw as f32,
+                    pitch: self.controls.pitch.unwrap_or(self.player.pitch),
+                })]
+            }
+            Act::UseOffHand => {
+                self.sequence_sent += 1;
+                vec![Effect::Send(C2s::UseItem {
+                    hand: 1,
                     sequence: self.sequence_sent,
                     yaw: self.controls.yaw as f32,
                     pitch: self.controls.pitch.unwrap_or(self.player.pitch),

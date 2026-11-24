@@ -24,6 +24,7 @@ pub mod path;
 pub mod place;
 pub mod redig;
 pub mod scoop;
+pub mod shield;
 pub mod smelt;
 pub mod stairs;
 pub mod station;
@@ -608,6 +609,9 @@ pub struct Plan {
     pub maroon: bool,
     #[serde(default)]
     pub refused_prey: Vec<i32>,
+    /// The shield's raise and lower, and what it met (docs/problems/shield.md).
+    #[serde(default)]
+    pub shield: shield::Shield,
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -681,6 +685,7 @@ impl Plan {
             relocate: false,
             maroon: false,
             refused_prey: Vec::new(),
+            shield: shield::Shield::default(),
             acts: Vec::new(),
         }
     }
@@ -742,8 +747,76 @@ impl Plan {
     pub fn step(&mut self, w: &World) -> Controls {
         let notes_before = self.event_count;
         let c = self.step_inner(w);
+        // >>> shield (docs/problems/shield.md): the one call site of `plan::shield`.
+        let c = self.shield_step(w, c);
+        // <<< shield
         self.track(w.session.server_ticks, notes_before);
         c
+    }
+
+    /// The shield over whatever the tick chose: a held shield goes to the off hand; with a
+    /// fireball coming or a blaze about to shoot it is raised, and while it is up the bot stands,
+    /// faces the threat and strikes nothing (a client using an item cannot attack and moves at a
+    /// fifth of its speed). An escape, a meal or any work of the hands comes first.
+    fn shield_step(&mut self, w: &World, c: Controls) -> Controls {
+        let tick = w.ticks;
+        if self.acts.is_empty()
+            && tick >= self.equip_at
+            && let Some((slot, act)) = shield::to_off_hand(w)
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(act);
+            self.note(
+                tick,
+                format!("shield to the off hand from slot {slot}"),
+                "a shield held, the off hand without one".to_owned(),
+            );
+            return c;
+        }
+        let task_free = match &self.task {
+            Task::Defend(_) | Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
+            Task::Escape(_)
+            | Task::Eat(_)
+            | Task::Hunt(_)
+            | Task::Dig(_)
+            | Task::Craft(_)
+            | Task::Place(_)
+            | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_)
+            | Task::Scoop(_)
+            | Task::Cast(_)
+            | Task::Enter(_)
+            | Task::Swim(..) => false,
+        };
+        // A strike or a change of the held slot waits for the shield; any other act is work.
+        let hands_free = self.acts.iter().all(|a| {
+            matches!(
+                a,
+                world::Act::Attack { .. } | world::Act::Swing | world::Act::Hold { .. }
+            )
+        });
+        let step = self.shield.step(w, tick, task_free && hands_free);
+        for what in step.notes {
+            self.note(tick, what, "shield".to_owned());
+        }
+        if step.yaw.is_some() {
+            self.acts
+                .retain(|a| !matches!(a, world::Act::Attack { .. } | world::Act::Swing));
+        }
+        // First: a lowering goes ahead of a meal's own `use_item` in the same tick.
+        if let Some(act) = step.act {
+            self.acts.insert(0, act);
+        }
+        match step.yaw {
+            Some(yaw) => Controls {
+                forward: false,
+                jump: false,
+                yaw,
+                ..c
+            },
+            None => c,
+        }
     }
 
     /// The task records made since the last call, oldest first: the shell writes them.
