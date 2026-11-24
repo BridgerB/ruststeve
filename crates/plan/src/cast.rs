@@ -1226,49 +1226,47 @@ impl Cast {
                         // from every cell at its height, and a level tunnel never came nearer
                         // ("no route, 1 tunnels" with 168 and 286 sources seen: cast.md wall 2).
                         // The stairs' own refusal stops them short of lava.
-                        let mut down = t.1 + 1 < f.1;
-                        // Never through the frame's rock or a cell the plan places: stairs down
-                        // from the room's floor cut the floor just laid, and one cast went back
-                        // to its place op 304 times in 13,280 ticks (race 45354357884, place 0).
-                        // The straight steps down to the source's height are checked; with one
-                        // in the way, the level tunnel as before.
-                        if down {
-                            let mut kept = crate::station::kept(self.site.frame);
-                            kept.extend(
-                                self.plan
-                                    .iter()
-                                    .filter(|op| op.kind == OpKind::Place)
-                                    .filter_map(|op| op.pos),
-                            );
-                            let steps = (f.1 - (t.1 + 1)).min(6);
-                            let hit = (1..=steps).find_map(|k| {
-                                let from =
-                                    (f.0 + dir.0 * (k - 1), f.1 - (k - 1), f.2 + dir.1 * (k - 1));
-                                let to = (f.0 + dir.0 * k, f.1 - k, f.2 + dir.1 * k);
-                                crate::tunnel::opened(from, to).and_then(|(cells, _)| {
-                                    cells.into_iter().find(|c| kept.contains(c))
-                                })
-                            });
-                            if let Some(c) = hit {
-                                down = false;
-                                self.trail(tick, format!("tunnel down refused at {c:?}"));
-                            }
-                        }
-                        self.tunnel_floor = down.then_some(t.1 + 1);
-                        self.trail(
-                            tick,
-                            format!(
-                                "tunnel {} toward {t:?}",
-                                if down { "down" } else { "level" }
-                            ),
+                        let down = t.1 + 1 < f.1;
+                        // Never through the frame's rock or a cell the plan places: a tunnel from
+                        // the room's floor cut the floor just laid, and the cast went back to its
+                        // place op 304 times in 13,280 ticks (race 45354357884, place 0, stairs
+                        // down) and 61 times (race 45361499544, the level tunnel). The straight
+                        // steps are checked (down to the source's height, or six level); with one
+                        // in the way no tunnel is cut and the refill fails, the fetch next.
+                        let mut kept = crate::station::kept(self.site.frame);
+                        kept.extend(
+                            self.plan
+                                .iter()
+                                .filter(|op| op.kind == OpKind::Place)
+                                .filter_map(|op| op.pos),
                         );
-                        self.work = Work::Tunnel(Box::new(if down {
-                            crate::stairs::Stairs::new(dir, tick)
+                        let steps = if down { (f.1 - (t.1 + 1)).min(6) } else { 6 };
+                        let drop = i32::from(down);
+                        let hit = (1..=steps).find_map(|k| {
+                            let from = (
+                                f.0 + dir.0 * (k - 1),
+                                f.1 - drop * (k - 1),
+                                f.2 + dir.1 * (k - 1),
+                            );
+                            let to = (f.0 + dir.0 * k, f.1 - drop * k, f.2 + dir.1 * k);
+                            crate::tunnel::opened(from, to)
+                                .and_then(|(cells, _)| cells.into_iter().find(|c| kept.contains(c)))
+                        });
+                        let way = if down { "down" } else { "level" };
+                        if let Some(c) = hit {
+                            self.trail(tick, format!("tunnel {way} refused at {c:?}"));
+                            self.tunnels = MAX_TUNNELS;
                         } else {
-                            crate::stairs::Stairs::level(dir, tick)
-                        }));
-                        self.last_done = tick;
-                        return (Controls::default(), None, CastStatus::Running);
+                            self.tunnel_floor = down.then_some(t.1 + 1);
+                            self.trail(tick, format!("tunnel {way} toward {t:?}"));
+                            self.work = Work::Tunnel(Box::new(if down {
+                                crate::stairs::Stairs::new(dir, tick)
+                            } else {
+                                crate::stairs::Stairs::level(dir, tick)
+                            }));
+                            self.last_done = tick;
+                            return (Controls::default(), None, CastStatus::Running);
+                        }
                     }
                 }
                 self.trail(
