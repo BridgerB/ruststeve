@@ -2138,7 +2138,10 @@ impl Plan {
             return Flow::On;
         }
         if !first {
-            if world::stage::Stage::Ready.holds(w) {
+            // The stage's own bar and the whole reserve (overworld-leg wall 4): a bot resumed
+            // from a `ready` snapshot with less than the reserve hunts on the surface again, on
+            // the clock below, before it goes down.
+            if world::stage::Stage::Ready.holds(w) && food >= rules.food_reserve {
                 self.readied = true;
                 self.note(
                     tick,
@@ -2170,7 +2173,11 @@ impl Plan {
         if logs < want && spent < rules.provision_ticks * 2 {
             return Flow::Stock;
         }
-        if food < rules.food_reserve && spent < rules.provision_ticks * 3 {
+        // The second stocking looks for one `provision_ticks` only: it begins with most of the
+        // reserve held, and a bot resumed at noon that looked for three would still be on the
+        // surface after dark.
+        let look = rules.provision_ticks * if first { 3 } else { 1 };
+        if food < rules.food_reserve && spent < look {
             let why = format!(
                 "provisions {food} of {}: look for animals",
                 rules.food_reserve

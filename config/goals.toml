@@ -313,9 +313,12 @@ act = "hunt"
 hungry_below = 14
 # Hunger points of safe food held before a portal is entered (issue 16a, Bridger 2026-11-20: food
 # first, then the Nether): the Nether has little to eat, and the heal between blaze fights needs
-# food over 18. 32 is eight raw beef or porkchop, or about five cooked (clojurecraft held four
-# items, blaze.clj food-reserve).
-food_reserve = 32
+# food over 18. 32 was eight raw beef or porkchop, or about five cooked (clojurecraft held four
+# items, blaze.clj food-reserve). 48 since the fight at the spawner was measured (2026-11-23,
+# docs/problems/overworld-leg.md wall 4): a fireball costs 6 to 9 health in armour and healing 13
+# health took 5 raw porkchops, and the bot arrived with about 8. 48 is 16 raw beef or porkchop.
+# The `ready` stage's own bar stays 32 (world::stage::READY_FOOD).
+food_reserve = 48
 # Never eaten: what poisons or makes hungry, what teleports, a random effect, and golden apples
 # (worth more than food) (clojurecraft's eat/unsafe).
 unsafe_foods = ["rotten_flesh", "spider_eye", "pufferfish", "poisonous_potato", "chicken", "chorus_fruit", "suspicious_stew", "golden_apple", "enchanted_golden_apple"]
@@ -347,8 +350,8 @@ provision_ticks = 6000
 # under the open sky and for provision_ticks at most (docs/problems/overworld-leg.md wall 3). 24 is
 # the eight raw beef or porkchop the reserve was first counted as: the snapshot bot holds 36 and
 # the bots of race 45204423376 stood at their portals with 21 to 30, two of them hunting at y -53
-# for 24,000 ticks at 24 and 21.
-portal_food = 24
+# for 24,000 ticks at 24 and 21. 36 since the reserve is 48: the trip down eats two to four pieces.
+portal_food = 36
 # Fewer stone pickaxes than this with spare_uses left and more are made from the pack before the
 # next task, up to the nether-kit row's four (overworld-leg wall 2). Two: one in the hand and one
 # for when it breaks inside a task (a cast digs up to 131 times; every bot of races 45194253932

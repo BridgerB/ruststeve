@@ -58,6 +58,13 @@ The stage: a real bot resumed from the clean `ready` snapshot (race 45128866973 
 - **Fix**: the bot goes in with `portal_food` (24) hunger points or more; under that it looks for animals only under the open sky and for at most `provision_ticks`, else it notes "into the Nether short of food" and goes in.
 - **Unit test**: `the_portal_food_check_is_proportionate` (plan).
 
+## 4. Too little food for the fight (2026-11-23, late: the measured limit at the spawner)
+
+- **What happened** (the orchestrator's read of the spawner races): a fireball costs 6 to 9 health in armour, healing 13 health took 1,000 ticks and 5 raw porkchops, and the bot arrives at the spawner with about 8 raw meat.
+- **Cause, on this leg**: the reserve was 32 points (11 raw pieces), the snapshot bot holds 36 and is `ready` the tick it resumes, so it never hunts again, though pigs and chickens are heard 10 to 15 blocks off at ticks 60 to 200 in every ledger.
+- **Fix**: `food_reserve` 48 (16 raw beef or porkchop) and `portal_food` 36. The clean flow counts a bot ready only with the whole reserve, so a bot resumed from the snapshot looks for animals under the open sky first ("provisions 36 of 48: look for animals", the hunt row taking those in view), on the flow's clock (one `provision_ticks`, 6,000 ticks, for this second stocking: the snapshot resumes near noon and three would end after dark), then notes "stocked again". Cooking the meat and a shield are agent A11's rows, to be placed in the flow when they exist.
+- **Unit test**: `the_portal_food_check_is_proportionate` reads both numbers.
+
 ## Weighed, not built: a portal near the surface
 
 The cast needs ten lava sources at one site. Carried up they are ten trips of 120 blocks each way. Memory at the snapshot holds no surface pool: the nearest sources are at y -19 and y -15, single-source pools ("sources 1 … refused/spent 124"), and one sighting at (172, 57, -81) that no walk reached. The sea at y -55 is the only lava this world is known to hold in tens. Not built.

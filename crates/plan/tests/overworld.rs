@@ -57,12 +57,13 @@ fn spare_pickaxes_are_made_before_the_last_one_breaks() {
     assert!(!plan::spares_due(&bare, &r, true));
 }
 
-/// Wall 3 (lanes 1 and 10 of race 45204423376): the portal is entered with 24 hunger points,
-/// not the whole reserve of 32; unset, the reserve stands.
+/// Wall 3 (lanes 1 and 10 of race 45204423376): the portal is entered with 36 hunger points,
+/// not the whole reserve of 48 (wall 4); unset, the reserve stands.
 #[test]
 fn the_portal_food_check_is_proportionate() {
     let mut r = rules();
-    assert_eq!(plan::portal_food(&r), 24);
+    assert_eq!(r.food_reserve, 48);
+    assert_eq!(plan::portal_food(&r), 36);
     assert!(plan::portal_food(&r) < r.food_reserve);
     r.portal_food = 0;
     assert_eq!(plan::portal_food(&r), r.food_reserve);
