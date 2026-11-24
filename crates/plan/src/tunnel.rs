@@ -349,12 +349,24 @@ pub fn route(
     lay: bool,
     max_nodes: u32,
 ) -> Option<Route> {
-    route_keeping(w, from, goals, blocked, lay, max_nodes, None)
+    route_keeping(w, from, goals, blocked, lay, max_nodes, Limits::default())
 }
 
-/// `route`, never a stair down into `footprint` (a fortress's brick bounds, padded: issue 17c,
-/// clojurecraft #715: a fortress's floors are thin over the lava sea, and a stair cut down through
-/// one comes out over it).
+/// What a heading's tunnel asks of its route beyond a fortress's (issue 17d,
+/// docs/problems/heading.md).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Limits {
+    /// No stair down into this (a fortress's brick bounds, padded: issue 17c, clojurecraft #715:
+    /// a fortress's floors are thin over the lava sea, and a stair cut down through one comes out
+    /// over it).
+    pub footprint: Option<(i32, i32, i32, i32)>,
+    /// Open cells cost no more than a step (no `OPEN_COST`): pickaxe uses are a heading's scarce
+    /// resource, so its tunnel walks what is open and cuts only what is not. A fortress's tunnel
+    /// keeps to rock, out of the open where ghasts and piglins are.
+    pub open_cheap: bool,
+}
+
+/// `route` within `limits`.
 pub fn route_keeping(
     w: &World,
     from: Cell,
@@ -362,8 +374,9 @@ pub fn route_keeping(
     blocked: &BTreeSet<Cell>,
     lay: bool,
     max_nodes: u32,
-    footprint: Option<(i32, i32, i32, i32)>,
+    limits: Limits,
 ) -> Option<Route> {
+    let footprint = limits.footprint;
     let mut down_refused = 0;
     let target = *goals.first()?;
     // The box: the feet and the target with a margin, the target pulled in when it is far.
@@ -450,7 +463,7 @@ pub fn route_keeping(
                 if digs > 0 && suspect.contains(&to) {
                     cost += SUSPECT_COST;
                 }
-                if sight.open_sides(to) > 4 {
+                if !limits.open_cheap && sight.open_sides(to) > 4 {
                     cost += OPEN_COST;
                 }
                 let g2 = g + cost;
@@ -514,6 +527,9 @@ pub struct Travel {
     /// A heading tunnel's fortress footprint (`endermen::fortress_bounds`): no stair down in it.
     #[serde(default)]
     pub footprint: Option<(i32, i32, i32, i32)>,
+    /// A heading tunnel's: open cells cost a step (`Limits::open_cheap`).
+    #[serde(default)]
+    pub open_cheap: bool,
 }
 
 /// What a stretch of route does, for the note: "stairs up", "level" or "stairs down".
@@ -594,6 +610,7 @@ impl Plan {
     ) -> Option<Task> {
         self.travel.paced.clear();
         self.travel.footprint = None;
+        self.travel.open_cheap = false;
         self.tunnel(w, target, true, (what, why), tick)
     }
 
@@ -610,6 +627,7 @@ impl Plan {
         self.travel.exploring = false;
         self.travel.paced = paced;
         self.travel.footprint = crate::endermen::fortress_bounds(w);
+        self.travel.open_cheap = true;
         self.tunnel(w, target, false, (what, why), tick)
     }
 
@@ -626,6 +644,7 @@ impl Plan {
         self.travel.exploring = false;
         self.travel.paced.clear();
         self.travel.footprint = None;
+        self.travel.open_cheap = false;
         self.tunnel(w, target, false, (what, why), tick)
     }
 
@@ -748,8 +767,11 @@ impl Plan {
                     all.extend(self.travel.paced.iter().filter(|c| **c != feet));
                     std::borrow::Cow::Owned(all)
                 };
-                let footprint = self.travel.footprint;
-                let Some(r) = route_keeping(w, feet, &goals, &blocked, lay, MAX_NODES, footprint)
+                let limits = Limits {
+                    footprint: self.travel.footprint,
+                    open_cheap: self.travel.open_cheap,
+                };
+                let Some(r) = route_keeping(w, feet, &goals, &blocked, lay, MAX_NODES, limits)
                 else {
                     self.note(
                         tick,

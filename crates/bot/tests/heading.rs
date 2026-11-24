@@ -472,14 +472,43 @@ fn no_stair_down_is_cut_in_a_fortress_footprint() {
         &none,
         false,
         20_000,
-        Some((-40, -40, 60, 40)),
+        plan::tunnel::Limits {
+            footprint: Some((-40, -40, 60, 40)),
+            open_cheap: false,
+        },
     );
+    // The footprint padded by 4: no stair down ends inside it (the route may go round it).
+    let inside = |c: (i32, i32, i32)| (-44..=64).contains(&c.0) && (-44..=44).contains(&c.2);
     if let Some(r) = kept {
         assert!(
-            r.cells.windows(2).all(|p| p[1].1 >= p[0].1),
+            r.cells
+                .windows(2)
+                .all(|p| p[1].1 >= p[0].1 || !inside(p[1])),
             "{:?}",
             r.cells
         );
         assert!(r.down_refused > 0);
     }
+}
+
+/// A heading's tunnel walks what is open: over a cavern's floor its route stays on the floor and
+/// cuts nothing (pickaxe uses are the trip's scarce resource).
+#[test]
+fn a_heading_tunnel_walks_open_ground_and_cuts_nothing_there() {
+    let (w, _, _) = joined();
+    let r = plan::tunnel::route_keeping(
+        &w,
+        (0, 64, 0),
+        &[(30, 64, 0)],
+        &BTreeSet::new(),
+        false,
+        20_000,
+        plan::tunnel::Limits {
+            footprint: None,
+            open_cheap: true,
+        },
+    )
+    .unwrap();
+    assert!(r.found);
+    assert!(r.cells.iter().all(|c| c.1 == 64), "{:?}", r.cells);
 }
