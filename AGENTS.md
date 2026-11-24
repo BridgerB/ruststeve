@@ -28,8 +28,9 @@ Do these in order before writing any code, every session, and again after any co
 - The one exception (Bridger, 2026-11-12): to **watch the bot live**, the bot and a vanilla server may run on the Mac, streaming to steve running locally (`STEVE_RELAY=ws://localhost:8787`). Runners never stream to steve.
 - The loop: change code, commit, push the branch, let CI run on the push, read the run's logs (`gh run view <id> --log-failed`), push again.
 - A question that needs code run goes to the probe: the `probe_run` MCP tool, or `gh workflow run probe.yml --ref <branch> -f command=...` ([`brain/ruststeve/design/ci-on-runners.md`](brain/ruststeve/design/ci-on-runners.md)).
-- **Use the `ruststeve` MCP server** (`.mcp.json`, built with the official Rust MCP SDK `rmcp`): `probe_run`, `probe_output`, `run_status`, `run_log`, `ci_runs`, `brain_check`, `brain_note`, `brain_search`. New agent-facing tooling is added there as a tool, not as a script (`brain/ruststeve/decisions/agent-tools-over-mcp.md`).
+- **Use the `ruststeve` MCP server** (`.mcp.json`, built with the official Rust MCP SDK `rmcp`): `probe_run`, `probe_output`, `run_done`, `run_status`, `run_log`, `ci_runs`, `brain_check`, `brain_note`, `brain_search`. New agent-facing tooling is added there as a tool, not as a script (`brain/ruststeve/decisions/agent-tools-over-mcp.md`).
 - Watch runs in the background and keep working; never end a turn just waiting on a run.
+- **Waiting on a run costs API requests, and they are shared** (2026-11-23: nine agents' `gh run watch` and release polls spent the token's 5,000 requests an hour in one hour, and every `gh` call of every agent failed with HTTP 403 until the reset). **Never `gh run watch`; never poll in a loop.** Ask once every 4 minutes or more, with one request: the MCP tool `run_done`, or `gh api repos/BridgerB/ruststeve/actions/runs/<id> --jq '"\(.status) \(.conclusion)"'` (`gh run view --json jobs` and `gh run list` cost several each). `gh api rate_limit --jq .resources.core` is free and says what is left. A 403 that says "rate limit" is the limit, not a missing credential: wait for its reset.
 
 ## 3. How to work an issue
 
@@ -70,6 +71,7 @@ cargo run -q -p brain-check                       # the brain's four invariants,
 cargo run -q -p brain-check -- drift              # notes whose cited sources changed since their pin
 cargo run -q -p brain-check -- touches ruststeve <paths>   # notes a change affects
 gh run list -R BridgerB/ruststeve --branch <branch>        # CI on the runners
+gh api repos/BridgerB/ruststeve/actions/runs/<id> --jq '"\(.status) \(.conclusion)"'   # is a run done: one request, at most every 4 minutes (never gh run watch)
 ```
 
 Tests, the bot and every binary run in the workflows under `.github/workflows/`, not here.
