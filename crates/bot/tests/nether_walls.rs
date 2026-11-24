@@ -250,7 +250,7 @@ fn the_pillar_is_at_the_fortress_with_its_spawner_in_view() {
 }
 
 #[test]
-#[ignore = "blaze wall: from the pillar's foot to the spawner 32 up and 80 along; owner A3"]
+#[ignore = "blaze wall: stays at the pillar's foot, 'stairs up toward the spawner' cutting nothing; owner A3"]
 fn the_spawner_is_reached_from_the_foot_of_the_pillar() {
     let kit = [
         (ItemKind::StonePickaxe, 1),
