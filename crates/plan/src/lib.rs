@@ -1903,20 +1903,33 @@ impl Plan {
         // No walk: the travel tunnel to the brick held, else to the nearest: up out of the lava
         // sea's level, through rock, and down at the far end (docs/problems/nether-tunnel.md; the
         // stairs down this used to cut ended beside lava, blaze.md walls 22 and 23).
-        let held = self.travel.target.filter(|c| !self.refused_now(*c, tick));
+        let held = self
+            .travel
+            .target
+            .filter(|c| !self.travel.exploring && !self.refused_now(*c, tick));
         if let Some(c) = held.or_else(|| {
             world::stage::bricks_near(w, FORTRESS_CHUNKS)
                 .into_iter()
                 .find(|c| !self.refused_now(*c, tick))
-        }) && let Some(t) = self.travel_tunnel(
-            w,
-            c,
-            ("the fortress", "nether bricks seen, no walk to them"),
-            tick,
-        ) {
-            return t;
+        }) {
+            self.travel.exploring = false;
+            if let Some(t) = self.travel_tunnel(
+                w,
+                c,
+                ("the fortress", "nether bricks seen, no walk to them"),
+                tick,
+            ) {
+                return t;
+            }
         }
         if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
+            return t;
+        }
+        // No walk out either: a search tunnel on a held heading (the Nether's open ground is lava
+        // shores and soul sand; rock is the way that is always there).
+        if world::stage::in_nether(w)
+            && let Some(t) = self.explore_tunnel(w, tick, "no fortress in view and no walk out")
+        {
             return t;
         }
         self.failed_in_row += 1;

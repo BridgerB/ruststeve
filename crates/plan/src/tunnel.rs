@@ -435,6 +435,12 @@ pub struct Travel {
     pub began: Option<usize>,
     /// The cell a segment last ended short of with nothing refused there, and how often.
     pub short: Option<(Cell, u32)>,
+    /// With no bricks seen: the compass heading held, and whether the target is a leg along it
+    /// (not a brick).
+    #[serde(default)]
+    pub heading: Option<(i32, i32)>,
+    #[serde(default)]
+    pub exploring: bool,
     /// Counted for the ledger: routes searched, segments begun, cells blocked.
     pub routes: u32,
     pub segments: u32,
@@ -453,7 +459,59 @@ fn phase(cells: &[Cell]) -> &'static str {
     }
 }
 
+/// Blocks a leg of the search tunnel runs along its heading before the next is set: three
+/// chunks, so each leg loads a new row of columns ahead (bricks with an open face in a loaded
+/// column are seen through rock).
+pub const EXPLORE_LEG: i32 = 48;
+
 impl Plan {
+    /// With no bricks seen and no walk out: a tunnel on a held compass heading, a leg at a time,
+    /// at the travel height. A leg with no way turns the heading a quarter, once a call.
+    pub(crate) fn explore_tunnel(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let leg = self
+            .travel
+            .target
+            .filter(|t| self.travel.exploring && !self.refused_now(*t, tick))
+            .filter(|t| !within_reach(feet, *t));
+        let target = match leg {
+            Some(t) => t,
+            None => {
+                let (s, c) = self.heading.to_radians().sin_cos();
+                let from_explore = if s.abs() >= c.abs() {
+                    (if s > 0.0 { -1 } else { 1 }, 0)
+                } else {
+                    (0, if c > 0.0 { 1 } else { -1 })
+                };
+                let (dx, dz) = *self.travel.heading.get_or_insert(from_explore);
+                let t = (
+                    feet.0 + dx * EXPLORE_LEG,
+                    feet.1.max(SAFE_Y),
+                    feet.2 + dz * EXPLORE_LEG,
+                );
+                self.note(
+                    tick,
+                    format!("search tunnel leg toward {t:?}"),
+                    format!("{why}; the heading ({dx}, {dz}) is held"),
+                );
+                t
+            }
+        };
+        self.travel.exploring = true;
+        let task = self.travel_tunnel(w, target, ("the heading", why), tick);
+        if task.is_none() {
+            let (dx, dz) = self.travel.heading.unwrap_or((1, 0));
+            self.travel.heading = Some((-dz, dx));
+            self.note(
+                tick,
+                format!("search tunnel turned to ({}, {})", -dz, dx),
+                format!("no way on ({dx}, {dz})"),
+            );
+        }
+        task
+    }
+
     /// The next stretch of the travel tunnel toward `target`, or `None` when there is no way (the
     /// target is then refused a while). Called each time the planner looks again: what the last
     /// stretch did is read from where the feet are on the route, a step that failed is blocked
