@@ -149,6 +149,9 @@ pub struct Snapshot {
     pub sounds: usize,
     pub level_events: usize,
     pub chat: usize,
+    /// The time of day (`World::day_time`), when the server has told it.
+    #[serde(default)]
+    pub day_time: Option<i64>,
 }
 
 /// A fact for the ledger.
@@ -255,6 +258,14 @@ pub enum Fact {
         kind: EntityKind,
         sign: String,
         d: f64,
+    },
+    /// Night fell (`world::time::DUSK`), or the bot joined at night: the time of day then.
+    Night {
+        day_time: i64,
+    },
+    /// Day broke (`world::time::DAWN`): the time of day then.
+    Day {
+        day_time: i64,
     },
 }
 
@@ -400,6 +411,7 @@ pub fn snapshot(w: &World) -> Snapshot {
         sounds: w.sounds.len(),
         level_events: w.level_events.len(),
         chat: w.chat.len(),
+        day_time: w.day_time(),
     }
 }
 
@@ -581,6 +593,12 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
     if next.won && !prev.won {
         out.push(Fact::Won);
     }
+    let night = |s: &Snapshot| s.day_time.map(world::time::is_night);
+    match (night(prev), night(next), next.day_time) {
+        (Some(true), Some(false), Some(day_time)) => out.push(Fact::Day { day_time }),
+        (Some(false) | None, Some(true), Some(day_time)) => out.push(Fact::Night { day_time }),
+        _ => {}
+    }
     for e in &next.effects {
         if !prev.effects.contains(e) {
             out.push(Fact::Effect {
@@ -748,6 +766,9 @@ pub struct Senses {
     /// The stack on the cursor, when there is one.
     #[serde(default)]
     pub cursor: Option<(String, i32)>,
+    /// The time of day, 0 to 23,999 (`World::day_time`), when the server has told it.
+    #[serde(default)]
+    pub day_time: Option<i64>,
 }
 
 /// How a fluid touches the body (the feet's cell and the one over it).
@@ -907,6 +928,7 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
         lava: cell.map_or(Touch::No, |c| touch(w, c, BlockKind::Lava)),
         water: cell.map_or(Touch::No, |c| touch(w, c, BlockKind::Water)),
         cursor: w.inventory.carried.map(|(item, n)| (item_name(item), n)),
+        day_time: w.day_time(),
     }
 }
 
@@ -980,6 +1002,8 @@ impl Fact {
             } => format!("{}#{id} {sign} at {d:.0}", kind(k)),
             Fact::Shot { kind: k, closest } => format!("{} passed within {closest:.1}", kind(k)),
             Fact::Landed { id, kind: k } => format!("blow landed on {}#{id}", kind(k)),
+            Fact::Night { day_time } => format!("night fell (day time {day_time})"),
+            Fact::Day { day_time } => format!("day broke (day time {day_time})"),
         }
     }
 }

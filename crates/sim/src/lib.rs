@@ -155,6 +155,10 @@ pub struct Sim {
     pub look: (f32, f32),
     /// Scheduled fluid ticks (issue 14a).
     pub(crate) fluids: fluid::Fluids,
+    /// The overworld clock's ticks: 0 at a new world's first tick (dawn), one more each server
+    /// tick, sent in `set_time` (the day clock, `docs/problems/day-clock.md`). A test sets it
+    /// to start at dusk.
+    pub day_time: i64,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -197,6 +201,7 @@ impl Sim {
             survival: survival::Survival::new(0),
             look: (0.0, 0.0),
             fluids: fluid::Fluids::default(),
+            day_time: 0,
         }
     }
 
@@ -647,6 +652,21 @@ impl Sim {
         Ok(out)
     }
 
+    /// The clock as the server syncs it (`ClientboundSetTimePacket`): the game time and the
+    /// overworld clock, ticking at rate 1. A real server also sends the End's clock; the bot
+    /// reads only the overworld's.
+    fn set_time(&self) -> S2c {
+        S2c::SetTime {
+            game_time: i64::try_from(self.ticks).unwrap_or(i64::MAX),
+            clocks: vec![protocol::ClockUpdate {
+                clock: protocol::OVERWORLD_CLOCK,
+                total_ticks: self.day_time,
+                partial_tick: 0.0,
+                rate: 1.0,
+            }],
+        }
+    }
+
     fn tick(&mut self) -> Result<Vec<Wire>, EncodeError> {
         if self.phase != Phase::Play {
             return Ok(Vec::new());
@@ -655,9 +675,10 @@ impl Sim {
         // vanilla's resetPosition at the start of each tick.
         self.first_good = self.pos;
         self.moves_this_tick = 0;
+        self.day_time += 1;
         let mut out = Vec::new();
         if self.ticks.is_multiple_of(SET_TIME_EVERY) {
-            out.push(wire(State::Play, &S2c::SetTime)?);
+            out.push(wire(State::Play, &self.set_time())?);
         }
         if self.config.peaceful
             && self.health > 0.0
