@@ -178,9 +178,10 @@ fn a_netherrack_flat_is_walked_to_the_bricks() {
     assert_eq!(c.run.min_health_in_script, Some(20.0), "{}", c.story());
 }
 
-/// (a) Soul sand all the way.
+/// (a) Soul sand all the way. Crossed today, though not by a route (the pathfinder has none:
+/// plan/tests/nether_routes.rs): the fortress task's level tunnel steps across it. Kept as a
+/// guard for whoever changes either.
 #[test]
-#[ignore = "blaze wall: no route starts on soul sand (path::classify holds it Awkward); owner A2"]
 fn a_soul_sand_flat_is_crossed_to_the_bricks() {
     let c = cross(walls::soul_sand_flat(), &KIT, 2400);
     c.assert_reached();
@@ -188,7 +189,7 @@ fn a_soul_sand_flat_is_crossed_to_the_bricks() {
 
 /// (b) A lava moat 4 wide with no way round.
 #[test]
-#[ignore = "blaze wall: no move places a block, so a moat is never bridged; owner A2"]
+#[ignore = "blaze wall: stands at the moat's bank, alive, tunnel tasks ending with no refusal; owner A2"]
 fn a_lava_moat_is_crossed_to_the_bricks() {
     let c = cross(walls::lava_moat(), &KIT, 2400);
     c.assert_reached();
@@ -197,7 +198,7 @@ fn a_lava_moat_is_crossed_to_the_bricks() {
 /// (c) The lake of the lava sea under a hill: through the rock over it. Four pickaxes, the kit
 /// bot's count: 60 blocks of tunnel two high is more than one stone pickaxe's 131 uses.
 #[test]
-#[ignore = "blaze wall: dig_toward goes down to the bricks' height, into the lava sea; owner A7"]
+#[ignore = "blaze wall: level tunnels end at the lake's shore, never up into the hill; owner A7"]
 fn a_lava_lake_under_a_hill_is_tunnelled_over_to_the_bricks() {
     let kit = [
         (ItemKind::StonePickaxe, 1),
@@ -212,7 +213,7 @@ fn a_lava_lake_under_a_hill_is_tunnelled_over_to_the_bricks() {
 
 /// (d) Lava down the bot's own stairs: sealed out, then on to the bricks.
 #[test]
-#[ignore = "blaze wall 22: Nether lava runs down the stair cut behind the bot; owners A2, A7"]
+#[ignore = "blaze wall 22: the head cell sealed at ticks 61 and 71, then dead in the lava; owners A2, A7"]
 fn lava_at_the_door_of_a_stair_cut_is_sealed_out() {
     let c = cross(walls::stair_cut(), &KIT, 2400);
     c.assert_reached();

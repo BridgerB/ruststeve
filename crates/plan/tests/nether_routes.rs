@@ -113,7 +113,7 @@ fn no_route_on_any_wall_puts_the_body_in_lava() {
 
 /// (a) Soul sand is ground: the flat has a route as the netherrack one does.
 #[test]
-#[ignore = "blaze wall: soul sand is Awkward to path::classify, so no search starts; owner A2"]
+#[ignore = "blaze wall: Status::None after 0 expansions, no cell of soul sand is standable; owner A2"]
 fn a_soul_sand_flat_has_a_route() {
     let wall = walls::soul_sand_flat();
     let w = world_of(&wall);
@@ -123,7 +123,7 @@ fn a_soul_sand_flat_has_a_route() {
 
 /// (b) A moat 4 wide has a route for a bot that holds blocks (the bridging move).
 #[test]
-#[ignore = "blaze wall: MoveKind has no move that places a block, so lava is never bridged; owner A2"]
+#[ignore = "blaze wall: Partial after 6000 expansions, ending at the bank (9, 34, 0); owner A2"]
 fn a_lava_moat_has_a_route() {
     let wall = walls::lava_moat();
     let mut w = world_of(&wall);
@@ -135,8 +135,9 @@ fn a_lava_moat_has_a_route() {
 }
 
 /// (c) and (d) are the tunnel's: no walk crosses 49 blocks of lava or solid rock, and none
-/// should. What the pathfinder owes them is an honest no: it spends its budget or its frontier
-/// and says so, with no route that claims to arrive.
+/// should for a bot that holds no blocks (this one holds nothing). What the pathfinder owes
+/// them is an honest no: it spends its budget or its frontier and says so, with no route that
+/// claims to arrive.
 #[test]
 fn the_lake_and_the_stair_cut_have_no_walk_and_say_so() {
     for wall in [walls::lake_under_a_hill(), walls::stair_cut()] {

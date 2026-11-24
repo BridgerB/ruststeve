@@ -30,7 +30,7 @@ A change to the route or the tunnel is tried on the four walls below in one CI r
 | wall | stage (`sim::nether::walls`) | closed loop (bot) | pathfinder (plan) | owner |
 |---|---|---|---|---|
 | control | `netherrack_flat` | `a_netherrack_flat_is_walked_to_the_bricks` | `a_netherrack_flat_has_a_route` | runs in CI |
-| (a) soul sand | `soul_sand_flat`: soul sand wall to wall, bricks 30 east | `a_soul_sand_flat_is_crossed_to_the_bricks` (ignored) | `a_soul_sand_flat_has_a_route` (ignored) | A2 |
+| (a) soul sand | `soul_sand_flat`: soul sand wall to wall, bricks 30 east | `a_soul_sand_flat_is_crossed_to_the_bricks` (passes today, runs in CI) | `a_soul_sand_flat_has_a_route` (ignored) | A2 |
 | (b) lava moat | `lava_moat`: 4 wide, 2 deep, wall to wall, bricks 6 past it | `a_lava_moat_is_crossed_to_the_bricks` (ignored) | `a_lava_moat_has_a_route` (ignored; the bot holds 64 cobblestone in slot 36) | A2 |
 | (c) the tunnel | `lake_under_a_hill`: the shore at y 32, the lava sea 49 wide, bricks 60 east, 4 of air under rock to the roof | `a_lava_lake_under_a_hill_is_tunnelled_over_to_the_bricks` (ignored; four pickaxes) | `the_lake_and_the_stair_cut_have_no_walk_and_say_so` | A7 |
 | (d) the seal | `stair_cut`: wall 22 to scale, a lava source woken beside the doorway of a one-wide stair, the bot at its foot | `lava_at_the_door_of_a_stair_cut_is_sealed_out` (ignored) | the same | A2, A7 |
@@ -41,5 +41,12 @@ To take a wall: remove its `#[ignore]` in the commit that crosses it. A wall tha
 
 ## Walls
 
-### 1. What each wall does today
-Not yet read: the first run of the ignored tests is the next entry.
+### 1. What each wall does today (probe 45335940127, facb439)
+- **Read**: the probe's `probe-out/bot.txt` and `plan.txt`, every test run with `--include-ignored`.
+- **The model's rules**: 6 of 6 pass (`crates/sim/tests/nether.rs`).
+- **Control**: the netherrack flat is walked to the bricks at 20 health; the pathfinder finds its route.
+- **(a) soul sand**: the pathfinder has nothing: `Status::None` after 0 expansions, the start and all four cells round it not standable. The bot crosses all the same, at 20 health: with no walk the fortress task falls to its level tunnel, which steps over the soul sand. So (a) is a wall for the route only; the closed-loop test passes and now runs in CI as a guard.
+- **(b) the moat**: the pathfinder answers `Partial` after 6,000 expansions, its route ending at the bank (9, 34, 0). The bot lives at 20 health and never crosses: 2,400 ticks of "tunnel toward the fortress" tasks that each end "cut 6 stairs" in 40 to 60 ticks with nothing cut and nothing refused, and explores to the side between them. It ends 27 blocks from the bricks. No task says the lava stopped it.
+- **(c) the lake under the hill**: the same for 8,000 ticks: 233 ledger lines of level tunnels along the shore that end "cut 6 stairs" and explores; it never climbs into the hill. Alive at 20 health, 82 blocks from the bricks at the end.
+- **(d) the seal**: dead. The stair task runs from tick 20 to 60 and ends with an empty outcome; the lava escape starts at 60 ("trapped in lava"), seals the head's cell (0, 32, 0) at ticks 61 and 71, then "no bank or notch from (0, 31, 1)" at 81, 101 and 121; health 2.3 at its lowest, then 0. The lava was beside the head from about tick 50 and the escape began only once the body was in it; one step into its own tunnel, the bot had nowhere to go.
+- **Cause**: open; these are the owners' walls. What the test bed shows is that none of (b), (c), (d) needs a race to see.
