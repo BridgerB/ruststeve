@@ -216,7 +216,7 @@ impl Stage {
         };
         format!(
             "MEASURES: rods {} (7 at tick {:?}), died {}, ticks {}, kills {} ({:.2} per 1,000 ticks), \
-             blazes spawned {}, alive at the end {}, fireballs fired {} hit {} blocked {}, \
+             blazes spawned {}, alive at the end {}, fireballs fired {} hit {} landed {} blocked {}, \
              health lost {:.1} ({:.1} a kill), lowest health {:?}, meals {}, fire cells within 6 of the \
              spawner {}, blaze-ticks within 1.5 of the eye's height {} of {}, damage by type {}, \
              blazes knocked {}, spawner at {:?}, the bot at {:?}\n\
@@ -231,6 +231,7 @@ impl Stage {
             life.mobs.values().filter(|m| m.dead_at.is_none()).count(),
             life.fireballs_fired,
             life.fireballs_hit,
+            life.fireballs_landed,
             life.fireballs_blocked,
             self.health_lost,
             self.health_lost / kills.max(1) as f32,
@@ -291,7 +292,7 @@ fn seven_rods_are_taken_at_the_spawner_with_thirty_cooked_beef() {
 
 /// The same with a shield in the off hand.
 #[test]
-#[ignore = "blaze stage: unread; owners A11 (shield), A4"]
+#[ignore = "blaze stage: passes at 68353e3 (seed 7; 2 of 8 seeds), kept ignored as seed-sensitive; owners A11 (shield), A4"]
 fn seven_rods_are_taken_at_the_spawner_with_a_shield() {
     stage((ItemKind::CookedBeef, 30), true).assert_seven();
 }
@@ -315,15 +316,20 @@ fn seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving() {
 /// A report: it fails only if no seed passes.
 fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
     let mut passed = 0;
+    let (mut all_ticks, mut all_kills, mut all_landed, mut all_rods) = (0u64, 0u64, 0u64, 0i64);
     for seed in SEEDS {
         let s = stage_with(kit, shield, seed, |_| {});
         let life = &s.run.sim.survival.life;
         let ok = !s.run.died && s.rods >= 7;
         passed += u32::from(ok);
+        all_ticks += s.ticks;
+        all_kills += life.kills;
+        all_landed += life.fireballs_landed;
+        all_rods += s.rods;
         println!(
             "SEED {name} seed {seed}: rods {}, alive {}, seventh at {:?}, ticks {}, kills {} \
-             ({:.2} per 1,000), fireballs {} fired {} hit ({:.2} per 1,000) {} blocked, \
-             health lost {:.1} ({}), blazes knocked {}, meals {}",
+             ({:.2} per 1,000), fireballs {} fired {} hit {} landed ({:.2} landed per 1,000) \
+             {} blocked, health lost {:.1} ({}), blazes knocked {}, meals {}",
             s.rods,
             !s.run.died,
             s.seven_at,
@@ -332,17 +338,29 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
             life.kills as f64 * 1000.0 / s.ticks.max(1) as f64,
             life.fireballs_fired,
             life.fireballs_hit,
-            life.fireballs_hit as f64 * 1000.0 / s.ticks.max(1) as f64,
+            life.fireballs_landed,
+            life.fireballs_landed as f64 * 1000.0 / s.ticks.max(1) as f64,
             life.fireballs_blocked,
             s.health_lost,
             damage_by_type(life),
             life.mobs_knocked,
             s.meals,
         );
+        // A seed that died: how it ended (blaze-fight walls 17 and 19).
+        if s.run.died {
+            let from = s.ledger.len().saturating_sub(30);
+            for l in &s.ledger[from..] {
+                println!("LATE {name} seed {seed}: {l}");
+            }
+        }
     }
+    let per = |n: u64| n as f64 * 1000.0 / all_ticks.max(1) as f64;
     println!(
-        "SEEDS {name}: {passed} of {} alive with 7 rods",
-        SEEDS.len()
+        "SEEDS {name}: {passed} of {} alive with 7 rods; {all_rods} rods in all, {:.2} kills \
+         and {:.2} fireballs landed per 1,000 ticks over {all_ticks} ticks",
+        SEEDS.len(),
+        per(all_kills),
+        per(all_landed),
     );
     assert!(passed > 0, "{name}: no seed of {} passed", SEEDS.len());
 }
