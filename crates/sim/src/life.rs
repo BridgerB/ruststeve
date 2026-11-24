@@ -24,7 +24,24 @@
 //!   `0.2 + scale² × 0.8`, the scale the ticks since the last swing over `20 / speed` (base 4
 //!   plus its modifier); within 3 + 1 of the eye; the mob's own invulnerability; at 0 health
 //!   entity event 3 and, 20 ticks on, its removal.
-//! - mobs here are placed by a start (a moment's `summon`): no AI, no loot.
+//! - mobs here are placed by a start (a moment's `summon`): no AI, no loot, unless given a
+//!   `Brain` (issue 16's fight arenas): `Melee` walks straight at the player over ground that
+//!   holds it and hits in reach every 20 ticks (`MeleeAttackGoal`), a wither skeleton's hit
+//!   leaving the wither effect. No navigation, no knockback.
+//! - a blaze with `Brain::Blaze` (`Blaze$BlazeAttackGoal.tick`, javap): with the player in
+//!   sight and within its follow range 48, it charges 60 ticks, looses three small fireballs 6
+//!   ticks apart, and rests 100; within 2 blocks it hits for 6 every 20. It never moves here.
+//! - a small fireball (`AbstractHurtingProjectile`, `SmallFireball`): from rest it gains 0.1 a
+//!   tick along its aim and keeps 0.95 of its speed; the aim is at the player's middle with
+//!   a triangular spread of `2.297 × sqrt(sqrt(distance²)) × 0.5` on x and z; a hit takes 5
+//!   (`fireball`, cut by armour) and sets the player alight for 5 s; a block hit leaves fire in
+//!   the cell before it when that has a floor.
+//! - a shield (`blocks_attacks`): held in either hand and used for 5 ticks or more, it stops a
+//!   fireball that comes from the half of the plane the player faces: no damage, no fire.
+//! - armour (`CombatRules.getDamageAfterArmorAbsorb`): a mob's hit is cut by
+//!   `min(20, max(armor / 5, armor - 4 × damage / 8)) / 25`; `Life::armor` is set by a test (the
+//!   model wears nothing).
+//! - wither (`MobEffects.WITHER`, amplifier 0): 1 (`wither`) each 40 ticks while it lasts.
 
 use data::{BlockKind, EntityKind, ItemKind};
 use protocol::metadata::MetaValue;
@@ -56,9 +73,110 @@ const EXHAUSTION_HURT: f32 = 0.1;
 const EXHAUSTION_MINE: f32 = 0.005;
 const EXHAUSTION_HEAL: f32 = 6.0;
 
+/// Ticks between a melee mob's hits (`MeleeAttackGoal.resetAttackCooldown`: 20).
+const MELEE_EVERY: u64 = 20;
+/// Ticks between the wither effect's hits at amplifier 0 (`WitherMobEffect`: 40 >> amplifier).
+const WITHER_EVERY: u32 = 40;
+/// Armour's ceiling and the toughness-free divisor of `CombatRules.getDamageAfterArmorAbsorb`.
+const ARMOR_CAP: f32 = 20.0;
+
+/// How a melee mob comes and hits.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Melee {
+    /// Blocks a tick over the ground.
+    pub speed: f64,
+    pub damage: f32,
+    /// Centre to centre on the plane, at which it hits and stops coming.
+    pub reach: f64,
+    /// Ticks of the wither effect a hit leaves.
+    pub wither_ticks: u32,
+}
+
+impl Melee {
+    /// A wither skeleton on Normal. Speed: its `movement_speed` 0.25 times the melee goal's
+    /// 1.2 is both the mob's speed and its forward input, so the ground speed settles at
+    /// 0.3 x 0.3 / (1 - 0.546), 0.198 blocks a tick (a zombie's 0.23 gives the 2.3 blocks a
+    /// second it is known for). Damage 8 with its stone sword and the wither effect for 10 s
+    /// (the wiki's Wither Skeleton page); reach about 1.5 (its box 0.7 wide, the attack box's
+    /// 0.83 beyond it, to the player's 0.3).
+    pub fn wither_skeleton() -> Self {
+        Self {
+            speed: 0.198,
+            damage: 8.0,
+            reach: 1.5,
+            wither_ticks: 200,
+        }
+    }
+}
+
+/// What a placed mob does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Brain {
+    /// Stands (or hovers) where it was put.
+    Still,
+    Melee(Melee),
+    /// A blaze's ranged attack: ticks until its next step, and the step of its volley (0
+    /// resting, 1 charged, 2 to 4 a fireball each).
+    Blaze {
+        attack_time: i32,
+        step: u8,
+    },
+}
+
+impl Brain {
+    /// A blaze about to begin its first charge.
+    pub fn blaze() -> Self {
+        Brain::Blaze {
+            attack_time: 0,
+            step: 0,
+        }
+    }
+}
+
+/// A small fireball in flight.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fireball {
+    pub id: i32,
+    pub pos: [f64; 3],
+    pub vel: [f64; 3],
+    /// Its aim, a unit vector: what it accelerates along.
+    pub dir: [f64; 3],
+    /// Where it was loosed from (a shield stops what comes from the side it faces).
+    pub from: [f64; 3],
+    pub age: u32,
+}
+
+/// `Blaze$BlazeAttackGoal`: the charge, the gap between fireballs, the rest, the melee gap.
+const BLAZE_CHARGE: i32 = 60;
+const BLAZE_GAP: i32 = 6;
+const BLAZE_REST: i32 = 100;
+const BLAZE_MELEE_EVERY: i32 = 20;
+/// A blaze's `follow_range` and `attack_damage` (`Blaze.createAttributes`).
+const BLAZE_RANGE: f64 = 48.0;
+const BLAZE_MELEE: f32 = 6.0;
+/// The fireball's spread factor (`2.297` in the goal).
+const BLAZE_SPREAD: f64 = 2.297;
+/// `AbstractHurtingProjectile`: `accelerationPower` and `getInertia`.
+const FIREBALL_POWER: f64 = 0.1;
+const FIREBALL_INERTIA: f64 = 0.95;
+/// `SmallFireball.onHitEntity`: 5 damage and 5 s alight.
+const FIREBALL_DAMAGE: f32 = 5.0;
+const FIREBALL_FIRE_TICKS: i32 = 100;
+/// A fireball that has hit nothing is dropped after this long (the model's own bound).
+const FIREBALL_LIFE: u32 = 200;
+/// How far a projectile's hit test reaches past the target's box (`ProjectileUtil`: 0.3).
+const PROJECTILE_MARGIN: f64 = 0.3;
+/// Ticks a shield must be up before it blocks (`block_delay_seconds` 0.25).
+const SHIELD_DELAY: u64 = 5;
+/// The steps a flight or a line of sight is sampled at, in blocks.
+const SAMPLE: f64 = 0.2;
+
 /// A mob a start placed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mob {
+    pub brain: Brain,
+    /// The tick its next hit may land.
+    pub next_hit: u64,
     pub kind: EntityKind,
     pub pos: [f64; 3],
     pub health: f32,
@@ -89,11 +207,22 @@ pub struct Life {
     /// The fire resistance effect: fire, lava and burning do no damage (`LivingEntity.hurt`
     /// refuses an `is_fire` source), though lava still slows and sets the body alight.
     pub fire_resistance: bool,
-    /// The shift key as the server holds it (`isShiftKeyDown`, set by the `player_input`
-    /// packet). The bot's protocol sends no `player_input`, so to a server it never sneaks and
-    /// nothing here sets this: sneaking over magma does not spare the bot until that packet is
-    /// sent. A test sets it by hand.
+    /// The shift key as the server holds it (`isShiftKeyDown`), set by the `player_input`
+    /// packet the bot's world sends when its keys change: sneaking over magma spares the bot.
     pub sneaking: bool,
+    /// Armour points worn (iron helmet, chestplate and leggings: 2 + 6 + 5). The model wears
+    /// nothing: a test sets it.
+    pub armor: f32,
+    /// Ticks of the wither effect left.
+    pub wither_ticks: u32,
+    /// Small fireballs in flight.
+    pub fireballs: Vec<Fireball>,
+    /// The tick a shield went up (`use_item` with a shield in either hand), until the use key
+    /// is let go.
+    pub blocking_since: Option<u64>,
+    /// Fireballs a shield stopped, and fireballs that hit.
+    pub fireballs_blocked: u64,
+    pub fireballs_hit: u64,
     /// Ticks since the last swing (`attackStrengthTicker`).
     pub attack_ticker: u32,
     pub mobs: std::collections::BTreeMap<i32, Mob>,
@@ -120,6 +249,12 @@ impl Default for Life {
             water_breathing: false,
             fire_resistance: false,
             sneaking: false,
+            armor: 0.0,
+            wither_ticks: 0,
+            fireballs: Vec::new(),
+            blocking_since: None,
+            fireballs_blocked: 0,
+            fireballs_hit: 0,
             attack_ticker: 0,
             mobs: std::collections::BTreeMap::new(),
             sent: (20.0, 20, false),
@@ -159,9 +294,294 @@ impl Sim {
                 last_hurt: 0.0,
                 dead_at: None,
                 loot: true,
+                brain: Brain::Still,
+                next_hit: 0,
             },
         );
         id
+    }
+
+    /// Place a mob that acts (`Brain`).
+    pub fn summon_with(&mut self, kind: EntityKind, pos: [f64; 3], brain: Brain) -> i32 {
+        let id = self.summon(kind, pos);
+        if let Some(m) = self.survival.life.mobs.get_mut(&id) {
+            m.brain = brain;
+        }
+        id
+    }
+
+    /// A mob's hit after armour (`CombatRules.getDamageAfterArmorAbsorb`, toughness 0).
+    fn after_armor(&self, damage: f32) -> f32 {
+        let armor = self.survival.life.armor;
+        let cut = ARMOR_CAP.min((armor / 5.0).max(armor - 4.0 * damage / 8.0)) / 25.0;
+        damage * (1.0 - cut.max(0.0))
+    }
+
+    /// Whether nothing that collides lies between two points (sampled; a partial block counts
+    /// as a whole one).
+    pub fn sight(&self, a: [f64; 3], b: [f64; 3]) -> bool {
+        let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let len = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let steps = (len / SAMPLE).ceil().max(1.0) as u32;
+        (0..=steps).all(|i| {
+            let t = f64::from(i) / f64::from(steps);
+            let p = [a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t];
+            self.state_at(
+                p[0].floor() as i32,
+                p[1].floor() as i32,
+                p[2].floor() as i32,
+            )
+            .is_none()
+                || self
+                    .solid(
+                        p[0].floor() as i32,
+                        p[1].floor() as i32,
+                        p[2].floor() as i32,
+                    )
+                    .is_none()
+        })
+    }
+
+    /// The blazes' tick (`Blaze$BlazeAttackGoal.tick`).
+    fn tick_blazes(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let ids: Vec<i32> = self.survival.life.mobs.keys().copied().collect();
+        for id in ids {
+            let Some(m) = self.survival.life.mobs.get(&id).copied() else {
+                continue;
+            };
+            let Brain::Blaze { attack_time, step } = m.brain else {
+                continue;
+            };
+            if m.dead_at.is_some() || self.health <= 0.0 {
+                continue;
+            }
+            let mut attack_time = attack_time - 1;
+            let mut step = step;
+            // Middle to middle (`getY(0.5)`): both bodies are 1.8 high.
+            let from = [m.pos[0], m.pos[1] + 0.9, m.pos[2]];
+            let to = [self.pos[0], self.pos[1] + 0.9, self.pos[2]];
+            let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+            let dist2: f64 = d.iter().map(|v| v * v).sum();
+            let seen = self.sight(
+                [m.pos[0], m.pos[1] + 1.6, m.pos[2]],
+                [self.pos[0], self.pos[1] + physics::EYE_HEIGHT, self.pos[2]],
+            );
+            if dist2 < 4.0 {
+                if seen && attack_time <= 0 {
+                    attack_time = BLAZE_MELEE_EVERY;
+                    let dealt = self.after_armor(BLAZE_MELEE);
+                    out.extend(self.hurt_player(dealt, "mob_attack", "death.attack.mob")?);
+                }
+            } else if dist2 < BLAZE_RANGE * BLAZE_RANGE && seen && attack_time <= 0 {
+                step += 1;
+                if step == 1 {
+                    attack_time = BLAZE_CHARGE;
+                } else if step <= 4 {
+                    attack_time = BLAZE_GAP;
+                } else {
+                    attack_time = BLAZE_REST;
+                    step = 0;
+                }
+                if step > 1 {
+                    let spread = BLAZE_SPREAD * dist2.sqrt().sqrt() * 0.5;
+                    let mut tri =
+                        || spread * (self.survival.next_double() - self.survival.next_double());
+                    let aim = [d[0] + tri(), d[1], d[2] + tri()];
+                    let len = aim.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+                    let fid = self.survival.next_id();
+                    let pos = [from[0], from[1] + 0.5, from[2]];
+                    self.survival.life.fireballs.push(Fireball {
+                        id: fid,
+                        pos,
+                        vel: [0.0; 3],
+                        dir: aim.map(|v| v / len),
+                        from: pos,
+                        age: 0,
+                    });
+                    let mut uuid = [0u8; 16];
+                    uuid[12..].copy_from_slice(&fid.to_be_bytes());
+                    out.push(wire(
+                        State::Play,
+                        &S2c::AddEntity {
+                            id: fid,
+                            uuid,
+                            kind: EntityKind::SmallFireball.id(),
+                            x: pos[0],
+                            y: pos[1],
+                            z: pos[2],
+                        },
+                    )?);
+                }
+            }
+            if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
+                mob.brain = Brain::Blaze { attack_time, step };
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether a shield is up and faces `from`.
+    fn shield_stops(&self, from: [f64; 3]) -> bool {
+        let Some(since) = self.survival.life.blocking_since else {
+            return false;
+        };
+        if self.ticks < since + SHIELD_DELAY {
+            return false;
+        }
+        let yaw = f64::from(self.look.0).to_radians();
+        let facing = [-yaw.sin(), yaw.cos()];
+        let to = [from[0] - self.pos[0], from[2] - self.pos[2]];
+        facing[0] * to[0] + facing[1] * to[1] > 0.0
+    }
+
+    /// The fireballs' tick: each flies, and ends on the player, on a block or of age.
+    fn tick_fireballs(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let balls = std::mem::take(&mut self.survival.life.fireballs);
+        let mut kept = Vec::new();
+        let mut gone = Vec::new();
+        for mut b in balls {
+            let len = b.vel.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let steps = (len / SAMPLE).ceil().max(1.0) as u32;
+            let body = physics::aabb(self.pos);
+            let mut ended = false;
+            let mut last = b.pos;
+            for i in 1..=steps {
+                let t = f64::from(i) / f64::from(steps);
+                let p = [
+                    b.pos[0] + b.vel[0] * t,
+                    b.pos[1] + b.vel[1] * t,
+                    b.pos[2] + b.vel[2] * t,
+                ];
+                let on_body = (0..3).all(|a| {
+                    p[a] >= body[a] - PROJECTILE_MARGIN && p[a] <= body[a + 3] + PROJECTILE_MARGIN
+                });
+                let cell = (
+                    p[0].floor() as i32,
+                    p[1].floor() as i32,
+                    p[2].floor() as i32,
+                );
+                if on_body && self.health > 0.0 {
+                    if self.shield_stops(b.from) {
+                        self.survival.life.fireballs_blocked += 1;
+                    } else {
+                        self.survival.life.fireballs_hit += 1;
+                        if !self.survival.life.fire_resistance {
+                            self.survival.life.fire_ticks =
+                                self.survival.life.fire_ticks.max(FIREBALL_FIRE_TICKS);
+                        }
+                        let dealt = self.after_armor(FIREBALL_DAMAGE);
+                        out.extend(self.hurt_player(dealt, "fireball", "death.attack.fireball")?);
+                    }
+                    ended = true;
+                } else if self.state_at(cell.0, cell.1, cell.2).is_none() {
+                    ended = true;
+                } else if self.solid(cell.0, cell.1, cell.2).is_some() {
+                    // `SmallFireball.onHitBlock`: fire in the cell before the block.
+                    let before = (
+                        last[0].floor() as i32,
+                        last[1].floor() as i32,
+                        last[2].floor() as i32,
+                    );
+                    let air = kind_at(self, before) == Some(BlockKind::Air);
+                    let floor = self.solid(before.0, before.1 - 1, before.2) == Some(1.0);
+                    if air && floor {
+                        let fire = BlockKind::Fire.info().map_or(0, |i| i.default_state);
+                        out.extend(self.setblock(before, fire)?);
+                    }
+                    ended = true;
+                }
+                if ended {
+                    break;
+                }
+                last = p;
+            }
+            b.age += 1;
+            if ended || b.age > FIREBALL_LIFE {
+                gone.push(b.id);
+                continue;
+            }
+            for a in 0..3 {
+                b.pos[a] += b.vel[a];
+                b.vel[a] = (b.vel[a] + b.dir[a] * FIREBALL_POWER) * FIREBALL_INERTIA;
+            }
+            out.push(wire(
+                State::Play,
+                &S2c::EntityPositionSync {
+                    id: b.id,
+                    x: b.pos[0],
+                    y: b.pos[1],
+                    z: b.pos[2],
+                },
+            )?);
+            kept.push(b);
+        }
+        self.survival.life.fireballs = kept;
+        if !gone.is_empty() {
+            out.push(wire(State::Play, &S2c::RemoveEntities { ids: gone })?);
+        }
+        Ok(out)
+    }
+
+    /// The melee mobs' tick: each comes straight at the player while the ground ahead holds it
+    /// and the way is open, and hits in reach.
+    fn tick_mobs(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let ids: Vec<i32> = self.survival.life.mobs.keys().copied().collect();
+        for id in ids {
+            let Some(m) = self.survival.life.mobs.get(&id).copied() else {
+                continue;
+            };
+            let Brain::Melee(melee) = m.brain else {
+                continue;
+            };
+            if m.dead_at.is_some() {
+                continue;
+            }
+            let (dx, dz) = (self.pos[0] - m.pos[0], self.pos[2] - m.pos[2]);
+            let flat = (dx * dx + dz * dz).sqrt();
+            let level = (self.pos[1] - m.pos[1]).abs() < 2.0;
+            if flat > melee.reach * 0.8 {
+                let step = melee.speed.min(flat);
+                let to = [
+                    m.pos[0] + dx / flat * step,
+                    m.pos[1],
+                    m.pos[2] + dz / flat * step,
+                ];
+                let cell = |p: [f64; 3], dy: i32| {
+                    self.solid(
+                        p[0].floor() as i32,
+                        p[1].floor() as i32 + dy,
+                        p[2].floor() as i32,
+                    )
+                };
+                if cell(to, -1).is_some() && cell(to, 0).is_none() && cell(to, 1).is_none() {
+                    if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
+                        mob.pos = to;
+                    }
+                    out.push(wire(
+                        State::Play,
+                        &S2c::EntityPositionSync {
+                            id,
+                            x: to[0],
+                            y: to[1],
+                            z: to[2],
+                        },
+                    )?);
+                }
+            }
+            if flat <= melee.reach && level && self.ticks >= m.next_hit && self.health > 0.0 {
+                if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
+                    mob.next_hit = self.ticks + MELEE_EVERY;
+                }
+                let dealt = self.after_armor(melee.damage);
+                out.extend(self.hurt_player(dealt, "mob_attack", "death.attack.mob")?);
+                let life = &mut self.survival.life;
+                life.wither_ticks = life.wither_ticks.max(melee.wither_ticks);
+            }
+        }
+        Ok(out)
     }
 
     /// The mobs' `add_entity`, for the join.
@@ -212,7 +632,10 @@ impl Sim {
             return Ok(Vec::new());
         }
         if self.survival.life.fire_resistance
-            && matches!(damage_type, "lava" | "in_fire" | "on_fire" | "hot_floor")
+            && matches!(
+                damage_type,
+                "lava" | "in_fire" | "on_fire" | "hot_floor" | "fireball"
+            )
         {
             return Ok(Vec::new());
         }
@@ -293,6 +716,16 @@ impl Sim {
         {
             out.extend(self.hurt_player(MAGMA_DAMAGE, "hot_floor", "death.attack.hotFloor")?);
         }
+        // The wither effect, then the mobs that act.
+        if self.survival.life.wither_ticks > 0 {
+            if self.survival.life.wither_ticks.is_multiple_of(WITHER_EVERY) {
+                out.extend(self.hurt_player(1.0, "wither", "death.attack.wither")?);
+            }
+            self.survival.life.wither_ticks -= 1;
+        }
+        out.extend(self.tick_mobs()?);
+        out.extend(self.tick_blazes()?);
+        out.extend(self.tick_fireballs()?);
         // Eating.
         if let Some((item, left)) = self.survival.life.using {
             if left > 1 {
@@ -403,6 +836,13 @@ impl Sim {
 
     /// `use_item`: start eating the held food when there is room for it.
     pub(crate) fn on_use_item(&mut self, sequence: i32) -> Result<Vec<Wire>, EncodeError> {
+        // A shield in either hand goes up (the offhand is menu slot 45).
+        let shield = |s: Option<(ItemKind, i32)>| s.is_some_and(|(k, _)| k == ItemKind::Shield);
+        if shield(self.survival.held_stack())
+            || shield(self.survival.slots.get(45).copied().flatten())
+        {
+            self.survival.life.blocking_since.get_or_insert(self.ticks);
+        }
         // A bucket is used along the look (`BucketItem.use`, issue 14a).
         if let Some(used) = self.use_bucket() {
             let mut out = used?;
@@ -421,6 +861,7 @@ impl Sim {
     /// `player_action` status 5: the use key let go.
     pub(crate) fn on_release_use(&mut self) {
         self.survival.life.using = None;
+        self.survival.life.blocking_since = None;
     }
 
     /// A jump (`jumpFromGround`, from a move that leaves the ground going up).

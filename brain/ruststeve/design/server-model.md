@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds, nether_world, Stage, Wall, Nether stage, magma, hot_floor, fast lava, setblock]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+verifiedAgainst: ruststeve@b72980e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -101,9 +101,10 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 
 ## The Nether (issue 16, read from the 26.1.2 jar with javap)
 - `sim::nether` (`crates/sim/src/nether.rs`): `Stage` lays a world in `minecraft:the_nether` (a netherrack floor and ceiling, bedrock at y 0 and 127, 16 sections from y 0) with lava lakes, soul sand, soul soil, magma, gravel and nether bricks, and `build`s it; `nether_world` is the empty cavern. The login carries the dimension type's index in the synced registry (sorted by name: 3). `walls` holds the Nether crossing's walls as stages; `Sim::setblock` sets a block with its updates (lava put so runs, a lake laid in a stage rests until its bank changes).
-- Lava reads the dimension (`ModelWorld::fast_lava`: the type's `gameplay/fast_lava` attribute, the Nether alone): `LavaFluid.getTickDelay` 10 against 30, `getDropOff` 1 against 2 (7 cells from a source against 3), `getSlopeFindDistance` 4 against 2.
-- Magma (`Entity.applyEffectsFromBlocks`, `MagmaBlock.stepOn`): on the ground with a magma block 0.2 under the feet and not sneaking, 1 (`hot_floor`) a tick, so 1 each 10 ticks through the invulnerability; fire resistance refuses it (`is_fire`). The bot sends no `player_input`, so a server never holds it sneaking: `Life::sneaking` is false unless a test sets it.
-- Not modelled: soul sand's speed factor 0.4 (`physics` has no block speed factors at all: no ice, no honey), falling gravel, fire from lava, mobs.
+- Lava reads the dimension (`ModelWorld::fast_lava`: the type's `gameplay/fast_lava` attribute, the Nether alone): `LavaFluid.getTickDelay` 10 against 30, `getDropOff` 1 against 2 (7 cells from a source against 3), `getSlopeFindDistance` 4 against 2. Fluid ticks run only in chunks within the simulation distance of the player and wait elsewhere; `Sim::wake_fluids` schedules every fluid cell that flows or has room to (a captured world's lava falls, still in the columns as sent).
+- Magma (`Entity.applyEffectsFromBlocks`, `MagmaBlock.stepOn`): on the ground with a magma block 0.2 under the feet and not sneaking, 1 (`hot_floor`) a tick, so 1 each 10 ticks through the invulnerability; fire resistance refuses it (`is_fire`). The model takes `player_input` and keeps the shift key as `Life::sneaking` (`handlePlayerInput`: `setShiftKeyDown`), which the bot's world sends when its keys change ([[physics]]).
+- The fight (`life.rs`): a placed mob may hold a `Brain`: `Melee` (a wither skeleton walking straight in, 8 a hit with the wither effect), `Blaze` (`BlazeAttackGoal`: a charge of 60 ticks, three small fireballs 6 apart, a rest of 100; fireballs as entities, 5 and alight on a hit, fire left on a block hit); `Life::armor` cuts a mob's hit as `CombatRules` does; a shield up 5 ticks stops fireballs from the side faced. Arenas: `walls::fortress_bridge`, `fire_beside`, `shelter_wall`; tests `crates/bot/tests/nether_fight.rs`.
+- Not modelled: falling gravel, fire from lava, mobs.
 - Tests: `crates/sim/tests/nether.rs`; the walls closed loop in `crates/bot/tests/nether_walls.rs`, the pathfinder alone on them in `crates/plan/tests/nether_routes.rs` (docs/problems/nether-testbed.md).
 
 ## Issue 14a

@@ -7,7 +7,7 @@
 //!
 //! `verify` folds every event from the start and compares each step's effects, byte for byte,
 //! with the recorded ones, and the world at each checkpoint with the recorded world; then it folds
-//! again from the middle checkpoint and from the last (`replay::verify`, linear in the file). Any
+//! again from the last checkpoint (`replay::verify_stream`: linear, a record at a time). Any
 //! difference fails it. A recording from another
 //! commit is refused unless `--force`: a fold with newer code drifts (the handoff's lesson 4.5).
 
@@ -35,7 +35,20 @@ fn main() -> ExitCode {
 }
 
 fn verify(path: &Path, force: bool) -> Result<(), String> {
-    let (header, records) = Recording::read_all(path)?;
+    // Read a record at a time: a long recording's checkpoints are never all in memory.
+    let mut recording = Recording::open(path)?;
+    let header = match recording.next_record()? {
+        Some(Record::Header(h)) => h,
+        Some(other) => return Err(format!("the first record is not a header: {other:?}")),
+        None => return Err("an empty recording".to_owned()),
+    };
+    if header.format_version != record::FORMAT_VERSION {
+        return Err(format!(
+            "recording format {} (this build reads {})",
+            header.format_version,
+            record::FORMAT_VERSION
+        ));
+    }
     check_commit(&header, COMMIT, force)?;
     if header.dirty {
         eprintln!("replay: warning: the recording was made from a tree with uncommitted changes");
@@ -47,16 +60,16 @@ fn verify(path: &Path, force: bool) -> Result<(), String> {
         );
     }
     println!(
-        "replay: {} ({} {} as {}, commit {}), {} records",
+        "replay: {} ({} {} as {}, commit {})",
         path.display(),
         header.minecraft_version,
         header.server,
         header.bot_name,
-        header.commit,
-        records.len()
+        header.commit
     );
     let from = std::time::Instant::now();
-    let report = replay::verify(&records)?;
+    let (report, records) = replay::verify_stream(|| recording.next_record())?;
+    println!("{records} records");
     for line in &report.lines {
         eprintln!("{line}");
     }

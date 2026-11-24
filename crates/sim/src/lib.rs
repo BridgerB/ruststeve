@@ -167,7 +167,7 @@ fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
 }
 
 /// The column holding a block position.
-fn column_of(x: f64, z: f64) -> (i32, i32) {
+pub(crate) fn column_of(x: f64, z: f64) -> (i32, i32) {
     ((x.floor() as i32) >> 4, (z.floor() as i32) >> 4)
 }
 
@@ -295,6 +295,12 @@ impl Sim {
             (Phase::Play, C2s::MovePlayerStatusOnly { flags }) => {
                 let pos = self.pos;
                 self.on_move(pos, flags & 1 != 0)
+            }
+            // The keys held: a server keeps the shift key (`handlePlayerInput`:
+            // `setShiftKeyDown`), which is what spares the player on magma.
+            (Phase::Play, C2s::PlayerInput { flags }) => {
+                self.survival.life.sneaking = flags & protocol::packets::INPUT_SHIFT != 0;
+                Ok(Vec::new())
             }
             (
                 Phase::Play,

@@ -32,10 +32,17 @@ struct Crossing {
 
 /// The bot with `kit` at the wall's start, the planner aiming at the fortress, for `ticks`.
 fn cross(wall: Wall, kit: &[(ItemKind, i32)], ticks: u64) -> Crossing {
+    cross_with(Aim::Fortress, wall, kit, ticks)
+}
+
+/// The same with another aim; `reached_at` is then the first tick at the wall's spawner when it
+/// has one.
+fn cross_with(aim: Aim, wall: Wall, kit: &[(ItemKind, i32)], ticks: u64) -> Crossing {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
-    let mut plan = Plan::with_table(Aim::Fortress, table);
+    let mut plan = Plan::with_table(aim, table);
     let mut sim = wall.sim(CONFIG).unwrap();
+    let to_spawner = wall.spawner.is_some();
     for stack in kit {
         sim.survival.give(*stack);
     }
@@ -44,7 +51,12 @@ fn cross(wall: Wall, kit: &[(ItemKind, i32)], ticks: u64) -> Crossing {
     let run = bot::lockstep::run_acting(sim, "rs-nether", 1, ticks, 20, |w, t| {
         let c = plan.step(w);
         ledger.extend(plan.take_records().into_iter().map(line));
-        if reached_at.is_none() && world::stage::at_fortress(w) {
+        let there = if to_spawner {
+            world::stage::at_spawner(w)
+        } else {
+            world::stage::at_fortress(w)
+        };
+        if reached_at.is_none() && there {
             reached_at = Some(t);
         }
         (c, plan.take_acts())
@@ -125,11 +137,7 @@ impl Crossing {
     /// refuse on the way.
     fn assert_reached(&self) {
         assert!(!self.run.died, "died\n{}", self.story());
-        assert!(
-            self.reached_at.is_some(),
-            "never at the fortress\n{}",
-            self.story()
-        );
+        assert!(self.reached_at.is_some(), "never arrived\n{}", self.story());
         assert!(
             self.run.sim.violations.is_empty(),
             "{:?}\n{}",
@@ -189,7 +197,6 @@ fn a_soul_sand_flat_is_crossed_to_the_bricks() {
 
 /// (b) A lava moat 4 wide with no way round.
 #[test]
-#[ignore = "blaze wall: stands at the moat's bank, alive, tunnel tasks ending with no refusal; owner A2"]
 fn a_lava_moat_is_crossed_to_the_bricks() {
     let c = cross(walls::lava_moat(), &KIT, 2400);
     c.assert_reached();
@@ -212,7 +219,6 @@ fn a_lava_lake_under_a_hill_is_tunnelled_over_to_the_bricks() {
 
 /// (d) Lava down the bot's own stairs: sealed out, then on to the bricks.
 #[test]
-#[ignore = "blaze wall 22: the head cell sealed at ticks 61 and 71, then dead in the lava; owners A2, A7"]
 fn lava_at_the_door_of_a_stair_cut_is_sealed_out() {
     let c = cross(walls::stair_cut(), &KIT, 2400);
     c.assert_reached();
@@ -222,4 +228,34 @@ fn lava_at_the_door_of_a_stair_cut_is_sealed_out() {
         "burned\n{}",
         c.story()
     );
+}
+
+/// The next leg (A3's): from the foot of a brick pillar in the lava sea, where the bridged walk
+/// arrives, up to the fortress's deck and along it to the blaze spawner. The stage first: the
+/// bot is at the fortress there, sees the spawner, and is not at it.
+#[test]
+fn the_pillar_is_at_the_fortress_with_its_spawner_in_view() {
+    let wall = walls::pillar_in_the_sea();
+    let run = bot::lockstep::run(wall.sim(CONFIG).unwrap(), "rs-nether", 1, 5, 0, |_, _| {
+        physics::Controls::default()
+    });
+    let w = &run.world;
+    assert!(world::stage::at_fortress(w));
+    assert!(!world::stage::at_spawner(w));
+    let spawners = world::stage::kind_near(w, data::BlockKind::Spawner, 8);
+    assert_eq!(spawners.first().copied(), wall.spawner);
+}
+
+#[test]
+fn the_spawner_is_reached_from_the_foot_of_the_pillar() {
+    let kit = [
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::IronSword, 1),
+        (ItemKind::Cobblestone, 128),
+    ];
+    let c = cross_with(Aim::Race, walls::pillar_in_the_sea(), &kit, 8000);
+    c.assert_reached();
 }

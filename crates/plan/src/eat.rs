@@ -49,9 +49,18 @@ pub const HEALS_FROM: i32 = 18;
 
 /// Hurt under the engage line with the food bar too low to heal (issue 16: eat to heal between
 /// blaze fights, not only when hungry).
+///
+/// With a food held whose saturation is at least its hunger points (cooked meat: 8 and 12.8),
+/// any food bar under 20 is eaten at: health comes back a point every 10 ticks only while there
+/// is saturation, and a fed bot at food 20 with none healed 2 health in 200 ticks holding 25
+/// cooked beef (race 45343424571, ticks 3,400 to 3,600; docs/problems/blaze-fight.md wall 9).
 pub fn eat_to_heal(w: &World, rules: &SurvivalRules) -> bool {
+    let rich = best_food(w, rules)
+        .and_then(data::generated::item_props::food_of)
+        .is_some_and(|f| f.saturation >= f32::from(f.nutrition));
+    let under = if rich { 20 } else { HEALS_FROM };
     w.player.health.is_some_and(|h| h < rules.engage_health)
-        && w.player.food.is_some_and(|f| f < HEALS_FROM)
+        && w.player.food.is_some_and(|f| f < under)
 }
 
 /// Hunger points of safe food held: what a reserve is counted in (issue 16a).

@@ -6,7 +6,7 @@ tags: [wire, actions, attack, dig, use-item]
 aliases: [use_item, release use, LpVec3, set_entity_motion, attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@ddae609
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@b72980e
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub enum Act {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_dig_carries_its_sequence() {"
@@ -40,6 +40,7 @@ Everything the bot does to the world is one of a few client packets. Several car
 | `swing` | hand | arm animation |
 | `set-carried-item` | slot (i16) | select a hotbar slot |
 | `client-command` | action (0 respawn) | respawn after death |
+| `player-input` | flags (one byte: forward 1, backward 2, left 4, right 8, jump 16, shift 32, sprint 64) | the keys held, sent when they change; the only way a server learns of a sneak since 1.21.2 (`player-command` no longer carries it) |
 
 Faces: down 0, up 1, north 2, south 3, west 4, east 5. Hands: main 0, off 1. ruststeve sends `use-item-on` as `Act::UseOn` (issue 11a, [[placing]]).
 
