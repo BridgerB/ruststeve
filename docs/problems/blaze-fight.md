@@ -163,3 +163,11 @@ A bot at a blaze spawner with the gear a real bot holds ends with 7 blaze rods (
 ### 16. Seven rods held, and still among the blazes (the model's eight-seed loop at dad04f5, from the orchestrator)
 - **What happened**: two seeds held 7 rods (ticks 2,537 and 2,099) and died at the spawner afterwards (3,440 and 10,540). In a race the run ends when the aim is met; in the model, and for any leg after this one, the defend row kept fighting.
 - **Fix**: with 7 rods held a blaze is no foe (the always-row ignores every blaze; a running blaze defend ends, note "rods held: Blaze N left alone"), and the spawner task first walks away from the spawner to 26 by the route's measure ("rods held: away from the spawner at …", once; a goal met at the feet, or no route, and the aim is met).
+
+### 17. Seven rods, one short walk, and the aim met in sight (seed loop, probe 45355765767 at b54e3c9)
+- **What happened**: "rods held: away from the spawner … to 26" ended after 20 to 80 ticks with no outcome (cut by a meal or an escape) in shield seeds 2, 3, 4 and 6; the spawner was then refused, the aim met, and the bot stood on the bridge at (127 to 129, 61, 173 to 189), 14 to 30 blocks off, eating and escaping fire until it died.
+- **Fix**: the walk goes to 50 by the route's measure (a blaze shoots from 48), from any spawner on record (not only within 24), and is walked again when cut, at most 12 times (`LEAVE_RANGE`, `LEAVE_TRIES`); the aim is met when the goal is met at the feet, or with no route.
+
+### 18. Fire beside the feet on the deck (S's real race 45350933958 lane 0, ticks 13,860 to 14,300; the seed loop)
+- **What happened**: on the deck, "escape-fire (trapped in fire)" and "out of the fire" in the same tick again and again, `in_fire` hits 2.2 to 2.9 each, then burning; lane 0's last minute began with `in_fire`, 19 hits. Fireballs light the deck; the escape steps the body one cell off and ends, the fight stands beside the fire.
+- **Fix** (`defend::fire_near`): a deck cell with fire in it or in any of the eight round it is no post cell; standing beside fire on the deck, the fight steps to the nearest post cell clear of fire, swinging in passing ("N steps off fire on the deck" in the fight's note).

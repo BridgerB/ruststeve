@@ -121,6 +121,9 @@ pub struct Defend {
     /// Steps taken on the deck toward a blaze rod lying there, its foe out of reach.
     #[serde(default)]
     pub rod_steps: u32,
+    /// Steps taken on the deck away from fire beside the feet (wall 18).
+    #[serde(default)]
+    pub fire_steps: u32,
     /// Steps held because fire lay ahead (wall 11).
     #[serde(default)]
     pub fire_held: u32,
@@ -284,17 +287,11 @@ pub fn post_cells(
     toward: [f64; 3],
 ) -> Vec<crate::path::Cell> {
     let mut cells = crate::path::Cells::new(w);
-    let burning = |c: crate::path::Cell| {
-        matches!(
-            crate::cast::seen(w, c),
-            Some(data::BlockKind::Fire | data::BlockKind::SoulFire)
-        )
-    };
     let mut out: Vec<(i64, crate::path::Cell)> = Vec::new();
     for dx in -POST_CELLS..=POST_CELLS {
         for dz in -POST_CELLS..=POST_CELLS {
             let c = (spawner.0 + dx, spawner.1, spawner.2 + dz);
-            if on_post(c, spawner) && cells.standable(c) && !burning(c) && !edge(w, c) {
+            if on_post(c, spawner) && cells.standable(c) && !fire_near(w, c) && !edge(w, c) {
                 let d = [
                     f64::from(c.0) + 0.5 - toward[0],
                     f64::from(c.2) + 0.5 - toward[2],
@@ -322,6 +319,23 @@ pub fn rod_on_deck(w: &World, spawner: crate::path::Cell, pos: [f64; 3]) -> Opti
             on_post(c, spawner) && (c.0, c.2) != (feet.0, feet.2)
         })
         .min_by(|a, b| distance(*a, pos).total_cmp(&distance(*b, pos)))
+}
+
+/// Fire seen in `c` or any of the eight cells round it, at the feet or the head: a body in `c`
+/// can touch it. The deck burns where fireballs land; bots fought beside the fire and stepped
+/// into it, "escape-fire" and "out of the fire" in the same tick over and over, 19 in_fire hits
+/// in one real bot's last minute (race 45350933958 lane 0).
+pub fn fire_near(w: &World, c: crate::path::Cell) -> bool {
+    (-1..=1).any(|dx| {
+        (-1..=1).any(|dz| {
+            (0..=1).any(|dy| {
+                matches!(
+                    crate::cast::seen(w, (c.0 + dx, c.1 + dy, c.2 + dz)),
+                    Some(data::BlockKind::Fire | data::BlockKind::SoulFire)
+                )
+            })
+        })
+    })
 }
 
 /// The blaze spawner seen nearest the feet, within `POST_RANGE`.
@@ -605,6 +619,7 @@ impl Defend {
             walking_post: false,
             passing_swings: 0,
             rod_steps: 0,
+            fire_steps: 0,
             fire_held: 0,
             given_up: false,
             crit_wait: 0,
@@ -1092,6 +1107,31 @@ impl Defend {
                     }
                 }
                 self.walking_post = false;
+                // Fire beside the feet on the deck: to the nearest deck cell with none round it
+                // (blaze-fight wall 18). Counted in the fight's note.
+                if let Some(sp) = post
+                    && on_post(feet, sp)
+                    && fire_near(w, feet)
+                    && let Some(c) = post_cells(w, sp, body.pos).into_iter().next()
+                {
+                    let at = [f64::from(c.0) + 0.5, body.pos[1], f64::from(c.2) + 0.5];
+                    let yaw = yaw_to(body.pos, at);
+                    if !fire_ahead(w, body.pos, yaw) {
+                        self.fire_steps += 1;
+                        let act = self.strike_in_passing(w, rules, tick);
+                        return (
+                            Controls {
+                                forward: true,
+                                jump: body.horizontal_collision,
+                                sneak: false,
+                                yaw,
+                                pitch: None,
+                            },
+                            act,
+                            DefendStatus::Running,
+                        );
+                    }
+                }
                 // A shooter in touch is stepped away from, the strikes going on: its touch costs
                 // more than its fireballs (blaze-fight wall 4).
                 let face = match self

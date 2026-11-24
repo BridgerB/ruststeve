@@ -118,6 +118,10 @@ impl Enter {
 const FORTRESS_CHUNKS: i32 = 16;
 /// Blaze rods the race wants (clojurecraft's `rods-wanted`: six for twelve eyes, one spare).
 pub const RODS_WANTED: i32 = 7;
+/// With the rods held, the bot walks this far from the spawner by the route's measure (a blaze
+/// shoots from 48), at most `LEAVE_TRIES` walks, before the aim is met.
+pub const LEAVE_RANGE: f64 = 50.0;
+pub const LEAVE_TRIES: u32 = 12;
 /// Ticks between putting on one piece of armour and the next.
 const EQUIP_TICKS: u64 = 20;
 /// An escape this long writes its trail to the ledger, and again each time as long (16e).
@@ -528,6 +532,9 @@ pub struct Plan {
     /// When "no fight post: hurt, no cover found" may next be noted.
     #[serde(default)]
     pub unposted_at: u64,
+    /// Walks away from the spawner begun with 7 rods held.
+    #[serde(default)]
+    pub leave_tries: u32,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -707,6 +714,7 @@ impl Plan {
             shelter_blocks: 0,
             unhealed_at: 0,
             unposted_at: 0,
+            leave_tries: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -1710,7 +1718,7 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck",
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck, {} steps off fire on the deck",
                             d.swings,
                             d.landed,
                             d.stance,
@@ -1727,7 +1735,8 @@ impl Plan {
                             d.falling_swings,
                             d.passing_swings,
                             d.fire_held,
-                            d.rod_steps
+                            d.rod_steps,
+                            d.fire_steps
                         )))
                     }
                 };
@@ -2230,19 +2239,25 @@ impl Plan {
             // whole-stage model two seeds held 7 rods at ticks 2,537 and 2,099 and died at 3,440
             // and 10,540, still at the spawner; the defend row leaves blazes alone from now).
             // The goal is by the route's measure, met at the feet is no walk (spawner wall 8).
+            // Past a blaze's sight (48), and walked again when a meal or an escape cuts the walk:
+            // with one walk and the aim met after it, the bots of the seed loop stood on the
+            // bridge 14 to 30 blocks off, in sight, and burned there (probe 45355765767).
             if let Some(body) = w.body
-                && let Some(sp) = defend::spawner_near(w)
+                && let Some(sp) =
+                    world::stage::kind_near(w, data::BlockKind::Spawner, FORTRESS_CHUNKS)
+                        .first()
+                        .copied()
+                && self.leave_tries < LEAVE_TRIES
             {
                 let feet = path::feet_cell(body.pos);
-                let range = defend::POST_RANGE + 2.0;
+                let range = LEAVE_RANGE;
                 let goal = Goal::Away { pos: sp, range };
                 let mut walk = Walk::new(sp, goal, Arrive::Goal, tick);
                 if !goal.done(feet)
-                    && !self.refused_now(sp, tick)
                     && walk.route_now(w, tick)
                     && walk.route == Some(path::Status::Found)
                 {
-                    self.refuse(sp, tick);
+                    self.leave_tries += 1;
                     self.walks += 1;
                     self.note(
                         tick,
