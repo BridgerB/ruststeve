@@ -523,6 +523,31 @@ impl Plan {
         (what, why): (&str, &str),
         tick: u64,
     ) -> Option<Task> {
+        self.tunnel(w, target, true, (what, why), tick)
+    }
+
+    /// The travel tunnel to one cell (a spawner, a place): as `travel_tunnel`, but the route ends
+    /// only within `REACH` of `target` itself, never at a brick near it. For any task that has a
+    /// target seen and no walk to it; call it each time the planner looks again.
+    pub fn tunnel_toward(
+        &mut self,
+        w: &World,
+        target: Cell,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        self.travel.exploring = false;
+        self.tunnel(w, target, false, (what, why), tick)
+    }
+
+    fn tunnel(
+        &mut self,
+        w: &World,
+        target: Cell,
+        bricks: bool,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
         let body = w.body?;
         let feet = path::feet_cell(body.pos);
         if self.travel.target != Some(target) {
@@ -618,7 +643,8 @@ impl Plan {
                         world::stage::bricks_near(w, crate::FORTRESS_CHUNKS)
                             .into_iter()
                             .filter(|b| {
-                                *b != target
+                                bricks
+                                    && *b != target
                                     && flat(*b, target) <= GOAL_SPREAD
                                     && (b.1 - target.1).abs() <= 2 * GOAL_SPREAD
                             })

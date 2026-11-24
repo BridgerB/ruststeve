@@ -212,7 +212,12 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
     if hot(kind(w, floor)) {
         return Some(format!("magma under {floor:?}"));
     }
-    if !full(kind(w, floor)) && !short_drop(w, floor) {
+    // What the walk stands on is a floor here too, full block or not (soul sand, once the route
+    // takes it): the stair and the walk agree by construction (docs/problems/nether-tunnel.md:
+    // 19 of a tunnel's 22 refusals were soul sand floors on one cavern face).
+    let stood_on =
+        path::classify(w.state_at(BlockPos::new(floor.0, floor.1, floor.2))) == path::Class::Solid;
+    if !full(kind(w, floor)) && !stood_on && !short_drop(w, floor) {
         return Some(format!("no floor at {floor:?}"));
     }
     // Nothing that falls over what is opened: gravel or sand over a dug cell drops into it and
@@ -518,12 +523,21 @@ impl Stairs {
                         Err(f) => (still, None, StairsStatus::Failed(f)),
                     };
                 }
+                let before = self.refusals.len();
                 match self.plan(feet, w) {
                     Ok(s) => {
                         self.stage = s;
                         (still, None, StairsStatus::Running)
                     }
-                    Err(f) => (still, None, StairsStatus::Failed(f)),
+                    Err(f) => {
+                        // Boxed: every heading's refusal in one line, the last the ledger prints.
+                        let all = self.refusals.get(before..).unwrap_or_default().join("; ");
+                        self.refusals.push(format!(
+                            "boxed at {feet:?} after {} level steps: {all}",
+                            self.level_steps
+                        ));
+                        (still, None, StairsStatus::Failed(f))
+                    }
                 }
             }
             StairStage::Cut { cells, to, level } => {
@@ -547,7 +561,9 @@ impl Stairs {
                             self.dig = None;
                             (still, act, StairsStatus::Running)
                         }
-                        DigStatus::Failed(_) => {
+                        DigStatus::Failed(f) => {
+                            self.refusals
+                                .push(format!("a dig for the stair to {to:?} failed {f:?}"));
                             (still, act, StairsStatus::Failed(StairsFailure::DigFailed))
                         }
                     };
@@ -596,13 +612,23 @@ impl Stairs {
                     self.stage = StairStage::Plan;
                     return (still, None, StairsStatus::Running);
                 }
+                // Every failure names its reason (644 "last refusal: ;" in one ledger said
+                // nothing: race 45204423376 lane 3).
+                let to = *to;
                 if tick.saturating_sub(*since) > STEP_TICKS {
+                    self.refusals.push(format!(
+                        "the step from {feet:?} onto {to:?} took over {STEP_TICKS} ticks"
+                    ));
                     return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
                 }
                 match walk.step(w, tick) {
                     (c, TaskStatus::Running) => (c, None, StairsStatus::Running),
                     (_, TaskStatus::Done) => (still, None, StairsStatus::Running),
-                    (_, TaskStatus::Failed(_)) => {
+                    (_, TaskStatus::Failed(f)) => {
+                        let under = kind(w, (to.0, to.1 - 1, to.2));
+                        self.refusals.push(format!(
+                            "the walk from {feet:?} onto {to:?} failed {f:?} (its floor {under:?})"
+                        ));
                         (still, None, StairsStatus::Failed(StairsFailure::StepFailed))
                     }
                 }

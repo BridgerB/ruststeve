@@ -56,6 +56,9 @@ pub const SEARCH_COLUMNS: i32 = 8;
 /// After a failed task the planner waits this long before choosing again: a choice that fails at
 /// once must not be made every tick (the churn invariant).
 pub const RETRY_TICKS: u64 = 20;
+/// In the Nether, a dig toward a target farther than this on the plane is a travel tunnel
+/// (`tunnel::route`); nearer, the plain cut: a route's reach is 5.
+pub const TUNNEL_FROM: i32 = 8;
 /// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
 /// water lost twice, never a site worked forever.
 pub const WATER_TRIPS: u32 = 2;
@@ -2729,6 +2732,15 @@ impl Plan {
         let (fx, fy, fz) = path::feet_cell(body.pos);
         if (bank.1 > fy && !above_ok) || self.refused_now(bank, tick) {
             return None;
+        }
+        // In the Nether a far target gets the travel tunnel: a searched way through rock, over
+        // the lava sea's level, that comes to the target's own height at its end, where the cut
+        // below goes six down for a target one lower and six up for one two higher (lane 14 of
+        // race 45164371770 sawed between y 22 and y 28 under the lava sea:
+        // docs/problems/nether-tunnel.md).
+        let flat = (bank.0 - fx).abs() + (bank.2 - fz).abs();
+        if above_ok && world::stage::in_nether(w) && flat > TUNNEL_FROM {
+            return self.tunnel_toward(w, bank, (what, why), tick);
         }
         let d =
             f64::from((bank.0 - fx).pow(2) + (bank.1 - fy).pow(2) + (bank.2 - fz).pow(2)).sqrt();
