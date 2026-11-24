@@ -297,12 +297,14 @@ impl Stage {
     }
 
     /// The highest stage that holds of those above `reached` (all of them when `None`): the
-    /// stages at or under it are not looked at again.
-    pub fn highest_above(w: &World, reached: Option<Stage>) -> Option<Stage> {
+    /// stages at or under it are not looked at again, and the ones that scan the sightings of 25
+    /// chunk columns (`scans`) only when `scans`.
+    pub fn highest_above(w: &World, reached: Option<Stage>, scans: bool) -> Option<Stage> {
         Stage::ALL
             .into_iter()
             .rev()
             .take_while(|s| reached.is_none_or(|r| *s > r))
+            .filter(|s| scans || !matches!(s, Stage::Fortress | Stage::Spawner))
             .find(|s| s.holds(w))
     }
 }
