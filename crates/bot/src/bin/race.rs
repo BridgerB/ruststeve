@@ -7,7 +7,7 @@
 //! RUSTSTEVE_RCON_PASSWORD=... cargo run -p bot --bin race -- --start spawn --bots 14 --lane 0 \
 //!     --out target/race/lane-0 [--config config/race.toml] [--starts config/starts.toml] \
 //!     [--host 127.0.0.1] [--port 25565] [--rcon-port 25575] [--run local-<ms>] \
-//!     [--cap TICKS] [--wall-limit SECONDS] [--walk square]
+//!     [--cap TICKS] [--wall-limit SECONDS] [--walk square] [--snapshot-at TICKS]
 //! ```
 //!
 //! `--wall-limit` is the job's end, never a cap on behaviour: bots still running then end `Cut`
@@ -40,6 +40,8 @@ struct Args {
     /// Keep each bot living after its aim is met, to the cap (issue 12e).
     hold_after_aim: bool,
     revive: bool,
+    /// Take a snapshot once a bot has played this many server ticks (`--snapshot-at`).
+    snapshot_at: Option<u64>,
     /// A snapshot's memory to seed every bot with (`--memory`).
     memory: Option<PathBuf>,
     /// The server's directory: its `world/` is what a snapshot copies.
@@ -64,6 +66,7 @@ fn args() -> Result<Args, String> {
         wall_limit: None,
         hold_after_aim: false,
         revive: false,
+        snapshot_at: None,
         memory: None,
         server_dir: PathBuf::from("target/server"),
         walk: None,
@@ -92,6 +95,7 @@ fn args() -> Result<Args, String> {
             "--wall-limit" => a.wall_limit = Some(num(&flag, &v)?),
             "--hold-after-aim" => a.hold_after_aim = v == "true",
             "--revive" => a.revive = v == "true",
+            "--snapshot-at" => a.snapshot_at = Some(num(&flag, &v)?),
             "--memory" => a.memory = Some(PathBuf::from(v)),
             "--server-dir" => a.server_dir = PathBuf::from(v),
             "--goal" => a.goal = Some(plan::Aim::parse(&v).ok_or(format!("--goal: no aim {v}"))?),
@@ -131,7 +135,16 @@ fn snapshot(
     let mut r = rcon::Rcon::connect(rcon_addr, password)?;
     let reply = r.command("save-all flush")?;
     println!("snapshot {}: save-all flush -> {reply}", up.stage.name());
-    let dir = out.join(up.stage.name());
+    // A stage's snapshot is named by the stage; one on request or of a stuck spot by its kind.
+    let kind = match up.kind {
+        bot::SnapKind::Stage => None,
+        bot::SnapKind::At(t) => Some(("at", t)),
+        bot::SnapKind::Stuck => Some(("stuck", 0)),
+    };
+    let dir = out.join(match kind {
+        None => up.stage.name().to_owned(),
+        Some((k, t)) => bot::devstart::request_dir(k, t, &up.bot),
+    });
     let files = results::snapshot::copy_dir(server_world, &dir.join("world"))?;
     results::snapshot::write_memory(&dir.join("memory.rsw"), &up.world.memory)?;
     let snap = results::snapshot::Snap {
@@ -170,6 +183,10 @@ fn snapshot(
         bot::devstart::mark_dev(&text)
     } else {
         text
+    };
+    let text = match kind {
+        Some((k, _)) => bot::devstart::mark_kind(&text, k),
+        None => text,
     };
     std::fs::write(dir.join("snap.toml"), text).map_err(|e| e.to_string())?;
     println!(
@@ -259,11 +276,24 @@ fn race(a: &Args) -> Result<bool, String> {
         };
         std::thread::spawn(move || {
             let mut best = from;
+            let mut at_taken = false;
             for up in rx {
-                if best.is_some_and(|b| up.stage <= b) {
-                    continue;
+                match up.kind {
+                    bot::SnapKind::Stage => {
+                        if best.is_some_and(|b| up.stage <= b) {
+                            continue;
+                        }
+                        best = Some(up.stage);
+                    }
+                    // One world for the lane: the first bot to play the ticks asked for.
+                    bot::SnapKind::At(_) => {
+                        if at_taken {
+                            continue;
+                        }
+                        at_taken = true;
+                    }
+                    bot::SnapKind::Stuck => {}
                 }
-                best = Some(up.stage);
                 if let Err(e) = snapshot(&up, &server_world, &out, &rcon_addr, &password, &race) {
                     eprintln!("snapshot {}: {e}", up.stage.name());
                 }
@@ -318,6 +348,7 @@ fn race(a: &Args) -> Result<bool, String> {
             on_stage: Some(tx.clone()),
             no_progress_ticks: config.race.no_progress_ticks,
             progress: Some(a.out.join(format!("progress-{name}.txt"))),
+            snapshot_at: a.snapshot_at,
         };
         let watch = Watch::start(
             format!("{}:{}", a.host, a.rcon_port),

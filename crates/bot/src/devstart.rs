@@ -35,6 +35,30 @@ pub fn mark_dev(snap_toml: &str) -> String {
     format!("dev = true\n{snap_toml}")
 }
 
+/// A `snap.toml` marked as a snapshot on request (`kind = "at"`) or of a stuck spot
+/// (`kind = "stuck"`): a place to resume a look from, never a stage's snapshot.
+pub fn mark_kind(snap_toml: &str, kind: &str) -> String {
+    format!("kind = \"{kind}\"\n{snap_toml}")
+}
+
+/// The `kind` a `snap.toml` is marked with, if any.
+pub fn snap_kind(snap_toml: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Mark {
+        kind: Option<String>,
+    }
+    toml::from_str::<Mark>(snap_toml).ok().and_then(|m| m.kind)
+}
+
+/// The directory (and so the asset's name) of a snapshot that is not a stage's: `at-<ticks>` or
+/// `stuck-<bot>`. No stage is named so (a test holds it).
+pub fn request_dir(kind: &str, ticks: u64, bot: &str) -> String {
+    match kind {
+        "at" => format!("at-{ticks}"),
+        _ => format!("{kind}-{bot}"),
+    }
+}
+
 /// Whether a race's snapshots are development ones: its start is, or the snapshot it resumed is.
 pub fn race_is_dev(start: &str, resumed_snap_toml: Option<&str>) -> bool {
     dev_start(start) || resumed_snap_toml.is_some_and(snap_is_dev)
@@ -50,6 +74,12 @@ pub fn frontier_refusal(frontier_toml: &str) -> Option<String> {
         Ok(f) => f,
         Err(e) => return Some(format!("config/frontier.toml: {e}")),
     };
+    if f.asset.starts_with("snapshot-at-") || f.asset.starts_with("snapshot-stuck-") {
+        return Some(format!(
+            "the frontier's asset {} is a snapshot on request or of a stuck spot, not a stage's",
+            f.asset
+        ));
+    }
     f.asset.starts_with(DEV_PREFIX).then(|| {
         format!(
             "the frontier's asset {} is a development snapshot: only a bot from a real start \
@@ -127,6 +157,26 @@ mod tests {
         assert!(frontier_refusal(dev).is_some());
         let real = "stage = \"fortress\"\ntag = \"race-1\"\nasset = \"snapshot-fortress-1-race-1-lane-0.tar.zst\"\n";
         assert_eq!(frontier_refusal(real), None);
+    }
+
+    #[test]
+    fn a_snapshot_on_request_is_marked_and_never_a_stage_or_the_frontier() {
+        let at = mark_kind(SNAP, "at");
+        assert_eq!(snap_kind(&at).as_deref(), Some("at"));
+        assert_eq!(snap_kind(SNAP), None);
+        // Both marks together still parse, each a top-level key.
+        let both = mark_dev(&mark_kind(SNAP, "stuck"));
+        assert!(snap_is_dev(&both));
+        assert_eq!(snap_kind(&both).as_deref(), Some("stuck"));
+        assert_eq!(request_dir("at", 36_000, "rs-l00-b00"), "at-36000");
+        assert_eq!(request_dir("stuck", 0, "rs-l00-b00"), "stuck-rs-l00-b00");
+        for dir in ["at-36000", "stuck-rs-l00-b00"] {
+            assert!(world::stage::Stage::from_name(dir).is_none());
+            let frontier = format!(
+                "stage = \"nether\"\ntag = \"race-1\"\nasset = \"snapshot-{dir}-1-race-1-lane-0.tar.zst\"\n"
+            );
+            assert!(frontier_refusal(&frontier).is_some(), "{dir}");
+        }
     }
 
     /// The repository's own frontier: CI fails the commit that points it at a dev snapshot.

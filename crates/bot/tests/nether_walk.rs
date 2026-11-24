@@ -70,6 +70,12 @@ fn soul_sand_is_ground_for_a_route() {
     let r = path::plan(&w, (0, 64, 0), &Goal::Block { pos: (8, 64, 0) }, 6000);
     assert_eq!(r.status, Status::Found);
     assert_eq!(r.waypoints.len(), 8, "{:?}", r.waypoints);
+    // Four of the eight cells are soul sand, each at its pace: 1 / 0.581 of a plain cell.
+    assert!(
+        (r.cost - (4.0 + 4.0 / 0.581)).abs() < 0.05,
+        "cost {}",
+        r.cost
+    );
     assert!(
         r.kinds.iter().all(|k| *k == MoveKind::Walk),
         "{:?}",

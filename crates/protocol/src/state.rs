@@ -45,6 +45,7 @@ impl State {
             | C2s::ChunkBatchReceived { .. }
             | C2s::MovePlayerPosRot { .. }
             | C2s::MovePlayerStatusOnly { .. }
+            | C2s::PlayerInput { .. }
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
             | C2s::ClientCommand { .. }

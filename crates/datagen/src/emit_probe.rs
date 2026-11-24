@@ -1,5 +1,6 @@
 //! Rust source for the tables the JNI probe reads from the game's classes (02b): hardness and
-//! needs-correct-tool, collision shapes, tool materials, fuel, mobs, entity data serializers.
+//! needs-correct-tool, collision shapes, movement factors, tool materials, fuel, mobs, entity
+//! data serializers.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -133,6 +134,63 @@ pub fn shapes_rs(g: &Game, p: &Probe) -> Result<String> {
         s,
         "    usize::try_from(block.id()).ok().and_then(|i| COLLISION.get(i)).copied()"
     )?;
+    writeln!(s, "}}")?;
+    Ok(s)
+}
+
+/// The blocks that change how a body moves on them: every block whose speed factor, jump
+/// factor or friction is not the default, in block-id order.
+pub fn movement_rs(g: &Game, p: &Probe) -> Result<String> {
+    // `Block.Properties`' own defaults: speedFactor 1, jumpFactor 1, friction 0.6 (a float).
+    let default = (1.0, 1.0, f64::from(0.6f32));
+    let rows = block_rows(g, p)?;
+    let odd: Vec<(&str, &BlockProbe)> = g
+        .blocks
+        .iter()
+        .zip(&rows)
+        .filter(|(_, r)| (r.speed_factor, r.jump_factor, r.friction) != default)
+        .map(|(b, r)| (b.name.as_str(), *r))
+        .collect();
+    ensure!(
+        odd.iter().any(|(n, _)| *n == "soul_sand"),
+        "the probe found no speed factor on soul sand"
+    );
+    let mut s = probe_header();
+    writeln!(s, "use super::blocks::BlockKind;")?;
+    writeln!(s, "use crate::types::Movement;\n")?;
+    writeln!(
+        s,
+        "/// Every block whose speed factor, jump factor or friction (`Block.getSpeedFactor`,"
+    )?;
+    writeln!(
+        s,
+        "/// `getJumpFactor`, `getFriction`) is not the default (1, 1, 0.6), in block-id order."
+    )?;
+    writeln!(
+        s,
+        "pub static MOVEMENT: [(BlockKind, Movement); {}] = [",
+        odd.len()
+    )?;
+    for (name, r) in &odd {
+        writeln!(
+            s,
+            "    (BlockKind::{}, Movement {{ speed_factor: {}, jump_factor: {}, friction: {} }}),",
+            pascal(name),
+            f32_lit(name, r.speed_factor)?,
+            f32_lit(name, r.jump_factor)?,
+            f32_lit(name, r.friction)?
+        )?;
+    }
+    writeln!(s, "];\n")?;
+    writeln!(
+        s,
+        "/// A block's movement numbers: the default for every block not in `MOVEMENT`."
+    )?;
+    writeln!(s, "pub fn movement(block: BlockKind) -> Movement {{")?;
+    writeln!(s, "    MOVEMENT")?;
+    writeln!(s, "        .iter()")?;
+    writeln!(s, "        .find(|(b, _)| *b == block)")?;
+    writeln!(s, "        .map_or(Movement::DEFAULT, |(_, m)| *m)")?;
     writeln!(s, "}}")?;
     Ok(s)
 }

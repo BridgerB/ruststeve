@@ -281,6 +281,18 @@ impl<'a> Cells<'a> {
         }
     }
 
+    /// What a step onto `node` costs more for the floor's pace: on soul sand a walk settles at
+    /// 0.581 of the plain pace (`physics::pace_factor`), so a cell there costs 1.72 cells; 1 on
+    /// every other floor a route takes.
+    pub fn pace(&mut self, (x, y, z): Cell) -> f64 {
+        if self.world.block_at(BlockPos::new(x, y - 1, z)) == Some(BlockKind::SoulSand) {
+            let factor = data::generated::movement::movement(BlockKind::SoulSand).speed_factor;
+            1.0 / physics::pace_factor(f64::from(factor))
+        } else {
+            1.0
+        }
+    }
+
     /// Clear, with no lava beside: the feet's cell of a bridge move, whose floor (lava, as like
     /// as not) is laid before the feet come.
     pub fn clear_over(&mut self, (x, y, z): Cell) -> bool {
@@ -594,14 +606,14 @@ pub fn neighbors(cells: &mut Cells<'_>, (x, y, z): Cell) -> Vec<Step> {
                 if let Some((node, fall)) = landing(cells, there) {
                     out.push(Step {
                         node,
-                        cost: m.cost + FALL_COST_PER_BLOCK * f64::from(fall),
+                        cost: (m.cost + FALL_COST_PER_BLOCK * f64::from(fall)) * cells.pace(node),
                         kind: m.id,
                     });
                 }
             } else {
                 out.push(Step {
                     node: there,
-                    cost: m.cost,
+                    cost: m.cost * cells.pace(there),
                     kind: m.id,
                 });
             }
