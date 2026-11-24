@@ -5,8 +5,8 @@ type: how-to
 tags: [replay, why, recording, debugging]
 aliases: [replay verify, replay export, why binary, replan, replan binary, --route, --steps, --blocks, --radius, block slice, --force, debug a run, fold a recording]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@a5ae696
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@adfcb00
 sourceRefs:
   - "ruststeve:crates/replay/src/bin/replay.rs#fn verify(path: &Path, force: bool) -> Result<(), String> {"
   - "ruststeve:crates/replay/src/bin/why.rs#fn print_world(w: &World, events: u64) {"
@@ -29,6 +29,7 @@ related:
 - One fold from the start compares every step's effects and every checkpoint's world. A checkpoint that matches proves a fold from it would go as the running one does, so only the middle checkpoint and the last are folded again (they prove `Folder::from_checkpoint`). The first version folded again from every checkpoint: a three-hour recording has 180, and the lane's replay took most of an hour.
 - A run resumed from a snapshot starts with the snapshot's memory, which no event carries: the bot writes that world as a checkpoint before the first event and `Folder::take_start` begins the fold from it. An older resumed recording, whose first checkpoint differs from the fold in the memory alone, is taken as the truth and said so, not counted a mismatch.
 - A checkpoint that differs is counted once: the fold goes on from the recorded world.
+- The binary reads a record at a time (`replay::verify_stream`): it holds the records from one checkpoint to the next and one world, and folds again from the last checkpoint only, so a five-hour recording (250 worlds) needs the memory of one. `replay::verify` over a whole slice (two refolds) is kept for tests.
 
 ## Asking the planner again: replan (issue 16, wall 6)
 - `cargo run -q --release -p replay --bin replan -- <file.rsr> --at <ticks> --route x,y,z [--range 2] [--nodes 6000] [--force]`: `plan::path::plan` from the bot's feet to within `--range` of the cell (0 is the cell itself): how it ended, waypoints, cost, nodes; whether the feet's cell is a start and why not; when it did not arrive, the moves the route's end has and each cell beside it nearer the goal that no move enters, with the reason (no floor and what is under, the block and class in the feet or head cell, lava beside and where).

@@ -5,8 +5,8 @@ type: how-to
 tags: [ci, runners, github-actions, probe, caching]
 aliases: [ci.yml, probe.yml, how to run code, rust-cache, nextest, workflow_dispatch, deps-boundary, xtask]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@a5ae696
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@adfcb00
 sourceRefs:
   - "ruststeve:.github/workflows/ci.yml## Incremental compilation only adds overhead and cache churn on a fresh runner."
   - "ruststeve:.github/workflows/ci.yml## Only main writes the cache; branches and PRs restore it."
@@ -56,6 +56,9 @@ The command arrives through an environment variable, never interpolated into the
 
 ## A probe on a recording
 `replay`'s binaries read a race's recording on a runner: `why` (the world at a moment, a block slice with `--blocks x,y,z --radius 15 --ys lo,hi`), `replan` (the route or the planner's steps asked again there) and `replay verify`. The command lines are in [[replay-and-why]].
+
+## Waiting on a run (the shared API limit)
+Every `gh` call of every agent and session draws on one token's 5,000 requests an hour. On 2026-11-23 nine agents' `gh run watch` and release polls spent it in an hour and every call failed 403 until the reset. The rule: never `gh run watch`, never poll in a loop; ask once every 4 minutes or more with one request: the MCP tool `run_done`, or `gh api repos/BridgerB/ruststeve/actions/runs/<id> --jq '"\(.status) \(.conclusion)"'`. `gh api rate_limit` is free.
 
 ## Gotchas
 - **`workflow_dispatch` only works for a workflow file on the default branch.** That is why the work moved to `main` ([[just-ruststeve]]). `--ref` then chooses which branch's code runs.
