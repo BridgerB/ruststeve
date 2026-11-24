@@ -128,7 +128,12 @@ fn a_lava_moat_has_a_route() {
     w.inventory
         .slots
         .insert(36, (data::ItemKind::Cobblestone, 64));
-    let r = to_bricks(&wall, &w);
+    // The far search is the one that bridges (`fortress_task`'s far walk).
+    let goal = Goal::Near {
+        pos: wall.bricks,
+        range: world::stage::FORTRESS_NEAR - 1.0,
+    };
+    let r = plan::path::plan_far(&w, wall.start, &goal, Budget::Far.expansions(), 1.0);
     assert_eq!(r.status, Status::Found, "{}", said(&wall, &w, &r));
 }
 

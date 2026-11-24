@@ -44,6 +44,8 @@ pub const FAR_WEIGHT: f64 = 4.0;
 pub const FAR_RETRY_TICKS: u64 = 200;
 /// After a far route was found, the least ticks before the planner searches the next.
 pub const FAR_AGAIN_TICKS: u64 = 100;
+/// Waypoints ahead a far walk watches for a mob to keep clear of.
+pub const SHUN_AHEAD: usize = 12;
 /// Ticks between two clicks laying one bridge block: the block update arrives in a tick or two.
 pub const PLACE_EVERY_TICKS: u64 = 6;
 /// Clicks for one bridge block before the walk fails.
@@ -288,7 +290,11 @@ impl Walk {
         } else {
             (Budget::Far.expansions(), 1.0)
         };
-        let r = path::plan_weighted(w, path::feet_cell(pos), &self.goal, nodes, weight);
+        let r = if self.more.far {
+            path::plan_far(w, path::feet_cell(pos), &self.goal, nodes, weight)
+        } else {
+            path::plan_weighted(w, path::feet_cell(pos), &self.goal, nodes, weight)
+        };
         self.expanded += u64::from(r.expanded);
         self.waypoints = Some(r.waypoints);
         self.more.kinds = r.kinds;
@@ -321,8 +327,18 @@ impl Walk {
             return true;
         };
         let ahead = wps.get(self.at..).unwrap_or_default();
-        let mut cells = path::Cells::new(w);
-        ahead.iter().enumerate().any(|(i, c)| {
+        let mut cells = if self.more.far {
+            path::Cells::far(w)
+        } else {
+            path::Cells::new(w)
+        };
+        // A mob to keep clear of has come within its radius of the way ahead: plan again.
+        let from = self.more.from.unwrap_or(self.target);
+        let near = ahead
+            .iter()
+            .take(SHUN_AHEAD)
+            .any(|c| cells.shunned(*c, from));
+        near || ahead.iter().enumerate().any(|(i, c)| {
             let kind = self
                 .more
                 .kinds

@@ -118,12 +118,12 @@ fn a_lava_moat_is_routed_over_only_with_blocks_held() {
     let w = joined(nether(&moat, &[]));
     let goal = Goal::Block { pos: (8, 64, 0) };
     assert_ne!(
-        path::plan(&w, (0, 64, 0), &goal, 6000).status,
+        path::plan_far(&w, (0, 64, 0), &goal, 6000, 1.0).status,
         Status::Found
     );
     // With cobblestone held the route bridges its four cells and walks the rest.
     let w = joined(nether(&moat, &[(ItemKind::Cobblestone, 64)]));
-    let r = path::plan(&w, (0, 64, 0), &goal, 6000);
+    let r = path::plan_far(&w, (0, 64, 0), &goal, 6000, 1.0);
     assert_eq!(r.status, Status::Found);
     let bridged: Vec<_> = r
         .waypoints
@@ -136,10 +136,16 @@ fn a_lava_moat_is_routed_over_only_with_blocks_held() {
         bridged,
         vec![(2, 64, 0), (3, 64, 0), (4, 64, 0), (5, 64, 0)]
     );
+    // A plain plan (an explore, a walk to a log) never bridges.
+    let goal = Goal::Block { pos: (8, 64, 0) };
+    assert_ne!(
+        path::plan(&w, (0, 64, 0), &goal, 6000).status,
+        Status::Found
+    );
     // Fewer than the reserve is not a crossing.
     let w = joined(nether(&moat, &[(ItemKind::Cobblestone, 8)]));
     assert_ne!(
-        path::plan(&w, (0, 64, 0), &goal, 6000).status,
+        path::plan_far(&w, (0, 64, 0), &goal, 6000, 1.0).status,
         Status::Found
     );
 }
@@ -153,7 +159,7 @@ fn the_overworld_is_not_bridged() {
     let mut sim = Sim::new(CONFIG, m);
     sim.survival.give((ItemKind::Cobblestone, 64));
     let w = joined(sim);
-    let r = path::plan(&w, (0, 64, 0), &Goal::Block { pos: (8, 64, 0) }, 6000);
+    let r = path::plan_far(&w, (0, 64, 0), &Goal::Block { pos: (8, 64, 0) }, 6000, 1.0);
     assert_ne!(r.status, Status::Found);
 }
 

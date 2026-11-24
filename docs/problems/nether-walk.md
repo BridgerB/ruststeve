@@ -20,3 +20,23 @@ Read with `navmap` (crate `navprobe`, probes 45334641630 and 45334717081) on `rs
 2. A start that is allowed beside lava: a bot with lava at its door must still be given a way off.
 3. A way over lava: a bridge of held blocks, as a move the search can choose and the walk can make.
 4. A search that reaches 110 to 250 blocks: 6,000 expansions do not.
+
+## Fix 1: soul sand is ground, a bridge move, a far search (38f14da, d709221, 475e5f1)
+
+- **Soul sand** is `Solid` to `path::classify`; `feet_cell` reads feet at y + 0.875 as the cell over it (`FEET_LIFT`); `follow` jumps only for more than a step up; soul sand is dry land for a trap to clear on. Magma stays a wall.
+- **The lava rule was not the cause.** `lava_near` forbids a cell with lava beside it at its own height, or under it. A shore whose floor is level with the sea (floor y 31, feet y 32) has lava beside the floor, not beside the feet, and was always usable. What had no route was the ledge (an island) and soul sand. The rule is kept; only the bridge's own feet cell may have lava under it, since its floor is laid first (`clear_over`).
+- **The bridge move** (`MoveKind::Bridge`): one cell on the level whose floor is air or lava; the walk stands on the block before it and lays a held block against that block's side, then steps. It does not sneak (the protocol sends no sneak input; the server asks only that the clicked block is in reach). A bridge it cannot lay fails the walk; it never steps over a floor not laid. In the Nether only, with 16 bridge blocks held. Each block laid writes "bridge block laid at …".
+- **The far search** (`plan_far`, `Walk::far`): f = g + 4h, 40,000 expansions. Probe 45336893578 on the recorded Nether (lane 5 of race 45194253932 at tick 25,140, from (19, 35, -20) to within 5 of (61, 33, 95)): weight 1 with 6,000 finds nothing; weight 2 finds 291 cells (76 bridged) in 147,900 expansions, 1.8 s; weight 3, 290 cells (91 bridged) in 35,525; weight 4, 222 cells (163 bridged) in 12,664, 0.1 s; weight 10, 218 cells in 8,906. At ticks 25,020 and 25,060, with half the chunks, a search spends all it is given and finds none, so a failed one is tried again 200 ticks on. The weight-4 route: nine cells bridged north off the ledge, over the land to the north-east, 15 bridged east, then a causeway 110 long at feet y 33 down the east cavern to an islet at (70 to 74, 32, 79 to 82) and 20 more to (63, 33, 91).
+- **In `fortress_task`** (a fenced block, agreed with the orchestrator): one far search toward the nearest brick, its route held by the walk, a note with its cells, bridges and expansions; the tunnel stays the fallback.
+- **What the search reads**: the blocks of loaded columns, as `path::plan` always has; it walks only through open cells and digs nothing.
+- **Unit tests**: `crates/bot/tests/nether_walk.rs` (soul sand routed and walked, the feet's cell, a moat routed only with blocks held, the overworld not bridged, a chasm bridged block by block in the model, the weighed search); the test bed's `a_soul_sand_flat_has_a_route`, `a_lava_moat_has_a_route` and `a_lava_moat_is_crossed_to_the_bricks` no longer ignored.
+
+### Raced: race 45337580375 (475e5f1, the Nether snapshot, 3 x 1, cap 12,000)
+
+- **Lane 1**: the bridge works on a real server. Nine "bridge block laid" notes at ticks 80 to 120, (24, 33, -25) to (24, 33, -33): nine blocks in about 50 ticks, health 20, and the bot off the ledge 120 ticks after resuming. It was an `explore` walk that laid them (no bricks on record yet at tick 40), not the far walk. On the north-east land two piglins met it at tick 200: "defend Piglin 12 (Fight)", 5.1 a hit, dead at tick 300 ("death.attack.mob piglin").
+- **Cause of the death**: the route crosses land where piglins stand (they were on record at 25 to 37 blocks when the route was chosen), and a bot in iron with no gold is attacked on sight. The defend row fights them and loses.
+
+## Fix 2: a far route keeps clear of piglins; only a far walk bridges
+
+- `Cells::far` holds where piglins, piglin brutes and hoglins stand (`SHUN_KINDS`); a far search enters no cell within 20 of one (`SHUN_RADIUS`; a piglin sees at 16), except within 6 of its start. A far walk plans again when one comes within 20 of its next 12 waypoints.
+- Bridging is the far search's alone (`plan_far`): a plain `plan` (an explore, a walk to a block) lays nothing.

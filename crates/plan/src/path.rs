@@ -218,9 +218,11 @@ pub struct Cells<'a> {
     held: BTreeMap<Cell, Class>,
     /// `clear` answers, which read five neighbours for lava each: held too.
     clear: BTreeMap<Cell, bool>,
-    /// May a search lay a held block as a floor (`MoveKind::Bridge`)? Only in the Nether, with
-    /// `BRIDGE_RESERVE` blocks held.
+    /// May a search lay a held block as a floor (`MoveKind::Bridge`)? Only a far search
+    /// (`Cells::far`), in the Nether, with `BRIDGE_RESERVE` blocks held.
     bridge: bool,
+    /// Where the mobs a far route keeps clear of stand (`SHUN_KINDS`).
+    shun: Vec<[f64; 3]>,
 }
 
 impl<'a> Cells<'a> {
@@ -230,8 +232,36 @@ impl<'a> Cells<'a> {
             ice: on_ice(world),
             held: BTreeMap::new(),
             clear: BTreeMap::new(),
-            bridge: bridges(world),
+            bridge: false,
+            shun: Vec::new(),
         }
+    }
+
+    /// The cells for a far search (`plan_far`): it may bridge, and it keeps clear of the mobs
+    /// that kill a bot on sight.
+    pub fn far(world: &'a World) -> Self {
+        Self {
+            bridge: bridges(world),
+            shun: world
+                .entities
+                .values()
+                .filter(|e| SHUN_KINDS.contains(&e.kind))
+                .map(|e| e.pos)
+                .collect(),
+            ..Self::new(world)
+        }
+    }
+
+    /// Is `c` within `SHUN_RADIUS` of a mob to keep clear of? Never within `SHUN_FREE` of the
+    /// search's `start`: a bot already beside one must still be given a way off.
+    pub fn shunned(&self, c: Cell, start: Cell) -> bool {
+        let at = |c: Cell| [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+        let d = |a: [f64; 3], b: [f64; 3]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        };
+        !self.shun.is_empty()
+            && d(at(c), at(start)) > SHUN_FREE
+            && self.shun.iter().any(|m| d(at(c), *m) <= SHUN_RADIUS)
     }
 
     /// Can a held block be laid at `c` as a floor: air or lava there (a block replaces a fluid),
@@ -329,6 +359,19 @@ pub const BRIDGE_RESERVE: i64 = 16;
 /// Added to a walk's cost for a cell bridged: a route takes ground up to four times as long
 /// before it lays a block (and a block laid is a block spent).
 pub const BRIDGE_COST: f64 = 3.0;
+
+/// Mobs a far route keeps clear of: they attack on sight a bot with no gold on, and two piglins
+/// took a bot in iron from 20 health to 0 in 100 ticks (race 45337580375 lane 1,
+/// docs/problems/nether-walk.md).
+pub const SHUN_KINDS: &[data::EntityKind] = &[
+    data::EntityKind::Piglin,
+    data::EntityKind::PiglinBrute,
+    data::EntityKind::Hoglin,
+];
+/// A far route enters no cell within this of one: a piglin sees a player at 16.
+pub const SHUN_RADIUS: f64 = 20.0;
+/// Cells this near the search's start are free of the rule.
+pub const SHUN_FREE: f64 = 6.0;
 
 /// The bridge blocks held, every kind together.
 pub fn bridge_blocks(w: &World) -> i64 {
@@ -741,6 +784,9 @@ pub fn search_weighted(
             best_h = hn;
         }
         for s in neighbors(cells, node) {
+            if cells.shunned(s.node, start) {
+                continue;
+            }
             let g2 = gn + s.cost;
             if !closed.contains(&s.node) && g2 < g.get(&s.node).copied().unwrap_or(f64::MAX) {
                 open.insert((
@@ -818,9 +864,20 @@ pub fn plan(world: &World, from: Cell, goal: &Goal, max_nodes: u32) -> Route {
     plan_weighted(world, from, goal, max_nodes, 1.0)
 }
 
-/// `plan` with the heuristic weighed (`search_weighted`): for a goal far off.
+/// `plan` with the heuristic weighed (`search_weighted`).
 pub fn plan_weighted(world: &World, from: Cell, goal: &Goal, max_nodes: u32, weight: f64) -> Route {
-    let mut cells = Cells::new(world);
+    plan_over(Cells::new(world), from, goal, max_nodes, weight)
+}
+
+/// A route to a goal far off (docs/problems/nether-walk.md): weighed, over `Cells::far`, so it
+/// may bridge and keeps clear of the mobs that kill on sight. A plain `plan` does neither: an
+/// explore's walk laid nine blocks out over a lava sea on its first try.
+pub fn plan_far(world: &World, from: Cell, goal: &Goal, max_nodes: u32, weight: f64) -> Route {
+    plan_over(Cells::far(world), from, goal, max_nodes, weight)
+}
+
+fn plan_over(mut cells: Cells<'_>, from: Cell, goal: &Goal, max_nodes: u32, weight: f64) -> Route {
+    let world = cells.world;
     let under_box = world
         .player
         .pos

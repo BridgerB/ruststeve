@@ -134,7 +134,7 @@ fn run() -> Result<(), String> {
             range: f64::from(range),
         };
         let began = std::time::Instant::now();
-        let r = path::plan_weighted(w, start, &goal, nodes, weight);
+        let r = path::plan_far(w, start, &goal, nodes, weight);
         let took = began.elapsed().as_millis();
         let end = r.waypoints.last().copied().or(r.from);
         let count = |k: path::MoveKind| r.kinds.iter().filter(|m| **m == k).count();
