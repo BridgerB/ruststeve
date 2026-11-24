@@ -3,8 +3,8 @@
 //! leaves for more.
 
 use data::{BlockKind, ItemKind};
-use plan::make::{Choice, Counts, Goals, Table, Wear, make_with_wear};
-use plan::shield::{kit_act, kit_row};
+use plan::make::{Act, Choice, Counts, Goals, Table, Wear, make_with_wear};
+use plan::shield::{cook_choice, kit_act, kit_row};
 
 fn real_table() -> Table {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
@@ -114,4 +114,131 @@ fn a_trip_is_told_from_work() {
         .unwrap();
     assert!(!kit_act(gather) && !kit_act(mine));
     assert!(kit_act(craft) && kit_act(place));
+}
+
+/// What the real Nether snapshot bot holds (race 45194253932, lane 5, its `snap.toml`): raw
+/// iron, two logs and a plank, a table, cobblestone, sticks, raw meat, no shield and no furnace.
+fn nether_snapshot() -> Counts {
+    use ItemKind::*;
+    counts(&[
+        (RawIron, 8),
+        (BirchLog, 1),
+        (OakLog, 1),
+        (BirchPlanks, 1),
+        (CraftingTable, 1),
+        (StonePickaxe, 4),
+        (Cobblestone, 256),
+        (Beef, 6),
+        (Porkchop, 5),
+        (Stick, 13),
+        (FlintAndSteel, 1),
+        (Bucket, 1),
+        (WaterBucket, 2),
+        (IronHelmet, 1),
+        (IronChestplate, 1),
+        (IronLeggings, 1),
+        (IronBoots, 1),
+        (IronSword, 1),
+    ])
+}
+
+fn take(c: &mut Counts, set: &[ItemKind], n: i32) {
+    let mut n = n;
+    for k in set {
+        let have = c.get(k).copied().unwrap_or(0);
+        let t = have.min(n);
+        if t > 0 {
+            c.insert(*k, have - t);
+            n -= t;
+        }
+    }
+    assert_eq!(n, 0, "short of {set:?}");
+}
+
+/// The smelt's fuel as `smelt::fuels_held` burns it: planks, then sticks over the reserve.
+fn burn(c: &mut Counts, ticks: i32) {
+    let planks = data::generated::tags::item_tag("planks").unwrap();
+    let mut left = ticks;
+    while left > 0 {
+        if let Some(k) = planks.iter().find(|k| c.get(k).copied().unwrap_or(0) > 0) {
+            *c.get_mut(k).unwrap() -= 1;
+            left -= 300;
+        } else {
+            let s = c.get_mut(&ItemKind::Stick).unwrap();
+            assert!(*s > plan::make::STICK_RESERVE, "out of fuel");
+            *s -= 1;
+            left -= 100;
+        }
+    }
+}
+
+/// Shield wall 3: the real Nether snapshot bot makes its one shield where it stands. The needs
+/// planner, asked for the row `kit_row` picks, puts the table down, makes and puts down a
+/// furnace, smelts one ingot (its smelt cooks what the shield is short of, no more), crafts the
+/// planks and the shield: every step work where the bot stands, within the call site's bound of
+/// 12 tasks. Then the fuel left cooks the raw beef.
+#[test]
+fn the_nether_snapshot_bot_makes_one_shield_where_it_stands() {
+    let t = real_table();
+    let mut c = nether_snapshot();
+    let (mut table, mut furnace) = (false, false);
+    let mut steps = Vec::new();
+    while let Some(row) = kit_row(&c) {
+        assert_eq!(row, "shield", "one shield's iron and wood");
+        assert!(steps.len() < 12, "no shield in 12 steps: {steps:?}");
+        let goal = t.until(row).unwrap();
+        let near = |k: BlockKind| {
+            (k == BlockKind::CraftingTable && table) || (k == BlockKind::Furnace && furnace)
+        };
+        let r = match make_with_wear(&t, &c, &near, false, &Wear::default(), goal) {
+            Choice::Act(r) => r,
+            other => panic!("after {steps:?}: {other:?}"),
+        };
+        assert!(kit_act(r), "{} is a trip, after {steps:?}", r.id);
+        steps.push(r.id.clone());
+        match r.act.unwrap() {
+            Act::Place(BlockKind::CraftingTable) => {
+                take(&mut c, &[ItemKind::CraftingTable], 1);
+                table = true;
+            }
+            Act::Place(BlockKind::Furnace) => {
+                take(&mut c, &[ItemKind::Furnace], 1);
+                furnace = true;
+            }
+            Act::Craft(rec) => {
+                for (_, set) in plan::craft::layout(rec, 3) {
+                    take(&mut c, set, 1);
+                }
+                *c.entry(rec.result).or_default() += i32::from(rec.count);
+            }
+            Act::Smelt(s) => {
+                let n = plan::shield::smelt_count(row, &c).unwrap();
+                assert_eq!(n, 1, "one ingot for one shield");
+                take(&mut c, s.input, n);
+                burn(&mut c, i32::try_from(s.ticks).unwrap() * n);
+                *c.entry(s.result).or_default() += n * i32::from(s.count);
+            }
+            other => panic!("{other:?} after {steps:?}"),
+        }
+    }
+    assert_eq!(c.get(&ItemKind::Shield), Some(&1), "{steps:?}");
+    assert!(table && furnace, "{steps:?}");
+    assert!(steps.len() <= 8, "{steps:?}");
+    // The fuel left: two planks and eleven sticks over the reserve, 1,700 ticks: the six beef.
+    let (r, n) = cook_choice(&c).unwrap();
+    assert_eq!((r.result, n), (ItemKind::CookedBeef, 6), "{c:?}");
+}
+
+#[test]
+fn nothing_is_cooked_without_raw_meat_or_fuel() {
+    assert!(cook_choice(&counts(&[(ItemKind::Beef, 4)])).is_none());
+    assert!(cook_choice(&counts(&[(ItemKind::OakPlanks, 4)])).is_none());
+    assert!(cook_choice(&counts(&[(ItemKind::Beef, 4), (ItemKind::Stick, 2)])).is_none());
+    // A plank burns 300 ticks, a cook takes 200: one plank cooks one.
+    let (r, n) = cook_choice(&counts(&[
+        (ItemKind::Porkchop, 3),
+        (ItemKind::OakPlanks, 1),
+    ]))
+    .unwrap();
+    assert_eq!((r.result, n), (ItemKind::CookedPorkchop, 1));
 }

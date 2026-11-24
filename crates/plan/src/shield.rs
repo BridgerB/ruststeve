@@ -130,6 +130,64 @@ pub fn kit_row(counts: &crate::make::Counts) -> Option<&'static str> {
     }
 }
 
+/// For a shield row (`shield`, `shields`), how many ingots its smelt should cook: what the
+/// shields still to make are short of. `None` for any other row.
+pub fn smelt_count(row: &str, counts: &crate::make::Counts) -> Option<i32> {
+    let target = match row {
+        "shield" => 1,
+        "shields" => KIT_SHIELDS,
+        _ => return None,
+    };
+    let have = |key: &str| crate::make::Need::parse(key).map_or(0, |n| n.have(counts));
+    Some((target - have("item:shield") - have("item:iron_ingot")).max(1))
+}
+
+/// What a furnace cooks into food: each a smelting result whose raw input the bot may hold.
+pub const COOKED: [ItemKind; 7] = [
+    ItemKind::CookedBeef,
+    ItemKind::CookedPorkchop,
+    ItemKind::CookedMutton,
+    ItemKind::CookedChicken,
+    ItemKind::CookedRabbit,
+    ItemKind::CookedCod,
+    ItemKind::CookedSalmon,
+];
+
+/// Game ticks of burning the held fuel gives, as the smelt burns it (`smelt::fuels_held`): coal
+/// and planks whole, sticks over `make::STICK_RESERVE`.
+pub fn fuel_ticks_held(counts: &crate::make::Counts) -> i64 {
+    let ticks = |k: ItemKind| i64::from(data::generated::fuel::fuel_ticks(k).unwrap_or(0));
+    let n = |k: ItemKind| i64::from(counts.get(&k).copied().unwrap_or(0).max(0));
+    let wood: i64 = crate::make::burn_order()
+        .into_iter()
+        .map(|k| n(k) * ticks(k))
+        .sum();
+    let sticks = (n(ItemKind::Stick) - i64::from(crate::make::STICK_RESERVE)).max(0);
+    wood + sticks * ticks(ItemKind::Stick)
+}
+
+/// After the shield, at its furnace: the raw meat held most of, cooked as far as the fuel left
+/// burns (a raw beef is 3 hunger, a cooked one 8: the fight is won fed, docs/problems/shield.md).
+/// `None` with no raw meat or no fuel for one.
+pub fn cook_choice(counts: &crate::make::Counts) -> Option<(&'static data::types::Smelt, i32)> {
+    let (r, n) = data::generated::recipes::SMELTING
+        .iter()
+        .filter(|r| COOKED.contains(&r.result))
+        .map(|r| {
+            let n: i32 = r
+                .input
+                .iter()
+                .map(|i| counts.get(i).copied().unwrap_or(0))
+                .sum();
+            (r, n)
+        })
+        .filter(|(_, n)| *n > 0)
+        .max_by_key(|(r, n)| (*n, std::cmp::Reverse(r.id)))?;
+    let fits = fuel_ticks_held(counts) / i64::from(r.ticks.max(1));
+    let count = i64::from(n).min(fits).min(64);
+    (count >= 1).then(|| (r, i32::try_from(count).unwrap_or(1)))
+}
+
 /// Whether a kit act is work where the bot stands (a craft, a smelt, a station put down), not a
 /// trip for wood or ore.
 pub fn kit_act(row: &crate::make::Row) -> bool {
