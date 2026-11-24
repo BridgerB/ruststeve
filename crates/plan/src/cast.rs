@@ -30,6 +30,10 @@ pub const OP_TRIES: u32 = 3;
 pub const OP_TRAIL: usize = 6;
 /// Ticks with no op done before the cast gives its site up (the progress invariant).
 pub const STALL_TICKS: u64 = 2400;
+/// Regressions with no op reached past the furthest before the cast gives its site up. Failed
+/// casts of the sealava races 45350748165 and 45354357884 went back 2 to 10 times, or 299 to 394
+/// (a churn); real casts of race 45343519424 went back 35 and 26 in all.
+pub const CHURN_LIMIT: u32 = 60;
 /// Eye to a block's centre a dig or a place is worked from (the game's 4.5 less a margin).
 pub const REACH: f64 = 4.0;
 /// Failed walks or digs toward the station before a cast refills from the nearest sources.
@@ -170,6 +174,8 @@ pub enum CastFailure {
     Stalled,
     /// Lava showed in the room (exposed by a dig).
     Exposed,
+    /// `CHURN_LIMIT` regressions with no op reached past the furthest one (cast.md wall 4).
+    Churned,
     /// A pour's bucket could not be filled: no lava or water source reached.
     NoRefill,
 }
@@ -264,6 +270,14 @@ pub struct Cast {
     /// The feet's height a refill's stairs down stop at: one over the source they head for.
     #[serde(default)]
     tunnel_floor: Option<i32>,
+    /// The furthest op reached, and the regressions since it was (cast.md wall 4).
+    #[serde(default)]
+    furthest: Option<usize>,
+    #[serde(default)]
+    churn: u32,
+    /// Way digs after a walk to an op failed (cast.md wall 6), for the notes.
+    #[serde(default)]
+    walk_digs: u32,
     /// Why each try at the op in hand failed, for the failure note (overworld-leg wall 5: a cast
     /// ended "Op after 13 ops, at :dig :room" with nothing to say what the dig met).
     #[serde(default)]
@@ -382,6 +396,9 @@ impl Cast {
             refused: Vec::new(),
             box_reach: 0,
             tunnel_floor: None,
+            furthest: None,
+            churn: 0,
+            walk_digs: 0,
         }
     }
 
@@ -409,9 +426,10 @@ impl Cast {
     /// The refused sources, for the notes: the count is the fix's firings (cast.md wall 1).
     pub fn refused_text(&self) -> String {
         format!(
-            "refused sources {}, box reach {}",
+            "refused sources {}, box reach {}, walk digs {}",
             self.refused.len(),
-            self.box_reach
+            self.box_reach,
+            self.walk_digs
         )
     }
 
@@ -489,11 +507,18 @@ impl Cast {
             if let Some(was) = self.op {
                 if i < was {
                     self.regressions += 1;
+                    self.churn += 1;
                     self.last_regression = Some((was, i));
                 } else {
                     self.done_ops += 1;
                     self.last_done = tick;
                 }
+            }
+            // The furthest op reached: a cast that gets past it has made progress, whatever it
+            // undid on the way.
+            if self.furthest.is_none_or(|f| i > f) {
+                self.furthest = Some(i);
+                self.churn = 0;
             }
             self.op = Some(i);
             self.work = Work::Idle;
@@ -503,6 +528,13 @@ impl Cast {
         }
         if tick.saturating_sub(self.last_done) > STALL_TICKS {
             return (still, None, CastStatus::Failed(CastFailure::Stalled));
+        }
+        // The progress invariant over regressions: an op undone and done again counts as done,
+        // so a cast that churns (place a floor, dig it, place it) never stalls by the clock. One
+        // went back 304 times in 13,280 ticks and never got past its furthest op (race
+        // 45354357884, place 0).
+        if self.churn > CHURN_LIMIT {
+            return (still, None, CastStatus::Failed(CastFailure::Churned));
         }
         if self.exposed(w) {
             return (still, None, CastStatus::Failed(CastFailure::Exposed));
@@ -640,6 +672,17 @@ impl Cast {
             TaskStatus::Done => {
                 self.work = Work::Idle;
                 Err((Controls::default(), None, CastStatus::Running))
+            }
+            // A walk that failed on its way: the straight way's block dug as when no walk is
+            // found, before a try is spent. Place 7 of the sealava races failed its first room dig
+            // 0 ops in with "walk to the stand failed NoProgress" four times, in every lane.
+            TaskStatus::Failed(_)
+                if let Some(block) = self.way_block(w, body, stand.unwrap_or(target)) =>
+            {
+                self.way_digs += 1;
+                self.walk_digs += 1;
+                self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+                Err((c, None, CastStatus::Running))
             }
             TaskStatus::Failed(f) => Err(
                 if self.try_again(format!("walk to the stand failed {f:?}")) {
@@ -1184,21 +1227,46 @@ impl Cast {
                         // ("no route, 1 tunnels" with 168 and 286 sources seen: cast.md wall 2).
                         // The stairs' own refusal stops them short of lava.
                         let down = t.1 + 1 < f.1;
-                        self.tunnel_floor = down.then_some(t.1 + 1);
-                        self.trail(
-                            tick,
-                            format!(
-                                "tunnel {} toward {t:?}",
-                                if down { "down" } else { "level" }
-                            ),
+                        // Never through the frame's rock or a cell the plan places: a tunnel from
+                        // the room's floor cut the floor just laid, and the cast went back to its
+                        // place op 304 times in 13,280 ticks (race 45354357884, place 0, stairs
+                        // down) and 61 times (race 45361499544, the level tunnel). The straight
+                        // steps are checked (down to the source's height, or six level); with one
+                        // in the way no tunnel is cut and the refill fails, the fetch next.
+                        let mut kept = crate::station::kept(self.site.frame);
+                        kept.extend(
+                            self.plan
+                                .iter()
+                                .filter(|op| op.kind == OpKind::Place)
+                                .filter_map(|op| op.pos),
                         );
-                        self.work = Work::Tunnel(Box::new(if down {
-                            crate::stairs::Stairs::new(dir, tick)
+                        let steps = if down { (f.1 - (t.1 + 1)).min(6) } else { 6 };
+                        let drop = i32::from(down);
+                        let hit = (1..=steps).find_map(|k| {
+                            let from = (
+                                f.0 + dir.0 * (k - 1),
+                                f.1 - drop * (k - 1),
+                                f.2 + dir.1 * (k - 1),
+                            );
+                            let to = (f.0 + dir.0 * k, f.1 - drop * k, f.2 + dir.1 * k);
+                            crate::tunnel::opened(from, to)
+                                .and_then(|(cells, _)| cells.into_iter().find(|c| kept.contains(c)))
+                        });
+                        let way = if down { "down" } else { "level" };
+                        if let Some(c) = hit {
+                            self.trail(tick, format!("tunnel {way} refused at {c:?}"));
+                            self.tunnels = MAX_TUNNELS;
                         } else {
-                            crate::stairs::Stairs::level(dir, tick)
-                        }));
-                        self.last_done = tick;
-                        return (Controls::default(), None, CastStatus::Running);
+                            self.tunnel_floor = down.then_some(t.1 + 1);
+                            self.trail(tick, format!("tunnel {way} toward {t:?}"));
+                            self.work = Work::Tunnel(Box::new(if down {
+                                crate::stairs::Stairs::new(dir, tick)
+                            } else {
+                                crate::stairs::Stairs::level(dir, tick)
+                            }));
+                            self.last_done = tick;
+                            return (Controls::default(), None, CastStatus::Running);
+                        }
                     }
                 }
                 self.trail(
