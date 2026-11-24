@@ -76,6 +76,8 @@ struct Stage {
     blaze_ticks: u64,
     ledger: Vec<String>,
     ticks: u64,
+    /// The planner's shield at the end: its counts.
+    shield: plan::shield::Shield,
 }
 
 fn line(r: TaskRecord) -> String {
@@ -166,6 +168,7 @@ fn stage_with(kit: &[(ItemKind, i32)], shield: bool, seed: u64, more: impl Fn(&m
         }
         (c, plan.take_acts())
     });
+    let shield = plan.shield.clone();
     let rods = run.world.inventory.count(ItemKind::BlazeRod);
     let ticks = run.world.session.server_ticks;
     Stage {
@@ -179,6 +182,7 @@ fn stage_with(kit: &[(ItemKind, i32)], shield: bool, seed: u64, more: impl Fn(&m
         blaze_ticks,
         ledger,
         ticks,
+        shield,
     }
 }
 
@@ -366,16 +370,21 @@ fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl
             life.mobs_knocked,
             s.meals,
         );
-        // The shield's notes counted (docs/problems/shield.md wall 4).
-        let count = |what: &str| s.ledger.iter().filter(|l| l.contains(what)).count();
+        // The shield's counts (docs/problems/shield.md wall 4).
+        let sh = &s.shield;
         println!(
-            "SHIELD {name} seed {seed}: raised {}, yields to the strike {}, kept up for a \
-             fireball {}, placing held {}, lowered for the fight {}",
-            count("shield raised against"),
-            count("shield yields to the strike"),
-            count("shield kept up for fireball"),
-            count("placing held for the shield"),
-            count("(the fight strikes"),
+            "SHIELD {name} seed {seed}: raised {}, blocked {}, hit up {}, hit down {}, yields to \
+             the strike {} ({} ticks), kept up for a fireball {} ticks, placing held {}, strikes \
+             given back {}",
+            sh.raises,
+            sh.blocked,
+            sh.hits_up,
+            sh.hits_down,
+            sh.yields,
+            sh.yield_ticks,
+            sh.kept_for_ball,
+            sh.places_held,
+            sh.strikes_held,
         );
         // A seed that died: how it ended (blaze-fight walls 17 and 19).
         if s.run.died {
