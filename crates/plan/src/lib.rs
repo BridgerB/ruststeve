@@ -1224,6 +1224,30 @@ impl Plan {
         if table.always.is_empty() {
             return None;
         }
+        // Armour held and not worn goes on here in the Nether, ahead of the rows: `equip` runs
+        // only when a task is chosen, and a defend cuts in before that (blaze-fight wall 1: three
+        // bots fought their first blazes bare and put the armour on 220 ticks later).
+        if tick >= self.equip_at
+            && w.window.is_none()
+            && w.click.is_none()
+            && w.inventory.carried.is_none()
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == "minecraft:the_nether")
+            && let Some(slot) = unworn_armour(&w.inventory.slots)
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(world::Act::Click {
+                slot,
+                button: 0,
+                mode: 1,
+            });
+            self.note(
+                tick,
+                format!("armour on from slot {slot}"),
+                "armour held, not worn; ahead of the always-rows".to_owned(),
+            );
+        }
         // A cast and a scoop stand beside lava on purpose; anything else answers lava at the door.
         let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_));
         let trap = self.traps.tick(w, body, door);
@@ -1385,6 +1409,8 @@ impl Plan {
             };
             self.begin(task);
         }
+        // What a defend did this tick, for the ledger (blaze-fight walls 2 and 3).
+        let mut said: Vec<String> = Vec::new();
         let (c, act, ended) = match &mut self.task {
             Task::Escape(e) => {
                 let (c, act) = e.step(w, tick);
@@ -1404,6 +1430,7 @@ impl Plan {
             Task::Defend(d) => {
                 let (sent, landed) = (d.swings, d.landed);
                 let (c, act, status) = d.step(w, rules, tick);
+                said = std::mem::take(&mut d.notes);
                 self.swings_sent += u64::from(d.swings.saturating_sub(sent));
                 self.swings_landed += u64::from(d.landed.saturating_sub(landed));
                 let ended = match status {
@@ -1435,7 +1462,7 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks",
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling",
                             d.swings,
                             d.landed,
                             d.stance,
@@ -1444,7 +1471,12 @@ impl Plan {
                             d.health_start,
                             w.player.health,
                             d.max_dy,
-                            d.charged_ticks
+                            d.charged_ticks,
+                            d.kept_off,
+                            d.sweeps_held,
+                            d.dodges,
+                            d.dodges_known,
+                            d.falling_swings
                         )))
                     }
                 };
@@ -1486,6 +1518,9 @@ impl Plan {
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
+        for what in said {
+            self.note(tick, what, "defend".to_owned());
+        }
         if let Some(end) = ended {
             match (&self.task, &end) {
                 (Task::Eat(_), Ok(_)) => self.meals += 1,
@@ -4305,6 +4340,23 @@ pub fn cursor_step(
     junk_stack(slots, junk).map(|(s, _)| s)
 }
 
+/// The first main or hotbar slot holding an iron armour piece whose own armour slot (5 to 8 of
+/// window 0) is empty: the piece a quick move puts on.
+pub fn unworn_armour(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+) -> Option<i16> {
+    slots.iter().find_map(|(slot, (k, _))| {
+        let to = match k {
+            data::ItemKind::IronHelmet => 5,
+            data::ItemKind::IronChestplate => 6,
+            data::ItemKind::IronLeggings => 7,
+            data::ItemKind::IronBoots => 8,
+            _ => return None,
+        };
+        (*slot >= 9 && !slots.contains_key(&to)).then_some(*slot)
+    })
+}
+
 /// The main slot to drop, with its kind, when fewer than `JUNK_FREE_SLOTS` are free: the first
 /// stack of a junk kind whose drop still leaves that kind's `keep` held. None with room to spare.
 pub fn junk_slot(
@@ -4393,6 +4445,24 @@ mod bank_tests {
         assert!(climb_to_log(4, 26, Some(data::BlockKind::Stone)));
         assert!(!climb_to_log(4, 26, None));
         assert!(!roofed_below(&at(4.0), 26));
+    }
+
+    /// Blaze-fight wall 1: a held piece whose armour slot is empty is the one put on; a worn kind
+    /// and anything that is not armour are left.
+    #[test]
+    fn held_armour_with_its_slot_empty_is_put_on() {
+        use data::ItemKind::{Cobblestone, IronChestplate, IronHelmet, IronLeggings};
+        let mut slots = std::collections::BTreeMap::new();
+        slots.insert(9, (Cobblestone, 64));
+        assert_eq!(unworn_armour(&slots), None);
+        slots.insert(17, (IronHelmet, 1));
+        slots.insert(18, (IronChestplate, 1));
+        assert_eq!(unworn_armour(&slots), Some(17));
+        slots.insert(5, (IronHelmet, 1));
+        assert_eq!(unworn_armour(&slots), Some(18), "the helmet is worn");
+        slots.insert(6, (IronChestplate, 1));
+        slots.insert(7, (IronLeggings, 1));
+        assert_eq!(unworn_armour(&slots), None);
     }
 
     /// Blaze wall 13: a full inventory drops a junk stack that leaves its keep; one with room, a

@@ -373,6 +373,14 @@ engage_health = 18.0
 # enderman looked at or hit teleports in to fight (docs/problems/fortress.md wall 2).
 neutral = ["zombified_piglin", "enderman"]
 ranged_radius = 16.0
+# A fight with a shooter that lands nothing for this long is given up: a blaze winds up for 60 ticks
+# and fires for 12, so 100 ticks is one volley's worth of standing in the open for nothing. A fight
+# held 300 ticks on a blaze sitting on a roof and cost 18 health (blaze-fight wall 2).
+shooter_patience = 100
+# A fight with a shooter backs off to cover at or under this health: the fire a fireball lights
+# takes 4 to 5 more after the hit, so the danger line of 8 is met from 13 (a fight ended at 9.7 and
+# the fire took it to 7.0: blaze-fight wall 3).
+shooter_retreat_health = 13.0
 # A never_fight kind is backed away from within this: a creeper's fuse starts at 3 blocks, and
 # backing away only within defend_radius let 7 creepers kill (docs/problems/iron-kit.md wall 21).
 flee_radius = 8.0
