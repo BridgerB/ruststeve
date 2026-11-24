@@ -308,6 +308,13 @@ pub struct Route {
     pub expanded: u32,
 }
 
+/// Rock within this many steps of a cell found bad is suspect, and a step into it costs
+/// `SUSPECT_COST` more: what refused one step (a soul sand face, a lava pocket) is seldom one
+/// block. Race 45337739022: 19 refusals one after another along one soul sand face, each route
+/// stepping to the cell beside the last one blocked, about 2,500 ticks a bot.
+pub const SUSPECT_NEAR: i32 = 3;
+pub const SUSPECT_COST: u32 = 8;
+
 /// The cost of each block a laid stair places (`LAY_COST`): a stair up through rock stays
 /// cheaper than one built in the open.
 pub const LAY_COST: u32 = 2;
@@ -340,6 +347,18 @@ pub fn route(
         from.2.max(near.2) + MARGIN,
     );
     let mut sight = Sight::new(w, lo, hi);
+    let mut suspect: BTreeSet<Cell> = BTreeSet::new();
+    for b in blocked {
+        for dx in -SUSPECT_NEAR..=SUSPECT_NEAR {
+            for dy in -SUSPECT_NEAR..=SUSPECT_NEAR {
+                for dz in -SUSPECT_NEAR..=SUSPECT_NEAR {
+                    if dx.abs() + dy.abs() + dz.abs() <= SUSPECT_NEAR {
+                        suspect.insert((b.0 + dx, b.1 + dy, b.2 + dz));
+                    }
+                }
+            }
+        }
+    }
     // Twice the cheapest step a block: the search runs at the target and takes the first way.
     let h = |c: Cell| -> u32 {
         let d = flat(c, target).unsigned_abs() * 6;
@@ -390,6 +409,9 @@ pub fn route(
                 }
                 if laid {
                     cost += 2 * LAY_COST;
+                }
+                if digs > 0 && suspect.contains(&to) {
+                    cost += SUSPECT_COST;
                 }
                 if sight.open_sides(to) > 4 {
                     cost += OPEN_COST;

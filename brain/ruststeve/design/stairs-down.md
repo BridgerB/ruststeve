@@ -6,7 +6,7 @@ tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@3079a6b clojurecraft@be85a92
+verifiedAgainst: ruststeve@beb29ac clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -69,3 +69,7 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 - **Progress invariant**: 16 stretches begun with the feet no nearer the target on the plane give the tunnel up and refuse the target a while.
 - **A staircase that did nothing fails**: six steps with nothing dug that end within a block of where they began fail `Boxed` ("nothing cut and nowhere gone"), not "cut 6 stairs".
 - **Looking at a recorded world**: `survey <file.rsr> --at <ticks> --slab|--line …` prints slabs and sections; `--route x,y,z,tx,ty,tz` prints the route the search finds there and the steps today's world would refuse.
+- **Raced** (race 45337739022, 3079a6b): 3 of 3 bots from the Nether snapshot reached `fortress` by the tunnel alone, one went on to `spawner`; 23 to 25 routes, 58 or 59 stretches and 22 refusals a bot.
+- **Suspect rock**: a step into rock within 3 of a blocked cell costs 8 more, so a route leaves a bad face instead of trying it cell by cell.
+- **`Plan::tunnel_toward`** (pub): the tunnel to one cell, ending only at it; `dig_toward` hands it any Nether target more than 8 blocks off (`TUNNEL_FROM`).
+- **Every failure names its reason**: a step (the cells, the walk's failure, the floor's block), a dig, and `Boxed` (each heading's refusal).

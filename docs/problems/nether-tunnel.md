@@ -47,3 +47,17 @@ A bot resumed from `race-45194253932/snapshot-nether-45194253932-race-4519425393
 
 ### 4. No bricks in view and no walk out
 - **Fix**: `Plan::explore_tunnel`: a search tunnel on a held compass heading, 48 blocks a leg at the travel height, the heading turned a quarter only when a leg has no way. Notes "search tunnel leg toward …" and "search tunnel turned to …". Not yet seen in a race: every bot of this snapshot has bricks in view.
+
+## Raced
+### Race 45337739022 (3079a6b, the Nether snapshot of race 45194253932 lane 5, 3 x 1, cap 12,000)
+- **3 of 3 at stage `fortress`**, at ticks 8,540, 8,000 and 9,400, each at 20 health, by the tunnel alone (no "walk toward the fortress" in any ledger). Lane 0 went on to stage `spawner` at tick 11,940 at (128, 61, 166), 20 health. Lane 1 died in lava at tick 9,480 on the fortress, inside a `defend`, after the tunnel's work was done; lane 2 was alive in `defend Blaze` at (114, 62, 186) at the cap.
+- **Published**: `snapshot-fortress-45337739022-race-45337739022-lane-0.tar.zst`, `-lane-1`, `-lane-2` and `snapshot-spawner-45337739022-race-45337739022-lane-0.tar.zst` on release `race-45337739022`.
+- **The notes, counted** (lanes 0 / 1 / 2): "tunnel route N" 25 / 23 / 24; stretches begun ("start … stairs: tunnel …") 59 / 58 / 59; "tunnel step to … refused" 22 / 22 / 22; "tunnel off its route" 2 in lane 0 (after a `defend` cut a stretch); "given up" and "no tunnel route" 0.
+- **The way taken** (lane 0's ledger): route 1 at tick 220, 157 steps, 4,511 nodes; stairs up south from the portal to y 40 and level along x 22; "lava beside (22, 40, 42)" refused at tick 2,040 and gone round; from tick 2,940 to 6,860 the soul sand face at (21 to 35, 50 to 63, 53 to 62), 19 refusals "no floor" (soul sand under the step) and 3 "the step ended short there 2 times", the route climbing from y 51 to y 64; then 60 level steps at y 64, south to z 95 and east to the bricks, in 1,700 ticks. The stage was met at (50.9, 64, 95.5), in rock, 11 steps before the route's end. The lava that killed the earlier bots at the portal never met this one: it was in the hill by tick 400.
+- **The magma refusal** (blaze.md wall 23, 4b214ac): "magma under" 0 times in all three ledgers. The route leaves the magma band (y 33 to 37) in its first five stairs, so the refusal had nothing to refuse. It stays, unproven: it costs nothing, and the search treats seen magma the same way.
+- **Costs**: about 2 pickaxes of 4 (lane 0 held 2 spares and one at 60 uses at the fortress), 266 netherrack in the pack.
+
+### What the race showed to fix
+- **The soul sand face cost about 2,500 ticks a bot**: each refusal blocked one cell and the next route stepped to the cell beside it. Fix: rock within 3 steps of a blocked cell is suspect, 8 more a step (`SUSPECT_NEAR`, `SUSPECT_COST`); and a stair's floor is whatever `path::classify` calls a floor, so when the route takes soul sand as ground (nether-walk.md) the stairs do too.
+- **Stairs failures with no reason** ("last refusal: ;", 644 in one ledger of race 45204423376): a failed step now says the cells, the walk's failure and the floor's block; a failed dig its failure; `Boxed` every heading's refusal.
+- **The spawner leg**: `dig_toward` in the Nether hands a target more than 8 blocks off to the travel tunnel (`Plan::tunnel_toward`, the route ending only at the target itself), in place of six stairs down or up at a time.
