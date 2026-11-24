@@ -3231,7 +3231,12 @@ impl Plan {
                         self.cook_tasks
                     ),
                 );
-                if let Some(t) = self.carry_table(w, tick) {
+                // The spare pickaxes first, at the cook's table (wall 15: a bot took its table
+                // along, lost it in a dig, had no wood for another after the shields, and dug
+                // 10,000 ticks by hand with both pickaxes broken, race 45357148484): the spares'
+                // row takes the table along after.
+                let spares = fresh_pickaxes(w, rules.spare_uses) >= rules.spare_pickaxes;
+                if spares && let Some(t) = self.carry_table(w, tick) {
                     return Flow::Task(Box::new(t));
                 }
             }

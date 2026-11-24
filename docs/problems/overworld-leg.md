@@ -155,3 +155,8 @@ The cast needs ten lava sources at one site. Carried up they are ten trips of 12
 
 - **The portal's food check**: it is bounded by `provision_ticks` from its first look on this branch (wall 3), and now never looks once the surface stocking is over (`readied`): a readied bot holds its cooked meat and does not walk away from its lit portal. `portal_food_look`, test `the_portal_food_look_is_bounded`.
 - **A hunt cutting a cast**: the hunt row was in force whenever food was short and prey near, whatever ran; it never cuts a cast, a scoop or a portal's entry now (`hunt_may_cut`, test `a_hunt_never_cuts_a_scoop`).
+
+## 15. Spares before the cook's table is taken (race 45357148484)
+
+- **What happened**: after the shields (tick 9,320) the bot dug its table to take along; the dig failed "Uncollected" (the drop fell to y 62 under the hut's blocks), the shields had taken the last planks (0 logs, 1 plank), so no table and no spare pickaxes. The stone pickaxe broke at 11,480, the wooden one at 13,920, and the bot dug own stairs by hand for 10,000 ticks (case onset "no pickaxe: from tick 13920").
+- **Fix**: after the cook, the table is taken along only once `spare_pickaxes` fresh stone pickaxes are held; else the spares' row runs first at the cook's table (it takes the table along after).
