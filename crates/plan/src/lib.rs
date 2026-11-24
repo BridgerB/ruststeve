@@ -2017,7 +2017,9 @@ impl Plan {
             .find(|k| craft::count(w, *k) > 0);
         let next = cover::hut_block(w, body.pos);
         let end = match (item, next) {
-            _ if !world::stage::open_sky(w) => Some("not under the open sky: no hut"),
+            _ if self.hut_blocks == 0 && !world::stage::open_sky(w) => {
+                Some("not under the open sky: no hut")
+            }
             (_, None) => Some("hut closed"),
             (None, Some(_)) => Some("no block held for a hut"),
             _ if self.hut_blocks >= HUT_MAX => Some("hut given up"),
@@ -2511,7 +2513,9 @@ impl Plan {
                 );
                 return Flow::On;
             }
-            if !world::stage::open_sky(w) {
+            // Under its own hut's roof the bot is at the surface: no stairs up through it (wall
+            // 11: a bot roofed itself in and cut stairs up onto its hut, race 45357148484).
+            if !world::stage::open_sky(w) && self.hut_blocks == 0 {
                 if let Some(t) = self.stairs_to_surface(w, tick) {
                     return Flow::Task(Box::new(t));
                 }
