@@ -1514,3 +1514,57 @@ dz = 16
 script = "straight:0"
 ticks = 60
 set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["soul_sand", 0, -1, 2], ["soul_sand", 0, -1, 3], ["soul_sand", 0, -1, 4], ["soul_sand", 0, -1, 5], ["soul_sand", 0, -1, 6], ["soul_sand", 0, -1, 7], ["soul_sand", 0, -1, 8], ["soul_sand", 0, -1, 9], ["soul_sand", 0, -1, 10], ["soul_sand", 0, -1, 11], ["soul_sand", 0, -1, 12], ["air", 0, 0, 1], ["air", 0, 1, 1], ["air", 0, 0, 2], ["air", 0, 1, 2], ["air", 0, 0, 3], ["air", 0, 1, 3], ["air", 0, 0, 4], ["air", 0, 1, 4], ["air", 0, 0, 5], ["air", 0, 1, 5], ["air", 0, 0, 6], ["air", 0, 1, 6], ["air", 0, 0, 7], ["air", 0, 1, 7], ["air", 0, 0, 8], ["air", 0, 1, 8], ["air", 0, 0, 9], ["air", 0, 1, 9], ["air", 0, 0, 10], ["air", 0, 1, 10], ["air", 0, 0, 11], ["air", 0, 1, 11], ["air", 0, 0, 12], ["air", 0, 1, 12]]
+
+# Endermen (issue 17, docs/problems/endermen-model.md): rows at Normal (an enderman is a monster:
+# peaceful removes it), run after the others with the real server's difficulty set by RCON. Each
+# at its own landing, 40 south of its centre, so no other row's bot is near.
+# - e01-frozen: an enderman 64 east (4 chunks, beyond the simulation distance 3), two above its
+#   floor in a shaft: frozen, it never falls.
+# - e02-ticks: the same 30 east (within 3 chunks): it ticks and falls.
+# - e00-stare: an enderman penned 12 east, the bot looking at its eye (pitch -4.43): it is angered
+#   (creepy) and, stared at within 16, frozen in place.
+# - e03-aside: the same look 15 degrees aside: neutral.
+
+[[moment]]
+id = "e00-stare"
+landing = 0
+dx = 0
+dz = 40
+script = "use:100000:-90:-4.43"
+ticks = 40
+difficulty = "normal"
+mobs = [["enderman", 12, 0, 0]]
+set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0], ["air", 1, 2, 0], ["air", 2, 0, 0], ["air", 2, 1, 0], ["air", 2, 2, 0], ["air", 3, 0, 0], ["air", 3, 1, 0], ["air", 3, 2, 0], ["air", 4, 0, 0], ["air", 4, 1, 0], ["air", 4, 2, 0], ["air", 5, 0, 0], ["air", 5, 1, 0], ["air", 5, 2, 0], ["air", 6, 0, 0], ["air", 6, 1, 0], ["air", 6, 2, 0], ["air", 7, 0, 0], ["air", 7, 1, 0], ["air", 7, 2, 0], ["air", 8, 0, 0], ["air", 8, 1, 0], ["air", 8, 2, 0], ["air", 9, 0, 0], ["air", 9, 1, 0], ["air", 9, 2, 0], ["air", 10, 0, 0], ["air", 10, 1, 0], ["air", 10, 2, 0], ["stone", 12, -1, 0], ["air", 12, 0, 0], ["air", 12, 1, 0], ["air", 12, 2, 0], ["stone", 12, 3, 0], ["stone", 11, 0, 0], ["air", 11, 1, 0], ["air", 11, 2, 0], ["stone", 11, 3, 0], ["stone", 13, 0, 0], ["stone", 13, 1, 0], ["stone", 13, 2, 0], ["stone", 13, 3, 0], ["stone", 11, 0, -1], ["stone", 11, 0, 1], ["stone", 11, 1, -1], ["stone", 11, 1, 1], ["stone", 11, 2, -1], ["stone", 11, 2, 1], ["stone", 11, 3, -1], ["stone", 11, 3, 1], ["stone", 12, 0, -1], ["stone", 12, 0, 1], ["stone", 12, 1, -1], ["stone", 12, 1, 1], ["stone", 12, 2, -1], ["stone", 12, 2, 1], ["stone", 12, 3, -1], ["stone", 12, 3, 1], ["stone", 13, 0, -1], ["stone", 13, 0, 1], ["stone", 13, 1, -1], ["stone", 13, 1, 1], ["stone", 13, 2, -1], ["stone", 13, 2, 1], ["stone", 13, 3, -1], ["stone", 13, 3, 1]]
+
+[[moment]]
+id = "e01-frozen"
+landing = 1
+dx = 0
+dz = 40
+script = "use:100000:0:90"
+ticks = 60
+difficulty = "normal"
+mobs = [["enderman", 64, 2, 0]]
+set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["stone", 64, -1, 0], ["air", 64, 0, 0], ["air", 64, 1, 0], ["air", 64, 2, 0], ["air", 64, 3, 0], ["air", 64, 4, 0]]
+
+[[moment]]
+id = "e02-ticks"
+landing = 2
+dx = 0
+dz = 40
+script = "use:100000:0:90"
+ticks = 60
+difficulty = "normal"
+mobs = [["enderman", 30, 2, 0]]
+set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["stone", 30, -1, 0], ["air", 30, 0, 0], ["air", 30, 1, 0], ["air", 30, 2, 0], ["air", 30, 3, 0], ["air", 30, 4, 0]]
+
+[[moment]]
+id = "e03-aside"
+landing = 3
+dx = 0
+dz = 40
+script = "use:100000:-75:-4.43"
+ticks = 40
+difficulty = "normal"
+mobs = [["enderman", 12, 0, 0]]
+set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0], ["air", 1, 2, 0], ["air", 2, 0, 0], ["air", 2, 1, 0], ["air", 2, 2, 0], ["air", 3, 0, 0], ["air", 3, 1, 0], ["air", 3, 2, 0], ["air", 4, 0, 0], ["air", 4, 1, 0], ["air", 4, 2, 0], ["air", 5, 0, 0], ["air", 5, 1, 0], ["air", 5, 2, 0], ["air", 6, 0, 0], ["air", 6, 1, 0], ["air", 6, 2, 0], ["air", 7, 0, 0], ["air", 7, 1, 0], ["air", 7, 2, 0], ["air", 8, 0, 0], ["air", 8, 1, 0], ["air", 8, 2, 0], ["air", 9, 0, 0], ["air", 9, 1, 0], ["air", 9, 2, 0], ["air", 10, 0, 0], ["air", 10, 1, 0], ["air", 10, 2, 0], ["stone", 12, -1, 0], ["air", 12, 0, 0], ["air", 12, 1, 0], ["air", 12, 2, 0], ["stone", 12, 3, 0], ["stone", 11, 0, 0], ["air", 11, 1, 0], ["air", 11, 2, 0], ["stone", 11, 3, 0], ["stone", 13, 0, 0], ["stone", 13, 1, 0], ["stone", 13, 2, 0], ["stone", 13, 3, 0], ["stone", 11, 0, -1], ["stone", 11, 0, 1], ["stone", 11, 1, -1], ["stone", 11, 1, 1], ["stone", 11, 2, -1], ["stone", 11, 2, 1], ["stone", 11, 3, -1], ["stone", 11, 3, 1], ["stone", 12, 0, -1], ["stone", 12, 0, 1], ["stone", 12, 1, -1], ["stone", 12, 1, 1], ["stone", 12, 2, -1], ["stone", 12, 2, 1], ["stone", 12, 3, -1], ["stone", 12, 3, 1], ["stone", 13, 0, -1], ["stone", 13, 0, 1], ["stone", 13, 1, -1], ["stone", 13, 1, 1], ["stone", 13, 2, -1], ["stone", 13, 2, 1], ["stone", 13, 3, -1], ["stone", 13, 3, 1]]

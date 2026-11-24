@@ -66,6 +66,52 @@ impl ModelWorld {
     }
 }
 
+/// The Nether's biomes (`data/minecraft/worldgen/biome`, the five the Nether's biome source
+/// places): what a stage's columns carry in their biome containers, so a bot's world reads the
+/// biome at its feet (issue 17) as it does from a real server's chunks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Biome {
+    NetherWastes,
+    CrimsonForest,
+    WarpedForest,
+    SoulSandValley,
+    BasaltDeltas,
+}
+
+impl Biome {
+    /// The biome's registry name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Biome::NetherWastes => "nether_wastes",
+            Biome::CrimsonForest => "crimson_forest",
+            Biome::WarpedForest => "warped_forest",
+            Biome::SoulSandValley => "soul_sand_valley",
+            Biome::BasaltDeltas => "basalt_deltas",
+        }
+    }
+
+    /// Its index in the synced biome registry, as a chunk's biome container carries it: the
+    /// registry is sent sorted by name, as the generated `BIOME` list is (the dimension types'
+    /// index is read the same way, `nether_type`).
+    pub fn id(self) -> u32 {
+        biome_id(self.name()).unwrap_or(0)
+    }
+}
+
+/// A biome's index in the synced registry by name.
+pub fn biome_id(name: &str) -> Option<u32> {
+    data::generated::registries::BIOME
+        .iter()
+        .position(|b| *b == name)
+        .and_then(|i| u32::try_from(i).ok())
+}
+
+/// A biome container's cell for a block: biomes are kept a cell per 4x4x4 blocks, 64 to a
+/// section, y then z then x (`PalettedContainer` with `Strategy.SECTION_BIOMES`).
+pub fn biome_index(x: i32, y: i32, z: i32) -> usize {
+    ((((y & 15) >> 2) << 4) | (((z & 15) >> 2) << 2) | ((x & 15) >> 2)) as usize
+}
+
 /// A Nether stage being laid: an open cavern between a netherrack floor and ceiling, with the
 /// cells a test sets over it. `build` encodes it.
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +123,9 @@ pub struct Stage {
     ceiling: i32,
     cells: BTreeMap<Pos, u32>,
     spawn: [f64; 3],
+    /// Biomes laid by quart column (block x >> 2, block z >> 2), every height; the rest is
+    /// `nether_wastes`, the Nether's commonest.
+    biomes: BTreeMap<(i32, i32), Biome>,
 }
 
 fn ordered((a, b): Span) -> std::ops::RangeInclusive<i32> {
@@ -94,6 +143,7 @@ impl Stage {
             ceiling,
             cells: BTreeMap::new(),
             spawn: [0.5, f64::from(floor + 1), 0.5],
+            biomes: BTreeMap::new(),
         }
     }
 
@@ -110,6 +160,7 @@ impl Stage {
                 f64::from(floor + 1),
                 f64::from(z.0.min(z.1)) + 0.5,
             ],
+            biomes: BTreeMap::new(),
         }
     }
 
@@ -199,6 +250,26 @@ impl Stage {
         self.bricks(x, (y, y), z)
     }
 
+    /// A biome over the block spans `x` and `z`, every height. Biomes are kept per 4x4 of
+    /// blocks: each quart a span touches takes it.
+    pub fn biome(&mut self, x: Span, z: Span, biome: Biome) -> &mut Self {
+        let q = |s: Span| (s.0.min(s.1) >> 2)..=(s.0.max(s.1) >> 2);
+        for qx in q(x) {
+            for qz in q(z) {
+                self.biomes.insert((qx, qz), biome);
+            }
+        }
+        self
+    }
+
+    /// The biome the stage holds at a block column.
+    pub fn biome_at(&self, x: i32, z: i32) -> Biome {
+        self.biomes
+            .get(&(x >> 2, z >> 2))
+            .copied()
+            .unwrap_or(Biome::NetherWastes)
+    }
+
     /// Open a box to air (a cave, a cut, the room a portal stands in).
     pub fn air(&mut self, x: Span, y: Span, z: Span) -> &mut Self {
         self.fill(x, y, z, BlockKind::Air)
@@ -253,7 +324,7 @@ impl Stage {
                             block_count: count(&|c| c != air),
                             fluid_count: count(&fluid),
                             blocks: Paletted::pack(&cells, 4),
-                            biomes: Paletted::Single(0),
+                            biomes: self.biome_container(cx, cz),
                         }
                     })
                     .collect();
@@ -270,6 +341,31 @@ impl Stage {
             dimension: NETHER.to_owned(),
             dimension_type: nether_type(),
         })
+    }
+}
+
+impl Stage {
+    /// One section's biome container in column (cx, cz): the same at every height.
+    fn biome_container(&self, cx: i32, cz: i32) -> Paletted {
+        let cells: Vec<u32> = (0..64i32)
+            .map(|i| {
+                let (qx, qz) = (i & 3, (i >> 2) & 3);
+                self.biome_at(cx * 16 + qx * 4, cz * 16 + qz * 4).id()
+            })
+            .collect();
+        // Vanilla's biome containers go from a single value to 1 bit and up.
+        Paletted::pack(&cells, 1)
+    }
+}
+
+impl ModelWorld {
+    /// The biome's registry name at a block, from the columns' biome containers.
+    pub fn biome_at(&self, x: i32, y: i32, z: i32) -> Option<&'static str> {
+        let col = self.columns.get(&(x >> 4, z >> 4))?;
+        let id = col.column.section_at(y)?.biomes.get(biome_index(x, y, z))?;
+        data::generated::registries::BIOME
+            .get(usize::try_from(id).ok()?)
+            .copied()
     }
 }
 
