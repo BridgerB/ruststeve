@@ -3,9 +3,9 @@
 //! stops getting closer fails fast (`NoProgress`) instead of pacing.
 
 use physics::Controls;
-use world::World;
+use world::{Act, BlockPos, World};
 
-use crate::path::{self, Budget, Cell, Goal, Status};
+use crate::path::{self, Budget, Cell, Goal, MoveKind, Status};
 
 /// Horizontal distance to a waypoint's centre that reaches it (clojurecraft's `waypoint-reach`).
 pub const WAYPOINT_REACH: f64 = 0.35;
@@ -31,6 +31,74 @@ pub const PICKUP_RISE: i32 = 2;
 pub const PATIENCE_TICKS: u64 = 200;
 /// A gain smaller than this is not progress (a body jittering in place is not getting closer).
 pub const PROGRESS_STEP: f64 = 0.25;
+
+/// A far walk's search (docs/problems/nether-walk.md): the expansions it may spend and the weight
+/// on its heuristic. Measured on the recorded Nether of race 45194253932 lane 5 at tick 25,140
+/// (probe 45336893578): from the portal to the bricks 110 blocks off, weight 2 finds a route in
+/// 147,900 expansions (1.8 s), 3 in 35,525, 4 in 12,664 (0.1 s; 222 cells, 163 bridged), 10 in
+/// 8,906; with the chunks half loaded a search spends all it is given and finds none.
+pub const FAR_NODES: u32 = 40_000;
+pub const FAR_WEIGHT: f64 = 4.0;
+/// After a far search that found no route the planner runs no other for this long: ten seconds
+/// (a bot just through a portal has half its chunks, and a search then finds none).
+pub const FAR_RETRY_TICKS: u64 = 200;
+/// After a far route was found, the least ticks before the planner searches the next.
+pub const FAR_AGAIN_TICKS: u64 = 20;
+/// Where feet rest on soul sand, over its cell's floor line (its collision box's top).
+pub const SOUL_SAND_TOP: f64 = 0.875;
+/// Waypoints ahead a far walk watches for a mob to keep clear of.
+pub const SHUN_AHEAD: usize = 12;
+/// Ticks between two clicks laying one bridge block: the block update arrives in a tick or two.
+pub const PLACE_EVERY_TICKS: u64 = 6;
+/// Clicks for one bridge block before the walk fails.
+pub const MAX_PLACE_TRIES: u32 = 8;
+/// The ticks a walk may take more for each cell it bridges (hold the block, click, step).
+pub const BRIDGE_TICKS: u64 = 40;
+/// Laying a block, the body stays this near the centre of the block it stands on.
+pub const BRIDGE_STAND: f64 = 0.45;
+
+/// Brick columns within the nine 16-block squares round a brick that make it part of a fortress's
+/// body and not a lone pillar: a corridor five wide crossing three squares is 240; the pillar in
+/// the lava sea the first far walks ended at ((58 to 66, 95 to 104) of race 45337580375) is 60.
+pub const BODY_COLUMNS: usize = 200;
+
+/// The first of `bricks` (nearest first) that stands in a fortress's body: `BODY_COLUMNS` brick
+/// columns in the nine 16-block squares round it. A far walk prefers it to a nearer lone pillar,
+/// which is `fortress` met on a spot with lava all round (docs/problems/nether-walk.md).
+pub fn brick_in_the_body(bricks: &[Cell]) -> Option<Cell> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut squares: BTreeMap<(i32, i32), BTreeSet<(i32, i32)>> = BTreeMap::new();
+    for (x, _, z) in bricks {
+        squares
+            .entry((x >> 4, z >> 4))
+            .or_default()
+            .insert((*x, *z));
+    }
+    let mut counted: BTreeMap<(i32, i32), usize> = BTreeMap::new();
+    bricks.iter().copied().find(|(x, _, z)| {
+        let at = (x >> 4, z >> 4);
+        *counted.entry(at).or_insert_with(|| {
+            (-1..=1)
+                .flat_map(|dx| (-1..=1).map(move |dz| (at.0 + dx, at.1 + dz)))
+                .map(|k| squares.get(&k).map_or(0, BTreeSet::len))
+                .sum()
+        }) >= BODY_COLUMNS
+    })
+}
+
+/// Is there rock under the feet to tunnel into: a full block under them with a full block under
+/// that (a causeway is one block thick over lava or air), and no lava at the door. Where there
+/// is not, the fortress leg takes the far walk before the tunnel.
+pub fn rock_to_tunnel(w: &World, (x, y, z): Cell) -> bool {
+    let full = |c: Cell| {
+        w.block_at(BlockPos::new(c.0, c.1, c.2))
+            .and_then(data::generated::shapes::collision)
+            == Some(data::types::Collision::Full)
+    };
+    full((x, y - 1, z))
+        && full((x, y - 2, z))
+        && crate::escape::lava_door_at(w, (x, y, z)).is_none()
+}
 
 /// Why a task failed: data, for recovery and for the case file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -80,6 +148,29 @@ pub struct Walk {
     pub longest_stall: u64,
     /// What its searches spent.
     pub expanded: u64,
+    /// The route's moves and the bridge in hand (boxed: a walk sits inside other tasks' enums).
+    #[serde(default)]
+    pub more: Box<More>,
+}
+
+/// What a walk keeps beyond clojurecraft's: its route's moves, and its bridging.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct More {
+    /// The move that reaches each waypoint (`MoveKind::Bridge` lays its floor first), and the
+    /// cell the route was searched from.
+    pub kinds: Vec<MoveKind>,
+    pub from: Option<Cell>,
+    /// A far walk: its searches spend `FAR_NODES` at `FAR_WEIGHT`.
+    pub far: bool,
+    /// Bridge blocks laid, the last click and the clicks sent for the block in hand.
+    pub placed: u32,
+    pub place_tick: u64,
+    pub place_tries: u32,
+    /// The floor cell being laid.
+    pub laying: Option<Cell>,
+    /// Acts to send and notes to write, taken by the planner each tick (`take_out`).
+    pub acts: Vec<Act>,
+    pub said: Vec<(String, String)>,
 }
 
 fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -122,7 +213,49 @@ impl Walk {
             best_distance_at: tick,
             longest_stall: 0,
             expanded: 0,
+            more: Box::default(),
         }
+    }
+
+    /// A walk to a place far off (a fortress seen 110 blocks away): to within `range` of
+    /// `target`, its route searched with `FAR_NODES` at `FAR_WEIGHT`, bridging where the search
+    /// may. Arrives at the goal.
+    pub fn far(target: Cell, range: f64, tick: u64) -> Self {
+        let mut walk = Self::new(
+            target,
+            Goal::Near { pos: target, range },
+            Arrive::Goal,
+            tick,
+        );
+        walk.more.far = true;
+        walk
+    }
+
+    /// A far walk to any goal (an explore's `Goal::Afar`, a spawner's `Goal::Near`): as `far`,
+    /// for the planner's other legs. Start it only when `route_now` answers a found route, and
+    /// run it as `Task::Explore`: the planner sends its acts and writes its notes there.
+    pub fn far_to(target: Cell, goal: Goal, tick: u64) -> Self {
+        let mut walk = Self::new(target, goal, Arrive::Goal, tick);
+        walk.more.far = true;
+        walk
+    }
+
+    /// The acts and notes this tick left, for the planner to send and write.
+    pub fn take_out(&mut self) -> (Vec<Act>, Vec<(String, String)>) {
+        (
+            std::mem::take(&mut self.more.acts),
+            std::mem::take(&mut self.more.said),
+        )
+    }
+
+    /// The bridge cells the route still has ahead.
+    pub fn bridges_ahead(&self) -> usize {
+        self.more
+            .kinds
+            .iter()
+            .skip(self.at)
+            .filter(|k| **k == MoveKind::Bridge)
+            .count()
     }
 
     /// A walk to beside a block to dig (issue 10): where its drop falls within the pickup box,
@@ -154,7 +287,7 @@ impl Walk {
         )
     }
 
-    fn arrived(&self, pos: [f64; 3]) -> bool {
+    fn arrived(&self, w: &World, pos: [f64; 3]) -> bool {
         match self.arrive {
             Arrive::Reach => {
                 let eye = [pos[0], pos[1] + physics::EYE_HEIGHT, pos[2]];
@@ -164,12 +297,20 @@ impl Walk {
                         .sqrt();
                 d <= REACH && self.target.1 - pos[1].floor() as i32 <= PICKUP_RISE
             }
-            Arrive::Goal => self.goal.done(path::feet_cell(pos)),
+            Arrive::Goal => self.goal.done(path::stand_cell(w, pos)),
         }
     }
 
     fn deadline(&self) -> u64 {
-        WALK_TIMEOUT_TICKS + WAYPOINT_TICKS * self.waypoints.as_ref().map_or(0, |w| w.len() as u64)
+        WALK_TIMEOUT_TICKS
+            + WAYPOINT_TICKS * self.waypoints.as_ref().map_or(0, |w| w.len() as u64)
+            + BRIDGE_TICKS
+                * self
+                    .more
+                    .kinds
+                    .iter()
+                    .filter(|k| **k == MoveKind::Bridge)
+                    .count() as u64
     }
 
     /// Plan the route now and say whether the target is walkable (clojurecraft's `walkable?`):
@@ -198,18 +339,56 @@ impl Walk {
     }
 
     fn route(&mut self, w: &World, pos: [f64; 3], tick: u64) {
-        let r = path::plan(
-            w,
-            path::feet_cell(pos),
-            &self.goal,
-            Budget::Far.expansions(),
-        );
+        let (nodes, weight) = if self.more.far {
+            (FAR_NODES, FAR_WEIGHT)
+        } else {
+            (Budget::Far.expansions(), 1.0)
+        };
+        let r = if self.more.far {
+            path::plan_far(w, path::feet_cell(pos), &self.goal, nodes, weight)
+        } else {
+            path::plan_weighted(w, path::feet_cell(pos), &self.goal, nodes, weight)
+        };
         self.expanded += u64::from(r.expanded);
         self.waypoints = Some(r.waypoints);
+        self.more.kinds = r.kinds;
+        self.more.from = r.from;
+        self.more.laying = None;
+        self.more.place_tries = 0;
+        // A far search is dear: each one after the first is written down with what it spent.
+        if self.more.far && self.replans > 0 {
+            self.more.said.push((
+                "far route planned again".to_owned(),
+                format!(
+                    "{:?}, {} cells, {} expansions; plan {} of {MAX_REPLANS}",
+                    r.status,
+                    self.waypoints.as_ref().map_or(0, Vec::len),
+                    r.expanded,
+                    self.replans + 1
+                ),
+            ));
+        }
         self.route = Some(r.status);
         self.at = 0;
         self.replans += 1;
         self.best_tick = tick;
+    }
+
+    /// A far walk's own reason to plan again: a mob its route keeps clear of (`path::SHUN_KINDS`)
+    /// has come within its radius of the next `SHUN_AHEAD` waypoints.
+    fn foe_ahead(&self, w: &World) -> bool {
+        if !self.more.far {
+            return false;
+        }
+        let cells = path::Cells::far(w);
+        let from = self.more.from.unwrap_or(self.target);
+        self.waypoints
+            .as_ref()
+            .and_then(|wps| wps.get(self.at..))
+            .unwrap_or_default()
+            .iter()
+            .take(SHUN_AHEAD)
+            .any(|c| cells.shunned(*c, from))
     }
 
     /// clojurecraft's `route-stale?`: a waypoint ahead can no longer be stood on, no waypoint
@@ -219,8 +398,21 @@ impl Walk {
             return true;
         };
         let ahead = wps.get(self.at..).unwrap_or_default();
-        let mut cells = path::Cells::new(w);
-        ahead.iter().any(|c| !cells.standable(*c))
+        let mut cells = if self.more.far {
+            path::Cells::far(w)
+        } else {
+            path::Cells::new(w)
+        };
+        self.foe_ahead(w)
+            || ahead.iter().enumerate().any(|(i, c)| {
+                let kind = self
+                    .more
+                    .kinds
+                    .get(self.at + i)
+                    .copied()
+                    .unwrap_or(MoveKind::Walk);
+                !cells.usable(*c, kind)
+            })
             || tick.saturating_sub(self.best_tick) > STUCK_TICKS
             || (ahead.is_empty() && self.route != Some(Status::Found))
     }
@@ -239,7 +431,7 @@ impl Walk {
         }
         let stall = tick.saturating_sub(self.best_distance_at);
         self.longest_stall = self.longest_stall.max(stall);
-        if self.arrived(pos) {
+        if self.arrived(w, pos) {
             return (Controls::default(), TaskStatus::Done);
         }
         if stall > PATIENCE_TICKS {
@@ -259,6 +451,15 @@ impl Walk {
             };
         }
         if self.stale(w, tick) {
+            if self.foe_ahead(w) {
+                self.more.said.push((
+                    "a mob to keep clear of is near the way ahead".to_owned(),
+                    format!(
+                        "within {} of the next {SHUN_AHEAD} cells; plan again round it",
+                        path::SHUN_RADIUS
+                    ),
+                ));
+            }
             if self.replans >= MAX_REPLANS {
                 return (Controls::default(), TaskStatus::Failed(Failure::NoPath));
             }
@@ -279,9 +480,125 @@ impl Walk {
         if horizontal(pos, wc) <= WAYPOINT_REACH && (pos[1] - f64::from(wy)).abs() <= 0.5 {
             self.at += 1;
             self.best_tick = tick;
+            // On a far walk's found route a waypoint reached is progress, though the route leads
+            // round (a way over a lava sea goes away from its goal before it comes back). A far
+            // walk only: on every walk it broke the overworld's log walk (probe 45351964250).
+            if self.more.far && self.route == Some(Status::Found) {
+                self.best_distance_at = tick;
+            }
             return (Controls::default(), TaskStatus::Running);
         }
-        (follow(body, next), TaskStatus::Running)
+        if self.more.kinds.get(self.at) == Some(&MoveKind::Bridge)
+            && let Some(out) = self.bridge(w, body, next, tick)
+        {
+            return out;
+        }
+        // Feet resting in soul sand's own cell (y + 0.875): read from the block, never from the
+        // fraction of y, which a body mid-jump or a hair under a whole block also shows.
+        let soul = w.block_at(BlockPos::new(
+            pos[0].floor() as i32,
+            pos[1].floor() as i32,
+            pos[2].floor() as i32,
+        )) == Some(data::BlockKind::SoulSand);
+        (follow(body, next, soul), TaskStatus::Running)
+    }
+
+    /// The bridge move's executor: with no floor under `next`, stand on the block before it and
+    /// lay a held block against that block's side (the server asks only that the block clicked is
+    /// in reach, not that its face is in view). `None` once the floor is there: walk on. Until
+    /// then the body never leaves the block it stands on.
+    fn bridge(
+        &mut self,
+        w: &World,
+        body: physics::Body,
+        next: Cell,
+        tick: u64,
+    ) -> Option<(Controls, TaskStatus)> {
+        let still = Controls::default();
+        let floor = (next.0, next.1 - 1, next.2);
+        let mut cells = path::Cells::new(w);
+        if cells.floor(floor) {
+            if self.more.laying.take() == Some(floor) {
+                self.more.placed += 1;
+                self.more.place_tries = 0;
+                self.more.said.push((
+                    format!("bridge block laid at {floor:?}"),
+                    format!(
+                        "the route's bridge move, {} laid on this walk, {} bridge cells ahead",
+                        self.more.placed,
+                        self.bridges_ahead().saturating_sub(1)
+                    ),
+                ));
+            }
+            return None;
+        }
+        // The block stood on: the waypoint before, or the cell the route was searched from. With
+        // no such block to click the walk fails here: it never steps out over a floor not laid.
+        let lost = Some((still, TaskStatus::Failed(Failure::NoPath)));
+        let prev = match self.at.checked_sub(1) {
+            Some(i) => self.waypoints.as_ref().and_then(|w| w.get(i)).copied(),
+            None => self.more.from,
+        };
+        let Some(prev) = prev else {
+            return lost;
+        };
+        let face = match (next.0 - prev.0, next.2 - prev.2) {
+            (0, -1) => 2,
+            (0, 1) => 3,
+            (-1, 0) => 4,
+            (1, 0) => 5,
+            _ => return lost,
+        };
+        let under = (prev.0, prev.1 - 1, prev.2);
+        if prev.1 != next.1 || !cells.floor(under) {
+            return lost;
+        }
+        // Progress here is a block laid, not ground gained.
+        self.best_tick = tick;
+        let stand = [
+            f64::from(prev.0) + 0.5,
+            body.pos[1],
+            f64::from(prev.2) + 0.5,
+        ];
+        if horizontal(body.pos, stand) > BRIDGE_STAND || !body.on_ground {
+            let mut c = toward(body, stand);
+            c.jump = false;
+            c.forward = body.on_ground;
+            return Some((c, TaskStatus::Running));
+        }
+        let Some(item) = path::bridge_item(w) else {
+            self.more.said.push((
+                format!("no bridge block for {floor:?}"),
+                "none of the bridge blocks is held".to_owned(),
+            ));
+            return Some((still, TaskStatus::Failed(Failure::NoPath)));
+        };
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Act(a) => self.more.acts.push(a),
+            crate::hold::Hold::Wait => {}
+            crate::hold::Hold::Missing => {
+                return Some((still, TaskStatus::Failed(Failure::NoPath)));
+            }
+            crate::hold::Hold::Held => {
+                if tick.saturating_sub(self.more.place_tick) >= PLACE_EVERY_TICKS {
+                    if self.more.place_tries >= MAX_PLACE_TRIES {
+                        self.more.said.push((
+                            format!("bridge block at {floor:?} not laid"),
+                            format!("{MAX_PLACE_TRIES} clicks on {under:?} face {face}"),
+                        ));
+                        return Some((still, TaskStatus::Failed(Failure::NoPath)));
+                    }
+                    self.more.place_tries += 1;
+                    self.more.place_tick = tick;
+                    self.more.laying = Some(floor);
+                    self.more.acts.push(Act::UseOn {
+                        pos: BlockPos::new(under.0, under.1, under.2),
+                        face,
+                    });
+                }
+            }
+        }
+        Some((still, TaskStatus::Running))
     }
 }
 
@@ -298,7 +615,7 @@ fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
 
 /// To a waypoint (clojurecraft's `follow`): face its centre, forward, jump only when it is above
 /// and near, or when blocked; stop once wholly over a descending waypoint.
-fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
+fn follow(body: physics::Body, (wx, wy, wz): Cell, on_soul_sand: bool) -> Controls {
     let [px, py, pz] = body.pos;
     let centre = [
         f64::from(wx) + 0.5,
@@ -310,8 +627,37 @@ fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
         return Controls::default();
     }
     let near = horizontal([px, 0.0, pz], centre) < JUMP_NEAR;
-    let up = f64::from(wy) > py.floor() + 0.5;
+    // A cell up. On soul sand, feet at y + 0.875, the next cell's floor line is an eighth up:
+    // a step and no jump (`SOUL_SAND_TOP`); everywhere else as clojurecraft has it (the
+    // overworld's walk is unchanged: `the_planner_reaches_a_log_thirty_blocks_out_on_real_terrain`).
+    let up = f64::from(wy) > py.floor() + if on_soul_sand { 1.5 } else { 0.5 };
+    // That eighth is stepped, never jumped: under a two-high roof a jump hits the lintel, comes
+    // down on the soul sand still blocked by the eighth, and jumps again (the model's kit bot
+    // hopped at (61, 46.88, 79.7) for 8,000 ticks: docs/problems/nether-walk.md).
+    let rise = f64::from(wy) - py;
+    let low_step = on_soul_sand && body.on_ground && rise > 0.0 && rise <= physics::STEP_HEIGHT;
     let mut c = toward(body, centre);
-    c.jump = c.jump || (up && near);
+    c.jump = (c.jump && !low_step) || (up && near);
     c
+}
+
+#[cfg(test)]
+mod body_tests {
+    use super::*;
+
+    /// A lone pillar near and a corridor far: the corridor's nearest brick is the body's.
+    #[test]
+    fn a_corridor_is_preferred_to_a_nearer_pillar() {
+        let pillar: Vec<Cell> = (58..=66)
+            .flat_map(|x| (95..=104).flat_map(move |z| (28..=40).map(move |y| (x, y, z))))
+            .collect();
+        let corridor: Vec<Cell> = (100..=160)
+            .flat_map(|x| (150..=154).map(move |z| (x, 64, z)))
+            .collect();
+        let mut bricks = pillar.clone();
+        bricks.extend(corridor);
+        // The first corridor brick with 200 columns in its nine squares (x 100 to 143, five wide).
+        assert_eq!(brick_in_the_body(&bricks), Some((112, 64, 150)));
+        assert_eq!(brick_in_the_body(&pillar), None);
+    }
 }

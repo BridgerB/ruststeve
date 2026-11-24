@@ -113,7 +113,6 @@ fn no_route_on_any_wall_puts_the_body_in_lava() {
 
 /// (a) Soul sand is ground: the flat has a route as the netherrack one does.
 #[test]
-#[ignore = "blaze wall: Status::None after 0 expansions, no cell of soul sand is standable; owner A2"]
 fn a_soul_sand_flat_has_a_route() {
     let wall = walls::soul_sand_flat();
     let w = world_of(&wall);
@@ -123,14 +122,18 @@ fn a_soul_sand_flat_has_a_route() {
 
 /// (b) A moat 4 wide has a route for a bot that holds blocks (the bridging move).
 #[test]
-#[ignore = "blaze wall: Partial after 6000 expansions, ending at the bank (9, 34, 0); owner A2"]
 fn a_lava_moat_has_a_route() {
     let wall = walls::lava_moat();
     let mut w = world_of(&wall);
     w.inventory
         .slots
         .insert(36, (data::ItemKind::Cobblestone, 64));
-    let r = to_bricks(&wall, &w);
+    // The far search is the one that bridges (`fortress_task`'s far walk).
+    let goal = Goal::Near {
+        pos: wall.bricks,
+        range: world::stage::FORTRESS_NEAR - 1.0,
+    };
+    let r = plan::path::plan_far(&w, wall.start, &goal, Budget::Far.expansions(), 1.0);
     assert_eq!(r.status, Status::Found, "{}", said(&wall, &w, &r));
 }
 
