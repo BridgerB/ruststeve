@@ -20,6 +20,9 @@ pub fn bricks_near(w: &World, chunks: i32) -> Vec<(i32, i32, i32)> {
     kind_near(w, data::BlockKind::NetherBricks, chunks)
 }
 
+/// World ticks between two looks at the stages (a second).
+pub const STAGE_EVERY_TICKS: u64 = 20;
+
 /// The cells of `kind` on record in the dimension the bot is in, within `chunks` chunk columns of
 /// the feet, nearest first (memory's watched kinds only).
 pub fn kind_near(w: &World, kind: data::BlockKind, chunks: i32) -> Vec<(i32, i32, i32)> {
@@ -31,9 +34,19 @@ pub fn kind_near(w: &World, kind: data::BlockKind, chunks: i32) -> Vec<(i32, i32
     let mut out: Vec<(f64, (i32, i32, i32))> = Vec::new();
     for dx in -chunks..=chunks {
         for dz in -chunks..=chunks {
-            for s in w.memory.in_column(&dim.name, cx + dx, cz + dz) {
-                if data::block_of_state(s.state) == Some(kind) {
-                    let c = s.pos;
+            let cells = w
+                .memory
+                .indexed_in_column(&dim.name, cx + dx, cz + dz, kind)
+                .unwrap_or_else(|| {
+                    w.memory
+                        .in_column(&dim.name, cx + dx, cz + dz)
+                        .into_iter()
+                        .filter(|s| data::block_of_state(s.state) == Some(kind))
+                        .map(|s| s.pos)
+                        .collect()
+                });
+            for c in cells {
+                {
                     let d = (0..3)
                         .map(|i| {
                             let v = [c.0, c.1, c.2][i];
@@ -291,5 +304,17 @@ impl Stage {
     /// reached is the highest this has ever been (items get spent), kept by the world.
     pub fn highest(w: &World) -> Option<Stage> {
         Stage::ALL.into_iter().rev().find(|s| s.holds(w))
+    }
+
+    /// The highest stage that holds of those above `reached` (all of them when `None`): the
+    /// stages at or under it are not looked at again, and the ones that scan the sightings of 25
+    /// chunk columns (`scans`) only when `scans`.
+    pub fn highest_above(w: &World, reached: Option<Stage>, scans: bool) -> Option<Stage> {
+        Stage::ALL
+            .into_iter()
+            .rev()
+            .take_while(|s| reached.is_none_or(|r| *s > r))
+            .filter(|s| scans || !matches!(s, Stage::Fortress | Stage::Spawner))
+            .find(|s| s.holds(w))
     }
 }

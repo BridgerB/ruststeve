@@ -121,7 +121,10 @@ fn run() -> Result<(), String> {
         })
         .last()
         .unwrap_or(0);
-    let world = folder.world;
+    let mut world = folder.world;
+    // A recording from before the memory's kind index: build it, so the steps run at today's
+    // speed.
+    world.memory.reindex();
     let pos = world
         .body
         .map(|b| b.pos)

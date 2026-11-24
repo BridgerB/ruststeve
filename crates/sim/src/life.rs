@@ -51,14 +51,20 @@
 //!   knock from the ground lifts the mob 0.4 (`min(0.4, vy / 2 + 0.4)`), which under gravity
 //!   0.08 and drag 0.98 keeps it aloft 11 ticks: the air's drag holds that long, so a walker
 //!   goes about 3 blocks in 11 ticks (clojurecraft measured the same, brain mc-mob-facts) and
-//!   a blaze in the air about 4.4. The lift itself is not drawn (a mob's height is unchanged);
-//!   a walker stops at a floor's edge rather than fall. A `Still` mob is not moved. A sprint's
-//!   extra knock is not modelled.
+//!   a blaze in the air about 4.4. A blaze's lift is not drawn (its height is its flight's). A
+//!   walker's is: lifted `min(0.4, vy / 2 + 0.4)` (0.3608 standing), it falls under gravity
+//!   0.08 and drag 0.98 where nothing holds it, so a knock carries it off a bridge's edge, and
+//!   it lands with `ceil(fallen - 3)` of fall damage (`tick_falls`). The player's lift is
+//!   the same rule on the server's own vy. A `Still` mob is not moved. A sprint's extra knock
+//!   is not modelled.
 //! - `Life::hurt_by` sums the damage each type dealt, for a test to name what a death was.
 //! - a fire set with updates (a fireball's, flint and steel's) keeps its own clock
 //!   (`FireBlock.tick`, every 30 to 39 ticks): on netherrack or magma it burns on; elsewhere
 //!   it ages by `nextInt(3) / 2` and goes out once older than 3 (about 25 s), nothing
-//!   flammable being taken to stand by it. A fire laid by a stage does not age.
+//!   flammable being taken to stand by it. The infiniburn floors are the jar's
+//!   `#infiniburn_nether` (= `#infiniburn_overworld`: netherrack and magma_block; probe
+//!   45359635431). Fires the world began with (a stage's, a capture's) get their clocks at the
+//!   first tick (`wake_fires`) and age the same way.
 //! - a spawner (`BaseSpawner`, javap): with the player within 16 it counts down (20 at first,
 //!   then 200 plus up to 599); at 0, unless 6 of its mob are alive within 4 of it, it tries 4
 //!   places (`(rand - rand) × 4` on x and z, -1 to 1 on y) and spawns where the body is free.
@@ -69,8 +75,24 @@
 //!   a triangular spread of `2.297 × sqrt(sqrt(distance²)) × 0.5` on x and z; a hit takes 5
 //!   (`fireball`, cut by armour) and sets the player alight for 5 s; a block hit leaves fire in
 //!   the cell before it when that has a floor.
-//! - a shield (`blocks_attacks`): held in either hand and used for 5 ticks or more, it stops a
-//!   fireball that comes from the half of the plane the player faces: no damage, no fire.
+//! - a shield (`Items.SHIELD`'s `BlocksAttacks`, probe 45359635431: delay 0.25 s, one
+//!   reduction of base 0 factor 1 within 90 degrees, item damage threshold 3 base 1 factor 1,
+//!   bypassed by `#bypasses_shield`, durability 336): held in either hand and used for 5 ticks
+//!   or more, it stops whole a fireball or a mob's blow (`mob_attack`) whose source position
+//!   (the fireball's own, the mob's) is in the half of the plane the player faces: no damage,
+//!   no fire, no wither, the block sound. `in_fire`, `lava`, `hot_floor`, `on_fire`, `wither`
+//!   are in `#bypasses_shield`. Each blocked hit of 3 or more wears it `floor(1 + damage)` (6 a
+//!   fireball), sent as its `damage` component; at 336 it breaks. A blocked blow knocks the
+//!   mob 0.5 back (`blockedByItem`); a blow from a weapon with `disable_blocking_for_seconds`
+//!   (`Melee::disables_shield`) stops the use and cools the shield down (`BlocksAttacks.disable`:
+//!   seconds × 20). A blocked hit is still a hit of 0 to `hurtServer`: outside the invulnerable
+//!   half it starts 20 fresh ticks with `lastHurt` 0, and the player's client is not knocked.
+//! - a fireball or a blow that lands nothing (inside the invulnerable half, no excess) leaves no
+//!   fire (`SmallFireball.onHitEntity` puts the fire ticks back) and no wither.
+//! - a blaze's touch (`Mob.doHurtTarget`; `Blaze` does not override it) is its `attack_damage`
+//!   6 as `mob_attack`, every 20 ticks, and sets nothing alight: fire from a blow comes only from
+//!   a weapon's enchantment (`doPostAttackEffects`), and a blaze holds none.
+//! - armour also cuts `lava`, `in_fire` and `hot_floor` (not in `#bypasses_armor`).
 //! - armour (`CombatRules.getDamageAfterArmorAbsorb`): a mob's hit is cut by
 //!   `min(20, max(armor / 5, armor - 4 × damage / 8)) / 25`; `Life::armor` is set by a test (the
 //!   model wears nothing).
@@ -123,21 +145,46 @@ pub struct Melee {
     pub reach: f64,
     /// Ticks of the wither effect a hit leaves.
     pub wither_ticks: u32,
+    /// Ticks a raised shield it strikes is disabled for (an axe's blow; 0 for none).
+    pub disables_shield: u32,
 }
 
 impl Melee {
-    /// A wither skeleton on Normal. Speed: its `movement_speed` 0.25 times the melee goal's
-    /// 1.2 is both the mob's speed and its forward input, so the ground speed settles at
-    /// 0.3 x 0.3 / (1 - 0.546), 0.198 blocks a tick (a zombie's 0.23 gives the 2.3 blocks a
-    /// second it is known for). Damage 8 with its stone sword and the wither effect for 10 s
-    /// (the wiki's Wither Skeleton page); reach about 1.5 (its box 0.7 wide, the attack box's
-    /// 0.83 beyond it, to the player's 0.3).
+    /// A wither skeleton on Normal (probe 45359635431). Speed: its `movement_speed` 0.25
+    /// (`AbstractSkeleton.createAttributes`) times the melee goal's 1.2 is both the mob's speed
+    /// and its forward input, so the ground speed settles at 0.3 x 0.3 / (1 - 0.546), 0.198
+    /// blocks a tick (a zombie's 0.23 gives the 2.3 blocks a second it is known for). Damage
+    /// 8: `attack_damage` set to 4 in `WitherSkeleton.finalizeSpawn`, plus its stone sword's 4
+    /// (`Items.STONE_SWORD`: `sword(STONE, 3, -2.4)`, stone's bonus 1). The wither effect for
+    /// 200 ticks when the blow lands (`WitherSkeleton.doHurtTarget`), 1 each 40
+    /// (`WitherMobEffect`). Reach about 1.5 (its box 0.7 wide, the attack box's 0.83 beyond it,
+    /// to the player's 0.3).
     pub fn wither_skeleton() -> Self {
         Self {
             speed: 0.198,
             damage: 8.0,
             reach: 1.5,
             wither_ticks: 200,
+            disables_shield: 0,
+        }
+    }
+
+    /// A piglin brute (bastions, not fortresses: here for a shield's test). `attack_damage` 7,
+    /// `movement_speed` 0.35 (`PiglinBrute.createAttributes`, probe 45359635431) and its
+    /// golden axe (`populateDefaultEquipmentSlots`), whose damage is the generated item
+    /// table's. An axe disables a shield it strikes for 5 s (an axe's `weapon` component,
+    /// `disable_blocking_for_seconds`; not read from the jar here: `Item$Properties.axe`) times
+    /// the shield's `disable_cooldown_scale` 1: 100 ticks. Speed 0.35 × 1.0 (its melee goal's,
+    /// assumed) settles at 0.35 × 0.35 / 0.454.
+    pub fn piglin_brute() -> Self {
+        let axe = data::generated::item_props::weapon_of(ItemKind::GoldenAxe)
+            .map_or(6.0, |w| w.damage as f32);
+        Self {
+            speed: 0.27,
+            damage: 7.0 + axe,
+            reach: 1.5,
+            wither_ticks: 0,
+            disables_shield: 100,
         }
     }
 }
@@ -263,6 +310,16 @@ const FIREBALL_LIFE: u32 = 200;
 const PROJECTILE_MARGIN: f64 = 0.3;
 /// Ticks a shield must be up before it blocks (`block_delay_seconds` 0.25).
 const SHIELD_DELAY: u64 = 5;
+/// The shield's wear for a blocked hit (`BlocksAttacks$ItemDamageFunction`, the shield's
+/// `item_damage`): nothing under the threshold 3, else `floor(base 1 + factor 1 × damage)`:
+/// 6 a fireball, 7 a blaze's touch, of a new shield's 336.
+const SHIELD_WEAR_THRESHOLD: f32 = 3.0;
+const SHIELD_WEAR_BASE: f32 = 1.0;
+const SHIELD_WEAR_FACTOR: f32 = 1.0;
+/// `LivingEntity.blockedByItem`: a mob whose blow a shield stopped is knocked 0.5 away.
+const BLOCKED_KNOCK: f64 = 0.5;
+/// The sound source players' sounds go out on (`SoundSource.PLAYERS`).
+const SOURCE_PLAYERS: i32 = 7;
 /// The steps a flight or a line of sight is sampled at, in blocks.
 const SAMPLE: f64 = 0.2;
 
@@ -300,7 +357,33 @@ pub struct Mob {
     /// spent a tick at a time and cut by friction, and the ticks the knock keeps it aloft.
     pub push: [f64; 2],
     pub aloft: u32,
+    /// A walker's upward speed (a knock's lift, then gravity) and how far it has fallen since
+    /// it last stood: a walker knocked off an edge falls and takes the fall's damage.
+    pub vy: f64,
+    pub fallen: f64,
 }
+
+impl Mob {
+    /// `LivingEntity.knockback(strength, …)` away along `away` (x, z): half the sideways motion
+    /// kept plus `strength`; a walker on its feet lifted `min(0.4, vy / 2 + 0.4)` (its standing
+    /// vy is a tick of gravity, -0.0784: 0.3608), one in the air keeps its vy.
+    fn knocked(&mut self, away: [f64; 2], strength: f64) {
+        let len = away[0].hypot(away[1]).max(1e-9);
+        self.push = [
+            self.push[0] / 2.0 + away[0] / len * strength,
+            self.push[1] / 2.0 + away[1] / len * strength,
+        ];
+        self.aloft = KNOCK_ALOFT;
+        if matches!(self.brain, Brain::Melee(_)) && self.vy == 0.0 {
+            self.vy = (STANDING_VY / 2.0 + KNOCKBACK).min(KNOCKBACK);
+        }
+    }
+}
+
+/// A body on the ground carries a tick of gravity as its vy (`-0.08 × 0.98`).
+const STANDING_VY: f64 = -physics::GRAVITY * physics::VERTICAL_DRAG;
+/// `safe_fall_distance` (the attribute's default, 3).
+const SAFE_FALL: f64 = 3.0;
 
 /// The player's body as the server keeps it (issue 12a).
 #[derive(Clone, Debug, PartialEq)]
@@ -336,11 +419,23 @@ pub struct Life {
     pub fires: Vec<Fire>,
     /// Of those, the ones gone out.
     pub fires_out: u64,
+    /// Whether the world's own fires were given their clocks (`Sim::wake_fires`).
+    pub fires_woken: bool,
     /// The spawners that run (`Sim::add_spawner`).
     pub spawners: Vec<Spawner>,
     /// The tick a shield went up (`use_item` with a shield in either hand), until the use key
     /// is let go.
     pub blocking_since: Option<u64>,
+    /// The menu slot of the shield raised (the held one, else the off hand, 45).
+    pub blocking_slot: usize,
+    /// The wear each shield holds, by menu slot (`damage` of a new shield's 336). Kept by slot:
+    /// a shield moved to another slot loses it (the model's limit; a raised shield stays put).
+    pub shield_wear: std::collections::BTreeMap<usize, i32>,
+    /// The tick before which a shield cannot be raised (an axe's blow disabled it).
+    pub shield_cooldown_until: u64,
+    /// Shields worn out, and mobs' blows a shield stopped.
+    pub shields_broken: u64,
+    pub blows_blocked: u64,
     /// Fireballs a shield stopped, and fireballs that hit.
     pub fireballs_blocked: u64,
     pub fireballs_hit: u64,
@@ -360,6 +455,8 @@ pub struct Life {
     pub kills: u64,
     /// Fresh hits on mobs that knocked them back.
     pub mobs_knocked: u64,
+    /// Walkers hurt by a fall (knocked off an edge).
+    pub mobs_fell: u64,
     /// Damage dealt to the player by damage type (after armour and invulnerability), so a
     /// test can say what a death was made of.
     pub hurt_by: std::collections::BTreeMap<String, f32>,
@@ -386,8 +483,14 @@ impl Default for Life {
             fireballs: Vec::new(),
             fires: Vec::new(),
             fires_out: 0,
+            fires_woken: false,
             spawners: Vec::new(),
             blocking_since: None,
+            blocking_slot: 45,
+            shield_wear: std::collections::BTreeMap::new(),
+            shield_cooldown_until: 0,
+            shields_broken: 0,
+            blows_blocked: 0,
             fireballs_blocked: 0,
             fireballs_hit: 0,
             fireballs_landed: 0,
@@ -400,6 +503,7 @@ impl Default for Life {
             sent_fire: false,
             kills: 0,
             mobs_knocked: 0,
+            mobs_fell: 0,
             hurt_by: std::collections::BTreeMap::new(),
         }
     }
@@ -438,6 +542,8 @@ impl Sim {
                 next_hit: 0,
                 push: [0.0; 2],
                 aloft: 0,
+                vy: 0.0,
+                fallen: 0.0,
             },
         );
         id
@@ -570,8 +676,11 @@ impl Sim {
         if !out.is_empty() {
             let (dx, dz) = (self.pos[0] - from[0], self.pos[2] - from[2]);
             let len = (dx * dx + dz * dz).sqrt().max(1e-9);
+            // `LivingEntity.knockback`: on the ground `min(0.4, vy / 2 + 0.4)` of the server's own
+            // vy (a tick of gravity: 0.3608); in the air the vy is kept (0 here: the tick's
+            // motion packet then carries the server's own).
             let up = if self.survival.on_ground {
-                KNOCKBACK
+                (self.server_vy / 2.0 + KNOCKBACK).min(KNOCKBACK)
             } else {
                 0.0
             };
@@ -641,12 +750,7 @@ impl Sim {
             if dist2 < 4.0 {
                 if seen && attack_time <= 0 {
                     attack_time = BLAZE_MELEE_EVERY;
-                    out.extend(self.hit_from(
-                        BLAZE_MELEE,
-                        "mob_attack",
-                        "death.attack.mob",
-                        m.pos,
-                    )?);
+                    out.extend(self.blow_from(id, BLAZE_MELEE, m.pos, 0)?.1);
                 }
             } else if dist2 < BLAZE_RANGE * BLAZE_RANGE && seen && attack_time <= 0 {
                 step += 1;
@@ -803,18 +907,113 @@ impl Sim {
         Ok(out)
     }
 
-    /// Whether a shield is up and faces `from`.
-    fn shield_stops(&self, from: [f64; 3]) -> bool {
-        let Some(since) = self.survival.life.blocking_since else {
-            return false;
-        };
+    /// The slot of a shield that is up and faces `source` (`LivingEntity.applyItemBlocking`:
+    /// the item in use for its `block_delay_seconds`, and the damage's source position, the
+    /// direct entity's, within `horizontal_blocking_angle` 90 of the look on the plane). Only
+    /// for damage not in `#bypasses_shield` (a fireball's, a mob's blow).
+    fn shield_stops(&self, source: [f64; 3]) -> Option<usize> {
+        let life = &self.survival.life;
+        let since = life.blocking_since?;
         if self.ticks < since + SHIELD_DELAY {
-            return false;
+            return None;
+        }
+        let slot = life.blocking_slot;
+        let held = self.survival.slots.get(slot).copied().flatten();
+        if held.is_none_or(|(k, _)| k != ItemKind::Shield) {
+            return None;
         }
         let yaw = f64::from(self.look.0).to_radians();
         let facing = [-yaw.sin(), yaw.cos()];
-        let to = [from[0] - self.pos[0], from[2] - self.pos[2]];
-        facing[0] * to[0] + facing[1] * to[1] > 0.0
+        let to = [source[0] - self.pos[0], source[2] - self.pos[2]];
+        (facing[0] * to[0] + facing[1] * to[1] > 0.0).then_some(slot)
+    }
+
+    /// A hit the shield in `slot` stopped (`BlocksAttacks.hurtBlockingItem` and `onBlocked`):
+    /// the block sound, and the shield's wear, sent as its `damage`; worn through, it breaks
+    /// (`hurtAndBreak`: the slot emptied, the use stopped, the break sound).
+    fn shield_takes(&mut self, slot: usize, damage: f32) -> Result<Vec<Wire>, EncodeError> {
+        // `hurtServer` goes on with the blocked hit's 0: outside the invulnerable half it
+        // starts a fresh 20 ticks with `lastHurt` 0, so the next hit in them lands whole.
+        let life = &mut self.survival.life;
+        if life.invulnerable <= INVULNERABLE_HALF {
+            life.invulnerable = INVULNERABLE_TICKS;
+            life.last_hurt = 0.0;
+        }
+        let mut out = vec![self.player_sound("item.shield.block")?];
+        let wear = if damage < SHIELD_WEAR_THRESHOLD {
+            0
+        } else {
+            (SHIELD_WEAR_BASE + SHIELD_WEAR_FACTOR * damage).floor() as i32
+        };
+        if wear == 0 {
+            return Ok(out);
+        }
+        let max = data::generated::item_props::max_damage(ItemKind::Shield);
+        let life = &mut self.survival.life;
+        let worn = life.shield_wear.get(&slot).copied().unwrap_or(0) + wear;
+        if worn >= max {
+            life.shield_wear.remove(&slot);
+            life.shields_broken += 1;
+            life.blocking_since = None;
+            if let Some(s) = self.survival.slots.get_mut(slot) {
+                *s = None;
+            }
+            // The emptied slot goes out with the tick's `broadcast_changes`.
+            out.push(self.player_sound("item.shield.break")?);
+            return Ok(out);
+        }
+        life.shield_wear.insert(slot, worn);
+        out.extend(self.wear_sent(slot)?);
+        Ok(out)
+    }
+
+    /// A sound at the player's feet on the players' source, by its registry name.
+    fn player_sound(&self, name: &str) -> Result<Wire, EncodeError> {
+        let id = data::generated::registries::SOUND_EVENT
+            .iter()
+            .position(|n| *n == name)
+            .and_then(|i| u32::try_from(i).ok())
+            .unwrap_or(0);
+        wire(
+            State::Play,
+            &S2c::Sound {
+                sound: protocol::SoundRef::Registry(id),
+                source: SOURCE_PLAYERS,
+                pos: self.pos,
+                volume: 1.0,
+                pitch: 1.0,
+            },
+        )
+    }
+
+    /// A mob's blow at the player (`Mob.doHurtTarget`, damage type `mob_attack`): a raised
+    /// shield facing it stops it whole, knocks the mob 0.5 back (`blockedByItem`) and, from an
+    /// axe, is disabled for `disables` ticks (`BlocksAttacks.disable`: the use stopped, a
+    /// cooldown); else the hit lands with its knock. Whether it landed.
+    fn blow_from(
+        &mut self,
+        id: i32,
+        damage: f32,
+        from: [f64; 3],
+        disables: u32,
+    ) -> Result<(bool, Vec<Wire>), EncodeError> {
+        if let Some(slot) = self.shield_stops(from) {
+            self.survival.life.blows_blocked += 1;
+            let mut out = self.shield_takes(slot, damage)?;
+            let (px, pz) = (self.pos[0], self.pos[2]);
+            if let Some(m) = self.survival.life.mobs.get_mut(&id) {
+                m.knocked([m.pos[0] - px, m.pos[2] - pz], BLOCKED_KNOCK);
+            }
+            if disables > 0 {
+                let life = &mut self.survival.life;
+                life.blocking_since = None;
+                life.shield_cooldown_until = self.ticks + u64::from(disables);
+                out.push(self.player_sound("item.shield.break")?);
+            }
+            return Ok((false, out));
+        }
+        let out = self.hit_from(damage, "mob_attack", "death.attack.mob", from)?;
+        Ok((!out.is_empty(), out))
     }
 
     /// The fireballs' tick: each flies, and ends on the player, on a block or of age.
@@ -845,10 +1044,14 @@ impl Sim {
                     p[2].floor() as i32,
                 );
                 if on_body && self.health > 0.0 {
-                    if self.shield_stops(b.from) {
+                    // The source position is the fireball's own (`getSourcePosition`: the
+                    // direct entity's), where it stood as this tick's move began.
+                    if let Some(slot) = self.shield_stops(b.pos) {
                         self.survival.life.fireballs_blocked += 1;
+                        out.extend(self.shield_takes(slot, FIREBALL_DAMAGE)?);
                     } else {
                         self.survival.life.fireballs_hit += 1;
+                        let before = self.survival.life.fire_ticks;
                         if !self.survival.life.fire_resistance {
                             self.survival.life.fire_ticks =
                                 self.survival.life.fire_ticks.max(FIREBALL_FIRE_TICKS);
@@ -861,7 +1064,10 @@ impl Sim {
                         )?;
                         // A hit inside the invulnerable half with no excess deals nothing and
                         // the client hears of no damage: a race's "hit facts" count only these.
-                        if !landed.is_empty() {
+                        // `SmallFireball.onHitEntity` then puts the fire ticks back as they were.
+                        if landed.is_empty() {
+                            self.survival.life.fire_ticks = before;
+                        } else {
                             self.survival.life.fireballs_landed += 1;
                         }
                         out.extend(landed);
@@ -916,6 +1122,39 @@ impl Sim {
         Ok(out)
     }
 
+    /// Every fire block the world began with (a stage's, a captured world's) gets its own clock,
+    /// as a fire's scheduled tick is kept with its chunk: such fires age and go out as the
+    /// fireballs' do. Done once, at the first tick. How many were found.
+    pub fn wake_fires(&mut self) -> usize {
+        let fire = |s: u32| data::block_of_state(s) == Some(BlockKind::Fire);
+        let mut cells = Vec::new();
+        for (&(cx, cz), col) in &self.world.columns {
+            let column = &col.column;
+            for (si, section) in column.sections.iter().enumerate() {
+                if !section.blocks.may_contain(fire) {
+                    continue;
+                }
+                let base = column.min_y + 16 * i32::try_from(si).unwrap_or(0);
+                for i in 0..4096usize {
+                    if section.blocks.get(i).is_some_and(fire) {
+                        let (lx, lz, ly) =
+                            ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
+                        cells.push((cx * 16 + lx, base + ly, cz * 16 + lz));
+                    }
+                }
+            }
+        }
+        let mut found = 0;
+        for p in cells {
+            if self.survival.life.fires.iter().any(|f| f.pos == p) {
+                continue;
+            }
+            self.fire_lit(p);
+            found += 1;
+        }
+        found
+    }
+
     /// `FireBlock.getFireTickDelay`: 30 + `nextInt(10)`.
     fn fire_delay(&mut self) -> u64 {
         FIRE_DELAY + (self.survival.next_double() * FIRE_DELAY_SPAN) as u64
@@ -934,6 +1173,10 @@ impl Sim {
     /// is taken as false). The age is kept here, not sent in the block state.
     fn tick_fires(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
+        if !self.survival.life.fires_woken {
+            self.survival.life.fires_woken = true;
+            self.wake_fires();
+        }
         let fires = std::mem::take(&mut self.survival.life.fires);
         let mut kept = Vec::with_capacity(fires.len());
         for mut f in fires {
@@ -993,10 +1236,14 @@ impl Sim {
                 )
             };
             let walker = matches!(m.brain, Brain::Melee(_));
-            let fits = cell(to, 0.0).is_none()
-                && cell(to, 1.79).is_none()
-                && (!walker || cell(to, -0.05).is_some());
-            let grounded = m.aloft == 0 && cell(m.pos, -0.05).is_some();
+            // A walker is carried over an edge as the game carries it (its fall is
+            // `tick_falls`'); a blaze keeps to where its body fits.
+            let fits = cell(to, 0.0).is_none() && cell(to, 1.79).is_none();
+            let grounded = if walker {
+                m.vy == 0.0 && cell(m.pos, -0.05).is_some()
+            } else {
+                m.aloft == 0 && cell(m.pos, -0.05).is_some()
+            };
             let drag = if grounded { DRAG_GROUND } else { DRAG_AIR };
             let push = if fits {
                 m.push.map(|v| v * drag)
@@ -1022,6 +1269,92 @@ impl Sim {
                         x: pos[0],
                         y: pos[1],
                         z: pos[2],
+                    },
+                )?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The walkers' vertical motion (`LivingEntity.travel`): a knock's lift, then gravity 0.08
+    /// and drag 0.98 a tick while nothing holds the feet; on landing, the fall's damage
+    /// (`calculateFallDamage`: `ceil(fallen - safe_fall_distance 3)`). A walker knocked off a
+    /// bridge falls to what is under it (a wither skeleton is fire immune: lava holds it as a
+    /// floor here, out of the fight) and one that falls out of the world is gone.
+    fn tick_falls(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let ids: Vec<i32> = self.survival.life.mobs.keys().copied().collect();
+        for id in ids {
+            let Some(m) = self.survival.life.mobs.get(&id).copied() else {
+                continue;
+            };
+            if m.dead_at.is_some() || !matches!(m.brain, Brain::Melee(_)) {
+                continue;
+            }
+            let (x, z) = (m.pos[0].floor() as i32, m.pos[2].floor() as i32);
+            let floor_at = |y: f64| {
+                let c = y.floor() as i32;
+                match self.state_at(x, c, z) {
+                    None => None,
+                    Some(s) => {
+                        let lava = data::block_of_state(s) == Some(BlockKind::Lava);
+                        self.solid(x, c, z)
+                            .map(|top| f64::from(c) + top)
+                            .or(lava.then_some(f64::from(c) + 1.0))
+                    }
+                }
+            };
+            let standing = m.vy == 0.0 && floor_at(m.pos[1] - 0.05).is_some();
+            if standing {
+                continue;
+            }
+            let mut y = m.pos[1] + m.vy;
+            let mut vy = (m.vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
+            let mut fallen = m.fallen + (m.pos[1] - y).max(0.0);
+            let mut landed = false;
+            if m.vy > 0.0 && self.solid(x, (y + 1.79).floor() as i32, z).is_some() {
+                y = m.pos[1];
+                vy = 0.0;
+            } else if m.vy <= 0.0
+                && let Some(top) = floor_at(y)
+                && top <= m.pos[1]
+            {
+                fallen -= top - y;
+                y = top;
+                vy = 0.0;
+                landed = true;
+            }
+            let gone = self.state_at(x, y.floor() as i32, z).is_none() && y < m.pos[1];
+            let hurt = if landed {
+                (fallen - SAFE_FALL).ceil().max(0.0) as f32
+            } else {
+                0.0
+            };
+            let Some(mob) = self.survival.life.mobs.get_mut(&id) else {
+                continue;
+            };
+            mob.pos[1] = y;
+            mob.vy = vy;
+            mob.fallen = if landed { 0.0 } else { fallen };
+            if landed {
+                mob.aloft = 0;
+            }
+            if hurt > 0.0 {
+                mob.health = (mob.health - hurt).max(0.0);
+                self.survival.life.mobs_fell += 1;
+            }
+            let dead = gone || mob.health <= 0.0;
+            if dead {
+                mob.dead_at = Some(self.ticks);
+                out.push(wire(State::Play, &S2c::EntityEvent { id, status: 3 })?);
+            } else {
+                out.push(wire(
+                    State::Play,
+                    &S2c::EntityPositionSync {
+                        id,
+                        x: m.pos[0],
+                        y,
+                        z: m.pos[2],
                     },
                 )?);
             }
@@ -1082,9 +1415,14 @@ impl Sim {
                 if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
                     mob.next_hit = self.ticks + MELEE_EVERY;
                 }
-                out.extend(self.hit_from(melee.damage, "mob_attack", "death.attack.mob", m.pos)?);
-                let life = &mut self.survival.life;
-                life.wither_ticks = life.wither_ticks.max(melee.wither_ticks);
+                let (landed, hit) =
+                    self.blow_from(id, melee.damage, m.pos, melee.disables_shield)?;
+                out.extend(hit);
+                // `WitherSkeleton.doHurtTarget`: the effect only when the blow landed.
+                if landed {
+                    let life = &mut self.survival.life;
+                    life.wither_ticks = life.wither_ticks.max(melee.wither_ticks);
+                }
             }
         }
         Ok(out)
@@ -1199,12 +1537,17 @@ impl Sim {
         if in_water {
             self.survival.life.fire_ticks = 0;
         }
+        // `lava`, `in_fire` and `hot_floor` are not in `#bypasses_armor` (the 26.1.2 jar's
+        // damage type tags; `on_fire`, `wither`, `starve`, `drown`, `fall` are): armour cuts them
+        // as it cuts a blow.
         if self.box_touches(&[BlockKind::Lava]) {
             self.survival.life.fire_ticks = self.survival.life.fire_ticks.max(LAVA_FIRE_TICKS);
-            out.extend(self.hurt_player(4.0, "lava", "death.attack.lava")?);
+            let dealt = self.after_armor(4.0);
+            out.extend(self.hurt_player(dealt, "lava", "death.attack.lava")?);
         } else if self.box_touches(&[BlockKind::Fire, BlockKind::SoulFire]) {
             self.survival.life.fire_ticks = self.survival.life.fire_ticks.max(FIRE_BLOCK_TICKS);
-            out.extend(self.hurt_player(1.0, "in_fire", "death.attack.inFire")?);
+            let dealt = self.after_armor(1.0);
+            out.extend(self.hurt_player(dealt, "in_fire", "death.attack.inFire")?);
         } else if self.survival.life.fire_ticks > 0 {
             if self.survival.life.fire_ticks % 20 == 0 {
                 out.extend(self.hurt_player(1.0, "on_fire", "death.attack.onFire")?);
@@ -1221,7 +1564,8 @@ impl Sim {
             && !self.survival.life.sneaking
             && kind_at(self, on) == Some(BlockKind::MagmaBlock)
         {
-            out.extend(self.hurt_player(MAGMA_DAMAGE, "hot_floor", "death.attack.hotFloor")?);
+            let dealt = self.after_armor(MAGMA_DAMAGE);
+            out.extend(self.hurt_player(dealt, "hot_floor", "death.attack.hotFloor")?);
         }
         // The wither effect, then the mobs that act.
         if self.survival.life.wither_ticks > 0 {
@@ -1232,6 +1576,7 @@ impl Sim {
         }
         out.extend(self.tick_fires()?);
         out.extend(self.tick_pushes()?);
+        out.extend(self.tick_falls()?);
         out.extend(self.tick_mobs()?);
         out.extend(self.tick_spawners()?);
         out.extend(self.tick_blazes()?);
@@ -1347,11 +1692,21 @@ impl Sim {
     /// `use_item`: start eating the held food when there is room for it.
     pub(crate) fn on_use_item(&mut self, sequence: i32) -> Result<Vec<Wire>, EncodeError> {
         // A shield in either hand goes up (the offhand is menu slot 45).
+        // Not while an axe's blow has it cooling down (`ItemCooldowns`: the use is refused).
         let shield = |s: Option<(ItemKind, i32)>| s.is_some_and(|(k, _)| k == ItemKind::Shield);
-        if shield(self.survival.held_stack())
-            || shield(self.survival.slots.get(45).copied().flatten())
+        let slot = if shield(self.survival.held_stack()) {
+            Some(self.survival.held_slot_index())
+        } else if shield(self.survival.slots.get(45).copied().flatten()) {
+            Some(45)
+        } else {
+            None
+        };
+        if let Some(slot) = slot
+            && self.ticks >= self.survival.life.shield_cooldown_until
+            && self.survival.life.blocking_since.is_none()
         {
-            self.survival.life.blocking_since.get_or_insert(self.ticks);
+            self.survival.life.blocking_since = Some(self.ticks);
+            self.survival.life.blocking_slot = slot;
         }
         // A bucket is used along the look (`BucketItem.use`, issue 14a).
         if let Some(used) = self.use_bucket() {
@@ -1424,13 +1779,7 @@ impl Sim {
             // A fresh hit knocks the mob 0.4 away from the player on the plane, half its
             // motion kept (`hurtServer` → `knockback(0.4, …)`; a hit inside the invulnerable
             // half knocks nothing). Blazes and wither skeletons resist none.
-            let (dx, dz) = (m.pos[0] - self.pos[0], m.pos[2] - self.pos[2]);
-            let len = (dx * dx + dz * dz).sqrt().max(1e-9);
-            m.push = [
-                m.push[0] / 2.0 + dx / len * KNOCKBACK,
-                m.push[1] / 2.0 + dz / len * KNOCKBACK,
-            ];
-            m.aloft = KNOCK_ALOFT;
+            m.knocked([m.pos[0] - self.pos[0], m.pos[2] - self.pos[2]], KNOCKBACK);
             life.mobs_knocked += 1;
             damage
         };

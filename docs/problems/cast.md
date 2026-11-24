@@ -42,6 +42,41 @@ The overworld leg's portal cast, for a real bot from the clean `ready` snapshot 
 
 `sealava`, 3 lanes x 9 bots, cap 24,000, goal `portal`: **15 of 27 lit** (55.6%), in 113 casts begun. Places 4 and 8 lit 3 of 3; place 0 none. Casts failed: `Op` `place :wall` 7, `NoRefill` `NoSight` 5, `NoRefill` "no route, tunnels" 3, `Op` `dig :room` 3, `Op` `pour :lava` 3, `NoRefill` `NoWay` 2, `place :floor` 3, `Exposed` 1; "cast out of lava" 38 times (17 at the first cell), "no lava to fetch" 9.
 
+## Raced: walls 1 to 3 (race 45354357884, c073b1a)
+
+**20 of 27 lit** (74.1%) in 57 casts, against 15 of 27 in 113. By place (baseline, then this): 0 0/3, 0/3; 1 2/3, 2/3; 2 2/3, 3/3; 3 1/3, 1/3; 4 3/3, 3/3; 5 1/3, 3/3; 6 2/3, 3/3; 7 1/3, 2/3; 8 3/3, 3/3. `place :wall` failures 7 to 0, `NoRefill` 10 to 1, "cast out of lava" 38 to 12. Firings (failed and resumed casts' notes; a lit cast's note carries only its uses): "box reach" in 17 of 20 endings (336 ticks); "refused sources" 16 in 4 casts; "tunnel down" 24 times, "tunnel level" 13; the fetch walk skipped sources in reach 19 times of 27. Casts failed now: `dig :room` 3 (place 7, "walk to the stand failed NoProgress" four times, 0 ops in), `place :floor` 3 (place 0), `pour :lava` 3, `NoRefill` 1, `fall-clear` 1.
+
+## 4. Stairs down cut the room's own floor (race 45354357884: place 0, 0 of 3, 304 regressions in one cast)
+
+- **What happened**: rs-l00-b00 cast at (28, -52, -64) for 13,280 ticks and failed `Op` at `place :floor [26 -53 -66]` after 366 ops and 304 regressions, each from the first lava pour back to that floor; its refill trail "168 sources, no station / tunnel down toward (28, -55, -71)" over and over. The same in all three lanes (299 to 394 regressions).
+- **Cause**: wall 2's stairs down start from the room's floor and the first step cuts the floor cell in front, a cell the plan places; the cast places it again, the next refill cuts it again. And the cast's clock counts an op done again after a regression as progress, so no invariant ended it.
+- **Fix**: the stairs down are refused when a straight step down to the source's height opens the frame's rock or a placed cell (the level tunnel as before; trail "tunnel down refused at …"); a cast that goes back `CHURN_LIMIT` (60) times without reaching past its furthest op fails `Churned` (failed casts went back 2 to 10 times, or about 300).
+
+## 5. Lava stands seen by the sampled line only, stairs below the sea (race 45354357884)
+
+- **Read**: every lava scoop routed to a "stand sampled" failed `NoSight` (15 of 15 by tick 11,860; the trail names each), and wall 1's refusal then moved to the next source with the same result. Wall 2's stairs went six down: "feet (-69, -58, -101)", under the sea's surface.
+- **Fix** (34352b8): a lava scoop routes only to stands the exact line sees from (water keeps the sampled ones, 109 of 112 filled); the trail counts "sampled skipped". The stairs down stop with the feet one over the source.
+
+## Raced: wall 5 (race 45358066420, 34352b8)
+
+**20 of 27 lit** again, in 61 casts. By place: 0 0/3, 1 3/3, 2 3/3, 3 1/3, 4 2/3, 5 3/3, 6 3/3, 7 2/3, 8 3/3. "cast out of lava" 12, "no lava to fetch" 7; no lava scoop routed to a sampled stand; "tunnel down ended" 13 by mid-race. Casts failed: `place :floor` 4 (place 0's churn, wall 4), `dig :room` 3 (place 7), `pour :lava` 3, `NoRefill` 1.
+
+A real cast beside it (agent O's race 45354021804 lane 0, 9966559, without these fixes): from the `ready` snapshot, a site reached through a shaft the bot dug itself at y -53, lit in one cast of 6,340 ticks (124 ops, 10 fills).
+
+## Raced: wall 4 (race 45361499544, a316d36)
+
+**22 of 27 lit** (81.5%) in 85 casts. By place: 0 0/3, 1 3/3, 2 3/3, 3 2/3, 4 3/3, 5 3/3, 6 3/3, 7 2/3, 8 3/3. `Churned` ended 9 casts (8 bots; places 2 and 4 churned once and lit at their next site); "tunnel down refused" 9 times. Place 0 still churned: its refill fell to the level tunnel, which cut the same floor cell, (28, -52, -67), 61 times. 17b78e2 checks the level tunnel the same way, and a refused tunnel fails the refill to the fetch.
+
+## 6. A failed walk to an op spends a try (sealava place 7, every lane: `dig :room` 0 ops in)
+
+- **Read**: "tries: walk to the stand failed NoProgress" four times, 800 to 940 ticks into the cast, at its first room dig (-32, -53, -124).
+- **Fix** (56395f1): a walk to an op that fails on its way digs the straight way's first block, as a walk not found does (wall 22 of portal.md), before a try is spent. Notes: "walk digs N".
+
+## Raced: wall 4's level tunnel and wall 6 (race 45365616984, 17b78e2)
+
+**23 of 27 lit** (85.2%) in 48 casts. By place: 0 0/3, 1 2/3, 2 3/3, 3 3/3, 4 3/3, 5 3/3, 6 3/3, 7 3/3, 8 3/3. Casts failed: 4 in all (`Churned` 1, `Exposed` 1, `NoRefill` 1, `dig :room` 1); "tunnel … refused" 8, `Churned` 1. Wall 6's "walk digs" is printed only on a failed cast's note, and none of the four counted one: its firings are not counted, and place 7 lit 3 of 3 (2 of 3 before).
+
 ## Status
 
-- f449f5b (walls 1, 2), a0359ab (wall 2's tunnel down), c073b1a (wall 3): clippy clean, CI tests green on f449f5b. Raced together in `sealava` race 45354357884.
+- `sealava` (development evidence only), cap 24,000, 27 bots a race: baseline 15 (8c3d038, 113 casts); 20 (c073b1a), 20 (34352b8), 22 (a316d36), 23 (17b78e2, 48 casts).
+- Open: place 0 (37.5, -52, -74.5) lights none in any race (its sites have no station and every tunnel would cut its own floor); wall 6's firings uncounted; no real race from `ready` on this code yet.
