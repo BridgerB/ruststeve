@@ -50,3 +50,30 @@ fn reach_is_measured_to_the_box_not_the_middle() {
     // Inside the box the distance is 0.
     assert!(plan::defend::box_distance([2.8, 64.9, 0.5], blaze) < 1e-9);
 }
+
+/// Wall 2: a blaze hovering with its feet 4 over the bot's and a block aside is in reach by its
+/// box (2.5 from the eye) and out of it by its middle (3.4): the fight strikes it where it stands.
+#[test]
+fn a_blaze_overhead_is_struck_by_its_box() {
+    use data::{EntityKind, ItemKind};
+    use plan::{Aim, Plan};
+    let config = Config {
+        peaceful: false,
+        ..CONFIG
+    };
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut p = Plan::with_table(Aim::Hold, table);
+    let mut m = flat_world(2, 63).unwrap();
+    m.spawn = [0.5, 64.0, 0.5];
+    let mut sim = Sim::new(config, m).seeded(3);
+    sim.health = 20.0;
+    sim.survival.give((ItemKind::IronSword, 1));
+    sim.summon(EntityKind::Blaze, [1.5, 68.0, 0.5]);
+    let run = bot::lockstep::run_acting(sim, "rs-bf", 1, 400, 20, |w, _| {
+        let c = p.step(w);
+        (c, p.take_acts())
+    });
+    assert!(run.world.kills >= 1, "no kill: {:#?}", p.events);
+    assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
+}

@@ -565,9 +565,16 @@ impl Defend {
             }
             Stance::Fight => {
                 let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
-                // A shooter's fight strikes whichever of its kind is in reach, measured to the
-                // box: the one it set out for may sit on a roof while another hovers beside it.
+                let out_of_reach = if shooter {
+                    box_distance(eye, pos) > STRIKE_REACH || !sight(w, eye, target)
+                } else {
+                    distance(eye, target) > STRIKE_REACH
+                };
+                // A shooter's fight with its foe out of reach strikes whichever of the kind is in
+                // reach, measured to the box: the one it set out for may sit on a roof while
+                // another hovers beside it. A foe in reach is kept (no flipping between two).
                 if shooter
+                    && out_of_reach
                     && let Some(id) = self.in_reach(w, eye)
                     && id != self.foe
                 {
@@ -589,11 +596,6 @@ impl Defend {
                 let face = Controls {
                     yaw: toward,
                     ..still
-                };
-                let out_of_reach = if shooter {
-                    box_distance(eye, pos) > STRIKE_REACH || !sight(w, eye, target)
-                } else {
-                    distance(eye, target) > STRIKE_REACH
                 };
                 // A shooter in touch is stepped away from, the strikes going on: its touch costs
                 // more than its fireballs (blaze-fight wall 4).
