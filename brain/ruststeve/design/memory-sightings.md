@@ -5,12 +5,13 @@ type: reference
 tags: [memory, sightings, no-xray, facts, world]
 aliases: [Memory, Sighting, Seen, watched kinds, exposed face, memory crate, facts with time]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@c5791eb clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#/// A block seen with an exposed face. Only `Seen::check` makes one."
   - "ruststeve:crates/memory/src/lib.rs#pub fn record_source(&mut self, seen: SeenSource) -> bool {"
   - "ruststeve:crates/memory/src/lib.rs#pub fn record(&mut self, seen: Seen, at_tick: u64) -> bool {"
+  - "ruststeve:crates/memory/src/lib.rs#pub fn record_sign(&mut self, seen: &Seen) -> bool {"
   - "ruststeve:crates/world/src/lib.rs#fn observe_column(&mut self, at: ChunkPos) {"
   - "ruststeve:crates/world/tests/properties.rs#fn a_buried_log_is_seen_only_once_uncovered() {"
   - "clojurecraft:src/clojurecraft/memory.clj#defn watched?"
@@ -44,6 +45,15 @@ The `memory` crate (core, no I/O) is clojurecraft's sighting store in Rust ([[cc
 - Only `SeenSource::check` makes one: **water** with air straight over it (a surface a bucket reaches; water under a ceiling is the aquifer trap), **lava** with an air neighbour. A source buried in rock never enters memory (strict no X-ray, Bridger 2026-11-15).
 - The world scans a column's fluid sections top first on arrival, stopping once a pool is full, and re-checks a cell and its neighbours on every block change; a cell that holds no source now is forgotten.
 - `sources_near` answers the scoop task ([[buckets-and-fluids]]) and, in 14c, the cast's site choice.
+
+## Issue 17b: biome signs and seen columns
+- **Biome signs** (`Memory::record_sign`, `Sign`, `sign_of`): an exposed face of warped nylium, warped wart block, warped stem or hyphae (warped forest), crimson nylium or nether wart block (crimson forest), soul sand or soul soil (soul sand valley), basalt or blackstone (basalt deltas) is kept by dimension, chunk column and sign, at most `SIGNS_KEPT` (64) cells each, so a soul sand valley stays a small record. Signs are not sightings: they do not enter the log, and a sign is never retracted (evidence of where the biome grew).
+- **A known forest** (`forest_known`, `forests`): a Nether column with `FOREST_SIGNS` (12, clojurecraft's nylium threshold) warped signs, kept in the order known and after the column unloads. `biome_signs_in_column(cx, cz)` counts a Nether column's signs.
+- **A known soul sand valley** (`soul_valley_known`, `soul_valleys`): a Nether column with `SOUL_SIGNS` (12, the forest's threshold by analogy) soul sand or soul soil seen; the first target of issue 17 (the valley 32 blocks west of the frontier's spawner). Soul soil the bot placed itself counts too (it carries 50): a known gap.
+- **Sign kinds through the kind index**: `indexed_in_column` answers a sign kind (soul sand, soul soil, warped nylium and the rest of `SIGN_KINDS`) from the sign record (exposed cells, at most 64 a kind and column), so `stage::kind_near` gets exact cells with no scan. A cell seen to hold something else leaves the record (`forget_sign`, from `World::observe`); a column known as a forest or a valley stays known.
+- **The world's scan** (`World::observe_column_signs`): a column's sections tested by palette (`is_sign`), each sign cell's six faces read inside the section where it can, a sign whose record is full skipped. A changed block is checked by `observe`. Faces on the edge towards an unloaded column are not re-checked when it loads (the watched kinds' edge pass does not cover signs).
+- **Seen columns** (`seen_columns(dimension)`): the column keys of `by_column` for one dimension, by a range of the index (issue 17d's heading counts seen columns).
+- Bridger, 2026-11-24 ([[strict-no-xray]]): the planner may know biomes only from its feet and from these signs, never from an unseen column's biome.
 
 ## See also
 - [[hist-no-xray]] - why the rule.

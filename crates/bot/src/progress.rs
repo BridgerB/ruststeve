@@ -29,6 +29,8 @@ pub enum Gain {
     NewKind,
     GoalItem,
     NewPlace,
+    /// A feet biome not stood in before, or a warped forest known (issue 17b).
+    Biome,
 }
 
 /// The run's progress so far.
@@ -39,6 +41,8 @@ pub struct Progress {
     /// The most the run has held of each item.
     most: BTreeMap<String, i32>,
     regions: BTreeSet<(i32, i32, i32)>,
+    /// Feet biomes stood in.
+    biomes: BTreeSet<String>,
     /// The server tick of the last progress.
     last: Option<u64>,
 }
@@ -62,6 +66,16 @@ impl Progress {
         for f in facts {
             match &f.fact {
                 observe::Fact::Stage { .. } => gain = Some(Gain::Stage),
+                // A feet biome not stood in before, or a forest known from blocks seen, is
+                // progress (issue 17b): a long heading crosses biomes.
+                observe::Fact::Biome { name } => {
+                    if self.biomes.insert(name.clone()) {
+                        gain = gain.or(Some(Gain::Biome));
+                    }
+                }
+                observe::Fact::ForestSeen { .. } | observe::Fact::SoulValleySeen { .. } => {
+                    gain = gain.or(Some(Gain::Biome))
+                }
                 observe::Fact::Item { item, to, .. } => {
                     let most = self.most.get(item).copied();
                     if most.is_none() && *to > 0 {
@@ -99,6 +113,8 @@ impl Progress {
                 | observe::Fact::Sign { .. }
                 | observe::Fact::Night { .. }
                 | observe::Fact::Day { .. }
+                | observe::Fact::Enderman { .. }
+                | observe::Fact::EndermanStill { .. }
                 | observe::Fact::Death
                 | observe::Fact::Won => {}
             }
@@ -285,5 +301,37 @@ mod tests {
         .unwrap();
         assert_eq!(race_items(&text).get("blaze_rod"), Some(&7));
         assert!(race_items("[race]\ncap_ticks = 1").is_empty());
+    }
+
+    /// Issue 17b: a feet biome not stood in before is progress, the same one again is not, and
+    /// an enderman seen is not.
+    #[test]
+    fn a_new_feet_biome_is_progress() {
+        let fact = |at, fact| observe::Stamped { at, fact };
+        let biome = |name: &str| observe::Fact::Biome {
+            name: name.to_owned(),
+        };
+        let mut p = Progress::new(goals());
+        p.see(100, &[], HERE);
+        assert_eq!(
+            p.see(101, &[fact(101, biome("soul_sand_valley"))], HERE),
+            Some(Gain::Biome)
+        );
+        assert_eq!(
+            p.see(102, &[fact(102, biome("nether_wastes"))], HERE),
+            Some(Gain::Biome)
+        );
+        assert_eq!(
+            p.see(103, &[fact(103, biome("soul_sand_valley"))], HERE),
+            None
+        );
+        let seen = observe::Fact::Enderman {
+            id: 5,
+            d: 40.0,
+            ticking: false,
+        };
+        assert_eq!(p.see(104, &[fact(104, seen)], HERE), None);
+        let forest = observe::Fact::ForestSeen { column: (30, -8) };
+        assert_eq!(p.see(105, &[fact(105, forest)], HERE), Some(Gain::Biome));
     }
 }
