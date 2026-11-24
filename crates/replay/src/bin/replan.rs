@@ -331,6 +331,9 @@ fn route(w: &World, from: Cell, to: Cell, a: &Args) {
     }
 }
 
+/// A step at least this slow is printed (a tick is 50 ms).
+const SLOW_MS: f64 = 10.0;
+
 fn steps(mut world: World, n: u64, clock: u64, a: &Args) -> Result<(), String> {
     let aim = plan::Aim::parse(&a.goal).ok_or_else(|| format!("--goal: no aim {}", a.goal))?;
     let mut p = if aim.is_goal() {
@@ -347,8 +350,21 @@ fn steps(mut world: World, n: u64, clock: u64, a: &Args) -> Result<(), String> {
     );
     let mut seen = 0u64;
     let mut last_controls = None;
+    let mut times: Vec<f64> = Vec::new();
     for i in 0..n {
+        // How long the step took (a fight's planner step ran 128 ms at p99 in race 45350933958
+        // lane 1 and the bot was dropped): slow steps are printed with the task they ran.
+        let t0 = std::time::Instant::now();
         let c = p.step(&world);
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        times.push(ms);
+        if ms >= SLOW_MS {
+            println!(
+                "  step {i:>5} SLOW {ms:.1} ms, task {} ({})",
+                p.task.name(),
+                p.why()
+            );
+        }
         let acts = p.take_acts();
         for e in p.events_since(seen) {
             println!("  step {i:>5} tick {}: {} ({})", e.tick, e.what, e.why);
@@ -367,6 +383,20 @@ fn steps(mut world: World, n: u64, clock: u64, a: &Args) -> Result<(), String> {
             seed: i + 1,
         });
     }
+    times.sort_by(f64::total_cmp);
+    let at = |q: f64| {
+        times
+            .get(((times.len() as f64 - 1.0) * q) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    };
+    println!(
+        "step time ms: p50 {:.2}, p99 {:.2}, max {:.2} over {} steps",
+        at(0.5),
+        at(0.99),
+        at(1.0),
+        times.len()
+    );
     let pos = world.body.map(|b| b.pos).or(world.player.pos);
     println!(
         "after {n} steps: task {} ({}), the bot at {pos:?}, {} notes",

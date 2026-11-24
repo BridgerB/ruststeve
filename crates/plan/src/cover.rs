@@ -93,6 +93,20 @@ pub fn awake_at(c: Cell, pos: [f64; 3]) -> bool {
     distance(mid, pos) < SPAWNER_QUIET
 }
 
+/// Why standing work (a craft, a smelt, a table or a furnace placed) is not safe where the body
+/// is, or `None` when it is: a spawner on record within `SPAWNER_QUIET`, or a shooter (`shooters`)
+/// that sees the body. One bot made its shield on the spawner's deck in the whole-stage model,
+/// a table and a furnace on the deck and 200 ticks of smelting beside the spawner with blazes
+/// firing, and died at tick 1,140 (probe 45357767095).
+pub fn unsafe_to_work(w: &World) -> Option<String> {
+    let body = w.body?;
+    if let Some(sp) = spawners_awake(w, body.pos).first() {
+        return Some(format!("a spawner at {sp:?} within {SPAWNER_QUIET}"));
+    }
+    let eyes = shooters(w);
+    seen_body(w, &eyes, body.pos).then(|| format!("seen by a shooter ({} in range)", eyes.len()))
+}
+
 /// A fall this deep or deeper beside a cell keeps it from being cover: three blocks of fall cost
 /// no health, as the fight's own step rule has it.
 pub const DROP_BESIDE: i32 = 4;
