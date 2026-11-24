@@ -143,6 +143,18 @@ const SHELTER_MAX: u32 = 80;
 /// table and furnace among the walls), more where the body spans two columns or a floor is
 /// missing (overworld-leg wall 11).
 const HUT_MAX: u32 = 24;
+/// Ticks after a junk drop in which its kind coming back counts as the drop picked up again: the
+/// 40 ticks of a thrown stack's pick-up delay and the walk back over it.
+const REPICKUP_TICKS: u64 = 200;
+/// Stone over the junk keep at which the carried table is put down to press it: a stack, a slot
+/// (wall 12).
+const PRESS_AT: i32 = 64;
+/// Looks at one far lava target that come no nearer than the best before it is given up: a leg
+/// of stairs or a walk each (overworld-leg wall 13).
+const LAVA_AIM_STALLS: u32 = 4;
+/// Items of the dropped kind coming back at once that count as the stack picked up again: a dig
+/// brings one.
+const REPICKUP_JUMP: i32 = 4;
 /// Ticks a full pack holds tasks back while its junk is dropped: three drops at `EQUIP_TICKS`
 /// and their resyncs, with room (overworld-leg wall 10).
 const FULL_WAIT_TICKS: u64 = 200;
@@ -598,6 +610,21 @@ pub struct Plan {
     pub hut_blocks: u32,
     #[serde(default)]
     pub hut_done: bool,
+    /// Furnaces pressed from junk stone (wall 12), and junk stacks picked up again after a drop:
+    /// the kind, the count left after the drop, and when.
+    #[serde(default)]
+    pub pressed: u32,
+    /// Far lava targets of the hunt with the nearest the feet came and the looks since that came
+    /// no nearer (wall 13).
+    #[serde(default)]
+    pub lava_aims: Vec<(Cell, f64, u32)>,
+    /// A table put down to press stone at, to be taken along after (wall 12).
+    #[serde(default)]
+    pub press_table: bool,
+    #[serde(default)]
+    pub repickups: u32,
+    #[serde(default)]
+    pub dropped: Option<(data::ItemKind, i32, u64)>,
     /// When the pack was first seen with no main slot free (wall 10).
     #[serde(default)]
     pub full_since: Option<u64>,
@@ -736,6 +763,11 @@ impl Plan {
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
+            pressed: 0,
+            lava_aims: Vec::new(),
+            press_table: false,
+            repickups: 0,
+            dropped: None,
             hunt_over: false,
             own_from: None,
             own_leg: None,
@@ -820,8 +852,50 @@ impl Plan {
     pub fn step(&mut self, w: &World) -> Controls {
         let notes_before = self.event_count;
         let c = self.step_inner(w);
+        self.count_repickup(w);
         self.track(w.session.server_ticks, notes_before);
         c
+    }
+
+    /// A junk stack dropped and its kind back by `REPICKUP_JUMP` or more at once within
+    /// `REPICKUP_TICKS`: a
+    /// pick-up of the drop, noted and counted (overworld-leg wall 12; the run's count is to be 0).
+    fn count_repickup(&mut self, w: &World) {
+        let Some((kind, left, at)) = self.dropped else {
+            return;
+        };
+        let tick = w.session.server_ticks;
+        if tick.saturating_sub(at) > REPICKUP_TICKS {
+            self.dropped = None;
+            return;
+        }
+        // `left` is negative until the drop shows (minus one less the count it must fall to); then the
+        // lowest count seen since. A stack back in one look, not a block or two dug since (a
+        // stair's digs come one by one), is the drop picked up again.
+        let now = craft::count(w, kind);
+        if left < 0 {
+            if now < -left {
+                self.dropped = Some((kind, now, at));
+            }
+            return;
+        }
+        if now < left + REPICKUP_JUMP {
+            self.dropped = Some((kind, now.min(left), at));
+            return;
+        }
+        {
+            self.dropped = None;
+            self.repickups += 1;
+            self.note(
+                tick,
+                format!("junk picked up again: {kind:?}"),
+                format!(
+                    "{now} held, {left} after the drop {} ticks before; {} in the run",
+                    tick.saturating_sub(at),
+                    self.repickups
+                ),
+            );
+        }
     }
 
     /// The task records made since the last call, oldest first: the shell writes them.
@@ -1728,6 +1802,9 @@ impl Plan {
             && let Some((slot, kind)) = junk_slot(&w.inventory.slots, &junk)
         {
             self.equip_at = tick + EQUIP_TICKS;
+            // Kept to count a pick-up of it again (wall 12).
+            let stack = w.inventory.slots.get(&slot).map_or(0, |(_, n)| *n);
+            self.dropped = Some((kind, -(craft::count(w, kind) - stack).max(0) - 1, tick));
             // Mode 4 button 1: drop the whole stack (the client's ctrl+Q over the slot).
             self.acts.push(world::Act::Click {
                 slot,
@@ -2748,6 +2825,50 @@ impl Plan {
             return Task::Smelt(Box::new(smelt::Smelt::collect(
                 w, furnace, result, count, tick,
             )));
+        }
+        // Stone over the junk keep, with a table at hand: eight pressed into a furnace, a slot
+        // for 512, instead of a stack thrown down and picked up again 40 ticks later (wall 12:
+        // a bot idled 14,700 ticks on one pile, race 45354021804 lane 1).
+        if self.aim == Aim::Race
+            && let Some(t) = self.at_hand(w, data::BlockKind::CraftingTable, tick)
+            && let Some(r) = press_recipe(w, &table.survival)
+        {
+            self.pressed += 1;
+            self.note(
+                tick,
+                format!("press stone into a furnace at the table {t:?}"),
+                format!(
+                    "{} stone held over the junk keep, {} pressed so far",
+                    stone_over_keep(w, &table.survival),
+                    self.pressed
+                ),
+            );
+            return Task::Craft(Craft::at_table(r, t, tick));
+        }
+        // A stack of stone over the keep and the table in the pack: it is put down to press at,
+        // and taken along again once the stone is pressed (wall 12).
+        if self.aim == Aim::Race && !cook_row {
+            let over = stone_over_keep(w, &table.survival);
+            let carried = craft::count(w, data::ItemKind::CraftingTable) > 0;
+            if over >= PRESS_AT
+                && carried
+                && press_recipe(w, &table.survival).is_some()
+                && let Some(p) = Place::new(data::BlockKind::CraftingTable, tick)
+            {
+                self.press_table = true;
+                self.note(
+                    tick,
+                    "place CraftingTable to press stone".to_owned(),
+                    format!("{over} stone held over the junk keep"),
+                );
+                return Task::Place(p);
+            }
+            if self.press_table && press_recipe(w, &table.survival).is_none() {
+                self.press_table = false;
+                if let Some(t) = self.carry_table(w, tick) {
+                    return t;
+                }
+            }
         }
         // Taken up front: the block needs are a crafting table and a furnace. The spares and the
         // Nether kit are made where the bot stands: a table remembered 44 blocks off, down the
@@ -3798,6 +3919,27 @@ impl Plan {
         // No site, and over the lava sea's level: down by its own stairs (overworld-leg wall 1),
         // unless a pool of ten sources is known near the feet's height, which is walked to as
         // before. A far pool of fewer is one the site choice refuses on arrival (`spent`).
+        // A far lava target the hunt comes no nearer to is given up (wall 13, a progress
+        // invariant: lane 0 of race 45354021804 circled a pool of ten at (-30, 46, -254) for 8,000
+        // ticks, its walks failing and its stairs re-walking cut steps).
+        if let Some(body) = w.body
+            && let Some(aim) = cast::far_pool(w, &self.given_up_sites)
+                .or_else(|| cast::far_lava(w, &self.given_up_sites))
+        {
+            let (fx, fy, fz) = path::feet_cell(body.pos);
+            let d =
+                f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
+            let (best, stalls) = landing_stalls(&mut self.lava_aims, aim, d);
+            if stalls >= LAVA_AIM_STALLS {
+                self.lava_aims.retain(|(c, _, _)| *c != aim);
+                self.given_up_sites.push(aim);
+                self.note(
+                    tick,
+                    format!("lava at {aim:?} given up"),
+                    format!("{stalls} looks came no nearer than {best:.1}: another target"),
+                );
+            }
+        }
         if let Some(body) = w.body {
             let feet = path::feet_cell(body.pos);
             let pool = cast::far_pool(w, &self.given_up_sites);
@@ -4631,6 +4773,29 @@ fn water_turns(st: &Stairs) -> String {
         0 => String::new(),
         n => format!(" ({n} turned from water beside)"),
     }
+}
+
+/// Junk stone (cobblestone and cobbled deepslate, what a furnace is made of) held over the
+/// cobblestone keep of the junk list.
+pub fn stone_over_keep(w: &World, rules: &make::SurvivalRules) -> i32 {
+    let keep = rules
+        .junk
+        .iter()
+        .find(|(k, _)| *k == data::ItemKind::Cobblestone)
+        .map_or(64, |(_, n)| *n);
+    craft::count(w, data::ItemKind::Cobblestone) + craft::count(w, data::ItemKind::CobbledDeepslate)
+        - keep
+}
+
+/// The furnace recipe, when eight stone over the keep are held and fewer than 64 furnaces
+/// (one slot): junk pressed eight to one (overworld-leg wall 12).
+fn press_recipe(w: &World, rules: &make::SurvivalRules) -> Option<&'static data::types::Recipe> {
+    if stone_over_keep(w, rules) < 8 || craft::count(w, data::ItemKind::Furnace) >= 64 {
+        return None;
+    }
+    data::generated::recipes::RECIPES
+        .iter()
+        .find(|r| r.id == "furnace")
 }
 
 /// Stone pickaxes held with at least `spare_uses` uses left (one on the cursor counts).
