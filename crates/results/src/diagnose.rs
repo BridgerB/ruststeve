@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 
 use crate::{Case, Ending};
 
-/// Note kinds shown, most runs first.
-const KINDS_SHOWN: usize = 40;
+/// Note kinds shown, most runs first (the rest are counted in a last line).
+const KINDS_SHOWN: usize = 60;
 
 /// The bot's number in its lane, from its name (`rs-l03-b07` is 7): its place in a start that
 /// lists places.
@@ -98,6 +98,9 @@ pub fn diagnose(cases: &[Case]) -> String {
     let mut kinds: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     let mut failures: BTreeMap<CastFailure, u64> = BTreeMap::new();
     let mut with_notes = 0u64;
+    // Runs whose case counts every note of the ledger (`story::note_kinds`); the others' kinds
+    // come from the case's kept notes, which leave repeats and the middle out.
+    let mut whole = 0u64;
     for c in &counted {
         if let Some(p) = place_of(&c.bot) {
             let place = places.entry(p).or_default();
@@ -107,15 +110,23 @@ pub fn diagnose(cases: &[Case]) -> String {
                 *place.deaths.entry(killer.clone()).or_default() += 1;
             }
         }
-        let Some(plan) = &c.plan else {
-            continue;
-        };
-        with_notes += u64::from(!plan.notes.is_empty());
         let mut mine: BTreeMap<String, u64> = BTreeMap::new();
-        for note in &plan.notes {
-            *mine.entry(note_kind(note)).or_default() += 1;
-            if let Some(f) = cast_failure(note) {
-                *failures.entry(f).or_default() += 1;
+        let counted_whole = c.story.as_ref().filter(|s| !s.note_kinds.is_empty());
+        if let Some(s) = counted_whole {
+            whole += 1;
+            for k in &s.note_kinds {
+                *mine.entry(k.kind.clone()).or_default() += k.n;
+            }
+        }
+        if let Some(plan) = &c.plan {
+            with_notes += u64::from(!plan.notes.is_empty());
+            for note in &plan.notes {
+                if counted_whole.is_none() {
+                    *mine.entry(note_kind(note)).or_default() += 1;
+                }
+                if let Some(f) = cast_failure(note) {
+                    *failures.entry(f).or_default() += 1;
+                }
             }
         }
         for (kind, times) in mine {
@@ -162,10 +173,21 @@ pub fn diagnose(cases: &[Case]) -> String {
     let mut ranked: Vec<_> = kinds.into_iter().collect();
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     lines.push(String::new());
+    lines.push(format!(
+        "### notes by kind (race totals; every note of the ledger for {whole} of {} runs: a fix's firings are counted here)",
+        counted.len()
+    ));
+    lines.push(String::new());
     lines.push("| runs | times | note kind |".to_owned());
     lines.push("|---|---|---|".to_owned());
+    let more = ranked.len().saturating_sub(KINDS_SHOWN);
     for (kind, (runs, times)) in ranked.into_iter().take(KINDS_SHOWN) {
         lines.push(format!("| {runs} | {times} | {kind} |"));
+    }
+    if more > 0 {
+        lines.push(format!(
+            "({more} more kinds, each in fewer runs: see the case files)"
+        ));
     }
     lines.join("\n") + "\n"
 }
