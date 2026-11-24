@@ -70,6 +70,35 @@ fn recipe_counts_match() {
     assert_eq!(SMELTING.len(), 73);
 }
 
+/// The blocks that change a body's movement, as the game's classes hold them (`Blocks`:
+/// soul sand `speedFactor(0.4)`, honey `speedFactor(0.4).jumpFactor(0.5)`, the ices and slime
+/// by `friction`), and nothing else.
+#[test]
+fn soul_sand_and_honey_slow_a_body_and_nothing_else_does() {
+    use data::BlockKind;
+    use data::generated::movement::{MOVEMENT, movement};
+    use data::types::Movement;
+    let soul = movement(BlockKind::SoulSand);
+    assert_eq!(
+        (soul.speed_factor, soul.jump_factor, soul.friction),
+        (0.4, 1.0, 0.6)
+    );
+    let honey = movement(BlockKind::HoneyBlock);
+    assert_eq!((honey.speed_factor, honey.jump_factor), (0.4, 0.5));
+    assert_eq!(movement(BlockKind::Ice).friction, 0.98);
+    assert_eq!(movement(BlockKind::BlueIce).friction, 0.989);
+    assert_eq!(movement(BlockKind::SlimeBlock).friction, 0.8);
+    assert_eq!(movement(BlockKind::Netherrack), Movement::DEFAULT);
+    assert_eq!(movement(BlockKind::SoulSoil), Movement::DEFAULT);
+    assert_eq!(movement(BlockKind::MagmaBlock), Movement::DEFAULT);
+    let slowing: Vec<BlockKind> = MOVEMENT
+        .iter()
+        .filter(|(_, m)| m.speed_factor != 1.0)
+        .map(|(b, _)| *b)
+        .collect();
+    assert_eq!(slowing, [BlockKind::SoulSand, BlockKind::HoneyBlock]);
+}
+
 #[test]
 fn names_round_trip() {
     assert_eq!(ItemKind::from_name("oak_log"), Some(ItemKind::OakLog));

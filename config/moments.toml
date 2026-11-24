@@ -1492,3 +1492,25 @@ dz = -16
 script = "sneak:180"
 ticks = 120
 set = [["stone", 0, -1, 0], ["stone", 0, -1, -1], ["stone", 0, -1, -2], ["air", 0, 0, -1], ["air", 0, 1, -1], ["air", 0, 0, -2], ["air", 0, 1, -2], ["air", 0, 0, -3], ["air", 0, 1, -3], ["air", 0, 0, -4], ["air", 0, 1, -4], ["air", 0, 0, -5], ["air", 0, 1, -5], ["air", 0, 0, -6], ["air", 0, 1, -6], ["air", 0, 0, -7], ["air", 0, 1, -7], ["air", 0, 0, -8], ["air", 0, 1, -8], ["air", 0, -1, -3], ["air", 0, -2, -3], ["air", 0, -3, -3], ["air", 0, -1, -4], ["air", 0, -2, -4], ["air", 0, -3, -4], ["air", 0, -1, -5], ["air", 0, -2, -5], ["air", 0, -3, -5], ["air", 0, -1, -6], ["air", 0, -2, -6], ["air", 0, -3, -6], ["air", 0, -1, -7], ["air", 0, -2, -7], ["air", 0, -3, -7], ["air", 0, -1, -8], ["air", 0, -2, -8], ["air", 0, -3, -8]]
+
+# Soul sand (docs/problems/client-parity.md): a walk along a soul sand floor, 60 ticks. The body
+# is slowed to the game's pace (about 2.5 blocks a second, 6 blocks in the 50 ticks on the sand)
+# and the server corrects nothing.
+
+[[moment]]
+id = "p00-soul"
+landing = 0
+dx = 16
+dz = 16
+script = "straight:0"
+ticks = 60
+set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["soul_sand", 0, -1, 2], ["soul_sand", 0, -1, 3], ["soul_sand", 0, -1, 4], ["soul_sand", 0, -1, 5], ["soul_sand", 0, -1, 6], ["soul_sand", 0, -1, 7], ["soul_sand", 0, -1, 8], ["soul_sand", 0, -1, 9], ["soul_sand", 0, -1, 10], ["soul_sand", 0, -1, 11], ["soul_sand", 0, -1, 12], ["air", 0, 0, 1], ["air", 0, 1, 1], ["air", 0, 0, 2], ["air", 0, 1, 2], ["air", 0, 0, 3], ["air", 0, 1, 3], ["air", 0, 0, 4], ["air", 0, 1, 4], ["air", 0, 0, 5], ["air", 0, 1, 5], ["air", 0, 0, 6], ["air", 0, 1, 6], ["air", 0, 0, 7], ["air", 0, 1, 7], ["air", 0, 0, 8], ["air", 0, 1, 8], ["air", 0, 0, 9], ["air", 0, 1, 9], ["air", 0, 0, 10], ["air", 0, 1, 10], ["air", 0, 0, 11], ["air", 0, 1, 11], ["air", 0, 0, 12], ["air", 0, 1, 12]]
+
+[[moment]]
+id = "p01-soul"
+landing = 1
+dx = 16
+dz = 16
+script = "straight:0"
+ticks = 60
+set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["soul_sand", 0, -1, 2], ["soul_sand", 0, -1, 3], ["soul_sand", 0, -1, 4], ["soul_sand", 0, -1, 5], ["soul_sand", 0, -1, 6], ["soul_sand", 0, -1, 7], ["soul_sand", 0, -1, 8], ["soul_sand", 0, -1, 9], ["soul_sand", 0, -1, 10], ["soul_sand", 0, -1, 11], ["soul_sand", 0, -1, 12], ["air", 0, 0, 1], ["air", 0, 1, 1], ["air", 0, 0, 2], ["air", 0, 1, 2], ["air", 0, 0, 3], ["air", 0, 1, 3], ["air", 0, 0, 4], ["air", 0, 1, 4], ["air", 0, 0, 5], ["air", 0, 1, 5], ["air", 0, 0, 6], ["air", 0, 1, 6], ["air", 0, 0, 7], ["air", 0, 1, 7], ["air", 0, 0, 8], ["air", 0, 1, 8], ["air", 0, 0, 9], ["air", 0, 1, 9], ["air", 0, 0, 10], ["air", 0, 1, 10], ["air", 0, 0, 11], ["air", 0, 1, 11], ["air", 0, 0, 12], ["air", 0, 1, 12]]

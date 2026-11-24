@@ -12,11 +12,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use data::generated::dimensions::DIMENSION_TYPES;
+use data::generated::movement::movement;
 use data::generated::shapes::collision;
 use data::types::Collision;
 use data::{BlockKind, EntityKind, ItemKind};
 use memory::{Memory, Seen};
-use physics::{Body, Controls, Fluid, FluidKind};
+use physics::{Body, Controls, Fluid, FluidKind, Surface};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::nbt::Death;
@@ -729,6 +730,24 @@ impl World {
         }
     }
 
+    /// What the block at a cell does to a body moving on it, for physics: its speed and jump
+    /// factors from the generated table (soul sand 0.4, honey 0.4 and 0.5), and whether it is
+    /// water or a bubble column. An unloaded block is plain.
+    pub fn surface(&self, x: i32, y: i32, z: i32) -> Surface {
+        let Some(block) = self
+            .state_at(BlockPos::new(x, y, z))
+            .and_then(data::block_of_state)
+        else {
+            return Surface::PLAIN;
+        };
+        let m = movement(block);
+        Surface {
+            speed_factor: f64::from(m.speed_factor),
+            jump_factor: f64::from(m.jump_factor),
+            wet: matches!(block, BlockKind::Water | BlockKind::BubbleColumn),
+        }
+    }
+
     /// The fluid at a block, for physics: water or lava and its level (the block state's
     /// `level` property; unloaded is no fluid).
     pub fn fluid(&self, x: i32, y: i32, z: i32) -> Option<Fluid> {
@@ -791,7 +810,8 @@ impl World {
         }
         let solid = |x, y, z| self.solid(x, y, z);
         let fluid = |x, y, z| self.fluid(x, y, z);
-        let moved = physics::step(&solid, &fluid, &body, &self.controls);
+        let surface = |x, y, z| self.surface(x, y, z);
+        let moved = physics::step_on(&solid, &fluid, &surface, &body, &self.controls);
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
         // Physics and the movement packets use the controls' yaw; the pitch is the controls' when

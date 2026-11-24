@@ -9,7 +9,8 @@
 //!
 //! The world is read through two oracles: `solid(x, y, z)` gives `None` for nothing, `Some(1.0)`
 //! for a full cube and `Some(top)` for a flat box under 1 (a carpet's 0.0625); `fluid(x, y, z)`
-//! gives the fluid there and its level.
+//! gives the fluid there and its level. `step_on` takes a third, `surface(x, y, z)`: what the
+//! block does to a body moving on it (soul sand's speed factor, honey's jump factor).
 
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -115,6 +116,111 @@ impl<F: Fn(i32, i32, i32) -> Option<Fluid>> FluidAt for F {}
 /// A fluid oracle for a dry world.
 pub fn no_fluid(_: i32, _: i32, _: i32) -> Option<Fluid> {
     None
+}
+
+/// What a block does to a body moving in or on it (`Block.getSpeedFactor`, `getJumpFactor`),
+/// as the game's floats widened.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Surface {
+    /// The horizontal velocity is multiplied by this after each move (soul sand, honey: 0.4).
+    pub speed_factor: f64,
+    /// A jump's velocity is multiplied by this (honey: 0.5).
+    pub jump_factor: f64,
+    /// Water or a bubble column: with the feet in it, the block under them is not asked.
+    pub wet: bool,
+}
+
+impl Surface {
+    /// A block that changes nothing.
+    pub const PLAIN: Surface = Surface {
+        speed_factor: 1.0,
+        jump_factor: 1.0,
+        wet: false,
+    };
+}
+
+/// What the block at a cell does to movement.
+pub trait SurfaceAt: Fn(i32, i32, i32) -> Surface {}
+impl<F: Fn(i32, i32, i32) -> Surface> SurfaceAt for F {}
+
+/// A surface oracle for a world of plain blocks.
+pub fn plain_surface(_: i32, _: i32, _: i32) -> Surface {
+    Surface::PLAIN
+}
+
+/// How far under the feet the block that affects movement is looked for
+/// (`Entity.getBlockPosBelowThatAffectsMyMovement`, 0.500001).
+pub const BELOW_AFFECTS: f64 = 0.500_001;
+/// The slab under the feet a supporting block must reach (`Entity.checkSupportingBlock`, 1.0E-6).
+pub const SUPPORT_SLAB: f64 = 1.0e-6;
+
+/// The block a body on the ground stands on: of the blocks whose shape reaches the feet, the
+/// one whose centre is nearest the body (`Level.findSupportingBlock`; ties to the lower y, then
+/// z, then x, as `Vec3i.compareTo`). The game's second try, the box moved back by the last
+/// move, is not made.
+pub fn supporting_block(solid: &impl Solid, pos: Vec3) -> Option<(i32, i32, i32)> {
+    let b = aabb(pos);
+    let slab = [b[0], b[1] - SUPPORT_SLAB, b[2], b[3], b[1], b[5]];
+    let mut best: Option<(f64, (i32, i32, i32))> = None;
+    for c in solid_boxes(solid, slab) {
+        if !(0..3).all(|axis| overlaps(&slab, &c, axis)) {
+            continue;
+        }
+        let cell = (floor(c[0]), floor(c[1]), floor(c[2]));
+        let d = (c[0] + 0.5 - pos[0]).powi(2)
+            + (c[1] + 0.5 - pos[1]).powi(2)
+            + (c[2] + 0.5 - pos[2]).powi(2);
+        let key = (cell.1, cell.2, cell.0);
+        let nearer = best.is_none_or(|(bd, bc)| d < bd || (d == bd && key < (bc.1, bc.2, bc.0)));
+        if nearer {
+            best = Some((d, cell));
+        }
+    }
+    best.map(|(_, cell)| cell)
+}
+
+/// The block under the body that affects its movement: 0.500001 under the feet, in the column
+/// of the supporting block when the body is on the ground (`Entity.getOnPos`).
+pub fn below_that_affects(solid: &impl Solid, pos: Vec3, on_ground: bool) -> (i32, i32, i32) {
+    let y = floor(pos[1] - BELOW_AFFECTS);
+    match on_ground.then(|| supporting_block(solid, pos)).flatten() {
+        Some((x, _, z)) => (x, y, z),
+        None => (floor(pos[0]), y, floor(pos[2])),
+    }
+}
+
+/// The factor the horizontal velocity is multiplied by after a move (`Entity.getBlockSpeedFactor`,
+/// javap of the 26.1.2 server jar, probe 45339873719): that of the block the feet are in (a body
+/// on soul sand stands inside its cell, the block being 14/16 high), alone when that block is
+/// water or a bubble column; when it is 1, that of the block under the body.
+pub fn block_speed_factor(
+    solid: &impl Solid,
+    surface: &impl SurfaceAt,
+    pos: Vec3,
+    on_ground: bool,
+) -> f64 {
+    let here = surface(floor(pos[0]), floor(pos[1]), floor(pos[2]));
+    if here.wet || here.speed_factor != 1.0 {
+        return here.speed_factor;
+    }
+    let (x, y, z) = below_that_affects(solid, pos, on_ground);
+    surface(x, y, z).speed_factor
+}
+
+/// The factor a jump's velocity is multiplied by (`Entity.getBlockJumpFactor`): that of the
+/// block the feet are in, or when it is 1 that of the block under the body.
+pub fn block_jump_factor(
+    solid: &impl Solid,
+    surface: &impl SurfaceAt,
+    pos: Vec3,
+    on_ground: bool,
+) -> f64 {
+    let here = surface(floor(pos[0]), floor(pos[1]), floor(pos[2]));
+    if here.jump_factor != 1.0 {
+        return here.jump_factor;
+    }
+    let (x, y, z) = below_that_affects(solid, pos, on_ground);
+    surface(x, y, z).jump_factor
 }
 
 /// The player's body: what the step reads and writes.
@@ -413,8 +519,19 @@ pub fn land_tick(solid: &impl Solid, pos: Vec3, [vx, vy, vz]: Vec3) -> (Vec3, Ve
     )
 }
 
-/// One tick of movement: the body after `controls` for a tick in this world.
+/// One tick of movement: the body after `controls` for a tick in this world, every block plain.
 pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Controls) -> Body {
+    step_on(solid, fluid, &plain_surface, body, controls)
+}
+
+/// One tick of movement in a world whose blocks may slow a body or damp its jump.
+pub fn step_on(
+    solid: &impl Solid,
+    fluid: &impl FluidAt,
+    surface: &impl SurfaceAt,
+    body: &Body,
+    controls: &Controls,
+) -> Body {
     let pos = body.pos;
     let b = aabb(pos);
     let in_water = in_fluid(fluid, FluidKind::Water, WATER_CONTRACT, b);
@@ -430,7 +547,7 @@ pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Co
         && !liquid
         && (body.on_ground || touching_water(fluid, pos));
     let vy = if jumping {
-        JUMP_VELOCITY
+        JUMP_VELOCITY * block_jump_factor(solid, surface, pos, body.on_ground)
     } else if liquid && controls.jump {
         vy + SWIM_UP
     } else if liquid && controls.sneak {
@@ -467,6 +584,9 @@ pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Co
     // `land_tick` gives the move back unless it hit something, then zero.
     let vx = if wx == mx { vx } else { 0.0 };
     let vz = if wz == mz { vz } else { 0.0 };
+    // The block's speed factor ends every move (`Entity.move`), before the tick's inertia.
+    let slow = block_speed_factor(solid, surface, pos2, landed);
+    let (vx, vz) = (vx * slow, vz * slow);
     let inertia = if in_lava {
         LAVA_INERTIA
     } else if in_water {
@@ -696,6 +816,156 @@ mod tests {
             "walked off the carpet: {:?}",
             b.pos
         );
+    }
+
+    /// Soul sand's numbers as the game holds them: a float 0.4, widened.
+    const SOUL: Surface = Surface {
+        speed_factor: 0.4f32 as f64,
+        jump_factor: 1.0,
+        wet: false,
+    };
+
+    fn walk() -> Controls {
+        Controls {
+            forward: true,
+            ..Controls::default()
+        }
+    }
+
+    /// The distance of the 201st tick of a walk.
+    fn pace(solid: &impl Solid, fluid: &impl FluidAt, surface: &impl SurfaceAt, from: Body) -> f64 {
+        let mut b = from;
+        for _ in 0..200 {
+            b = step_on(solid, fluid, surface, &b, &walk());
+        }
+        let before = b.pos[2];
+        step_on(solid, fluid, surface, &b, &walk()).pos[2] - before
+    }
+
+    #[test]
+    fn soul_sand_slows_the_walk_to_the_games_pace() {
+        // A soul sand floor: 14/16 high, so the feet stand inside its cell at y 63.875.
+        let sand = |_: i32, y: i32, _: i32| match y {
+            63 => Some(0.875),
+            y if y < 63 => Some(1.0),
+            _ => None,
+        };
+        let soul = |_: i32, y: i32, _: i32| if y == 63 { SOUL } else { Surface::PLAIN };
+        let on_sand = Body {
+            pos: [0.5, 63.875, 0.5],
+            on_ground: true,
+            ..Body::default()
+        };
+        let slow = pace(&sand, &no_fluid, &soul, on_sand);
+        let plain = pace(&ground, &no_fluid, &plain_surface, standing());
+        // Each tick: the input's acceleration, the move, then the velocity × factor × inertia.
+        // The pace settles at accel / (1 - factor × inertia): 0.098 / (1 - 0.4 × 0.546).
+        let k = f64::from(0.4f32);
+        let want = FORWARD_INPUT * ground_acceleration() / (1.0 - k * GROUND_INERTIA);
+        assert!((slow - want).abs() < 1e-12, "{slow} against {want}");
+        // 2.51 blocks a second on soul sand, against the walk's 4.32.
+        assert!((slow * 20.0 - 2.508).abs() < 0.001, "{}", slow * 20.0);
+        assert!((plain * 20.0 - 4.317).abs() < 0.001, "{}", plain * 20.0);
+        // The same floor with nothing said about it is walked at the plain pace.
+        let unsaid = pace(&sand, &no_fluid, &plain_surface, on_sand);
+        assert!((unsaid - plain).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_block_under_the_body_slows_it_when_the_feet_are_in_air() {
+        // A full cube with a speed factor (no such block in the game: its own two are lower
+        // than a cube, but the rule reads the block under the body all the same).
+        let slow_floor = |_: i32, y: i32, _: i32| if y == 63 { SOUL } else { Surface::PLAIN };
+        let slow = pace(&ground, &no_fluid, &slow_floor, standing());
+        let k = f64::from(0.4f32);
+        let want = FORWARD_INPUT * ground_acceleration() / (1.0 - k * GROUND_INERTIA);
+        assert!((slow - want).abs() < 1e-12, "{slow} against {want}");
+        // In the air over it (more than half a block up) it does nothing.
+        let high = [0.5, 66.0, 0.5];
+        assert_eq!(block_speed_factor(&ground, &slow_floor, high, false), 1.0);
+        assert_eq!(
+            block_speed_factor(&ground, &slow_floor, [0.5, 64.4, 0.5], false),
+            f64::from(0.4f32),
+            "within half a block of it"
+        );
+    }
+
+    #[test]
+    fn the_supporting_block_is_asked_when_the_body_hangs_over_an_edge() {
+        // Slow blocks for z <= 0, nothing beyond z = 1: the body's centre is past the edge, over
+        // air, its box still on the last block.
+        let ledge = |_: i32, y: i32, z: i32| (y == 63 && z <= 0).then_some(1.0);
+        let slow = |_: i32, y: i32, z: i32| {
+            if y == 63 && z <= 0 {
+                SOUL
+            } else {
+                Surface::PLAIN
+            }
+        };
+        let over = [0.5, 64.0, 1.2];
+        assert_eq!(supporting_block(&ledge, over), Some((0, 63, 0)));
+        assert_eq!(below_that_affects(&ledge, over, true), (0, 63, 0));
+        assert_eq!(
+            block_speed_factor(&ledge, &slow, over, true),
+            f64::from(0.4f32)
+        );
+        // Off the ground the column of the centre is asked: air.
+        assert_eq!(block_speed_factor(&ledge, &slow, over, false), 1.0);
+        // Of two blocks under the box, the nearer centre.
+        assert_eq!(
+            supporting_block(&ground, [0.9, 64.0, 0.5]),
+            Some((0, 63, 0))
+        );
+        assert_eq!(
+            supporting_block(&ground, [1.1, 64.0, 0.5]),
+            Some((1, 63, 0))
+        );
+        assert_eq!(supporting_block(&ground, [0.5, 65.0, 0.5]), None);
+    }
+
+    #[test]
+    fn water_at_the_feet_hides_the_soul_sand_under_it() {
+        let wet = |_: i32, y: i32, _: i32| match y {
+            63 => SOUL,
+            64 => Surface {
+                wet: true,
+                ..Surface::PLAIN
+            },
+            _ => Surface::PLAIN,
+        };
+        assert_eq!(
+            block_speed_factor(&ground, &wet, [0.5, 64.0, 0.5], true),
+            1.0
+        );
+        let dry = |_: i32, y: i32, _: i32| if y == 63 { SOUL } else { Surface::PLAIN };
+        assert_eq!(
+            block_speed_factor(&ground, &dry, [0.5, 64.0, 0.5], true),
+            f64::from(0.4f32)
+        );
+    }
+
+    #[test]
+    fn honey_halves_the_jump() {
+        // Honey's jump factor is 0.5: the jump leaves at 0.21, not 0.42.
+        let honey = |_: i32, y: i32, _: i32| {
+            if y == 63 {
+                Surface {
+                    speed_factor: f64::from(0.4f32),
+                    jump_factor: 0.5,
+                    wet: false,
+                }
+            } else {
+                Surface::PLAIN
+            }
+        };
+        let jump = Controls {
+            jump: true,
+            ..Controls::default()
+        };
+        let b = step_on(&ground, &no_fluid, &honey, &standing(), &jump);
+        assert!((b.pos[1] - 64.21).abs() < 1e-9, "rose {}", b.pos[1] - 64.0);
+        let b = step_on(&ground, &no_fluid, &plain_surface, &standing(), &jump);
+        assert!((b.pos[1] - 64.42).abs() < 1e-9);
     }
 
     #[test]
