@@ -492,7 +492,14 @@ impl Walk {
         {
             return out;
         }
-        (follow(body, next), TaskStatus::Running)
+        // Feet resting in soul sand's own cell (y + 0.875): read from the block, never from the
+        // fraction of y, which a body mid-jump or a hair under a whole block also shows.
+        let soul = w.block_at(BlockPos::new(
+            pos[0].floor() as i32,
+            pos[1].floor() as i32,
+            pos[2].floor() as i32,
+        )) == Some(data::BlockKind::SoulSand);
+        (follow(body, next, soul), TaskStatus::Running)
     }
 
     /// The bridge move's executor: with no floor under `next`, stand on the block before it and
@@ -607,7 +614,7 @@ fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
 
 /// To a waypoint (clojurecraft's `follow`): face its centre, forward, jump only when it is above
 /// and near, or when blocked; stop once wholly over a descending waypoint.
-fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
+fn follow(body: physics::Body, (wx, wy, wz): Cell, on_soul_sand: bool) -> Controls {
     let [px, py, pz] = body.pos;
     let centre = [
         f64::from(wx) + 0.5,
@@ -620,14 +627,14 @@ fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
     }
     let near = horizontal([px, 0.0, pz], centre) < JUMP_NEAR;
     // A cell up. On soul sand, feet at y + 0.875, the next cell's floor line is an eighth up:
-    // a step and no jump (`SOUL_SAND_TOP`); everywhere else as clojurecraft has it.
-    let on_soul_sand = py - py.floor() >= SOUL_SAND_TOP - 0.01;
+    // a step and no jump (`SOUL_SAND_TOP`); everywhere else as clojurecraft has it (the
+    // overworld's walk is unchanged: `the_planner_reaches_a_log_thirty_blocks_out_on_real_terrain`).
     let up = f64::from(wy) > py.floor() + if on_soul_sand { 1.5 } else { 0.5 };
     // That eighth is stepped, never jumped: under a two-high roof a jump hits the lintel, comes
     // down on the soul sand still blocked by the eighth, and jumps again (the model's kit bot
     // hopped at (61, 46.88, 79.7) for 8,000 ticks: docs/problems/nether-walk.md).
     let rise = f64::from(wy) - py;
-    let low_step = body.on_ground && rise > 0.0 && rise <= physics::STEP_HEIGHT;
+    let low_step = on_soul_sand && body.on_ground && rise > 0.0 && rise <= physics::STEP_HEIGHT;
     let mut c = toward(body, centre);
     c.jump = (c.jump && !low_step) || (up && near);
     c

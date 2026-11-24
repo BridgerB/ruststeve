@@ -85,3 +85,9 @@ Read with `navmap` (crate `navprobe`, probes 45334641630 and 45334717081) on `rs
 - **What happened** (probe 45346724772, the whole suite on 113cd37, 329 of 333): with the tunnel merged, the model's kit bot from the real exit stood at (37.5, 51.875, 47.5), on soul sand, in one "tunnel stairs up" task from tick 2,900 to the cap; `the_printed_cell_is_the_planners_feet_cell` failed (the senses' cell and the planner's no longer agreed at y 63.875); and `the_planner_reaches_a_log_thirty_blocks_out_on_real_terrain` still failed NoProgress.
 - **Cause**: mine. Fix 1 made `feet_cell` add 0.2 before flooring y, for every task. The stairs, the senses and every other reader of the feet's cell got a different cell on soul sand and in the top fifth of any jump.
 - **Fix**: `feet_cell` floors again. Soul sand is handled where a route is made and walked: `plan` searches from the cell over soul sand, the walk's arrival reads `stand_cell`, `follow` knows feet at y + 0.875 are not a cell under their waypoint.
+
+## Fix 6: soul sand is read from the block, not from the fraction of y
+
+- **What happened** (probe 45349492975, the whole suite on fc9bed7, 363 of 364): `the_planner_reaches_a_log_thirty_blocks_out_on_real_terrain` still failed NoProgress, three walks to the log at (189, 75, 24) each failing after about 440 ticks; on `origin/issue-16e-observability` it passes.
+- **Cause**: `follow` took a body with y's fraction at 0.865 or more to be on soul sand, and then let go of the jump for a rise of a step or less and read "a cell up" a block higher. Any body whose y sits a hair under a whole block, or is in the top of a jump, read as on soul sand: the overworld's walk was changed.
+- **Fix**: the walk passes `follow` whether the feet's cell is soul sand (the block, from the world); both soul sand rules apply only then. Off soul sand `follow` is clojurecraft's again, line for line.
