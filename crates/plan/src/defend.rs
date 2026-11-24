@@ -115,6 +115,9 @@ pub struct Defend {
     pub spawner: Option<Option<crate::path::Cell>>,
     #[serde(default)]
     pub walking_post: bool,
+    /// Steps held because fire lay ahead (wall 11).
+    #[serde(default)]
+    pub fire_held: u32,
     /// The fight gave its foe up with health whole: it ends, and the next foe is taken.
     #[serde(default)]
     pub given_up: bool,
@@ -566,6 +569,7 @@ impl Defend {
             posted_at: None,
             spawner: None,
             walking_post: false,
+            fire_held: 0,
             given_up: false,
             crit_wait: 0,
             falling_swings: 0,
@@ -714,6 +718,20 @@ impl Defend {
         tick: u64,
     ) -> (Controls, Option<Act>, DefendStatus) {
         let (c, act, status) = self.step_inner(w, rules, tick);
+        // No step of a defend goes into fire, whatever chose it (a route to cover, a flee, the
+        // close-in): the fire escape moves the body out and the defend walked it back in every
+        // other tick, 14 escapes and 18.5 to 0 in 220 ticks (race 45343411709), the same in the
+        // whole-stage model (probe 45347050872, ticks 6,100 to 6,160). Wall 11.
+        let c = match w.body {
+            Some(body) if c.forward && fire_ahead(w, body.pos, c.yaw) => {
+                self.fire_held += 1;
+                Controls {
+                    forward: false,
+                    ..c
+                }
+            }
+            _ => c,
+        };
         if status == DefendStatus::Running
             && self.stance == Stance::Fight
             && rules.ranged.contains(&self.kind)

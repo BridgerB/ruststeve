@@ -121,3 +121,12 @@ A bot at a blaze spawner with the gear a real bot holds ends with 7 blaze rods (
 - **Rods**: a rod on the deck is within a step of every deck cell; the spawner task's pickup (8 blocks, a found route) runs before the post walk whenever no fight is on. Counted from "item blaze_rod" lines.
 - **Judged by**: kills and rods per 1,000 ticks against the sorties (0 to 1 kill per 1,000 ticks tonight), health lost per kill.
 - **Unit test**: `the_fight_post_is_the_spawners_deck` (bot/tests/blaze_fight.rs).
+
+### The whole-stage model (another agent's `crates/bot/tests/nether_rods.rs`; probe 45347050872 at ffc97e2, the post in)
+- Raw kit: no death in 12,000 ticks, 3 kills, 0 rods, 46 health lost, 8 meals. 30 cooked beef: dead at 6,160, 8 kills (1.30 per 1,000 ticks), 78 fireballs fired and 19 hit, 150 health lost (18.8 a kill), 15 meals. With a shield: dead at 8,300, 11 kills, 196 fired, 24 hit, 26 blocked. No rod held in any (the model's blazes hold their columns, most off the deck).
+- The model's health a kill (18.6 to 18.8) matches the real fed race (19). So the model is fit to judge a change in minutes.
+
+### 11. A defend walks back into the fire the escape left (race 45343411709, another agent's; the model run above, ticks 6,100 to 6,160)
+- **What happened**: "escape-fire (trapped in fire; cut defend)" and "defend Blaze 86 (Retreat) (… cut escape)" begun in turn several times a tick stamp, health 5.7 to 0 in 60 ticks in the model; 14 escapes and 18.5 to 0 in 220 ticks in the real race.
+- **Read**: the fire trap is in force only while the body's box touches a fire block (`escape::touching_fire`), and it is not held. One tick the escape steps the body off; the next the trap is gone, the defend begins again and its walk (a route to cover, a flee, a close-in) takes the body back through the burning cell.
+- **Fix** (`defend.rs`): no step a defend sends goes into fire: after every stance's choice, a forward step with fire in the cell 0.9 ahead is held (`fire_ahead`; counted in the fight's note, "N steps held from fire"). A route through fire then stalls and the retreat looks for another cell.
