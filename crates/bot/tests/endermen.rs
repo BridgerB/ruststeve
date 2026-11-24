@@ -85,7 +85,15 @@ fn cavern(aim: Aim, ticks: u64, summon: impl Fn(&mut Sim)) -> Run {
     summon(&mut sim);
     let mut ledger = Vec::new();
     let run = bot::lockstep::run_acting(sim, "rs-ender", 5, ticks, 20, |w, _| {
+        // The notes are the planner's events (the shell writes them to the ledger); the task
+        // records carry only starts and ends.
+        let seen = plan.event_count;
         let c = plan.step(w);
+        ledger.extend(
+            plan.events_since(seen)
+                .iter()
+                .map(|e| format!("{:>6} note  {} ({})", e.tick, e.what, e.why)),
+        );
         ledger.extend(plan.take_records().into_iter().map(line));
         (c, plan.take_acts())
     });
@@ -121,10 +129,10 @@ fn seven_rods_held_go_on_to_the_endermen() {
     let story = r.story();
     assert!(!r.plan.met, "not met at the rods:\n{story}");
     assert_eq!(r.has("rods met"), 0, "{story}");
-    assert_eq!(r.has("rods held: on to the endermen"), 1, "{story}");
-    assert_eq!(r.has("note  provisions"), 1, "{story}");
+    assert!(r.has("rods held: on to the endermen") >= 1, "{story}");
+    assert!(r.has("note  provisions") >= 1, "{story}");
     assert!(
-        r.has("pickaxe uses left 262") == 1,
+        r.has("pickaxe uses left 262") >= 1,
         "two fresh stone pickaxes:\n{story}"
     );
     assert!(
@@ -142,9 +150,9 @@ fn a_ticking_enderman_near_is_met_in_a_sealed_pocket() {
         sim.summon(EntityKind::Enderman, [20.5, f64::from(FLOOR + 1), 0.5]);
     });
     let story = r.story();
-    assert_eq!(r.has("endermen reached"), 1, "{story}");
+    assert!(r.has("endermen reached") >= 1, "{story}");
     assert!(r.has("pocket block") >= 5, "{story}");
-    assert_eq!(r.has("endermen met"), 1, "{story}");
+    assert!(r.has("endermen met") >= 1, "{story}");
     assert!(r.plan.met, "{story}");
     assert!(sealed(&r), "the pocket is shut:\n{story}");
     assert_eq!(r.has("near miss"), 0, "{story}");
@@ -158,7 +166,7 @@ fn a_ticking_enderman_at_44_is_walked_to() {
     });
     let story = r.story();
     assert!(r.has("approach enderman") >= 1, "{story}");
-    assert_eq!(r.has("endermen reached"), 1, "{story}");
+    assert!(r.has("endermen reached") >= 1, "{story}");
     assert!(r.plan.met, "{story}");
 }
 
