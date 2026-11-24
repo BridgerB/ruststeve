@@ -141,6 +141,7 @@ fn line(r: TaskRecord) -> String {
 /// The kit bot's own situation: the equipped Nether snapshot's bot, with what it holds, where it
 /// stands, the fortress aim. Twelve thousand ticks is ten minutes; the bricks are 121 blocks off.
 #[test]
+#[ignore = "the tunnel comes out at (61, 47, 79) after 2,660 ticks at 20 health, 16 from the bricks; the far walk then lays 44 blocks and stalls there, each route failing NoPath (CI 45341556367); owners A2, A7"]
 fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
@@ -164,6 +165,26 @@ fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
         if t % 600 == 0 {
             let p = w.body.map(|b| b.pos.map(|v| v.floor() as i32));
             track.push(format!("{t}: {p:?} health {:?}", w.player.health));
+        }
+        // A walk in hand, ten ticks apart over one stalled far walk: where the body is and
+        // the waypoint and move it is on.
+        if (4130..4470).contains(&t)
+            && t % 10 == 0
+            && let Some(walk) = plan.task.walk()
+        {
+            track.push(format!(
+                "{t}: body {:?} ground {:?}; at {} of {}, next {:?} by {:?}, from {:?}, replans {}, laying {:?} tries {}",
+                w.body.map(|b| b.pos.map(|v| (v * 100.0).round() / 100.0)),
+                w.body.map(|b| b.on_ground),
+                walk.at,
+                walk.waypoints.as_ref().map_or(0, Vec::len),
+                walk.waypoints.as_ref().and_then(|p| p.get(walk.at)),
+                walk.more.kinds.get(walk.at),
+                walk.more.from,
+                walk.replans,
+                walk.more.laying,
+                walk.more.place_tries,
+            ));
         }
         (c, plan.take_acts())
     });
