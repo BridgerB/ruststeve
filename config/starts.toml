@@ -176,6 +176,24 @@ setup = [
   "give {bot} minecraft:oak_log 2",
 ]
 
+# A DEVELOPMENT start for the shield (issue 16, 2026-11-23; never issue-16 evidence, never the
+# frontier): a shield put into the off hand of a bot resumed at the blaze spawner, to measure what
+# a raised shield is worth before any crafting of one (docs/problems/shield.md). Race it only with
+# `snapshot=race-45336326999/snapshot-spawner-45336326999-race-45336326999-lane-2.tar.zst` (the
+# healthy armoured bot the blaze fight's race 45338756013 started from, so the two compare). No
+# kit and no place: the snapshot's own. The 32 cooked beef are there so that the food a bot can
+# carry does not hide what the shield does (the orchestrator, 2026-11-23); the two more shields are
+# the spares a long fight wears through.
+[[start]]
+name = "dev-shield"
+stage = "spawner"
+place = "spawn"
+setup = [
+  "item replace entity {bot} weapon.offhand with minecraft:shield",
+  "give {bot} minecraft:shield 2",
+  "give {bot} minecraft:cooked_beef 32",
+]
+
 # A DEVELOPMENT start (2026-11-23; never issue-16 evidence, never the frontier): the blaze fight
 # with the food ceiling taken away. Race it only with
 # `snapshot=race-45336326999/snapshot-spawner-45336326999-race-45336326999-lane-2.tar.zst` (a bot
