@@ -133,9 +133,31 @@ pub fn lava_door(feet: Cell, lava_at: impl Fn(Cell) -> bool) -> Option<Cell> {
         .find(|c| lava_at(*c))
 }
 
-/// `lava_door` on the world.
+/// `lava_door` on the world, lava seen only: a cell with an open face (no X-ray). Every cell the
+/// door looks at but the ring a cell over the head borders the body's own cells; that ring, in a
+/// one-wide tunnel, borders only rock, and lava shut in there is never seen.
 pub fn lava_door_at(w: &World, feet: Cell) -> Option<Cell> {
-    lava_door(feet, |c| is_lava(w, c))
+    lava_door(feet, |c| seen_lava(w, c))
+}
+
+/// Lava with a face open to the air or a fluid: what can be seen.
+fn seen_lava(w: &World, c: Cell) -> bool {
+    is_lava(w, c) && exposed(w, c)
+}
+
+/// A cell with a neighbour that is not a full block (air, a fluid, a slab): one of its faces
+/// shows. A cell all six of whose neighbours are full blocks, or not loaded, is hidden.
+pub fn exposed(w: &World, (x, y, z): Cell) -> bool {
+    [
+        (1, 0, 0),
+        (-1, 0, 0),
+        (0, 1, 0),
+        (0, -1, 0),
+        (0, 0, 1),
+        (0, 0, -1),
+    ]
+    .iter()
+    .any(|(dx, dy, dz)| kind_at(w, (x + dx, y + dy, z + dz)).is_some_and(|k| !full(Some(k))))
 }
 
 /// Seals tried against lava at the door before the escape flees without one.
@@ -191,7 +213,7 @@ fn afloat(w: &World, body: &physics::Body) -> bool {
 impl Traps {
     /// The trap this tick (clojurecraft's `trapped-tick`).
     pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {
-        let at_door = door && lava_door(feet_cell(body.pos), |c| is_lava(w, c)).is_some();
+        let at_door = door && lava_door_at(w, feet_cell(body.pos)).is_some();
         self.wet = if body.eye_in_water { self.wet + 1 } else { 0 };
         self.afloat = if afloat(w, body) { self.afloat + 1 } else { 0 };
         self.dry = if dry_land(w, body) { self.dry + 1 } else { 0 };
@@ -595,7 +617,7 @@ impl Escape {
         if self.kind == TrapKind::Lava
             && !body.in_lava
             && self.seals < MAX_LAVA_SEALS
-            && let Some(door) = lava_door(feet, |c| is_lava(w, c))
+            && let Some(door) = lava_door_at(w, feet)
             && let Some(item) = SEAL_BLOCKS
                 .iter()
                 .copied()

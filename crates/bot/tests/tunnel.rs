@@ -364,3 +364,58 @@ fn a_tunnel_from_soul_sand_keeps_its_route() {
     assert!(!run.died);
     assert!(count("tunnel off its route") <= 2, "{tail:#?}");
 }
+
+/// A race beside the fortress's bricks with the stage not yet set (a brick seen between the tick
+/// that sets the stage and the choice) goes on: `fortress_task` never ends a race there.
+#[test]
+fn a_race_at_the_bricks_before_its_stage_is_not_over() {
+    let mut stage = rock();
+    stage
+        .air((0, 0), (40, 41), (1, 1))
+        .bricks((0, 0), (40, 41), (2, 2));
+    let (p, run, _) = in_the_rock(stage, (0, 40, 2), 4, 200);
+    assert!(p.met, "the fortress aim is met beside its bricks");
+    let mut w = run.world.clone();
+    w.stage_reached = Some(world::Stage::Nether);
+    assert!(world::stage::at_fortress(&w));
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut race = Plan::with_table(Aim::Race, table);
+    for _ in 0..40 {
+        race.step(&w);
+    }
+    assert!(!race.finished(), "{:#?}", race.events);
+}
+
+/// Lava shut in the rock a cell over the head and one aside, in a one-wide tunnel, is never
+/// seen: no lava at the door, no trap, no seal (no X-ray). With an open face it is.
+#[test]
+fn lava_shut_in_over_a_tunnel_is_not_at_the_door() {
+    let mut set = filled([-3, 6], [48, 54], [-3, 3], BlockKind::Stone);
+    set.extend(filled([0, 5], [50, 51], [0, 0], BlockKind::Air));
+    set.push(((1, 52, 1), BlockKind::Lava));
+    let w = world_with(&set);
+    assert_eq!(plan::escape::lava_door_at(&w, (1, 50, 0)), None);
+    // A cave beside it: the lava shows a face, and is at the door.
+    set.extend(filled([1, 1], [52, 53], [2, 2], BlockKind::Air));
+    let w = world_with(&set);
+    assert_eq!(plan::escape::lava_door_at(&w, (1, 50, 0)), Some((1, 52, 1)));
+}
+
+/// Rock to tunnel is read from what shows: a pocket of air shut in two under the feet is rock to
+/// the planner; lava open under a causeway is not.
+#[test]
+fn rock_to_tunnel_reads_only_what_shows() {
+    let mut set = filled([-3, 6], [44, 54], [-3, 3], BlockKind::Stone);
+    set.extend(filled([0, 0], [50, 51], [0, 0], BlockKind::Air));
+    set.push(((0, 48, 0), BlockKind::Air));
+    let w = world_with(&set);
+    assert!(plan::walk::rock_to_tunnel(&w, (0, 50, 0)));
+    // A causeway: one block over open lava beside and under.
+    let mut set = filled([-3, 6], [44, 47], [-3, 3], BlockKind::Stone);
+    set.extend(filled([-3, 6], [48, 48], [-3, 3], BlockKind::Lava));
+    set.extend(filled([-3, 6], [49, 54], [-3, 3], BlockKind::Air));
+    set.push(((0, 49, 0), BlockKind::Stone));
+    let w = world_with(&set);
+    assert!(!plan::walk::rock_to_tunnel(&w, (0, 50, 0)));
+}

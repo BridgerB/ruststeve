@@ -459,8 +459,10 @@ pub fn route(
     })
 }
 
-/// The planner's memory of its tunnel: the target held, the route, the cells found bad.
+/// The planner's memory of its tunnel: the target held, the route, the cells found bad. Every
+/// field defaults: a moment written before a field was added still loads.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Travel {
     pub target: Option<Cell>,
     pub route: Vec<Cell>,

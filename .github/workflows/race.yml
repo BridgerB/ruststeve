@@ -259,7 +259,9 @@ jobs:
           # reached is a start for the next race at once and survives a lane that never ends.
           every=300
           if [ "$LANES" -gt 8 ]; then every=600; fi
-          # Snapshots not yet sent, packed and added to `files`.
+          # Snapshots not yet sent, packed and added to `files`, their stages to `stages`: a
+          # stage is marked sent only once its upload succeeded, so one refused (a 403 rate limit)
+          # is packed and sent again on the next turn.
           new_snapshots() {
             for d in "lane-$LANE"/snapshots/*; do
               [ -f "$d/snap.toml" ] || continue
@@ -270,15 +272,24 @@ jobs:
               f="${prefix}snapshot-$stage-${{ github.run_id }}-race-${{ github.run_id }}-lane-$LANE.tar.zst"
               if tar --zstd -C "$(dirname "$d")" -cf "$f" "$stage"; then
                 files+=("$f")
-                touch ".sent-$stage"
+                stages+=("$stage")
               fi
             done
+          }
+          # Upload `files`; on success mark `stages` sent.
+          send_files() {
+            if gh release upload "race-${{ github.run_id }}" "${files[@]}" --clobber; then
+              for s in "${stages[@]}"; do touch ".sent-$s"; done
+            else
+              echo "::warning::lane $LANE: an upload failed; its snapshots are sent again on the next turn"
+            fi
           }
           (
             waited=0
             while sleep 30; do
               waited=$(( waited + 30 ))
               files=()
+              stages=()
               new_snapshots
               if [ $(( waited % every )) -eq 0 ]; then
                 if cat "lane-$LANE"/progress-*.txt > "progress-lane-$LANE.txt" 2>/dev/null; then
@@ -291,7 +302,7 @@ jobs:
                 fi
               fi
               if [ "${#files[@]}" -gt 0 ]; then
-                gh release upload "race-${{ github.run_id }}" "${files[@]}" --clobber || true
+                send_files
               fi
             done
           ) &
@@ -305,9 +316,10 @@ jobs:
           # A snapshot of the race's last half minute leaves with this lane, not with the last
           # lane of the race (publish waits for every lane).
           files=()
+          stages=()
           new_snapshots
           if [ "${#files[@]}" -gt 0 ]; then
-            gh release upload "race-${{ github.run_id }}" "${files[@]}" --clobber || true
+            send_files
           fi
           echo "RACE_END=$(date +%s)" >> "$GITHUB_ENV"
           echo "RACE_EXIT=$code" >> "$GITHUB_ENV"
@@ -317,6 +329,12 @@ jobs:
             echo "::warning::lane $LANE: the race was killed at the hard limit ($hard s): its batch may be missing"
           elif [ "$code" -ne 0 ]; then
             echo "::warning::lane $LANE: the race exited $code"
+          fi
+          # A bot the harness lost (an error, a kick, a lost connection) fails the lane, after
+          # every upload; a death or a cap is a result, not a failure.
+          if grep -qE ': ended (Error|Kicked|Lost) \{' "race-$LANE.log"; then
+            echo "::error::lane $LANE: a bot ended by the harness: $(grep -E ': ended (Error|Kicked|Lost) \{' "race-$LANE.log" | head -3)"
+            exit 1
           fi
           exit 0
 

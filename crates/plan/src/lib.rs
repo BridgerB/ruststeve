@@ -1575,7 +1575,22 @@ impl Plan {
             if let Some(make::Always::Escape(k)) = running {
                 let said = match std::mem::replace(&mut self.task, Task::Idle) {
                     Task::Escape(e) => e.report(),
-                    _ => String::new(),
+                    Task::Idle
+                    | Task::ToLog(_)
+                    | Task::Explore(_)
+                    | Task::Dig(_)
+                    | Task::Craft(_)
+                    | Task::Place(_)
+                    | Task::Stairs(_)
+                    | Task::Smelt(_)
+                    | Task::Redig(_)
+                    | Task::Scoop(_)
+                    | Task::Cast(_)
+                    | Task::Enter(_)
+                    | Task::Swim(..)
+                    | Task::Defend(_)
+                    | Task::Eat(_)
+                    | Task::Hunt(_) => String::new(),
                 };
                 self.retry_at = tick;
                 self.note(
@@ -2554,6 +2569,11 @@ impl Plan {
     /// Issue 15's aim: met once nether bricks have been seen with an exposed face; until then,
     /// explore (15a's baseline; the held-heading search is 15b).
     fn fortress_task(&mut self, w: &World, tick: u64) -> Task {
+        // The race goes on from the fortress: a brick seen between the tick that sets the stage
+        // and this choice must not end the run there (met ends a run with no hold).
+        if self.aim == Aim::Race && world::stage::at_fortress(w) {
+            return self.spawner_task(w, tick);
+        }
         if world::stage::at_fortress(w) {
             self.met = true;
             self.note(
