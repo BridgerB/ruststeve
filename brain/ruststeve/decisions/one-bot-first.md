@@ -5,8 +5,8 @@ type: decision
 tags: [decision, roadmap, snapshots, frontier, done-conditions]
 aliases: [one bot first, win once, the frontier, snapshot and resume, no rates until the win]
 status: verified
-lastUpdated: 2026-11-19
-verifiedAgainst: ruststeve@d0e92fc
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609
 sourceRefs:
   - "ruststeve:crates/results/src/snapshot.rs#pub fn offline_uuid(name: &str) -> String {"
 related:
@@ -14,6 +14,7 @@ related:
   - "[[measurement-rules]]"
   - "[[first-twenty-issues]]"
   - "[[race-and-results]]"
+  - "[[development-starts]]"
 ---
 
 # One bot first
@@ -24,6 +25,7 @@ Bridger, 2026-11-19: "the goal is 1 bot ... 1 full end to end bot that goes from
 - **Done for a stage** = one real bot passed it, starting from the previous stage's snapshot, and its snapshot is saved. Rates are reported, never a gate.
 - **Every attempt starts at the frontier**: the furthest snapshot a real bot has made (`config/frontier.toml`), never from spawn or a made-up checkpoint.
 - **Generalising** (more bots passing, speed) is a phase after the dragon dies.
+- **Development runs are a separate kind** (Bridger, 2026-11-23, [[development-starts]]): a made-up start may be raced to develop a stage, but it is never an attempt: it proves nothing, closes nothing and never becomes the frontier. The two lines above stand for every run that counts.
 
 ## Why
 - Rate targets spent days polishing stages the bot already passes (the portal from 10% to 19%) while the stages after them were never reached; the unknown walls are there. clojurecraft lost four weeks on a late stage it reached late ([[cc-stage18-lessons]]).
@@ -31,7 +33,7 @@ Bridger, 2026-11-19: "the goal is 1 bot ... 1 full end to end bot that goes from
 - A stage passed one time in twenty is enough when the next attempt starts right before it: the runners work the frontier instead of replaying the opening.
 
 ## How
-- **Capture**: `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor: `save-all flush` over RCON, the server's `world/` copied, the bot's memory and `snap.toml` (stage, bot, offline UUID, position, dimension, commit). Races and the marathon publish each as `snapshot-<stage>-<run>-<lane>.tar.zst`.
+- **Capture**: `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor: `save-all flush` over RCON, the server's `world/` copied, the bot's memory and `snap.toml` (stage, bot, offline UUID, server ticks, run and lane, position, dimension, commit, and the items held by name). Races and the marathon publish each as `snapshot-<stage>-<run>-<lane>.tar.zst`.
 - **Resume**: `race.yml` `snapshot=frontier` (or `<tag>/<asset>`) restores that world before the server starts, gives every bot the snapshot bot's player file under its own offline UUID (`results offline-uuid`), and seeds each bot's memory (`--memory`). The `snapshot` start gives nothing more.
 - **The frontier** moves by a commit to `config/frontier.toml` each time a bot first passes a stage.
 - **The marathon** stays end to end from spawn on the latest main: the proof the whole chain runs.
