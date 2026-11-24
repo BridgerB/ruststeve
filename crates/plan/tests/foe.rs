@@ -192,3 +192,16 @@ fn with_nothing_to_heal_with_the_blaze_line_is_the_danger_line() {
     let d = Defend::new(&w, 118, EntityKind::Blaze, &r, 0);
     assert_eq!(d.stance, Stance::Retreat, "the food bar heals: to cover");
 }
+
+/// Review of bba8161: a blaze left alone after a fight that landed nothing (ignored for 600
+/// ticks) stood in touch with no defend. One within `KEEP_OFF` is answered, ignored or not; one
+/// farther off still waits.
+#[test]
+fn an_ignored_blaze_in_touch_is_answered() {
+    let r = rules();
+    let mut w = beside(EntityKind::Blaze, 2.0);
+    w.player.health = Some(20.0);
+    assert_eq!(foe(&w, &r, &[118]), Some((118, EntityKind::Blaze)));
+    let w = beside(EntityKind::Blaze, 4.0);
+    assert_eq!(foe(&w, &r, &[118]), None, "out of touch it waits");
+}

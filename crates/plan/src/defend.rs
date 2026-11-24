@@ -435,7 +435,14 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
                 // A foe a fight never struck nor was hurt by (a spider in a pit 4.5 under the eye,
                 // fought 96 times: blaze wall 15) waits, unless its kind hits the bot.
                 && (!ignored.contains(id)
-                    || (provoked(w, e.kind) && !rules.ranged.contains(&e.kind)))
+                    || (provoked(w, e.kind) && !rules.ranged.contains(&e.kind))
+                    // A blaze in touch is never out of reach, ignored or not: a blaze left alone
+                    // 600 ticks after a retreat that landed nothing stood in touch with no defend
+                    // (review of bba8161; the touch was the model's top damage with the shield).
+                    // Not once 7 rods are held: then every blaze is left (wall 16).
+                    || (e.kind == EntityKind::Blaze
+                        && distance(body.pos, e.pos) < KEEP_OFF
+                        && crate::craft::count(w, data::ItemKind::BlazeRod) < crate::RODS_WANTED))
         })
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= rules.defend_radius)
