@@ -325,6 +325,9 @@ pub struct Survival {
     /// Ticks the bot waits in a warped forest for an enderman to spawn before it goes on.
     #[serde(default)]
     pub forest_wait_ticks: u64,
+    /// Ticks the bot waits in its nook in a soul sand valley before it goes on.
+    #[serde(default)]
+    pub valley_wait_ticks: u64,
 }
 
 fn flee_radius() -> f64 {
@@ -400,6 +403,7 @@ impl Default for Survival {
             travel_health: 0.0,
             pickaxe_reserve: 0,
             forest_wait_ticks: 0,
+            valley_wait_ticks: 0,
         }
     }
 }
@@ -446,6 +450,7 @@ pub struct SurvivalRules {
     pub travel_health: f32,
     pub pickaxe_reserve: i32,
     pub forest_wait_ticks: u64,
+    pub valley_wait_ticks: u64,
     /// Kinds dropped when the main inventory is nearly full, each with how many to keep.
     pub junk: Vec<(data::ItemKind, i32)>,
     pub stock_logs: i32,
@@ -735,6 +740,7 @@ impl Table {
                 travel_health: g.survival.travel_health,
                 pickaxe_reserve: g.survival.pickaxe_reserve,
                 forest_wait_ticks: g.survival.forest_wait_ticks,
+                valley_wait_ticks: g.survival.valley_wait_ticks,
             },
         })
     }

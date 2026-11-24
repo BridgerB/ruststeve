@@ -53,6 +53,8 @@ pub const FORTRESS_PAD: i32 = 4;
 const NOTE_EVERY: u64 = 600;
 /// Ticks between two "look kept off" notes (the count is in each).
 const LOOK_NOTE_EVERY: u64 = 200;
+/// Ticks between two progress notes of the valley wait.
+const VALLEY_NOTE_EVERY: u64 = 1200;
 /// Ticks the fortress footprint is kept before it is read again from memory's brick index.
 const FORTRESS_EVERY: u64 = 600;
 /// The pitch the bot holds in its pocket: straight down at its own floor.
@@ -101,6 +103,18 @@ pub struct EnderState {
     pub forest_since: Option<u64>,
     #[serde(default)]
     pub forest_over: bool,
+    /// The soul sand valley wait: when it began, whether it is over, the walks toward the valley,
+    /// the nook's open side, and when its progress was last noted.
+    #[serde(default)]
+    pub valley_since: Option<u64>,
+    #[serde(default)]
+    pub valley_over: bool,
+    #[serde(default)]
+    pub place_tries: Vec<(Cell, u32)>,
+    #[serde(default)]
+    pub nook_open: Option<(Cell, (i32, i32))>,
+    #[serde(default)]
+    pub valley_noted_at: Option<u64>,
     /// The pocket being sealed: where the feet were, blocks placed, when the next may go.
     #[serde(default)]
     pub pocket_cell: Option<Cell>,
@@ -246,6 +260,84 @@ pub fn in_footprint((ax, az, bx, bz): (i32, i32, i32, i32), c: Cell) -> bool {
 /// seen; E1's feet biome joins this once it lands).
 pub fn in_forest(w: &World) -> bool {
     w.block_under_player() == Some(BlockKind::WarpedNylium)
+}
+
+/// The chunk column of a soul sand valley known from soul sand and soul soil seen exposed (E1's
+/// `Memory::soul_valley_known`, stubbed here until it lands: `None`).
+pub fn soul_valley_known(_w: &World) -> Option<(i32, i32)> {
+    None
+}
+
+/// The chunk column of a warped forest known from warped blocks seen (E1's
+/// `Memory::forest_known`, stubbed until it lands: `None`).
+pub fn forest_known(_w: &World) -> Option<(i32, i32)> {
+    None
+}
+
+/// Where to walk for a known column: its centre at the feet's height (until memory keeps the
+/// seen soul cells themselves, `kind_near`).
+pub fn column_target(w: &World, (cx, cz): (i32, i32)) -> Option<Cell> {
+    let body = w.body?;
+    Some((cx * 16 + 8, path::feet_cell(body.pos).1, cz * 16 + 8))
+}
+
+/// Whether the bot stands in a soul sand valley: on soul sand or soul soil (blocks seen), or in
+/// the known valley's column (E1's feet biome joins this once it lands).
+pub fn in_valley(w: &World) -> bool {
+    let on_soul = matches!(
+        w.block_under_player(),
+        Some(BlockKind::SoulSand | BlockKind::SoulSoil)
+    );
+    let in_column = w
+        .body
+        .zip(soul_valley_known(w))
+        .is_some_and(|(b, (cx, cz))| {
+            let f = path::feet_cell(b.pos);
+            (f.0 >> 4, f.2 >> 4) == (cx, cz)
+        });
+    on_soul || in_column
+}
+
+/// The kinds a nook's open side must not face at build time while another side is open.
+pub const NOOK_SHOOTERS: &[EntityKind] = &[EntityKind::Ghast, EntityKind::Skeleton];
+
+/// The side a nook at `feet` is left open on: the longest open run (`cover::open_runs`), but not
+/// one facing (within 60 degrees) a ticking ghast or skeleton within `cover::COVER_RANGE` while a
+/// side with any open run does not. With its run.
+pub fn nook_side(w: &World, feet: Cell) -> ((i32, i32), usize) {
+    let shooters: Vec<[f64; 3]> = w
+        .entities
+        .values()
+        .filter(|e| !e.dead && NOOK_SHOOTERS.contains(&e.kind) && ticking(w, e.pos))
+        .filter(|e| {
+            let c = [
+                f64::from(feet.0) + 0.5,
+                f64::from(feet.1),
+                f64::from(feet.2) + 0.5,
+            ];
+            distance(c, e.pos) <= cover::COVER_RANGE
+        })
+        .map(|e| e.pos)
+        .collect();
+    let faces = |(dx, dz): (i32, i32)| {
+        shooters.iter().any(|p| {
+            let (vx, vz) = (
+                p[0] - f64::from(feet.0) - 0.5,
+                p[2] - f64::from(feet.2) - 0.5,
+            );
+            let len = (vx * vx + vz * vz).sqrt();
+            len > 0.0 && (f64::from(dx) * vx + f64::from(dz) * vz) / len > 0.5
+        })
+    };
+    let runs = cover::open_runs(w, feet);
+    let best = |safe: bool| {
+        runs.iter()
+            .rev()
+            .filter(|r| !safe || (r.1 > 0 && !faces(r.0)))
+            .max_by_key(|(_, n)| *n)
+            .copied()
+    };
+    best(true).or_else(|| best(false)).unwrap_or(((1, 0), 0))
 }
 
 /// Whether a ticking blaze or ghast within `cover::COVER_RANGE` has a line to the body.
@@ -406,6 +498,11 @@ impl Plan {
     /// The next block of a pocket round the body (the cook's hut: the cells beside the feet and
     /// the head, then the roof), one a `SHELTER_EVERY_TICKS`.
     pub(crate) fn pocket_step(&mut self, w: &World, tick: u64) -> Pocket {
+        self.shell_step(w, tick, None)
+    }
+
+    /// The pocket, or with `open` a nook (`cover::nook_block`): the same blocks, one side left.
+    fn shell_step(&mut self, w: &World, tick: u64, open: Option<(i32, i32)>) -> Pocket {
         let Some(body) = w.body else {
             return Pocket::Building;
         };
@@ -419,7 +516,11 @@ impl Plan {
             .threat
             .and_then(|id| w.entities.get(&id))
             .map(|e| e.pos);
-        let Some((cell, click, face)) = cover::pocket_block(w, body.pos, threat) else {
+        let next = match open {
+            Some(side) => cover::nook_block(w, body.pos, side),
+            None => cover::pocket_block(w, body.pos, threat),
+        };
+        let Some((cell, click, face)) = next else {
             return Pocket::Closed;
         };
         if !body.on_ground {
@@ -601,6 +702,13 @@ impl Plan {
         if let Some(t) = self.approach(w, tick) {
             return t;
         }
+        // A warped forest known from blocks seen comes first (the enderman is its only monster).
+        if !in_forest(w)
+            && let Some(c) = forest_known(w).and_then(|k| column_target(w, k))
+            && let Some(t) = self.go_toward(w, tick, c, "the warped forest")
+        {
+            return t;
+        }
         // In a warped forest with none near: wait for one to spawn.
         if in_forest(w) && !self.ender.forest_over {
             let wait = rules.as_ref().map_or(0, |r| r.forest_wait_ticks);
@@ -622,6 +730,20 @@ impl Plan {
                 "forest wait over".to_owned(),
                 format!("no enderman came within {ENDERMAN_NEAR} in {wait} ticks; on"),
             );
+        }
+        // A soul sand valley known (seen soul sand and soul soil), or stood in: there, in a nook,
+        // wait for an enderman (docs/problems/endermen.md, the decision of 2026-11-24).
+        if !self.ender.valley_over {
+            if in_valley(w) {
+                let wait = rules.as_ref().map_or(0, |r| r.valley_wait_ticks);
+                if let Some(t) = self.valley_wait(w, tick, wait) {
+                    return t;
+                }
+            } else if let Some(c) = soul_valley_known(w).and_then(|k| column_target(w, k))
+                && let Some(t) = self.go_toward(w, tick, c, "the soul sand valley")
+            {
+                return t;
+            }
         }
         // Out of the fortress's footprint on a plain walk first: no stairs down inside it, where
         // the floors are thin over the lava sea (clojurecraft #715).
@@ -740,6 +862,125 @@ impl Plan {
             return Some(Task::Explore(walk));
         }
         None
+    }
+
+    /// A walk toward a known place: a plain route, else the far walk, else (above the pickaxe
+    /// reserve) the travel tunnel; at most `CHASE_TRIES` begun for one place, then it is noted
+    /// given up and `None` from then on.
+    fn go_toward(&mut self, w: &World, tick: u64, c: Cell, what: &str) -> Option<Task> {
+        let i = match self.ender.place_tries.iter().position(|p| p.0 == c) {
+            Some(i) => i,
+            None => {
+                self.ender.place_tries.push((c, 0));
+                self.ender.place_tries.len() - 1
+            }
+        };
+        let tries = self.ender.place_tries[i].1;
+        if tries >= CHASE_TRIES {
+            return None;
+        }
+        self.ender.place_tries[i].1 += 1;
+        let goal = Goal::Near { pos: c, range: 4.0 };
+        let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
+        let how = if walk.route_now(w, tick) {
+            Some("a plain route")
+        } else {
+            walk = Walk::far_to(c, goal, tick);
+            walk.route_now(w, tick).then_some("the far walk")
+        };
+        if let Some(how) = how {
+            self.walks += 1;
+            self.note(
+                tick,
+                format!("to {what} at {c:?}"),
+                format!("by {how}, walk {} of {CHASE_TRIES}", tries + 1),
+            );
+            return Some(Task::Explore(walk));
+        }
+        let reserve = self
+            .table
+            .as_ref()
+            .map_or(0, |t| t.survival.pickaxe_reserve);
+        if pickaxe_uses_left(w) > reserve
+            && let Some(t) = self.tunnel_toward(w, c, (what, "no walk to it"), tick)
+        {
+            return Some(t);
+        }
+        self.note(
+            tick,
+            format!("no way to {what} at {c:?}"),
+            format!("try {} of {CHASE_TRIES}", tries + 1),
+        );
+        if tries + 1 >= CHASE_TRIES {
+            self.note(
+                tick,
+                format!("{what} given up"),
+                format!("{CHASE_TRIES} tries with no way"),
+            );
+        }
+        None
+    }
+
+    /// The wait in a soul sand valley: a nook built round the feet (its open side toward the most
+    /// open floor, never toward a ticking ghast or skeleton while another side is open), then
+    /// stood in until an enderman comes (the approach and the stage take it from there) or
+    /// `wait` ticks pass. `None` once the wait is over.
+    fn valley_wait(&mut self, w: &World, tick: u64, wait: u64) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let since = *self.ender.valley_since.get_or_insert(tick);
+        let spent = tick.saturating_sub(since);
+        if spent >= wait {
+            self.ender.valley_over = true;
+            self.note(
+                tick,
+                "valley wait over".to_owned(),
+                format!("no ticking enderman came within {ENDERMAN_NEAR} in {spent} ticks; on"),
+            );
+            return None;
+        }
+        let side = match self.ender.nook_open {
+            Some((at, side)) if at == feet => side,
+            _ => {
+                let (side, run) = nook_side(w, feet);
+                self.ender.nook_open = Some((feet, side));
+                self.note(
+                    tick,
+                    format!("nook at {feet:?}, open to {side:?}"),
+                    format!(
+                        "in a soul sand valley; open floor {run} cells that way; up to {wait} ticks for an enderman"
+                    ),
+                );
+                side
+            }
+        };
+        if self.shell_step(w, tick, Some(side)) == Pocket::Building {
+            self.retry_at = tick + 1;
+            return Some(Task::Idle);
+        }
+        if self
+            .ender
+            .valley_noted_at
+            .is_none_or(|t| tick >= t + VALLEY_NOTE_EVERY)
+        {
+            self.ender.valley_noted_at = Some(tick);
+            let near = endermen(w).into_iter().next();
+            self.note(
+                tick,
+                "waiting in the soul sand valley".to_owned(),
+                format!(
+                    "{spent} of {wait} ticks in the nook at {feet:?} ({} blocks); nearest enderman {}; health {:?}",
+                    self.ender.pocket_blocks,
+                    near.map_or("none".to_owned(), |s| format!(
+                        "{} at {:.1}, ticking {}",
+                        s.id, s.dist, s.ticking
+                    )),
+                    w.player.health
+                ),
+            );
+        }
+        self.retry_at = tick + crate::RETRY_TICKS;
+        Some(Task::Idle)
     }
 
     /// The way on with no enderman to go to: the heading (issue 17d).

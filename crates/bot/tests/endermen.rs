@@ -70,11 +70,19 @@ impl Run {
 /// The frontier kit (7 rods, an iron sword, two stone pickaxes, netherrack, the armour) on a
 /// netherrack floor at (0, FLOOR + 1, 0), `aim`ed, with what `summon` adds, for `ticks`.
 fn cavern(aim: Aim, ticks: u64, summon: impl Fn(&mut Sim)) -> Run {
+    cavern_on(aim, ticks, false, summon)
+}
+
+/// The same, on a soul sand floor when `soul` (a soul sand valley's ground, a block seen).
+fn cavern_on(aim: Aim, ticks: u64, soul: bool, summon: impl Fn(&mut Sim)) -> Run {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
     let mut plan = Plan::with_table(aim, table);
     let mut stage = Stage::new(3, FLOOR, CEILING);
     stage.spawn((0, FLOOR + 1, 0));
+    if soul {
+        stage.soul_sand((-48, 63), (-48, 63), FLOOR);
+    }
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(5);
     sim.survival.life.armor = IRON;
     sim.survival.give((ItemKind::IronSword, 1));
@@ -195,4 +203,26 @@ fn a_provoked_enderman_is_answered_by_the_pocket_never_a_swing() {
     // Health is printed, not judged: the model's melee strikes with no line of sight (vanilla's
     // needs one), so a sealed pocket does not stop it here.
     println!("health at the end {:?}", r.run.world.player.health);
+}
+
+/// The soul sand valley wait (the decision of 2026-11-24): standing on soul sand with no enderman
+/// near, the bot builds a nook of held filler round itself, its open side not toward a ghast that
+/// ticks 30 blocks east, and waits there with progress notes.
+#[test]
+fn in_a_soul_sand_valley_the_bot_waits_in_a_nook_open_away_from_a_ghast() {
+    let r = cavern_on(Aim::Race, 1400, true, |sim| {
+        sim.summon(EntityKind::Ghast, [30.5, f64::from(FLOOR + 6), 0.5]);
+    });
+    let story = r.story();
+    assert!(r.has("rods held: on to the endermen") >= 1, "{story}");
+    assert!(r.has("nook at") >= 1, "{story}");
+    assert_eq!(r.has("open to (1, 0)"), 0, "not toward the ghast:\n{story}");
+    assert!(r.has("pocket block") >= 4, "{story}");
+    assert!(r.has("waiting in the soul sand valley") >= 1, "{story}");
+    assert!(!r.plan.met, "{story}");
+    assert_eq!(
+        r.has("search tunnel leg"),
+        0,
+        "no heading while it waits:\n{story}"
+    );
 }

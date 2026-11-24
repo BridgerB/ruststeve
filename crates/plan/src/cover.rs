@@ -286,6 +286,49 @@ pub fn pocket_block(
     pos: [f64; 3],
     threat: Option<[f64; 3]>,
 ) -> Option<(Cell, Cell, i8)> {
+    shell_block(w, pos, threat, None)
+}
+
+/// A nook (issue 17, the soul sand valley wait): the pocket with the side `open` (a step on the
+/// plane, as `open_side` gives it) left open at the feet and the head, so the bot looks out over
+/// open ground with a roof and three walls between it and the arrows and fireballs from the rest.
+pub fn nook_block(w: &World, pos: [f64; 3], open: (i32, i32)) -> Option<(Cell, Cell, i8)> {
+    shell_block(w, pos, None, Some(open))
+}
+
+/// Cells along each side of the feet counted for `open_side`.
+pub const OPEN_RUN: i32 = 8;
+
+/// Each side of `feet` (east, west, south, north) with its run of open standing cells (both
+/// cells open, a full floor), up to `OPEN_RUN`. Only cells in a straight line from the feet are
+/// read.
+pub fn open_runs(w: &World, feet: Cell) -> [((i32, i32), usize); 4] {
+    let run = |(dx, dz): (i32, i32)| {
+        (1..=OPEN_RUN)
+            .take_while(|k| {
+                let c = (feet.0 + dx * k, feet.1, feet.2 + dz * k);
+                open(w, c) && open(w, (c.0, c.1 + 1, c.2)) && full(w, (c.0, c.1 - 1, c.2))
+            })
+            .count()
+    };
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|d| (d, run(d)))
+}
+
+/// The side of `feet` with the longest open run; ties in the order east, west, south, north.
+pub fn open_side(w: &World, feet: Cell) -> (i32, i32) {
+    open_runs(w, feet)
+        .into_iter()
+        .rev()
+        .max_by_key(|(_, n)| *n)
+        .map_or((1, 0), |(d, _)| d)
+}
+
+fn shell_block(
+    w: &World,
+    pos: [f64; 3],
+    threat: Option<[f64; 3]>,
+    open: Option<(i32, i32)>,
+) -> Option<(Cell, Cell, i8)> {
     let body = occupied(pos);
     let top = body.iter().map(|c| c.1).max()?;
     let low = body.iter().map(|c| c.1).min()?;
@@ -293,6 +336,9 @@ pub fn pocket_block(
     for y in low..=top {
         for (x, _, z) in body.iter().filter(|c| c.1 == y) {
             for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                if open == Some((dx, dz)) {
+                    continue;
+                }
                 let c = (x + dx, y, z + dz);
                 if !body.contains(&c) && !shell.contains(&c) {
                     shell.push(c);
