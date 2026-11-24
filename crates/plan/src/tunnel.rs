@@ -58,6 +58,12 @@ pub const MAX_STALLS: u32 = 16;
 /// is blocked: one short segment may be a task cut by a meal or a fight.
 pub const SHORT_STRIKES: u32 = 2;
 
+/// The target's own structure: bricks this near it on the plane (and twice that in height) end a
+/// route as it does, at most `GOALS` of them, the nearest the feet first. The stage is "within 6
+/// of any brick seen", and the brick first seen is often the foot of a pillar in the lava.
+pub const GOAL_SPREAD: i32 = 12;
+pub const GOALS: usize = 48;
+
 /// Steps a stretch cuts before the planner looks again: `stairs::STAIR_DEPTH`.
 pub const STRETCH: usize = 6;
 
@@ -206,9 +212,23 @@ impl<'a> Sight<'a> {
         v
     }
 
-    /// May a step open `cells` onto `floor`, by what is known.
-    fn takes(&mut self, cells: &[Cell], floor: Cell) -> bool {
-        if !matches!(self.at(floor), ROCK | FALLS) {
+    /// May a step open `cells` onto `floor`, by what is known. `laid`: the floor is open and a
+    /// held block is laid there first (a stair up from a cavern's floor), with nothing but open
+    /// air or rock under it and no lava beside either.
+    fn takes(&mut self, cells: &[Cell], floor: Cell, laid: bool) -> bool {
+        if laid {
+            let under = (floor.0, floor.1 - 1, floor.2);
+            if self.at(floor) != OPEN || !matches!(self.at(under), OPEN | ROCK | FALLS) {
+                return false;
+            }
+            for c in [floor, under] {
+                for (dx, dy, dz) in SIDES {
+                    if matches!(self.at((c.0 + dx, c.1 + dy, c.2 + dz)), LAVA | WATER) {
+                        return false;
+                    }
+                }
+            }
+        } else if !matches!(self.at(floor), ROCK | FALLS) {
             return false;
         }
         for c in cells {
@@ -256,6 +276,16 @@ pub fn opened(from: Cell, to: Cell) -> Option<(Vec<Cell>, Cell)> {
     }
 }
 
+/// The staircase's refusal of the step from `from` to `to`, as the planner asks it afterwards:
+/// a stair up whose floor is open is laid, not refused, while a block to lay is held.
+pub fn step_refusal(w: &World, from: Cell, to: Cell) -> Option<String> {
+    let (cells, floor) = opened(from, to)?;
+    if !stairs::lays(w, from, to).is_empty() && stairs::lay_item(w).is_some() {
+        return None;
+    }
+    stairs::refusal(w, &cells, floor)
+}
+
 fn within_reach((x, y, z): Cell, target: Cell) -> bool {
     let d = [
         f64::from(target.0 - x),
@@ -278,16 +308,24 @@ pub struct Route {
     pub expanded: u32,
 }
 
-/// The cheapest tunnel found from `from` to within `REACH` of `target`, never stepping onto a
-/// `blocked` cell: a weighted A* over level steps and stairs. `None` when there is no way that
+/// The cost of each block a laid stair places (`LAY_COST`): a stair up through rock stays
+/// cheaper than one built in the open.
+pub const LAY_COST: u32 = 2;
+
+/// The cheapest tunnel found from `from` to within `REACH` of any of `goals` (the first is the
+/// target the search runs at; the rest are the same structure's cells near it), never stepping
+/// onto a `blocked` cell: a weighted A* over level steps and stairs, with stairs up laid from
+/// held blocks where there is nothing to step onto when `lay`. `None` when there is no way that
 /// ends `PARTIAL_GAIN` nearer. Pure and deterministic.
 pub fn route(
     w: &World,
     from: Cell,
-    target: Cell,
+    goals: &[Cell],
     blocked: &BTreeSet<Cell>,
+    lay: bool,
     max_nodes: u32,
 ) -> Option<Route> {
+    let target = *goals.first()?;
     // The box: the feet and the target with a margin, the target pulled in when it is far.
     let pull = |f: i32, t: i32| f + (t - f).clamp(-(MAX_SPAN - 2 * MARGIN), MAX_SPAN - 2 * MARGIN);
     let near = (pull(from.0, target.0), target.1, pull(from.2, target.2));
@@ -320,7 +358,7 @@ pub fn route(
         if !closed.insert(c) {
             continue;
         }
-        if within_reach(c, target) {
+        if goals.iter().any(|g| within_reach(c, *g)) {
             end = Some(c);
             break;
         }
@@ -341,13 +379,17 @@ pub fn route(
                 let Some((cells, floor)) = opened(c, to) else {
                     continue;
                 };
-                if !sight.takes(&cells, floor) {
+                let laid = !sight.takes(&cells, floor, false);
+                if laid && !(lay && dy == 1 && sight.takes(&cells, floor, true)) {
                     continue;
                 }
                 let digs = cells.iter().filter(|x| sight.at(**x) != OPEN).count();
                 let mut cost = 1 + u32::try_from(digs).unwrap_or(3);
                 if to.1 < SAFE_Y {
                     cost += LOW_COST;
+                }
+                if laid {
+                    cost += 2 * LAY_COST;
                 }
                 if sight.open_sides(to) > 4 {
                     cost += OPEN_COST;
@@ -455,8 +497,7 @@ impl Plan {
                     if let Some(next) = next
                         && cut < STRETCH
                     {
-                        let refused = opened(feet, next)
-                            .and_then(|(cells, floor)| stairs::refusal(w, &cells, floor));
+                        let refused = step_refusal(w, feet, next);
                         let strikes = match self.travel.short {
                             Some((c, n)) if c == next => n + 1,
                             Some(_) | None => 1,
@@ -513,7 +554,21 @@ impl Plan {
         let at = match on {
             Some(i) if i + 1 < self.travel.route.len() => i,
             Some(_) | None => {
-                let Some(r) = route(w, feet, target, &self.travel.blocked, MAX_NODES) else {
+                // The target and the bricks round it: within reach of any is the fortress.
+                let goals: Vec<Cell> = std::iter::once(target)
+                    .chain(
+                        world::stage::bricks_near(w, crate::FORTRESS_CHUNKS)
+                            .into_iter()
+                            .filter(|b| {
+                                *b != target
+                                    && flat(*b, target) <= GOAL_SPREAD
+                                    && (b.1 - target.1).abs() <= 2 * GOAL_SPREAD
+                            })
+                            .take(GOALS - 1),
+                    )
+                    .collect();
+                let lay = stairs::lay_item(w).is_some();
+                let Some(r) = route(w, feet, &goals, &self.travel.blocked, lay, MAX_NODES) else {
                     self.note(
                         tick,
                         format!("no tunnel route toward {what} at {target:?}"),

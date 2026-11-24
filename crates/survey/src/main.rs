@@ -143,8 +143,9 @@ fn tunnel(w: &World, from: (i32, i32, i32), target: (i32, i32, i32)) {
     let found = plan::tunnel::route(
         w,
         from,
-        target,
+        &[target],
         &std::collections::BTreeSet::new(),
+        true,
         plan::tunnel::MAX_NODES,
     );
     let took = began.elapsed();
@@ -164,8 +165,7 @@ fn tunnel(w: &World, from: (i32, i32, i32), target: (i32, i32, i32)) {
     );
     for pair in r.cells.windows(2) {
         let (a, b) = (pair[0], pair[1]);
-        let refused = plan::tunnel::opened(a, b)
-            .and_then(|(cells, floor)| plan::stairs::refusal(w, &cells, floor));
+        let refused = plan::tunnel::step_refusal(w, a, b);
         println!(
             "  {b:?} {}{}",
             match b.1 - a.1 {

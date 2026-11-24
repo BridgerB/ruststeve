@@ -61,6 +61,15 @@ pub enum StairStage {
         since: u64,
         level: bool,
     },
+    /// A travel tunnel's stair up with no block to step onto (a cavern's floor, the air under a
+    /// roof): held blocks are laid first, each `(cell, the block clicked, its face)`, then the
+    /// stair is cut as any other.
+    Lay {
+        lays: Vec<(Cell, Cell, i8)>,
+        cells: Vec<Cell>,
+        to: Cell,
+        sent: Option<u64>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -90,6 +99,52 @@ pub struct Stairs {
     /// searches its route again), no heading is turned.
     #[serde(default)]
     pub route: Vec<Cell>,
+    /// Cells dug, and where the feet were when the task began: a staircase that ends having dug
+    /// nothing and gone nowhere has failed (docs/problems/nether-testbed.md: "cut 6 stairs" in
+    /// 40 ticks over cells already open, again and again, read as progress).
+    #[serde(default)]
+    pub dug: u32,
+    #[serde(default)]
+    pub from: Option<Cell>,
+}
+
+/// Blocks a stair is laid with, the first held: what a tunnel leaves in the pack.
+pub const LAY_ITEMS: [data::ItemKind; 3] = [
+    data::ItemKind::Netherrack,
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+];
+/// Ticks a laid block may take to show before the step fails.
+pub const LAY_TICKS: u64 = 40;
+
+/// The first of `LAY_ITEMS` in the inventory.
+pub fn lay_item(w: &World) -> Option<data::ItemKind> {
+    LAY_ITEMS.into_iter().find(|i| w.inventory.count(*i) > 0)
+}
+
+/// What a stair up from `from` to `to` must lay first, when the block it steps onto is missing:
+/// the cell under that block (clicked onto the side of the block the feet stand on) when it is
+/// open too, then the block itself (clicked onto the top of the one under it). Empty when the
+/// step has its floor or is not a stair up.
+pub fn lays(w: &World, from: Cell, to: Cell) -> Vec<(Cell, Cell, i8)> {
+    let (dx, dz) = (to.0 - from.0, to.2 - from.2);
+    let floor = (to.0, to.1 - 1, to.2);
+    if to.1 != from.1 + 1 || !open(kind(w, floor)) {
+        return Vec::new();
+    }
+    let under = (floor.0, floor.1 - 1, floor.2);
+    let mut out = Vec::new();
+    if !full(kind(w, under)) {
+        let face = match (dx, dz) {
+            (1, _) => 5,
+            (-1, _) => 4,
+            (_, 1) => 3,
+            _ => 2,
+        };
+        out.push((under, (from.0, from.1 - 1, from.2), face));
+    }
+    out.push((floor, under, 1));
+    out
 }
 
 fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
@@ -235,6 +290,8 @@ impl Stairs {
             level_only: false,
             up: false,
             route: Vec::new(),
+            dug: 0,
+            from: None,
         }
     }
 
@@ -264,11 +321,40 @@ impl Stairs {
                 .push(format!("no step from {feet:?} to {to:?}"));
             return Err(StairsFailure::Boxed);
         };
+        self.dir = (to.0 - feet.0, to.2 - feet.2);
+        let lays = lays(w, feet, to);
+        if !lays.is_empty() {
+            // Nothing laid into or beside a fluid, and only onto something clickable.
+            let wet = lays.iter().any(|(c, _, _)| {
+                !open(kind(w, *c))
+                    || SIDES.iter().any(|(dx, dy, dz)| {
+                        fluid(kind(w, (c.0 + dx, c.1 + dy, c.2 + dz))).is_some()
+                    })
+            });
+            let why = if wet {
+                Some(format!(
+                    "no floor at {floor:?} and fluid where one would be laid"
+                ))
+            } else if lay_item(w).is_none() {
+                Some(format!("no floor at {floor:?} and no block to lay"))
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                self.refusals.push(why);
+                return Err(StairsFailure::Boxed);
+            }
+            return Ok(Some(StairStage::Lay {
+                lays,
+                cells,
+                to,
+                sent: None,
+            }));
+        }
         if let Some(why) = refusal(w, &cells, floor) {
             self.refusals.push(why);
             return Err(StairsFailure::Boxed);
         }
-        self.dir = (to.0 - feet.0, to.2 - feet.2);
         Ok(Some(StairStage::Cut {
             cells,
             to,
@@ -351,9 +437,72 @@ impl Stairs {
             return (still, None, StairsStatus::Failed(StairsFailure::Lost));
         };
         let feet = path::feet_cell(body.pos);
+        let from = *self.from.get_or_insert(feet);
         match &mut self.stage {
+            StairStage::Lay {
+                lays,
+                cells,
+                to,
+                sent,
+            } => {
+                let Some((c, against, face)) =
+                    lays.iter().find(|(c, _, _)| open(kind(w, *c))).copied()
+                else {
+                    let (cells, to) = (cells.clone(), *to);
+                    return match refusal(w, &cells, (to.0, to.1 - 1, to.2)) {
+                        None => {
+                            self.stage = StairStage::Cut {
+                                cells,
+                                to,
+                                level: false,
+                            };
+                            (still, None, StairsStatus::Running)
+                        }
+                        Some(why) => {
+                            self.refusals.push(why);
+                            (still, None, StairsStatus::Failed(StairsFailure::Boxed))
+                        }
+                    };
+                };
+                if let Some(at) = *sent {
+                    if tick.saturating_sub(at) <= LAY_TICKS {
+                        return (still, None, StairsStatus::Running);
+                    }
+                    self.refusals
+                        .push(format!("a block laid at {c:?} did not show"));
+                    return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
+                }
+                let Some(item) = lay_item(w) else {
+                    self.refusals.push(format!("no block to lay at {c:?}"));
+                    return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
+                };
+                match crate::hold::toward(w, item) {
+                    crate::hold::Hold::Held => {
+                        *sent = Some(tick);
+                        let act = Act::UseOn {
+                            pos: BlockPos::new(against.0, against.1, against.2),
+                            face,
+                        };
+                        (still, Some(act), StairsStatus::Running)
+                    }
+                    crate::hold::Hold::Act(a) => (still, Some(a), StairsStatus::Running),
+                    crate::hold::Hold::Wait => (still, None, StairsStatus::Running),
+                    crate::hold::Hold::Missing => {
+                        (still, None, StairsStatus::Failed(StairsFailure::Boxed))
+                    }
+                }
+            }
             StairStage::Plan => {
                 if self.stairs >= STAIR_DEPTH {
+                    // Six steps over cells already open that came back to where they began:
+                    // nothing was done, and saying "done" hides it.
+                    let gone =
+                        (feet.0 - from.0).abs() + (feet.1 - from.1).abs() + (feet.2 - from.2).abs();
+                    if self.dug == 0 && gone <= 1 {
+                        self.refusals
+                            .push("nothing cut and nowhere gone".to_owned());
+                        return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
+                    }
                     return (still, None, StairsStatus::Done);
                 }
                 if !self.route.is_empty() {
@@ -412,6 +561,7 @@ impl Stairs {
                         d.drop = None;
                         d.others.clear();
                         self.dig = Some(d);
+                        self.dug += 1;
                         (still, None, StairsStatus::Running)
                     }
                     None => {

@@ -64,7 +64,7 @@ fn steps_are_cuts(cells: &[Cell]) {
 #[test]
 fn through_rock_the_route_is_level_and_ends_within_reach() {
     let w = world_with(&[]);
-    let r = tunnel::route(&w, (0, 50, 0), (30, 50, 0), &none(), 20_000).unwrap();
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 20_000).unwrap();
     assert!(r.found);
     steps_are_cuts(&r.cells);
     assert!(
@@ -81,7 +81,7 @@ fn through_rock_the_route_is_level_and_ends_within_reach() {
 #[test]
 fn a_long_route_from_low_climbs_first_and_comes_down_at_the_end() {
     let w = world_with(&[]);
-    let r = tunnel::route(&w, (0, 34, 0), (40, 32, 0), &none(), 20_000).unwrap();
+    let r = tunnel::route(&w, (0, 34, 0), &[(40, 32, 0)], &none(), false, 20_000).unwrap();
     assert!(r.found);
     steps_are_cuts(&r.cells);
     let top = r.cells.iter().map(|c| c.1).max().unwrap();
@@ -102,7 +102,7 @@ fn a_long_route_from_low_climbs_first_and_comes_down_at_the_end() {
 #[test]
 fn a_chasm_is_gone_round() {
     let w = world_with(&filled([10, 14], [30, 70], [-6, 6], BlockKind::Air));
-    let r = tunnel::route(&w, (0, 50, 0), (30, 50, 0), &none(), 40_000).unwrap();
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 40_000).unwrap();
     assert!(r.found);
     steps_are_cuts(&r.cells);
     assert!(
@@ -122,7 +122,7 @@ fn seen_lava_is_avoided_and_hidden_lava_is_left_to_the_refusal() {
     let mut lake = filled([12, 13], [50, 51], [-1, 1], BlockKind::Lava);
     lake.extend(filled([12, 13], [52, 52], [-1, 1], BlockKind::Air));
     let w = world_with(&lake);
-    let r = tunnel::route(&w, (0, 50, 0), (30, 50, 0), &none(), 40_000).unwrap();
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 40_000).unwrap();
     assert!(r.found);
     let lava = |c: Cell| (12..=13).contains(&c.0) && (50..=51).contains(&c.1) && c.2.abs() <= 1;
     for c in &r.cells {
@@ -146,13 +146,13 @@ fn seen_lava_is_avoided_and_hidden_lava_is_left_to_the_refusal() {
     }
 
     let w = world_with(&filled([12, 12], [50, 51], [0, 0], BlockKind::Lava));
-    let r = tunnel::route(&w, (0, 50, 0), (30, 50, 0), &none(), 40_000).unwrap();
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 40_000).unwrap();
     assert!(r.cells.contains(&(12, 50, 0)), "the pocket is not known");
     let (cells, floor) = tunnel::opened((10, 50, 0), (11, 50, 0)).unwrap();
     let why = plan::stairs::refusal(&w, &cells, floor).unwrap();
     assert!(why.starts_with("lava beside"), "{why}");
     let blocked: BTreeSet<Cell> = [(11, 50, 0)].into();
-    let r = tunnel::route(&w, (10, 50, 0), (30, 50, 0), &blocked, 40_000).unwrap();
+    let r = tunnel::route(&w, (10, 50, 0), &[(30, 50, 0)], &blocked, false, 40_000).unwrap();
     assert!(r.found && !r.cells.contains(&(11, 50, 0)));
 }
 
@@ -162,7 +162,7 @@ fn a_portal_is_never_stepped_into() {
     let mut set = filled([5, 5], [64, 66], [-1, 1], BlockKind::NetherPortal);
     set.extend(filled([5, 5], [63, 63], [-1, 1], BlockKind::Obsidian));
     let w = world_with(&set);
-    let r = tunnel::route(&w, (0, 64, 0), (30, 64, 0), &none(), 40_000).unwrap();
+    let r = tunnel::route(&w, (0, 64, 0), &[(30, 64, 0)], &none(), false, 40_000).unwrap();
     assert!(r.found);
     assert!(
         r.cells
