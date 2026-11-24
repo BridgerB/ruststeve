@@ -21,6 +21,8 @@ struct Ended {
     run: bot::lockstep::Run,
     /// The tick the trap last cleared, if it did.
     out_at: Option<u64>,
+    /// Every note of the run ("what (why)"): the planner keeps only its last 64 events.
+    notes: Vec<String>,
 }
 
 /// The bot spawns at `spawn` in the flat world (grass at y 63) with `set` laid, a planner for
@@ -46,6 +48,8 @@ fn escape_with(
     let mut p = Plan::with_table(Aim::Table, table);
     let mut out_at = None;
     let mut was = false;
+    let mut notes = Vec::new();
+    let mut seen = 0;
     let mut sim = Sim::new(CONFIG, m);
     for g in give {
         sim.survival.give(*g);
@@ -57,12 +61,19 @@ fn escape_with(
             out_at = Some(t);
         }
         was = now;
+        notes.extend(
+            p.events_since(seen)
+                .iter()
+                .map(|e| format!("{} {} ({})", e.tick, e.what, e.why)),
+        );
+        seen = p.event_count;
         (c, p.take_acts())
     });
     Ended {
         plan: p,
         run,
         out_at,
+        notes,
     }
 }
 
@@ -233,5 +244,36 @@ fn an_island_in_a_lake_is_swum_off() {
         e.run.sim.violations.is_empty(),
         "{:?}",
         e.run.sim.violations
+    );
+}
+
+#[test]
+fn water_far_from_any_bank_is_notched_beside_the_body() {
+    // Race 45343519424 lane 2: own stairs cut into an aquifer at y 55; the bot afloat in water
+    // two deep, the stairs' cells beside it floored with water, and the only banks (nine, in a
+    // pocket six blocks off) behind stone that holds water back. Each bank was refused in turn
+    // and the list cleared, for 21,000 ticks. A bank refused, the notch beside the body comes
+    // first; never one holding the water back (the column at x -2).
+    let mut set = cells(-9..=9, 50..=62, -5..=5, BlockKind::Stone);
+    set.extend(cells(0..=0, 54..=55, 0..=0, BlockKind::Water));
+    set.extend(cells(1..=3, 55..=55, 0..=0, BlockKind::Water));
+    set.extend(cells(0..=3, 56..=57, 0..=0, BlockKind::Air));
+    set.extend(cells(-2..=-2, 55..=58, -2..=2, BlockKind::Water));
+    set.extend(cells(-7..=-5, 56..=57, -1..=1, BlockKind::Air));
+    let e = escape_with(
+        [0.5, 55.0, 0.5],
+        &set,
+        &[(data::ItemKind::StonePickaxe, 1)],
+        3000,
+    );
+    assert_out(&e, TrapKind::Water);
+    let body = e.run.world.body.unwrap();
+    assert!(body.pos[0] > -1.0, "went west at {:?}", body.pos);
+    let escape: Vec<&String> = e.notes.iter().filter(|n| n.contains("water")).collect();
+    assert!(
+        e.notes
+            .iter()
+            .any(|n| n.contains("notch before another bank")),
+        "{escape:#?}"
     );
 }
