@@ -43,7 +43,7 @@ pub const FAR_WEIGHT: f64 = 4.0;
 /// (a bot just through a portal has half its chunks, and a search then finds none).
 pub const FAR_RETRY_TICKS: u64 = 200;
 /// After a far route was found, the least ticks before the planner searches the next.
-pub const FAR_AGAIN_TICKS: u64 = 100;
+pub const FAR_AGAIN_TICKS: u64 = 20;
 /// Waypoints ahead a far walk watches for a mob to keep clear of.
 pub const SHUN_AHEAD: usize = 12;
 /// Ticks between two clicks laying one bridge block: the block update arrives in a tick or two.
@@ -320,6 +320,23 @@ impl Walk {
         self.best_tick = tick;
     }
 
+    /// A far walk's own reason to plan again: a mob its route keeps clear of (`path::SHUN_KINDS`)
+    /// has come within its radius of the next `SHUN_AHEAD` waypoints.
+    fn foe_ahead(&self, w: &World) -> bool {
+        if !self.more.far {
+            return false;
+        }
+        let cells = path::Cells::far(w);
+        let from = self.more.from.unwrap_or(self.target);
+        self.waypoints
+            .as_ref()
+            .and_then(|wps| wps.get(self.at..))
+            .unwrap_or_default()
+            .iter()
+            .take(SHUN_AHEAD)
+            .any(|c| cells.shunned(*c, from))
+    }
+
     /// clojurecraft's `route-stale?`: a waypoint ahead can no longer be stood on, no waypoint
     /// reached for `STUCK_TICKS`, or a short route walked out.
     fn stale(&self, w: &World, tick: u64) -> bool {
@@ -332,21 +349,17 @@ impl Walk {
         } else {
             path::Cells::new(w)
         };
-        // A mob to keep clear of has come within its radius of the way ahead: plan again.
-        let from = self.more.from.unwrap_or(self.target);
-        let near = ahead
-            .iter()
-            .take(SHUN_AHEAD)
-            .any(|c| cells.shunned(*c, from));
-        near || ahead.iter().enumerate().any(|(i, c)| {
-            let kind = self
-                .more
-                .kinds
-                .get(self.at + i)
-                .copied()
-                .unwrap_or(MoveKind::Walk);
-            !cells.usable(*c, kind)
-        }) || tick.saturating_sub(self.best_tick) > STUCK_TICKS
+        self.foe_ahead(w)
+            || ahead.iter().enumerate().any(|(i, c)| {
+                let kind = self
+                    .more
+                    .kinds
+                    .get(self.at + i)
+                    .copied()
+                    .unwrap_or(MoveKind::Walk);
+                !cells.usable(*c, kind)
+            })
+            || tick.saturating_sub(self.best_tick) > STUCK_TICKS
             || (ahead.is_empty() && self.route != Some(Status::Found))
     }
 
@@ -384,6 +397,15 @@ impl Walk {
             };
         }
         if self.stale(w, tick) {
+            if self.foe_ahead(w) {
+                self.more.said.push((
+                    "a mob to keep clear of is near the way ahead".to_owned(),
+                    format!(
+                        "within {} of the next {SHUN_AHEAD} cells; plan again round it",
+                        path::SHUN_RADIUS
+                    ),
+                ));
+            }
             if self.replans >= MAX_REPLANS {
                 return (Controls::default(), TaskStatus::Failed(Failure::NoPath));
             }
