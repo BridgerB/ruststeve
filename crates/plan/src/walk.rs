@@ -3,9 +3,9 @@
 //! stops getting closer fails fast (`NoProgress`) instead of pacing.
 
 use physics::Controls;
-use world::World;
+use world::{Act, BlockPos, World};
 
-use crate::path::{self, Budget, Cell, Goal, Status};
+use crate::path::{self, Budget, Cell, Goal, MoveKind, Status};
 
 /// Horizontal distance to a waypoint's centre that reaches it (clojurecraft's `waypoint-reach`).
 pub const WAYPOINT_REACH: f64 = 0.35;
@@ -31,6 +31,19 @@ pub const PICKUP_RISE: i32 = 2;
 pub const PATIENCE_TICKS: u64 = 200;
 /// A gain smaller than this is not progress (a body jittering in place is not getting closer).
 pub const PROGRESS_STEP: f64 = 0.25;
+
+/// A far walk's search (docs/problems/nether-walk.md): the expansions it may spend and the weight
+/// on its heuristic. Measured on the recorded Nether of race 45194253932 (probe 45338206210).
+pub const FAR_NODES: u32 = 60_000;
+pub const FAR_WEIGHT: f64 = 2.0;
+/// Ticks between two clicks laying one bridge block: the block update arrives in a tick or two.
+pub const PLACE_EVERY_TICKS: u64 = 6;
+/// Clicks for one bridge block before the walk fails.
+pub const MAX_PLACE_TRIES: u32 = 8;
+/// The ticks a walk may take more for each cell it bridges (hold the block, click, step).
+pub const BRIDGE_TICKS: u64 = 40;
+/// Laying a block, the body stays this near the centre of the block it stands on.
+pub const BRIDGE_STAND: f64 = 0.45;
 
 /// Why a task failed: data, for recovery and for the case file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -80,6 +93,29 @@ pub struct Walk {
     pub longest_stall: u64,
     /// What its searches spent.
     pub expanded: u64,
+    /// The route's moves and the bridge in hand (boxed: a walk sits inside other tasks' enums).
+    #[serde(default)]
+    pub more: Box<More>,
+}
+
+/// What a walk keeps beyond clojurecraft's: its route's moves, and its bridging.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct More {
+    /// The move that reaches each waypoint (`MoveKind::Bridge` lays its floor first), and the
+    /// cell the route was searched from.
+    pub kinds: Vec<MoveKind>,
+    pub from: Option<Cell>,
+    /// A far walk: its searches spend `FAR_NODES` at `FAR_WEIGHT`.
+    pub far: bool,
+    /// Bridge blocks laid, the last click and the clicks sent for the block in hand.
+    pub placed: u32,
+    pub place_tick: u64,
+    pub place_tries: u32,
+    /// The floor cell being laid.
+    pub laying: Option<Cell>,
+    /// Acts to send and notes to write, taken by the planner each tick (`take_out`).
+    pub acts: Vec<Act>,
+    pub said: Vec<(String, String)>,
 }
 
 fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -122,7 +158,40 @@ impl Walk {
             best_distance_at: tick,
             longest_stall: 0,
             expanded: 0,
+            more: Box::default(),
         }
+    }
+
+    /// A walk to a place far off (a fortress seen 110 blocks away): to within `range` of
+    /// `target`, its route searched with `FAR_NODES` at `FAR_WEIGHT`, bridging where the search
+    /// may. Arrives at the goal.
+    pub fn far(target: Cell, range: f64, tick: u64) -> Self {
+        let mut walk = Self::new(
+            target,
+            Goal::Near { pos: target, range },
+            Arrive::Goal,
+            tick,
+        );
+        walk.more.far = true;
+        walk
+    }
+
+    /// The acts and notes this tick left, for the planner to send and write.
+    pub fn take_out(&mut self) -> (Vec<Act>, Vec<(String, String)>) {
+        (
+            std::mem::take(&mut self.more.acts),
+            std::mem::take(&mut self.more.said),
+        )
+    }
+
+    /// The bridge cells the route still has ahead.
+    pub fn bridges_ahead(&self) -> usize {
+        self.more
+            .kinds
+            .iter()
+            .skip(self.at)
+            .filter(|k| **k == MoveKind::Bridge)
+            .count()
     }
 
     /// A walk to beside a block to dig (issue 10): where its drop falls within the pickup box,
@@ -169,7 +238,15 @@ impl Walk {
     }
 
     fn deadline(&self) -> u64 {
-        WALK_TIMEOUT_TICKS + WAYPOINT_TICKS * self.waypoints.as_ref().map_or(0, |w| w.len() as u64)
+        WALK_TIMEOUT_TICKS
+            + WAYPOINT_TICKS * self.waypoints.as_ref().map_or(0, |w| w.len() as u64)
+            + BRIDGE_TICKS
+                * self
+                    .more
+                    .kinds
+                    .iter()
+                    .filter(|k| **k == MoveKind::Bridge)
+                    .count() as u64
     }
 
     /// Plan the route now and say whether the target is walkable (clojurecraft's `walkable?`):
@@ -198,14 +275,18 @@ impl Walk {
     }
 
     fn route(&mut self, w: &World, pos: [f64; 3], tick: u64) {
-        let r = path::plan(
-            w,
-            path::feet_cell(pos),
-            &self.goal,
-            Budget::Far.expansions(),
-        );
+        let (nodes, weight) = if self.more.far {
+            (FAR_NODES, FAR_WEIGHT)
+        } else {
+            (Budget::Far.expansions(), 1.0)
+        };
+        let r = path::plan_weighted(w, path::feet_cell(pos), &self.goal, nodes, weight);
         self.expanded += u64::from(r.expanded);
         self.waypoints = Some(r.waypoints);
+        self.more.kinds = r.kinds;
+        self.more.from = r.from;
+        self.more.laying = None;
+        self.more.place_tries = 0;
         self.route = Some(r.status);
         self.at = 0;
         self.replans += 1;
@@ -220,8 +301,15 @@ impl Walk {
         };
         let ahead = wps.get(self.at..).unwrap_or_default();
         let mut cells = path::Cells::new(w);
-        ahead.iter().any(|c| !cells.standable(*c))
-            || tick.saturating_sub(self.best_tick) > STUCK_TICKS
+        ahead.iter().enumerate().any(|(i, c)| {
+            let kind = self
+                .more
+                .kinds
+                .get(self.at + i)
+                .copied()
+                .unwrap_or(MoveKind::Walk);
+            !cells.usable(*c, kind)
+        }) || tick.saturating_sub(self.best_tick) > STUCK_TICKS
             || (ahead.is_empty() && self.route != Some(Status::Found))
     }
 
@@ -279,9 +367,117 @@ impl Walk {
         if horizontal(pos, wc) <= WAYPOINT_REACH && (pos[1] - f64::from(wy)).abs() <= 0.5 {
             self.at += 1;
             self.best_tick = tick;
+            // On a found route a waypoint reached is progress, though the route leads round
+            // (a way over a lava sea goes away from its goal before it comes back).
+            if self.route == Some(Status::Found) {
+                self.best_distance_at = tick;
+            }
             return (Controls::default(), TaskStatus::Running);
         }
+        if self.more.kinds.get(self.at) == Some(&MoveKind::Bridge)
+            && let Some(out) = self.bridge(w, body, next, tick)
+        {
+            return out;
+        }
         (follow(body, next), TaskStatus::Running)
+    }
+
+    /// The bridge move's executor: with no floor under `next`, stand on the block before it and
+    /// lay a held block against that block's side (the server asks only that the block clicked is
+    /// in reach, not that its face is in view). `None` once the floor is there: walk on. Until
+    /// then the body never leaves the block it stands on.
+    fn bridge(
+        &mut self,
+        w: &World,
+        body: physics::Body,
+        next: Cell,
+        tick: u64,
+    ) -> Option<(Controls, TaskStatus)> {
+        let still = Controls::default();
+        let floor = (next.0, next.1 - 1, next.2);
+        let mut cells = path::Cells::new(w);
+        if cells.floor(floor) {
+            if self.more.laying.take() == Some(floor) {
+                self.more.placed += 1;
+                self.more.place_tries = 0;
+                self.more.said.push((
+                    format!("bridge block laid at {floor:?}"),
+                    format!(
+                        "the route's bridge move, {} laid on this walk, {} bridge cells ahead",
+                        self.more.placed,
+                        self.bridges_ahead().saturating_sub(1)
+                    ),
+                ));
+            }
+            return None;
+        }
+        // The block stood on: the waypoint before, or the cell the route was searched from. With
+        // no such block to click the walk fails here: it never steps out over a floor not laid.
+        let lost = Some((still, TaskStatus::Failed(Failure::NoPath)));
+        let prev = match self.at.checked_sub(1) {
+            Some(i) => self.waypoints.as_ref().and_then(|w| w.get(i)).copied(),
+            None => self.more.from,
+        };
+        let Some(prev) = prev else {
+            return lost;
+        };
+        let face = match (next.0 - prev.0, next.2 - prev.2) {
+            (0, -1) => 2,
+            (0, 1) => 3,
+            (-1, 0) => 4,
+            (1, 0) => 5,
+            _ => return lost,
+        };
+        let under = (prev.0, prev.1 - 1, prev.2);
+        if prev.1 != next.1 || !cells.floor(under) {
+            return lost;
+        }
+        // Progress here is a block laid, not ground gained.
+        self.best_tick = tick;
+        let stand = [
+            f64::from(prev.0) + 0.5,
+            body.pos[1],
+            f64::from(prev.2) + 0.5,
+        ];
+        if horizontal(body.pos, stand) > BRIDGE_STAND || !body.on_ground {
+            let mut c = toward(body, stand);
+            c.jump = false;
+            c.forward = body.on_ground;
+            return Some((c, TaskStatus::Running));
+        }
+        let Some(item) = path::bridge_item(w) else {
+            self.more.said.push((
+                format!("no bridge block for {floor:?}"),
+                "none of the bridge blocks is held".to_owned(),
+            ));
+            return Some((still, TaskStatus::Failed(Failure::NoPath)));
+        };
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Act(a) => self.more.acts.push(a),
+            crate::hold::Hold::Wait => {}
+            crate::hold::Hold::Missing => {
+                return Some((still, TaskStatus::Failed(Failure::NoPath)));
+            }
+            crate::hold::Hold::Held => {
+                if tick.saturating_sub(self.more.place_tick) >= PLACE_EVERY_TICKS {
+                    if self.more.place_tries >= MAX_PLACE_TRIES {
+                        self.more.said.push((
+                            format!("bridge block at {floor:?} not laid"),
+                            format!("{MAX_PLACE_TRIES} clicks on {under:?} face {face}"),
+                        ));
+                        return Some((still, TaskStatus::Failed(Failure::NoPath)));
+                    }
+                    self.more.place_tries += 1;
+                    self.more.place_tick = tick;
+                    self.more.laying = Some(floor);
+                    self.more.acts.push(Act::UseOn {
+                        pos: BlockPos::new(under.0, under.1, under.2),
+                        face,
+                    });
+                }
+            }
+        }
+        Some((still, TaskStatus::Running))
     }
 }
 
@@ -310,7 +506,9 @@ fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
         return Controls::default();
     }
     let near = horizontal([px, 0.0, pz], centre) < JUMP_NEAR;
-    let up = f64::from(wy) > py.floor() + 0.5;
+    // More than a step up: from soul sand (feet at y + 0.875) the next cell's floor line is an
+    // eighth up, a step and no jump.
+    let up = f64::from(wy) - py > physics::STEP_HEIGHT;
     let mut c = toward(body, centre);
     c.jump = c.jump || (up && near);
     c

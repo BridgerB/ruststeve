@@ -38,6 +38,7 @@ fn run() -> Result<(), String> {
     let force = args.iter().any(|a| a == "--force");
     let (mut file, mut at) = (None, None);
     let (mut map, mut ys, mut route, mut from, mut nodes) = (None, vec![30, 36], None, None, 6000);
+    let mut weight = 1.0f64;
     let mut it = args.iter().filter(|a| a.as_str() != "--force");
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -53,6 +54,13 @@ fn run() -> Result<(), String> {
             "--y" => ys = numbers(it.next(), "--y")?,
             "--route" => route = Some(numbers(it.next(), "--route")?),
             "--from" => from = Some(numbers(it.next(), "--from")?),
+            "--weight" => {
+                weight = it
+                    .next()
+                    .ok_or("--weight needs a number")?
+                    .parse()
+                    .map_err(|e| format!("--weight: {e}"))?;
+            }
             "--nodes" => {
                 nodes = it
                     .next()
@@ -125,27 +133,41 @@ fn run() -> Result<(), String> {
             pos: (gx, gy, gz),
             range: f64::from(range),
         };
-        let r = path::plan(w, start, &goal, nodes);
+        let began = std::time::Instant::now();
+        let r = path::plan_weighted(w, start, &goal, nodes, weight);
+        let took = began.elapsed().as_millis();
         let end = r.waypoints.last().copied().or(r.from);
+        let count = |k: path::MoveKind| r.kinds.iter().filter(|m| **m == k).count();
         println!(
-            "route from {start:?} toward ({gx}, {gy}, {gz}) within {range}: {:?}, {} waypoints, cost {:.1}, {} expanded, searched from {:?}, ends {:?} ({:.1} left)",
+            "route from {start:?} toward ({gx}, {gy}, {gz}) within {range}, {nodes} nodes at weight {weight}, {} bridge blocks held: {:?}, {} waypoints ({} bridged, {} jumps, {} drops), cost {:.1}, {} expanded in {took} ms, searched from {:?}, ends {:?} ({:.1} left)",
+            path::bridge_blocks(w),
             r.status,
             r.waypoints.len(),
+            count(path::MoveKind::Bridge),
+            count(path::MoveKind::JumpUp),
+            count(path::MoveKind::Drop),
             r.cost,
             r.expanded,
             r.from,
             end,
             end.map_or(f64::NAN, |e| goal.heuristic(e)),
         );
-        for chunk in r.waypoints.chunks(8) {
-            println!(
-                "  {}",
-                chunk
-                    .iter()
-                    .map(|c| format!("{c:?}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
+        // A bridged waypoint is marked with `+`.
+        let marked: Vec<String> = r
+            .waypoints
+            .iter()
+            .zip(&r.kinds)
+            .map(|(c, k)| {
+                let mark = if *k == path::MoveKind::Bridge {
+                    "+"
+                } else {
+                    ""
+                };
+                format!("{mark}{},{},{}", c.0, c.1, c.2)
+            })
+            .collect();
+        for chunk in marked.chunks(12) {
+            println!("  {}", chunk.join(" "));
         }
     }
     Ok(())

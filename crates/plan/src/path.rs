@@ -133,7 +133,6 @@ const AWKWARD: &[&str] = &[
     "ice",
     "frosted_ice",
     "web",
-    "soul_sand",
     "mud",
     "weathering_copper_slab",
     "weathering_copper_stair",
@@ -194,6 +193,12 @@ pub fn classify(state: Option<u32>) -> Class {
     if STOOD_ON_TYPES.contains(&definition) || STOOD_ON_BLOCKS.contains(&kind) {
         return Class::Solid;
     }
+    // Soul sand is ground (docs/problems/nether-walk.md): a box 0.875 high the physics stands
+    // on, lining every Nether shore. The feet rest at y + 0.875, which `feet_cell` reads as the
+    // cell over it.
+    if kind == BlockKind::SoulSand {
+        return Class::Solid;
+    }
     let shape = collision(kind);
     let tall_partial = matches!(shape, Some(Collision::Partial { top }) if top > FLAT_SHAPE);
     if AWKWARD.contains(&definition) || tall_partial {
@@ -213,6 +218,9 @@ pub struct Cells<'a> {
     held: BTreeMap<Cell, Class>,
     /// `clear` answers, which read five neighbours for lava each: held too.
     clear: BTreeMap<Cell, bool>,
+    /// May a search lay a held block as a floor (`MoveKind::Bridge`)? Only in the Nether, with
+    /// `BRIDGE_RESERVE` blocks held.
+    bridge: bool,
 }
 
 impl<'a> Cells<'a> {
@@ -222,7 +230,34 @@ impl<'a> Cells<'a> {
             ice: on_ice(world),
             held: BTreeMap::new(),
             clear: BTreeMap::new(),
+            bridge: bridges(world),
         }
+    }
+
+    /// Can a held block be laid at `c` as a floor: air or lava there (a block replaces a fluid),
+    /// never water (the overworld's walks are not changed here), fire or anything awkward.
+    pub fn layable(&mut self, c: Cell) -> bool {
+        self.bridge && self.replaceable(c)
+    }
+
+    fn replaceable(&mut self, c: Cell) -> bool {
+        match self.at(c) {
+            Class::Lava => true,
+            Class::Clear => matches!(
+                self.world.block_at(BlockPos::new(c.0, c.1, c.2)),
+                Some(BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir)
+            ),
+            Class::Solid | Class::Water | Class::Awkward | Class::Unknown => false,
+        }
+    }
+
+    /// A waypoint a route may still use: standable, or (a bridge's) clear with a floor to lay.
+    pub fn usable(&mut self, c: Cell, kind: MoveKind) -> bool {
+        self.standable(c)
+            || (kind == MoveKind::Bridge
+                && self.clear(c)
+                && self.clear((c.0, c.1 + 1, c.2))
+                && self.layable((c.0, c.1 - 1, c.2)))
     }
 
     pub fn at(&mut self, c: Cell) -> Class {
@@ -268,6 +303,63 @@ impl<'a> Cells<'a> {
     }
 }
 
+/// Blocks a bridge is laid with, the commonest first: full cubes that do not fall or burn, what a
+/// digging bot carries by the hundred.
+pub const BRIDGE_BLOCKS: &[data::ItemKind] = &[
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+    data::ItemKind::Netherrack,
+    data::ItemKind::Granite,
+    data::ItemKind::Diorite,
+    data::ItemKind::Andesite,
+    data::ItemKind::Tuff,
+    data::ItemKind::Dirt,
+];
+/// Blocks held before a search may bridge: fewer is not a crossing.
+pub const BRIDGE_RESERVE: i64 = 16;
+/// Added to a walk's cost for a cell bridged: a route takes ground up to four times as long
+/// before it lays a block (and a block laid is a block spent).
+pub const BRIDGE_COST: f64 = 3.0;
+
+/// The bridge blocks held, every kind together.
+pub fn bridge_blocks(w: &World) -> i64 {
+    w.inventory
+        .slots
+        .values()
+        .filter(|(k, _)| BRIDGE_BLOCKS.contains(k))
+        .map(|(_, n)| i64::from(*n))
+        .sum()
+}
+
+/// The next bridge block to hold: the kind with the most held.
+pub fn bridge_item(w: &World) -> Option<data::ItemKind> {
+    BRIDGE_BLOCKS
+        .iter()
+        .copied()
+        .map(|k| {
+            let n: i64 = w
+                .inventory
+                .slots
+                .values()
+                .filter(|(i, _)| *i == k)
+                .map(|(_, n)| i64::from(*n))
+                .sum();
+            (n, k)
+        })
+        .filter(|(n, _)| *n > 0)
+        .max_by_key(|(n, _)| *n)
+        .map(|(_, k)| k)
+}
+
+/// May a route bridge in this world: in the Nether (its seas are lava and its ground is in
+/// pieces; the overworld's walks are left as they were), with blocks to spare.
+fn bridges(w: &World) -> bool {
+    w.dimension
+        .as_ref()
+        .is_some_and(|d| d.name == "minecraft:the_nether")
+        && bridge_blocks(w) >= BRIDGE_RESERVE
+}
+
 /// Do the feet stand on a sheet of ice (clojurecraft's `on-ice?`).
 fn on_ice(w: &World) -> bool {
     let Some([x, y, z]) = w.player.pos else {
@@ -297,6 +389,8 @@ enum Need {
     Floor,
     Clear,
     NotFloor,
+    /// Air or lava a held block can be laid in (never where bridging is off).
+    Layable,
 }
 
 /// A move along +x; `MOVES` turns it to every direction.
@@ -315,10 +409,13 @@ pub enum MoveKind {
     JumpUp,
     Drop,
     Diagonal,
+    /// One cell on the level onto a floor laid first: a held block placed against the side of
+    /// the block under the feet (docs/problems/nether-walk.md).
+    Bridge,
 }
 
 /// clojurecraft's `templates`, in its order.
-const TEMPLATES: [Move; 4] = [
+const TEMPLATES: [Move; 5] = [
     Move {
         id: MoveKind::Walk,
         to: (1, 0, 0),
@@ -366,6 +463,17 @@ const TEMPLATES: [Move; 4] = [
             (Need::Clear, (1, 1, 0)),
             (Need::Clear, (0, 0, 1)),
             (Need::Clear, (0, 1, 1)),
+        ],
+    },
+    Move {
+        id: MoveKind::Bridge,
+        to: (1, 0, 0),
+        cost: WALK_COST + BRIDGE_COST,
+        fall: false,
+        needs: &[
+            (Need::Layable, (1, -1, 0)),
+            (Need::Clear, (1, 0, 0)),
+            (Need::Clear, (1, 1, 0)),
         ],
     },
 ];
@@ -419,6 +527,7 @@ pub fn neighbors(cells: &mut Cells<'_>, (x, y, z): Cell) -> Vec<Step> {
                     Need::Floor => cells.floor(c),
                     Need::Clear => cells.clear(c),
                     Need::NotFloor => !cells.floor(c),
+                    Need::Layable => cells.layable(c),
                 }
             });
             if !ok {
@@ -529,6 +638,9 @@ pub struct Route {
     pub status: Status,
     pub from: Option<Cell>,
     pub expanded: u32,
+    /// The move that reaches each waypoint, one a waypoint.
+    #[serde(default)]
+    pub kinds: Vec<MoveKind>,
 }
 
 /// An f64 that orders totally, for the open set.
@@ -552,32 +664,50 @@ impl Ord for Ord64 {
 /// A* from `start` toward `goal`, spending at most `max_nodes` expansions (clojurecraft's
 /// `search`). The open set is ordered by (f, g, node), so ties break on the node itself.
 pub fn search(cells: &mut Cells<'_>, start: Cell, goal: &Goal, max_nodes: u32) -> Route {
+    search_weighted(cells, start, goal, max_nodes, 1.0)
+}
+
+/// `search` with the heuristic weighed: f = g + `weight` × h. At 1 it is A* and the route is the
+/// cheapest; over 1 the search leans toward the goal and reaches far ones in a fraction of the
+/// expansions, its route at most `weight` times the cheapest (docs/problems/nether-walk.md: a
+/// fortress 110 blocks off is past 6,000 plain expansions).
+pub fn search_weighted(
+    cells: &mut Cells<'_>,
+    start: Cell,
+    goal: &Goal,
+    max_nodes: u32,
+    weight: f64,
+) -> Route {
     let h0 = goal.heuristic(start);
     let mut open: BTreeSet<(Ord64, Ord64, Cell)> = BTreeSet::new();
-    open.insert((Ord64(h0), Ord64(0.0), start));
+    open.insert((Ord64(weight * h0), Ord64(0.0), start));
     let mut g: BTreeMap<Cell, f64> = BTreeMap::new();
     g.insert(start, 0.0);
-    let mut parents: BTreeMap<Cell, Cell> = BTreeMap::new();
+    let mut parents: BTreeMap<Cell, (Cell, MoveKind)> = BTreeMap::new();
     let mut closed: BTreeSet<Cell> = BTreeSet::new();
     let (mut best, mut best_h) = (start, h0);
     let mut expanded = 0u32;
-    let done =
-        |status, parents: &BTreeMap<Cell, Cell>, node: Cell, g: &BTreeMap<Cell, f64>, expanded| {
-            let mut back = vec![node];
-            let mut at = node;
-            while let Some(p) = parents.get(&at) {
-                back.push(*p);
-                at = *p;
-            }
-            back.reverse();
-            Route {
-                waypoints: back.into_iter().skip(1).collect(),
-                cost: g.get(&node).copied().unwrap_or(0.0),
-                status,
-                from: Some(start),
-                expanded,
-            }
-        };
+    let done = |status,
+                parents: &BTreeMap<Cell, (Cell, MoveKind)>,
+                node: Cell,
+                g: &BTreeMap<Cell, f64>,
+                expanded| {
+        let mut back = Vec::new();
+        let mut at = node;
+        while let Some((p, kind)) = parents.get(&at) {
+            back.push((at, *kind));
+            at = *p;
+        }
+        back.reverse();
+        Route {
+            waypoints: back.iter().map(|(c, _)| *c).collect(),
+            cost: g.get(&node).copied().unwrap_or(0.0),
+            status,
+            from: Some(start),
+            expanded,
+            kinds: back.iter().map(|(_, k)| *k).collect(),
+        }
+    };
     loop {
         let Some(entry) = open.pop_first() else {
             return done(Status::None, &parents, best, &g, expanded);
@@ -601,25 +731,38 @@ pub fn search(cells: &mut Cells<'_>, start: Cell, goal: &Goal, max_nodes: u32) -
         for s in neighbors(cells, node) {
             let g2 = gn + s.cost;
             if !closed.contains(&s.node) && g2 < g.get(&s.node).copied().unwrap_or(f64::MAX) {
-                open.insert((Ord64(g2 + goal.heuristic(s.node)), Ord64(g2), s.node));
+                open.insert((
+                    Ord64(g2 + weight * goal.heuristic(s.node)),
+                    Ord64(g2),
+                    s.node,
+                ));
                 g.insert(s.node, g2);
-                parents.insert(s.node, node);
+                parents.insert(s.node, (node, s.kind));
             }
         }
         expanded += 1;
     }
 }
 
-/// The node a player at feet position `pos` stands in.
+/// Feet this far under a cell's floor line stand in that cell: on soul sand the feet rest at
+/// y + 0.875, an eighth under the cell a route gives them (docs/problems/nether-walk.md).
+pub const FEET_LIFT: f64 = 0.2;
+
+/// The node a player at feet position `pos` stands in: the cell of the feet, or the one over it
+/// when they rest on a box just short of a full block (soul sand).
 pub fn feet_cell([x, y, z]: [f64; 3]) -> Cell {
-    (x.floor() as i32, y.floor() as i32, z.floor() as i32)
+    (
+        x.floor() as i32,
+        (y + FEET_LIFT).floor() as i32,
+        z.floor() as i32,
+    )
 }
 
 /// The cells at the feet's height whose columns the body's box overlaps, the one under most of
 /// it first (clojurecraft's `rests`): a box over a ledge's edge rests on the block beside.
 fn rests(pos: [f64; 3]) -> Vec<Cell> {
     let [px, py, pz] = pos;
-    let y = py.floor() as i32;
+    let y = (py + FEET_LIFT).floor() as i32;
     let lo = |v: f64| (v - physics::HALF_WIDTH).floor() as i32;
     let hi = |v: f64| (v + physics::HALF_WIDTH).floor() as i32;
     let mut xs = vec![lo(px), hi(px)];
@@ -660,6 +803,11 @@ fn start_cell(cells: &mut Cells<'_>, from: Cell, under_box: &[Cell]) -> Option<C
 /// deterministic. It may leave a supported, clear feet cell directly when that reaches the goal;
 /// otherwise it starts from `start_cell`.
 pub fn plan(world: &World, from: Cell, goal: &Goal, max_nodes: u32) -> Route {
+    plan_weighted(world, from, goal, max_nodes, 1.0)
+}
+
+/// `plan` with the heuristic weighed (`search_weighted`): for a goal far off.
+pub fn plan_weighted(world: &World, from: Cell, goal: &Goal, max_nodes: u32, weight: f64) -> Route {
     let mut cells = Cells::new(world);
     let under_box = world
         .player
@@ -667,26 +815,27 @@ pub fn plan(world: &World, from: Cell, goal: &Goal, max_nodes: u32) -> Route {
         .filter(|p| feet_cell(*p) == from)
         .map(rests)
         .unwrap_or_default();
-    let start = start_cell(&mut cells, from, &under_box);
     let (x, y, z) = from;
+    let start = start_cell(&mut cells, from, &under_box);
     let supported = world
         .block_at(BlockPos::new(x, y - 1, z))
         .and_then(collision)
         .is_some_and(|c| c == Collision::Full);
     if start != Some(from) && supported && cells.clear(from) && cells.clear((x, y + 1, z)) {
-        let departure = search(&mut cells, from, goal, max_nodes);
+        let departure = search_weighted(&mut cells, from, goal, max_nodes, weight);
         if departure.status == Status::Found {
             return departure;
         }
     }
     match start {
-        Some(s) => search(&mut cells, s, goal, max_nodes),
+        Some(s) => search_weighted(&mut cells, s, goal, max_nodes, weight),
         None => Route {
             waypoints: Vec::new(),
             cost: 0.0,
             status: Status::None,
             from: None,
             expanded: 0,
+            kinds: Vec::new(),
         },
     }
 }

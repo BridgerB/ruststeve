@@ -896,7 +896,17 @@ impl Plan {
             && self.pickaxe_at_hand(w, tick);
         let (controls, status) = match &mut self.task {
             Task::Idle => (Controls::default(), TaskStatus::Running),
-            Task::ToLog(walk) | Task::Explore(walk) => walk.step(w, tick),
+            Task::ToLog(walk) | Task::Explore(walk) => {
+                let out = walk.step(w, tick);
+                // A walk's bridge move lays blocks: its acts are sent and each block laid is
+                // written to the ledger (docs/problems/nether-walk.md).
+                let (acts, said) = walk.take_out();
+                self.acts.extend(acts);
+                for (what, why) in said {
+                    self.note(tick, what, why);
+                }
+                out
+            }
             Task::Dig(d) => {
                 let (c, act, status) = d.step(w, tick);
                 self.acts.extend(act);
