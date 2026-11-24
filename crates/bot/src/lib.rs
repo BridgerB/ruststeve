@@ -4,6 +4,8 @@
 //! every 50 ms, records every run when asked, and ends with an `Ending`.
 
 pub mod captured;
+pub mod devstart;
+pub mod evidence;
 pub mod landings;
 pub mod live;
 pub mod lockstep;
@@ -91,7 +93,8 @@ pub struct Opts {
     /// issue 16e); `None` never does.
     pub no_progress_ticks: Option<u64>,
     /// A file rewritten every `PROGRESS_EVERY_TICKS` with where the run stands, for a look while
-    /// the race runs (issue 16e).
+    /// the race runs (issue 16e); the run's ledger, senses and story so far are written beside it
+    /// as `<name>.ledger.txt`, `<name>.senses.txt` and `<name>.case.txt` (`evidence`).
     pub progress: Option<PathBuf>,
 }
 
@@ -118,8 +121,10 @@ pub struct Stats {
 
 /// Ticks between senses rows: one a second (clojurecraft's senses line).
 pub const SENSES_EVERY_TICKS: u64 = 20;
-/// Ticks between progress files: ten minutes.
-pub const PROGRESS_EVERY_TICKS: u64 = 12_000;
+/// Ticks between progress files, and the run's evidence beside them (`evidence`): two minutes.
+/// Ten until issue 16, with the evidence written only at the run's end: a race of 12,000 ticks
+/// showed nothing until it was over (docs/problems/race-tooling.md).
+pub const PROGRESS_EVERY_TICKS: u64 = 2400;
 pub use progress::REGION_SHIFT;
 
 /// Ticks between moments: one a minute.
@@ -505,6 +510,8 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         BTreeMap::new()
     });
     let mut last_controls: Option<physics::Controls> = None;
+    // The evidence writer of the last progress interval, on its own thread.
+    let mut evidence_writer: Option<JoinHandle<()>> = None;
     let mut doing = if let Some(a) = aim {
         Doing {
             task: format!("aim {}", a.name()),
@@ -760,8 +767,29 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                         .map_or_else(|| "-".to_owned(), |u| u.to_string()),
                     progressed.idle(now_tick),
                 );
-                if let Err(e) = std::fs::write(path, line) {
+                if let Err(e) = std::fs::write(path, &line) {
                     eprintln!("bot {name}: progress: {e}");
+                }
+                // The evidence so far, beside it: copied here, rendered and written on a thread
+                // of its own (the loop never waits on the disk). A writer still busy is left be.
+                if evidence_writer.as_ref().is_none_or(JoinHandle::is_finished)
+                    && let Some(dir) = path.parent()
+                {
+                    let e = evidence::Evidence {
+                        dir: dir.to_path_buf(),
+                        run: run_id.clone(),
+                        bot: name.clone(),
+                        progress: line,
+                        tasks: ledger.clone(),
+                        facts: facts.clone(),
+                        senses: senses_rows.clone(),
+                    };
+                    let bot = name.clone();
+                    evidence_writer = Some(std::thread::spawn(move || {
+                        if let Err(err) = e.write() {
+                            eprintln!("bot {bot}: evidence: {err}");
+                        }
+                    }));
                 }
             }
             if world_ticks.is_multiple_of(SENSES_EVERY_TICKS) {
@@ -860,6 +888,12 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             stats.play_ticks_from = run.world.session.server_ticks;
         }
     };
+    // The last evidence is whole on disk before the run's end writes the same files.
+    if let Some(h) = evidence_writer.take()
+        && h.join().is_err()
+    {
+        eprintln!("bot {name}: the evidence writer panicked");
+    }
     stats.events = run.events;
     stats.wall_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     stats.play_ms = play_since.map_or(0, |t| {
