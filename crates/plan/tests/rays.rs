@@ -139,3 +139,24 @@ fn a_step_up_opens_the_head_room_then_the_step() {
     assert_eq!(to, (131, 44, 159));
     assert_eq!(cells, vec![(130, 45, 159), (131, 45, 159), (131, 44, 159)]);
 }
+
+/// Race 45350748165, place 5 of `sealava` in every lane: the wall behind the frame's top cell,
+/// (60, -50, -182), from the top stair's stand (61, -51, -178). Its centre is 4.12 from the eye,
+/// over the cast's reach, so the op failed every try; its box is 3.54 off, and the server takes a
+/// click within 5.5 of the box (docs/problems/cast.md wall 3).
+#[test]
+fn the_wall_behind_the_top_cell_is_in_reach_by_its_box() {
+    let eye = [61.5, -51.0 + physics::EYE_HEIGHT, -177.5];
+    let wall = (60, -50, -182);
+    let centre = [60.5, -49.5, -181.5];
+    let d = (0..3)
+        .map(|i| (eye[i] - centre[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(d > plan::cast::REACH, "centre {d}");
+    let b = plan::cast::box_dist(eye, wall);
+    assert!(b <= plan::cast::REACH && b > 3.5, "box {b}");
+    // Inside the box, and level with a face: the distance is to that face.
+    assert!(plan::cast::box_dist([0.5, 0.5, 0.5], (0, 0, 0)).abs() < 1e-9);
+    assert!((plan::cast::box_dist([0.5, 2.5, 0.5], (0, 0, 0)) - 1.5).abs() < 1e-9);
+}

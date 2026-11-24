@@ -257,6 +257,10 @@ pub struct Cast {
     /// went; the next source tried filled in 160 ticks).
     #[serde(default)]
     refused: Vec<Cell>,
+    /// Ticks an op was worked from a place in reach of its cell's box and not of its centre
+    /// (cast.md wall 3), for the notes.
+    #[serde(default)]
+    box_reach: u32,
     /// Why each try at the op in hand failed, for the failure note (overworld-leg wall 5: a cast
     /// ended "Op after 13 ops, at :dig :room" with nothing to say what the dig met).
     #[serde(default)]
@@ -269,6 +273,15 @@ fn eye(b: &physics::Body) -> [f64; 3] {
 
 fn centre((x, y, z): Cell) -> [f64; 3] {
     [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5]
+}
+
+/// The eye's distance to the nearest point of cell `c`'s box (0 inside it).
+pub fn box_dist(e: [f64; 3], (x, y, z): Cell) -> f64 {
+    let lo = [f64::from(x), f64::from(y), f64::from(z)];
+    (0..3)
+        .map(|i| (lo[i] - e[i]).max(e[i] - (lo[i] + 1.0)).max(0.0).powi(2))
+        .sum::<f64>()
+        .sqrt()
 }
 
 fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -364,6 +377,7 @@ impl Cast {
             last_regression: None,
             tunnels: 0,
             refused: Vec::new(),
+            box_reach: 0,
         }
     }
 
@@ -390,7 +404,11 @@ impl Cast {
 
     /// The refused sources, for the notes: the count is the fix's firings (cast.md wall 1).
     pub fn refused_text(&self) -> String {
-        format!("refused sources {}", self.refused.len())
+        format!(
+            "refused sources {}, box reach {}",
+            self.refused.len(),
+            self.box_reach
+        )
     }
 
     pub fn tries_text(&self) -> String {
@@ -561,10 +579,19 @@ impl Cast {
                 }
             });
         }
+        // In reach by the cell's box, not its centre: the server takes a dig or a click when the
+        // eye is within 5.5 of the block's box (`canInteractWithBlock`, the 4.5 range plus 1).
+        // A room cell five over the floor and the wall behind the frame's top cells lie 3.9 to
+        // 4.1 from the eye to their centres from every stand the room has, and failed their
+        // op every try (cast.md wall 3).
+        let by_box = box_dist(eye(body), target) <= REACH;
         let there = match stand {
             Some(s) => feet(body) == s && body.on_ground,
-            None => dist(eye(body), centre(target)) <= REACH && body.on_ground,
+            None => by_box && body.on_ground,
         };
+        if there && stand.is_none() && dist(eye(body), centre(target)) > REACH {
+            self.box_reach += 1;
+        }
         if there {
             if let Work::Walk(_) = self.work {
                 self.work = Work::Idle;
