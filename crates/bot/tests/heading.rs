@@ -35,6 +35,26 @@ impl Out {
         self.notes.iter().filter(|n| n.contains(s)).count()
     }
 
+    /// The first turn noted with the body where `at` holds (each world's turns belong at its
+    /// edge, where its columns end).
+    fn turned_where(&self, at: impl Fn([f64; 3]) -> bool) -> Option<String> {
+        self.notes
+            .iter()
+            .filter(|n| n.contains("heading turned"))
+            .find(|n| {
+                let tick: u64 = n
+                    .split(' ')
+                    .next()
+                    .and_then(|t| t.parse().ok())
+                    .unwrap_or(0);
+                self.track
+                    .get(usize::try_from(tick / 20).unwrap_or(usize::MAX))
+                    .or(self.track.last())
+                    .is_some_and(|p| at(*p))
+            })
+            .cloned()
+    }
+
     fn tail(&self) -> Vec<&String> {
         self.notes.iter().rev().take(40).rev().collect()
     }
@@ -106,7 +126,12 @@ fn open_ground_holds_the_axis_two_hundred_blocks() {
     );
     let x = out.run.world.body.map_or(0.0, |b| b.pos[0]);
     assert!(x >= 200.0, "at x {x}: {:#?}", out.tail());
-    assert_eq!(out.count("heading turned"), 0, "{:#?}", out.tail());
+    assert_eq!(
+        out.turned_where(|p| p[0] < 230.0),
+        None,
+        "{:#?}",
+        out.tail()
+    );
     assert!(out.count("heading leg") >= 4, "{:#?}", out.tail());
     assert!(out.count("by walk") >= 4, "{:#?}", out.tail());
     let h = out.p.headed.as_ref().unwrap();
@@ -134,7 +159,12 @@ fn a_wall_is_tunnelled_on_the_axis_at_two_digs_a_metre() {
     );
     let x = out.run.world.body.map_or(0.0, |b| b.pos[0]);
     assert!(x >= 80.0, "at x {x}: {:#?}", out.tail());
-    assert_eq!(out.count("heading turned"), 0, "{:#?}", out.tail());
+    assert_eq!(
+        out.turned_where(|p| p[0] < 120.0),
+        None,
+        "{:#?}",
+        out.tail()
+    );
     assert!(
         out.count("tunnel level toward the heading") >= 1,
         "{:#?}",
@@ -267,7 +297,7 @@ fn a_lava_sea_is_bridged_with_the_keep_held_after_a_restock() {
     assert!(x >= 40.0, "at x {x}: {tail:#?}");
     let held = plan::path::bridge_blocks(&out.run.world);
     assert!(held >= heading::KEEP, "{held} blocks held: {tail:#?}");
-    assert_eq!(out.count("heading turned"), 0, "{tail:#?}");
+    assert_eq!(out.turned_where(|p| p[0] < 105.0), None, "{tail:#?}");
     assert!(!out.run.died);
 }
 

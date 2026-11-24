@@ -59,9 +59,12 @@ pub const RESTOCK_DIGS: u32 = 24;
 pub const RESTOCK_REACH: f64 = 4.0;
 /// A leg's budget per metre of `best` gained, read only past `BUDGET_GRACE` metres of spend: a
 /// level tunnel cuts 2 a metre and a stair 3 (docs/problems/nether-tunnel.md), a straight bridge
-/// lays 1 a metre (the plan's starting numbers, to be refined from races).
+/// lays 1 a metre (the plan's starting numbers, to be refined from races). Blocks placed are let
+/// run to 2 a metre: filler is plentiful (619 at the frontier start) and the first leg from the
+/// frontier's leave point is a far walk of 78 cells, 66 of them bridged over the lava sea
+/// (probe 45478841859); a leg ended mid-bridge stands over lava.
 pub const DIGS_PER_M: f64 = 3.0;
-pub const PLACED_PER_M: f64 = 1.0;
+pub const PLACED_PER_M: f64 = 2.0;
 pub const BUDGET_GRACE: i32 = 8;
 /// A tunnel leg's digs are estimated at this a metre against the uses left over the reserve.
 pub const TUNNEL_DIGS_PER_M: i32 = 2;
@@ -85,6 +88,12 @@ pub const SIGNS_TURN: u32 = 12;
 /// Leg attempts one look may make: each is up to three searches (`walk::FAR_NODES` the dearest),
 /// so a look that turns twice waits a tick for the next.
 pub const ATTEMPTS_PER_LOOK: u32 = 2;
+/// A leg whose target's column is not loaded waits this long for it, looking again every
+/// `LOAD_EVERY` ticks (a far search is tens of milliseconds): chunks arrive over the first seconds
+/// after a portal, and the race servers send 8 chunks (128 blocks), so a target 48 ahead is
+/// loaded once the bot has stood a moment.
+pub const LOAD_WAIT: u64 = 200;
+pub const LOAD_EVERY: u64 = 20;
 /// Tries of one way (walk, far walk) that gained under `PACE_GAIN` before the leg goes on to the
 /// next way: one may be a walk cut by a fight or a meal.
 pub const WAY_TRIES: u32 = 2;
@@ -152,6 +161,9 @@ pub struct Leg {
     pub pending: Vec<(Cell, bool)>,
     #[serde(default)]
     pub planned: Vec<Cell>,
+    /// While the target's column is not loaded yet: no search before this tick.
+    #[serde(default)]
+    pub wait_until: u64,
 }
 
 /// A restock in hand: filler and uses at its start, digs begun.
@@ -847,6 +859,7 @@ impl Plan {
             gained: 0,
             pending: Vec::new(),
             planned: Vec::new(),
+            wait_until: 0,
         };
         leg.mark = (leg.progress(h.dir, feet), tick);
         self.note(
@@ -880,6 +893,9 @@ impl Plan {
         {
             leg.way = leg.way.next()?;
             leg.tries = 0;
+        }
+        if tick < leg.wait_until {
+            return Some(Task::Idle);
         }
         let mut refusals: Vec<String> = Vec::new();
         loop {
@@ -978,6 +994,26 @@ impl Plan {
                 }
                 None => {
                     let n = leg_now.n;
+                    // The target's column not loaded yet (a bot just through a portal, a turn
+                    // toward columns still arriving): no way is not known yet. Wait, with the
+                    // ways from the first, for at most `LOAD_WAIT` ticks of the leg.
+                    let t = leg_now.target;
+                    let loaded = w
+                        .columns
+                        .contains_key(&BlockPos::new(t.0, t.1, t.2).chunk());
+                    if !loaded && tick.saturating_sub(leg_now.began) < LOAD_WAIT {
+                        if leg_now.wait_until == 0 {
+                            self.note(
+                                tick,
+                                format!("heading leg {n} waits for its target's column"),
+                                format!("{t:?} not loaded; {}", refusals.join("; ")),
+                            );
+                        }
+                        leg_now.way = Way::Walk;
+                        leg_now.tries = 0;
+                        leg_now.wait_until = tick + LOAD_EVERY;
+                        return Some(Task::Idle);
+                    }
                     // Paced: was there a way only back over the cut? One far search to say so.
                     if !blocked.is_empty() {
                         let goal = leg_now.goal(dir);

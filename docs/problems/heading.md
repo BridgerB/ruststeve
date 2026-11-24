@@ -33,3 +33,12 @@ Open ground 200 blocks with no turn; a wall tunnelled on the axis at 2 digs a me
 - **Passed**: open ground, the wall, the lava sea with the restock, the paced refusal, `NoProgress` at 1,200 ticks, crimson, the axis choice.
 - **The known forest**: the test put the forest's column outside its own world (x -24 in a world from x -16): no route, the leg failed. The test's forest is now inside.
 - **The causeway**: the heading did what it should (walked the causeway, no way east, turned north, bridged 13 blocks north, walked on), then its world ended 42 blocks north and it turned on the world's edge, so "one turn" failed. Read in its notes: 7 "paced" notes said "runs back over 0 cells": the check ran on any found route, not one the cut alone refused. Fixed: "paced" only for a route over cut cells and within the keep. The world now runs 200 blocks north.
+
+### 2. Turns at a test world's edge, legs failed before their columns loaded (c7004cd, run 45478821672)
+- **What happened**: open ground, the wall and the lava sea each went on to their world's end and turned there (x 240, 143, 124): the tests' "no turn" counted those. The paced test's first 17 legs had no way at ticks 20 to 566 and the heading turned and re-chose before it ever walked: the columns 48 ahead were not loaded yet.
+- **Fix**: a leg whose target's column is not loaded waits for it (`LOAD_WAIT` 200 ticks, a look every `LOAD_EVERY` 20) before it is called a leg with no way, noted "heading leg N waits for its target's column". The tests count turns only short of their world's end.
+
+### 3. The first leg from the frontier's leave point (probe 45478841859, `replan --heading` on race 45358767468 lane 0 at tick 5660)
+- The bot at (130.5, 61, 205.5), 619 filler, 144 pickaxe uses. "heading chosen: (-1, 0)" (1 soul sign that way), then "heading to the soul sand valley at column (11, 19)": leg 1 toward (152, 61, 248) by a far walk of 78 cells, 66 of them bridged over the lava sea, found in 5,657 expansions (125 ms, the run's slowest step). Open loop, no block laid shows, so the walk failed `NoProgress` twice and the leg went on to a tunnel route of 146 steps (5,760 nodes, 16 ms) up to y 70.
+- Step times over 1,500 steps: p50 0.01 ms, p99 0.15 ms, max 125 ms (the far search, as the fortress leg's own far walk spends).
+- Read: the leg's bridges run 66 for about 50 metres, so blocks placed may run to 2 a metre (`PLACED_PER_M`): at 1 the leg would have ended standing on its own bridge. A tunnel leg's 146 steps would meet the 24-dig budget about 12 metres in.
