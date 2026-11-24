@@ -6,7 +6,7 @@ tags: [parity, sim, measurement, capture, moments, real]
 aliases: [enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@bb982b2
+verifiedAgainst: ruststeve@764d798
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -84,7 +84,7 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - Rows `e00` to `e03` (`docs/problems/endermen-model.md`), each at its own landing 40 south of the centre: an enderman two above a floor 64 east (4 chunks: beyond the simulation distance) stays where it was put; one 30 east falls (it ticks); one penned 12 east and looked in the eye turns creepy; the same look 15 degrees aside leaves it neutral.
 - A row may name a `difficulty` (`normal`): those rows run after the others, the real server's difficulty set by RCON for them and put back to peaceful after (an enderman is a monster: peaceful removes it at once); the model runs them off peaceful. `mobs` places mobs with their AI (`summon` kept and lootless in real, the model's own brain in sim; the model places endermen only).
 - The class gains `mobs`: for each placed mob, the entity of its kind nearest where it was put in the bot's world: seen, moved more than half a block, and creepy (entity data 17).
-- Tolerance 162 of 164.
+- Tolerance 162 of 164. The first run (parity 45483333265, 764d798): **164 of 164**, the four enderman rows matching on both sides: frozen still at 64, ticking and fallen at 30, creepy under the stare, neutral 15 degrees aside.
 
 ## See also
 - [[server-model]] - what the model models.

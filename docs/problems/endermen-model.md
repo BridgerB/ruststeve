@@ -1,6 +1,6 @@
 # Problem: endermen in the model (issue 17f)
 
-**Status: open** (issue 17, agent E4). The index of issue 17's walls is [`endermen.md`](endermen.md).
+**Status: done for issue 17** (agent E4): the model, its tests and four parity rows that match a real server. The index of issue 17's walls is [`endermen.md`](endermen.md).
 
 ## What the bot needs
 Issue 17 is done when one real bot comes within 32 blocks of an enderman that ticks (its chunk within the server's simulation distance of the player's). The heading (E2), the stage and the feet biome (E1), and the stare filter (E3) each need a closed-loop test that says so in minutes, not a race: a Nether test world whose columns carry the Nether's biomes, and endermen that stand, wander, freeze, anger and teleport as the 26.1.2 server's do.
@@ -34,3 +34,9 @@ Probe 45472254333 (`javap -c -p -constants` of `EnderMan` and its four goals, `L
 
 ## The parity rows
 `config/moments.toml` rows `e00-stare`, `e01-frozen`, `e02-ticks`, `e03-aside` (the parity-table note's section). A row's `difficulty = "normal"` runs it after the peaceful rows with the real server set to Normal by RCON; `mobs` places mobs with their AI; the class gains `mobs` (seen, moved, creepy).
+
+### The first parity run (parity 45483333265, 764d798)
+**164 of 164** moments match in every field, the four new rows included: `e01-frozen` (an enderman 64 east, 4 chunks out) stays where it was put in real and in the model; `e02-ticks` (30 east) falls in both; `e00-stare` turns creepy in both and stays penned; `e03-aside` stays neutral in both. The real server ran them at Normal by RCON after the peaceful rows.
+
+### The whole suite before and after (probe 45477950396)
+Release, every test with `--include-ignored`: main 5657899 451 passed, 8 failed; 764d798 466 passed (the 15 new), the same 8 failed (issue 16's ignored fight and rods walls). Every `SEED`, `SEEDS` and `MEASURES` line is byte-identical: freezing every mob beyond the simulation distance changed no issue-16 arena, all of which sit within 3 chunks.
