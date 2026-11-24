@@ -80,7 +80,7 @@ fn planks_burn_only_what_the_batch_needs() {
 
 /// Overworld-leg wall 4 (race 45343519424): five oak and twelve birch planks, and a batch of nine
 /// that neither five alone covers. The first kind is loaded and burned, then the next: nine
-/// results, six planks burned in all, and no fuel clicked in and out.
+/// results, seven planks burned in all, and no fuel clicked in and out.
 #[test]
 fn two_kinds_of_planks_fuel_one_batch() {
     let (run, ended) = smelt_for(
@@ -95,6 +95,8 @@ fn two_kinds_of_planks_fuel_one_batch() {
     assert_eq!(ended, Some(SmeltStatus::Done));
     assert_eq!(held(&run, ItemKind::IronIngot), 9);
     let planks = held(&run, ItemKind::OakPlanks) + held(&run, ItemKind::BirchPlanks);
-    assert_eq!(planks, 11, "1,800 ticks of cooking, 300 a plank");
+    // Five oak burn 1,500 ticks: seven results and half of the eighth. Two are left to cook,
+    // 400 ticks: two birch. Seven planks burned.
+    assert_eq!(planks, 10);
     assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
 }
