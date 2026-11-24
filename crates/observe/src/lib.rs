@@ -86,6 +86,78 @@ pub struct Flying {
 /// Projectiles watched (blocks): clojurecraft's senses list those within 16.
 pub const PROJECTILE_WATCH: f64 = 16.0;
 
+/// Endermen watched (blocks): the senses row's count was always within 128, the server's
+/// despawn distance for monsters (`MobCategory.MONSTER`), so a farther one is gone soon.
+pub const ENDERMAN_WATCH: f64 = 128.0;
+/// Server ticks a ticking enderman may stand still before the ledger says so: a frozen mob
+/// sends no movement, a ticking one strolls (`EnderMan` has a random stroll goal). A
+/// disagreement is a note, never a decision (issue 17b); 30 s is long for an idle enderman.
+pub const STILL_TICKS: u64 = 600;
+
+/// An enderman within `ENDERMAN_WATCH`: whether it ticks (`world::ticks`), where it was, and
+/// since when it has stood still while ticking (carried from tick to tick by `diff`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EnderSeen {
+    pub ticking: bool,
+    pub pos: [f64; 3],
+    pub still_since: u64,
+    pub still_noted: bool,
+}
+
+/// The bridge blocks the planner spends (`plan::path::BRIDGE_BLOCKS`; a test in `results`
+/// holds the two lists equal): the senses row's filler.
+pub const FILLER: &[data::ItemKind] = &[
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+    data::ItemKind::Netherrack,
+    data::ItemKind::Granite,
+    data::ItemKind::Diorite,
+    data::ItemKind::Andesite,
+    data::ItemKind::Tuff,
+    data::ItemKind::Dirt,
+];
+
+/// The filler held, every kind together.
+pub fn filler(w: &World) -> i64 {
+    w.inventory
+        .slots
+        .values()
+        .filter(|(k, _)| FILLER.contains(k))
+        .map(|(_, n)| i64::from(*n))
+        .sum()
+}
+
+/// Uses left over every pickaxe held (issue 17: the trip's scarce resource).
+pub fn pickaxe_uses(w: &World) -> i32 {
+    let picks = data::generated::tags::item_tag("pickaxes").unwrap_or(&[]);
+    w.inventory
+        .slots
+        .iter()
+        .filter(|(_, (k, _))| picks.contains(k))
+        .filter_map(|(slot, _)| w.inventory.uses_left(*slot))
+        .sum()
+}
+
+/// Endermen within `ENDERMAN_WATCH` of `here`, by id.
+fn endermen_near(w: &World, here: [f64; 3], at: u64) -> BTreeMap<i32, EnderSeen> {
+    w.entities
+        .iter()
+        .filter(|(_, e)| !e.dead && e.kind == EntityKind::Enderman)
+        .filter(|(_, e)| dist(e.pos, here) <= ENDERMAN_WATCH)
+        .map(|(id, e)| {
+            (
+                *id,
+                EnderSeen {
+                    ticking: world::ticks(w, e.pos),
+                    pos: e.pos,
+                    still_since: at,
+                    still_noted: false,
+                },
+            )
+        })
+        .collect()
+}
+
 fn projectile(kind: EntityKind) -> bool {
     matches!(
         kind,
@@ -152,6 +224,18 @@ pub struct Snapshot {
     /// The time of day (`World::day_time`), when the server has told it.
     #[serde(default)]
     pub day_time: Option<i64>,
+    /// The biome at the feet (`World::feet_biome`, issue 17b).
+    #[serde(default)]
+    pub biome: Option<String>,
+    /// Endermen within `ENDERMAN_WATCH`, by id (carried by `diff`).
+    #[serde(default)]
+    pub endermen: BTreeMap<i32, EnderSeen>,
+    /// Warped forests known from blocks seen (`Memory::forests`).
+    #[serde(default)]
+    pub forests: usize,
+    /// Soul sand valleys known from blocks seen (`Memory::soul_valleys`).
+    #[serde(default)]
+    pub soul_valleys: usize,
 }
 
 /// A fact for the ledger.
@@ -266,6 +350,30 @@ pub enum Fact {
     /// Day broke (`world::time::DAWN`): the time of day then.
     Day {
         day_time: i64,
+    },
+    /// The biome at the feet changed (issue 17b).
+    Biome {
+        name: String,
+    },
+    /// An enderman within `ENDERMAN_WATCH` first seen, or begun or stopped ticking.
+    Enderman {
+        id: i32,
+        d: f64,
+        ticking: bool,
+    },
+    /// A ticking enderman (by distance) has not moved for `STILL_TICKS` or more.
+    EndermanStill {
+        id: i32,
+        d: f64,
+        for_ticks: u64,
+    },
+    /// A Nether chunk column became a known warped forest from blocks seen.
+    ForestSeen {
+        column: (i32, i32),
+    },
+    /// A Nether chunk column became a known soul sand valley from blocks seen.
+    SoulValleySeen {
+        column: (i32, i32),
     },
 }
 
@@ -412,6 +520,10 @@ pub fn snapshot(w: &World) -> Snapshot {
         level_events: w.level_events.len(),
         chat: w.chat.len(),
         day_time: w.day_time(),
+        biome: w.feet_biome().map(str::to_owned),
+        endermen: endermen_near(w, bot, at),
+        forests: w.memory.forests().len(),
+        soul_valleys: w.memory.soul_valleys().len(),
     }
 }
 
@@ -593,6 +705,50 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
     if next.won && !prev.won {
         out.push(Fact::Won);
     }
+    if next.biome != prev.biome
+        && let Some(name) = &next.biome
+    {
+        out.push(Fact::Biome { name: name.clone() });
+    }
+    for (id, n) in &mut next.endermen {
+        let d = dist(n.pos, bot);
+        match prev.endermen.get(id) {
+            None => out.push(Fact::Enderman {
+                id: *id,
+                d,
+                ticking: n.ticking,
+            }),
+            Some(p) => {
+                if p.ticking != n.ticking {
+                    out.push(Fact::Enderman {
+                        id: *id,
+                        d,
+                        ticking: n.ticking,
+                    });
+                }
+                // Still while ticking: the span carries on; a move or a change starts it again.
+                if p.ticking && n.ticking && p.pos == n.pos {
+                    n.still_since = p.still_since;
+                    n.still_noted = p.still_noted;
+                }
+            }
+        }
+        let for_ticks = at.saturating_sub(n.still_since);
+        if n.ticking && !n.still_noted && for_ticks >= STILL_TICKS {
+            n.still_noted = true;
+            out.push(Fact::EndermanStill {
+                id: *id,
+                d,
+                for_ticks,
+            });
+        }
+    }
+    for column in w.memory.forests().iter().skip(prev.forests) {
+        out.push(Fact::ForestSeen { column: *column });
+    }
+    for column in w.memory.soul_valleys().iter().skip(prev.soul_valleys) {
+        out.push(Fact::SoulValleySeen { column: *column });
+    }
     let night = |s: &Snapshot| s.day_time.map(world::time::is_night);
     match (night(prev), night(next), next.day_time) {
         (Some(true), Some(false), Some(day_time)) => out.push(Fact::Day { day_time }),
@@ -769,6 +925,19 @@ pub struct Senses {
     /// The time of day, 0 to 23,999 (`World::day_time`), when the server has told it.
     #[serde(default)]
     pub day_time: Option<i64>,
+    /// The biome at the feet (issue 17b).
+    #[serde(default)]
+    pub biome: Option<String>,
+    /// The nearest enderman within `ENDERMAN_WATCH` that ticks, and the nearest frozen one.
+    #[serde(default)]
+    pub enderman_ticking: Option<f64>,
+    #[serde(default)]
+    pub enderman_frozen: Option<f64>,
+    /// Uses left over every pickaxe held, and the filler (bridge blocks) held.
+    #[serde(default)]
+    pub pickaxe_uses: Option<i32>,
+    #[serde(default)]
+    pub filler: Option<i64>,
 }
 
 /// How a fluid touches the body (the feet's cell and the one over it).
@@ -821,6 +990,33 @@ fn block_name(w: &World, x: i32, y: i32, z: i32) -> Option<String> {
 const AIRS: [&str; 3] = ["air", "cave_air", "void_air"];
 
 impl Senses {
+    /// Issue 17's part of the row, each piece only when known (older rows print nothing):
+    /// ` biome soul_sand_valley ender 31 ticking, 70 frozen picks 144 filler 620`.
+    pub fn travel(&self) -> String {
+        let mut s = String::new();
+        if let Some(b) = &self.biome {
+            s.push_str(&format!(" biome {b}"));
+        }
+        match (self.enderman_ticking, self.enderman_frozen) {
+            (None, None) => {}
+            (t, f) => {
+                let part = |d: Option<f64>, what: &str| d.map(|d| format!("{d:.0} {what}"));
+                let parts: Vec<String> = [part(t, "ticking"), part(f, "frozen")]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                s.push_str(&format!(" ender {}", parts.join(", ")));
+            }
+        }
+        if let Some(p) = self.pickaxe_uses {
+            s.push_str(&format!(" picks {p}"));
+        }
+        if let Some(f) = self.filler {
+            s.push_str(&format!(" filler {f}"));
+        }
+        s
+    }
+
     /// The feet's cell: as recorded, else the position floored (rows from before the cell was
     /// kept).
     pub fn feet(&self) -> Option<[i32; 3]> {
@@ -903,6 +1099,15 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
         .values()
         .filter(|e| !e.dead && e.kind == EntityKind::Enderman && dist(e.pos, here) <= 128.0)
         .count() as u32;
+    let nearest = |ticking: bool| {
+        w.entities
+            .values()
+            .filter(|e| !e.dead && e.kind == EntityKind::Enderman)
+            .filter(|e| world::ticks(w, e.pos) == ticking)
+            .map(|e| dist(e.pos, here))
+            .filter(|d| *d <= ENDERMAN_WATCH)
+            .min_by(f64::total_cmp)
+    };
     Senses {
         at: w.session.server_ticks,
         pos: bot,
@@ -929,6 +1134,11 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
         water: cell.map_or(Touch::No, |c| touch(w, c, BlockKind::Water)),
         cursor: w.inventory.carried.map(|(item, n)| (item_name(item), n)),
         day_time: w.day_time(),
+        biome: w.feet_biome().map(str::to_owned),
+        enderman_ticking: nearest(true),
+        enderman_frozen: nearest(false),
+        pickaxe_uses: Some(pickaxe_uses(w)),
+        filler: Some(filler(w)),
     }
 }
 
@@ -1004,6 +1214,20 @@ impl Fact {
             Fact::Landed { id, kind: k } => format!("blow landed on {}#{id}", kind(k)),
             Fact::Night { day_time } => format!("night fell (day time {day_time})"),
             Fact::Day { day_time } => format!("day broke (day time {day_time})"),
+            Fact::Biome { name } => format!("feet biome {name}"),
+            Fact::Enderman { id, d, ticking } => format!(
+                "enderman#{id} at {d:.0}, {}",
+                if *ticking { "ticking" } else { "frozen" }
+            ),
+            Fact::EndermanStill { id, d, for_ticks } => format!(
+                "enderman#{id} at {d:.0} ticks by distance but has not moved for {for_ticks} ticks"
+            ),
+            Fact::ForestSeen { column: (cx, cz) } => {
+                format!("warped forest known from blocks seen: chunk column {cx},{cz}")
+            }
+            Fact::SoulValleySeen { column: (cx, cz) } => {
+                format!("soul sand valley known from blocks seen: chunk column {cx},{cz}")
+            }
         }
     }
 }

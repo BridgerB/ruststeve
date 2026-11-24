@@ -187,7 +187,12 @@ fn key_of(f: &Fact) -> Key {
         | Fact::Landed { .. }
         | Fact::Sign { .. }
         | Fact::Night { .. }
-        | Fact::Day { .. } => Key::Other(f.line()),
+        | Fact::Day { .. }
+        | Fact::Biome { .. }
+        | Fact::Enderman { .. }
+        | Fact::EndermanStill { .. }
+        | Fact::ForestSeen { .. }
+        | Fact::SoulValleySeen { .. } => Key::Other(f.line()),
     }
 }
 
