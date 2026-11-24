@@ -5,8 +5,8 @@ type: reference
 tags: [wire, place, use_item_on, model]
 aliases: [use_item_on, UseItemOn, Act::UseOn, place_held, BlockItem.place, handleUseItemOn, replaceable]
 status: verified
-lastUpdated: 2026-11-14
-verifiedAgainst: ruststeve@1a3aaac clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/packets.rs#/// (a crafting table). Field order from the game's `ServerboundUseItemOnPacket`; the cursor is"
   - "ruststeve:crates/sim/src/survival.rs#pub(crate) fn on_use_item_on("
@@ -26,7 +26,8 @@ Issue 11a. `Act::UseOn { pos, face }` right-clicks a block's face with the main 
 
 ## How the server answers (`handleUseItemOn`, read with `javap`)
 - The sequence is acknowledged whatever happens; out of reach (eye to the block's box over 4.5 + 1) nothing else does.
-- A crafting table opens its menu ([[table-window]]) unless the player sneaks.
+- A crafting table opens its menu ([[table-window]]) unless the player sneaks; in the model a furnace opens the same way ([[smelting]]).
+- Else held flint and steel strikes the face (`FlintAndSteelItem.useOn`, issue 14a: [[buckets-and-fluids]]).
 - Else a held block item is placed (`BlockItem.place`): in the clicked cell when it is replaceable (air, water, plants, snow), else in the cell beside it on the face; never in a cell the player's box overlaps; the held stack loses one.
 - Always: block updates for the clicked cell and its neighbour on the face, so a refused placement is corrected on the client.
 

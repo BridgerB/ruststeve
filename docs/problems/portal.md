@@ -1,5 +1,7 @@
 # The portal (issue 14)
 
+**Status: done** (issue 14, closed by Bridger on 2026-11-18 under the planned bar: see "Closed" at the end). The story continues in [`fortress.md`](fortress.md). There is no wall 17: the numbers skip it.
+
 ## Needs
 From the `kit` start (an iron pickaxe, two buckets, flint and steel, a stone pickaxe and sword, a table, sticks, 16 cobblestone; spread 128), within 72,000 server ticks: a water bucket filled at surface water, lava seen with an exposed face (a surface pool, a cave, or the lava sea under y -54), a site beside it, the room cut, ten cells cast (a lava source and a water pour each), the inside opened, and flint and steel struck on the frame.
 

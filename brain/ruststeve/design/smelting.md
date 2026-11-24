@@ -5,8 +5,8 @@ type: reference
 tags: [smelting, furnace, window, sim, plan, parity]
 aliases: [furnace, Furnace, smelt, Smelt, SmeltStage, container_set_data, furnace window, cook, fuel, burn order, lit, smelt rows, half rows]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@3ee956a clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/furnace.rs#pub fn tick(&mut self) -> bool {"
   - "ruststeve:crates/sim/src/survival.rs#fn furnace_quick_move(&mut self, i: usize, l: Loc, stack: Stack) {"
@@ -37,7 +37,9 @@ Issue 13a. The furnace is the first window whose slots change on their own: the 
 ## How it works
 - **The window**: `open_screen` with the `furnace` menu; slots 0 input, 1 fuel, 2 result, 3-38 the inventory (window 0's 9-44). Properties by `container_set_data`: 0 lit time left, 1 lit total, 2 cook, 3 cook total.
 - **The model's furnace** (`AbstractFurnaceBlockEntity.serverTick`, read with `javap`): a lit furnace burns a tick; lit, or with fuel and input, and a smelting recipe whose result fits: an unlit one lights from the fuel (`fuel_ticks`, one item taken, a lava bucket leaving its bucket), the cook rises and at the recipe's time (200) turns one input into the result; not able, the cook resets; neither lit nor fed, it cools by 2. A new input item restarts the cook with its recipe's time. The `lit` block state follows. It cooks with its window closed. `quickMoveStack`: the result to the inventory from the end; from the inventory, what smelts to the input, else fuel to the fuel slot, else between main and hotbar. Only fuel (or a bucket) goes in the fuel slot.
-- **The smelt task**: approach and open as a table craft; settle the cursor; **fuel** first: the batch's cook time less what burns now and what sits in the fuel slot, from the hottest held fuel (coal, charcoal, a coal block, then planks; logs, sticks and tools are never burned), the fewest items that cover it, one per right-click; then the **input**; then **cook**: results are shift-clicked out as they show; done when the batch's results are held; past the batch's cook time by the slowdown and 5 s, `Slow`. One click per round trip; loads are judged by the window's slots, never its state id (the furnace's own changes move it).
+- **The smelt task**: approach and open as a table craft; settle the cursor; **fuel** first: the batch's cook time less what burns now and what sits in the fuel slot, from the hottest held fuel (coal, charcoal, a coal block, then planks, then last the sticks over `make::STICK_RESERVE` 2; logs and tools are never burned), the fewest items that cover it, one per right-click; then the **input**; then **cook**: results are shift-clicked out as they show; done when the batch's results are held; past the batch's cook time by the slowdown and 5 s, `Slow`. One click per round trip; loads are judged by the window's slots, never its state id (the furnace's own changes move it).
+- **A leftover in the fuel slot** of a fuel no longer held, with the batch needing more: it is taken out first so the fuel held can go in (a plank left and only sticks held, iron-kit wall 12).
+- **Collect** (`Smelt::collect`, issue 13b): a task that only goes back to a loaded furnace and takes the results, skipping fuel and input; `loaded()` is true once a task is at its cook ([[fuel-and-smelt-needs]]).
 
 ## What the parity table found
 - **The bot played at two thirds of a client's pace.** The half rows (take at script tick 330: one cook done, the second half way) disagreed: in real a 200-tick cook took 129 bot ticks. The loop waited for a packet up to a whole tick after each tick, so ticks drifted 50 to 100 ms apart; ticks now keep a fixed 20 Hz schedule ([[tick-loop]]). Every real run before issue 13a walked, dug and clicked at about 0.65 of a vanilla client's pace.
