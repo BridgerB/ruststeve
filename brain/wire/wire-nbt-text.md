@@ -5,8 +5,8 @@ type: reference
 tags: [wire, nbt, text, death, damage]
 aliases: [network NBT, text component, death message, player_combat_kill, damage_event, killer, damage type]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/nbt.rs#pub fn read_root(r: &mut Reader<'_>) -> Result<Nbt, ParseError> {"
   - "ruststeve:crates/protocol/src/nbt.rs#pub fn death(c: &Nbt) -> Death {"
@@ -29,6 +29,7 @@ Since 1.20.3 a text component on the wire is network NBT: an anonymous root (a t
 - **Reading a component** (`plain`, clojurecraft's `text/plain`): a string as it is; a compound as its `text`, or for a `translate` key the key then each `with` argument's text; then `extra`. No English table: `death.attack.mob rs-001 entity.minecraft.zombie` says what happened, to whom and by what. A compound whose only key is `""` is a list element NBT had to wrap.
 - **`player_combat_kill`**: the player's entity id and the death message, read into `Death { text, key, victim, by }` (clojurecraft's `text/death`; `by` loses the `entity.minecraft.` prefix). The world keeps it only for the bot's own id.
 - **`damage_event`**: entity id, the damage type id, the cause and direct entity ids sent **plus one** (0 = none), then an optional position (an unread tail). The type id indexes the damage-type registry in the order the server syncs it; ruststeve uses the generated `DAMAGE_TYPE` table, as clojurecraft used its generated `damage-types.edn`.
+- **Other text** (issue 16e): system chat, the action bar, titles, subtitles and a boss bar's name are read through the same `read_root` and `plain` into one line of text each. A spawner's `block_entity_data` is network NBT too: its mob is `SpawnData.entity.id`.
 
 ## Gotchas
 - The server model writes these packets too (`write_root`, `death_component`, the encoders), round-trip tested against the reader ([[server-model]]).
