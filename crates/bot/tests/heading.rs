@@ -3,7 +3,7 @@
 //! cut, bridges a lava sea with the keep held after restocking from the wall, fails a leg that
 //! stops gaining, turns for a crimson forest at the feet, and gives way to a known forest.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use data::{BlockKind, ItemKind};
 use plan::heading::{self, Dir, Heading, Signs};
@@ -115,12 +115,12 @@ fn open_ground_holds_the_axis_two_hundred_blocks() {
     assert!(!out.run.died);
 }
 
-/// Open ground ends in solid netherrack at x 30: the heading tunnels on its axis, level, at two
-/// digs a metre at most, and never turns.
+/// A wall of solid netherrack across the axis, x 30 to 39: the heading tunnels it on its axis,
+/// level, at two digs a metre at most and inside a leg's dig budget, and never turns.
 #[test]
 fn a_wall_is_tunnelled_on_the_axis_at_two_digs_a_metre() {
     let mut stage = flat((-16, 140), (-24, 24));
-    stage.fill((30, 140), (64, 79), (-24, 24), BlockKind::Netherrack);
+    stage.fill((30, 39), (64, 79), (-48, 48), BlockKind::Netherrack);
     let out = drive(
         &stage,
         &[
@@ -141,7 +141,7 @@ fn a_wall_is_tunnelled_on_the_axis_at_two_digs_a_metre() {
         out.tail()
     );
     let h = out.p.headed.as_ref().unwrap();
-    let rock = (x - 30.0).max(1.0);
+    let rock = 10.0;
     assert!(
         f64::from(h.digs) <= 2.0 * rock + 4.0,
         "{} digs for {rock:.0} m of rock: {:#?}",
@@ -153,26 +153,27 @@ fn a_wall_is_tunnelled_on_the_axis_at_two_digs_a_metre() {
 }
 
 /// The 1-wide causeway with a dead end (clojurecraft's `heading-no-pace` case). West ground, a lava
-/// sea east of x 0, a causeway on z 0 to x 60, and land north of the sea from x -16 to 80. The
+/// sea east of x 0, a causeway on z 0 to x 60, and land north of the sea (z -14 and on) from x -16
+/// to 80. The
 /// first leg walks the causeway; the second has no way east (the sea past x 60 needs more blocks
 /// than the keep spares), so the heading turns north. A walk back along the causeway and round by
 /// the west ground is a plain route north; it runs over cut cells and is refused, so the far walk
 /// bridges north. The causeway is never walked back.
 #[test]
 fn a_dead_end_causeway_is_turned_from_and_never_walked_back() {
-    let mut stage = Stage::over((-16, 120), (-90, 30), 49, 80);
+    let mut stage = Stage::over((-16, 120), (-200, 30), 49, 80);
     stage
-        .fill((1, 120), (50, 63), (-90, 30), BlockKind::Lava)
-        .fill((-16, 0), (50, 63), (-90, 30), BlockKind::Netherrack)
+        .fill((1, 127), (50, 63), (-210, 40), BlockKind::Lava)
+        .fill((-16, 0), (50, 63), (-210, 40), BlockKind::Netherrack)
         .fill((1, 60), (63, 63), (0, 0), BlockKind::Netherrack)
-        .fill((-16, 80), (50, 63), (-90, -14), BlockKind::Netherrack)
+        .fill((-16, 80), (50, 63), (-210, -14), BlockKind::Netherrack)
         .spawn((-5, 64, 0));
     let out = drive(
         &stage,
         &[(ItemKind::Netherrack, 50)],
         (1, 0),
         Signs::default(),
-        5000,
+        2500,
     );
     let tail = out.tail();
     assert_eq!(out.count("heading turned to (0, -1)"), 1, "{tail:#?}");
@@ -203,12 +204,12 @@ fn a_dead_end_causeway_is_turned_from_and_never_walked_back() {
 /// note says so ("paced"), and the bot never walks back.
 #[test]
 fn a_way_only_back_over_the_cut_is_refused_and_said() {
-    let mut stage = Stage::over((-16, 120), (-90, 30), 49, 80);
+    let mut stage = Stage::over((-16, 120), (-200, 30), 49, 80);
     stage
-        .fill((1, 120), (50, 63), (-90, 30), BlockKind::Lava)
-        .fill((-16, 0), (50, 63), (-90, 30), BlockKind::Netherrack)
+        .fill((1, 127), (50, 63), (-210, 40), BlockKind::Lava)
+        .fill((-16, 0), (50, 63), (-210, 40), BlockKind::Netherrack)
         .fill((1, 60), (63, 63), (0, 0), BlockKind::Netherrack)
-        .fill((-16, 80), (50, 63), (-90, -14), BlockKind::Netherrack)
+        .fill((-16, 80), (50, 63), (-210, -14), BlockKind::Netherrack)
         .spawn((-5, 64, 0));
     let out = drive(
         &stage,
@@ -234,8 +235,8 @@ fn a_way_only_back_over_the_cut_is_refused_and_said() {
 fn a_lava_sea_is_bridged_with_the_keep_held_after_a_restock() {
     let mut stage = Stage::over((-16, 120), (-24, 24), 49, 80);
     stage
-        .fill((-16, 120), (50, 63), (-24, 24), BlockKind::Netherrack)
-        .fill((11, 20), (50, 63), (-24, 24), BlockKind::Lava)
+        .fill((-16, 127), (50, 63), (-48, 48), BlockKind::Netherrack)
+        .fill((11, 20), (50, 63), (-48, 48), BlockKind::Lava)
         .fill((-6, -2), (64, 67), (-3, 3), BlockKind::Netherrack)
         .spawn((0, 64, 0));
     let out = drive(
@@ -315,7 +316,7 @@ fn a_crimson_forest_at_the_feet_turns_the_heading_once() {
     let (w, mut p, _) = joined();
     let crimson = Signs {
         feet_biome: Some("crimson_forest"),
-        forest: None,
+        ..Signs::default()
     };
     let _ = p.heading_with(&w, crimson, 100);
     let turned = |p: &Plan| {
@@ -338,8 +339,8 @@ fn a_crimson_forest_at_the_feet_turns_the_heading_once() {
 fn a_known_forest_replaces_the_heading_and_its_biome_ends_it() {
     let (w, mut p, feet) = joined();
     let forest = Signs {
-        feet_biome: None,
-        forest: Some((-2, 1)),
+        forest: Some((2, 1)),
+        ..Signs::default()
     };
     let t = p.heading_with(&w, forest, 100);
     assert!(t.is_some(), "{:#?}", said(&p));
@@ -347,14 +348,14 @@ fn a_known_forest_replaces_the_heading_and_its_biome_ends_it() {
     assert!(
         notes
             .iter()
-            .any(|n| n.contains("heading to the warped forest at column (-2, 1)")),
+            .any(|n| n.contains("heading to the warped forest at column (2, 1)")),
         "{notes:#?}"
     );
     let leg = p.headed.as_ref().unwrap().leg.clone().unwrap();
-    assert_eq!(leg.target, (-24, feet.1, 24), "the forest's column centre");
+    assert_eq!(leg.target, (40, feet.1, 24), "the forest's column centre");
     let warped = Signs {
         feet_biome: Some("warped_forest"),
-        forest: None,
+        ..Signs::default()
     };
     p.task = Task::Idle;
     assert!(p.heading_with(&w, warped, 140).is_none());
@@ -375,17 +376,22 @@ fn the_axis_points_away_from_the_explored_and_else_to_the_unseen() {
     let fortress: BTreeSet<(i32, i32)> = (-12..=-6)
         .flat_map(|x| (-3..=3).map(move |z| (x, z)))
         .collect();
-    let (dir, why) = heading::choose_dir((0, 64, 0), &fortress, &[]).unwrap();
+    let (dir, why) = heading::choose_dir((0, 64, 0), &fortress, &BTreeMap::new(), &[]).unwrap();
     assert_eq!(dir, (1, 0), "{why}");
+    // Soul signs seen one way count for it, before the way away from the explored.
+    let soul: BTreeMap<(i32, i32), u32> = [((0, 4), 20)].into();
+    let (dir, why) = heading::choose_dir((0, 64, 0), &fortress, &soul, &[]).unwrap();
+    assert_eq!(dir, (0, 1), "{why}");
+    assert!(why.contains("soul signs"), "{why}");
     // Never an avoided axis.
-    let (dir, _) = heading::choose_dir((0, 64, 0), &fortress, &[(1, 0)]).unwrap();
+    let (dir, _) = heading::choose_dir((0, 64, 0), &fortress, &BTreeMap::new(), &[(1, 0)]).unwrap();
     assert_ne!(dir, (1, 0));
     // Seen all round the feet but a strip south: the centroid is near, so the strip decides.
     let round: BTreeSet<(i32, i32)> = (-16..=16)
         .flat_map(|x| (-16..=16).map(move |z| (x, z)))
         .filter(|(x, z): &(i32, i32)| !(*z >= 7 && x.abs() <= 2))
         .collect();
-    let (dir, why) = heading::choose_dir((8, 64, 8), &round, &[]).unwrap();
+    let (dir, why) = heading::choose_dir((8, 64, 8), &round, &BTreeMap::new(), &[]).unwrap();
     assert_eq!(dir, (0, 1), "{why}");
     // The turn goes to the side with fewer seen columns, a tie away from the last side.
     assert_eq!(heading::turn_dir((1, 0), (0, 0), &round, 0).0, (0, 1));

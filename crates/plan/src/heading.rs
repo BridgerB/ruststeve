@@ -20,7 +20,7 @@
 //! What it may know (strict no X-ray): blocks seen, the biome at its own feet and the biomes that
 //! blocks seen evidence; never a biome of an unseen column, never anything from RCON.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use data::BlockKind;
 use world::{BlockPos, World};
@@ -65,6 +65,11 @@ pub const PLACED_PER_M: f64 = 1.0;
 pub const BUDGET_GRACE: i32 = 8;
 /// A tunnel leg's digs are estimated at this a metre against the uses left over the reserve.
 pub const TUNNEL_DIGS_PER_M: i32 = 2;
+/// A leg's hard dig budget: 144 pickaxe uses in all in the frontier kit (13 + 131, 17a's read of
+/// the snapshot), 40 of them the reserve, so about four tunnelled legs' worth at 24 (a level
+/// tunnel's 2 a metre over half a leg). Walk and bridge are the legs' ways; a tunnel is the
+/// exception.
+pub const LEG_DIGS: u32 = 24;
 /// Seen columns counted ahead on an axis: chunks 7 to 16 out, 2 either side (clojurecraft's
 /// `most-unseen-dir`, over seen columns, not loaded ones).
 pub const AHEAD_NEAR: i32 = 7;
@@ -190,8 +195,12 @@ pub struct Heading {
     pub restock_after: u64,
     /// The feet biome a turn was last made for (crimson or basalt), so it turns once on entering.
     pub biome_turned: Option<String>,
-    /// The forest column a leg is running to.
+    /// The column legs are running to (a warped forest, or a soul sand valley), instead of the axis.
     pub forest: Option<(i32, i32)>,
+    /// Whether that column is a soul sand valley's (reached, the axis goes on) and not a forest's.
+    pub valley: bool,
+    /// Valleys reached: never run to again.
+    pub valleys: Vec<(i32, i32)>,
     /// Set when the heading is over (a warped forest at the feet, or turned out).
     pub over: bool,
 }
@@ -202,6 +211,9 @@ pub struct Signs {
     pub feet_biome: Option<&'static str>,
     /// A column with a warped forest's signs seen (`Memory::forest_known`).
     pub forest: Option<(i32, i32)>,
+    /// A column with a soul sand valley's signs seen (soul sand and soul soil): the second
+    /// choice, an enderman spawns there too (docs/problems/endermen.md, 17a).
+    pub valley: Option<(i32, i32)>,
 }
 
 // >>> stubs (agreed signatures; the real calls replace these at merge, BRIEF.md):
@@ -227,6 +239,16 @@ fn feet_biome(_w: &World) -> Option<&'static str> {
     None
 }
 
+/// A soul sand valley known from soul blocks seen (`biome_signs_in_column`'s `soul`).
+fn valley_known(_w: &World) -> Option<(i32, i32)> {
+    None
+}
+
+/// Soul signs seen in one column.
+fn soul_signs_in_column(_w: &World, _cx: i32, _cz: i32) -> u32 {
+    0
+}
+
 fn pickaxe_uses_left(w: &World) -> i32 {
     crate::dig_budget(w, false)
 }
@@ -237,6 +259,14 @@ fn pickaxe_reserve(_p: &Plan) -> i32 {
 }
 // <<< stubs
 
+/// The seen columns with soul signs, and how many.
+fn soul_columns(w: &World, seen: &BTreeSet<(i32, i32)>) -> BTreeMap<(i32, i32), u32> {
+    seen.iter()
+        .map(|c| (*c, soul_signs_in_column(w, c.0, c.1)))
+        .filter(|(_, n)| *n > 0)
+        .collect()
+}
+
 /// Seen columns `AHEAD_NEAR` to `AHEAD_FAR` chunks ahead of `chunk` on `dir`, `AHEAD_WIDE` aside.
 pub fn seen_ahead(seen: &BTreeSet<(i32, i32)>, chunk: (i32, i32), (dx, dz): Dir) -> usize {
     (AHEAD_NEAR..=AHEAD_FAR)
@@ -245,11 +275,30 @@ pub fn seen_ahead(seen: &BTreeSet<(i32, i32)>, chunk: (i32, i32), (dx, dz): Dir)
         .count()
 }
 
-/// The axis to hold from `feet`, with why: the one pointing most away from the centroid of the
-/// columns seen (the fortress and the portal trail in them), never one of `avoid`; ties (the
-/// centroid within `AWAY_MIN`, or two axes level) to the fewest seen columns ahead, then `AXES`'
-/// order. `None` when every axis is avoided. Pure.
-pub fn choose_dir(feet: Cell, seen: &BTreeSet<(i32, i32)>, avoid: &[Dir]) -> Option<(Dir, String)> {
+/// Soul signs seen in the columns on `dir`'s side of `chunk` (ahead more than aside): a soul
+/// sand valley that way, where endermen spawn too.
+pub fn soul_ahead(soul: &BTreeMap<(i32, i32), u32>, chunk: (i32, i32), (dx, dz): Dir) -> u32 {
+    soul.iter()
+        .filter(|((cx, cz), _)| {
+            let (x, z) = (cx - chunk.0, cz - chunk.1);
+            let on = x * dx + z * dz;
+            on > 0 && on >= (x * dz - z * dx).abs()
+        })
+        .map(|(_, n)| *n)
+        .sum()
+}
+
+/// The axis to hold from `feet`, with why, never one of `avoid`: the one with the most soul signs
+/// seen on its side (`soul_ahead`), then the one pointing most away from the centroid of the
+/// columns seen (the fortress and the portal trail in them); ties (the centroid within
+/// `AWAY_MIN`, or two axes level) to the fewest seen columns ahead, then `AXES`' order. `None`
+/// when every axis is avoided. Pure.
+pub fn choose_dir(
+    feet: Cell,
+    seen: &BTreeSet<(i32, i32)>,
+    soul: &BTreeMap<(i32, i32), u32>,
+    avoid: &[Dir],
+) -> Option<(Dir, String)> {
     let n = seen.len().max(1) as f64;
     let (sx, sz) = seen.iter().fold((0.0, 0.0), |(x, z), (cx, cz)| {
         (x + f64::from(cx * 16 + 8), z + f64::from(cz * 16 + 8))
@@ -268,14 +317,23 @@ pub fn choose_dir(feet: Cell, seen: &BTreeSet<(i32, i32)>, avoid: &[Dir]) -> Opt
         } else {
             0
         };
-        (std::cmp::Reverse(dot), seen_ahead(seen, chunk, *d))
+        (
+            std::cmp::Reverse(soul_ahead(soul, chunk, *d)),
+            std::cmp::Reverse(dot),
+            seen_ahead(seen, chunk, *d),
+        )
     };
     let best = AXES
         .iter()
         .filter(|d| !avoid.contains(d))
         .min_by_key(|d| score(d))?;
-    let (dot, ahead) = score(best);
-    let why = if far {
+    let (souls, dot, ahead) = score(best);
+    let why = if souls.0 > 0 {
+        format!(
+            "{} soul signs seen that way (a soul sand valley); {ahead} seen columns ahead",
+            souls.0
+        )
+    } else if far {
         format!(
             "{} blocks away from the centroid of {} seen columns at ({:.0}, {:.0}); {ahead} seen \
              columns ahead",
@@ -391,6 +449,13 @@ fn open(w: &World, c: Cell) -> bool {
     )
 }
 
+/// Whether the feet are within `LEG_REACH` of a column's centre on the plane.
+fn feet_at_column(feet: Cell, col: Option<(i32, i32)>) -> bool {
+    col.is_some_and(|(cx, cz)| {
+        (cx * 16 + 8 - feet.0).abs() + (cz * 16 + 8 - feet.2).abs() <= LEG_REACH
+    })
+}
+
 fn per_m(n: f64, gain: i32) -> f64 {
     n / f64::from(gain.max(1))
 }
@@ -410,8 +475,8 @@ impl Heading {
     /// The axis chosen once from what is seen (plan 17d): see `choose_dir`.
     pub fn choose(w: &World, feet: Cell, tick: u64) -> Self {
         let seen = seen_columns(w);
-        let (dir, why) =
-            choose_dir(feet, &seen, &[]).unwrap_or(((1, 0), "no axis scored".to_owned()));
+        let (dir, why) = choose_dir(feet, &seen, &soul_columns(w, &seen), &[])
+            .unwrap_or(((1, 0), "no axis scored".to_owned()));
         Self::new(dir, feet, tick, why)
     }
 
@@ -483,6 +548,7 @@ impl Plan {
         let signs = Signs {
             feet_biome: feet_biome(w),
             forest: forest_known(w),
+            valley: valley_known(w),
         };
         self.heading_with(w, signs, tick)
     }
@@ -545,16 +611,30 @@ impl Plan {
             );
             return None;
         }
-        // A forest known from blocks seen replaces the axis: legs run to it.
+        // A forest known from blocks seen replaces the axis (and a valley): legs run to it.
         if let Some(col) = signs.forest
-            && h.forest != Some(col)
+            && (h.forest != Some(col) || h.valley)
         {
             h.forest = Some(col);
+            h.valley = false;
             self.heading_leg_end(w, h, feet, tick, "replaced: a warped forest is known");
             self.note(
                 tick,
                 format!("heading to the warped forest at column {col:?}"),
                 "a forest known from warped blocks seen replaces the axis".to_owned(),
+            );
+        }
+        // Else a soul sand valley known from soul blocks seen, once: endermen spawn there too.
+        if h.forest.is_none()
+            && let Some(col) = signs.valley.filter(|c| !h.valleys.contains(c))
+        {
+            h.forest = Some(col);
+            h.valley = true;
+            self.heading_leg_end(w, h, feet, tick, "replaced: a soul sand valley is known");
+            self.note(
+                tick,
+                format!("heading to the soul sand valley at column {col:?}"),
+                "soul blocks seen there; no warped forest known; the axis waits".to_owned(),
             );
         }
         // Restock in hand: on until enough, or no wall cell to dig.
@@ -570,7 +650,35 @@ impl Plan {
                     }
                     self.heading_fail(w, h, feet, tick, "no way on")?;
                 }
-                Look::Done => self.heading_leg_end(w, h, feet, tick, "done"),
+                Look::Done => {
+                    self.heading_leg_end(w, h, feet, tick, "done");
+                    if let Some(col) = h
+                        .forest
+                        .filter(|_| h.leg.is_none() && feet_at_column(feet, h.forest))
+                    {
+                        if h.valley {
+                            // The valley is crossed, not waited in: the axis goes on.
+                            h.valleys.push(col);
+                            h.forest = None;
+                            h.valley = false;
+                            self.note(
+                                tick,
+                                format!("soul sand valley reached at column {col:?}"),
+                                "the axis goes on from here".to_owned(),
+                            );
+                        } else {
+                            h.over = true;
+                            self.note(
+                                tick,
+                                format!("heading ended: the warped forest at column {col:?}"),
+                                format!(
+                                    "its column's centre reached at {feet:?}; the endermen task takes                                      over"
+                                ),
+                            );
+                            return None;
+                        }
+                    }
+                }
                 Look::Failed(why) => {
                     self.heading_fail(w, h, feet, tick, &why)?;
                 }
@@ -673,6 +781,12 @@ impl Plan {
         if tick.saturating_sub(leg.mark.1) > PACE_TICKS {
             return Look::Failed(format!(
                 "NoProgress: under {PACE_GAIN} blocks gained in {PACE_TICKS} ticks"
+            ));
+        }
+        if leg.digs > LEG_DIGS {
+            return Look::Failed(format!(
+                "over budget: {} digs, the leg's budget is {LEG_DIGS}",
+                leg.digs
             ));
         }
         let gain = here - leg.progress(dir, leg.from);
@@ -814,7 +928,8 @@ impl Plan {
                 Way::Tunnel => {
                     let left = pickaxe_uses_left(w);
                     let reserve = pickaxe_reserve(self);
-                    let need = TUNNEL_DIGS_PER_M * (LEG - here.max(0)).max(LEG_REACH);
+                    let need = (TUNNEL_DIGS_PER_M * (LEG - here.max(0)).max(LEG_REACH))
+                        .min(i32::try_from(LEG_DIGS).unwrap_or(i32::MAX));
                     if left > reserve + need {
                         let target = leg.target;
                         let n = leg.n;
@@ -864,10 +979,15 @@ impl Plan {
                         let goal = leg_now.goal(dir);
                         let mut walk = Walk::far_to(leg_now.target, goal, tick);
                         walk.more.keep = Some(KEEP);
-                        if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
-                            let back = walk.waypoints.as_ref().map_or(0, |wps| {
-                                wps.iter().filter(|c| blocked.contains(c)).count()
-                            });
+                        let found =
+                            walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
+                        let back = walk
+                            .waypoints
+                            .as_ref()
+                            .map_or(0, |wps| wps.iter().filter(|c| blocked.contains(c)).count());
+                        let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
+                        // Only a route the cut alone refused: over cut cells, within the keep.
+                        if found && back > 0 && bridges <= path::bridge_blocks(w) - KEEP {
                             self.note(
                                 tick,
                                 format!("heading leg {n} refused for cut (paced)"),
@@ -971,7 +1091,7 @@ impl Plan {
             h.choices += 1;
             let avoid = std::mem::take(&mut h.failed);
             let chosen = (h.choices < MAX_CHOICES)
-                .then(|| choose_dir(feet, &seen, &[was]))
+                .then(|| choose_dir(feet, &seen, &soul_columns(w, &seen), &[was]))
                 .flatten();
             let Some((dir, reason)) = chosen else {
                 h.over = true;

@@ -5,7 +5,12 @@
 //! ```text
 //! cargo run -p replay --bin replan -- <file.rsr> --at <ticks> --route <x,y,z> [--range 2] [--nodes 6000] [--force]
 //! cargo run -p replay --bin replan -- <file.rsr> --at <ticks> --steps <n> [--goal race] [--goals config/goals.toml] [--force]
+//! cargo run -p replay --bin replan -- <file.rsr> --at <ticks> --steps <n> --heading [--force]
 //! ```
+//!
+//! `--heading` steps a planner holding `hold` whose only work is the heading
+//! (`Plan::heading_task`, issue 17d, docs/problems/heading.md), asked each time it is idle: its
+//! legs, routes and their times from the feet at that moment.
 //!
 //! `--route` prints `plan::path::plan` from the feet to within `--range` of the cell (0 is the
 //! cell itself): how it ended, what it spent, its waypoints, why the feet's own cell is or is not
@@ -49,6 +54,7 @@ struct Args {
     steps: Option<u64>,
     goal: String,
     goals: String,
+    heading: bool,
 }
 
 fn args() -> Result<Args, String> {
@@ -64,12 +70,17 @@ fn args() -> Result<Args, String> {
         steps: None,
         goal: "race".to_owned(),
         goals: "config/goals.toml".to_owned(),
+        heading: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
         match flag.as_str() {
             "--force" => a.force = true,
+            "--heading" => {
+                a.heading = true;
+                a.goal = "hold".to_owned();
+            }
             "--at" => at = Some(At::Ticks(num(&value("--at")?)?)),
             "--event" => at = Some(At::Event(num(&value("--event")?)?)),
             "--route" => a.route = Some(replay::parse_cell(&value("--route")?)?),
@@ -354,10 +365,17 @@ fn steps(mut world: World, n: u64, clock: u64, a: &Args) -> Result<(), String> {
     let mut seen = 0u64;
     let mut last_controls = None;
     let mut times: Vec<f64> = Vec::new();
+    let mut heading_over = false;
     for i in 0..n {
         // How long the step took (a fight's planner step ran 128 ms at p99 in race 45350933958
         // lane 1 and the bot was dropped): slow steps are printed with the task they ran.
         let t0 = std::time::Instant::now();
+        if a.heading && !heading_over && matches!(p.task, plan::Task::Idle) {
+            match p.heading_task(&world, world.ticks) {
+                Some(t) => p.task = t,
+                None => heading_over = true,
+            }
+        }
         let c = p.step(&world);
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         times.push(ms);
