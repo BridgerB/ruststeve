@@ -61,6 +61,15 @@ pub enum StairStage {
         since: u64,
         level: bool,
     },
+    /// A travel tunnel's stair up with no block to step onto (a cavern's floor, the air under a
+    /// roof): held blocks are laid first, each `(cell, the block clicked, its face)`, then the
+    /// stair is cut as any other.
+    Lay {
+        lays: Vec<(Cell, Cell, i8)>,
+        cells: Vec<Cell>,
+        to: Cell,
+        sent: Option<u64>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -84,6 +93,58 @@ pub struct Stairs {
     /// tunnel toward it level or down only (docs/problems/blaze.md wall 1).
     #[serde(default)]
     pub up: bool,
+    /// A travel tunnel's stretch (docs/problems/nether-tunnel.md): the feet cells to cut to, in
+    /// order, the first where the feet are. Each step is the level step, stair up or stair down
+    /// that leads to the next cell; a refusal ends the stretch (the planner blocks the cell and
+    /// searches its route again), no heading is turned.
+    #[serde(default)]
+    pub route: Vec<Cell>,
+    /// Cells dug, and where the feet were when the task began: a staircase that ends having dug
+    /// nothing and gone nowhere has failed (docs/problems/nether-testbed.md: "cut 6 stairs" in
+    /// 40 ticks over cells already open, again and again, read as progress).
+    #[serde(default)]
+    pub dug: u32,
+    #[serde(default)]
+    pub from: Option<Cell>,
+}
+
+/// Blocks a stair is laid with, the first held: what a tunnel leaves in the pack.
+pub const LAY_ITEMS: [data::ItemKind; 3] = [
+    data::ItemKind::Netherrack,
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+];
+/// Ticks a laid block may take to show before the step fails.
+pub const LAY_TICKS: u64 = 40;
+
+/// The first of `LAY_ITEMS` in the inventory.
+pub fn lay_item(w: &World) -> Option<data::ItemKind> {
+    LAY_ITEMS.into_iter().find(|i| w.inventory.count(*i) > 0)
+}
+
+/// What a stair up from `from` to `to` must lay first, when the block it steps onto is missing:
+/// the cell under that block (clicked onto the side of the block the feet stand on) when it is
+/// open too, then the block itself (clicked onto the top of the one under it). Empty when the
+/// step has its floor or is not a stair up.
+pub fn lays(w: &World, from: Cell, to: Cell) -> Vec<(Cell, Cell, i8)> {
+    let (dx, dz) = (to.0 - from.0, to.2 - from.2);
+    let floor = (to.0, to.1 - 1, to.2);
+    if to.1 != from.1 + 1 || !open(kind(w, floor)) {
+        return Vec::new();
+    }
+    let under = (floor.0, floor.1 - 1, floor.2);
+    let mut out = Vec::new();
+    if !full(kind(w, under)) {
+        let face = match (dx, dz) {
+            (1, _) => 5,
+            (-1, _) => 4,
+            (_, 1) => 3,
+            _ => 2,
+        };
+        out.push((under, (from.0, from.1 - 1, from.2), face));
+    }
+    out.push((floor, under, 1));
+    out
 }
 
 fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
@@ -151,7 +212,12 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
     if hot(kind(w, floor)) {
         return Some(format!("magma under {floor:?}"));
     }
-    if !full(kind(w, floor)) && !short_drop(w, floor) {
+    // What the walk stands on is a floor here too, full block or not (soul sand, once the route
+    // takes it): the stair and the walk agree by construction (docs/problems/nether-tunnel.md:
+    // 19 of a tunnel's 22 refusals were soul sand floors on one cavern face).
+    let stood_on =
+        path::classify(w.state_at(BlockPos::new(floor.0, floor.1, floor.2))) == path::Class::Solid;
+    if !full(kind(w, floor)) && !stood_on && !short_drop(w, floor) {
         return Some(format!("no floor at {floor:?}"));
     }
     // Nothing that falls over what is opened: gravel or sand over a dug cell drops into it and
@@ -228,7 +294,77 @@ impl Stairs {
             started: tick,
             level_only: false,
             up: false,
+            route: Vec::new(),
+            dug: 0,
+            from: None,
         }
+    }
+
+    /// A stretch of a travel tunnel: the steps that lead along `route`, as far as it goes.
+    pub fn along(route: Vec<Cell>, tick: u64) -> Self {
+        let dir = match route.as_slice() {
+            [a, b, ..] => (b.0 - a.0, b.2 - a.2),
+            _ => (1, 0),
+        };
+        Self {
+            route,
+            ..Self::new(dir, tick)
+        }
+    }
+
+    /// The next step along the route from the feet; `Ok(None)` at its end.
+    fn plan_route(&mut self, feet: Cell, w: &World) -> Result<Option<StairStage>, StairsFailure> {
+        let Some(i) = self.route.iter().position(|c| *c == feet) else {
+            self.refusals.push(format!("off the route at {feet:?}"));
+            return Err(StairsFailure::Boxed);
+        };
+        let Some(to) = self.route.get(i + 1).copied() else {
+            return Ok(None);
+        };
+        let Some((cells, floor)) = crate::tunnel::opened(feet, to) else {
+            self.refusals
+                .push(format!("no step from {feet:?} to {to:?}"));
+            return Err(StairsFailure::Boxed);
+        };
+        self.dir = (to.0 - feet.0, to.2 - feet.2);
+        let lays = lays(w, feet, to);
+        if !lays.is_empty() {
+            // Nothing laid into or beside a fluid, and only onto something clickable.
+            let wet = lays.iter().any(|(c, _, _)| {
+                !open(kind(w, *c))
+                    || SIDES.iter().any(|(dx, dy, dz)| {
+                        fluid(kind(w, (c.0 + dx, c.1 + dy, c.2 + dz))).is_some()
+                    })
+            });
+            let why = if wet {
+                Some(format!(
+                    "no floor at {floor:?} and fluid where one would be laid"
+                ))
+            } else if lay_item(w).is_none() {
+                Some(format!("no floor at {floor:?} and no block to lay"))
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                self.refusals.push(why);
+                return Err(StairsFailure::Boxed);
+            }
+            return Ok(Some(StairStage::Lay {
+                lays,
+                cells,
+                to,
+                sent: None,
+            }));
+        }
+        if let Some(why) = refusal(w, &cells, floor) {
+            self.refusals.push(why);
+            return Err(StairsFailure::Boxed);
+        }
+        Ok(Some(StairStage::Cut {
+            cells,
+            to,
+            level: to.1 == feet.1,
+        }))
     }
 
     /// Stairs up: `STAIR_DEPTH` steps up along the heading (a level step where all four headings
@@ -306,17 +442,102 @@ impl Stairs {
             return (still, None, StairsStatus::Failed(StairsFailure::Lost));
         };
         let feet = path::feet_cell(body.pos);
+        let from = *self.from.get_or_insert(feet);
         match &mut self.stage {
+            StairStage::Lay {
+                lays,
+                cells,
+                to,
+                sent,
+            } => {
+                let Some((c, against, face)) =
+                    lays.iter().find(|(c, _, _)| open(kind(w, *c))).copied()
+                else {
+                    let (cells, to) = (cells.clone(), *to);
+                    return match refusal(w, &cells, (to.0, to.1 - 1, to.2)) {
+                        None => {
+                            self.stage = StairStage::Cut {
+                                cells,
+                                to,
+                                level: false,
+                            };
+                            (still, None, StairsStatus::Running)
+                        }
+                        Some(why) => {
+                            self.refusals.push(why);
+                            (still, None, StairsStatus::Failed(StairsFailure::Boxed))
+                        }
+                    };
+                };
+                if let Some(at) = *sent {
+                    if tick.saturating_sub(at) <= LAY_TICKS {
+                        return (still, None, StairsStatus::Running);
+                    }
+                    self.refusals
+                        .push(format!("a block laid at {c:?} did not show"));
+                    return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
+                }
+                let Some(item) = lay_item(w) else {
+                    self.refusals.push(format!("no block to lay at {c:?}"));
+                    return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
+                };
+                match crate::hold::toward(w, item) {
+                    crate::hold::Hold::Held => {
+                        *sent = Some(tick);
+                        let act = Act::UseOn {
+                            pos: BlockPos::new(against.0, against.1, against.2),
+                            face,
+                        };
+                        (still, Some(act), StairsStatus::Running)
+                    }
+                    crate::hold::Hold::Act(a) => (still, Some(a), StairsStatus::Running),
+                    crate::hold::Hold::Wait => (still, None, StairsStatus::Running),
+                    crate::hold::Hold::Missing => {
+                        (still, None, StairsStatus::Failed(StairsFailure::Boxed))
+                    }
+                }
+            }
             StairStage::Plan => {
                 if self.stairs >= STAIR_DEPTH {
+                    // Six steps over cells already open that came back to where they began:
+                    // nothing was done, and saying "done" hides it.
+                    let gone =
+                        (feet.0 - from.0).abs() + (feet.1 - from.1).abs() + (feet.2 - from.2).abs();
+                    if self.dug == 0 && gone <= 1 {
+                        self.refusals
+                            .push("nothing cut and nowhere gone".to_owned());
+                        return (still, None, StairsStatus::Failed(StairsFailure::Boxed));
+                    }
                     return (still, None, StairsStatus::Done);
                 }
+                if !self.route.is_empty() {
+                    // A stretch that cut a step is done where it stops: the planner reads the
+                    // feet's place on the route and knows the next step failed.
+                    return match self.plan_route(feet, w) {
+                        Ok(Some(s)) => {
+                            self.stage = s;
+                            (still, None, StairsStatus::Running)
+                        }
+                        Ok(None) => (still, None, StairsStatus::Done),
+                        Err(_) if self.stairs > 0 => (still, None, StairsStatus::Done),
+                        Err(f) => (still, None, StairsStatus::Failed(f)),
+                    };
+                }
+                let before = self.refusals.len();
                 match self.plan(feet, w) {
                     Ok(s) => {
                         self.stage = s;
                         (still, None, StairsStatus::Running)
                     }
-                    Err(f) => (still, None, StairsStatus::Failed(f)),
+                    Err(f) => {
+                        // Boxed: every heading's refusal in one line, the last the ledger prints.
+                        let all = self.refusals.get(before..).unwrap_or_default().join("; ");
+                        self.refusals.push(format!(
+                            "boxed at {feet:?} after {} level steps: {all}",
+                            self.level_steps
+                        ));
+                        (still, None, StairsStatus::Failed(f))
+                    }
                 }
             }
             StairStage::Cut { cells, to, level } => {
@@ -340,7 +561,9 @@ impl Stairs {
                             self.dig = None;
                             (still, act, StairsStatus::Running)
                         }
-                        DigStatus::Failed(_) => {
+                        DigStatus::Failed(f) => {
+                            self.refusals
+                                .push(format!("a dig for the stair to {to:?} failed {f:?}"));
                             (still, act, StairsStatus::Failed(StairsFailure::DigFailed))
                         }
                     };
@@ -354,6 +577,7 @@ impl Stairs {
                         d.drop = None;
                         d.others.clear();
                         self.dig = Some(d);
+                        self.dug += 1;
                         (still, None, StairsStatus::Running)
                     }
                     None => {
@@ -381,20 +605,30 @@ impl Stairs {
                         && feet.1 < to.1
                         && feet.1 >= to.1 - MAX_DROP)
                 {
-                    if !*level || self.level_only {
+                    if !*level || self.level_only || !self.route.is_empty() {
                         self.stairs += 1;
                         self.turns = 0;
                     }
                     self.stage = StairStage::Plan;
                     return (still, None, StairsStatus::Running);
                 }
+                // Every failure names its reason (644 "last refusal: ;" in one ledger said
+                // nothing: race 45204423376 lane 3).
+                let to = *to;
                 if tick.saturating_sub(*since) > STEP_TICKS {
+                    self.refusals.push(format!(
+                        "the step from {feet:?} onto {to:?} took over {STEP_TICKS} ticks"
+                    ));
                     return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
                 }
                 match walk.step(w, tick) {
                     (c, TaskStatus::Running) => (c, None, StairsStatus::Running),
                     (_, TaskStatus::Done) => (still, None, StairsStatus::Running),
-                    (_, TaskStatus::Failed(_)) => {
+                    (_, TaskStatus::Failed(f)) => {
+                        let under = kind(w, (to.0, to.1 - 1, to.2));
+                        self.refusals.push(format!(
+                            "the walk from {feet:?} onto {to:?} failed {f:?} (its floor {under:?})"
+                        ));
                         (still, None, StairsStatus::Failed(StairsFailure::StepFailed))
                     }
                 }
