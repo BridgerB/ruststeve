@@ -99,6 +99,11 @@ pub struct Defend {
     /// Of those, the fireballs whose velocity the server had sent.
     #[serde(default)]
     pub dodges_known: u32,
+    /// Ticks a ready swing has waited for the fall, and the swings sent falling (wall 8).
+    #[serde(default)]
+    pub crit_wait: u32,
+    #[serde(default)]
+    pub falling_swings: u32,
     /// Ticks in a row a shooter's fight has had no way to its foe.
     #[serde(default)]
     pub no_way: u32,
@@ -216,6 +221,33 @@ fn safe_ahead(w: &World, body: &physics::Body, yaw: f64) -> bool {
     false
 }
 
+/// Whether a cell has a fall beside it: a neighbour column with no floor (seen, or never seen)
+/// within three blocks under the cell's own. The top of a bridge's rail is such a cell: a bot
+/// took cover on one, was struck there and fell to its death (race 45343424571, at
+/// (127, 62, 165)).
+pub fn edge(w: &World, c: crate::path::Cell) -> bool {
+    let floor = |n: crate::path::Cell| {
+        crate::cast::seen(w, n).is_none_or(|k| {
+            data::generated::shapes::collision(k) != Some(data::types::Collision::Empty)
+        })
+    };
+    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .any(|(dx, dz)| !(1..=4).any(|down| floor((c.0 + dx, c.1 - down, c.2 + dz))))
+}
+
+/// Fire in the cell 0.9 ahead along `yaw`, at the feet or the head.
+fn fire_ahead(w: &World, pos: [f64; 3], yaw: f64) -> bool {
+    let rad = yaw.to_radians();
+    let c = crate::path::feet_cell([pos[0] - rad.sin() * 0.9, pos[1], pos[2] + rad.cos() * 0.9]);
+    [c, (c.0, c.1 + 1, c.2)].into_iter().any(|c| {
+        matches!(
+            crate::cast::seen(w, c),
+            Some(data::BlockKind::Fire | data::BlockKind::SoulFire)
+        )
+    })
+}
+
 /// Is this kind of mob hostile (the game's `monster` category)?
 pub fn hostile(kind: EntityKind) -> bool {
     data::generated::mobs::MOBS
@@ -273,7 +305,8 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
                 && (!rules.neutral.contains(&e.kind) || provoked(w, e.kind))
                 // A foe a fight never struck nor was hurt by (a spider in a pit 4.5 under the eye,
                 // fought 96 times: blaze wall 15) waits, unless its kind hits the bot.
-                && (!ignored.contains(id) || provoked(w, e.kind))
+                && (!ignored.contains(id)
+                    || (provoked(w, e.kind) && !rules.ranged.contains(&e.kind)))
         })
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= rules.defend_radius)
@@ -311,10 +344,19 @@ pub const PRESSING_TICKS: u64 = 40;
 pub fn pressing(w: &World, rules: &SurvivalRules, current: i32) -> Option<(i32, EntityKind)> {
     let body = w.body?;
     let now = w.session.server_ticks;
+    // Never a shooter: two blazes, each "the kind that just hit", were turned to in turn six
+    // times a tick and the fight never swung (race 45343420833 lane 0: 0 swings, dead at 600).
     let near = |radius: f64, want: &dyn Fn(&world::Entity) -> bool| {
         w.entities
             .iter()
-            .filter(|(id, e)| **id != current && !e.dead && hostile(e.kind) && want(e))
+            .filter(|(id, e)| {
+                **id != current
+                    && !e.dead
+                    && hostile(e.kind)
+                    && !rules.ranged.contains(&e.kind)
+                    && !rules.never_fight.contains(&e.kind)
+                    && want(e)
+            })
             .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
             .filter(|(d, _, _)| *d <= radius)
             .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
@@ -370,6 +412,11 @@ pub fn dodge_side(mid: [f64; 3], ball: [f64; 3], velocity: Option<[f64; 3]>) -> 
     let h = (v[0] * v[0] + v[2] * v[2]).sqrt();
     (h > 1e-9).then(|| [v[2] / h, -v[0] / h])
 }
+
+/// A jump leaves the ground for about 12 ticks and falls from the seventh: the jump goes this
+/// many ticks before the swing is ready, and a ready swing waits at most `CRIT_WAIT` for the fall.
+pub const CRIT_LEAD: u64 = 7;
+pub const CRIT_WAIT: u32 = 8;
 
 /// Ticks a shooter's fight stands with its foe out of reach and no step to take toward it (a
 /// floor missing, fire or lava ahead, or the foe over the reach) before it is answered from
@@ -439,6 +486,8 @@ impl Defend {
             kept_off: 0,
             dodging: None,
             dodged: Vec::new(),
+            crit_wait: 0,
+            falling_swings: 0,
             dodges: 0,
             dodges_known: 0,
             no_way: 0,
@@ -482,7 +531,7 @@ impl Defend {
             // in 220 ticks and burned there (race 45338756013 lane 2).
             for c in crate::cover::cover_cells(w, &eyes)
                 .into_iter()
-                .filter(|c| !self.cover_tried.contains(c))
+                .filter(|c| !self.cover_tried.contains(c) && !edge(w, *c))
                 .take(COVER_TRIES)
             {
                 let mut walk = crate::walk::Walk::new(
@@ -827,7 +876,10 @@ impl Defend {
                     let safe = if shooter {
                         safe_step(w, body.pos, toward)
                     } else {
-                        safe_ahead(w, &body, toward)
+                        // Any fight's close-in stays out of fire: the fire escape and a defend
+                        // on a wither skeleton cut each other every tick across a fire cell,
+                        // 20 to 2.3 health with no swing (the fire arena, probe 45343436986).
+                        safe_ahead(w, &body, toward) && !fire_ahead(w, body.pos, toward)
                     };
                     // A shooter with no step toward it, or over the reach, is answered from
                     // cover after a second, not stood under (blaze-fight wall 6).
@@ -883,11 +935,41 @@ impl Defend {
                 let faced = *self.faced_at.get_or_insert(tick);
                 let ready =
                     (crate::hunt::swing_ticks(w) * crate::dig::slowdown(w)).ceil() as u64 + 1;
+                // A shooter is struck on the way down from a jump: a falling blow is a critical
+                // one, half as much again (9 for 6 with an iron sword: a blaze's 20 in three
+                // blows, not four; blaze-fight wall 8). The jump goes `CRIT_LEAD` ticks before
+                // the swing is ready; a swing ready on the ground or on the way up waits for the
+                // fall at most `CRIT_WAIT` ticks.
+                let due = self
+                    .last_swing
+                    .map_or(0, |t| (t + ready).saturating_sub(tick));
+                let falling = !body.on_ground && body.vel[1] < 0.0;
+                let face = if shooter
+                    && body.on_ground
+                    && due <= CRIT_LEAD
+                    && !edge(w, crate::path::feet_cell(body.pos))
+                {
+                    Controls { jump: true, ..face }
+                } else {
+                    face
+                };
+                if shooter
+                    && tick > faced
+                    && due == 0
+                    && !body.on_ground
+                    && !falling
+                    && self.crit_wait < CRIT_WAIT
+                {
+                    self.crit_wait += 1;
+                    return (face, None, DefendStatus::Running);
+                }
                 if tick > faced
                     && self
                         .last_swing
                         .is_none_or(|t| tick.saturating_sub(t) >= ready)
                 {
+                    self.crit_wait = 0;
+                    self.falling_swings += u32::from(falling);
                     self.last_swing = Some(tick);
                     self.swings += 1;
                     return (
