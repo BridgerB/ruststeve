@@ -36,7 +36,11 @@ fn ticks(sim: &mut Sim, n: u32) -> Vec<S2c> {
 }
 
 fn joined_with(world: ModelWorld, config: Config) -> (Sim, Vec<S2c>) {
-    let mut sim = Sim::new(config, world).seeded(5);
+    join(Sim::new(config, world).seeded(5).with_natural_spawns())
+}
+
+/// The model joined and standing at the world's spawn; with it, what the join sent.
+fn join(mut sim: Sim) -> (Sim, Vec<S2c>) {
     for p in protocol::session::opening(775, "model", 0, "rs-test") {
         send(&mut sim, p);
     }
@@ -245,7 +249,9 @@ fn a_carved_pumpkin_on_the_head_spares_a_stare() {
 #[test]
 fn an_angry_enderman_farther_than_sixteen_teleports_toward_the_player_after_thirty_ticks() {
     let mut sim = joined(&cavern(3));
-    let id = sim.summon_enderman([30.5, FEET, 0.5]);
+    // 50 east (chunk 3, ticking): it runs at the player, and is still past 16 when the 30 ticks
+    // are up.
+    let id = sim.summon_enderman([50.5, FEET, 0.5]);
     // Angered by a hit's rule (the goal's target), then left unwatched: the player looks down.
     if let Some(m) = sim.survival.life.mobs.get_mut(&id)
         && let sim::life::Brain::Enderman(e) = &mut m.brain
@@ -266,7 +272,7 @@ fn an_angry_enderman_farther_than_sixteen_teleports_toward_the_player_after_thir
     assert!(t >= 30, "teleported after {t} ticks");
     let pos = sim.survival.life.mobs[&id].pos;
     let d = (pos[0] - sim.pos[0]).hypot(pos[2] - sim.pos[2]);
-    assert!(d < 25.0, "nearer: {d:.1} from the player");
+    assert!(d < 40.0, "nearer: {d:.1} from the player");
 }
 
 #[test]
@@ -299,32 +305,42 @@ fn a_warped_forest_spawns_endermen_beyond_twenty_four_within_ticking_chunks() {
     let mut stage = cavern(4);
     stage.biome((-64, 79), (-64, 79), Biome::WarpedForest);
     let mut sim = joined(&stage);
-    ticks(&mut sim, 200);
+    // Each new enderman judged where it appeared (they stroll after).
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..200 {
+        ticks(&mut sim, 1);
+        for (id, m) in &sim.survival.life.mobs {
+            if m.kind != EntityKind::Enderman || !seen.insert(*id) {
+                continue;
+            }
+            let p = m.pos;
+            let d = ((p[0] - 0.5).powi(2) + (p[2] - 0.5).powi(2)).sqrt();
+            assert!(d > 20.0, "spawned {d:.1} from the player");
+            assert!(sim.ticking(p), "spawned in a ticking chunk: {p:?}");
+        }
+    }
     let spawned = sim.survival.life.ender_spawns;
     assert!(spawned > 0, "the forest spawned endermen");
-    let endermen: Vec<[f64; 3]> = sim
-        .survival
-        .life
-        .mobs
-        .values()
-        .filter(|m| m.kind == EntityKind::Enderman)
-        .map(|m| m.pos)
-        .collect();
-    assert!(!endermen.is_empty());
-    for p in &endermen {
-        let d = ((p[0] - 0.5).powi(2) + (p[2] - 0.5).powi(2)).sqrt();
-        assert!(d > 20.0, "spawned {d:.1} from the player");
-        assert!(sim.ticking(*p), "spawned in a ticking chunk: {p:?}");
-    }
+    assert_eq!(seen.len() as u64, spawned);
     // The spawn cost: no two closer than 1 / 0.12 (8.3) when each spawned; they may stroll since.
-    println!("{spawned} spawned, {} alive", endermen.len());
+    println!("{spawned} spawned, {} alive", sim.survival.life.mobs.len());
 }
 
 #[test]
-fn nether_wastes_and_peaceful_spawn_no_endermen() {
-    let mut sim = joined(&cavern(4));
+fn crimson_forest_peaceful_and_spawning_off_spawn_no_endermen() {
+    let mut crimson = cavern(4);
+    crimson.biome((-64, 79), (-64, 79), Biome::CrimsonForest);
+    let mut sim = joined(&crimson);
     ticks(&mut sim, 200);
-    assert_eq!(sim.survival.life.ender_spawns, 0, "nether wastes");
+    assert_eq!(sim.survival.life.ender_spawns, 0, "crimson forest");
+    let mut forest = cavern(4);
+    forest.biome((-64, 79), (-64, 79), Biome::WarpedForest);
+    let (mut sim, _) = join(Sim::new(CONFIG, forest.build().unwrap()).seeded(5));
+    ticks(&mut sim, 200);
+    assert_eq!(
+        sim.survival.life.ender_spawns, 0,
+        "natural spawns off by default"
+    );
     let mut stage = cavern(4);
     stage.biome((-64, 79), (-64, 79), Biome::WarpedForest);
     let peaceful = Config {
@@ -334,4 +350,26 @@ fn nether_wastes_and_peaceful_spawn_no_endermen() {
     let (mut sim, _) = joined_with(stage.build().unwrap(), peaceful);
     ticks(&mut sim, 200);
     assert_eq!(sim.survival.life.ender_spawns, 0, "peaceful");
+}
+
+#[test]
+fn a_soul_sand_valley_spawns_endermen_one_pack_in_seventy_one() {
+    // Issue 17a's first target (docs/problems/endermen.md): a soul sand valley, whose monster
+    // packs are skeletons (20), ghasts (50) and endermen (1); the model spawns the endermen only.
+    let mut stage = cavern(4);
+    stage.biome((-64, 79), (-64, 79), Biome::SoulSandValley);
+    let mut sim = joined(&stage);
+    ticks(&mut sim, 4000);
+    let spawned = sim.survival.life.ender_spawns;
+    println!("soul sand valley: {spawned} endermen in 4000 ticks");
+    assert!(spawned > 0, "a valley spawns endermen, rarely");
+    let mut forest = cavern(4);
+    forest.biome((-64, 79), (-64, 79), Biome::WarpedForest);
+    let mut sim = joined(&forest);
+    ticks(&mut sim, 4000);
+    assert!(
+        sim.survival.life.ender_spawns > spawned,
+        "a forest spawns more: {} against {spawned}",
+        sim.survival.life.ender_spawns
+    );
 }

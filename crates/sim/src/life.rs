@@ -462,8 +462,9 @@ pub struct Life {
     /// Damage dealt to the player by damage type (after armour and invulnerability), so a
     /// test can say what a death was made of.
     pub hurt_by: std::collections::BTreeMap<String, f32>,
-    /// Endermen the world spawned in warped forests (issue 17).
+    /// Endermen the world spawned (issue 17), and whether it spawns them (`Sim::with_natural_spawns`).
     pub ender_spawns: u64,
+    pub natural_spawns: bool,
 }
 
 impl Default for Life {
@@ -510,6 +511,7 @@ impl Default for Life {
             mobs_fell: 0,
             hurt_by: std::collections::BTreeMap::new(),
             ender_spawns: 0,
+            natural_spawns: false,
         }
     }
 }

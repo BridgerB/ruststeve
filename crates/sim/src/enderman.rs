@@ -36,10 +36,12 @@
 //!   not met: a place in the chunk at a height up to its top block + 1, not inside a full
 //!   block; three packs of `ceil(4 rand)` tries, each moved `nextInt(6) - nextInt(6)` on x and z;
 //!   a try spawns where the player is more than 24 away and within 128, the biome is
-//!   `warped_forest` (its monster list is endermen alone, in groups of 4), the body (0.6 by 2.9)
+//!   `warped_forest` or `soul_sand_valley` (a pack's kind drawn by weight from the biome's monster
+//!   list, its group size then the pack's tries; the model spawns endermen only), the body (0.6 by 2.9)
 //!   is free of blocks and liquid over a floor that collides, and the spawn cost allows it
-//!   (charge 1, energy budget 0.12: the sum of 1 / distance to the endermen already there at
-//!   most 0.12); a pack stops at 4.
+//!   (the biome's charge and energy budget: the sum of charge² / distance to the endermen
+//!   already there at most the budget; the call stops at 4 spawned. Skeletons and ghasts carry
+//!   charges in real but are not spawned here, so the model's endermen meet less resistance).
 //!
 //! Left out: light (no light in the model: every place is dark enough), the block carried and
 //! taken (`EndermanTakeBlockGoal`: the Nether has nothing it picks up but crimson and warped
@@ -109,12 +111,37 @@ const PACK_TRIES: f64 = 4.0;
 const PACK_STEP: f64 = 6.0;
 const MONSTER_CAP: usize = 70;
 const CLUSTER: u32 = 4;
-/// The warped forest's `spawners.monster` (enderman, weight 1, 4 to 4) and `spawn_costs`
-/// (charge 1.0, energy budget 0.12), from `data/minecraft/worldgen/biome/warped_forest.json`.
-const GROUP: u32 = 4;
-const CHARGE: f64 = 1.0;
-const ENERGY_BUDGET: f64 = 0.12;
-const WARPED_FOREST: &str = "warped_forest";
+
+/// A Nether biome's `spawners.monster` (kind, weight, min, max), from
+/// `data/minecraft/worldgen/biome/<biome>.json` in the 26.1.2 jar (probes 45472254333 and
+/// 45475308661). Kinds the model does not spawn still take their share of the draws.
+fn monsters_of(biome: Option<&str>) -> &'static [(EntityKind, u32, u32, u32)] {
+    match biome {
+        Some("warped_forest") => &[(EntityKind::Enderman, 1, 4, 4)],
+        Some("nether_wastes") => &[
+            (EntityKind::Ghast, 50, 4, 4),
+            (EntityKind::ZombifiedPiglin, 100, 4, 4),
+            (EntityKind::MagmaCube, 2, 4, 4),
+            (EntityKind::Enderman, 1, 4, 4),
+            (EntityKind::Piglin, 15, 4, 4),
+        ],
+        Some("soul_sand_valley") => &[
+            (EntityKind::Skeleton, 20, 5, 5),
+            (EntityKind::Ghast, 50, 4, 4),
+            (EntityKind::Enderman, 1, 4, 4),
+        ],
+        _ => &[],
+    }
+}
+
+/// A biome's `spawn_costs` for a kind: (charge, energy budget).
+fn spawn_cost(biome: Option<&str>, kind: EntityKind) -> Option<(f64, f64)> {
+    match (biome, kind) {
+        (Some("warped_forest"), EntityKind::Enderman) => Some((1.0, 0.12)),
+        (Some("soul_sand_valley"), EntityKind::Enderman) => Some((0.7, 0.15)),
+        _ => None,
+    }
+}
 
 /// An enderman's own state.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -167,6 +194,14 @@ impl Sim {
     pub fn summon_enderman(&mut self, pos: [f64; 3]) -> i32 {
         let ender = Ender::new(self.ticks);
         self.summon_with(EntityKind::Enderman, pos, Brain::Enderman(ender))
+    }
+
+    /// Natural spawning on (issue 17): endermen in the Nether's biomes as the jar's
+    /// `NaturalSpawner` places them. Off by default, so the closed-loop worlds of earlier issues
+    /// (all `nether_wastes`, whose packs draw an enderman 1 in 168) keep their mobs.
+    pub fn with_natural_spawns(mut self) -> Self {
+        self.survival.life.natural_spawns = true;
+        self
     }
 
     /// An enderman's state, for a test.
@@ -560,7 +595,7 @@ impl Sim {
     /// The endermen's natural spawning in warped forests (`NaturalSpawner`).
     pub(crate) fn tick_ender_spawns(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
-        if self.config.peaceful || self.health <= 0.0 {
+        if !self.survival.life.natural_spawns || self.config.peaceful || self.health <= 0.0 {
             return Ok(out);
         }
         let chunks: Vec<(i32, i32)> = self
@@ -606,11 +641,17 @@ impl Sim {
             if self.solid(x0, y0, z0) == Some(1.0) {
                 continue;
             }
-            for _ in 0..PACKS {
+            // `spawnCategoryForPosition`: three packs; a pack's type is drawn at its first try that
+            // is the right distance from the player, from the biome there, and its group size
+            // then becomes the pack's tries; the whole call stops at the cluster size.
+            let mut total = 0;
+            'packs: for _ in 0..PACKS {
                 let (mut x, mut z) = (x0, z0);
-                let tries = (self.survival.next_double() * PACK_TRIES).ceil() as u32;
-                let mut spawned = 0;
-                for _ in 0..tries {
+                let mut tries = (self.survival.next_double() * PACK_TRIES).ceil() as u32;
+                let mut chosen: Option<EntityKind> = None;
+                let mut q = 0;
+                while q < tries {
+                    q += 1;
                     let mut step = || {
                         ((self.survival.next_double() * PACK_STEP).floor()
                             - (self.survival.next_double() * PACK_STEP).floor())
@@ -623,29 +664,47 @@ impl Sim {
                     if d2 <= SPAWN_MIN_SQ || d2 > SPAWN_MAX_SQ {
                         continue;
                     }
-                    if self.world.biome_at(x, y0, z) != Some(WARPED_FOREST) {
+                    let biome = self.world.biome_at(x, y0, z);
+                    let kind = match chosen {
+                        Some(k) => k,
+                        None => {
+                            let Some((k, group)) = self.draw_monster(biome) else {
+                                break;
+                            };
+                            chosen = Some(k);
+                            tries = group;
+                            k
+                        }
+                    };
+                    // The model spawns endermen only: a pack of another kind is left out.
+                    if kind != EntityKind::Enderman {
+                        continue 'packs;
+                    }
+                    if !monsters_of(biome).iter().any(|m| m.0 == kind) {
                         continue;
                     }
                     if self.solid(x, y0 - 1, z).is_none() || !self.ender_fits(at) {
                         continue;
                     }
-                    let potential: f64 = self
-                        .survival
-                        .life
-                        .mobs
-                        .values()
-                        .filter(|m| m.dead_at.is_none() && m.kind == EntityKind::Enderman)
-                        .map(|m| {
-                            let d = dist_sq(m.pos, at).sqrt();
-                            if d < 1e-9 {
-                                f64::INFINITY
-                            } else {
-                                CHARGE * CHARGE / d
-                            }
-                        })
-                        .sum();
-                    if potential > ENERGY_BUDGET {
-                        continue;
+                    if let Some((charge, budget)) = spawn_cost(biome, kind) {
+                        let potential: f64 = self
+                            .survival
+                            .life
+                            .mobs
+                            .values()
+                            .filter(|m| m.dead_at.is_none() && m.kind == EntityKind::Enderman)
+                            .map(|m| {
+                                let d = dist_sq(m.pos, at).sqrt();
+                                if d < 1e-9 {
+                                    f64::INFINITY
+                                } else {
+                                    charge * charge / d
+                                }
+                            })
+                            .sum();
+                        if potential > budget {
+                            continue;
+                        }
                     }
                     let id = self.summon_enderman(at);
                     if let Some(Mob {
@@ -669,14 +728,35 @@ impl Sim {
                             z: at[2],
                         },
                     )?);
-                    spawned += 1;
-                    if spawned >= CLUSTER.min(GROUP) {
-                        break;
+                    total += 1;
+                    if total >= CLUSTER {
+                        break 'packs;
                     }
                 }
             }
         }
         Ok(out)
+    }
+
+    /// `getRandomSpawnMobAt`: a monster drawn by weight from the biome's list, and its group
+    /// size (`minCount` plus `nextInt(maxCount - minCount + 1)`).
+    fn draw_monster(&mut self, biome: Option<&str>) -> Option<(EntityKind, u32)> {
+        let list = monsters_of(biome);
+        let total: u32 = list.iter().map(|m| m.1).sum();
+        if total == 0 {
+            return None;
+        }
+        let mut pick = (self.survival.next_double() * f64::from(total)).floor() as u32;
+        let &(kind, _, min, max) = list.iter().find(|m| {
+            if pick < m.1 {
+                true
+            } else {
+                pick -= m.1;
+                false
+            }
+        })?;
+        let group = min + (self.survival.next_double() * f64::from(max - min + 1)).floor() as u32;
+        Some((kind, group))
     }
 
     /// An enderman's blow (7, `mob_attack`), through a raised shield's rule.

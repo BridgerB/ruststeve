@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 160 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 164 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
-aliases: [drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
+aliases: [enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@b72980e
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@bb982b2
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -14,6 +14,7 @@ sourceRefs:
   - "ruststeve:crates/bot/src/bin/simrace.rs#fn simrace(a: &Args) -> Result<bool, String> {"
   - "ruststeve:config/moments.toml#id = \"m00-0\""
   - "ruststeve:config/moments.toml#id = \"d00-late\""
+  - "ruststeve:config/moments.toml#id = \"e00-stare\""
   - "ruststeve:crates/bot/src/script.rs#pub fn acts(self, tick: u64, w: &World) -> Vec<Act> {"
   - "ruststeve:.github/workflows/parity.yml#./target/release/moments compare parity/real parity/sim --report parity/parity.md"
 related:
@@ -30,7 +31,7 @@ A sim number counts only after the model agrees with a real server at the same m
 ## Key files
 - `crates/bot/src/bin/capture.rs`, `src/captured.rs`: captured worlds.
 - `crates/bot/src/bin/moments.rs` (`real`, `sim`, `compare`), `crates/results/src/parity.rs`.
-- `config/landings.toml` (10 landings), `config/moments.toml` (160 moments).
+- `config/landings.toml` (10 landings), `config/moments.toml` (164 moments).
 - `.github/workflows/parity.yml`; `crates/bot/src/bin/simrace.rs` and `simrace.yml` for sim races.
 
 ## How it works
@@ -78,6 +79,12 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 ## Client parity rows (issue 16)
 - Rows `p00` and `p01` (eight, on landings 0 and 1, each in a corridor laid from the feet; `docs/problems/client-parity.md`): a walk over magma (hurt), the same floor sneaked (full: only a server told the shift key by `player_input` spares the feet), a sneak to the edge of a pit (the body stops on the last block), and a walk along soul sand (slowed, not corrected). Scripts `sneak:<yaw>` and `crouch`.
 - What these rows cannot show: a server never simulates a client's speed, so the walk's pace on soul sand or while sneaking is the same on both sides whatever it is. The pace is checked against the game's own formula in `crates/physics`' unit tests; the rows show the server accepts it.
+
+## Enderman rows (issue 17)
+- Rows `e00` to `e03` (`docs/problems/endermen-model.md`), each at its own landing 40 south of the centre: an enderman two above a floor 64 east (4 chunks: beyond the simulation distance) stays where it was put; one 30 east falls (it ticks); one penned 12 east and looked in the eye turns creepy; the same look 15 degrees aside leaves it neutral.
+- A row may name a `difficulty` (`normal`): those rows run after the others, the real server's difficulty set by RCON for them and put back to peaceful after (an enderman is a monster: peaceful removes it at once); the model runs them off peaceful. `mobs` places mobs with their AI (`summon` kept and lootless in real, the model's own brain in sim; the model places endermen only).
+- The class gains `mobs`: for each placed mob, the entity of its kind nearest where it was put in the bot's world: seen, moved more than half a block, and creepy (entity data 17).
+- Tolerance 162 of 164.
 
 ## See also
 - [[server-model]] - what the model models.
