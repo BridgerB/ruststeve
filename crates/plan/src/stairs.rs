@@ -500,9 +500,16 @@ impl Stairs {
                 to,
                 sent,
             } => {
-                let Some((c, against, face)) =
-                    lays.iter().find(|(c, _, _)| open(kind(w, *c))).copied()
-                else {
+                // A block that has shown is done, and the next gets its own click: with two to
+                // lay, the wait for the first was held against the second, which was never
+                // clicked ("a block laid at … did not show", with the first block spent: races
+                // 45337739022 and 45344386490).
+                let before = lays.len();
+                lays.retain(|(c, _, _)| open(kind(w, *c)));
+                if lays.len() != before {
+                    *sent = None;
+                }
+                let Some((c, against, face)) = lays.first().copied() else {
                     let (cells, to) = (cells.clone(), *to);
                     return match refusal(w, &cells, (to.0, to.1 - 1, to.2)) {
                         None => {
