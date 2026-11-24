@@ -91,8 +91,9 @@ fn the_exit_is_the_ground_of_blaze_wall_22() {
         ((27, 34, -21), BlockKind::CaveAir),
         ((33, 34, -17), BlockKind::MagmaBlock),
         ((28, 34, -15), BlockKind::Gravel),
-        ((33, 32, -18), BlockKind::SoulSand),
-        ((33, 31, -18), BlockKind::SoulSand),
+        // The block view's "soul_s" cells are soul soil, a full block, not soul sand.
+        ((33, 32, -18), BlockKind::SoulSoil),
+        ((33, 31, -18), BlockKind::SoulSoil),
         ((27, 31, -18), BlockKind::Gravel),
         ((30, 31, -18), BlockKind::Netherrack),
         ((32, 30, -21), BlockKind::Lava),
@@ -140,7 +141,7 @@ fn line(r: TaskRecord) -> String {
 /// The kit bot's own situation: the equipped Nether snapshot's bot, with what it holds, where it
 /// stands, the fortress aim. Twelve thousand ticks is ten minutes; the bricks are 121 blocks off.
 #[test]
-#[ignore = "blaze wall: the kit bot at the real portal exit does not reach the bricks; owners A2, A7"]
+#[ignore = "blaze wall: alive at 20 health, 12,000 ticks of stairs down and up round (20, 22, 55); owners A2, A7"]
 fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
