@@ -1782,7 +1782,9 @@ impl Plan {
             return Some(Task::Idle);
         }
         let eyes = cover::shooters(w);
-        if !burning && !cover::seen_body(w, &eyes, body.pos) {
+        // A spawner within 16 blocks of a player is awake: resting there, the shooters multiply.
+        let awake = cover::spawners_awake(w, body.pos);
+        if !burning && awake.is_empty() && !cover::seen_body(w, &eyes, body.pos) {
             self.retry_at = tick + RETRY_TICKS;
             self.note(
                 tick,
@@ -1802,12 +1804,14 @@ impl Plan {
         let feet = path::feet_cell(body.pos);
         for c in cover::cover_cells(w, &eyes)
             .into_iter()
-            .filter(|c| *c != feet)
+            .filter(|c| *c != feet && !self.refused_now(*c, tick))
             .take(CANDIDATES_PER_TICK)
         {
             let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
             if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
                 self.walks += 1;
+                // Walked to and still seen there, it is not offered again for a while.
+                self.refuse(c, tick);
                 self.note(
                     tick,
                     format!("take cover at {c:?}"),
@@ -1815,6 +1819,32 @@ impl Plan {
                         "health {:?}; {} shooters in range, burning {burning}",
                         w.player.health,
                         eyes.len()
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+        }
+        // Inside a spawner's range with no cover cell beyond it: away from the spawner first, on
+        // a found route, and the rest or the shelter is made out there.
+        if let Some(sp) = awake.first().copied() {
+            let mut walk = Walk::new(
+                sp,
+                Goal::Away {
+                    pos: sp,
+                    range: cover::SPAWNER_QUIET + 2.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("leave the spawner at {sp:?} to heal"),
+                    format!(
+                        "health {:?}; a spawner within {} is awake and no cover cell beyond it",
+                        w.player.health,
+                        cover::SPAWNER_QUIET
                     ),
                 );
                 return Some(Task::Explore(walk));

@@ -68,19 +68,56 @@ pub fn seen_at(w: &World, eyes: &[[f64; 3]], c: Cell) -> bool {
     })
 }
 
-/// The standable cells within `COVER_RADIUS` that none of `eyes` sees, nearest the feet first.
+/// Blocks from a spawner beyond which a hurt bot rests, shelters and heals. A spawner runs only
+/// with a player within 16 blocks of it (vanilla's `requiredPlayerRange`): bots resting 14 to 17
+/// from the blaze spawner saw the shooters in range go 3, 5, 7, 8, 12 in one rest (races
+/// 45337168104 and 45338756013). Two more than 16, for where in its cell the body stands.
+pub const SPAWNER_QUIET: f64 = 18.0;
+
+/// The spawners on record within `SPAWNER_QUIET` of `pos` (two chunk columns round the feet
+/// hold every one that near).
+pub fn spawners_awake(w: &World, pos: [f64; 3]) -> Vec<Cell> {
+    world::stage::kind_near(w, data::BlockKind::Spawner, 2)
+        .into_iter()
+        .filter(|c| awake_at(*c, pos))
+        .collect()
+}
+
+/// Whether a spawner in `c` is within `SPAWNER_QUIET` of a body at `pos`.
+pub fn awake_at(c: Cell, pos: [f64; 3]) -> bool {
+    let mid = [
+        f64::from(c.0) + 0.5,
+        f64::from(c.1) + 0.5,
+        f64::from(c.2) + 0.5,
+    ];
+    distance(mid, pos) < SPAWNER_QUIET
+}
+
+/// The cells to rest in: standable on a full block, within `COVER_RADIUS`, where none of `eyes`
+/// sees a body standing (`seen_body`, the same test the rest itself is judged by) and no spawner
+/// on record is within `SPAWNER_QUIET`; nearest the feet first. The floor must be a full block
+/// (on a stair the body stands higher than its cell says). One bot walked eleven times to a cell
+/// on a bridge's low wall that it was still seen in (race 45338756013): the planner also refuses
+/// a cover cell once it has walked to it.
 pub fn cover_cells(w: &World, eyes: &[[f64; 3]]) -> Vec<Cell> {
     let Some(body) = w.body else {
         return Vec::new();
     };
     let f = feet_cell(body.pos);
     let mut cells = Cells::new(w);
+    // Every spawner that could be within the quiet range of a cell in the search.
+    let spawners = world::stage::kind_near(w, data::BlockKind::Spawner, 3);
     let mut out: Vec<(i32, Cell)> = Vec::new();
     for dx in -COVER_RADIUS..=COVER_RADIUS {
         for dy in -2..=2 {
             for dz in -COVER_RADIUS..=COVER_RADIUS {
                 let c = (f.0 + dx, f.1 + dy, f.2 + dz);
-                if cells.standable(c) && !seen_at(w, eyes, c) {
+                let pos = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+                if cells.standable(c)
+                    && full(w, (c.0, c.1 - 1, c.2))
+                    && !seen_body(w, eyes, pos)
+                    && !spawners.iter().any(|s| awake_at(*s, pos))
+                {
                     out.push((dx * dx + dy * dy + dz * dz, c));
                 }
             }

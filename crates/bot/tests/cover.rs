@@ -126,3 +126,32 @@ fn a_roof_hangs_on_a_wall_three_high() {
         "the roof, on the west face of the wall's top"
     );
 }
+
+/// A spawner runs with a player within 16 blocks: a rest 14 to 17 from the blaze spawner saw its
+/// shooters go from 3 to 12 (races 45337168104 and 45338756013). Rest is 18 or more from one.
+#[test]
+fn a_spawner_within_eighteen_blocks_is_awake() {
+    let spawner = (129, 64, 159);
+    assert!(plan::cover::awake_at(spawner, [129.5, 61.0, 175.5]));
+    assert!(!plan::cover::awake_at(spawner, [129.5, 61.0, 178.5]));
+}
+
+/// A cover cell is one a body standing in it is not seen in, by the test the rest is judged
+/// by: behind the wall yes, in the open no, and never the top of the wall.
+#[test]
+fn cover_cells_are_out_of_sight_for_a_standing_body() {
+    let w = walled();
+    // A shooter's eye east of the wall, a little over it.
+    let eyes = [[8.5, 66.5, 0.5]];
+    let cells = plan::cover::cover_cells(&w, &eyes);
+    assert!(
+        cells.contains(&(2, 64, 0)),
+        "right behind the wall: {cells:?}"
+    );
+    assert!(!cells.contains(&(5, 64, 0)), "in the open");
+    assert!(!cells.contains(&(3, 67, 0)), "on the wall");
+    for c in &cells {
+        let pos = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+        assert!(!plan::cover::seen_body(&w, &eyes, pos), "{c:?}");
+    }
+}
