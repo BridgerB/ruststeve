@@ -355,9 +355,11 @@ junk = [
   ["rotten_flesh", 0], ["spider_eye", 0], ["bone", 0], ["leaf_litter", 0],
 ]
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
-# Wither skeletons too (Bridger, 2026-11-20): 8 a hit and the wither effect killed 5 of 7 bots at the
-# fortress (race 44789031743); backed away from, never fought.
-never_fight = ["creeper", "wither_skeleton"]
+# Wither skeletons were here from 2026-11-20 (8 a hit and the wither effect killed 5 of 7 bare bots,
+# race 44789031743) until an armoured bot met one: it walks as fast as the bot, so backing away
+# never ends, and 2 of 2 died with no swing after 700 and 900 ticks of it (race 45334573113,
+# docs/problems/spawner.md wall 1). Fought within defend_radius now, as a zombie is.
+never_fight = ["creeper"]
 # Mobs that shoot: answered within ranged_radius, closed in on and fought (skeleton arrows were
 # the top killer underground in the iron races: docs/problems/iron-kit.md wall 16).
 # Blazes too (issue 16): they shoot from up to 48, and are closed on and struck the same way.

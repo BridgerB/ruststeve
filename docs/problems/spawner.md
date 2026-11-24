@@ -1,0 +1,24 @@
+# Issue 16: from the fortress to the blaze spawner
+
+## Needs
+A bot that stands at a Nether fortress with the kit a real bot carries in (iron helmet, chestplate and leggings, an iron sword, four stone pickaxes, a table, both buckets, flint and steel, about eleven raw meat) reaches the `spawner` stage: the feet within `SPAWNER_NEAR` 8 of a blaze spawner seen exposed, alive and healthy enough to fight (14 health or more).
+
+## Done (world terms)
+One case file shows `stage reached: spawner` with the bot at 14 health or more when the stage is taken, and the ledger lines of each fix below counted.
+
+## Risks
+Wither skeletons on the bridges (8 a hit bare, 5.1 through iron, and the wither effect, which armour does not stop); blazes shooting along an open bridge; ghasts; lava under every bridge; raw meat heals little (three hunger points an item, about two health).
+
+## The development start
+- **`dev-fortress`** (`config/starts.toml`; development only, never issue-16 evidence, never the frontier): no armoured, fed bot had ever stood at a fortress, and none could until the Nether walk is passed. The start resumes the old frontier snapshot (`race-44678197603/snapshot-fortress-44678197603-race-44678197603-lane-0.tar.zst`: the world, the bot's place at (22, 55, 129) in the tunnel it dug, its memory, 17 health and 17 food) and then swaps the bare kit over RCON (`clear`, then `give`) for what rs-l05-b00 held in the equipped Nether snapshot of race 45194253932, less the overworld's stone. The planner puts the armour on. A place on a fresh world of the same seed was not used: the snapshot bot stands in its own tunnel, which a fresh world does not have.
+- **What the first ticks show** (race 45334573113, both lanes read): the kit arrives at tick 20; "eat porkchop" at tick 40 to 60 (hurt at 17 with food 17: the eat-to-heal rule), food 20 at tick 80, three "put on the armour" notes, three "rest" notes, and 18 health at tick 140, when the spawner task starts. A hurt bot with food eats and comes back in 120 ticks; the bare bots of race 45124122633 rested for 24,000.
+
+## Walls
+
+### 1. Backing away from a wither skeleton that walks as fast as the bot (race 45334573113, b58ef19, `dev-fortress`, 3 x 1, cap 12,000)
+- **What happened**: lanes 0 and 2 both died, at ticks 4,500 and 4,340, neither at the spawner and neither with one swing. Both cut stairs for 2,500 ticks from (22, 55, 129) to the bridge at (60, 61, 149), then "walk to the spawner at (129, 64, 159)" along the bridge at y 61, z 186 to 189, as far as (110, 61, 186) and (121, 61, 186): 28 blocks from the spawner. There "defend WitherSkeleton 118 (Retreat)" and "defend WitherSkeleton 119 (Retreat)".
+- **Read** (both ledgers and senses): lane 0's retreat ran 900 ticks. Senses rows: (105, 61, 187) at tick 3,640, (68, 61, 188) at 3,840, (62, 62, 158) at 4,040, (61, 61, 124) at 4,240, the wither skeleton 7 to 12 blocks behind in every row; then one hit (20 to 14.9) at tick 4,400 and the bot is in lava at (62, 28, 104): `death.attack.lava.player … wither_skeleton`, "9 steps held back". Lane 2's ran 700 ticks back to (66, 58, 153), the skeleton at 6, 4, 2, 1 blocks, then four hits of 5.1 in 40 ticks (20, 14.9, 9.8, 4.6, dead), "0 swings, 0 landed".
+- **Cause**: a retreat ends when the foe is `flee_clear` 20 blocks off. A creeper gives up; a wither skeleton chases at the bot's own walking pace (the bot does not sprint), so the gap never opens. The retreat only takes the bot 100 blocks back from its goal with its back turned, until it runs out of route (a bridge end, a drop over lava) and is struck from behind every 20 ticks. `never_fight` for wither skeletons was chosen for bare bots (blaze.md wall 2: 8 a hit, 5 of 7 dead); those same bare bots, fighting, won 4 of 8 fights with a stone sword in 3 to 5 swings and no hit taken. Backing away has now lost 2 of 2 with armour on.
+- **Fix**: wither skeletons leave `never_fight` (`config/goals.toml`): an armoured bot with an iron sword fights one that comes within `defend_radius`, as it fights a zombie, and backs away only at `danger_health`. Creepers stay. The note that counts it is the fight's own: "defend WitherSkeleton … (Fight)" and its "defended: n swings, m landed … health a to b".
+- **Unit test**: `a_wither_skeleton_within_reach_is_fought` (`crates/plan/tests/foe.rs`, on the real goal table): Fight at full health, Retreat at the danger line; a creeper is still backed away from.
+- **Also seen, not this wall**: a skeleton 7 to 10 blocks over the eye was "fought" twice a lane for 280 to 480 ticks with no swing (it never hit; the ignore rule then held). The stairs alternate "stairs up" and "stairs down" six steps at a time toward a spawner 9 blocks higher and 107 away, and wore one pickaxe from 131 uses to 14 in 38 blocks.
