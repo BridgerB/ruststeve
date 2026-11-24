@@ -794,7 +794,12 @@ impl Plan {
             return None;
         }
         if !self.shield_done {
-            let row = shield::kit_row(&held(w));
+            // Only a bot holding no shield begins: one made at the surface is never made again.
+            let row = if self.shield_tasks == 0 {
+                shield::nether_row(&held(w))
+            } else {
+                shield::kit_row(&held(w))
+            };
             if row.is_some() && self.shield_tasks < SHIELD_TASKS {
                 self.shield_tasks += 1;
                 if self.shield_tasks == 1 {

@@ -130,6 +130,17 @@ pub fn kit_row(counts: &crate::make::Counts) -> Option<&'static str> {
     }
 }
 
+/// The row made in the Nether, from what is held: `kit_row`, but none once any shield is held.
+/// A bot that made its shields at the surface (the overworld flow's cook site) arrives with
+/// them and never stops for another; only a bot that came through with none makes one here.
+pub fn nether_row(counts: &crate::make::Counts) -> Option<&'static str> {
+    let held = counts.get(&ItemKind::Shield).copied().unwrap_or(0);
+    if held > 0 {
+        return None;
+    }
+    kit_row(counts)
+}
+
 /// For a shield row (`shield`, `shields`), how many ingots its smelt should cook: what the
 /// shields still to make are short of. `None` for any other row.
 pub fn smelt_count(row: &str, counts: &crate::make::Counts) -> Option<i32> {

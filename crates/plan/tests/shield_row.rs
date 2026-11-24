@@ -242,3 +242,15 @@ fn nothing_is_cooked_without_raw_meat_or_fuel() {
     .unwrap();
     assert_eq!((r.result, n), (ItemKind::CookedPorkchop, 1));
 }
+
+/// A shield made at the surface (the overworld flow's cook site) is never made again in the
+/// Nether: with one held and the makings of another, the Nether row is none.
+#[test]
+fn a_shield_held_from_the_surface_ends_the_nether_row() {
+    let mut c = nether_snapshot();
+    assert_eq!(plan::shield::nether_row(&c), Some("shield"));
+    c.insert(ItemKind::Shield, 1);
+    assert_eq!(plan::shield::nether_row(&c), None);
+    c.insert(ItemKind::Shield, 2);
+    assert_eq!(plan::shield::nether_row(&c), None);
+}
