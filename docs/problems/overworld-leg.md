@@ -61,3 +61,9 @@ The stage: a real bot resumed from the clean `ready` snapshot (race 45128866973 
 ## Weighed, not built: a portal near the surface
 
 The cast needs ten lava sources at one site. Carried up they are ten trips of 120 blocks each way. Memory at the snapshot holds no surface pool: the nearest sources are at y -19 and y -15, single-source pools ("sources 1 … refused/spent 124"), and one sighting at (172, 57, -81) that no walk reached. The sea at y -55 is the only lava this world is known to hold in tens. Not built.
+
+## Status (2026-11-23, evening): written and linted, not run
+
+- Walls 1 to 3 are fixed in commit 91b81d9 on `issue-16-a1-overworld`, with their unit tests (`crates/plan/tests/overworld.rs`, `crates/bot/tests/overworld.rs`, `a_cornered_retreat_strikes_back` in `crates/bot/tests/defend.rs`). Clippy and brain-check pass. The tests have not run: the branch was not pushed, so no CI, no probe and no race has seen this code.
+- **Nothing here is proven.** No firing is counted. The ledger lines to count in the first race from the `ready` snapshot (3 lanes, cap 30,000): "own stairs down, leg N" (wall 1; and no "walk toward lava" before the feet reach y -54), "spare pickaxes" and "spare pickaxes held" (wall 2; and "cast paused: no pickaxe" and the case's `no pickaxe` onset near zero), "into the Nether short of food" (wall 3), and defend lines that read swings with `Retreat`.
+- **What to watch for, each a reason to revert that part**: own stairs that end in a tunnel at y -54 with no lake found (the old descent saw lava from the caves it walked; a tunnel through rock sees only what it opens); a table left behind or a log spent on a new one at every batch of spares; a bot entering the Nether under 24 hunger points.
