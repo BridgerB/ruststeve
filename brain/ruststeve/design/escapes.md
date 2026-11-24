@@ -6,7 +6,7 @@ tags: [plan, escape, survival, water, lava, fire, always-rows]
 aliases: [always-rows, escape-water, escape-lava, escape-fire, Escape, Traps, TrapKind, swim-out, flee, bank, notch, lid, Aim::Hold, plan:hold, dry land]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@e6a22b2 clojurecraft@be85a92
+verifiedAgainst: ruststeve@475e5f1 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/escape.rs#pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {"
   - "ruststeve:crates/plan/src/escape.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>) {"
@@ -57,6 +57,11 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 ## Issue 13b
 - **A wall** (`TrapKind::Wall`): the eyes in a full block (gravel fallen into a tunnel, `in_wall` damage): the eye and feet cells are dug with the best tool held.
 - **A swim off an island** (`Escape::swim`, `Task::Swim`): the water escape's machinery with its bank preset to dry footing 10 to 32 blocks away, started by the planner when it gives up beside water ([[planner]]); the water row does not cut it (it is in water on purpose), lava, fire and a wall do. Model test: an island 3 wide in a lake 41 wide.
+
+## Issue 16: what an escape says (docs/problems/nether-walk.md)
+- An escape's end is written with what it did (`Escape::report`: seals, digs, refusals, the trail): on "out of the lava" and when the run ends with the escape running ("escape-lava ended with the run"). Its start says whether the lava was at the door, and where.
+- `lava_door` also sees lava one cell over the head's height beside its column (the ring at y + 2), last in its order.
+- Soul sand is dry land for a trap to clear on.
 
 ## See also
 - [[mc-water]] - the water physics the escape relies on.

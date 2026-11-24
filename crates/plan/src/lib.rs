@@ -146,6 +146,25 @@ pub const TRAIL_TOWARD: f64 = 4.0;
 /// refusal lasts `FAILURE_MEMORY_TICKS` 600: six looks).
 const SPAWNER_WAIT_TICKS: u64 = 100;
 
+/// Whether a rest can bring health back: food to eat, or a food bar natural healing runs on
+/// (`eat::HEALS_FROM`).
+pub fn can_heal(food: Option<i32>, food_held: bool) -> bool {
+    food_held || food.is_none_or(|f| f >= eat::HEALS_FROM)
+}
+
+/// Blocks behind the nearest it came to a dig's target at which the bot counts as pushed back:
+/// a stairs leg is six steps, so from six back no one leg comes nearer than the mark.
+pub const PUSHED_BACK: f64 = 6.0;
+
+/// Whether feet at `pos` are `PUSHED_BACK` or more farther from `target` than `best`, the
+/// nearest a dig toward it has come (cell to cell, as `dig_toward` measures).
+pub fn pushed_back(pos: [f64; 3], target: Cell, best: f64) -> bool {
+    let f = path::feet_cell(pos);
+    let d = f64::from((target.0 - f.0).pow(2) + (target.1 - f.1).pow(2) + (target.2 - f.2).pow(2))
+        .sqrt();
+    d >= best + PUSHED_BACK
+}
+
 /// The trail marks at least `TRAIL_TOWARD` nearer to `target` than `feet`, the nearest to the
 /// target first: where the bot itself has stood, so no cell it has not seen.
 pub fn trail_toward(trail: &[[f64; 3]], feet: [f64; 3], target: Cell) -> Vec<[f64; 3]> {
@@ -502,6 +521,9 @@ pub struct Plan {
     pub shelter_at: u64,
     #[serde(default)]
     pub shelter_blocks: u32,
+    /// When "no rest: nothing to heal with" may next be noted.
+    #[serde(default)]
+    pub unhealed_at: u64,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -600,6 +622,11 @@ pub struct Plan {
     /// site choice flipped between two landings and each flip forgot the other).
     #[serde(default)]
     pub landings: Vec<(Cell, f64, u32)>,
+    /// The tick the next far search may run (A2, nether-walk.md): one costs tens of thousands
+    /// of expansions, so it is run once, its route held by the walk, and not again for
+    /// `walk::FAR_RETRY_TICKS`.
+    #[serde(default)]
+    pub far_search_at: u64,
     /// The watchdog's mark: where the body was, how many items were held, the events made, and
     /// when (issue 13b).
     #[serde(default)]
@@ -651,6 +678,7 @@ impl Plan {
             equip_at: 0,
             shelter_at: 0,
             shelter_blocks: 0,
+            unhealed_at: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -684,6 +712,7 @@ impl Plan {
             toward: None,
             travel: tunnel::Travel::default(),
             landings: Vec::new(),
+            far_search_at: 0,
             mark: None,
             stalls: 0,
             trail: Vec::new(),
@@ -771,6 +800,16 @@ impl Plan {
 
     /// Ends the open task with the run (the ledger then holds an end for every start).
     pub fn close(&mut self, at: u64, why: &str) {
+        // An escape cut by the run's end says what it tried (nether-walk.md: three bots died in
+        // lava with the escape's seals and targets in no file).
+        if let Task::Escape(e) = &self.task {
+            let said = e.report();
+            self.note(
+                at,
+                format!("escape-{} ended with the run", e.kind.name()),
+                said,
+            );
+        }
         if let Some(o) = self.open.take() {
             self.task_counts.ended += 1;
             self.records.push(TaskRecord::Ended {
@@ -953,7 +992,17 @@ impl Plan {
             && self.pickaxe_at_hand(w, tick);
         let (controls, status) = match &mut self.task {
             Task::Idle => (Controls::default(), TaskStatus::Running),
-            Task::ToLog(walk) | Task::Explore(walk) => walk.step(w, tick),
+            Task::ToLog(walk) | Task::Explore(walk) => {
+                let out = walk.step(w, tick);
+                // A walk's bridge move lays blocks: its acts are sent and each block laid is
+                // written to the ledger (docs/problems/nether-walk.md).
+                let (acts, said) = walk.take_out();
+                self.acts.extend(acts);
+                for (what, why) in said {
+                    self.note(tick, what, why);
+                }
+                out
+            }
             Task::Dig(d) => {
                 let (c, act, status) = d.step(w, tick);
                 self.acts.extend(act);
@@ -1278,12 +1327,15 @@ impl Plan {
         }
         let Some((id, row)) = chosen else {
             if let Some(make::Always::Escape(k)) = running {
-                self.task = Task::Idle;
+                let said = match std::mem::replace(&mut self.task, Task::Idle) {
+                    Task::Escape(e) => e.report(),
+                    _ => String::new(),
+                };
                 self.retry_at = tick;
                 self.note(
                     tick,
                     format!("out of the {}", k.name()),
-                    "dry land held; back to the goal".to_owned(),
+                    format!("dry land held; back to the goal; {said}"),
                 );
             }
             return None;
@@ -1299,7 +1351,17 @@ impl Plan {
             let task = match row {
                 make::Always::Escape(k) => {
                     self.escapes += 1;
-                    self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
+                    // Which lava: on the body, or at the door and where (nether-walk.md).
+                    let door = (k == escape::TrapKind::Lava && !body.in_lava)
+                        .then(|| escape::lava_door_at(w, path::feet_cell(body.pos)))
+                        .flatten()
+                        .map(|c| format!(" (at the door, {c:?}, the body not in it)"))
+                        .unwrap_or_default();
+                    self.note(
+                        tick,
+                        id,
+                        format!("trapped in {}{door}; cut {cut}", k.name()),
+                    );
                     // Stairs that cut into water: their target waits, or the next choice cuts the
                     // same stairs into the same water (blaze wall 16: 72 escapes in one run, each
                     // after "stairs up toward the log at (36, 88, 7)").
@@ -1768,9 +1830,40 @@ impl Plan {
         if w.player.health.is_none_or(|h| h >= rules.engage_health) {
             return None;
         }
-        let eyes = cover::shooters(w);
         let burning = escape::touching_fire(w, body.pos);
-        if !burning && !cover::seen_body(w, &eyes, body.pos) {
+        // A shelter block just placed: its block update is a tick or two away, and the lines of
+        // sight are read again only once it is in.
+        if !burning && tick < self.shelter_at {
+            self.retry_at = self.shelter_at;
+            return Some(Task::Idle);
+        }
+        // A rest that cannot heal is no rest: with no safe food held and the food bar under 18
+        // nothing comes back, and two real bots sat out their last 7,400 and 7,900 ticks at 15.8
+        // and 16.8 health, 27 blocks from the spawner, their meat eaten (race 45346418004). Over
+        // the danger line the bot goes on with what it has; at or under it, it stays hidden.
+        if !can_heal(w.player.food, eat::best_food(w, &rules).is_some())
+            && w.player.health.is_some_and(|h| h > rules.danger_health)
+        {
+            if tick >= self.unhealed_at {
+                self.unhealed_at = tick + FAILURE_MEMORY_TICKS;
+                self.note(
+                    tick,
+                    "no rest: nothing to heal with".to_owned(),
+                    format!(
+                        "health {:?} under {}, food {:?} under {} and no safe food held; on with it",
+                        w.player.health,
+                        rules.engage_health,
+                        w.player.food,
+                        eat::HEALS_FROM
+                    ),
+                );
+            }
+            return None;
+        }
+        let eyes = cover::shooters(w);
+        // A spawner within 16 blocks of a player is awake: resting there, the shooters multiply.
+        let awake = cover::spawners_awake(w, body.pos);
+        if !burning && awake.is_empty() && !cover::seen_body(w, &eyes, body.pos) {
             self.retry_at = tick + RETRY_TICKS;
             self.note(
                 tick,
@@ -1790,12 +1883,14 @@ impl Plan {
         let feet = path::feet_cell(body.pos);
         for c in cover::cover_cells(w, &eyes)
             .into_iter()
-            .filter(|c| *c != feet)
+            .filter(|c| *c != feet && !self.refused_now(*c, tick))
             .take(CANDIDATES_PER_TICK)
         {
             let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
             if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
                 self.walks += 1;
+                // Walked to and still seen there, it is not offered again for a while.
+                self.refuse(c, tick);
                 self.note(
                     tick,
                     format!("take cover at {c:?}"),
@@ -1803,6 +1898,32 @@ impl Plan {
                         "health {:?}; {} shooters in range, burning {burning}",
                         w.player.health,
                         eyes.len()
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+        }
+        // Inside a spawner's range with no cover cell beyond it: away from the spawner first, on
+        // a found route, and the rest or the shelter is made out there.
+        if let Some(sp) = awake.first().copied() {
+            let mut walk = Walk::new(
+                sp,
+                Goal::Away {
+                    pos: sp,
+                    range: cover::SPAWNER_QUIET + 2.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("leave the spawner at {sp:?} to heal"),
+                    format!(
+                        "health {:?}; a spawner within {} is awake and no cover cell beyond it",
+                        w.player.health,
+                        cover::SPAWNER_QUIET
                     ),
                 );
                 return Some(Task::Explore(walk));
@@ -1823,9 +1944,6 @@ impl Plan {
         // One click a look; a window open or a click not yet answered waits.
         self.retry_at = tick + 1;
         if w.window.is_some() || w.click.is_some() || !self.acts.is_empty() {
-            return Some(Task::Idle);
-        }
-        if tick < self.shelter_at {
             return Some(Task::Idle);
         }
         match hold::toward(w, item) {
@@ -1957,6 +2075,22 @@ impl Plan {
                 );
                 return Task::Explore(walk);
             }
+            // Pushed back (a retreat from a skeleton took the bot 14 blocks down its own
+            // tunnel): the dig's stall count is against the nearest it ever came, so three legs
+            // back up the tunnel were three stalls and the spawner was refused (spawner wall 2,
+            // 3 of 6 lanes). From well behind that mark the count starts again from here.
+            if let Some((c, best, _)) = self.toward
+                && c == sp
+                && let Some(body) = w.body
+                && pushed_back(body.pos, sp, best)
+            {
+                self.toward = None;
+                self.note(
+                    tick,
+                    format!("pushed back from the spawner at {sp:?}"),
+                    format!("the nearest was {best:.0} blocks; the dig's stalls count from here"),
+                );
+            }
             if let Some(t) = self.dig_toward(
                 w,
                 sp,
@@ -1965,6 +2099,43 @@ impl Plan {
                 tick,
             ) {
                 return t;
+            }
+            // No plain route and no dig (no rock: a real bot stood at the foot of a brick pillar
+            // over the lava sea, 68 blocks from this spawner, race 45337580375): one far search
+            // (`Walk::far`, the Nether walk's: weighed, 40,000 expansions, bridging on the level
+            // with held blocks). It comes after the tunnel: ahead of it, it left a tunnel with a
+            // route of 150 steps for 47 cells of bridge in the open, laid two and stalled, in
+            // three lanes of three (race 45343411709).
+            if tick >= self.far_search_at {
+                self.far_search_at = tick + walk::FAR_RETRY_TICKS;
+                let mut far = Walk::far(sp, world::stage::SPAWNER_NEAR - 2.0, tick);
+                let found = far.route_now(w, tick) && far.route == Some(path::Status::Found);
+                let steps = far.waypoints.as_ref().map_or(0, Vec::len);
+                if found {
+                    self.far_search_at = tick + walk::FAR_AGAIN_TICKS;
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("far walk toward the spawner at {sp:?}"),
+                        format!(
+                            "no plain route; {steps} cells, {} to bridge, found in {} expansions",
+                            far.bridges_ahead(),
+                            far.expanded
+                        ),
+                    );
+                    return Task::Explore(far);
+                }
+                self.expanded += far.expanded;
+                self.note(
+                    tick,
+                    format!("no far route to the spawner at {sp:?}"),
+                    format!(
+                        "{:?} after {} expansions; none again for {} ticks",
+                        far.route,
+                        far.expanded,
+                        walk::FAR_RETRY_TICKS
+                    ),
+                );
             }
         }
         // A spawner known and no way on from here (spawner wall 2: a bot pushed back down its own
@@ -2082,6 +2253,49 @@ impl Plan {
             );
             return Task::Idle;
         }
+        // --- A2's block (docs/problems/nether-walk.md): a far walk first. One weighed search
+        // toward the nearest brick, bridging where it must; found, its route is held by the walk
+        // and followed (off the portal's ledge at once: lava floods it about 700 ticks after a
+        // bot arrives). Not found, no far search again for a while: the tunnel below goes on.
+        if tick >= self.far_search_at
+            && let Some(c) = world::stage::bricks_near(w, FORTRESS_CHUNKS)
+                .into_iter()
+                .next()
+        {
+            self.far_search_at = tick + walk::FAR_RETRY_TICKS;
+            let mut walk = Walk::far(c, world::stage::FORTRESS_NEAR - 1.0, tick);
+            let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
+            let steps = walk.waypoints.as_ref().map_or(0, Vec::len);
+            if found {
+                // Cut (a meal, a foe) or failed, the next one may be searched soon.
+                self.far_search_at = tick + walk::FAR_AGAIN_TICKS;
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("far walk toward the fortress at {c:?}"),
+                    format!(
+                        "a route of {steps} cells, {} to bridge with {} blocks held, found in {} \
+                         expansions",
+                        walk.bridges_ahead(),
+                        path::bridge_blocks(w),
+                        walk.expanded
+                    ),
+                );
+                return Task::Explore(walk);
+            }
+            self.expanded += walk.expanded;
+            self.note(
+                tick,
+                format!("no far route to the fortress at {c:?}"),
+                format!(
+                    "{:?} after {} expansions, {steps} cells; none again for {} ticks",
+                    walk.route,
+                    walk.expanded,
+                    walk::FAR_RETRY_TICKS
+                ),
+            );
+        }
+        // --- the end of A2's block.
         // Bricks seen: walk toward the nearest a route gets nearer to, refusing each once tried.
         let bricks: Vec<Cell> = world::stage::bricks_near(w, FORTRESS_CHUNKS)
             .into_iter()

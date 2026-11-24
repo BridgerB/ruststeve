@@ -5,8 +5,8 @@ type: reference
 tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@475e5f1 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -36,6 +36,12 @@ Issue 09a: clojurecraft's walk intent, made to fail fast when it stops getting c
 
 ## Since 09b
 `route_now` decides whether a target is walkable before the planner chooses it: a found route, or a partial one toward a column not loaded yet; an explore takes any route with waypoints ([[planner]]).
+
+## Issue 16: bridges and far walks (docs/problems/nether-walk.md)
+- **The bridge's executor** (`Walk::bridge`): at a waypoint reached by `MoveKind::Bridge` with no floor yet, the body stays within `BRIDGE_STAND` of the centre of the block it stands on, holds a bridge block (`hold::toward`) and clicks the side of the block under its feet (`Act::UseOn`, every `PLACE_EVERY_TICKS`, `MAX_PLACE_TRIES` times); the floor seen, it walks on. It never sneaks (the protocol sends no sneak input) and never steps over a floor not laid: a bridge it cannot lay fails the walk `NoPath`. Each block laid is a ledger note, "bridge block laid at …".
+- **A walk's acts and notes** are left in `Walk::more` and taken by the planner each tick (`take_out`).
+- **A far walk** (`Walk::far`) searches with `FAR_NODES` at `FAR_WEIGHT`; each search after its first is a note. On a found route a waypoint reached counts as progress, so a route that leads round is not failed `NoProgress`.
+- **`follow` jumps** only for a waypoint more than a step (`physics::STEP_HEIGHT`) over the feet: from soul sand the next cell is an eighth up.
 
 ## See also
 - [[pathfinding]] - the routes.

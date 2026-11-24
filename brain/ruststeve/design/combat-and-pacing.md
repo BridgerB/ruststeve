@@ -6,7 +6,7 @@ tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@071c346 clojurecraft@be85a92
+verifiedAgainst: ruststeve@43bd9ba clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -68,3 +68,5 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **Its notes** reach the ledger through `Defend::notes`: "struck N in reach, not M", "shooter fight given up", "retreat to cover at", "in cover at", "defend switched to"; the fight's closing note counts ticks kept off, sweeps held and fireballs dodged.
 - **Wither skeletons are fought** (spawner wall 1, `docs/problems/spawner.md`): they were `never_fight` from 2026-11-20, chosen for bare bots; a wither skeleton walks as fast as the bot, so a retreat from one never reaches `flee_clear`, and two armoured bots backed away 700 and 900 ticks and died with no swing (race 45334573113). `never_fight` is the creeper alone again.
 - **Cover and shelter** (`plan::cover`, `Plan::take_cover`; spawner wall 3): under `engage_health` in the Nether the bot rests only where no shooter sees its body (blazes and ghasts within 48, piglins and skeletons within 16; lines to its eye and middle) and nothing burns. Seen, it walks to the nearest cell out of sight within 8 on a found route; with none it builds cover where it stands, a held block into each cell a line of sight comes in through (`cover::shelter_block`, one every 10 ticks, cobblestone first). The range was 16 until three armoured bots rested on an open bridge 16 to 24 blocks from blazes and died there (race 45335627948).
+- **Heal beyond the spawner's range** (spawner wall 5): a spawner runs only with a player within 16 blocks, so no rest and no cover cell lies within `cover::SPAWNER_QUIET` (18) of a spawner on record; a hurt bot inside it walks away from the spawner on a found route first ("leave the spawner at … to heal"). A cover cell stands on a full block, passes `seen_body` for a body standing in it, and is refused for 600 ticks once walked to.
+- **Cover is never beside a drop, and a rest must be able to heal** (spawner walls 6 and 7): `cover::beside_drop` keeps cells at a bridge's edge out of `cover_cells` (two bots fell 17 blocks heading for one); `take_cover` rests only while `can_heal` holds (safe food held, or the food bar at 18+), else the bot goes on over `danger_health` (two bots sat 7,400 and 7,900 ticks at 16 health with their meat eaten).
