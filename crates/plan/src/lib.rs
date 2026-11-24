@@ -4643,8 +4643,10 @@ pub fn spares_due(w: &World, rules: &make::SurvivalRules, table_near: bool) -> b
 }
 
 /// Tasks the cook phase may begin: planks from five logs, a table and a furnace made and placed,
-/// a batch a kind of meat and a log or two gathered are under twenty; forty leaves each a retry.
-const COOK_TASKS: u32 = 40;
+/// a batch a kind of meat and a log or two gathered are under twenty; the shields' wood and
+/// crafts add up to twenty more (race 45354021804 lane 1 gave up at task 41 on its first shield
+/// craft, wall 8); sixty leaves each a retry.
+const COOK_TASKS: u32 = 60;
 
 /// The goal the cook phase hands the needs planner (overworld-leg wall 4), from what is held:
 /// while the coal and planks held burn for less than all the raw meat's cook time, the planks
