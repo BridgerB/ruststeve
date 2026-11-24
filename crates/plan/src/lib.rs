@@ -143,6 +143,9 @@ const SHELTER_MAX: u32 = 80;
 /// table and furnace among the walls), more where the body spans two columns or a floor is
 /// missing (overworld-leg wall 11).
 const HUT_MAX: u32 = 24;
+/// Ticks a full pack holds tasks back while its junk is dropped: three drops at `EQUIP_TICKS`
+/// and their resyncs, with room (overworld-leg wall 10).
+const FULL_WAIT_TICKS: u64 = 200;
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
 pub const TRAIL_TOWARD: f64 = 4.0;
@@ -595,6 +598,9 @@ pub struct Plan {
     pub hut_blocks: u32,
     #[serde(default)]
     pub hut_done: bool,
+    /// When the pack was first seen with no main slot free (wall 10).
+    #[serde(default)]
+    pub full_since: Option<u64>,
     /// The second stocking's look for animals is over: its walks failed `HUNT_WALK_FAILS` times
     /// running (overworld-leg wall 4: twelve failed walks cost a relocation, and six end the run).
     #[serde(default)]
@@ -729,6 +735,7 @@ impl Plan {
             cook_over: false,
             hut_blocks: 0,
             hut_done: false,
+            full_since: None,
             hunt_over: false,
             own_from: None,
             own_leg: None,
@@ -1765,9 +1772,18 @@ impl Plan {
     fn nether_task(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {
         self.equip(w, tick);
         // No main slot free and junk to drop: nothing begun until a stack is out (wall 10: a
-        // craft into a full pack failed twelve times running and the run ended stuck).
+        // craft into a full pack failed twelve times running and the run ended stuck), for
+        // `FULL_WAIT_TICKS` at most: a stack thrown at the feet is picked up again 40 ticks later,
+        // and a bot that waited on it idled 14,700 ticks (race 45354021804 lane 1).
         let full = (9i16..=44).all(|s| w.inventory.slots.contains_key(&s));
+        let since = if full {
+            *self.full_since.get_or_insert(tick)
+        } else {
+            self.full_since = None;
+            tick
+        };
         if full
+            && tick.saturating_sub(since) < FULL_WAIT_TICKS
             && w.window.is_none()
             && w.inventory.carried.is_none()
             && self
