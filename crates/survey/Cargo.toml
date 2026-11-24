@@ -8,5 +8,6 @@ description = "Survey a recorded world: slabs and sections of the blocks the bot
 
 [dependencies]
 data = { path = "../data" }
+plan = { path = "../plan" }
 record = { path = "../record" }
 world = { path = "../world" }

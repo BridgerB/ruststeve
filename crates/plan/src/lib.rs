@@ -27,6 +27,7 @@ pub mod scoop;
 pub mod smelt;
 pub mod stairs;
 pub mod station;
+pub mod tunnel;
 pub mod walk;
 
 use std::collections::BTreeMap;
@@ -542,6 +543,10 @@ pub struct Plan {
     /// nearer (a progress invariant, issue 13b).
     #[serde(default)]
     pub toward: Option<(Cell, f64, u32)>,
+    /// The travel tunnel in hand: its target, route and the cells found bad
+    /// (docs/problems/nether-tunnel.md).
+    #[serde(default)]
+    pub travel: tunnel::Travel,
     /// The same count for each cast landing looked at, the newest last (blaze.md wall 19: the
     /// site choice flipped between two landings and each flip forgot the other).
     #[serde(default)]
@@ -626,6 +631,7 @@ impl Plan {
             smelts: 0,
             relocations: 0,
             toward: None,
+            travel: tunnel::Travel::default(),
             landings: Vec::new(),
             mark: None,
             stalls: 0,
@@ -1894,19 +1900,20 @@ impl Plan {
                 return Task::Explore(walk);
             }
         }
-        // No walk: tunnel toward the nearest brick (stairs down to it when it is below), the
-        // tunnel hiding the bot from ghasts; three without coming nearer refuse it.
-        if let Some(c) = world::stage::bricks_near(w, FORTRESS_CHUNKS)
-            .into_iter()
-            .find(|c| !self.refused_now(*c, tick))
-            && let Some(t) = self.dig_toward(
-                w,
-                c,
-                true,
-                ("the fortress", "nether bricks seen, no walk to them"),
-                tick,
-            )
-        {
+        // No walk: the travel tunnel to the brick held, else to the nearest: up out of the lava
+        // sea's level, through rock, and down at the far end (docs/problems/nether-tunnel.md; the
+        // stairs down this used to cut ended beside lava, blaze.md walls 22 and 23).
+        let held = self.travel.target.filter(|c| !self.refused_now(*c, tick));
+        if let Some(c) = held.or_else(|| {
+            world::stage::bricks_near(w, FORTRESS_CHUNKS)
+                .into_iter()
+                .find(|c| !self.refused_now(*c, tick))
+        }) && let Some(t) = self.travel_tunnel(
+            w,
+            c,
+            ("the fortress", "nether bricks seen, no walk to them"),
+            tick,
+        ) {
             return t;
         }
         if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {

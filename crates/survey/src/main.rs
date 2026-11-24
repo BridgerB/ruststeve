@@ -6,7 +6,11 @@
 //! ```text
 //! survey <file.rsr> --at <server ticks> --slab x0,z0,x1,z1 --y y0,y1 [--force]
 //! survey <file.rsr> --at <server ticks> --line x0,z0,x1,z1 --y y0,y1 [--force]
+//! survey <file.rsr> --at <server ticks> --route x,y,z,tx,ty,tz [--force]
 //! ```
+//!
+//! `--route` asks the travel tunnel's search (`plan::tunnel::route`, a pure function) for its way
+//! from a feet cell to a target on that world, and prints it with the time it took.
 //!
 //! Letters: `#` netherrack, `.` air, `L` lava, `m` magma, `s` soul sand or soil, `g` gravel,
 //! `B` nether bricks, `o` any other full block, `,` any other block, `?` not loaded.
@@ -46,6 +50,7 @@ fn run() -> Result<(), String> {
     let force = args.iter().any(|a| a == "--force");
     let (mut file, mut at) = (None, None);
     let (mut slab, mut line, mut ys) = (None, None, vec![28, 60]);
+    let mut route = None;
     let mut it = args.iter().filter(|a| a.as_str() != "--force");
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -59,6 +64,7 @@ fn run() -> Result<(), String> {
             }
             "--slab" => slab = Some(numbers(it.next(), 4, "--slab")?),
             "--line" => line = Some(numbers(it.next(), 4, "--line")?),
+            "--route" => route = Some(numbers(it.next(), 6, "--route")?),
             "--y" => ys = numbers(it.next(), 2, "--y")?,
             other => file = Some(other.to_owned()),
         }
@@ -103,6 +109,9 @@ fn run() -> Result<(), String> {
     if let Some(l) = line {
         section(w, [l[0], l[1], l[2], l[3]], [ys[0], ys[1]]);
     }
+    if let Some(r) = route {
+        tunnel(w, (r[0], r[1], r[2]), (r[3], r[4], r[5]));
+    }
     Ok(())
 }
 
@@ -125,6 +134,47 @@ fn letter(w: &World, x: i32, y: i32, z: i32) -> char {
                 ','
             }
         }
+    }
+}
+
+/// The travel tunnel's route from `from` to `target`, a cell a line with the step it takes.
+fn tunnel(w: &World, from: (i32, i32, i32), target: (i32, i32, i32)) {
+    let began = std::time::Instant::now();
+    let found = plan::tunnel::route(
+        w,
+        from,
+        target,
+        &std::collections::BTreeSet::new(),
+        plan::tunnel::MAX_NODES,
+    );
+    let took = began.elapsed();
+    let Some(r) = found else {
+        println!("route from {from:?} to {target:?}: none, in {took:?}");
+        return;
+    };
+    println!(
+        "route from {from:?} to {target:?}: {} steps, {}, {} nodes, in {took:?}",
+        r.cells.len().saturating_sub(1),
+        if r.found {
+            "within reach"
+        } else {
+            "ends short"
+        },
+        r.expanded
+    );
+    for pair in r.cells.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let refused = plan::tunnel::opened(a, b)
+            .and_then(|(cells, floor)| plan::stairs::refusal(w, &cells, floor));
+        println!(
+            "  {b:?} {}{}",
+            match b.1 - a.1 {
+                1 => "up",
+                -1 => "down",
+                _ => "level",
+            },
+            refused.map_or_else(String::new, |why| format!("  REFUSED on this world: {why}"))
+        );
     }
 }
 

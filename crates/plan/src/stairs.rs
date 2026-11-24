@@ -84,6 +84,12 @@ pub struct Stairs {
     /// tunnel toward it level or down only (docs/problems/blaze.md wall 1).
     #[serde(default)]
     pub up: bool,
+    /// A travel tunnel's stretch (docs/problems/nether-tunnel.md): the feet cells to cut to, in
+    /// order, the first where the feet are. Each step is the level step, stair up or stair down
+    /// that leads to the next cell; a refusal ends the stretch (the planner blocks the cell and
+    /// searches its route again), no heading is turned.
+    #[serde(default)]
+    pub route: Vec<Cell>,
 }
 
 fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
@@ -228,7 +234,46 @@ impl Stairs {
             started: tick,
             level_only: false,
             up: false,
+            route: Vec::new(),
         }
+    }
+
+    /// A stretch of a travel tunnel: the steps that lead along `route`, as far as it goes.
+    pub fn along(route: Vec<Cell>, tick: u64) -> Self {
+        let dir = match route.as_slice() {
+            [a, b, ..] => (b.0 - a.0, b.2 - a.2),
+            _ => (1, 0),
+        };
+        Self {
+            route,
+            ..Self::new(dir, tick)
+        }
+    }
+
+    /// The next step along the route from the feet; `Ok(None)` at its end.
+    fn plan_route(&mut self, feet: Cell, w: &World) -> Result<Option<StairStage>, StairsFailure> {
+        let Some(i) = self.route.iter().position(|c| *c == feet) else {
+            self.refusals.push(format!("off the route at {feet:?}"));
+            return Err(StairsFailure::Boxed);
+        };
+        let Some(to) = self.route.get(i + 1).copied() else {
+            return Ok(None);
+        };
+        let Some((cells, floor)) = crate::tunnel::opened(feet, to) else {
+            self.refusals
+                .push(format!("no step from {feet:?} to {to:?}"));
+            return Err(StairsFailure::Boxed);
+        };
+        if let Some(why) = refusal(w, &cells, floor) {
+            self.refusals.push(why);
+            return Err(StairsFailure::Boxed);
+        }
+        self.dir = (to.0 - feet.0, to.2 - feet.2);
+        Ok(Some(StairStage::Cut {
+            cells,
+            to,
+            level: to.1 == feet.1,
+        }))
     }
 
     /// Stairs up: `STAIR_DEPTH` steps up along the heading (a level step where all four headings
@@ -311,6 +356,19 @@ impl Stairs {
                 if self.stairs >= STAIR_DEPTH {
                     return (still, None, StairsStatus::Done);
                 }
+                if !self.route.is_empty() {
+                    // A stretch that cut a step is done where it stops: the planner reads the
+                    // feet's place on the route and knows the next step failed.
+                    return match self.plan_route(feet, w) {
+                        Ok(Some(s)) => {
+                            self.stage = s;
+                            (still, None, StairsStatus::Running)
+                        }
+                        Ok(None) => (still, None, StairsStatus::Done),
+                        Err(_) if self.stairs > 0 => (still, None, StairsStatus::Done),
+                        Err(f) => (still, None, StairsStatus::Failed(f)),
+                    };
+                }
                 match self.plan(feet, w) {
                     Ok(s) => {
                         self.stage = s;
@@ -381,7 +439,7 @@ impl Stairs {
                         && feet.1 < to.1
                         && feet.1 >= to.1 - MAX_DROP)
                 {
-                    if !*level || self.level_only {
+                    if !*level || self.level_only || !self.route.is_empty() {
                         self.stairs += 1;
                         self.turns = 0;
                     }

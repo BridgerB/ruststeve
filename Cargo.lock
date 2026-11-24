@@ -1592,6 +1592,7 @@ name = "survey"
 version = "0.1.0"
 dependencies = [
  "data",
+ "plan",
  "record",
  "world",
 ]
