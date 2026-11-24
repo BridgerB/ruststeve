@@ -1,0 +1,210 @@
+//! Issue 17 (docs/problems/endermen-leave.md): the stare filter (`plan::look`, the 26.1.2 jar's
+//! `EnderMan.isBeingStaredBy`, probe 45472254333), the provoked enderman, ticking, the provisions
+//! counts and the fortress footprint, on hand-built worlds.
+
+use data::{EntityKind, ItemKind};
+use physics::Controls;
+use plan::endermen::{
+    self, FORTRESS_PAD, Sighting, angry, filler_held, in_footprint, near_ticking,
+    pickaxe_uses_left, ticking,
+};
+use plan::look::{ENDERMAN_EYE, keep_off, stares};
+use protocol::S2c;
+use protocol::metadata::MetaValue;
+use world::{Event, World};
+
+const FEET: [f64; 3] = [0.5, 64.0, 0.5];
+
+fn eye() -> [f64; 3] {
+    [FEET[0], FEET[1] + physics::EYE_HEIGHT, FEET[2]]
+}
+
+fn bare() -> World {
+    let mut w = World::new();
+    w.body = Some(physics::Body {
+        pos: FEET,
+        ..physics::Body::default()
+    });
+    w.simulation_distance = Some(3);
+    w
+}
+
+fn with(mut w: World, id: i32, kind: EntityKind, at: [f64; 3]) -> World {
+    w.step(&Event::Packet(S2c::AddEntity {
+        id,
+        uuid: [0; 16],
+        kind: kind.id(),
+        x: at[0],
+        y: at[1],
+        z: at[2],
+    }));
+    w
+}
+
+fn enderman_at(at: [f64; 3]) -> World {
+    with(bare(), 41, EntityKind::Enderman, at)
+}
+
+/// The look straight at an enderman's eye point, from the bot's eye.
+fn at_its_eye(at: [f64; 3]) -> (f32, f32) {
+    let (yaw, pitch) = plan::walk::look_at(eye(), [at[0], at[1] + ENDERMAN_EYE, at[2]]);
+    #[allow(clippy::cast_possible_truncation)]
+    (yaw as f32, pitch)
+}
+
+#[test]
+fn a_look_at_its_eye_stares_and_is_kept_off() {
+    let at = [10.5, 64.0, 0.5];
+    let w = enderman_at(at);
+    let (yaw, pitch) = at_its_eye(at);
+    assert_eq!(stares(&w, eye(), yaw, pitch), Some(41));
+    let c = Controls {
+        yaw: f64::from(yaw),
+        pitch: Some(pitch),
+        forward: true,
+        ..Controls::default()
+    };
+    let (kept, id) = keep_off(&w, c);
+    assert_eq!(id, Some(41));
+    assert!(kept.forward, "the walk goes on");
+    assert!(
+        (kept.yaw - c.yaw).abs() < f64::EPSILON,
+        "the heading is the yaw"
+    );
+    let p = kept.pitch.unwrap();
+    assert!((p - pitch).abs() > 1.0, "the pitch changed: {p}");
+    assert_eq!(stares(&w, eye(), yaw, p), None);
+}
+
+/// The dig's look at a block 20 east, 2 up, passes 2.8 degrees from the eye of an enderman 10
+/// east: inside the jar's cone at 10 blocks (about 4 degrees). Sent with a changed look.
+#[test]
+fn a_dig_whose_look_crosses_its_head_is_sent_with_a_changed_look() {
+    let w = enderman_at([10.5, 64.0, 0.5]);
+    let (yaw, pitch) = plan::walk::look_at(eye(), [20.5, 66.5, 0.5]);
+    let c = Controls {
+        yaw,
+        pitch: Some(pitch),
+        ..Controls::default()
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    let y = yaw as f32;
+    assert_eq!(stares(&w, eye(), y, pitch), Some(41));
+    let (kept, id) = keep_off(&w, c);
+    assert_eq!(id, Some(41));
+    assert_eq!(stares(&w, eye(), y, kept.pitch.unwrap()), None);
+}
+
+#[test]
+fn a_look_away_or_beyond_its_range_is_not_changed() {
+    // Beyond the follow range of 64 the goal never takes the player: the look is left alone.
+    let far = [70.5, 64.0, 0.5];
+    let w = enderman_at(far);
+    let (yaw, pitch) = at_its_eye(far);
+    assert_eq!(stares(&w, eye(), yaw, pitch), None);
+    // Within range, a look at its feet 30 blocks off is about 5 degrees under its eye,
+    // outside the cone (2.3 degrees at 30).
+    let near = [30.5, 64.0, 0.5];
+    let w = enderman_at(near);
+    let (yaw, pitch) = plan::walk::look_at(eye(), [30.5, 64.0, 0.5]);
+    #[allow(clippy::cast_possible_truncation)]
+    let y = yaw as f32;
+    assert_eq!(stares(&w, eye(), y, pitch), None);
+    let c = Controls {
+        yaw,
+        pitch: Some(pitch),
+        ..Controls::default()
+    };
+    assert_eq!(keep_off(&w, c), (c, None));
+}
+
+#[test]
+fn a_carved_pumpkin_on_the_head_stares_at_nothing() {
+    let at = [10.5, 64.0, 0.5];
+    let mut w = enderman_at(at);
+    w.inventory.slots.insert(5, (ItemKind::CarvedPumpkin, 1));
+    let (yaw, pitch) = at_its_eye(at);
+    assert_eq!(stares(&w, eye(), yaw, pitch), None);
+}
+
+#[test]
+fn an_enderman_ticks_inside_the_simulation_distance() {
+    let w = bare();
+    // The player's chunk is 0; chunk 3 ticks, chunk 4 does not (a square of 3).
+    assert!(ticking(&w, [63.9, 64.0, 0.5]));
+    assert!(!ticking(&w, [64.1, 64.0, 0.5]));
+    assert!(ticking(&w, [-47.9, 64.0, 63.0]));
+    assert!(!ticking(&w, [0.5, 64.0, -49.0]));
+    let mut unknown = bare();
+    unknown.simulation_distance = None;
+    assert!(!ticking(&unknown, [1.5, 64.0, 0.5]));
+}
+
+#[test]
+fn the_stage_is_a_ticking_enderman_within_32() {
+    let w = enderman_at([31.5, 64.0, 0.5]);
+    assert!(matches!(near_ticking(&w), Some(Sighting { id: 41, .. })));
+    let w = enderman_at([33.5, 64.0, 0.5]);
+    assert_eq!(near_ticking(&w), None);
+    assert_eq!(endermen::endermen(&w).len(), 1);
+}
+
+#[test]
+fn a_provoked_enderman_is_its_creepy_flag_or_its_hit() {
+    let mut w = enderman_at([6.5, 64.0, 0.5]);
+    assert_eq!(angry(&w), None, "a calm enderman is left alone");
+    w.entities
+        .get_mut(&41)
+        .unwrap()
+        .metadata
+        .insert(endermen::CREEPY_INDEX, MetaValue::Bool(true));
+    assert_eq!(angry(&w), Some(41));
+    let mut w = enderman_at([6.5, 64.0, 0.5]);
+    w.hits.push(world::Hit {
+        at_tick: w.session.server_ticks,
+        damage_type: "mob_attack".to_owned(),
+        cause: Some(EntityKind::Enderman),
+        direct: Some(EntityKind::Enderman),
+    });
+    assert_eq!(angry(&w), Some(41));
+}
+
+/// Never a swing at an enderman in issue 17, provoked or not: the defend row never takes one.
+#[test]
+fn an_enderman_is_never_the_foe() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let goals: plan::make::Goals = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let rules = plan::make::Table::new(&goals).unwrap().survival;
+    let mut w = enderman_at([2.5, 64.0, 0.5]);
+    w.hits.push(world::Hit {
+        at_tick: w.session.server_ticks,
+        damage_type: "mob_attack".to_owned(),
+        cause: Some(EntityKind::Enderman),
+        direct: Some(EntityKind::Enderman),
+    });
+    assert_eq!(plan::defend::foe(&w, &rules, &[]), None);
+    assert_eq!(plan::defend::pressing(&w, &rules, -1), None);
+    assert!(rules.pickaxe_reserve >= 40, "the reserve is in the config");
+    assert!(rules.travel_health > rules.danger_health);
+}
+
+#[test]
+fn provisions_count_pickaxe_uses_and_filler() {
+    let mut w = bare();
+    w.inventory.slots.insert(36, (ItemKind::StonePickaxe, 1));
+    w.inventory.slots.insert(37, (ItemKind::StonePickaxe, 1));
+    w.inventory.slots.insert(9, (ItemKind::Netherrack, 64));
+    w.inventory.slots.insert(10, (ItemKind::Cobblestone, 20));
+    w.inventory.slots.insert(11, (ItemKind::BlazeRod, 7));
+    assert_eq!(pickaxe_uses_left(&w), 262, "two fresh stone pickaxes");
+    assert_eq!(filler_held(&w), 84, "rods are not filler");
+}
+
+#[test]
+fn the_fortress_footprint_is_the_bricks_bounds_padded() {
+    let b = (100, 120, 160, 200);
+    assert!(in_footprint(b, (129, 64, 159)));
+    assert!(in_footprint(b, (100 - FORTRESS_PAD, 30, 120)));
+    assert!(!in_footprint(b, (100 - FORTRESS_PAD - 1, 64, 150)));
+    assert!(!in_footprint(b, (130, 64, 200 + FORTRESS_PAD + 1)));
+}

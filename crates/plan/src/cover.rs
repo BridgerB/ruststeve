@@ -275,6 +275,17 @@ fn support(w: &World, c: Cell, body: &[Cell], depth: u32) -> Option<(Cell, Cell,
 /// head, each open one filled; the cell to fill, the full block to click and its face. `None` when
 /// the hut is closed or nothing can be clicked. Only cells beside the body are read.
 pub fn hut_block(w: &World, pos: [f64; 3]) -> Option<(Cell, Cell, i8)> {
+    pocket_block(w, pos, None)
+}
+
+/// `hut_block` with the walls nearest `threat` first (issue 17: a provoked enderman walks in
+/// while the pocket goes up, and the side it comes from is shut before the far side); the roof
+/// is always last.
+pub fn pocket_block(
+    w: &World,
+    pos: [f64; 3],
+    threat: Option<[f64; 3]>,
+) -> Option<(Cell, Cell, i8)> {
     let body = occupied(pos);
     let top = body.iter().map(|c| c.1).max()?;
     let low = body.iter().map(|c| c.1).min()?;
@@ -288,6 +299,13 @@ pub fn hut_block(w: &World, pos: [f64; 3]) -> Option<(Cell, Cell, i8)> {
                 }
             }
         }
+    }
+    if let Some(t) = threat {
+        let d = |c: &Cell| {
+            let (dx, dz) = (f64::from(c.0) + 0.5 - t[0], f64::from(c.2) + 0.5 - t[2]);
+            dx * dx + dz * dz
+        };
+        shell.sort_by(|a, b| d(a).total_cmp(&d(b)).then(a.cmp(b)));
     }
     for (x, _, z) in body.iter().filter(|c| c.1 == top) {
         let c = (*x, top + 1, *z);
