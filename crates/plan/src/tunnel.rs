@@ -221,6 +221,21 @@ impl<'a> Sight<'a> {
             if self.at(floor) != OPEN || !matches!(self.at(under), OPEN | ROCK | FALLS) {
                 return false;
             }
+            // Ground near under it: laid over a cavern's floor, never out over a drop.
+            let mut ground = false;
+            for d in 1..=stairs::LAY_OVER {
+                match self.at((floor.0, floor.1 - d, floor.2)) {
+                    OPEN => {}
+                    ROCK | FALLS => {
+                        ground = true;
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            if !ground {
+                return false;
+            }
             for c in [floor, under] {
                 for (dx, dy, dz) in SIDES {
                     if matches!(self.at((c.0 + dx, c.1 + dy, c.2 + dz)), LAVA | WATER) {

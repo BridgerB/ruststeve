@@ -6,7 +6,7 @@ tags: [wire, actions, attack, dig, use-item]
 aliases: [use_item, release use, LpVec3, set_entity_motion, attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@b72980e
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@f427d67
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub enum Act {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_dig_carries_its_sequence() {"
@@ -27,7 +27,7 @@ Everything the bot does to the world is one of a few client packets. Several car
 ## Key files
 - clojurecraft `src/clojurecraft/packet.clj`: the play c2s specs and `values`.
 - ruststeve v1 `src/bot/mod.rs`: `attack`.
-- ruststeve `crates/world/src/lib.rs`: `Act` (`Dig { step, pos, face }`, `Hold`, `Click`, `CloseWindow`, `Swing`, `Resync`, `UseOn`, `Attack`, `UseItem`, `ReleaseUse`, `Respawn`) is an input event; the world turns it into the packet, counting the dig sequence (`sequence_sent`) and folding `block_changed_ack` into `sequence_acked` (the highest seen). Live on a local server (2026-11-12): START then FINISH 3 s later on a grass block drew the block update to air, `block_changed_ack 2` and the pickup into hotbar slot 36.
+- ruststeve `crates/world/src/lib.rs`: `Act` (`Dig { step, pos, face }`, `Hold`, `Click`, `CloseWindow`, `Swing`, `Resync`, `UseOn`, `Attack`, `UseItem`, `ReleaseUse`, `Respawn`, `UseOffHand`: `use_item` with hand 1, a shield raised until `ReleaseUse`) is an input event; the world turns it into the packet, counting the dig sequence (`sequence_sent`) and folding `block_changed_ack` into `sequence_acked` (the highest seen). Live on a local server (2026-11-12): START then FINISH 3 s later on a grass block drew the block update to air, `block_changed_ack 2` and the pickup into hotbar slot 36.
 
 ## How it works
 

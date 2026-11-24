@@ -1244,6 +1244,20 @@ impl Sim {
             self.violations.push(format!("click slot {slot}"));
             return Ok(Vec::new());
         };
+        // Mode 2 (SWAP) with button 40: an inventory slot's stack and the off hand's change
+        // places (`AbstractContainerMenu.doClick`, the `F` key over a slot): how a shield gets
+        // to the off hand (docs/problems/shield.md).
+        if mode == 2 && button == 40 {
+            match l {
+                Loc::Inv(n) if (9..=44).contains(&n) => {
+                    let (here, off) = (self.get(l), self.get(Loc::Inv(45)));
+                    self.put(l, off);
+                    self.put(Loc::Inv(45), here);
+                }
+                _ => self.violations.push(format!("swap click on slot {slot}")),
+            }
+            return Ok(Vec::new());
+        }
         if !(button == 0 || button == 1) {
             self.violations.push(format!("click button {button}"));
             return Ok(Vec::new());
