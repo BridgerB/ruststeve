@@ -714,6 +714,16 @@ impl Plan {
 
     /// Ends the open task with the run (the ledger then holds an end for every start).
     pub fn close(&mut self, at: u64, why: &str) {
+        // An escape cut by the run's end says what it tried (nether-walk.md: three bots died in
+        // lava with the escape's seals and targets in no file).
+        if let Task::Escape(e) = &self.task {
+            let said = e.report();
+            self.note(
+                at,
+                format!("escape-{} ended with the run", e.kind.name()),
+                said,
+            );
+        }
         if let Some(o) = self.open.take() {
             self.task_counts.ended += 1;
             self.records.push(TaskRecord::Ended {
@@ -1207,12 +1217,15 @@ impl Plan {
         }
         let Some((id, row)) = chosen else {
             if let Some(make::Always::Escape(k)) = running {
-                self.task = Task::Idle;
+                let said = match std::mem::replace(&mut self.task, Task::Idle) {
+                    Task::Escape(e) => e.report(),
+                    _ => String::new(),
+                };
                 self.retry_at = tick;
                 self.note(
                     tick,
                     format!("out of the {}", k.name()),
-                    "dry land held; back to the goal".to_owned(),
+                    format!("dry land held; back to the goal; {said}"),
                 );
             }
             return None;
@@ -1228,7 +1241,17 @@ impl Plan {
             let task = match row {
                 make::Always::Escape(k) => {
                     self.escapes += 1;
-                    self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
+                    // Which lava: on the body, or at the door and where (nether-walk.md).
+                    let door = (k == escape::TrapKind::Lava && !body.in_lava)
+                        .then(|| escape::lava_door_at(w, path::feet_cell(body.pos)))
+                        .flatten()
+                        .map(|c| format!(" (at the door, {c:?}, the body not in it)"))
+                        .unwrap_or_default();
+                    self.note(
+                        tick,
+                        id,
+                        format!("trapped in {}{door}; cut {cut}", k.name()),
+                    );
                     // Stairs that cut into water: their target waits, or the next choice cuts the
                     // same stairs into the same water (blaze wall 16: 72 escapes in one run, each
                     // after "stairs up toward the log at (36, 88, 7)").
