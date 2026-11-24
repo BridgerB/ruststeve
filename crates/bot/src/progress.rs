@@ -78,7 +78,27 @@ impl Progress {
                         self.most.insert(item.clone(), *to);
                     }
                 }
-                _ => {}
+                observe::Fact::Health { .. }
+                | observe::Fact::Food { .. }
+                | observe::Fact::Hit { .. }
+                | observe::Fact::Alight { .. }
+                | observe::Fact::ToolWorn { .. }
+                | observe::Fact::ToolBroke { .. }
+                | observe::Fact::ToolGone { .. }
+                | observe::Fact::HealthDrop { .. }
+                | observe::Fact::Cursor { .. }
+                | observe::Fact::Dimension { .. }
+                | observe::Fact::Effect { .. }
+                | observe::Fact::Sound { .. }
+                | observe::Fact::LevelEvent { .. }
+                | observe::Fact::Chat { .. }
+                | observe::Fact::Appear { .. }
+                | observe::Fact::Gone { .. }
+                | observe::Fact::Shot { .. }
+                | observe::Fact::Landed { .. }
+                | observe::Fact::Sign { .. }
+                | observe::Fact::Death
+                | observe::Fact::Won => {}
             }
         }
         if place.is_some_and(|p| self.regions.insert(region(p))) {

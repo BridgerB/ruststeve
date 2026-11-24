@@ -513,7 +513,7 @@ impl Stairs {
         let Some(body) = w.body else {
             return (still, None, StairsStatus::Failed(StairsFailure::Lost));
         };
-        let feet = path::feet_cell(body.pos);
+        let feet = path::stand_cell(w, body.pos);
         let from = *self.from.get_or_insert(feet);
         match self.stood {
             Some((c, since)) if c == feet => {
