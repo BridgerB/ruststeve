@@ -272,9 +272,6 @@ pub struct Survival {
     pub engage_health: f32,
     #[serde(default = "ranged_radius")]
     pub ranged_radius: f64,
-    /// A shooter's line of sight counts from this far (a blaze shoots from 48).
-    #[serde(default = "shoot_radius")]
-    pub shoot_radius: f64,
     /// A fight with a shooter that lands nothing for this many ticks is given up.
     #[serde(default = "shooter_patience")]
     pub shooter_patience: u64,
@@ -300,10 +297,6 @@ fn flee_clear() -> f64 {
 
 fn ranged_radius() -> f64 {
     16.0
-}
-
-fn shoot_radius() -> f64 {
-    48.0
 }
 
 /// With no key: the fight's own `NO_HIT_TICKS`.
@@ -348,7 +341,6 @@ impl Default for Survival {
             neutral: Vec::new(),
             engage_health: 0.0,
             ranged_radius: ranged_radius(),
-            shoot_radius: shoot_radius(),
             shooter_patience: shooter_patience(),
             shooter_retreat_health: 0.0,
             flee_radius: flee_radius(),
@@ -388,7 +380,6 @@ pub struct SurvivalRules {
     pub neutral: Vec<data::EntityKind>,
     pub engage_health: f32,
     pub ranged_radius: f64,
-    pub shoot_radius: f64,
     pub shooter_patience: u64,
     pub shooter_retreat_health: f32,
     pub flee_radius: f64,
@@ -662,7 +653,6 @@ impl Table {
                 neutral,
                 engage_health: g.survival.engage_health,
                 ranged_radius: g.survival.ranged_radius,
-                shoot_radius: g.survival.shoot_radius,
                 shooter_patience: g.survival.shooter_patience,
                 shooter_retreat_health: g.survival.shooter_retreat_health,
                 flee_radius: g.survival.flee_radius,

@@ -81,17 +81,21 @@ pub struct Defend {
     pub cover: Option<crate::walk::Walk>,
     #[serde(default)]
     pub covered_at: Option<u64>,
+    /// Ticks stepped away from a shooter in touch, and ticks a swing was held for a neutral mob
+    /// in the sweep (blaze-fight walls 4 and 5): in the fight's note.
+    #[serde(default)]
+    pub kept_off: u32,
+    #[serde(default)]
+    pub sweeps_held: u32,
     /// What the fight did that the ledger should hold, taken by the planner each tick.
     #[serde(default)]
     pub notes: Vec<String>,
 }
 
-/// A blaze's box (vanilla `EntityType.BLAZE`: 0.6 wide, 1.8 high) and its eye (85% up).
+/// A blaze's box (vanilla `EntityType.BLAZE`: 0.6 wide, 1.8 high).
 const SHOOTER_HALF_WIDTH: f64 = 0.3;
 const SHOOTER_HEIGHT: f64 = 1.8;
-const SHOOTER_EYE: f64 = 1.53;
-/// Cells each way a cover cell is looked for, and how many are tried for a route a look.
-const COVER_CELLS: i32 = 6;
+/// How many cover cells are tried for a route a look.
 const COVER_TRIES: usize = 4;
 
 /// From `eye` to the nearest point of the box of a mob standing at `pos`: what the client's
@@ -119,56 +123,44 @@ pub fn sight(w: &World, from: [f64; 3], to: [f64; 3]) -> bool {
         .any(|c| blocks_sight(w, c))
 }
 
-/// The eyes of every live shooter (`ranged` kinds) within `shoot_radius` of the feet.
-pub fn shooter_eyes(w: &World, rules: &SurvivalRules) -> Vec<[f64; 3]> {
-    let Some(body) = w.body else {
-        return Vec::new();
-    };
-    w.entities
-        .values()
-        .filter(|e| !e.dead && rules.ranged.contains(&e.kind))
-        .filter(|e| distance(e.pos, body.pos) <= rules.shoot_radius)
-        .map(|e| [e.pos[0], e.pos[1] + SHOOTER_EYE, e.pos[2]])
-        .collect()
-}
+/// A shooter of this kind strikes by touch too, within this of its target, feet to feet: a blaze
+/// hits once a second inside 2 blocks (vanilla `BlazeAttackGoal`: `distanceToSqr < 4`), for 3.6 in
+/// iron armour. The fight keeps this far off and strikes from its own reach of 3.
+pub const KEEP_OFF: f64 = 2.4;
+/// A sweep's reach round the mob struck (the game's sweep takes every mob within a block of the
+/// target's box and 3 of the player), with a margin.
+pub const SWEEP_NEAR: f64 = 2.0;
 
-/// Whether any of `eyes` has a line to a body whose feet stand in `c`: to its eye or its middle.
-pub fn seen_by(w: &World, eyes: &[[f64; 3]], c: crate::path::Cell) -> bool {
-    let x = f64::from(c.0) + 0.5;
-    let z = f64::from(c.2) + 0.5;
-    let head = [x, f64::from(c.1) + physics::EYE_HEIGHT, z];
-    let mid = [x, f64::from(c.1) + 0.9, z];
-    eyes.iter()
-        .any(|from| sight(w, *from, head) || sight(w, *from, mid))
-}
-
-/// The standable cells within `COVER_CELLS` that none of `eyes` sees and that hold no fire,
-/// nearest the feet first: a full block seen stands between each and every shooter.
-pub fn cover_cells(w: &World, eyes: &[[f64; 3]]) -> Vec<crate::path::Cell> {
-    let Some(body) = w.body else {
-        return Vec::new();
-    };
-    let f = crate::path::feet_cell(body.pos);
-    let burning = |c: crate::path::Cell| {
+/// Whether a step along `yaw` is one a shooter's fight may take: the cells 0.9 and 1.7 ahead hold
+/// no lava and no fire at the feet or head, and have a seen floor right under them or one block
+/// down, with no lava there. Stricter than `safe_ahead` (which allows a three-block drop): two
+/// bots walked off fortress bridges into lava closing in on a blaze and a skeleton, and one
+/// walked back into the fire it had just left 13 times (race 45336326999). An unseen cell is
+/// rock, as everywhere.
+pub fn safe_step(w: &World, pos: [f64; 3], yaw: f64) -> bool {
+    let rad = yaw.to_radians();
+    let seen = |c: crate::path::Cell| crate::cast::seen(w, c);
+    let bad = |c: crate::path::Cell| {
         matches!(
-            crate::cast::seen(w, c),
-            Some(data::BlockKind::Fire | data::BlockKind::SoulFire)
+            seen(c),
+            Some(data::BlockKind::Lava | data::BlockKind::Fire | data::BlockKind::SoulFire)
         )
     };
-    let mut cells = crate::path::Cells::new(w);
-    let mut out: Vec<(i32, crate::path::Cell)> = Vec::new();
-    for dx in -COVER_CELLS..=COVER_CELLS {
-        for dy in -2..=2 {
-            for dz in -COVER_CELLS..=COVER_CELLS {
-                let c = (f.0 + dx, f.1 + dy, f.2 + dz);
-                if cells.standable(c) && !burning(c) && !seen_by(w, eyes, c) {
-                    out.push((dx * dx + dy * dy + dz * dz, c));
-                }
-            }
-        }
-    }
-    out.sort();
-    out.into_iter().map(|(_, c)| c).collect()
+    let floor = |c: crate::path::Cell| {
+        seen(c).is_none_or(|k| {
+            data::generated::shapes::collision(k) != Some(data::types::Collision::Empty)
+        })
+    };
+    [0.9, 1.7].into_iter().all(|far| {
+        let c =
+            crate::path::feet_cell([pos[0] - rad.sin() * far, pos[1], pos[2] + rad.cos() * far]);
+        let under = (c.0, c.1 - 1, c.2);
+        let under2 = (c.0, c.1 - 2, c.2);
+        !bad(c)
+            && !bad((c.0, c.1 + 1, c.2))
+            && !bad(under)
+            && (floor(under) || (!bad(under2) && floor(under2)))
+    })
 }
 
 /// A drop this deep or deeper ahead holds a step: three blocks of fall cost no health.
@@ -309,7 +301,13 @@ fn mob_health(w: &World, id: i32) -> Option<f32> {
 
 impl Defend {
     pub fn new(w: &World, foe: i32, kind: EntityKind, rules: &SurvivalRules, tick: u64) -> Self {
-        let stance = if rules.never_fight.contains(&kind) || in_danger(w, rules) {
+        // A shooter is not fought from under its own line either: a fight begun at 9.9 with two
+        // blazes in touch ended in 20 ticks (blaze-fight wall 4).
+        let hurt = rules.ranged.contains(&kind)
+            && w.player
+                .health
+                .is_some_and(|h| h <= rules.shooter_retreat_health);
+        let stance = if rules.never_fight.contains(&kind) || in_danger(w, rules) || hurt {
             Stance::Retreat
         } else {
             Stance::Fight
@@ -334,6 +332,8 @@ impl Defend {
             held_back: 0,
             cover: None,
             covered_at: None,
+            kept_off: 0,
+            sweeps_held: 0,
             notes: Vec::new(),
         }
     }
@@ -345,15 +345,14 @@ impl Defend {
     fn cover_step(
         &mut self,
         w: &World,
-        rules: &SurvivalRules,
         body: &physics::Body,
         near: bool,
         tick: u64,
     ) -> Option<(Controls, Option<Act>, DefendStatus)> {
         let still = Controls::default();
-        let eyes = shooter_eyes(w, rules);
+        let eyes = crate::cover::shooters(w);
         let feet = crate::path::feet_cell(body.pos);
-        if !seen_by(w, &eyes, feet) {
+        if !crate::cover::seen_body(w, &eyes, body.pos) {
             if near {
                 return None;
             }
@@ -369,7 +368,10 @@ impl Defend {
                 .is_none_or(|t| tick.saturating_sub(t) >= FLEE_RETRY_TICKS)
         {
             self.covered_at = Some(tick);
-            for c in cover_cells(w, &eyes).into_iter().take(COVER_TRIES) {
+            for c in crate::cover::cover_cells(w, &eyes)
+                .into_iter()
+                .take(COVER_TRIES)
+            {
                 let mut walk = crate::walk::Walk::new(
                     c,
                     crate::path::Goal::Block { pos: c },
@@ -393,6 +395,17 @@ impl Defend {
             self.cover = None;
         }
         Some((c, None, DefendStatus::Running))
+    }
+
+    /// The nearest live mob of the foe's kind within `KEEP_OFF` of the feet: one in touch.
+    fn in_touch(&self, w: &World, feet: [f64; 3]) -> Option<[f64; 3]> {
+        w.entities
+            .values()
+            .filter(|e| !e.dead && e.kind == self.kind)
+            .map(|e| (distance(feet, e.pos), e.pos))
+            .filter(|(d, _)| *d < KEEP_OFF)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, p)| p)
     }
 
     /// The live mob of the foe's kind nearest the eye by its box, within `STRIKE_REACH` and in
@@ -488,8 +501,7 @@ impl Defend {
             Stance::Retreat => {
                 // From a shooter: out of every shooter's sight, not out of this one's reach.
                 if shooter
-                    && let Some(r) =
-                        self.cover_step(w, rules, &body, d <= rules.defend_radius, tick)
+                    && let Some(r) = self.cover_step(w, &body, d <= rules.defend_radius, tick)
                 {
                     return r;
                 }
@@ -583,11 +595,32 @@ impl Defend {
                 } else {
                     distance(eye, target) > STRIKE_REACH
                 };
+                // A shooter in touch is stepped away from, the strikes going on: its touch costs
+                // more than its fireballs (blaze-fight wall 4).
+                let face = match self.in_touch(w, body.pos).filter(|_| shooter) {
+                    Some(at) => {
+                        let away = (yaw_to(body.pos, middle(at)) + 180.0) % 360.0;
+                        self.kept_off += 1;
+                        Controls {
+                            forward: safe_step(w, body.pos, away),
+                            jump: body.horizontal_collision,
+                            yaw: away,
+                            ..still
+                        }
+                    }
+                    None => face,
+                };
                 if out_of_reach {
                     // Close in, facing it, unless lava or a deep drop lies between: then wait for
-                    // it facing it (wall 29).
+                    // it facing it (wall 29). A shooter's fight steps only onto a floor, never
+                    // into fire (blaze-fight wall 4).
                     self.faced_at = None;
-                    if !safe_ahead(w, &body, toward) {
+                    let safe = if shooter {
+                        safe_step(w, body.pos, toward)
+                    } else {
+                        safe_ahead(w, &body, toward)
+                    };
+                    if !safe {
                         self.held_back += 1;
                         return (face, None, DefendStatus::Running);
                     }
@@ -609,6 +642,18 @@ impl Defend {
                         Hold::Act(a) => return (face, Some(a), DefendStatus::Running),
                         Hold::Wait => return (face, None, DefendStatus::Running),
                     }
+                }
+                // No swing while a neutral mob stands in the sweep: a sweep that caught a
+                // zombified piglin brought its blow of 5 and the bot's death (blaze-fight wall 5).
+                let swept = shooter
+                    && w.entities.values().any(|e| {
+                        !e.dead
+                            && rules.neutral.contains(&e.kind)
+                            && distance(e.pos, pos) <= SWEEP_NEAR
+                    });
+                if swept {
+                    self.sweeps_held += 1;
+                    return (face, None, DefendStatus::Running);
                 }
                 let faced = *self.faced_at.get_or_insert(tick);
                 let ready =

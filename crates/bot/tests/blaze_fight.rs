@@ -1,5 +1,5 @@
-//! The blaze fight (docs/problems/blaze-fight.md walls 2 and 3): what a shooter sees, the cover a
-//! retreat from one walks to, and the reach a strike is measured by, on a hand-built world.
+//! The blaze fight (docs/problems/blaze-fight.md walls 2 and 4): the reach a strike is measured
+//! by and the steps a shooter's fight may take, on a hand-built world.
 
 use data::BlockKind;
 use sim::{Config, Sim, flat_world};
@@ -14,14 +14,14 @@ fn state(k: BlockKind) -> u32 {
     k.info().unwrap().default_state
 }
 
-/// The bot stands at (0.5, 64, 0.5); a stone wall three high runs along x = 3, z -3 to 3.
-fn walled() -> world::World {
+/// The bot stands at (0.5, 64, 0.5) on a flat floor at y 63: fire one cell east, lava in the floor
+/// one cell north, a hole two deep two cells west, and open floor south.
+fn hazards() -> world::World {
     let mut m = flat_world(2, 63).unwrap();
-    for y in 64..=66 {
-        for z in -3..=3 {
-            m.set_block(3, y, z, state(BlockKind::Stone)).unwrap();
-        }
-    }
+    m.set_block(1, 64, 0, state(BlockKind::Fire)).unwrap();
+    m.set_block(0, 63, -1, state(BlockKind::Lava)).unwrap();
+    m.set_block(-2, 63, 0, state(BlockKind::Air)).unwrap();
+    m.set_block(-2, 62, 0, state(BlockKind::Air)).unwrap();
     bot::lockstep::run(Sim::new(CONFIG, m), "rs-bf", 1, 30, 20, |_, _| {
         physics::Controls::default()
     })
@@ -29,31 +29,14 @@ fn walled() -> world::World {
 }
 
 #[test]
-fn a_shooter_sees_the_open_and_not_behind_a_full_block() {
-    let w = walled();
-    // A blaze's eye east of the wall.
-    let eyes = [[8.5, 65.5, 0.5]];
-    assert!(
-        !plan::defend::seen_by(&w, &eyes, (1, 64, 0)),
-        "behind the wall"
-    );
-    assert!(plan::defend::seen_by(&w, &eyes, (5, 64, 0)), "in the open");
-}
-
-#[test]
-fn cover_from_a_shooter_is_the_near_side_of_the_wall() {
-    let w = walled();
-    // A blaze's eye west of the bot: the bot at (0, 64, 0) is seen, and the nearest cells it
-    // does not see are east of the wall.
-    let eyes = [[-6.5, 65.5, 0.5]];
-    assert!(plan::defend::seen_by(&w, &eyes, (0, 64, 0)));
-    let cells = plan::defend::cover_cells(&w, &eyes);
-    let first = cells.first().copied().expect("a cover cell");
-    assert!(first.0 >= 4, "east of the wall: {first:?}");
-    assert!(
-        cells.iter().all(|c| !plan::defend::seen_by(&w, &eyes, *c)),
-        "every cover cell is unseen"
-    );
+fn a_shooters_fight_steps_onto_floor_only() {
+    let w = hazards();
+    let pos = [0.5, 64.0, 0.5];
+    // Yaw as the game counts it: 0 south (+z), 90 west (-x), 180 north, 270 east.
+    assert!(plan::defend::safe_step(&w, pos, 0.0), "open floor south");
+    assert!(!plan::defend::safe_step(&w, pos, 270.0), "fire east");
+    assert!(!plan::defend::safe_step(&w, pos, 180.0), "lava floor north");
+    assert!(!plan::defend::safe_step(&w, pos, 90.0), "a hole west");
 }
 
 #[test]
