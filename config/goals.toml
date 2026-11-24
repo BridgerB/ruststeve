@@ -353,6 +353,10 @@ provision_ticks = 6000
 # about three times a raw one (8 hunger and 12.8 saturation against 3 and 1.8); ten raw pieces
 # were gone after three blazes (agent A4's spawner races, 2026-11-23).
 meat_stock = 30
+# Iron ingots held when the cook phase ends, smelted from held raw iron in the same furnace: a
+# shield is one ingot and six planks, the Nether kit wants two (a timed shield cut fireball hits
+# from 3.1 to 0.6 per 1,000 ticks at the spawner: agent A11's race 45345386828), and one spare.
+kit_ingots = 3
 # The portal is entered with this much safe food or more; under it the bot looks for animals only
 # under the open sky and for provision_ticks at most (docs/problems/overworld-leg.md wall 3). 24 is
 # the eight raw beef or porkchop the reserve was first counted as: the snapshot bot holds 36 and

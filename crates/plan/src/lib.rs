@@ -2145,6 +2145,8 @@ impl Plan {
         let counts = held(w);
         let pieces = eat::meat_pieces(&counts, rules);
         let raw: i32 = eat::raw_held(&counts, rules).iter().map(|r| r.1).sum();
+        // Something left for the cook phase: raw meat, or the kit's ingots still to smelt.
+        let to_cook = cook_goal(&counts, rules).is_some();
         let kit = geared(w)
             && n(data::ItemKind::WaterBucket) >= 1
             && n(data::ItemKind::Bucket) >= 1
@@ -2159,7 +2161,7 @@ impl Plan {
             // the clock below, before it goes down.
             if world::stage::Stage::Ready.holds(w)
                 && if rules.meat_stock > 0 {
-                    self.cook_over || (pieces >= rules.meat_stock && raw == 0)
+                    self.cook_over || (pieces >= rules.meat_stock && !to_cook)
                 } else {
                     food >= rules.food_reserve
                 }
@@ -2206,7 +2208,7 @@ impl Plan {
                     return Flow::Task(Box::new(t));
                 }
             }
-            if raw > 0 && !self.cook_over {
+            if to_cook && !self.cook_over {
                 return Flow::Cook;
             }
             if !self.cook_over {
@@ -2215,7 +2217,8 @@ impl Plan {
                     tick,
                     "cooked".to_owned(),
                     format!(
-                        "{pieces} pieces and {food} food points held, none raw, after {} cook tasks",
+                        "{pieces} pieces and {food} food points held, {raw} raw, {} iron ingots, after {} cook tasks",
+                        craft::count(w, data::ItemKind::IronIngot),
                         self.cook_tasks
                     ),
                 );
@@ -2656,7 +2659,17 @@ impl Plan {
                     let count = if cook_row {
                         let first = smelt::fuels_held(w).first().copied();
                         let held = first.map_or(0, |(k, _)| craft::count(w, k));
-                        fuel_batch(first.map(|(_, t)| t), held, r.ticks, count)
+                        // No more than the goal is short of (three ingots, not all the ore).
+                        let short = goal
+                            .provides
+                            .first()
+                            .map_or(count, |(_, n)| n - craft::count(w, r.result));
+                        fuel_batch(
+                            first.map(|(_, t)| t),
+                            held,
+                            r.ticks,
+                            count.min(short.max(1)),
+                        )
                     } else {
                         count
                     };
@@ -4187,11 +4200,18 @@ const COOK_TASKS: u32 = 40;
 /// of it cooked. `None` with nothing raw to cook.
 pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<make::Row> {
     let raw = eat::raw_held(counts, rules);
-    let (_, n, recipe) = raw.first().copied()?;
+    // The kit's ingots (the shields'), from held raw iron, once the meat is done.
+    let ingots = counts.get(&data::ItemKind::IronIngot).copied().unwrap_or(0);
+    let raw_iron = counts.get(&data::ItemKind::RawIron).copied().unwrap_or(0);
+    let iron = (rules.kit_ingots - ingots).clamp(0, raw_iron.max(0));
+    if raw.is_empty() && iron == 0 {
+        return None;
+    }
     let need: i32 = raw
         .iter()
         .map(|(_, n, r)| n * i32::try_from(r.ticks).unwrap_or(200))
-        .sum();
+        .sum::<i32>()
+        + iron * 200;
     let planks = data::generated::tags::item_tag("planks").unwrap_or(&[]);
     let coals = data::generated::tags::item_tag("coals").unwrap_or(&[]);
     let burns = |k: &data::ItemKind| {
@@ -4227,6 +4247,13 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
             held + more,
         ));
     }
+    let Some((_, n, recipe)) = raw.first().copied() else {
+        return Some(row(
+            "cook-iron",
+            make::Need::parse("item:iron_ingot")?,
+            ingots + iron,
+        ));
+    };
     let cooked = counts.get(&recipe.result).copied().unwrap_or(0);
     let name = recipe.result.name()?;
     Some(row(

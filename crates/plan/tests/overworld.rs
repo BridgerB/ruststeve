@@ -174,6 +174,19 @@ fn raw_meat_is_cooked_through_the_needs_planner() {
         cook_step(&[(CookedPorkchop, 12), (OakPlanks, 4)], true, true),
         "nothing raw"
     );
+    // The kit's ingots after the meat: three of the eight raw iron, in the same furnace.
+    let ore = [(CookedPorkchop, 12), (OakPlanks, 4), (ItemKind::RawIron, 8)];
+    assert_eq!(r.kit_ingots, 3);
+    let iron = plan::cook_goal(&ore.iter().copied().collect(), &r).unwrap();
+    assert_eq!((iron.id.as_str(), iron.provides[0].1), ("cook-iron", 3));
+    let step = cook_step(&ore, true, true);
+    assert!(step.starts_with("smelt:iron_ingot"), "{step}");
+    let done = [
+        (CookedPorkchop, 12),
+        (ItemKind::IronIngot, 3),
+        (ItemKind::RawIron, 5),
+    ];
+    assert_eq!(cook_step(&done, true, true), "nothing raw");
 }
 
 /// Wall 4, race 45343519424 lane 2: nine porkchops with five oak planks first in the burn order

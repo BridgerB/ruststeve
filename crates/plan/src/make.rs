@@ -258,6 +258,10 @@ pub struct Survival {
     /// on the stocking clock and then cooked (overworld-leg wall 4). 0: the reserve in points.
     #[serde(default)]
     pub meat_stock: i32,
+    /// Iron ingots held when the cook phase ends, smelted from held raw iron while its furnace
+    /// stands (the Nether kit's shields take one each; overworld-leg wall 4). 0: none.
+    #[serde(default)]
+    pub kit_ingots: i32,
     /// Stone pickaxes with `spare_uses` left held under this and the race makes more from what
     /// it holds, before the next task (overworld-leg wall 2). 0: never.
     #[serde(default)]
@@ -338,6 +342,7 @@ impl Default for Survival {
             provision_ticks: 0,
             portal_food: 0,
             meat_stock: 0,
+            kit_ingots: 0,
             spare_pickaxes: 0,
             danger_health: danger_health(),
             never_fight: Vec::new(),
@@ -390,6 +395,7 @@ pub struct SurvivalRules {
     pub provision_ticks: u64,
     pub portal_food: i32,
     pub meat_stock: i32,
+    pub kit_ingots: i32,
     pub spare_pickaxes: i32,
 }
 
@@ -653,6 +659,7 @@ impl Table {
                 provision_ticks: g.survival.provision_ticks,
                 portal_food: g.survival.portal_food,
                 meat_stock: g.survival.meat_stock,
+                kit_ingots: g.survival.kit_ingots,
                 spare_pickaxes: g.survival.spare_pickaxes,
                 never_fight,
                 ranged,
