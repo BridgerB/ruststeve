@@ -3504,6 +3504,9 @@ impl Plan {
         let mut st = Stairs::new(dir, tick);
         // The last leg stops at the sea's level: the count starts short of a full leg.
         st.stairs = stairs::STAIR_DEPTH - steps;
+        // Never a stair cut beside water (wall 7: a leg at y 55 let an aquifer in and the bot
+        // was held in it to the cap).
+        st.dry = true;
         Task::Stairs(Box::new(st))
     }
 
@@ -3893,7 +3896,7 @@ impl Plan {
                 if let Task::Stairs(st) = std::mem::replace(&mut self.task, Task::Idle) {
                     self.note(
                         tick,
-                        format!("cut {} stairs", st.stairs),
+                        format!("cut {} stairs{}", st.stairs, water_turns(&st)),
                         "look again for what to mine".to_owned(),
                     );
                 }
@@ -3908,7 +3911,11 @@ impl Plan {
                     let last = st.refusals.last().cloned().unwrap_or_default();
                     self.note(
                         tick,
-                        format!("stairs failed: {f:?} after {} stairs", st.stairs),
+                        format!(
+                            "stairs failed: {f:?} after {} stairs{}",
+                            st.stairs,
+                            water_turns(&st)
+                        ),
                         format!("last refusal: {last}; turn the heading"),
                     );
                 }
@@ -4380,6 +4387,15 @@ pub fn own_heading(feet: Cell, pool: Option<Cell>, legs: u32) -> (i32, i32) {
         (dx.signum(), 0)
     } else {
         (0, dz.signum())
+    }
+}
+
+/// A dry staircase's turns from water, for its ending note (overworld-leg wall 7); empty for
+/// any other staircase or none.
+fn water_turns(st: &Stairs) -> String {
+    match st.water_refusals() {
+        0 => String::new(),
+        n => format!(" ({n} turned from water beside)"),
     }
 }
 

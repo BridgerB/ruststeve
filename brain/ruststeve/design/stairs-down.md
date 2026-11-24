@@ -5,8 +5,8 @@ type: reference
 tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@beb29ac clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@77a455c clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -73,3 +73,6 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 - **Suspect rock**: a step into rock within 3 of a blocked cell costs 8 more, so a route leaves a bad face instead of trying it cell by cell.
 - **`Plan::tunnel_toward`** (pub): the tunnel to one cell, ending only at it; `dig_toward` hands it any Nether target more than 8 blocks off (`TUNNEL_FROM`).
 - **Every failure names its reason**: a step (the cells, the walk's failure, the floor's block), a dig, and `Boxed` (each heading's refusal).
+
+## Issue 16: dry stairs (overworld-leg wall 7)
+- **`Stairs::dry`**: water beside a cell a stair or level step opens refuses it too ("water beside", the heading turns), as lava beside does for every staircase. Set by the lava hunt's own stairs (`Plan::own_stairs`) only: a leg at y 55 cut beside an aquifer, the water ran in and the bot was held in it 20,000 ticks (race 45343519424 lane 2). The ending note counts the turns ("cut 6 stairs (N turned from water beside)"). Test `a_dry_staircase_turns_from_water_beside` (bot).

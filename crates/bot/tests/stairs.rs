@@ -77,3 +77,20 @@ fn an_unloaded_column_refuses_a_stair() {
     .unwrap();
     assert!(far.starts_with("unloaded"), "{far}");
 }
+
+/// Overworld-leg wall 7 (race 45343519424 lane 2): the lava hunt's own stairs cut beside water at
+/// y 55, the water ran in, and the bot was held in it to the cap. A dry staircase turns from a
+/// stair with water beside a cell it opens; any other staircase still takes it.
+#[test]
+fn a_dry_staircase_turns_from_water_beside() {
+    use plan::stairs::Stairs;
+    let w = world_with(&[((2, 63, 0), BlockKind::Water)]);
+    let mut wet = Stairs::new((1, 0), 0);
+    wet.step(&w, 1);
+    assert_eq!(wet.dir, (1, 0), "{:?}", wet.refusals);
+    let mut dry = Stairs::new((1, 0), 0);
+    dry.dry = true;
+    dry.step(&w, 1);
+    assert_ne!(dry.dir, (1, 0), "{:?}", dry.refusals);
+    assert_eq!(dry.water_refusals(), 1, "{:?}", dry.refusals);
+}
