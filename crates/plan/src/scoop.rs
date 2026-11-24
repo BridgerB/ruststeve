@@ -91,6 +91,9 @@ pub struct Scoop {
     /// the trail says which, so a race counts the exact-first stands (cast.md wall 1).
     #[serde(default)]
     pub stand_exact: Option<bool>,
+    /// Lava stands passed over for being seen by the sampled line only (cast.md wall 1).
+    #[serde(default)]
+    pub sampled_skipped: u32,
 }
 
 fn water() -> memory::Fluid {
@@ -397,6 +400,7 @@ impl Scoop {
             centring: 0,
             uses: [0; 4],
             stand_exact: None,
+            sampled_skipped: 0,
         }
     }
 
@@ -438,6 +442,15 @@ impl Scoop {
                 .map(|st| (exact(st), st))
                 .collect();
             tried.sort_by_key(|(e, _)| !*e);
+            // Lava: a stand the sampled line alone passes is no stand. Since the use asks the
+            // exact line (portal.md wall 34) every lava scoop routed to one failed `NoSight`
+            // (race 45354357884: 15 of 15 by tick 11,860, against the exact stands' fills).
+            // Water keeps them: its scoop fills 109 of 112 as it is.
+            if self.fluid == memory::Fluid::Lava {
+                let before = tried.len();
+                tried.retain(|(e, _)| *e);
+                self.sampled_skipped += u32::try_from(before - tried.len()).unwrap_or(u32::MAX);
+            }
             for (e, st) in tried.into_iter().take(STAND_TRIES) {
                 let mut walk = Walk::new(st, Goal::Block { pos: st }, Arrive::Goal, tick);
                 if walk.route_now(w, tick) && walk.route == Some(crate::path::Status::Found) {

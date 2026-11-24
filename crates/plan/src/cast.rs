@@ -261,6 +261,9 @@ pub struct Cast {
     /// (cast.md wall 3), for the notes.
     #[serde(default)]
     box_reach: u32,
+    /// The feet's height a refill's stairs down stop at: one over the source they head for.
+    #[serde(default)]
+    tunnel_floor: Option<i32>,
     /// Why each try at the op in hand failed, for the failure note (overworld-leg wall 5: a cast
     /// ended "Op after 13 ops, at :dig :room" with nothing to say what the dig met).
     #[serde(default)]
@@ -378,6 +381,7 @@ impl Cast {
             tunnels: 0,
             refused: Vec::new(),
             box_reach: 0,
+            tunnel_floor: None,
         }
     }
 
@@ -1073,6 +1077,19 @@ impl Cast {
         item: ItemKind,
         tick: u64,
     ) -> (Controls, Option<Act>, CastStatus) {
+        // Stairs down end with the feet one over the source they head for: six stairs from a
+        // floor three over the sea took the feet to y -58, under the lava's surface, and the next
+        // refill found no route (race 45354357884, place 3).
+        if let (Work::Tunnel(_), Some(floor), Some(body)) = (&self.work, self.tunnel_floor, w.body)
+            && body.on_ground
+            && feet(&body).1 <= floor
+        {
+            self.work = Work::Idle;
+            self.tunnels += 1;
+            self.last_done = tick;
+            self.trail(tick, format!("tunnel down ended at y {}", feet(&body).1));
+            return (Controls::default(), None, CastStatus::Running);
+        }
         if let Work::Tunnel(st) = &mut self.work {
             let (c, act, status) = st.step(w, tick);
             if status == crate::stairs::StairsStatus::Running {
@@ -1167,6 +1184,7 @@ impl Cast {
                         // ("no route, 1 tunnels" with 168 and 286 sources seen: cast.md wall 2).
                         // The stairs' own refusal stops them short of lava.
                         let down = t.1 + 1 < f.1;
+                        self.tunnel_floor = down.then_some(t.1 + 1);
                         self.trail(
                             tick,
                             format!(
@@ -1198,7 +1216,13 @@ impl Cast {
                 Some(false) => " (stand sampled)",
                 None => "",
             };
-            self.trail(tick, format!("scoop {:?} routed{how}", s.target));
+            self.trail(
+                tick,
+                format!(
+                    "scoop {:?} routed{how}, {} sampled skipped",
+                    s.target, s.sampled_skipped
+                ),
+            );
             self.tunnels = 0;
             self.work = Work::Refill(Box::new(s));
             self.last_done = tick;
