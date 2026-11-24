@@ -109,6 +109,11 @@ fn line(r: TaskRecord) -> String {
 /// The frontier bot (armour 13, an iron sword) with `food` and, when `shield`, a shield in the
 /// off hand, the race's aim, for `TICKS`.
 fn stage(food: (ItemKind, i32), shield: bool) -> Stage {
+    stage_with(food, shield, |_| {})
+}
+
+/// The same, with what `more` adds to the model first.
+fn stage_with(food: (ItemKind, i32), shield: bool, more: impl Fn(&mut Sim)) -> Stage {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
     let mut plan = Plan::with_table(Aim::Race, table);
@@ -121,6 +126,7 @@ fn stage(food: (ItemKind, i32), shield: bool) -> Stage {
         // The off hand is menu slot 45.
         sim.survival.slots[45] = Some((ItemKind::Shield, 1));
     }
+    more(&mut sim);
     let mut ledger = Vec::new();
     let (mut meals, mut health_lost, mut last) = (0u64, 0.0f32, 20.0f32);
     let (mut level_ticks, mut blaze_ticks) = (0u64, 0u64);
@@ -264,4 +270,19 @@ fn seven_rods_are_taken_at_the_spawner_with_thirty_cooked_beef() {
 #[ignore = "blaze stage: unread; owners A11 (shield), A4"]
 fn seven_rods_are_taken_at_the_spawner_with_a_shield() {
     stage((ItemKind::CookedBeef, 30), true).assert_seven();
+}
+
+/// The shield variant with company: one wither skeleton on the bridge 12 blocks south of the
+/// bot as the run begins, walking in (`Melee::wither_skeleton`).
+#[test]
+#[ignore = "blaze stage: unread; owner A4"]
+fn seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving() {
+    stage_with((ItemKind::CookedBeef, 30), true, |sim| {
+        sim.summon_with(
+            EntityKind::WitherSkeleton,
+            [128.5, 61.0, 176.5],
+            Brain::Melee(sim::life::Melee::wither_skeleton()),
+        );
+    })
+    .assert_seven();
 }

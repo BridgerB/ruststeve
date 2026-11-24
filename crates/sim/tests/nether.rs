@@ -390,9 +390,20 @@ fn a_fireball_burns_a_player_in_sight_and_none_flies_at_one_behind_a_wall() {
     assert!(lowest <= 15.0 && alight, "lowest {lowest}, alight {alight}");
 
     let mut sim = blazed(&[]);
+    // Walled in on every side to the ceiling: a blaze with no target strolls, and would
+    // come round a single wall.
     for y in 41..=59 {
-        for z in -1..=1 {
-            sim.setblock((3, y, z), state(BlockKind::NetherBricks))
+        for (x, z) in [
+            (4, -1),
+            (4, 0),
+            (4, 1),
+            (5, -1),
+            (5, 1),
+            (6, -1),
+            (6, 0),
+            (6, 1),
+        ] {
+            sim.setblock((x, y, z), state(BlockKind::NetherBricks))
                 .unwrap();
         }
     }
@@ -638,4 +649,65 @@ fn a_blaze_killed_by_the_player_drops_a_rod_or_none() {
         rods = held;
     }
     assert!((8..=32).contains(&rods), "{rods} rods of 40 blazes");
+}
+
+/// `LivingEntity.knockback`: a mob's hit sends the player's motion as 0.4 away from the mob on
+/// the plane and 0.4 up from the ground.
+#[test]
+fn a_mobs_hit_knocks_the_player_away_and_up() {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    sim.summon_with(
+        data::EntityKind::WitherSkeleton,
+        [1.5, 41.0, 0.5],
+        sim::life::Brain::Melee(sim::life::Melee::wither_skeleton()),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    let motion = tick(&mut sim).into_iter().find_map(|p| match p {
+        S2c::SetEntityMotion { id: 1, velocity } => Some(velocity),
+        _ => None,
+    });
+    let v = motion.unwrap();
+    assert!(
+        (v[0] + 0.4).abs() < 1e-6 && (v[1] - 0.4).abs() < 1e-6 && v[2].abs() < 1e-6,
+        "{v:?}"
+    );
+    assert_eq!(sim.health, 12.0, "8 unarmoured");
+}
+
+/// `BlazeAttackGoal`: a blaze moves at a target it sees within 2 blocks, and holds its place
+/// with one in sight farther off.
+#[test]
+fn a_blaze_closes_on_a_target_within_two_blocks_and_holds_beyond() {
+    let run = |x: f64| {
+        let stage = Stage::new(1, 40, 60);
+        let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+        let id = sim.summon_with(
+            data::EntityKind::Blaze,
+            [x, 41.0, 0.5],
+            sim::life::Brain::blaze(),
+        );
+        for p in protocol::session::opening(775, "model", 0, "rs-test") {
+            send(&mut sim, p);
+        }
+        send(&mut sim, C2s::LoginAcknowledged);
+        send(&mut sim, C2s::SelectKnownPacks);
+        send(&mut sim, C2s::FinishConfiguration);
+        send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+        send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+        for _ in 0..10 {
+            tick_alive(&mut sim);
+        }
+        sim.survival.life.mobs[&id].pos[0]
+    };
+    let near = run(2.3);
+    assert!(near < 2.0, "within 2 blocks it stayed at x {near}");
+    assert_eq!(run(6.5), 6.5, "in sight beyond 2 blocks it moved");
 }

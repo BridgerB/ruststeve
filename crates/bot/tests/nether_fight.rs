@@ -26,7 +26,7 @@ struct Fight {
     plan: Plan,
     run: bot::lockstep::Run,
     ledger: Vec<String>,
-    /// Ticks the body was in lava, and ticks its feet's cell held fire.
+    /// Ticks the body was in lava, and ticks its box touched a fire cell.
     lava_ticks: u64,
     fire_ticks: u64,
     /// The lowest the feet went.
@@ -82,12 +82,16 @@ fn fight(wall: &Wall, aim: Aim, health: f32, ticks: u64, summon: impl Fn(&mut Si
         ledger.extend(plan.take_records().into_iter().map(line));
         if let Some(b) = w.body {
             lava_ticks += u64::from(b.in_lava);
-            let feet = world::BlockPos::new(
-                b.pos[0].floor() as i32,
-                b.pos[1].floor() as i32,
-                b.pos[2].floor() as i32,
-            );
-            fire_ticks += u64::from(w.block_at(feet) == Some(BlockKind::Fire));
+            // Fire burns a body whose box touches its cell, not only one whose feet are in it.
+            let bx = physics::aabb(b.pos);
+            let cells = |lo: f64, hi: f64| (lo.floor() as i32)..=((hi - 1e-7).floor() as i32);
+            let touching = cells(bx[0], bx[3]).any(|x| {
+                cells(bx[1], bx[4]).any(|y| {
+                    cells(bx[2], bx[5])
+                        .any(|z| w.block_at(world::BlockPos::new(x, y, z)) == Some(BlockKind::Fire))
+                })
+            });
+            fire_ticks += u64::from(touching);
             lowest = lowest.min(b.pos[1]);
         }
         (c, plan.take_acts())
