@@ -2284,10 +2284,16 @@ impl Plan {
                 w, furnace, result, count, tick,
             )));
         }
-        // Taken up front: the block needs are a crafting table and a furnace.
-        let table_near = self
-            .near_block(w, data::BlockKind::CraftingTable, tick)
-            .is_some();
+        // Taken up front: the block needs are a crafting table and a furnace. The spares and the
+        // Nether kit are made where the bot stands: a table remembered 44 blocks off, down the
+        // old stairs in a cave, walked a bot to it for 600 ticks and it died there (race
+        // 45337088346 lane 0).
+        let table_cell = if spare_row || self.kit_row {
+            self.table_at_hand(w, tick)
+        } else {
+            self.near_block(w, data::BlockKind::CraftingTable, tick)
+        };
+        let table_near = table_cell.is_some();
         let furnace_near = self.near_block(w, data::BlockKind::Furnace, tick).is_some();
         let near = move |b: data::BlockKind| match b {
             data::BlockKind::CraftingTable => table_near,
@@ -2420,7 +2426,7 @@ impl Plan {
             }
             make::Choice::Act(row) => match row.act {
                 Some(make::Act::Craft(r)) if !make::fits_grid(r) => {
-                    let Some(t) = self.near_block(w, data::BlockKind::CraftingTable, tick) else {
+                    let Some(t) = table_cell else {
                         self.retry_at = tick + RETRY_TICKS;
                         self.note(
                             tick,
@@ -3014,6 +3020,21 @@ impl Plan {
         None
     }
 
+    /// A crafting table remembered within `TABLE_AT_HAND` of the eye: one to craft at with no
+    /// walk to speak of.
+    fn table_at_hand(&self, w: &World, tick: u64) -> Option<Cell> {
+        let t = self.near_block(w, data::BlockKind::CraftingTable, tick)?;
+        let b = w.body?;
+        let eye = [b.pos[0], b.pos[1] + physics::EYE_HEIGHT, b.pos[2]];
+        let c = [
+            f64::from(t.0) + 0.5,
+            f64::from(t.1) + 0.5,
+            f64::from(t.2) + 0.5,
+        ];
+        let d = (0..3).map(|i| (eye[i] - c[i]).powi(2)).sum::<f64>().sqrt();
+        (d <= TABLE_AT_HAND).then_some(t)
+    }
+
     /// Whether the race makes spare pickaxes now (overworld-leg wall 2): from `ready` on, in the
     /// overworld, before a portal is lit, with fewer than `spare_pickaxes` stone pickaxes with
     /// uses to spare and the makings of one in the pack. Once begun it holds until the row's
@@ -3037,9 +3058,7 @@ impl Plan {
         if self.sparing {
             return true;
         }
-        let table_near = self
-            .near_block(w, data::BlockKind::CraftingTable, tick)
-            .is_some();
+        let table_near = self.table_at_hand(w, tick).is_some();
         if !spares_due(w, rules, table_near) {
             return false;
         }
@@ -3917,6 +3936,10 @@ pub const SEA_FEET: i32 = -54;
 pub const DESCENT_WALK: i32 = 8;
 /// The spiral's headings, a quarter turn a leg: east, south, west, north.
 pub const SPIRAL: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+/// Blocks from the eye a table counts as at hand for the spares and the Nether kit: a placed
+/// table lands within two or three of the feet, and a walk of a few blocks stays in the bot's
+/// own cut.
+const TABLE_AT_HAND: f64 = 6.0;
 /// Ticks before spare pickaxes are asked for again once they could not be made.
 const SPARES_RETRY_TICKS: u64 = 2400;
 
