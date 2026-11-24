@@ -1345,6 +1345,26 @@ pub fn far_lava(w: &World, given_up: &[Cell]) -> Option<Cell> {
     })
 }
 
+/// The nearest far source whose pool, as seen, holds the sources a whole frame needs: the only
+/// far lava worth a trip (overworld-leg wall 1). The nearest far source of races 45194253932 and
+/// 45204423376 was a pool of one, refused as `spent` by the site choice once the bot stood by it.
+pub fn far_pool(w: &World, given_up: &[Cell]) -> Option<Cell> {
+    let here = w.body.map_or([0.0; 3], |b| centre(feet(&b)));
+    let all = lava_within(w, FAR_RADIUS);
+    let frame = crate::build::FRAME_CELLS.len();
+    all.iter().copied().find(|c| {
+        dist(here, centre(*c)) > LAVA_RADIUS
+            && !given_up
+                .iter()
+                .any(|g| dist(centre(*g), centre(*c)) <= GIVE_UP_RADIUS)
+            && all
+                .iter()
+                .filter(|o| dist(centre(**o), centre(*c)) <= POOL_RADIUS)
+                .count()
+                >= frame
+    })
+}
+
 pub fn lava_within(w: &World, radius: f64) -> Vec<Cell> {
     let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
         return Vec::new();

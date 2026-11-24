@@ -96,7 +96,27 @@ fn modelled() -> impl Strategy<Value = (State, S2c)> {
                     flags
                 }
             )),
-        Just((State::Play, S2c::SetTime)),
+        (
+            any::<i64>(),
+            proptest::collection::vec((0i32..4, any::<i64>(), 0.0f32..1.0, 0.0f32..2.0), 0..3)
+        )
+            .prop_map(|(game_time, clocks)| (
+                State::Play,
+                S2c::SetTime {
+                    game_time,
+                    clocks: clocks
+                        .into_iter()
+                        .map(
+                            |(clock, total_ticks, partial_tick, rate)| protocol::ClockUpdate {
+                                clock,
+                                total_ticks,
+                                partial_tick,
+                                rate,
+                            }
+                        )
+                        .collect(),
+                }
+            )),
         (any::<i32>(), any::<i32>())
             .prop_map(|(x, z)| (State::Play, S2c::ForgetLevelChunk { x, z })),
         (

@@ -614,7 +614,7 @@ impl SensesFile {
                 })
                 .collect();
             out.push_str(&format!(
-                "{:>8} {pos} {} hp {} food {} held {}{}{} | {} ({}) | {}\n",
+                "{:>8} {pos} {} hp {} food {} held {}{}{}{} | {} ({}) | {}\n",
                 r.at,
                 r.standing(),
                 r.health
@@ -626,6 +626,14 @@ impl SensesFile {
                 r.cursor
                     .as_ref()
                     .map_or_else(String::new, |(i, n)| format!(" cursor {i} {n}")),
+                r.day_time.map_or_else(String::new, |t| format!(
+                    " day {t}{}",
+                    if world::time::is_night(t) {
+                        " night"
+                    } else {
+                        ""
+                    }
+                )),
                 r.task,
                 r.why,
                 near.join(", ")
@@ -928,6 +936,7 @@ mod text_tests {
             lava: ::observe::Touch::No,
             water: ::observe::Touch::No,
             cursor: None,
+            day_time: None,
         }
     }
 

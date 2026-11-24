@@ -175,6 +175,19 @@ pub fn sight(w: &World, from: [f64; 3], to: [f64; 3]) -> bool {
 /// hits once a second inside 2 blocks (vanilla `BlazeAttackGoal`: `distanceToSqr < 4`), for 3.6 in
 /// iron armour. The fight keeps this far off and strikes from its own reach of 3.
 pub const KEEP_OFF: f64 = 2.4;
+/// Whether a live blaze is within `KEEP_OFF` of the feet: in touch. A shield raised then holds
+/// the bot still (its controls stop any step not toward the threat) and drops the strike, and the
+/// blaze touches it every second: in the whole-stage model with the shield the touch was the top
+/// direct damage, 11 to 65 health a run, and the three shield seeds that died died to it (probe
+/// 45357767095). The defend's keep-off step and its strike go first (blaze-fight wall 19).
+pub fn blaze_in_touch(w: &World) -> bool {
+    w.body.is_some_and(|b| {
+        w.entities
+            .values()
+            .any(|e| !e.dead && e.kind == EntityKind::Blaze && distance(b.pos, e.pos) < KEEP_OFF)
+    })
+}
+
 /// A sweep's reach round the mob struck (the game's sweep takes every mob within a block of the
 /// target's box and 3 of the player), with a margin.
 pub const SWEEP_NEAR: f64 = 2.0;
@@ -422,7 +435,14 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
                 // A foe a fight never struck nor was hurt by (a spider in a pit 4.5 under the eye,
                 // fought 96 times: blaze wall 15) waits, unless its kind hits the bot.
                 && (!ignored.contains(id)
-                    || (provoked(w, e.kind) && !rules.ranged.contains(&e.kind)))
+                    || (provoked(w, e.kind) && !rules.ranged.contains(&e.kind))
+                    // A blaze in touch is never out of reach, ignored or not: a blaze left alone
+                    // 600 ticks after a retreat that landed nothing stood in touch with no defend
+                    // (review of bba8161; the touch was the model's top damage with the shield).
+                    // Not once 7 rods are held: then every blaze is left (wall 16).
+                    || (e.kind == EntityKind::Blaze
+                        && distance(body.pos, e.pos) < KEEP_OFF
+                        && crate::craft::count(w, data::ItemKind::BlazeRod) < crate::RODS_WANTED))
         })
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= rules.defend_radius)
@@ -587,6 +607,48 @@ fn stance_for(w: &World, kind: EntityKind, rules: &SurvivalRules) -> Stance {
 }
 
 impl Defend {
+    /// A retreat's strike at a melee foe within reach, when a swing is ready: the weapon to the
+    /// hand first, then the attack, the feet still backing away. Counted as the fight's swings
+    /// are, so the defend's ledger line shows a retreat that struck.
+    fn retreat_strike(
+        &mut self,
+        w: &World,
+        body: &physics::Body,
+        target: [f64; 3],
+        tick: u64,
+    ) -> Option<Act> {
+        let health = mob_health(w, self.foe);
+        if health
+            .zip(self.last_health)
+            .is_some_and(|(now, was)| now < was)
+        {
+            self.last_hit_at = tick;
+            self.landed += 1;
+        }
+        self.last_health = health.or(self.last_health);
+        let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+        if distance(eye, target) > STRIKE_REACH {
+            return None;
+        }
+        if let Some(wp) = crate::hunt::weapon(w) {
+            match hold::toward(w, wp) {
+                Hold::Held | Hold::Missing => {}
+                Hold::Act(a) => return Some(a),
+                Hold::Wait => return None,
+            }
+        }
+        let ready = (crate::hunt::swing_ticks(w) * crate::dig::slowdown(w)).ceil() as u64 + 1;
+        if self
+            .last_swing
+            .is_some_and(|t| tick.saturating_sub(t) < ready)
+        {
+            return None;
+        }
+        self.last_swing = Some(tick);
+        self.swings += 1;
+        Some(Act::Attack { entity: self.foe })
+    }
+
     pub fn new(w: &World, foe: i32, kind: EntityKind, rules: &SurvivalRules, tick: u64) -> Self {
         let stance = stance_for(w, kind, rules);
         Self {
@@ -966,6 +1028,14 @@ impl Defend {
         let toward = yaw_to(body.pos, target);
         match self.stance {
             Stance::Retreat => {
+                // A melee foe in the bot's face is struck as it backs away from a fight that
+                // went nowhere (overworld-leg wall 1). Never under the danger line: there the
+                // retreat is only a retreat.
+                let strike = if never || rules.ranged.contains(&self.kind) || in_danger(w, rules) {
+                    None
+                } else {
+                    self.retreat_strike(w, &body, target, tick)
+                };
                 // From a shooter: out of every shooter's sight, not out of this one's reach.
                 if shooter
                     && let Some(r) = self.cover_step(w, &body, d <= rules.defend_radius, tick)
@@ -1007,7 +1077,7 @@ impl Defend {
                 if let Some((walk, _)) = &mut self.flee {
                     let (c, status) = walk.step(w, tick);
                     if status == crate::walk::TaskStatus::Running {
-                        return (c, None, DefendStatus::Running);
+                        return (c, strike, DefendStatus::Running);
                     }
                     self.flee = None;
                 }
@@ -1016,7 +1086,11 @@ impl Defend {
                 let away = (toward + 180.0) % 360.0;
                 if !safe_ahead(w, &body, away) {
                     self.held_back += 1;
-                    return (Controls { yaw: away, ..still }, None, DefendStatus::Running);
+                    return (
+                        Controls { yaw: away, ..still },
+                        strike,
+                        DefendStatus::Running,
+                    );
                 }
                 (
                     Controls {
@@ -1026,7 +1100,7 @@ impl Defend {
                         yaw: away,
                         pitch: None,
                     },
-                    None,
+                    strike,
                     DefendStatus::Running,
                 )
             }

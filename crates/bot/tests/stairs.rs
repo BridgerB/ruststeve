@@ -77,3 +77,67 @@ fn an_unloaded_column_refuses_a_stair() {
     .unwrap();
     assert!(far.starts_with("unloaded"), "{far}");
 }
+
+/// Overworld-leg wall 7 (race 45343519424 lane 2): the lava hunt's own stairs cut beside water at
+/// y 55, the water ran in, and the bot was held in it to the cap. A dry staircase turns from a
+/// stair with water beside a cell it opens; any other staircase still takes it.
+#[test]
+fn a_dry_staircase_turns_from_water_beside() {
+    use plan::stairs::Stairs;
+    let w = world_with(&[((2, 63, 0), BlockKind::Water)]);
+    let mut wet = Stairs::new((1, 0), 0);
+    wet.step(&w, 1);
+    assert_eq!(wet.dir, (1, 0), "{:?}", wet.refusals);
+    let mut dry = Stairs::new((1, 0), 0);
+    dry.dry = true;
+    dry.step(&w, 1);
+    assert_ne!(dry.dir, (1, 0), "{:?}", dry.refusals);
+    assert_eq!(dry.water_refusals(), 1, "{:?}", dry.refusals);
+}
+
+/// Overworld-leg wall 11: the cook's hut on open ground is ten blocks, the eight beside the body
+/// (the feet's ring on the ground, the head's ring on it), a block over a wall and the roof; a
+/// closed hut has nothing more to place.
+#[test]
+fn a_hut_walls_in_the_body_then_roofs_it() {
+    use plan::cover::hut_block;
+    let pos = [0.5, 64.0, 0.5];
+    let first = hut_block(&world_with(&[]), pos).unwrap();
+    assert_eq!(first, ((1, 64, 0), (1, 63, 0), 1));
+    let ring: Vec<_> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .flat_map(|(dx, dz)| {
+            [
+                ((dx, 64, dz), BlockKind::Cobblestone),
+                ((dx, 65, dz), BlockKind::Cobblestone),
+            ]
+        })
+        .collect();
+    let walled = hut_block(&world_with(&ring), pos).unwrap();
+    // The roof hangs from a block over a wall, then fills the cell over the head.
+    assert_eq!(walled, ((1, 66, 0), (1, 65, 0), 1));
+    let mut all = ring.clone();
+    all.push(((1, 66, 0), BlockKind::Cobblestone));
+    assert_eq!(hut_block(&world_with(&all), pos).unwrap().0, (0, 66, 0));
+    all.push(((0, 66, 0), BlockKind::Cobblestone));
+    assert_eq!(hut_block(&world_with(&all), pos), None);
+}
+
+/// Wall 11 (race 45354710755): a hut block was clicked onto the top of the cook's furnace, which
+/// opens it and places nothing. The cell over a furnace is filled from a wall beside it.
+#[test]
+fn a_hut_never_clicks_a_furnace() {
+    use plan::cover::hut_block;
+    let pos = [0.5, 64.0, 0.5];
+    let mut set: Vec<_> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .map(|(dx, dz)| ((dx, 64, dz), BlockKind::Cobblestone))
+        .collect();
+    set[0].1 = BlockKind::Furnace;
+    set.push(((0, 65, 1), BlockKind::Cobblestone));
+    let w = world_with(&set);
+    let mut cells = Vec::new();
+    let (cell, click, _) = hut_block(&w, pos).unwrap();
+    cells.push(cell);
+    assert_ne!(click, (1, 64, 0), "clicked the furnace");
+}

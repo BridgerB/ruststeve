@@ -101,7 +101,10 @@ fn server_packets() -> impl Strategy<Value = S2c> {
         Just(S2c::SelectKnownPacks),
         Just(S2c::FinishConfiguration),
         Just(S2c::StartConfiguration),
-        Just(S2c::SetTime),
+        Just(S2c::SetTime {
+            game_time: 0,
+            clocks: Vec::new()
+        }),
         (0i32..64).prop_map(|size| S2c::ChunkBatchFinished { size }),
         (0u32..140).prop_map(|id| S2c::Unknown {
             state: State::Play,

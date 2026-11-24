@@ -93,6 +93,20 @@ pub fn awake_at(c: Cell, pos: [f64; 3]) -> bool {
     distance(mid, pos) < SPAWNER_QUIET
 }
 
+/// Why standing work (a craft, a smelt, a table or a furnace placed) is not safe where the body
+/// is, or `None` when it is: a spawner on record within `SPAWNER_QUIET`, or a shooter (`shooters`)
+/// that sees the body. One bot made its shield on the spawner's deck in the whole-stage model,
+/// a table and a furnace on the deck and 200 ticks of smelting beside the spawner with blazes
+/// firing, and died at tick 1,140 (probe 45357767095).
+pub fn unsafe_to_work(w: &World) -> Option<String> {
+    let body = w.body?;
+    if let Some(sp) = spawners_awake(w, body.pos).first() {
+        return Some(format!("a spawner at {sp:?} within {SPAWNER_QUIET}"));
+    }
+    let eyes = shooters(w);
+    seen_body(w, &eyes, body.pos).then(|| format!("seen by a shooter ({} in range)", eyes.len()))
+}
+
 /// A fall this deep or deeper beside a cell keeps it from being cover: three blocks of fall cost
 /// no health, as the fight's own step rule has it.
 pub const DROP_BESIDE: i32 = 4;
@@ -221,7 +235,14 @@ fn click_for(w: &World, (x, y, z): Cell) -> Option<(Cell, i8)> {
         ((x, y, z - 1), 3),
     ]
     .into_iter()
-    .find(|(c, _)| full(w, *c))
+    // Never a furnace or table: a right-click opens it and places nothing (overworld-leg wall
+    // 11: a hut block clicked onto the cook's furnace opened it, and the hut waited for ever).
+    .find(|(c, _)| {
+        full(w, *c)
+            && !w
+                .block_at(world::BlockPos::new(c.0, c.1, c.2))
+                .is_some_and(|k| crate::place::OPENS.contains(&k))
+    })
 }
 
 /// The block to place now so that `c` can be filled: `c` itself when a full block touches it,
@@ -247,6 +268,36 @@ fn support(w: &World, c: Cell, body: &[Cell], depth: u32) -> Option<(Cell, Cell,
     ]
     .into_iter()
     .find_map(|n| support(w, n, body, depth - 1))
+}
+
+/// The next block of a hut round a body standing at `pos` (overworld-leg wall 11: the cook walled
+/// in on the surface): the cells beside the body at the feet and the head, then the roof over the
+/// head, each open one filled; the cell to fill, the full block to click and its face. `None` when
+/// the hut is closed or nothing can be clicked. Only cells beside the body are read.
+pub fn hut_block(w: &World, pos: [f64; 3]) -> Option<(Cell, Cell, i8)> {
+    let body = occupied(pos);
+    let top = body.iter().map(|c| c.1).max()?;
+    let low = body.iter().map(|c| c.1).min()?;
+    let mut shell: Vec<Cell> = Vec::new();
+    for y in low..=top {
+        for (x, _, z) in body.iter().filter(|c| c.1 == y) {
+            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let c = (x + dx, y, z + dz);
+                if !body.contains(&c) && !shell.contains(&c) {
+                    shell.push(c);
+                }
+            }
+        }
+    }
+    for (x, _, z) in body.iter().filter(|c| c.1 == top) {
+        let c = (*x, top + 1, *z);
+        if !shell.contains(&c) {
+            shell.push(c);
+        }
+    }
+    shell
+        .into_iter()
+        .find_map(|c| support(w, c, &body, SUPPORT_DEPTH))
 }
 
 /// Steps down a support chain: a roof needs a wall cell three high beside the head.

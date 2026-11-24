@@ -155,6 +155,13 @@ pub struct Sim {
     pub look: (f32, f32),
     /// Scheduled fluid ticks (issue 14a).
     pub(crate) fluids: fluid::Fluids,
+    /// The overworld clock's ticks: 0 at a new world's first tick (dawn), one more each server
+    /// tick, sent in `set_time` (the day clock, `docs/problems/day-clock.md`). A test sets it
+    /// to start at dusk.
+    pub day_time: i64,
+    /// The clocks went out: a real server sends them once, at the join, and then the game time
+    /// alone (race 45355573039: one 33-byte `set_time`, then 599 of 9 bytes).
+    clocks_sent: bool,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -197,6 +204,8 @@ impl Sim {
             survival: survival::Survival::new(0),
             look: (0.0, 0.0),
             fluids: fluid::Fluids::default(),
+            day_time: 0,
+            clocks_sent: false,
         }
     }
 
@@ -647,6 +656,30 @@ impl Sim {
         Ok(out)
     }
 
+    /// The clock as the server syncs it (`ClientboundSetTimePacket`): the game time, and the
+    /// first time both world clocks (overworld 0, the End 1) ticking at rate 1, as a real join's
+    /// `set_time` carries them; after that the game time alone.
+    fn set_time(&mut self) -> S2c {
+        let clocks = if self.clocks_sent {
+            Vec::new()
+        } else {
+            self.clocks_sent = true;
+            [protocol::OVERWORLD_CLOCK, 1]
+                .into_iter()
+                .map(|clock| protocol::ClockUpdate {
+                    clock,
+                    total_ticks: self.day_time,
+                    partial_tick: 0.0,
+                    rate: 1.0,
+                })
+                .collect()
+        };
+        S2c::SetTime {
+            game_time: i64::try_from(self.ticks).unwrap_or(i64::MAX),
+            clocks,
+        }
+    }
+
     fn tick(&mut self) -> Result<Vec<Wire>, EncodeError> {
         if self.phase != Phase::Play {
             return Ok(Vec::new());
@@ -655,9 +688,11 @@ impl Sim {
         // vanilla's resetPosition at the start of each tick.
         self.first_good = self.pos;
         self.moves_this_tick = 0;
+        self.day_time += 1;
         let mut out = Vec::new();
         if self.ticks.is_multiple_of(SET_TIME_EVERY) {
-            out.push(wire(State::Play, &S2c::SetTime)?);
+            let p = self.set_time();
+            out.push(wire(State::Play, &p)?);
         }
         if self.config.peaceful
             && self.health > 0.0

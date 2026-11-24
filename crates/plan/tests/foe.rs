@@ -42,6 +42,50 @@ fn a_spider_within_reach_is_answered_unless_ignored() {
     );
 }
 
+fn zombie_in_reach(health: f32) -> World {
+    let mut w = World::new();
+    w.body = Some(physics::Body {
+        pos: [0.5, 0.0, 0.5],
+        ..physics::Body::default()
+    });
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 7,
+        uuid: [0; 16],
+        kind: EntityKind::Zombie.id(),
+        x: 2.5,
+        y: 0.0,
+        z: 0.5,
+    }));
+    w.step(&Event::Packet(S2c::SetHealth {
+        health,
+        food: 20,
+        saturation: 0.0,
+    }));
+    w
+}
+
+/// Never fight under danger health (overworld-leg wall 1): a retreat under the line sends no
+/// swing at the zombie in its face; the same retreat with its health back over the line does.
+#[test]
+fn a_retreat_strikes_only_over_the_danger_line() {
+    use plan::defend::{Defend, Stance};
+    let r = rules();
+    let hurt = zombie_in_reach(6.0);
+    let mut d = Defend::new(&hurt, 7, EntityKind::Zombie, &r, 0);
+    assert_eq!(d.stance, Stance::Retreat);
+    for tick in 1..=60 {
+        let (_, act, _) = d.step(&hurt, &r, tick);
+        assert!(act.is_none(), "an act under the danger line: {act:?}");
+    }
+    assert_eq!(d.swings, 0);
+    let well = zombie_in_reach(20.0);
+    for tick in 61..=120 {
+        d.step(&well, &r, tick);
+    }
+    assert_eq!(d.stance, Stance::Retreat);
+    assert!(d.swings >= 1, "a retreat over the line never struck");
+}
+
 fn beside(kind: EntityKind, at: f64) -> World {
     let mut w = World::new();
     w.body = Some(physics::Body {
@@ -191,4 +235,17 @@ fn with_nothing_to_heal_with_the_blaze_line_is_the_danger_line() {
     assert_eq!(retreat_line(&w, &r), r.shooter_retreat_health);
     let d = Defend::new(&w, 118, EntityKind::Blaze, &r, 0);
     assert_eq!(d.stance, Stance::Retreat, "the food bar heals: to cover");
+}
+
+/// Review of bba8161: a blaze left alone after a fight that landed nothing (ignored for 600
+/// ticks) stood in touch with no defend. One within `KEEP_OFF` is answered, ignored or not; one
+/// farther off still waits.
+#[test]
+fn an_ignored_blaze_in_touch_is_answered() {
+    let r = rules();
+    let mut w = beside(EntityKind::Blaze, 2.0);
+    w.player.health = Some(20.0);
+    assert_eq!(foe(&w, &r, &[118]), Some((118, EntityKind::Blaze)));
+    let w = beside(EntityKind::Blaze, 4.0);
+    assert_eq!(foe(&w, &r, &[118]), None, "out of touch it waits");
 }

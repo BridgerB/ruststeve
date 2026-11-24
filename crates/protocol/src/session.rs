@@ -123,7 +123,7 @@ impl Session {
                 }
                 out
             }
-            S2c::SetTime => {
+            S2c::SetTime { .. } => {
                 self.server_ticks += TICKS_PER_SET_TIME;
                 Vec::new()
             }
