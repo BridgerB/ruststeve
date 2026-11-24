@@ -301,12 +301,21 @@ impl Memory {
     }
 
     /// The latest sighting of every position on record in one chunk column.
+    ///
+    /// One key is made and reused for every lookup: `latest` makes a `String` a call, and a
+    /// fortress column holds thousands of sightings; the spawner and fortress scans of 25 columns
+    /// cost about 100 ms (callgrind of a replay of race 45350933958 lane 1, 90% in
+    /// `Memory::latest`), and a real bot fell behind the server and was dropped.
     pub fn in_column(&self, dimension: &str, cx: i32, cz: i32) -> Vec<&Sighting> {
+        let mut key = (dimension.to_owned(), (0, 0, 0));
         self.by_column
             .get(&(dimension.to_owned(), cx, cz))
             .into_iter()
             .flatten()
-            .filter_map(|p| self.latest(dimension, *p))
+            .filter_map(|p| {
+                key.1 = *p;
+                self.latest.get(&key).and_then(|i| self.log.get(*i))
+            })
             .collect()
     }
 
