@@ -168,12 +168,14 @@ setup = [
 # `snapshot=race-45336326999/snapshot-spawner-45336326999-race-45336326999-lane-2.tar.zst` (the
 # healthy armoured bot the blaze fight's race 45338756013 started from, so the two compare). No
 # kit and no place: the snapshot's own. The 32 cooked beef are there so that the food a bot can
-# carry does not hide what the shield does (the orchestrator, 2026-11-23).
+# carry does not hide what the shield does (the orchestrator, 2026-11-23); the second shield is the
+# spare the kit row makes.
 [[start]]
 name = "dev-shield"
 stage = "spawner"
 place = "spawn"
 setup = [
   "item replace entity {bot} weapon.offhand with minecraft:shield",
+  "give {bot} minecraft:shield 1",
   "give {bot} minecraft:cooked_beef 32",
 ]

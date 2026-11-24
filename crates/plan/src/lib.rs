@@ -764,9 +764,9 @@ impl Plan {
     }
 
     /// The shield over whatever the tick chose: a held shield goes to the off hand; with a
-    /// fireball coming or a blaze about to shoot it is raised, and while it is up the bot stands,
-    /// faces the threat and strikes nothing (a client using an item cannot attack and moves at a
-    /// fifth of its speed). An escape, a meal or any work of the hands comes first.
+    /// fireball coming or a blaze about to shoot it is raised, and while it is up the bot strikes
+    /// nothing and walks slowed, toward the threat only (`shield::controls`: what a client using
+    /// an item can do). An escape, a meal or any work of the hands comes first.
     fn shield_step(&mut self, w: &World, c: Controls) -> Controls {
         let tick = w.ticks;
         if self.acts.is_empty()
@@ -818,12 +818,7 @@ impl Plan {
             self.acts.insert(0, act);
         }
         match step.yaw {
-            Some(yaw) => Controls {
-                forward: false,
-                jump: false,
-                yaw,
-                ..c
-            },
+            Some(yaw) => shield::controls(c, yaw, tick),
             None => c,
         }
     }

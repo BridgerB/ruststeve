@@ -7,9 +7,9 @@
 //!
 //! Pure reads of the world (`threats`, `should_raise`, `facing`) and a small holder (`Shield`)
 //! that times the raise, keeps it up while a threat lasts, lowers it, and says what became of
-//! every fireball that ended beside the bot. While the shield is up the bot stands and faces the
-//! threat and strikes nothing: a client using an item moves at a fifth of its speed and cannot
-//! attack, and the bot is held to what a client can do.
+//! every fireball that ended beside the bot. While the shield is up the bot strikes nothing and
+//! walks at a fifth of its speed, and only toward the threat (`controls`): a client using an
+//! item is slowed so and cannot attack, and the bot is held to what a client can do.
 
 use std::collections::BTreeMap;
 
@@ -25,10 +25,22 @@ pub const BLAZE_RANGE: f64 = 48.0;
 /// more each tick, drag 0.95): 24 blocks is about a second and a half of flight.
 pub const FIREBALL_RANGE: f64 = 24.0;
 /// Ticks after a blaze's charge flag is first seen before the shield goes up for it. Vanilla
-/// sets the flag 60 ticks before the first of three fireballs; measured on 26.1.2 the flag was
-/// seen 28 to 70 ticks before (`world::Entity::blaze_charged`). The raise itself takes 5 ticks
-/// on the server and a tick or two on the wire, so 15 leaves 6 spare at the shortest.
-pub const RAISE_AFTER: u64 = 15;
+/// sets the flag, waits 60 ticks, shoots at 60, 66 and 72 and clears it at 78
+/// (`Blaze.BlazeAttackGoal`); the raise takes 5 ticks on the server and a tick or two on the
+/// wire, so 45 leaves 8 spare. It was 15: with three blazes one was always "due", and the shield
+/// stayed up 866 ticks on end with nothing struck (race 45343415088, lane 0). A flag seen late
+/// (28 ticks before the fireballs at the shortest, `world::Entity::blaze_charged`) is met by the
+/// fireball itself, in flight.
+pub const RAISE_AFTER: u64 = 45;
+/// With the shield up the bot may still walk the way its tick chose when that way is within
+/// this of the threat (the shield stops 90 either side of the look), one tick in `SLOW_EVERY`.
+pub const ADVANCE_ARC: f64 = 60.0;
+/// A client using an item walks at a fifth of its speed (the client's `LocalPlayer.aiStep`
+/// scales both impulses by 0.2 and stops a sprint; the server does not check it). The body's
+/// ground speed is linear in its input, so forward one tick in five averages the same.
+pub const SLOW_EVERY: u64 = 5;
+/// Uses left under this share of a new shield's (336) are said in the ledger: time for the spare.
+pub const WORN_SHARE: f64 = 0.2;
 /// Ticks the shield stays up after the last threat was seen: a fireball between two packets.
 pub const HOLD_TICKS: u64 = 6;
 /// While it is up, `use_item` goes again this often: the server ignores it when the use still
@@ -161,10 +173,31 @@ pub fn facing(w: &World) -> Option<f64> {
         .map(|t| crate::walk::yaw_to(body.pos, t.pos))
 }
 
+/// The tick's controls under a raised shield held toward `yaw`: walking on, slowed, when the
+/// tick's own way lies within `ADVANCE_ARC` of the threat (closing on a blaze behind the
+/// shield); else standing, turned to the threat.
+pub fn controls(c: physics::Controls, yaw: f64, tick: u64) -> physics::Controls {
+    let d = (c.yaw - yaw).rem_euclid(360.0);
+    if c.forward && d.min(360.0 - d) <= ADVANCE_ARC {
+        let go = tick.is_multiple_of(SLOW_EVERY);
+        return physics::Controls {
+            forward: go,
+            jump: c.jump && go,
+            ..c
+        };
+    }
+    physics::Controls {
+        forward: false,
+        jump: false,
+        yaw,
+        ..c
+    }
+}
+
 /// What the holder asks of the tick.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Step {
-    /// The shield is up (or going up): stand, look along this yaw, strike nothing.
+    /// The shield is up (or going up) toward this yaw: `controls`, and strike nothing.
     pub yaw: Option<f64>,
     /// `UseOffHand` to raise, `ReleaseUse` to lower.
     pub act: Option<Act>,
@@ -186,6 +219,7 @@ pub struct Ended {
 
 /// The raise and the lower, and the count of what the shield met.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Shield {
     /// When the raise was sent; `None` while it is down.
     pub raised_at: Option<u64>,
@@ -205,6 +239,11 @@ pub struct Shield {
     pub missed: u32,
     pub hits_up: u32,
     pub hits_down: u32,
+    /// `item.shield.block` sounds heard, and the server tick they are counted up to.
+    pub blocks_heard: u32,
+    pub heard_until: u64,
+    /// The worn note was written for the shield in hand.
+    pub worn_noted: bool,
 }
 
 impl Shield {
@@ -222,7 +261,8 @@ impl Shield {
         for id in charged {
             self.charged_since.entry(id).or_insert(tick);
         }
-        all.into_iter()
+        let mut due: Vec<Threat> = all
+            .into_iter()
             .filter(|t| match t.kind {
                 ThreatKind::Fireball => true,
                 ThreatKind::Blaze => self
@@ -230,7 +270,46 @@ impl Shield {
                     .get(&t.id)
                     .is_some_and(|since| tick.saturating_sub(*since) >= RAISE_AFTER),
             })
-            .collect()
+            .collect();
+        // Fireballs first, the nearest first (as `threats` has them); then the blaze charged
+        // longest: its volley comes first.
+        due.sort_by_key(|t| match t.kind {
+            ThreatKind::Fireball => 0,
+            ThreatKind::Blaze => 1 + self.charged_since.get(&t.id).copied().unwrap_or(tick),
+        });
+        due
+    }
+
+    /// The block sounds since the last tick, counted; and once a shield, its wear under
+    /// `WORN_SHARE`.
+    fn wear(&mut self, w: &World, notes: &mut Vec<String>) {
+        let now = w.session.server_ticks;
+        let heard = w
+            .sounds
+            .iter()
+            .filter(|s| s.at_tick > self.heard_until && s.name.ends_with("shield.block"))
+            .count();
+        self.blocks_heard += u32::try_from(heard).unwrap_or(u32::MAX);
+        self.heard_until = now;
+        let Some(left) = w.inventory.uses_left(OFF_HAND).filter(|_| held(w)) else {
+            self.worn_noted = false;
+            return;
+        };
+        let new = data::generated::item_props::max_damage(ItemKind::Shield);
+        let worn = f64::from(left) < f64::from(new) * WORN_SHARE;
+        if worn && !self.worn_noted {
+            let spares = w
+                .inventory
+                .slots
+                .iter()
+                .filter(|(s, (k, _))| **s != OFF_HAND && *k == ItemKind::Shield)
+                .count();
+            notes.push(format!(
+                "shield worn: {left} of {new} uses left, {spares} spare shields held, {} blocks heard",
+                self.blocks_heard
+            ));
+        }
+        self.worn_noted = worn;
     }
 
     /// Fireballs gone since the last tick are kept to be judged; those kept long enough are.
@@ -313,6 +392,7 @@ impl Shield {
     pub fn step(&mut self, w: &World, tick: u64, free: bool) -> Step {
         let mut step = Step::default();
         self.judge(w, tick, &mut step.notes);
+        self.wear(w, &mut step.notes);
         let due = self.due(w, tick);
         let Some(body) = w.body else {
             return step;
@@ -359,13 +439,14 @@ impl Shield {
         self.raised_at = None;
         step.act = Some(Act::ReleaseUse);
         step.notes.push(format!(
-            "shield lowered after {} ticks ({}; health {:?})",
+            "shield lowered after {} ticks ({}; {} blocks heard in all; health {:?})",
             tick.saturating_sub(at),
             if usable {
                 "no threat left"
             } else {
                 "the hands are needed"
             },
+            self.blocks_heard,
             w.player.health
         ));
         step

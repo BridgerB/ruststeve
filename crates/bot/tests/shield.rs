@@ -252,3 +252,65 @@ fn the_planner_raises_it_and_stands() {
     );
     assert!(p.shield.raised_at.is_some());
 }
+
+/// Behind a raised shield the bot walks on, one tick in five, when its way is toward the threat;
+/// any other way it stands and turns to the threat.
+#[test]
+fn a_raised_shield_slows_an_advance_and_stops_a_walk_away() {
+    let toward = physics::Controls {
+        forward: true,
+        yaw: 300.0,
+        ..physics::Controls::default()
+    };
+    let go = shield::controls(toward, 270.0, shield::SLOW_EVERY * 4);
+    assert!(go.forward && yaw_near(go.yaw, 300.0), "{go:?}");
+    let wait = shield::controls(toward, 270.0, shield::SLOW_EVERY * 4 + 1);
+    assert!(!wait.forward && yaw_near(wait.yaw, 300.0), "{wait:?}");
+    let away = physics::Controls {
+        forward: true,
+        jump: true,
+        yaw: 90.0,
+        ..physics::Controls::default()
+    };
+    let stand = shield::controls(away, 270.0, shield::SLOW_EVERY * 4);
+    assert!(!stand.forward && !stand.jump && yaw_near(stand.yaw, 270.0));
+}
+
+/// Two blazes charged: the one charged longest is faced, its volley coming first.
+#[test]
+fn the_blaze_charged_longest_is_faced() {
+    let mut w = with_shield(floor(false));
+    add(&mut w, 7, EntityKind::Blaze, [8.5, 64.0, 0.5]);
+    add(&mut w, 8, EntityKind::Blaze, [0.5, 64.0, 4.5]);
+    charge(&mut w, 7, true);
+    let mut s = Shield::default();
+    s.step(&w, 100, true);
+    charge(&mut w, 8, true);
+    s.step(&w, 120, true);
+    // Both due: the nearer one is 8, the longer charged 7 (east, yaw 270).
+    let up = s.step(&w, 120 + shield::RAISE_AFTER, true);
+    assert!(yaw_near(up.yaw.unwrap(), 270.0), "{up:?}");
+    assert!(up.notes[0].starts_with("shield raised against blaze 7"));
+}
+
+/// A shield under a fifth of its uses is said once, with the spares held.
+#[test]
+fn a_worn_shield_is_said_once() {
+    let mut w = with_shield(floor(false));
+    w.inventory.slots.insert(20, (ItemKind::Shield, 1));
+    let mut s = Shield::default();
+    assert!(s.step(&w, 10, true).notes.is_empty(), "a new shield");
+    w.inventory.wear.insert(
+        shield::OFF_HAND,
+        protocol::slot::Wear {
+            damage: Some(300),
+            max_damage: None,
+        },
+    );
+    let notes = s.step(&w, 11, true).notes;
+    assert!(
+        notes[0].starts_with("shield worn: 36 of 336 uses left, 1 spare shields held"),
+        "{notes:?}"
+    );
+    assert!(s.step(&w, 12, true).notes.is_empty(), "said once");
+}
