@@ -343,3 +343,24 @@ fn a_lava_face_across_the_tunnel_is_gone_round_unopened() {
     assert_eq!(run.min_health_in_script, Some(20.0), "burned: {tail:#?}");
     assert_eq!(p.escapes, 0, "an escape ran: {tail:#?}");
 }
+
+/// Feet on soul sand rest at y + 0.875, in the soul sand's own cell: the tunnel and its stairs
+/// read the cell over it (`path::stand_cell`). Read as the soul sand's cell, every stretch ended
+/// "off its route" and the route was searched again, between two cells, for the rest of the run
+/// (race 45355573039 lane 0 at (22, 54, 60) and (22, 54, 61), 22 notes, no progress for 1,760
+/// ticks). A strip of soul sand floor under the start and on the way to bricks in view.
+#[test]
+fn a_tunnel_from_soul_sand_keeps_its_route() {
+    let mut stage = rock();
+    stage
+        .fill((-2, 2), (39, 39), (-2, 12), BlockKind::SoulSand)
+        .air((0, 0), (40, 41), (39, 39))
+        .bricks((0, 0), (40, 41), (40, 40));
+    let (p, run, notes) = in_the_rock(stage, (0, 40, 40), 4, 14_000);
+    let count = |s: &str| notes.iter().filter(|n| n.contains(s)).count();
+    let at = run.world.body.map(|b| b.pos);
+    let tail: Vec<&String> = notes.iter().rev().take(30).rev().collect();
+    assert!(p.met, "not met at {at:?}: {tail:#?}");
+    assert!(!run.died);
+    assert!(count("tunnel off its route") <= 2, "{tail:#?}");
+}
