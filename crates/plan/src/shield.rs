@@ -242,6 +242,8 @@ pub struct Shield {
     /// `item.shield.block` sounds heard, and the server tick they are counted up to.
     pub blocks_heard: u32,
     pub heard_until: u64,
+    /// How many of them were counted at `heard_until` itself.
+    pub heard_there: u32,
     /// The worn note was written for the shield in hand.
     pub worn_noted: bool,
 }
@@ -284,13 +286,24 @@ impl Shield {
     /// `WORN_SHARE`.
     fn wear(&mut self, w: &World, notes: &mut Vec<String>) {
         let now = w.session.server_ticks;
-        let heard = w
-            .sounds
-            .iter()
-            .filter(|s| s.at_tick > self.heard_until && s.name.ends_with("shield.block"))
-            .count();
-        self.blocks_heard += u32::try_from(heard).unwrap_or(u32::MAX);
-        self.heard_until = now;
+        // Server ticks come twenty at a time (`set_time`), so many sounds share one: those at
+        // the newest tick are counted again each step, less what was counted there already.
+        let blocks = |at: u64| {
+            let n = w
+                .sounds
+                .iter()
+                .filter(|s| s.at_tick == at && s.name.ends_with("shield.block"))
+                .count();
+            u32::try_from(n).unwrap_or(u32::MAX)
+        };
+        if now > self.heard_until {
+            self.blocks_heard += blocks(self.heard_until).saturating_sub(self.heard_there);
+            self.heard_there = 0;
+            self.heard_until = now;
+        }
+        let there = blocks(now);
+        self.blocks_heard += there.saturating_sub(self.heard_there);
+        self.heard_there = there;
         let Some(left) = w.inventory.uses_left(OFF_HAND).filter(|_| held(w)) else {
             self.worn_noted = false;
             return;

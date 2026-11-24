@@ -314,3 +314,35 @@ fn a_worn_shield_is_said_once() {
     );
     assert!(s.step(&w, 12, true).notes.is_empty(), "said once");
 }
+
+/// Block sounds are counted once each, though many share one server tick (the server's time
+/// comes twenty ticks at a time).
+#[test]
+fn block_sounds_are_counted_once() {
+    let mut w = with_shield(floor(false));
+    let block = |w: &mut World| {
+        let at_tick = w.session.server_ticks;
+        w.sounds.push(world::Heard {
+            at_tick,
+            name: "item.shield.block".to_owned(),
+            pos: None,
+            entity: None,
+            volume: 1.0,
+        });
+    };
+    let mut s = Shield::default();
+    s.step(&w, 10, true);
+    block(&mut w);
+    s.step(&w, 11, true);
+    block(&mut w);
+    block(&mut w);
+    s.step(&w, 12, true);
+    assert_eq!(s.blocks_heard, 3);
+    // One more at the old tick after the last step, then the server's time moves on.
+    block(&mut w);
+    w.session.server_ticks += 20;
+    block(&mut w);
+    s.step(&w, 13, true);
+    s.step(&w, 14, true);
+    assert_eq!(s.blocks_heard, 5);
+}

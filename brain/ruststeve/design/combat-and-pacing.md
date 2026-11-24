@@ -5,8 +5,8 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@58f99c0 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@3bccc70 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -70,6 +70,8 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 
 ## Issue 16: the shield (docs/problems/shield.md)
 - **What it is**: `plan::shield`. A shield in the off hand (window slot 45) is raised with `Act::UseOffHand` (`use_item`, hand 1) and lowered with `Act::ReleaseUse`. Raised 5 ticks or more it stops what comes from the front half of the look, a blaze's fireball whole: no damage and no fire.
-- **When**: `threats` lists charged blazes within 48 that see the bot and small fireballs within 24 not flying away; `should_raise` and `facing` read it. The holder `Shield::step` raises `RAISE_AFTER` 15 ticks after a blaze's charge flag is first seen (the fireballs come 28 to 70 ticks after it) or at once for a fireball, sends `use_item` again every 20 ticks, and lowers 6 ticks after the last threat.
-- **The call site**: `Plan::shield_step`, called once from `Plan::step` after the tick's choice. While the shield is up the controls stand and face the threat and that tick's strike is dropped (a client using an item cannot attack and moves at a fifth of its speed); an escape, a meal, a hunt, a dig, a window or a block to place lowers it. A shield held elsewhere is swapped into the off hand first (`to_off_hand`: click mode 2, button 40).
-- **Its notes**: "shield raised against blaze N / fireball N", "shield lowered after N ticks", and each fireball that ended within 3.5 blocks judged: "vanished with no damage, the shield up / down" or "hit the bot with the shield up / down", with running counts.
+- **When**: `threats` lists charged blazes within 48 that see the bot and small fireballs within 24 not flying away; `should_raise` and `facing` read it. The holder `Shield::step` raises `RAISE_AFTER` 45 ticks after a blaze's charge flag is first seen (the wind-up is 60; at 15 the shield never came down among three blazes) or at once for a fireball, faces fireballs first and then the blaze charged longest, sends `use_item` again every 20 ticks, and lowers 6 ticks after the last threat.
+- **The call site**: `Plan::shield_step`, called once from `Plan::step` after the tick's choice. While the shield is up that tick's strike is dropped and the bot walks on only toward the threat (within 60 degrees), forward one tick in five (`shield::controls`: a client using an item cannot attack and moves at a fifth of its speed); else it stands and faces the threat; an escape, a meal, a hunt, a dig, a window or a block to place lowers it. A shield held elsewhere is swapped into the off hand first (`to_off_hand`: click mode 2, button 40).
+- **Its notes**: "shield raised against blaze N / fireball N", "shield lowered after N ticks", and each fireball that ended within 3.5 blocks judged: "vanished with no damage, the shield up / down" or "hit the bot with the shield up / down", with running counts; "shield worn: N of 336 uses left" under a fifth.
+- **The kit**: the `nether-kit` row makes two shields before the portal (a blocked fireball takes 6 of 336 uses).
+- **Measured** (development start, races 45343415088 and 45345386828): 0.4 fireball hits a thousand ticks behind the shield against 3.1 after it broke; with the timed raise 5 rods in 12,000 bot-ticks, both bots alive.
