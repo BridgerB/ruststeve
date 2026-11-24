@@ -55,6 +55,35 @@ pub const BRIDGE_TICKS: u64 = 40;
 /// Laying a block, the body stays this near the centre of the block it stands on.
 pub const BRIDGE_STAND: f64 = 0.45;
 
+/// Brick columns within the nine 16-block squares round a brick that make it part of a fortress's
+/// body and not a lone pillar: a corridor five wide crossing three squares is 240; the pillar in
+/// the lava sea the first far walks ended at ((58 to 66, 95 to 104) of race 45337580375) is 60.
+pub const BODY_COLUMNS: usize = 200;
+
+/// The first of `bricks` (nearest first) that stands in a fortress's body: `BODY_COLUMNS` brick
+/// columns in the nine 16-block squares round it. A far walk prefers it to a nearer lone pillar,
+/// which is `fortress` met on a spot with lava all round (docs/problems/nether-walk.md).
+pub fn brick_in_the_body(bricks: &[Cell]) -> Option<Cell> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut squares: BTreeMap<(i32, i32), BTreeSet<(i32, i32)>> = BTreeMap::new();
+    for (x, _, z) in bricks {
+        squares
+            .entry((x >> 4, z >> 4))
+            .or_default()
+            .insert((*x, *z));
+    }
+    let mut counted: BTreeMap<(i32, i32), usize> = BTreeMap::new();
+    bricks.iter().copied().find(|(x, _, z)| {
+        let at = (x >> 4, z >> 4);
+        *counted.entry(at).or_insert_with(|| {
+            (-1..=1)
+                .flat_map(|dx| (-1..=1).map(move |dz| (at.0 + dx, at.1 + dz)))
+                .map(|k| squares.get(&k).map_or(0, BTreeSet::len))
+                .sum()
+        }) >= BODY_COLUMNS
+    })
+}
+
 /// Why a task failed: data, for recovery and for the case file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Failure {
@@ -182,6 +211,15 @@ impl Walk {
             Arrive::Goal,
             tick,
         );
+        walk.more.far = true;
+        walk
+    }
+
+    /// A far walk to any goal (an explore's `Goal::Afar`, a spawner's `Goal::Near`): as `far`,
+    /// for the planner's other legs. Start it only when `route_now` answers a found route, and
+    /// run it as `Task::Explore`: the planner sends its acts and writes its notes there.
+    pub fn far_to(target: Cell, goal: Goal, tick: u64) -> Self {
+        let mut walk = Self::new(target, goal, Arrive::Goal, tick);
         walk.more.far = true;
         walk
     }
@@ -571,4 +609,24 @@ fn follow(body: physics::Body, (wx, wy, wz): Cell) -> Controls {
     let mut c = toward(body, centre);
     c.jump = c.jump || (up && near);
     c
+}
+
+#[cfg(test)]
+mod body_tests {
+    use super::*;
+
+    /// A lone pillar near and a corridor far: the corridor's nearest brick is the body's.
+    #[test]
+    fn a_corridor_is_preferred_to_a_nearer_pillar() {
+        let pillar: Vec<Cell> = (58..=66)
+            .flat_map(|x| (95..=104).flat_map(move |z| (28..=40).map(move |y| (x, y, z))))
+            .collect();
+        let corridor: Vec<Cell> = (100..=160)
+            .flat_map(|x| (150..=154).map(move |z| (x, 64, z)))
+            .collect();
+        let mut bricks = pillar.clone();
+        bricks.extend(corridor);
+        assert_eq!(brick_in_the_body(&bricks), Some((100, 64, 150)));
+        assert_eq!(brick_in_the_body(&pillar), None);
+    }
 }

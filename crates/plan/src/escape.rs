@@ -248,6 +248,72 @@ pub struct Escape {
     /// How many long-escape reports the planner has written (one each `ESCAPE_REPORT_TICKS`).
     #[serde(default)]
     pub reports: u64,
+    /// Blocks laid in lava to climb out on (`lava_step`), and the last click.
+    #[serde(default)]
+    pub steps: u32,
+    #[serde(default)]
+    pub stepped_at: u64,
+}
+
+/// Blocks laid for a step out of lava before the escape swims on without one.
+pub const MAX_LAVA_STEPS: u32 = 8;
+/// How far on the plane a step out of lava is laid: within the hand's reach.
+pub const STEP_RADIUS: i32 = 3;
+
+/// A step out of lava for a body swimming in it with no bank in reach (nether-walk.md: a bot off
+/// a bridge one block over the sea has the bridge for its nearest footing, and the lift out of a
+/// liquid is half a block): a block laid in a lava cell at the surface, to climb onto. Answers
+/// the block to click, its face, the cell laid and whether that cell is the step itself (else it
+/// is the block under a bridge that the step will be laid against next).
+///
+/// `surface` is the lava's top cell height; a step cell is lava there with two open cells over
+/// it, clear of the body's box; it is laid against a full block beside it at its own height, or,
+/// with none, a block is first laid under a full block one up beside it (a bridge's underside).
+pub fn lava_step(
+    pos: [f64; 3],
+    surface: i32,
+    lava_at: impl Fn(Cell) -> bool,
+    full_at: impl Fn(Cell) -> bool,
+) -> Option<(Cell, i8, Cell, bool)> {
+    let feet = feet_cell(pos);
+    let open = |c: Cell| !lava_at(c) && !full_at(c);
+    let clear_of_body = |(x, _, z): Cell| {
+        let reach = 0.5 + physics::HALF_WIDTH + 0.05;
+        (f64::from(x) + 0.5 - pos[0]).abs() > reach || (f64::from(z) + 0.5 - pos[2]).abs() > reach
+    };
+    let beside = |(x, y, z): Cell| {
+        [
+            ((x + 1, y, z), 4),
+            ((x - 1, y, z), 5),
+            ((x, y, z + 1), 2),
+            ((x, y, z - 1), 3),
+        ]
+    };
+    let cells: Vec<Cell> = around(feet, STEP_RADIUS, surface..=surface)
+        .into_iter()
+        .filter(|c| {
+            lava_at(*c)
+                && clear_of_body(*c)
+                && open((c.0, c.1 + 1, c.2))
+                && open((c.0, c.1 + 2, c.2))
+        })
+        .collect();
+    // A step against a block at its own height.
+    for c in &cells {
+        if let Some((click, face)) = beside(*c).into_iter().find(|(n, _)| full_at(*n)) {
+            return Some((click, face, *c, true));
+        }
+    }
+    // None: under a full block one up beside a step cell (a bridge), the block to lay it against.
+    for c in &cells {
+        for (n, _) in beside(*c) {
+            let over = (n.0, n.1 + 1, n.2);
+            if lava_at(n) && full_at(over) && clear_of_body(n) {
+                return Some((over, 0, n, false));
+            }
+        }
+    }
+    None
 }
 
 /// Seals tried before the escape goes on without one.
@@ -384,6 +450,59 @@ impl Escape {
             sealed_at: 0,
             trail: Vec::new(),
             reports: 0,
+            steps: 0,
+            stepped_at: 0,
+        }
+    }
+
+    /// In lava with a block held: the click that lays the next block of a step out, if one is
+    /// due. The step's top becomes the target at once.
+    fn step_out(&mut self, w: &World, body: &physics::Body, tick: u64) -> Option<Act> {
+        if self.kind != TrapKind::Lava
+            || !body.in_lava
+            || self.steps >= MAX_LAVA_STEPS
+            || tick.saturating_sub(self.stepped_at) < SEAL_EVERY_TICKS
+        {
+            return None;
+        }
+        let (x, y, z) = feet_cell(body.pos);
+        // The lava's top cell in the body's column.
+        let surface = (y - 1..=y + 2)
+            .rev()
+            .find(|yy| is_lava(w, (x, *yy, z)) && !is_lava(w, (x, yy + 1, z)))?;
+        let (click, face, laid, is_step) = lava_step(
+            body.pos,
+            surface,
+            |c| is_lava(w, c),
+            |c| full(kind_at(w, c)),
+        )?;
+        let item = SEAL_BLOCKS
+            .iter()
+            .copied()
+            .find(|k| crate::held(w).get(k).copied().unwrap_or(0) > 0)?;
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.steps += 1;
+                self.stepped_at = tick;
+                self.trail(
+                    tick,
+                    format!(
+                        "lay {} {laid:?} on {click:?} face {face}",
+                        if is_step { "a step" } else { "a block under" }
+                    ),
+                );
+                if is_step {
+                    self.target = Some((laid.0, laid.1 + 1, laid.2));
+                    self.best = f64::MAX;
+                    self.best_at = tick;
+                }
+                Some(Act::UseOn {
+                    pos: BlockPos::new(click.0, click.1, click.2),
+                    face,
+                })
+            }
+            crate::hold::Hold::Act(a) => Some(a),
+            crate::hold::Hold::Wait | crate::hold::Hold::Missing => None,
         }
     }
 
@@ -467,8 +586,9 @@ impl Escape {
     /// What the escape did, for the note at its end: how long, its seals and digs, its trail.
     pub fn report(&self) -> String {
         format!(
-            "{} seals, {} digs, {} refused; trail: {}",
+            "{} seals, {} steps laid, {} digs, {} refused; trail: {}",
             self.seals,
+            self.steps,
             self.digs,
             self.refused.len(),
             if self.trail.is_empty() {
@@ -666,6 +786,8 @@ impl Escape {
             }
             return (Controls::default(), None);
         }
+        // In lava with no bank the feet can climb: lay a step of held blocks (swimming on).
+        let step_act = self.step_out(w, &body, tick);
         if self.target.is_none() && tick >= self.next_search {
             self.next_search = tick + SEARCH_EVERY_TICKS;
             self.target = match self.kind {
@@ -704,7 +826,7 @@ impl Escape {
                     yaw: self.yaw,
                     pitch: None,
                 },
-                None,
+                step_act,
             );
         };
         let d = distance(body.pos, target);
@@ -755,7 +877,7 @@ impl Escape {
                 yaw: self.yaw,
                 pitch: None,
             },
-            None,
+            step_act,
         )
     }
 }
@@ -824,6 +946,39 @@ mod fill_tests {
             None
         );
         assert_eq!(corner_head((13, 31, 2), (16, 31, 2), full, dry), None);
+    }
+
+    /// A body in the lava sea beside a bridge one block over it (the far walk's causeway): the
+    /// bridge's underside gets a block first, then a step is laid against that block on the
+    /// body's side, clear of the body.
+    #[test]
+    fn a_step_out_of_lava_is_laid_beside_a_bridge() {
+        // The sea's top cell is y 31; the bridge runs along x at (.., 32, 0); the body swims at
+        // (13.5, 31.2, 1.5).
+        let lava = |(_, y, _): Cell| y <= 31;
+        let bridge = |(_, y, z): Cell| y == 32 && z == 0;
+        let pos = [13.5, 31.2, 1.5];
+        let first = lava_step(pos, 31, |c| lava(c) && !bridge(c), bridge).unwrap();
+        // Under the bridge beside a step cell clear of the body: face 0 of a bridge block.
+        assert_eq!(first.1, 0);
+        assert!(!first.3);
+        let under = first.2;
+        assert_eq!((under.1, under.2), (31, 0));
+        assert_eq!(first.0, (under.0, 32, 0));
+        // That block there, the step is laid against it, on the body's side.
+        let full = |c: Cell| bridge(c) || c == under;
+        let second = lava_step(pos, 31, |c| lava(c) && !full(c), full).unwrap();
+        assert!(second.3);
+        assert_eq!(second.0, under);
+        assert_eq!(second.2, (under.0, 31, 1));
+        assert_ne!(second.2.0, 13, "never a cell the body is in");
+        // A bank at the surface's height needs no block under: the step goes against it.
+        let bank = |(x, y, _): Cell| x == 15 && y <= 31;
+        let third = lava_step(pos, 31, |c| lava(c) && !bank(c), bank).unwrap();
+        assert!(third.3);
+        assert_eq!(third.0.0, 15);
+        // Nothing full in reach: nothing to lay against.
+        assert_eq!(lava_step(pos, 31, lava, |_| false), None);
     }
 
     /// Blaze wall 22: lava over the head, beside the head or beside the feet is at the door;

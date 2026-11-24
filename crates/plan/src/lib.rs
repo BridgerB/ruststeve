@@ -1908,11 +1908,14 @@ impl Plan {
         // toward the nearest brick, bridging where it must; found, its route is held by the walk
         // and followed (off the portal's ledge at once: lava floods it about 700 ticks after a
         // bot arrives). Not found, no far search again for a while: the tunnel below goes on.
-        if tick >= self.far_search_at
-            && let Some(c) = world::stage::bricks_near(w, FORTRESS_CHUNKS)
-                .into_iter()
-                .next()
-        {
+        // The target: bricks of a fortress's body before a nearer lone pillar (the first far walks
+        // met `fortress` at a pillar's foot in the lava sea, the fortress proper 70 blocks on).
+        let far_target = (tick >= self.far_search_at)
+            .then(|| world::stage::bricks_near(w, FORTRESS_CHUNKS))
+            .and_then(|bricks| {
+                walk::brick_in_the_body(&bricks).or_else(|| bricks.first().copied())
+            });
+        if let Some(c) = far_target {
             self.far_search_at = tick + walk::FAR_RETRY_TICKS;
             let mut walk = Walk::far(c, world::stage::FORTRESS_NEAR - 1.0, tick);
             let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
