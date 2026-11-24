@@ -539,6 +539,14 @@ pub struct Plan {
     pub cook_tasks: u32,
     #[serde(default)]
     pub cook_over: bool,
+    /// The second stocking's look for animals is over: its walks failed `HUNT_WALK_FAILS` times
+    /// running (overworld-leg wall 4: twelve failed walks cost a relocation, and six end the run).
+    #[serde(default)]
+    pub hunt_over: bool,
+    /// The feet cell the last leg of own stairs began from, and legs begun from it since: a leg
+    /// that leaves the feet where they were made no way down (wall 1).
+    #[serde(default)]
+    pub own_from: Option<(Cell, u32)>,
     /// When the portal's food check first found the bot short, and whether it has said the bot
     /// goes in short (wall 3).
     #[serde(default)]
@@ -652,6 +660,8 @@ impl Plan {
             portal_food_noted: false,
             cook_tasks: 0,
             cook_over: false,
+            hunt_over: false,
+            own_from: None,
             provision_since: None,
             surface_target: None,
             surface_tries: 0,
@@ -2199,7 +2209,18 @@ impl Plan {
         // that looked for three would still be hunting after dark); then all the raw meat cooked;
         // then the logs the cook burned.
         if !first && rules.meat_stock > 0 {
-            if pieces < rules.meat_stock && spent < rules.provision_ticks {
+            if !self.hunt_over && self.failed_in_row >= HUNT_WALK_FAILS {
+                self.hunt_over = true;
+                self.note(
+                    tick,
+                    "the look for animals is over".to_owned(),
+                    format!(
+                        "{} walks failed running; {pieces} of {} pieces held after {spent} ticks",
+                        self.failed_in_row, rules.meat_stock
+                    ),
+                );
+            }
+            if pieces < rules.meat_stock && spent < rules.provision_ticks && !self.hunt_over {
                 let why = format!(
                     "provisions {pieces} of {} pieces: look for animals",
                     rules.meat_stock
@@ -3408,8 +3429,25 @@ impl Plan {
                 .dimension
                 .as_ref()
                 .is_some_and(|d| d.name == "minecraft:overworld");
+            // Legs begun from this same cell: two that left the feet where they were (every
+            // heading refused: a ledge over a cave, its floors air) and the old hunt takes over
+            // from here, a walk where one goes.
+            let legs_here = match self.own_from {
+                Some((c, n)) if c == feet => n + 1,
+                Some(_) | None => 0,
+            };
             if overworld && feet.1 > SEA_FEET && pool.is_none_or(|p| feet.1 - p.1 > DESCENT_WALK) {
-                return self.own_stairs(feet, pool, tick);
+                self.own_from = Some((feet, legs_here));
+                if legs_here < OWN_LEGS_STUCK {
+                    return self.own_stairs(feet, pool, tick);
+                }
+                if legs_here == OWN_LEGS_STUCK {
+                    self.note(
+                        tick,
+                        "own stairs make no way here".to_owned(),
+                        format!("{legs_here} legs begun from {feet:?} left the feet there: the old hunt from here"),
+                    );
+                }
             }
         }
         // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
@@ -4140,6 +4178,12 @@ pub const SPIRAL: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 /// table lands within two or three of the feet, and a walk of a few blocks stays in the bot's
 /// own cut.
 const TABLE_AT_HAND: f64 = 6.0;
+/// Failed walks running that end the second stocking's look for animals: half the twelve that
+/// cost a relocation.
+const HUNT_WALK_FAILS: u32 = 6;
+/// Legs of own stairs begun from one cell before the old hunt takes over there: a leg turns
+/// through all four headings itself, so the second failure is no accident.
+const OWN_LEGS_STUCK: u32 = 2;
 /// Ticks before spare pickaxes are asked for again once they could not be made.
 const SPARES_RETRY_TICKS: u64 = 2400;
 
