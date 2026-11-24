@@ -408,3 +408,60 @@ fn a_shield_stops_fireballs_from_the_side_it_faces() {
         "back to it: {hit} hit, {blocked} blocked"
     );
 }
+
+/// A block dug is set with its updates (`Level.setBlock`): the lava behind a bank the player
+/// digs runs into the cut at the Nether's pace.
+#[test]
+fn digging_a_lakes_bank_lets_the_lava_out() {
+    let mut stage = Stage::new(1, 40, 60);
+    // The player at (0, 41, 0); a cut at (1, 40, 0), the bank at (2, 40, 0), the lake beyond.
+    stage
+        .air((1, 1), (40, 40), (0, 0))
+        .lava_lake((3, 5), (0, 0), 40, 1);
+    let (mut sim, _) = joined(stage.build().unwrap());
+    let dig = |sim: &mut Sim, status, sequence| {
+        send(
+            sim,
+            C2s::PlayerAction {
+                status,
+                pos: (2, 40, 0),
+                face: 4,
+                sequence,
+            },
+        )
+    };
+    dig(&mut sim, 0, 1);
+    // Netherrack by hand: hardness 0.4 with no pickaxe, 1 / 0.4 / 100 a tick, 40 ticks.
+    for _ in 0..45 {
+        tick(&mut sim);
+    }
+    dig(&mut sim, 2, 2);
+    assert_eq!(kind(&sim, 2, 40, 0), Some(BlockKind::Air), "not dug");
+    for _ in 0..25 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 2, 40, 0), lava(&sim, 1, 40, 0)), (7, 6));
+    assert_eq!(sim.health, 20.0);
+}
+
+/// `FallingBlock`: gravel over a cell that comes free falls into it, and the gravel on it
+/// follows.
+#[test]
+fn gravel_falls_into_a_cell_that_comes_free() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage
+        .fill((6, 6), (41, 42), (6, 6), BlockKind::Gravel)
+        .spawn((0, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.setblock((6, 40, 6), state(BlockKind::Air)).unwrap();
+    let column: Vec<Option<BlockKind>> = (39..=42).map(|y| kind(&sim, 6, y, 6)).collect();
+    assert_eq!(
+        column,
+        [
+            Some(BlockKind::Netherrack),
+            Some(BlockKind::Gravel),
+            Some(BlockKind::Gravel),
+            Some(BlockKind::Air)
+        ]
+    );
+}
