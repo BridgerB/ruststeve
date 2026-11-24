@@ -593,6 +593,15 @@ pub struct Plan {
     /// that leaves the feet where they were made no way down (wall 1).
     #[serde(default)]
     pub own_from: Option<(Cell, u32)>,
+    /// The last leg of own stairs begun (its feet cell and heading), the leg that led to the
+    /// cell the feet are on, and a cell walked back to with the heading it must not take again
+    /// (wall 9: a leg cut onto a ledge over a cave, every heading's floor air).
+    #[serde(default)]
+    pub own_leg: Option<(Cell, (i32, i32))>,
+    #[serde(default)]
+    pub own_into: Option<(Cell, (i32, i32))>,
+    #[serde(default)]
+    pub own_back: Option<(Cell, (i32, i32))>,
     /// When the portal's food check first found the bot short, and whether it has said the bot
     /// goes in short (wall 3).
     #[serde(default)]
@@ -710,6 +719,9 @@ impl Plan {
             cook_over: false,
             hunt_over: false,
             own_from: None,
+            own_leg: None,
+            own_into: None,
+            own_back: None,
             provision_since: None,
             surface_target: None,
             surface_tries: 0,
@@ -3497,7 +3509,20 @@ impl Plan {
     /// own refusal turns it. Seven of sixteen bots died in the caves the hunt's walks led through
     /// before any cast.
     fn own_stairs(&mut self, feet: Cell, pool: Option<Cell>, tick: u64) -> Task {
-        let dir = own_heading(feet, pool, self.descent_legs);
+        let mut dir = own_heading(feet, pool, self.descent_legs);
+        // Walked back from a ledge (wall 9): the heading that led there is not taken again.
+        let back = self.own_back.filter(|(c, _)| *c == feet);
+        if let Some((_, bad)) = back
+            && dir == bad
+        {
+            dir = (-bad.1, bad.0);
+            self.note(
+                tick,
+                format!("own stairs turned from {bad:?} to {dir:?}"),
+                format!("walked back to {feet:?} from a ledge that heading led to"),
+            );
+        }
+        self.own_leg = Some((feet, dir));
         self.descent_legs += 1;
         let steps = u32::try_from(feet.1 - SEA_FEET)
             .unwrap_or(0)
@@ -3635,8 +3660,38 @@ impl Plan {
             };
             if overworld && feet.1 > SEA_FEET && pool.is_none_or(|p| feet.1 - p.1 > DESCENT_WALK) {
                 self.own_from = Some((feet, legs_here));
+                if legs_here == 0 {
+                    // A new cell: the leg that led here, kept for a walk back from it.
+                    // Not at a cell walked back to: the leg into it is the ledge's.
+                    self.own_into = self
+                        .own_leg
+                        .filter(|(c, _)| *c != feet)
+                        .filter(|_| self.own_back.is_none_or(|(b, _)| b != feet));
+                }
                 if legs_here < OWN_LEGS_STUCK {
                     return self.own_stairs(feet, pool, tick);
+                }
+                // Boxed on a ledge (wall 9: every heading's floor air over a cave, the old hunt's
+                // stairs boxed too, relocations spent on walks with no path): back up the leg's
+                // own stairs to where it began, once, and from there another heading.
+                if let Some((start, dir)) = self.own_into.take()
+                    && !self.refused_now(start, tick)
+                {
+                    let mut walk = Walk::new(start, Goal::Block { pos: start }, Arrive::Goal, tick);
+                    if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                        self.own_back = Some((start, dir));
+                        self.own_from = None;
+                        self.walks += 1;
+                        self.note(
+                            tick,
+                            format!("own stairs back to {start:?}"),
+                            format!(
+                                "{legs_here} legs begun from {feet:?} left the feet there: back up the leg that came {dir:?}, another heading from there"
+                            ),
+                        );
+                        return Task::Explore(walk);
+                    }
+                    self.refuse(start, tick);
                 }
                 if legs_here == OWN_LEGS_STUCK {
                     self.note(

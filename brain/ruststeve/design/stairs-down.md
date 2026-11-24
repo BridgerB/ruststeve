@@ -76,3 +76,4 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 
 ## Issue 16: dry stairs (overworld-leg wall 7)
 - **`Stairs::dry`**: water beside a cell a stair or level step opens refuses it too ("water beside", the heading turns), as lava beside does for every staircase. Set by the lava hunt's own stairs (`Plan::own_stairs`) only: a leg at y 55 cut beside an aquifer, the water ran in and the bot was held in it 20,000 ticks (race 45343519424 lane 2). The ending note counts the turns ("cut 6 stairs (N turned from water beside)"). Test `a_dry_staircase_turns_from_water_beside` (bot).
+- **Back from a ledge** (overworld-leg wall 9): two own-stairs legs from one cell that left the feet there walk the bot back up the leg that led to it, once (`Plan::own_into`, "own stairs back to …"); the next leg from there turns from that heading (`own_back`, "own stairs turned from … to …").
