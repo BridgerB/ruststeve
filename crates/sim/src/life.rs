@@ -55,6 +55,10 @@
 //!   a walker stops at a floor's edge rather than fall. A `Still` mob is not moved. A sprint's
 //!   extra knock is not modelled.
 //! - `Life::hurt_by` sums the damage each type dealt, for a test to name what a death was.
+//! - a fire set with updates (a fireball's, flint and steel's) keeps its own clock
+//!   (`FireBlock.tick`, every 30 to 39 ticks): on netherrack or magma it burns on; elsewhere
+//!   it ages by `nextInt(3) / 2` and goes out once older than 3 (about 25 s), nothing
+//!   flammable being taken to stand by it. A fire laid by a stage does not age.
 //! - a spawner (`BaseSpawner`, javap): with the player within 16 it counts down (20 at first,
 //!   then 200 plus up to 599); at 0, unless 6 of its mob are alive within 4 of it, it tries 4
 //!   places (`(rand - rand) × 4` on x and z, -1 to 1 on y) and spawns where the body is free.
@@ -262,6 +266,22 @@ const SHIELD_DELAY: u64 = 5;
 /// The steps a flight or a line of sight is sampled at, in blocks.
 const SAMPLE: f64 = 0.2;
 
+/// A fire block a fireball left, and its own clock (`FireBlock.tick`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fire {
+    pub pos: (i32, i32, i32),
+    pub age: u8,
+    /// The tick of its next scheduled tick.
+    pub next: u64,
+}
+
+/// `FireBlock.getFireTickDelay`: 30 plus up to 9.
+const FIRE_DELAY: u64 = 30;
+const FIRE_DELAY_SPAN: f64 = 10.0;
+/// `FireBlock.tick`: off an infiniburn floor and with nothing flammable beside it, a fire
+/// older than 3 goes out.
+const FIRE_OLD: u8 = 3;
+
 /// A mob a start placed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mob {
@@ -312,6 +332,10 @@ pub struct Life {
     pub wither_ticks: u32,
     /// Small fireballs in flight.
     pub fireballs: Vec<Fireball>,
+    /// Fires the fireballs left, ageing until they go out.
+    pub fires: Vec<Fire>,
+    /// Of those, the ones gone out.
+    pub fires_out: u64,
     /// The spawners that run (`Sim::add_spawner`).
     pub spawners: Vec<Spawner>,
     /// The tick a shield went up (`use_item` with a shield in either hand), until the use key
@@ -360,6 +384,8 @@ impl Default for Life {
             armor: 0.0,
             wither_ticks: 0,
             fireballs: Vec::new(),
+            fires: Vec::new(),
+            fires_out: 0,
             spawners: Vec::new(),
             blocking_since: None,
             fireballs_blocked: 0,
@@ -890,6 +916,59 @@ impl Sim {
         Ok(out)
     }
 
+    /// `FireBlock.getFireTickDelay`: 30 + `nextInt(10)`.
+    fn fire_delay(&mut self) -> u64 {
+        FIRE_DELAY + (self.survival.next_double() * FIRE_DELAY_SPAN) as u64
+    }
+
+    /// `FireBlock.onPlace`: a fire set with updates (`set_and_update`) schedules its tick.
+    pub(crate) fn fire_lit(&mut self, pos: (i32, i32, i32)) {
+        let next = self.ticks + self.fire_delay();
+        self.survival.life.fires.push(Fire { pos, age: 0, next });
+    }
+
+    /// The fireballs' fires (`FireBlock.tick`, each at its scheduled tick): gone if the cell
+    /// is no longer fire; on an infiniburn floor (netherrack, magma: `#infiniburn_nether`)
+    /// it burns on; else it ages by `nextInt(3) / 2` and, with no floor face under it or
+    /// older than 3, goes out (the fortress holds nothing flammable, so `isValidFireLocation`
+    /// is taken as false). The age is kept here, not sent in the block state.
+    fn tick_fires(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let fires = std::mem::take(&mut self.survival.life.fires);
+        let mut kept = Vec::with_capacity(fires.len());
+        for mut f in fires {
+            if kind_at(self, f.pos) != Some(BlockKind::Fire) {
+                continue;
+            }
+            if self.ticks < f.next {
+                kept.push(f);
+                continue;
+            }
+            f.next = self.ticks + self.fire_delay();
+            let (x, y, z) = f.pos;
+            let below = kind_at(self, (x, y - 1, z));
+            if matches!(below, Some(BlockKind::Netherrack | BlockKind::MagmaBlock)) {
+                kept.push(f);
+                continue;
+            }
+            let old = f.age;
+            let grow = (self.survival.next_double() * 3.0).floor() as u8 / 2;
+            f.age = (old + grow).min(15);
+            let sturdy = self.solid(x, y - 1, z) == Some(1.0);
+            if !sturdy || old > FIRE_OLD {
+                let air = BlockKind::Air.info().map_or(0, |i| i.default_state);
+                out.extend(self.setblock(f.pos, air)?);
+                self.survival.life.fires_out += 1;
+                continue;
+            }
+            kept.push(f);
+        }
+        // A fire placed while this ran (none can be) would be lost: append, not replace.
+        kept.append(&mut self.survival.life.fires);
+        self.survival.life.fires = kept;
+        Ok(out)
+    }
+
     /// The knocks the player's hits left: each knocked mob moves by its motion while its body
     /// fits where it goes (a walker also needs a floor there), and the motion is cut by the
     /// air's or the floor's drag. A blow into a wall stops.
@@ -1151,6 +1230,7 @@ impl Sim {
             }
             self.survival.life.wither_ticks -= 1;
         }
+        out.extend(self.tick_fires()?);
         out.extend(self.tick_pushes()?);
         out.extend(self.tick_mobs()?);
         out.extend(self.tick_spawners()?);
