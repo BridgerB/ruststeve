@@ -167,7 +167,14 @@ fn click_for(w: &World, (x, y, z): Cell) -> Option<(Cell, i8)> {
         ((x, y, z - 1), 3),
     ]
     .into_iter()
-    .find(|(c, _)| full(w, *c))
+    // Never a furnace or table: a right-click opens it and places nothing (overworld-leg wall
+    // 11: a hut block clicked onto the cook's furnace opened it, and the hut waited for ever).
+    .find(|(c, _)| {
+        full(w, *c)
+            && !w
+                .block_at(world::BlockPos::new(c.0, c.1, c.2))
+                .is_some_and(|k| crate::place::OPENS.contains(&k))
+    })
 }
 
 /// The block to place now so that `c` can be filled: `c` itself when a full block touches it,

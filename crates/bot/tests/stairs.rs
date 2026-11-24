@@ -122,3 +122,22 @@ fn a_hut_walls_in_the_body_then_roofs_it() {
     all.push(((0, 66, 0), BlockKind::Cobblestone));
     assert_eq!(hut_block(&world_with(&all), pos), None);
 }
+
+/// Wall 11 (race 45354710755): a hut block was clicked onto the top of the cook's furnace, which
+/// opens it and places nothing. The cell over a furnace is filled from a wall beside it.
+#[test]
+fn a_hut_never_clicks_a_furnace() {
+    use plan::cover::hut_block;
+    let pos = [0.5, 64.0, 0.5];
+    let mut set: Vec<_> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .map(|(dx, dz)| ((dx, 64, dz), BlockKind::Cobblestone))
+        .collect();
+    set[0].1 = BlockKind::Furnace;
+    set.push(((0, 65, 1), BlockKind::Cobblestone));
+    let w = world_with(&set);
+    let mut cells = Vec::new();
+    let (cell, click, _) = hut_block(&w, pos).unwrap();
+    cells.push(cell);
+    assert_ne!(click, (1, 64, 0), "clicked the furnace");
+}

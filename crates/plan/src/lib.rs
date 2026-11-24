@@ -2018,6 +2018,11 @@ impl Plan {
         }
         let (item, (cell, click, face)) = item.zip(next)?;
         self.retry_at = tick + 1;
+        // A window open under the hut (a furnace or table clicked by mistake): closed first.
+        if w.window.is_some() && w.click.is_none() && self.acts.is_empty() {
+            self.acts.push(world::Act::CloseWindow);
+            return Some(Task::Idle);
+        }
         if w.window.is_some()
             || w.click.is_some()
             || !self.acts.is_empty()
