@@ -96,13 +96,31 @@ pub struct Opts {
     /// the race runs (issue 16e); the run's ledger, senses and story so far are written beside it
     /// as `<name>.ledger.txt`, `<name>.senses.txt` and `<name>.case.txt` (`evidence`).
     pub progress: Option<PathBuf>,
+    /// Ask for a snapshot (through `on_stage`) once the run has played this many server ticks:
+    /// a place to resume from that is not a stage (`race --snapshot-at`).
+    pub snapshot_at: Option<u64>,
 }
 
 /// A run reaching a new stage, for the race's snapshot.
 pub struct StageUp {
     pub bot: String,
+    /// The stage reached (`Stage`), or the highest held when the snapshot is asked for another
+    /// reason.
     pub stage: world::stage::Stage,
     pub world: Box<World>,
+    pub kind: SnapKind,
+}
+
+/// Why a snapshot is asked for. Only `Stage` is a stage snapshot; the others are places to
+/// resume a look from and are named and marked apart (`devstart::mark_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapKind {
+    /// The run reached a stage higher than any it held.
+    Stage,
+    /// The run played the ticks `Opts::snapshot_at` names.
+    At(u64),
+    /// The run is ending `NoProgress`: the stuck spot, to resume and study.
+    Stuck,
 }
 
 /// What the bot counts while it runs.
@@ -421,6 +439,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         on_stage,
         no_progress_ticks,
         progress,
+        snapshot_at,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -546,6 +565,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     };
 
     let mut deaths: u32 = 0;
+    let mut snapshot_at_sent = false;
     let ending = loop {
         if run.world.stage_reached > stage_told {
             stage_told = run.world.stage_reached;
@@ -554,6 +574,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     bot: name.clone(),
                     stage,
                     world: Box::new(run.world.clone()),
+                    kind: SnapKind::Stage,
                 });
             }
         }
@@ -581,6 +602,24 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         }
         if deadline.is_some_and(|d| Instant::now() >= d) {
             break Ending::Cut;
+        }
+        // A snapshot on request: once, when the run has played the ticks asked for.
+        if let (Some(at), Some(tx), Some(_)) = (snapshot_at, on_stage.as_ref(), play_since)
+            && !snapshot_at_sent
+            && run
+                .world
+                .session
+                .server_ticks
+                .saturating_sub(stats.play_ticks_from)
+                >= at
+        {
+            snapshot_at_sent = true;
+            let _ = tx.send(StageUp {
+                bot: name.clone(),
+                stage: run.world.stage_reached.unwrap_or(world::Stage::InWorld),
+                world: Box::new(run.world.clone()),
+                kind: SnapKind::At(at),
+            });
         }
         if let (Some(cap), Some(_)) = (cap_ticks, play_since)
             && run
@@ -760,6 +799,15 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     .as_ref()
                     .map_or("none", |p| p.task.name())
                     .to_owned();
+                // The stuck spot is kept: a snapshot to resume and study it from, never a stage's.
+                if let Some(tx) = on_stage.as_ref() {
+                    let _ = tx.send(StageUp {
+                        bot: name.clone(),
+                        stage: run.world.stage_reached.unwrap_or(world::Stage::InWorld),
+                        world: Box::new(run.world.clone()),
+                        kind: SnapKind::Stuck,
+                    });
+                }
                 break Ending::NoProgress {
                     for_ticks: progressed.idle(now_tick),
                     task,

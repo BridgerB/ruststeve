@@ -303,6 +303,34 @@ fn a_block_is_placed_into_lava_and_the_flow_behind_it_drains() {
     assert_eq!(sim.health, 20.0);
 }
 
+/// The shift key reaches the model as it reaches a server, by `player_input`
+/// (`ServerGamePacketListenerImpl.handlePlayerInput`: `setShiftKeyDown`): held, magma spares
+/// the feet; let go, it burns again.
+#[test]
+fn the_shift_key_of_player_input_spares_the_feet_on_magma() {
+    use protocol::packets::{INPUT_FORWARD, INPUT_SHIFT};
+    let mut magma = Stage::new(1, 40, 60);
+    magma.magma((0, 0), (0, 0), 40);
+    let held = |s: &mut Sim| {
+        s.step(&In::Packet(C2s::PlayerInput {
+            flags: INPUT_SHIFT | INPUT_FORWARD,
+        }))
+        .unwrap();
+    };
+    assert_eq!(burns(&magma, 25, held), 0, "sneaking");
+    let let_go = |s: &mut Sim| {
+        held(s);
+        s.step(&In::Packet(C2s::PlayerInput {
+            flags: INPUT_FORWARD,
+        }))
+        .unwrap();
+    };
+    assert_eq!(burns(&magma, 25, let_go), 3, "walking");
+    let (mut sim, _) = joined(magma.build().unwrap());
+    held(&mut sim);
+    assert!(sim.violations.is_empty(), "{:?}", sim.violations);
+}
+
 /// A blaze five blocks east of the player on an open floor, and the model joined.
 fn blazed(give: &[data::ItemKind]) -> Sim {
     let stage = Stage::new(1, 40, 60);

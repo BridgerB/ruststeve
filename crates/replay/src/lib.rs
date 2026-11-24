@@ -66,15 +66,15 @@ fn show(effects: &[EffectRecord]) -> String {
         .join(", ")
 }
 
-/// Fold `records[start..]` from `folder`, comparing as it goes.
+/// Fold `records[start..]` on from `folder`, comparing as it goes and adding to `t`.
 fn fold(
-    mut folder: Folder,
+    folder: &mut Folder,
     records: &[Record],
     start: usize,
     label: &str,
     report: &mut Report,
-) -> Result<Tally, String> {
-    let mut t = Tally::default();
+    t: &mut Tally,
+) -> Result<(), String> {
     let mut i = start;
     while let Some(rec) = records.get(i) {
         match rec {
@@ -157,14 +157,22 @@ fn fold(
         }
         i += 1;
     }
-    Ok(t)
+    Ok(())
 }
 
 /// Verify a recording's records (the header already read): one fold from the start, then a fold
 /// from the middle checkpoint and one from the last.
 pub fn verify(records: &[Record]) -> Result<Report, String> {
     let mut report = Report::default();
-    let full = fold(Folder::new(), records, 0, "from the start", &mut report)?;
+    let mut full = Tally::default();
+    fold(
+        &mut Folder::new(),
+        records,
+        0,
+        "from the start",
+        &mut report,
+        &mut full,
+    )?;
     report.full = full;
     // Checkpoints a fold can start from: every one after the first event.
     let at: Vec<usize> = records
@@ -190,12 +198,14 @@ pub fn verify(records: &[Record]) -> Result<Report, String> {
         }) = records.get(i)
         {
             let label = format!("from checkpoint at event {event_index} ({server_ticks} ticks)");
-            let tally = fold(
-                Folder::from_checkpoint((**world).clone(), *event_index),
+            let mut tally = Tally::default();
+            fold(
+                &mut Folder::from_checkpoint((**world).clone(), *event_index),
                 records,
                 i + 1,
                 &label,
                 &mut report,
+                &mut tally,
             )?;
             report.refolds.push(Refold {
                 event_index: *event_index,
@@ -205,6 +215,71 @@ pub fn verify(records: &[Record]) -> Result<Report, String> {
         }
     }
     Ok(report)
+}
+
+/// `verify` for a recording of any length: the records are taken one at a time and held only
+/// from one checkpoint to the next, so a five-hour recording (250 checkpoints, each a whole
+/// world) needs the memory of one. The fold from the start is the same; the one fold again is
+/// from the last checkpoint. Returns the report and how many records were read.
+pub fn verify_stream(
+    mut next: impl FnMut() -> Result<Option<Record>, String>,
+) -> Result<(Report, u64), String> {
+    let mut report = Report::default();
+    let mut full = Tally::default();
+    let mut folder = Folder::new();
+    let mut window: Vec<Record> = Vec::new();
+    let mut last: Option<Record> = None;
+    let mut read = 0u64;
+    while let Some(rec) = next()? {
+        read += 1;
+        let ends_window =
+            matches!(&rec, Record::Checkpoint { event_index, .. } if *event_index > 0);
+        window.push(rec);
+        if ends_window {
+            fold(
+                &mut folder,
+                &window,
+                0,
+                "from the start",
+                &mut report,
+                &mut full,
+            )?;
+            last = window.pop();
+            window.clear();
+        }
+    }
+    fold(
+        &mut folder,
+        &window,
+        0,
+        "from the start",
+        &mut report,
+        &mut full,
+    )?;
+    report.full = full;
+    if let Some(Record::Checkpoint {
+        event_index,
+        server_ticks,
+        world,
+    }) = last
+    {
+        let label = format!("from checkpoint at event {event_index} ({server_ticks} ticks)");
+        let mut tally = Tally::default();
+        fold(
+            &mut Folder::from_checkpoint(*world, event_index),
+            &window,
+            0,
+            &label,
+            &mut report,
+            &mut tally,
+        )?;
+        report.refolds.push(Refold {
+            event_index,
+            server_ticks,
+            tally,
+        });
+    }
+    Ok((report, read))
 }
 
 /// A moment of a recording to fold to.
@@ -463,6 +538,38 @@ mod tests {
         let r = verify(&records).unwrap();
         assert_eq!(r.full.mismatches, 1);
         assert_eq!(r.lines.len(), 1);
+    }
+
+    /// The streamed verify finds what the whole one finds, a window at a time.
+    #[test]
+    fn the_streamed_verify_agrees_with_the_whole_one() {
+        let stream = |records: Vec<Record>| {
+            let mut it = records.into_iter();
+            verify_stream(|| Ok(it.next())).unwrap()
+        };
+        let clean = recording(&World::new(), false, 230, 50);
+        let (r, read) = stream(clean.clone());
+        assert_eq!(read, clean.len() as u64);
+        assert_eq!(r.full, verify(&clean).unwrap().full);
+        assert_eq!(r.mismatches(), 0, "{:?}", r.lines);
+        // One fold again, from the last checkpoint (event 200), over the 30 events after it.
+        assert_eq!(r.refolds.len(), 1);
+        assert_eq!(r.refolds[0].event_index, 200);
+        assert_eq!(r.refolds[0].tally.events, 30);
+
+        let (seeded, _) = stream(recording(&remembering(), true, 200, 50));
+        assert!(seeded.start_taken);
+        assert_eq!(seeded.mismatches(), 0, "{:?}", seeded.lines);
+        let (old, _) = stream(recording(&remembering(), false, 200, 50));
+        assert!(old.memory_only);
+        assert_eq!(old.mismatches(), 0, "{:?}", old.lines);
+
+        let mut wrong = recording(&World::new(), false, 200, 50);
+        if let Some(Record::Effects(e)) = wrong.iter_mut().find(|r| matches!(r, Record::Effects(_)))
+        {
+            e.push(EffectRecord::SetCompression(1));
+        }
+        assert_eq!(stream(wrong).0.full.mismatches, 1);
     }
 
     #[test]
