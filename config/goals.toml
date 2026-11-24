@@ -381,6 +381,13 @@ shooter_patience = 100
 # takes 4 to 5 more after the hit, so the danger line of 8 is met from 13 (a fight ended at 9.7 and
 # the fire took it to 7.0: blaze-fight wall 3).
 shooter_retreat_health = 13.0
+# The parts of a shooter's fight, each on: stepping off a shooter within 2.4 (a blaze's touch is
+# 3.6 in iron armour), stepping out of a fireball's line, and striking on the way down from a jump
+# (9 for 6). Switched here so the whole-stage model can judge each alone
+# (docs/problems/blaze-fight.md).
+shooter_keep_off = true
+shooter_dodge = true
+shooter_crit = true
 # A never_fight kind is backed away from within this: a creeper's fuse starts at 3 blocks, and
 # backing away only within defend_radius let 7 creepers kill (docs/problems/iron-kit.md wall 21).
 flee_radius = 8.0

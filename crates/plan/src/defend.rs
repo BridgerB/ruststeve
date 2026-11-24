@@ -735,6 +735,7 @@ impl Defend {
         if status == DefendStatus::Running
             && self.stance == Stance::Fight
             && rules.ranged.contains(&self.kind)
+            && rules.shooter_dodge
             && !self.walking_post
             && let Some(body) = w.body
             && let Some(yaw) = self.dodge(w, &body, tick)
@@ -1008,7 +1009,10 @@ impl Defend {
                 self.walking_post = false;
                 // A shooter in touch is stepped away from, the strikes going on: its touch costs
                 // more than its fireballs (blaze-fight wall 4).
-                let face = match self.in_touch(w, body.pos).filter(|_| shooter) {
+                let face = match self
+                    .in_touch(w, body.pos)
+                    .filter(|_| shooter && rules.shooter_keep_off)
+                {
                     Some(at) => {
                         let away = (yaw_to(body.pos, middle(at)) + 180.0) % 360.0;
                         self.kept_off += 1;
@@ -1110,7 +1114,8 @@ impl Defend {
                     .last_swing
                     .map_or(0, |t| (t + ready).saturating_sub(tick));
                 let falling = !body.on_ground && body.vel[1] < 0.0;
-                let face = if shooter
+                let crit = shooter && rules.shooter_crit;
+                let face = if crit
                     && body.on_ground
                     && due <= CRIT_LEAD
                     && !edge(w, crate::path::feet_cell(body.pos))
@@ -1119,7 +1124,7 @@ impl Defend {
                 } else {
                     face
                 };
-                if shooter
+                if crit
                     && tick > faced
                     && due == 0
                     && !body.on_ground
