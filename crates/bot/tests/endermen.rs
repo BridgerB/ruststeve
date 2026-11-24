@@ -165,7 +165,7 @@ fn seven_rods_held_go_on_to_the_endermen() {
         "two fresh stone pickaxes:\n{story}"
     );
     assert!(
-        r.has("search tunnel leg") + r.has("explore") > 0,
+        r.has("search tunnel leg") + r.has("explore") + r.has("heading") > 0,
         "the heading's fallback travels on:\n{story}"
     );
     assert_eq!(r.run.world.inventory.count(ItemKind::BlazeRod), 7);

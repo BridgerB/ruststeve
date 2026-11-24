@@ -52,6 +52,8 @@ pub const FORTRESS_PAD: i32 = 4;
 const NOTE_EVERY: u64 = 600;
 /// Ticks between two "look kept off" notes (the count is in each).
 const LOOK_NOTE_EVERY: u64 = 200;
+/// Ticks after a fruitless search for a way to a known place before the next is made.
+const GO_EVERY: u64 = 100;
 /// Ticks a valley target search is kept before it is made again.
 const VALLEY_EVERY: u64 = 100;
 /// Ticks between two progress notes of the valley wait.
@@ -122,6 +124,9 @@ pub struct EnderState {
     pub valleys_refused: Vec<(i32, i32)>,
     #[serde(default)]
     pub valley_refused_at: Option<u64>,
+    /// No search for a way to a known place before this tick (`GO_EVERY` after a fruitless one).
+    #[serde(default)]
+    pub go_next: u64,
     /// The last valley target found and when.
     #[serde(default)]
     pub valley_cache: Option<(u64, Option<Cell>)>,
@@ -1035,29 +1040,44 @@ impl Plan {
         if tries >= CHASE_TRIES {
             return None;
         }
+        // One search a look, and none sooner than `GO_EVERY` after a fruitless one: a far
+        // search on the frontier recording took about 516 ms (E2's replan probe 45483359193), and
+        // a plain search, a far one and a tunnel's in one step stalls the bot's loop. The bot
+        // holds where it is between tries.
+        if tick < self.ender.go_next {
+            self.retry_at = self.ender.go_next;
+            return Some(Task::Idle);
+        }
         self.ender.place_tries[i].1 += 1;
         let goal = Goal::Near { pos: c, range: 4.0 };
-        let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
-        let how = if walk.route_now(w, tick) {
-            Some("a plain route")
-        } else {
-            walk = Walk::far_to(c, goal, tick);
-            walk.route_now(w, tick).then_some("the far walk")
-        };
-        if let Some(how) = how {
-            self.walks += 1;
-            self.note(
-                tick,
-                format!("to {what} at {c:?}"),
-                format!("by {how}, walk {} of {CHASE_TRIES}", tries + 1),
-            );
-            return Some(Task::Explore(walk));
-        }
         let reserve = self
             .table
             .as_ref()
             .map_or(0, |t| t.survival.pickaxe_reserve);
-        if pickaxe_uses_left(w) > reserve
+        // The first try a plain route, the second the far walk (bridging), the third the travel
+        // tunnel above the pickaxe reserve.
+        let found = match tries {
+            0 => {
+                let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
+                walk.route_now(w, tick).then_some((walk, "a plain route"))
+            }
+            1 => {
+                let mut walk = Walk::far_to(c, goal, tick);
+                walk.route_now(w, tick).then_some((walk, "the far walk"))
+            }
+            _ => None,
+        };
+        if let Some((walk, how)) = found {
+            self.walks += 1;
+            self.note(
+                tick,
+                format!("to {what} at {c:?}"),
+                format!("by {how}, try {} of {CHASE_TRIES}", tries + 1),
+            );
+            return Some(Task::Explore(walk));
+        }
+        if tries >= 2
+            && pickaxe_uses_left(w) > reserve
             && let Some(t) = self.tunnel_toward(w, c, (what, "no walk to it"), tick)
         {
             return Some(t);
@@ -1073,8 +1093,11 @@ impl Plan {
                 format!("{what} given up"),
                 format!("{CHASE_TRIES} tries with no way"),
             );
+            return None;
         }
-        None
+        self.ender.go_next = tick + GO_EVERY;
+        self.retry_at = self.ender.go_next;
+        Some(Task::Idle)
     }
 
     /// The wait in a soul sand valley: a nook built round the feet (its open side toward the most
