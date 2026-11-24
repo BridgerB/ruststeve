@@ -34,6 +34,9 @@ on:
       revive:
         description: Respawn after a death and play on, to the cap (true or false)
         default: "false"
+      snapshot_at:
+        description: Take a snapshot once a bot has played this many server ticks (not a stage's - named snapshot-at-<ticks>), or empty
+        default: ""
       minutes:
         description: The lane job's timeout; bots still running 10 minutes before it end Cut (72,000 ticks, a game hour, needs over 60 of play)
         default: "60"
@@ -176,6 +179,11 @@ jobs:
             echo "::error::the frontier ($tag/$asset) is a development snapshot: refused"
             exit 1
           fi
+          # Nor a snapshot on request or of a stuck spot (kind = "at" or "stuck"): not a stage's.
+          if [ "$SNAPSHOT" = frontier ] && grep -q '^kind = ' "$dir/snap.toml"; then
+            echo "::error::the frontier ($tag/$asset) is not a stage's snapshot: refused"
+            exit 1
+          fi
           if grep -q '^dev = true' "$dir/snap.toml"; then
             echo "::notice::lane $LANE resumes a development snapshot: its own snapshots are marked dev and never count as evidence"
           fi
@@ -221,6 +229,7 @@ jobs:
           GOAL: ${{ inputs.goal }}
           HOLD: ${{ inputs.hold }}
           REVIVE: ${{ inputs.revive }}
+          SNAPSHOT_AT: ${{ inputs.snapshot_at }}
           MINUTES: ${{ inputs.minutes }}
         # The wall limit is the job's end, not a cap: bots still running 10 minutes before it end
         # Cut (not counted) and write their files; 7 minutes before it the race is killed. Both
@@ -233,6 +242,7 @@ jobs:
           if [ -n "$GOAL" ]; then goal=(--goal "$GOAL"); fi
           memory=()
           if [ -n "${SNAP_MEMORY:-}" ]; then memory=(--memory "$SNAP_MEMORY"); fi
+          if [ -n "$SNAPSHOT_AT" ]; then memory+=(--snapshot-at "$SNAPSHOT_AT"); fi
           now="$(date +%s)"
           echo "RACE_START=$now" >> "$GITHUB_ENV"
           end=$(( JOB_START + MINUTES * 60 ))

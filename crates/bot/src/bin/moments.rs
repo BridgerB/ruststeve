@@ -313,6 +313,7 @@ fn real(a: &Args) -> Result<(), String> {
                 memory: None,
                 on_stage: None,
                 no_progress_ticks: None,
+                snapshot_at: None,
                 progress: None,
             };
             let id = m.id.clone();
