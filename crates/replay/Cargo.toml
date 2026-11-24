@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Fold recordings: replay (verify, export) and why (the world at a moment)"
+description = "Fold recordings: replay (verify, export), why (the world at a moment), replan (the planner asked again there)"
 
 [[bin]]
 name = "replay"
@@ -18,8 +18,14 @@ path = "src/bin/why.rs"
 name = "ledger"
 path = "src/bin/ledger.rs"
 
+[[bin]]
+name = "replan"
+path = "src/bin/replan.rs"
+
 [dependencies]
 data = { path = "../data" }
+plan = { path = "../plan" }
+toml = "1"
 protocol = { path = "../protocol" }
 observe = { path = "../observe" }
 record = { path = "../record" }

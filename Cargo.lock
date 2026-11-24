@@ -1214,8 +1214,10 @@ dependencies = [
  "data",
  "memory",
  "observe",
+ "plan",
  "protocol",
  "record",
+ "toml",
  "world",
 ]
 

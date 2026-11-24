@@ -207,6 +207,149 @@ pub fn verify(records: &[Record]) -> Result<Report, String> {
     Ok(report)
 }
 
+/// A moment of a recording to fold to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum At {
+    /// The first event at or after this many server ticks.
+    Ticks(u64),
+    /// After this many events.
+    Event(u64),
+}
+
+/// Fold a recording to a moment, from the last checkpoint at or before it: the folder there and
+/// the planner's notes up to it (from the start: a checkpoint holds the world, not the notes).
+pub fn fold_to(records: &[Record], at: At) -> Result<(Folder, Vec<String>), String> {
+    let reached = |f: &Folder| match at {
+        At::Ticks(t) => f.world.session.server_ticks >= t,
+        At::Event(n) => f.events >= n,
+    };
+    let mut folder = Folder::new();
+    let mut start = 0;
+    for (i, rec) in records.iter().enumerate() {
+        if let Record::Checkpoint {
+            event_index,
+            server_ticks,
+            world,
+        } = rec
+        {
+            let before = match at {
+                At::Ticks(t) => *server_ticks <= t,
+                At::Event(n) => *event_index <= n,
+            };
+            if before {
+                folder = Folder::from_checkpoint((**world).clone(), *event_index);
+                start = i + 1;
+            }
+        }
+    }
+    let mut notes = Vec::new();
+    for (i, rec) in records.iter().enumerate() {
+        if i >= start && reached(&folder) {
+            break;
+        }
+        match rec {
+            Record::Note(n) => notes.push(n.clone()),
+            Record::Event(e) if i >= start => folder.step(e).map(|_| ())?,
+            _ => {}
+        }
+    }
+    Ok((folder, notes))
+}
+
+/// `x,y,z` as three whole numbers.
+pub fn parse_cell(s: &str) -> Result<[i32; 3], String> {
+    let v: Vec<i32> = s
+        .split(',')
+        .map(|p| p.trim().parse().map_err(|e| format!("{s}: {e}")))
+        .collect::<Result<_, _>>()?;
+    match v[..] {
+        [x, y, z] => Ok([x, y, z]),
+        _ => Err(format!("{s}: not x,y,z")),
+    }
+}
+
+/// The two-character code of the `n`th block name of a slice: `a` to `z`, `A` to `Z`, then
+/// `aa`, `ab` and on.
+fn code(n: usize) -> String {
+    const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let letter = |i: usize| char::from(LETTERS[i % LETTERS.len()]);
+    if n < LETTERS.len() {
+        letter(n).to_string()
+    } else {
+        let n = n - LETTERS.len();
+        format!("{}{}", letter(n / LETTERS.len()), letter(n))
+    }
+}
+
+/// The blocks round a cell as the bot knew them: one layer for each height from `ys.1` down to
+/// `ys.0`, rows north to south (z up), columns west to east (x up), `radius` cells each way. Each
+/// cell is a short code; the legend under the layers gives every code's full block name and how
+/// many cells hold it. `.` is air, `?` a cell not loaded, `*` marks the centre, `@` the cells
+/// in `marks` (the bot's feet).
+pub fn slice(
+    name_at: &dyn Fn([i32; 3]) -> Option<String>,
+    [cx, cy, cz]: [i32; 3],
+    radius: i32,
+    ys: (i32, i32),
+    marks: &[[i32; 3]],
+) -> String {
+    use std::collections::BTreeMap;
+    let mut codes: BTreeMap<String, (String, u32)> = BTreeMap::new();
+    let mut out = format!(
+        "blocks round ({cx}, {cy}, {cz}): x {} to {} across, z {} to {} down, y {} down to {}\n",
+        cx - radius,
+        cx + radius,
+        cz - radius,
+        cz + radius,
+        ys.1,
+        ys.0
+    );
+    let mut air = 0u32;
+    let mut unknown = 0u32;
+    for y in (ys.0..=ys.1).rev() {
+        out.push_str(&format!("y {y}\n"));
+        for z in cz - radius..=cz + radius {
+            let mut row = format!("  z {z:>5} ");
+            for x in cx - radius..=cx + radius {
+                let cell = match name_at([x, y, z]) {
+                    None => {
+                        unknown += 1;
+                        "?".to_owned()
+                    }
+                    Some(n) if n == "air" || n == "cave_air" || n == "void_air" => {
+                        air += 1;
+                        ".".to_owned()
+                    }
+                    Some(n) => {
+                        let next = codes.len();
+                        let entry = codes.entry(n).or_insert_with(|| (code(next), 0));
+                        entry.1 += 1;
+                        entry.0.clone()
+                    }
+                };
+                let mark = if [x, y, z] == [cx, cy, cz] {
+                    '*'
+                } else if marks.contains(&[x, y, z]) {
+                    '@'
+                } else {
+                    ' '
+                };
+                row.push_str(&format!("{mark}{cell:<2}"));
+            }
+            out.push_str(row.trim_end());
+            out.push('\n');
+        }
+    }
+    out.push_str("legend:\n");
+    out.push_str(&format!("  .  air ({air})\n  ?  not loaded ({unknown})\n"));
+    let mut legend: Vec<(&String, &(String, u32))> = codes.iter().collect();
+    legend.sort_by(|a, b| a.1.0.len().cmp(&b.1.0.len()).then(a.1.0.cmp(&b.1.0)));
+    for (name, (c, n)) in legend {
+        out.push_str(&format!("  {c:<2} {name} ({n})\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,5 +463,48 @@ mod tests {
         let r = verify(&records).unwrap();
         assert_eq!(r.full.mismatches, 1);
         assert_eq!(r.lines.len(), 1);
+    }
+
+    #[test]
+    fn a_moment_is_folded_to_from_the_checkpoint_before_it() {
+        let records = recording(&World::new(), false, 200, 50);
+        let (at_event, _) = fold_to(&records, At::Event(120)).unwrap();
+        assert_eq!(at_event.events, 120);
+        let mut whole = Folder::new();
+        for r in &records {
+            if whole.events == 120 {
+                break;
+            }
+            if let Record::Event(e) = r {
+                whole.step(e).unwrap();
+            }
+        }
+        assert!(at_event.world == whole.world);
+    }
+
+    #[test]
+    fn a_slice_names_every_block_in_full() {
+        let name_at = |[x, y, _z]: [i32; 3]| match (x, y) {
+            (_, 31) => Some("soul_sand".to_owned()),
+            (5, _) => None,
+            (4, 32) => Some("lava".to_owned()),
+            _ => Some("air".to_owned()),
+        };
+        let text = slice(&name_at, [3, 32, 0], 2, (31, 32), &[[2, 32, 0]]);
+        assert!(text.contains("y 32\n"), "{text}");
+        // Row z 0 of y 32: x 1 air, the bot at x 2, the centre at x 3, lava at x 4, x 5 unloaded.
+        assert!(text.contains("  z     0  . @. *.  a  ?\n"), "{text}");
+        assert!(text.contains("  a  lava (5)\n"), "{text}");
+        assert!(text.contains("  b  soul_sand (25)\n"), "{text}");
+        assert!(text.contains("  ?  not loaded (5)\n"), "{text}");
+        assert_eq!(code(0), "a");
+        assert_eq!(code(51), "Z");
+        assert_eq!(code(52), "aa");
+    }
+
+    #[test]
+    fn cells_parse() {
+        assert_eq!(parse_cell("61, 33,95"), Ok([61, 33, 95]));
+        assert!(parse_cell("61,33").is_err());
     }
 }
