@@ -29,6 +29,7 @@ toml = "1"
 protocol = { path = "../protocol" }
 observe = { path = "../observe" }
 record = { path = "../record" }
+results = { path = "../results" }
 world = { path = "../world" }
 
 [dev-dependencies]

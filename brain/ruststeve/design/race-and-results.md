@@ -94,6 +94,12 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - `race.yml -f snapshot=frontier` (or `<tag>/<asset>`) restores it: the world unpacked into the server's before it starts, the snapshot bot's `players/data/<uuid>.dat` (26.1.2's place for it, not the older `playerdata/`) copied to every bot's own offline UUID (`results offline-uuid`), `--memory` seeding each bot; the `snapshot` start gives nothing more. `config/frontier.toml` names the furthest snapshot.
 - **Development starts are marked** (`bot::devstart`, [[development-starts]]): a start other than `snapshot`, `fresh` or `spawn`, or a resume of a marked snapshot, writes `dev = true` first in each `snap.toml`; race.yml names the asset `dev-snapshot-...` and refuses `snapshot=frontier` on a marked snapshot or a `dev-` asset; a test fails when `config/frontier.toml` names one. Snapshots older than the mark (the present frontier came from the `portal` start) carry none.
 
+## Reading the text files (issue 16, [[observability]])
+- `.senses.txt`: `tick x,y,z cell cx,cy,cz on <block>[, lava beside] hp … held … [cursor …] | task (why) | hostiles`; the position has one decimal, the cell is floored (the planner's). A line `tick in <dimension>` when it changes.
+- `.ledger.txt`: planner lines in the planner's order, then that second's facts; `[xN, to tick T (#id)]` closes a line told once for a run; `item x 164 -> 177 (3 changes)` is one second. The header counts the file's records and facts, and the lines they are told in.
+- `.case.txt`: `where:` under the ending; `notes by kind` (every note of the ledger, with first and last tick: a fix's firings); `escape trails (whole)`; `tasks by time` with those that ended within the second they began.
+- `summary.md`: the diagnosis's "notes by kind" table is the race's total over every note of every ledger (it was built from each case's kept notes, which leave repeats out); it says for how many runs it had the whole ledger.
+
 ## See also
 - [[observability]] - what every run produces.
 - [[data-out]] - where the files go next (the insight store, 07b).
