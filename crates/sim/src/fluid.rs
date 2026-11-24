@@ -256,6 +256,7 @@ impl Sim {
             (p.0 - 1, p.1, p.2),
             (p.0 + 1, p.1, p.2),
         ];
+        out.extend(self.fall_onto(p)?);
         for n in around {
             let Some(f) = self.fluid_at(n) else {
                 continue;
@@ -268,6 +269,33 @@ impl Sim {
             }
             self.schedule(n, f.kind, f.kind.delay(self.world.fast_lava()));
         }
+        Ok(out)
+    }
+
+    /// `FallingBlock`: gravel or sand over a cell that has just come free falls into it, down
+    /// to the first cell with something under it, and what stood on that gravel follows. In
+    /// the game the block waits 2 ticks and falls as an entity; here it lands at once.
+    fn fall_onto(&mut self, p: Pos) -> Result<Vec<Wire>, EncodeError> {
+        let free = |sim: &Self, c: Pos| {
+            sim.state_at(c.0, c.1, c.2)
+                .is_some_and(|s| is_air(s) || fluid_of(s).is_some())
+        };
+        let above = (p.0, p.1 + 1, p.2);
+        let falls = matches!(
+            kind_of(self.st(above)),
+            Some(BlockKind::Gravel | BlockKind::Sand | BlockKind::RedSand)
+        );
+        if !falls || !free(self, p) {
+            return Ok(Vec::new());
+        }
+        let mut land = p;
+        while free(self, (land.0, land.1 - 1, land.2)) {
+            land.1 -= 1;
+        }
+        let block = self.st(above);
+        let air = BlockKind::Air.info().map_or(0, |i| i.default_state);
+        let mut out = self.set_and_update(land, block)?;
+        out.extend(self.set_and_update(above, air)?);
         Ok(out)
     }
 
@@ -323,20 +351,70 @@ impl Sim {
         Ok(Some(self.set_and_update(p, state)?))
     }
 
-    /// The fluid ticks due now, in order (`LevelTicks.tick`).
+    /// The fluid ticks due now, in order (`LevelTicks.tick`), in the chunks that tick: those
+    /// within the simulation distance of the player. A tick due in a chunk farther off waits
+    /// there until the player comes near, as a server's does.
     pub(crate) fn tick_fluids(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
-        while let Some((&(at, n), &(p, kind))) = self.fluids.queue.first_key_value() {
-            if at > self.ticks {
-                break;
-            }
-            self.fluids.queue.remove(&(at, n));
+        let (cx, cz) = crate::column_of(self.pos[0], self.pos[2]);
+        let r = self.config.simulation_distance;
+        let due: Vec<((u64, u64), (Pos, Kind))> = self
+            .fluids
+            .queue
+            .range(..=(self.ticks, u64::MAX))
+            .filter(|(_, (p, _))| ((p.0 >> 4) - cx).abs() <= r && ((p.2 >> 4) - cz).abs() <= r)
+            .map(|(k, v)| (*k, *v))
+            .collect();
+        for (key, (p, kind)) in due {
+            self.fluids.queue.remove(&key);
             self.fluids.scheduled.remove(&(p, kind));
             if self.fluid_at(p).is_some_and(|f| f.kind == kind) {
                 out.extend(self.fluid_tick(p)?);
             }
         }
         Ok(out)
+    }
+
+    /// Wake the world's fluids: a tick scheduled for every fluid cell that is flowing, or has
+    /// under it or beside it a cell it could run into. A generated chunk's lava falls and
+    /// springs run when a player first brings the chunk to tick; columns captured as a server
+    /// sent them on arrival hold that lava still, and without this it would stay so (the lava
+    /// that came down on the Nether portal's ledge 700 ticks after each bot arrived:
+    /// docs/problems/nether-walk.md). How many cells were woken.
+    pub fn wake_fluids(&mut self) -> usize {
+        let mut cells: Vec<(Pos, Kind)> = Vec::new();
+        for (&(cx, cz), col) in &self.world.columns {
+            let column = &col.column;
+            for (si, section) in column.sections.iter().enumerate() {
+                if !section.blocks.may_contain(|s| fluid_of(s).is_some()) {
+                    continue;
+                }
+                let base = column.min_y + 16 * i32::try_from(si).unwrap_or(0);
+                for i in 0..4096usize {
+                    let Some(f) = section.blocks.get(i).and_then(fluid_of) else {
+                        continue;
+                    };
+                    let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
+                    cells.push(((cx * 16 + lx, base + ly, cz * 16 + lz), f.kind));
+                }
+            }
+        }
+        let fast = self.world.fast_lava();
+        let mut woken = 0;
+        for (p, kind) in cells {
+            let open = |n: Pos| {
+                // Only inside the world: a cell of a column not held is no room to run into.
+                self.state_at(n.0, n.1, n.2)
+                    .is_some_and(|s| holds_any(s) && fluid_of(s).is_none_or(|f| f.kind != kind))
+            };
+            let flowing = self.fluid_at(p).is_some_and(|f| !f.source);
+            let room = open((p.0, p.1 - 1, p.2)) || SIDES.iter().any(|d| open(side_of(p, *d)));
+            if flowing || room {
+                self.schedule(p, kind, kind.delay(fast));
+                woken += 1;
+            }
+        }
+        woken
     }
 
     /// `FlowingFluid.tick`.
