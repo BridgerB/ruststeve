@@ -30,6 +30,10 @@ pub const OP_TRIES: u32 = 3;
 pub const OP_TRAIL: usize = 6;
 /// Ticks with no op done before the cast gives its site up (the progress invariant).
 pub const STALL_TICKS: u64 = 2400;
+/// Regressions with no op reached past the furthest before the cast gives its site up. Failed
+/// casts of the sealava races 45350748165 and 45354357884 went back 2 to 10 times, or 299 to 394
+/// (a churn); real casts of race 45343519424 went back 35 and 26 in all.
+pub const CHURN_LIMIT: u32 = 60;
 /// Eye to a block's centre a dig or a place is worked from (the game's 4.5 less a margin).
 pub const REACH: f64 = 4.0;
 /// Failed walks or digs toward the station before a cast refills from the nearest sources.
@@ -170,6 +174,8 @@ pub enum CastFailure {
     Stalled,
     /// Lava showed in the room (exposed by a dig).
     Exposed,
+    /// `CHURN_LIMIT` regressions with no op reached past the furthest one (cast.md wall 4).
+    Churned,
     /// A pour's bucket could not be filled: no lava or water source reached.
     NoRefill,
 }
@@ -252,6 +258,23 @@ pub struct Cast {
     /// Tunnels cut toward the pool for the refill in hand.
     #[serde(default)]
     tunnels: u32,
+    /// Sources a refill's scoop failed at, never chosen again by this cast (cast.md wall 1: the
+    /// refill chose (-7, -55, -233) six times running, each "routed" then `NoSight`, and the site
+    /// went; the next source tried filled in 160 ticks).
+    #[serde(default)]
+    refused: Vec<Cell>,
+    /// Ticks an op was worked from a place in reach of its cell's box and not of its centre
+    /// (cast.md wall 3), for the notes.
+    #[serde(default)]
+    box_reach: u32,
+    /// The feet's height a refill's stairs down stop at: one over the source they head for.
+    #[serde(default)]
+    tunnel_floor: Option<i32>,
+    /// The furthest op reached, and the regressions since it was (cast.md wall 4).
+    #[serde(default)]
+    furthest: Option<usize>,
+    #[serde(default)]
+    churn: u32,
     /// Why each try at the op in hand failed, for the failure note (overworld-leg wall 5: a cast
     /// ended "Op after 13 ops, at :dig :room" with nothing to say what the dig met).
     #[serde(default)]
@@ -264,6 +287,15 @@ fn eye(b: &physics::Body) -> [f64; 3] {
 
 fn centre((x, y, z): Cell) -> [f64; 3] {
     [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5]
+}
+
+/// The eye's distance to the nearest point of cell `c`'s box (0 inside it).
+pub fn box_dist(e: [f64; 3], (x, y, z): Cell) -> f64 {
+    let lo = [f64::from(x), f64::from(y), f64::from(z)];
+    (0..3)
+        .map(|i| (lo[i] - e[i]).max(e[i] - (lo[i] + 1.0)).max(0.0).powi(2))
+        .sum::<f64>()
+        .sqrt()
 }
 
 fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -358,6 +390,11 @@ impl Cast {
             sight_digs: 0,
             last_regression: None,
             tunnels: 0,
+            refused: Vec::new(),
+            box_reach: 0,
+            tunnel_floor: None,
+            furthest: None,
+            churn: 0,
         }
     }
 
@@ -377,6 +414,20 @@ impl Cast {
     /// The cast's refill bucket uses by outcome and by what the exact sight line said, for the
     /// notes (`Scoop::uses`): a race's own count of where the exact line and the server differ.
     /// Why the tries at the op in hand failed, oldest first.
+    /// Sources this cast's refills refused after a failed scoop.
+    pub fn refused_sources(&self) -> &[Cell] {
+        &self.refused
+    }
+
+    /// The refused sources, for the notes: the count is the fix's firings (cast.md wall 1).
+    pub fn refused_text(&self) -> String {
+        format!(
+            "refused sources {}, box reach {}",
+            self.refused.len(),
+            self.box_reach
+        )
+    }
+
     pub fn tries_text(&self) -> String {
         if self.op_trail.is_empty() {
             "no failed try".to_owned()
@@ -451,11 +502,18 @@ impl Cast {
             if let Some(was) = self.op {
                 if i < was {
                     self.regressions += 1;
+                    self.churn += 1;
                     self.last_regression = Some((was, i));
                 } else {
                     self.done_ops += 1;
                     self.last_done = tick;
                 }
+            }
+            // The furthest op reached: a cast that gets past it has made progress, whatever it
+            // undid on the way.
+            if self.furthest.is_none_or(|f| i > f) {
+                self.furthest = Some(i);
+                self.churn = 0;
             }
             self.op = Some(i);
             self.work = Work::Idle;
@@ -465,6 +523,13 @@ impl Cast {
         }
         if tick.saturating_sub(self.last_done) > STALL_TICKS {
             return (still, None, CastStatus::Failed(CastFailure::Stalled));
+        }
+        // The progress invariant over regressions: an op undone and done again counts as done,
+        // so a cast that churns (place a floor, dig it, place it) never stalls by the clock. One
+        // went back 304 times in 13,280 ticks and never got past its furthest op (race
+        // 45354357884, place 0).
+        if self.churn > CHURN_LIMIT {
+            return (still, None, CastStatus::Failed(CastFailure::Churned));
         }
         if self.exposed(w) {
             return (still, None, CastStatus::Failed(CastFailure::Exposed));
@@ -545,10 +610,19 @@ impl Cast {
                 }
             });
         }
+        // In reach by the cell's box, not its centre: the server takes a dig or a click when the
+        // eye is within 5.5 of the block's box (`canInteractWithBlock`, the 4.5 range plus 1).
+        // A room cell five over the floor and the wall behind the frame's top cells lie 3.9 to
+        // 4.1 from the eye to their centres from every stand the room has, and failed their
+        // op every try (cast.md wall 3).
+        let by_box = box_dist(eye(body), target) <= REACH;
         let there = match stand {
             Some(s) => feet(body) == s && body.on_ground,
-            None => dist(eye(body), centre(target)) <= REACH && body.on_ground,
+            None => by_box && body.on_ground,
         };
+        if there && stand.is_none() && dist(eye(body), centre(target)) > REACH {
+            self.box_reach += 1;
+        }
         if there {
             if let Work::Walk(_) = self.work {
                 self.work = Work::Idle;
@@ -920,7 +994,7 @@ impl Cast {
         let own = cast_cells(&self.plan);
         let sources: Vec<Cell> = lava_sources(w)
             .into_iter()
-            .filter(|c| !own.contains(c))
+            .filter(|c| !own.contains(c) && !self.refused.contains(c))
             .collect();
         let print = footprint(&self.plan);
         let Some(st) =
@@ -1030,6 +1104,19 @@ impl Cast {
         item: ItemKind,
         tick: u64,
     ) -> (Controls, Option<Act>, CastStatus) {
+        // Stairs down end with the feet one over the source they head for: six stairs from a
+        // floor three over the sea took the feet to y -58, under the lava's surface, and the next
+        // refill found no route (race 45354357884, place 3).
+        if let (Work::Tunnel(_), Some(floor), Some(body)) = (&self.work, self.tunnel_floor, w.body)
+            && body.on_ground
+            && feet(&body).1 <= floor
+        {
+            self.work = Work::Idle;
+            self.tunnels += 1;
+            self.last_done = tick;
+            self.trail(tick, format!("tunnel down ended at y {}", feet(&body).1));
+            return (Controls::default(), None, CastStatus::Running);
+        }
         if let Work::Tunnel(st) = &mut self.work {
             let (c, act, status) = st.step(w, tick);
             if status == crate::stairs::StairsStatus::Running {
@@ -1057,7 +1144,7 @@ impl Cast {
             let mut targets: Vec<Cell> = match fluid {
                 memory::Fluid::Lava => lava_sources(w)
                     .into_iter()
-                    .filter(|c| !own.contains(c))
+                    .filter(|c| !own.contains(c) && !self.refused.contains(c))
                     .filter(|c| dist(centre(*c), centre(self.site.lava)) <= POOL_RADIUS)
                     .collect(),
                 // The cast's own poured water first (wall 28): a pour that made no obsidian left
@@ -1118,7 +1205,52 @@ impl Cast {
                         (0, dz.signum())
                     };
                     if dir != (0, 0) {
-                        self.work = Work::Tunnel(Box::new(crate::stairs::Stairs::level(dir, tick)));
+                        // A source two or more under the feet: stairs down toward it, not a level
+                        // tunnel. A room floor three over the lava sea is out of a bucket's reach
+                        // from every cell at its height, and a level tunnel never came nearer
+                        // ("no route, 1 tunnels" with 168 and 286 sources seen: cast.md wall 2).
+                        // The stairs' own refusal stops them short of lava.
+                        let mut down = t.1 + 1 < f.1;
+                        // Never through the frame's rock or a cell the plan places: stairs down
+                        // from the room's floor cut the floor just laid, and one cast went back
+                        // to its place op 304 times in 13,280 ticks (race 45354357884, place 0).
+                        // The straight steps down to the source's height are checked; with one
+                        // in the way, the level tunnel as before.
+                        if down {
+                            let mut kept = crate::station::kept(self.site.frame);
+                            kept.extend(
+                                self.plan
+                                    .iter()
+                                    .filter(|op| op.kind == OpKind::Place)
+                                    .filter_map(|op| op.pos),
+                            );
+                            let steps = (f.1 - (t.1 + 1)).min(6);
+                            let hit = (1..=steps).find_map(|k| {
+                                let from =
+                                    (f.0 + dir.0 * (k - 1), f.1 - (k - 1), f.2 + dir.1 * (k - 1));
+                                let to = (f.0 + dir.0 * k, f.1 - k, f.2 + dir.1 * k);
+                                crate::tunnel::opened(from, to).and_then(|(cells, _)| {
+                                    cells.into_iter().find(|c| kept.contains(c))
+                                })
+                            });
+                            if let Some(c) = hit {
+                                down = false;
+                                self.trail(tick, format!("tunnel down refused at {c:?}"));
+                            }
+                        }
+                        self.tunnel_floor = down.then_some(t.1 + 1);
+                        self.trail(
+                            tick,
+                            format!(
+                                "tunnel {} toward {t:?}",
+                                if down { "down" } else { "level" }
+                            ),
+                        );
+                        self.work = Work::Tunnel(Box::new(if down {
+                            crate::stairs::Stairs::new(dir, tick)
+                        } else {
+                            crate::stairs::Stairs::level(dir, tick)
+                        }));
                         self.last_done = tick;
                         return (Controls::default(), None, CastStatus::Running);
                     }
@@ -1133,7 +1265,18 @@ impl Cast {
                     CastStatus::Failed(CastFailure::NoRefill),
                 );
             };
-            self.trail(tick, format!("scoop {:?} routed", s.target));
+            let how = match s.stand_exact {
+                Some(true) => " (stand exact)",
+                Some(false) => " (stand sampled)",
+                None => "",
+            };
+            self.trail(
+                tick,
+                format!(
+                    "scoop {:?} routed{how}, {} sampled skipped",
+                    s.target, s.sampled_skipped
+                ),
+            );
             self.tunnels = 0;
             self.work = Work::Refill(Box::new(s));
             self.last_done = tick;
@@ -1153,7 +1296,11 @@ impl Cast {
             ScoopStatus::Failed(f) => {
                 let (target, uses) = (s.target, s.uses);
                 self.count_uses(uses);
-                self.trail(tick, format!("scoop {target:?} failed {f:?}"));
+                // Never this source again in this cast: the next refill takes another.
+                if !self.refused.contains(&target) {
+                    self.refused.push(target);
+                }
+                self.trail(tick, format!("scoop {target:?} failed {f:?}, refused"));
                 self.work = Work::Idle;
                 if self.try_again(format!("scoop failed {f:?}")) {
                     (c, act, CastStatus::Running)
