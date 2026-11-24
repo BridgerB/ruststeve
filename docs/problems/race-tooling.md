@@ -12,9 +12,11 @@ The walls here are not the bot's: they are what made each experiment on issue 16
 | 4. Evidence only at a run's end | ledger, senses and story rewritten every 2,400 ticks and uploaded | 982cf5c | race 45336625960: `evidence-lane-0.tar.zst` on the release 5 minutes in, while the bot ran |
 | 5. A bot digging in place never ends | progress is a stage, a new item kind, more of a goal item, a new cube | 86d45e5 | unit tests (`bot::progress`); no race has run 24,000 idle ticks on it yet |
 | 6. No way to ask the planner again offline | `replan`, `why --blocks --radius --ys` | a5ae696 | probe 45337136275 (below) |
-| 7. A development start could become the frontier | `dev = true` in `snap.toml`, a `dev-` asset name, the frontier refuses both | 982cf5c | unit tests (`bot::devstart`); see wall 7 for the race |
+| 7. A development start could become the frontier | `dev = true` in `snap.toml`, a `dev-` asset name, the frontier refuses both | 982cf5c | races 45340021886 and 45344044745: `dev-snapshot-stone_pickaxe-...` on the release, 13 s after the stage |
 | 8. The insight job fails while another race runs | a release without batches is left out | c525230 | race 45336625960: insight green, 7 releases left out |
 | 9. `brain-check` read another worktree's brain | the root is the working directory's | bbb3210 | unit test; `cargo run -q -p brain-check` from this worktree: four zeros |
+| 10. A stuck spot could not be resumed | `--snapshot-at`, a snapshot when `NoProgress` ends a bot | bcd490d | unit tests; race 45344611351 (see wall 10) |
+| 11. Watching runs spent the API limit | `run_done`, the rule in AGENTS.md | bf2b4dc | the limit hit at 06:27 UTC; none since |
 
 ## Wall 1: a lane at the job limit uploads nothing
 
@@ -32,7 +34,8 @@ The walls here are not the bot's: they are what made each experiment on issue 16
 - **Cause**: quadratic work; and a start state that was not in the recording.
 - **Fix**: `replay::verify` (a new library in `crates/replay`, unit-tested). One fold from the start compares every step's effects and every checkpoint's world. A checkpoint that matches proves a fold from it would go as the running fold does, so only the middle checkpoint and the last are folded again (they prove `Folder::from_checkpoint`). A checkpoint that differs is counted once and the fold goes on from the recorded world. The bot now writes the seeded world as a checkpoint before the first event (`event_index` 0, the existing record variant: the format grows by accretion) and `Folder::take_start` begins a fold from it (`replay verify`, `ledger`; `why` already started from the last checkpoint). An older resumed recording, whose first checkpoint differs from the fold in the memory alone, is taken as the truth and said so in a line, not counted.
 - **Proof**: race 45335753205 (86d45e5, resumed from the Nether snapshot): `from the start: 40930 events, 3661 effects, 5 checkpoints, 0 mismatches`, `the start state is recorded`, two refolds, `51913 events stepped in 1.3 s`, `verified`. Probe 45337136275 on `rs-l05-b00.rsr` of race 45194253932 lane 5 (recorded before the fix): `130750 events, 21 checkpoints, 0 mismatches`, the memory-only line, `190686 events stepped in 1.8 s`. The old code stepped the events once per checkpoint (21 folds there).
-- **Not measured**: a three-hour recording on the new code. The work is at most 2.5 folds whatever the length; reading the file (every checkpoint's world held in memory at once) is unchanged.
+- **Then** (adfcb00): the binary reads a record at a time (`replay::verify_stream`): it holds the records from one checkpoint to the next and one world, and folds again from the last checkpoint only. The whole-file `replay::verify` (two refolds) stays for the tests.
+- **Not measured**: a three-hour recording on the new code. The work is under two folds whatever the length.
 
 ## Wall 3: the caches were never saved
 
@@ -46,7 +49,7 @@ The walls here are not the bot's: they are what made each experiment on issue 16
 
 - **What happened**: case, ledger and senses were written when a bot's run ended; a snapshot was written when its stage was reached but left the runner only in the end-of-job artifact. A 12,000-tick race showed one progress line and nothing else for its whole length, and a lane that never finished (wall 1) left none of it.
 - **Fix**: every 2,400 ticks (`PROGRESS_EVERY_TICKS`, 12,000 before) the bot rewrites its progress line and, beside it, `<bot>.ledger.txt`, `<bot>.senses.txt` and `<bot>.case.txt` (`bot::evidence`: copies taken on the loop thread, rendered and written on a thread of its own, each file whole by rename). The running case text starts `RUNNING` with the progress line and holds the story so far (`results::story`); the run's end writes the real case over it. The lane's loop looks every 30 s: a snapshot whose `snap.toml` is there (written last) is uploaded at once, named as `publish` names it; every 5 minutes (10 with more than 8 lanes) the progress lines and `evidence-lane-N.tar.zst` go up. The interval is a budget: the workflow token has 1,000 requests an hour for the repository and an upload with `--clobber` is about three.
-- **Proof**: development race 45336625960 (portal start, c525230): the release held `progress-lane-0.txt` and `evidence-lane-0.tar.zst` at 06:01:20 UTC, about five minutes into the race and before it ended; the tarball's case text began `RUNNING`, with the stages, the longest tasks and the last two minutes, and the ledger had 144 lines to tick 4,760. The snapshot upload: see wall 7.
+- **Proof**: development race 45336625960 (portal start, c525230): the release held `progress-lane-0.txt` and `evidence-lane-0.tar.zst` at 06:01:20 UTC, about five minutes into the race and before it ended; the tarball's case text began `RUNNING`, with the stages, the longest tasks and the last two minutes, and the ledger had 144 lines to tick 4,760. The snapshot upload: development race 45344044745 (`table` start, `stone-tools`, held to a 2,400-tick cap): `snapshot stone_pickaxe (dev)` written at 06:58:42 UTC, the asset on the release at 06:58:55, the race ending at 06:59:55. Since 8643b01 a lane also sends its last snapshots when its race ends (race 45340021886 lasted 25 s, under the loop's 30).
 - **Read while racing**: `gh release download race-<id> -p 'evidence-lane-*' -p 'progress-lane-*'`, then `tar --zstd -xf evidence-lane-N.tar.zst`.
 
 ## Wall 5: a bot digging in place never ended `NoProgress`
@@ -91,7 +94,26 @@ route from (30, 31, -19) to Near { pos: (61, 33, 95), range: 2.0 }, at most 6000
 
 - **What happened**: nothing yet; since 2026-11-23 made-up starts are allowed for development, and nothing stopped a snapshot taken in such a race from being raced as `snapshot=frontier` or written into `config/frontier.toml`.
 - **Fix**: `bot::devstart` (pure, unit-tested). A start other than `snapshot`, `fresh` or `spawn` is a development start (a test holds those three to no kit and no place in `config/starts.toml`). A race from one, or resumed from a snapshot marked so, writes `dev = true` as the first line of each `snap.toml`; race.yml names such an asset `dev-snapshot-...` (in the lane's loop and in `publish`), and its restore step refuses `snapshot=frontier` when the snapshot is marked or its asset name starts `dev-`. A test fails CI when `config/frontier.toml` names a `dev-` asset.
+- **Proof**: development races 45340021886 and 45344044745 (`table` start): the log says `race: a development start (table): its snapshots are marked dev and can never be the frontier`, `snap.toml` begins `dev = true`, and the release holds `dev-snapshot-stone_pickaxe-<run>-race-<run>-lane-0.tar.zst`. The refusal: probe 45344916725 ran race.yml's own condition with `SNAPSHOT=frontier` on that asset and printed `the frontier (dev-snapshot-stone_pickaxe-...) is a development snapshot: refused`. Not run through a dispatched race: that needs `config/frontier.toml` to name the asset, which the test forbids.
 - **Known gap**: the present frontier (`race-44678197603`, the `portal` start) and tonight's Nether snapshot were taken before the mark existed. The first is a development snapshot by this rule and carries no mark; the guard cannot see it.
+
+## Wall 10: a stuck spot could not be resumed
+
+- **What happened**: a snapshot was taken only when a stage was reached. A bot stuck for hours between stages (the Nether's first minute) left no world to resume from; every look at the spot cost the hours before it.
+- **Fix**: `race --snapshot-at <ticks>` (race.yml `snapshot_at`): the first bot of the lane to have played that many server ticks has the world and its memory copied. A bot ending `NoProgress` leaves a snapshot of where it stood. Neither is a stage's snapshot: the directory and the asset are `at-<ticks>` or `stuck-<bot>` (`snapshot-at-2400-<run>-...`, `snapshot-stuck-rs-l00-b00-<run>-...`), `snap.toml` begins `kind = "at"` or `kind = "stuck"`, and the frontier refuses both (race.yml's restore step and the test on `config/frontier.toml`). Its `stage` is the highest the bot held, so a race resumed from it takes its next stage snapshot as usual. Resume with `-f start=snapshot -f snapshot=race-<id>/<asset>`.
+
+## Wall 11: watching runs spent the API limit
+
+- **What happened**: at 06:27 UTC every `gh` call of every agent failed `HTTP 403: API rate limit exceeded` for 22 minutes. Nine agents share one token (5,000 requests an hour); `gh run watch` polls every few seconds with several requests a poll, and release polling added more.
+- **Fix**: the MCP tool `run_done` (one request while a run goes on: `gh api repos/BridgerB/ruststeve/actions/runs/<id>`; its artifact names once it is done) and the rule in AGENTS.md sections 2 and 5: never `gh run watch`, one check every 4 minutes or more. `gh api rate_limit` is free.
+
+## A whole run in one job (the end-to-end race)
+
+- **Ticks, from this week's runs** (one bot, estimates where no bot has done the leg): spawn to `ready` about 55,000 (race 45128866973 lane 6: stairs up to the surface from tick 48,720); `ready` to `nether` 24,960 to 34,480 (race 45194253932, lanes 5, 10, 0); the Nether walk or tunnel of about 110 blocks to the bricks, not yet done by a whole bot, taken as 30,000; the spawner and 7 rods, never done, taken as 60,000. About 180,000 ticks, with a wide error on the last two legs: a cap of 300,000 leaves two thirds over.
+- **The job**: GitHub ends a hosted job at 360 minutes. With `minutes=360` bots end `Cut` at minute 350 and the race is killed at 353; setup is 1.3 to 2.5 minutes, so about 347 minutes of play, 416,000 ticks at 20 a second. The pre-flight (cap / 1,200 + 20 minutes) allows 408,000.
+- **The largest safe cap is 396,000 ticks with `minutes=360`** (330 minutes of play, 17 spare: a server at 19 ticks a second still finishes). **A 300,000-tick race fits with `minutes=300`** (250 of play; the pre-flight asks 270). A bot cut by the limit still leaves every file: its run ends `Cut` and the lane uploads.
+- **What grows with the cap**: the recording, about 1.3 MB a thousand ticks (7.7 MB for 6,000): 385 MB at 300,000, inside the artifact. `replay verify` read the whole file into memory with every checkpoint's world (250 of them at 300,000 ticks); since adfcb00 it reads a record at a time and holds one (`replay::verify_stream`). The evidence copies (ledger, facts, senses) are taken every 2,400 ticks and written on their own thread. One lane uploads about 12 times an hour: no pressure on the 1,000-request budget.
+- **Not measured**: any race over 90,000 ticks on this tooling. `NoProgress` (24,000 idle ticks) ends a stuck bot long before the cap, with a `stuck` snapshot.
 
 ## Wall 8: the insight job failed while another race ran
 

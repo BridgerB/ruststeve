@@ -28,8 +28,9 @@ Do these in order before writing any code, every session, and again after any co
 - The one exception (Bridger, 2026-11-12): to **watch the bot live**, the bot and a vanilla server may run on the Mac, streaming to steve running locally (`STEVE_RELAY=ws://localhost:8787`). Runners never stream to steve.
 - The loop: change code, commit, push the branch, let CI run on the push, read the run's logs (`gh run view <id> --log-failed`), push again.
 - A question that needs code run goes to the probe: the `probe_run` MCP tool, or `gh workflow run probe.yml --ref <branch> -f command=...` ([`brain/ruststeve/design/ci-on-runners.md`](brain/ruststeve/design/ci-on-runners.md)).
-- **Use the `ruststeve` MCP server** (`.mcp.json`, built with the official Rust MCP SDK `rmcp`): `probe_run`, `probe_output`, `run_status`, `run_log`, `ci_runs`, `brain_check`, `brain_note`, `brain_search`. New agent-facing tooling is added there as a tool, not as a script (`brain/ruststeve/decisions/agent-tools-over-mcp.md`).
+- **Use the `ruststeve` MCP server** (`.mcp.json`, built with the official Rust MCP SDK `rmcp`): `probe_run`, `probe_output`, `run_done`, `run_status`, `run_log`, `ci_runs`, `brain_check`, `brain_note`, `brain_search`. New agent-facing tooling is added there as a tool, not as a script (`brain/ruststeve/decisions/agent-tools-over-mcp.md`).
 - Watch runs in the background and keep working; never end a turn just waiting on a run.
+- **Waiting on a run costs API requests, and they are shared** (2026-11-23: nine agents' `gh run watch` and release polls spent the token's 5,000 requests an hour in one hour, and every `gh` call of every agent failed with HTTP 403 until the reset). **Never `gh run watch`; never poll in a loop.** Ask once every 4 minutes or more, with one request: the MCP tool `run_done`, or `gh api repos/BridgerB/ruststeve/actions/runs/<id> --jq '"\(.status) \(.conclusion)"'` (`gh run view --json jobs` and `gh run list` cost several each). `gh api rate_limit --jq .resources.core` is free and says what is left. A 403 that says "rate limit" is the limit, not a missing credential: wait for its reset.
 
 ## 3. How to work an issue
 
@@ -47,7 +48,7 @@ clojurecraft lost four weeks on its pearl stage, and most of its mistakes are ju
 1. **Throughput first.** How many attempts did the stuck stage get on this commit? Every attempt starts at the frontier snapshot, one bot a lane, 15 lanes at once (the marathon holds the 16th runner); more attempts before a cleverer bot.
 2. **Coverage is the gate** (`brain/ruststeve/decisions/observe-first.md`, issue 16e). The race summary prints the coverage row first: every run's case, recording, ledger, senses, moments and server truth; tasks with a reason and an end; ledger drops; slots and entity data cut short; packets the stages need thrown away (`config/observe.toml`). Any `!!` is a blind spot fixed before any behaviour PR.
 3. **Read the evidence yourself, from the files.** Rank the signatures (the summary names three bots to read for each); read their case files: the story (stages, each tool worn or broken with the task running, when the bot starved, went without a pickaxe, burned, the longest tasks, server truth's blind lines) and the last two minutes. Then the bot's `.ledger.txt` (every task with its reason and outcome, every fact: hits, items, tools, sounds, mobs' signs) and `.senses.txt` (a row every 10 s). MCP `race_summary` and `race_read` read them without running code; `replay ledger <rsr> --force` re-reads any recording, old ones included, with today's decoders. A probe with `why` is for what the files cannot answer. A reason code is where a run ended, never why. A cause is a hypothesis until one bot's ledger lines confirm it.
-4. **While a race runs**, read the release's `progress-lane-N.txt` (updated every 10 minutes); a bot with no progress for 20 game minutes ends `no-progress` with its case instead of sitting to the cap.
+4. **While a race runs**, read the release's `progress-lane-N.txt` and `evidence-lane-N.tar.zst` (each bot's ledger, senses and story so far; uploaded every 5 minutes, 10 with more than 8 lanes); a bot with no progress for 20 game minutes ends `no-progress` with its case instead of sitting to the cap.
 5. **Name the structural cause** in `docs/problems/`, then fix it. Prefer structure (a progress invariant, a held target, a kept reserve) over a threshold.
 6. **Judge the fix** on tens of paired runs (same worlds, same seeds), count the new code path's firings in the ledger, and confirm a passing stage did not drop.
 7. **Test in order; a race is the last check** (`brain/ruststeve/decisions/stage-loop-lessons.md`, issue 16's night of 2026-11-23): a unit test on a hand-built world, then a probe on a recorded world (`why` at the tick), then a short race from a snapshot taken right before the wall, with a short cap. Never a three-hour race from two stages back to test one fix.
@@ -70,6 +71,7 @@ cargo run -q -p brain-check                       # the brain's four invariants,
 cargo run -q -p brain-check -- drift              # notes whose cited sources changed since their pin
 cargo run -q -p brain-check -- touches ruststeve <paths>   # notes a change affects
 gh run list -R BridgerB/ruststeve --branch <branch>        # CI on the runners
+gh api repos/BridgerB/ruststeve/actions/runs/<id> --jq '"\(.status) \(.conclusion)"'   # is a run done: one request, at most every 4 minutes (never gh run watch)
 ```
 
 Tests, the bot and every binary run in the workflows under `.github/workflows/`, not here.
@@ -107,3 +109,14 @@ Tests, the bot and every binary run in the workflows under `.github/workflows/`,
 - Lead with the outcome, briefly; times in Denver time (America/Denver).
 - A missing credential, sign-in, API key or a 401/403: stop and ask; never work around it.
 - Ask before anything irreversible outside the repository (money, accounts, the game box, deleting data).
+
+## 10. Several agents at once
+
+From the night of 2026-11-23, nine agents on issue 16 (`docs/problems/race-tooling.md`):
+
+- **One worktree and one branch each**, cut from the shared base branch; an agent edits only its own worktree and pushes only its own branch. One agent (or the session that started them) merges into the base; the others merge the base back in before each push that follows a merge. Say who owns which crates and files before starting: two agents in one file is a conflict in every merge.
+- **Push small, proven steps.** A crash or a restart loses whatever is uncommitted; a commit that is pushed is also what the others can merge. Send the merger the commit hash once CI is green on it.
+- **A target directory each, if the disk allows.** A shared `CARGO_TARGET_DIR` saves disk and time but cargo then takes another worktree's build of a crate as fresh whenever this worktree's sources are older than that artifact: a build fails against a struct this tree does not have, or passes against code it does not hold. When sharing is forced: `find crates -name '*.rs' -exec touch {} +` before the build or the commit, and trust CI, not the local build. A binary must not bake in its build's checkout (`brain-check` did, through `CARGO_MANIFEST_DIR`; it now finds the repository from the working directory).
+- **The API limit is shared**: 5,000 requests an hour for every agent and session on the token. Never `gh run watch`, never poll in a loop; one request every 4 minutes or more (section 2).
+- **Runners are shared too**: give each agent a lane budget and keep races short; a queued lane is someone else's race.
+- **Each agent writes its walls in its own file** under `docs/problems/`, and updates only the brain notes of what it touched: one owner for each shared record.

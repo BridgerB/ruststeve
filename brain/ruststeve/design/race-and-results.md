@@ -5,8 +5,8 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@a5ae696 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@adfcb00 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -92,6 +92,8 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 ## Snapshots and the frontier ([[one-bot-first]])
 - `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor (the start's stage, or a resumed snapshot's): `save-all flush`, the server's `world/` copied to `<out>/snapshots/<stage>/` with `memory.rsw` (the bot's memory, `results::snapshot::write_memory`) and `snap.toml` (stage, bot, offline UUID, position, dimension, commit). Publish steps add each as a release asset `snapshot-<stage>-<run>-<lane>.tar.zst`.
 - `race.yml -f snapshot=frontier` (or `<tag>/<asset>`) restores it: the world unpacked into the server's before it starts, the snapshot bot's `players/data/<uuid>.dat` (26.1.2's place for it, not the older `playerdata/`) copied to every bot's own offline UUID (`results offline-uuid`), `--memory` seeding each bot; the `snapshot` start gives nothing more. `config/frontier.toml` names the furthest snapshot.
+- **Snapshots that are not a stage's** (`bot::SnapKind`): `race --snapshot-at <ticks>` (race.yml `snapshot_at`) copies the world and the memory of the first bot of the lane to have played that long, and a bot ending `NoProgress` leaves one of where it stood. Their directory and asset are `at-<ticks>` and `stuck-<bot>`, `snap.toml` begins `kind = "at"` or `kind = "stuck"`, and the frontier refuses both; resume one with `-f start=snapshot -f snapshot=race-<id>/<asset>`.
+- **A whole run in one job**: a hosted job ends at 360 minutes. The largest safe cap is 396,000 ticks with `minutes=360`; a 300,000-tick race fits with `minutes=300` (`docs/problems/race-tooling.md`, "A whole run in one job").
 - **Development starts are marked** (`bot::devstart`, [[development-starts]]): a start other than `snapshot`, `fresh` or `spawn`, or a resume of a marked snapshot, writes `dev = true` first in each `snap.toml`; race.yml names the asset `dev-snapshot-...` and refuses `snapshot=frontier` on a marked snapshot or a `dev-` asset; a test fails when `config/frontier.toml` names one. Snapshots older than the mark (the present frontier came from the `portal` start) carry none.
 
 ## Reading the text files (issue 16, [[observability]])
