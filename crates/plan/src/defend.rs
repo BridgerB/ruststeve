@@ -88,6 +88,14 @@ pub struct Defend {
     /// in the sweep (blaze-fight walls 4 and 5): in the fight's note.
     #[serde(default)]
     pub kept_off: u32,
+    /// A dodge under way (until this tick, along this yaw), the fireballs already answered, and
+    /// how many dodges the fight made (blaze-fight wall 7).
+    #[serde(default)]
+    pub dodging: Option<(u64, f64)>,
+    #[serde(default)]
+    pub dodged: Vec<i32>,
+    #[serde(default)]
+    pub dodges: u32,
     /// Ticks in a row a shooter's fight has had no way to its foe.
     #[serde(default)]
     pub no_way: u32,
@@ -321,6 +329,45 @@ pub fn pressing(w: &World, rules: &SurvivalRules, current: i32) -> Option<(i32, 
     })
 }
 
+/// A fireball whose line passes this near the body's middle is stepped out of: clojurecraft
+/// measured 212 small fireballs, and every one of the 24 that hit passed within 1.4 blocks; none
+/// of 76 passing 1.5 or more away did (brain/oracle/architecture/cc-blaze-hunt.md).
+pub const DODGE_CLEAR: f64 = 1.5;
+/// Ticks a dodge walks: 8 at a walk are 1.7 blocks. A fireball arrives 6 to 15 ticks after it
+/// appears.
+pub const DODGE_TICKS: u64 = 8;
+/// Fireballs farther than this are not looked at.
+pub const DODGE_RANGE: f64 = 30.0;
+
+/// The way to step out of a fireball's line, on the plane (a unit vector), or `None` when it
+/// will pass `DODGE_CLEAR` or more from `mid` or is flying away. `velocity` unknown (the server
+/// has sent none yet): it is taken to fly straight at `mid`. A line through the body is left to
+/// the left of its heading.
+pub fn dodge_side(mid: [f64; 3], ball: [f64; 3], velocity: Option<[f64; 3]>) -> Option<[f64; 2]> {
+    let rel = [mid[0] - ball[0], mid[1] - ball[1], mid[2] - ball[2]];
+    let v = velocity
+        .filter(|v| (v[0] * v[0] + v[2] * v[2]).sqrt() > 0.05)
+        .unwrap_or(rel);
+    let vv = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    if vv < 1e-9 {
+        return None;
+    }
+    let t = (rel[0] * v[0] + rel[1] * v[1] + rel[2] * v[2]) / vv;
+    if t < 0.0 {
+        return None;
+    }
+    let off = [rel[0] - v[0] * t, rel[1] - v[1] * t, rel[2] - v[2] * t];
+    if (off[0] * off[0] + off[1] * off[1] + off[2] * off[2]).sqrt() >= DODGE_CLEAR {
+        return None;
+    }
+    let flat = (off[0] * off[0] + off[2] * off[2]).sqrt();
+    if flat > 0.2 {
+        return Some([off[0] / flat, off[2] / flat]);
+    }
+    let h = (v[0] * v[0] + v[2] * v[2]).sqrt();
+    (h > 1e-9).then(|| [v[2] / h, -v[0] / h])
+}
+
 /// Ticks a shooter's fight stands with its foe out of reach and no step to take toward it (a
 /// floor missing, fire or lava ahead, or the foe over the reach) before it is answered from
 /// cover: a second.
@@ -387,6 +434,9 @@ impl Defend {
             covered_at: None,
             cover_tried: Vec::new(),
             kept_off: 0,
+            dodging: None,
+            dodged: Vec::new(),
+            dodges: 0,
             no_way: 0,
             sweeps_held: 0,
             notes: Vec::new(),
@@ -481,7 +531,70 @@ impl Defend {
             .map(|(_, id, _)| id)
     }
 
+    /// The yaw to walk this tick to step out of a fireball's line (blaze-fight wall 7): a dodge
+    /// begun holds `DODGE_TICKS`; each fireball starts one dodge. The side is the one its line
+    /// leaves the body on, or the other when no safe step lies that way.
+    fn dodge(&mut self, w: &World, body: &physics::Body, tick: u64) -> Option<f64> {
+        if let Some((until, yaw)) = self.dodging {
+            if tick < until {
+                return safe_step(w, body.pos, yaw).then_some(yaw);
+            }
+            self.dodging = None;
+        }
+        let mid = middle(body.pos);
+        let seen = &self.dodged;
+        let (id, side) = w
+            .entities
+            .iter()
+            .filter(|(id, e)| !e.dead && e.kind == EntityKind::SmallFireball && !seen.contains(id))
+            .filter(|(_, e)| distance(e.pos, mid) <= DODGE_RANGE)
+            .filter_map(|(id, e)| {
+                dodge_side(mid, e.pos, e.velocity).map(|s| (distance(e.pos, mid), *id, s))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .map(|(_, id, s)| (id, s))?;
+        self.dodged.push(id);
+        if self.dodged.len() > 64 {
+            self.dodged.remove(0);
+        }
+        let yaw_of = |s: [f64; 2]| (-s[0]).atan2(s[1]).to_degrees().rem_euclid(360.0);
+        let yaw = [side, [-side[0], -side[1]]]
+            .into_iter()
+            .map(yaw_of)
+            .find(|y| safe_step(w, body.pos, *y))?;
+        self.dodging = Some((tick + DODGE_TICKS, yaw));
+        self.dodges += 1;
+        Some(yaw)
+    }
+
+    /// One tick of the defence. A shooter's fight steps out of a fireball's line first, its
+    /// strikes going on (the server judges a strike by where the bot stands, not where it looks).
     pub fn step(
+        &mut self,
+        w: &World,
+        rules: &SurvivalRules,
+        tick: u64,
+    ) -> (Controls, Option<Act>, DefendStatus) {
+        let (c, act, status) = self.step_inner(w, rules, tick);
+        if status == DefendStatus::Running
+            && self.stance == Stance::Fight
+            && rules.ranged.contains(&self.kind)
+            && let Some(body) = w.body
+            && let Some(yaw) = self.dodge(w, &body, tick)
+        {
+            let c = Controls {
+                forward: true,
+                jump: body.horizontal_collision,
+                sneak: false,
+                yaw,
+                pitch: c.pitch,
+            };
+            return (c, act, status);
+        }
+        (c, act, status)
+    }
+
+    fn step_inner(
         &mut self,
         w: &World,
         rules: &SurvivalRules,
