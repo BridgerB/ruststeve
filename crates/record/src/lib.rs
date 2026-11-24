@@ -270,6 +270,17 @@ impl Folder {
         }
     }
 
+    /// A checkpoint written before the first event is the run's start state, not a fold's
+    /// result: a run resumed from a snapshot begins with the snapshot's memory, which no event
+    /// carries (bot `run`). Takes it and says so; any other checkpoint is left to the caller.
+    pub fn take_start(&mut self, event_index: u64, world: &World) -> bool {
+        if self.events != 0 || event_index != 0 {
+            return false;
+        }
+        self.world = world.clone();
+        true
+    }
+
     /// Fold one event; return the effects, as recorded.
     pub fn step(&mut self, e: &EventRecord) -> Result<Vec<EffectRecord>, String> {
         let event = match e {

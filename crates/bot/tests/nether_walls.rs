@@ -206,7 +206,6 @@ fn a_lava_moat_is_crossed_to_the_bricks() {
 /// (c) The lake of the lava sea under a hill: through the rock over it. Four pickaxes, the kit
 /// bot's count: 60 blocks of tunnel two high is more than one stone pickaxe's 131 uses.
 #[test]
-#[ignore = "blaze wall: level tunnels end at the lake's shore, never up into the hill; owner A7"]
 fn a_lava_lake_under_a_hill_is_tunnelled_over_to_the_bricks() {
     let kit = [
         (ItemKind::StonePickaxe, 1),

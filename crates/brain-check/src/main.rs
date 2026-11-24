@@ -404,8 +404,22 @@ fn report(label: &str, items: &[String]) {
     }
 }
 
+/// The repository the check reads: the nearest directory at or above `from` that holds both
+/// `brain/` and `Cargo.toml`. The working directory decides, not where the binary was built:
+/// worktrees that share one target directory share one binary, and a root baked in at build
+/// time (`CARGO_MANIFEST_DIR`) made each check whichever worktree had built it last.
+fn repo_root(from: &Path) -> Option<PathBuf> {
+    from.ancestors()
+        .find(|d| d.join("brain").is_dir() && d.join("Cargo.toml").is_file())
+        .map(Path::to_path_buf)
+}
+
 fn main() -> ExitCode {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    // Outside any checkout (no such directory above), the build's own repository as before.
+    let repo = std::env::current_dir()
+        .ok()
+        .and_then(|d| repo_root(&d))
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
     let repo = repo.canonicalize().unwrap_or(repo);
     let brain = repo.join("brain");
     let sources = load_sources(&brain, &repo);
@@ -563,5 +577,28 @@ fn check(notes: &[Note], sources: &BTreeMap<String, Source>, strict: bool) -> Ex
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::repo_root;
+
+    /// The root is found from any directory of a checkout, and it is that checkout's.
+    #[test]
+    fn the_root_is_the_checkout_the_working_directory_is_in() {
+        let base = std::env::temp_dir().join(format!("brain-check-root-{}", std::process::id()));
+        for tree in ["a", "b"] {
+            let root = base.join(tree);
+            std::fs::create_dir_all(root.join("brain")).unwrap();
+            std::fs::create_dir_all(root.join("crates/x/src")).unwrap();
+            std::fs::write(root.join("Cargo.toml"), "").unwrap();
+            assert_eq!(repo_root(&root.join("crates/x/src")), Some(root.clone()));
+            assert_eq!(repo_root(&root), Some(root));
+        }
+        // A crate's own Cargo.toml with no brain beside it is not a root.
+        std::fs::write(base.join("a/crates/x/Cargo.toml"), "").unwrap();
+        assert_eq!(repo_root(&base.join("a/crates/x")), Some(base.join("a")));
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }
