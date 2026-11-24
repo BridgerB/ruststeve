@@ -28,9 +28,8 @@ use crate::path::{self, Cell, Goal};
 use crate::walk::{Arrive, Walk};
 use crate::{Plan, Task, cover, craft, hold};
 
-/// The stage's distance: the feet within this of a ticking enderman (`world::stage::ENDERMAN_NEAR`
-/// once E1's stage lands; the issue's done-condition).
-pub const ENDERMAN_NEAR: f64 = 32.0;
+/// The stage's distance: the feet within this of a ticking enderman (the issue's done-condition).
+pub const ENDERMAN_NEAR: f64 = world::stage::ENDERMAN_NEAR;
 /// A ticking enderman within this is walked to (it is already in the simulated chunks).
 pub const APPROACH_FROM: f64 = 64.0;
 /// A frozen enderman seen within this is walked toward (clojurecraft's sighting chase, 32 to 128).
@@ -115,6 +114,9 @@ pub struct EnderState {
     pub nook_open: Option<(Cell, (i32, i32))>,
     #[serde(default)]
     pub valley_noted_at: Option<u64>,
+    /// Soul sand columns refused as a fortress's wart rooms.
+    #[serde(default)]
+    pub valleys_refused: Vec<(i32, i32)>,
     /// The pocket being sealed: where the feet were, blocks placed, when the next may go.
     #[serde(default)]
     pub pocket_cell: Option<Cell>,
@@ -162,15 +164,9 @@ fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 /// Whether an entity at `pos` ticks: its chunk within the server's simulation distance of the
-/// player's chunk on both axes; `false` when either is unknown. The agreed semantics of E1's
-/// `world::ticks` (BRIEF), kept here in one place until it lands.
+/// player's chunk on both axes (`world::ticks`).
 pub fn ticking(w: &World, pos: [f64; 3]) -> bool {
-    let (Some(body), Some(sd)) = (w.body, w.simulation_distance) else {
-        return false;
-    };
-    let chunk = |p: [f64; 3]| ((p[0].floor() as i32) >> 4, (p[2].floor() as i32) >> 4);
-    let (a, b) = (chunk(body.pos), chunk(pos));
-    (a.0 - b.0).abs().max((a.1 - b.1).abs()) <= sd
+    world::ticks(w, pos)
 }
 
 /// The live endermen the world holds, the nearest first.
@@ -193,12 +189,17 @@ pub fn endermen(w: &World) -> Vec<Sighting> {
     v
 }
 
-/// The stage's test: a ticking enderman within `ENDERMAN_NEAR` of the feet (E1's
-/// `Stage::Endermen`, once it lands, reads the same).
+/// The stage's test: a ticking enderman within `ENDERMAN_NEAR` of the feet
+/// (`world::stage::enderman_near`, which `Stage::Endermen` reads with the rods).
 pub fn near_ticking(w: &World) -> Option<Sighting> {
-    endermen(w)
-        .into_iter()
-        .find(|s| s.ticking && s.dist <= ENDERMAN_NEAR)
+    let (id, dist) = world::stage::enderman_near(w)?;
+    let pos = w.entities.get(&id)?.pos;
+    Some(Sighting {
+        id,
+        pos,
+        dist,
+        ticking: true,
+    })
 }
 
 /// The held pickaxes' uses left, summed (a stack that does not report wear counts its item's
@@ -256,46 +257,78 @@ pub fn in_footprint((ax, az, bx, bz): (i32, i32, i32, i32), c: Cell) -> bool {
         && c.2 <= bz + FORTRESS_PAD
 }
 
-/// Whether the bot stands in a warped forest: the block under its feet is warped nylium (a block
-/// seen; E1's feet biome joins this once it lands).
+/// Whether the bot stands in a warped forest: the biome at its feet, or warped nylium under them.
 pub fn in_forest(w: &World) -> bool {
-    w.block_under_player() == Some(BlockKind::WarpedNylium)
+    w.feet_biome() == Some("warped_forest")
+        || w.block_under_player() == Some(BlockKind::WarpedNylium)
 }
 
-/// The chunk column of a soul sand valley known from soul sand and soul soil seen exposed (E1's
-/// `Memory::soul_valley_known`, stubbed here until it lands: `None`).
-pub fn soul_valley_known(_w: &World) -> Option<(i32, i32)> {
-    None
+/// The signs a forest and a valley are known by, walked to (memory's sign record: cells seen
+/// exposed).
+pub const FOREST_KINDS: &[BlockKind] = &[BlockKind::WarpedNylium];
+pub const VALLEY_KINDS: &[BlockKind] = &[BlockKind::SoulSand, BlockKind::SoulSoil];
+
+/// Whether a chunk column overlaps a fortress footprint (padded), or holds nether bricks on
+/// record: a fortress's nether-wart rooms stand on soul sand, and are no valley.
+pub fn column_in_fortress(
+    w: &World,
+    bounds: Option<(i32, i32, i32, i32)>,
+    (cx, cz): (i32, i32),
+) -> bool {
+    let (x0, z0, x1, z1) = (cx * 16, cz * 16, cx * 16 + 15, cz * 16 + 15);
+    let overlaps = bounds.is_some_and(|(ax, az, bx, bz)| {
+        x1 >= ax - FORTRESS_PAD
+            && x0 <= bx + FORTRESS_PAD
+            && z1 >= az - FORTRESS_PAD
+            && z0 <= bz + FORTRESS_PAD
+    });
+    let bricks = w.dimension.as_ref().is_some_and(|d| {
+        w.memory
+            .indexed_in_column(&d.name, cx, cz, BlockKind::NetherBricks)
+            .is_some_and(|v| !v.is_empty())
+    });
+    overlaps || bricks
 }
 
-/// The chunk column of a warped forest known from warped blocks seen (E1's
-/// `Memory::forest_known`, stubbed until it lands: `None`).
-pub fn forest_known(_w: &World) -> Option<(i32, i32)> {
-    None
-}
-
-/// Where to walk for a known column: its centre at the feet's height (until memory keeps the
-/// seen soul cells themselves, `kind_near`).
-pub fn column_target(w: &World, (cx, cz): (i32, i32)) -> Option<Cell> {
+/// Where to walk for a known column: over the seen sign of `kinds` in it nearest the feet (the
+/// cell above it, where a body stands); with none on record, the column's centre at the feet's
+/// height.
+pub fn column_target(w: &World, (cx, cz): (i32, i32), kinds: &[BlockKind]) -> Option<Cell> {
     let body = w.body?;
-    Some((cx * 16 + 8, path::feet_cell(body.pos).1, cz * 16 + 8))
+    let feet = path::feet_cell(body.pos);
+    let dim = w.dimension.as_ref().map(|d| d.name.clone())?;
+    let near = kinds
+        .iter()
+        .flat_map(|k| {
+            w.memory
+                .indexed_in_column(&dim, cx, cz, *k)
+                .unwrap_or_default()
+        })
+        .map(|c| (c.0, c.1 + 1, c.2))
+        .min_by_key(|c| {
+            (
+                (c.0 - feet.0).pow(2) + (c.1 - feet.1).pow(2) + (c.2 - feet.2).pow(2),
+                *c,
+            )
+        });
+    Some(near.unwrap_or((cx * 16 + 8, feet.1, cz * 16 + 8)))
 }
 
-/// Whether the bot stands in a soul sand valley: on soul sand or soul soil (blocks seen), or in
-/// the known valley's column (E1's feet biome joins this once it lands).
-pub fn in_valley(w: &World) -> bool {
-    let on_soul = matches!(
-        w.block_under_player(),
-        Some(BlockKind::SoulSand | BlockKind::SoulSoil)
-    );
-    let in_column = w
-        .body
-        .zip(soul_valley_known(w))
-        .is_some_and(|(b, (cx, cz))| {
-            let f = path::feet_cell(b.pos);
-            (f.0 >> 4, f.2 >> 4) == (cx, cz)
-        });
-    on_soul || in_column
+/// Whether the bot stands in a soul sand valley: the biome at its feet, soul sand or soul soil
+/// under them, or a known valley's column; never inside a fortress's footprint.
+pub fn in_valley(w: &World, bounds: Option<(i32, i32, i32, i32)>) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let f = path::feet_cell(body.pos);
+    let column = (f.0 >> 4, f.2 >> 4);
+    let valley = w.feet_biome() == Some("soul_sand_valley")
+        || matches!(
+            w.block_under_player(),
+            Some(BlockKind::SoulSand | BlockKind::SoulSoil)
+        )
+        || w.memory.soul_valleys().contains(&column);
+    valley && !bounds.is_some_and(|b| in_footprint(b, f))
 }
 
 /// The kinds a nook's open side must not face at build time while another side is open.
@@ -702,9 +735,21 @@ impl Plan {
         if let Some(t) = self.approach(w, tick) {
             return t;
         }
+        if self
+            .ender
+            .fortress_at
+            .is_none_or(|t| tick >= t + FORTRESS_EVERY)
+        {
+            self.ender.fortress_at = Some(tick);
+            self.ender.fortress = fortress_bounds(w);
+        }
+        let bounds = self.ender.fortress;
         // A warped forest known from blocks seen comes first (the enderman is its only monster).
         if !in_forest(w)
-            && let Some(c) = forest_known(w).and_then(|k| column_target(w, k))
+            && let Some(c) = w
+                .memory
+                .forest_known()
+                .and_then(|k| column_target(w, k, FOREST_KINDS))
             && let Some(t) = self.go_toward(w, tick, c, "the warped forest")
         {
             return t;
@@ -734,12 +779,14 @@ impl Plan {
         // A soul sand valley known (seen soul sand and soul soil), or stood in: there, in a nook,
         // wait for an enderman (docs/problems/endermen.md, the decision of 2026-11-24).
         if !self.ender.valley_over {
-            if in_valley(w) {
+            if in_valley(w, bounds) {
                 let wait = rules.as_ref().map_or(0, |r| r.valley_wait_ticks);
                 if let Some(t) = self.valley_wait(w, tick, wait) {
                     return t;
                 }
-            } else if let Some(c) = soul_valley_known(w).and_then(|k| column_target(w, k))
+            } else if let Some(c) = self
+                .valley_column(w, tick, bounds)
+                .and_then(|k| column_target(w, k, VALLEY_KINDS))
                 && let Some(t) = self.go_toward(w, tick, c, "the soul sand valley")
             {
                 return t;
@@ -747,15 +794,7 @@ impl Plan {
         }
         // Out of the fortress's footprint on a plain walk first: no stairs down inside it, where
         // the floors are thin over the lava sea (clojurecraft #715).
-        if self
-            .ender
-            .fortress_at
-            .is_none_or(|t| tick >= t + FORTRESS_EVERY)
-        {
-            self.ender.fortress_at = Some(tick);
-            self.ender.fortress = fortress_bounds(w);
-        }
-        if let Some(b) = self.ender.fortress.filter(|b| in_footprint(*b, feet)) {
+        if let Some(b) = bounds.filter(|b| in_footprint(*b, feet)) {
             let centre = ((b.0 + b.2) / 2, feet.1, (b.1 + b.3) / 2);
             let half = (b.2 - b.0).max(b.3 - b.1) / 2;
             let range = f64::from(half + FORTRESS_PAD + 2);
@@ -860,6 +899,31 @@ impl Plan {
                 ),
             );
             return Some(Task::Explore(walk));
+        }
+        None
+    }
+
+    /// The first soul sand valley column memory knows that is not inside the fortress (its wart
+    /// rooms stand on soul sand); each refused one noted once.
+    fn valley_column(
+        &mut self,
+        w: &World,
+        tick: u64,
+        bounds: Option<(i32, i32, i32, i32)>,
+    ) -> Option<(i32, i32)> {
+        let valleys = w.memory.soul_valleys().to_vec();
+        for k in valleys {
+            if !column_in_fortress(w, bounds, k) {
+                return Some(k);
+            }
+            if !self.ender.valleys_refused.contains(&k) {
+                self.ender.valleys_refused.push(k);
+                self.note(
+                    tick,
+                    format!("soul sand column {k:?} refused"),
+                    "inside the fortress's footprint or with nether bricks seen: a nether-wart room, no valley".to_owned(),
+                );
+            }
         }
         None
     }

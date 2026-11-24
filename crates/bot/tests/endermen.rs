@@ -1,13 +1,12 @@
 //! Issue 17 (docs/problems/endermen-leave.md), closed loop on a Nether cavern of the model
 //! (`sim::nether::Stage`): with 7 blaze rods held the race no longer ends; the endermen task
 //! takes over, notes its provisions and travels on; a ticking enderman within 32 is the stage, met
-//! only once the bot is sealed in a 2-high pocket; one at 44 is walked to; a provoked one is
-//! answered with the pocket, never a swing. The model's endermen only stand (or strike, for the
-//! provoked case): E4's enderman model is not needed for these.
+//! only once the bot is sealed in a 2-high pocket; one at 44 is walked to, and neither is ever
+//! stared at or angered (E4's `sim::enderman`, the jar's stare); on soul sand the bot waits in a
+//! nook. The provoked case is held on the planner itself (crates/plan/tests/endermen.rs).
 
 use data::{BlockKind, EntityKind, ItemKind};
 use plan::{Aim, Plan, TaskRecord};
-use sim::life::Brain;
 use sim::nether::{LAVA_SEA, Stage};
 use sim::{Config, Sim};
 
@@ -204,27 +203,6 @@ fn a_ticking_enderman_at_44_is_walked_to() {
     assert!(r.has("approach enderman") >= 1, "{story}");
     assert!(r.has("endermen reached") >= 1, "{story}");
     assert!(r.plan.met, "{story}");
-}
-
-/// A provoked enderman (17e.3): one angered (here set so in the model: it chases and strikes) is
-/// answered with a sealed pocket, never a swing. The aim met in the Nether leaves nothing else to
-/// do, so the threat is the only row.
-#[test]
-fn a_provoked_enderman_is_answered_by_the_pocket_never_a_swing() {
-    let r = cavern(Aim::Nether, 600, |sim| {
-        let id = summon_enderman(sim, [5.5, f64::from(FLOOR + 1), 0.5]);
-        if let Some(m) = sim.survival.life.mobs.get_mut(&id)
-            && let Brain::Enderman(e) = &mut m.brain
-        {
-            e.angry = true;
-        }
-    });
-    let story = r.story();
-    assert!(r.has("provoked enderman") >= 1, "{story}");
-    assert!(r.has("pocket block") >= 1, "{story}");
-    assert_eq!(r.has("defend Enderman"), 0, "{story}");
-    assert_eq!(r.plan.swings_sent, 0, "never a swing:\n{story}");
-    println!("health at the end {:?}", r.run.world.player.health);
 }
 
 /// The soul sand valley wait (the decision of 2026-11-24): standing on soul sand with no enderman

@@ -208,3 +208,54 @@ fn the_fortress_footprint_is_the_bricks_bounds_padded() {
     assert!(!in_footprint(b, (100 - FORTRESS_PAD - 1, 64, 150)));
     assert!(!in_footprint(b, (130, 64, 200 + FORTRESS_PAD + 1)));
 }
+
+/// A provoked enderman (17e.3) cuts in ahead of every task: the planner notes it, holds still with
+/// its eyes down, builds its pocket where it stands (none to build on a world with no blocks
+/// loaded: it holds), and never strikes. (The model's enderman, angered by hand, never came to
+/// strike in a closed loop, so the rule is held here on the planner itself.)
+#[test]
+fn a_provoked_enderman_is_answered_by_the_pocket_never_a_swing() {
+    let mut w = enderman_at([6.5, 64.0, 0.5]);
+    w.entities
+        .get_mut(&41)
+        .unwrap()
+        .metadata
+        .insert(endermen::CREEPY_INDEX, MetaValue::Bool(true));
+    let mut plan = plan::Plan::new(plan::Aim::Hold);
+    let c = plan.step(&w);
+    assert_eq!(c.pitch, Some(endermen::EYES_DOWN));
+    assert!(!c.forward);
+    let notes: Vec<String> = plan.events.iter().map(|e| e.what.clone()).collect();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n == "provoked enderman 41: into a sealed pocket"),
+        "{notes:?}"
+    );
+    assert!(
+        notes.iter().any(|n| n == "held from enderman 41"),
+        "{notes:?}"
+    );
+    assert!(
+        plan.take_acts()
+            .iter()
+            .all(|a| !matches!(a, world::Act::Attack { .. })),
+        "never a swing"
+    );
+    assert_eq!(plan.ender.threat, Some(41));
+    // Calm again: the threat is let go, with a note.
+    w.entities
+        .get_mut(&41)
+        .unwrap()
+        .metadata
+        .insert(endermen::CREEPY_INDEX, MetaValue::Bool(false));
+    plan.step(&w);
+    assert_eq!(plan.ender.threat, None);
+    assert!(
+        plan.events
+            .iter()
+            .any(|e| e.what == "enderman 41 calm or gone"),
+        "{:?}",
+        plan.events
+    );
+}
