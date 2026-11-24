@@ -87,3 +87,102 @@ fn own_stairs_head_for_the_pool_then_spiral() {
     let legs: Vec<_> = (0..5).map(|n| own_heading(feet, None, n)).collect();
     assert_eq!(legs, [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 0)]);
 }
+
+fn table() -> Table {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let goals: Goals = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    Table::new(&goals).unwrap()
+}
+
+/// The cook phase's next step through the needs planner on the real goal table, with a table
+/// and a furnace near or not.
+fn cook_step(held: &[(ItemKind, i32)], table_near: bool, furnace_near: bool) -> String {
+    use plan::make::{Choice, Counts, Wear, make_with_wear};
+    let t = table();
+    let counts: Counts = held.iter().copied().collect();
+    let Some(goal) = plan::cook_goal(&counts, &t.survival) else {
+        return "nothing raw".to_owned();
+    };
+    let near = move |k: data::BlockKind| match k {
+        data::BlockKind::CraftingTable => table_near,
+        data::BlockKind::Furnace => furnace_near,
+        _ => false,
+    };
+    match make_with_wear(&t, &counts, &near, true, &Wear::default(), &goal) {
+        Choice::Act(r) => r.id.clone(),
+        Choice::Done => "done".to_owned(),
+        Choice::Stuck => "stuck".to_owned(),
+    }
+}
+
+/// Wall 4: a dozen raw porkchops and four raw chickens with the snapshot bot's pack. First the
+/// planks that burn for all sixteen (11, from logs), then a furnace made and placed where the
+/// bot stands, then the smelt; cooked food and nothing raw is nothing to cook.
+#[test]
+fn raw_meat_is_cooked_through_the_needs_planner() {
+    use ItemKind::{
+        BirchLog, Chicken, Cobblestone, CookedPorkchop, CraftingTable, Furnace, OakPlanks, Porkchop,
+    };
+    let r = table().survival;
+    assert_eq!(r.meat_stock, 30);
+    let pack = [
+        (Porkchop, 12),
+        (Chicken, 4),
+        (BirchLog, 4),
+        (Cobblestone, 64),
+        (CraftingTable, 1),
+    ];
+    let counts: plan::make::Counts = pack.iter().copied().collect();
+    assert_eq!(
+        plan::eat::meat_pieces(&counts, &r),
+        16,
+        "raw chicken counts"
+    );
+    let fuel = plan::cook_goal(&counts, &r).unwrap();
+    assert_eq!(fuel.id, "cook-fuel");
+    assert_eq!(
+        fuel.provides[0].1, 11,
+        "16 pieces at 200 ticks, a plank burns 300"
+    );
+    let step = cook_step(&pack, false, false);
+    assert!(
+        step.starts_with("craft:") && step.ends_with("planks"),
+        "{step}"
+    );
+    // The planks held: the furnace is made at a placed table, placed, and the meat smelted.
+    let fuelled = [
+        (Porkchop, 12),
+        (Chicken, 4),
+        (OakPlanks, 12),
+        (Cobblestone, 64),
+        (CraftingTable, 1),
+    ];
+    assert_eq!(
+        plan::cook_goal(&fuelled.iter().copied().collect(), &r)
+            .unwrap()
+            .id,
+        "cook"
+    );
+    assert_eq!(cook_step(&fuelled, false, false), "place-table");
+    assert_eq!(cook_step(&fuelled, true, false), "craft:furnace");
+    let mut with_furnace = fuelled.to_vec();
+    with_furnace.push((Furnace, 1));
+    assert_eq!(cook_step(&with_furnace, true, false), "place-furnace");
+    let smelt = cook_step(&fuelled, true, true);
+    assert!(smelt.starts_with("smelt:cooked_"), "{smelt}");
+    assert_eq!(
+        cook_step(&[(CookedPorkchop, 12), (OakPlanks, 4)], true, true),
+        "nothing raw"
+    );
+}
+
+/// A chicken is game now (its meat is cooked before it is eaten), and raw chicken is still
+/// never the food to eat.
+#[test]
+fn a_chicken_is_hunted_and_never_eaten_raw() {
+    let r = rules();
+    assert!(plan::hunt::game(data::EntityKind::Chicken, &r));
+    assert!(r.unsafe_foods.contains(&ItemKind::Chicken));
+    assert!(plan::eat::cooks(ItemKind::Chicken).is_some());
+    assert!(plan::eat::cooks(ItemKind::CookedBeef).is_none());
+}

@@ -533,6 +533,12 @@ pub struct Plan {
     /// Legs of the lava hunt's own stairs cut so far: the spiral's next heading (wall 1).
     #[serde(default)]
     pub descent_legs: u32,
+    /// The cook phase (overworld-leg wall 4): tasks begun for it, whether it is over (done or
+    /// given up), and whether its end was noted.
+    #[serde(default)]
+    pub cook_tasks: u32,
+    #[serde(default)]
+    pub cook_over: bool,
     /// When the portal's food check first found the bot short, and whether it has said the bot
     /// goes in short (wall 3).
     #[serde(default)]
@@ -644,6 +650,8 @@ impl Plan {
             descent_legs: 0,
             portal_food_since: None,
             portal_food_noted: false,
+            cook_tasks: 0,
+            cook_over: false,
             provision_since: None,
             surface_target: None,
             surface_tries: 0,
@@ -1529,7 +1537,11 @@ impl Plan {
             && w.dimension
                 .as_ref()
                 .is_some_and(|d| d.name == "minecraft:overworld")
-            && eat::food_points(w, rules) < rules.food_reserve
+            && if rules.meat_stock > 0 {
+                eat::meat_pieces(&held(w), rules) < rules.meat_stock
+            } else {
+                eat::food_points(w, rules) < rules.food_reserve
+            }
     }
 
     /// Armour held but not worn goes on (issue 16): a quick move (shift-click) of the piece from the
@@ -2129,6 +2141,9 @@ impl Plan {
         let n = |k: data::ItemKind| craft::count(w, k);
         let logs = logs_held(w);
         let food = eat::food_points(w, rules);
+        let counts = held(w);
+        let pieces = eat::meat_pieces(&counts, rules);
+        let raw: i32 = eat::raw_held(&counts, rules).iter().map(|r| r.1).sum();
         let kit = geared(w)
             && n(data::ItemKind::WaterBucket) >= 1
             && n(data::ItemKind::Bucket) >= 1
@@ -2141,7 +2156,13 @@ impl Plan {
             // The stage's own bar and the whole reserve (overworld-leg wall 4): a bot resumed
             // from a `ready` snapshot with less than the reserve hunts on the surface again, on
             // the clock below, before it goes down.
-            if world::stage::Stage::Ready.holds(w) && food >= rules.food_reserve {
+            if world::stage::Stage::Ready.holds(w)
+                && if rules.meat_stock > 0 {
+                    self.cook_over || (pieces >= rules.meat_stock && raw == 0)
+                } else {
+                    food >= rules.food_reserve
+                }
+            {
                 self.readied = true;
                 self.note(
                     tick,
@@ -2170,6 +2191,51 @@ impl Plan {
         } else {
             world::stage::READY_LOGS as i32
         };
+        // The second stocking, with a meat stock set (overworld-leg wall 4): animals first, for
+        // one `provision_ticks` (it begins with a dozen pieces held, and a bot resumed at noon
+        // that looked for three would still be hunting after dark); then all the raw meat cooked;
+        // then the logs the cook burned.
+        if !first && rules.meat_stock > 0 {
+            if pieces < rules.meat_stock && spent < rules.provision_ticks {
+                let why = format!(
+                    "provisions {pieces} of {} pieces: look for animals",
+                    rules.meat_stock
+                );
+                if let Some(t) = self.explore_walk(w, tick, &why) {
+                    return Flow::Task(Box::new(t));
+                }
+            }
+            if raw > 0 && !self.cook_over {
+                return Flow::Cook;
+            }
+            if !self.cook_over {
+                self.cook_over = true;
+                self.note(
+                    tick,
+                    "cooked".to_owned(),
+                    format!(
+                        "{pieces} pieces and {food} food points held, none raw, after {} cook tasks",
+                        self.cook_tasks
+                    ),
+                );
+                if let Some(t) = self.carry_table(w, tick) {
+                    return Flow::Task(Box::new(t));
+                }
+            }
+            if logs < want && spent < rules.provision_ticks * 4 {
+                return Flow::Stock;
+            }
+            self.provision_since = None;
+            self.readied = true;
+            self.note(
+                tick,
+                "stocked again".to_owned(),
+                format!(
+                    "{logs} logs, {pieces} pieces of meat and {food} food points held after {spent} ticks"
+                ),
+            );
+            return Flow::On;
+        }
         if logs < want && spent < rules.provision_ticks * 2 {
             return Flow::Stock;
         }
@@ -2261,15 +2327,17 @@ impl Plan {
         // The clean flow first (issue 16): stock up above ground before the first descent, and
         // come back up, stocked, before the cast.
         let mut stock_row = false;
+        let mut cook_row = false;
         if self.aim == Aim::Race && !self.kit_row {
             match self.clean_flow(w, &table.survival, tick) {
                 Flow::Task(t) => return *t,
                 Flow::Stock => stock_row = true,
+                Flow::Cook => cook_row = true,
                 Flow::On => {}
             }
         }
         // Spare pickaxes ahead of need (overworld-leg wall 2).
-        let spare_row = !stock_row && self.spares_wanted(w, &table.survival, tick);
+        let spare_row = !stock_row && !cook_row && self.spares_wanted(w, &table.survival, tick);
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
             // A portal stands and the bot is about to go in: the tools for the Nether first.
@@ -2288,7 +2356,12 @@ impl Plan {
             Aim::Nether | Aim::Race => "portal".to_owned(),
             _ => self.aim.name(),
         };
-        let Some(goal) = table.until(&row) else {
+        let cook_goal = if cook_row {
+            cook_goal(&held(w), &table.survival)
+        } else {
+            None
+        };
+        let Some(goal) = cook_goal.as_ref().or_else(|| table.until(&row)) else {
             self.stuck = true;
             self.note(
                 tick,
@@ -2318,13 +2391,19 @@ impl Plan {
         // Nether kit are made where the bot stands: a table remembered 44 blocks off, down the
         // old stairs in a cave, walked a bot to it for 600 ticks and it died there (race
         // 45337088346 lane 0).
-        let table_cell = if spare_row || self.kit_row {
-            self.table_at_hand(w, tick)
+        let table_cell = if spare_row || self.kit_row || cook_row {
+            self.at_hand(w, data::BlockKind::CraftingTable, tick)
         } else {
             self.near_block(w, data::BlockKind::CraftingTable, tick)
         };
         let table_near = table_cell.is_some();
-        let furnace_near = self.near_block(w, data::BlockKind::Furnace, tick).is_some();
+        // The cook's furnace too is one where the bot stands: the one remembered is down a mine.
+        let furnace_cell = if cook_row {
+            self.at_hand(w, data::BlockKind::Furnace, tick)
+        } else {
+            self.near_block(w, data::BlockKind::Furnace, tick)
+        };
+        let furnace_near = furnace_cell.is_some();
         let near = move |b: data::BlockKind| match b {
             data::BlockKind::CraftingTable => table_near,
             data::BlockKind::Furnace => furnace_near,
@@ -2365,6 +2444,58 @@ impl Plan {
             && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
         {
             return t;
+        }
+        // The cook phase takes only what can be done where the bot stands: a craft, a placing,
+        // a smelt, or a log gathered for fuel; never a mine. It is bounded by its tasks.
+        if cook_row {
+            let ok = matches!(
+                &choice,
+                make::Choice::Act(r)
+                    if matches!(
+                        r.act,
+                        Some(
+                            make::Act::Craft(_)
+                                | make::Act::Place(_)
+                                | make::Act::Smelt(_)
+                                | make::Act::Gather
+                        )
+                    )
+            );
+            self.cook_tasks += 1;
+            if !ok || self.cook_tasks > COOK_TASKS {
+                self.cook_over = true;
+                self.note(
+                    tick,
+                    "cooking given up".to_owned(),
+                    format!(
+                        "{} tasks begun; the next step toward {} was {}",
+                        self.cook_tasks,
+                        goal.id,
+                        match &choice {
+                            make::Choice::Act(r) => r.id.clone(),
+                            make::Choice::Done => "done".to_owned(),
+                            make::Choice::Stuck => "stuck".to_owned(),
+                        }
+                    ),
+                );
+                return Task::Idle;
+            }
+            if let make::Choice::Act(r) = &choice
+                && let Some(make::Act::Smelt(s)) = r.act
+            {
+                self.note(
+                    tick,
+                    format!("cook {}", s.id),
+                    format!(
+                        "{} raw pieces held, {} food points; a batch of all of this kind",
+                        eat::raw_held(&counts, &table.survival)
+                            .iter()
+                            .map(|r| r.1)
+                            .sum::<i32>(),
+                        eat::food_points(w, &table.survival)
+                    ),
+                );
+            }
         }
         // The spare pickaxes end here: the row's pickaxes held, or its next step no craft (a trip
         // for wood is never made for a spare). The table comes along.
@@ -2417,7 +2548,10 @@ impl Plan {
             );
             return Task::Idle;
         }
-        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race) && !self.kit_row && !spare_row
+        if matches!(self.aim, Aim::Portal | Aim::Nether | Aim::Race)
+            && !self.kit_row
+            && !spare_row
+            && !cook_row
         {
             if let Some(site) = self.site.filter(|s| cast::lit(w, s)) {
                 self.portal = Some(site.frame.at((1, 1, 0)));
@@ -2498,7 +2632,7 @@ impl Plan {
                     self.mine(w, blocks, depth, tick)
                 }
                 Some(make::Act::Smelt(r)) => {
-                    let Some(f) = self.near_block(w, data::BlockKind::Furnace, tick) else {
+                    let Some(f) = furnace_cell else {
                         self.retry_at = tick + RETRY_TICKS;
                         self.note(
                             tick,
@@ -3059,10 +3193,10 @@ impl Plan {
         None
     }
 
-    /// A crafting table remembered within `TABLE_AT_HAND` of the eye: one to craft at with no
-    /// walk to speak of.
-    fn table_at_hand(&self, w: &World, tick: u64) -> Option<Cell> {
-        let t = self.near_block(w, data::BlockKind::CraftingTable, tick)?;
+    /// A block of `kind` (a crafting table, a furnace) remembered within `TABLE_AT_HAND` of the
+    /// eye: one to work at with no walk to speak of.
+    fn at_hand(&self, w: &World, kind: data::BlockKind, tick: u64) -> Option<Cell> {
+        let t = self.near_block(w, kind, tick)?;
         let b = w.body?;
         let eye = [b.pos[0], b.pos[1] + physics::EYE_HEIGHT, b.pos[2]];
         let c = [
@@ -3097,7 +3231,9 @@ impl Plan {
         if self.sparing {
             return true;
         }
-        let table_near = self.table_at_hand(w, tick).is_some();
+        let table_near = self
+            .at_hand(w, data::BlockKind::CraftingTable, tick)
+            .is_some();
         if !spares_due(w, rules, table_near) {
             return false;
         }
@@ -4029,6 +4165,65 @@ pub fn spares_due(w: &World, rules: &make::SurvivalRules, table_near: bool) -> b
         && pickaxe_makeable(w, table_near)
 }
 
+/// Tasks the cook phase may begin: planks from five logs, a table and a furnace made and placed,
+/// a batch a kind of meat and a log or two gathered are under twenty; forty leaves each a retry.
+const COOK_TASKS: u32 = 40;
+
+/// The goal the cook phase hands the needs planner (overworld-leg wall 4), from what is held:
+/// while the coal and planks held burn for less than all the raw meat's cook time, the planks
+/// that cover it (crafted from logs; with no log, a gather); then, for the first raw kind, all
+/// of it cooked. `None` with nothing raw to cook.
+pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<make::Row> {
+    let raw = eat::raw_held(counts, rules);
+    let (_, n, recipe) = raw.first().copied()?;
+    let need: i32 = raw
+        .iter()
+        .map(|(_, n, r)| n * i32::try_from(r.ticks).unwrap_or(200))
+        .sum();
+    let planks = data::generated::tags::item_tag("planks").unwrap_or(&[]);
+    let coals = data::generated::tags::item_tag("coals").unwrap_or(&[]);
+    let burns = |k: &data::ItemKind| {
+        data::generated::fuel::fuel_ticks(*k)
+            .and_then(|t| i32::try_from(t).ok())
+            .unwrap_or(0)
+    };
+    let have: i32 = counts
+        .iter()
+        .filter(|(k, _)| planks.contains(k) || coals.contains(k))
+        .map(|(k, n)| n * burns(k))
+        .sum();
+    let row = |id: &str, need: make::Need, count: i32| make::Row {
+        id: id.to_owned(),
+        needs: Vec::new(),
+        provides: vec![(need, count)],
+        holds: Vec::new(),
+        spares: Vec::new(),
+        wants: Vec::new(),
+        act: None,
+    };
+    if have < need {
+        let plank = burns(&data::ItemKind::OakPlanks).max(1);
+        let held: i32 = counts
+            .iter()
+            .filter(|(k, _)| planks.contains(k))
+            .map(|(_, n)| *n)
+            .sum();
+        let more = (need - have + plank - 1) / plank;
+        return Some(row(
+            "cook-fuel",
+            make::Need::parse("tag:planks")?,
+            held + more,
+        ));
+    }
+    let cooked = counts.get(&recipe.result).copied().unwrap_or(0);
+    let name = recipe.result.name()?;
+    Some(row(
+        "cook",
+        make::Need::parse(&format!("item:{name}"))?,
+        cooked + n,
+    ))
+}
+
 /// The hunger points a portal is entered with: `portal_food`, or the whole reserve when unset.
 pub fn portal_food(rules: &make::SurvivalRules) -> i32 {
     if rules.portal_food > 0 {
@@ -4210,6 +4405,8 @@ enum Flow {
     Task(Box<Task>),
     /// Work the `stock` row (logs).
     Stock,
+    /// Cook the raw meat held (`cook_goal`).
+    Cook,
     /// Nothing: the race goes on.
     On,
 }

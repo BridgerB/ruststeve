@@ -6,7 +6,7 @@ tags: [plan, food, eat, hunt, survival, always-rows, loot]
 aliases: [eat, hunt, Eat, Hunt, hungry_below, unsafe_foods, hunt_radius, starving_radius, prey, game animals, MOB_DROPS, mob_drops_of, meals, kills, survival rules]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+verifiedAgainst: ruststeve@00db250 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/eat.rs#pub fn best_food(w: &World, rules: &SurvivalRules) -> Option<ItemKind> {"
   - "ruststeve:crates/plan/src/hunt.rs#pub fn game(kind: EntityKind, rules: &SurvivalRules) -> bool {"
@@ -52,3 +52,5 @@ Issue 12c. An hour of play spends the food bar (jumps, digging, healing), and on
 
 ## See also
 - [[escapes]] - the always-rows ahead of these.
+
+- **A stock of cooked meat before the Nether** (docs/problems/overworld-leg.md wall 4): with `meat_stock` set (30 pieces) the race hunts on the surface for one `provision_ticks` before it goes down, the bot resumed from a `ready` snapshot too, then cooks every raw piece (`Flow::Cook`, `cook_goal`: planks for the whole cook first, then a furnace made and placed where it stands, a batch a kind through the smelt task). A kind whose meat cooks into safe food is game, so chickens are hunted; raw chicken is never eaten. `eat::meat_pieces` counts pieces, `eat::food_points` each item's own hunger, so cooked pieces count 8.

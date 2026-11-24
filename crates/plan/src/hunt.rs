@@ -73,13 +73,17 @@ pub struct Hunt {
     pub started: u64,
 }
 
-/// The safe foods a kind of animal drops.
+/// The foods a kind of animal drops that are safe, or cook into a safe one (a chicken's: never
+/// eaten raw, cooked before the Nether; overworld-leg wall 4).
 fn meat(kind: EntityKind, rules: &SurvivalRules) -> Vec<ItemKind> {
     data::generated::loot::mob_drops_of(kind)
         .iter()
         .map(|d| d.item)
         .filter(|i| {
-            data::generated::item_props::food_of(*i).is_some() && !rules.unsafe_foods.contains(i)
+            data::generated::item_props::food_of(*i).is_some()
+                && (!rules.unsafe_foods.contains(i)
+                    || crate::eat::cooks(*i)
+                        .is_some_and(|r| !rules.unsafe_foods.contains(&r.result)))
         })
         .collect()
 }

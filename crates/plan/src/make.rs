@@ -254,6 +254,10 @@ pub struct Survival {
     /// first, under the open sky only (overworld-leg wall 3). 0: the whole `food_reserve`.
     #[serde(default)]
     pub portal_food: i32,
+    /// Pieces of meat (raw that cooks, or safe to eat) the race holds before it goes down, hunted
+    /// on the stocking clock and then cooked (overworld-leg wall 4). 0: the reserve in points.
+    #[serde(default)]
+    pub meat_stock: i32,
     /// Stone pickaxes with `spare_uses` left held under this and the race makes more from what
     /// it holds, before the next task (overworld-leg wall 2). 0: never.
     #[serde(default)]
@@ -333,6 +337,7 @@ impl Default for Survival {
             stock_logs: 0,
             provision_ticks: 0,
             portal_food: 0,
+            meat_stock: 0,
             spare_pickaxes: 0,
             danger_health: danger_health(),
             never_fight: Vec::new(),
@@ -384,6 +389,7 @@ pub struct SurvivalRules {
     pub stock_logs: i32,
     pub provision_ticks: u64,
     pub portal_food: i32,
+    pub meat_stock: i32,
     pub spare_pickaxes: i32,
 }
 
@@ -646,6 +652,7 @@ impl Table {
                 stock_logs: g.survival.stock_logs,
                 provision_ticks: g.survival.provision_ticks,
                 portal_food: g.survival.portal_food,
+                meat_stock: g.survival.meat_stock,
                 spare_pickaxes: g.survival.spare_pickaxes,
                 never_fight,
                 ranged,

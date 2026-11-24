@@ -58,12 +58,17 @@ The stage: a real bot resumed from the clean `ready` snapshot (race 45128866973 
 - **Fix**: the bot goes in with `portal_food` (24) hunger points or more; under that it looks for animals only under the open sky and for at most `provision_ticks`, else it notes "into the Nether short of food" and goes in.
 - **Unit test**: `the_portal_food_check_is_proportionate` (plan).
 
-## 4. Too little food for the fight (2026-11-23, late: the measured limit at the spawner)
+## 4. Too little food for the fight, and all of it raw (2026-11-23, late: the measured limit at the spawner)
 
-- **What happened** (the orchestrator's read of the spawner races): a fireball costs 6 to 9 health in armour, healing 13 health took 1,000 ticks and 5 raw porkchops, and the bot arrives at the spawner with about 8 raw meat.
-- **Cause, on this leg**: the reserve was 32 points (11 raw pieces), the snapshot bot holds 36 and is `ready` the tick it resumes, so it never hunts again, though pigs and chickens are heard 10 to 15 blocks off at ticks 60 to 200 in every ledger.
-- **Fix**: `food_reserve` 48 (16 raw beef or porkchop) and `portal_food` 36. The clean flow counts a bot ready only with the whole reserve, so a bot resumed from the snapshot looks for animals under the open sky first ("provisions 36 of 48: look for animals", the hunt row taking those in view), on the flow's clock (one `provision_ticks`, 6,000 ticks, for this second stocking: the snapshot resumes near noon and three would end after dark), then notes "stocked again". Cooking the meat and a shield are agent A11's rows, to be placed in the flow when they exist.
-- **Unit test**: `the_portal_food_check_is_proportionate` reads both numbers.
+- **What happened** (agent A4's spawner races, the orchestrator's read): ten raw meals were gone by tick 3,600 for three blazes killed; the bot then sat at 3.9 health and food 17 with nothing to eat until it died. A fireball costs 6 to 9 health in armour; healing 13 health took 1,000 ticks and five raw porkchops. Raw beef and porkchop give 3 hunger and 1.8 saturation, cooked 8 and 12.8.
+- **Cause, on this leg**: the reserve was 32 points (11 raw pieces) and nothing ever cooked meat. The snapshot bot holds 12 raw pieces and is `ready` the tick it resumes, so it never hunts again, though pigs and chickens are heard 10 to 15 blocks off at ticks 60 to 200 in every ledger. A chicken was never hunted at all: its raw meat is unsafe, so it was not game.
+- **Fix**:
+  - `meat_stock = 30` pieces (config, with the arithmetic: 14 blazes at 6 to 8 health a kill). With it set the clean flow's second stocking is: animals for one `provision_ticks` ("provisions N of 30 pieces: look for animals", the hunt row taking those in view; the snapshot resumes near noon and a longer look would end after dark); then `Flow::Cook` while raw meat is held; then the logs the cook burned; then "stocked again". A bot is counted ready only with the stock met (or the clock run out) and nothing raw. The bot resumed from the `ready` snapshot does all of it before it goes down.
+  - The cook goes through the needs planner (`cook_goal`): first the planks that burn for every raw piece (crafted from held logs; with none, a log gathered), then for each raw kind all of it cooked, the planner making and placing the table and a furnace (8 cobblestone) where the bot stands and the smelt task doing the batch. Only a craft, a placing, a smelt or a gather is taken (never a mine), 40 tasks at most; a table or furnace counts only within 6 blocks. Ledger: "cook cooked_porkchop" a batch, "smelted", "cooked (N pieces and P food points held …)" at the end, or "cooking given up".
+  - A kind whose meat cooks into safe food is game (`hunt::meat`): chickens are hunted, raw chicken is still never eaten.
+  - `eat::food_points` and `best_food` already read each item's own hunger from the generated food table, so cooked pieces count 8 each and are eaten first. `food_reserve` 48 and `portal_food` 36 (points) stand for the first stocking and the portal's check.
+- **Unit tests** (plan, on the real goal table): `raw_meat_is_cooked_through_the_needs_planner`, `a_chicken_is_hunted_and_never_eaten_raw`, `the_portal_food_check_is_proportionate`.
+- **Risks to read in the first race**: up to 6,000 ticks hunting and 200 ticks a piece cooking, on the surface, ending near or after dusk; a smelt cut by a mob leaves its batch to be collected; planks crafted from the four logs leave the pack short of logs until the stock row gathers again.
 
 ## Weighed, not built: a portal near the surface
 

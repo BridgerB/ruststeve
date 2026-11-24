@@ -65,6 +65,43 @@ pub fn food_points(w: &World, rules: &SurvivalRules) -> i32 {
         .sum()
 }
 
+/// The furnace recipe that cooks `item` into food, if it is raw food (beef, porkchop, mutton,
+/// chicken, rabbit, the fish, a potato): what the cook phase works (overworld-leg wall 4).
+pub fn cooks(item: ItemKind) -> Option<&'static data::types::Smelt> {
+    data::generated::item_props::food_of(item)?;
+    data::generated::recipes::SMELTING.iter().find(|r| {
+        r.input.contains(&item) && data::generated::item_props::food_of(r.result).is_some()
+    })
+}
+
+/// Raw food held that cooks into safe food, by kind, with its recipe: raw chicken counts (it is
+/// never eaten raw, and cooked it is safe).
+pub fn raw_held(
+    counts: &crate::make::Counts,
+    rules: &SurvivalRules,
+) -> Vec<(ItemKind, i32, &'static data::types::Smelt)> {
+    counts
+        .iter()
+        .filter(|(_, n)| **n > 0)
+        .filter_map(|(k, n)| cooks(*k).map(|r| (*k, *n, r)))
+        .filter(|(_, _, r)| !rules.unsafe_foods.contains(&r.result))
+        .collect()
+}
+
+/// Pieces of meat held: every safe food item, and raw food that cooks into one.
+pub fn meat_pieces(counts: &crate::make::Counts, rules: &SurvivalRules) -> i32 {
+    counts
+        .iter()
+        .filter(|(k, n)| {
+            **n > 0
+                && data::generated::item_props::food_of(**k).is_some()
+                && (!rules.unsafe_foods.contains(k)
+                    || cooks(**k).is_some_and(|r| !rules.unsafe_foods.contains(&r.result)))
+        })
+        .map(|(_, n)| *n)
+        .sum()
+}
+
 /// The food to eat: safe food in the inventory (hotbar and main, window 0's slots 9-44), the
 /// most nutritious first, ties by item id.
 pub fn best_food(w: &World, rules: &SurvivalRules) -> Option<ItemKind> {
