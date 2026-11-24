@@ -6,7 +6,7 @@ tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@475e5f1 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3c1b500 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -42,6 +42,8 @@ Issue 09a: clojurecraft's walk intent, made to fail fast when it stops getting c
 - **A walk's acts and notes** are left in `Walk::more` and taken by the planner each tick (`take_out`).
 - **A far walk** (`Walk::far`) searches with `FAR_NODES` at `FAR_WEIGHT`; each search after its first is a note. On a found route a waypoint reached counts as progress, so a route that leads round is not failed `NoProgress`.
 - **`follow` jumps** only for a waypoint more than a step (`physics::STEP_HEIGHT`) over the feet: from soul sand the next cell is an eighth up.
+- **The fortress leg's order** (`fortress_task`): a found plain route; on rock (`rock_to_tunnel`: two full blocks under the feet, no lava at the door) the travel tunnel, then the far walk; with no rock to tunnel, the far walk first. The far walk's target is the nearest brick in a fortress's body (`brick_in_the_body`: 200 brick columns in the nine 16-block squares round it), before a nearer lone pillar. `Walk::far_to` serves the planner's other legs.
+- **Raced** (45337580375, the Nether snapshot, 3 x 1): two bots at `fortress` at ticks 1,600 and 1,720 with 20 health, 162 and 172 blocks laid; the third killed by piglins on land before its far walk.
 
 ## See also
 - [[pathfinding]] - the routes.

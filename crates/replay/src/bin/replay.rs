@@ -7,13 +7,14 @@
 //!
 //! `verify` folds every event from the start and compares each step's effects, byte for byte,
 //! with the recorded ones, and the world at each checkpoint with the recorded world; then it folds
-//! again from every checkpoint to the end. Any difference fails it. A recording from another
+//! again from the middle checkpoint and from the last (`replay::verify`, linear in the file). Any
+//! difference fails it. A recording from another
 //! commit is refused unless `--force`: a fold with newer code drifts (the handoff's lesson 4.5).
 
 use std::path::Path;
 use std::process::ExitCode;
 
-use record::{COMMIT, EffectRecord, Folder, Record, Recording, check_commit};
+use record::{COMMIT, EffectRecord, Record, Recording, check_commit};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -31,92 +32,6 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// What one fold found.
-#[derive(Default)]
-struct Tally {
-    events: u64,
-    effects: u64,
-    checkpoints: u64,
-    mismatches: u64,
-}
-
-/// Fold `records[start..]` from `folder`, comparing as it goes. Prints the first few mismatches.
-fn fold(
-    mut folder: Folder,
-    records: &[Record],
-    start: usize,
-    label: &str,
-) -> Result<Tally, String> {
-    let mut t = Tally::default();
-    let mut i = start;
-    while let Some(rec) = records.get(i) {
-        match rec {
-            Record::Event(e) => {
-                let produced = folder.step(e)?;
-                t.events += 1;
-                match records.get(i + 1) {
-                    Some(Record::Effects(recorded)) => {
-                        t.effects += recorded.len() as u64;
-                        if &produced != recorded {
-                            t.mismatches += 1;
-                            if t.mismatches <= 3 {
-                                eprintln!(
-                                    "{label}: event {} ({e:?}) at {} server ticks: produced {}, recorded {}",
-                                    folder.events - 1,
-                                    folder.world.session.server_ticks,
-                                    show(&produced),
-                                    show(recorded)
-                                );
-                            }
-                        }
-                        i += 2;
-                        continue;
-                    }
-                    // A run killed between an event and its effects ends here.
-                    None => break,
-                    Some(other) => {
-                        return Err(format!(
-                            "record {} after an event is not its effects: {other:?}",
-                            i + 1
-                        ));
-                    }
-                }
-            }
-            Record::Checkpoint {
-                event_index, world, ..
-            } => {
-                t.checkpoints += 1;
-                if folder.events != *event_index || folder.world != **world {
-                    t.mismatches += 1;
-                    if t.mismatches <= 3 {
-                        eprintln!(
-                            "{label}: the world folded to event {} differs from checkpoint at event {event_index}",
-                            folder.events
-                        );
-                    }
-                }
-            }
-            Record::Effects(_) => {
-                return Err(format!("record {i}: effects with no event before them"));
-            }
-            Record::Header(_) | Record::Note(_) => {}
-        }
-        i += 1;
-    }
-    Ok(t)
-}
-
-fn show(effects: &[EffectRecord]) -> String {
-    effects
-        .iter()
-        .map(|e| match e {
-            EffectRecord::Send { id, body } => format!("send id {id} ({} bytes)", body.len()),
-            EffectRecord::SetCompression(t) => format!("compression {t}"),
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 fn verify(path: &Path, force: bool) -> Result<(), String> {
@@ -140,30 +55,37 @@ fn verify(path: &Path, force: bool) -> Result<(), String> {
         header.commit,
         records.len()
     );
-    let full = fold(Folder::new(), &records, 0, "from the start")?;
+    let from = std::time::Instant::now();
+    let report = replay::verify(&records)?;
+    for line in &report.lines {
+        eprintln!("{line}");
+    }
+    let full = &report.full;
     println!(
         "from the start: {} events, {} effects, {} checkpoints, {} mismatches",
         full.events, full.effects, full.checkpoints, full.mismatches
     );
-    let mut total = full.mismatches;
-    for (i, rec) in records.iter().enumerate() {
-        if let Record::Checkpoint {
-            event_index,
-            server_ticks,
-            world,
-        } = rec
-        {
-            let label = format!("from checkpoint at event {event_index} ({server_ticks} ticks)");
-            let t = fold(
-                Folder::from_checkpoint((**world).clone(), *event_index),
-                &records,
-                i + 1,
-                &label,
-            )?;
-            println!("{label}: {} events, {} mismatches", t.events, t.mismatches);
-            total += t.mismatches;
-        }
+    if report.start_taken {
+        println!("the start state is recorded (a run resumed from a snapshot)");
     }
+    if report.memory_only {
+        println!(
+            "the first checkpoint differs from the fold in its memory alone: a resumed run \
+             recorded before the start state was kept; taken as the truth, not a mismatch"
+        );
+    }
+    for r in &report.refolds {
+        println!(
+            "from checkpoint at event {} ({} ticks): {} events, {} mismatches",
+            r.event_index, r.server_ticks, r.tally.events, r.tally.mismatches
+        );
+    }
+    println!(
+        "{} events stepped in {:.1} s",
+        report.events_stepped(),
+        from.elapsed().as_secs_f64()
+    );
+    let total = report.mismatches();
     if total == 0 {
         println!("replay: verified, 0 mismatches");
         Ok(())

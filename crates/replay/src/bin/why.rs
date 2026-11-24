@@ -5,7 +5,12 @@
 //! cargo run -p why -- <file.rsr> --at <server ticks> [--force]
 //! cargo run -p why -- <file.rsr> --event <n> [--force]
 //! cargo run -p why -- <file.rsr> --event <n> --blocks <x,y,z> [--force]   # and the blocks round a cell
+//! cargo run -p why -- <file.rsr> --at <ticks> --blocks <x,y,z> --radius 15 --ys 29,36 [--force]
 //! ```
+//!
+//! `--blocks` prints the cells round a cell as the bot knew them, 3 each way and from 2 under to
+//! 3 over unless `--radius` (cells each way on the plane) and `--ys lo,hi` (heights) say more: a
+//! 31 by 31 slice is `--radius 15`. Every block is named in full in the legend under the layers.
 //!
 //! It starts from the last checkpoint before the moment, so a moment late in a long run is quick.
 
@@ -13,14 +18,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use data::block_of_state;
-use record::{COMMIT, Folder, Record, Recording, check_commit};
+use record::{COMMIT, Recording, check_commit};
+use replay::At;
 use world::{BlockPos, World};
-
-/// Where to stop.
-enum At {
-    Ticks(u64),
-    Event(u64),
-}
 
 fn main() -> ExitCode {
     match run() {
@@ -38,20 +38,28 @@ fn run() -> Result<(), String> {
     let mut file = None;
     let mut at = None;
     let mut blocks: Option<[i32; 3]> = None;
+    let mut radius: i32 = 3;
+    let mut ys: Option<(i32, i32)> = None;
     let mut it = args.iter().filter(|a| a.as_str() != "--force");
     while let Some(a) = it.next() {
         match a.as_str() {
             "--blocks" => {
-                let v: Vec<i32> = it
+                blocks = Some(replay::parse_cell(
+                    it.next().ok_or("--blocks needs x,y,z")?,
+                )?);
+            }
+            "--radius" => {
+                radius = it
                     .next()
-                    .ok_or("--blocks needs x,y,z")?
-                    .split(',')
-                    .map(|s| s.trim().parse().map_err(|e| format!("--blocks: {e}")))
-                    .collect::<Result<_, _>>()?;
-                let [x, y, z] = v[..] else {
-                    return Err("--blocks needs x,y,z".to_owned());
-                };
-                blocks = Some([x, y, z]);
+                    .ok_or("--radius needs a number")?
+                    .parse()
+                    .map_err(|e| format!("--radius: {e}"))?;
+            }
+            "--ys" => {
+                let v = it.next().ok_or("--ys needs lo,hi")?;
+                let (lo, hi) = v.split_once(',').ok_or("--ys needs lo,hi")?;
+                let n = |s: &str| s.trim().parse::<i32>().map_err(|e| format!("--ys: {e}"));
+                ys = Some((n(lo)?, n(hi)?));
             }
             "--at" => {
                 at = Some(At::Ticks(
@@ -77,46 +85,24 @@ fn run() -> Result<(), String> {
     let (header, records) = Recording::read_all(Path::new(&file))?;
     check_commit(&header, COMMIT, force)?;
 
-    let reached = |f: &Folder| match at {
-        At::Ticks(t) => f.world.session.server_ticks >= t,
-        At::Event(n) => f.events >= n,
-    };
-    // The last checkpoint at or before the moment.
-    let mut folder = Folder::new();
-    let mut start = 0;
-    for (i, rec) in records.iter().enumerate() {
-        if let Record::Checkpoint {
-            event_index,
-            server_ticks,
-            world,
-        } = rec
-        {
-            let before = match at {
-                At::Ticks(t) => *server_ticks <= t,
-                At::Event(n) => *event_index <= n,
-            };
-            if before {
-                folder = Folder::from_checkpoint((**world).clone(), *event_index);
-                start = i + 1;
-            }
-        }
-    }
-    // The planner's notes up to the moment: from the start, since a checkpoint holds the world,
-    // not the notes.
-    let mut notes = Vec::new();
-    for (i, rec) in records.iter().enumerate() {
-        if i >= start && reached(&folder) {
-            break;
-        }
-        match rec {
-            Record::Note(n) => notes.push(n.clone()),
-            Record::Event(e) if i >= start => folder.step(e).map(|_| ())?,
-            _ => {}
-        }
-    }
+    let (folder, notes) = replay::fold_to(&records, at)?;
     print_world(&folder.world, folder.events);
     if let Some(c) = blocks {
-        print_blocks(&folder.world, c);
+        let w = &folder.world;
+        let name_at = |[x, y, z]: [i32; 3]| {
+            w.block_at(BlockPos::new(x, y, z))
+                .and_then(data::BlockKind::name)
+                .map(str::to_owned)
+        };
+        let feet: Vec<[i32; 3]> = w
+            .body
+            .map(|b| b.pos)
+            .or(w.player.pos)
+            .map(|[x, y, z]| [x.floor() as i32, y.floor() as i32, z.floor() as i32])
+            .into_iter()
+            .collect();
+        let ys = ys.unwrap_or((c[1] - 2, c[1] + 3));
+        print!("{}", replay::slice(&name_at, c, radius, ys, &feet));
     }
     if notes.is_empty() {
         println!("planner: no decisions recorded (a run with no aim, or none made yet)");
@@ -131,34 +117,6 @@ fn run() -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// The blocks round cell `c`, 7 by 7 on the plane, from 3 over it to 2 under, as the bot knew
-/// them: the first six letters of each name, `?` for an unloaded cell. Rows run north to south (z
-/// up), columns west to east (x up); the cell itself is marked with `*`.
-fn print_blocks(w: &World, [cx, cy, cz]: [i32; 3]) {
-    println!(
-        "blocks round ({cx}, {cy}, {cz}), x {} to {} across:",
-        cx - 3,
-        cx + 3
-    );
-    for y in (cy - 2..=cy + 3).rev() {
-        println!("y {y}");
-        for z in cz - 3..=cz + 3 {
-            let row: Vec<String> = (cx - 3..=cx + 3)
-                .map(|x| {
-                    let name = w
-                        .block_at(BlockPos::new(x, y, z))
-                        .and_then(data::BlockKind::name)
-                        .unwrap_or("?");
-                    let short: String = name.chars().take(6).collect();
-                    let mark = if (x, y, z) == (cx, cy, cz) { '*' } else { ' ' };
-                    format!("{mark}{short:<6}")
-                })
-                .collect();
-            println!("  z {z:>5} {}", row.join(" "));
-        }
-    }
 }
 
 fn print_world(w: &World, events: u64) {

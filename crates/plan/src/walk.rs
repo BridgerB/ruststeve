@@ -84,6 +84,20 @@ pub fn brick_in_the_body(bricks: &[Cell]) -> Option<Cell> {
     })
 }
 
+/// Is there rock under the feet to tunnel into: a full block under them with a full block under
+/// that (a causeway is one block thick over lava or air), and no lava at the door. Where there
+/// is not, the fortress leg takes the far walk before the tunnel.
+pub fn rock_to_tunnel(w: &World, (x, y, z): Cell) -> bool {
+    let full = |c: Cell| {
+        w.block_at(BlockPos::new(c.0, c.1, c.2))
+            .and_then(data::generated::shapes::collision)
+            == Some(data::types::Collision::Full)
+    };
+    full((x, y - 1, z))
+        && full((x, y - 2, z))
+        && crate::escape::lava_door_at(w, (x, y, z)).is_none()
+}
+
 /// Why a task failed: data, for recovery and for the case file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Failure {

@@ -5,8 +5,8 @@ type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@92fdb59 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@a5ae696 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -50,6 +50,13 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - **Spread** (issue 13): a start may say `spread = <blocks>`: each bot is then moved to a random surface spot within that of where it joined (`execute at <bot> run spreadplayers ~ ~ 0 <blocks> false <bot>`), so a lane's bots do not dig up each other's tables and take each other's drops. The `stone` start spreads 128.
 - **Holding after the aim** (issue 12e): `hold=true` (`race --hold-after-aim true`, `Opts::hold_after_aim`) keeps a bot whose aim is met living to the cap, its planner's always-rows running on (escapes, defence, food: [[escapes]], [[combat-and-pacing]], [[food-and-hunting]]). `minutes` is the lane job's timeout and the wall limit 15 less: a game hour (72,000 ticks, about 61 minutes at the 19.7 ticks a second a 14-bot runner keeps) takes `minutes=100`.
 
+## The lane's time and files (issue 16, `docs/problems/race-tooling.md`)
+- **A lane never loses its files.** The server log and `upload-artifact` run straight after the race, before the replay. The race is ended from the job's start: bots end `Cut` 10 minutes before the job's limit (`minutes`), `timeout` kills the race 7 minutes before it, and the race step's own limit is the job's less 9. Before, the replay ran first and unbounded, and a lane at the job limit uploaded nothing.
+- **The replay never fails a lane.** It runs last, at most 5 minutes, with `continue-on-error`; its result is a line in the job summary, a warning when it fails and `verify-lane-N.txt` on the release ([[replay-and-why]]).
+- **While the race runs**: every 2,400 ticks each bot rewrites `progress-<bot>.txt` and, beside it, `<bot>.ledger.txt`, `<bot>.senses.txt` and `<bot>.case.txt` (`bot::evidence`; the case text starts `RUNNING` and holds the story so far, and the run's end writes the real case over it). The lane uploads `progress-lane-N.txt` and `evidence-lane-N.tar.zst` to the release every 5 minutes (10 with more than 8 lanes: the workflow token has 1,000 requests an hour), and a snapshot within 30 seconds of its `snap.toml`. Read them with `gh release download race-<id> -p 'evidence-lane-*' -p 'progress-lane-*'`.
+- **Each lane reports its seconds** (setup, race, after the race, job) in the job summary.
+- **`NoProgress`** (`bot::progress`, `config/race.toml` `no_progress_ticks` and `[progress] items`): progress is a new stage, an item kind the run has not held, more of a goal item than the run ever held (up to the most any goal row asks for) or a 16-block cube not stood in before. "Any count went up" was progress until issue 16, and a bot digging in place gained netherrack and never ended.
+
 ## Evidence
 - Runners, run 43181608927 on main 409c473: 4 lanes × 14 bots on `spawn`, cap 6000: **56/56 `in_world`, 0/56 above, coverage cases 56/56 and recordings 56/56**, every lane in about 7 minutes; the server ticked 20.1 a second with 14 bots (headroom for more).
 - Local, 3 bots on `table`, cap 600: the kit arrived over RCON, 3/3 reached `table`, coverage 1.0, a recording verified with 0 mismatches over 10,846 events; the local server ticked 21.3 a second.
@@ -85,6 +92,13 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 ## Snapshots and the frontier ([[one-bot-first]])
 - `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor (the start's stage, or a resumed snapshot's): `save-all flush`, the server's `world/` copied to `<out>/snapshots/<stage>/` with `memory.rsw` (the bot's memory, `results::snapshot::write_memory`) and `snap.toml` (stage, bot, offline UUID, position, dimension, commit). Publish steps add each as a release asset `snapshot-<stage>-<run>-<lane>.tar.zst`.
 - `race.yml -f snapshot=frontier` (or `<tag>/<asset>`) restores it: the world unpacked into the server's before it starts, the snapshot bot's `players/data/<uuid>.dat` (26.1.2's place for it, not the older `playerdata/`) copied to every bot's own offline UUID (`results offline-uuid`), `--memory` seeding each bot; the `snapshot` start gives nothing more. `config/frontier.toml` names the furthest snapshot.
+- **Development starts are marked** (`bot::devstart`, [[development-starts]]): a start other than `snapshot`, `fresh` or `spawn`, or a resume of a marked snapshot, writes `dev = true` first in each `snap.toml`; race.yml names the asset `dev-snapshot-...` and refuses `snapshot=frontier` on a marked snapshot or a `dev-` asset; a test fails when `config/frontier.toml` names one. Snapshots older than the mark (the present frontier came from the `portal` start) carry none.
+
+## Reading the text files (issue 16, [[observability]])
+- `.senses.txt`: `tick x,y,z cell cx,cy,cz on <block>[, lava beside] hp … held … [cursor …] | task (why) | hostiles`; the position has one decimal, the cell is floored (the planner's). A line `tick in <dimension>` when it changes.
+- `.ledger.txt`: planner lines in the planner's order, then that second's facts; `[xN, to tick T (#id)]` closes a line told once for a run; `item x 164 -> 177 (3 changes)` is one second. The header counts the file's records and facts, and the lines they are told in.
+- `.case.txt`: `where:` under the ending; `notes by kind` (every note of the ledger, with first and last tick: a fix's firings); `escape trails (whole)`; `tasks by time` with those that ended within the second they began.
+- `summary.md`: the diagnosis's "notes by kind" table is the race's total over every note of every ledger (it was built from each case's kept notes, which leave repeats out); it says for how many runs it had the whole ledger.
 
 ## See also
 - [[observability]] - what every run produces.

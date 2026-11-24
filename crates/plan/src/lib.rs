@@ -27,6 +27,7 @@ pub mod scoop;
 pub mod smelt;
 pub mod stairs;
 pub mod station;
+pub mod tunnel;
 pub mod walk;
 
 use std::collections::BTreeMap;
@@ -55,6 +56,9 @@ pub const SEARCH_COLUMNS: i32 = 8;
 /// After a failed task the planner waits this long before choosing again: a choice that fails at
 /// once must not be made every tick (the churn invariant).
 pub const RETRY_TICKS: u64 = 20;
+/// In the Nether, a dig toward a target farther than this on the plane is a travel tunnel
+/// (`tunnel::route`); nearer, the plain cut: a route's reach is 5.
+pub const TUNNEL_FROM: i32 = 8;
 /// Times a cast out of water keeps its site to fetch water (wall 43): enough for a cast's spare
 /// water lost twice, never a site worked forever.
 pub const WATER_TRIPS: u32 = 2;
@@ -542,6 +546,10 @@ pub struct Plan {
     /// nearer (a progress invariant, issue 13b).
     #[serde(default)]
     pub toward: Option<(Cell, f64, u32)>,
+    /// The travel tunnel in hand: its target, route and the cells found bad
+    /// (docs/problems/nether-tunnel.md).
+    #[serde(default)]
+    pub travel: tunnel::Travel,
     /// The same count for each cast landing looked at, the newest last (blaze.md wall 19: the
     /// site choice flipped between two landings and each flip forgot the other).
     #[serde(default)]
@@ -631,6 +639,7 @@ impl Plan {
             smelts: 0,
             relocations: 0,
             toward: None,
+            travel: tunnel::Travel::default(),
             landings: Vec::new(),
             far_search_at: 0,
             mark: None,
@@ -1904,52 +1913,6 @@ impl Plan {
             );
             return Task::Idle;
         }
-        // --- A2's block (docs/problems/nether-walk.md): a far walk first. One weighed search
-        // toward the nearest brick, bridging where it must; found, its route is held by the walk
-        // and followed (off the portal's ledge at once: lava floods it about 700 ticks after a
-        // bot arrives). Not found, no far search again for a while: the tunnel below goes on.
-        // The target: bricks of a fortress's body before a nearer lone pillar (the first far walks
-        // met `fortress` at a pillar's foot in the lava sea, the fortress proper 70 blocks on).
-        let far_target = (tick >= self.far_search_at)
-            .then(|| world::stage::bricks_near(w, FORTRESS_CHUNKS))
-            .and_then(|bricks| {
-                walk::brick_in_the_body(&bricks).or_else(|| bricks.first().copied())
-            });
-        if let Some(c) = far_target {
-            self.far_search_at = tick + walk::FAR_RETRY_TICKS;
-            let mut walk = Walk::far(c, world::stage::FORTRESS_NEAR - 1.0, tick);
-            let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
-            let steps = walk.waypoints.as_ref().map_or(0, Vec::len);
-            if found {
-                // Cut (a meal, a foe) or failed, the next one may be searched soon.
-                self.far_search_at = tick + walk::FAR_AGAIN_TICKS;
-                self.walks += 1;
-                self.note(
-                    tick,
-                    format!("far walk toward the fortress at {c:?}"),
-                    format!(
-                        "a route of {steps} cells, {} to bridge with {} blocks held, found in {} \
-                         expansions",
-                        walk.bridges_ahead(),
-                        path::bridge_blocks(w),
-                        walk.expanded
-                    ),
-                );
-                return Task::Explore(walk);
-            }
-            self.expanded += walk.expanded;
-            self.note(
-                tick,
-                format!("no far route to the fortress at {c:?}"),
-                format!(
-                    "{:?} after {} expansions, {steps} cells; none again for {} ticks",
-                    walk.route,
-                    walk.expanded,
-                    walk::FAR_RETRY_TICKS
-                ),
-            );
-        }
-        // --- the end of A2's block.
         // Bricks seen: walk toward the nearest a route gets nearer to, refusing each once tried.
         let bricks: Vec<Cell> = world::stage::bricks_near(w, FORTRESS_CHUNKS)
             .into_iter()
@@ -1979,22 +1942,50 @@ impl Plan {
                 return Task::Explore(walk);
             }
         }
-        // No walk: tunnel toward the nearest brick (stairs down to it when it is below), the
-        // tunnel hiding the bot from ghasts; three without coming nearer refuse it.
-        if let Some(c) = world::stage::bricks_near(w, FORTRESS_CHUNKS)
-            .into_iter()
-            .find(|c| !self.refused_now(*c, tick))
-            && let Some(t) = self.dig_toward(
-                w,
-                c,
-                true,
-                ("the fortress", "nether bricks seen, no walk to them"),
-                tick,
-            )
-        {
+        // --- A2: with no rock under the feet to tunnel into (a causeway over the sea, a ledge
+        // with lava at its door) the far walk comes before the tunnel; on rock, after it.
+        let rock = w
+            .body
+            .is_some_and(|b| walk::rock_to_tunnel(w, path::feet_cell(b.pos)));
+        if !rock && let Some(t) = self.far_fortress_walk(w, tick) {
             return t;
         }
+        // --- the end of A2's lines.
+        // No walk: the travel tunnel to the brick held, else to the nearest: up out of the lava
+        // sea's level, through rock, and down at the far end (docs/problems/nether-tunnel.md; the
+        // stairs down this used to cut ended beside lava, blaze.md walls 22 and 23).
+        let held = self
+            .travel
+            .target
+            .filter(|c| !self.travel.exploring && !self.refused_now(*c, tick));
+        if let Some(c) = held.or_else(|| {
+            world::stage::bricks_near(w, FORTRESS_CHUNKS)
+                .into_iter()
+                .find(|c| !self.refused_now(*c, tick))
+        }) {
+            self.travel.exploring = false;
+            if let Some(t) = self.travel_tunnel(
+                w,
+                c,
+                ("the fortress", "nether bricks seen, no walk to them"),
+                tick,
+            ) {
+                return t;
+            }
+        }
+        // --- A2: on rock the tunnel did not take, the far walk.
+        if rock && let Some(t) = self.far_fortress_walk(w, tick) {
+            return t;
+        }
+        // --- the end of A2's lines.
         if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
+            return t;
+        }
+        // No walk out either: a search tunnel on a held heading (the Nether's open ground is lava
+        // shores and soul sand; rock is the way that is always there).
+        if world::stage::in_nether(w)
+            && let Some(t) = self.explore_tunnel(w, tick, "no fortress in view and no walk out")
+        {
             return t;
         }
         self.failed_in_row += 1;
@@ -2006,6 +1997,54 @@ impl Plan {
         );
         self.check_stuck(tick);
         Task::Idle
+    }
+
+    /// A2's far walk (docs/problems/nether-walk.md): one weighed search toward the fortress,
+    /// bridging where it must; found, its route is held by the walk and followed. Not found, no
+    /// far search again for a while. The way over open lava, where there is no rock to tunnel.
+    fn far_fortress_walk(&mut self, w: &World, tick: u64) -> Option<Task> {
+        // The target: bricks of a fortress's body before a nearer lone pillar (the first far walks
+        // met `fortress` at a pillar's foot in the lava sea, the fortress proper 70 blocks on).
+        let far_target = (tick >= self.far_search_at)
+            .then(|| world::stage::bricks_near(w, FORTRESS_CHUNKS))
+            .and_then(|bricks| {
+                walk::brick_in_the_body(&bricks).or_else(|| bricks.first().copied())
+            });
+        if let Some(c) = far_target {
+            self.far_search_at = tick + walk::FAR_RETRY_TICKS;
+            let mut walk = Walk::far(c, world::stage::FORTRESS_NEAR - 1.0, tick);
+            let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
+            let steps = walk.waypoints.as_ref().map_or(0, Vec::len);
+            if found {
+                // Cut (a meal, a foe) or failed, the next one may be searched soon.
+                self.far_search_at = tick + walk::FAR_AGAIN_TICKS;
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("far walk toward the fortress at {c:?}"),
+                    format!(
+                        "a route of {steps} cells, {} to bridge with {} blocks held, found in {} \
+                         expansions",
+                        walk.bridges_ahead(),
+                        path::bridge_blocks(w),
+                        walk.expanded
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            self.note(
+                tick,
+                format!("no far route to the fortress at {c:?}"),
+                format!(
+                    "{:?} after {} expansions, {steps} cells; none again for {} ticks",
+                    walk.route,
+                    walk.expanded,
+                    walk::FAR_RETRY_TICKS
+                ),
+            );
+        }
+        None
     }
 
     /// The next task: the nearest log in view far enough from the origin, else explore.
@@ -2794,6 +2833,15 @@ impl Plan {
         let (fx, fy, fz) = path::feet_cell(body.pos);
         if (bank.1 > fy && !above_ok) || self.refused_now(bank, tick) {
             return None;
+        }
+        // In the Nether a far target gets the travel tunnel: a searched way through rock, over
+        // the lava sea's level, that comes to the target's own height at its end, where the cut
+        // below goes six down for a target one lower and six up for one two higher (lane 14 of
+        // race 45164371770 sawed between y 22 and y 28 under the lava sea:
+        // docs/problems/nether-tunnel.md).
+        let flat = (bank.0 - fx).abs() + (bank.2 - fz).abs();
+        if above_ok && world::stage::in_nether(w) && flat > TUNNEL_FROM {
+            return self.tunnel_toward(w, bank, (what, why), tick);
         }
         let d =
             f64::from((bank.0 - fx).pow(2) + (bank.1 - fy).pow(2) + (bank.2 - fz).pow(2)).sqrt();
