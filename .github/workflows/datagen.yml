@@ -35,7 +35,7 @@ env:
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
   # The server jar and its reports, kept between runs (keyed by the Minecraft version).
-  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+  DATAGEN_WORK: /home/runner/work/datagen-work
 
 jobs:
   datagen:
@@ -55,7 +55,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.DATAGEN_WORK }}
-          key: datagen-work-26.1.2-v1
+          key: datagen-work-26.1.2-v2
 
       - name: Fetch clojurecraft at its pin (the oracle the probe's tables are compared with)
         run: |

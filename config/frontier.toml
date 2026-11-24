@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "fortress"
-tag = "race-44678197603"
-asset = "snapshot-fortress-44678197603-race-44678197603-lane-0.tar.zst"
-commit = "b074be5326d4bc370f44fef02f986655c28f6d85"
-how = "rs-l00-b00 of race 44678197603 (portal start, aim race): walked into its lit portal, tunnelled to the fortress round (48, ~, 176) in the Nether. The spawn race 44662871756 took 2 of 98 bots from spawn into the Nether on d0e92fc."
+stage = "spawner"
+tag = "race-45337739022"
+asset = "snapshot-spawner-45337739022-race-45337739022-lane-0.tar.zst"
+commit = "3079a6bb8791336adfe5b7b857c1ef810ead0bd1"
+how = "rs-l00-b00 of race 45337739022 (resumed from the Nether snapshot of race 45194253932 lane 5, itself a bot of the clean ready snapshot of race 45128866973): a travel tunnel through the hill to the fortress at tick 8,540, then walked the fortress to within reach of the blaze spawner at (129, 64, 159) at tick 11,940, 20 health, armour worn, iron sword, 2 stone pickaxes, both water buckets, 8 meat. The first armed, fed bot at the spawner."

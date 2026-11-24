@@ -4,10 +4,13 @@
 //! every 50 ms, records every run when asked, and ends with an `Ending`.
 
 pub mod captured;
+pub mod devstart;
+pub mod evidence;
 pub mod landings;
 pub mod live;
 pub mod lockstep;
 pub mod model;
+pub mod progress;
 pub mod script;
 
 pub use script::Script;
@@ -85,11 +88,13 @@ pub struct Opts {
     /// Told each time the run reaches a stage higher than any it held, with the world then (the
     /// race takes a snapshot of the first bot to reach each stage).
     pub on_stage: Option<std::sync::mpsc::Sender<StageUp>>,
-    /// End the run `NoProgress` after this many server ticks with no stage, no item gained and
-    /// no new place (issue 16e); `None` never does.
+    /// End the run `NoProgress` after this many server ticks with no stage, no item kind new to
+    /// the run, no more of a goal item than it ever held and no new place (`progress::Progress`,
+    /// issue 16e); `None` never does.
     pub no_progress_ticks: Option<u64>,
     /// A file rewritten every `PROGRESS_EVERY_TICKS` with where the run stands, for a look while
-    /// the race runs (issue 16e).
+    /// the race runs (issue 16e); the run's ledger, senses and story so far are written beside it
+    /// as `<name>.ledger.txt`, `<name>.senses.txt` and `<name>.case.txt` (`evidence`).
     pub progress: Option<PathBuf>,
 }
 
@@ -116,10 +121,11 @@ pub struct Stats {
 
 /// Ticks between senses rows: one a second (clojurecraft's senses line).
 pub const SENSES_EVERY_TICKS: u64 = 20;
-/// Ticks between progress files: ten minutes.
-pub const PROGRESS_EVERY_TICKS: u64 = 12_000;
-/// A place is a 16-block cube: entering one not seen before is progress.
-pub const REGION_SHIFT: i32 = 4;
+/// Ticks between progress files, and the run's evidence beside them (`evidence`): two minutes.
+/// Ten until issue 16, with the evidence written only at the run's end: a race of 12,000 ticks
+/// showed nothing until it was over (docs/problems/race-tooling.md).
+pub const PROGRESS_EVERY_TICKS: u64 = 2400;
+pub use progress::REGION_SHIFT;
 
 /// Ticks between moments: one a minute.
 pub const MOMENT_EVERY_TICKS: u64 = 1200;
@@ -200,6 +206,22 @@ fn note_kind(what: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// A note's kind for a reader: each run of words `note_kind` leaves out shown as one `…`.
+pub fn kind_shown(what: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for w in what.split_whitespace() {
+        let cut = w
+            .chars()
+            .any(|c| c.is_ascii_digit() || c == '(' || c == '[');
+        if !cut {
+            out.push(w);
+        } else if out.last() != Some(&"…") {
+            out.push("…");
+        }
+    }
+    out.join(" ")
 }
 
 impl Notes {
@@ -451,6 +473,16 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     };
     if let Some(m) = memory {
         run.world.memory = m;
+        // The seeded memory is the run's start state and no event carries it: recorded as a
+        // checkpoint before the first event, so a fold begins where the run did (`replay verify`
+        // counted every checkpoint of every resumed run a mismatch without it).
+        if let Some(r) = &mut run.recorder {
+            r.write(&Record::Checkpoint {
+                event_index: 0,
+                server_ticks: 0,
+                world: Box::new(run.world.clone()),
+            })?;
+        }
     }
     let mut stage_told = run.world.stage_reached;
     let mut stats = Stats::default();
@@ -487,11 +519,15 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut senses_rows: Vec<observe::Senses> = Vec::new();
     let mut moments: std::collections::VecDeque<Moment> = std::collections::VecDeque::new();
     let mut last_snap = observe::snapshot(&run.world);
-    // Progress (issue 16e): the server tick of the last stage, item gained or new place.
-    let mut last_progress: Option<u64> = None;
-    let mut regions: std::collections::BTreeSet<(i32, i32, i32)> =
-        std::collections::BTreeSet::new();
+    // Progress (issue 16e): the last stage, new item kind, more of a goal item or new place.
+    let mut progressed = progress::Progress::new(if no_progress_ticks.is_some() {
+        progress::items_from_repo()
+    } else {
+        BTreeMap::new()
+    });
     let mut last_controls: Option<physics::Controls> = None;
+    // The evidence writer of the last progress interval, on its own thread.
+    let mut evidence_writer: Option<JoinHandle<()>> = None;
     let mut doing = if let Some(a) = aim {
         Doing {
             task: format!("aim {}", a.name()),
@@ -714,32 +750,18 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             let new_facts = observe::diff(&last_snap, &mut snap, &run.world);
             last_snap = snap;
             let now_tick = run.world.session.server_ticks;
-            let gained = new_facts.iter().any(|f| {
-                matches!(f.fact, observe::Fact::Stage { .. })
-                    || matches!(f.fact, observe::Fact::Item { from, to, .. } if to > from)
-            });
-            let place = run.world.body.map(|b| {
-                (
-                    (b.pos[0].floor() as i32) >> REGION_SHIFT,
-                    (b.pos[1].floor() as i32) >> REGION_SHIFT,
-                    (b.pos[2].floor() as i32) >> REGION_SHIFT,
-                )
-            });
-            let new_place = place.is_some_and(|p| regions.insert(p));
-            if gained || new_place || last_progress.is_none() {
-                last_progress = Some(now_tick);
-            }
+            progressed.see(now_tick, &new_facts, run.world.body.map(|b| b.pos));
             facts.extend(new_facts);
-            if let (Some(n), Some(since)) = (no_progress_ticks, last_progress)
+            if let Some(n) = no_progress_ticks
                 && run.world.body.is_some()
-                && now_tick.saturating_sub(since) >= n
+                && progressed.idle(now_tick) >= n
             {
                 let task = planner
                     .as_ref()
                     .map_or("none", |p| p.task.name())
                     .to_owned();
                 break Ending::NoProgress {
-                    for_ticks: now_tick.saturating_sub(since),
+                    for_ticks: progressed.idle(now_tick),
                     task,
                 };
             }
@@ -751,18 +773,42 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
                 let r = observe::senses(&run.world, task, &why, plan_tick_us.last().copied());
                 let line = format!(
-                    "{name}\ttick {now_tick}\tstage {}\thp {}\tfood {}\theld {} ({} uses)\ttask {task} ({why})\tno progress for {} ticks\n",
+                    "{name}\ttick {now_tick}\tstage {}\tat {}\thp {}\tfood {}\theld {}{}\ttask {task} ({why})\tno progress for {} ticks\n",
                     run.world.stage_reached.map_or("none", world::Stage::name),
+                    // Where it stands: the cell, what is under it, lava or water at it.
+                    r.standing(),
                     r.health
                         .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
                     r.food.map_or_else(|| "-".to_owned(), |f| f.to_string()),
                     r.held.as_deref().unwrap_or("nothing"),
+                    // Uses only for what has them: food read "held beef (- uses)".
                     r.held_uses
-                        .map_or_else(|| "-".to_owned(), |u| u.to_string()),
-                    last_progress.map_or(0, |s| now_tick.saturating_sub(s)),
+                        .map_or_else(String::new, |u| format!(" ({u} uses)")),
+                    progressed.idle(now_tick),
                 );
-                if let Err(e) = std::fs::write(path, line) {
+                if let Err(e) = std::fs::write(path, &line) {
                     eprintln!("bot {name}: progress: {e}");
+                }
+                // The evidence so far, beside it: copied here, rendered and written on a thread
+                // of its own (the loop never waits on the disk). A writer still busy is left be.
+                if evidence_writer.as_ref().is_none_or(JoinHandle::is_finished)
+                    && let Some(dir) = path.parent()
+                {
+                    let e = evidence::Evidence {
+                        dir: dir.to_path_buf(),
+                        run: run_id.clone(),
+                        bot: name.clone(),
+                        progress: line,
+                        tasks: ledger.clone(),
+                        facts: facts.clone(),
+                        senses: senses_rows.clone(),
+                    };
+                    let bot = name.clone();
+                    evidence_writer = Some(std::thread::spawn(move || {
+                        if let Err(err) = e.write() {
+                            eprintln!("bot {bot}: evidence: {err}");
+                        }
+                    }));
                 }
             }
             if world_ticks.is_multiple_of(SENSES_EVERY_TICKS) {
@@ -861,6 +907,12 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             stats.play_ticks_from = run.world.session.server_ticks;
         }
     };
+    // The last evidence is whole on disk before the run's end writes the same files.
+    if let Some(h) = evidence_writer.take()
+        && h.join().is_err()
+    {
+        eprintln!("bot {name}: the evidence writer panicked");
+    }
     stats.events = run.events;
     stats.wall_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     stats.play_ms = play_since.map_or(0, |t| {
@@ -897,11 +949,14 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         });
     }
     // The signature names what the planner was doing at the end, as a kind (no cells or counts),
-    // not the aim it started with: every run of a race had the same signature (issue 16e).
+    // not the aim it started with: every run of a race had the same signature (issue 16e). The
+    // words left out show as an ellipsis, so the case's `doing:` line does not read as cut off
+    // ("stairs down toward the fortress at" was); the numbers themselves are in the story's
+    // last lines, and with them every run would be a signature of its own.
     if let Some(e) = planner.as_ref().and_then(|p| p.events.last()) {
         doing = Doing {
-            task: note_kind(&e.what),
-            why: note_kind(&e.why),
+            task: kind_shown(&e.what),
+            why: kind_shown(&e.why),
         };
     }
     let stream_counts = sink.map(|s| {
@@ -957,7 +1012,23 @@ pub fn plan_summary(p: &plan::Plan, tick_us: &[u64], notes: &Notes) -> results::
 
 #[cfg(test)]
 mod notes_tests {
-    use super::{KIND_KEPT, NOTES_HEAD, NOTES_TAIL, Notes};
+    use super::{KIND_KEPT, NOTES_HEAD, NOTES_TAIL, Notes, kind_shown};
+
+    #[test]
+    fn a_kind_shows_where_words_were_left_out() {
+        assert_eq!(
+            kind_shown("stairs down toward the fortress at (61, 30, 95)"),
+            "stairs down toward the fortress at …"
+        );
+        assert_eq!(
+            kind_shown("stairs failed: DigFailed after 0 stairs"),
+            "stairs failed: DigFailed after … stairs"
+        );
+        assert_eq!(
+            kind_shown("nether bricks seen, no walk to them"),
+            "nether bricks seen, no walk to them"
+        );
+    }
 
     #[test]
     fn alternating_pairs_collapse_and_are_counted() {

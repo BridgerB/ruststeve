@@ -3,10 +3,10 @@ title: The server model
 description: How ruststeve plays without a Java server - the sim crate (the vanilla server as a pure reducer, grown per issue), S2c encoders that make the model's bytes a server's, the model as the bot's body behind the same channels a socket gives, and what it models so far.
 type: reference
 tags: [sim, model, server, body, closed-loop]
-aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds]
+aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds, nether_world, Stage, Wall, Nether stage, magma, hot_floor, fast lava, setblock]
 status: verified
-lastUpdated: 2026-11-15
-verifiedAgainst: ruststeve@61fdf54 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -98,6 +98,13 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - `chunk_batch_start` goes out as its id with an empty body; the bot counts it unknown.
 - `ModelWorld::ground` and `placeable` place a player as vanilla does (under leaves, two free cells): found by issue 09's measure ([[planner]]).
 - Peaceful regeneration (`ServerPlayer.tickRegeneration`, 1 every 20 ticks below full) is modelled when `Config::peaceful`; found by the parity table.
+
+## The Nether (issue 16, read from the 26.1.2 jar with javap)
+- `sim::nether` (`crates/sim/src/nether.rs`): `Stage` lays a world in `minecraft:the_nether` (a netherrack floor and ceiling, bedrock at y 0 and 127, 16 sections from y 0) with lava lakes, soul sand, soul soil, magma, gravel and nether bricks, and `build`s it; `nether_world` is the empty cavern. The login carries the dimension type's index in the synced registry (sorted by name: 3). `walls` holds the Nether crossing's walls as stages; `Sim::setblock` sets a block with its updates (lava put so runs, a lake laid in a stage rests until its bank changes).
+- Lava reads the dimension (`ModelWorld::fast_lava`: the type's `gameplay/fast_lava` attribute, the Nether alone): `LavaFluid.getTickDelay` 10 against 30, `getDropOff` 1 against 2 (7 cells from a source against 3), `getSlopeFindDistance` 4 against 2.
+- Magma (`Entity.applyEffectsFromBlocks`, `MagmaBlock.stepOn`): on the ground with a magma block 0.2 under the feet and not sneaking, 1 (`hot_floor`) a tick, so 1 each 10 ticks through the invulnerability; fire resistance refuses it (`is_fire`). The bot sends no `player_input`, so a server never holds it sneaking: `Life::sneaking` is false unless a test sets it.
+- Not modelled: soul sand's speed factor 0.4 (`physics` has no block speed factors at all: no ice, no honey), falling gravel, fire from lava, mobs.
+- Tests: `crates/sim/tests/nether.rs`; the walls closed loop in `crates/bot/tests/nether_walls.rs`, the pathfinder alone on them in `crates/plan/tests/nether_routes.rs` (docs/problems/nether-testbed.md).
 
 ## Issue 14a
 - Fluids, buckets along the look, obsidian and portal lighting (`crates/sim/src/fluid.rs`), and the player's look kept from each move with rotation ([[buckets-and-fluids]]).

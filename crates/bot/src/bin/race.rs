@@ -104,6 +104,15 @@ fn args() -> Result<Args, String> {
     Ok(a)
 }
 
+/// The race a snapshot comes from: its run, its lane, and whether it is a development race
+/// (`bot::devstart`).
+#[derive(Clone)]
+struct From {
+    run: String,
+    lane: u32,
+    dev: bool,
+}
+
 /// Copy the server's world (after `save-all flush`), the bot's memory and a `snap.toml` into
 /// `<out>/<stage>/`: the moment a bot first reached the stage, for later attempts to resume from.
 fn snapshot(
@@ -112,9 +121,10 @@ fn snapshot(
     out: &std::path::Path,
     rcon_addr: &str,
     password: &str,
-    run: &str,
-    lane: u32,
+    from: &From,
 ) -> Result<(), String> {
+    let From { run, lane, dev } = from;
+    let (lane, dev) = (*lane, *dev);
     if password.is_empty() {
         return Err("no RCON password: the world cannot be saved first".to_owned());
     }
@@ -130,7 +140,7 @@ fn snapshot(
         uuid: results::snapshot::offline_uuid(&up.bot),
         server_ticks: up.world.session.server_ticks,
         commit: record::COMMIT.to_owned(),
-        run: run.to_owned(),
+        run: run.clone(),
         lane,
         pos: up.world.body.map_or([0.0; 3], |b| b.pos),
         dimension: up
@@ -155,10 +165,20 @@ fn snapshot(
             }),
     };
     let text = toml::to_string(&snap).map_err(|e| e.to_string())?;
+    // A development race's snapshots are marked: never the frontier (bot::devstart).
+    let text = if dev {
+        bot::devstart::mark_dev(&text)
+    } else {
+        text
+    };
     std::fs::write(dir.join("snap.toml"), text).map_err(|e| e.to_string())?;
     println!(
-        "snapshot {}: {} at {:?} in {}, {files} files",
-        snap.stage, snap.bot, snap.pos, snap.dimension
+        "snapshot {}{}: {} at {:?} in {}, {files} files",
+        snap.stage,
+        if dev { " (dev)" } else { "" },
+        snap.bot,
+        snap.pos,
+        snap.dimension
     );
     Ok(())
 }
@@ -209,20 +229,34 @@ fn race(a: &Args) -> Result<bool, String> {
     let snapper = {
         // Resuming: the snapshot's own stage is the floor, so the resumed bots' first tick (already
         // there) takes no second copy of it.
-        let resumed = a
+        let resumed_text = a
             .memory
             .as_ref()
             .and_then(|m| m.parent())
             .map(|d| d.join("snap.toml"))
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| toml::from_str::<results::snapshot::Snap>(&t).ok())
+            .and_then(|p| std::fs::read_to_string(p).ok());
+        let resumed = resumed_text
+            .as_deref()
+            .and_then(|t| toml::from_str::<results::snapshot::Snap>(t).ok())
             .and_then(|snap| world::stage::Stage::from_name(&snap.stage));
+        // A made-up start, or a resume of a snapshot that came from one: development only.
+        let dev = bot::devstart::race_is_dev(&start.name, resumed_text.as_deref());
+        if dev {
+            println!(
+                "race: a development start ({}): its snapshots are marked dev and can never be the frontier",
+                start.name
+            );
+        }
         let from = resumed.or_else(|| world::stage::Stage::from_name(&start.stage));
         let server_world = a.server_dir.join("world");
         let out = a.out.join("snapshots");
         let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
         let password = password.clone();
-        let (run, lane) = (a.run.clone(), a.lane);
+        let race = From {
+            run: a.run.clone(),
+            lane: a.lane,
+            dev,
+        };
         std::thread::spawn(move || {
             let mut best = from;
             for up in rx {
@@ -230,9 +264,7 @@ fn race(a: &Args) -> Result<bool, String> {
                     continue;
                 }
                 best = Some(up.stage);
-                if let Err(e) =
-                    snapshot(&up, &server_world, &out, &rcon_addr, &password, &run, lane)
-                {
+                if let Err(e) = snapshot(&up, &server_world, &out, &rcon_addr, &password, &race) {
                     eprintln!("snapshot {}: {e}", up.stage.name());
                 }
             }

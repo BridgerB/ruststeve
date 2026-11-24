@@ -34,7 +34,7 @@ env:
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
-  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+  DATAGEN_WORK: /home/runner/work/datagen-work
 
 jobs:
   probe:
@@ -61,7 +61,7 @@ jobs:
         if: inputs.server == 'true'
         with:
           path: ${{ env.DATAGEN_WORK }}
-          key: datagen-work-26.1.2-v1
+          key: datagen-work-26.1.2-v2
       - name: Start the race's server (RCON on, a password for this run only)
         if: inputs.server == 'true'
         run: |
