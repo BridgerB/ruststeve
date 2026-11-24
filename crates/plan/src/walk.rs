@@ -33,11 +33,15 @@ pub const PATIENCE_TICKS: u64 = 200;
 pub const PROGRESS_STEP: f64 = 0.25;
 
 /// A far walk's search (docs/problems/nether-walk.md): the expansions it may spend and the weight
-/// on its heuristic. Measured on the recorded Nether of race 45194253932 (probe 45338206210).
-pub const FAR_NODES: u32 = 60_000;
-pub const FAR_WEIGHT: f64 = 2.0;
-/// After a far search (found or not) the planner runs no other for this long: a minute.
-pub const FAR_RETRY_TICKS: u64 = 1200;
+/// on its heuristic. Measured on the recorded Nether of race 45194253932 lane 5 at tick 25,140
+/// (probe 45336893578): from the portal to the bricks 110 blocks off, weight 2 finds a route in
+/// 147,900 expansions (1.8 s), 3 in 35,525, 4 in 12,664 (0.1 s; 222 cells, 163 bridged), 10 in
+/// 8,906; with the chunks half loaded a search spends all it is given and finds none.
+pub const FAR_NODES: u32 = 40_000;
+pub const FAR_WEIGHT: f64 = 4.0;
+/// After a far search that found no route the planner runs no other for this long: ten seconds
+/// (a bot just through a portal has half its chunks, and a search then finds none).
+pub const FAR_RETRY_TICKS: u64 = 200;
 /// After a far route was found, the least ticks before the planner searches the next.
 pub const FAR_AGAIN_TICKS: u64 = 100;
 /// Ticks between two clicks laying one bridge block: the block update arrives in a tick or two.
