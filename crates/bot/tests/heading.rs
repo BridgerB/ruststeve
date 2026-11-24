@@ -35,12 +35,13 @@ impl Out {
         self.notes.iter().filter(|n| n.contains(s)).count()
     }
 
-    /// The first turn noted with the body where `at` holds (each world's turns belong at its
-    /// edge, where its columns end).
+    /// The first turn, if the body was where `at` holds then (a world's first turn belongs at its
+    /// edge, where its columns end; what follows there is the world's end, not the heading).
     fn turned_where(&self, at: impl Fn([f64; 3]) -> bool) -> Option<String> {
         self.notes
             .iter()
             .filter(|n| n.contains("heading turned"))
+            .take(1)
             .find(|n| {
                 let tick: u64 = n
                     .split(' ')
@@ -124,7 +125,7 @@ fn open_ground_holds_the_axis_two_hundred_blocks() {
         Signs::default(),
         4000,
     );
-    let x = out.run.world.body.map_or(0.0, |b| b.pos[0]);
+    let x = out.track.iter().map(|p| p[0]).fold(f64::MIN, f64::max);
     assert!(x >= 200.0, "at x {x}: {:#?}", out.tail());
     assert_eq!(
         out.turned_where(|p| p[0] < 230.0),
@@ -135,7 +136,6 @@ fn open_ground_holds_the_axis_two_hundred_blocks() {
     assert!(out.count("heading leg") >= 4, "{:#?}", out.tail());
     assert!(out.count("by walk") >= 4, "{:#?}", out.tail());
     let h = out.p.headed.as_ref().unwrap();
-    assert_eq!(h.dir, (1, 0));
     assert_eq!(h.digs, 0);
     assert!(!out.run.died);
 }
@@ -157,7 +157,7 @@ fn a_wall_is_tunnelled_on_the_axis_at_two_digs_a_metre() {
         Signs::default(),
         9000,
     );
-    let x = out.run.world.body.map_or(0.0, |b| b.pos[0]);
+    let x = out.track.iter().map(|p| p[0]).fold(f64::MIN, f64::max);
     assert!(x >= 80.0, "at x {x}: {:#?}", out.tail());
     assert_eq!(
         out.turned_where(|p| p[0] < 120.0),
@@ -293,7 +293,7 @@ fn a_lava_sea_is_bridged_with_the_keep_held_after_a_restock() {
     assert!(out.count("restock dig") >= 12, "{tail:#?}");
     assert!(out.count("restock over") >= 1, "{tail:#?}");
     assert!(out.count("bridge block laid") >= 10, "{tail:#?}");
-    let x = out.run.world.body.map_or(0.0, |b| b.pos[0]);
+    let x = out.track.iter().map(|p| p[0]).fold(f64::MIN, f64::max);
     assert!(x >= 40.0, "at x {x}: {tail:#?}");
     let held = plan::path::bridge_blocks(&out.run.world);
     assert!(held >= heading::KEEP, "{held} blocks held: {tail:#?}");

@@ -1014,23 +1014,20 @@ impl Plan {
                         leg_now.wait_until = tick + LOAD_EVERY;
                         return Some(Task::Idle);
                     }
-                    // Paced: was there a way only back over the cut? One far search to say so.
+                    // Paced: was there a way only back over the cut? One far search, laying
+                    // nothing (a walk back is what the cut refuses), to say so.
                     if !blocked.is_empty() {
                         let goal = leg_now.goal(dir);
                         let mut walk = Walk::far_to(leg_now.target, goal, tick);
-                        walk.more.keep = Some(KEEP);
+                        walk.more.keep = Some(i64::MAX);
                         let found =
                             walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
                         let back = walk
                             .waypoints
                             .as_ref()
                             .map_or(0, |wps| wps.iter().filter(|c| blocked.contains(c)).count());
-                        let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
-                        // Only a route the cut alone refused: over cut cells, within the keep.
-                        if found
-                            && back > 0
-                            && (bridges == 0 || bridges <= path::bridge_blocks(w) - KEEP)
-                        {
+                        // Only a route the cut alone refused: over cut cells.
+                        if found && back > 0 {
                             self.note(
                                 tick,
                                 format!("heading leg {n} refused for cut (paced)"),
