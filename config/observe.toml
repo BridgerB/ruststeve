@@ -1,0 +1,388 @@
+# What the bot hears from the server, classified (issue 16e, full observability).
+#
+# Every clientbound packet in the generated tables is exactly one of: decoded by
+# `crates/protocol` (an `S2c` variant), `wanted` (sent by the server, still thrown away, and a
+# blind spot until decoded: the race summary marks it `!!`), or `skipped` (thrown away on purpose,
+# with the reason). The test `every_clientbound_packet_is_classified` in `crates/results` fails
+# when a packet is in two lists, in none, or when a decoded one is still listed here, so a new
+# game version cannot add a packet unseen. Names are `state/name` as the generated tables spell
+# them. The lists began from clojurecraft's map of what its bot sensed (2026-11-06: hearing, the
+# biggest blank) and its `deliberate` list.
+
+# ---- wanted: the facts issues 16 to 20 need, still thrown away ----
+# (none: every packet the stages need is decoded since issue 16e, phase B. A new one is added
+# here, as `[[wanted]]` with `packet` and `why`, until it is decoded.)
+
+# ---- skipped: thrown away on purpose ----
+
+[[skipped]]
+packet = "login/hello"
+why = "encryption request: the race server runs in offline mode and never sends it"
+
+[[skipped]]
+packet = "login/custom_query"
+why = "plugin login queries: none on a vanilla server"
+
+[[skipped]]
+packet = "login/cookie_request"
+why = "transfer cookies: none on a vanilla server"
+
+[[skipped]]
+packet = "configuration/cookie_request"
+why = "transfer cookies: none on a vanilla server"
+
+[[skipped]]
+packet = "configuration/custom_payload"
+why = "plugin channels (the server brand): nothing the run spends"
+
+[[skipped]]
+packet = "configuration/reset_chat"
+why = "clears the chat window"
+
+[[skipped]]
+packet = "configuration/registry_data"
+why = "the registries come from the generated tables of the same version (datagen)"
+
+[[skipped]]
+packet = "configuration/resource_pack_pop"
+why = "no resource packs on the race server"
+
+[[skipped]]
+packet = "configuration/resource_pack_push"
+why = "no resource packs on the race server"
+
+[[skipped]]
+packet = "configuration/store_cookie"
+why = "transfer cookies: none on a vanilla server"
+
+[[skipped]]
+packet = "configuration/transfer"
+why = "server transfers: none"
+
+[[skipped]]
+packet = "configuration/update_enabled_features"
+why = "the vanilla feature set is fixed for the version"
+
+[[skipped]]
+packet = "configuration/update_tags"
+why = "the tags come from the generated tables of the same version"
+
+[[skipped]]
+packet = "configuration/custom_report_details"
+why = "crash-report text for the client"
+
+[[skipped]]
+packet = "configuration/server_links"
+why = "links for the pause menu"
+
+[[skipped]]
+packet = "configuration/clear_dialog"
+why = "server dialogs: none on a vanilla server"
+
+[[skipped]]
+packet = "configuration/show_dialog"
+why = "server dialogs: none on a vanilla server"
+
+[[skipped]]
+packet = "configuration/code_of_conduct"
+why = "a server's code of conduct screen: none on the race server"
+
+[[skipped]]
+packet = "play/bundle_delimiter"
+why = "framing marker: the packets between two delimiters are decoded one by one"
+
+[[skipped]]
+packet = "play/award_stats"
+why = "statistics screen"
+
+[[skipped]]
+packet = "play/update_advancements"
+why = "advancement toasts: the stages are judged from the world, not advancements"
+
+[[skipped]]
+packet = "play/select_advancements_tab"
+why = "advancement screen"
+
+[[skipped]]
+packet = "play/change_difficulty"
+why = "fixed by the race server's config (normal)"
+
+[[skipped]]
+packet = "play/chunk_batch_start"
+why = "batch start marker; the batch's end is answered (chunk_batch_finished is decoded)"
+
+[[skipped]]
+packet = "play/clear_dialog"
+why = "server dialogs: none on a vanilla server"
+
+[[skipped]]
+packet = "play/show_dialog"
+why = "server dialogs: none on a vanilla server"
+
+[[skipped]]
+packet = "play/clear_titles"
+why = "clears titles; the titles themselves are wanted"
+
+[[skipped]]
+packet = "play/set_titles_animation"
+why = "title fade timing"
+
+[[skipped]]
+packet = "play/commands"
+why = "the command tree: the bot runs no commands"
+
+[[skipped]]
+packet = "play/command_suggestions"
+why = "tab completion for commands"
+
+[[skipped]]
+packet = "play/custom_chat_completions"
+why = "chat completion hints"
+
+[[skipped]]
+packet = "play/tag_query"
+why = "answers a debug query the bot never sends"
+
+[[skipped]]
+packet = "play/cookie_request"
+why = "transfer cookies: none on a vanilla server"
+
+[[skipped]]
+packet = "play/store_cookie"
+why = "transfer cookies: none on a vanilla server"
+
+[[skipped]]
+packet = "play/transfer"
+why = "server transfers: none"
+
+[[skipped]]
+packet = "play/custom_payload"
+why = "plugin channels: nothing the run spends"
+
+[[skipped]]
+packet = "play/custom_report_details"
+why = "crash-report text for the client"
+
+[[skipped]]
+packet = "play/server_links"
+why = "links for the pause menu"
+
+[[skipped]]
+packet = "play/debug_sample"
+why = "debug-screen samples, sent only to a subscriber"
+
+[[skipped]]
+packet = "play/delete_chat"
+why = "removes another player's chat line"
+
+[[skipped]]
+packet = "play/player_chat"
+why = "other players' chat: the bot plays alone"
+
+[[skipped]]
+packet = "play/disguised_chat"
+why = "command-sent chat (/say): nothing a solo run sends"
+
+[[skipped]]
+packet = "play/game_rule_values"
+why = "game rules for the settings screen; the race server's rules are its config"
+
+[[skipped]]
+packet = "play/game_test_highlight_pos"
+why = "game-test framework only"
+
+[[skipped]]
+packet = "play/test_instance_block_status"
+why = "game-test framework only"
+
+[[skipped]]
+packet = "play/initialize_border"
+why = "world border: thousands of blocks from any race"
+
+[[skipped]]
+packet = "play/set_border_center"
+why = "world border: thousands of blocks from any race"
+
+[[skipped]]
+packet = "play/set_border_lerp_size"
+why = "world border: thousands of blocks from any race"
+
+[[skipped]]
+packet = "play/set_border_size"
+why = "world border: thousands of blocks from any race"
+
+[[skipped]]
+packet = "play/set_border_warning_delay"
+why = "world border: thousands of blocks from any race"
+
+[[skipped]]
+packet = "play/set_border_warning_distance"
+why = "world border: thousands of blocks from any race"
+
+[[skipped]]
+packet = "play/low_disk_space_warning"
+why = "a client-side warning"
+
+[[skipped]]
+packet = "play/map_item_data"
+why = "map items: the bot holds none"
+
+[[skipped]]
+packet = "play/merchant_offers"
+why = "villager trades: the bot never trades"
+
+[[skipped]]
+packet = "play/mount_screen_open"
+why = "a mount's inventory: the bot never rides"
+
+[[skipped]]
+packet = "play/move_minecart_along_track"
+why = "minecart movement: the bot never rides"
+
+[[skipped]]
+packet = "play/move_vehicle"
+why = "vehicle movement: the bot never rides"
+
+[[skipped]]
+packet = "play/open_book"
+why = "book screen"
+
+[[skipped]]
+packet = "play/open_sign_editor"
+why = "sign editor"
+
+[[skipped]]
+packet = "play/place_ghost_recipe"
+why = "recipe-book ghost: the bot crafts by its own clicks from generated recipes"
+
+[[skipped]]
+packet = "play/recipe_book_add"
+why = "recipe book: the bot crafts from the generated recipes"
+
+[[skipped]]
+packet = "play/recipe_book_remove"
+why = "recipe book: the bot crafts from the generated recipes"
+
+[[skipped]]
+packet = "play/recipe_book_settings"
+why = "recipe book: the bot crafts from the generated recipes"
+
+[[skipped]]
+packet = "play/update_recipes"
+why = "the recipes come from the generated tables of the same version"
+
+[[skipped]]
+packet = "play/update_tags"
+why = "the tags come from the generated tables of the same version"
+
+[[skipped]]
+packet = "play/server_data"
+why = "the server's MOTD and icon for the client"
+
+[[skipped]]
+packet = "play/player_abilities"
+why = "survival constants (no flight, no instant build); speed comes from attributes"
+
+[[skipped]]
+packet = "play/player_info_remove"
+why = "the tab list: other players"
+
+[[skipped]]
+packet = "play/player_info_update"
+why = "the tab list: other players and their game modes"
+
+[[skipped]]
+packet = "play/tab_list"
+why = "the tab list's header and footer"
+
+[[skipped]]
+packet = "play/player_look_at"
+why = "sent only by /teleport facing and similar commands; the race runs none"
+
+[[skipped]]
+packet = "play/player_rotation"
+why = "a server-set rotation from commands; the race runs none"
+
+[[skipped]]
+packet = "play/pong_response"
+why = "answers a ping request the bot never sends"
+
+[[skipped]]
+packet = "play/reset_score"
+why = "scoreboard"
+
+[[skipped]]
+packet = "play/set_display_objective"
+why = "scoreboard"
+
+[[skipped]]
+packet = "play/set_objective"
+why = "scoreboard"
+
+[[skipped]]
+packet = "play/set_score"
+why = "scoreboard"
+
+[[skipped]]
+packet = "play/set_player_team"
+why = "teams and name tags"
+
+[[skipped]]
+packet = "play/resource_pack_pop"
+why = "no resource packs on the race server"
+
+[[skipped]]
+packet = "play/resource_pack_push"
+why = "no resource packs on the race server"
+
+[[skipped]]
+packet = "play/set_camera"
+why = "spectator camera only"
+
+[[skipped]]
+packet = "play/set_default_spawn_position"
+why = "the compass and respawn point: a death ends the attempt (revive=false)"
+
+[[skipped]]
+packet = "play/set_entity_link"
+why = "leads: the bot uses none"
+
+[[skipped]]
+packet = "play/ticking_state"
+why = "the /tick command: the race server never freezes or steps ticks"
+
+[[skipped]]
+packet = "play/ticking_step"
+why = "the /tick command: the race server never freezes or steps ticks"
+
+[[skipped]]
+packet = "play/waypoint"
+why = "the locator bar: other players' positions"
+
+[[skipped]]
+packet = "play/level_particles"
+why = "particles are visual; what they show (portals, drips, teleports) comes from blocks and sounds"
+
+[[skipped]]
+packet = "play/light_update"
+why = "light changes: the plan reads no light yet; spawnable cells come with issue 17 if it needs them"
+
+[[skipped]]
+packet = "play/block_event"
+why = "chests opening, pistons, note blocks: nothing the stages need"
+
+[[skipped]]
+packet = "play/debug/block_value"
+why = "debug-renderer values, sent only to a subscribed developer client"
+
+[[skipped]]
+packet = "play/debug/chunk_value"
+why = "debug-renderer values, sent only to a subscribed developer client"
+
+[[skipped]]
+packet = "play/debug/entity_value"
+why = "debug-renderer values, sent only to a subscribed developer client"
+
+[[skipped]]
+packet = "play/debug/event"
+why = "debug-renderer events, sent only to a subscribed developer client"

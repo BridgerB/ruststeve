@@ -1,0 +1,421 @@
+//! The travel tunnel (docs/problems/nether-tunnel.md): its route search on hand-built worlds (a
+//! long route climbs over the lava sea's level first, goes round a chasm and seen lava, cuts
+//! through what rock hides and leaves that to the staircase's refusal), and the planner cutting
+//! one to nether bricks no walk reaches, round a lava pocket it could not see.
+
+use std::collections::BTreeSet;
+
+use data::BlockKind;
+use plan::tunnel::{self, SAFE_Y};
+use plan::{Aim, Plan};
+use sim::{Config, ModelWorld, Sim, flat_world};
+
+const CONFIG: Config = Config {
+    view_distance: 4,
+    simulation_distance: 3,
+    peaceful: true,
+};
+
+type Cell = (i32, i32, i32);
+
+fn state(k: BlockKind) -> u32 {
+    k.info().unwrap().default_state
+}
+
+/// Stone to y 62 and grass at 63 for four chunks round the origin, with `set` in it.
+fn model(set: &[(Cell, BlockKind)]) -> ModelWorld {
+    let mut m = flat_world(4, 63).unwrap();
+    for ((x, y, z), k) in set {
+        m.set_block(*x, *y, *z, state(*k)).unwrap();
+    }
+    m
+}
+
+/// The world a bot that joined `set` knows.
+fn world_with(set: &[(Cell, BlockKind)]) -> world::World {
+    let run = bot::lockstep::run(Sim::new(CONFIG, model(set)), "rs-tu", 1, 30, 20, |_, _| {
+        physics::Controls::default()
+    });
+    run.world
+}
+
+fn filled(x: [i32; 2], y: [i32; 2], z: [i32; 2], k: BlockKind) -> Vec<(Cell, BlockKind)> {
+    (x[0]..=x[1])
+        .flat_map(|x| (y[0]..=y[1]).flat_map(move |y| (z[0]..=z[1]).map(move |z| ((x, y, z), k))))
+        .collect()
+}
+
+fn none() -> BTreeSet<Cell> {
+    BTreeSet::new()
+}
+
+/// Every step of a route is one the staircase can cut: a level step or a stair, one block along.
+fn steps_are_cuts(cells: &[Cell]) {
+    for pair in cells.windows(2) {
+        assert!(
+            tunnel::opened(pair[0], pair[1]).is_some(),
+            "{:?} to {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+#[test]
+fn through_rock_the_route_is_level_and_ends_within_reach() {
+    let w = world_with(&[]);
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 20_000).unwrap();
+    assert!(r.found);
+    steps_are_cuts(&r.cells);
+    assert!(
+        r.cells.iter().all(|c| c.1 == 50 && c.2 == 0),
+        "{:?}",
+        r.cells
+    );
+    assert_eq!(r.cells.len(), 27, "26 steps to within 5 of the block");
+    assert!(r.expanded < 200, "{} nodes for a straight way", r.expanded);
+}
+
+/// From the lava sea's level a long route climbs to `SAFE_Y` first, runs level there and comes
+/// down only at the far end, to its target's height.
+#[test]
+fn a_long_route_from_low_climbs_first_and_comes_down_at_the_end() {
+    let w = world_with(&[]);
+    let r = tunnel::route(&w, (0, 34, 0), &[(40, 32, 0)], &none(), false, 20_000).unwrap();
+    assert!(r.found);
+    steps_are_cuts(&r.cells);
+    let top = r.cells.iter().map(|c| c.1).max().unwrap();
+    assert_eq!(top, SAFE_Y);
+    let up = r.cells.iter().position(|c| c.1 == SAFE_Y).unwrap();
+    assert_eq!(up, usize::try_from(SAFE_Y - 34).unwrap(), "stairs up first");
+    let level = r.cells.iter().filter(|c| c.1 == SAFE_Y).count();
+    assert!(
+        level >= 20,
+        "{level} cells at the travel height: {:?}",
+        r.cells
+    );
+    let end = r.cells.last().unwrap();
+    assert!(end.1 < SAFE_Y, "down toward the target at the end: {end:?}");
+}
+
+/// A chasm with no floor across the line is gone round, in rock.
+#[test]
+fn a_chasm_is_gone_round() {
+    let w = world_with(&filled([10, 14], [30, 70], [-6, 6], BlockKind::Air));
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 40_000).unwrap();
+    assert!(r.found);
+    steps_are_cuts(&r.cells);
+    assert!(
+        r.cells
+            .iter()
+            .all(|c| !((10..=14).contains(&c.0) && (-6..=6).contains(&c.2))),
+        "{:?}",
+        r.cells
+    );
+}
+
+/// Lava with an open cell over it is known and kept a block away from; a pocket shut in rock is
+/// not known (no X-ray): the route runs into it, the staircase refuses the step beside it, and
+/// with that cell blocked the next route goes round.
+#[test]
+fn seen_lava_is_avoided_and_hidden_lava_is_left_to_the_refusal() {
+    let mut lake = filled([12, 13], [50, 51], [-1, 1], BlockKind::Lava);
+    lake.extend(filled([12, 13], [52, 52], [-1, 1], BlockKind::Air));
+    let w = world_with(&lake);
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 40_000).unwrap();
+    assert!(r.found);
+    let lava = |c: Cell| (12..=13).contains(&c.0) && (50..=51).contains(&c.1) && c.2.abs() <= 1;
+    for c in &r.cells {
+        let beside = [0, 1].iter().any(|up| {
+            [
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 1, 0),
+                (0, -1, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+            ]
+            .iter()
+            .any(|d| lava((c.0 + d.0, c.1 + up + d.1, c.2 + d.2)))
+        });
+        assert!(
+            !beside && !lava(*c),
+            "{c:?} is beside the lake: {:?}",
+            r.cells
+        );
+    }
+
+    let w = world_with(&filled([12, 12], [50, 51], [0, 0], BlockKind::Lava));
+    let r = tunnel::route(&w, (0, 50, 0), &[(30, 50, 0)], &none(), false, 40_000).unwrap();
+    assert!(r.cells.contains(&(12, 50, 0)), "the pocket is not known");
+    let (cells, floor) = tunnel::opened((10, 50, 0), (11, 50, 0)).unwrap();
+    let why = plan::stairs::refusal(&w, &cells, floor).unwrap();
+    assert!(why.starts_with("lava beside"), "{why}");
+    let blocked: BTreeSet<Cell> = [(11, 50, 0)].into();
+    let r = tunnel::route(&w, (10, 50, 0), &[(30, 50, 0)], &blocked, false, 40_000).unwrap();
+    assert!(r.found && !r.cells.contains(&(11, 50, 0)));
+}
+
+/// A portal's own blocks are never stepped into (a step in is a trip to the other dimension).
+#[test]
+fn a_portal_is_never_stepped_into() {
+    let mut set = filled([5, 5], [64, 66], [-1, 1], BlockKind::NetherPortal);
+    set.extend(filled([5, 5], [63, 63], [-1, 1], BlockKind::Obsidian));
+    let w = world_with(&set);
+    let r = tunnel::route(&w, (0, 64, 0), &[(30, 64, 0)], &none(), false, 40_000).unwrap();
+    assert!(r.found);
+    assert!(
+        r.cells
+            .iter()
+            .all(|c| !(c.0 == 5 && (-1..=1).contains(&c.2) && c.1 >= 63)),
+        "{:?}",
+        r.cells
+    );
+}
+
+/// The planner, closed loop: nether bricks in a pocket under the ground 30 blocks off, no walk to
+/// them, and a wall of lava shut in the rock between. The tunnel is cut, the steps beside the
+/// lava are refused and blocked, the route goes round, and the fortress is met alive.
+#[test]
+fn the_planner_tunnels_to_bricks_no_walk_reaches_round_hidden_lava() {
+    let mut set = vec![
+        ((30, 50, 0), BlockKind::NetherBricks),
+        ((31, 50, 0), BlockKind::Air),
+        ((31, 51, 0), BlockKind::Air),
+    ];
+    set.extend(filled([15, 15], [44, 62], [-2, 2], BlockKind::Lava));
+    let mut m = model(&set);
+    m.dimension = "minecraft:the_nether".to_owned();
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut p = Plan::with_table(Aim::Fortress, table);
+    let mut sim = Sim::new(CONFIG, m).seeded(1);
+    sim.survival.give((data::ItemKind::StonePickaxe, 1));
+    sim.survival.give((data::ItemKind::StonePickaxe, 1));
+    let mut notes = Vec::new();
+    let mut seen = 0;
+    let run = bot::lockstep::run_acting(sim, "rs-tu", 1, 9000, 20, |w, _| {
+        let c = p.step(w);
+        notes.extend(
+            p.events_since(seen)
+                .iter()
+                .map(|e| format!("{} ({})", e.what, e.why)),
+        );
+        seen = p.event_count;
+        (c, p.take_acts())
+    });
+    let count = |s: &str| notes.iter().filter(|n| n.contains(s)).count();
+    assert!(
+        p.met,
+        "not met at {:?}: {notes:#?}",
+        run.world.body.map(|b| b.pos)
+    );
+    assert!(!run.died);
+    assert!(
+        count("tunnel route 1 toward the fortress") == 1,
+        "{notes:#?}"
+    );
+    assert!(
+        count("lava beside") >= 1,
+        "the hidden lava refused a step: {notes:#?}"
+    );
+    assert!(count("tunnel step to") >= 1, "{notes:#?}");
+    assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
+}
+
+/// A stair up with nothing to step onto is laid from held blocks, but only over ground near
+/// under it: on the flat one block, over a pit three deep the cell under the step too, and over
+/// a drop nothing (race 45340444298: stairs laid from a cliff's edge out over a cavern).
+#[test]
+fn stairs_are_laid_over_near_ground_only() {
+    let w = world_with(&[]);
+    assert_eq!(
+        plan::stairs::lays(&w, (0, 64, 0), (1, 65, 0)),
+        vec![((1, 64, 0), (1, 63, 0), 1)]
+    );
+    let w = world_with(&filled([1, 1], [61, 63], [0, 0], BlockKind::Air));
+    assert_eq!(
+        plan::stairs::lays(&w, (0, 64, 0), (1, 65, 0)),
+        vec![((1, 63, 0), (0, 63, 0), 5), ((1, 64, 0), (1, 63, 0), 1)]
+    );
+    let w = world_with(&filled([1, 1], [40, 63], [0, 0], BlockKind::Air));
+    assert!(plan::stairs::lays(&w, (0, 64, 0), (1, 65, 0)).is_empty());
+    // And the search does not build out over the drop either: a pit across the whole line.
+    let w = world_with(&filled([3, 12], [30, 63], [-40, 40], BlockKind::Air));
+    let r = tunnel::route(&w, (0, 64, 0), &[(30, 70, 0)], &none(), true, 40_000);
+    if let Some(r) = r {
+        for pair in r.cells.windows(2) {
+            let over_pit = (3..=12).contains(&pair[1].0) && pair[1].1 >= 31;
+            assert!(!over_pit, "{:?} is over the pit: {:?}", pair[1], r.cells);
+        }
+    }
+}
+
+/// A bot shut in solid netherrack of the model's Nether (`sim::nether::Stage`), with `kit`,
+/// the fortress aim, for `ticks`: the planner, the run and every note.
+fn in_the_rock(
+    stage: sim::nether::Stage,
+    bricks: Cell,
+    view: i32,
+    ticks: u64,
+) -> (Plan, bot::lockstep::Run, Vec<String>) {
+    let wall = sim::nether::Wall {
+        name: "shut in the rock",
+        stage,
+        start: (0, 40, 0),
+        bricks,
+        spawner: None,
+        wake: Vec::new(),
+    };
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut p = Plan::with_table(Aim::Fortress, table);
+    let config = Config {
+        view_distance: view,
+        simulation_distance: 3,
+        peaceful: true,
+    };
+    let mut sim = wall.sim(config).unwrap().seeded(1);
+    for _ in 0..4 {
+        sim.survival.give((data::ItemKind::IronPickaxe, 1));
+    }
+    let mut notes = Vec::new();
+    let mut seen = 0;
+    let run = bot::lockstep::run_acting(sim, "rs-tu", 1, ticks, 20, |w, _| {
+        let c = p.step(w);
+        notes.extend(
+            p.events_since(seen)
+                .iter()
+                .map(|e| format!("{} {} ({})", e.tick, e.what, e.why)),
+        );
+        seen = p.event_count;
+        (c, p.take_acts())
+    });
+    (p, run, notes)
+}
+
+/// Solid netherrack three chunks each way, the bot in a two-high cell at (0, 40, 0).
+fn rock() -> sim::nether::Stage {
+    let mut stage = sim::nether::Stage::new(3, sim::nether::ROOF - 1, sim::nether::ROOF);
+    stage.air((0, 0), (40, 41), (0, 0));
+    stage
+}
+
+/// No bricks in view and the fortress WEST: the search tunnel's first heading is south, the
+/// wrong way. It runs to where the world ends, has no way on, turns a quarter (west), and on
+/// that leg the bricks' column loads: the tunnel goes to them, with no second turn. One chunk
+/// of view, so the bricks 40 blocks west are unseen from the start.
+#[test]
+fn the_search_tunnel_turns_when_its_heading_is_wrong_and_arrives() {
+    let mut stage = rock();
+    stage
+        .air((-41, -41), (40, 41), (0, 0))
+        .bricks((-40, -40), (40, 41), (0, 0));
+    let (p, run, notes) = in_the_rock(stage, (-40, 40, 0), 1, 14_000);
+    let count = |s: &str| notes.iter().filter(|n| n.contains(s)).count();
+    let at = run.world.body.map(|b| b.pos);
+    let tail: Vec<&String> = notes.iter().rev().take(30).rev().collect();
+    assert!(p.met, "not met at {at:?}: {tail:#?}");
+    assert!(!run.died);
+    assert!(count("search tunnel leg toward") >= 3, "{tail:#?}");
+    assert!(count("search tunnel turned to (-1, 0)") >= 1, "{tail:#?}");
+    assert_eq!(count("search tunnel turned to (0, -1)"), 0, "{tail:#?}");
+    assert!(count("toward the fortress at") >= 1, "{tail:#?}");
+}
+
+/// A face of lava shut in the rock across the way to bricks in view (41 wide, 17 high, a block
+/// thick, 10 blocks on): each step beside it is refused before anything is opened, the cell is
+/// blocked, and the route goes round or over. The bot arrives never having burned.
+#[test]
+fn a_lava_face_across_the_tunnel_is_gone_round_unopened() {
+    let mut stage = rock();
+    stage
+        .fill((-20, 20), (34, 50), (10, 10), BlockKind::Lava)
+        .air((0, 0), (40, 41), (39, 39))
+        .bricks((0, 0), (40, 41), (40, 40));
+    let (p, run, notes) = in_the_rock(stage, (0, 40, 40), 4, 14_000);
+    let count = |s: &str| notes.iter().filter(|n| n.contains(s)).count();
+    let at = run.world.body.map(|b| b.pos);
+    let tail: Vec<&String> = notes.iter().rev().take(30).rev().collect();
+    assert!(p.met, "not met at {at:?}: {tail:#?}");
+    assert!(!run.died);
+    assert!(count("lava beside") >= 1, "{tail:#?}");
+    assert_eq!(run.min_health_in_script, Some(20.0), "burned: {tail:#?}");
+    assert_eq!(p.escapes, 0, "an escape ran: {tail:#?}");
+}
+
+/// Feet on soul sand rest at y + 0.875, in the soul sand's own cell: the tunnel and its stairs
+/// read the cell over it (`path::stand_cell`). Read as the soul sand's cell, every stretch ended
+/// "off its route" and the route was searched again, between two cells, for the rest of the run
+/// (race 45355573039 lane 0 at (22, 54, 60) and (22, 54, 61), 22 notes, no progress for 1,760
+/// ticks). A strip of soul sand floor under the start and on the way to bricks in view.
+#[test]
+fn a_tunnel_from_soul_sand_keeps_its_route() {
+    let mut stage = rock();
+    stage
+        .fill((-2, 2), (39, 39), (-2, 12), BlockKind::SoulSand)
+        .air((0, 0), (40, 41), (39, 39))
+        .bricks((0, 0), (40, 41), (40, 40));
+    let (p, run, notes) = in_the_rock(stage, (0, 40, 40), 4, 14_000);
+    let count = |s: &str| notes.iter().filter(|n| n.contains(s)).count();
+    let at = run.world.body.map(|b| b.pos);
+    let tail: Vec<&String> = notes.iter().rev().take(30).rev().collect();
+    assert!(p.met, "not met at {at:?}: {tail:#?}");
+    assert!(!run.died);
+    assert!(count("tunnel off its route") <= 2, "{tail:#?}");
+}
+
+/// A race beside the fortress's bricks with the stage not yet set (a brick seen between the tick
+/// that sets the stage and the choice) goes on: `fortress_task` never ends a race there.
+#[test]
+fn a_race_at_the_bricks_before_its_stage_is_not_over() {
+    let mut stage = rock();
+    stage
+        .air((0, 0), (40, 41), (1, 1))
+        .bricks((0, 0), (40, 41), (2, 2));
+    let (p, run, _) = in_the_rock(stage, (0, 40, 2), 4, 200);
+    assert!(p.met, "the fortress aim is met beside its bricks");
+    let mut w = run.world.clone();
+    w.stage_reached = Some(world::Stage::Nether);
+    assert!(world::stage::at_fortress(&w));
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut race = Plan::with_table(Aim::Race, table);
+    for _ in 0..40 {
+        race.step(&w);
+    }
+    assert!(!race.finished(), "{:#?}", race.events);
+}
+
+/// Lava shut in the rock a cell over the head and one aside, in a one-wide tunnel, is never
+/// seen: no lava at the door, no trap, no seal (no X-ray). With an open face it is.
+#[test]
+fn lava_shut_in_over_a_tunnel_is_not_at_the_door() {
+    let mut set = filled([-3, 6], [48, 54], [-3, 3], BlockKind::Stone);
+    set.extend(filled([0, 5], [50, 51], [0, 0], BlockKind::Air));
+    set.push(((1, 52, 1), BlockKind::Lava));
+    let w = world_with(&set);
+    assert_eq!(plan::escape::lava_door_at(&w, (1, 50, 0)), None);
+    // A cave beside it: the lava shows a face, and is at the door.
+    set.extend(filled([1, 1], [52, 53], [2, 2], BlockKind::Air));
+    let w = world_with(&set);
+    assert_eq!(plan::escape::lava_door_at(&w, (1, 50, 0)), Some((1, 52, 1)));
+}
+
+/// Rock to tunnel is read from what shows: a pocket of air shut in two under the feet is rock to
+/// the planner; lava open under a causeway is not.
+#[test]
+fn rock_to_tunnel_reads_only_what_shows() {
+    let mut set = filled([-3, 6], [44, 54], [-3, 3], BlockKind::Stone);
+    set.extend(filled([0, 0], [50, 51], [0, 0], BlockKind::Air));
+    set.push(((0, 48, 0), BlockKind::Air));
+    let w = world_with(&set);
+    assert!(plan::walk::rock_to_tunnel(&w, (0, 50, 0)));
+    // A causeway: one block over open lava beside and under.
+    let mut set = filled([-3, 6], [44, 47], [-3, 3], BlockKind::Stone);
+    set.extend(filled([-3, 6], [48, 48], [-3, 3], BlockKind::Lava));
+    set.extend(filled([-3, 6], [49, 54], [-3, 3], BlockKind::Air));
+    set.push(((0, 49, 0), BlockKind::Stone));
+    let w = world_with(&set);
+    assert!(!plan::walk::rock_to_tunnel(&w, (0, 50, 0)));
+}

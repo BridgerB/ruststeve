@@ -85,12 +85,21 @@ jobs:
           set -euo pipefail
           mkdir -p races
           gh release list --limit 1000 --json tagName --jq '.[].tagName | select(startswith("race-"))' > tags.txt
+          skipped=0
           while read -r tag; do
             mkdir -p "races/$tag"
-            gh release download "$tag" -p 'batches-*.tar.zst' -D "races/$tag"
+            # A race still running has its release (opened for progress) and no batches yet: it
+            # is left out, not this job's failure (race 45334668363's insight job failed "no
+            # assets to download" on another race's open release).
+            if ! gh release download "$tag" -p 'batches-*.tar.zst' -D "races/$tag"; then
+              echo "left out: $tag has no batches (still running, or never published)"
+              rmdir "races/$tag" || true
+              skipped=$(( skipped + 1 ))
+              continue
+            fi
             tar --zstd -xf "races/$tag"/batches-*.tar.zst -C "races/$tag"
           done < tags.txt
-          echo "$(wc -l < tags.txt) races"
+          echo "$(wc -l < tags.txt) races, $skipped left out"
 
       - name: Add them and query
         run: |

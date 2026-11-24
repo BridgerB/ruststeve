@@ -117,13 +117,13 @@ fn world_events(column: Arc<Column>) -> impl Strategy<Value = Event> {
             entries: vec![
                 (0, MetaValue::Byte(f)),
                 (9, MetaValue::Float(h)),
-                (8, MetaValue::Item(Slot::Item { item: 3, count: 2 }))
+                (8, MetaValue::Item(Slot::item(3, 2)))
             ],
         })),
         (0i32..46, 0u32..1500, 1i32..65).prop_map(|(slot, item, count)| Event::Packet(
             S2c::SetPlayerInventory {
                 slot,
-                item: Slot::Item { item, count }
+                item: Slot::item(item, count)
             }
         )),
         (-50.0f64..50.0, 60.0f64..90.0, -50.0f64..50.0).prop_map(|(x, y, z)| Event::Packet(

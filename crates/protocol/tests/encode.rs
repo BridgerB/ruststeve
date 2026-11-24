@@ -10,7 +10,7 @@ use protocol::{S2c, State, decode};
 fn slot() -> impl Strategy<Value = protocol::slot::Slot> {
     prop_oneof![
         Just(protocol::slot::Slot::Empty),
-        (0u32..1500, 1i32..65).prop_map(|(item, count)| protocol::slot::Slot::Item { item, count }),
+        (0u32..1500, 1i32..65).prop_map(|(item, count)| protocol::slot::Slot::item(item, count)),
     ]
 }
 
@@ -96,7 +96,27 @@ fn modelled() -> impl Strategy<Value = (State, S2c)> {
                     flags
                 }
             )),
-        Just((State::Play, S2c::SetTime)),
+        (
+            any::<i64>(),
+            proptest::collection::vec((0i32..4, any::<i64>(), 0.0f32..1.0, 0.0f32..2.0), 0..3)
+        )
+            .prop_map(|(game_time, clocks)| (
+                State::Play,
+                S2c::SetTime {
+                    game_time,
+                    clocks: clocks
+                        .into_iter()
+                        .map(
+                            |(clock, total_ticks, partial_tick, rate)| protocol::ClockUpdate {
+                                clock,
+                                total_ticks,
+                                partial_tick,
+                                rate,
+                            }
+                        )
+                        .collect(),
+                }
+            )),
         (any::<i32>(), any::<i32>())
             .prop_map(|(x, z)| (State::Play, S2c::ForgetLevelChunk { x, z })),
         (
@@ -248,6 +268,30 @@ fn a_click_predicts_nothing() {
     );
     // window 0, state id 7, slot 36 (i16), button 0, mode 0, no changed slots, an empty cursor.
     assert_eq!(body, [0, 7, 0, 36, 0, 0, 0, 0]);
+}
+
+#[test]
+fn the_keys_held_are_one_byte_of_flags() {
+    use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT, INPUT_SPRINT};
+    // The game's `Input` record: forward 1, jump 16, shift 32, sprint 64, in one byte.
+    assert_eq!(
+        (INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT, INPUT_SPRINT),
+        (0x01, 0x10, 0x20, 0x40)
+    );
+    let p = protocol::C2s::PlayerInput {
+        flags: INPUT_FORWARD | INPUT_SHIFT,
+    };
+    assert_eq!(p.state(), State::Play);
+    let (id, body) = p.encode().unwrap();
+    // `player_input` is serverbound play packet 43 (0x2b) in 26.1.2's packet report.
+    assert_eq!(id, 43);
+    assert_eq!(
+        id,
+        data::generated::packets::PlayServerbound::PlayerInput.id()
+    );
+    assert_eq!(body, [0x21]);
+    let (_, none) = protocol::C2s::PlayerInput { flags: 0 }.encode().unwrap();
+    assert_eq!(none, [0]);
 }
 
 #[test]

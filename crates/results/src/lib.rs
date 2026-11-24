@@ -8,8 +8,12 @@
 
 pub mod config;
 pub mod diagnose;
+pub mod observe;
 pub mod parity;
 pub mod snapshot;
+pub mod story;
+pub mod text;
+pub mod truth;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -18,6 +22,10 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use world::{Hit, Stage};
+
+/// The planner's ledger record, for readers that build a `Ledger` without the planner (the
+/// `ledger` binary re-reading a recording).
+pub use plan::TaskRecord;
 
 /// The results formats' version; a reader refuses one it does not know.
 pub const FORMAT_VERSION: u32 = 1;
@@ -47,6 +55,9 @@ pub enum Ending {
     Error { why: String },
     /// The job's end stopped it: not counted in n (brain/ruststeve/design/race-and-results.md).
     Cut,
+    /// No progress (no stage, no item gained, no new place) for `for_ticks`: the bot was ended
+    /// with its case rather than left to the cap (issue 16e). Counted: a stuck run is a result.
+    NoProgress { for_ticks: u64, task: String },
 }
 
 impl Ending {
@@ -59,6 +70,7 @@ impl Ending {
             Ending::Lost { .. } => "lost",
             Ending::Error { .. } => "error",
             Ending::Cut => "cut",
+            Ending::NoProgress { .. } => "no-progress",
         }
     }
 
@@ -114,6 +126,10 @@ pub struct Case {
     /// The planner's account, when the run had an aim (issue 09).
     #[serde(default)]
     pub plan: Option<PlanSummary>,
+    /// The run's story from its ledger and senses (issue 16e): when present the case prints it
+    /// in place of the cut notes.
+    #[serde(default)]
+    pub story: Option<story::Story>,
 }
 
 /// What the planner did in a run: its aim, whether it was met or the planner stopped stuck,
@@ -157,6 +173,7 @@ impl Case {
             Ending::Death { killer } => killer.clone(),
             Ending::Kicked { reason } => reason.clone(),
             Ending::Lost { why } | Ending::Error { why } => why.clone(),
+            Ending::NoProgress { task, .. } => task.clone(),
             Ending::Cap | Ending::Cut => String::new(),
         };
         [
@@ -199,6 +216,15 @@ impl Case {
                 self.stage_reached.map_or("none", Stage::name)
             ),
             format!("ending: {:?}", self.ending),
+        ];
+        // Where the bot stood at the end, in plain terms, before anything else is read.
+        if let Some(s) = &self.story
+            && !s.standing.is_empty()
+        {
+            lines.push("where:".to_owned());
+            lines.extend(s.standing.iter().map(|l| format!("  {l}")));
+        }
+        lines.extend([
             format!(
                 "death message: {}",
                 self.death_text.as_deref().unwrap_or("-")
@@ -215,10 +241,22 @@ impl Case {
                 "swings sent {}, landed {}",
                 self.swings_sent, self.swings_landed
             ),
+            // The feet's cell is the position floored, as the planner has it: a position
+            // rounded by eye reads one cell off (-18.3 is cell -19).
             format!(
-                "health {:?}  at {:?} in {}",
-                self.health,
-                self.pos,
+                "health {}  at {} in {}",
+                self.health
+                    .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
+                self.pos.map_or_else(
+                    || "-".to_owned(),
+                    |p| {
+                        let [x, y, z] = ::observe::feet_cell(p);
+                        format!(
+                            "{:.2},{:.2},{:.2} (feet cell {x},{y},{z})",
+                            p[0], p[1], p[2]
+                        )
+                    }
+                ),
                 self.dimension.as_deref().unwrap_or("-")
             ),
             format!(
@@ -227,7 +265,7 @@ impl Case {
                 self.wall_ms as f64 / 1000.0
             ),
             format!("replay: {}", self.replay),
-        ];
+        ]);
         if let Some(p) = &self.plan {
             lines.push(format!(
                 "plan {}: reached {}, stuck {}, {} walks, failures {:?}, longest stall {} ticks, {} expansions, tick us {:?}",
@@ -241,7 +279,9 @@ impl Case {
             ));
         }
         lines.extend(self.hits.iter().map(|h| format!("  hit {}", hit(h))));
-        if let Some(p) = &self.plan {
+        if let Some(s) = &self.story {
+            lines.extend(s.render());
+        } else if let Some(p) = &self.plan {
             if p.notes_dropped > 0 {
                 lines.push(format!("notes left out: {}", p.notes_dropped));
             }
@@ -268,7 +308,8 @@ pub struct Row {
     pub aim: Option<(String, bool)>,
 }
 
-/// What a batch could see: full sight is every ratio 1.0 and the counts 0.
+/// What a batch could see: full sight is every ratio 1.0 and the counts 0 (issue 16e). A column
+/// that is `None` is not measured yet, which the summary marks as blind: it never reads as fine.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Coverage {
     pub runs: u64,
@@ -278,6 +319,205 @@ pub struct Coverage {
     pub events_dropped: u64,
     /// Packets with an id the protocol layer does not model, summed over runs.
     pub unknown_packets: u64,
+    /// The same, by `state/name` (`protocol::packet_name`).
+    #[serde(default)]
+    pub unknown_by_kind: BTreeMap<String, u64>,
+    /// Inventory slots whose item components could not all be read (the rest of the frame lost).
+    #[serde(default)]
+    pub slots_truncated: u64,
+    /// The same, by the item component that stopped the read: the next reader to add.
+    #[serde(default)]
+    pub slots_truncated_by: BTreeMap<String, u64>,
+    /// Entity data cut short at a serializer the bot cannot read.
+    #[serde(default)]
+    pub metadata_truncated: Option<u64>,
+    /// The same, by the serializer the read stopped at.
+    #[serde(default)]
+    pub metadata_truncated_by: BTreeMap<String, u64>,
+    /// Runs with each of the files a run should leave (issue 16e phases C and D).
+    #[serde(default)]
+    pub ledgers: Option<u64>,
+    #[serde(default)]
+    pub senses: Option<u64>,
+    #[serde(default)]
+    pub moments: Option<u64>,
+    #[serde(default)]
+    pub truths: Option<u64>,
+    /// Tasks the planner started, those that carried a reason, and those that ended.
+    #[serde(default)]
+    pub tasks_started: Option<u64>,
+    #[serde(default)]
+    pub tasks_with_reason: Option<u64>,
+    #[serde(default)]
+    pub tasks_ended: Option<u64>,
+    /// Ledger events the bot could not write (must be 0).
+    #[serde(default)]
+    pub ledger_dropped: Option<u64>,
+}
+
+/// Entity-data serializers left unread on purpose, with why: a stop at one is counted apart and
+/// is no blind spot (issue 16e).
+pub const SKIPPED_SERIALIZERS: [(&str, &str); 4] = [
+    (
+        "PARTICLES",
+        "a living entity's effect particles, each type laid out its own way; after them only arrow and stinger counts and a sleeping place",
+    ),
+    (
+        "PARTICLE",
+        "an area cloud's particle, its last entry; the cloud's radius comes before it",
+    ),
+    (
+        "RESOLVABLE_PROFILE",
+        "a mannequin's or a head's player profile",
+    ),
+    (
+        "PAINTING_VARIANT",
+        "a painting's variant, which may be written inline",
+    ),
+];
+
+/// Adds an optional count: unmeasured anywhere stays unmeasured.
+fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    Some(a? + b?)
+}
+
+impl Coverage {
+    /// Two batches' coverage, summed.
+    pub fn add(&mut self, b: &Coverage) {
+        self.runs += b.runs;
+        self.cases += b.cases;
+        self.recordings += b.recordings;
+        self.events_dropped += b.events_dropped;
+        self.unknown_packets += b.unknown_packets;
+        for (k, n) in &b.unknown_by_kind {
+            *self.unknown_by_kind.entry(k.clone()).or_default() += n;
+        }
+        self.slots_truncated += b.slots_truncated;
+        for (k, n) in &b.slots_truncated_by {
+            *self.slots_truncated_by.entry(k.clone()).or_default() += n;
+        }
+        self.metadata_truncated = add_opt(self.metadata_truncated, b.metadata_truncated);
+        for (k, n) in &b.metadata_truncated_by {
+            *self.metadata_truncated_by.entry(k.clone()).or_default() += n;
+        }
+        self.ledgers = add_opt(self.ledgers, b.ledgers);
+        self.senses = add_opt(self.senses, b.senses);
+        self.moments = add_opt(self.moments, b.moments);
+        self.truths = add_opt(self.truths, b.truths);
+        self.tasks_started = add_opt(self.tasks_started, b.tasks_started);
+        self.tasks_with_reason = add_opt(self.tasks_with_reason, b.tasks_with_reason);
+        self.tasks_ended = add_opt(self.tasks_ended, b.tasks_ended);
+        self.ledger_dropped = add_opt(self.ledger_dropped, b.ledger_dropped);
+    }
+
+    /// The coverage block of a summary: one line a column, `!!` on each blind spot, then the
+    /// packets thrown away by kind, wanted (blind) before skipped.
+    pub fn render(&self, observe: Option<&observe::Observe>) -> Vec<String> {
+        const BLIND: &str = " !!";
+        let runs = self.runs;
+        let have = |name: &str, n: u64, want: u64| {
+            let mark = if n < want { BLIND } else { "" };
+            format!("- {name}: {n}/{want}{mark}")
+        };
+        let have_opt = |name: &str, n: Option<u64>, want: u64| match n {
+            Some(n) => have(name, n, want),
+            None => format!("- {name}: not measured{BLIND}"),
+        };
+        let zero = |name: &str, n: u64| {
+            let mark = if n > 0 { BLIND } else { "" };
+            format!("- {name}: {n}{mark}")
+        };
+        let zero_opt = |name: &str, n: Option<u64>| match n {
+            Some(n) => zero(name, n),
+            None => format!("- {name}: not measured{BLIND}"),
+        };
+        let mut lines = vec![
+            "### coverage (`!!` is a blind spot, fixed before any bot change)".to_owned(),
+            String::new(),
+            have("cases", self.cases, runs),
+            have("recordings", self.recordings, runs),
+            have_opt("ledgers", self.ledgers, runs),
+            have_opt("senses lines", self.senses, runs),
+            have_opt("moments", self.moments, runs),
+            have_opt("server truth", self.truths, runs),
+        ];
+        match self.tasks_started {
+            Some(started) => {
+                lines.push(have_opt(
+                    "tasks with a reason",
+                    self.tasks_with_reason,
+                    started,
+                ));
+                lines.push(have_opt("tasks ended", self.tasks_ended, started));
+            }
+            None => {
+                lines.push(format!("- tasks with a reason: not measured{BLIND}"));
+                lines.push(format!("- tasks ended: not measured{BLIND}"));
+            }
+        }
+        lines.push(zero_opt("ledger events dropped", self.ledger_dropped));
+        lines.push(zero("decode errors", self.events_dropped));
+        lines.push(zero("item slots cut short", self.slots_truncated));
+        for (component, n) in &self.slots_truncated_by {
+            lines.push(format!("  - at component `{component}`: {n}"));
+        }
+        // Stops at a serializer left unread on purpose are counted apart, with the reason.
+        let on_purpose = |s: &str| SKIPPED_SERIALIZERS.iter().find(|(n, _)| *n == s);
+        let blind_stops: u64 = self
+            .metadata_truncated_by
+            .iter()
+            .filter(|(s, _)| on_purpose(s).is_none())
+            .map(|(_, n)| n)
+            .sum();
+        lines.push(zero_opt(
+            "entity data cut short",
+            self.metadata_truncated.map(|_| blind_stops),
+        ));
+        for (serializer, n) in &self.metadata_truncated_by {
+            match on_purpose(serializer) {
+                Some((_, why)) => {
+                    lines.push(format!("  - at `{serializer}`, on purpose ({why}): {n}"));
+                }
+                None => lines.push(format!("  - at serializer `{serializer}`: {n}")),
+            }
+        }
+        // Packets thrown away, by class then count.
+        let class = |k: &str| observe.map_or(observe::Class::Unclassed, |o| o.class(k));
+        let mut kinds: Vec<(observe::Class, &String, u64)> = self
+            .unknown_by_kind
+            .iter()
+            .map(|(k, n)| (class(k), k, *n))
+            .collect();
+        kinds.sort_by(|a, b| a.0.cmp(&b.0).then(b.2.cmp(&a.2)).then(a.1.cmp(b.1)));
+        let blind: u64 = kinds.iter().filter(|k| k.0.blind()).map(|k| k.2).sum();
+        let skipped: u64 = kinds.iter().filter(|k| !k.0.blind()).map(|k| k.2).sum();
+        let per_run = |n: u64| n as f64 / runs.max(1) as f64;
+        lines.push(zero("packets thrown away that the stages need", blind));
+        lines.push(format!(
+            "- packets thrown away on purpose: {skipped} ({})",
+            observe::PATH
+        ));
+        if self.unknown_by_kind.is_empty() && self.unknown_packets > 0 {
+            lines.push(format!(
+                "- unknown packets not broken down by kind (an older batch): {}{BLIND}",
+                self.unknown_packets
+            ));
+        }
+        if !kinds.is_empty() {
+            lines.push(String::new());
+            lines.push("| packet thrown away | class | total | per run |".to_owned());
+            lines.push("|---|---|---|---|".to_owned());
+            for (c, k, n) in &kinds {
+                let label = match c {
+                    observe::Class::Wanted => "wanted !!",
+                    observe::Class::Unclassed => "unclassed !!",
+                    observe::Class::Skipped => "skipped",
+                };
+                lines.push(format!("| {k} | {label} | {n} | {:.1} |", per_run(*n)));
+            }
+        }
+        lines
+    }
 }
 
 impl Coverage {
@@ -311,6 +551,131 @@ pub struct Batch {
     pub server_tick_rate: f64,
     pub rows: Vec<Row>,
     pub coverage: Coverage,
+}
+
+/// A run's ledger (issue 16e): every task the planner started and ended, unsampled, with its
+/// reason and outcome. Written beside the case as `<bot>.ledger.rsl`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Ledger {
+    pub format_version: u32,
+    pub run: String,
+    pub bot: String,
+    pub commit: String,
+    pub tasks: Vec<plan::TaskRecord>,
+    /// Records the bot could not keep (must be 0).
+    #[serde(default)]
+    pub dropped: u64,
+    /// What the bot sensed, in order: health, hits, items and tools, sounds, mobs and their
+    /// signs (`observe::diff`).
+    #[serde(default)]
+    pub facts: Vec<::observe::Stamped>,
+}
+
+impl SensesFile {
+    /// One line every `every` rows (1 is every second): the tick, the position to one decimal,
+    /// the feet's cell as the planner has it (floored: a rounded position reads one cell off),
+    /// what the feet stand on and any lava or water against the body, then health, food, the
+    /// held item, the task with its reason, and the nearest hostiles. A change of dimension is
+    /// a line of its own.
+    pub fn render(&self, every: usize) -> String {
+        let mut out = format!(
+            "senses {} / {}: {} rows (x,y,z to one decimal; cell is the feet's cell, floored, as the planner has it)\n",
+            self.run,
+            self.bot,
+            self.rows.len()
+        );
+        let mut dimension: Option<&str> = None;
+        for r in self.rows.iter().step_by(every.max(1)) {
+            if r.dimension.is_some() && r.dimension.as_deref() != dimension {
+                dimension = r.dimension.as_deref();
+                out.push_str(&format!("{:>8} in {}\n", r.at, dimension.unwrap_or("-")));
+            }
+            let pos = r.pos.map_or_else(
+                || "-".to_owned(),
+                |p| format!("{:.1},{:.1},{:.1}", p[0], p[1], p[2]),
+            );
+            let near: Vec<String> = r
+                .hostiles
+                .iter()
+                .take(3)
+                .map(|h| {
+                    let mut s = format!("{} at {:.0}", h.kind.name().unwrap_or("?"), h.d);
+                    for (on, sign) in [
+                        (h.signs.fuse, "fuse"),
+                        (h.signs.charge, "charge"),
+                        (h.signs.angry, "angry"),
+                        (h.signs.facing, "facing"),
+                    ] {
+                        if on {
+                            s.push_str(&format!(" +{sign}"));
+                        }
+                    }
+                    s
+                })
+                .collect();
+            out.push_str(&format!(
+                "{:>8} {pos} {} hp {} food {} held {}{}{}{} | {} ({}) | {}\n",
+                r.at,
+                r.standing(),
+                r.health
+                    .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
+                r.food.map_or_else(|| "-".to_owned(), |f| f.to_string()),
+                r.held.as_deref().unwrap_or("nothing"),
+                r.held_uses
+                    .map_or_else(String::new, |u| format!(" ({u} uses)")),
+                r.cursor
+                    .as_ref()
+                    .map_or_else(String::new, |(i, n)| format!(" cursor {i} {n}")),
+                r.day_time.map_or_else(String::new, |t| format!(
+                    " day {t}{}",
+                    if world::time::is_night(t) {
+                        " night"
+                    } else {
+                        ""
+                    }
+                )),
+                r.task,
+                r.why,
+                near.join(", ")
+            ));
+        }
+        out
+    }
+}
+
+impl Ledger {
+    /// Every task start and end, every note and every fact, by tick (`text`): the planner's
+    /// records in its own order, a run of the same records once with its count, one second's
+    /// changes to an item on one line. The header counts what the file holds, not the lines.
+    pub fn lines(&self) -> Vec<(u64, String)> {
+        text::merged(&self.tasks, &self.facts)
+    }
+
+    pub fn render(&self) -> String {
+        let lines = self.lines();
+        let mut out = format!(
+            "ledger {} / {}: {} task records, {} facts, {} dropped, told in {} lines (a run of the same records is one line: [xN, to tick T])\n",
+            self.run,
+            self.bot,
+            self.tasks.len(),
+            self.facts.len(),
+            self.dropped,
+            lines.len()
+        );
+        for (at, l) in lines {
+            out.push_str(&format!("{at:>8} {l}\n"));
+        }
+        out
+    }
+}
+
+/// A run's senses: one row a second (`<bot>.senses.rss`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SensesFile {
+    pub format_version: u32,
+    pub run: String,
+    pub bot: String,
+    pub rows: Vec<::observe::Senses>,
 }
 
 /// What a file holds, so one reader opens either.
@@ -394,12 +759,25 @@ pub fn summarize(batches: &[Batch]) -> Summary {
     out
 }
 
-/// The summary as a markdown table, for a job summary.
-pub fn render_summary(s: &Summary, batches: &[Batch]) -> String {
-    let mut lines = vec![
-        "| commit | start | source | stage | k/n | rate |".to_owned(),
-        "|---|---|---|---|---|---|".to_owned(),
-    ];
+/// The summary as markdown, for a job summary: coverage first (a blind spot is read before any
+/// rate), then k/n per stage, the aims and the endings ranked.
+pub fn render_summary(
+    s: &Summary,
+    batches: &[Batch],
+    observe: Option<&observe::Observe>,
+) -> String {
+    // From the first batch: an unmeasured column stays unmeasured only if some batch lacks it.
+    let mut total = batches
+        .first()
+        .map(|b| b.coverage.clone())
+        .unwrap_or_default();
+    for b in batches.iter().skip(1) {
+        total.add(&b.coverage);
+    }
+    let mut lines = total.render(observe);
+    lines.push(String::new());
+    lines.push("| commit | start | source | stage | k/n | rate |".to_owned());
+    lines.push("|---|---|---|---|---|---|".to_owned());
     for ((commit, start, source), stages) in s {
         let short = commit.get(..7).unwrap_or(commit);
         for (stage, kn) in stages {
@@ -412,26 +790,6 @@ pub fn render_summary(s: &Summary, batches: &[Batch]) -> String {
             ));
         }
     }
-    let total = batches.iter().fold(Coverage::default(), |mut c, b| {
-        c.runs += b.coverage.runs;
-        c.cases += b.coverage.cases;
-        c.recordings += b.coverage.recordings;
-        c.events_dropped += b.coverage.events_dropped;
-        c.unknown_packets += b.coverage.unknown_packets;
-        c
-    });
-    lines.push(String::new());
-    lines.push(format!(
-        "coverage: cases {}/{} ({:.2}), recordings {}/{} ({:.2}), events dropped {}, unknown packets {}",
-        total.cases,
-        total.runs,
-        total.cases_ratio(),
-        total.recordings,
-        total.runs,
-        total.recordings_ratio(),
-        total.events_dropped,
-        total.unknown_packets
-    ));
     // The planner's aims, when runs had one: met over counted runs, per aim.
     let mut aims: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for row in batches
@@ -451,17 +809,241 @@ pub fn render_summary(s: &Summary, batches: &[Batch]) -> String {
             100.0 * ratio(*k, *n)
         ));
     }
-    let mut endings: BTreeMap<[String; 4], u64> = BTreeMap::new();
-    for row in batches.iter().flat_map(|b| &b.rows) {
-        *endings.entry(row.signature.clone()).or_default() += 1;
+    // Endings ranked, each with the first three bots to read (AGENTS.md section 4: three case
+    // files of the top signature, issue 16e).
+    let mut endings: BTreeMap<[String; 4], (u64, Vec<String>)> = BTreeMap::new();
+    for (b, row) in batches
+        .iter()
+        .flat_map(|b| b.rows.iter().map(move |r| (b, r)))
+    {
+        let e = endings.entry(row.signature.clone()).or_default();
+        e.0 += 1;
+        if e.1.len() < 3 {
+            e.1.push(format!("lane {} {}", b.lane, row.bot));
+        }
     }
     let mut ranked: Vec<_> = endings.into_iter().collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ranked.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
     lines.push(String::new());
-    lines.push("| runs | ending | killer | doing | why |".to_owned());
-    lines.push("|---|---|---|---|---|".to_owned());
-    for ([ending, killer, doing, why], n) in ranked {
-        lines.push(format!("| {n} | {ending} | {killer} | {doing} | {why} |"));
+    lines.push("| runs | ending | killer | doing | why | read first |".to_owned());
+    lines.push("|---|---|---|---|---|---|".to_owned());
+    for ([ending, killer, doing, why], (n, bots)) in ranked {
+        lines.push(format!(
+            "| {n} | {ending} | {killer} | {doing} | {why} | {} |",
+            bots.join(", ")
+        ));
     }
     lines.join("\n") + "\n"
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    /// Issue 16e: a column not measured, a wanted packet thrown away and a missing case each
+    /// read as blind (`!!`); a skipped packet does not.
+    #[test]
+    fn blind_spots_are_marked_and_unmeasured_never_reads_as_fine() {
+        let mut c = Coverage {
+            runs: 2,
+            cases: 1,
+            recordings: 2,
+            ..Coverage::default()
+        };
+        c.unknown_by_kind.insert("play/sound".to_owned(), 10);
+        c.unknown_by_kind
+            .insert("play/bundle_delimiter".to_owned(), 4);
+        let o = observe::Observe {
+            wanted: vec![observe::Entry {
+                packet: "play/sound".to_owned(),
+                why: "hearing".to_owned(),
+            }],
+            skipped: vec![observe::Entry {
+                packet: "play/bundle_delimiter".to_owned(),
+                why: "framing".to_owned(),
+            }],
+        };
+        let text = c.render(Some(&o)).join("\n");
+        assert!(text.contains("- cases: 1/2 !!"), "{text}");
+        assert!(text.contains("- recordings: 2/2\n"), "{text}");
+        assert!(text.contains("- ledgers: not measured !!"), "{text}");
+        assert!(
+            text.contains("- tasks with a reason: not measured !!"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- packets thrown away that the stages need: 10 !!"),
+            "{text}"
+        );
+        assert!(
+            text.contains("| play/sound | wanted !! | 10 | 5.0 |"),
+            "{text}"
+        );
+        assert!(
+            text.contains("| play/bundle_delimiter | skipped | 4 | 2.0 |"),
+            "{text}"
+        );
+    }
+
+    /// Summing keeps a column unmeasured when any batch did not measure it.
+    #[test]
+    fn an_unmeasured_batch_keeps_the_sum_unmeasured() {
+        let mut a = Coverage {
+            ledgers: Some(3),
+            ..Coverage::default()
+        };
+        a.add(&Coverage::default());
+        assert_eq!(a.ledgers, None);
+        let mut b = Coverage {
+            ledgers: Some(3),
+            ..Coverage::default()
+        };
+        b.add(&Coverage {
+            ledgers: Some(2),
+            ..Coverage::default()
+        });
+        assert_eq!(b.ledgers, Some(5));
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    fn row(at: u64, pos: [f64; 3]) -> ::observe::Senses {
+        ::observe::Senses {
+            at,
+            pos: Some(pos),
+            dimension: Some("minecraft:the_nether".to_owned()),
+            health: Some(20.0),
+            food: Some(16),
+            saturation: None,
+            air: None,
+            on_fire: false,
+            held: Some("stone_pickaxe".to_owned()),
+            held_uses: Some(57),
+            tools: Vec::new(),
+            free_slots: 3,
+            task: "stairs".to_owned(),
+            why: "nether bricks seen, no walk to them".to_owned(),
+            hostiles: Vec::new(),
+            endermen: 0,
+            sound: None,
+            tick_us: None,
+            cell: None,
+            feet_block: None,
+            under: None,
+            lava: ::observe::Touch::No,
+            water: ::observe::Touch::No,
+            cursor: None,
+            day_time: None,
+        }
+    }
+
+    /// Wall 1: the cell a row prints is the cell the planner works in, for every sign and
+    /// fraction (a rounded -18.3 read -18; the planner's feet cell is -19).
+    #[test]
+    fn the_printed_cell_is_the_planners_feet_cell() {
+        for pos in [
+            [30.499, 31.0, -18.3],
+            [-0.3, 63.875, 0.7],
+            [29.7, 36.42181483855212, -20.65643210844759],
+            [0.0, -64.0, -1.0],
+            [117.5, 70.5, -117.5],
+        ] {
+            let (x, y, z) = plan::path::feet_cell(pos);
+            assert_eq!(::observe::feet_cell(pos), [x, y, z], "{pos:?}");
+        }
+    }
+
+    /// Wall 1 as the senses text has it: an old row (no cell kept) prints the position to one
+    /// decimal and the floored cell; a new row adds what the feet stand on and the lava; the
+    /// dimension is a line of its own when it changes.
+    #[test]
+    fn a_senses_line_gives_the_cell_and_what_the_feet_stand_on() {
+        let old = row(31_300, [30.499, 31.0, -18.3]);
+        let mut new = row(31_500, [30.499, 31.88, -18.3]);
+        new.cell = Some([30, 31, -19]);
+        new.feet_block = Some("soul_sand".to_owned());
+        new.under = Some("netherrack".to_owned());
+        new.lava = ::observe::Touch::Beside;
+        new.cursor = Some(("bucket".to_owned(), 1));
+        let text = SensesFile {
+            format_version: FORMAT_VERSION,
+            run: "r".to_owned(),
+            bot: "b".to_owned(),
+            rows: vec![old, new],
+        }
+        .render(1);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[1], "   31300 in minecraft:the_nether");
+        assert_eq!(
+            lines[2],
+            "   31300 30.5,31.0,-18.3 cell 30,31,-19 hp 20.0 food 16 held stone_pickaxe (57 uses) | stairs (nether bricks seen, no walk to them) | "
+        );
+        assert_eq!(
+            lines[3],
+            "   31500 30.5,31.9,-18.3 cell 30,31,-19 in soul_sand over netherrack, lava beside hp 20.0 food 16 held stone_pickaxe (57 uses) cursor bucket 1 | stairs (nether bricks seen, no walk to them) | "
+        );
+        assert_eq!(lines.len(), 4);
+    }
+
+    /// Wall 5: the case's head says where the bot stood before anything else, and its position
+    /// line gives the feet's cell beside the position.
+    #[test]
+    fn a_case_opens_with_where_the_bot_stood() {
+        let case = Case {
+            format_version: FORMAT_VERSION,
+            run: "45204423376".to_owned(),
+            bot: "rs-l03-b00".to_owned(),
+            commit: "c".to_owned(),
+            lane: 3,
+            start: "snapshot".to_owned(),
+            source: Source::Real,
+            stage_reached: Some(Stage::Nether),
+            ending: Ending::NoProgress {
+                for_ticks: 24_000,
+                task: "idle".to_owned(),
+            },
+            death_text: None,
+            first_hit: None,
+            hits: Vec::new(),
+            doing: Doing {
+                task: "idle".to_owned(),
+                why: String::new(),
+            },
+            items_gained: BTreeMap::new(),
+            items_lost: BTreeMap::new(),
+            swings_sent: 0,
+            swings_landed: 0,
+            health: Some(20.0),
+            pos: Some([30.49940297953616, 31.0, -18.3]),
+            dimension: Some("minecraft:the_nether".to_owned()),
+            server_ticks: 55_940,
+            wall_ms: 0,
+            recording: None,
+            replay: String::new(),
+            stream: None,
+            plan: None,
+            story: Some(story::Story {
+                standing: vec![
+                    "in minecraft:the_nether at 30.50,31.00,-18.30: cell 30,31,-19 on soul_sand, lava beside".to_owned(),
+                ],
+                ..story::Story::default()
+            }),
+        };
+        let text = case.render();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[4], "where:");
+        assert_eq!(
+            lines[5],
+            "  in minecraft:the_nether at 30.50,31.00,-18.30: cell 30,31,-19 on soul_sand, lava beside"
+        );
+        assert!(
+            text.contains(
+                "health 20.0  at 30.50,31.00,-18.30 (feet cell 30,31,-19) in minecraft:the_nether"
+            ),
+            "{text}"
+        );
+    }
 }

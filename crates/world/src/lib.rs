@@ -12,18 +12,21 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use data::generated::dimensions::DIMENSION_TYPES;
+use data::generated::movement::movement;
 use data::generated::shapes::collision;
 use data::types::Collision;
 use data::{BlockKind, EntityKind, ItemKind};
 use memory::{Memory, Seen};
-use physics::{Body, Controls, Fluid, FluidKind};
+use physics::{Body, Controls, Fluid, FluidKind, Surface};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::nbt::Death;
-use protocol::slot::Slot;
+use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT};
+use protocol::slot::{Slot, Wear};
 use protocol::{C2s, Out, S2c, Session};
 
 pub mod stage;
+pub mod time;
 pub use stage::Stage;
 
 /// How long hits are kept: a minute of server ticks (a case file's "first hit in the last
@@ -61,6 +64,105 @@ pub struct Entity {
     /// The bot has sent it an `attack`: its death counts as a kill.
     #[serde(default)]
     pub struck: bool,
+    /// Its UUID, from `add_entity` (truth files name mobs by it).
+    #[serde(default)]
+    pub uuid: Option<[u8; 16]>,
+    /// Its velocity as the server last set it, blocks per tick (a fireball's heading).
+    #[serde(default)]
+    pub velocity: Option<[f64; 3]>,
+    /// The newest entity-event statuses with their server tick (`ENTITY_STATUSES_KEPT`).
+    #[serde(default)]
+    pub statuses: Vec<(u64, i8)>,
+    /// The newest damage events on it: tick, damage type, and whether the bot dealt it
+    /// (`ENTITY_HURTS_KEPT`). A real server sends no hurt animation for a mob, so this is how
+    /// a swing is known to have landed (clojurecraft hear.clj).
+    #[serde(default)]
+    pub hurts: Vec<Hurt>,
+    /// Where its head points, degrees (`rotate_head`): an enderman facing the bot.
+    #[serde(default)]
+    pub head_yaw: Option<f32>,
+    /// What it holds and wears, by equipment slot (0 main hand, 1 off hand, 2 to 5 feet to
+    /// head, 6 body, 7 saddle): a wither skeleton's sword, a piglin's crossbow.
+    #[serde(default)]
+    pub equipment: BTreeMap<u8, ItemKind>,
+    /// Its last main-hand swing (`animate` 0), server tick: a strike coming.
+    #[serde(default)]
+    pub swung_at: Option<u64>,
+    /// A fireball's acceleration power (`projectile_power`).
+    #[serde(default)]
+    pub power: Option<f64>,
+    /// What rides it (`set_passengers`).
+    #[serde(default)]
+    pub passengers: Vec<i32>,
+    /// Effects on it by name, with their amplifier.
+    #[serde(default)]
+    pub effects: BTreeMap<String, i32>,
+    /// Its attributes as the server sent them (base plus add-value modifiers).
+    #[serde(default)]
+    pub attributes: BTreeMap<String, f64>,
+}
+
+/// Sounds and level events kept (the newest): a minute of a fight is well under this.
+pub const SOUNDS_KEPT: usize = 64;
+
+/// A sound the bot heard: by name, where (or on which entity), and when.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct Heard {
+    pub at_tick: u64,
+    /// `entity.blaze.shoot`, from the generated sound registry.
+    pub name: String,
+    pub pos: Option<[f64; 3]>,
+    pub entity: Option<i32>,
+    pub volume: f32,
+}
+
+/// A level event: its id, its constant's name from the game, and where.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct LevelEventSeen {
+    pub at_tick: u64,
+    pub id: i32,
+    pub name: Option<String>,
+    pub pos: (i32, i32, i32),
+    pub data: i32,
+}
+
+/// A registry entry's name by id, or `id:<n>` when the table lacks it.
+fn registry_name(table: &[&str], id: i32) -> String {
+    usize::try_from(id)
+        .ok()
+        .and_then(|i| table.get(i))
+        .map_or_else(|| format!("id:{id}"), |n| (*n).to_owned())
+}
+
+/// A line of chat or screen text and where it came from.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct ChatLine {
+    pub at_tick: u64,
+    /// `system`, `action_bar`, `title` or `subtitle`.
+    pub via: String,
+    pub text: String,
+}
+
+/// A blast: where, when, and the knockback it gave the bot.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct Blast {
+    pub at_tick: u64,
+    pub center: [f64; 3],
+    pub knockback: Option<[f64; 3]>,
+}
+
+/// Entity-event statuses kept per entity.
+pub const ENTITY_STATUSES_KEPT: usize = 4;
+/// Damage events kept per entity.
+pub const ENTITY_HURTS_KEPT: usize = 4;
+
+/// A damage event on another entity.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct Hurt {
+    pub at_tick: u64,
+    pub damage_type: String,
+    /// The bot was the cause (its swing or its arrow).
+    pub by_bot: bool,
 }
 
 impl Entity {
@@ -78,6 +180,25 @@ impl Entity {
             Some(MetaValue::Item(s)) => s.stack().map(|(i, n)| (ItemKind::from_id(i), n)),
             Some(_) | None => None,
         }
+    }
+
+    /// A blaze's charge flag: its own metadata index 16, bit 0, set 1.4 to 3.5 s before its
+    /// fireballs spawn, with no direction in it (clojurecraft dodge.clj, measured on 26.1.2;
+    /// docs/problems/blaze.md). False for anything else or when not yet sent.
+    pub fn blaze_charged(&self) -> bool {
+        self.kind == EntityKind::Blaze
+            && matches!(self.metadata.get(&16), Some(MetaValue::Byte(b)) if b & 1 == 1)
+    }
+
+    /// Whether its head points at `target` within `degrees` on the plane (`None` before any
+    /// `rotate_head`): an enderman staring, a skeleton turned to aim. Yaw 0 faces +z, 90 faces
+    /// -x, as the game counts it; clojurecraft takes 12 degrees as a stare.
+    pub fn faces(&self, target: [f64; 3], degrees: f64) -> Option<bool> {
+        let yaw = f64::from(self.head_yaw?);
+        let (dx, dz) = (target[0] - self.pos[0], target[2] - self.pos[2]);
+        let toward = (-dx).atan2(dz).to_degrees();
+        let diff = (yaw - toward).rem_euclid(360.0);
+        Some(diff.min(360.0 - diff) <= degrees)
     }
 
     /// The shared flags bitfield, metadata index 0 (on fire, sneaking, ...).
@@ -101,6 +222,13 @@ pub struct Inventory {
     pub carried: Option<(ItemKind, i32)>,
     /// Slots whose components could not all be read (the rest of that frame was lost).
     pub truncated: u64,
+    /// The same, by the component that stopped the read (what to read next, issue 16e).
+    #[serde(default)]
+    pub truncated_by: BTreeMap<String, u64>,
+    /// The wear of each slot whose stack carries damage or a max damage (issue 16e: a pickaxe
+    /// wearing out was invisible, blaze wall 7). A slot not here is unworn.
+    #[serde(default)]
+    pub wear: BTreeMap<i16, Wear>,
 }
 
 impl Inventory {
@@ -112,6 +240,10 @@ impl Inventory {
     fn put(&mut self, slot: i16, s: Slot) {
         if s.truncated() {
             self.truncated += 1;
+            *self
+                .truncated_by
+                .entry(s.stopped_at().unwrap_or("unknown").to_owned())
+                .or_default() += 1;
         }
         match Self::stack(s) {
             Some(stack) => {
@@ -121,6 +253,34 @@ impl Inventory {
                 self.slots.remove(&slot);
             }
         }
+        match s
+            .wear()
+            .filter(|w| w.damage.is_some() || w.max_damage.is_some())
+        {
+            Some(w) if self.slots.contains_key(&slot) => {
+                self.wear.insert(slot, w);
+            }
+            Some(_) | None => {
+                self.wear.remove(&slot);
+            }
+        }
+    }
+
+    /// Every slot emptied (a whole-window refresh).
+    fn clear(&mut self) {
+        self.slots.clear();
+        self.wear.clear();
+    }
+
+    /// Uses left on the stack in `slot`: its max damage (the component, else the item's
+    /// default) less its damage. `None` for an empty slot or an item that does not wear.
+    pub fn uses_left(&self, slot: i16) -> Option<i32> {
+        let (item, _) = self.slots.get(&slot)?;
+        let wear = self.wear.get(&slot).copied().unwrap_or_default();
+        let max = wear
+            .max_damage
+            .unwrap_or_else(|| data::generated::item_props::max_damage(*item));
+        (max > 0).then(|| max - wear.damage.unwrap_or(0))
     }
 
     /// The menu slot of a player-inventory index: 0-8 hotbar → 36-44, 9-35 main stay, 36-39
@@ -261,6 +421,9 @@ pub enum Act {
     /// Respawn after a death (`client_command` 0): the death is cleared and the body waits for
     /// the server's next position (the marathon keeps playing through deaths).
     Respawn,
+    /// Start using the off-hand item (`use_item` with hand 1), aimed by the body's look: a
+    /// shield is raised and stays up until `ReleaseUse` (docs/problems/shield.md).
+    UseOffHand,
 }
 
 /// A window the server opened (`open_screen`, issue 11a): its id, menu type (an index into
@@ -372,6 +535,19 @@ pub struct Player {
     /// Items finished using (an eat: entity event 9 for the bot), counted.
     #[serde(default)]
     pub uses_finished: u64,
+    /// Effects on the bot by name: amplifier and the server tick it ends (issue 16e).
+    #[serde(default)]
+    pub effects: BTreeMap<String, (i32, u64)>,
+    /// Its attributes as the server holds them (`armor`, `max_health`): base plus the
+    /// add-value modifiers.
+    #[serde(default)]
+    pub attributes: BTreeMap<String, f64>,
+    /// The server thinks it is in a fight (`player_combat_enter` until `_end`).
+    #[serde(default)]
+    pub in_combat: bool,
+    /// Experience: level and total points.
+    #[serde(default)]
+    pub experience: Option<(i32, i32)>,
 }
 
 /// The world value.
@@ -394,6 +570,9 @@ pub struct World {
     pub entities: BTreeMap<i32, Entity>,
     /// Moves and data for ids the world does not hold: counted, never invented.
     pub unknown_entity_updates: u64,
+    /// Entity-data reads cut short, by the serializer they stopped at (issue 16e).
+    #[serde(default)]
+    pub metadata_unread: BTreeMap<String, u64>,
     /// Window 0, the player's own inventory.
     pub inventory: Inventory,
     /// Sightings of watched blocks seen with an exposed face, all dimensions, never retracted.
@@ -412,9 +591,58 @@ pub struct World {
     pub sent_pos: Option<[f64; 3]>,
     pub sent_look: Option<(f32, f32)>,
     pub sent_tick: u64,
+    /// The keys last reported to the server (`C2s::PlayerInput`'s bits): a new report goes out
+    /// only when they change, as the client's `lastSentInput` does.
+    #[serde(default)]
+    pub sent_input: u8,
     /// Hits on the bot in the last `HITS_KEPT_TICKS` server ticks, oldest first.
     #[serde(default)]
     pub hits: Vec<Hit>,
+    /// Sounds heard, newest last (`SOUNDS_KEPT`): what the bot hears out of sight (issue 16e).
+    #[serde(default)]
+    pub sounds: Vec<Heard>,
+    /// Level events, newest last (`SOUNDS_KEPT`): 1018 a blaze shooting, 1015 a ghast's warning.
+    #[serde(default)]
+    pub level_events: Vec<LevelEventSeen>,
+    /// Blasts heard and felt, newest last (`SOUNDS_KEPT`).
+    #[serde(default)]
+    pub explosions: Vec<Blast>,
+    /// Each spawner's mob from its block-entity data (`blaze`): which spawner is the blaze one,
+    /// with no blaze in sight (blaze wall 4 took a dungeon spawner for it).
+    #[serde(default)]
+    pub spawner_mobs: BTreeMap<(i32, i32, i32), String>,
+    /// Blocks cracking under another's digging, by position: (breaker, stage, server tick).
+    #[serde(default)]
+    pub cracks: BTreeMap<(i32, i32, i32), (i32, i8, u64)>,
+    /// The bot's last hurt flash: server tick and the yaw the blow came from.
+    #[serde(default)]
+    pub hurt_from: Option<(u64, f32)>,
+    /// Item cooldowns by group (`ender_pearl`): the server tick each ends.
+    #[serde(default)]
+    pub cooldowns: BTreeMap<String, u64>,
+    /// Game events, newest last (`SOUNDS_KEPT`): server tick, id, its name, parameter.
+    #[serde(default)]
+    pub game_events: Vec<(u64, u8, Option<String>, f32)>,
+    /// The game said the run is won (`win_game`, after the dragon).
+    #[serde(default)]
+    pub won: bool,
+    /// Chat and the screen's text, newest last (`SOUNDS_KEPT`).
+    #[serde(default)]
+    pub chat: Vec<ChatLine>,
+    /// Boss bars by uuid: name and health 0 to 1 (the dragon's, issue 20).
+    #[serde(default)]
+    pub bosses: BTreeMap<[u8; 16], (String, f32)>,
+    /// The chunk the server centres the view on, the view radius, and the simulation distance
+    /// (mobs beyond it do not move: issue 17's frozen endermen).
+    #[serde(default)]
+    pub chunk_center: Option<(i32, i32)>,
+    #[serde(default)]
+    pub view_radius: Option<i32>,
+    #[serde(default)]
+    pub simulation_distance: Option<i32>,
+    /// Chunks whose biomes the server changed since the run began.
+    #[serde(default)]
+    pub biome_updates: u64,
     /// The server's account of the bot's death (`player_combat_kill`); the run ends there.
     #[serde(default)]
     pub death: Option<Death>,
@@ -454,6 +682,22 @@ pub struct World {
     /// other deaths in view (another player's kill, a player in lava) are not the bot's.
     #[serde(default)]
     pub kills: u64,
+    /// The level's game time from the newest `set_time`.
+    #[serde(default)]
+    pub game_time: Option<i64>,
+    /// The overworld clock from the newest `set_time` that carried it: its total ticks, the
+    /// game time it came with and its rate. `day_time` runs it on from there.
+    #[serde(default)]
+    pub day_clock: Option<DayClock>,
+}
+
+/// The overworld clock as last told (`protocol::OVERWORLD_CLOCK`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct DayClock {
+    pub total_ticks: i64,
+    pub game_time: i64,
+    /// Clock ticks per game tick: 1, or 0 with the day cycle stopped.
+    pub rate: f32,
 }
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
@@ -462,6 +706,24 @@ const STATUS_ONLY_EVERY: u64 = 20;
 impl World {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The time of day, 0 to 23,999 (`time`'s helpers read it): the overworld clock as last
+    /// told, run on by the game ticks since at its rate, so a `set_time` that leaves the clock
+    /// out still moves it. `None` before any `set_time` with the overworld clock.
+    pub fn day_time(&self) -> Option<i64> {
+        let c = self.day_clock?;
+        let since = self
+            .game_time
+            .unwrap_or(c.game_time)
+            .saturating_sub(c.game_time);
+        let ran = (since as f64 * f64::from(c.rate)).floor() as i64;
+        Some(time::of_day(c.total_ticks.saturating_add(ran)))
+    }
+
+    /// Night now (`time::is_night`); `None` while the time is unknown.
+    pub fn is_night(&self) -> Option<bool> {
+        self.day_time().map(time::is_night)
     }
 
     /// Fold one event; return what the shell must do, in order.
@@ -506,6 +768,24 @@ impl World {
         }
     }
 
+    /// What the block at a cell does to a body moving on it, for physics: its speed and jump
+    /// factors from the generated table (soul sand 0.4, honey 0.4 and 0.5), and whether it is
+    /// water or a bubble column. An unloaded block is plain.
+    pub fn surface(&self, x: i32, y: i32, z: i32) -> Surface {
+        let Some(block) = self
+            .state_at(BlockPos::new(x, y, z))
+            .and_then(data::block_of_state)
+        else {
+            return Surface::PLAIN;
+        };
+        let m = movement(block);
+        Surface {
+            speed_factor: f64::from(m.speed_factor),
+            jump_factor: f64::from(m.jump_factor),
+            wet: matches!(block, BlockKind::Water | BlockKind::BubbleColumn),
+        }
+    }
+
     /// The fluid at a block, for physics: water or lava and its level (the block state's
     /// `level` property; unloaded is no fluid).
     pub fn fluid(&self, x: i32, y: i32, z: i32) -> Option<Fluid> {
@@ -520,12 +800,40 @@ impl World {
         Some(Fluid { kind, level })
     }
 
-    /// One tick of the body: physics, then the movement packet vanilla would send.
+    /// The keys held, as the server is told them: forward, jump and shift from the controls.
+    /// The bot has no backward, strafe or sprint key (it walks; sprinting is never reported).
+    pub fn input_flags(controls: &Controls) -> u8 {
+        (if controls.forward { INPUT_FORWARD } else { 0 })
+            | (if controls.jump { INPUT_JUMP } else { 0 })
+            | (if controls.sneak { INPUT_SHIFT } else { 0 })
+    }
+
+    /// One tick of the body: the keys when they changed, physics, then the movement packet
+    /// vanilla would send.
     fn tick(&mut self) -> Vec<Effect> {
         self.ticks += 1;
         let Some(body) = self.body else {
             return Vec::new();
         };
+        let mut out = self.report_input();
+        out.extend(self.move_body(body));
+        out
+    }
+
+    /// The keys, when they differ from the last report: vanilla's `LocalPlayer.tick` sends
+    /// `player_input` after the body's tick and before its position whenever the pressed keys
+    /// are not the last ones sent. This is the only way a server learns the bot sneaks: its
+    /// shift key spares it on magma (`MagmaBlock.stepOn`) and gives it the crouching pose.
+    fn report_input(&mut self) -> Vec<Effect> {
+        let flags = Self::input_flags(&self.controls);
+        if flags == self.sent_input {
+            return Vec::new();
+        }
+        self.sent_input = flags;
+        vec![Effect::Send(C2s::PlayerInput { flags })]
+    }
+
+    fn move_body(&mut self, body: Body) -> Vec<Effect> {
         let at = BlockPos::containing(body.pos[0], body.pos[1], body.pos[2]).chunk();
         if !self.columns.contains_key(&at) {
             // No physics without the ground, but still the once-a-second status: the server
@@ -540,7 +848,8 @@ impl World {
         }
         let solid = |x, y, z| self.solid(x, y, z);
         let fluid = |x, y, z| self.fluid(x, y, z);
-        let moved = physics::step(&solid, &fluid, &body, &self.controls);
+        let surface = |x, y, z| self.surface(x, y, z);
+        let moved = physics::step_on(&solid, &fluid, &surface, &body, &self.controls);
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
         // Physics and the movement packets use the controls' yaw; the pitch is the controls' when
@@ -831,6 +1140,15 @@ impl World {
                     pitch: self.controls.pitch.unwrap_or(self.player.pitch),
                 })]
             }
+            Act::UseOffHand => {
+                self.sequence_sent += 1;
+                vec![Effect::Send(C2s::UseItem {
+                    hand: 1,
+                    sequence: self.sequence_sent,
+                    yaw: self.controls.yaw as f32,
+                    pitch: self.controls.pitch.unwrap_or(self.player.pitch),
+                })]
+            }
             Act::ReleaseUse => vec![Effect::Send(C2s::PlayerAction {
                 status: 5,
                 pos: (0, 0, 0),
@@ -895,21 +1213,56 @@ impl World {
         }
     }
 
+    /// A line of chat or screen text, kept with the newest `SOUNDS_KEPT`.
+    fn say(&mut self, via: &str, text: &str) {
+        self.chat.push(ChatLine {
+            at_tick: self.session.server_ticks,
+            via: via.to_owned(),
+            text: text.to_owned(),
+        });
+        let over = self.chat.len().saturating_sub(SOUNDS_KEPT);
+        self.chat.drain(..over);
+    }
+
+    /// A sound heard, kept with the newest `SOUNDS_KEPT`.
+    fn hear(&mut self, h: Heard) {
+        self.sounds.push(h);
+        let over = self.sounds.len().saturating_sub(SOUNDS_KEPT);
+        self.sounds.drain(..over);
+    }
+
+    /// Counts an entity-data read that stopped early, by its serializer.
+    fn count_unread(&mut self, entries: &[(u8, MetaValue)]) {
+        if let Some(s) = protocol::metadata::unread(entries) {
+            *self.metadata_unread.entry(s.to_owned()).or_default() += 1;
+        }
+    }
+
     fn fold(&mut self, p: &S2c) {
         match p {
             S2c::Login {
                 entity_id,
                 dimension_type,
                 dimension,
+                view_distance,
+                simulation_distance,
                 ..
             } => {
                 self.player.entity_id = Some(*entity_id);
                 self.enter(*dimension_type, dimension);
+                self.simulation_distance = Some(*simulation_distance);
+                self.view_radius = Some(*view_distance);
             }
             S2c::Respawn {
                 dimension_type,
                 dimension,
-            } => self.enter(*dimension_type, dimension),
+            } => {
+                self.enter(*dimension_type, dimension);
+                // A respawn makes the client a new player whose last sent keys are none
+                // (`LocalPlayer`'s `lastSentInput` starts empty), and after a death the server's
+                // new player holds no shift key: keys still held are reported again.
+                self.sent_input = 0;
+            }
             S2c::LevelChunkWithLight { x, z, column } => {
                 let at = ChunkPos { x: *x, z: *z };
                 self.overlay.remove(&at);
@@ -934,7 +1287,12 @@ impl World {
                 }
             }
             S2c::AddEntity {
-                id, kind, x, y, z, ..
+                id,
+                uuid,
+                kind,
+                x,
+                y,
+                z,
             } => {
                 if Some(*id) != self.player.entity_id && [x, y, z].iter().all(|v| v.is_finite()) {
                     let tick = self.session.server_ticks;
@@ -948,6 +1306,17 @@ impl World {
                             last_seen: tick,
                             dead: false,
                             struck: false,
+                            uuid: Some(*uuid),
+                            velocity: None,
+                            statuses: Vec::new(),
+                            hurts: Vec::new(),
+                            head_yaw: None,
+                            equipment: BTreeMap::new(),
+                            swung_at: None,
+                            power: None,
+                            passengers: Vec::new(),
+                            effects: BTreeMap::new(),
+                            attributes: BTreeMap::new(),
                         },
                     );
                 }
@@ -982,6 +1351,7 @@ impl World {
                 self.place_entity(*id, [*x, *y, *z], *flags)
             }
             S2c::SetEntityData { id, entries } if Some(*id) == self.player.entity_id => {
+                self.count_unread(entries);
                 for (index, value) in entries {
                     match (index, value) {
                         (1, MetaValue::Int(air)) => self.player.air = Some(*air),
@@ -991,11 +1361,16 @@ impl World {
                 }
             }
             S2c::SetEntityData { id, entries } => {
+                self.count_unread(entries);
                 let tick = self.session.server_ticks;
                 match self.entities.get_mut(id) {
                     Some(e) => {
+                        // An `Unread` entry marks where the read stopped; the value it would
+                        // replace is kept rather than lost.
                         for (index, value) in entries {
-                            e.metadata.insert(*index, value.clone());
+                            if !matches!(value, MetaValue::Unread(_)) {
+                                e.metadata.insert(*index, value.clone());
+                            }
                         }
                         e.last_seen = tick;
                     }
@@ -1030,7 +1405,7 @@ impl World {
                 } else if *window == 0 {
                     self.window_moved(0, *state_id);
                     self.inventory.state_id = *state_id;
-                    self.inventory.slots.clear();
+                    self.inventory.clear();
                     for (i, s) in slots.iter().enumerate() {
                         if let Ok(i) = i16::try_from(i) {
                             self.inventory.put(i, *s);
@@ -1143,9 +1518,20 @@ impl World {
                     && velocity.iter().all(|v| v.is_finite())
                 {
                     b.vel = *velocity;
+                } else if let Some(e) = self.entities.get_mut(id)
+                    && velocity.iter().all(|v| v.is_finite())
+                {
+                    // Any other entity's velocity is kept: a fireball's heading (issue 16e).
+                    e.velocity = Some(*velocity);
                 }
             }
             S2c::EntityEvent { id, status } => {
+                let tick = self.session.server_ticks;
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.statuses.push((tick, *status));
+                    let over = e.statuses.len().saturating_sub(ENTITY_STATUSES_KEPT);
+                    e.statuses.drain(..over);
+                }
                 if Some(*id) == self.player.entity_id {
                     if *status == 9 {
                         self.player.uses_finished += 1;
@@ -1206,6 +1592,247 @@ impl World {
                     };
                     self.hits.retain(|h| h.at_tick + HITS_KEPT_TICKS >= tick);
                     self.hits.push(hit);
+                } else {
+                    // Damage on another entity was dropped before issue 16e: it is how a swing
+                    // is known to land, and what wears a blaze down.
+                    let tick = self.session.server_ticks;
+                    let by_bot = self.player.entity_id.is_some()
+                        && (*cause == self.player.entity_id || *direct == self.player.entity_id);
+                    let damage_type = usize::try_from(*source_type)
+                        .ok()
+                        .and_then(|i| data::generated::registries::DAMAGE_TYPE.get(i))
+                        .map_or_else(|| format!("unknown:{source_type}"), |n| (*n).to_owned());
+                    if let Some(e) = self.entities.get_mut(entity_id) {
+                        e.hurts.push(Hurt {
+                            at_tick: tick,
+                            damage_type,
+                            by_bot,
+                        });
+                        let over = e.hurts.len().saturating_sub(ENTITY_HURTS_KEPT);
+                        e.hurts.drain(..over);
+                    }
+                }
+            }
+            S2c::Sound {
+                sound, pos, volume, ..
+            } => {
+                let tick = self.session.server_ticks;
+                self.hear(Heard {
+                    at_tick: tick,
+                    name: sound.name(),
+                    pos: Some(*pos),
+                    entity: None,
+                    volume: *volume,
+                });
+            }
+            S2c::SoundEntity {
+                sound,
+                entity,
+                volume,
+                ..
+            } => {
+                let tick = self.session.server_ticks;
+                let pos = self.entities.get(entity).map(|e| e.pos);
+                self.hear(Heard {
+                    at_tick: tick,
+                    name: sound.name(),
+                    pos,
+                    entity: Some(*entity),
+                    volume: *volume,
+                });
+            }
+            S2c::LevelEvent {
+                event, pos, data, ..
+            } => {
+                let tick = self.session.server_ticks;
+                self.level_events.push(LevelEventSeen {
+                    at_tick: tick,
+                    id: *event,
+                    name: data::generated::events::level_event_name(*event).map(str::to_owned),
+                    pos: *pos,
+                    data: *data,
+                });
+                let over = self.level_events.len().saturating_sub(SOUNDS_KEPT);
+                self.level_events.drain(..over);
+            }
+            // A sound stopped: nothing the bot keeps is playing (sounds are instants here).
+            S2c::StopSound { .. } => {}
+            S2c::RotateHead { id, yaw } => {
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.head_yaw = Some(*yaw);
+                }
+            }
+            S2c::SetEquipment { id, items } => {
+                if let Some(e) = self.entities.get_mut(id) {
+                    for (slot, item) in items {
+                        match item.stack() {
+                            Some((i, n)) if n > 0 => {
+                                e.equipment.insert(*slot, ItemKind::from_id(i));
+                            }
+                            Some(_) | None => {
+                                e.equipment.remove(slot);
+                            }
+                        }
+                    }
+                }
+            }
+            S2c::Animate { id, action } => {
+                let tick = self.session.server_ticks;
+                if *action == 0
+                    && let Some(e) = self.entities.get_mut(id)
+                {
+                    e.swung_at = Some(tick);
+                }
+            }
+            S2c::HurtAnimation { id, yaw } => {
+                if Some(*id) == self.player.entity_id {
+                    self.hurt_from = Some((self.session.server_ticks, *yaw));
+                }
+            }
+            S2c::ProjectilePower { id, power } => {
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.power = Some(*power);
+                }
+            }
+            S2c::SetPassengers {
+                vehicle,
+                passengers,
+            } => {
+                if let Some(e) = self.entities.get_mut(vehicle) {
+                    e.passengers.clone_from(passengers);
+                }
+            }
+            S2c::Explode { center, knockback } => {
+                self.explosions.push(Blast {
+                    at_tick: self.session.server_ticks,
+                    center: *center,
+                    knockback: *knockback,
+                });
+                let over = self.explosions.len().saturating_sub(SOUNDS_KEPT);
+                self.explosions.drain(..over);
+            }
+            S2c::BlockEntityData { pos, spawns, .. } => {
+                if let Some(m) = spawns {
+                    self.spawner_mobs.insert(*pos, m.clone());
+                }
+            }
+            S2c::UpdateMobEffect {
+                id,
+                effect,
+                amplifier,
+                duration,
+            } => {
+                let name =
+                    registry_name(data::generated::registries::MOB_EFFECT.as_slice(), *effect);
+                if Some(*id) == self.player.entity_id {
+                    // A duration of -1 is infinite.
+                    let until = u64::try_from(*duration)
+                        .map_or(u64::MAX, |d| self.session.server_ticks.saturating_add(d));
+                    self.player.effects.insert(name, (*amplifier, until));
+                } else if let Some(e) = self.entities.get_mut(id) {
+                    e.effects.insert(name, *amplifier);
+                }
+            }
+            S2c::RemoveMobEffect { id, effect } => {
+                let name =
+                    registry_name(data::generated::registries::MOB_EFFECT.as_slice(), *effect);
+                if Some(*id) == self.player.entity_id {
+                    self.player.effects.remove(&name);
+                } else if let Some(e) = self.entities.get_mut(id) {
+                    e.effects.remove(&name);
+                }
+            }
+            S2c::UpdateAttributes { id, attributes } => {
+                let values = attributes.iter().map(|(a, base, add)| {
+                    (
+                        registry_name(data::generated::registries::ATTRIBUTE.as_slice(), *a),
+                        base + add,
+                    )
+                });
+                if Some(*id) == self.player.entity_id {
+                    self.player.attributes.extend(values);
+                } else if let Some(e) = self.entities.get_mut(id) {
+                    e.attributes.extend(values);
+                }
+            }
+            S2c::PlayerCombatEnter => self.player.in_combat = true,
+            S2c::PlayerCombatEnd { .. } => self.player.in_combat = false,
+            S2c::SetExperience { level, total, .. } => {
+                self.player.experience = Some((*level, *total));
+            }
+            S2c::Cooldown { group, ticks } => {
+                let group = group.trim_start_matches("minecraft:").to_owned();
+                if *ticks > 0 {
+                    let until = self.session.server_ticks + u64::try_from(*ticks).unwrap_or(0);
+                    self.cooldowns.insert(group, until);
+                } else {
+                    self.cooldowns.remove(&group);
+                }
+            }
+            S2c::GameEvent { event, param } => {
+                let name = data::generated::events::game_event_name(i32::from(*event));
+                if name == Some("win_game") {
+                    self.won = true;
+                }
+                self.game_events.push((
+                    self.session.server_ticks,
+                    *event,
+                    name.map(str::to_owned),
+                    *param,
+                ));
+                let over = self.game_events.len().saturating_sub(SOUNDS_KEPT);
+                self.game_events.drain(..over);
+            }
+            S2c::SystemChat { text, overlay } => {
+                let via = if *overlay { "action_bar" } else { "system" };
+                self.say(via, text);
+            }
+            S2c::ActionBar { text } => self.say("action_bar", text),
+            S2c::Title { text } => self.say("title", text),
+            S2c::Subtitle { text } => self.say("subtitle", text),
+            S2c::BossEvent { uuid, op } => match op {
+                protocol::BossOp::Add { name, progress } => {
+                    self.bosses.insert(*uuid, (name.clone(), *progress));
+                }
+                protocol::BossOp::Remove => {
+                    self.bosses.remove(uuid);
+                }
+                protocol::BossOp::Progress(p) => {
+                    if let Some(b) = self.bosses.get_mut(uuid) {
+                        b.1 = *p;
+                    }
+                }
+                protocol::BossOp::Name(n) => {
+                    if let Some(b) = self.bosses.get_mut(uuid) {
+                        b.0.clone_from(n);
+                    }
+                }
+                protocol::BossOp::Style => {}
+            },
+            S2c::ChunksBiomes { chunks } => self.biome_updates += chunks.len() as u64,
+            S2c::SetChunkCacheCenter { x, z } => self.chunk_center = Some((*x, *z)),
+            S2c::SetChunkCacheRadius { radius } => self.view_radius = Some(*radius),
+            S2c::SetSimulationDistance { distance } => self.simulation_distance = Some(*distance),
+            S2c::BlockDestruction {
+                breaker,
+                pos,
+                stage,
+            } => {
+                if (0..=9).contains(stage) {
+                    self.cracks
+                        .insert(*pos, (*breaker, *stage, self.session.server_ticks));
+                } else {
+                    self.cracks.remove(pos);
+                }
+            }
+            S2c::SetTime { game_time, clocks } => {
+                self.game_time = Some(*game_time);
+                if let Some(c) = clocks.iter().find(|c| c.clock == protocol::OVERWORLD_CLOCK) {
+                    self.day_clock = Some(DayClock {
+                        total_ticks: c.total_ticks,
+                        game_time: *game_time,
+                        rate: c.rate,
+                    });
                 }
             }
             S2c::SetHealth {
@@ -1227,7 +1854,6 @@ impl World {
             | S2c::ConfigDisconnect { .. }
             | S2c::KeepAlive { .. }
             | S2c::Ping { .. }
-            | S2c::SetTime
             | S2c::ChunkBatchFinished { .. }
             | S2c::StartConfiguration
             | S2c::Disconnect { .. }
@@ -1262,5 +1888,304 @@ impl World {
     pub fn block_under_player(&self) -> Option<BlockKind> {
         let [x, y, z] = self.player.pos?;
         self.block_at(BlockPos::containing(x, y - 0.01, z))
+    }
+}
+
+#[cfg(test)]
+mod blaze_charge {
+    use super::*;
+
+    fn entity(kind: EntityKind, flag: Option<u8>) -> Entity {
+        Entity {
+            kind,
+            pos: [0.0; 3],
+            metadata: flag
+                .map(|b| (16u8, MetaValue::Byte(b)))
+                .into_iter()
+                .collect(),
+            first_seen: 0,
+            last_seen: 0,
+            dead: false,
+            struck: false,
+            uuid: None,
+            velocity: None,
+            statuses: Vec::new(),
+            hurts: Vec::new(),
+            head_yaw: None,
+            equipment: BTreeMap::new(),
+            swung_at: None,
+            power: None,
+            passengers: Vec::new(),
+            effects: BTreeMap::new(),
+            attributes: BTreeMap::new(),
+        }
+    }
+
+    /// Issue 16: a blaze's charge flag is bit 0 of its metadata index 16; nothing else charges.
+    #[test]
+    fn the_charge_flag_is_bit_0_of_index_16_on_a_blaze() {
+        assert!(entity(EntityKind::Blaze, Some(1)).blaze_charged());
+        assert!(!entity(EntityKind::Blaze, Some(0)).blaze_charged());
+        assert!(!entity(EntityKind::Blaze, None).blaze_charged());
+        assert!(!entity(EntityKind::Zombie, Some(1)).blaze_charged());
+    }
+}
+
+#[cfg(test)]
+mod wear_tests {
+    use super::*;
+    use protocol::slot::Wear;
+
+    fn set(w: &mut World, slot: i16, s: Slot) {
+        w.inventory.put(slot, s);
+    }
+
+    /// Blaze wall 7: the uses left on a worn stone pickaxe come from its damage component, and
+    /// an unworn one from the item's default; an item that does not wear has none.
+    #[test]
+    fn uses_left_reads_the_wear_and_the_default() {
+        let mut w = World::new();
+        let pick = ItemKind::StonePickaxe;
+        set(
+            &mut w,
+            36,
+            Slot::Item {
+                item: pick.id(),
+                count: 1,
+                wear: Wear {
+                    damage: Some(120),
+                    max_damage: None,
+                },
+            },
+        );
+        assert_eq!(w.inventory.uses_left(36), Some(11));
+        set(&mut w, 37, Slot::item(pick.id(), 1));
+        assert_eq!(w.inventory.uses_left(37), Some(131));
+        set(&mut w, 38, Slot::item(ItemKind::Cobblestone.id(), 64));
+        assert_eq!(w.inventory.uses_left(38), None);
+        // The slot emptied, its wear goes with it.
+        set(&mut w, 36, Slot::Empty);
+        assert!(!w.inventory.wear.contains_key(&36));
+        assert_eq!(w.inventory.uses_left(36), None);
+    }
+}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::*;
+
+    /// Issue 16e: a mob keeps its uuid and velocity, and damage on it is kept with whether the
+    /// bot dealt it (before, damage on anything but the bot was dropped).
+    #[test]
+    fn a_mob_keeps_its_uuid_velocity_and_the_damage_on_it() {
+        let mut w = World::new();
+        w.player.entity_id = Some(1);
+        w.fold(&S2c::AddEntity {
+            id: 7,
+            uuid: [9; 16],
+            kind: EntityKind::Blaze.id(),
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+        });
+        w.fold(&S2c::SetEntityMotion {
+            id: 7,
+            velocity: [0.1, 0.0, -0.2],
+        });
+        w.fold(&S2c::DamageEvent {
+            entity_id: 7,
+            source_type: 0,
+            cause: Some(1),
+            direct: Some(1),
+        });
+        w.fold(&S2c::EntityEvent { id: 7, status: 2 });
+        let e = &w.entities[&7];
+        assert_eq!(e.uuid, Some([9; 16]));
+        assert_eq!(e.velocity, Some([0.1, 0.0, -0.2]));
+        assert_eq!(e.hurts.len(), 1);
+        assert!(e.hurts[0].by_bot);
+        assert_eq!(e.statuses, vec![(0, 2)]);
+    }
+
+    /// An entity-data read that stopped early is counted by serializer, and the value it would
+    /// have replaced is kept.
+    #[test]
+    fn a_cut_short_entity_data_read_is_counted_and_keeps_the_old_value() {
+        let mut w = World::new();
+        w.fold(&S2c::AddEntity {
+            id: 7,
+            uuid: [0; 16],
+            kind: EntityKind::Blaze.id(),
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+        });
+        w.fold(&S2c::SetEntityData {
+            id: 7,
+            entries: vec![(9, MetaValue::Float(20.0))],
+        });
+        w.fold(&S2c::SetEntityData {
+            id: 7,
+            entries: vec![(9, MetaValue::Unread("PARTICLE".to_owned()))],
+        });
+        assert_eq!(w.entities[&7].health(), Some(20.0));
+        assert_eq!(w.metadata_unread.get("PARTICLE"), Some(&1));
+    }
+}
+
+#[cfg(test)]
+mod hearing_tests {
+    use super::*;
+    use protocol::SoundRef;
+
+    /// Issue 16e: a blaze's shot is heard as a level event named from the game's table, and a
+    /// sound on an entity is placed where the entity stands.
+    #[test]
+    fn the_world_keeps_what_it_hears_by_name() {
+        let mut w = World::new();
+        w.fold(&S2c::LevelEvent {
+            event: 1018,
+            pos: (1, 70, 2),
+            data: 0,
+            global: false,
+        });
+        assert_eq!(
+            w.level_events.last().and_then(|e| e.name.as_deref()),
+            Some("sound_blaze_fireball")
+        );
+        w.fold(&S2c::AddEntity {
+            id: 5,
+            uuid: [0; 16],
+            kind: EntityKind::Enderman.id(),
+            x: 3.0,
+            y: 64.0,
+            z: 4.0,
+        });
+        w.fold(&S2c::SoundEntity {
+            sound: SoundRef::Inline("entity.enderman.stare".to_owned()),
+            source: 5,
+            entity: 5,
+            volume: 2.5,
+            pitch: 1.0,
+        });
+        let h = w.sounds.last().unwrap();
+        assert_eq!(h.name, "entity.enderman.stare");
+        assert_eq!(h.pos, Some([3.0, 64.0, 4.0]));
+        for i in 0..(SOUNDS_KEPT + 5) {
+            w.fold(&S2c::Sound {
+                sound: SoundRef::Registry(u32::try_from(i).unwrap_or(0)),
+                source: 0,
+                pos: [0.0; 3],
+                volume: 1.0,
+                pitch: 1.0,
+            });
+        }
+        assert_eq!(w.sounds.len(), SOUNDS_KEPT);
+    }
+}
+
+#[cfg(test)]
+mod sight_tests {
+    use super::*;
+
+    fn add(w: &mut World, id: i32, kind: EntityKind, pos: [f64; 3]) {
+        w.fold(&S2c::AddEntity {
+            id,
+            uuid: [0; 16],
+            kind: kind.id(),
+            x: pos[0],
+            y: pos[1],
+            z: pos[2],
+        });
+    }
+
+    /// Issue 16e: a spawner's mob comes from its block-entity data (blaze wall 4), a mob's gear
+    /// and gaze are kept, and `faces` reads the game's yaw (0 toward +z, 90 toward -x).
+    #[test]
+    fn spawner_mob_gear_and_gaze_are_kept() {
+        let mut w = World::new();
+        w.fold(&S2c::BlockEntityData {
+            pos: (10, 60, 10),
+            kind: 9,
+            spawns: Some("blaze".to_owned()),
+        });
+        assert_eq!(
+            w.spawner_mobs.get(&(10, 60, 10)).map(String::as_str),
+            Some("blaze")
+        );
+        add(&mut w, 4, EntityKind::WitherSkeleton, [0.0, 64.0, 0.0]);
+        w.fold(&S2c::SetEquipment {
+            id: 4,
+            items: vec![(0, protocol::slot::Slot::item(ItemKind::StoneSword.id(), 1))],
+        });
+        assert_eq!(
+            w.entities[&4].equipment.get(&0),
+            Some(&ItemKind::StoneSword)
+        );
+        w.fold(&S2c::RotateHead { id: 4, yaw: 90.0 });
+        let e = &w.entities[&4];
+        assert_eq!(e.faces([-5.0, 64.0, 0.0], 12.0), Some(true));
+        assert_eq!(e.faces([0.0, 64.0, 5.0], 12.0), Some(false));
+        w.fold(&S2c::RotateHead { id: 4, yaw: 0.0 });
+        assert_eq!(w.entities[&4].faces([0.0, 64.0, 5.0], 12.0), Some(true));
+    }
+}
+
+#[cfg(test)]
+mod body_tests {
+    use super::*;
+    use protocol::BossOp;
+
+    /// Issue 16e: effects, attributes, chat, the boss bar and the win reach the world by name.
+    #[test]
+    fn effects_chat_bosses_and_the_win_are_kept() {
+        let mut w = World::new();
+        w.player.entity_id = Some(1);
+        let wither = data::generated::registries::MOB_EFFECT
+            .iter()
+            .position(|n| *n == "wither")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap();
+        w.fold(&S2c::UpdateMobEffect {
+            id: 1,
+            effect: wither,
+            amplifier: 0,
+            duration: 200,
+        });
+        assert_eq!(w.player.effects.get("wither").map(|e| e.0), Some(0));
+        let armor = data::generated::registries::ATTRIBUTE
+            .iter()
+            .position(|n| *n == "armor")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap();
+        w.fold(&S2c::UpdateAttributes {
+            id: 1,
+            attributes: vec![(armor, 0.0, 15.0)],
+        });
+        assert_eq!(w.player.attributes.get("armor"), Some(&15.0));
+        w.fold(&S2c::SystemChat {
+            text: "rs-l01-b00 was slain by Blaze".to_owned(),
+            overlay: false,
+        });
+        assert_eq!(w.chat.last().map(|c| c.via.as_str()), Some("system"));
+        w.fold(&S2c::BossEvent {
+            uuid: [3; 16],
+            op: BossOp::Add {
+                name: "Ender Dragon".to_owned(),
+                progress: 1.0,
+            },
+        });
+        w.fold(&S2c::BossEvent {
+            uuid: [3; 16],
+            op: BossOp::Progress(0.5),
+        });
+        assert_eq!(w.bosses.get(&[3; 16]).map(|b| b.1), Some(0.5));
+        w.fold(&S2c::GameEvent {
+            event: 4,
+            param: 1.0,
+        });
+        assert!(w.won);
+        w.fold(&S2c::SetSimulationDistance { distance: 3 });
+        assert_eq!(w.simulation_distance, Some(3));
     }
 }

@@ -1,5 +1,7 @@
 # Problem: fourteen bots, one spawn, the same trees
 
+**Status: done** (issue 10, closed: 51 of 56 at 26d38a9). The story continues in [`iron-kit.md`](iron-kit.md) (issues 11 and 12 left no problem file).
+
 Issue 10's done-condition: from the spawn start, 90% of real bots hold a crafting table within 5
 game minutes (`race.yml`, 4 lanes × 14 bots, cap 6,000 server ticks, `goal=table`).
 

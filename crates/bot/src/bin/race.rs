@@ -7,14 +7,18 @@
 //! RUSTSTEVE_RCON_PASSWORD=... cargo run -p bot --bin race -- --start spawn --bots 14 --lane 0 \
 //!     --out target/race/lane-0 [--config config/race.toml] [--starts config/starts.toml] \
 //!     [--host 127.0.0.1] [--port 25565] [--rcon-port 25575] [--run local-<ms>] \
-//!     [--cap TICKS] [--wall-limit SECONDS] [--walk square]
+//!     [--cap TICKS] [--wall-limit SECONDS] [--walk square] [--snapshot-at TICKS]
 //! ```
 //!
 //! `--wall-limit` is the job's end, never a cap on behaviour: bots still running then end `Cut`
 //! and are not counted.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use results::config::{RaceConfig, Starts, start_commands};
@@ -36,6 +40,8 @@ struct Args {
     /// Keep each bot living after its aim is met, to the cap (issue 12e).
     hold_after_aim: bool,
     revive: bool,
+    /// Take a snapshot once a bot has played this many server ticks (`--snapshot-at`).
+    snapshot_at: Option<u64>,
     /// A snapshot's memory to seed every bot with (`--memory`).
     memory: Option<PathBuf>,
     /// The server's directory: its `world/` is what a snapshot copies.
@@ -60,6 +66,7 @@ fn args() -> Result<Args, String> {
         wall_limit: None,
         hold_after_aim: false,
         revive: false,
+        snapshot_at: None,
         memory: None,
         server_dir: PathBuf::from("target/server"),
         walk: None,
@@ -88,6 +95,7 @@ fn args() -> Result<Args, String> {
             "--wall-limit" => a.wall_limit = Some(num(&flag, &v)?),
             "--hold-after-aim" => a.hold_after_aim = v == "true",
             "--revive" => a.revive = v == "true",
+            "--snapshot-at" => a.snapshot_at = Some(num(&flag, &v)?),
             "--memory" => a.memory = Some(PathBuf::from(v)),
             "--server-dir" => a.server_dir = PathBuf::from(v),
             "--goal" => a.goal = Some(plan::Aim::parse(&v).ok_or(format!("--goal: no aim {v}"))?),
@@ -100,6 +108,15 @@ fn args() -> Result<Args, String> {
     Ok(a)
 }
 
+/// The race a snapshot comes from: its run, its lane, and whether it is a development race
+/// (`bot::devstart`).
+#[derive(Clone)]
+struct From {
+    run: String,
+    lane: u32,
+    dev: bool,
+}
+
 /// Copy the server's world (after `save-all flush`), the bot's memory and a `snap.toml` into
 /// `<out>/<stage>/`: the moment a bot first reached the stage, for later attempts to resume from.
 fn snapshot(
@@ -108,16 +125,26 @@ fn snapshot(
     out: &std::path::Path,
     rcon_addr: &str,
     password: &str,
-    run: &str,
-    lane: u32,
+    from: &From,
 ) -> Result<(), String> {
+    let From { run, lane, dev } = from;
+    let (lane, dev) = (*lane, *dev);
     if password.is_empty() {
         return Err("no RCON password: the world cannot be saved first".to_owned());
     }
     let mut r = rcon::Rcon::connect(rcon_addr, password)?;
     let reply = r.command("save-all flush")?;
     println!("snapshot {}: save-all flush -> {reply}", up.stage.name());
-    let dir = out.join(up.stage.name());
+    // A stage's snapshot is named by the stage; one on request or of a stuck spot by its kind.
+    let kind = match up.kind {
+        bot::SnapKind::Stage => None,
+        bot::SnapKind::At(t) => Some(("at", t)),
+        bot::SnapKind::Stuck => Some(("stuck", 0)),
+    };
+    let dir = out.join(match kind {
+        None => up.stage.name().to_owned(),
+        Some((k, t)) => bot::devstart::request_dir(k, t, &up.bot),
+    });
     let files = results::snapshot::copy_dir(server_world, &dir.join("world"))?;
     results::snapshot::write_memory(&dir.join("memory.rsw"), &up.world.memory)?;
     let snap = results::snapshot::Snap {
@@ -126,7 +153,7 @@ fn snapshot(
         uuid: results::snapshot::offline_uuid(&up.bot),
         server_ticks: up.world.session.server_ticks,
         commit: record::COMMIT.to_owned(),
-        run: run.to_owned(),
+        run: run.clone(),
         lane,
         pos: up.world.body.map_or([0.0; 3], |b| b.pos),
         dimension: up
@@ -134,12 +161,41 @@ fn snapshot(
             .dimension
             .as_ref()
             .map_or_else(String::new, |d| d.name.clone()),
+        items: up
+            .world
+            .inventory
+            .slots
+            .iter()
+            .filter(|(slot, _)| **slot >= 1)
+            .map(|(_, s)| *s)
+            .chain(up.world.inventory.carried)
+            .fold(std::collections::BTreeMap::new(), |mut m, (item, n)| {
+                let name = item
+                    .name()
+                    .map_or_else(|| format!("unknown:{}", item.id()), str::to_owned);
+                *m.entry(name).or_default() += i64::from(n);
+                m
+            }),
     };
     let text = toml::to_string(&snap).map_err(|e| e.to_string())?;
+    // A development race's snapshots are marked: never the frontier (bot::devstart).
+    let text = if dev {
+        bot::devstart::mark_dev(&text)
+    } else {
+        text
+    };
+    let text = match kind {
+        Some((k, _)) => bot::devstart::mark_kind(&text, k),
+        None => text,
+    };
     std::fs::write(dir.join("snap.toml"), text).map_err(|e| e.to_string())?;
     println!(
-        "snapshot {}: {} at {:?} in {}, {files} files",
-        snap.stage, snap.bot, snap.pos, snap.dimension
+        "snapshot {}{}: {} at {:?} in {}, {files} files",
+        snap.stage,
+        if dev { " (dev)" } else { "" },
+        snap.bot,
+        snap.pos,
+        snap.dimension
     );
     Ok(())
 }
@@ -190,30 +246,55 @@ fn race(a: &Args) -> Result<bool, String> {
     let snapper = {
         // Resuming: the snapshot's own stage is the floor, so the resumed bots' first tick (already
         // there) takes no second copy of it.
-        let resumed = a
+        let resumed_text = a
             .memory
             .as_ref()
             .and_then(|m| m.parent())
             .map(|d| d.join("snap.toml"))
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| toml::from_str::<results::snapshot::Snap>(&t).ok())
+            .and_then(|p| std::fs::read_to_string(p).ok());
+        let resumed = resumed_text
+            .as_deref()
+            .and_then(|t| toml::from_str::<results::snapshot::Snap>(t).ok())
             .and_then(|snap| world::stage::Stage::from_name(&snap.stage));
+        // A made-up start, or a resume of a snapshot that came from one: development only.
+        let dev = bot::devstart::race_is_dev(&start.name, resumed_text.as_deref());
+        if dev {
+            println!(
+                "race: a development start ({}): its snapshots are marked dev and can never be the frontier",
+                start.name
+            );
+        }
         let from = resumed.or_else(|| world::stage::Stage::from_name(&start.stage));
         let server_world = a.server_dir.join("world");
         let out = a.out.join("snapshots");
         let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
         let password = password.clone();
-        let (run, lane) = (a.run.clone(), a.lane);
+        let race = From {
+            run: a.run.clone(),
+            lane: a.lane,
+            dev,
+        };
         std::thread::spawn(move || {
             let mut best = from;
+            let mut at_taken = false;
             for up in rx {
-                if best.is_some_and(|b| up.stage <= b) {
-                    continue;
+                match up.kind {
+                    bot::SnapKind::Stage => {
+                        if best.is_some_and(|b| up.stage <= b) {
+                            continue;
+                        }
+                        best = Some(up.stage);
+                    }
+                    // One world for the lane: the first bot to play the ticks asked for.
+                    bot::SnapKind::At(_) => {
+                        if at_taken {
+                            continue;
+                        }
+                        at_taken = true;
+                    }
+                    bot::SnapKind::Stuck => {}
                 }
-                best = Some(up.stage);
-                if let Err(e) =
-                    snapshot(&up, &server_world, &out, &rcon_addr, &password, &run, lane)
-                {
+                if let Err(e) = snapshot(&up, &server_world, &out, &rcon_addr, &password, &race) {
                     eprintln!("snapshot {}: {e}", up.stage.name());
                 }
             }
@@ -231,6 +312,7 @@ fn race(a: &Args) -> Result<bool, String> {
         let commands = start_commands(&start, &name, i as usize);
         let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
         let password = password.clone();
+        let watch_password = password.clone();
         let apply: Option<bot::ApplyStart> = (!commands.is_empty()).then(|| {
             Box::new(move || {
                 let mut r = rcon::Rcon::connect(&rcon_addr, &password)?;
@@ -264,8 +346,16 @@ fn race(a: &Args) -> Result<bool, String> {
             revive: a.revive,
             memory: memory.clone(),
             on_stage: Some(tx.clone()),
+            no_progress_ticks: config.race.no_progress_ticks,
+            progress: Some(a.out.join(format!("progress-{name}.txt"))),
+            snapshot_at: a.snapshot_at,
         };
-        handles.push((name, std::thread::spawn(move || bot::run(opts))));
+        let watch = Watch::start(
+            format!("{}:{}", a.host, a.rcon_port),
+            watch_password,
+            name.clone(),
+        );
+        handles.push((name, std::thread::spawn(move || bot::run(opts)), watch));
     }
 
     drop(tx);
@@ -276,17 +366,19 @@ fn race(a: &Args) -> Result<bool, String> {
     let mut rows = Vec::new();
     let mut coverage = Coverage::default();
     let mut tick_rate = 0.0f64;
-    for (name, h) in handles {
+    for (name, h, watch) in handles {
         coverage.runs += 1;
         let outcome = match h.join() {
             Ok(Ok(o)) => o,
             Ok(Err(e)) => {
                 // Never connected: still a run, with a case saying so.
                 eprintln!("race: {name}: {e}");
+                watch.finish(&name, None);
                 rows.push(never_connected(a, &start.name, &name, &e, &mut coverage)?);
                 continue;
             }
             Err(_) => {
+                watch.finish(&name, None);
                 rows.push(never_connected(
                     a,
                     &start.name,
@@ -297,6 +389,9 @@ fn race(a: &Args) -> Result<bool, String> {
                 continue;
             }
         };
+        // Server truth (issue 16e): the last minutes' samples and the end's, and what the bot
+        // was blind to at the end.
+        let truth_samples = watch.finish(&name, outcome.world.player.pos);
         let w = &outcome.world;
         let ticks = w
             .session
@@ -307,6 +402,20 @@ fn race(a: &Args) -> Result<bool, String> {
         }
         coverage.events_dropped += outcome.stats.decode_errors;
         coverage.unknown_packets += outcome.stats.unknown.values().sum::<u64>();
+        for ((state, id), n) in &outcome.stats.unknown {
+            *coverage
+                .unknown_by_kind
+                .entry(protocol::packet_name(*state, *id))
+                .or_default() += n;
+        }
+        coverage.slots_truncated += w.inventory.truncated;
+        for (k, n) in &w.inventory.truncated_by {
+            *coverage.slots_truncated_by.entry(k.clone()).or_default() += n;
+        }
+        *coverage.metadata_truncated.get_or_insert(0) += w.metadata_unread.values().sum::<u64>();
+        for (k, n) in &w.metadata_unread {
+            *coverage.metadata_truncated_by.entry(k.clone()).or_default() += n;
+        }
         let recording = format!("{name}.rsr");
         if outcome.recorded {
             coverage.recordings += 1;
@@ -319,7 +428,7 @@ fn race(a: &Args) -> Result<bool, String> {
             .cloned()
             .collect();
         let (items_gained, items_lost) = outcome.items_changed();
-        let case = Case {
+        let mut case = Case {
             format_version: FORMAT_VERSION,
             run: a.run.clone(),
             bot: name.clone(),
@@ -335,8 +444,8 @@ fn race(a: &Args) -> Result<bool, String> {
             doing: outcome.doing.clone(),
             items_gained,
             items_lost,
-            swings_sent: 0,
-            swings_landed: 0,
+            swings_sent: outcome.plan.as_ref().map_or(0, |p| p.swings_sent),
+            swings_landed: outcome.plan.as_ref().map_or(0, |p| p.swings_landed),
             health: w.player.health,
             pos: w.player.pos,
             dimension: w.dimension.as_ref().map(|d| d.name.clone()),
@@ -354,7 +463,81 @@ fn race(a: &Args) -> Result<bool, String> {
                 failed: c.failed,
                 connects: c.connects,
             }),
+            story: None,
         };
+        // The ledger (issue 16e): every task with its reason and outcome, beside the case.
+        let ledger = results::Ledger {
+            format_version: FORMAT_VERSION,
+            run: a.run.clone(),
+            bot: name.clone(),
+            commit: record::COMMIT.to_owned(),
+            tasks: outcome.ledger.clone(),
+            dropped: 0,
+            facts: outcome.facts.clone(),
+        };
+        // The same as text, to read without running anything (`results ledger` prints it too).
+        if let Err(e) = std::fs::write(a.out.join(format!("{name}.ledger.txt")), ledger.render()) {
+            eprintln!("race: {name}: the ledger text: {e}");
+        }
+        match results::write(&a.out.join(format!("{name}.ledger.rsl")), &ledger) {
+            Ok(()) => {
+                *coverage.ledgers.get_or_insert(0) += 1;
+                *coverage.ledger_dropped.get_or_insert(0) += ledger.dropped;
+            }
+            Err(e) => eprintln!("race: {name}: the ledger: {e}"),
+        }
+        let senses = results::SensesFile {
+            format_version: FORMAT_VERSION,
+            run: a.run.clone(),
+            bot: name.clone(),
+            rows: outcome.senses.clone(),
+        };
+        if let Err(e) = std::fs::write(a.out.join(format!("{name}.senses.txt")), senses.render(10))
+        {
+            eprintln!("race: {name}: the senses text: {e}");
+        }
+        match results::write(&a.out.join(format!("{name}.senses.rss")), &senses) {
+            Ok(()) => *coverage.senses.get_or_insert(0) += 1,
+            Err(e) => eprintln!("race: {name}: the senses: {e}"),
+        }
+        match results::write(&a.out.join(format!("{name}.moments.rsm")), &outcome.moments) {
+            Ok(()) => *coverage.moments.get_or_insert(0) += 1,
+            Err(e) => eprintln!("race: {name}: the moments: {e}"),
+        }
+        if let Some(p) = &outcome.plan {
+            *coverage.tasks_started.get_or_insert(0) += p.task_counts.started;
+            *coverage.tasks_with_reason.get_or_insert(0) += p.task_counts.with_reason;
+            *coverage.tasks_ended.get_or_insert(0) += p.task_counts.ended;
+        }
+        // The case tells the run's story from its ledger and senses, never cut.
+        case.story = Some(results::story::story(&ledger, &outcome.senses));
+        let believed: Vec<(String, [f64; 3])> = w
+            .entities
+            .values()
+            .map(|e| (e.kind.name().unwrap_or("unknown").to_owned(), e.pos))
+            .collect();
+        let blind = truth_samples
+            .last()
+            .map(|s| results::truth::blind(s, &believed))
+            .unwrap_or_default();
+        if let Some(s) = case.story.as_mut() {
+            s.blind.clone_from(&blind);
+        }
+        let truth = results::truth::TruthFile {
+            format_version: FORMAT_VERSION,
+            run: a.run.clone(),
+            bot: name.clone(),
+            samples: truth_samples,
+            blind,
+        };
+        if !truth.samples.is_empty() {
+            match results::write(&a.out.join(format!("{name}.truth.rst")), &truth) {
+                Ok(()) => *coverage.truths.get_or_insert(0) += 1,
+                Err(e) => eprintln!("race: {name}: the truth: {e}"),
+            }
+        } else {
+            coverage.truths.get_or_insert(0);
+        }
         let row = write_case(&a.out, &case, &mut coverage)?;
         rows.push(row);
     }
@@ -377,7 +560,8 @@ fn race(a: &Args) -> Result<bool, String> {
         "{}",
         results::render_summary(
             &results::summarize(std::slice::from_ref(&batch)),
-            std::slice::from_ref(&batch)
+            std::slice::from_ref(&batch),
+            results::observe::Observe::from_repo().as_ref(),
         )
     );
     println!("server tick rate {tick_rate:.1} ticks/s");
@@ -444,6 +628,7 @@ fn never_connected(
         replay: "-".to_owned(),
         stream: None,
         plan: None,
+        story: None,
     };
     write_case(&a.out, &case, coverage)
 }
@@ -467,4 +652,96 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Truth samples kept per bot: the last five minutes (issue 16e, phase D).
+const TRUTH_KEPT: usize = 5;
+/// Wall seconds between truth samples (a minute: the server ticks near 20 a second).
+const TRUTH_EVERY_S: u64 = 60;
+
+/// A bot's truth watcher: once a minute it asks the lane's own server, over RCON, what it holds
+/// about the bot and the entities near it. Shell only: nothing it learns reaches the planner.
+struct Watch {
+    stop: Arc<AtomicBool>,
+    thread: JoinHandle<VecDeque<results::truth::TruthSample>>,
+    addr: String,
+    password: String,
+}
+
+impl Watch {
+    fn start(addr: String, password: String, bot: String) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (stop, addr, password) = (stop.clone(), addr.clone(), password.clone());
+            std::thread::spawn(move || {
+                let mut ring = VecDeque::new();
+                let mut last = Instant::now();
+                while !stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_secs(1));
+                    if last.elapsed() < Duration::from_secs(TRUTH_EVERY_S) {
+                        continue;
+                    }
+                    last = Instant::now();
+                    let near = results::truth::near_command(&bot);
+                    if let Ok(s) = truth_sample(&addr, &password, &near, &bot) {
+                        ring.push_back(s);
+                        if ring.len() > TRUTH_KEPT {
+                            ring.pop_front();
+                        }
+                    }
+                }
+                ring
+            })
+        };
+        Watch {
+            stop,
+            thread,
+            addr,
+            password,
+        }
+    }
+
+    /// Stops the watcher and takes the end sample around the bot's last position (the bot has
+    /// left the server, so its name no longer anchors the search).
+    fn finish(self, bot: &str, pos: Option<[f64; 3]>) -> Vec<results::truth::TruthSample> {
+        self.stop.store(true, Ordering::Relaxed);
+        let mut samples: Vec<_> = self.thread.join().unwrap_or_default().into_iter().collect();
+        if let Some(p) = pos {
+            let near = format!(
+                "execute positioned {} {} {} as @e[distance=..32,limit=12,sort=nearest,type=!player,type=!item,type=!experience_orb] run data get entity @s",
+                p[0], p[1], p[2]
+            );
+            match truth_sample(&self.addr, &self.password, &near, bot) {
+                Ok(s) => samples.push(s),
+                Err(e) => eprintln!("race: {bot}: the end's truth: {e}"),
+            }
+        }
+        samples
+    }
+}
+
+/// One truth sample: the game time, the entities near, and the bot as the server holds it.
+fn truth_sample(
+    addr: &str,
+    password: &str,
+    near: &str,
+    bot: &str,
+) -> Result<results::truth::TruthSample, String> {
+    let mut r = rcon::Rcon::connect(addr, password)?;
+    let time = r.command("time query gametime")?;
+    let at_tick = time
+        .split_whitespace()
+        .last()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let reply = r.command(near)?;
+    let me = r.command(&results::truth::self_command(bot))?;
+    let bot_entity = results::truth::parse_reply(&me).into_iter().next();
+    Ok(results::truth::TruthSample {
+        at_tick,
+        entities: results::truth::parse_reply(&reply),
+        bot: bot_entity,
+        bot_items: results::truth::bot_items(&me),
+        raw: format!("{reply}\n{me}"),
+    })
 }

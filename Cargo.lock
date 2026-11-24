@@ -124,6 +124,7 @@ dependencies = [
  "data",
  "memory",
  "net",
+ "observe",
  "physics",
  "plan",
  "protocol",
@@ -933,6 +934,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "navprobe"
+version = "0.1.0"
+dependencies = [
+ "data",
+ "plan",
+ "record",
+ "world",
+]
+
+[[package]]
 name = "net"
 version = "0.1.0"
 dependencies = [
@@ -946,6 +957,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "observe"
+version = "0.1.0"
+dependencies = [
+ "data",
+ "protocol",
+ "serde",
+ "world",
 ]
 
 [[package]]
@@ -1201,8 +1222,13 @@ name = "replay"
 version = "0.1.0"
 dependencies = [
  "data",
+ "memory",
+ "observe",
+ "plan",
  "protocol",
  "record",
+ "results",
+ "toml",
  "world",
 ]
 
@@ -1213,6 +1239,8 @@ dependencies = [
  "data",
  "md-5",
  "memory",
+ "observe",
+ "plan",
  "protocol",
  "rmp-serde",
  "serde",
@@ -1572,6 +1600,16 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "survey"
+version = "0.1.0"
+dependencies = [
+ "data",
+ "plan",
+ "record",
+ "world",
+]
 
 [[package]]
 name = "syn"

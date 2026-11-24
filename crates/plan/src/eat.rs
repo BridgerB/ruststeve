@@ -44,6 +44,73 @@ pub fn hungry(w: &World, rules: &SurvivalRules) -> bool {
     w.player.food.is_some_and(|f| f < rules.hungry_below)
 }
 
+/// Food at or over this lets health come back by itself (vanilla's natural regeneration).
+pub const HEALS_FROM: i32 = 18;
+
+/// Hurt under the engage line with the food bar too low to heal (issue 16: eat to heal between
+/// blaze fights, not only when hungry).
+///
+/// With a food held whose saturation is at least its hunger points (cooked meat: 8 and 12.8),
+/// any food bar under 20 is eaten at: health comes back a point every 10 ticks only while there
+/// is saturation, and a fed bot at food 20 with none healed 2 health in 200 ticks holding 25
+/// cooked beef (race 45343424571, ticks 3,400 to 3,600; docs/problems/blaze-fight.md wall 9).
+pub fn eat_to_heal(w: &World, rules: &SurvivalRules) -> bool {
+    let rich = best_food(w, rules)
+        .and_then(data::generated::item_props::food_of)
+        .is_some_and(|f| f.saturation >= f32::from(f.nutrition));
+    let under = if rich { 20 } else { HEALS_FROM };
+    w.player.health.is_some_and(|h| h < rules.engage_health)
+        && w.player.food.is_some_and(|f| f < under)
+}
+
+/// Hunger points of safe food held: what a reserve is counted in (issue 16a).
+pub fn food_points(w: &World, rules: &SurvivalRules) -> i32 {
+    crate::held(w)
+        .into_iter()
+        .filter(|(k, n)| *n > 0 && !rules.unsafe_foods.contains(k))
+        .filter_map(|(k, n)| {
+            data::generated::item_props::food_of(k).map(|f| i32::from(f.nutrition) * n)
+        })
+        .sum()
+}
+
+/// The furnace recipe that cooks `item` into food, if it is raw food (beef, porkchop, mutton,
+/// chicken, rabbit, the fish, a potato): what the cook phase works (overworld-leg wall 4).
+pub fn cooks(item: ItemKind) -> Option<&'static data::types::Smelt> {
+    data::generated::item_props::food_of(item)?;
+    data::generated::recipes::SMELTING.iter().find(|r| {
+        r.input.contains(&item) && data::generated::item_props::food_of(r.result).is_some()
+    })
+}
+
+/// Raw food held that cooks into safe food, by kind, with its recipe: raw chicken counts (it is
+/// never eaten raw, and cooked it is safe).
+pub fn raw_held(
+    counts: &crate::make::Counts,
+    rules: &SurvivalRules,
+) -> Vec<(ItemKind, i32, &'static data::types::Smelt)> {
+    counts
+        .iter()
+        .filter(|(_, n)| **n > 0)
+        .filter_map(|(k, n)| cooks(*k).map(|r| (*k, *n, r)))
+        .filter(|(_, _, r)| !rules.unsafe_foods.contains(&r.result))
+        .collect()
+}
+
+/// Pieces of meat held: every safe food item, and raw food that cooks into one.
+pub fn meat_pieces(counts: &crate::make::Counts, rules: &SurvivalRules) -> i32 {
+    counts
+        .iter()
+        .filter(|(k, n)| {
+            **n > 0
+                && data::generated::item_props::food_of(**k).is_some()
+                && (!rules.unsafe_foods.contains(k)
+                    || cooks(**k).is_some_and(|r| !rules.unsafe_foods.contains(&r.result)))
+        })
+        .map(|(_, n)| *n)
+        .sum()
+}
+
 /// The food to eat: safe food in the inventory (hotbar and main, window 0's slots 9-44), the
 /// most nutritious first, ties by item id.
 pub fn best_food(w: &World, rules: &SurvivalRules) -> Option<ItemKind> {

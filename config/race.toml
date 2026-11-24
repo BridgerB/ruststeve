@@ -22,6 +22,18 @@ bots_per_server = 14
 join_stagger_ms = 2000
 # 6,000 server ticks = 5 game minutes: the default when a start names no cap.
 cap_ticks = 6000
+# 24,000 server ticks (20 game minutes) with no stage, no item kind new to the run, no more of a
+# goal item than the run ever held and no new 16-block place ends a bot `NoProgress`, counted,
+# with its case (issue 16e): in race 44947909226 11 of 12 bots sat stuck for about 2.5 hours,
+# found only when the race ended. "Any item count went up" was progress until issue 16: a bot
+# digging in place gained netherrack and never ended (docs/problems/race-tooling.md).
+no_progress_ticks = 24000
+
+[progress]
+# Items that count as a goal row's items do (bot `progress`): more of one than the run ever held
+# is progress, up to this count. The goal table names the rest (config/goals.toml); issue 16's
+# done-condition is 7 blaze rods and the table has no row for them yet.
+items = [["blaze_rod", 7]]
 
 [budget]
 # The brain's CPU per bot per tick (issue 09; brain/ruststeve/design/progress-invariants.md):

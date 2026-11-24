@@ -3,7 +3,7 @@ title: Decisions
 type: moc
 tags: [moc, decisions]
 status: verified
-lastUpdated: 2026-11-15
+lastUpdated: 2026-11-23
 related:
   - "[[ruststeve/_moc|ruststeve]]"
 ---
@@ -13,6 +13,9 @@ related:
 Each says what was chosen, what was rejected with the reason, and what would change the answer.
 
 - [[one-bot-first]] - one bot to the dead dragon first: a stage is done when one real bot passes it from the last snapshot; resume from the frontier; rates later (Bridger, 2026-11-19).
+- [[development-starts]] - made-up starts are allowed for development only: never an issue's evidence, never the frontier; the win needs one real bot from a real snapshot (Bridger, 2026-11-23).
+- [[observe-first]] - full observability before any behaviour fix: the coverage row is the gate (issue 16e).
+- [[stage-loop-lessons]] - the order of tests (unit test, probe, short race), a fix is done when its ledger line is counted, senses rows round and cells floor, split a chain of stages (issue 16, 2026-11-23).
 - [[strict-no-xray]] - never read an unexposed cell, not even to refuse (Bridger, 2026-11-15).
 - [[just-ruststeve]] - the name is ruststeve (not v2), a clean reset, Rust-only tooling.
 - [[runners-not-the-mac]] - all code runs on GitHub Actions runners (20 at once, 16 GB each); the Mac only edits.

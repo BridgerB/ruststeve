@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 137 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 160 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
 aliases: [drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
-lastUpdated: 2026-11-15
-verifiedAgainst: ruststeve@61fdf54
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@b72980e
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -30,7 +30,7 @@ A sim number counts only after the model agrees with a real server at the same m
 ## Key files
 - `crates/bot/src/bin/capture.rs`, `src/captured.rs`: captured worlds.
 - `crates/bot/src/bin/moments.rs` (`real`, `sim`, `compare`), `crates/results/src/parity.rs`.
-- `config/landings.toml` (10 landings), `config/moments.toml` (105 moments).
+- `config/landings.toml` (10 landings), `config/moments.toml` (160 moments).
 - `.github/workflows/parity.yml`; `crates/bot/src/bin/simrace.rs` and `simrace.yml` for sim races.
 
 ## How it works
@@ -43,7 +43,7 @@ A sim number counts only after the model agrees with a real server at the same m
 - **Random drops are not a class**: an item some block drops only by chance and no recipe makes (a sapling from leaves, a seed from grass, flint from gravel) is left out of the inventory on both sides; sticks, which a dead bush drops by chance, stay in (11a found them left out). The model's roll is seeded, not vanilla's, and **a fresh server grows different canopies on the same seed** from run to run (two runner captures disagree about leaves at landings 4 and 7), so no dig spot can be promised leaf-free.
 - **Stone and table rows** (issue 11a), on the five dry landings (digging and placing from water is issue 12's): a moment may `set` blocks at the start (`setblock` by RCON in real, retried until the chunk is loaded, which right after a teleport it often is not; into the model's world in sim). Stone under the feet dug by hand (the delayed destroy at 150 ticks, no drop) and with a given wooden pickaxe (late and early FINISH); a table placed east of the feet on laid stone, opened, and a wooden pickaxe crafted, or a stone pickaxe and a sword.
 - **Survival rows** (issue 12a), on the dry landings: a moment may say `breathe = false` (no water breathing), `effects` (`effect give` in real, the model's `Life` in sim) and `summon` (a mob with no AI, no loot and kept). Drowning in a capped water shaft, standing in fire on netherrack, lava in a stone cup, a honey bottle drunk after a hunger effect (`eat:220`), and a stone sword against a cow two blocks east (`attack:13:270`, a swing each 13 ticks, the sword's full charge being 12.5). The class gains the food the server last sent and the bot's kills (deaths of entities it struck).
-- **The stated tolerance**: all but 2 of the moments match in every field (126 of 128; 117 of 119; 103 of 105; 78 of 80 with 10b; 48 of 50 before). A mismatch is a model or harness bug until shown otherwise, never tuned away.
+- **The stated tolerance**: all but 2 of the moments match in every field (158 of 160, `TOLERANCE` in `moments.rs`; 150 of 152; 126 of 128; 117 of 119; 103 of 105; 78 of 80 with 10b; 48 of 50 before). A mismatch is a model or harness bug until shown otherwise, never tuned away.
 - **simrace**: lanes of lockstep runs in generated worlds, the same case and batch files with `source = sim`, released as `race-sim-<run>` so the insight store keeps sim beside real, never mixed.
 
 ## What the table found
@@ -73,7 +73,11 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - A dig row checks whether the block broke by the row's end, not the tick it broke on.
 
 ## Issue 14a
-- Rows `w00` to `w02` (scoop, pour, lava, obsidian, portal) and the `watch` field: cells whose blocks join the outcome class as `blocks` ([[buckets-and-fluids]]).
+- Rows `w00` to `w02` (scoop, pour, lava, obsidian, portal: 15 rows, on landings 0 to 2) and the `watch` field: cells from the feet cell whose blocks join the outcome class as `blocks`, by name ([[buckets-and-fluids]]). Scripts `use:<tick>:<yaw>:<pitch>` (the held item used along a look) and `light:<tick>:<dx>:<dy>:<dz>:<face>` (used on a block's face).
+
+## Client parity rows (issue 16)
+- Rows `p00` and `p01` (eight, on landings 0 and 1, each in a corridor laid from the feet; `docs/problems/client-parity.md`): a walk over magma (hurt), the same floor sneaked (full: only a server told the shift key by `player_input` spares the feet), a sneak to the edge of a pit (the body stops on the last block), and a walk along soul sand (slowed, not corrected). Scripts `sneak:<yaw>` and `crouch`.
+- What these rows cannot show: a server never simulates a client's speed, so the walk's pace on soul sand or while sneaking is the same on both sides whatever it is. The pace is checked against the game's own formula in `crates/physics`' unit tests; the rows show the server accepts it.
 
 ## See also
 - [[server-model]] - what the model models.

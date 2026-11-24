@@ -23,6 +23,9 @@ pub struct Snap {
     pub lane: u32,
     pub pos: [f64; 3],
     pub dimension: String,
+    /// What the bot held, by item name (issue 16a: a snapshot's food is read without unpacking).
+    #[serde(default)]
+    pub items: std::collections::BTreeMap<String, i64>,
 }
 
 /// The UUID an offline-mode server gives `name` (vanilla's `UUIDUtil.createOfflinePlayerUUID`:
@@ -101,6 +104,7 @@ mod tests {
             lane: 0,
             pos: [1.5, 64.0, -3.5],
             dimension: "minecraft:the_nether".to_owned(),
+            items: [("cooked_beef".to_owned(), 6)].into_iter().collect(),
         };
         let text = toml::to_string(&s).expect("toml");
         assert_eq!(toml::from_str::<Snap>(&text).expect("back"), s);

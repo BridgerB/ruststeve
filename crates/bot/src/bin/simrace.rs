@@ -168,6 +168,7 @@ fn one(a: &Args, config: sim::Config, seed: u64) -> Result<Case, String> {
         ),
         stream: None,
         plan: None,
+        story: None,
     })
 }
 
@@ -242,7 +243,8 @@ fn simrace(a: &Args) -> Result<bool, String> {
         "{}",
         results::render_summary(
             &results::summarize(std::slice::from_ref(&batch)),
-            std::slice::from_ref(&batch)
+            std::slice::from_ref(&batch),
+            results::observe::Observe::from_repo().as_ref(),
         )
     );
     Ok(batch.coverage.cases == batch.coverage.runs)

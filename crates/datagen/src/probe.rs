@@ -1,5 +1,5 @@
 //! The tables no data file holds, read from the game's own classes: block hardness and
-//! needs-correct-tool, collision shapes, tool materials, fuel burn times, mob health and category,
+//! needs-correct-tool, collision shapes, movement factors, tool materials, fuel burn times, mob health and category,
 //! and the entity-data serializer ids. A JVM is started from Rust over JNI with the inner server
 //! jar and the bundler's libraries on its class path, the game is bootstrapped, and its objects are
 //! read by reflection, as clojurecraft's `dev/clojurecraft/jar_probe.clj` does from Clojure.
@@ -30,6 +30,11 @@ pub struct BlockProbe {
     pub hardness: f64,
     pub needs_correct_tool: bool,
     pub collision: Collision,
+    /// `Block.getSpeedFactor`, `getJumpFactor` and `getFriction`: what the block does to a body
+    /// moving on it (soul sand 0.4, honey's jump 0.5, ice 0.98; 1, 1 and 0.6 for the rest).
+    pub speed_factor: f64,
+    pub jump_factor: f64,
+    pub friction: f64,
 }
 
 pub struct Material {
@@ -54,6 +59,11 @@ pub struct Probe {
     pub mobs: BTreeMap<String, Mob>,
     /// `EntityDataSerializers` constant name → its serialized id (the wire's index).
     pub serializers: BTreeMap<String, i64>,
+    /// `LevelEvent` constant name → its id (the `level_event` packet's type: 1018 is a blaze
+    /// shooting, issue 16e).
+    pub level_events: BTreeMap<String, i64>,
+    /// `ClientboundGameEventPacket` type constant name → its id (the `game_event` packet).
+    pub game_events: BTreeMap<String, i64>,
 }
 
 /// Every `.jar` under a directory, sorted.
@@ -471,12 +481,21 @@ fn probe_blocks<'a>(r: &mut Reflect<'a, '_>) -> Result<BTreeMap<String, BlockPro
                 Collision::Partial(r.f64(&top)?)
             }
         };
+        let v = r.invoke(&block, "getSpeedFactor", &[])?;
+        let speed_factor = r.f64(&v)?;
+        let v = r.invoke(&block, "getJumpFactor", &[])?;
+        let jump_factor = r.f64(&v)?;
+        let v = r.invoke(&block, "getFriction", &[])?;
+        let friction = r.f64(&v)?;
         out.insert(
             name,
             BlockProbe {
                 hardness,
                 needs_correct_tool,
                 collision,
+                speed_factor,
+                jump_factor,
+                friction,
             },
         );
     }
@@ -664,6 +683,61 @@ fn probe_serializers<'a>(r: &mut Reflect<'a, '_>) -> Result<BTreeMap<String, i64
     Ok(out)
 }
 
+/// Every `public static final int` of `LevelEvent`: the ids the `level_event` packet names (a
+/// blaze's shot, a ghast's warning, the dragon's breath and death), issue 16e.
+fn probe_level_events<'a>(r: &mut Reflect<'a, '_>) -> Result<BTreeMap<String, i64>> {
+    let cls = r.class("net/minecraft/world/level/block/LevelEvent")?;
+    let integer = r.class("java/lang/Integer")?;
+    let mut out = BTreeMap::new();
+    for (name, field, is_static) in r.declared_fields(&cls)? {
+        if !is_static {
+            continue;
+        }
+        let v = r.field_get(&field, &JObject::null())?;
+        if v.is_null() || !r.is_instance(&integer, &v)? {
+            continue;
+        }
+        out.insert(name, r.i64(&v)?);
+    }
+    ensure!(!out.is_empty(), "LevelEvent has no int constants");
+    Ok(out)
+}
+
+/// The `ClientboundGameEventPacket.Type` constants and their private `id`: what the `game_event`
+/// packet names (rain starting, the win after the dragon), issue 16e.
+fn probe_game_events<'a>(r: &mut Reflect<'a, '_>) -> Result<BTreeMap<String, i64>> {
+    let packet = r.class("net/minecraft/network/protocol/game/ClientboundGameEventPacket")?;
+    let ty = r.class("net/minecraft/network/protocol/game/ClientboundGameEventPacket$Type")?;
+    let id_field = r
+        .declared_fields(&ty)?
+        .into_iter()
+        .find(|(n, _, is_static)| n == "id" && !is_static)
+        .map(|(_, f, _)| f)
+        .ok_or_else(|| anyhow!("ClientboundGameEventPacket.Type has no id field"))?;
+    let res = r
+        .env
+        .call_method(&id_field, "setAccessible", "(Z)V", &[JValue::Bool(1)]);
+    r.check(res, "setAccessible")?;
+    let mut out = BTreeMap::new();
+    for (name, field, is_static) in r.declared_fields(&packet)? {
+        if !is_static {
+            continue;
+        }
+        let res = r
+            .env
+            .call_method(&field, "setAccessible", "(Z)V", &[JValue::Bool(1)]);
+        r.check(res, "setAccessible")?;
+        let v = r.field_get(&field, &JObject::null())?;
+        if v.is_null() || !r.is_instance(&ty, &v)? {
+            continue;
+        }
+        let id = r.field_get(&id_field, &v)?;
+        out.insert(name, r.i64(&id)?);
+    }
+    ensure!(!out.is_empty(), "no game event types found");
+    Ok(out)
+}
+
 /// Start the JVM on the bundler's extracted inner jar and libraries (written into `work` when the
 /// reports ran), boot the game and read every table.
 pub fn run(work: &Path) -> Result<Probe> {
@@ -708,14 +782,18 @@ pub fn run(work: &Path) -> Result<Probe> {
         fuel: probe_fuel(&mut r).context("fuel")?,
         mobs: probe_mobs(&mut r).context("mobs")?,
         serializers: probe_serializers(&mut r).context("entity data serializers")?,
+        level_events: probe_level_events(&mut r).context("level events")?,
+        game_events: probe_game_events(&mut r).context("game events")?,
     };
     println!(
-        "probe: {} blocks, {} materials, {} fuels, {} mobs, {} serializers",
+        "probe: {} blocks, {} materials, {} fuels, {} mobs, {} serializers, {} level events, {} game events",
         probe.blocks.len(),
         probe.materials.len(),
         probe.fuel.len(),
         probe.mobs.len(),
-        probe.serializers.len()
+        probe.serializers.len(),
+        probe.level_events.len(),
+        probe.game_events.len()
     );
     if probe.blocks.is_empty() {
         bail!("the probe read no blocks");

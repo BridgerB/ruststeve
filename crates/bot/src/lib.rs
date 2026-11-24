@@ -4,17 +4,20 @@
 //! every 50 ms, records every run when asked, and ends with an `Ending`.
 
 pub mod captured;
+pub mod devstart;
+pub mod evidence;
 pub mod landings;
 pub mod live;
 pub mod lockstep;
 pub mod model;
+pub mod progress;
 pub mod script;
 
 pub use script::Script;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -85,13 +88,39 @@ pub struct Opts {
     /// Told each time the run reaches a stage higher than any it held, with the world then (the
     /// race takes a snapshot of the first bot to reach each stage).
     pub on_stage: Option<std::sync::mpsc::Sender<StageUp>>,
+    /// End the run `NoProgress` after this many server ticks with no stage, no item kind new to
+    /// the run, no more of a goal item than it ever held and no new place (`progress::Progress`,
+    /// issue 16e); `None` never does.
+    pub no_progress_ticks: Option<u64>,
+    /// A file rewritten every `PROGRESS_EVERY_TICKS` with where the run stands, for a look while
+    /// the race runs (issue 16e); the run's ledger, senses and story so far are written beside it
+    /// as `<name>.ledger.txt`, `<name>.senses.txt` and `<name>.case.txt` (`evidence`).
+    pub progress: Option<PathBuf>,
+    /// Ask for a snapshot (through `on_stage`) once the run has played this many server ticks:
+    /// a place to resume from that is not a stage (`race --snapshot-at`).
+    pub snapshot_at: Option<u64>,
 }
 
 /// A run reaching a new stage, for the race's snapshot.
 pub struct StageUp {
     pub bot: String,
+    /// The stage reached (`Stage`), or the highest held when the snapshot is asked for another
+    /// reason.
     pub stage: world::stage::Stage,
     pub world: Box<World>,
+    pub kind: SnapKind,
+}
+
+/// Why a snapshot is asked for. Only `Stage` is a stage snapshot; the others are places to
+/// resume a look from and are named and marked apart (`devstart::mark_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapKind {
+    /// The run reached a stage higher than any it held.
+    Stage,
+    /// The run played the ticks `Opts::snapshot_at` names.
+    At(u64),
+    /// The run is ending `NoProgress`: the stuck spot, to resume and study.
+    Stuck,
 }
 
 /// What the bot counts while it runs.
@@ -106,6 +135,28 @@ pub struct Stats {
     pub play_ms: u64,
     /// Server ticks when play began and at the end.
     pub play_ticks_from: u64,
+}
+
+/// Ticks between senses rows: one a second (clojurecraft's senses line).
+pub const SENSES_EVERY_TICKS: u64 = 20;
+/// Ticks between progress files, and the run's evidence beside them (`evidence`): two minutes.
+/// Ten until issue 16, with the evidence written only at the run's end: a race of 12,000 ticks
+/// showed nothing until it was over (docs/problems/race-tooling.md).
+pub const PROGRESS_EVERY_TICKS: u64 = 2400;
+pub use progress::REGION_SHIFT;
+
+/// Ticks between moments: one a minute.
+pub const MOMENT_EVERY_TICKS: u64 = 1200;
+/// Moments kept: the last five minutes, then the end.
+pub const MOMENTS_KEPT: usize = 5;
+
+/// A moment: the planner whole, with the senses row of that second (the world itself is in the
+/// recording's checkpoint of the same minute).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Moment {
+    pub at: u64,
+    pub senses: observe::Senses,
+    pub plan: Option<plan::Plan>,
 }
 
 /// How a run went.
@@ -129,6 +180,12 @@ pub struct Outcome {
     pub plan_tick_us: Vec<u64>,
     /// The planner's notes for the case file.
     pub plan_notes: Notes,
+    /// Every task the planner started and ended, with its reason and outcome (issue 16e).
+    pub ledger: Vec<plan::TaskRecord>,
+    /// World facts in order, a senses row a second, and the last moments (issue 16e).
+    pub facts: Vec<observe::Stamped>,
+    pub senses: Vec<observe::Senses>,
+    pub moments: Vec<Moment>,
 }
 
 /// Notes kept from a run's start, and from its end: a case file read in one screen. A race of
@@ -167,6 +224,22 @@ fn note_kind(what: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// A note's kind for a reader: each run of words `note_kind` leaves out shown as one `…`.
+pub fn kind_shown(what: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for w in what.split_whitespace() {
+        let cut = w
+            .chars()
+            .any(|c| c.is_ascii_digit() || c == '(' || c == '[');
+        if !cut {
+            out.push(w);
+        } else if out.last() != Some(&"…") {
+            out.push("…");
+        }
+    }
+    out.join(" ")
 }
 
 impl Notes {
@@ -258,6 +331,24 @@ pub fn goals_table(path: &str) -> Result<plan::make::Table, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let goals: plan::make::Goals = toml::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
     plan::make::Table::new(&goals)
+}
+
+/// Packets handled between two ticks at most: the queue is taken whole in all but a flood.
+pub const MAX_PACKETS_A_TURN: usize = 4096;
+
+/// `first` and every message already queued behind it, up to `max` in all, and whether the
+/// sender is gone. The loop takes the whole queue between two ticks, so a slow tick never leaves
+/// a keep-alive waiting behind a backlog (race 45350933958 lane 1).
+pub fn batch<T>(rx: &Receiver<T>, first: T, max: usize) -> (Vec<T>, bool) {
+    let mut out = vec![first];
+    while out.len() < max {
+        match rx.try_recv() {
+            Ok(m) => out.push(m),
+            Err(TryRecvError::Empty) => return (out, false),
+            Err(TryRecvError::Disconnected) => return (out, true),
+        }
+    }
+    (out, false)
 }
 
 pub fn now_ms() -> u64 {
@@ -364,6 +455,9 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         revive,
         memory,
         on_stage,
+        no_progress_ticks,
+        progress,
+        snapshot_at,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -416,6 +510,16 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     };
     if let Some(m) = memory {
         run.world.memory = m;
+        // The seeded memory is the run's start state and no event carries it: recorded as a
+        // checkpoint before the first event, so a fold begins where the run did (`replay verify`
+        // counted every checkpoint of every resumed run a mismatch without it).
+        if let Some(r) = &mut run.recorder {
+            r.write(&Record::Checkpoint {
+                event_index: 0,
+                server_ticks: 0,
+                world: Box::new(run.world.clone()),
+            })?;
+        }
     }
     let mut stage_told = run.world.stage_reached;
     let mut stats = Stats::default();
@@ -444,8 +548,24 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     let mut plan_seen: u64 = 0;
     let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut plan_notes = Notes::default();
+    // The task ledger, every record of the run, unsampled (issue 16e).
+    let mut ledger: Vec<plan::TaskRecord> = Vec::new();
+    // What the bot sensed (issue 16e): world facts every tick, a senses row a second, and a
+    // moment (the plan, its senses) a minute for the last few minutes.
+    let mut facts: Vec<observe::Stamped> = Vec::new();
+    let mut senses_rows: Vec<observe::Senses> = Vec::new();
+    let mut moments: std::collections::VecDeque<Moment> = std::collections::VecDeque::new();
+    let mut last_snap = observe::snapshot(&run.world);
+    // Progress (issue 16e): the last stage, new item kind, more of a goal item or new place.
+    let mut progressed = progress::Progress::new(if no_progress_ticks.is_some() {
+        progress::items_from_repo()
+    } else {
+        BTreeMap::new()
+    });
     let mut last_controls: Option<physics::Controls> = None;
-    let doing = if let Some(a) = aim {
+    // The evidence writer of the last progress interval, on its own thread.
+    let mut evidence_writer: Option<JoinHandle<()>> = None;
+    let mut doing = if let Some(a) = aim {
         Doing {
             task: format!("aim {}", a.name()),
             why: "the planner (issue 09)".to_owned(),
@@ -463,7 +583,8 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     };
 
     let mut deaths: u32 = 0;
-    let ending = loop {
+    let mut snapshot_at_sent = false;
+    let ending = 'run: loop {
         if run.world.stage_reached > stage_told {
             stage_told = run.world.stage_reached;
             if let (Some(tx), Some(stage)) = (on_stage.as_ref(), stage_told) {
@@ -471,6 +592,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     bot: name.clone(),
                     stage,
                     world: Box::new(run.world.clone()),
+                    kind: SnapKind::Stage,
                 });
             }
         }
@@ -498,6 +620,24 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         }
         if deadline.is_some_and(|d| Instant::now() >= d) {
             break Ending::Cut;
+        }
+        // A snapshot on request: once, when the run has played the ticks asked for.
+        if let (Some(at), Some(tx), Some(_)) = (snapshot_at, on_stage.as_ref(), play_since)
+            && !snapshot_at_sent
+            && run
+                .world
+                .session
+                .server_ticks
+                .saturating_sub(stats.play_ticks_from)
+                >= at
+        {
+            snapshot_at_sent = true;
+            let _ = tx.send(StageUp {
+                bot: name.clone(),
+                stage: run.world.stage_reached.unwrap_or(world::Stage::InWorld),
+                world: Box::new(run.world.clone()),
+                kind: SnapKind::At(at),
+            });
         }
         if let (Some(cap), Some(_)) = (cap_ticks, play_since)
             && run
@@ -627,6 +767,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 teleports_at_script.get_or_insert(run.world.session.teleports);
                 for e in p.events_since(plan_seen) {
                     plan_notes.push(e.tick, &e.what, &e.why);
+                    ledger.push(plan::TaskRecord::Note {
+                        at: run.world.session.server_ticks,
+                        what: e.what.clone(),
+                        why: e.why.clone(),
+                    });
                     if let Some(r) = &mut run.recorder {
                         let note = format!("plan tick {}: {} ({})", e.tick, e.what, e.why);
                         if let Err(err) = r.write(&Record::Note(note)) {
@@ -635,6 +780,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     }
                 }
                 plan_seen = p.event_count;
+                ledger.extend(p.take_records());
                 if Some(c) != last_controls {
                     last_controls = Some(c);
                     if let Err(e) = run.step(&conn, EventRecord::Controls(c), Event::Controls(c)) {
@@ -657,6 +803,97 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 break Ending::Error { why: e };
             }
             world_ticks += 1;
+            let mut snap = observe::snapshot(&run.world);
+            let new_facts = observe::diff(&last_snap, &mut snap, &run.world);
+            last_snap = snap;
+            let now_tick = run.world.session.server_ticks;
+            progressed.see(now_tick, &new_facts, run.world.body.map(|b| b.pos));
+            facts.extend(new_facts);
+            if let Some(n) = no_progress_ticks
+                && run.world.body.is_some()
+                && progressed.idle(now_tick) >= n
+            {
+                let task = planner
+                    .as_ref()
+                    .map_or("none", |p| p.task.name())
+                    .to_owned();
+                // The stuck spot is kept: a snapshot to resume and study it from, never a stage's.
+                if let Some(tx) = on_stage.as_ref() {
+                    let _ = tx.send(StageUp {
+                        bot: name.clone(),
+                        stage: run.world.stage_reached.unwrap_or(world::Stage::InWorld),
+                        world: Box::new(run.world.clone()),
+                        kind: SnapKind::Stuck,
+                    });
+                }
+                break Ending::NoProgress {
+                    for_ticks: progressed.idle(now_tick),
+                    task,
+                };
+            }
+            if let Some(path) = &progress
+                && world_ticks.is_multiple_of(PROGRESS_EVERY_TICKS)
+            {
+                let (task, why) = planner
+                    .as_ref()
+                    .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
+                let r = observe::senses(&run.world, task, &why, plan_tick_us.last().copied());
+                let line = format!(
+                    "{name}\ttick {now_tick}\tstage {}\tat {}\thp {}\tfood {}\theld {}{}\ttask {task} ({why})\tno progress for {} ticks\n",
+                    run.world.stage_reached.map_or("none", world::Stage::name),
+                    // Where it stands: the cell, what is under it, lava or water at it.
+                    r.standing(),
+                    r.health
+                        .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
+                    r.food.map_or_else(|| "-".to_owned(), |f| f.to_string()),
+                    r.held.as_deref().unwrap_or("nothing"),
+                    // Uses only for what has them: food read "held beef (- uses)".
+                    r.held_uses
+                        .map_or_else(String::new, |u| format!(" ({u} uses)")),
+                    progressed.idle(now_tick),
+                );
+                if let Err(e) = std::fs::write(path, &line) {
+                    eprintln!("bot {name}: progress: {e}");
+                }
+                // The evidence so far, beside it: copied here, rendered and written on a thread
+                // of its own (the loop never waits on the disk). A writer still busy is left be.
+                if evidence_writer.as_ref().is_none_or(JoinHandle::is_finished)
+                    && let Some(dir) = path.parent()
+                {
+                    let e = evidence::Evidence {
+                        dir: dir.to_path_buf(),
+                        run: run_id.clone(),
+                        bot: name.clone(),
+                        progress: line,
+                        tasks: ledger.clone(),
+                        facts: facts.clone(),
+                        senses: senses_rows.clone(),
+                    };
+                    let bot = name.clone();
+                    evidence_writer = Some(std::thread::spawn(move || {
+                        if let Err(err) = e.write() {
+                            eprintln!("bot {bot}: evidence: {err}");
+                        }
+                    }));
+                }
+            }
+            if world_ticks.is_multiple_of(SENSES_EVERY_TICKS) {
+                let (task, why) = planner
+                    .as_ref()
+                    .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
+                let row = observe::senses(&run.world, task, &why, plan_tick_us.last().copied());
+                if world_ticks.is_multiple_of(MOMENT_EVERY_TICKS) {
+                    moments.push_back(Moment {
+                        at: run.world.session.server_ticks,
+                        senses: row.clone(),
+                        plan: planner.clone(),
+                    });
+                    if moments.len() > MOMENTS_KEPT {
+                        moments.pop_front();
+                    }
+                }
+                senses_rows.push(row);
+            }
             if let Some(sink) = &sink {
                 let tick = run.world.session.server_ticks;
                 if world_ticks.is_multiple_of(live::SELF_EVERY_TICKS)
@@ -674,7 +911,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         let wait = next_tick
             .saturating_duration_since(Instant::now())
             .max(Duration::from_millis(1));
-        let msg = match conn.inbound.recv_timeout(wait) {
+        let first = match conn.inbound.recv_timeout(wait) {
             Ok(m) => m,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
@@ -683,59 +920,79 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 };
             }
         };
-        let (packet, raw) = match msg {
-            Inbound::Packet { packet, raw } => (packet, raw),
-            Inbound::DecodeError { state, id, error } => {
-                stats.decode_errors += 1;
-                eprintln!("bot {name}: cannot decode {state:?} id {id}: {error}");
-                continue;
+        // Every packet already queued is handled before the next tick, not one a tick: with ticks
+        // slowed to 130 ms by the planner, one packet a tick left the server's keep-alive queued
+        // past its 15 s and the server dropped the bot (race 45350933958 lane 1, "lost
+        // connection: Timed out", read by the bot as "the writer thread stopped").
+        let (msgs, gone) = batch(&conn.inbound, first, MAX_PACKETS_A_TURN);
+        'packets: for msg in msgs {
+            let (packet, raw) = match msg {
+                Inbound::Packet { packet, raw } => (packet, raw),
+                Inbound::DecodeError { state, id, error } => {
+                    stats.decode_errors += 1;
+                    eprintln!("bot {name}: cannot decode {state:?} id {id}: {error}");
+                    continue 'packets;
+                }
+                Inbound::Closed(why) => break 'run Ending::Lost { why },
+            };
+            *stats.per_state.entry(run.world.session.state).or_default() += 1;
+            match &packet {
+                S2c::Unknown { state, id, .. } => {
+                    *stats.unknown.entry((*state, *id)).or_default() += 1
+                }
+                S2c::LoginDisconnect { reason } => {
+                    break 'run Ending::Kicked {
+                        reason: reason.clone(),
+                    };
+                }
+                S2c::ConfigDisconnect { reason } | S2c::Disconnect { reason } => {
+                    break 'run Ending::Kicked {
+                        reason: printable(reason),
+                    };
+                }
+                S2c::Login {
+                    entity_id,
+                    dimension,
+                    ..
+                } => println!("bot {name}: in play as entity {entity_id} in {dimension}"),
+                _ => {}
             }
-            Inbound::Closed(why) => break Ending::Lost { why },
-        };
-        *stats.per_state.entry(run.world.session.state).or_default() += 1;
-        match &packet {
-            S2c::Unknown { state, id, .. } => *stats.unknown.entry((*state, *id)).or_default() += 1,
-            S2c::LoginDisconnect { reason } => {
-                break Ending::Kicked {
-                    reason: reason.clone(),
-                };
+            let before = run.world.session.state;
+            // What the stream will show of this packet, read before the step consumes it.
+            let shown = sink
+                .as_ref()
+                .map(|_| live::from_packet(&packet, Some(&raw.body)))
+                .unwrap_or_default();
+            let record = EventRecord::Packet {
+                state: raw.state,
+                id: raw.id,
+                body: raw.body,
+            };
+            if let Err(e) = run.step(&conn, record, Event::Packet(packet)) {
+                break 'run Ending::Error { why: e };
             }
-            S2c::ConfigDisconnect { reason } | S2c::Disconnect { reason } => {
-                break Ending::Kicked {
-                    reason: printable(reason),
-                };
+            if let Some(sink) = &sink {
+                for b in shown {
+                    sink.send(run.world.session.server_ticks, b);
+                }
             }
-            S2c::Login {
-                entity_id,
-                dimension,
-                ..
-            } => println!("bot {name}: in play as entity {entity_id} in {dimension}"),
-            _ => {}
+            if before != run.world.session.state && run.world.session.state == State::Play {
+                play_since.get_or_insert_with(Instant::now);
+                stats.play_ticks_from = run.world.session.server_ticks;
+            }
         }
-        let before = run.world.session.state;
-        // What the stream will show of this packet, read before the step consumes it.
-        let shown = sink
-            .as_ref()
-            .map(|_| live::from_packet(&packet, Some(&raw.body)))
-            .unwrap_or_default();
-        let record = EventRecord::Packet {
-            state: raw.state,
-            id: raw.id,
-            body: raw.body,
-        };
-        if let Err(e) = run.step(&conn, record, Event::Packet(packet)) {
-            break Ending::Error { why: e };
-        }
-        if let Some(sink) = &sink {
-            for b in shown {
-                sink.send(run.world.session.server_ticks, b);
-            }
-        }
-        if before != run.world.session.state && run.world.session.state == State::Play {
-            play_since.get_or_insert_with(Instant::now);
-            stats.play_ticks_from = run.world.session.server_ticks;
+        if gone {
+            break Ending::Lost {
+                why: "the reader thread stopped".to_owned(),
+            };
         }
     };
+    // The last evidence is whole on disk before the run's end writes the same files.
+    if let Some(h) = evidence_writer.take()
+        && h.join().is_err()
+    {
+        eprintln!("bot {name}: the evidence writer panicked");
+    }
     stats.events = run.events;
     stats.wall_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     stats.play_ms = play_since.map_or(0, |t| {
@@ -755,6 +1012,33 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         "bot {name}: ended {ending:?} after {} server ticks, stage {:?}, {} events",
         run.world.session.server_ticks, run.world.stage_reached, stats.events
     );
+    // The task still running ends with the run, so every start has an end in the ledger.
+    if let Some(p) = planner.as_mut() {
+        p.close(run.world.session.server_ticks, &format!("{ending:?}"));
+        ledger.extend(p.take_records());
+    }
+    // The moment at the end, after the last five minutes.
+    {
+        let (task, why) = planner
+            .as_ref()
+            .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
+        moments.push_back(Moment {
+            at: run.world.session.server_ticks,
+            senses: observe::senses(&run.world, task, &why, plan_tick_us.last().copied()),
+            plan: planner.clone(),
+        });
+    }
+    // The signature names what the planner was doing at the end, as a kind (no cells or counts),
+    // not the aim it started with: every run of a race had the same signature (issue 16e). The
+    // words left out show as an ellipsis, so the case's `doing:` line does not read as cut off
+    // ("stairs down toward the fortress at" was); the numbers themselves are in the story's
+    // last lines, and with them every run would be a signature of its own.
+    if let Some(e) = planner.as_ref().and_then(|p| p.events.last()) {
+        doing = Doing {
+            task: kind_shown(&e.what),
+            why: kind_shown(&e.why),
+        };
+    }
     let stream_counts = sink.map(|s| {
         s.send(
             run.world.session.server_ticks,
@@ -775,6 +1059,10 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         plan: planner,
         plan_tick_us,
         plan_notes,
+        ledger,
+        facts,
+        senses: senses_rows,
+        moments: moments.into_iter().collect(),
     })
 }
 
@@ -804,7 +1092,23 @@ pub fn plan_summary(p: &plan::Plan, tick_us: &[u64], notes: &Notes) -> results::
 
 #[cfg(test)]
 mod notes_tests {
-    use super::{KIND_KEPT, NOTES_HEAD, NOTES_TAIL, Notes};
+    use super::{KIND_KEPT, NOTES_HEAD, NOTES_TAIL, Notes, kind_shown};
+
+    #[test]
+    fn a_kind_shows_where_words_were_left_out() {
+        assert_eq!(
+            kind_shown("stairs down toward the fortress at (61, 30, 95)"),
+            "stairs down toward the fortress at …"
+        );
+        assert_eq!(
+            kind_shown("stairs failed: DigFailed after 0 stairs"),
+            "stairs failed: DigFailed after … stairs"
+        );
+        assert_eq!(
+            kind_shown("nether bricks seen, no walk to them"),
+            "nether bricks seen, no walk to them"
+        );
+    }
 
     #[test]
     fn alternating_pairs_collapse_and_are_counted() {
@@ -873,5 +1177,37 @@ mod notes_tests {
             lines.last().unwrap(),
             "99 cast at (1, 2, 3) facing south (a site)"
         );
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::batch;
+    use std::sync::mpsc::channel;
+
+    /// The whole queue is taken after one wait: a keep-alive behind a backlog is answered in the
+    /// same turn, not one packet a tick later (race 45350933958 lane 1).
+    #[test]
+    fn the_whole_queue_is_taken_in_one_turn() {
+        let (tx, rx) = channel();
+        for i in 1..=300 {
+            tx.send(i).unwrap();
+        }
+        let first = rx.recv().unwrap();
+        let (got, gone) = batch(&rx, first, 4096);
+        assert_eq!(got, (1..=300).collect::<Vec<_>>());
+        assert!(!gone);
+        // A cap bounds a flood; what is left waits for the next turn.
+        for i in 1..=10 {
+            tx.send(i).unwrap();
+        }
+        let first = rx.recv().unwrap();
+        assert_eq!(batch(&rx, first, 4).0, vec![1, 2, 3, 4]);
+        // The sender gone is said once the queue is empty.
+        drop(tx);
+        let first = rx.recv().unwrap();
+        let (got, gone) = batch(&rx, first, 4096);
+        assert_eq!(got, vec![5, 6, 7, 8, 9, 10]);
+        assert!(gone);
     }
 }

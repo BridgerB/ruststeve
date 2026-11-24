@@ -5,8 +5,8 @@ type: reference
 tags: [world, chunks, overlay, fold, state]
 aliases: [World, World::step, block_at, state_at, overlay, chunk columns, Event, Effect, world crate]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@34b2252 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@064c33e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn step(&mut self, e: &Event) -> Vec<Effect> {"
   - "ruststeve:crates/world/src/lib.rs#pub fn state_at(&self, pos: BlockPos) -> Option<u32> {"
@@ -36,22 +36,25 @@ related:
   - `dimension`: type id, name, `min_y` and height from the generated dimension types;
   - `columns`: `BTreeMap<ChunkPos, Arc<Column>>`, as received;
   - `overlay`: block changes by column;
-  - `player`: entity id, position and look from teleports (relative flags applied), health, food, saturation;
+  - `player`: entity id, position and look from teleports (relative flags applied), health, food, saturation; air, on fire, effects, attributes, in combat, experience;
   - `entities`, `inventory` (window 0) and `memory` (sightings) ([[entities-and-inventory]], [[memory-sightings]]);
   - `held`, the dig `sequence_sent`/`sequence_acked`, the pending `click` and `pickups` (issue 10a, [[entities-and-inventory]], [[wire-actions]]);
   - `body`, `controls` and what was last sent: the physics body and what it presses ([[physics]]);
   - `hits`, `death` and `stage_reached`: the hits on the bot in the last minute, the server's death message, the highest stage held ([[entities-and-inventory]], [[race-and-results]]);
+  - `window` and `closed_window`: the window open besides the inventory and the one the bot last closed ([[table-window]], [[wire-container-click]]); `kills` ([[entities-and-inventory]]);
+  - what the bot hears and is told (issue 16e), each list the newest 64 (`SOUNDS_KEPT`): `sounds`, `level_events`, `explosions`, `game_events`, `chat`; and `bosses`, `spawner_mobs` (each spawner's mob from its block-entity data), `cracks`, `cooldowns`, `hurt_from`, `won` (the `win_game` game event), `chunk_center`, `view_radius`, `simulation_distance`, `biome_updates`;
+  - `game_time` and `day_clock`: the level's game time and the overworld clock from the newest `set_time` (issue 16, `docs/problems/day-clock.md`). `World::day_time()` is the time of day, 0 to 23,999, run on from the last overworld clock by the game ticks since; `World::is_night()` and the pure `world::time` helpers (`is_night`, `ticks_to_dusk`, `ticks_to_dawn`, `DUSK` 12542 and `DAWN` 23460 from the jar's `timeline/day.json` `monsters_burn` track) are what the planner asks;
   - `now_ms`, `seed`.
-- **Acts**: `Event::Act` is what the bot does (dig, hold, click, close, swing); the world turns it into the packet and the state it waits on, so an act is an input like a tick, recorded and replayed ([[wire-actions]]).
+- **Acts**: `Event::Act` is what the bot does (dig, hold, click, close, swing, resync, use on a block, attack, use item, release use, respawn); the world turns it into the packet and the state it waits on, so an act is an input like a tick, recorded and replayed ([[wire-actions]]).
 - **Chunks** are decoded on the net reader thread into `Column`s (and, since issue 08a, encoded back by `Column::encode` for the server model's generated worlds, [[server-model]]) whose sections stay packed paletted containers (no 4096-cell expansion); a cell is read on demand. A column's height comes from its section count: 24 starts at y −64, 16 at y 0.
 - **Block changes** (`block_update`, `section_blocks_update`) go to the overlay; a column resent or forgotten drops its overlay. `state_at` reads the overlay first, then the column; `block_at` maps the state through `data::block_of_state`.
-- **A dimension change** (respawn into another level) clears every column and the overlay: chunks belong to one dimension.
+- **A dimension change** (respawn into another level) clears every column, the overlay, every entity and the body: chunks belong to one dimension. Memory keeps everything, by dimension.
 
 ## Checked against clojurecraft
 `tests/fixtures/expected.txt` holds 100 overworld and 100 Nether positions and the state clojurecraft's own `chunk/decode` and `block-at` (at be85a92) read there, from race recording `Clj_r12` (run 43143461648); the 40 sampled columns' raw chunk bytes sit beside it. The test loads them through the same packets the server sends and compares every position.
 
 ## Limits
-- Other windows (tables, furnaces), fluid pools and intentions in memory are later issues.
+- Intentions in memory are a later issue.
 - Collision shapes per state and prediction of the bot's own digs are later issues.
 
 ## See also

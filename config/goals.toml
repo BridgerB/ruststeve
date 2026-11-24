@@ -144,9 +144,66 @@ doc = "what a portal cast spends that the iron kit does not hold"
 provides = [["item:water_bucket", 1], ["item:bucket", 1]]
 spares = [["item:stick", 24]]
 
+# The tools taken through the portal (blaze.md wall 18: race 45164371770 lane 4 stood in view of a
+# fortress 110 blocks off when its one pickaxe broke, and the Nether has no wood). 4 stone pickaxes
+# are some 520 digs: the stairs to a fortress and a cut around its spawner. The table is for the
+# next pickaxe from sticks and blackstone over there.
+[[goal]]
+id = "nether-kit"
+priority = 14
+until = "nether-kit"
+doc = "spare stone pickaxes and a crafting table held before the portal is entered"
+provides = [["item:stone_pickaxe", 4], ["item:crafting_table", 1]]
+
+# >>> shield (docs/problems/shield.md): shields for the blaze fight, made after the Nether kit's
+# tools and only from what is held (`plan::shield::kit_row` picks the row by what the held iron
+# and wood make; an act that would be a trip skips them with a note). One iron ingot and six
+# planks each, at a table: a blaze's fireball that a raised shield meets deals nothing and lights
+# nothing, where one that lands costs 6 to 9 health in iron armour. Two: a shield is 336 uses and
+# a blocked fireball takes 6; with the timed raise one lasted about 5,000 ticks among three blazes
+# (race 45345386828). In the off hand a shield still counts as held (window slot 45).
+[[goal]]
+id = "shield"
+priority = 14
+until = "shield"
+doc = "one shield held before the portal is entered"
+provides = [["item:shield", 1]]
+
+[[goal]]
+id = "shields"
+priority = 14
+until = "shields"
+doc = "two shields held before the portal is entered"
+provides = [["item:shield", 2]]
+# <<< shield
+
+# Issue 16's clean flow (Bridger, 2026-11-22): the race stocks logs above ground before it first
+# goes down for iron, and again before the cast (plan::Plan::clean_flow). Every gear snapshot of
+# race 44840801185 was a bot 40 to 70 blocks underground with 1 to 23 sticks and no logs, and walls
+# 5 to 16 of docs/problems/blaze.md followed from it.
+[[goal]]
+id = "stock"
+priority = 5
+until = "stock"
+doc = "logs held before going underground: sticks, tables and pickaxes for the whole trip"
+provides = [["tag:logs", 12]]
+
 # Issue 14c's done-condition (clojurecraft's portal row): the kit the cast spends (a water
 # bucket, a bucket for the lava, flint and steel) held, then the cast at a site beside lava
 # (plan::cast); met once a portal is lit.
+# Issue 16's: iron armour and an iron sword before the Nether (Bridger, 2026-11-20: wither
+# skeletons killed 5 of 7 bare bots at the fortress, race 44789031743; clojurecraft's Nether
+# starts carried the same). Worn armour counts as held (window 0's slots 5 to 8).
+[[goal]]
+id = "gear"
+priority = 13
+until = "gear"
+doc = "an iron helmet, chestplate and leggings and an iron sword, before the Nether"
+provides = [["item:iron_helmet", 1], ["item:iron_chestplate", 1], ["item:iron_leggings", 1], ["item:iron_sword", 1]]
+holds = [["tag:pickaxes", 1]]
+# Twenty ingots of armour and two of sword, and coal to smelt them, taken whenever exposed near.
+wants = [["item:raw_iron", 22], ["item:coal", 6]]
+
 [[goal]]
 id = "portal"
 priority = 15
@@ -276,6 +333,14 @@ act = "hunt"
 # Food under this is hunger to answer: six short of full, four below where health stops coming
 # back by itself at 18 (clojurecraft's eat/hungry-below).
 hungry_below = 14
+# Hunger points of safe food held before a portal is entered (issue 16a, Bridger 2026-11-20: food
+# first, then the Nether): the Nether has little to eat, and the heal between blaze fights needs
+# food over 18. 32 was eight raw beef or porkchop, or about five cooked (clojurecraft held four
+# items, blaze.clj food-reserve). 48 since the fight at the spawner was measured (2026-11-23,
+# docs/problems/overworld-leg.md wall 4): a fireball costs 6 to 9 health in armour and healing 13
+# health took 5 raw porkchops, and the bot arrived with about 8. 48 is 16 raw beef or porkchop.
+# The `ready` stage's own bar stays 32 (world::stage::READY_FOOD).
+food_reserve = 48
 # Never eaten: what poisons or makes hungry, what teleports, a random effect, and golden apples
 # (worth more than food) (clojurecraft's eat/unsafe).
 unsafe_foods = ["rotten_flesh", "spider_eye", "pufferfish", "poisonous_potato", "chicken", "chorus_fruit", "suspicious_stew", "golden_apple", "enchanted_golden_apple"]
@@ -288,16 +353,97 @@ starving_radius = 48.0
 defend_radius = 4.0
 # Never fight at or under this health: two zombie hits on Normal (3 each) and a margin of 2.
 danger_health = 8.0
+# A tool with fewer uses left is worn and no spare (clojurecraft window/spare-uses: a tunnel's twelve
+# level steps dig about thirty). Blaze wall 7: a stone pickaxe with 13 uses counted as the spare.
+spare_uses = 40
+# Digs held (pickaxes' uses left, and 131 for each stone pickaxe the held wood and stone make) under
+# this and the bot goes for wood from anywhere, while it can still dig its way to the trees
+# (clojurecraft pearls.edn travel-reserve-digs: a stone pickaxe's uses). Blaze wall 7: every bot of
+# race 45000585321 mined on underground until both pickaxes broke, 40 blocks of stone from a log.
+travel_reserve_digs = 131
+# The clean flow's numbers (issue 16). stock_logs: 12 logs are 48 planks, a table and the sticks
+# for some twenty stone pickaxes (2,600 digs: the gear and kit trip of race 45071679507 broke 3 to
+# 6 pickaxes a bot). provision_ticks: the clock for each stocking phase: logs for up to twice it,
+# then animals for up to three times it in all (6,000 ticks is five game minutes; a treeless or
+# empty place costs minutes, never the run).
+stock_logs = 12
+provision_ticks = 6000
+# Pieces of meat held before the race goes down from the surface, the bot resumed from a ready
+# snapshot too (docs/problems/overworld-leg.md wall 4): hunted for one provision_ticks, then every
+# raw piece cooked in a furnace made on the spot, the fuel planks from held logs. 30: seven rods
+# are about 14 blazes at 6 to 8 health a kill, some 100 health to heal, and a cooked piece heals
+# about three times a raw one (8 hunger and 12.8 saturation against 3 and 1.8); ten raw pieces
+# were gone after three blazes (agent A4's spawner races, 2026-11-23).
+meat_stock = 30
+# Iron ingots held when the cook phase ends, smelted from held raw iron in the same furnace: a
+# shield is one ingot and six planks, the Nether kit wants two (a timed shield cut fireball hits
+# from 3.1 to 0.6 per 1,000 ticks at the spawner: agent A11's race 45345386828), and one spare.
+kit_ingots = 3
+# Shields crafted from those ingots at the cook's table before the descent (one ingot and six
+# planks each; docs/problems/overworld-leg.md wall 8): a development bot with a timed shield and
+# cooked food took 7 rods at 20 health (agent A11's race 45347052453), and two because a shield
+# is 336 uses and a blocked fireball takes 6. A made shield counts as an ingot of kit_ingots.
+kit_shields = 2
+# The portal is entered with this much safe food or more; under it the bot looks for animals only
+# under the open sky and for provision_ticks at most (docs/problems/overworld-leg.md wall 3). 24 is
+# the eight raw beef or porkchop the reserve was first counted as: the snapshot bot holds 36 and
+# the bots of race 45204423376 stood at their portals with 21 to 30, two of them hunting at y -53
+# for 24,000 ticks at 24 and 21. 36 since the reserve is 48: the trip down eats two to four pieces.
+portal_food = 36
+# Fewer stone pickaxes than this with spare_uses left and more are made from the pack before the
+# next task, up to the nether-kit row's four (overworld-leg wall 2). Two: one in the hand and one
+# for when it breaks inside a task (a cast digs up to 131 times; every bot of races 45194253932
+# and 45204423376 that reached a cast spent 1,940 to 58,960 ticks holding no pickaxe).
+spare_pickaxes = 2
+# Dropped a stack at a time when fewer than six main slots (two until wall 21) are free, each kept to its count (blaze
+# wall 13: lane 11 of race 45071679507 held eleven stacks of cobblestone and deepslate, dirt,
+# granite, andesite and diorite in every slot, so a dig's drop went uncollected and the bucket
+# could not be held for the cast). 64 cobblestone and deepslate cover stone tools, stairs' floors,
+# seals and the cast's placed blocks; gravel is kept for flint; nothing else here is ever used.
+junk = [
+  ["cobblestone", 64], ["cobbled_deepslate", 64], ["dirt", 16], ["gravel", 8],
+  ["andesite", 0], ["diorite", 0], ["granite", 0], ["tuff", 0], ["calcite", 0],
+  ["smooth_basalt", 0], ["raw_copper", 0], ["lapis_lazuli", 0], ["glow_ink_sac", 0],
+  ["rotten_flesh", 0], ["spider_eye", 0], ["bone", 0], ["leaf_litter", 0],
+  # The hunt's by-products (overworld-leg wall 10: a cook-site bot's pack held eggs, feathers,
+  # leather and three colours of wool when it filled and its crafts failed).
+  ["egg", 0], ["feather", 0], ["leather", 0], ["string", 0], ["white_wool", 0],
+  ["light_gray_wool", 0], ["gray_wool", 0], ["black_wool", 0], ["brown_wool", 0],
+]
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
+# Wither skeletons were here from 2026-11-20 (8 a hit and the wither effect killed 5 of 7 bare bots,
+# race 44789031743) until an armoured bot met one: it walks as fast as the bot, so backing away
+# never ends, and 2 of 2 died with no swing after 700 and 900 ticks of it (race 45334573113,
+# docs/problems/spawner.md wall 1). Fought within defend_radius now, as a zombie is.
 never_fight = ["creeper"]
 # Mobs that shoot: answered within ranged_radius, closed in on and fought (skeleton arrows were
 # the top killer underground in the iron races: docs/problems/iron-kit.md wall 16).
-ranged = ["skeleton", "stray", "bogged"]
+# Blazes too (issue 16): they shoot from up to 48, and are closed on and struck the same way.
+ranged = ["skeleton", "stray", "bogged", "blaze"]
+# A shooter beyond defend_radius is gone after only at this health or more: one fireball and the
+# fire it lights take 5 to 7 (clojurecraft blaze.clj engage-health; a blaze run began a fight at
+# 10.5 and died in it).
+engage_health = 18.0
 # Left alone until one of their kind hits the bot: a zombified piglin struck angers its whole group
 # (11 of 112 bots of the first nether race died to piglins after defending against one), an
 # enderman looked at or hit teleports in to fight (docs/problems/fortress.md wall 2).
 neutral = ["zombified_piglin", "enderman"]
 ranged_radius = 16.0
+# A fight with a shooter that lands nothing for this long is given up: a blaze winds up for 60 ticks
+# and fires for 12, so 100 ticks is one volley's worth of standing in the open for nothing. A fight
+# held 300 ticks on a blaze sitting on a roof and cost 18 health (blaze-fight wall 2).
+shooter_patience = 100
+# A fight with a shooter backs off to cover at or under this health: the fire a fireball lights
+# takes 4 to 5 more after the hit, so the danger line of 8 is met from 13 (a fight ended at 9.7 and
+# the fire took it to 7.0: blaze-fight wall 3).
+shooter_retreat_health = 13.0
+# The parts of a shooter's fight, each on: stepping off a shooter within 2.4 (a blaze's touch is
+# 3.6 in iron armour), stepping out of a fireball's line, and striking on the way down from a jump
+# (9 for 6). Switched here so the whole-stage model can judge each alone
+# (docs/problems/blaze-fight.md).
+shooter_keep_off = true
+shooter_dodge = true
+shooter_crit = true
 # A never_fight kind is backed away from within this: a creeper's fuse starts at 3 blocks, and
 # backing away only within defend_radius let 7 creepers kill (docs/problems/iron-kit.md wall 21).
 flee_radius = 8.0

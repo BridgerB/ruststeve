@@ -5,8 +5,8 @@ type: how-to
 tags: [datagen, data, tables, ci, packets]
 aliases: [use_remainder, FOODS, WEAPONS, crates/data, generated tables, JNI probe, jar probe, hardness, fuel values, collision shapes, entity data serializers, --oracle, datagen.yml, verify-stream, regenerate the tables, BlockKind, ItemKind, packet enums]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@b86d924 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@b72980e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/main.rs#//! datagen: the game's tables, generated from the vanilla server itself and committed as Rust in"
   - "ruststeve:crates/datagen/src/fetch.rs#pub fn server_jar(work: &Path) -> Result<PathBuf> {"
@@ -37,7 +37,7 @@ Every game table ruststeve uses is generated from the vanilla 26.1.2 server and 
 - `.github/workflows/datagen.yml`: generate → upload → clippy and test `data` → start a server → `verify-stream` → drift check.
 
 ## How it works
-1. `datagen generate` reads Mojang's version manifest, downloads `server.jar` for 26.1.2, checks its sha1 and runs `java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --reports` (Java 25). The jar and reports are cached by the workflow under a version key.
+1. `datagen generate` reads Mojang's version manifest, downloads `server.jar` for 26.1.2, checks its sha1 and runs `java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --reports` (Java 25). The jar and reports are cached by the workflow under a version key. Each download gets 4 tries (`GET_TRIES`), waiting 5, 10 and 15 s between them.
 2. From the reports: packet ids per state and direction, the block, item and entity-type registries, block states (ranges per block, properties in report order) and the registries the wire sends by index (menus, attributes, mob effects, sounds, data components, particles, potions, fluids).
 3. From the inner jar (`META-INF/versions/26.1.2/server-26.1.2.jar`): `version.json`, item and block tags (nested `#tag`s resolved, cycles cut), shaped and shapeless crafting recipes (patterns trimmed like vanilla), smelting, block loot (the first pool for a plain tool), dimension types, damage types and biomes (sorted by name, the order the server syncs them).
 4. Every table is checked as it is read: ids run 0..n with no gaps, a block's state range equals the product of its property values, every item and block a tag, recipe or loot table names exists. A failure stops the run; nothing is defaulted.
@@ -54,6 +54,10 @@ From the same item components: `FOODS` (`food`: nutrition, saturation as the nea
 
 ## The probe (the game's classes)
 Hardness, needs-correct-tool, collision shapes, tool materials, fuel, mob health and category, and the entity-data serializer ids are in no data file. `probe.rs` starts a JVM from Rust (`jni` 0.21, `invocation`: libjvm is found through `JAVA_HOME` and loaded at run time, so the crate builds without Java) with the inner jar and the bundler's `libraries/` on its class path, bootstraps the game and reads them by reflection, mirroring clojurecraft's `jar_probe.clj`. Only JDK methods are called by JNI signature; each game method is found by name, argument count and argument types at run time and cached, so a renamed return type cannot break it. `--oracle <clojurecraft>/resources/clojurecraft` then compares every probe table with clojurecraft's EDN entry by entry and fails on any difference.
+
+Since issue 16e the probe also reads the `LevelEvent` int constants and the `ClientboundGameEventPacket` types with their ids, written to `events.rs` (`LEVEL_EVENTS`, `GAME_EVENTS`, `level_event_name`, `game_event_name`): level event 1018 is a blaze shooting, game event 4 the win.
+
+Since issue 16 it reads `Block.getSpeedFactor`, `getJumpFactor` and `getFriction` too; `movement.rs` holds the seven blocks that differ from the default (1, 1, 0.6) as `MOVEMENT`, with `movement(block)` giving the default for the rest ([[physics]]).
 
 ## Regenerating
 On a runner only. Push a change under `crates/datagen`, `crates/data` or `crates/verify-stream` (or dispatch `datagen`); download the `generated-<run id>` artifact with `gh run download` and copy it over `crates/data/src/generated/`. The last step of the workflow fails while the committed files differ from the regenerated ones.

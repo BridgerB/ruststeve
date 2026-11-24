@@ -54,6 +54,8 @@ const SURFACE_SEARCH: i32 = 24;
 /// A swim off an island lands at least this far away, and at most this.
 pub const SWIM_FROM: i32 = 10;
 pub const SWIM_TO: i32 = 32;
+/// Trail entries kept.
+const TRAIL: usize = 12;
 /// Banks refused before the list starts over.
 const MAX_REFUSED: usize = 8;
 
@@ -109,6 +111,58 @@ fn is_water(w: &World, c: Cell) -> bool {
     )
 }
 
+fn is_lava(w: &World, c: Cell) -> bool {
+    kind_at(w, c) == Some(BlockKind::Lava)
+}
+
+/// Lava at the door: over the head, or beside the head or the feet, the first such cell. It is
+/// in the body's cells within a second (blaze.md wall 22: Nether lava ran down a bot's own
+/// stairs and took 20 health in 80 ticks, the trap firing only once the body was in it).
+///
+/// And lava one cell higher beside the head's column (the ring at y + 2), last: it falls beside
+/// the head in 10 ticks and is on the feet in 30 (nether-walk.md: race 45204423376 lane 5 stood
+/// at (29, 34, -22) with lava spreading at y 36 over (30, 36, -22) and (29, 36, -21); the check
+/// saw nothing until it was beside the head, and the body burned 20 ticks later).
+pub fn lava_door(feet: Cell, lava_at: impl Fn(Cell) -> bool) -> Option<Cell> {
+    let (x, y, z) = feet;
+    let beside = |h: i32| [(x + 1, h, z), (x - 1, h, z), (x, h, z + 1), (x, h, z - 1)];
+    std::iter::once((x, y + 2, z))
+        .chain(beside(y + 1))
+        .chain(beside(y))
+        .chain(beside(y + 2))
+        .find(|c| lava_at(*c))
+}
+
+/// `lava_door` on the world, lava seen only: a cell with an open face (no X-ray). Every cell the
+/// door looks at but the ring a cell over the head borders the body's own cells; that ring, in a
+/// one-wide tunnel, borders only rock, and lava shut in there is never seen.
+pub fn lava_door_at(w: &World, feet: Cell) -> Option<Cell> {
+    lava_door(feet, |c| seen_lava(w, c))
+}
+
+/// Lava with a face open to the air or a fluid: what can be seen.
+fn seen_lava(w: &World, c: Cell) -> bool {
+    is_lava(w, c) && exposed(w, c)
+}
+
+/// A cell with a neighbour that is not a full block (air, a fluid, a slab): one of its faces
+/// shows. A cell all six of whose neighbours are full blocks, or not loaded, is hidden.
+pub fn exposed(w: &World, (x, y, z): Cell) -> bool {
+    [
+        (1, 0, 0),
+        (-1, 0, 0),
+        (0, 1, 0),
+        (0, -1, 0),
+        (0, 0, 1),
+        (0, 0, -1),
+    ]
+    .iter()
+    .any(|(dx, dy, dz)| kind_at(w, (x + dx, y + dy, z + dz)).is_some_and(|k| !full(Some(k))))
+}
+
+/// Seals tried against lava at the door before the escape flees without one.
+pub const MAX_LAVA_SEALS: u32 = 16;
+
 fn full(k: Option<BlockKind>) -> bool {
     k.and_then(data::generated::shapes::collision) == Some(data::types::Collision::Full)
 }
@@ -135,7 +189,9 @@ pub fn touching_fire(w: &World, pos: [f64; 3]) -> bool {
 pub fn dry_land(w: &World, body: &physics::Body) -> bool {
     let [x, y, z] = body.pos;
     let under = (x.floor() as i32, (y - 0.5).floor() as i32, z.floor() as i32);
-    body.on_ground && !body.in_water && !body.eye_in_water && full(kind_at(w, under))
+    // Soul sand is land too (a box 0.875 high): a bot out of Nether lava onto it is out.
+    let land = full(kind_at(w, under)) || kind_at(w, under) == Some(BlockKind::SoulSand);
+    body.on_ground && !body.in_water && !body.eye_in_water && land
 }
 
 /// The eyes in a full block (vanilla's `isInWall` takes the eye's cell).
@@ -156,14 +212,15 @@ fn afloat(w: &World, body: &physics::Body) -> bool {
 
 impl Traps {
     /// The trap this tick (clojurecraft's `trapped-tick`).
-    pub fn tick(&mut self, w: &World, body: &physics::Body) -> Option<TrapKind> {
+    pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {
+        let at_door = door && lava_door_at(w, feet_cell(body.pos)).is_some();
         self.wet = if body.eye_in_water { self.wet + 1 } else { 0 };
         self.afloat = if afloat(w, body) { self.afloat + 1 } else { 0 };
         self.dry = if dry_land(w, body) { self.dry + 1 } else { 0 };
         let held = self
             .kind
             .filter(|k| *k != TrapKind::Fire && self.dry < DRY_TICKS_TO_CLEAR);
-        self.kind = if body.in_lava {
+        self.kind = if body.in_lava || at_door {
             Some(TrapKind::Lava)
         } else if self.wet >= TRAP_AFTER_TICKS || self.afloat >= AFLOAT_AFTER_TICKS {
             Some(TrapKind::Water)
@@ -196,6 +253,112 @@ pub struct Escape {
     pub digs: u32,
     pub started: u64,
     pub yaw: f64,
+    /// A bucket being filled before the swim out (wall 10), and whether one was tried.
+    #[serde(default)]
+    pub fill: Option<Box<crate::scoop::Scoop>>,
+    #[serde(default)]
+    pub fill_tried: bool,
+    /// Seals sent over the head against water pouring down a shaft (wall 11), and the last one.
+    #[serde(default)]
+    pub seals: u32,
+    #[serde(default)]
+    pub sealed_at: u64,
+    /// What the escape chose and why, the last `TRAIL` entries: printed when it stalls (an escape
+    /// held 25,000 ticks beside a dry cell with nothing in the ledger to say why: race 45085497535).
+    #[serde(default)]
+    pub trail: Vec<String>,
+    /// How many long-escape reports the planner has written (one each `ESCAPE_REPORT_TICKS`).
+    #[serde(default)]
+    pub reports: u64,
+}
+
+/// Seals tried before the escape goes on without one.
+pub const MAX_SEALS: u32 = 6;
+/// Ticks between two seals: the block update arrives in a tick or two.
+pub const SEAL_EVERY_TICKS: u64 = 10;
+/// Blocks a seal is made of, the commonest first: what a digging bot carries.
+const SEAL_BLOCKS: &[data::ItemKind] = &[
+    data::ItemKind::Cobblestone,
+    data::ItemKind::CobbledDeepslate,
+    data::ItemKind::Dirt,
+    data::ItemKind::Andesite,
+    data::ItemKind::Granite,
+    data::ItemKind::Diorite,
+    data::ItemKind::Netherrack,
+];
+
+/// Water over the cell, or past it on the far side from the bot (`away`, a unit step): digging
+/// it lets more in (wall 11). The bot's own wet cells on the near side do not count.
+fn holds_back_water(w: &World, (x, y, z): Cell, (ax, ay, az): Cell) -> bool {
+    is_water(w, (x, y + 1, z)) || is_water(w, (x + ax, y + ay, z + az))
+}
+
+/// The cell to steer at on the way to `target` from `feet`: the target itself when it is straight
+/// along x or z, else the cardinal neighbour toward it that `open` passes (the larger step first),
+/// so a diagonal is taken round a corner. Neither open: the target, as before.
+pub fn waypoint(feet: Cell, target: Cell, open: impl Fn(Cell) -> bool) -> Cell {
+    let (dx, dz) = (target.0 - feet.0, target.2 - feet.2);
+    if dx == 0 || dz == 0 {
+        return target;
+    }
+    let along_x = (feet.0 + dx.signum(), feet.1, feet.2);
+    let along_z = (feet.0, feet.1, feet.2 + dz.signum());
+    let order = if dx.abs() >= dz.abs() {
+        [along_x, along_z]
+    } else {
+        [along_z, along_x]
+    };
+    order.into_iter().find(|c| open(*c)).unwrap_or(target)
+}
+
+/// On the way to a diagonal `target`, a cardinal cell toward it the feet fit (not full) but the
+/// head does not: its head-height block, to dig so the way round the corner is two high, never
+/// one holding water back (blaze wall 14: the only way to the dry cell was a one-high stream).
+pub fn corner_head(
+    feet: Cell,
+    target: Cell,
+    full_at: impl Fn(Cell) -> bool,
+    holds_back: impl Fn(Cell, Cell) -> bool,
+) -> Option<Cell> {
+    let (x, y, z) = feet;
+    let (sx, sz) = ((target.0 - x).signum(), (target.2 - z).signum());
+    if sx == 0 || sz == 0 {
+        return None;
+    }
+    [((x + sx, y, z), (sx, 0, 0)), ((x, y, z + sz), (0, 0, sz))]
+        .into_iter()
+        .find_map(|(c, away)| {
+            let head = (c.0, c.1 + 1, c.2);
+            (!full_at(c) && full_at(head) && !holds_back(head, away)).then_some(head)
+        })
+}
+
+/// A full block beside `target` to click, and the face of it that looks at `target` (faces as
+/// the protocol numbers them: 0 down, 1 up, 2 north, 3 south, 4 west, 5 east). Never the cell
+/// under `target`: that is the head.
+pub fn against(target: Cell, full_at: impl Fn(Cell) -> bool) -> Option<(Cell, i8)> {
+    let (x, y, z) = target;
+    [
+        ((x, y + 1, z), 0),
+        ((x + 1, y, z), 4),
+        ((x - 1, y, z), 5),
+        ((x, y, z + 1), 2),
+        ((x, y, z - 1), 3),
+    ]
+    .into_iter()
+    .find(|(c, _)| full_at(*c))
+}
+
+/// Afloat with an empty bucket and no water bucket: the water the bot came for is here, so it
+/// fills one before swimming out (blaze.md wall 10).
+pub fn wants_fill(w: &World) -> bool {
+    fill_wanted(&crate::held(w))
+}
+
+/// The rule over what is held: an empty bucket, and no water bucket yet.
+pub fn fill_wanted(held: &crate::make::Counts) -> bool {
+    let n = |k: data::ItemKind| held.get(&k).copied().unwrap_or(0);
+    n(data::ItemKind::Bucket) >= 1 && n(data::ItemKind::WaterBucket) == 0
 }
 
 /// The cell `c`'s distance to the feet: on the plane, plus how far it is above them.
@@ -237,6 +400,12 @@ impl Escape {
             digs: 0,
             started: tick,
             yaw: w.player.yaw.into(),
+            fill: None,
+            fill_tried: false,
+            seals: 0,
+            sealed_at: 0,
+            trail: Vec::new(),
+            reports: 0,
         }
     }
 
@@ -295,7 +464,16 @@ impl Escape {
                     is_water(w, (x + dx, y, z + dz)) || is_water(w, (x + dx, y - 1, z + dz))
                 });
                 let cells = [(x, y, z), (x, y + 1, z)];
+                // Never a cell holding water back: over it, or beside it on the level. Dug, it
+                // floods the notch, and a body in water on the notch's floor is never on dry land
+                // (race 45343519424 lane 2: the aquifer round (42, 55, -136) stood at three heights).
+                let wet = |(kx, ky, kz): Cell| {
+                    [(0, 1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
+                        .iter()
+                        .any(|(dx, dy, dz)| is_water(w, (kx + dx, ky + dy, kz + dz)))
+                };
                 let ok = beside_water
+                    && !cells.iter().any(|k| wet(*k))
                     && c.floor((x, y - 1, z))
                     && cells
                         .iter()
@@ -317,7 +495,30 @@ impl Escape {
             .map(|(_, _, cell, dig)| (cell, dig))
     }
 
+    /// What the escape did, for the note at its end: how long, its seals and digs, its trail.
+    pub fn report(&self) -> String {
+        format!(
+            "{} seals, {} digs, {} refused; trail: {}",
+            self.seals,
+            self.digs,
+            self.refused.len(),
+            if self.trail.is_empty() {
+                "nothing chosen".to_owned()
+            } else {
+                self.trail.join(" / ")
+            }
+        )
+    }
+
+    fn trail(&mut self, tick: u64, what: String) {
+        self.trail.push(format!("{tick} {what}"));
+        if self.trail.len() > TRAIL {
+            self.trail.remove(0);
+        }
+    }
+
     fn start_dig(&mut self, w: &World, cell: Cell, tick: u64) {
+        self.trail(tick, format!("dig {cell:?}"));
         let mut d = Dig::new(w, cell, tick);
         // Nothing is collected on the way out.
         d.drop = None;
@@ -330,14 +531,28 @@ impl Escape {
     fn in_the_way(&self, w: &World, body: &physics::Body, target: Cell) -> Option<Cell> {
         let (x, y, z) = feet_cell(body.pos);
         let lid = (x, y + 2, z);
-        if body.eye_in_water && full(kind_at(w, lid)) {
+        // Never a block with water on it: a stair cut into an aquifer pours down the shaft, and
+        // digging the lid let more in until the bot drowned (blaze.md wall 11: 4 of 12).
+        if body.eye_in_water && full(kind_at(w, lid)) && !holds_back_water(w, lid, (0, 1, 0)) {
             return Some(lid);
         }
         let dx = (target.0 - x).signum();
         let dz = (target.2 - z).signum();
         [(x + dx, target.1 + 1, z + dz), (x + dx, y + 1, z + dz)]
             .into_iter()
-            .find(|c| full(kind_at(w, *c)) && *c != (target.0, target.1 - 1, target.2))
+            .find(|c| {
+                full(kind_at(w, *c))
+                    && *c != (target.0, target.1 - 1, target.2)
+                    && !holds_back_water(w, *c, (dx, 0, dz))
+            })
+            .or_else(|| {
+                corner_head(
+                    (x, y, z),
+                    target,
+                    |c| full(kind_at(w, c)),
+                    |c, away| holds_back_water(w, c, away),
+                )
+            })
     }
 
     /// One tick: the controls and the act to send.
@@ -346,6 +561,95 @@ impl Escape {
             return (Controls::default(), None);
         };
         let feet = feet_cell(body.pos);
+        // In the water the bot wanted: fill the bucket first, once, then swim out.
+        if self.kind == TrapKind::Water && !self.fill_tried && wants_fill(w) {
+            self.fill_tried = true;
+            self.fill = crate::scoop::Scoop::from_here(w, tick).map(Box::new);
+        }
+        if let Some(s) = &mut self.fill {
+            let (mut c, act, status) = s.step(w, tick);
+            match status {
+                crate::scoop::ScoopStatus::Running => {
+                    // Keep the head up while aiming.
+                    c.jump = body.in_water;
+                    return (c, act);
+                }
+                crate::scoop::ScoopStatus::Done | crate::scoop::ScoopStatus::Failed(_) => {
+                    self.fill = None;
+                }
+            }
+        }
+        // Water pouring down onto the head (a stair cut into an aquifer): put a held block into
+        // the cell over the head, so the shaft drains instead of filling (blaze.md wall 11).
+        let over = (feet.0, feet.1 + 2, feet.2);
+        if self.kind == TrapKind::Water
+            && body.eye_in_water
+            && is_water(w, over)
+            && self.seals < MAX_SEALS
+            && tick.saturating_sub(self.sealed_at) >= SEAL_EVERY_TICKS
+            && let Some(item) = SEAL_BLOCKS
+                .iter()
+                .copied()
+                .find(|k| crate::held(w).get(k).copied().unwrap_or(0) > 0)
+            && let Some((click, face)) = against(over, |c| full(kind_at(w, c)))
+        {
+            // Still: a jump lifts the body into the cell sealed, and the server refuses it.
+            let up = Controls::default();
+            match crate::hold::toward(w, item) {
+                crate::hold::Hold::Held => {
+                    self.seals += 1;
+                    self.trail(tick, format!("seal {over:?} on {click:?} face {face}"));
+                    self.sealed_at = tick;
+                    return (
+                        up,
+                        Some(Act::UseOn {
+                            pos: BlockPos::new(click.0, click.1, click.2),
+                            face,
+                        }),
+                    );
+                }
+                crate::hold::Hold::Act(a) => return (up, Some(a)),
+                crate::hold::Hold::Wait => return (up, None),
+                crate::hold::Hold::Missing => {}
+            }
+        }
+        // Lava at the door and the body not yet in it: a held block into that cell (wall 22).
+        if self.kind == TrapKind::Lava
+            && !body.in_lava
+            && self.seals < MAX_LAVA_SEALS
+            && let Some(door) = lava_door_at(w, feet)
+            && let Some(item) = SEAL_BLOCKS
+                .iter()
+                .copied()
+                .find(|k| crate::held(w).get(k).copied().unwrap_or(0) > 0)
+            && let Some((click, face)) = against(door, |c| full(kind_at(w, c))).or_else(|| {
+                let under = (door.0, door.1 - 1, door.2);
+                (under != (feet.0, feet.1 + 1, feet.2) && full(kind_at(w, under)))
+                    .then_some((under, 1))
+            })
+        {
+            let still = Controls::default();
+            if tick.saturating_sub(self.sealed_at) < SEAL_EVERY_TICKS {
+                return (still, None);
+            }
+            match crate::hold::toward(w, item) {
+                crate::hold::Hold::Held => {
+                    self.seals += 1;
+                    self.trail(tick, format!("seal lava {door:?} on {click:?} face {face}"));
+                    self.sealed_at = tick;
+                    return (
+                        still,
+                        Some(Act::UseOn {
+                            pos: BlockPos::new(click.0, click.1, click.2),
+                            face,
+                        }),
+                    );
+                }
+                crate::hold::Hold::Act(a) => return (still, Some(a)),
+                crate::hold::Hold::Wait => return (still, None),
+                crate::hold::Hold::Missing => {}
+            }
+        }
         if let Some(d) = &mut self.dig {
             let (mut c, act, status) = d.step(w, tick);
             // Keep the head up while digging out of water.
@@ -359,6 +663,7 @@ impl Escape {
                         && let Some(t) = self.target.take()
                     {
                         self.refused.push(t);
+                        self.trail(tick, format!("dig failed; refused {t:?}"));
                         self.queue.clear();
                         self.next_search = tick;
                     }
@@ -394,7 +699,25 @@ impl Escape {
         }
         if self.target.is_none() && tick >= self.next_search {
             self.next_search = tick + SEARCH_EVERY_TICKS;
+            // A bank refused (no nearer, nothing on the way it may dig) is past a swim's reach:
+            // a notch beside the body comes before the next bank. With a bank within reach on
+            // record the list never ran out, and the notch was never cut (race 45343519424 lane
+            // 2: nine banks 12 blocks off through stone holding water back, refused in turn
+            // and the list cleared, from tick 14,780 to the run's end).
+            let notch_first = (self.kind == TrapKind::Water && !self.refused.is_empty())
+                .then(|| self.notch(w, feet))
+                .flatten();
+            if let Some((cell, _)) = &notch_first {
+                self.trail(
+                    tick,
+                    format!(
+                        "notch before another bank at {cell:?}: {} banks refused",
+                        self.refused.len()
+                    ),
+                );
+            }
             self.target = match self.kind {
+                TrapKind::Water if notch_first.is_some() => None,
                 TrapKind::Water => self.bank(w, feet),
                 TrapKind::Lava => {
                     self.footing(w, around(feet, FLEE_RADIUS, feet.1 - 1..=feet.1 + 2))
@@ -408,12 +731,17 @@ impl Escape {
             self.best_at = tick;
             if self.target.is_none()
                 && self.kind == TrapKind::Water
-                && let Some((cell, dig)) = self.notch(w, feet)
+                && let Some((cell, dig)) = notch_first.or_else(|| self.notch(w, feet))
             {
                 self.target = Some(cell);
                 // Popped from the end: the head-height cell first, then the feet's.
                 self.queue = dig;
             }
+            let found = match self.target {
+                Some(t) => format!("target {t:?} from {feet:?}, {} queued", self.queue.len()),
+                None => format!("no bank or notch from {feet:?}"),
+            };
+            self.trail(tick, found);
         }
         let Some(target) = self.target else {
             // Nowhere yet: rise, and keep going the way the body faces.
@@ -437,6 +765,10 @@ impl Escape {
                 Some(cell) if self.kind == TrapKind::Water => self.start_dig(w, cell, tick),
                 Some(_) | None => {
                     self.refused.push(target);
+                    self.trail(
+                        tick,
+                        format!("no nearer in {STUCK_TICKS}; refused {target:?}"),
+                    );
                     if self.refused.len() > MAX_REFUSED {
                         self.refused.clear();
                     }
@@ -452,7 +784,15 @@ impl Escape {
             f64::from(target.1),
             f64::from(target.2) + 0.5,
         ];
-        self.yaw = yaw_to(body.pos, centre);
+        // Round a corner, not into it: a diagonal target is steered at through the open cardinal
+        // cell first (wall 14: a bot pressed into the stone corner between it and a dry cell one
+        // diagonal step away and refused every bank for 25,000 ticks).
+        let open = |c: Cell| !full(kind_at(w, c)) && !full(kind_at(w, (c.0, c.1 + 1, c.2)));
+        let aim = waypoint(feet, target, open);
+        self.yaw = yaw_to(
+            body.pos,
+            [f64::from(aim.0) + 0.5, centre[1], f64::from(aim.2) + 0.5],
+        );
         let flat = ((centre[0] - body.pos[0]).powi(2) + (centre[2] - body.pos[2]).powi(2)).sqrt();
         // On footing over the target's centre: stand still and let the trap clear.
         let there = flat < 0.2 && body.on_ground;
@@ -466,5 +806,96 @@ impl Escape {
             },
             None,
         )
+    }
+}
+
+#[cfg(test)]
+mod fill_tests {
+    use super::*;
+
+    /// Blaze wall 10: afloat with only an empty bucket, fill it; with water held, or no bucket,
+    /// just swim out (a second empty bucket is kept for lava).
+    #[test]
+    fn an_empty_bucket_and_no_water_is_filled() {
+        let c = |v: &[(data::ItemKind, i32)]| v.iter().copied().collect::<crate::make::Counts>();
+        assert!(fill_wanted(&c(&[(data::ItemKind::Bucket, 1)])));
+        assert!(!fill_wanted(&c(&[
+            (data::ItemKind::Bucket, 1),
+            (data::ItemKind::WaterBucket, 1)
+        ])));
+        assert!(!fill_wanted(&c(&[(data::ItemKind::StonePickaxe, 1)])));
+    }
+
+    /// Blaze wall 11: water over the head in a shaft is sealed by clicking the stone over it
+    /// (its down face), else a wall beside it on the face that looks at it; never the head below.
+    #[test]
+    fn a_seal_clicks_the_stone_round_the_cell_over_the_head() {
+        let over = (57, 26, -152);
+        assert_eq!(
+            against(over, |c| c == (57, 27, -152)),
+            Some(((57, 27, -152), 0))
+        );
+        assert_eq!(
+            against(over, |c| c == (58, 26, -152)),
+            Some(((58, 26, -152), 4))
+        );
+        assert_eq!(
+            against(over, |c| c == (57, 26, -153)),
+            Some(((57, 26, -153), 3))
+        );
+        assert_eq!(against(over, |c| c == (57, 25, -152)), None);
+    }
+
+    /// Blaze wall 14 (race 45091345688, lane 1): from (13, 31, 2) the dry cell (14, 31, 3) is a
+    /// diagonal step past the stone at (13, 31, 3): steer through (14, 31, 2), the open one.
+    #[test]
+    fn a_diagonal_bank_is_reached_round_the_corner() {
+        let stone = (13, 31, 3);
+        let open = |c: Cell| c != stone && c != (13, 32, 3);
+        assert_eq!(waypoint((13, 31, 2), (14, 31, 3), open), (14, 31, 2));
+        assert_eq!(waypoint((13, 31, 2), (16, 30, 2), open), (16, 30, 2));
+        assert_eq!(waypoint((13, 31, 2), (14, 31, 3), |_| false), (14, 31, 3));
+    }
+
+    /// Blaze wall 14 again (race 45096903034, lanes 2, 8, 9, 10 at (13, 31, 2)): the cardinal cell
+    /// (14, 31, 2) is a one-high stream under stone, so the stone over it is dug; (13, 31, 3) is
+    /// stone at the feet, no way. Holding water back, or a straight target: nothing.
+    #[test]
+    fn the_one_high_way_round_a_corner_is_dug_two_high() {
+        let full = |c: Cell| matches!(c, (14, 32, 2) | (13, 31, 3) | (13, 32, 3));
+        let dry = |_: Cell, _: Cell| false;
+        assert_eq!(
+            corner_head((13, 31, 2), (14, 31, 3), full, dry),
+            Some((14, 32, 2))
+        );
+        assert_eq!(
+            corner_head((13, 31, 2), (14, 31, 3), full, |_, _| true),
+            None
+        );
+        assert_eq!(corner_head((13, 31, 2), (16, 31, 2), full, dry), None);
+    }
+
+    /// Blaze wall 22: lava over the head, beside the head or beside the feet is at the door;
+    /// lava under a neighbour's floor, or two cells off, is not.
+    #[test]
+    fn lava_at_the_door_is_seen_over_and_beside_the_body() {
+        let feet = (30, 31, -18);
+        let at = |cells: &'static [Cell]| move |c: Cell| cells.contains(&c);
+        assert_eq!(lava_door(feet, at(&[(30, 33, -18)])), Some((30, 33, -18)));
+        assert_eq!(lava_door(feet, at(&[(30, 32, -19)])), Some((30, 32, -19)));
+        assert_eq!(lava_door(feet, at(&[(30, 31, -19)])), Some((30, 31, -19)));
+        // Over the head first, then the head's height, then the feet's.
+        assert_eq!(
+            lava_door(feet, at(&[(30, 31, -19), (31, 32, -18), (30, 33, -18)])),
+            Some((30, 33, -18))
+        );
+        assert_eq!(lava_door(feet, at(&[(30, 30, -19), (30, 31, -20)])), None);
+        // Lava a cell over the head's height, beside its column, is seen, and last.
+        assert_eq!(lava_door(feet, at(&[(31, 33, -18)])), Some((31, 33, -18)));
+        assert_eq!(
+            lava_door(feet, at(&[(31, 33, -18), (30, 31, -19)])),
+            Some((30, 31, -19))
+        );
+        assert_eq!(lava_door(feet, at(&[(31, 33, -19), (30, 34, -18)])), None);
     }
 }

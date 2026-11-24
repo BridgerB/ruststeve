@@ -11,7 +11,8 @@
 //! (`ServerGamePacketListenerImpl.handleMovePlayer`, `Entity.checkFallDamage`,
 //! `LivingEntity.calculateFallDamage`): a correction is the server's verdict on a move. Issue
 //! 10b adds digging, drops and pickup and window 0's crafting (`survival`); 11a placing blocks,
-//! the crafting table's menu, tools and stack sizes.
+//! the crafting table's menu, tools and stack sizes. Issue 16 adds the Nether (`nether`): a
+//! world in that dimension, its fast lava and magma's burn.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -154,6 +155,13 @@ pub struct Sim {
     pub look: (f32, f32),
     /// Scheduled fluid ticks (issue 14a).
     pub(crate) fluids: fluid::Fluids,
+    /// The overworld clock's ticks: 0 at a new world's first tick (dawn), one more each server
+    /// tick, sent in `set_time` (the day clock, `docs/problems/day-clock.md`). A test sets it
+    /// to start at dusk.
+    pub day_time: i64,
+    /// The clocks went out: a real server sends them once, at the join, and then the game time
+    /// alone (race 45355573039: one 33-byte `set_time`, then 599 of 9 bytes).
+    clocks_sent: bool,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -166,7 +174,7 @@ fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
 }
 
 /// The column holding a block position.
-fn column_of(x: f64, z: f64) -> (i32, i32) {
+pub(crate) fn column_of(x: f64, z: f64) -> (i32, i32) {
     ((x.floor() as i32) >> 4, (z.floor() as i32) >> 4)
 }
 
@@ -196,6 +204,8 @@ impl Sim {
             survival: survival::Survival::new(0),
             look: (0.0, 0.0),
             fluids: fluid::Fluids::default(),
+            day_time: 0,
+            clocks_sent: false,
         }
     }
 
@@ -294,6 +304,12 @@ impl Sim {
             (Phase::Play, C2s::MovePlayerStatusOnly { flags }) => {
                 let pos = self.pos;
                 self.on_move(pos, flags & 1 != 0)
+            }
+            // The keys held: a server keeps the shift key (`handlePlayerInput`:
+            // `setShiftKeyDown`), which is what spares the player on magma.
+            (Phase::Play, C2s::PlayerInput { flags }) => {
+                self.survival.life.sneaking = flags & protocol::packets::INPUT_SHIFT != 0;
+                Ok(Vec::new())
             }
             (
                 Phase::Play,
@@ -640,6 +656,30 @@ impl Sim {
         Ok(out)
     }
 
+    /// The clock as the server syncs it (`ClientboundSetTimePacket`): the game time, and the
+    /// first time both world clocks (overworld 0, the End 1) ticking at rate 1, as a real join's
+    /// `set_time` carries them; after that the game time alone.
+    fn set_time(&mut self) -> S2c {
+        let clocks = if self.clocks_sent {
+            Vec::new()
+        } else {
+            self.clocks_sent = true;
+            [protocol::OVERWORLD_CLOCK, 1]
+                .into_iter()
+                .map(|clock| protocol::ClockUpdate {
+                    clock,
+                    total_ticks: self.day_time,
+                    partial_tick: 0.0,
+                    rate: 1.0,
+                })
+                .collect()
+        };
+        S2c::SetTime {
+            game_time: i64::try_from(self.ticks).unwrap_or(i64::MAX),
+            clocks,
+        }
+    }
+
     fn tick(&mut self) -> Result<Vec<Wire>, EncodeError> {
         if self.phase != Phase::Play {
             return Ok(Vec::new());
@@ -648,9 +688,11 @@ impl Sim {
         // vanilla's resetPosition at the start of each tick.
         self.first_good = self.pos;
         self.moves_this_tick = 0;
+        self.day_time += 1;
         let mut out = Vec::new();
         if self.ticks.is_multiple_of(SET_TIME_EVERY) {
-            out.push(wire(State::Play, &S2c::SetTime)?);
+            let p = self.set_time();
+            out.push(wire(State::Play, &p)?);
         }
         if self.config.peaceful
             && self.health > 0.0
@@ -691,7 +733,15 @@ impl Sim {
                 State::Play,
                 &S2c::SetEntityMotion {
                     id: PLAYER_ID,
-                    velocity: [0.0, self.server_vy, 0.0],
+                    // A mob's hit knocks; any other hurt sends the server's own motion.
+                    velocity: self
+                        .survival
+                        .life
+                        .knock
+                        .take()
+                        .map_or([0.0, self.server_vy, 0.0], |k| {
+                            [k[0], if k[1] > 0.0 { k[1] } else { self.server_vy }, k[2]]
+                        }),
                 },
             )?);
         }
@@ -764,8 +814,29 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
 pub mod fluid;
 pub mod furnace;
 pub mod life;
+pub mod nether;
 pub mod survival;
 pub mod terrain;
+
+pub use nether::nether_world;
+
+impl Sim {
+    /// A `setblock` as a start's setup runs one: the block set and sent, the fluids it touches
+    /// told and its own fluid tick scheduled (`Level.setBlock` with updates). How a test opens a
+    /// lake's bank or drops a source without a bucket.
+    pub fn setblock(
+        &mut self,
+        (x, y, z): (i32, i32, i32),
+        state: u32,
+    ) -> Result<Vec<Wire>, EncodeError> {
+        self.set_and_update((x, y, z), state)
+    }
+
+    /// The model's world, for a test's reading.
+    pub fn world(&self) -> &ModelWorld {
+        &self.world
+    }
+}
 
 impl ModelWorld {
     /// Set one block (a start's place, a test's ledge): the column is re-encoded so the bytes

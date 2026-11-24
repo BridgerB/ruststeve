@@ -1,0 +1,776 @@
+//! Issue 16: the model's Nether (crates/sim/src/nether.rs, docs/problems/nether-testbed.md): the
+//! dimension a stage logs in as, Nether lava's delay, reach and slope search against the
+//! Overworld's (`LavaFluid` in the 26.1.2 jar), and magma's burn (`MagmaBlock.stepOn`).
+
+use data::BlockKind;
+use protocol::{C2s, S2c, decode};
+use sim::nether::{NETHER, Stage};
+use sim::{Config, In, ModelWorld, Sim, Wire, flat_world};
+
+const CONFIG: Config = Config {
+    view_distance: 2,
+    simulation_distance: 2,
+    peaceful: false,
+};
+
+fn packets(out: Vec<Wire>) -> Vec<S2c> {
+    out.iter()
+        .filter_map(|w| decode(w.state, w.id, &w.body).ok())
+        .collect()
+}
+
+fn send(sim: &mut Sim, p: C2s) -> Vec<S2c> {
+    packets(sim.step(&In::Packet(p)).unwrap())
+}
+
+fn tick(sim: &mut Sim) -> Vec<S2c> {
+    packets(sim.step(&In::Tick).unwrap())
+}
+
+fn state(k: BlockKind) -> u32 {
+    k.info().unwrap().default_state
+}
+
+/// The model joined and standing at the world's spawn; with it, what the join sent.
+fn joined(world: ModelWorld) -> (Sim, Vec<S2c>) {
+    let mut sim = Sim::new(CONFIG, world).seeded(3);
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    let join = send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    (sim, join)
+}
+
+fn kind(sim: &Sim, x: i32, y: i32, z: i32) -> Option<BlockKind> {
+    sim.state_at(x, y, z).and_then(data::block_of_state)
+}
+
+/// The lava's amount at a cell (8 a source or falling, 7 to 1 flowing), 0 where there is none.
+fn lava(sim: &Sim, x: i32, y: i32, z: i32) -> i32 {
+    sim.state_at(x, y, z)
+        .and_then(sim::fluid::fluid_of)
+        .filter(|f| f.kind == sim::fluid::Kind::Lava)
+        .map_or(0, |f| f.amount)
+}
+
+/// A Nether cavern (floor 40, ceiling 60) and a flat overworld (ground 63), the player well away
+/// from (0, 0); with each, the height of the cells over the floor.
+fn nether() -> (Sim, i32) {
+    let mut stage = Stage::new(1, 40, 60);
+    stage.spawn((12, 41, 12));
+    (joined(stage.build().unwrap()).0, 41)
+}
+
+fn overworld() -> (Sim, i32) {
+    let mut w = flat_world(1, 63).unwrap();
+    w.spawn = [12.5, 64.0, 12.5];
+    (joined(w).0, 64)
+}
+
+#[test]
+fn a_stage_logs_in_as_the_nether_with_its_sixteen_sections() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage
+        .lava_lake((2, 4), (2, 4), 40, 2)
+        .soul_sand((-3, -1), (0, 2), 40)
+        .bricks((6, 8), (41, 44), (6, 6));
+    let (sim, join) = joined(stage.build().unwrap());
+    let login = join.iter().find_map(|p| match p {
+        S2c::Login {
+            dimension,
+            dimension_type,
+            ..
+        } => Some((dimension.clone(), *dimension_type)),
+        _ => None,
+    });
+    // The synced registry's dimension types are sorted by name: the Nether is the fourth.
+    assert_eq!(login, Some((NETHER.to_owned(), 3)));
+    assert!(sim.world().fast_lava());
+    let column = join
+        .iter()
+        .find_map(|p| match p {
+            S2c::LevelChunkWithLight { x: 0, z: 0, column } => Some(column.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!((column.min_y, column.sections.len()), (0, 16));
+    assert_eq!(kind(&sim, 0, 0, 0), Some(BlockKind::Bedrock));
+    assert_eq!(kind(&sim, 0, 40, 5), Some(BlockKind::Netherrack));
+    assert_eq!(kind(&sim, 0, 41, 5), Some(BlockKind::Air));
+    assert_eq!(kind(&sim, 0, 60, 5), Some(BlockKind::Netherrack));
+    assert_eq!(kind(&sim, 0, 127, 5), Some(BlockKind::Bedrock));
+    assert_eq!(kind(&sim, 0, 128, 5), Some(BlockKind::Air));
+    assert_eq!(kind(&sim, 3, 39, 3), Some(BlockKind::Lava));
+    assert_eq!(lava(&sim, 3, 40, 3), 8);
+    assert_eq!(kind(&sim, 3, 38, 3), Some(BlockKind::Netherrack));
+    assert_eq!(kind(&sim, -2, 40, 1), Some(BlockKind::SoulSand));
+    assert_eq!(kind(&sim, 7, 43, 6), Some(BlockKind::NetherBricks));
+    assert!(!joined(flat_world(1, 63).unwrap()).0.world().fast_lava());
+}
+
+/// `LavaFluid.getTickDelay` (10 with fast lava, else 30) and `getDropOff` (1, else 2): a source
+/// on a flat floor reaches the next cell on its tenth tick in the Nether and stops 7 cells out;
+/// in the Overworld on its thirtieth, and 3 cells out.
+#[test]
+fn nether_lava_flows_a_block_in_ten_ticks_and_seven_blocks_out() {
+    let (mut sim, y) = nether();
+    sim.setblock((0, y, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..9 {
+        tick(&mut sim);
+    }
+    assert_eq!(lava(&sim, 1, y, 0), 0, "a cell before the tenth tick");
+    tick(&mut sim);
+    assert_eq!(lava(&sim, 1, y, 0), 7, "a cell on the tenth tick");
+    for _ in 0..20 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 3, y, 0), lava(&sim, 4, y, 0)), (5, 0));
+    for _ in 0..200 {
+        tick(&mut sim);
+    }
+    let along: Vec<i32> = (0..=8).map(|x| lava(&sim, x, y, 0)).collect();
+    assert_eq!(along, [8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    // Each step out costs one, whichever way: three east and two south is five from the source.
+    assert_eq!(lava(&sim, 3, y, 2), 3);
+}
+
+#[test]
+fn overworld_lava_flows_a_block_in_thirty_ticks_and_three_blocks_out() {
+    let (mut sim, y) = overworld();
+    sim.setblock((0, y, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..29 {
+        tick(&mut sim);
+    }
+    assert_eq!(lava(&sim, 1, y, 0), 0, "a cell before the thirtieth tick");
+    tick(&mut sim);
+    assert_eq!(lava(&sim, 1, y, 0), 6, "a cell on the thirtieth tick");
+    for _ in 0..240 {
+        tick(&mut sim);
+    }
+    let along: Vec<i32> = (0..=4).map(|x| lava(&sim, x, y, 0)).collect();
+    assert_eq!(along, [8, 6, 4, 2, 0]);
+}
+
+/// `LavaFluid.getSlopeFindDistance` (4 with fast lava, else 2): a hole four cells east of the
+/// source is found in the Nether, so the lava goes east alone; in the Overworld the search stops
+/// short of it and the lava goes all four ways.
+#[test]
+fn nether_lava_finds_a_hole_four_cells_off() {
+    let sides = |sim: &Sim, y: i32| {
+        [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|(dx, dz)| i32::from(lava(sim, dx, y, dz) > 0))
+    };
+    let (mut sim, y) = nether();
+    sim.setblock((4, y - 1, 0), state(BlockKind::Air)).unwrap();
+    sim.setblock((0, y, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..10 {
+        tick(&mut sim);
+    }
+    assert_eq!(sides(&sim, y), [1, 0, 0, 0], "the Nether: east alone");
+    let (mut sim, y) = overworld();
+    sim.setblock((4, y - 1, 0), state(BlockKind::Air)).unwrap();
+    sim.setblock((0, y, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..30 {
+        tick(&mut sim);
+    }
+    assert_eq!(sides(&sim, y), [1, 1, 1, 1], "the Overworld: every side");
+}
+
+/// A lake at rest stays at rest; opening its bank lets it out at the Nether's pace.
+#[test]
+fn a_lake_flows_once_its_bank_is_dug() {
+    let mut stage = Stage::new(1, 40, 60);
+    // A lake sunk in the floor and a trench beside it, a netherrack bank between them.
+    stage
+        .lava_lake((0, 2), (0, 2), 40, 1)
+        .air((4, 6), (40, 40), (1, 1))
+        .spawn((12, 41, 12));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    assert_eq!(lava(&sim, 4, 40, 1), 0, "a lake at rest ran");
+    sim.setblock((3, 40, 1), state(BlockKind::Air)).unwrap();
+    for _ in 0..45 {
+        tick(&mut sim);
+    }
+    let trench: Vec<i32> = (3..=6).map(|x| lava(&sim, x, 40, 1)).collect();
+    assert_eq!(trench, [7, 6, 5, 4]);
+}
+
+/// How many `hot_floor` hits the player takes in `ticks` standing at the spawn of `stage`.
+fn burns(stage: &Stage, ticks: u32, set: impl Fn(&mut Sim)) -> usize {
+    let (mut sim, _) = joined(stage.build().unwrap());
+    set(&mut sim);
+    let hot = data::generated::registries::DAMAGE_TYPE
+        .iter()
+        .position(|n| *n == "hot_floor")
+        .unwrap() as i32;
+    (0..ticks)
+        .flat_map(|_| tick(&mut sim))
+        .filter(|p| matches!(p, S2c::DamageEvent { source_type, .. } if *source_type == hot))
+        .count()
+}
+
+/// `MagmaBlock.stepOn`: 1 a tick to a body on it that is not stepping carefully, which the 20
+/// ticks of invulnerability make one hit each 10 ticks (the wiki's "every half second").
+#[test]
+fn magma_burns_the_feet_each_ten_ticks_unless_sneaking_or_fire_resistant() {
+    let mut magma = Stage::new(1, 40, 60);
+    magma.magma((0, 0), (0, 0), 40);
+    assert_eq!(burns(&magma, 25, |_| {}), 3, "ticks 1, 11 and 21");
+    assert_eq!(burns(&magma, 25, |s| s.survival.life.sneaking = true), 0);
+    assert_eq!(
+        burns(&magma, 25, |s| s.survival.life.fire_resistance = true),
+        0
+    );
+    assert_eq!(burns(&Stage::new(1, 40, 60), 25, |_| {}), 0, "netherrack");
+    // Magma beside the feet, not under them, does nothing.
+    let mut beside = Stage::new(1, 40, 60);
+    beside.magma((1, 1), (0, 0), 40);
+    assert_eq!(burns(&beside, 25, |_| {}), 0);
+}
+
+/// Lava laid in a stage rests, as captured columns hold a lava fall still; `wake_fluids` sets
+/// what can run running, and only in the chunks that tick: within the simulation distance (2
+/// here) of the player. A spring four chunks off waits.
+#[test]
+fn woken_lava_runs_where_the_chunks_tick_and_waits_where_they_do_not() {
+    let mut stage = Stage::new(5, 40, 60);
+    stage
+        .set((2, 41, 2), BlockKind::Lava)
+        .set((70, 41, 2), BlockKind::Lava)
+        .lava_lake((-20, -16), (-20, -16), 40, 2)
+        .spawn((12, 41, 12));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    for _ in 0..30 {
+        tick(&mut sim);
+    }
+    assert_eq!(lava(&sim, 3, 41, 2), 0, "lava at rest ran");
+    // The two springs; the lake sunk in the floor has nowhere to go and is left asleep.
+    assert_eq!(sim.wake_fluids(), 2);
+    for _ in 0..10 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 3, 41, 2), lava(&sim, 71, 41, 2)), (7, 0));
+    for _ in 0..60 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 8, 41, 2), lava(&sim, 71, 41, 2)), (2, 0));
+}
+
+/// `BlockItem.place` into lava: water and lava are replaceable, so a held block goes into a
+/// lava cell (the bridge's move and the seal's), the lava is gone from it, and the flow it cut
+/// off from its source drains.
+#[test]
+fn a_block_is_placed_into_lava_and_the_flow_behind_it_drains() {
+    let mut stage = Stage::new(1, 40, 60);
+    // A trench in the floor east of the player, a source set at its far end.
+    stage.air((3, 5), (40, 40), (0, 0)).spawn((2, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.give((data::ItemKind::Cobblestone, 64));
+    sim.setblock((6, 40, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    let trench = |sim: &Sim| [3, 4, 5, 6].map(|x| lava(sim, x, 40, 0));
+    assert_eq!(trench(&sim), [5, 6, 7, 8]);
+    // The trench's floor under (4, 40, 0), clicked on its top face.
+    let out = send(
+        &mut sim,
+        C2s::UseItemOn {
+            hand: 0,
+            pos: (4, 39, 0),
+            face: 1,
+            cursor: [0.5, 1.0, 0.5],
+            inside: false,
+            sequence: 1,
+        },
+    );
+    assert_eq!(kind(&sim, 4, 40, 0), Some(BlockKind::Cobblestone));
+    assert_eq!(
+        sim.survival.held_stack(),
+        Some((data::ItemKind::Cobblestone, 63))
+    );
+    assert_eq!(out.last(), Some(&S2c::BlockChangedAck { sequence: 1 }));
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    assert_eq!(trench(&sim), [0, 0, 7, 8], "the cut-off flow did not drain");
+    assert_eq!(sim.health, 20.0);
+}
+
+/// The shift key reaches the model as it reaches a server, by `player_input`
+/// (`ServerGamePacketListenerImpl.handlePlayerInput`: `setShiftKeyDown`): held, magma spares
+/// the feet; let go, it burns again.
+#[test]
+fn the_shift_key_of_player_input_spares_the_feet_on_magma() {
+    use protocol::packets::{INPUT_FORWARD, INPUT_SHIFT};
+    let mut magma = Stage::new(1, 40, 60);
+    magma.magma((0, 0), (0, 0), 40);
+    let held = |s: &mut Sim| {
+        s.step(&In::Packet(C2s::PlayerInput {
+            flags: INPUT_SHIFT | INPUT_FORWARD,
+        }))
+        .unwrap();
+    };
+    assert_eq!(burns(&magma, 25, held), 0, "sneaking");
+    let let_go = |s: &mut Sim| {
+        held(s);
+        s.step(&In::Packet(C2s::PlayerInput {
+            flags: INPUT_FORWARD,
+        }))
+        .unwrap();
+    };
+    assert_eq!(burns(&magma, 25, let_go), 3, "walking");
+    let (mut sim, _) = joined(magma.build().unwrap());
+    held(&mut sim);
+    assert!(sim.violations.is_empty(), "{:?}", sim.violations);
+}
+
+/// A blaze five blocks east of the player on an open floor, and the model joined.
+fn blazed(give: &[data::ItemKind]) -> Sim {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    for k in give {
+        sim.survival.give((*k, 1));
+    }
+    sim.summon_with(
+        data::EntityKind::Blaze,
+        [5.5, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    sim
+}
+
+/// `Blaze$BlazeAttackGoal.tick`: a charge of 60 ticks, three small fireballs 6 ticks apart, a
+/// rest of 100, and again: fireballs on ticks 61, 67 and 73, then 239.
+#[test]
+fn a_blaze_charges_sixty_ticks_and_looses_three_fireballs_six_apart() {
+    let mut sim = blazed(&[]);
+    let small = data::EntityKind::SmallFireball.id();
+    let mut loosed = Vec::new();
+    for t in 1..=250u32 {
+        for p in tick(&mut sim) {
+            if matches!(p, S2c::AddEntity { kind, .. } if kind == small) {
+                loosed.push(t);
+            }
+        }
+    }
+    assert_eq!(loosed, [61, 67, 73, 239, 245]);
+}
+
+/// `SmallFireball.onHitEntity`: 5 and alight. Over three volleys at five blocks a still player
+/// is hit; behind a wall the blaze has no sight and looses nothing.
+#[test]
+fn a_fireball_burns_a_player_in_sight_and_none_flies_at_one_behind_a_wall() {
+    let mut sim = blazed(&[]);
+    let mut lowest = 20.0f32;
+    let mut alight = false;
+    for _ in 0..500 {
+        tick(&mut sim);
+        lowest = lowest.min(sim.health);
+        alight |= sim.survival.life.fire_ticks > 0;
+    }
+    assert!(
+        sim.survival.life.fireballs_hit >= 1,
+        "nine fireballs missed"
+    );
+    assert!(lowest <= 15.0 && alight, "lowest {lowest}, alight {alight}");
+
+    let mut sim = blazed(&[]);
+    // Walled in on every side to the ceiling: a blaze with no target strolls, and would
+    // come round a single wall.
+    for y in 41..=59 {
+        for (x, z) in [
+            (4, -1),
+            (4, 0),
+            (4, 1),
+            (5, -1),
+            (5, 1),
+            (6, -1),
+            (6, 0),
+            (6, 1),
+        ] {
+            sim.setblock((x, y, z), state(BlockKind::NetherBricks))
+                .unwrap();
+        }
+    }
+    for _ in 0..500 {
+        tick(&mut sim);
+    }
+    assert_eq!(sim.survival.life.fireballs_hit, 0);
+    assert_eq!(sim.health, 20.0);
+}
+
+/// A shield up for 5 ticks stops what comes from the side the player faces, and nothing from
+/// behind.
+#[test]
+fn a_shield_stops_fireballs_from_the_side_it_faces() {
+    let hits = |yaw: f32| {
+        let mut sim = blazed(&[data::ItemKind::Shield]);
+        send(
+            &mut sim,
+            C2s::UseItem {
+                hand: 0,
+                sequence: 1,
+                yaw,
+                pitch: 0.0,
+            },
+        );
+        for _ in 0..500 {
+            tick(&mut sim);
+        }
+        let life = &sim.survival.life;
+        (life.fireballs_hit, life.fireballs_blocked)
+    };
+    // East is yaw -90 (south 0, west +90): the blaze's side.
+    let (hit, blocked) = hits(-90.0);
+    assert!(
+        hit == 0 && blocked >= 1,
+        "facing it: {hit} hit, {blocked} blocked"
+    );
+    let (hit, blocked) = hits(90.0);
+    assert!(
+        hit >= 1 && blocked == 0,
+        "back to it: {hit} hit, {blocked} blocked"
+    );
+}
+
+/// A block dug is set with its updates (`Level.setBlock`): the lava behind a bank the player
+/// digs runs into the cut at the Nether's pace.
+#[test]
+fn digging_a_lakes_bank_lets_the_lava_out() {
+    let mut stage = Stage::new(1, 40, 60);
+    // The player at (0, 41, 0); a cut at (1, 40, 0), the bank at (2, 40, 0), the lake beyond.
+    stage
+        .air((1, 1), (40, 40), (0, 0))
+        .lava_lake((3, 5), (0, 0), 40, 1);
+    let (mut sim, _) = joined(stage.build().unwrap());
+    let dig = |sim: &mut Sim, status, sequence| {
+        send(
+            sim,
+            C2s::PlayerAction {
+                status,
+                pos: (2, 40, 0),
+                face: 4,
+                sequence,
+            },
+        )
+    };
+    dig(&mut sim, 0, 1);
+    // Netherrack by hand: hardness 0.4 with no pickaxe, 1 / 0.4 / 100 a tick, 40 ticks.
+    for _ in 0..45 {
+        tick(&mut sim);
+    }
+    dig(&mut sim, 2, 2);
+    assert_eq!(kind(&sim, 2, 40, 0), Some(BlockKind::Air), "not dug");
+    for _ in 0..25 {
+        tick(&mut sim);
+    }
+    assert_eq!((lava(&sim, 2, 40, 0), lava(&sim, 1, 40, 0)), (7, 6));
+    assert_eq!(sim.health, 20.0);
+}
+
+/// `FallingBlock`: gravel over a cell that comes free falls into it, and the gravel on it
+/// follows.
+#[test]
+fn gravel_falls_into_a_cell_that_comes_free() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage
+        .fill((6, 6), (41, 42), (6, 6), BlockKind::Gravel)
+        .spawn((0, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.setblock((6, 40, 6), state(BlockKind::Air)).unwrap();
+    let column: Vec<Option<BlockKind>> = (39..=42).map(|y| kind(&sim, 6, y, 6)).collect();
+    assert_eq!(
+        column,
+        [
+            Some(BlockKind::Netherrack),
+            Some(BlockKind::Gravel),
+            Some(BlockKind::Gravel),
+            Some(BlockKind::Air)
+        ]
+    );
+}
+
+/// A tick that answers the server's keep-alives, for runs past 600 ticks.
+fn tick_alive(sim: &mut Sim) {
+    for p in tick(sim) {
+        if let S2c::KeepAlive { id } = p {
+            send(sim, C2s::KeepAlive { id });
+        }
+    }
+}
+
+/// A spawner on a pedestal at (0, 42, 0), the player `away` blocks east of it on the floor,
+/// fire resistant so the blazes it spawns do not end the run.
+fn spawner(away: i32) -> Sim {
+    let mut stage = Stage::new(4, 40, 60);
+    stage
+        .bricks((0, 0), (41, 41), (0, 0))
+        .set((0, 42, 0), BlockKind::Spawner)
+        .spawn((away, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    sim.add_spawner(
+        (0, 42, 0),
+        data::EntityKind::Blaze,
+        sim::life::Brain::blaze(),
+    );
+    sim
+}
+
+/// `BaseSpawner`: the first delay is 20 ticks with a player within 16; a cycle spawns 1 to 4
+/// within 4 blocks; later cycles come 200 to 799 ticks apart; with 6 of its mob near, none.
+#[test]
+fn a_spawner_spawns_blazes_for_a_player_within_sixteen() {
+    let mut sim = spawner(8);
+    for _ in 0..19 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(sim.survival.life.mobs.len(), 0, "before the first delay");
+    tick_alive(&mut sim);
+    let first = sim.survival.life.mobs.len();
+    assert!((1..=4).contains(&first), "the first cycle spawned {first}");
+    for m in sim.survival.life.mobs.values() {
+        assert!((m.pos[0] - 0.5).abs() <= 4.0 && (m.pos[2] - 0.5).abs() <= 4.0);
+        assert!((41.0..=43.0).contains(&m.pos[1]), "{:?}", m.pos);
+    }
+    for _ in 0..199 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(
+        sim.survival.life.mobs.len(),
+        first,
+        "a second cycle within 200 ticks"
+    );
+    for _ in 0..6000 {
+        tick_alive(&mut sim);
+    }
+    let alive = sim.survival.life.mobs.len();
+    // The cap is checked before a cycle of up to 4: 5 near and 4 more at the most.
+    assert!((6..=9).contains(&alive), "{alive} blazes after 6,000 ticks");
+    assert!(sim.open(), "{:?}", sim.closed);
+}
+
+#[test]
+fn a_spawner_sleeps_with_no_player_within_sixteen() {
+    let mut sim = spawner(20);
+    for _ in 0..500 {
+        tick_alive(&mut sim);
+    }
+    assert_eq!(sim.survival.life.mobs.len(), 0);
+}
+
+/// `Blaze.customServerAiStep`: a blaze rises while the player's eye is over its own plus its
+/// offset, and never sinks through the floor. The rise is slow: each tick it gains
+/// `(0.3 - vy) × 0.3` and loses gravity's 0.08, which settles near 0.03 blocks a tick. Under a
+/// player 12 up on a pillar, a blaze on the floor is 2 to 3 blocks up after 90 ticks.
+#[test]
+fn a_blaze_rises_toward_a_player_above_it() {
+    let mut stage = Stage::new(1, 40, 75);
+    stage.bricks((0, 0), (41, 52), (0, 0)).spawn((0, 53, 0));
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    sim.survival.life.fire_resistance = true;
+    let id = sim.summon_with(
+        data::EntityKind::Blaze,
+        [5.5, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    let mut lowest = f64::MAX;
+    for _ in 0..90 {
+        tick_alive(&mut sim);
+        lowest = lowest.min(sim.survival.life.mobs[&id].pos[1]);
+    }
+    let y = sim.survival.life.mobs[&id].pos[1];
+    assert!((43.0..44.5).contains(&y), "the blaze is at y {y}");
+    assert!(lowest >= 41.0, "it sank to {lowest}");
+}
+
+/// `loot_table/entities/blaze.json`: a blaze killed by the player drops 0 or 1 rod. Of 40
+/// blazes killed, some drop one and some none, and never more than one each.
+#[test]
+fn a_blaze_killed_by_the_player_drops_a_rod_or_none() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage.spawn((0, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    sim.survival.give((data::ItemKind::DiamondSword, 1));
+    let mut rods = 0;
+    for _ in 0..40 {
+        let id = sim.summon(data::EntityKind::Blaze, [1.0, 41.0, 0.5]);
+        let mut killed = false;
+        for _ in 0..12 {
+            for _ in 0..13 {
+                tick_alive(&mut sim);
+            }
+            let out = send(&mut sim, C2s::Attack { entity: id });
+            if out
+                .iter()
+                .any(|p| matches!(p, S2c::EntityEvent { status: 3, .. }))
+            {
+                killed = true;
+                break;
+            }
+        }
+        assert!(killed, "a blaze outlived twelve swings");
+        for _ in 0..40 {
+            tick_alive(&mut sim);
+        }
+        let held: i32 = sim
+            .survival
+            .slots
+            .iter()
+            .flatten()
+            .filter(|(k, _)| *k == data::ItemKind::BlazeRod)
+            .map(|(_, n)| *n)
+            .sum();
+        assert!(held - rods <= 1, "more than one rod from a blaze");
+        rods = held;
+    }
+    assert!((8..=32).contains(&rods), "{rods} rods of 40 blazes");
+}
+
+/// `LivingEntity.knockback`: a mob's hit sends the player's motion as 0.4 away from the mob on
+/// the plane and 0.4 up from the ground.
+#[test]
+fn a_mobs_hit_knocks_the_player_away_and_up() {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    sim.summon_with(
+        data::EntityKind::WitherSkeleton,
+        [1.5, 41.0, 0.5],
+        sim::life::Brain::Melee(sim::life::Melee::wither_skeleton()),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    let motion = tick(&mut sim).into_iter().find_map(|p| match p {
+        S2c::SetEntityMotion { id: 1, velocity } => Some(velocity),
+        _ => None,
+    });
+    let v = motion.unwrap();
+    // The packet's velocity is quantised on the wire (-0.39998779 for -0.4), so the bound is
+    // a thousandth, not a millionth.
+    assert!(
+        (v[0] + 0.4).abs() < 1e-3 && (v[1] - 0.4).abs() < 1e-3 && v[2].abs() < 1e-3,
+        "{v:?}"
+    );
+    assert_eq!(sim.health, 12.0, "8 unarmoured");
+}
+
+/// `BlazeAttackGoal`: a blaze moves at a target it sees within 2 blocks, and holds its place
+/// with one in sight farther off.
+#[test]
+fn a_blaze_closes_on_a_target_within_two_blocks_and_holds_beyond() {
+    let run = |x: f64| {
+        let stage = Stage::new(1, 40, 60);
+        let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+        let id = sim.summon_with(
+            data::EntityKind::Blaze,
+            [x, 41.0, 0.5],
+            sim::life::Brain::blaze(),
+        );
+        for p in protocol::session::opening(775, "model", 0, "rs-test") {
+            send(&mut sim, p);
+        }
+        send(&mut sim, C2s::LoginAcknowledged);
+        send(&mut sim, C2s::SelectKnownPacks);
+        send(&mut sim, C2s::FinishConfiguration);
+        send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+        send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+        for _ in 0..10 {
+            tick_alive(&mut sim);
+        }
+        sim.survival.life.mobs[&id].pos[0]
+    };
+    let near = run(2.3);
+    assert!(near < 2.0, "within 2 blocks it stayed at x {near}");
+    assert_eq!(run(6.5), 6.5, "in sight beyond 2 blocks it moved");
+}
+
+/// `hurtServer` → `knockback(0.4)`: the player's hit knocks a blaze on the ground 0.4 away
+/// and lifts it; 11 ticks aloft at the air's 0.91, then the floor's 0.546: about 3.2 blocks
+/// in all. Once more than 2 off with the player in sight it holds there.
+#[test]
+fn the_players_hit_knocks_a_blaze_away() {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    let id = sim.summon_with(
+        data::EntityKind::Blaze,
+        [2.3, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    send(&mut sim, C2s::Attack { entity: id });
+    assert_eq!(sim.survival.life.mobs_knocked, 1);
+    tick_alive(&mut sim);
+    let first = sim.survival.life.mobs[&id].pos[0];
+    assert!(first > 2.5, "one tick after the hit it is at x {first}");
+    for _ in 0..20 {
+        tick_alive(&mut sim);
+    }
+    let x = sim.survival.life.mobs[&id].pos[0];
+    assert!((5.3..5.6).contains(&x), "twenty ticks on it is at x {x}");
+}
+
+/// `FireBlock.tick`: a fire on nether bricks with nothing flammable by it ages and goes out
+/// (about 25 s); one on netherrack (`#infiniburn_nether`) burns on.
+#[test]
+fn a_fire_on_bricks_goes_out_and_one_on_netherrack_burns_on() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage.bricks((3, 3), (40, 40), (0, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    let fire = state(BlockKind::Fire);
+    sim.setblock((3, 41, 0), fire).unwrap();
+    sim.setblock((-3, 41, 0), fire).unwrap();
+    let kind =
+        |sim: &Sim, p: (i32, i32, i32)| sim.state_at(p.0, p.1, p.2).and_then(data::block_of_state);
+    let mut out_at = None;
+    for t in 0..2400 {
+        tick_alive(&mut sim);
+        if out_at.is_none() && kind(&sim, (3, 41, 0)) != Some(BlockKind::Fire) {
+            out_at = Some(t);
+        }
+    }
+    let out_at = out_at.expect("the fire on bricks still burns after 2,400 ticks");
+    assert!(
+        out_at > 100,
+        "it went out at tick {out_at}, before its age passed 3"
+    );
+    assert_eq!(kind(&sim, (-3, 41, 0)), Some(BlockKind::Fire));
+    assert_eq!(sim.survival.life.fires_out, 1);
+}

@@ -32,10 +32,7 @@ fn teleport() -> Event {
 fn give(slot: i32, item: ItemKind, count: i32) -> Event {
     Event::Packet(S2c::SetPlayerInventory {
         slot,
-        item: Slot::Item {
-            item: item.id(),
-            count,
-        },
+        item: Slot::item(item.id(), count),
     })
 }
 
@@ -159,8 +156,85 @@ fn hits_on_the_bot_are_named_and_kept_a_minute() {
     let names: Vec<&str> = w.hits.iter().map(|h| h.damage_type.as_str()).collect();
     assert_eq!(names, ["mob_attack", "unknown:9999"]);
     for _ in 0..(HITS_KEPT_TICKS / 20 + 2) {
-        w.step(&Event::Packet(S2c::SetTime));
+        w.step(&Event::Packet(S2c::SetTime {
+            game_time: 0,
+            clocks: Vec::new(),
+        }));
     }
     w.step(&hit(7, mob_attack));
     assert_eq!(w.hits.len(), 1, "older than a minute is dropped");
+}
+
+/// Issue 16's clean checkpoint: the whole kit, logs and safe food held is still not `ready`
+/// underground or with no terrain seen (the sky is part of it), and unsafe food never counts.
+#[test]
+fn ready_needs_the_kit_the_stock_and_the_open_sky() {
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    let kit = [
+        (ItemKind::IronHelmet, 1),
+        (ItemKind::IronChestplate, 1),
+        (ItemKind::IronLeggings, 1),
+        (ItemKind::IronSword, 1),
+        (ItemKind::WaterBucket, 1),
+        (ItemKind::Bucket, 1),
+        (ItemKind::FlintAndSteel, 1),
+        (ItemKind::StonePickaxe, 1),
+        (ItemKind::OakLog, 4),
+        (ItemKind::RottenFlesh, 20),
+        (ItemKind::Beef, 11),
+    ];
+    for (slot, (item, n)) in kit.into_iter().enumerate() {
+        w.step(&give(slot as i32, item, n));
+    }
+    w.step(&tick());
+    // Eleven raw beef are 33 points; the rotten flesh adds nothing.
+    assert_eq!(world::stage::safe_food(&w), 33);
+    assert!(
+        !world::stage::open_sky(&w),
+        "no column is loaded: no sky seen"
+    );
+    assert!(!Stage::Ready.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Gear));
+}
+
+/// The keys reach the server as vanilla sends them: `player_input` when they change, once,
+/// ahead of the tick's movement packet. Without it a server never sees the bot sneak.
+#[test]
+fn the_keys_held_are_reported_when_they_change() {
+    use physics::Controls;
+    use protocol::C2s;
+    use world::Effect;
+    let inputs = |out: &[Effect]| -> Vec<u8> {
+        out.iter()
+            .filter_map(|e| match e {
+                Effect::Send(C2s::PlayerInput { flags }) => Some(*flags),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    assert!(inputs(&w.step(&tick())).is_empty(), "nothing pressed");
+    w.step(&Event::Controls(Controls {
+        sneak: true,
+        ..Controls::default()
+    }));
+    let out = w.step(&tick());
+    assert_eq!(inputs(&out), [0x20], "shift");
+    assert!(
+        matches!(out.first(), Some(Effect::Send(C2s::PlayerInput { .. }))),
+        "before the move: {out:?}"
+    );
+    assert!(inputs(&w.step(&tick())).is_empty(), "sent once");
+    w.step(&Event::Controls(Controls {
+        forward: true,
+        jump: true,
+        ..Controls::default()
+    }));
+    assert_eq!(inputs(&w.step(&tick())), [0x11], "forward and jump");
+    w.step(&Event::Controls(Controls::default()));
+    assert_eq!(inputs(&w.step(&tick())), [0], "let go");
 }

@@ -36,6 +36,10 @@ pub struct RaceRules {
     pub bots_per_server: u32,
     pub join_stagger_ms: u64,
     pub cap_ticks: u64,
+    /// A bot with no stage, no item gained and no new place for this many server ticks ends
+    /// `NoProgress` with its case (issue 16e). `None` never ends a run that way.
+    #[serde(default)]
+    pub no_progress_ticks: Option<u64>,
 }
 
 /// Where a start puts the bot: where it spawned, or a dimension and a position.

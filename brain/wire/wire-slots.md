@@ -5,7 +5,7 @@ type: reference
 tags: [wire, items, slots, components]
 aliases: [read-slot, ItemStack, data components, DataComponentPatch, damage, truncated frame]
 status: verified
-lastUpdated: 2026-11-12
+lastUpdated: 2026-11-22
 verifiedAgainst: clojurecraft@be85a92
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#\"{:item :count} (plus :components {type-name value} when the slot carries any) or nil for an"
@@ -37,6 +37,9 @@ An item stack on the wire is a varint count (0 = empty), then the item id, then 
 
 ## Limits
 Which other components appear in a speedrun inventory (enchantments, custom names, potion contents) is not surveyed here.
+
+## Issue 16e
+- `protocol::slot` keeps `damage` and `max_damage` in a `Wear` on the slot instead of stepping over them, and `Slot::Truncated` names the component it stopped at (`stopped_at`), so coverage lists the next reader to write. `write_slot` writes the wear back, for the server model.
 
 ## See also
 - [[entities-and-inventory]] - ruststeve's reader (`protocol::slot`): clojurecraft's component codecs, `Slot::Truncated` for the rest.

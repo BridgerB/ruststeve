@@ -86,6 +86,14 @@ pub struct Scoop {
     /// what the server took; the third, the exact line passing what the server refused.
     #[serde(default)]
     pub uses: [u32; 4],
+    /// Whether the stand routed to sees a face of the source by the exact line from its middle
+    /// (`Some(true)`), by the sampled line only (`Some(false)`), or no stand was routed (`None`):
+    /// the trail says which, so a race counts the exact-first stands (cast.md wall 1).
+    #[serde(default)]
+    pub stand_exact: Option<bool>,
+    /// Lava stands passed over for being seen by the sampled line only (cast.md wall 1).
+    #[serde(default)]
+    pub sampled_skipped: u32,
 }
 
 fn water() -> memory::Fluid {
@@ -358,6 +366,21 @@ impl Scoop {
         Self::of(target, memory::Fluid::Water, tick)
     }
 
+    /// A water fill from where the body is, no walk: the nearest remembered source the eye has
+    /// a clear use on within `REACH`, aimed at once. For a bot afloat in the pool it came for
+    /// (blaze.md wall 10: six of twelve climbed to the pool, fell in, and swam 24,000 ticks
+    /// holding the empty bucket).
+    pub fn from_here(w: &World, tick: u64) -> Option<Self> {
+        let body = w.body?;
+        let from = eye(&body);
+        let target = sources(w)
+            .into_iter()
+            .find(|c| aim_at_use(w, from, *c, REACH).is_some())?;
+        let mut s = Self::new(target, tick);
+        s.stage = Stage::Aim { since: tick };
+        Some(s)
+    }
+
     /// A bucket filled at `target`, a source of `fluid`.
     pub fn of(target: Cell, fluid: memory::Fluid, tick: u64) -> Self {
         Self {
@@ -376,6 +399,8 @@ impl Scoop {
             sent_exact: None,
             centring: 0,
             uses: [0; 4],
+            stand_exact: None,
+            sampled_skipped: 0,
         }
     }
 
@@ -406,14 +431,31 @@ impl Scoop {
             let standing_blind = |st: Cell| {
                 here.is_some_and(|(f, e)| f == st && aim_at_use(w, e, target, REACH).is_none())
             };
-            for st in stands(w, self.target)
+            // Stands the exact line sees from first, nearest first within each (a stable sort):
+            // a stand the sampled line alone passes is walked to and the use refused there, the
+            // refill failing `NoSight` source after source (cast.md wall 1). The sampled ones stay,
+            // after: deciding stands by the exact line alone lit fewer (portal.md wall 27).
+            let exact = |st: Cell| aim_at_use(w, cell_eye(st), target, STAND_REACH).is_some();
+            let mut tried: Vec<(bool, Cell)> = stands(w, self.target)
                 .into_iter()
                 .filter(|st| !standing_blind(*st))
-                .take(STAND_TRIES)
-            {
+                .map(|st| (exact(st), st))
+                .collect();
+            tried.sort_by_key(|(e, _)| !*e);
+            // Lava: a stand the sampled line alone passes is no stand. Since the use asks the
+            // exact line (portal.md wall 34) every lava scoop routed to one failed `NoSight`
+            // (race 45354357884: 15 of 15 by tick 11,860, against the exact stands' fills).
+            // Water keeps them: its scoop fills 109 of 112 as it is.
+            if self.fluid == memory::Fluid::Lava {
+                let before = tried.len();
+                tried.retain(|(e, _)| *e);
+                self.sampled_skipped += u32::try_from(before - tried.len()).unwrap_or(u32::MAX);
+            }
+            for (e, st) in tried.into_iter().take(STAND_TRIES) {
                 let mut walk = Walk::new(st, Goal::Block { pos: st }, Arrive::Goal, tick);
                 if walk.route_now(w, tick) && walk.route == Some(crate::path::Status::Found) {
                     self.stage = Stage::Approach(walk);
+                    self.stand_exact = Some(e);
                     return true;
                 }
             }

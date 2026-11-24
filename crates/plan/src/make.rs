@@ -224,11 +224,52 @@ pub struct Survival {
     pub hungry_below: i32,
     /// Food the bot never eats, by item name (`unsafe`).
     pub unsafe_foods: Vec<String>,
+    /// Hunger points of safe food held before the portal is entered (issue 16a: the Nether has
+    /// little to eat and healing between blaze fights needs food); 0 for none.
+    #[serde(default)]
+    pub food_reserve: i32,
     /// Blocks from the feet an animal is hunted within (`hunt-radius`) ...
     pub hunt_radius: f64,
     /// ... and within this when starving: food at or under `starving_below`.
     pub starving_below: i32,
     pub starving_radius: f64,
+    /// A tool with fewer uses left is worn: no spare (clojurecraft's `window/spare-uses`).
+    #[serde(default = "spare_uses")]
+    pub spare_uses: i32,
+    /// Digs held under this (pickaxes' uses left, and those the held wood and stone make) and a
+    /// spare that needs a gather is worth it from anywhere (clojurecraft's `travel-reserve-digs`).
+    #[serde(default = "travel_reserve_digs")]
+    pub travel_reserve_digs: i32,
+    /// Items dropped when the main inventory is nearly full, each with how many to keep (blaze
+    /// wall 13: 700 blocks of stone filled every slot, and digs and scoops failed).
+    #[serde(default)]
+    pub junk: Vec<(String, i32)>,
+    /// Logs the race holds before it first goes underground, and again before the cast.
+    #[serde(default)]
+    pub stock_logs: i32,
+    /// Ticks the race looks for animals on the surface to fill the food reserve, each time.
+    #[serde(default)]
+    pub provision_ticks: u64,
+    /// Hunger points of safe food a portal is entered with; under it the race looks for animals
+    /// first, under the open sky only (overworld-leg wall 3). 0: the whole `food_reserve`.
+    #[serde(default)]
+    pub portal_food: i32,
+    /// Pieces of meat (raw that cooks, or safe to eat) the race holds before it goes down, hunted
+    /// on the stocking clock and then cooked (overworld-leg wall 4). 0: the reserve in points.
+    #[serde(default)]
+    pub meat_stock: i32,
+    /// Iron ingots held when the cook phase ends, smelted from held raw iron while its furnace
+    /// stands (the Nether kit's shields take one each; overworld-leg wall 4). 0: none.
+    #[serde(default)]
+    pub kit_ingots: i32,
+    /// Shields crafted at the cook's table from the ingots held, before the descent (the blaze
+    /// fight's shield; overworld-leg wall 8). 0: none.
+    #[serde(default)]
+    pub kit_shields: i32,
+    /// Stone pickaxes with `spare_uses` left held under this and the race makes more from what
+    /// it holds, before the next task (overworld-leg wall 2). 0: never.
+    #[serde(default)]
+    pub spare_pickaxes: i32,
     /// A hostile mob this near is answered (`defend`, issue 12d) ...
     #[serde(default = "defend_radius")]
     pub defend_radius: f64,
@@ -246,8 +287,26 @@ pub struct Survival {
     /// piglin struck angers its whole group).
     #[serde(default)]
     pub neutral: Vec<String>,
+    /// A shooter beyond `defend_radius` is gone after only at this health or more (issue 16).
+    #[serde(default)]
+    pub engage_health: f32,
     #[serde(default = "ranged_radius")]
     pub ranged_radius: f64,
+    /// A fight with a shooter that lands nothing for this many ticks is given up.
+    #[serde(default = "shooter_patience")]
+    pub shooter_patience: u64,
+    /// A fight with a shooter backs off to cover at or under this health (0: the danger line).
+    #[serde(default)]
+    pub shooter_retreat_health: f32,
+    /// The parts of a shooter's fight, each switched here so a model run can judge it alone:
+    /// stepping off a shooter in touch, stepping out of a fireball's line, striking on the way
+    /// down from a jump.
+    #[serde(default = "yes")]
+    pub shooter_keep_off: bool,
+    #[serde(default = "yes")]
+    pub shooter_dodge: bool,
+    #[serde(default = "yes")]
+    pub shooter_crit: bool,
     /// A `never_fight` kind is backed away from within this (a creeper's fuse starts at 3).
     #[serde(default = "flee_radius")]
     pub flee_radius: f64,
@@ -265,8 +324,17 @@ fn flee_clear() -> f64 {
     20.0
 }
 
+fn yes() -> bool {
+    true
+}
+
 fn ranged_radius() -> f64 {
     16.0
+}
+
+/// With no key: the fight's own `NO_HIT_TICKS`.
+fn shooter_patience() -> u64 {
+    200
 }
 
 fn defend_radius() -> f64 {
@@ -277,20 +345,45 @@ fn danger_health() -> f32 {
     8.0
 }
 
+fn spare_uses() -> i32 {
+    40
+}
+
+fn travel_reserve_digs() -> i32 {
+    131
+}
+
 impl Default for Survival {
     fn default() -> Self {
         Self {
             hungry_below: 14,
             unsafe_foods: Vec::new(),
+            food_reserve: 0,
             hunt_radius: 24.0,
             starving_below: 6,
             starving_radius: 48.0,
             defend_radius: defend_radius(),
+            spare_uses: spare_uses(),
+            travel_reserve_digs: travel_reserve_digs(),
+            junk: Vec::new(),
+            stock_logs: 0,
+            provision_ticks: 0,
+            portal_food: 0,
+            meat_stock: 0,
+            kit_ingots: 0,
+            kit_shields: 0,
+            spare_pickaxes: 0,
             danger_health: danger_health(),
             never_fight: Vec::new(),
             ranged: Vec::new(),
             neutral: Vec::new(),
+            engage_health: 0.0,
             ranged_radius: ranged_radius(),
+            shooter_patience: shooter_patience(),
+            shooter_retreat_health: 0.0,
+            shooter_keep_off: true,
+            shooter_dodge: true,
+            shooter_crit: true,
             flee_radius: flee_radius(),
             flee_clear: flee_clear(),
         }
@@ -314,18 +407,36 @@ pub enum Always {
 pub struct SurvivalRules {
     pub hungry_below: i32,
     pub unsafe_foods: Vec<data::ItemKind>,
+    pub food_reserve: i32,
     pub hunt_radius: f64,
     pub starving_below: i32,
     pub starving_radius: f64,
     pub defend_radius: f64,
     pub danger_health: f32,
+    pub spare_uses: i32,
+    pub travel_reserve_digs: i32,
     pub never_fight: Vec<data::EntityKind>,
     pub ranged: Vec<data::EntityKind>,
     /// Fought only after one of their kind hits the bot (`defend::provoked`).
     pub neutral: Vec<data::EntityKind>,
+    pub engage_health: f32,
     pub ranged_radius: f64,
+    pub shooter_patience: u64,
+    pub shooter_retreat_health: f32,
+    pub shooter_keep_off: bool,
+    pub shooter_dodge: bool,
+    pub shooter_crit: bool,
     pub flee_radius: f64,
     pub flee_clear: f64,
+    /// Kinds dropped when the main inventory is nearly full, each with how many to keep.
+    pub junk: Vec<(data::ItemKind, i32)>,
+    pub stock_logs: i32,
+    pub provision_ticks: u64,
+    pub portal_food: i32,
+    pub meat_stock: i32,
+    pub kit_ingots: i32,
+    pub kit_shields: i32,
+    pub spare_pickaxes: i32,
 }
 
 /// An always-row of `config/goals.toml` (clojurecraft's `:goal/always?` rows): a trap it
@@ -519,6 +630,16 @@ impl Table {
                 })
             })
             .collect::<Result<_, _>>()?;
+        let junk = g
+            .survival
+            .junk
+            .iter()
+            .map(|(n, keep)| {
+                data::ItemKind::from_name(n)
+                    .map(|k| (k, *keep))
+                    .ok_or_else(|| format!("survival: no junk item {n}"))
+            })
+            .collect::<Result<_, _>>()?;
         let unsafe_foods = g
             .survival
             .unsafe_foods
@@ -564,16 +685,33 @@ impl Table {
             always,
             survival: SurvivalRules {
                 hungry_below: g.survival.hungry_below,
+                food_reserve: g.survival.food_reserve,
                 unsafe_foods,
                 hunt_radius: g.survival.hunt_radius,
                 starving_below: g.survival.starving_below,
                 starving_radius: g.survival.starving_radius,
                 defend_radius: g.survival.defend_radius,
                 danger_health: g.survival.danger_health,
+                spare_uses: g.survival.spare_uses,
+                travel_reserve_digs: g.survival.travel_reserve_digs,
+                junk,
+                stock_logs: g.survival.stock_logs,
+                provision_ticks: g.survival.provision_ticks,
+                portal_food: g.survival.portal_food,
+                meat_stock: g.survival.meat_stock,
+                kit_ingots: g.survival.kit_ingots,
+                kit_shields: g.survival.kit_shields,
+                spare_pickaxes: g.survival.spare_pickaxes,
                 never_fight,
                 ranged,
                 neutral,
+                engage_health: g.survival.engage_health,
                 ranged_radius: g.survival.ranged_radius,
+                shooter_patience: g.survival.shooter_patience,
+                shooter_retreat_health: g.survival.shooter_retreat_health,
+                shooter_keep_off: g.survival.shooter_keep_off,
+                shooter_dodge: g.survival.shooter_dodge,
+                shooter_crit: g.survival.shooter_crit,
                 flee_radius: g.survival.flee_radius,
                 flee_clear: g.survival.flee_clear,
             },
@@ -620,6 +758,12 @@ struct Planner<'a> {
     /// Whether a gather can be started now (a log with a way to it): the world, read by the
     /// shell; a spare is made by a gather only then (clojurecraft's `spare-worth?`).
     gather_now: bool,
+    /// Worn tools held (fewer than `spare_uses` uses left): no spare, so a spare is counted
+    /// without them (clojurecraft's `without-worn`; blaze wall 7).
+    worn: Counts,
+    /// Digs held are under the travel reserve: a spare's gather is worth it from anywhere, while
+    /// the bot can still dig to the trees (clojurecraft's `tunnel-budget?`; blaze wall 7).
+    low_on_digs: bool,
 }
 
 /// What fuel burns, in the order the smelt burns it: the `coals` tag then the `planks` tag,
@@ -702,6 +846,44 @@ type Resolved<'a> = (Counts, Option<Result<&'a Row, ()>>);
 impl<'a> Planner<'a> {
     /// `resolve-row`: try to get `times` runs of a row done: `None` when its needs are met (act
     /// on it), `Some(Ok(row))` a producer further down to act on, `Some(Err(()))` stuck.
+    /// What a row holds, resolved once and handed back unconsumed (`resolve-holds`), then its
+    /// spares (`resolve-spares`): one more than it holds, counted without worn tools, planned
+    /// only when the producer is worth it now (never a mine; a gather only with a log to start
+    /// on, or when low on digs). `None` when the row keeps all it should.
+    fn keep(
+        &self,
+        counts: &Counts,
+        row: &'a Row,
+        path: &[Vec<ItemKind>],
+    ) -> Option<Result<&'a Row, ()>> {
+        for (k, n) in &row.holds {
+            if let (_, Some(r)) = self.resolve_need(counts.clone(), k, *n, path) {
+                return Some(r);
+            }
+        }
+        for (k, n) in &row.spares {
+            let held = row
+                .holds
+                .iter()
+                .find(|(h, _)| h.key == k.key)
+                .map_or(0, |(_, m)| *m);
+            let unworn = without(counts, &self.worn);
+            if let (_, Some(Ok(r))) = self.resolve_need(unworn, k, n + held, path) {
+                let worth = match r.act {
+                    Some(Act::Mine { .. } | Act::Scoop) => false,
+                    Some(Act::Gather) => self.gather_now || self.low_on_digs,
+                    Some(Act::Place(_) | Act::Craft(_) | Act::Smelt(_) | Act::Redig(_)) | None => {
+                        true
+                    }
+                };
+                if worth {
+                    return Some(Ok(r));
+                }
+            }
+        }
+        None
+    }
+
     fn resolve_row(
         &self,
         counts: Counts,
@@ -709,34 +891,8 @@ impl<'a> Planner<'a> {
         times: i32,
         path: &[Vec<ItemKind>],
     ) -> Resolved<'a> {
-        // What the row holds is resolved once and handed back unconsumed (`resolve-holds`).
-        for (k, n) in &row.holds {
-            match self.resolve_need(counts.clone(), k, *n, path) {
-                (_, Some(Err(()))) => return (counts, Some(Err(()))),
-                (c2, Some(Ok(r))) => return (c2, Some(Ok(r))),
-                (_, None) => {}
-            }
-        }
-        // Then its spares (`resolve-spares`): one more than it holds, planned only when the
-        // producer is worth it now (never a mine; a gather only with a log to start on).
-        for (k, n) in &row.spares {
-            let held = row
-                .holds
-                .iter()
-                .find(|(h, _)| h.key == k.key)
-                .map_or(0, |(_, m)| *m);
-            if let (_, Some(Ok(r))) = self.resolve_need(counts.clone(), k, n + held, path) {
-                let worth = match r.act {
-                    Some(Act::Mine { .. } | Act::Scoop) => false,
-                    Some(Act::Gather) => self.gather_now,
-                    Some(Act::Place(_) | Act::Craft(_) | Act::Smelt(_) | Act::Redig(_)) | None => {
-                        true
-                    }
-                };
-                if worth {
-                    return (counts, Some(Ok(r)));
-                }
-            }
+        if let Some(r) = self.keep(&counts, row, path) {
+            return (counts, Some(r));
         }
         let mut c = counts.clone();
         for (k, n) in &row.needs {
@@ -886,10 +1042,44 @@ pub fn make_with<'a>(
     gather_now: bool,
     goal: &'a Row,
 ) -> Choice<'a> {
+    make_with_wear(table, counts, near, gather_now, &Wear::default(), goal)
+}
+
+/// What the held tools have left, for the needs planner (blaze wall 7).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Wear {
+    /// Tools held with fewer than `spare_uses` uses left, by item.
+    pub worn: Counts,
+    /// The digs held are under `travel_reserve_digs`.
+    pub low_on_digs: bool,
+}
+
+/// `counts` less the worn tools: what a spare is counted from.
+pub fn without(counts: &Counts, worn: &Counts) -> Counts {
+    let mut c = counts.clone();
+    for (k, n) in worn {
+        if let Some(v) = c.get_mut(k) {
+            *v = (*v - n).max(0);
+        }
+    }
+    c
+}
+
+/// `make_with`, knowing the held tools' wear.
+pub fn make_with_wear<'a>(
+    table: &'a Table,
+    counts: &Counts,
+    near: &'a dyn Fn(data::BlockKind) -> bool,
+    gather_now: bool,
+    wear: &Wear,
+    goal: &'a Row,
+) -> Choice<'a> {
     let p = Planner {
         table,
         near,
         gather_now,
+        worn: wear.worn.clone(),
+        low_on_digs: wear.low_on_digs,
     };
     let mut c = counts.clone();
     for (k, n) in goal.provides.iter().chain(&goal.needs) {

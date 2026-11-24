@@ -5,8 +5,8 @@ type: reference
 tags: [plan, path, astar, routes, core]
 aliases: [path, pathfinder, A*, route, waypoints, Cells, classify, awkward, moves, goals, Near, Afar, budget, expansions, start_cell]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@8df1710 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@475e5f1 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/path.rs#pub fn classify(state: Option<u32>) -> Class {"
   - "ruststeve:crates/plan/src/path.rs#pub fn search(cells: &mut Cells<'_>, start: Cell, goal: &Goal, max_nodes: u32) -> Route {"
@@ -37,6 +37,14 @@ Issue 09a: clojurecraft's `path.clj` in Rust (`plan::path`), constant for consta
 ## Gotchas
 - Traps and the Nether's wary blocks (crimson forest) are not ported yet: they come with the issues that meet them.
 - A 6,000-node search costs tens of milliseconds; the planner asks at most a few per tick (the CPU budget, [[planner]]).
+
+## Issue 16: the Nether walk (docs/problems/nether-walk.md)
+- **Soul sand is ground**: `classify` answers `Solid` for it (a box 0.875 high the physics stands on). Feet resting on it floor to the soul sand's own cell, so `plan` searches from the cell over it and the walk reads its node with `stand_cell`; `feet_cell` is unchanged for every other task (a global lift of the feet's cell broke the tunnel's stairs on soul sand and was taken out). Magma stays `Awkward`.
+- **The bridge move** (`MoveKind::Bridge`, a far search's alone (`plan_far`, `Cells::far`), Nether only, with `BRIDGE_RESERVE` of the `BRIDGE_BLOCKS` held): one cell on the level whose floor is air or lava, laid first by the walk. Its cost is a walk plus `BRIDGE_COST` 3. Its feet cell may have lava under (`clear_over`), never beside. The overworld is not bridged and water is never laid in.
+- **A far search keeps clear of mobs that kill on sight** (`SHUN_KINDS`: piglins, brutes, hoglins): no cell within `SHUN_RADIUS` 20 of one, except within `SHUN_FREE` 6 of the start. Two piglins killed a bot in iron in 100 ticks on its first bridged route (race 45337580375).
+- **A route keeps its moves** (`Route::kinds`, one a waypoint).
+- **The weighed search** (`search_weighted`, `plan_weighted`): f = g + weight × h. At 1 it is `search`. The fortress leg uses 4 with 40,000 expansions (`walk::FAR_WEIGHT`, `FAR_NODES`): on the recorded Nether of race 45194253932 the 222-cell route to bricks 110 blocks off is found in 12,664 expansions, where weight 2 needs 147,900 and 6,000 plain ones find nothing.
+- **`navmap`** (crate `navprobe`) folds a recording to a tick and prints the terrain as layer maps and the route `plan_weighted` finds over it: the probe to run before a race.
 
 ## See also
 - [[walk-and-watchdog]] - following a route.

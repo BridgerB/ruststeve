@@ -131,7 +131,7 @@ impl Nbt {
         }
     }
 
-    fn as_str(&self) -> Option<&str> {
+    pub fn as_str(&self) -> Option<&str> {
         match self {
             Nbt::String(s) => Some(s),
             _ => None,

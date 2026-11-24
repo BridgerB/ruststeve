@@ -70,8 +70,14 @@ pub enum S2c {
         pitch: f32,
         flags: u32,
     },
-    /// The clock, sent every 20 server ticks; its arrival is what matters.
-    SetTime,
+    /// The clock, sent every 20 server ticks: the level's game time and the world clocks it
+    /// updates (26.1.2's `ClientboundSetTimePacket`: a long, then a map of
+    /// `Holder<WorldClock>` to `ClockNetworkState`). Its arrival is what the session counts;
+    /// the overworld clock's ticks are the day time (`World::day_time`).
+    SetTime {
+        game_time: i64,
+        clocks: Vec<ClockUpdate>,
+    },
     /// A chunk column, its sections decoded on the reader thread (heightmaps and light skipped).
     LevelChunkWithLight {
         x: i32,
@@ -233,11 +239,253 @@ pub enum S2c {
         reason: Vec<u8>,
     },
     /// An id this layer does not model: counted, never an error.
+    // Hearing (issue 16e).
+    /// A sound at a place: positions on the wire are eighths of a block.
+    Sound {
+        sound: SoundRef,
+        source: i32,
+        pos: [f64; 3],
+        volume: f32,
+        pitch: f32,
+    },
+    /// A sound on an entity (an enderman's stare and scream).
+    SoundEntity {
+        sound: SoundRef,
+        source: i32,
+        entity: i32,
+        volume: f32,
+        pitch: f32,
+    },
+    /// A level event (`data::generated::events::LEVEL_EVENTS`): 1018 a blaze shooting.
+    LevelEvent {
+        event: i32,
+        pos: (i32, i32, i32),
+        data: i32,
+        global: bool,
+    },
+    StopSound {
+        source: Option<i32>,
+        sound: Option<String>,
+    },
+    // Sight of mobs (issue 16e).
+    /// Where a mob's head points, in degrees (the wire's byte angle).
+    RotateHead {
+        id: i32,
+        yaw: f32,
+    },
+    /// What a mob holds and wears: (slot, item) pairs; slot 0 main hand, 1 off hand, 2 to 5
+    /// feet to head, 6 body, 7 saddle.
+    SetEquipment {
+        id: i32,
+        items: Vec<(u8, Slot)>,
+    },
+    /// An arm swing or other animation (0 main hand, 3 off hand, 4 and 5 critical hits).
+    Animate {
+        id: i32,
+        action: u8,
+    },
+    /// The bot's own hurt flash, with the direction the blow came from.
+    HurtAnimation {
+        id: i32,
+        yaw: f32,
+    },
+    /// A fireball's acceleration power.
+    ProjectilePower {
+        id: i32,
+        power: f64,
+    },
+    SetPassengers {
+        vehicle: i32,
+        passengers: Vec<i32>,
+    },
+    /// A blast: its centre, and the knockback it gives the bot when it does.
+    Explode {
+        center: [f64; 3],
+        knockback: Option<[f64; 3]>,
+    },
+    /// A block entity's data: for a spawner, the mob it spawns (`SpawnData.entity.id`).
+    BlockEntityData {
+        pos: (i32, i32, i32),
+        kind: i32,
+        spawns: Option<String>,
+    },
+    /// A block cracking under someone's digging (stage 0 to 9; anything else clears it).
+    BlockDestruction {
+        breaker: i32,
+        pos: (i32, i32, i32),
+        stage: i8,
+    },
+    // The body, language and the world (issue 16e).
+    UpdateMobEffect {
+        id: i32,
+        effect: i32,
+        amplifier: i32,
+        duration: i32,
+    },
+    RemoveMobEffect {
+        id: i32,
+        effect: i32,
+    },
+    /// Attribute values: (registry id, base, the sum of the add-value modifiers).
+    UpdateAttributes {
+        id: i32,
+        attributes: Vec<(i32, f64, f64)>,
+    },
+    PlayerCombatEnter,
+    PlayerCombatEnd {
+        duration: i32,
+    },
+    SetExperience {
+        progress: f32,
+        level: i32,
+        total: i32,
+    },
+    /// An item cooldown by its group (`minecraft:ender_pearl`), in ticks.
+    Cooldown {
+        group: String,
+        ticks: i32,
+    },
+    /// A game event (`data::generated::events::GAME_EVENTS`): 4 the win, 1 rain.
+    GameEvent {
+        event: u8,
+        param: f32,
+    },
+    /// Chat and the screen's text, as plain text: system chat (`overlay` is the action bar),
+    /// the action bar, titles and subtitles.
+    SystemChat {
+        text: String,
+        overlay: bool,
+    },
+    ActionBar {
+        text: String,
+    },
+    Title {
+        text: String,
+    },
+    Subtitle {
+        text: String,
+    },
+    /// A boss bar: added (with its name and health), removed, or changed.
+    BossEvent {
+        uuid: [u8; 16],
+        op: BossOp,
+    },
+    /// Chunks whose biomes changed (the data itself is not read yet).
+    ChunksBiomes {
+        chunks: Vec<(i32, i32)>,
+    },
+    SetChunkCacheCenter {
+        x: i32,
+        z: i32,
+    },
+    SetChunkCacheRadius {
+        radius: i32,
+    },
+    SetSimulationDistance {
+        distance: i32,
+    },
     Unknown {
         state: State,
         id: u32,
         len: usize,
     },
+}
+
+/// One world clock in a `set_time`, in wire order (26.1.2's `ClockNetworkState`: a var-long,
+/// two floats, after the clock's `holderRegistry` varint).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClockUpdate {
+    /// The `world_clock` registry id: synced registries are sent sorted by name, so 0 is
+    /// `minecraft:overworld` and 1 `minecraft:the_end` (`OVERWORLD_CLOCK`).
+    pub clock: i32,
+    /// The clock's ticks since the world began: the overworld's, taken mod 24,000, is the day
+    /// time (`data/minecraft/timeline/day.json`, `period_ticks`).
+    pub total_ticks: i64,
+    /// How far into the next tick the clock is, 0 to 1.
+    pub partial_tick: f32,
+    /// Clock ticks per server tick: 1 normally, 0 with the day cycle stopped.
+    pub rate: f32,
+}
+
+/// The `world_clock` registry id of `minecraft:overworld` (registry entries `overworld`,
+/// `the_end` in the 26.1.2 jar's `data/minecraft/world_clock/`, sent sorted by name).
+pub const OVERWORLD_CLOCK: i32 = 0;
+
+/// A sound event as the wire holds it: a registry id, or one written inline by name.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SoundRef {
+    Registry(u32),
+    Inline(String),
+}
+
+impl SoundRef {
+    /// The sound's name (`entity.blaze.shoot`); `sound:<id>` for an id the table lacks.
+    pub fn name(&self) -> String {
+        match self {
+            SoundRef::Registry(id) => usize::try_from(*id)
+                .ok()
+                .and_then(|i| data::generated::registries::SOUND_EVENT.get(i))
+                .map_or_else(|| format!("sound:{id}"), |n| (*n).to_owned()),
+            SoundRef::Inline(n) => n.trim_start_matches("minecraft:").to_owned(),
+        }
+    }
+}
+
+/// What a boss-bar packet does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BossOp {
+    Add {
+        name: String,
+        progress: f32,
+    },
+    Remove,
+    Progress(f32),
+    Name(String),
+    /// Colour, overlay or flags changed: nothing the bot reads.
+    Style,
+}
+
+/// A text component (network NBT) as one line of plain text.
+fn read_text(r: &mut Reader<'_>) -> Result<String, ParseError> {
+    Ok(crate::nbt::plain(&crate::nbt::read_root(r)?))
+}
+
+fn write_text(w: &mut Writer, s: &str) {
+    w.bytes(&crate::nbt::write_root(&crate::nbt::Nbt::String(
+        s.to_owned(),
+    )));
+}
+
+/// A byte angle (256 to the turn) in degrees.
+fn angle(b: u8) -> f32 {
+    f32::from(b) * 360.0 / 256.0
+}
+
+/// `Holder<SoundEvent>`: a varint, 0 for an inline event (its id and an optional fixed range),
+/// else the registry id plus one.
+fn read_sound(r: &mut Reader<'_>) -> Result<SoundRef, ParseError> {
+    let v = r.varint()?;
+    if v == 0 {
+        let name = r.string()?;
+        if r.bool()? {
+            r.f32()?;
+        }
+        Ok(SoundRef::Inline(name))
+    } else {
+        Ok(SoundRef::Registry((v - 1) as u32))
+    }
+}
+
+fn write_sound(w: &mut Writer, s: &SoundRef) -> Result<(), EncodeError> {
+    match s {
+        SoundRef::Registry(id) => w.varint(*id as i32 + 1),
+        SoundRef::Inline(name) => {
+            w.varint(0);
+            w.string(name)?;
+            w.bool(false);
+        }
+    }
+    Ok(())
 }
 
 /// The server's packet `id` in `state`, decoded from its fields.
@@ -320,7 +568,20 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                     flags: r.u32()?,
                 }
             }
-            Some(PlayIn::SetTime) => S2c::SetTime,
+            Some(PlayIn::SetTime) => {
+                let game_time = r.i64()?;
+                let n = r.length()?;
+                let mut clocks = Vec::new();
+                for _ in 0..n {
+                    clocks.push(ClockUpdate {
+                        clock: r.varint()?,
+                        total_ticks: r.varlong()?,
+                        partial_tick: r.f32()?,
+                        rate: r.f32()?,
+                    });
+                }
+                S2c::SetTime { game_time, clocks }
+            }
             Some(PlayIn::LevelChunkWithLight) => {
                 let (x, z) = (r.i32()?, r.i32()?);
                 for _ in 0..r.length()? {
@@ -508,6 +769,215 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
             Some(PlayIn::ContainerClose) => S2c::ContainerClose {
                 window: r.varint()?,
             },
+            Some(PlayIn::Sound) => S2c::Sound {
+                sound: read_sound(&mut r)?,
+                source: r.varint()?,
+                pos: {
+                    let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
+                    [f64::from(x) / 8.0, f64::from(y) / 8.0, f64::from(z) / 8.0]
+                },
+                volume: r.f32()?,
+                pitch: r.f32()?,
+            },
+            Some(PlayIn::SoundEntity) => S2c::SoundEntity {
+                sound: read_sound(&mut r)?,
+                source: r.varint()?,
+                entity: r.varint()?,
+                volume: r.f32()?,
+                pitch: r.f32()?,
+            },
+            Some(PlayIn::LevelEvent) => S2c::LevelEvent {
+                event: r.i32()?,
+                pos: r.position()?,
+                data: r.i32()?,
+                global: r.bool()?,
+            },
+            Some(PlayIn::StopSound) => {
+                let flags = r.u8()?;
+                let source = if flags & 1 != 0 {
+                    Some(r.varint()?)
+                } else {
+                    None
+                };
+                let sound = if flags & 2 != 0 {
+                    Some(r.string()?)
+                } else {
+                    None
+                };
+                S2c::StopSound { source, sound }
+            }
+            Some(PlayIn::RotateHead) => S2c::RotateHead {
+                id: r.varint()?,
+                yaw: angle(r.u8()?),
+            },
+            Some(PlayIn::SetEquipment) => {
+                let id = r.varint()?;
+                let mut items = Vec::new();
+                loop {
+                    let slot = r.u8()?;
+                    let item = read_slot(&mut r)?;
+                    items.push((slot & 0x7f, item));
+                    // A cut-short stack ends what can be read; the top bit says more follow.
+                    if item.truncated() || slot & 0x80 == 0 {
+                        break;
+                    }
+                }
+                S2c::SetEquipment { id, items }
+            }
+            Some(PlayIn::Animate) => S2c::Animate {
+                id: r.varint()?,
+                action: r.u8()?,
+            },
+            Some(PlayIn::HurtAnimation) => S2c::HurtAnimation {
+                id: r.varint()?,
+                yaw: r.f32()?,
+            },
+            Some(PlayIn::ProjectilePower) => S2c::ProjectilePower {
+                id: r.varint()?,
+                power: r.f64()?,
+            },
+            Some(PlayIn::SetPassengers) => {
+                let vehicle = r.varint()?;
+                let n = r.length()?;
+                let mut passengers = Vec::with_capacity(n.min(16));
+                for _ in 0..n {
+                    passengers.push(r.varint()?);
+                }
+                S2c::SetPassengers {
+                    vehicle,
+                    passengers,
+                }
+            }
+            // The centre and the knockback; the particles and sound after them are not read.
+            Some(PlayIn::Explode) => S2c::Explode {
+                center: [r.f64()?, r.f64()?, r.f64()?],
+                knockback: if r.bool()? {
+                    Some([r.f64()?, r.f64()?, r.f64()?])
+                } else {
+                    None
+                },
+            },
+            Some(PlayIn::BlockEntityData) => {
+                let pos = r.position()?;
+                let kind = r.varint()?;
+                let tag = crate::nbt::read_root(&mut r)?;
+                let spawns = tag
+                    .get("SpawnData")
+                    .and_then(|s| s.get("entity"))
+                    .and_then(|e| e.get("id"))
+                    .and_then(crate::nbt::Nbt::as_str)
+                    .map(|s| s.trim_start_matches("minecraft:").to_owned());
+                S2c::BlockEntityData { pos, kind, spawns }
+            }
+            Some(PlayIn::BlockDestruction) => S2c::BlockDestruction {
+                breaker: r.varint()?,
+                pos: r.position()?,
+                stage: r.i8()?,
+            },
+            Some(PlayIn::UpdateMobEffect) => {
+                let id = r.varint()?;
+                let effect = r.varint()?;
+                let amplifier = r.varint()?;
+                let duration = r.varint()?;
+                S2c::UpdateMobEffect {
+                    id,
+                    effect,
+                    amplifier,
+                    duration,
+                }
+            }
+            Some(PlayIn::RemoveMobEffect) => S2c::RemoveMobEffect {
+                id: r.varint()?,
+                effect: r.varint()?,
+            },
+            Some(PlayIn::UpdateAttributes) => {
+                let id = r.varint()?;
+                let n = r.length()?;
+                let mut attributes = Vec::with_capacity(n.min(64));
+                for _ in 0..n {
+                    let attr = r.varint()?;
+                    let base = r.f64()?;
+                    let mods = r.length()?;
+                    let mut add = 0.0;
+                    for _ in 0..mods {
+                        let _id = r.string()?;
+                        let amount = r.f64()?;
+                        // Operation 0 adds its amount; the multiplying ones are left out, as
+                        // clojurecraft's hear.clj does.
+                        if r.varint()? == 0 {
+                            add += amount;
+                        }
+                    }
+                    attributes.push((attr, base, add));
+                }
+                S2c::UpdateAttributes { id, attributes }
+            }
+            Some(PlayIn::PlayerCombatEnter) => S2c::PlayerCombatEnter,
+            Some(PlayIn::PlayerCombatEnd) => S2c::PlayerCombatEnd {
+                duration: r.varint()?,
+            },
+            Some(PlayIn::SetExperience) => S2c::SetExperience {
+                progress: r.f32()?,
+                level: r.varint()?,
+                total: r.varint()?,
+            },
+            Some(PlayIn::Cooldown) => S2c::Cooldown {
+                group: r.string()?,
+                ticks: r.varint()?,
+            },
+            Some(PlayIn::GameEvent) => S2c::GameEvent {
+                event: r.u8()?,
+                param: r.f32()?,
+            },
+            Some(PlayIn::SystemChat) => S2c::SystemChat {
+                text: read_text(&mut r)?,
+                overlay: r.bool()?,
+            },
+            Some(PlayIn::SetActionBarText) => S2c::ActionBar {
+                text: read_text(&mut r)?,
+            },
+            Some(PlayIn::SetTitleText) => S2c::Title {
+                text: read_text(&mut r)?,
+            },
+            Some(PlayIn::SetSubtitleText) => S2c::Subtitle {
+                text: read_text(&mut r)?,
+            },
+            Some(PlayIn::BossEvent) => {
+                let uuid = r.uuid()?;
+                let op = match r.varint()? {
+                    0 => BossOp::Add {
+                        name: read_text(&mut r)?,
+                        progress: r.f32()?,
+                    },
+                    1 => BossOp::Remove,
+                    2 => BossOp::Progress(r.f32()?),
+                    3 => BossOp::Name(read_text(&mut r)?),
+                    _ => BossOp::Style,
+                };
+                S2c::BossEvent { uuid, op }
+            }
+            Some(PlayIn::ChunksBiomes) => {
+                let n = r.length()?;
+                let mut chunks = Vec::with_capacity(n.min(64));
+                for _ in 0..n {
+                    // ChunkPos as a long: x in the low 32 bits, z in the high.
+                    let packed = r.i64()?;
+                    chunks.push((packed as i32, (packed >> 32) as i32));
+                    let len = r.length()?;
+                    r.take(len)?;
+                }
+                S2c::ChunksBiomes { chunks }
+            }
+            Some(PlayIn::SetChunkCacheCenter) => S2c::SetChunkCacheCenter {
+                x: r.varint()?,
+                z: r.varint()?,
+            },
+            Some(PlayIn::SetChunkCacheRadius) => S2c::SetChunkCacheRadius {
+                radius: r.varint()?,
+            },
+            Some(PlayIn::SetSimulationDistance) => S2c::SetSimulationDistance {
+                distance: r.varint()?,
+            },
             Some(PlayIn::StartConfiguration) => S2c::StartConfiguration,
             Some(PlayIn::Disconnect) => S2c::Disconnect {
                 reason: r.rest().to_vec(),
@@ -515,6 +985,36 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
             Some(_) | None => unknown,
         },
     })
+}
+
+/// The server's packet `id` in `state`, named `state/name` as the generated tables spell it
+/// (`play/sound`); an id the tables lack is `state/<id>`. What coverage counts unknown packets by.
+pub fn packet_name(state: State, id: u32) -> String {
+    let (prefix, name) = match state {
+        State::Handshake => ("handshake", None),
+        State::Login => ("login", LoginIn::from_id(id).map(LoginIn::name)),
+        State::Configuration => ("configuration", ConfIn::from_id(id).map(ConfIn::name)),
+        State::Play => ("play", PlayIn::from_id(id).map(PlayIn::name)),
+    };
+    match name {
+        Some(n) => format!("{prefix}/{n}"),
+        None => format!("{prefix}/{id}"),
+    }
+}
+
+/// Whether this layer decodes the server's packet `id` in `state`: anything else is
+/// `S2c::Unknown`. An empty body is enough to tell: a modelled packet fails to read or decodes,
+/// an unmodelled one is Unknown before any field is read.
+pub fn decodes(state: State, id: u32) -> bool {
+    !matches!(decode(state, id, &[]), Ok(S2c::Unknown { .. }))
+}
+
+/// Every clientbound packet the generated tables know, as `(state, id)`, in state then id order.
+pub fn clientbound() -> Vec<(State, u32)> {
+    let login = LoginIn::ALL.iter().map(|p| (State::Login, p.id()));
+    let conf = ConfIn::ALL.iter().map(|p| (State::Configuration, p.id()));
+    let play = PlayIn::ALL.iter().map(|p| (State::Play, p.id()));
+    login.chain(conf).chain(play).collect()
 }
 
 /// A packet to the server.
@@ -576,6 +1076,13 @@ pub enum C2s {
     MovePlayerStatusOnly {
         flags: u8,
     },
+    /// The keys held, sent when they change (`ServerboundPlayerInputPacket`, which since 1.21.2
+    /// carries the sneak that `player_command` used to): the `INPUT_*` bits. The server sets
+    /// the player's shift key from bit `INPUT_SHIFT`, which is what spares it on magma and gives
+    /// it the crouching pose.
+    PlayerInput {
+        flags: u8,
+    },
     /// A dig: status 0 START, 1 ABORT, 2 FINISH; the block, the face, and the client's
     /// sequence number the server acknowledges.
     PlayerAction {
@@ -633,6 +1140,17 @@ pub enum C2s {
     },
 }
 
+/// The bits of `C2s::PlayerInput`: the constants of the game's `Input` record (`FLAG_FORWARD` 1,
+/// `FLAG_BACKWARD` 2, `FLAG_LEFT` 4, `FLAG_RIGHT` 8, `FLAG_JUMP` 16, `FLAG_SHIFT` 32,
+/// `FLAG_SPRINT` 64; read with javap from the 26.1.2 server jar, probe 45339873719).
+pub const INPUT_FORWARD: u8 = 1;
+pub const INPUT_BACKWARD: u8 = 2;
+pub const INPUT_LEFT: u8 = 4;
+pub const INPUT_RIGHT: u8 = 8;
+pub const INPUT_JUMP: u8 = 16;
+pub const INPUT_SHIFT: u8 = 32;
+pub const INPUT_SPRINT: u8 = 64;
+
 impl C2s {
     /// The state this packet is sent in.
     pub fn state(&self) -> State {
@@ -651,6 +1169,7 @@ impl C2s {
             | C2s::ChunkBatchReceived { .. }
             | C2s::MovePlayerPosRot { .. }
             | C2s::MovePlayerStatusOnly { .. }
+            | C2s::PlayerInput { .. }
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
             | C2s::ClientCommand { .. }
@@ -754,6 +1273,10 @@ impl C2s {
             C2s::MovePlayerStatusOnly { flags } => {
                 w.u8(*flags);
                 PlayOut::MovePlayerStatusOnly.id()
+            }
+            C2s::PlayerInput { flags } => {
+                w.u8(*flags);
+                PlayOut::PlayerInput.id()
             }
             C2s::PlayerAction {
                 status,
@@ -930,11 +1453,15 @@ impl S2c {
                 w.i32(*flags as i32);
                 PlayIn::PlayerPosition.id()
             }
-            S2c::SetTime => {
-                // The bot counts the packet, not its fields; game time and day time, ticking.
-                w.i64(0);
-                w.i64(0);
-                w.bool(true);
+            S2c::SetTime { game_time, clocks } => {
+                w.i64(*game_time);
+                w.varint(i32::try_from(clocks.len()).map_err(|_| EncodeError::TooLong)?);
+                for c in clocks {
+                    w.varint(c.clock);
+                    w.varlong(c.total_ticks);
+                    w.f32(c.partial_tick);
+                    w.f32(c.rate);
+                }
                 PlayIn::SetTime.id()
             }
             S2c::ForgetLevelChunk { x, z } => {
@@ -1152,6 +1679,265 @@ impl S2c {
             S2c::Disconnect { reason } => {
                 w.bytes(reason);
                 PlayIn::Disconnect.id()
+            }
+            S2c::Sound {
+                sound,
+                source,
+                pos,
+                volume,
+                pitch,
+            } => {
+                write_sound(&mut w, sound)?;
+                w.varint(*source);
+                for v in pos {
+                    w.i32((v * 8.0).floor() as i32);
+                }
+                w.f32(*volume);
+                w.f32(*pitch);
+                w.i64(0); // the seed: the bot draws nothing from it
+                PlayIn::Sound.id()
+            }
+            S2c::SoundEntity {
+                sound,
+                source,
+                entity,
+                volume,
+                pitch,
+            } => {
+                write_sound(&mut w, sound)?;
+                w.varint(*source);
+                w.varint(*entity);
+                w.f32(*volume);
+                w.f32(*pitch);
+                w.i64(0);
+                PlayIn::SoundEntity.id()
+            }
+            S2c::LevelEvent {
+                event,
+                pos,
+                data,
+                global,
+            } => {
+                w.i32(*event);
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.i32(*data);
+                w.bool(*global);
+                PlayIn::LevelEvent.id()
+            }
+            S2c::StopSound { source, sound } => {
+                w.u8(u8::from(source.is_some()) | (u8::from(sound.is_some()) << 1));
+                if let Some(s) = source {
+                    w.varint(*s);
+                }
+                if let Some(s) = sound {
+                    w.string(s)?;
+                }
+                PlayIn::StopSound.id()
+            }
+            S2c::RotateHead { id, yaw } => {
+                w.varint(*id);
+                w.u8((yaw.rem_euclid(360.0) * 256.0 / 360.0).round() as u8);
+                PlayIn::RotateHead.id()
+            }
+            S2c::SetEquipment { id, items } => {
+                w.varint(*id);
+                for (i, (slot, item)) in items.iter().enumerate() {
+                    let more = if i + 1 < items.len() { 0x80 } else { 0 };
+                    w.u8(slot | more);
+                    crate::slot::write_slot(&mut w, *item);
+                }
+                PlayIn::SetEquipment.id()
+            }
+            S2c::Animate { id, action } => {
+                w.varint(*id);
+                w.u8(*action);
+                PlayIn::Animate.id()
+            }
+            S2c::HurtAnimation { id, yaw } => {
+                w.varint(*id);
+                w.f32(*yaw);
+                PlayIn::HurtAnimation.id()
+            }
+            S2c::ProjectilePower { id, power } => {
+                w.varint(*id);
+                w.f64(*power);
+                PlayIn::ProjectilePower.id()
+            }
+            S2c::SetPassengers {
+                vehicle,
+                passengers,
+            } => {
+                w.varint(*vehicle);
+                w.varint(i32::try_from(passengers.len()).unwrap_or(0));
+                for p in passengers {
+                    w.varint(*p);
+                }
+                PlayIn::SetPassengers.id()
+            }
+            // The model writes the fields the bot reads; a real server follows them with the
+            // particles and sound, which the decoder does not read.
+            S2c::Explode { center, knockback } => {
+                center.iter().for_each(|v| w.f64(*v));
+                w.bool(knockback.is_some());
+                if let Some(k) = knockback {
+                    k.iter().for_each(|v| w.f64(*v));
+                }
+                PlayIn::Explode.id()
+            }
+            S2c::BlockEntityData { pos, kind, spawns } => {
+                use crate::nbt::Nbt;
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.varint(*kind);
+                let tag = match spawns {
+                    Some(m) => Nbt::Compound(vec![(
+                        "SpawnData".to_owned(),
+                        Nbt::Compound(vec![(
+                            "entity".to_owned(),
+                            Nbt::Compound(vec![(
+                                "id".to_owned(),
+                                Nbt::String(format!("minecraft:{m}")),
+                            )]),
+                        )]),
+                    )]),
+                    None => Nbt::Compound(Vec::new()),
+                };
+                w.bytes(&crate::nbt::write_root(&tag));
+                PlayIn::BlockEntityData.id()
+            }
+            S2c::BlockDestruction {
+                breaker,
+                pos,
+                stage,
+            } => {
+                w.varint(*breaker);
+                w.i64(crate::bytes::pack_position(pos.0, pos.1, pos.2));
+                w.i8(*stage);
+                PlayIn::BlockDestruction.id()
+            }
+            S2c::UpdateMobEffect {
+                id,
+                effect,
+                amplifier,
+                duration,
+            } => {
+                w.varint(*id);
+                w.varint(*effect);
+                w.varint(*amplifier);
+                w.varint(*duration);
+                w.u8(0); // flags: not ambient, no particles, no icon
+                PlayIn::UpdateMobEffect.id()
+            }
+            S2c::RemoveMobEffect { id, effect } => {
+                w.varint(*id);
+                w.varint(*effect);
+                PlayIn::RemoveMobEffect.id()
+            }
+            S2c::UpdateAttributes { id, attributes } => {
+                w.varint(*id);
+                w.varint(i32::try_from(attributes.len()).unwrap_or(0));
+                for (attr, base, add) in attributes {
+                    w.varint(*attr);
+                    w.f64(*base);
+                    if *add == 0.0 {
+                        w.varint(0);
+                    } else {
+                        w.varint(1);
+                        w.string("ruststeve:model")?;
+                        w.f64(*add);
+                        w.varint(0);
+                    }
+                }
+                PlayIn::UpdateAttributes.id()
+            }
+            S2c::PlayerCombatEnter => PlayIn::PlayerCombatEnter.id(),
+            S2c::PlayerCombatEnd { duration } => {
+                w.varint(*duration);
+                PlayIn::PlayerCombatEnd.id()
+            }
+            S2c::SetExperience {
+                progress,
+                level,
+                total,
+            } => {
+                w.f32(*progress);
+                w.varint(*level);
+                w.varint(*total);
+                PlayIn::SetExperience.id()
+            }
+            S2c::Cooldown { group, ticks } => {
+                w.string(group)?;
+                w.varint(*ticks);
+                PlayIn::Cooldown.id()
+            }
+            S2c::GameEvent { event, param } => {
+                w.u8(*event);
+                w.f32(*param);
+                PlayIn::GameEvent.id()
+            }
+            S2c::SystemChat { text, overlay } => {
+                write_text(&mut w, text);
+                w.bool(*overlay);
+                PlayIn::SystemChat.id()
+            }
+            S2c::ActionBar { text } => {
+                write_text(&mut w, text);
+                PlayIn::SetActionBarText.id()
+            }
+            S2c::Title { text } => {
+                write_text(&mut w, text);
+                PlayIn::SetTitleText.id()
+            }
+            S2c::Subtitle { text } => {
+                write_text(&mut w, text);
+                PlayIn::SetSubtitleText.id()
+            }
+            S2c::BossEvent { uuid, op } => {
+                w.uuid(uuid);
+                match op {
+                    BossOp::Add { name, progress } => {
+                        w.varint(0);
+                        write_text(&mut w, name);
+                        w.f32(*progress);
+                        w.varint(0); // colour
+                        w.varint(0); // overlay
+                        w.u8(0); // flags
+                    }
+                    BossOp::Remove => w.varint(1),
+                    BossOp::Progress(p) => {
+                        w.varint(2);
+                        w.f32(*p);
+                    }
+                    BossOp::Name(n) => {
+                        w.varint(3);
+                        write_text(&mut w, n);
+                    }
+                    BossOp::Style => {
+                        w.varint(5);
+                        w.u8(0);
+                    }
+                }
+                PlayIn::BossEvent.id()
+            }
+            S2c::ChunksBiomes { chunks } => {
+                w.varint(i32::try_from(chunks.len()).unwrap_or(0));
+                for (x, z) in chunks {
+                    w.i64((i64::from(*x) & 0xffff_ffff) | (i64::from(*z) << 32));
+                    w.varint(0);
+                }
+                PlayIn::ChunksBiomes.id()
+            }
+            S2c::SetChunkCacheCenter { x, z } => {
+                w.varint(*x);
+                w.varint(*z);
+                PlayIn::SetChunkCacheCenter.id()
+            }
+            S2c::SetChunkCacheRadius { radius } => {
+                w.varint(*radius);
+                PlayIn::SetChunkCacheRadius.id()
+            }
+            S2c::SetSimulationDistance { distance } => {
+                w.varint(*distance);
+                PlayIn::SetSimulationDistance.id()
             }
             S2c::Unknown { .. } => return Err(EncodeError::NotModelled("an unknown packet")),
         };

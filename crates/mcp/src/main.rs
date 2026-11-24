@@ -131,6 +131,15 @@ struct NoteName {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct RaceRead {
+    /// The race's run id (its release is `race-<id>`).
+    run_id: u64,
+    /// A file in the race's bundle, by path or by its end (`lane-3/rs-l03-b00.ledger.txt`,
+    /// `rs-l03-b00.case.txt`); empty lists every file.
+    file: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct Search {
     /// Words to find in note titles, descriptions and aliases (case-insensitive).
     query: String,
@@ -210,6 +219,34 @@ impl Tools {
         )
     }
 
+    #[tool(
+        description = "Is a run done? One API request while it is not: its status (queued, in_progress, completed), conclusion and title. Once completed, a second request adds its artifact names. Use this to wait on a race, a probe or CI: one call every 4 minutes or more. Never `gh run watch` and never poll in a loop: nine agents' watches spent the token's 5,000 requests an hour in one hour (2026-11-23) and every gh call failed until the reset."
+    )]
+    async fn run_done(&self, Parameters(p): Parameters<RunId>) -> String {
+        let view = run(
+            "gh",
+            &[
+                "api",
+                &format!("repos/{REPO}/actions/runs/{}", p.run_id),
+                "--jq",
+                r#""\(.status) \(.conclusion // "-") \(.name): \(.display_title) (\(.head_branch), updated \(.updated_at))""#,
+            ],
+        );
+        if !view.trim_start().starts_with("completed") {
+            return view;
+        }
+        let artifacts = run(
+            "gh",
+            &[
+                "api",
+                &format!("repos/{REPO}/actions/runs/{}/artifacts", p.run_id),
+                "--jq",
+                ".artifacts[].name",
+            ],
+        );
+        format!("{view}artifacts:\n{artifacts}")
+    }
+
     #[tool(description = "The log lines of a run's failed steps.")]
     async fn run_log(&self, Parameters(p): Parameters<RunId>) -> String {
         run(
@@ -273,6 +310,97 @@ impl Tools {
             args.extend(["--branch", branch.as_str()]);
         }
         run("gh", &args)
+    }
+
+    #[tool(
+        description = "A race's release summary: the coverage row first (every `!!` is a blind spot), then k/n per stage and the endings ranked with three bots to read each. While a race runs, the release holds each lane's progress-lane-N.txt."
+    )]
+    async fn race_summary(&self, Parameters(p): Parameters<RunId>) -> String {
+        let tag = format!("race-{}", p.run_id);
+        run(
+            "gh",
+            &[
+                "release",
+                "view",
+                &tag,
+                "-R",
+                REPO,
+                "--json",
+                "body,assets",
+                "--jq",
+                ".body, (.assets[] | .name)",
+            ],
+        )
+    }
+
+    #[tool(
+        description = "Read a file of a race's bundle without running code: the case (`.case.txt`), the ledger (`.ledger.txt`: every task with its reason and outcome, and every fact: hits, tools worn and broken, sounds, signs), the senses (`.senses.txt`: a row every 10 s), a lane's progress. Downloads the bundle once into target/races/<id>. Without `file`, lists the files."
+    )]
+    async fn race_read(&self, Parameters(p): Parameters<RaceRead>) -> String {
+        let dir = repo_root()
+            .join("target")
+            .join("races")
+            .join(p.run_id.to_string());
+        if !dir.exists() {
+            let tag = format!("race-{}", p.run_id);
+            let d = dir.display().to_string();
+            let got = run(
+                "gh",
+                &[
+                    "release",
+                    "download",
+                    &tag,
+                    "-R",
+                    REPO,
+                    "-p",
+                    "batches-*",
+                    "-p",
+                    "progress-*",
+                    "-D",
+                    &d,
+                ],
+            );
+            let bundle = format!("{d}/batches-{}.tar.zst", p.run_id);
+            if std::path::Path::new(&bundle).exists() {
+                run("tar", &["--zstd", "-xf", &bundle, "-C", &d]);
+            } else {
+                return format!("no bundle for {tag} yet: {got}");
+            }
+        }
+        let mut files = Vec::new();
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.filter_map(Result::ok) {
+                let path = e.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+        walk(&dir, &mut files);
+        files.sort();
+        let readable = |f: &PathBuf| f.extension().is_some_and(|e| e == "txt" || e == "md");
+        match p.file.filter(|f| !f.is_empty()) {
+            None => files
+                .iter()
+                .filter(|f| readable(f))
+                .map(|f| f.strip_prefix(&dir).unwrap_or(f).display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Some(want) => match files
+                .iter()
+                .find(|f| readable(f) && f.display().to_string().ends_with(&want))
+            {
+                Some(f) => tail(std::fs::read_to_string(f).unwrap_or_else(|e| e.to_string())),
+                None => format!(
+                    "no readable file ending {want}; call race_read without file to list them"
+                ),
+            },
+        }
     }
 
     #[tool(

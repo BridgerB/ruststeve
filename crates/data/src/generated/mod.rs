@@ -4,6 +4,7 @@
 pub mod blocks;
 pub mod dimensions;
 pub mod entities;
+pub mod events;
 pub mod fuel;
 pub mod hardness;
 pub mod harvest;
@@ -12,6 +13,7 @@ pub mod items;
 pub mod loot;
 pub mod metadata;
 pub mod mobs;
+pub mod movement;
 pub mod packets;
 pub mod recipes;
 pub mod registries;
