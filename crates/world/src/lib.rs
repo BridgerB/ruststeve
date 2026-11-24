@@ -732,9 +732,12 @@ impl World {
             Event::Tick { now_ms, seed } => {
                 self.now_ms = *now_ms;
                 self.seed = *seed;
-                if let Some(s) = Stage::highest(self)
-                    && self.stage_reached.is_none_or(|r| s > r)
-                {
+                // Only the stages above the one reached, and the two that scan the sightings of 25
+                // chunk columns (fortress, spawner) once a second: in a fortress the scan is
+                // thousands of sightings a tick (callgrind of a replay of race 45350933958 lane 1:
+                // `Stage::highest` -> `kind_near` -> `Memory::in_column`).
+                let scans = self.ticks.is_multiple_of(stage::STAGE_EVERY_TICKS);
+                if let Some(s) = Stage::highest_above(self, self.stage_reached, scans) {
                     self.stage_reached = Some(s);
                 }
                 self.tick()
