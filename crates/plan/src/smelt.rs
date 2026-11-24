@@ -37,6 +37,10 @@ pub const CLICK_PATIENCE_TICKS: u64 = 60;
 pub const MAX_MISSES: u32 = 3;
 /// Past the batch's cook time, how long the results may take (clojurecraft's `cook-slack`, 5 s).
 pub const COOK_SLACK_TICKS: u64 = 100;
+/// Fuel loads after the first in one batch (a kind of fuel each), and how long into the cook the
+/// first look for burned-out fuel waits (the lit time arrives a moment after the fuel goes in).
+pub const MAX_REFUELS: u32 = 4;
+pub const REFUEL_AFTER_TICKS: u64 = 40;
 /// The progress invariant: a load is a few clicks a stack; more than this is a loop.
 pub const MAX_CLICKS: u32 = 80;
 
@@ -89,6 +93,9 @@ pub struct Smelt {
     /// Only take the results of a batch already loaded (issue 13b: a smelt the planner left).
     #[serde(default)]
     pub collect: bool,
+    /// Times the fuel was loaded again mid-batch, the kind before burned.
+    #[serde(default)]
+    pub refuels: u32,
 }
 
 /// The fuel the bot burns, hottest first: coal before wood. Logs, sticks and tools are kept for
@@ -138,6 +145,7 @@ impl Smelt {
             misses: 0,
             started: tick,
             collect: false,
+            refuels: 0,
         })
     }
 
@@ -157,6 +165,7 @@ impl Smelt {
             misses: 0,
             started: tick,
             collect: true,
+            refuels: 0,
         }
     }
 
@@ -230,7 +239,9 @@ impl Smelt {
     /// The fuel to put in: (item, how many in the slot in all), or `None` when what burns now and
     /// sits in the slot covers the batch.
     fn fuel_plan(&self, w: &World) -> Result<Option<(ItemKind, i32)>, SmeltFailure> {
-        let need = i64::from(self.cook_ticks) * i64::from(self.count);
+        // What is still to cook: the batch less the results already held.
+        let left = self.count - (crate::craft::count(w, self.result) - self.before).max(0);
+        let need = i64::from(self.cook_ticks) * i64::from(left.max(0));
         let burning = w
             .window
             .as_ref()
@@ -246,13 +257,21 @@ impl Smelt {
         }
         let candidates = fuels_held(w);
         let pick = match in_slot {
-            // More of what is in the slot, or nothing.
-            Some((k, _)) => candidates.iter().find(|(c, _)| *c == k).copied(),
-            None => candidates.first().copied(),
+            // More of what is in the slot. With no more of that kind held the slot is as full
+            // as it gets for now: the batch goes on with it, and the next kind held is loaded
+            // when this one is burned (`Cook`). Taking it out again for another kind looped
+            // to `TooManyClicks` with 5 oak and 12 birch planks held (race 45343519424: 24
+            // smelts failed so).
+            Some((k, _)) => match candidates.iter().find(|(c, _)| *c == k).copied() {
+                Some(p) => p,
+                None => return Ok(None),
+            },
+            None => match candidates.first().copied() {
+                Some(p) => p,
+                None => return Err(SmeltFailure::Missing),
+            },
         };
-        let Some((fuel, ticks)) = pick else {
-            return Err(SmeltFailure::Missing);
-        };
+        let (fuel, ticks) = pick;
         let n = (short + i64::from(ticks) - 1) / i64::from(ticks).max(1);
         let held = crate::craft::count(w, fuel)
             - if fuel == ItemKind::Stick {
@@ -385,17 +404,6 @@ impl Smelt {
                 };
                 self.stages(w, tick)
             }
-            SmeltStage::Fuel
-                if Self::slot(w, FUEL).is_some_and(|(k, _)| {
-                    let held = fuels_held(w);
-                    !held.iter().any(|(h, _)| *h == k) && !held.is_empty()
-                }) && self.fuel_plan(w).is_err() =>
-            {
-                // A leftover of a fuel no longer held sits in the slot and the batch needs more:
-                // take it out, so the fuel held can go in (a furnace with a plank left and only
-                // sticks held: docs/problems/iron-kit.md wall 12).
-                self.click(FUEL, 0, 1)
-            }
             SmeltStage::Fuel => match self.fuel_plan(w) {
                 Err(f) => (None, SmeltStatus::Failed(f)),
                 Ok(None) => {
@@ -432,6 +440,26 @@ impl Smelt {
                 }
                 if Self::slot(w, RESULT).is_some_and(|(k, _)| k == self.result) {
                     return self.click(RESULT, 0, 1);
+                }
+                // The fuel loaded is burned and input is left: the next kind of fuel held goes
+                // in (the slot takes one kind at a time; overworld-leg wall 4). With none held,
+                // or after `MAX_REFUELS`, the smelt fails once, saying fuel is missing.
+                let lit = w
+                    .window
+                    .as_ref()
+                    .and_then(|win| win.properties.get(&LIT_REMAINING).copied())
+                    .unwrap_or(0);
+                if tick.saturating_sub(since) >= REFUEL_AFTER_TICKS
+                    && lit <= 0
+                    && Self::slot(w, FUEL).is_none()
+                    && Self::slot(w, INPUT).is_some_and(|(k, _)| k == self.input)
+                {
+                    if fuels_held(w).is_empty() || self.refuels >= MAX_REFUELS {
+                        return (None, SmeltStatus::Failed(SmeltFailure::Missing));
+                    }
+                    self.refuels += 1;
+                    self.stage = SmeltStage::Fuel;
+                    return self.stages(w, tick);
                 }
                 let limit = (f64::from(self.cook_ticks)
                     * f64::from(self.count.max(1))

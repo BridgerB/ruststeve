@@ -24,6 +24,7 @@ pub mod path;
 pub mod place;
 pub mod redig;
 pub mod scoop;
+pub mod shield;
 pub mod smelt;
 pub mod stairs;
 pub mod station;
@@ -651,6 +652,24 @@ pub struct Plan {
     pub maroon: bool,
     #[serde(default)]
     pub refused_prey: Vec<i32>,
+    /// The shield's raise and lower, and what it met (docs/problems/shield.md).
+    #[serde(default)]
+    pub shield: shield::Shield,
+    /// The shield made in the Nether from what is held: over (made, skipped or given up), the
+    /// tasks begun for it, and set while the needs planner is asked for it alone.
+    #[serde(default)]
+    pub shield_done: bool,
+    #[serde(default)]
+    pub shield_tasks: u32,
+    /// After the shield: cook rounds and table digs begun, and the whole stop over.
+    #[serde(default)]
+    pub shield_cooks: u32,
+    #[serde(default)]
+    pub shield_carries: u32,
+    #[serde(default)]
+    pub shield_over: bool,
+    #[serde(skip)]
+    shield_only: bool,
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -729,6 +748,13 @@ impl Plan {
             relocate: false,
             maroon: false,
             refused_prey: Vec::new(),
+            shield: shield::Shield::default(),
+            shield_done: false,
+            shield_tasks: 0,
+            shield_cooks: 0,
+            shield_carries: 0,
+            shield_over: false,
+            shield_only: false,
             acts: Vec::new(),
         }
     }
@@ -790,8 +816,181 @@ impl Plan {
     pub fn step(&mut self, w: &World) -> Controls {
         let notes_before = self.event_count;
         let c = self.step_inner(w);
+        // >>> shield (docs/problems/shield.md): the one call site of `plan::shield`.
+        let c = self.shield_step(w, c);
+        // <<< shield
         self.track(w.session.server_ticks, notes_before);
         c
+    }
+
+    /// A shield made in the Nether from what the bot holds (docs/problems/shield.md): a real bot
+    /// that came through its portal before the kit made shields holds raw iron, a log or two and
+    /// a table, which is one shield. The needs planner is asked for the shield row alone, work
+    /// where the bot stands only (`decide` ends it on anything else), at most `SHIELD_TASKS`
+    /// tasks; then the table is taken along again.
+    fn nether_shield(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Option<Task> {
+        if self.shield_over {
+            return None;
+        }
+        if !self.shield_done {
+            // Only a bot holding no shield begins: one made at the surface is never made again.
+            let row = if self.shield_tasks == 0 {
+                shield::nether_row(&held(w))
+            } else {
+                shield::kit_row(&held(w))
+            };
+            if row.is_some() && self.shield_tasks < SHIELD_TASKS {
+                self.shield_tasks += 1;
+                if self.shield_tasks == 1 {
+                    self.note(
+                        tick,
+                        format!("make a shield here ({})", row.unwrap_or_default()),
+                        "iron and wood for one are held; none of the kit's is".to_owned(),
+                    );
+                }
+                self.kit_row = true;
+                self.shield_only = true;
+                let t = self.decide(w, origin, tick);
+                self.kit_row = false;
+                self.shield_only = false;
+                if !self.shield_done {
+                    return Some(t);
+                }
+            }
+            self.shield_done = true;
+            if self.shield_tasks > 0 {
+                self.note(
+                    tick,
+                    format!(
+                        "shield making over: {} held after {} tasks",
+                        craft::count(w, data::ItemKind::Shield),
+                        self.shield_tasks
+                    ),
+                    "cook what the fuel left allows, then on to the fortress".to_owned(),
+                );
+            }
+        }
+        // Nothing was made here: no furnace or table of this bot's stands near.
+        if self.shield_tasks == 0 {
+            self.shield_over = true;
+            return None;
+        }
+        // The furnace stands: the held raw meat cooked with the fuel left, a round or two (a
+        // round ends at the first fuel kind's end only when the smelt cannot refuel).
+        if self.shield_cooks < SHIELD_COOKS {
+            self.shield_cooks += 1;
+            if let Some(t) = self.cook_held(w, tick) {
+                return Some(t);
+            }
+            self.shield_cooks = SHIELD_COOKS;
+        }
+        // Then the table is taken along again, with a bound on the digs for it.
+        self.shield_carries += 1;
+        if self.shield_carries <= SHIELD_CARRIES
+            && let Some(t) = self.carry_table(w, tick)
+        {
+            return Some(t);
+        }
+        self.shield_over = true;
+        self.note(
+            tick,
+            format!(
+                "shield stop over: {} shield, {} cooked food, {} tables held",
+                craft::count(w, data::ItemKind::Shield),
+                shield::COOKED
+                    .iter()
+                    .map(|k| craft::count(w, *k))
+                    .sum::<i32>(),
+                craft::count(w, data::ItemKind::CraftingTable)
+            ),
+            "on to the fortress".to_owned(),
+        );
+        None
+    }
+
+    /// A smelt of the raw meat held at the furnace near, as far as the fuel held burns
+    /// (`shield::cook_choice`), or `None`.
+    fn cook_held(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let counts = held(w);
+        let (r, count) = shield::cook_choice(&counts)?;
+        let Some(f) = self.near_block(w, data::BlockKind::Furnace, tick) else {
+            self.note(
+                tick,
+                "no cooking: no furnace near".to_owned(),
+                format!("{count} {} would cook", r.id),
+            );
+            return None;
+        };
+        let sm = smelt::Smelt::new(w, f, r, count, tick)?;
+        self.note(
+            tick,
+            format!("cook {count} for {} at {f:?}", r.id),
+            format!(
+                "raw meat held and {} ticks of fuel left after the shield",
+                shield::fuel_ticks_held(&counts)
+            ),
+        );
+        Some(Task::Smelt(Box::new(sm)))
+    }
+
+    /// The shield over whatever the tick chose: a held shield goes to the off hand; with a
+    /// fireball coming or a blaze about to shoot it is raised, and while it is up the bot strikes
+    /// nothing and walks slowed, toward the threat only (`shield::controls`: what a client using
+    /// an item can do). An escape, a meal or any work of the hands comes first.
+    fn shield_step(&mut self, w: &World, c: Controls) -> Controls {
+        let tick = w.ticks;
+        if self.acts.is_empty()
+            && tick >= self.equip_at
+            && let Some((slot, act)) = shield::to_off_hand(w)
+        {
+            self.equip_at = tick + EQUIP_TICKS;
+            self.acts.push(act);
+            self.note(
+                tick,
+                format!("shield to the off hand from slot {slot}"),
+                "a shield held, the off hand without one".to_owned(),
+            );
+            return c;
+        }
+        let task_free = match &self.task {
+            Task::Defend(_) | Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
+            Task::Escape(_)
+            | Task::Eat(_)
+            | Task::Hunt(_)
+            | Task::Dig(_)
+            | Task::Craft(_)
+            | Task::Place(_)
+            | Task::Stairs(_)
+            | Task::Smelt(_)
+            | Task::Redig(_)
+            | Task::Scoop(_)
+            | Task::Cast(_)
+            | Task::Enter(_)
+            | Task::Swim(..) => false,
+        };
+        // A strike or a change of the held slot waits for the shield; any other act is work.
+        let hands_free = self.acts.iter().all(|a| {
+            matches!(
+                a,
+                world::Act::Attack { .. } | world::Act::Swing | world::Act::Hold { .. }
+            )
+        });
+        let step = self.shield.step(w, tick, task_free && hands_free);
+        for what in step.notes {
+            self.note(tick, what, "shield".to_owned());
+        }
+        if step.yaw.is_some() {
+            self.acts
+                .retain(|a| !matches!(a, world::Act::Attack { .. } | world::Act::Swing));
+        }
+        // First: a lowering goes ahead of a meal's own `use_item` in the same tick.
+        if let Some(act) = step.act {
+            self.acts.insert(0, act);
+        }
+        match step.yaw {
+            Some(yaw) => shield::controls(c, yaw, tick),
+            None => c,
+        }
     }
 
     /// The task records made since the last call, oldest first: the shell writes them.
@@ -1783,6 +1982,11 @@ impl Plan {
         {
             // The race goes on to the fortress, then its spawner and the rods (issue 16).
             if self.aim == Aim::Race {
+                // >>> shield (docs/problems/shield.md): a shield first, from what is held.
+                if let Some(t) = self.nether_shield(w, origin, tick) {
+                    return t;
+                }
+                // <<< shield
                 if w.stage_reached
                     .is_some_and(|s| s >= world::stage::Stage::Fortress)
                 {
@@ -2751,6 +2955,7 @@ impl Plan {
         // The nether aim casts with the portal row until a portal is seen (issue 15c).
         let row = match self.aim {
             // A portal stands and the bot is about to go in: the tools for the Nether first.
+            _ if self.shield_only => shield::kit_row(&held(w)).unwrap_or("shield").to_owned(),
             _ if self.kit_row => "nether-kit".to_owned(),
             Aim::Race if stock_row => "stock".to_owned(),
             // The race gears up first (issue 16), then casts.
@@ -2832,6 +3037,34 @@ impl Plan {
             );
         }
         let choice = make::make_with_wear(&table, &counts, &near, gather_now, &wear, goal);
+        // >>> shield (docs/problems/shield.md): the kit's tools held, the shields the held iron
+        // and wood make are made next; an act that would be a trip (a gather, a mine) skips them.
+        let (goal, choice) = match shield::kit_row(&counts).and_then(|r| table.until(r)) {
+            Some(row) if self.kit_row && (self.shield_only || choice == make::Choice::Done) => {
+                match make::make_with_wear(&table, &counts, &near, gather_now, &wear, row) {
+                    make::Choice::Act(r) if shield::kit_act(r) => (row, make::Choice::Act(r)),
+                    other => {
+                        let why = match other {
+                            make::Choice::Act(r) => format!("{} would be a trip", r.id),
+                            make::Choice::Done => "held".to_owned(),
+                            make::Choice::Stuck => "not makeable where the bot stands".to_owned(),
+                        };
+                        self.note(tick, format!("shields skipped: {why}"), row.id.clone());
+                        if self.shield_only {
+                            self.shield_done = true;
+                            return Task::Idle;
+                        }
+                        (goal, choice)
+                    }
+                }
+            }
+            _ if self.shield_only => {
+                self.shield_done = true;
+                return Task::Idle;
+            }
+            _ => (goal, choice),
+        };
+        // <<< shield
         if matches!(choice, make::Choice::Act(_))
             && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
         {
@@ -2952,6 +3185,11 @@ impl Plan {
                         .map(|i| craft::count(w, *i))
                         .sum::<i32>()
                         .min(64);
+                    // >>> shield: a shield's smelt cooks the ingots it is short of and no more;
+                    // the whole batch would burn the planks the shield is made of.
+                    let count =
+                        shield::smelt_count(&goal.id, &counts).map_or(count, |n| count.min(n));
+                    // <<< shield
                     match smelt::Smelt::new(w, f, r, count, tick) {
                         Some(sm) => {
                             self.note(
@@ -4500,6 +4738,15 @@ pub fn logs_held(w: &World) -> i32 {
 /// Tasks the Nether kit may begin before it is given up: four pickaxes, planks, a table and its
 /// placing are seven, so sixteen leaves each a retry.
 const KIT_TASKS: u32 = 16;
+/// Tasks begun for a shield made in the Nether: a table and a furnace put down, the furnace and
+/// the planks crafted, a smelt, the shield and the table dug again are 8; half as many again for
+/// a task that fails once.
+const SHIELD_TASKS: u32 = 12;
+/// Cook rounds after the shield: one a kind of raw meat, the two kinds a real bot carries
+/// (the Nether snapshot of race 45194253932: 6 raw beef and 5 raw porkchop).
+const SHIELD_COOKS: u32 = 2;
+/// Digs begun to take the table along again after the shield; a third failure leaves it.
+const SHIELD_CARRIES: u32 = 3;
 
 /// Six since blaze wall 21: the Nether kit's four pickaxes and table had no slot to land in with
 /// two, and a dig's drops take the rest.
