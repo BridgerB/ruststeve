@@ -3314,9 +3314,18 @@ impl Plan {
             StairsStatus::Done => {
                 self.failed_in_row = 0;
                 if let Task::Stairs(st) = std::mem::replace(&mut self.task, Task::Idle) {
+                    // A travel tunnel's laid blocks and straight-steered steps, counted here.
+                    let extra = if st.laid + st.steered > 0 {
+                        format!(
+                            " ({} blocks laid, {} steps steered straight)",
+                            st.laid, st.steered
+                        )
+                    } else {
+                        String::new()
+                    };
                     self.note(
                         tick,
-                        format!("cut {} stairs", st.stairs),
+                        format!("cut {} stairs{extra}", st.stairs),
                         "look again for what to mine".to_owned(),
                     );
                 }

@@ -60,6 +60,10 @@ pub enum StairStage {
         walk: Walk,
         since: u64,
         level: bool,
+        /// A travel tunnel's step whose walk failed (the route has no start beside lava or on
+        /// soul sand): the feet are steered straight at the cell just cut, one block away.
+        #[serde(default)]
+        direct: bool,
     },
     /// A travel tunnel's stair up with no block to step onto (a cavern's floor, the air under a
     /// roof): held blocks are laid first, each `(cell, the block clicked, its face)`, then the
@@ -106,6 +110,12 @@ pub struct Stairs {
     pub dug: u32,
     #[serde(default)]
     pub from: Option<Cell>,
+    /// Steps of a travel tunnel steered straight after their walk failed, and blocks laid: said
+    /// in the task's end note.
+    #[serde(default)]
+    pub steered: u32,
+    #[serde(default)]
+    pub laid: u32,
 }
 
 /// Blocks a stair is laid with, the first held: what a tunnel leaves in the pack.
@@ -297,6 +307,8 @@ impl Stairs {
             route: Vec::new(),
             dug: 0,
             from: None,
+            steered: 0,
+            laid: 0,
         }
     }
 
@@ -511,6 +523,7 @@ impl Stairs {
                 match crate::hold::toward(w, item) {
                     crate::hold::Hold::Held => {
                         *sent = Some(tick);
+                        self.laid += 1;
                         let act = Act::UseOn {
                             pos: BlockPos::new(against.0, against.1, against.2),
                             face,
@@ -614,6 +627,7 @@ impl Stairs {
                             walk,
                             since: tick,
                             level,
+                            direct: false,
                         };
                         (still, None, StairsStatus::Running)
                     }
@@ -624,6 +638,7 @@ impl Stairs {
                 walk,
                 since,
                 level,
+                direct,
             } => {
                 // On the stair, or down a short drop under it.
                 if feet == *to
@@ -648,9 +663,25 @@ impl Stairs {
                     ));
                     return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
                 }
+                if *direct {
+                    let middle = [f64::from(to.0) + 0.5, body.pos[1], f64::from(to.2) + 0.5];
+                    let c = physics::Controls {
+                        forward: true,
+                        jump: to.1 > feet.1,
+                        yaw: crate::walk::yaw_to(body.pos, middle),
+                        ..still
+                    };
+                    return (c, None, StairsStatus::Running);
+                }
                 match walk.step(w, tick) {
                     (c, TaskStatus::Running) => (c, None, StairsStatus::Running),
                     (_, TaskStatus::Done) => (still, None, StairsStatus::Running),
+                    (_, TaskStatus::Failed(_)) if !self.route.is_empty() => {
+                        *direct = true;
+                        *since = tick;
+                        self.steered += 1;
+                        (still, None, StairsStatus::Running)
+                    }
                     (_, TaskStatus::Failed(f)) => {
                         let under = kind(w, (to.0, to.1 - 1, to.2));
                         self.refusals.push(format!(
