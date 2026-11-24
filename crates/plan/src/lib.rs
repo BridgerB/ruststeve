@@ -2416,8 +2416,9 @@ impl Plan {
                     tick,
                     "cooked".to_owned(),
                     format!(
-                        "{pieces} pieces and {food} food points held, {raw} raw, {} iron ingots, after {} cook tasks",
+                        "{pieces} pieces and {food} food points held, {raw} raw, {} iron ingots, {} shields, after {} cook tasks",
                         craft::count(w, data::ItemKind::IronIngot),
+                        craft::count(w, data::ItemKind::Shield),
                         self.cook_tasks
                     ),
                 );
@@ -2696,6 +2697,21 @@ impl Plan {
                             .map(|r| r.1)
                             .sum::<i32>(),
                         eat::food_points(w, &table.survival)
+                    ),
+                );
+            }
+            // The shields at the cook's table (wall 8): each step says so.
+            if goal.id == "cook-shield"
+                && let make::Choice::Act(r) = &choice
+            {
+                self.note(
+                    tick,
+                    format!("shields at the cook site: {}", r.id),
+                    format!(
+                        "{} of {} shields held, {} iron ingots",
+                        craft::count(w, data::ItemKind::Shield),
+                        table.survival.kit_shields,
+                        craft::count(w, data::ItemKind::IronIngot)
                     ),
                 );
             }
@@ -4438,12 +4454,28 @@ const COOK_TASKS: u32 = 40;
 /// of it cooked. `None` with nothing raw to cook.
 pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<make::Row> {
     let raw = eat::raw_held(counts, rules);
-    // The kit's ingots (the shields'), from held raw iron, once the meat is done.
+    // The kit's ingots (the shields'), from held raw iron, once the meat is done; a shield made
+    // counts as the ingot it took.
     let ingots = counts.get(&data::ItemKind::IronIngot).copied().unwrap_or(0);
+    let shields = counts.get(&data::ItemKind::Shield).copied().unwrap_or(0);
     let raw_iron = counts.get(&data::ItemKind::RawIron).copied().unwrap_or(0);
-    let iron = (rules.kit_ingots - ingots).clamp(0, raw_iron.max(0));
+    let iron = (rules.kit_ingots - ingots - shields).clamp(0, raw_iron.max(0));
+    // Then the shields themselves, at the cook's table, from the ingots held (overworld-leg
+    // wall 8): crafted under the open sky, not at a portal down a mine.
+    let shield_more = (rules.kit_shields - shields).clamp(0, ingots.max(0));
     if raw.is_empty() && iron == 0 {
-        return None;
+        if shield_more == 0 {
+            return None;
+        }
+        return Some(make::Row {
+            id: "cook-shield".to_owned(),
+            needs: Vec::new(),
+            provides: vec![(make::Need::parse("item:shield")?, shields + shield_more)],
+            holds: Vec::new(),
+            spares: Vec::new(),
+            wants: Vec::new(),
+            act: None,
+        });
     }
     let need: i32 = raw
         .iter()

@@ -262,6 +262,10 @@ pub struct Survival {
     /// stands (the Nether kit's shields take one each; overworld-leg wall 4). 0: none.
     #[serde(default)]
     pub kit_ingots: i32,
+    /// Shields crafted at the cook's table from the ingots held, before the descent (the blaze
+    /// fight's shield; overworld-leg wall 8). 0: none.
+    #[serde(default)]
+    pub kit_shields: i32,
     /// Stone pickaxes with `spare_uses` left held under this and the race makes more from what
     /// it holds, before the next task (overworld-leg wall 2). 0: never.
     #[serde(default)]
@@ -354,6 +358,7 @@ impl Default for Survival {
             portal_food: 0,
             meat_stock: 0,
             kit_ingots: 0,
+            kit_shields: 0,
             spare_pickaxes: 0,
             danger_health: danger_health(),
             never_fight: Vec::new(),
@@ -411,6 +416,7 @@ pub struct SurvivalRules {
     pub portal_food: i32,
     pub meat_stock: i32,
     pub kit_ingots: i32,
+    pub kit_shields: i32,
     pub spare_pickaxes: i32,
 }
 
@@ -675,6 +681,7 @@ impl Table {
                 portal_food: g.survival.portal_food,
                 meat_stock: g.survival.meat_stock,
                 kit_ingots: g.survival.kit_ingots,
+                kit_shields: g.survival.kit_shields,
                 spare_pickaxes: g.survival.spare_pickaxes,
                 never_fight,
                 ranged,

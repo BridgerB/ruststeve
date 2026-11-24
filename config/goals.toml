@@ -357,6 +357,11 @@ meat_stock = 30
 # shield is one ingot and six planks, the Nether kit wants two (a timed shield cut fireball hits
 # from 3.1 to 0.6 per 1,000 ticks at the spawner: agent A11's race 45345386828), and one spare.
 kit_ingots = 3
+# Shields crafted from those ingots at the cook's table before the descent (one ingot and six
+# planks each; docs/problems/overworld-leg.md wall 8): a development bot with a timed shield and
+# cooked food took 7 rods at 20 health (agent A11's race 45347052453), and two because a shield
+# is 336 uses and a blocked fireball takes 6. A made shield counts as an ingot of kit_ingots.
+kit_shields = 2
 # The portal is entered with this much safe food or more; under it the bot looks for animals only
 # under the open sky and for provision_ticks at most (docs/problems/overworld-leg.md wall 3). 24 is
 # the eight raw beef or porkchop the reserve was first counted as: the snapshot bot holds 36 and

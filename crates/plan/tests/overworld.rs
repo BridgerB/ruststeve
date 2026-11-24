@@ -186,7 +186,48 @@ fn raw_meat_is_cooked_through_the_needs_planner() {
         (ItemKind::IronIngot, 3),
         (ItemKind::RawIron, 5),
     ];
-    assert_eq!(cook_step(&done, true, true), "nothing raw");
+    assert_eq!(r.kit_shields, 2);
+    assert_ne!(cook_step(&done, true, true), "nothing raw", "the shields");
+}
+
+/// Wall 8: with the meat cooked and the ingots smelted, two shields are made at the cook's
+/// table (planks from a held log first); a shield made counts as its ingot, so no more iron is
+/// smelted for it; two held, or no ingot, is nothing to do.
+#[test]
+fn the_shields_are_made_at_the_cook_site() {
+    use ItemKind::{CookedPorkchop, IronIngot, OakLog, OakPlanks, RawIron, Shield};
+    let r = table().survival;
+    let logs = [
+        (CookedPorkchop, 30),
+        (IronIngot, 3),
+        (RawIron, 5),
+        (OakLog, 4),
+    ];
+    let goal = plan::cook_goal(&logs.iter().copied().collect(), &r).unwrap();
+    assert_eq!((goal.id.as_str(), goal.provides[0].1), ("cook-shield", 2));
+    let step = cook_step(&logs, true, true);
+    assert!(step.ends_with("planks"), "{step}");
+    let planks = [(CookedPorkchop, 30), (IronIngot, 3), (OakPlanks, 16)];
+    assert_eq!(cook_step(&planks, true, true), "craft:shield");
+    assert_eq!(cook_step(&planks, false, true), "place-table");
+    // One made: one more, from the two ingots left, with no smelt for the one spent.
+    let one = [
+        (CookedPorkchop, 30),
+        (IronIngot, 2),
+        (Shield, 1),
+        (RawIron, 5),
+        (OakPlanks, 10),
+    ];
+    assert_eq!(cook_step(&one, true, true), "craft:shield");
+    let two = [
+        (CookedPorkchop, 30),
+        (IronIngot, 1),
+        (Shield, 2),
+        (RawIron, 5),
+    ];
+    assert_eq!(cook_step(&two, true, true), "nothing raw");
+    let bare = [(CookedPorkchop, 30), (OakPlanks, 10)];
+    assert_eq!(cook_step(&bare, true, true), "nothing raw");
 }
 
 /// Wall 4, race 45343519424 lane 2: nine porkchops with five oak planks first in the burn order

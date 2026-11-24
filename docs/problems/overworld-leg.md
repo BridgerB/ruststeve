@@ -105,3 +105,9 @@ The cast needs ten lava sources at one site. Carried up they are ten trips of 12
 - **Cause**: the own stairs' refusal is the Nether tunnel's and the mine's, made for lava; water beside a cell is taken.
 - **Fix**: a dry staircase (`Stairs::dry`, set by `own_stairs` only) refuses water beside a cell it opens and turns, as for lava. Reading the fluid beside a cell about to be opened is the existing no-X-ray exception. Ledger: the leg's ending note "cut N stairs (K turned from water beside)" or "stairs failed: … (K turned from water beside)".
 - **Unit test**: `a_dry_staircase_turns_from_water_beside` (bot, on the model).
+
+## 8. The shields made at the cook site (2026-11-24)
+
+- **Need**: the fight's winning kit is a shield and cooked food (a development bot with both took 7 rods at 20 health, agent A11's race 45347052453). A11's kit rows (`shield`, `shields`, on its branch) make them at the portal from what is held; a portal at y -50 is where casts fail, mobs walk and tables are left behind.
+- **Built**: `kit_shields = 2`. After the meat and the ingots, `cook_goal` asks for shields at the cook's table, up to two, from the ingots held (`cook-shield`; planks from held logs; the furnace's table). A made shield counts as an ingot of `kit_ingots`, so none is smelted again for it. Ledger: "shields at the cook site: craft:shield" (and the planks), the craft's own "crafted shield", and "cooked (… N iron ingots, M shields …)". With A11's rows merged, two shields held meet them at the portal with nothing to do.
+- **Unit test**: `the_shields_are_made_at_the_cook_site` (plan, the real goal table).
