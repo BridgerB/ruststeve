@@ -52,7 +52,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
-- [[parity-table]] - captured worlds, 152 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.
+- [[parity-table]] - captured worlds, 160 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.
 - [[world-value]] - what `World` holds, how `step` folds each packet, `block_at`, the chunk decoder checked against clojurecraft.
 - [[connection]] - how a bot connects and stays in the world: the pure protocol crate, the net threads, the bot binary, running a server locally.
 - [[datagen]] - the game tables: generated from the 26.1.2 server on a runner, committed in `crates/data`, drift and unknown packet ids caught in CI.

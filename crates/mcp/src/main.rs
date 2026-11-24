@@ -219,6 +219,34 @@ impl Tools {
         )
     }
 
+    #[tool(
+        description = "Is a run done? One API request while it is not: its status (queued, in_progress, completed), conclusion and title. Once completed, a second request adds its artifact names. Use this to wait on a race, a probe or CI: one call every 4 minutes or more. Never `gh run watch` and never poll in a loop: nine agents' watches spent the token's 5,000 requests an hour in one hour (2026-11-23) and every gh call failed until the reset."
+    )]
+    async fn run_done(&self, Parameters(p): Parameters<RunId>) -> String {
+        let view = run(
+            "gh",
+            &[
+                "api",
+                &format!("repos/{REPO}/actions/runs/{}", p.run_id),
+                "--jq",
+                r#""\(.status) \(.conclusion // "-") \(.name): \(.display_title) (\(.head_branch), updated \(.updated_at))""#,
+            ],
+        );
+        if !view.trim_start().starts_with("completed") {
+            return view;
+        }
+        let artifacts = run(
+            "gh",
+            &[
+                "api",
+                &format!("repos/{REPO}/actions/runs/{}/artifacts", p.run_id),
+                "--jq",
+                ".artifacts[].name",
+            ],
+        );
+        format!("{view}artifacts:\n{artifacts}")
+    }
+
     #[tool(description = "The log lines of a run's failed steps.")]
     async fn run_log(&self, Parameters(p): Parameters<RunId>) -> String {
         run(

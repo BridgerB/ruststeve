@@ -1037,6 +1037,13 @@ pub enum C2s {
     MovePlayerStatusOnly {
         flags: u8,
     },
+    /// The keys held, sent when they change (`ServerboundPlayerInputPacket`, which since 1.21.2
+    /// carries the sneak that `player_command` used to): the `INPUT_*` bits. The server sets
+    /// the player's shift key from bit `INPUT_SHIFT`, which is what spares it on magma and gives
+    /// it the crouching pose.
+    PlayerInput {
+        flags: u8,
+    },
     /// A dig: status 0 START, 1 ABORT, 2 FINISH; the block, the face, and the client's
     /// sequence number the server acknowledges.
     PlayerAction {
@@ -1094,6 +1101,17 @@ pub enum C2s {
     },
 }
 
+/// The bits of `C2s::PlayerInput`: the constants of the game's `Input` record (`FLAG_FORWARD` 1,
+/// `FLAG_BACKWARD` 2, `FLAG_LEFT` 4, `FLAG_RIGHT` 8, `FLAG_JUMP` 16, `FLAG_SHIFT` 32,
+/// `FLAG_SPRINT` 64; read with javap from the 26.1.2 server jar, probe 45339873719).
+pub const INPUT_FORWARD: u8 = 1;
+pub const INPUT_BACKWARD: u8 = 2;
+pub const INPUT_LEFT: u8 = 4;
+pub const INPUT_RIGHT: u8 = 8;
+pub const INPUT_JUMP: u8 = 16;
+pub const INPUT_SHIFT: u8 = 32;
+pub const INPUT_SPRINT: u8 = 64;
+
 impl C2s {
     /// The state this packet is sent in.
     pub fn state(&self) -> State {
@@ -1112,6 +1130,7 @@ impl C2s {
             | C2s::ChunkBatchReceived { .. }
             | C2s::MovePlayerPosRot { .. }
             | C2s::MovePlayerStatusOnly { .. }
+            | C2s::PlayerInput { .. }
             | C2s::PlayerAction { .. }
             | C2s::SetCarriedItem { .. }
             | C2s::ClientCommand { .. }
@@ -1215,6 +1234,10 @@ impl C2s {
             C2s::MovePlayerStatusOnly { flags } => {
                 w.u8(*flags);
                 PlayOut::MovePlayerStatusOnly.id()
+            }
+            C2s::PlayerInput { flags } => {
+                w.u8(*flags);
+                PlayOut::PlayerInput.id()
             }
             C2s::PlayerAction {
                 status,

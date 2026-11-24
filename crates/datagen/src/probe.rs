@@ -1,5 +1,5 @@
 //! The tables no data file holds, read from the game's own classes: block hardness and
-//! needs-correct-tool, collision shapes, tool materials, fuel burn times, mob health and category,
+//! needs-correct-tool, collision shapes, movement factors, tool materials, fuel burn times, mob health and category,
 //! and the entity-data serializer ids. A JVM is started from Rust over JNI with the inner server
 //! jar and the bundler's libraries on its class path, the game is bootstrapped, and its objects are
 //! read by reflection, as clojurecraft's `dev/clojurecraft/jar_probe.clj` does from Clojure.
@@ -30,6 +30,11 @@ pub struct BlockProbe {
     pub hardness: f64,
     pub needs_correct_tool: bool,
     pub collision: Collision,
+    /// `Block.getSpeedFactor`, `getJumpFactor` and `getFriction`: what the block does to a body
+    /// moving on it (soul sand 0.4, honey's jump 0.5, ice 0.98; 1, 1 and 0.6 for the rest).
+    pub speed_factor: f64,
+    pub jump_factor: f64,
+    pub friction: f64,
 }
 
 pub struct Material {
@@ -476,12 +481,21 @@ fn probe_blocks<'a>(r: &mut Reflect<'a, '_>) -> Result<BTreeMap<String, BlockPro
                 Collision::Partial(r.f64(&top)?)
             }
         };
+        let v = r.invoke(&block, "getSpeedFactor", &[])?;
+        let speed_factor = r.f64(&v)?;
+        let v = r.invoke(&block, "getJumpFactor", &[])?;
+        let jump_factor = r.f64(&v)?;
+        let v = r.invoke(&block, "getFriction", &[])?;
+        let friction = r.f64(&v)?;
         out.insert(
             name,
             BlockProbe {
                 hardness,
                 needs_correct_tool,
                 collision,
+                speed_factor,
+                jump_factor,
+                friction,
             },
         );
     }

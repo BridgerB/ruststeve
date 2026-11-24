@@ -195,3 +195,43 @@ fn ready_needs_the_kit_the_stock_and_the_open_sky() {
     assert!(!Stage::Ready.holds(&w));
     assert_eq!(w.stage_reached, Some(Stage::Gear));
 }
+
+/// The keys reach the server as vanilla sends them: `player_input` when they change, once,
+/// ahead of the tick's movement packet. Without it a server never sees the bot sneak.
+#[test]
+fn the_keys_held_are_reported_when_they_change() {
+    use physics::Controls;
+    use protocol::C2s;
+    use world::Effect;
+    let inputs = |out: &[Effect]| -> Vec<u8> {
+        out.iter()
+            .filter_map(|e| match e {
+                Effect::Send(C2s::PlayerInput { flags }) => Some(*flags),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    assert!(inputs(&w.step(&tick())).is_empty(), "nothing pressed");
+    w.step(&Event::Controls(Controls {
+        sneak: true,
+        ..Controls::default()
+    }));
+    let out = w.step(&tick());
+    assert_eq!(inputs(&out), [0x20], "shift");
+    assert!(
+        matches!(out.first(), Some(Effect::Send(C2s::PlayerInput { .. }))),
+        "before the move: {out:?}"
+    );
+    assert!(inputs(&w.step(&tick())).is_empty(), "sent once");
+    w.step(&Event::Controls(Controls {
+        forward: true,
+        jump: true,
+        ..Controls::default()
+    }));
+    assert_eq!(inputs(&w.step(&tick())), [0x11], "forward and jump");
+    w.step(&Event::Controls(Controls::default()));
+    assert_eq!(inputs(&w.step(&tick())), [0], "let go");
+}
