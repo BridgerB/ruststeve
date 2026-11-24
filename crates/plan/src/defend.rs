@@ -175,6 +175,19 @@ pub fn sight(w: &World, from: [f64; 3], to: [f64; 3]) -> bool {
 /// hits once a second inside 2 blocks (vanilla `BlazeAttackGoal`: `distanceToSqr < 4`), for 3.6 in
 /// iron armour. The fight keeps this far off and strikes from its own reach of 3.
 pub const KEEP_OFF: f64 = 2.4;
+/// Whether a live blaze is within `KEEP_OFF` of the feet: in touch. A shield raised then holds
+/// the bot still (its controls stop any step not toward the threat) and drops the strike, and the
+/// blaze touches it every second: in the whole-stage model with the shield the touch was the top
+/// direct damage, 11 to 65 health a run, and the three shield seeds that died died to it (probe
+/// 45357767095). The defend's keep-off step and its strike go first (blaze-fight wall 19).
+pub fn blaze_in_touch(w: &World) -> bool {
+    w.body.is_some_and(|b| {
+        w.entities
+            .values()
+            .any(|e| !e.dead && e.kind == EntityKind::Blaze && distance(b.pos, e.pos) < KEEP_OFF)
+    })
+}
+
 /// A sweep's reach round the mob struck (the game's sweep takes every mob within a block of the
 /// target's box and 3 of the player), with a margin.
 pub const SWEEP_NEAR: f64 = 2.0;
@@ -422,7 +435,14 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
                 // A foe a fight never struck nor was hurt by (a spider in a pit 4.5 under the eye,
                 // fought 96 times: blaze wall 15) waits, unless its kind hits the bot.
                 && (!ignored.contains(id)
-                    || (provoked(w, e.kind) && !rules.ranged.contains(&e.kind)))
+                    || (provoked(w, e.kind) && !rules.ranged.contains(&e.kind))
+                    // A blaze in touch is never out of reach, ignored or not: a blaze left alone
+                    // 600 ticks after a retreat that landed nothing stood in touch with no defend
+                    // (review of bba8161; the touch was the model's top damage with the shield).
+                    // Not once 7 rods are held: then every blaze is left (wall 16).
+                    || (e.kind == EntityKind::Blaze
+                        && distance(body.pos, e.pos) < KEEP_OFF
+                        && crate::craft::count(w, data::ItemKind::BlazeRod) < crate::RODS_WANTED))
         })
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= rules.defend_radius)

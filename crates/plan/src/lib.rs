@@ -122,6 +122,8 @@ pub const RODS_WANTED: i32 = 7;
 /// shoots from 48), at most `LEAVE_TRIES` walks, before the aim is met.
 pub const LEAVE_RANGE: f64 = 50.0;
 pub const LEAVE_TRIES: u32 = 12;
+/// Ticks a fruitless search for a cover cell is not made again.
+pub const COVER_SEARCH_TICKS: u64 = 20;
 /// Ticks between putting on one piece of armour and the next.
 const EQUIP_TICKS: u64 = 20;
 /// An escape this long writes its trail to the ledger, and again each time as long (16e).
@@ -536,6 +538,9 @@ pub struct Plan {
     /// When "no fight post: hurt, no cover found" may next be noted.
     #[serde(default)]
     pub unposted_at: u64,
+    /// No cover cell with a route was found: the search waits until this tick.
+    #[serde(default)]
+    pub cover_none_until: u64,
     /// Walks away from the spawner begun with 7 rods held.
     #[serde(default)]
     pub leave_tries: u32,
@@ -679,6 +684,9 @@ pub struct Plan {
     pub shield_carries: u32,
     #[serde(default)]
     pub shield_over: bool,
+    /// When "shield waits for safe ground" may next be noted.
+    #[serde(default)]
+    pub shield_wait_at: u64,
     #[serde(skip)]
     shield_only: bool,
     /// Acts made this tick, for the shell (`take_acts`).
@@ -718,6 +726,7 @@ impl Plan {
             shelter_blocks: 0,
             unhealed_at: 0,
             unposted_at: 0,
+            cover_none_until: 0,
             leave_tries: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
@@ -766,6 +775,7 @@ impl Plan {
             shield_cooks: 0,
             shield_carries: 0,
             shield_over: false,
+            shield_wait_at: 0,
             shield_only: false,
             acts: Vec::new(),
         }
@@ -842,6 +852,21 @@ impl Plan {
     /// tasks; then the table is taken along again.
     fn nether_shield(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Option<Task> {
         if self.shield_over {
+            return None;
+        }
+        // Never beside a spawner or in a shooter's sight: the shield waits for safe ground (the
+        // travel tunnel, a rest out of sight beyond the spawner's range), and the leg goes on.
+        if !self.shield_done
+            && let Some(why) = cover::unsafe_to_work(w)
+        {
+            if tick >= self.shield_wait_at {
+                self.shield_wait_at = tick + FAILURE_MEMORY_TICKS;
+                self.note(
+                    tick,
+                    "shield waits for safe ground".to_owned(),
+                    format!("{why}; made where neither holds"),
+                );
+            }
             return None;
         }
         if !self.shield_done {
@@ -965,7 +990,10 @@ impl Plan {
             return c;
         }
         let task_free = match &self.task {
-            Task::Defend(_) | Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
+            // A blaze in touch: the defend's keep-off and strike, not the shield (blaze-fight
+            // wall 19).
+            Task::Defend(_) => !defend::blaze_in_touch(w),
+            Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
             Task::Escape(_)
             | Task::Eat(_)
             | Task::Hunt(_)
@@ -2148,7 +2176,17 @@ impl Plan {
         // Not the cell it stands in: seen there by where the body really is, a walk to it is over
         // at once and the shelter never starts.
         let feet = path::feet_cell(body.pos);
-        for c in cover::cover_cells(w, &eyes)
+        // The search for a cover cell (every cell within 8, two lines from each shooter, and up to
+        // two routes) found nothing a moment ago: not again for a second. Between shelter clicks
+        // the task runs every tick, and it ran this search each time (review of bba8161: the
+        // likely cause of a 128 ms planner step, race 45350933958 lane 1).
+        let searched = tick < self.cover_none_until;
+        let candidates = if searched {
+            Vec::new()
+        } else {
+            cover::cover_cells(w, &eyes)
+        };
+        for c in candidates
             .into_iter()
             .filter(|c| *c != feet && !self.refused_now(*c, tick))
             .take(CANDIDATES_PER_TICK)
@@ -2170,6 +2208,9 @@ impl Plan {
                 return Some(Task::Explore(walk));
             }
         }
+        if !searched {
+            self.cover_none_until = tick + COVER_SEARCH_TICKS;
+        }
         // Inside a spawner's range with no cover cell beyond it: away from the spawner first, on
         // a found route, and the rest or the shelter is made out there.
         // The walk's goal is measured as routes are (octile plus height), which runs longer than
@@ -2177,8 +2218,8 @@ impl Plan {
         // while the spawner was 17.2 off, and "leave the spawner" ended at once 300 times in 380
         // ticks, the bot standing in sight of three blazes until it died (race 45350452261 lane
         // 0). So the goal is always 2 past where the feet are, and a goal met at the feet is no
-        // walk.
-        if let Some(sp) = awake.first().copied() {
+        // walk. Searched with the cover cells, at most once a second.
+        if !searched && let Some(sp) = awake.first().copied() {
             let range = (cover::SPAWNER_QUIET + 2.0).max(path::flat_distance(feet, sp) + 2.0);
             let goal = Goal::Away { pos: sp, range };
             let mut walk = Walk::new(sp, goal, Arrive::Goal, tick);

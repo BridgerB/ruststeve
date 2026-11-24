@@ -276,6 +276,21 @@ fn the_spawner_of_the_real_fortress_spawns_blazes_by_the_bot() {
     assert!(spawned >= 1, "no blaze spawned at {spawner:?}");
 }
 
+/// Blaze-fight wall 20: by the spawner no standing work is safe (the snapshot-kit run made its
+/// shield on the deck and died at 1,140): the fortress's own spawner, 5 blocks off, is named.
+#[test]
+fn no_work_is_safe_beside_the_spawner() {
+    let (sim, spawner) = fortress(SEED);
+    let run = bot::lockstep::run(sim, "rs-rods", 1, 40, 20, |_, _| {
+        physics::Controls::default()
+    });
+    let why = plan::cover::unsafe_to_work(&run.world);
+    assert!(
+        why.as_deref().is_some_and(|w| w.contains("spawner")),
+        "{why:?}, spawner at {spawner:?}"
+    );
+}
+
 /// The frontier snapshot's own kit: armour, an iron sword, 8 raw beef.
 #[test]
 #[ignore = "blaze stage: unread; owners A4 (fight), A3 (heal cycle)"]
