@@ -86,6 +86,32 @@ pub fn at_fortress(w: &World) -> bool {
 /// `camp-range` 8; a spawner wakes for a player within 16.
 pub const SPAWNER_NEAR: f64 = 8.0;
 
+/// Within this of an enderman that ticks, the bot has got to endermen (issue 17's done
+/// condition, #22: "within 32 blocks"). At the race's simulation distance 3 an enderman this
+/// near always ticks (its chunk is at most 2 from the player's); the ticking test still guards
+/// a server run at a smaller distance.
+pub const ENDERMAN_NEAR: f64 = 32.0;
+
+/// The nearest live enderman that ticks within `ENDERMAN_NEAR` of the feet: its id and distance
+/// (feet to feet).
+pub fn enderman_near(w: &World) -> Option<(i32, f64)> {
+    let body = w.body?;
+    let feet = [body.pos[0], body.pos[1], body.pos[2]];
+    w.entities
+        .iter()
+        .filter(|(_, e)| !e.dead && e.kind == data::EntityKind::Enderman)
+        .map(|(id, e)| {
+            let d = (0..3)
+                .map(|i| (e.pos[i] - feet[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            (*id, d, e.pos)
+        })
+        .filter(|(_, d, pos)| *d <= ENDERMAN_NEAR && crate::ticks(w, *pos))
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+        .map(|(id, d, _)| (id, d))
+}
+
 /// In the Nether: a fortress and its blaze spawner are nowhere else. A dungeon's monster spawner
 /// at y -21 in the overworld made a stone-tool bot `spawner`, and so every stage under it
 /// (race 44804466844; blaze wall 4).
@@ -215,6 +241,11 @@ pub enum Stage {
     Spawner,
     /// Holds 7 blaze rods (issue 16: "reach 7 rods").
     Rods7,
+    /// Holds the 7 rods and the feet within `ENDERMAN_NEAR` of an enderman that ticks (issue 17:
+    /// "getting to endermen"; one beyond the simulation distance is frozen and does not count).
+    /// The rods are part of it so the ladder stays a ladder: an enderman passing a bot at the
+    /// spawner before rod 7 (race 45358767468 lane 1, one at 31 blocks) is not this stage.
+    Endermen,
     /// Holds 12 ender pearls (issue 18: "reach 12 pearls").
     Pearls12,
     /// In the End (issue 20).
@@ -223,7 +254,7 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 13] = [
+    pub const ALL: [Stage; 14] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -235,6 +266,7 @@ impl Stage {
         Stage::Fortress,
         Stage::Spawner,
         Stage::Rods7,
+        Stage::Endermen,
         Stage::Pearls12,
         Stage::End,
     ];
@@ -253,6 +285,7 @@ impl Stage {
             Stage::Fortress => "fortress",
             Stage::Spawner => "spawner",
             Stage::Rods7 => "rods_7",
+            Stage::Endermen => "endermen",
             Stage::Pearls12 => "pearls_12",
             Stage::End => "end",
         }
@@ -295,6 +328,7 @@ impl Stage {
             Stage::Fortress => at_fortress(w),
             Stage::Spawner => at_spawner(w),
             Stage::Rods7 => has(ItemKind::BlazeRod, 7),
+            Stage::Endermen => has(ItemKind::BlazeRod, 7) && enderman_near(w).is_some(),
             Stage::Pearls12 => has(ItemKind::EnderPearl, 12),
             Stage::End => dim == Some("minecraft:the_end"),
         }

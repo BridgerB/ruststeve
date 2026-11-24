@@ -216,39 +216,30 @@ pub struct Signs {
     pub valley: Option<(i32, i32)>,
 }
 
-// >>> stubs (agreed signatures; the real calls replace these at merge, BRIEF.md):
-// E1's `Memory::seen_columns`, `Memory::forest_known`, `Memory::biome_signs_in_column` and
-// `World::feet_biome`; E3's `crate::endermen::pickaxe_uses_left` and `rules.pickaxe_reserve`.
+// What memory and the world know (E1, issue 17b): seen columns, the forest and valleys known from
+// blocks seen, the signs in a column, the feet's own biome.
 
-/// Chunk columns seen in this dimension. Stub: the columns loaded now (cheap, and with the bot at
-/// their middle the axis choice falls to its tie-break).
+/// Chunk columns seen in this dimension (`Memory::seen_columns`: kept after they unload).
 fn seen_columns(w: &World) -> BTreeSet<(i32, i32)> {
-    w.columns.keys().map(|c| (c.x, c.z)).collect()
-}
-
-fn forest_known(_w: &World) -> Option<(i32, i32)> {
-    None
+    w.dimension
+        .as_ref()
+        .map(|d| w.memory.seen_columns(&d.name).into_iter().collect())
+        .unwrap_or_default()
 }
 
 /// Crimson and basalt signs seen in one column.
-fn hostile_signs_in_column(_w: &World, _cx: i32, _cz: i32) -> u32 {
-    0
-}
-
-fn feet_biome(_w: &World) -> Option<&'static str> {
-    None
-}
-
-/// A soul sand valley known from soul blocks seen (`biome_signs_in_column`'s `soul`).
-fn valley_known(_w: &World) -> Option<(i32, i32)> {
-    None
+fn hostile_signs_in_column(w: &World, cx: i32, cz: i32) -> u32 {
+    let s = w.memory.biome_signs_in_column(cx, cz);
+    u32::try_from(s.crimson + s.basalt).unwrap_or(u32::MAX)
 }
 
 /// Soul signs seen in one column.
-fn soul_signs_in_column(_w: &World, _cx: i32, _cz: i32) -> u32 {
-    0
+fn soul_signs_in_column(w: &World, cx: i32, cz: i32) -> u32 {
+    u32::try_from(w.memory.biome_signs_in_column(cx, cz).soul).unwrap_or(u32::MAX)
 }
 
+// >>> stubs (agreed signatures; the real calls replace these at merge, BRIEF.md): E3's
+// `crate::endermen::pickaxe_uses_left` and `rules.pickaxe_reserve`.
 fn pickaxe_uses_left(w: &World) -> i32 {
     crate::dig_budget(w, false)
 }
@@ -545,10 +536,21 @@ impl Plan {
     /// at the feet (the caller's endermen task takes over), or no way on any axis after
     /// `MAX_CHOICES` choices (turned out). The ledger says which.
     pub fn heading_task(&mut self, w: &World, tick: u64) -> Option<Task> {
+        // The first valley known not yet crossed.
+        let crossed = self
+            .headed
+            .as_ref()
+            .map(|h| h.valleys.clone())
+            .unwrap_or_default();
         let signs = Signs {
-            feet_biome: feet_biome(w),
-            forest: forest_known(w),
-            valley: valley_known(w),
+            feet_biome: w.feet_biome(),
+            forest: w.memory.forest_known(),
+            valley: w
+                .memory
+                .soul_valleys()
+                .iter()
+                .find(|c| !crossed.contains(c))
+                .copied(),
         };
         self.heading_with(w, signs, tick)
     }

@@ -2,7 +2,7 @@
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
 stage = "rods_7"
-tag = "race-45358767468"
-asset = "snapshot-rods_7-45358767468-race-45358767468-lane-0.tar.zst"
-commit = "b15bb0da4ef6555b6b28a32bd5946ed8e0e1308f"
-how = "rs-l00-b00 of race 45358767468 (resumed from the real spawner snapshot of race 45350933958 lane 0, itself from the real Nether snapshot of race 45194253932 lane 5, from the clean ready snapshot of race 45128866973 lane 6): with a shield it made in the Nether and cooked meat, it fought blazes at the spawner and held 7 blaze rods at tick 5,320 (rods at 1,440, 2,360, 2,420, 3,560, 3,780, 4,620, 5,320; 79 swings, 40 landed), walked away and ended the run alive at 9.2 health."
+tag = "race-45363542882"
+asset = "snapshot-rods_7-45363542882-race-45363542882-lane-2.tar.zst"
+commit = "270f4e254ddef857b9299d16eb79bbfbc5ea2831"
+how = "rs-l02-b00 of race 45363542882 (resumed from the real spawner snapshot of race 45350933958 lane 0, itself from the real Nether snapshot of race 45194253932 lane 5, from the clean ready snapshot of race 45128866973 lane 6): it held 7 blaze rods at tick 6,700 at health 16.2, food 20, not burning, with 144 pickaxe uses and a shield at 48 of 336. A sideways move at the same stage (issue 17, docs/problems/endermen.md): the first rods_7 frontier, race 45358767468 lane 0, was burning at rod 7 with no shield."

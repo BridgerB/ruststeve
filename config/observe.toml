@@ -40,10 +40,6 @@ packet = "configuration/reset_chat"
 why = "clears the chat window"
 
 [[skipped]]
-packet = "configuration/registry_data"
-why = "the registries come from the generated tables of the same version (datagen)"
-
-[[skipped]]
 packet = "configuration/resource_pack_pop"
 why = "no resource packs on the race server"
 
