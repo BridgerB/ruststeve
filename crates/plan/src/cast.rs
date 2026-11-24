@@ -275,6 +275,9 @@ pub struct Cast {
     furthest: Option<usize>,
     #[serde(default)]
     churn: u32,
+    /// Way digs after a walk to an op failed (cast.md wall 6), for the notes.
+    #[serde(default)]
+    walk_digs: u32,
     /// Why each try at the op in hand failed, for the failure note (overworld-leg wall 5: a cast
     /// ended "Op after 13 ops, at :dig :room" with nothing to say what the dig met).
     #[serde(default)]
@@ -395,6 +398,7 @@ impl Cast {
             tunnel_floor: None,
             furthest: None,
             churn: 0,
+            walk_digs: 0,
         }
     }
 
@@ -422,9 +426,10 @@ impl Cast {
     /// The refused sources, for the notes: the count is the fix's firings (cast.md wall 1).
     pub fn refused_text(&self) -> String {
         format!(
-            "refused sources {}, box reach {}",
+            "refused sources {}, box reach {}, walk digs {}",
             self.refused.len(),
-            self.box_reach
+            self.box_reach,
+            self.walk_digs
         )
     }
 
@@ -667,6 +672,17 @@ impl Cast {
             TaskStatus::Done => {
                 self.work = Work::Idle;
                 Err((Controls::default(), None, CastStatus::Running))
+            }
+            // A walk that failed on its way: the straight way's block dug as when no walk is
+            // found, before a try is spent. Place 7 of the sealava races failed its first room dig
+            // 0 ops in with "walk to the stand failed NoProgress" four times, in every lane.
+            TaskStatus::Failed(_)
+                if let Some(block) = self.way_block(w, body, stand.unwrap_or(target)) =>
+            {
+                self.way_digs += 1;
+                self.walk_digs += 1;
+                self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+                Err((c, None, CastStatus::Running))
             }
             TaskStatus::Failed(f) => Err(
                 if self.try_again(format!("walk to the stand failed {f:?}")) {
