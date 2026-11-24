@@ -70,3 +70,9 @@ To take a wall: remove its `#[ignore]` in the commit that crosses it. A wall tha
 - **What happened**: the bot dies in lava at (24, 29, -14). Its ledger is 15 lines: four stairs down `Boxed` on "lava beside" by tick 540, an explore with `NoPath`, two level tunnels, and at tick 780 "escape-lava (trapped in lava; cut stairs)"; health 2.3 at its lowest, then 0. Blaze wall 22's bots died 700 to 900 ticks after entering, at (30, 31, -18) and (20, 34, -18).
 - **What it shows**: the death of wall 22 is the model's too, on the same ground at the same time, in a test that takes three seconds. The ignored test keeps the lava woken: that is the stage a fix must pass. Without the wake (wall 2 above) the same bot lives and saws up and down under the sea, which is the other half of the wall.
 - **Seen once**: one seed, one run. The model has no ghasts and no piglins.
+
+### 4. The pillar's foot (probe 45340033454, 4d6f240)
+- **What happened**: `the_spawner_is_reached_from_the_foot_of_the_pillar`, `Aim::Race`, 8,000 ticks: the bot ends where it began, on the shelf at (-1, 32, 0), at 20 health.
+- **Read** (its ledger, 351 lines): "stairs up toward the spawner at (41, 65, 46) (a spawner seen, no walk to it)" three times, each ending "cut 6 stairs" in 40 to 60 ticks with the bot no higher; "walk the fortress to (0, 33, 1)" and "(0, 31, 2)", done at once; then explores to the four quarters, each `NoPath`, and "relocate (n of 6) (12 walks failed in a row with none done)". The round repeats to the end.
+- **Cause**: the owner's (A3). A stair up from a shelf in the open has nothing to cut and nothing to stand on; no task builds up the pillar's face.
+- **The model**: the placement test passes (`a_block_is_placed_into_lava_and_the_flow_behind_it_drains`), 8 of 8 in `crates/sim/tests/nether.rs`.
