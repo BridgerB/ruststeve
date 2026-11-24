@@ -636,10 +636,11 @@ impl Sim {
             return Ok(None);
         }
         let air = BlockKind::Air.info().map_or(0, |i| i.default_state);
-        self.world.set_block(pos.0, pos.1, pos.2, air)?;
+        // With its updates (`Level.setBlock`): the fluids beside the hole are told, so a lake
+        // whose bank is dug runs into the cut, and gravel over the hole falls into it.
+        let mut out = self.set_and_update(pos, air)?;
         self.survival.broken += 1;
         self.mined();
-        let mut out = vec![self.block_update(pos)?];
         // setBlock's neighbour updates run before the broken block's own drops: what rested on
         // it pops off first.
         out.extend(self.pop_unsupported((pos.0, pos.1 + 1, pos.2))?);

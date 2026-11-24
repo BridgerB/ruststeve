@@ -6,7 +6,7 @@ tags: [observability, case-files, events, snapshots]
 aliases: [case files, senses, ledger, snapshot stream, coverage, flight recorder, tracing]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@e4e2305 clojurecraft@be85a92
+verifiedAgainst: ruststeve@a5ae696 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#Observability here means one thing: at any tick, a human can see what the bot believed, what it decided, why, and what actually happened, and compare them."
   - "clojurecraft:LOOP.md#Full observability is the rule (Bridger, Nov 6: \"otherwise you are a ship in the night\")."
@@ -50,6 +50,9 @@ At any tick a human must be able to see what the bot believed, what it decided, 
 - **Senses** (`observe::senses`): a row a second: position, health, food, saturation, air, fire, the held item and its uses, every tool's uses, free slots, the task and its reason, the six nearest hostiles with their signs and held item, endermen within 128, the newest sound, the planner's tick time.
 - **Moments**: the planner whole with that second's senses, once a minute for the last five and at the end; the world of the same minute is the recording's checkpoint.
 - **Files**: `<bot>.ledger.rsl` (tasks and facts), `<bot>.senses.rss`, `<bot>.moments.rsm`, beside the case and in the release's batches bundle; `results ledger <file>` and `results senses <file> [--every N]` print them.
+
+## Issue 16: the files while the race runs
+Until issue 16 the ledger, senses and case were written at a run's end, so a race was dark until it was over and a lane cut at its limit left nothing. Now each bot rewrites them as text every 2,400 ticks and the lane uploads them to the race's release every 5 minutes, with any new snapshot ([[race-and-results]], `docs/problems/race-tooling.md` wall 4).
 
 ## Issue 16: the text reads right the first time (`docs/problems/observability-gaps.md`)
 The files were whole and were still misread twice in one night (race 45204423376). The rules since:
