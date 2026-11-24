@@ -1,0 +1,42 @@
+# The Nether walk, by route (issue 16)
+
+Thirteen armed, fed bots stood in the Nether of the clean snapshot's world and none reached the fortress whose bricks they saw about 110 blocks away (`docs/problems/blaze.md`, walls 22 and 23 and the second "Stopped"). This file is the route's side of that wall: what the ground is, why no route was found over it, and each fix with its evidence. The tunnel's side is another agent's.
+
+## The ground, read before any fix
+
+Read with `navmap` (crate `navprobe`, probes 45334641630 and 45334717081) on `rs-l05-b00.rsr` of race 45194253932 lane 5 at tick 25,700, lane 3 of race 45204423376 at tick 50,000 (the same blocks, 329 columns known) and lane 5 of race 45204423376 at ticks 22,200 to 22,710. All coordinates are blocks; "feet y" is the cell the feet stand in.
+
+- **The lava sea's surface is y 31** (lava at y 31 and under, air from y 32). It is one sea: a cavern north and west of the portal (x -8 to 40, z -50 to -22), joined round the north-east (x 40 to 77, z -45 to -34) to a cavern on the east (x 68 to 100 and beyond, z -30 to 100 and beyond).
+- **The portal** (obsidian x 21 to 24, y 34 to 37, z -20) opens on a ledge of netherrack at feet y 34, about nine cells by three (x 22 to 30, z -24 to -21), three blocks over the sea on its north side. South of it is a hill: netherrack with magma veins (most of y 29 under the ledge, and bands all through), gravel pockets and soul soil, solid from the sea to above y 48 over x 0 to 66, z -18 to 97. A search from the portal at tick 24,980 spends 42 expansions and its frontier is empty: the ledge is an island for `path::plan`.
+- **Lava comes down onto the ledge after the bot arrives.** A lava stream runs down the hill's north face from above y 44 (x 25 to 33, z -23 to -18 at y 36 to 44) and a fall stands at (26, 35 and up, -23). At tick 22,200 the ledge is dry; at 22,560 lava lies at (26 to 28, 34, -23); at 22,700 it is at y 36 over (29 to 32, -23 to -21) and one tick-row later on the bot. By tick 25,700 the row (21 to 25, 34, -19) in front of the portal is lava. The chunks start ticking when a bot comes through, so every bot of this snapshot meets the same flood 700 to 900 ticks in: the four lava deaths at (30, 31, -18) and (20, 34, -18) are this, not only the bot's own stairs.
+- **The bricks in view** are a pillar standing in the sea: (61 to 62, 28 to 34 and up, 95 to 98), widening to x 58 to 66 at z 99 to 104. West of it the hill ends in a sheer face of soul soil and soul sand at x 56 to 57 (z 85 to 97), four cells of lava (x 57 to 60) between the face and the pillar. At z 100 a shelf at feet y 34, (55, 34, 100), is two lava cells from bricks at x 58. `at_fortress` is within 6 of a brick, so the shelf, or the face's foot, is enough. 1,927 bricks are on record; the nearest are these.
+- **Soul sand and soul soil** line every shore: the hill's east shore (x 62 to 78, z -50 to 100) is soul sand on slopes that drop 2 to 5 a column into the sea; a valley at z 44 to 72, x 15 to 66 has soul sand floors at feet y 32 to 40 round lava pools; the plateau at z 85 to 97 is soul soil from y 31 up. Soul sand is `Awkward` to `path::classify` (neither floor nor clear), so none of it is ground today; soul soil is a full block and is.
+- **Magma** is in the hill and under the ledge (y 29 to 30), and on shores at feet y 32 to 35 in places (x 32 to 39, z -42 to -40). It stays a wall for the route.
+- **No ground joins the portal to the bricks at or under y 48.** Between them is the hill (tunnel: 115 blocks of netherrack and soul soil at feet y 33 or 34, coming out at the face five blocks from the pillar) or the sea (round by the north-east and down the east cavern: about 200 cells of lava). Over y 48 was not read in this probe.
+
+## What a route needs here
+
+1. Soul sand as a floor, with the feet's cell right for a body standing at y + 0.875.
+2. A start that is allowed beside lava: a bot with lava at its door must still be given a way off.
+3. A way over lava: a bridge of held blocks, as a move the search can choose and the walk can make.
+4. A search that reaches 110 to 250 blocks: 6,000 expansions do not.
+
+## Fix 1: soul sand is ground, a bridge move, a far search (38f14da, d709221, 475e5f1)
+
+- **Soul sand** is `Solid` to `path::classify`; `feet_cell` reads feet at y + 0.875 as the cell over it (`FEET_LIFT`); `follow` jumps only for more than a step up; soul sand is dry land for a trap to clear on. Magma stays a wall.
+- **The lava rule was not the cause.** `lava_near` forbids a cell with lava beside it at its own height, or under it. A shore whose floor is level with the sea (floor y 31, feet y 32) has lava beside the floor, not beside the feet, and was always usable. What had no route was the ledge (an island) and soul sand. The rule is kept; only the bridge's own feet cell may have lava under it, since its floor is laid first (`clear_over`).
+- **The bridge move** (`MoveKind::Bridge`): one cell on the level whose floor is air or lava; the walk stands on the block before it and lays a held block against that block's side, then steps. It does not sneak (the protocol sends no sneak input; the server asks only that the clicked block is in reach). A bridge it cannot lay fails the walk; it never steps over a floor not laid. In the Nether only, with 16 bridge blocks held. Each block laid writes "bridge block laid at …".
+- **The far search** (`plan_far`, `Walk::far`): f = g + 4h, 40,000 expansions. Probe 45336893578 on the recorded Nether (lane 5 of race 45194253932 at tick 25,140, from (19, 35, -20) to within 5 of (61, 33, 95)): weight 1 with 6,000 finds nothing; weight 2 finds 291 cells (76 bridged) in 147,900 expansions, 1.8 s; weight 3, 290 cells (91 bridged) in 35,525; weight 4, 222 cells (163 bridged) in 12,664, 0.1 s; weight 10, 218 cells in 8,906. At ticks 25,020 and 25,060, with half the chunks, a search spends all it is given and finds none, so a failed one is tried again 200 ticks on. The weight-4 route: nine cells bridged north off the ledge, over the land to the north-east, 15 bridged east, then a causeway 110 long at feet y 33 down the east cavern to an islet at (70 to 74, 32, 79 to 82) and 20 more to (63, 33, 91).
+- **In `fortress_task`** (a fenced block, agreed with the orchestrator): one far search toward the nearest brick, its route held by the walk, a note with its cells, bridges and expansions; the tunnel stays the fallback.
+- **What the search reads**: the blocks of loaded columns, as `path::plan` always has; it walks only through open cells and digs nothing.
+- **Unit tests**: `crates/bot/tests/nether_walk.rs` (soul sand routed and walked, the feet's cell, a moat routed only with blocks held, the overworld not bridged, a chasm bridged block by block in the model, the weighed search); the test bed's `a_soul_sand_flat_has_a_route`, `a_lava_moat_has_a_route` and `a_lava_moat_is_crossed_to_the_bricks` no longer ignored.
+
+### Raced: race 45337580375 (475e5f1, the Nether snapshot, 3 x 1, cap 12,000)
+
+- **Lane 1**: the bridge works on a real server. Nine "bridge block laid" notes at ticks 80 to 120, (24, 33, -25) to (24, 33, -33): nine blocks in about 50 ticks, health 20, and the bot off the ledge 120 ticks after resuming. It was an `explore` walk that laid them (no bricks on record yet at tick 40), not the far walk. On the north-east land two piglins met it at tick 200: "defend Piglin 12 (Fight)", 5.1 a hit, dead at tick 300 ("death.attack.mob piglin").
+- **Cause of the death**: the route crosses land where piglins stand (they were on record at 25 to 37 blocks when the route was chosen), and a bot in iron with no gold is attacked on sight. The defend row fights them and loses.
+
+## Fix 2: a far route keeps clear of piglins; only a far walk bridges
+
+- `Cells::far` holds where piglins, piglin brutes and hoglins stand (`SHUN_KINDS`); a far search enters no cell within 20 of one (`SHUN_RADIUS`; a piglin sees at 16), except within 6 of its start. A far walk plans again when one comes within 20 of its next 12 waypoints.
+- Bridging is the far search's alone (`plan_far`): a plain `plan` (an explore, a walk to a block) lays nothing.

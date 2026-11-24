@@ -605,6 +605,11 @@ pub struct Plan {
     /// site choice flipped between two landings and each flip forgot the other).
     #[serde(default)]
     pub landings: Vec<(Cell, f64, u32)>,
+    /// The tick the next far search may run (A2, nether-walk.md): one costs tens of thousands
+    /// of expansions, so it is run once, its route held by the walk, and not again for
+    /// `walk::FAR_RETRY_TICKS`.
+    #[serde(default)]
+    pub far_search_at: u64,
     /// The watchdog's mark: where the body was, how many items were held, the events made, and
     /// when (issue 13b).
     #[serde(default)]
@@ -688,6 +693,7 @@ impl Plan {
             relocations: 0,
             toward: None,
             landings: Vec::new(),
+            far_search_at: 0,
             mark: None,
             stalls: 0,
             trail: Vec::new(),
@@ -775,6 +781,16 @@ impl Plan {
 
     /// Ends the open task with the run (the ledger then holds an end for every start).
     pub fn close(&mut self, at: u64, why: &str) {
+        // An escape cut by the run's end says what it tried (nether-walk.md: three bots died in
+        // lava with the escape's seals and targets in no file).
+        if let Task::Escape(e) = &self.task {
+            let said = e.report();
+            self.note(
+                at,
+                format!("escape-{} ended with the run", e.kind.name()),
+                said,
+            );
+        }
         if let Some(o) = self.open.take() {
             self.task_counts.ended += 1;
             self.records.push(TaskRecord::Ended {
@@ -957,7 +973,17 @@ impl Plan {
             && self.pickaxe_at_hand(w, tick);
         let (controls, status) = match &mut self.task {
             Task::Idle => (Controls::default(), TaskStatus::Running),
-            Task::ToLog(walk) | Task::Explore(walk) => walk.step(w, tick),
+            Task::ToLog(walk) | Task::Explore(walk) => {
+                let out = walk.step(w, tick);
+                // A walk's bridge move lays blocks: its acts are sent and each block laid is
+                // written to the ledger (docs/problems/nether-walk.md).
+                let (acts, said) = walk.take_out();
+                self.acts.extend(acts);
+                for (what, why) in said {
+                    self.note(tick, what, why);
+                }
+                out
+            }
             Task::Dig(d) => {
                 let (c, act, status) = d.step(w, tick);
                 self.acts.extend(act);
@@ -1258,12 +1284,15 @@ impl Plan {
         }
         let Some((id, row)) = chosen else {
             if let Some(make::Always::Escape(k)) = running {
-                self.task = Task::Idle;
+                let said = match std::mem::replace(&mut self.task, Task::Idle) {
+                    Task::Escape(e) => e.report(),
+                    _ => String::new(),
+                };
                 self.retry_at = tick;
                 self.note(
                     tick,
                     format!("out of the {}", k.name()),
-                    "dry land held; back to the goal".to_owned(),
+                    format!("dry land held; back to the goal; {said}"),
                 );
             }
             return None;
@@ -1279,7 +1308,17 @@ impl Plan {
             let task = match row {
                 make::Always::Escape(k) => {
                     self.escapes += 1;
-                    self.note(tick, id, format!("trapped in {}; cut {cut}", k.name()));
+                    // Which lava: on the body, or at the door and where (nether-walk.md).
+                    let door = (k == escape::TrapKind::Lava && !body.in_lava)
+                        .then(|| escape::lava_door_at(w, path::feet_cell(body.pos)))
+                        .flatten()
+                        .map(|c| format!(" (at the door, {c:?}, the body not in it)"))
+                        .unwrap_or_default();
+                    self.note(
+                        tick,
+                        id,
+                        format!("trapped in {}{door}; cut {cut}", k.name()),
+                    );
                     // Stairs that cut into water: their target waits, or the next choice cuts the
                     // same stairs into the same water (blaze wall 16: 72 escapes in one run, each
                     // after "stairs up toward the log at (36, 88, 7)").
@@ -2040,6 +2079,49 @@ impl Plan {
             );
             return Task::Idle;
         }
+        // --- A2's block (docs/problems/nether-walk.md): a far walk first. One weighed search
+        // toward the nearest brick, bridging where it must; found, its route is held by the walk
+        // and followed (off the portal's ledge at once: lava floods it about 700 ticks after a
+        // bot arrives). Not found, no far search again for a while: the tunnel below goes on.
+        if tick >= self.far_search_at
+            && let Some(c) = world::stage::bricks_near(w, FORTRESS_CHUNKS)
+                .into_iter()
+                .next()
+        {
+            self.far_search_at = tick + walk::FAR_RETRY_TICKS;
+            let mut walk = Walk::far(c, world::stage::FORTRESS_NEAR - 1.0, tick);
+            let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
+            let steps = walk.waypoints.as_ref().map_or(0, Vec::len);
+            if found {
+                // Cut (a meal, a foe) or failed, the next one may be searched soon.
+                self.far_search_at = tick + walk::FAR_AGAIN_TICKS;
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("far walk toward the fortress at {c:?}"),
+                    format!(
+                        "a route of {steps} cells, {} to bridge with {} blocks held, found in {} \
+                         expansions",
+                        walk.bridges_ahead(),
+                        path::bridge_blocks(w),
+                        walk.expanded
+                    ),
+                );
+                return Task::Explore(walk);
+            }
+            self.expanded += walk.expanded;
+            self.note(
+                tick,
+                format!("no far route to the fortress at {c:?}"),
+                format!(
+                    "{:?} after {} expansions, {steps} cells; none again for {} ticks",
+                    walk.route,
+                    walk.expanded,
+                    walk::FAR_RETRY_TICKS
+                ),
+            );
+        }
+        // --- the end of A2's block.
         // Bricks seen: walk toward the nearest a route gets nearer to, refusing each once tried.
         let bricks: Vec<Cell> = world::stage::bricks_near(w, FORTRESS_CHUNKS)
             .into_iter()
