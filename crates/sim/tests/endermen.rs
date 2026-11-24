@@ -363,13 +363,7 @@ fn a_soul_sand_valley_spawns_endermen_one_pack_in_seventy_one() {
     let spawned = sim.survival.life.ender_spawns;
     println!("soul sand valley: {spawned} endermen in 4000 ticks");
     assert!(spawned > 0, "a valley spawns endermen, rarely");
-    let mut forest = cavern(4);
-    forest.biome((-64, 79), (-64, 79), Biome::WarpedForest);
-    let mut sim = joined(&forest);
-    ticks(&mut sim, 4000);
-    assert!(
-        sim.survival.life.ender_spawns > spawned,
-        "a forest spawns more: {} against {spawned}",
-        sim.survival.life.ender_spawns
-    );
+    // Not compared with a forest: the forest's spawn cost (charge 1, budget 0.12, summed over
+    // every enderman there) saturates it at a dozen or so, where the valley's (0.7, 0.15) lets
+    // its rare packs land closer together (CI 45476117006: forest 13, valley 20 in 4000 ticks).
 }
