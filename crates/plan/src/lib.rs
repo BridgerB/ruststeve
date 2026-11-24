@@ -2539,6 +2539,26 @@ impl Plan {
             );
         }
         let choice = make::make_with_wear(&table, &counts, &near, gather_now, &wear, goal);
+        // >>> shield (docs/problems/shield.md): the kit's tools held, the shields the held iron
+        // and wood make are made next; an act that would be a trip (a gather, a mine) skips them.
+        let (goal, choice) = match shield::kit_row(&counts).and_then(|r| table.until(r)) {
+            Some(row) if self.kit_row && choice == make::Choice::Done => {
+                match make::make_with_wear(&table, &counts, &near, gather_now, &wear, row) {
+                    make::Choice::Act(r) if shield::kit_act(r) => (row, make::Choice::Act(r)),
+                    other => {
+                        let why = match other {
+                            make::Choice::Act(r) => format!("{} would be a trip", r.id),
+                            make::Choice::Done => "held".to_owned(),
+                            make::Choice::Stuck => "not makeable where the bot stands".to_owned(),
+                        };
+                        self.note(tick, format!("shields skipped: {why}"), row.id.clone());
+                        (goal, choice)
+                    }
+                }
+            }
+            _ => (goal, choice),
+        };
+        // <<< shield
         if matches!(choice, make::Choice::Act(_))
             && let Some(t) = self.opportunity(w, &table, goal, &near, gather_now, tick)
         {

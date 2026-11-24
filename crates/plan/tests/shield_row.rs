@@ -1,9 +1,10 @@
-//! The shields in the Nether kit (docs/problems/shield.md): the needs planner on the real goal
-//! table makes two shields from what a geared bot holds before the portal, last of the kit, and
-//! the kit is met with two held.
+//! The shields of the Nether kit (docs/problems/shield.md): after the kit's tools, the needs
+//! planner on the real goal table makes the shields the held iron and wood allow, and never
+//! leaves for more.
 
 use data::{BlockKind, ItemKind};
 use plan::make::{Choice, Counts, Goals, Table, Wear, make_with_wear};
+use plan::shield::{kit_act, kit_row};
 
 fn real_table() -> Table {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
@@ -11,71 +12,106 @@ fn real_table() -> Table {
     Table::new(&goals).unwrap()
 }
 
-/// The kit row's next act holding `held`, with a table and a furnace near or not.
-fn next(held: &[(ItemKind, i32)], stations: bool) -> String {
+fn counts(held: &[(ItemKind, i32)]) -> Counts {
+    held.iter().copied().collect()
+}
+
+/// The row `kit_row` picks for `held` and its next act, a table and a furnace near: the act's
+/// id and whether it is work where the bot stands.
+fn next(held: &[(ItemKind, i32)]) -> Option<(&'static str, String, bool)> {
     let t = real_table();
-    let goal = t.until("nether-kit").unwrap();
-    let counts: Counts = held.iter().copied().collect();
-    let near =
-        move |k: BlockKind| stations && (k == BlockKind::CraftingTable || k == BlockKind::Furnace);
-    match make_with_wear(&t, &counts, &near, false, &Wear::default(), goal) {
-        Choice::Act(r) => r.id.clone(),
-        Choice::Done => "done".to_owned(),
-        Choice::Stuck => "stuck".to_owned(),
-    }
-}
-
-const TOOLS: [(ItemKind, i32); 2] = [(ItemKind::StonePickaxe, 4), (ItemKind::CraftingTable, 1)];
-
-#[test]
-fn an_ingot_and_six_planks_at_a_table_are_crafted_into_a_shield() {
-    let mut held = TOOLS.to_vec();
-    held.extend([(ItemKind::IronIngot, 1), (ItemKind::OakPlanks, 6)]);
-    assert_eq!(next(&held, true), "craft:shield");
+    let c = counts(held);
+    let row = kit_row(&c)?;
+    let goal = t.until(row).unwrap();
+    let near = |k: BlockKind| k == BlockKind::CraftingTable || k == BlockKind::Furnace;
+    Some(
+        match make_with_wear(&t, &c, &near, false, &Wear::default(), goal) {
+            Choice::Act(r) => (row, r.id.clone(), kit_act(r)),
+            Choice::Done => (row, "done".to_owned(), false),
+            Choice::Stuck => (row, "stuck".to_owned(), false),
+        },
+    )
 }
 
 #[test]
-fn raw_iron_and_logs_lead_to_the_shield() {
-    // What the clean `ready` snapshot bot holds beside its tools: raw iron and logs. Every step
-    // is an act (planks, a smelt, the stations), never stuck.
-    let mut held = TOOLS.to_vec();
-    held.extend([(ItemKind::RawIron, 8), (ItemKind::OakLog, 6)]);
-    let first = next(&held, true);
-    assert!(first != "done" && first != "stuck", "{first}");
-    // The ingot smelted and the planks made: the craft.
-    held.extend([(ItemKind::IronIngot, 1), (ItemKind::OakPlanks, 8)]);
-    assert_eq!(next(&held, true), "craft:shield");
+fn the_row_is_what_the_held_iron_and_wood_make() {
+    use ItemKind::{IronIngot, OakLog, OakPlanks, RawIron, Shield};
+    assert_eq!(kit_row(&counts(&[])), None, "nothing held");
+    assert_eq!(kit_row(&counts(&[(IronIngot, 2)])), None, "no wood");
+    assert_eq!(kit_row(&counts(&[(OakLog, 3)])), None, "no iron");
+    assert_eq!(
+        kit_row(&counts(&[(IronIngot, 2), (OakPlanks, 12)])),
+        Some("shields")
+    );
+    assert_eq!(
+        kit_row(&counts(&[(RawIron, 8), (OakLog, 3)])),
+        Some("shields")
+    );
+    assert_eq!(
+        kit_row(&counts(&[(RawIron, 1), (OakLog, 3)])),
+        Some("shield")
+    );
+    assert_eq!(
+        kit_row(&counts(&[(IronIngot, 2), (OakPlanks, 11)])),
+        Some("shield")
+    );
+    // One held: the second from one ingot and six planks; two held: no row.
+    assert_eq!(
+        kit_row(&counts(&[(Shield, 1), (IronIngot, 1), (OakPlanks, 6)])),
+        Some("shields")
+    );
+    assert_eq!(kit_row(&counts(&[(Shield, 1), (OakPlanks, 6)])), None);
+    assert_eq!(
+        kit_row(&counts(&[(Shield, 2), (IronIngot, 4), (OakPlanks, 24)])),
+        None
+    );
 }
 
 #[test]
-fn the_kit_is_met_with_two_shields_held_and_the_tools_come_first() {
-    let mut held = TOOLS.to_vec();
-    held.push((ItemKind::Shield, 2));
-    assert_eq!(next(&held, true), "done");
-    // One held (in the off hand or not): the second is made.
-    let mut one = TOOLS.to_vec();
-    one.extend([
+fn ingots_and_planks_at_a_table_are_crafted_into_shields() {
+    let held = [(ItemKind::IronIngot, 2), (ItemKind::OakPlanks, 12)];
+    assert_eq!(
+        next(&held),
+        Some(("shields", "craft:shield".to_owned(), true))
+    );
+    let one = [
         (ItemKind::Shield, 1),
         (ItemKind::IronIngot, 1),
         (ItemKind::OakPlanks, 6),
-    ]);
-    assert_eq!(next(&one, true), "craft:shield");
-    // Without the tools the shield's makings are not touched first.
-    let short = [
-        (ItemKind::StonePickaxe, 3),
-        (ItemKind::CraftingTable, 1),
-        (ItemKind::IronIngot, 1),
-        (ItemKind::OakPlanks, 6),
-        (ItemKind::Cobblestone, 3),
-        (ItemKind::Stick, 2),
     ];
-    assert_eq!(next(&short, true), "craft:stone_pickaxe");
+    assert_eq!(
+        next(&one),
+        Some(("shields", "craft:shield".to_owned(), true))
+    );
 }
 
-/// With no wood and no iron held the row goes for them, as it does for the pickaxes' wood: a
-/// gather first. `Plan::nether_task` bounds the kit at `KIT_TASKS` tasks, so the flow before
-/// it should hold the makings (two ingots or raw iron with fuel, twelve planks or three logs).
+/// What the clean `ready` snapshot bot holds beside its tools: raw iron and logs. The first step
+/// is work where the bot stands, not a trip.
 #[test]
-fn nothing_to_make_it_from_is_a_gather() {
-    assert_eq!(next(&TOOLS, true), "gather");
+fn raw_iron_and_logs_lead_to_the_shields_where_the_bot_stands() {
+    let held = [
+        (ItemKind::RawIron, 8),
+        (ItemKind::OakLog, 6),
+        (ItemKind::Coal, 2),
+    ];
+    let (row, act, here) = next(&held).unwrap();
+    assert_eq!(row, "shields");
+    assert!(here, "{act} is a trip");
+}
+
+/// Iron to smelt and nothing to burn but the shields' own planks: whatever the planner answers,
+/// `kit_act` tells a trip from work, and the planner's call site skips a trip.
+#[test]
+fn a_trip_is_told_from_work() {
+    let t = real_table();
+    let gather = t.producers.iter().find(|r| r.id == "gather").unwrap();
+    let mine = t.producers.iter().find(|r| r.id == "mine-iron").unwrap();
+    let craft = t.producers.iter().find(|r| r.id == "craft:shield").unwrap();
+    let place = t
+        .producers
+        .iter()
+        .find(|r| r.id == "place-furnace")
+        .unwrap();
+    assert!(!kit_act(gather) && !kit_act(mine));
+    assert!(kit_act(craft) && kit_act(place));
 }

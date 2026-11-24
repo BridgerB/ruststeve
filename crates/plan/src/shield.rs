@@ -111,6 +111,42 @@ pub fn to_off_hand(w: &World) -> Option<(i16, Act)> {
     ))
 }
 
+/// Shields the kit holds before the portal (`config/goals.toml`, the `shields` row).
+pub const KIT_SHIELDS: i32 = 2;
+
+/// The goal row that makes the shields the held iron and wood allow, after the Nether kit's
+/// tools: `shields` for two, `shield` for one, `None` when they are held already or nothing
+/// held makes one. An ingot (or a raw iron to smelt) and six planks (a log is four) each.
+pub fn kit_row(counts: &crate::make::Counts) -> Option<&'static str> {
+    let have = |key: &str| crate::make::Need::parse(key).map_or(0, |n| n.have(counts));
+    let held = have("item:shield");
+    let iron = have("item:iron_ingot") + have("item:raw_iron");
+    let planks = have("tag:planks") + 4 * have("tag:logs");
+    let target = KIT_SHIELDS.min(held + iron.min(planks / 6));
+    match target {
+        t if t <= held => None,
+        1 => Some("shield"),
+        _ => Some("shields"),
+    }
+}
+
+/// Whether a kit act is work where the bot stands (a craft, a smelt, a station put down), not a
+/// trip for wood or ore.
+pub fn kit_act(row: &crate::make::Row) -> bool {
+    match row.act {
+        Some(
+            crate::make::Act::Craft(_) | crate::make::Act::Smelt(_) | crate::make::Act::Place(_),
+        ) => true,
+        Some(
+            crate::make::Act::Gather
+            | crate::make::Act::Mine { .. }
+            | crate::make::Act::Redig(_)
+            | crate::make::Act::Scoop,
+        )
+        | None => false,
+    }
+}
+
 /// Every threat now, nearest first, fireballs ahead of blazes: charged blazes within
 /// `BLAZE_RANGE` that see the bot, and small fireballs within `FIREBALL_RANGE` not known to be
 /// flying away (by the velocity the server last set; one with none yet counts).

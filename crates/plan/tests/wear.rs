@@ -121,14 +121,9 @@ fn the_nether_kit_makes_pickaxes_and_a_table() {
     .collect();
     assert_eq!(act(&held, &no_table), "place-table");
     assert_eq!(act(&held, &table_near), "craft:stone_pickaxe");
-    // Two shields are the kit's last items (docs/problems/shield.md).
-    let made: Counts = [
-        (ItemKind::StonePickaxe, 4),
-        (ItemKind::CraftingTable, 1),
-        (ItemKind::Shield, 2),
-    ]
-    .into_iter()
-    .collect();
+    let made: Counts = [(ItemKind::StonePickaxe, 4), (ItemKind::CraftingTable, 1)]
+        .into_iter()
+        .collect();
     assert_eq!(act(&made, &no_table), "done");
     // No wood, no sticks: nothing to make them from where the bot stands.
     let bare: Counts = [(ItemKind::Cobblestone, 64)].into_iter().collect();
