@@ -7,6 +7,10 @@
 //! - lava and fire (`Entity.baseTick`, `lavaHurt`, `BaseFireBlock.entityInside`): in lava 4
 //!   (`lava`) and fire for 15 s; in a fire block 1 (`in_fire`) and fire for 8 s; on fire, 1
 //!   (`on_fire`) each 20 ticks; water puts it out. Sent as metadata index 0, bit 0.
+//! - magma (`Entity.applyEffectsFromBlocks`, `MagmaBlock.stepOn`): on the ground, the block 0.2
+//!   under the feet (`getOnPosLegacy`) a magma block and the player not stepping carefully
+//!   (`isShiftKeyDown`): 1 (`hot_floor`) a tick, which the invulnerability below makes 1 each
+//!   10 ticks. `hot_floor` is in `is_fire`: fire resistance refuses it.
 //! - hurt (`LivingEntity.hurtServer`): 20 ticks of invulnerability after a hit; in its first
 //!   half only the excess over the last hit lands. Each hit costs 0.1 exhaustion.
 //! - hunger (`FoodData.tick`): over 4 exhaustion takes a saturation point, else a food point
@@ -34,6 +38,10 @@ const AIR_REGAIN: i32 = 4;
 /// Fire ticks lava and a fire block set (15 s and 8 s).
 const LAVA_FIRE_TICKS: i32 = 300;
 const FIRE_BLOCK_TICKS: i32 = 160;
+/// How far under the feet the block stood on is read (`Entity.getOnPosLegacy`'s 0.2).
+const ON_POS_BELOW: f64 = 0.2;
+/// What a magma block does to feet on it (`MagmaBlock.stepOn`'s 1.0).
+const MAGMA_DAMAGE: f32 = 1.0;
 /// Invulnerability after a hit, and the half in which only a larger hit lands.
 const INVULNERABLE_TICKS: u32 = 20;
 const INVULNERABLE_HALF: u32 = 10;
@@ -81,6 +89,11 @@ pub struct Life {
     /// The fire resistance effect: fire, lava and burning do no damage (`LivingEntity.hurt`
     /// refuses an `is_fire` source), though lava still slows and sets the body alight.
     pub fire_resistance: bool,
+    /// The shift key as the server holds it (`isShiftKeyDown`, set by the `player_input`
+    /// packet). The bot's protocol sends no `player_input`, so to a server it never sneaks and
+    /// nothing here sets this: sneaking over magma does not spare the bot until that packet is
+    /// sent. A test sets it by hand.
+    pub sneaking: bool,
     /// Ticks since the last swing (`attackStrengthTicker`).
     pub attack_ticker: u32,
     pub mobs: std::collections::BTreeMap<i32, Mob>,
@@ -106,6 +119,7 @@ impl Default for Life {
             hunger: None,
             water_breathing: false,
             fire_resistance: false,
+            sneaking: false,
             attack_ticker: 0,
             mobs: std::collections::BTreeMap::new(),
             sent: (20.0, 20, false),
@@ -198,7 +212,7 @@ impl Sim {
             return Ok(Vec::new());
         }
         if self.survival.life.fire_resistance
-            && matches!(damage_type, "lava" | "in_fire" | "on_fire")
+            && matches!(damage_type, "lava" | "in_fire" | "on_fire" | "hot_floor")
         {
             return Ok(Vec::new());
         }
@@ -266,6 +280,18 @@ impl Sim {
                 out.extend(self.hurt_player(1.0, "on_fire", "death.attack.onFire")?);
             }
             self.survival.life.fire_ticks -= 1;
+        }
+        // Magma under the feet.
+        let on = (
+            self.pos[0].floor() as i32,
+            (self.pos[1] - ON_POS_BELOW).floor() as i32,
+            self.pos[2].floor() as i32,
+        );
+        if self.survival.on_ground
+            && !self.survival.life.sneaking
+            && kind_at(self, on) == Some(BlockKind::MagmaBlock)
+        {
+            out.extend(self.hurt_player(MAGMA_DAMAGE, "hot_floor", "death.attack.hotFloor")?);
         }
         // Eating.
         if let Some((item, left)) = self.survival.life.using {
