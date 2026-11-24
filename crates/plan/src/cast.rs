@@ -1134,7 +1134,24 @@ impl Cast {
                         (0, dz.signum())
                     };
                     if dir != (0, 0) {
-                        self.work = Work::Tunnel(Box::new(crate::stairs::Stairs::level(dir, tick)));
+                        // A source two or more under the feet: stairs down toward it, not a level
+                        // tunnel. A room floor three over the lava sea is out of a bucket's reach
+                        // from every cell at its height, and a level tunnel never came nearer
+                        // ("no route, 1 tunnels" with 168 and 286 sources seen: cast.md wall 2).
+                        // The stairs' own refusal stops them short of lava.
+                        let down = t.1 + 1 < f.1;
+                        self.trail(
+                            tick,
+                            format!(
+                                "tunnel {} toward {t:?}",
+                                if down { "down" } else { "level" }
+                            ),
+                        );
+                        self.work = Work::Tunnel(Box::new(if down {
+                            crate::stairs::Stairs::new(dir, tick)
+                        } else {
+                            crate::stairs::Stairs::level(dir, tick)
+                        }));
                         self.last_done = tick;
                         return (Controls::default(), None, CastStatus::Running);
                     }
