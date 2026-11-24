@@ -189,7 +189,6 @@ fn a_soul_sand_flat_is_crossed_to_the_bricks() {
 
 /// (b) A lava moat 4 wide with no way round.
 #[test]
-#[ignore = "blaze wall: stands at the moat's bank, alive, tunnel tasks ending with no refusal; owner A2"]
 fn a_lava_moat_is_crossed_to_the_bricks() {
     let c = cross(walls::lava_moat(), &KIT, 2400);
     c.assert_reached();

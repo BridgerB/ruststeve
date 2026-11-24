@@ -251,11 +251,20 @@ impl<'a> Cells<'a> {
         }
     }
 
+    /// Clear, with no lava beside: the feet's cell of a bridge move, whose floor (lava, as like
+    /// as not) is laid before the feet come.
+    pub fn clear_over(&mut self, (x, y, z): Cell) -> bool {
+        self.at((x, y, z)) == Class::Clear
+            && ![(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|(dx, dz)| self.at((x + dx, y, z + dz)) == Class::Lava)
+    }
+
     /// A waypoint a route may still use: standable, or (a bridge's) clear with a floor to lay.
     pub fn usable(&mut self, c: Cell, kind: MoveKind) -> bool {
         self.standable(c)
             || (kind == MoveKind::Bridge
-                && self.clear(c)
+                && self.clear_over(c)
                 && self.clear((c.0, c.1 + 1, c.2))
                 && self.layable((c.0, c.1 - 1, c.2)))
     }
@@ -391,6 +400,8 @@ enum Need {
     NotFloor,
     /// Air or lava a held block can be laid in (never where bridging is off).
     Layable,
+    /// Clear with no lava beside, whatever is under: over a floor still to lay.
+    ClearOver,
 }
 
 /// A move along +x; `MOVES` turns it to every direction.
@@ -472,7 +483,7 @@ const TEMPLATES: [Move; 5] = [
         fall: false,
         needs: &[
             (Need::Layable, (1, -1, 0)),
-            (Need::Clear, (1, 0, 0)),
+            (Need::ClearOver, (1, 0, 0)),
             (Need::Clear, (1, 1, 0)),
         ],
     },
@@ -528,6 +539,7 @@ pub fn neighbors(cells: &mut Cells<'_>, (x, y, z): Cell) -> Vec<Step> {
                     Need::Clear => cells.clear(c),
                     Need::NotFloor => !cells.floor(c),
                     Need::Layable => cells.layable(c),
+                    Need::ClearOver => cells.clear_over(c),
                 }
             });
             if !ok {

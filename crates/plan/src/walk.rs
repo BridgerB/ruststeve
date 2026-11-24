@@ -36,6 +36,10 @@ pub const PROGRESS_STEP: f64 = 0.25;
 /// on its heuristic. Measured on the recorded Nether of race 45194253932 (probe 45338206210).
 pub const FAR_NODES: u32 = 60_000;
 pub const FAR_WEIGHT: f64 = 2.0;
+/// After a far search (found or not) the planner runs no other for this long: a minute.
+pub const FAR_RETRY_TICKS: u64 = 1200;
+/// After a far route was found, the least ticks before the planner searches the next.
+pub const FAR_AGAIN_TICKS: u64 = 100;
 /// Ticks between two clicks laying one bridge block: the block update arrives in a tick or two.
 pub const PLACE_EVERY_TICKS: u64 = 6;
 /// Clicks for one bridge block before the walk fails.
@@ -287,6 +291,19 @@ impl Walk {
         self.more.from = r.from;
         self.more.laying = None;
         self.more.place_tries = 0;
+        // A far search is dear: each one after the first is written down with what it spent.
+        if self.more.far && self.replans > 0 {
+            self.more.said.push((
+                "far route planned again".to_owned(),
+                format!(
+                    "{:?}, {} cells, {} expansions; plan {} of {MAX_REPLANS}",
+                    r.status,
+                    self.waypoints.as_ref().map_or(0, Vec::len),
+                    r.expanded,
+                    self.replans + 1
+                ),
+            ));
+        }
         self.route = Some(r.status);
         self.at = 0;
         self.replans += 1;
