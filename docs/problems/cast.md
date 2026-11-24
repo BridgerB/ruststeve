@@ -63,7 +63,15 @@ The overworld leg's portal cast, for a real bot from the clean `ready` snapshot 
 
 A real cast beside it (agent O's race 45354021804 lane 0, 9966559, without these fixes): from the `ready` snapshot, a site reached through a shaft the bot dug itself at y -53, lit in one cast of 6,340 ticks (124 ops, 10 fills).
 
+## Raced: wall 4 (race 45361499544, a316d36)
+
+**22 of 27 lit** (81.5%) in 85 casts. By place: 0 0/3, 1 3/3, 2 3/3, 3 2/3, 4 3/3, 5 3/3, 6 3/3, 7 2/3, 8 3/3. `Churned` ended 9 casts (8 bots; places 2 and 4 churned once and lit at their next site); "tunnel down refused" 9 times. Place 0 still churned: its refill fell to the level tunnel, which cut the same floor cell, (28, -52, -67), 61 times. 17b78e2 checks the level tunnel the same way, and a refused tunnel fails the refill to the fetch.
+
+## 6. A failed walk to an op spends a try (sealava place 7, every lane: `dig :room` 0 ops in)
+
+- **Read**: "tries: walk to the stand failed NoProgress" four times, 800 to 940 ticks into the cast, at its first room dig (-32, -53, -124).
+- **Fix** (56395f1): a walk to an op that fails on its way digs the straight way's first block, as a walk not found does (wall 22 of portal.md), before a try is spent. Notes: "walk digs N".
+
 ## Status
 
-- Walls 1 to 3 and 5: 20 of 27 twice running (c073b1a, 34352b8) against 15 of 27. 291ba59 (wall 4) racing in 45361499544 on a316d36. 78e6f05: bba8161 merged on top.
-- Open: place 0 (wall 4's race says), place 7's `dig :room` 0 ops in ("walk to the stand failed NoProgress" four times), place 3 lights 1 of 3.
+- Walls 1 to 3 and 5: 20 of 27 twice running (c073b1a, 34352b8); with wall 4, 22 of 27 (a316d36); baseline 15 of 27. 17b78e2 (walls 4's level tunnel and 6, bba8161 merged): racing.
