@@ -142,6 +142,19 @@ pub const TRAIL_TOWARD: f64 = 4.0;
 /// refusal lasts `FAILURE_MEMORY_TICKS` 600: six looks).
 const SPAWNER_WAIT_TICKS: u64 = 100;
 
+/// Blocks behind the nearest it came to a dig's target at which the bot counts as pushed back:
+/// a stairs leg is six steps, so from six back no one leg comes nearer than the mark.
+pub const PUSHED_BACK: f64 = 6.0;
+
+/// Whether feet at `pos` are `PUSHED_BACK` or more farther from `target` than `best`, the
+/// nearest a dig toward it has come (cell to cell, as `dig_toward` measures).
+pub fn pushed_back(pos: [f64; 3], target: Cell, best: f64) -> bool {
+    let f = path::feet_cell(pos);
+    let d = f64::from((target.0 - f.0).pow(2) + (target.1 - f.1).pow(2) + (target.2 - f.2).pow(2))
+        .sqrt();
+    d >= best + PUSHED_BACK
+}
+
 /// The trail marks at least `TRAIL_TOWARD` nearer to `target` than `feet`, the nearest to the
 /// target first: where the bot itself has stood, so no cell it has not seen.
 pub fn trail_toward(trail: &[[f64; 3]], feet: [f64; 3], target: Cell) -> Vec<[f64; 3]> {
@@ -1722,8 +1735,14 @@ impl Plan {
         if w.player.health.is_none_or(|h| h >= rules.engage_health) {
             return None;
         }
-        let eyes = cover::shooters(w);
         let burning = escape::touching_fire(w, body.pos);
+        // A shelter block just placed: its block update is a tick or two away, and the lines of
+        // sight are read again only once it is in.
+        if !burning && tick < self.shelter_at {
+            self.retry_at = self.shelter_at;
+            return Some(Task::Idle);
+        }
+        let eyes = cover::shooters(w);
         if !burning && !cover::seen_body(w, &eyes, body.pos) {
             self.retry_at = tick + RETRY_TICKS;
             self.note(
@@ -1777,9 +1796,6 @@ impl Plan {
         // One click a look; a window open or a click not yet answered waits.
         self.retry_at = tick + 1;
         if w.window.is_some() || w.click.is_some() || !self.acts.is_empty() {
-            return Some(Task::Idle);
-        }
-        if tick < self.shelter_at {
             return Some(Task::Idle);
         }
         match hold::toward(w, item) {
@@ -1882,6 +1898,22 @@ impl Plan {
                     "a blaze spawner seen exposed".to_owned(),
                 );
                 return Task::Explore(walk);
+            }
+            // Pushed back (a retreat from a skeleton took the bot 14 blocks down its own
+            // tunnel): the dig's stall count is against the nearest it ever came, so three legs
+            // back up the tunnel were three stalls and the spawner was refused (spawner wall 2,
+            // 3 of 6 lanes). From well behind that mark the count starts again from here.
+            if let Some((c, best, _)) = self.toward
+                && c == sp
+                && let Some(body) = w.body
+                && pushed_back(body.pos, sp, best)
+            {
+                self.toward = None;
+                self.note(
+                    tick,
+                    format!("pushed back from the spawner at {sp:?}"),
+                    format!("the nearest was {best:.0} blocks; the dig's stalls count from here"),
+                );
             }
             if let Some(t) = self.dig_toward(
                 w,
