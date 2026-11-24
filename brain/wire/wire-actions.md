@@ -5,8 +5,8 @@ type: reference
 tags: [wire, actions, attack, dig, use-item]
 aliases: [use_item, release use, LpVec3, set_entity_motion, attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@8a59f07
+lastUpdated: 2026-11-23
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@ddae609
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub enum Act {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_dig_carries_its_sequence() {"
@@ -27,7 +27,7 @@ Everything the bot does to the world is one of a few client packets. Several car
 ## Key files
 - clojurecraft `src/clojurecraft/packet.clj`: the play c2s specs and `values`.
 - ruststeve v1 `src/bot/mod.rs`: `attack`.
-- ruststeve `crates/world/src/lib.rs`: `Act` (`Dig { step, pos, face }`, `Hold`, `Click`, `CloseWindow`, `Swing`) is an input event; the world turns it into the packet, counting the dig sequence (`sequence_sent`) and folding `block_changed_ack` into `sequence_acked` (the highest seen). Live on a local server (2026-11-12): START then FINISH 3 s later on a grass block drew the block update to air, `block_changed_ack 2` and the pickup into hotbar slot 36.
+- ruststeve `crates/world/src/lib.rs`: `Act` (`Dig { step, pos, face }`, `Hold`, `Click`, `CloseWindow`, `Swing`, `Resync`, `UseOn`, `Attack`, `UseItem`, `ReleaseUse`, `Respawn`) is an input event; the world turns it into the packet, counting the dig sequence (`sequence_sent`) and folding `block_changed_ack` into `sequence_acked` (the highest seen). Live on a local server (2026-11-12): START then FINISH 3 s later on a grass block drew the block update to air, `block_changed_ack 2` and the pickup into hotbar slot 36.
 
 ## How it works
 
@@ -44,7 +44,8 @@ Everything the bot does to the world is one of a few client packets. Several car
 Faces: down 0, up 1, north 2, south 3, west 4, east 5. Hands: main 0, off 1. ruststeve sends `use-item-on` as `Act::UseOn` (issue 11a, [[placing]]).
 
 ## Issue 12a in ruststeve
-- `C2s::Attack { entity }` is 775's own packet; `C2s::UseItem { hand, sequence, yaw, pitch }` starts eating (the world's `Act::UseItem` bumps the sequence and sends the body's look); `Act::ReleaseUse` is `player_action` status 5.
+- `C2s::Attack { entity }` is 775's own packet; `C2s::UseItem { hand, sequence, yaw, pitch }` starts eating (the world's `Act::UseItem` bumps the sequence and sends the look: the controls' yaw, and their pitch when set, a bucket aimed, else the server's last); `Act::ReleaseUse` is `player_action` status 5.
+- `Act::Respawn` sends `client-command` 0 (`C2s::ClientCommand`), clears the death and drops the body until the server's next position.
 - Attacking an item, an experience orb or an arrow gets the client kicked (`invalid_entity_attacked`): strike only living mobs (found by the parity table, a cow's orb).
 - `set_entity_motion` is an `LpVec3`: a zero first byte means zero; else 48 bits, the scale in the low 2 bits, a continuation flag at bit 2, the three 15-bit components at 3, 18 and 33 (`protocol::bytes`).
 
