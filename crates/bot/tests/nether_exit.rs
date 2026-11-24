@@ -141,7 +141,7 @@ fn line(r: TaskRecord) -> String {
 /// The kit bot's own situation: the equipped Nether snapshot's bot, with what it holds, where it
 /// stands, the fortress aim. Twelve thousand ticks is ten minutes; the bricks are 121 blocks off.
 #[test]
-#[ignore = "blaze wall: alive at 20 health, 12,000 ticks of stairs down and up round (20, 22, 55); owners A2, A7"]
+#[ignore = "blaze wall 22: dead in lava near (24, 29, -14), the escape starting at tick 780; owners A2, A7"]
 fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
