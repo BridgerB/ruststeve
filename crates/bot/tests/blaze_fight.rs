@@ -113,12 +113,15 @@ fn the_fight_post_is_the_spawners_deck() {
     let cells = plan::defend::post_cells(&w, sp, [0.5, 64.0, 0.5]);
     assert_eq!(
         cells.len(),
-        23,
-        "24 deck cells less the burning one: {cells:?}"
+        16,
+        "24 deck cells less the burning one and the seven round it (wall 18): {cells:?}"
     );
     assert_eq!(cells[0], (4, 64, 0), "the nearest the bot first");
     assert!(cells.iter().all(|c| plan::defend::on_post(*c, sp)));
     assert!(!cells.contains(&(sp.0 + 1, 64, 1)), "no burning cell");
+    assert!(!cells.contains(&(sp.0, 64, 1)), "no cell beside fire");
+    assert!(plan::defend::fire_near(&w, (sp.0 + 2, 64, 2)));
+    assert!(!plan::defend::fire_near(&w, (sp.0 - 2, 64, -2)));
     assert!(!plan::defend::on_post(sp, sp), "not the spawner itself");
     assert!(
         !plan::defend::on_post((3, 64, 0), sp),
