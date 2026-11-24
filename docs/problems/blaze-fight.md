@@ -155,3 +155,7 @@ A bot at a blaze spawner with the gear a real bot holds ends with 7 blaze rods (
 - **What happened**: a fight turned to a retreat at 12.7; "fight post at (129, 64, 161)" 20 ticks later; at 4,620 health 2.9 and "leave the spawner … to heal"; dead.
 - **Read**: `take_cover` returns nothing when it finds no cover cell, no leave route and no shelter to build; `spawner_task` then goes on to the post walk, which asks nothing of health.
 - **Fix** (`spawner_task`): hurt under `engage_health` with a way to heal and a spawner within 24, the bot does not walk to the post (or to the spawner) but waits where it is, the eat row healing it (note "no fight post: hurt, no cover found", once per 600 ticks).
+
+### 15. Rods lie on the deck while the fight runs (agent S's development race 45347052453, lane 0)
+- **What happened**: "pick up a rod at (130, 64, 157)" once, at tick 8,220, and "item blaze_rod 4 -> 7 (3 changes)" that tick: three rods had lain on the deck while 58 defends ran. The spawner task's pickup runs only when no always-row is in force, and with blazes about a defend nearly always is.
+- **Fix** (`defend::rod_on_deck`, the fight's deck branch): on the deck with the foe out of reach, a blaze rod lying on another deck cell is stepped to (on the deck, `safe_step`), before the close-in. Counted: "rod on the deck at …" once a fight, and "N steps to rods on the deck" in the fight's note.

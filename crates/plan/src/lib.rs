@@ -1476,7 +1476,7 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire",
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck",
                             d.swings,
                             d.landed,
                             d.stance,
@@ -1492,7 +1492,8 @@ impl Plan {
                             d.dodges_known,
                             d.falling_swings,
                             d.passing_swings,
-                            d.fire_held
+                            d.fire_held,
+                            d.rod_steps
                         )))
                     }
                 };

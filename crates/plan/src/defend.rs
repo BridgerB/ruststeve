@@ -118,6 +118,9 @@ pub struct Defend {
     /// Swings sent in passing, outside the fight's own swing (wall 12).
     #[serde(default)]
     pub passing_swings: u32,
+    /// Steps taken on the deck toward a blaze rod lying there, its foe out of reach.
+    #[serde(default)]
+    pub rod_steps: u32,
     /// Steps held because fire lay ahead (wall 11).
     #[serde(default)]
     pub fire_held: u32,
@@ -302,6 +305,23 @@ pub fn post_cells(
     }
     out.sort();
     out.into_iter().map(|(_, c)| c).collect()
+}
+
+/// The blaze rod lying on the spawner's deck nearest `pos` (its feet's cell on the deck), not
+/// under the feet already. A fight never ends while blazes are about, so a rod dropped on the deck
+/// two cells off lay there: three were picked up only at tick 8,220, the first time no defend ran
+/// (race 45347052453 lane 0, "pick up a rod at (130, 64, 157)", 4 to 7 at once).
+pub fn rod_on_deck(w: &World, spawner: crate::path::Cell, pos: [f64; 3]) -> Option<[f64; 3]> {
+    let feet = crate::path::feet_cell(pos);
+    w.entities
+        .values()
+        .filter(|e| !e.dead && e.item().is_some_and(|(k, _)| k == data::ItemKind::BlazeRod))
+        .map(|e| e.pos)
+        .filter(|p| {
+            let c = crate::path::feet_cell(*p);
+            on_post(c, spawner) && (c.0, c.2) != (feet.0, feet.2)
+        })
+        .min_by(|a, b| distance(*a, pos).total_cmp(&distance(*b, pos)))
 }
 
 /// The blaze spawner seen nearest the feet, within `POST_RANGE`.
@@ -584,6 +604,7 @@ impl Defend {
             spawner: None,
             walking_post: false,
             passing_swings: 0,
+            rod_steps: 0,
             fire_held: 0,
             given_up: false,
             crit_wait: 0,
@@ -1080,6 +1101,44 @@ impl Defend {
                     }
                     None => face,
                 };
+                // On the deck with the foe out of reach, a rod lying on the deck is walked onto
+                // first: the fight would hold the bot where it stands while rods lay a cell or two
+                // off (wall 15).
+                if out_of_reach
+                    && let Some(sp) = post
+                    && on_post(feet, sp)
+                    && let Some(rod) = rod_on_deck(w, sp, body.pos)
+                {
+                    let yaw = yaw_to(body.pos, rod);
+                    let rad = yaw.to_radians();
+                    let ahead = crate::path::feet_cell([
+                        body.pos[0] - rad.sin() * 0.9,
+                        body.pos[1],
+                        body.pos[2] + rad.cos() * 0.9,
+                    ]);
+                    if on_post(ahead, sp) && safe_step(w, body.pos, yaw) {
+                        if self.rod_steps == 0 {
+                            self.notes.push(format!(
+                                "rod on the deck at {:?}: stepped to while {:?} {} is out of reach",
+                                crate::path::feet_cell(rod),
+                                self.kind,
+                                self.foe
+                            ));
+                        }
+                        self.rod_steps += 1;
+                        return (
+                            Controls {
+                                forward: true,
+                                jump: body.horizontal_collision,
+                                sneak: false,
+                                yaw,
+                                pitch: None,
+                            },
+                            None,
+                            DefendStatus::Running,
+                        );
+                    }
+                }
                 if out_of_reach {
                     // Close in, facing it, unless lava or a deep drop lies between: then wait for
                     // it facing it (wall 29). A shooter's fight steps only onto a floor, never
