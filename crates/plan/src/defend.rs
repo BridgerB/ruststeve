@@ -104,6 +104,20 @@ pub struct Defend {
     pub crit_wait: u32,
     #[serde(default)]
     pub falling_swings: u32,
+    /// The walk to the fight post, when it was last looked for, and whether this tick walked it
+    /// (no dodge then: the route is the safe way).
+    #[serde(default)]
+    pub post: Option<crate::walk::Walk>,
+    #[serde(default)]
+    pub posted_at: Option<u64>,
+    /// The spawner the fight is anchored to, once looked up (`Some(None)`: none near).
+    #[serde(default)]
+    pub spawner: Option<Option<crate::path::Cell>>,
+    #[serde(default)]
+    pub walking_post: bool,
+    /// The fight gave its foe up with health whole: it ends, and the next foe is taken.
+    #[serde(default)]
+    pub given_up: bool,
     /// Ticks in a row a shooter's fight has had no way to its foe.
     #[serde(default)]
     pub no_way: u32,
@@ -233,7 +247,69 @@ pub fn edge(w: &World, c: crate::path::Cell) -> bool {
     };
     [(1, 0), (-1, 0), (0, 1), (0, -1)]
         .into_iter()
-        .any(|(dx, dz)| !(1..=4).any(|down| floor((c.0 + dx, c.1 - down, c.2 + dz))))
+        .any(|(dx, dz)| !(0..=4).any(|down| floor((c.0 + dx, c.1 - down, c.2 + dz))))
+}
+
+/// Cells each way from a spawner its deck is taken to reach, and blocks from the feet within
+/// which a spawner seen makes the fight a fight from its deck.
+pub const POST_CELLS: i32 = 2;
+pub const POST_RANGE: f64 = 24.0;
+
+/// Whether `c` is on the spawner's deck: at the spawner's own level, within `POST_CELLS` of it
+/// each way, and not the spawner.
+pub fn on_post(c: crate::path::Cell, spawner: crate::path::Cell) -> bool {
+    c.1 == spawner.1
+        && (c.0 - spawner.0).abs() <= POST_CELLS
+        && (c.2 - spawner.2).abs() <= POST_CELLS
+        && c != spawner
+}
+
+/// The fight post (blaze-fight wall 10): the standable cells of the spawner's deck with no fall
+/// beside them and no fire in them, nearest `toward` first. A blaze stays where it spawns and a
+/// spawner spawns within 4 blocks of itself, so from these cells every spawn is within a strike
+/// of 3 (vanilla `BlazeAttackGoal.tick` moves at its target only within 2 blocks or for 5 ticks
+/// after losing sight; probe 45344729907). Seen blocks only.
+pub fn post_cells(
+    w: &World,
+    spawner: crate::path::Cell,
+    toward: [f64; 3],
+) -> Vec<crate::path::Cell> {
+    let mut cells = crate::path::Cells::new(w);
+    let burning = |c: crate::path::Cell| {
+        matches!(
+            crate::cast::seen(w, c),
+            Some(data::BlockKind::Fire | data::BlockKind::SoulFire)
+        )
+    };
+    let mut out: Vec<(i64, crate::path::Cell)> = Vec::new();
+    for dx in -POST_CELLS..=POST_CELLS {
+        for dz in -POST_CELLS..=POST_CELLS {
+            let c = (spawner.0 + dx, spawner.1, spawner.2 + dz);
+            if on_post(c, spawner) && cells.standable(c) && !burning(c) && !edge(w, c) {
+                let d = [
+                    f64::from(c.0) + 0.5 - toward[0],
+                    f64::from(c.2) + 0.5 - toward[2],
+                ];
+                out.push((((d[0] * d[0] + d[1] * d[1]) * 100.0) as i64, c));
+            }
+        }
+    }
+    out.sort();
+    out.into_iter().map(|(_, c)| c).collect()
+}
+
+/// The blaze spawner seen nearest the feet, within `POST_RANGE`.
+pub fn spawner_near(w: &World) -> Option<crate::path::Cell> {
+    let body = w.body?;
+    world::stage::kind_near(w, data::BlockKind::Spawner, 2)
+        .into_iter()
+        .map(|c| {
+            let at = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+            (distance(body.pos, at), c)
+        })
+        .filter(|(d, _)| *d <= POST_RANGE)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, c)| c)
 }
 
 /// Fire in the cell 0.9 ahead along `yaw`, at the feet or the head.
@@ -486,6 +562,11 @@ impl Defend {
             kept_off: 0,
             dodging: None,
             dodged: Vec::new(),
+            post: None,
+            posted_at: None,
+            spawner: None,
+            walking_post: false,
+            given_up: false,
             crit_wait: 0,
             falling_swings: 0,
             dodges: 0,
@@ -636,6 +717,7 @@ impl Defend {
         if status == DefendStatus::Running
             && self.stance == Stance::Fight
             && rules.ranged.contains(&self.kind)
+            && !self.walking_post
             && let Some(body) = w.body
             && let Some(yaw) = self.dodge(w, &body, tick)
         {
@@ -735,6 +817,16 @@ impl Defend {
                     .health
                     .is_some_and(|h| h <= rules.shooter_retreat_health);
             let stale = tick.saturating_sub(self.last_hit_at) > patience;
+            if shooter && stale && !hurt && !in_danger(w, rules) {
+                self.notes.push(format!(
+                    "shooter left for the next: {:?} {} not struck in {patience} ticks, {:.1} over the eye at {d:.1}",
+                    self.kind,
+                    self.foe,
+                    pos[1] - eye_y
+                ));
+                self.last_hit_at = self.started;
+                return (still, None, DefendStatus::Done);
+            }
             if in_danger(w, rules)
                 || hurt
                 || stale
@@ -853,6 +945,49 @@ impl Defend {
                     yaw: toward,
                     ..still
                 };
+                // A blaze is fought from its spawner's deck (wall 10): off the deck the fight
+                // walks a route to the deck cell nearest the foe; on it, no step leaves it.
+                // The spawner is looked up once a fight (a scan of the sightings round the bot).
+                let post = *self.spawner.get_or_insert_with(|| spawner_near(w));
+                let post = post.filter(|_| self.kind == EntityKind::Blaze);
+                let feet = crate::path::feet_cell(body.pos);
+                if let Some(sp) = post
+                    && !on_post(feet, sp)
+                {
+                    if self.post.is_none()
+                        && self
+                            .posted_at
+                            .is_none_or(|t| tick.saturating_sub(t) >= FLEE_RETRY_TICKS)
+                    {
+                        self.posted_at = Some(tick);
+                        for c in post_cells(w, sp, pos).into_iter().take(COVER_TRIES) {
+                            let mut walk = crate::walk::Walk::new(
+                                c,
+                                crate::path::Goal::Block { pos: c },
+                                crate::walk::Arrive::Goal,
+                                tick,
+                            );
+                            if walk.route_now(w, tick)
+                                && walk.route == Some(crate::path::Status::Found)
+                            {
+                                self.notes.push(format!(
+                                    "fight post at {c:?} from {feet:?}: the deck of the spawner at {sp:?}"
+                                ));
+                                self.post = Some(walk);
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(walk) = &mut self.post {
+                        let (c, status) = walk.step(w, tick);
+                        if status != crate::walk::TaskStatus::Running {
+                            self.post = None;
+                        }
+                        self.walking_post = true;
+                        return (c, None, DefendStatus::Running);
+                    }
+                }
+                self.walking_post = false;
                 // A shooter in touch is stepped away from, the strikes going on: its touch costs
                 // more than its fireballs (blaze-fight wall 4).
                 let face = match self.in_touch(w, body.pos).filter(|_| shooter) {
@@ -873,8 +1008,15 @@ impl Defend {
                     // it facing it (wall 29). A shooter's fight steps only onto a floor, never
                     // into fire (blaze-fight wall 4).
                     self.faced_at = None;
+                    let rad = toward.to_radians();
+                    let ahead = crate::path::feet_cell([
+                        body.pos[0] - rad.sin() * 0.9,
+                        body.pos[1],
+                        body.pos[2] + rad.cos() * 0.9,
+                    ]);
+                    let stays = post.is_none_or(|sp| !on_post(feet, sp) || on_post(ahead, sp));
                     let safe = if shooter {
-                        safe_step(w, body.pos, toward)
+                        stays && safe_step(w, body.pos, toward)
                     } else {
                         // Any fight's close-in stays out of fire: the fire escape and a defend
                         // on a wither skeleton cut each other every tick across a fire cell,
@@ -886,7 +1028,10 @@ impl Defend {
                     if shooter && (!safe || pos[1] - eye_y > STRIKE_REACH) {
                         self.no_way += 1;
                         if self.no_way >= NO_WAY_TICKS {
-                            self.stance = Stance::Retreat;
+                            // The foe waits (the planner leaves a foe never struck alone a
+                            // while) and the next one is taken: no retreat with health whole.
+                            self.last_hit_at = self.started;
+                            self.given_up = true;
                             self.notes.push(format!(
                                 "shooter fight given up: no way to {:?} {} for {} ticks, {:.1} over the eye at {d:.1}",
                                 self.kind,
@@ -895,6 +1040,9 @@ impl Defend {
                                 pos[1] - eye_y
                             ));
                         }
+                    }
+                    if self.given_up {
+                        return (face, None, DefendStatus::Done);
                     }
                     if !safe {
                         self.held_back += 1;

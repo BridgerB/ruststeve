@@ -88,3 +88,40 @@ fn a_cell_beside_a_fall_is_an_edge() {
     assert!(plan::defend::edge(&w, (-1, 64, 0)), "beside the hole");
     assert!(!plan::defend::edge(&w, (0, 64, 4)), "open floor");
 }
+
+/// Wall 10: the fight post is the spawner's deck. A deck five by five at y 64 round a spawner,
+/// fenced, with fire on one cell: the post's cells are the deck's standable cells (not the
+/// spawner, not the burning one, not anything off the deck), the nearest the asked point first.
+#[test]
+fn the_fight_post_is_the_spawners_deck() {
+    let mut m = flat_world(2, 63).unwrap();
+    let sp = (6, 64, 0);
+    m.set_block(sp.0, sp.1, sp.2, state(BlockKind::Spawner))
+        .unwrap();
+    for i in -3..=3 {
+        for (x, z) in [(sp.0 + i, -3), (sp.0 + i, 3), (sp.0 - 3, i), (sp.0 + 3, i)] {
+            m.set_block(x, 64, z, state(BlockKind::NetherBrickFence))
+                .unwrap();
+        }
+    }
+    m.set_block(sp.0 + 1, 64, 1, state(BlockKind::Fire))
+        .unwrap();
+    let w = bot::lockstep::run(Sim::new(CONFIG, m), "rs-bf", 1, 30, 20, |_, _| {
+        physics::Controls::default()
+    })
+    .world;
+    let cells = plan::defend::post_cells(&w, sp, [0.5, 64.0, 0.5]);
+    assert_eq!(
+        cells.len(),
+        23,
+        "24 deck cells less the burning one: {cells:?}"
+    );
+    assert_eq!(cells[0], (4, 64, 0), "the nearest the bot first");
+    assert!(cells.iter().all(|c| plan::defend::on_post(*c, sp)));
+    assert!(!cells.contains(&(sp.0 + 1, 64, 1)), "no burning cell");
+    assert!(!plan::defend::on_post(sp, sp), "not the spawner itself");
+    assert!(
+        !plan::defend::on_post((3, 64, 0), sp),
+        "the fence line is off it"
+    );
+}

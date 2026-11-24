@@ -1903,6 +1903,34 @@ impl Plan {
                 }
             }
         }
+        // --- the fight post (docs/problems/blaze-fight.md wall 10; defend.rs owns the rule) ---
+        // Healthy at the spawner with no fight on, the bot stands on the spawner's deck, where
+        // every blaze spawns within a strike, not on the bridge under it.
+        if let Some(body) = w.body
+            && let Some(sp) = defend::spawner_near(w)
+            && !defend::on_post(path::feet_cell(body.pos), sp)
+        {
+            for c in defend::post_cells(w, sp, body.pos)
+                .into_iter()
+                .take(CANDIDATES_PER_TICK)
+            {
+                if self.refused_now(c, tick) {
+                    continue;
+                }
+                let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+                self.refuse(c, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("fight post at {c:?}"),
+                        format!("the deck of the spawner at {sp:?}; no fight on"),
+                    );
+                    return Task::Explore(walk);
+                }
+            }
+        }
+        // --- end of the fight post ---
         if world::stage::at_spawner(w) {
             self.retry_at = tick + RETRY_TICKS;
             return Task::Idle;
