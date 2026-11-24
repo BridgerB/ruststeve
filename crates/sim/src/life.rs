@@ -320,6 +320,8 @@ pub struct Life {
     /// Fireballs a shield stopped, and fireballs that hit.
     pub fireballs_blocked: u64,
     pub fireballs_hit: u64,
+    /// Of those hits, the ones that dealt damage (what a race's damage events count).
+    pub fireballs_landed: u64,
     /// Fireballs loosed.
     pub fireballs_fired: u64,
     /// The motion a hit this tick knocks the player with, sent in place of the server's own.
@@ -362,6 +364,7 @@ impl Default for Life {
             blocking_since: None,
             fireballs_blocked: 0,
             fireballs_hit: 0,
+            fireballs_landed: 0,
             fireballs_fired: 0,
             knock: None,
             attack_ticker: 0,
@@ -824,12 +827,18 @@ impl Sim {
                             self.survival.life.fire_ticks =
                                 self.survival.life.fire_ticks.max(FIREBALL_FIRE_TICKS);
                         }
-                        out.extend(self.hit_from(
+                        let landed = self.hit_from(
                             FIREBALL_DAMAGE,
                             "fireball",
                             "death.attack.fireball",
                             b.from,
-                        )?);
+                        )?;
+                        // A hit inside the invulnerable half with no excess deals nothing and
+                        // the client hears of no damage: a race's "hit facts" count only these.
+                        if !landed.is_empty() {
+                            self.survival.life.fireballs_landed += 1;
+                        }
+                        out.extend(landed);
                     }
                     ended = true;
                 } else if self.state_at(cell.0, cell.1, cell.2).is_none() {
