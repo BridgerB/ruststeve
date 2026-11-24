@@ -72,6 +72,11 @@ A real cast beside it (agent O's race 45354021804 lane 0, 9966559, without these
 - **Read**: "tries: walk to the stand failed NoProgress" four times, 800 to 940 ticks into the cast, at its first room dig (-32, -53, -124).
 - **Fix** (56395f1): a walk to an op that fails on its way digs the straight way's first block, as a walk not found does (wall 22 of portal.md), before a try is spent. Notes: "walk digs N".
 
+## Raced: wall 4's level tunnel and wall 6 (race 45365616984, 17b78e2)
+
+**23 of 27 lit** (85.2%) in 48 casts. By place: 0 0/3, 1 2/3, 2 3/3, 3 3/3, 4 3/3, 5 3/3, 6 3/3, 7 3/3, 8 3/3. Casts failed: 4 in all (`Churned` 1, `Exposed` 1, `NoRefill` 1, `dig :room` 1); "tunnel … refused" 8, `Churned` 1. Wall 6's "walk digs" is printed only on a failed cast's note, and none of the four counted one: its firings are not counted, and place 7 lit 3 of 3 (2 of 3 before).
+
 ## Status
 
-- Walls 1 to 3 and 5: 20 of 27 twice running (c073b1a, 34352b8); with wall 4, 22 of 27 (a316d36); baseline 15 of 27. 17b78e2 (walls 4's level tunnel and 6, bba8161 merged): racing.
+- `sealava` (development evidence only), cap 24,000, 27 bots a race: baseline 15 (8c3d038, 113 casts); 20 (c073b1a), 20 (34352b8), 22 (a316d36), 23 (17b78e2, 48 casts).
+- Open: place 0 (37.5, -52, -74.5) lights none in any race (its sites have no station and every tunnel would cut its own floor); wall 6's firings uncounted; no real race from `ready` on this code yet.
