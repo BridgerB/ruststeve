@@ -5,8 +5,8 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@cc510b6 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@3453a59 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -57,3 +57,9 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - [[food-and-hunting]] - the hunt's strikes, paced the same way.
 
 - **A foe no strike reaches** (blaze wall 15): a defend that never struck its foe, the bot no worse than at its start, leaves that foe alone for `FAILURE_MEMORY_TICKS` (any kind but `never_fight`; wall 30 had covered only shooters), and within `defend_radius` it is answered again only once its kind hits the bot.
+
+## Issue 16: shooters at the blaze spawner (docs/problems/blaze-fight.md)
+- **Armour first**: in the Nether a held iron piece whose armour slot is empty is quick-moved on at the top of the always-rows (`unworn_armour`), since `equip` runs only when a task is chosen and a defend cuts in before that.
+- **A shooter's fight** (`ranged` kinds) strikes whichever mob of the foe's kind is in reach, measured from the eye to its box and only in plain sight (`in_reach`, `box_distance`, `sight`), and is given up after `shooter_patience` (100 ticks) with nothing landed.
+- **A shooter's retreat** starts at `shooter_retreat_health` (13: the danger line and one fireball's fire) and goes to cover, not to a distance: it ends where no shooter within `shoot_radius` (48) has a line to the bot's eye or middle (`seen_by`; a full block seen or a cell never seen exposed stops a line), else walks to the nearest standable, fire-free cell none sees (`cover_cells`).
+- **Its notes** reach the ledger through `Defend::notes`: "struck N in reach, not M", "shooter fight given up", "retreat to cover at", "in cover at".
