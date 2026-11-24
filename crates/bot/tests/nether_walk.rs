@@ -70,6 +70,12 @@ fn soul_sand_is_ground_for_a_route() {
     let r = path::plan(&w, (0, 64, 0), &Goal::Block { pos: (8, 64, 0) }, 6000);
     assert_eq!(r.status, Status::Found);
     assert_eq!(r.waypoints.len(), 8, "{:?}", r.waypoints);
+    // Four of the eight cells are soul sand, each at its pace: 1 / 0.581 of a plain cell.
+    assert!(
+        (r.cost - (4.0 + 4.0 / 0.581)).abs() < 0.05,
+        "cost {}",
+        r.cost
+    );
     assert!(
         r.kinds.iter().all(|k| *k == MoveKind::Walk),
         "{:?}",
@@ -83,10 +89,13 @@ fn soul_sand_is_ground_for_a_route() {
 
 #[test]
 fn the_feet_on_soul_sand_are_in_the_cell_over_it() {
-    assert_eq!(path::feet_cell([3.5, 63.875, 0.5]), (3, 64, 0));
-    assert_eq!(path::feet_cell([3.5, 64.0, 0.5]), (3, 64, 0));
-    assert_eq!(path::feet_cell([3.5, 63.5, 0.5]), (3, 63, 0));
-    assert_eq!(path::feet_cell([-0.5, -0.125, -0.5]), (-1, 0, -1));
+    let w = joined(nether(&band(63, 63, BlockKind::SoulSand), &[]));
+    // On the soul sand the feet floor to its own cell; the route's node is the cell over it.
+    assert_eq!(path::feet_cell([3.5, 63.875, 0.5]), (3, 63, 0));
+    assert_eq!(path::stand_cell(&w, [3.5, 63.875, 0.5]), (3, 64, 0));
+    // Off it nothing changes.
+    assert_eq!(path::stand_cell(&w, [0.5, 64.0, 0.5]), (0, 64, 0));
+    assert_eq!(path::stand_cell(&w, [0.5, 64.9, 0.5]), (0, 64, 0));
 }
 
 #[test]
@@ -106,7 +115,7 @@ fn a_walk_crosses_soul_sand_and_ends_on_it() {
     // From the soul sand, a route is found (the start is the cell over it).
     let w = out.run.world;
     let from = path::feet_cell(w.player.pos.unwrap());
-    assert_eq!(from, (4, 64, 0));
+    assert_eq!(from, (4, 63, 0), "the feet floor to the soul sand's cell");
     let r = path::plan(&w, from, &Goal::Block { pos: (0, 64, 0) }, 6000);
     assert_eq!(r.status, Status::Found);
 }

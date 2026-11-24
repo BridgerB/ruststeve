@@ -442,7 +442,16 @@ impl Escape {
                     is_water(w, (x + dx, y, z + dz)) || is_water(w, (x + dx, y - 1, z + dz))
                 });
                 let cells = [(x, y, z), (x, y + 1, z)];
+                // Never a cell holding water back: over it, or beside it on the level. Dug, it
+                // floods the notch, and a body in water on the notch's floor is never on dry land
+                // (race 45343519424 lane 2: the aquifer round (42, 55, -136) stood at three heights).
+                let wet = |(kx, ky, kz): Cell| {
+                    [(0, 1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
+                        .iter()
+                        .any(|(dx, dy, dz)| is_water(w, (kx + dx, ky + dy, kz + dz)))
+                };
                 let ok = beside_water
+                    && !cells.iter().any(|k| wet(*k))
                     && c.floor((x, y - 1, z))
                     && cells
                         .iter()
@@ -668,7 +677,25 @@ impl Escape {
         }
         if self.target.is_none() && tick >= self.next_search {
             self.next_search = tick + SEARCH_EVERY_TICKS;
+            // A bank refused (no nearer, nothing on the way it may dig) is past a swim's reach:
+            // a notch beside the body comes before the next bank. With a bank within reach on
+            // record the list never ran out, and the notch was never cut (race 45343519424 lane
+            // 2: nine banks 12 blocks off through stone holding water back, refused in turn
+            // and the list cleared, from tick 14,780 to the run's end).
+            let notch_first = (self.kind == TrapKind::Water && !self.refused.is_empty())
+                .then(|| self.notch(w, feet))
+                .flatten();
+            if let Some((cell, _)) = &notch_first {
+                self.trail(
+                    tick,
+                    format!(
+                        "notch before another bank at {cell:?}: {} banks refused",
+                        self.refused.len()
+                    ),
+                );
+            }
             self.target = match self.kind {
+                TrapKind::Water if notch_first.is_some() => None,
                 TrapKind::Water => self.bank(w, feet),
                 TrapKind::Lava => {
                     self.footing(w, around(feet, FLEE_RADIUS, feet.1 - 1..=feet.1 + 2))
@@ -682,7 +709,7 @@ impl Escape {
             self.best_at = tick;
             if self.target.is_none()
                 && self.kind == TrapKind::Water
-                && let Some((cell, dig)) = self.notch(w, feet)
+                && let Some((cell, dig)) = notch_first.or_else(|| self.notch(w, feet))
             {
                 self.target = Some(cell);
                 // Popped from the end: the head-height cell first, then the feet's.
