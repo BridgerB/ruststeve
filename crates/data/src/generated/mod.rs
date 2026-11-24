@@ -13,6 +13,7 @@ pub mod items;
 pub mod loot;
 pub mod metadata;
 pub mod mobs;
+pub mod movement;
 pub mod packets;
 pub mod recipes;
 pub mod registries;

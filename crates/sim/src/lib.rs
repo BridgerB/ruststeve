@@ -296,6 +296,12 @@ impl Sim {
                 let pos = self.pos;
                 self.on_move(pos, flags & 1 != 0)
             }
+            // The keys held: a server keeps the shift key (`handlePlayerInput`:
+            // `setShiftKeyDown`), which is what spares the player on magma.
+            (Phase::Play, C2s::PlayerInput { flags }) => {
+                self.survival.life.sneaking = flags & protocol::packets::INPUT_SHIFT != 0;
+                Ok(Vec::new())
+            }
             (
                 Phase::Play,
                 C2s::PlayerAction {
