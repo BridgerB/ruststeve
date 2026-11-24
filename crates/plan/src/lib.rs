@@ -1027,7 +1027,13 @@ impl Plan {
             free: task_free && hands_free,
             placing,
             striking: match &self.task {
-                Task::Defend(d) => shield::striking(w, d),
+                Task::Defend(d) => shield::striking(
+                    w,
+                    d,
+                    self.table
+                        .as_ref()
+                        .map_or(&[][..], |t| &t.survival.ranged[..]),
+                ),
                 _ => None,
             },
         };

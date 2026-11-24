@@ -476,10 +476,19 @@ fn a_dropped_strike_is_given_back() {
     );
     // What the planner names in reach.
     assert!(
-        shield::striking(&w, &d).is_some_and(|s| s.starts_with("WitherSkeleton 5 in reach")),
+        shield::striking(&w, &d, &rules().ranged)
+            .is_some_and(|s| s.starts_with("WitherSkeleton 5 in reach")),
         "{:?}",
-        shield::striking(&w, &d)
+        shield::striking(&w, &d, &rules().ranged)
     );
     w.entities.get_mut(&5).unwrap().pos = [0.5, 64.0, 9.0];
-    assert_eq!(shield::striking(&w, &d), None);
+    assert_eq!(shield::striking(&w, &d, &rules().ranged), None);
+    // A blaze in reach is not yielded to (the shield blocks its point-blank volley); in touch it is.
+    add(&mut w, 6, EntityKind::Blaze, [0.5, 64.5, 3.0]);
+    assert_eq!(shield::striking(&w, &d, &rules().ranged), None);
+    w.entities.get_mut(&6).unwrap().pos = [0.5, 64.0, 2.0];
+    assert_eq!(
+        shield::striking(&w, &d, &rules().ranged).as_deref(),
+        Some("a blaze in touch")
+    );
 }
