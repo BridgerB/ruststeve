@@ -455,6 +455,81 @@ pub mod walls {
         }
     }
 
+    /// How far over the lava sea the arenas' bridge deck is: a fall from it ends in lava.
+    const DECK: i32 = LAVA_SEA + 20;
+
+    /// A fight arena: a fortress bridge 61 long along x over the lava sea, `walk` cells wide
+    /// (1 or 3), with nether brick fences on a course outside the walk when `rails`, or open
+    /// edges. The bot starts at its middle; a test summons the foes (`Sim::summon_with`).
+    pub fn fortress_bridge(walk: i32, rails: bool) -> Wall {
+        let half = (walk.max(1) - 1) / 2;
+        let mut stage = Stage::new(3, LAVA_SEA - 3, LAVA_SEA + 60);
+        stage
+            .lava_lake((-48, 63), (-48, 63), LAVA_SEA, 3)
+            .bridge((-30, 30), (-half, half), DECK);
+        if rails {
+            for z in [-half - 1, half + 1] {
+                stage.bricks((-30, 30), (DECK, DECK), (z, z)).fill(
+                    (-30, 30),
+                    (DECK + 1, DECK + 1),
+                    (z, z),
+                    BlockKind::NetherBrickFence,
+                );
+            }
+        }
+        Wall {
+            name: if rails {
+                "a railed fortress bridge"
+            } else {
+                "an open fortress bridge"
+            },
+            stage,
+            start: (0, DECK + 1, 0),
+            bricks: (0, DECK, 0),
+            wake: Vec::new(),
+            spawner: None,
+        }
+    }
+
+    /// A fight arena: a netherrack flat with one fire cell east of the bot, between it and where
+    /// a test stands a foe. Fire on netherrack never goes out.
+    pub fn fire_beside() -> Wall {
+        let mut stage = Stage::new(2, FLOOR, CEILING);
+        stage.set((1, FLOOR + 1, 0), BlockKind::Fire).bricks(
+            (20, 22),
+            (FLOOR + 1, FLOOR + 4),
+            (-2, 2),
+        );
+        Wall {
+            name: "a fire cell beside the bot",
+            stage,
+            start: (0, FLOOR + 1, 0),
+            bricks: (20, FLOOR + 1, 0),
+            wake: Vec::new(),
+            spawner: None,
+        }
+    }
+
+    /// A rest arena: a brick floor in the open (the bot is at the fortress), a brick wall three
+    /// high and five wide four cells west of it, and room for a test's blaze to hover in the
+    /// east. Behind the wall is out of the blaze's sight; nowhere else is.
+    pub fn shelter_wall() -> Wall {
+        let mut stage = Stage::new(2, FLOOR, CEILING);
+        stage.bricks((-8, 8), (FLOOR, FLOOR), (-8, 8)).bricks(
+            (-4, -4),
+            (FLOOR + 1, FLOOR + 3),
+            (-2, 2),
+        );
+        Wall {
+            name: "a wall to rest behind",
+            stage,
+            start: (0, FLOOR + 1, 0),
+            bricks: (0, FLOOR, 0),
+            wake: Vec::new(),
+            spawner: None,
+        }
+    }
+
     /// Every wall of the walk to the fortress, the control first (`pillar_in_the_sea` is the
     /// next leg's: it starts at the fortress).
     pub fn all() -> Vec<Wall> {

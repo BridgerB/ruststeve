@@ -559,6 +559,11 @@ pub struct Plan {
     /// `walk::FAR_RETRY_TICKS`.
     #[serde(default)]
     pub far_search_at: u64,
+    /// Far walks begun on a found route that failed, in a row: each doubles the wait before the
+    /// next far search, so a route found and not walkable gives way to the tunnel (the model's
+    /// lake: the same 50-cell route found and failed every 80 ticks for a whole run).
+    #[serde(default)]
+    pub far_fails: u32,
     /// The watchdog's mark: where the body was, how many items were held, the events made, and
     /// when (issue 13b).
     #[serde(default)]
@@ -642,6 +647,7 @@ impl Plan {
             travel: tunnel::Travel::default(),
             landings: Vec::new(),
             far_search_at: 0,
+            far_fails: 0,
             mark: None,
             stalls: 0,
             trail: Vec::new(),
@@ -1065,6 +1071,9 @@ impl Plan {
                         );
                     }
                     Task::Explore(walk) => {
+                        if walk.more.far {
+                            self.far_fails = 0;
+                        }
                         self.explored.push(walk.target);
                         if self.explored.len() > EXPLORED_KEPT {
                             self.explored.remove(0);
@@ -1124,6 +1133,23 @@ impl Plan {
                             format!("explore to {:?} failed: {f:?}", walk.target),
                             "turn the heading a quarter".to_owned(),
                         );
+                        // A2: a far walk found and not walked is not searched again at once.
+                        if walk.more.far {
+                            self.far_fails += 1;
+                            let wait = walk::FAR_RETRY_TICKS << self.far_fails.min(5);
+                            self.far_search_at = tick + wait;
+                            self.note(
+                                tick,
+                                format!("far walk refused for {wait} ticks"),
+                                format!(
+                                    "{} far walks failed in a row, this one at cell {} of {} with {} blocks laid",
+                                    self.far_fails,
+                                    walk.at,
+                                    walk.waypoints.as_ref().map_or(0, Vec::len),
+                                    walk.more.placed
+                                ),
+                            );
+                        }
                     }
                     Task::Idle
                     | Task::Dig(_)

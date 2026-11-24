@@ -256,6 +256,7 @@ impl Sim {
             (p.0 - 1, p.1, p.2),
             (p.0 + 1, p.1, p.2),
         ];
+        out.extend(self.fall_onto(p)?);
         for n in around {
             let Some(f) = self.fluid_at(n) else {
                 continue;
@@ -268,6 +269,33 @@ impl Sim {
             }
             self.schedule(n, f.kind, f.kind.delay(self.world.fast_lava()));
         }
+        Ok(out)
+    }
+
+    /// `FallingBlock`: gravel or sand over a cell that has just come free falls into it, down
+    /// to the first cell with something under it, and what stood on that gravel follows. In
+    /// the game the block waits 2 ticks and falls as an entity; here it lands at once.
+    fn fall_onto(&mut self, p: Pos) -> Result<Vec<Wire>, EncodeError> {
+        let free = |sim: &Self, c: Pos| {
+            sim.state_at(c.0, c.1, c.2)
+                .is_some_and(|s| is_air(s) || fluid_of(s).is_some())
+        };
+        let above = (p.0, p.1 + 1, p.2);
+        let falls = matches!(
+            kind_of(self.st(above)),
+            Some(BlockKind::Gravel | BlockKind::Sand | BlockKind::RedSand)
+        );
+        if !falls || !free(self, p) {
+            return Ok(Vec::new());
+        }
+        let mut land = p;
+        while free(self, (land.0, land.1 - 1, land.2)) {
+            land.1 -= 1;
+        }
+        let block = self.st(above);
+        let air = BlockKind::Air.info().map_or(0, |i| i.default_state);
+        let mut out = self.set_and_update(land, block)?;
+        out.extend(self.set_and_update(above, air)?);
         Ok(out)
     }
 

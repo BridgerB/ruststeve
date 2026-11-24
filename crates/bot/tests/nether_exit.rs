@@ -5,7 +5,7 @@
 //! at (22 to 23, 34 to 35, -20); the nearest nether bricks are at (61, 30 to 37, 95), 121 blocks
 //! off. Outside the columns kept the model's world is solid and the bot's unloaded.
 //!
-//! Run the ignored one with `cargo test -p bot --test nether_exit -- --ignored --nocapture`.
+//! Nothing here is ignored any more: the kit bot reaches the bricks (probe 45343484013).
 
 use std::path::Path;
 
@@ -59,13 +59,15 @@ const KIT: [(ItemKind, i32); 26] = [
 
 /// The exit as a model world in the Nether, the player at the snapshot bot's place.
 fn exit() -> ModelWorld {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/nether-exit.rsw"
-    );
-    let mut world = CapturedWorld::read(Path::new(path))
+    captured("nether-exit.rsw", START)
+}
+
+/// A captured fixture as a model world in the Nether.
+fn captured(file: &str, spawn: [f64; 3]) -> ModelWorld {
+    let path = format!("{}/tests/fixtures/{file}", env!("CARGO_MANIFEST_DIR"));
+    let mut world = CapturedWorld::read(Path::new(&path))
         .unwrap()
-        .model(START)
+        .model(spawn)
         .unwrap();
     world.dimension = NETHER.to_owned();
     world.dimension_type = nether_type();
@@ -141,7 +143,6 @@ fn line(r: TaskRecord) -> String {
 /// The kit bot's own situation: the equipped Nether snapshot's bot, with what it holds, where it
 /// stands, the fortress aim. Twelve thousand ticks is ten minutes; the bricks are 121 blocks off.
 #[test]
-#[ignore = "the tunnel comes out at (61, 47, 79) after 2,660 ticks at 20 health, 16 from the bricks; the far walk then lays 44 blocks and stalls there, each route failing NoPath (CI 45341556367); owners A2, A7"]
 fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
@@ -209,4 +210,29 @@ fn the_kit_bot_reaches_the_bricks_from_the_real_exit() {
     );
     assert!(!run.died, "died\n{story}");
     assert!(reached_at.is_some(), "never at the fortress\n{story}");
+}
+
+/// The fortress itself (`fixtures/nether-fortress.rsw`): the 81 chunk columns x 2 to 10, z 4 to
+/// 12 (blocks x 32 to 175, z 64 to 207) as the server sent them to lane 0 of race 45337739022,
+/// the bot that tunnelled to the blaze spawner, cut at its server tick 12,000 where it stood at
+/// (129.8, 62.2, 164.3) on the bridges at y 61 to 62. The stage for the fight on the real
+/// ground: the bridges are there and so is a spawner near that place.
+#[test]
+fn the_fortress_fixture_holds_the_bridges_and_a_spawner() {
+    let world = captured("nether-fortress.rsw", [129.79, 62.17, 164.3]);
+    assert_eq!(world.columns.len(), 81);
+    assert!(world.fast_lava());
+    let sim = Sim::new(CONFIG, world);
+    for pos in [(129, 61, 163), (130, 61, 163), (129, 60, 164)] {
+        assert_eq!(kind(&sim, pos), Some(BlockKind::NetherBricks), "at {pos:?}");
+    }
+    let spawners: Vec<(i32, i32, i32)> = (113..=145)
+        .flat_map(|x| (56..=72).flat_map(move |y| (148..=180).map(move |z| (x, y, z))))
+        .filter(|p| kind(&sim, *p) == Some(BlockKind::Spawner))
+        .collect();
+    assert!(
+        !spawners.is_empty(),
+        "no spawner within 16 of the bot's place"
+    );
+    println!("spawners: {spawners:?}");
 }
