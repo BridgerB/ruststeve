@@ -261,3 +261,44 @@ fn woken_lava_runs_where_the_chunks_tick_and_waits_where_they_do_not() {
     }
     assert_eq!((lava(&sim, 8, 41, 2), lava(&sim, 71, 41, 2)), (2, 0));
 }
+
+/// `BlockItem.place` into lava: water and lava are replaceable, so a held block goes into a
+/// lava cell (the bridge's move and the seal's), the lava is gone from it, and the flow it cut
+/// off from its source drains.
+#[test]
+fn a_block_is_placed_into_lava_and_the_flow_behind_it_drains() {
+    let mut stage = Stage::new(1, 40, 60);
+    // A trench in the floor east of the player, a source set at its far end.
+    stage.air((3, 5), (40, 40), (0, 0)).spawn((2, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.give((data::ItemKind::Cobblestone, 64));
+    sim.setblock((6, 40, 0), state(BlockKind::Lava)).unwrap();
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    let trench = |sim: &Sim| [3, 4, 5, 6].map(|x| lava(sim, x, 40, 0));
+    assert_eq!(trench(&sim), [5, 6, 7, 8]);
+    // The trench's floor under (4, 40, 0), clicked on its top face.
+    let out = send(
+        &mut sim,
+        C2s::UseItemOn {
+            hand: 0,
+            pos: (4, 39, 0),
+            face: 1,
+            cursor: [0.5, 1.0, 0.5],
+            inside: false,
+            sequence: 1,
+        },
+    );
+    assert_eq!(kind(&sim, 4, 40, 0), Some(BlockKind::Cobblestone));
+    assert_eq!(
+        sim.survival.held_stack(),
+        Some((data::ItemKind::Cobblestone, 63))
+    );
+    assert_eq!(out.last(), Some(&S2c::BlockChangedAck { sequence: 1 }));
+    for _ in 0..40 {
+        tick(&mut sim);
+    }
+    assert_eq!(trench(&sim), [0, 0, 7, 8], "the cut-off flow did not drain");
+    assert_eq!(sim.health, 20.0);
+}

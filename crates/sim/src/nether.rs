@@ -291,6 +291,8 @@ pub struct Wall {
     pub start: Pos,
     /// The nether-brick cell nearest the start.
     pub bricks: Pos,
+    /// The blaze spawner, on the walls that have one.
+    pub spawner: Option<Pos>,
     /// Blocks set with their updates before the first tick (`Sim::setblock`): lava put here
     /// runs, where a lake laid in the stage rests.
     pub wake: Vec<(Pos, BlockKind)>,
@@ -340,6 +342,7 @@ pub mod walls {
             start: (0, FLOOR + 1, 0),
             bricks: (30, FLOOR + 1, 0),
             wake: Vec::new(),
+            spawner: None,
         }
     }
 
@@ -353,6 +356,7 @@ pub mod walls {
             start: (0, FLOOR + 1, 0),
             bricks: (30, FLOOR + 1, 0),
             wake: Vec::new(),
+            spawner: None,
         }
     }
 
@@ -372,6 +376,7 @@ pub mod walls {
             start: (0, FLOOR + 1, 0),
             bricks: (20, FLOOR + 1, 0),
             wake: Vec::new(),
+            spawner: None,
         }
     }
 
@@ -392,6 +397,7 @@ pub mod walls {
             start: (0, LAVA_SEA + 1, 0),
             bricks: (60, LAVA_SEA + 1, 0),
             wake: Vec::new(),
+            spawner: None,
         }
     }
 
@@ -416,10 +422,41 @@ pub mod walls {
             start: (0, foot, 0),
             bricks: (0, foot, 13),
             wake: vec![((0, foot + 3, -4), BlockKind::Lava)],
+            spawner: None,
         }
     }
 
-    /// Every wall, the control first.
+    /// Where the bridged walk of race 45337580375 ended, to scale: the bot on a shelf of
+    /// cobblestone it laid at the foot of a brick pillar that stands in the lava sea, already
+    /// "at the fortress" (within 6 of bricks). The fortress proper is up and away: the pillar
+    /// carries a bridge 32 over the sea that runs 40 east and then 40 south to a platform with
+    /// the blaze spawner (the real one was 68 east and 30 up). Nothing joins the shelf to the
+    /// deck but the pillar's face and what the bot builds or cuts.
+    pub fn pillar_in_the_sea() -> Wall {
+        let sea = LAVA_SEA;
+        let deck = sea + 32;
+        let mut stage = Stage::over((-32, 79), (-32, 79), sea - 3, sea + 70);
+        stage
+            .lava_lake((-32, 79), (-32, 79), sea, 3)
+            .bricks((0, 2), (sea - 3, deck), (0, 2))
+            .fill((-3, -1), (sea, sea), (0, 2), BlockKind::Cobblestone)
+            .bridge((0, 42), (0, 2), deck)
+            .bridge((40, 42), (0, 44), deck)
+            .bridge((37, 45), (42, 50), deck)
+            .bricks((41, 41), (deck + 1, deck + 1), (46, 46))
+            .set((41, deck + 2, 46), BlockKind::Spawner);
+        Wall {
+            name: "a brick pillar in the lava sea",
+            stage,
+            start: (-2, sea + 1, 1),
+            bricks: (0, sea + 1, 1),
+            wake: Vec::new(),
+            spawner: Some((41, deck + 2, 46)),
+        }
+    }
+
+    /// Every wall of the walk to the fortress, the control first (`pillar_in_the_sea` is the
+    /// next leg's: it starts at the fortress).
     pub fn all() -> Vec<Wall> {
         vec![
             netherrack_flat(),
