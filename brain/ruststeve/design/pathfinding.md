@@ -5,8 +5,8 @@ type: reference
 tags: [plan, path, astar, routes, core]
 aliases: [path, pathfinder, A*, route, waypoints, Cells, classify, awkward, moves, goals, Near, Afar, budget, expansions, start_cell]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@475e5f1 clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@5657899 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/path.rs#pub fn classify(state: Option<u32>) -> Class {"
   - "ruststeve:crates/plan/src/path.rs#pub fn search(cells: &mut Cells<'_>, start: Cell, goal: &Goal, max_nodes: u32) -> Route {"
@@ -45,6 +45,11 @@ Issue 09a: clojurecraft's `path.clj` in Rust (`plan::path`), constant for consta
 - **A route keeps its moves** (`Route::kinds`, one a waypoint).
 - **The weighed search** (`search_weighted`, `plan_weighted`): f = g + weight × h. At 1 it is `search`. The fortress leg uses 4 with 40,000 expansions (`walk::FAR_WEIGHT`, `FAR_NODES`): on the recorded Nether of race 45194253932 the 222-cell route to bricks 110 blocks off is found in 12,664 expansions, where weight 2 needs 147,900 and 6,000 plain ones find nothing.
 - **`navmap`** (crate `navprobe`) folds a recording to a tick and prints the terrain as layer maps and the route `plan_weighted` finds over it: the probe to run before a race.
+
+## Issue 17d: the heading's legs (docs/problems/heading.md)
+- **`Goal::Ahead { from, dir, gain }`**: `gain` or more along a compass axis from `from` (`path::along` gives a cell's projection and how far aside), no more than `gain` aside. A heading's leg ends wherever the ground lets it, not at one cell that may be rock.
+- **Blocked cells** (`Cells::blocking`): a search never enters them. The heading gives its cut cells at or behind the feet, so a leg never walks back over ground it covered (clojurecraft's causeway pacing).
+- **A keep for bridging** (`Cells::far_keeping`): a far search bridges only with that many blocks held; the heading keeps 32, the fortress walk `BRIDGE_RESERVE` 16. `plan_over` searches cells the caller made.
 
 ## See also
 - [[walk-and-watchdog]] - following a route.

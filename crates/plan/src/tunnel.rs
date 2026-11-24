@@ -321,6 +321,8 @@ pub struct Route {
     /// Whether it ends within reach of the target; else it is the nearest the search came.
     pub found: bool,
     pub expanded: u32,
+    /// Stairs down the search did not take inside a fortress's footprint (`route_keeping`).
+    pub down_refused: u32,
 }
 
 /// Rock within this many steps of a cell found bad is suspect, and a step into it costs
@@ -347,6 +349,35 @@ pub fn route(
     lay: bool,
     max_nodes: u32,
 ) -> Option<Route> {
+    route_keeping(w, from, goals, blocked, lay, max_nodes, Limits::default())
+}
+
+/// What a heading's tunnel asks of its route beyond a fortress's (issue 17d,
+/// docs/problems/heading.md).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Limits {
+    /// No stair down into this (a fortress's brick bounds, padded: issue 17c, clojurecraft #715:
+    /// a fortress's floors are thin over the lava sea, and a stair cut down through one comes out
+    /// over it).
+    pub footprint: Option<(i32, i32, i32, i32)>,
+    /// Open cells cost no more than a step (no `OPEN_COST`): pickaxe uses are a heading's scarce
+    /// resource, so its tunnel walks what is open and cuts only what is not. A fortress's tunnel
+    /// keeps to rock, out of the open where ghasts and piglins are.
+    pub open_cheap: bool,
+}
+
+/// `route` within `limits`.
+pub fn route_keeping(
+    w: &World,
+    from: Cell,
+    goals: &[Cell],
+    blocked: &BTreeSet<Cell>,
+    lay: bool,
+    max_nodes: u32,
+    limits: Limits,
+) -> Option<Route> {
+    let footprint = limits.footprint;
+    let mut down_refused = 0;
     let target = *goals.first()?;
     // The box: the feet and the target with a margin, the target pulled in when it is far.
     let pull = |f: i32, t: i32| f + (t - f).clamp(-(MAX_SPAN - 2 * MARGIN), MAX_SPAN - 2 * MARGIN);
@@ -410,6 +441,10 @@ pub fn route(
                 if closed.contains(&to) || blocked.contains(&to) {
                     continue;
                 }
+                if dy == -1 && footprint.is_some_and(|b| crate::endermen::in_footprint(b, to)) {
+                    down_refused += 1;
+                    continue;
+                }
                 let Some((cells, floor)) = opened(c, to) else {
                     continue;
                 };
@@ -428,7 +463,7 @@ pub fn route(
                 if digs > 0 && suspect.contains(&to) {
                     cost += SUSPECT_COST;
                 }
-                if sight.open_sides(to) > 4 {
+                if !limits.open_cheap && sight.open_sides(to) > 4 {
                     cost += OPEN_COST;
                 }
                 let g2 = g + cost;
@@ -456,6 +491,7 @@ pub fn route(
         cells,
         found,
         expanded,
+        down_refused,
     })
 }
 
@@ -484,6 +520,16 @@ pub struct Travel {
     pub routes: u32,
     pub segments: u32,
     pub refused: u32,
+    /// A heading's cut cells behind the feet (docs/problems/heading.md): blocked for the route
+    /// as `blocked` is, set by `heading_tunnel` and cleared by every other tunnel.
+    #[serde(default)]
+    pub paced: BTreeSet<Cell>,
+    /// A heading tunnel's fortress footprint (`endermen::fortress_bounds`): no stair down in it.
+    #[serde(default)]
+    pub footprint: Option<(i32, i32, i32, i32)>,
+    /// A heading tunnel's: open cells cost a step (`Limits::open_cheap`).
+    #[serde(default)]
+    pub open_cheap: bool,
 }
 
 /// What a stretch of route does, for the note: "stairs up", "level" or "stairs down".
@@ -562,7 +608,27 @@ impl Plan {
         (what, why): (&str, &str),
         tick: u64,
     ) -> Option<Task> {
+        self.travel.paced.clear();
+        self.travel.footprint = None;
+        self.travel.open_cheap = false;
         self.tunnel(w, target, true, (what, why), tick)
+    }
+
+    /// A heading's leg by tunnel (docs/problems/heading.md): as `tunnel_toward`, its route never
+    /// stepping into `paced` (the heading's cut cells behind the feet).
+    pub fn heading_tunnel(
+        &mut self,
+        w: &World,
+        target: Cell,
+        paced: BTreeSet<Cell>,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        self.travel.exploring = false;
+        self.travel.paced = paced;
+        self.travel.footprint = crate::endermen::fortress_bounds(w);
+        self.travel.open_cheap = true;
+        self.tunnel(w, target, false, (what, why), tick)
     }
 
     /// The travel tunnel to one cell (a spawner, a place): as `travel_tunnel`, but the route ends
@@ -576,6 +642,9 @@ impl Plan {
         tick: u64,
     ) -> Option<Task> {
         self.travel.exploring = false;
+        self.travel.paced.clear();
+        self.travel.footprint = None;
+        self.travel.open_cheap = false;
         self.tunnel(w, target, false, (what, why), tick)
     }
 
@@ -691,7 +760,19 @@ impl Plan {
                     )
                     .collect();
                 let lay = stairs::lay_item(w).is_some();
-                let Some(r) = route(w, feet, &goals, &self.travel.blocked, lay, MAX_NODES) else {
+                let blocked = if self.travel.paced.is_empty() {
+                    std::borrow::Cow::Borrowed(&self.travel.blocked)
+                } else {
+                    let mut all = self.travel.blocked.clone();
+                    all.extend(self.travel.paced.iter().filter(|c| **c != feet));
+                    std::borrow::Cow::Owned(all)
+                };
+                let limits = Limits {
+                    footprint: self.travel.footprint,
+                    open_cheap: self.travel.open_cheap,
+                };
+                let Some(r) = route_keeping(w, feet, &goals, &blocked, lay, MAX_NODES, limits)
+                else {
                     self.note(
                         tick,
                         format!("no tunnel route toward {what} at {target:?}"),
@@ -717,14 +798,22 @@ impl Plan {
                         r.cells.len().saturating_sub(1)
                     ),
                     format!(
-                        "{} at {end:?}, up to y {top}, {} nodes, {} cells blocked",
+                        "{} at {end:?}, up to y {top}, {} nodes, {} cells blocked{}",
                         if r.found {
                             "ends within reach"
                         } else {
                             "ends short (the nearest found)"
                         },
                         r.expanded,
-                        self.travel.blocked.len()
+                        self.travel.blocked.len(),
+                        if r.down_refused > 0 {
+                            format!(
+                                "; {} stairs down refused in the fortress footprint",
+                                r.down_refused
+                            )
+                        } else {
+                            String::new()
+                        }
                     ),
                 );
                 self.travel.route = r.cells;

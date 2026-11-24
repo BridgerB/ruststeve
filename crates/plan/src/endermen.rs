@@ -1141,13 +1141,13 @@ impl Plan {
 
     /// The way on with no enderman to go to: the heading (issue 17d).
     fn travel_on(&mut self, w: &World, tick: u64, reserve: i32) -> Task {
-        // >>> heading (E2): `self.heading_task(w, tick)` replaces this fallback once it lands.
-        let uses = pickaxe_uses_left(w);
-        if uses > reserve
-            && let Some(t) = self.explore_tunnel(w, tick, "no enderman in view")
-        {
+        // >>> heading (E2): the held heading (issue 17d, docs/problems/heading.md): a forest known,
+        // else a soul sand valley, else the axis, leg by leg. `None` when it is over (a warped
+        // forest at the feet, or turned out): the explore walk below.
+        if let Some(t) = self.heading_task(w, tick) {
             return t;
         }
+        let uses = pickaxe_uses_left(w);
         if uses <= reserve
             && self
                 .ender

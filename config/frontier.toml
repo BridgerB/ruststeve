@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "rods_7"
-tag = "race-45363542882"
-asset = "snapshot-rods_7-45363542882-race-45363542882-lane-2.tar.zst"
-commit = "270f4e254ddef857b9299d16eb79bbfbc5ea2831"
-how = "rs-l02-b00 of race 45363542882 (resumed from the real spawner snapshot of race 45350933958 lane 0, itself from the real Nether snapshot of race 45194253932 lane 5, from the clean ready snapshot of race 45128866973 lane 6): it held 7 blaze rods at tick 6,700 at health 16.2, food 20, not burning, with 144 pickaxe uses and a shield at 48 of 336. A sideways move at the same stage (issue 17, docs/problems/endermen.md): the first rods_7 frontier, race 45358767468 lane 0, was burning at rod 7 with no shield."
+stage = "endermen"
+tag = "race-45481633896"
+asset = "snapshot-endermen-45481633896-race-45481633896-lane-3.tar.zst"
+commit = "c3193e6b25e1ce4e7366071d11f325f3e61931dd"
+how = "rs-l03-b00 of race 45481633896 (resumed from the real rods_7 snapshot of race 45363542882 lane 2, itself from the real spawner snapshot of race 45350933958 lane 0): holding its 7 rods it walked away from the spawner through skeletons and a wither skeleton, saw enderman 224 frozen at 78 blocks, approached it by the plain route and then the far walk (25 bridge blocks, up to y 85), and stood within 32 blocks of it ticking at server tick 3,400 at (13.7, 84.0, 71.7) in a soul sand valley; it sealed a 2-high pocket with the enderman ticking 21.6 off and ended alive at 12.5 health. No look was ever kept off an enderman and none was provoked."
