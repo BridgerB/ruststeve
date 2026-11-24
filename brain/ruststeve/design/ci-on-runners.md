@@ -5,8 +5,8 @@ type: how-to
 tags: [ci, runners, github-actions, probe, caching]
 aliases: [ci.yml, probe.yml, how to run code, rust-cache, nextest, workflow_dispatch, deps-boundary, xtask]
 status: verified
-lastUpdated: 2026-11-18
-verifiedAgainst: ruststeve@ca34f7c
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@a5ae696
 sourceRefs:
   - "ruststeve:.github/workflows/ci.yml## Incremental compilation only adds overhead and cache churn on a fresh runner."
   - "ruststeve:.github/workflows/ci.yml## Only main writes the cache; branches and PRs restore it."
@@ -38,6 +38,11 @@ The Mac never runs code ([[runners-not-the-mac]]). Two workflows are how it runs
 - **nextest** is installed as a prebuilt binary by `taiki-e/install-action@v2`; it runs tests in parallel processes and reports per test.
 - **The boundary**: `xtask deps-boundary` runs `cargo tree -e normal` for each core crate that exists (`data`, `protocol`, `world`, `physics`, `memory`, `plan`, `sim`) and fails if any depends on an async runtime, an I/O library, SurrealDB, or our own `net`, `rcon`, `record`, `ingest`.
 
+## The race's caches (issue 16, `docs/problems/race-tooling.md` wall 3)
+- **The server jar** lives at `/home/runner/work/datagen-work` (`DATAGEN_WORK`, key `datagen-work-26.1.2-v2`) in every workflow. The path must be absolute with no `..`: `actions/cache` refuses to save one with relative parts ("Relative pathing '.' and '..' is not allowed"), so the first path (`workspace/../datagen-work`) was never saved by any run and every lane fetched the jar. race.yml saves it from lane 0 on a miss.
+- **The race's build** has its own rust-cache key (`shared-key: race`), saved by lane 0 and restored by the other lanes, by `publish` and by later races of the branch. Measured: 152 s from a lane's start to its race before, 129 s cold, 77 s warm (jar 0 s, build 42 s: workspace crates are not cached).
+- **A cache is per branch**: one saved on a branch is restored there only; one saved on `main` everywhere. A new branch pays the cold start once.
+
 ## Running code on a runner (the probe)
 ```bash
 gh workflow run probe.yml -R BridgerB/ruststeve --ref <branch> -f command='cargo nextest run -p world'
@@ -49,9 +54,13 @@ The command arrives through an environment variable, never interpolated into the
 ## A probe with the race's server (issue 15)
 - `-f server=true` starts the race config's own server (the race seed, RCON on, a password for that run only) before the command; the `rcon` binary (`cargo run -q -p rcon -- "<command>" ...`) sends commands and prints each reply. First use: `locate structure minecraft:fortress` from seven points in the Nether (probe 44386934210), setup data for the `nether` start that the bot never reads.
 
+## A probe on a recording
+`replay`'s binaries read a race's recording on a runner: `why` (the world at a moment, a block slice with `--blocks x,y,z --radius 15 --ys lo,hi`), `replan` (the route or the planner's steps asked again there) and `replay verify`. The command lines are in [[replay-and-why]].
+
 ## Gotchas
 - **`workflow_dispatch` only works for a workflow file on the default branch.** That is why the work moved to `main` ([[just-ruststeve]]). `--ref` then chooses which branch's code runs.
 - A new workflow file added on a branch cannot be dispatched until it is merged into `main`; a push-triggered workflow runs from any branch that has it.
+- **One target directory shared by several worktrees is a trap**: cargo takes another worktree's build of a crate as fresh when this worktree's sources are older than the artifact (a hook here compiled `results` against another worktree's `observe`), and a binary that bakes in `CARGO_MANIFEST_DIR` reads the wrong tree. `brain-check` now takes its root from the working directory; the rest is cured only by a target directory per worktree.
 - `brain-check --strict` fails when a source checkout is missing, so CI cannot pass by skipping the sibling repositories; locally, missing checkouts are only counted as unchecked.
 
 ## Sources outside the repository
