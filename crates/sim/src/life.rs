@@ -27,7 +27,7 @@
 //! - mobs here are placed by a start (a moment's `summon`): no AI, no loot, unless given a
 //!   `Brain` (issue 16's fight arenas): `Melee` walks straight at the player over ground that
 //!   holds it and hits in reach every 20 ticks (`MeleeAttackGoal`), a wither skeleton's hit
-//!   leaving the wither effect. No navigation, no knockback.
+//!   leaving the wither effect. No navigation.
 //! - a blaze with `Brain::Blaze` (`Blaze$BlazeAttackGoal.tick`, javap): with the player in
 //!   sight and within its follow range 48, it charges 60 ticks, looses three small fireballs 6
 //!   ticks apart, and rests 100; within 2 blocks it hits for 6 every 20.
@@ -44,7 +44,17 @@
 //!   0.23 speed through `LivingEntity.travel`: squared over 0.454 on the ground, 0.02 of
 //!   flying speed over 0.09 in the air); the game finds a path.
 //! - knockback (`LivingEntity.knockback`, strength 0.4): a mob's hit or a fireball's sends the
-//!   player's motion as 0.4 away from it on the plane and 0.4 up when on the ground.
+//!   player's motion as 0.4 away from it on the plane and 0.4 up when on the ground. The
+//!   player's fresh hit (not one inside the invulnerable half) knocks a mob the same way:
+//!   half its motion kept plus 0.4 away on the plane, then moved a tick at a time and cut by
+//!   0.91 in the air or 0.546 on a 0.6 floor (`LivingEntity.travel`), zeroed under 0.003. A
+//!   knock from the ground lifts the mob 0.4 (`min(0.4, vy / 2 + 0.4)`), which under gravity
+//!   0.08 and drag 0.98 keeps it aloft 11 ticks: the air's drag holds that long, so a walker
+//!   goes about 3 blocks in 11 ticks (clojurecraft measured the same, brain mc-mob-facts) and
+//!   a blaze in the air about 4.4. The lift itself is not drawn (a mob's height is unchanged);
+//!   a walker stops at a floor's edge rather than fall. A `Still` mob is not moved. A sprint's
+//!   extra knock is not modelled.
+//! - `Life::hurt_by` sums the damage each type dealt, for a test to name what a death was.
 //! - a spawner (`BaseSpawner`, javap): with the player within 16 it counts down (20 at first,
 //!   then 200 plus up to 599); at 0, unless 6 of its mob are alive within 4 of it, it tries 4
 //!   places (`(rand - rand) × 4` on x and z, -1 to 1 on y) and spawns where the body is free.
@@ -205,6 +215,15 @@ const BLAZE_WALK: f64 = 0.1165;
 const BLAZE_FLY: f64 = 0.051;
 /// `LivingEntity.knockback`'s strength from a mob's hit.
 const KNOCKBACK: f64 = 0.4;
+/// `LivingEntity.travel`: horizontal motion kept a tick in the air (0.91), and on a floor of
+/// friction 0.6 (netherrack, nether bricks: 0.6 × 0.91); motion under 0.003 is zeroed
+/// (`LivingEntity.aiStep`).
+const DRAG_AIR: f64 = 0.91;
+const DRAG_GROUND: f64 = 0.546;
+const MOTION_FLOOR: f64 = 0.003;
+/// Ticks a knock's 0.4 lift keeps a mob off the floor: y 0.4, 0.71, 0.94, 1.09, 1.15, 1.14,
+/// 1.05, 0.88, 0.63, 0.31, then below 0 on the 11th (vy -= 0.08, × 0.98 a tick).
+const KNOCK_ALOFT: u32 = 11;
 /// `BaseSpawner`: the first delay, the least and the span of the later ones, tries a cycle,
 /// the most of its mob near, how near a player must be, and the spawn range.
 const SPAWNER_FIRST: i32 = 20;
@@ -257,6 +276,10 @@ pub struct Mob {
     pub dead_at: Option<u64>,
     /// Whether its death drops its loot table (a parity row's mob is summoned without).
     pub loot: bool,
+    /// The sideways motion a player's hit left it with (`LivingEntity.knockback`), x and z,
+    /// spent a tick at a time and cut by friction, and the ticks the knock keeps it aloft.
+    pub push: [f64; 2],
+    pub aloft: u32,
 }
 
 /// The player's body as the server keeps it (issue 12a).
@@ -309,6 +332,11 @@ pub struct Life {
     sent_air: i32,
     sent_fire: bool,
     pub kills: u64,
+    /// Fresh hits on mobs that knocked them back.
+    pub mobs_knocked: u64,
+    /// Damage dealt to the player by damage type (after armour and invulnerability), so a
+    /// test can say what a death was made of.
+    pub hurt_by: std::collections::BTreeMap<String, f32>,
 }
 
 impl Default for Life {
@@ -342,6 +370,8 @@ impl Default for Life {
             sent_air: MAX_AIR,
             sent_fire: false,
             kills: 0,
+            mobs_knocked: 0,
+            hurt_by: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -377,6 +407,8 @@ impl Sim {
                 loot: true,
                 brain: Brain::Still,
                 next_hit: 0,
+                push: [0.0; 2],
+                aloft: 0,
             },
         );
         id
@@ -849,6 +881,66 @@ impl Sim {
         Ok(out)
     }
 
+    /// The knocks the player's hits left: each knocked mob moves by its motion while its body
+    /// fits where it goes (a walker also needs a floor there), and the motion is cut by the
+    /// air's or the floor's drag. A blow into a wall stops.
+    fn tick_pushes(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let ids: Vec<i32> = self.survival.life.mobs.keys().copied().collect();
+        for id in ids {
+            let Some(m) = self.survival.life.mobs.get(&id).copied() else {
+                continue;
+            };
+            // A `Still` mob stands where it was put (a parity row's or a placed target): only
+            // mobs that act are knocked.
+            if m.dead_at.is_some() || m.push == [0.0; 2] || matches!(m.brain, Brain::Still) {
+                continue;
+            }
+            let to = [m.pos[0] + m.push[0], m.pos[1], m.pos[2] + m.push[1]];
+            let cell = |p: [f64; 3], dy: f64| {
+                self.solid(
+                    p[0].floor() as i32,
+                    (p[1] + dy).floor() as i32,
+                    p[2].floor() as i32,
+                )
+            };
+            let walker = matches!(m.brain, Brain::Melee(_));
+            let fits = cell(to, 0.0).is_none()
+                && cell(to, 1.79).is_none()
+                && (!walker || cell(to, -0.05).is_some());
+            let grounded = m.aloft == 0 && cell(m.pos, -0.05).is_some();
+            let drag = if grounded { DRAG_GROUND } else { DRAG_AIR };
+            let push = if fits {
+                m.push.map(|v| v * drag)
+            } else {
+                [0.0; 2]
+            };
+            let push = if push[0].hypot(push[1]) < MOTION_FLOOR {
+                [0.0; 2]
+            } else {
+                push
+            };
+            let pos = if fits { to } else { m.pos };
+            if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
+                mob.pos = pos;
+                mob.push = push;
+                mob.aloft = m.aloft.saturating_sub(1);
+            }
+            if pos != m.pos {
+                out.push(wire(
+                    State::Play,
+                    &S2c::EntityPositionSync {
+                        id,
+                        x: pos[0],
+                        y: pos[1],
+                        z: pos[2],
+                    },
+                )?);
+            }
+        }
+        Ok(out)
+    }
+
     /// The melee mobs' tick: each comes straight at the player while the ground ahead holds it
     /// and the way is open, and hits in reach.
     fn tick_mobs(&mut self) -> Result<Vec<Wire>, EncodeError> {
@@ -867,7 +959,9 @@ impl Sim {
             let (dx, dz) = (self.pos[0] - m.pos[0], self.pos[2] - m.pos[2]);
             let flat = (dx * dx + dz * dz).sqrt();
             let level = (self.pos[1] - m.pos[1]).abs() < 2.0;
-            if flat > melee.reach * 0.8 {
+            // Aloft from a knock it has no footing to walk with (its air control, 0.02 a
+            // tick, is left out).
+            if flat > melee.reach * 0.8 && m.aloft == 0 {
                 let step = melee.speed.min(flat);
                 let to = [
                     m.pos[0] + dx / flat * step,
@@ -975,6 +1069,7 @@ impl Sim {
         };
         life.last_hurt = damage;
         life.exhaustion += EXHAUSTION_HURT;
+        *life.hurt_by.entry(damage_type.to_owned()).or_insert(0.0) += dealt;
         self.hurt(dealt, damage_type, death_key)
     }
 
@@ -1047,6 +1142,7 @@ impl Sim {
             }
             self.survival.life.wither_ticks -= 1;
         }
+        out.extend(self.tick_pushes()?);
         out.extend(self.tick_mobs()?);
         out.extend(self.tick_spawners()?);
         out.extend(self.tick_blazes()?);
@@ -1236,6 +1332,17 @@ impl Sim {
             damage - m.last_hurt
         } else {
             m.invulnerable = INVULNERABLE_TICKS;
+            // A fresh hit knocks the mob 0.4 away from the player on the plane, half its
+            // motion kept (`hurtServer` → `knockback(0.4, …)`; a hit inside the invulnerable
+            // half knocks nothing). Blazes and wither skeletons resist none.
+            let (dx, dz) = (m.pos[0] - self.pos[0], m.pos[2] - self.pos[2]);
+            let len = (dx * dx + dz * dz).sqrt().max(1e-9);
+            m.push = [
+                m.push[0] / 2.0 + dx / len * KNOCKBACK,
+                m.push[1] / 2.0 + dz / len * KNOCKBACK,
+            ];
+            m.aloft = KNOCK_ALOFT;
+            life.mobs_knocked += 1;
             damage
         };
         m.last_hurt = damage;

@@ -3,8 +3,9 @@
 //! blaze spawner as the server sent them to lane 0 of race 45337739022), the spawner running by
 //! `BaseSpawner`'s rules, blazes that shoot, rise to the bot's eye height and drop a rod to a
 //! player's kill (0 or 1, the jar's loot table), the model's hunger, eating and healing.
-//! Development evidence only: the model has no blaze that closes in, no other mobs, no
-//! knockback (crates/sim/src/life.rs says what it holds).
+//! Development evidence only: the model's blazes move and touch as their goals say and hits
+//! knock both ways, but it finds no paths and spawns no other mobs unless a test summons them
+//! (crates/sim/src/life.rs says what it holds).
 //!
 //! Each test prints its measures whether it passes or not. Run them with
 //! `cargo test -p bot --test nether_rods -- --ignored --nocapture --test-threads=1`.
@@ -181,6 +182,20 @@ fn stage_with(kit: &[(ItemKind, i32)], shield: bool, seed: u64, more: impl Fn(&m
     }
 }
 
+/// What hurt the bot, by the server's damage type: "mob_attack 12.0, fireball 8.4".
+fn damage_by_type(life: &sim::life::Life) -> String {
+    let parts: Vec<String> = life
+        .hurt_by
+        .iter()
+        .map(|(k, v)| format!("{k} {v:.1}"))
+        .collect();
+    if parts.is_empty() {
+        "none".to_owned()
+    } else {
+        parts.join(", ")
+    }
+}
+
 impl Stage {
     /// The measures, and the ledger's ends.
     fn story(&self) -> String {
@@ -203,7 +218,8 @@ impl Stage {
             "MEASURES: rods {} (7 at tick {:?}), died {}, ticks {}, kills {} ({:.2} per 1,000 ticks), \
              blazes spawned {}, alive at the end {}, fireballs fired {} hit {} blocked {}, \
              health lost {:.1} ({:.1} a kill), lowest health {:?}, meals {}, fire cells within 6 of the \
-             spawner {}, blaze-ticks within 1.5 of the eye's height {} of {}, spawner at {:?}, the bot at {:?}\n\
+             spawner {}, blaze-ticks within 1.5 of the eye's height {} of {}, damage by type {}, \
+             blazes knocked {}, spawner at {:?}, the bot at {:?}\n\
              ledger ({n} lines):\n{}\n  ...\n{}",
             self.rods,
             self.seven_at,
@@ -223,6 +239,8 @@ impl Stage {
             fire,
             self.level_ticks,
             self.blaze_ticks,
+            damage_by_type(life),
+            life.mobs_knocked,
             self.spawner,
             self.run
                 .world
@@ -304,7 +322,8 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
         passed += u32::from(ok);
         println!(
             "SEED {name} seed {seed}: rods {}, alive {}, seventh at {:?}, ticks {}, kills {} \
-             ({:.2} per 1,000), fireballs {} fired {} hit {} blocked, health lost {:.1}, meals {}",
+             ({:.2} per 1,000), fireballs {} fired {} hit ({:.2} per 1,000) {} blocked, \
+             health lost {:.1} ({}), blazes knocked {}, meals {}",
             s.rods,
             !s.run.died,
             s.seven_at,
@@ -313,8 +332,11 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
             life.kills as f64 * 1000.0 / s.ticks.max(1) as f64,
             life.fireballs_fired,
             life.fireballs_hit,
+            life.fireballs_hit as f64 * 1000.0 / s.ticks.max(1) as f64,
             life.fireballs_blocked,
             s.health_lost,
+            damage_by_type(life),
+            life.mobs_knocked,
             s.meals,
         );
     }

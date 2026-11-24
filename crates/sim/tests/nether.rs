@@ -713,3 +713,35 @@ fn a_blaze_closes_on_a_target_within_two_blocks_and_holds_beyond() {
     assert!(near < 2.0, "within 2 blocks it stayed at x {near}");
     assert_eq!(run(6.5), 6.5, "in sight beyond 2 blocks it moved");
 }
+
+/// `hurtServer` → `knockback(0.4)`: the player's hit knocks a blaze on the ground 0.4 away
+/// and lifts it; 11 ticks aloft at the air's 0.91, then the floor's 0.546: about 3.2 blocks
+/// in all. Once more than 2 off with the player in sight it holds there.
+#[test]
+fn the_players_hit_knocks_a_blaze_away() {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    let id = sim.summon_with(
+        data::EntityKind::Blaze,
+        [2.3, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    send(&mut sim, C2s::Attack { entity: id });
+    assert_eq!(sim.survival.life.mobs_knocked, 1);
+    tick_alive(&mut sim);
+    let first = sim.survival.life.mobs[&id].pos[0];
+    assert!(first > 2.5, "one tick after the hit it is at x {first}");
+    for _ in 0..20 {
+        tick_alive(&mut sim);
+    }
+    let x = sim.survival.life.mobs[&id].pos[0];
+    assert!((5.3..5.6).contains(&x), "twenty ticks on it is at x {x}");
+}
