@@ -278,6 +278,15 @@ pub struct Survival {
     /// A fight with a shooter backs off to cover at or under this health (0: the danger line).
     #[serde(default)]
     pub shooter_retreat_health: f32,
+    /// The parts of a shooter's fight, each switched here so a model run can judge it alone:
+    /// stepping off a shooter in touch, stepping out of a fireball's line, striking on the way
+    /// down from a jump.
+    #[serde(default = "yes")]
+    pub shooter_keep_off: bool,
+    #[serde(default = "yes")]
+    pub shooter_dodge: bool,
+    #[serde(default = "yes")]
+    pub shooter_crit: bool,
     /// A `never_fight` kind is backed away from within this (a creeper's fuse starts at 3).
     #[serde(default = "flee_radius")]
     pub flee_radius: f64,
@@ -293,6 +302,10 @@ fn flee_radius() -> f64 {
 
 fn flee_clear() -> f64 {
     20.0
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn ranged_radius() -> f64 {
@@ -343,6 +356,9 @@ impl Default for Survival {
             ranged_radius: ranged_radius(),
             shooter_patience: shooter_patience(),
             shooter_retreat_health: 0.0,
+            shooter_keep_off: true,
+            shooter_dodge: true,
+            shooter_crit: true,
             flee_radius: flee_radius(),
             flee_clear: flee_clear(),
         }
@@ -382,6 +398,9 @@ pub struct SurvivalRules {
     pub ranged_radius: f64,
     pub shooter_patience: u64,
     pub shooter_retreat_health: f32,
+    pub shooter_keep_off: bool,
+    pub shooter_dodge: bool,
+    pub shooter_crit: bool,
     pub flee_radius: f64,
     pub flee_clear: f64,
     /// Kinds dropped when the main inventory is nearly full, each with how many to keep.
@@ -655,6 +674,9 @@ impl Table {
                 ranged_radius: g.survival.ranged_radius,
                 shooter_patience: g.survival.shooter_patience,
                 shooter_retreat_health: g.survival.shooter_retreat_health,
+                shooter_keep_off: g.survival.shooter_keep_off,
+                shooter_dodge: g.survival.shooter_dodge,
+                shooter_crit: g.survival.shooter_crit,
                 flee_radius: g.survival.flee_radius,
                 flee_clear: g.survival.flee_clear,
             },

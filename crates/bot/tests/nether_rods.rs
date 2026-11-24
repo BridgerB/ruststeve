@@ -346,6 +346,13 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
             life.mobs_knocked,
             s.meals,
         );
+        // A seed that died: how it ended (blaze-fight walls 17 and 19).
+        if s.run.died {
+            let from = s.ledger.len().saturating_sub(30);
+            for l in &s.ledger[from..] {
+                println!("LATE {name} seed {seed}: {l}");
+            }
+        }
     }
     let per = |n: u64| n as f64 * 1000.0 / all_ticks.max(1) as f64;
     println!(
