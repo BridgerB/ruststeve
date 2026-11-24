@@ -10,7 +10,7 @@
 use data::EntityKind;
 use world::World;
 
-use crate::path::{Cell, Cells, feet_cell};
+use crate::path::{Cell, Cells, Class, feet_cell};
 
 /// Blocks within which a blaze's or a ghast's line of sight counts: a blaze follows and shoots
 /// from 48 (its `FOLLOW_RANGE`), a ghast from 64. It was 16 until three armoured bots rested "out
@@ -93,9 +93,25 @@ pub fn awake_at(c: Cell, pos: [f64; 3]) -> bool {
     distance(mid, pos) < SPAWNER_QUIET
 }
 
+/// A fall this deep or deeper beside a cell keeps it from being cover: three blocks of fall cost
+/// no health, as the fight's own step rule has it.
+pub const DROP_BESIDE: i32 = 4;
+
+/// Whether an open cell beside `c` has no floor within `DROP_BESIDE` under it: the edge of a
+/// bridge, or the top of its low wall. Two real bots heading for a cover cell at (128, 61, 183 to
+/// 184) went over the bridge's side and fell 17 blocks, one to its death (race 45346418004).
+pub fn beside_drop(cells: &mut Cells, (x, y, z): Cell) -> bool {
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dz)| {
+        let n = (x + dx, y, z + dz);
+        matches!(cells.at(n), Class::Clear | Class::Lava)
+            && (1..=DROP_BESIDE).all(|d| cells.at((n.0, n.1 - d, n.2)) != Class::Solid)
+    })
+}
+
 /// The cells to rest in: standable on a full block, within `COVER_RADIUS`, where none of `eyes`
 /// sees a body standing (`seen_body`, the same test the rest itself is judged by) and no spawner
-/// on record is within `SPAWNER_QUIET`; nearest the feet first. The floor must be a full block
+/// on record is within `SPAWNER_QUIET`, and no drop beside (`beside_drop`); nearest the feet
+/// first. The floor must be a full block
 /// (on a stair the body stands higher than its cell says). One bot walked eleven times to a cell
 /// on a bridge's low wall that it was still seen in (race 45338756013): the planner also refuses
 /// a cover cell once it has walked to it.
@@ -115,6 +131,7 @@ pub fn cover_cells(w: &World, eyes: &[[f64; 3]]) -> Vec<Cell> {
                 let pos = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
                 if cells.standable(c)
                     && full(w, (c.0, c.1 - 1, c.2))
+                    && !beside_drop(&mut cells, c)
                     && !seen_body(w, eyes, pos)
                     && !spawners.iter().any(|s| awake_at(*s, pos))
                 {

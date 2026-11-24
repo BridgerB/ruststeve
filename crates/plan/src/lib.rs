@@ -146,6 +146,12 @@ pub const TRAIL_TOWARD: f64 = 4.0;
 /// refusal lasts `FAILURE_MEMORY_TICKS` 600: six looks).
 const SPAWNER_WAIT_TICKS: u64 = 100;
 
+/// Whether a rest can bring health back: food to eat, or a food bar natural healing runs on
+/// (`eat::HEALS_FROM`).
+pub fn can_heal(food: Option<i32>, food_held: bool) -> bool {
+    food_held || food.is_none_or(|f| f >= eat::HEALS_FROM)
+}
+
 /// Blocks behind the nearest it came to a dig's target at which the bot counts as pushed back:
 /// a stairs leg is six steps, so from six back no one leg comes nearer than the mark.
 pub const PUSHED_BACK: f64 = 6.0;
@@ -515,6 +521,9 @@ pub struct Plan {
     pub shelter_at: u64,
     #[serde(default)]
     pub shelter_blocks: u32,
+    /// When "no rest: nothing to heal with" may next be noted.
+    #[serde(default)]
+    pub unhealed_at: u64,
     /// Origins of sites given up: no new site within `cast::GIVE_UP_RADIUS`.
     #[serde(default)]
     pub given_up_sites: Vec<Cell>,
@@ -669,6 +678,7 @@ impl Plan {
             equip_at: 0,
             shelter_at: 0,
             shelter_blocks: 0,
+            unhealed_at: 0,
             given_up_sites: Vec::new(),
             explored: Vec::new(),
             portal: None,
@@ -1824,6 +1834,29 @@ impl Plan {
         if !burning && tick < self.shelter_at {
             self.retry_at = self.shelter_at;
             return Some(Task::Idle);
+        }
+        // A rest that cannot heal is no rest: with no safe food held and the food bar under 18
+        // nothing comes back, and two real bots sat out their last 7,400 and 7,900 ticks at 15.8
+        // and 16.8 health, 27 blocks from the spawner, their meat eaten (race 45346418004). Over
+        // the danger line the bot goes on with what it has; at or under it, it stays hidden.
+        if !can_heal(w.player.food, eat::best_food(w, &rules).is_some())
+            && w.player.health.is_some_and(|h| h > rules.danger_health)
+        {
+            if tick >= self.unhealed_at {
+                self.unhealed_at = tick + FAILURE_MEMORY_TICKS;
+                self.note(
+                    tick,
+                    "no rest: nothing to heal with".to_owned(),
+                    format!(
+                        "health {:?} under {}, food {:?} under {} and no safe food held; on with it",
+                        w.player.health,
+                        rules.engage_health,
+                        w.player.food,
+                        eat::HEALS_FROM
+                    ),
+                );
+            }
+            return None;
         }
         let eyes = cover::shooters(w);
         // A spawner within 16 blocks of a player is awake: resting there, the shooters multiply.

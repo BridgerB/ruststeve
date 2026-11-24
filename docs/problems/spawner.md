@@ -72,3 +72,18 @@ The snapshot is a real bot's: the clean `ready` snapshot, its own portal, the tr
 - **Wall 2**: "explore toward" 0 in 3 lanes; "pushed back", "back toward the spawner" and "wait for the spawner" 0: the travel tunnel now carries the far dig and no refusal arose. Unproven, and perhaps no longer reachable.
 - **The far walk was wrong where it stood** (wall 4's addition): in all three lanes, with a tunnel route of 150 steps found at tick 60, "far walk toward the spawner … 141 cells, 47 to bridge" took over at tick 400, laid two bridge blocks out of the tunnel's mouth at (55 to 56, 64, 103) and failed NoProgress or was cut by a fight. It is now tried only after the dig and the tunnel give nothing.
 - **What killed them** (the fight's, not this file's): lane 0 60 ticks after the stage, burning; lane 1 in "escape-fire" and "defend Blaze … (Fight)" cutting each other 14 times from tick 3,260; lane 2 as above.
+
+## The heal cycle with the fight's fixes (race 45346418004, 4af0568: this branch with the fight branch at 8bd7212; 3 x 1 from the real `race-45343411709/snapshot-spawner-45343411709-race-45343411709-lane-1.tar.zst`, cap 12,000)
+- **The first blaze rod**: lane 2, "blaze#111 gone" at tick 100 after "4 swings, 3 landed", "item blaze_rod 0 -> 1" at tick 120. Two of three bots alive at the cap.
+- **Heal cycles completed** (rest beyond the spawner's range to 18 health, then back): lane 1 three (back at ticks 1,380, 2,100 and 3,460; "take cover at …" 11, meals 10), lane 2 one (4.0 to 20 by tick 1,560). No wither-skeleton death, no "escape-fire" ping-pong.
+
+### 6. A cover cell at the bridge's edge (the same race, lanes 0 and 2)
+- **What happened**: lane 0, at 7.3 health after a fireball at tick 300, began "take cover at (128, 61, 183)" and died of the fall 40 ticks later (`death.fell.killer`; last cell "(126, 61, 182) over air (in the air or on an edge)", body at y 43). Lane 2 fell the same 17 blocks at tick 340 on the fight's "retreat to cover at (128, 61, 184)" ("hit fall, health 4.0") and lived.
+- **Cause**: `cover_cells` took any standable cell out of sight; at a bridge's side, and on its low wall, a cell is out of sight because the wall hides it, and one step or one fireball's push from it is the drop.
+- **Fix**: a cell with a drop beside it is no cover (`cover::beside_drop`: an open neighbour with no floor within 4 under it). The fight's retreat reads the same list. Unit test `a_cell_beside_a_drop_is_no_cover` (`crates/bot/tests/cover.rs`).
+
+### 7. A rest that cannot heal (the same race, lanes 1 and 2)
+- **What happened**: lane 1 from tick 4,600 and lane 2 from tick 4,140 noted "rest (health 15.8 … / 16.8 … under 18; out of sight …)" to the cap, 7,400 and 7,900 ticks, 27 blocks from the spawner: food 17, "held nothing", ten meals eaten each.
+- **Cause**: under 18 on the food bar nothing comes back, and with the meat gone nothing raises it: the rest has no end. It is blaze.md's wall 3 (unfed bots rest for ever), reached by a fed bot after 3 to 4 cycles: raw meat gives about 3 health a meal, 1.3 health per 100 ticks (the heal of race 45343411709 lane 1: 9.3 health, three porkchops, 740 ticks).
+- **Fix**: a rest is taken only while it can heal (`can_heal`: safe food held, or the food bar at 18 or more). With nothing to heal with and health over `danger_health`, the bot goes on with what it has ("no rest: nothing to heal with", once per 600 ticks); at or under the danger line it stays hidden, as before. Unit test `a_rest_with_nothing_to_heal_with_is_no_rest` (`crates/plan/tests/spawner.rs`).
+- **The other half** is not this file's: cooked food (about 13 health a piece, on the fast path) and a shield, so that the cycle is seldom needed.

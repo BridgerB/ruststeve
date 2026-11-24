@@ -155,3 +155,29 @@ fn cover_cells_are_out_of_sight_for_a_standing_body() {
         assert!(!plan::cover::seen_body(&w, &eyes, pos), "{c:?}");
     }
 }
+
+/// Race 45346418004: two bots heading for a cover cell at a bridge's edge fell 17 blocks. A cell
+/// with a drop beside it is no cover: on a deck three wide over nothing, only the middle row.
+#[test]
+fn a_cell_beside_a_drop_is_no_cover() {
+    // A deck at y 70, x 0 to 2, z -4 to 4, with a wall across it at z 0 hiding the south half.
+    let mut m = flat_world(2, 63).unwrap();
+    for x in 0..=2 {
+        for z in -4..=4 {
+            m.set_block(x, 70, z, state(BlockKind::Stone)).unwrap();
+        }
+        for y in 71..=73 {
+            m.set_block(x, y, 0, state(BlockKind::Stone)).unwrap();
+        }
+    }
+    let w = joined(m);
+    let mut cells = plan::path::Cells::new(&w);
+    assert!(plan::cover::beside_drop(&mut cells, (0, 71, 2)), "the edge");
+    assert!(plan::cover::beside_drop(&mut cells, (2, 71, 2)), "the edge");
+    assert!(
+        !plan::cover::beside_drop(&mut cells, (1, 71, 2)),
+        "the middle"
+    );
+    // On the ground: no drop anywhere.
+    assert!(!plan::cover::beside_drop(&mut cells, (5, 64, 5)));
+}

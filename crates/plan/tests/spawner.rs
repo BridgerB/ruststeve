@@ -45,3 +45,16 @@ fn a_bot_well_behind_its_nearest_is_pushed_back() {
     );
     assert!(!plan::pushed_back([60.5, 64.0, 138.5], SPAWNER, best));
 }
+
+/// Race 45346418004, lanes 1 and 2: rested at 15.8 and 16.8 health with food 17 and no meat left
+/// for 7,400 and 7,900 ticks. A rest heals only with food held or the food bar at 18 or more.
+#[test]
+fn a_rest_with_nothing_to_heal_with_is_no_rest() {
+    assert!(!plan::can_heal(Some(17), false));
+    assert!(plan::can_heal(Some(17), true), "meat held: eat, then heal");
+    assert!(plan::can_heal(Some(18), false), "the food bar still heals");
+    assert!(
+        plan::can_heal(None, false),
+        "before the first health packet"
+    );
+}
