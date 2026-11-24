@@ -339,10 +339,10 @@ impl Defend {
         let toward = yaw_to(body.pos, target);
         match self.stance {
             Stance::Retreat => {
-                // A melee foe in the bot's face is struck as it backs away (overworld-leg wall
-                // 1): two bots under the danger line took six zombie hits each in a retreat
-                // with no swing back, and died with an iron sword in the pack.
-                let strike = if never || rules.ranged.contains(&self.kind) {
+                // A melee foe in the bot's face is struck as it backs away from a fight that
+                // went nowhere (overworld-leg wall 1). Never under the danger line: there the
+                // retreat is only a retreat.
+                let strike = if never || rules.ranged.contains(&self.kind) || in_danger(w, rules) {
                     None
                 } else {
                     self.retreat_strike(w, &body, target, tick)

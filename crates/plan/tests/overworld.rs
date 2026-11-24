@@ -73,3 +73,16 @@ fn the_portal_food_check_is_proportionate() {
         "never over the reserve"
     );
 }
+
+/// Wall 1: the lava hunt's own stairs head for a known pool of ten along the longer axis until
+/// it is within a leg, then (and with no pool) turn a quarter a leg. No terrain is read.
+#[test]
+fn own_stairs_head_for_the_pool_then_spiral() {
+    use plan::{SPIRAL, own_heading};
+    let feet = (55, 70, -133);
+    assert_eq!(own_heading(feet, Some((118, -45, -99)), 0), (1, 0));
+    assert_eq!(own_heading(feet, Some((60, -45, -99)), 3), (0, 1));
+    assert_eq!(own_heading(feet, Some((58, -45, -130)), 2), SPIRAL[2]);
+    let legs: Vec<_> = (0..5).map(|n| own_heading(feet, None, n)).collect();
+    assert_eq!(legs, [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 0)]);
+}

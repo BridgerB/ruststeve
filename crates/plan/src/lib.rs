@@ -3057,27 +3057,13 @@ impl Plan {
         true
     }
 
-    /// The lava hunt's own stairs (overworld-leg wall 1): six steps down in rock on the heading
-    /// whose cut holds the fewest cells seen open, toward `pool` first when one is known, else
-    /// the next of a spiral; never below `SEA_FEET`. Seven of sixteen bots died in the caves the
-    /// hunt's walks led through before any cast.
-    fn own_stairs(&mut self, w: &World, feet: Cell, pool: Option<Cell>, tick: u64) -> Task {
-        let mut prefer: Vec<(i32, i32)> = Vec::new();
-        if let Some(p) = pool {
-            let (dx, dz) = (p.0 - feet.0, p.2 - feet.2);
-            let (major, minor) = if dx.abs() >= dz.abs() {
-                ((dx.signum(), 0), (0, dz.signum()))
-            } else {
-                ((0, dz.signum()), (dx.signum(), 0))
-            };
-            // Over it already (within a leg): the spiral holds the place.
-            if dx.abs().max(dz.abs()) > stairs::STAIR_DEPTH as i32 {
-                prefer.extend([major, minor].into_iter().filter(|d| *d != (0, 0)));
-            }
-        }
-        let turn = self.descent_legs as usize;
-        prefer.extend((0..4).map(|i| SPIRAL[(turn + i) % 4]));
-        let (dir, open) = own_leg(w, feet, &prefer);
+    /// The lava hunt's own stairs (overworld-leg wall 1): six steps down in rock, toward `pool`
+    /// when one is known and not yet under the feet, else the next heading of a spiral; never
+    /// below `SEA_FEET`. No terrain is read to choose the heading (strict no X-ray): each stair's
+    /// own refusal turns it. Seven of sixteen bots died in the caves the hunt's walks led through
+    /// before any cast.
+    fn own_stairs(&mut self, feet: Cell, pool: Option<Cell>, tick: u64) -> Task {
+        let dir = own_heading(feet, pool, self.descent_legs);
         self.descent_legs += 1;
         let steps = u32::try_from(feet.1 - SEA_FEET)
             .unwrap_or(0)
@@ -3089,7 +3075,7 @@ impl Plan {
                 self.descent_legs
             ),
             format!(
-                "no site, the feet at y {} over {}: stairs in rock, no walk through caves; {open} cells seen open that way",
+                "no site, the feet at y {} over {}: stairs in rock, no walk through caves",
                 feet.1,
                 pool.map_or_else(
                     || format!("the lava sea (feet y {SEA_FEET})"),
@@ -3204,7 +3190,7 @@ impl Plan {
                 .as_ref()
                 .is_some_and(|d| d.name == "minecraft:overworld");
             if overworld && feet.1 > SEA_FEET && pool.is_none_or(|p| feet.1 - p.1 > DESCENT_WALK) {
-                return self.own_stairs(w, feet, pool, tick);
+                return self.own_stairs(feet, pool, tick);
             }
         }
         // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
@@ -3934,44 +3920,22 @@ pub const SPIRAL: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 /// Ticks before spare pickaxes are asked for again once they could not be made.
 const SPARES_RETRY_TICKS: u64 = 2400;
 
-/// The cells a leg of `STAIR_DEPTH` stairs down from `feet` along `dir` opens: three a step (the
-/// head room, the head and the feet of the step, as `Stairs` cuts them).
-pub fn leg_cells((x, y, z): Cell, (dx, dz): (i32, i32)) -> Vec<Cell> {
-    (1..=stairs::STAIR_DEPTH as i32)
-        .flat_map(|i| {
-            let (cx, cz) = (x + i * dx, z + i * dz);
-            [(cx, y - i + 2, cz), (cx, y - i + 1, cz), (cx, y - i, cz)]
-        })
-        .collect()
-}
-
-/// The heading of `prefer` (first wins a tie) whose leg from `feet` holds the fewest cells
-/// already open, in the cut or beside it, and that count: a leg through rock keeps the cave's
-/// mobs out. The feet's own column (where the bot came down) is not counted. Read as the
-/// stairs' own refusals read a cell: the loaded column, an open cell being its own open face.
-pub fn own_leg(w: &World, feet: Cell, prefer: &[(i32, i32)]) -> ((i32, i32), usize) {
-    let open = |c: Cell| {
-        w.block_at(world::BlockPos::new(c.0, c.1, c.2))
-            .is_some_and(|k| {
-                data::generated::shapes::collision(k) == Some(data::types::Collision::Empty)
-            })
+/// The heading of the lava hunt's next leg of own stairs: toward `pool` along the longer axis
+/// while it is more than a leg away on the plane, else the spiral's heading for leg `legs`. It
+/// reads no terrain.
+pub fn own_heading(feet: Cell, pool: Option<Cell>, legs: u32) -> (i32, i32) {
+    let spiral = SPIRAL[legs as usize % 4];
+    let Some(p) = pool else {
+        return spiral;
     };
-    let count = |dir: (i32, i32)| {
-        let cut = leg_cells(feet, dir);
-        let mut seen: Vec<Cell> = cut
-            .iter()
-            .flat_map(|c| memory::neighbours(*c).into_iter().chain([*c]))
-            .filter(|c| (c.0, c.2) != (feet.0, feet.2) && open(*c))
-            .collect();
-        seen.sort_unstable();
-        seen.dedup();
-        seen.len()
-    };
-    prefer
-        .iter()
-        .map(|d| (*d, count(*d)))
-        .min_by_key(|(_, n)| *n)
-        .unwrap_or(((1, 0), 0))
+    let (dx, dz) = (p.0 - feet.0, p.2 - feet.2);
+    if dx.abs().max(dz.abs()) <= stairs::STAIR_DEPTH as i32 {
+        spiral
+    } else if dx.abs() >= dz.abs() {
+        (dx.signum(), 0)
+    } else {
+        (0, dz.signum())
+    }
 }
 
 /// Stone pickaxes held with at least `spare_uses` uses left (one on the cursor counts).
