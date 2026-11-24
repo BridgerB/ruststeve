@@ -208,6 +208,22 @@ fn note_kind(what: &str) -> String {
         .join(" ")
 }
 
+/// A note's kind for a reader: each run of words `note_kind` leaves out shown as one `…`.
+pub fn kind_shown(what: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for w in what.split_whitespace() {
+        let cut = w
+            .chars()
+            .any(|c| c.is_ascii_digit() || c == '(' || c == '[');
+        if !cut {
+            out.push(w);
+        } else if out.last() != Some(&"…") {
+            out.push("…");
+        }
+    }
+    out.join(" ")
+}
+
 impl Notes {
     pub fn push(&mut self, tick: u64, what: &str, why: &str) {
         if self.last.iter().any(|w| w.as_deref() == Some(what)) {
@@ -757,14 +773,17 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     .map_or(("none", String::new()), |p| (p.task.name(), p.why()));
                 let r = observe::senses(&run.world, task, &why, plan_tick_us.last().copied());
                 let line = format!(
-                    "{name}\ttick {now_tick}\tstage {}\thp {}\tfood {}\theld {} ({} uses)\ttask {task} ({why})\tno progress for {} ticks\n",
+                    "{name}\ttick {now_tick}\tstage {}\tat {}\thp {}\tfood {}\theld {}{}\ttask {task} ({why})\tno progress for {} ticks\n",
                     run.world.stage_reached.map_or("none", world::Stage::name),
+                    // Where it stands: the cell, what is under it, lava or water at it.
+                    r.standing(),
                     r.health
                         .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
                     r.food.map_or_else(|| "-".to_owned(), |f| f.to_string()),
                     r.held.as_deref().unwrap_or("nothing"),
+                    // Uses only for what has them: food read "held beef (- uses)".
                     r.held_uses
-                        .map_or_else(|| "-".to_owned(), |u| u.to_string()),
+                        .map_or_else(String::new, |u| format!(" ({u} uses)")),
                     progressed.idle(now_tick),
                 );
                 if let Err(e) = std::fs::write(path, &line) {
@@ -930,11 +949,14 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         });
     }
     // The signature names what the planner was doing at the end, as a kind (no cells or counts),
-    // not the aim it started with: every run of a race had the same signature (issue 16e).
+    // not the aim it started with: every run of a race had the same signature (issue 16e). The
+    // words left out show as an ellipsis, so the case's `doing:` line does not read as cut off
+    // ("stairs down toward the fortress at" was); the numbers themselves are in the story's
+    // last lines, and with them every run would be a signature of its own.
     if let Some(e) = planner.as_ref().and_then(|p| p.events.last()) {
         doing = Doing {
-            task: note_kind(&e.what),
-            why: note_kind(&e.why),
+            task: kind_shown(&e.what),
+            why: kind_shown(&e.why),
         };
     }
     let stream_counts = sink.map(|s| {
@@ -990,7 +1012,23 @@ pub fn plan_summary(p: &plan::Plan, tick_us: &[u64], notes: &Notes) -> results::
 
 #[cfg(test)]
 mod notes_tests {
-    use super::{KIND_KEPT, NOTES_HEAD, NOTES_TAIL, Notes};
+    use super::{KIND_KEPT, NOTES_HEAD, NOTES_TAIL, Notes, kind_shown};
+
+    #[test]
+    fn a_kind_shows_where_words_were_left_out() {
+        assert_eq!(
+            kind_shown("stairs down toward the fortress at (61, 30, 95)"),
+            "stairs down toward the fortress at …"
+        );
+        assert_eq!(
+            kind_shown("stairs failed: DigFailed after 0 stairs"),
+            "stairs failed: DigFailed after … stairs"
+        );
+        assert_eq!(
+            kind_shown("nether bricks seen, no walk to them"),
+            "nether bricks seen, no walk to them"
+        );
+    }
 
     #[test]
     fn alternating_pairs_collapse_and_are_counted() {
