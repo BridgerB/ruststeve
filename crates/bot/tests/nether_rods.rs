@@ -330,10 +330,15 @@ fn seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving() {
 /// One variant over the eight seeds: a line a seed and the count that end alive with 7 rods.
 /// A report: it fails only if no seed passes.
 fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
+    over_seeds_with(name, kit, shield, |_| {});
+}
+
+/// The same, with what `more` adds to the model first.
+fn over_seeds_with(name: &str, kit: &[(ItemKind, i32)], shield: bool, more: impl Fn(&mut Sim)) {
     let mut passed = 0;
     let (mut all_ticks, mut all_kills, mut all_landed, mut all_rods) = (0u64, 0u64, 0u64, 0i64);
     for seed in SEEDS {
-        let s = stage_with(kit, shield, seed, |_| {});
+        let s = stage_with(kit, shield, seed, &more);
         let life = &s.run.sim.survival.life;
         let ok = !s.run.died && s.rods >= 7;
         passed += u32::from(ok);
@@ -360,6 +365,17 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
             damage_by_type(life),
             life.mobs_knocked,
             s.meals,
+        );
+        // The shield's notes counted (docs/problems/shield.md wall 4).
+        let count = |what: &str| s.ledger.iter().filter(|l| l.contains(what)).count();
+        println!(
+            "SHIELD {name} seed {seed}: raised {}, yields to the strike {}, kept up for a \
+             fireball {}, placing held {}, lowered for the fight {}",
+            count("shield raised against"),
+            count("shield yields to the strike"),
+            count("shield kept up for fireball"),
+            count("placing held for the shield"),
+            count("(the fight strikes"),
         );
         // A seed that died: how it ended (blaze-fight walls 17 and 19).
         if s.run.died {
@@ -396,6 +412,26 @@ fn eight_seeds_of_seven_rods_with_thirty_cooked_beef() {
 #[ignore = "blaze stage, eight seeds: a report, minutes long; owners A11, A4"]
 fn eight_seeds_of_seven_rods_with_a_shield() {
     over_seeds("shield", &[(ItemKind::CookedBeef, 30)], true);
+}
+
+/// The shield variant with a wither skeleton walking in from the bridge (as
+/// `seven_rods_are_taken_at_the_spawner_with_a_wither_skeleton_arriving`): the shield and a melee
+/// fight in reach (docs/problems/shield.md wall 4).
+#[test]
+#[ignore = "blaze stage, eight seeds: a report, minutes long; owners S2 (shield), F"]
+fn eight_seeds_of_seven_rods_with_a_shield_and_a_wither_skeleton() {
+    over_seeds_with(
+        "shield+wither",
+        &[(ItemKind::CookedBeef, 30)],
+        true,
+        |sim| {
+            sim.summon_with(
+                EntityKind::WitherSkeleton,
+                [128.5, 61.0, 176.5],
+                Brain::Melee(sim::life::Melee::wither_skeleton()),
+            );
+        },
+    );
 }
 
 /// The frontier bot's own situation for the next race: what the Nether snapshot's bot holds
