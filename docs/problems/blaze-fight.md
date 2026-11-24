@@ -171,3 +171,8 @@ A bot at a blaze spawner with the gear a real bot holds ends with 7 blaze rods (
 ### 18. Fire beside the feet on the deck (S's real race 45350933958 lane 0, ticks 13,860 to 14,300; the seed loop)
 - **What happened**: on the deck, "escape-fire (trapped in fire)" and "out of the fire" in the same tick again and again, `in_fire` hits 2.2 to 2.9 each, then burning; lane 0's last minute began with `in_fire`, 19 hits. Fireballs light the deck; the escape steps the body one cell off and ends, the fight stands beside the fire.
 - **Fix** (`defend::fire_near`): a deck cell with fire in it or in any of the eight round it is no post cell; standing beside fire on the deck, the fight steps to the nearest post cell clear of fire, swinging in passing ("N steps off fire on the deck" in the fight's note).
+
+### 19. The shield up with a blaze in touch (the model with S's shield, probe 45357767095)
+- **What happened**: with the shield in, 0.20 fireballs landed per 1,000 ticks, and the blaze's touch became the top direct damage (`mob_attack` 14 to 58 a seed); the three shield seeds that died, died to it (24.9, 25.2, 48.4).
+- **Read**: while the shield is up, `shield::controls` stops every step not toward the threat and the strike is dropped: the fight's keep-off step (wall 4) and its swing never happen, and a blaze within 2 moves at the bot and touches it every 20 ticks.
+- **Fix** (`defend::blaze_in_touch`, at the shield's call site in `Plan::shield_step`): a defend with a live blaze within `KEEP_OFF` of the feet does not hand the tick to the shield; the keep-off step and the strike go on. Counted by "kept off N ticks" in the fight's note and by `mob_attack` in the seed loop.

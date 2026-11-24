@@ -961,7 +961,10 @@ impl Plan {
             return c;
         }
         let task_free = match &self.task {
-            Task::Defend(_) | Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
+            // A blaze in touch: the defend's keep-off and strike, not the shield (blaze-fight
+            // wall 19).
+            Task::Defend(_) => !defend::blaze_in_touch(w),
+            Task::Idle | Task::ToLog(_) | Task::Explore(_) => true,
             Task::Escape(_)
             | Task::Eat(_)
             | Task::Hunt(_)
