@@ -24,7 +24,7 @@ A change to the route or the tunnel is tried on the four walls below in one CI r
 - Small fireballs (`AbstractHurtingProjectile`, `SmallFireball`): 0.1 a tick of acceleration along the aim, inertia 0.95, the aim spread by `2.297 × sqrt(sqrt(d²)) × 0.5` on x and z; a hit takes 5 and sets the player alight 5 s; a block hit leaves fire in the cell before it. They are entities the bot is sent (`add_entity`, `entity_position_sync`, `remove_entities`).
 - A shield in either hand, used for 5 ticks, stops a fireball from the half-plane the player faces. `Life::fireballs_hit` and `fireballs_blocked` count.
 - Armour (`CombatRules.getDamageAfterArmorAbsorb`) from `Life::armor`, which a test sets (the model wears nothing); the wither effect, 1 each 40 ticks.
-- Left out: mob navigation, the lift of a knock (its sideways part is in), a mob's own burning, the shield's wear and the axe that disables it; the client is not told of the wither effect.
+- Left out: mob navigation, a blaze's lift from a knock (a walker's is in, wall 9), a mob's own burning; the client is not told of the wither effect. The shield's wear and the axe that disables it are in from wall 9.
 
 Arenas in `sim::nether::walls`: `fortress_bridge(walk, rails)` (a deck 20 over the lava sea, 1 or 3 wide, fenced or open), `fire_beside`, `shelter_wall`. Tests in `crates/bot/tests/nether_fight.rs`.
 
