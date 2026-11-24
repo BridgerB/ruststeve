@@ -167,7 +167,7 @@ fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
 }
 
 /// The column holding a block position.
-fn column_of(x: f64, z: f64) -> (i32, i32) {
+pub(crate) fn column_of(x: f64, z: f64) -> (i32, i32) {
     ((x.floor() as i32) >> 4, (z.floor() as i32) >> 4)
 }
 

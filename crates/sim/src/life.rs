@@ -24,7 +24,15 @@
 //!   `0.2 + scale² × 0.8`, the scale the ticks since the last swing over `20 / speed` (base 4
 //!   plus its modifier); within 3 + 1 of the eye; the mob's own invulnerability; at 0 health
 //!   entity event 3 and, 20 ticks on, its removal.
-//! - mobs here are placed by a start (a moment's `summon`): no AI, no loot.
+//! - mobs here are placed by a start (a moment's `summon`): no AI, no loot, unless given a
+//!   `Brain` (issue 16's fight arenas): `Melee` walks straight at the player over ground that
+//!   holds it and hits in reach every 20 ticks (`MeleeAttackGoal`), a wither skeleton's hit
+//!   leaving the wither effect. No navigation, no knockback, no ranged attack: a blaze only
+//!   hovers.
+//! - armour (`CombatRules.getDamageAfterArmorAbsorb`): a mob's hit is cut by
+//!   `min(20, max(armor / 5, armor - 4 × damage / 8)) / 25`; `Life::armor` is set by a test (the
+//!   model wears nothing).
+//! - wither (`MobEffects.WITHER`, amplifier 0): 1 (`wither`) each 40 ticks while it lasts.
 
 use data::{BlockKind, EntityKind, ItemKind};
 use protocol::metadata::MetaValue;
@@ -56,9 +64,56 @@ const EXHAUSTION_HURT: f32 = 0.1;
 const EXHAUSTION_MINE: f32 = 0.005;
 const EXHAUSTION_HEAL: f32 = 6.0;
 
+/// Ticks between a melee mob's hits (`MeleeAttackGoal.resetAttackCooldown`: 20).
+const MELEE_EVERY: u64 = 20;
+/// Ticks between the wither effect's hits at amplifier 0 (`WitherMobEffect`: 40 >> amplifier).
+const WITHER_EVERY: u32 = 40;
+/// Armour's ceiling and the toughness-free divisor of `CombatRules.getDamageAfterArmorAbsorb`.
+const ARMOR_CAP: f32 = 20.0;
+
+/// How a melee mob comes and hits.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Melee {
+    /// Blocks a tick over the ground.
+    pub speed: f64,
+    pub damage: f32,
+    /// Centre to centre on the plane, at which it hits and stops coming.
+    pub reach: f64,
+    /// Ticks of the wither effect a hit leaves.
+    pub wither_ticks: u32,
+}
+
+impl Melee {
+    /// A wither skeleton on Normal. Speed: its `movement_speed` 0.25 times the melee goal's
+    /// 1.2 is both the mob's speed and its forward input, so the ground speed settles at
+    /// 0.3 x 0.3 / (1 - 0.546), 0.198 blocks a tick (a zombie's 0.23 gives the 2.3 blocks a
+    /// second it is known for). Damage 8 with its stone sword and the wither effect for 10 s
+    /// (the wiki's Wither Skeleton page); reach about 1.5 (its box 0.7 wide, the attack box's
+    /// 0.83 beyond it, to the player's 0.3).
+    pub fn wither_skeleton() -> Self {
+        Self {
+            speed: 0.198,
+            damage: 8.0,
+            reach: 1.5,
+            wither_ticks: 200,
+        }
+    }
+}
+
+/// What a placed mob does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Brain {
+    /// Stands (or hovers) where it was put.
+    Still,
+    Melee(Melee),
+}
+
 /// A mob a start placed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mob {
+    pub brain: Brain,
+    /// The tick its next hit may land.
+    pub next_hit: u64,
     pub kind: EntityKind,
     pub pos: [f64; 3],
     pub health: f32,
@@ -94,6 +149,11 @@ pub struct Life {
     /// nothing here sets this: sneaking over magma does not spare the bot until that packet is
     /// sent. A test sets it by hand.
     pub sneaking: bool,
+    /// Armour points worn (iron helmet, chestplate and leggings: 2 + 6 + 5). The model wears
+    /// nothing: a test sets it.
+    pub armor: f32,
+    /// Ticks of the wither effect left.
+    pub wither_ticks: u32,
     /// Ticks since the last swing (`attackStrengthTicker`).
     pub attack_ticker: u32,
     pub mobs: std::collections::BTreeMap<i32, Mob>,
@@ -120,6 +180,8 @@ impl Default for Life {
             water_breathing: false,
             fire_resistance: false,
             sneaking: false,
+            armor: 0.0,
+            wither_ticks: 0,
             attack_ticker: 0,
             mobs: std::collections::BTreeMap::new(),
             sent: (20.0, 20, false),
@@ -159,9 +221,82 @@ impl Sim {
                 last_hurt: 0.0,
                 dead_at: None,
                 loot: true,
+                brain: Brain::Still,
+                next_hit: 0,
             },
         );
         id
+    }
+
+    /// Place a mob that acts (`Brain`).
+    pub fn summon_with(&mut self, kind: EntityKind, pos: [f64; 3], brain: Brain) -> i32 {
+        let id = self.summon(kind, pos);
+        if let Some(m) = self.survival.life.mobs.get_mut(&id) {
+            m.brain = brain;
+        }
+        id
+    }
+
+    /// The melee mobs' tick: each comes straight at the player while the ground ahead holds it
+    /// and the way is open, and hits in reach.
+    fn tick_mobs(&mut self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        let ids: Vec<i32> = self.survival.life.mobs.keys().copied().collect();
+        for id in ids {
+            let Some(m) = self.survival.life.mobs.get(&id).copied() else {
+                continue;
+            };
+            let Brain::Melee(melee) = m.brain else {
+                continue;
+            };
+            if m.dead_at.is_some() {
+                continue;
+            }
+            let (dx, dz) = (self.pos[0] - m.pos[0], self.pos[2] - m.pos[2]);
+            let flat = (dx * dx + dz * dz).sqrt();
+            let level = (self.pos[1] - m.pos[1]).abs() < 2.0;
+            if flat > melee.reach * 0.8 {
+                let step = melee.speed.min(flat);
+                let to = [
+                    m.pos[0] + dx / flat * step,
+                    m.pos[1],
+                    m.pos[2] + dz / flat * step,
+                ];
+                let cell = |p: [f64; 3], dy: i32| {
+                    self.solid(
+                        p[0].floor() as i32,
+                        p[1].floor() as i32 + dy,
+                        p[2].floor() as i32,
+                    )
+                };
+                if cell(to, -1).is_some() && cell(to, 0).is_none() && cell(to, 1).is_none() {
+                    if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
+                        mob.pos = to;
+                    }
+                    out.push(wire(
+                        State::Play,
+                        &S2c::EntityPositionSync {
+                            id,
+                            x: to[0],
+                            y: to[1],
+                            z: to[2],
+                        },
+                    )?);
+                }
+            }
+            if flat <= melee.reach && level && self.ticks >= m.next_hit && self.health > 0.0 {
+                if let Some(mob) = self.survival.life.mobs.get_mut(&id) {
+                    mob.next_hit = self.ticks + MELEE_EVERY;
+                }
+                let armor = self.survival.life.armor;
+                let cut = ARMOR_CAP.min((armor / 5.0).max(armor - 4.0 * melee.damage / 8.0)) / 25.0;
+                let dealt = melee.damage * (1.0 - cut.max(0.0));
+                out.extend(self.hurt_player(dealt, "mob_attack", "death.attack.mob")?);
+                let life = &mut self.survival.life;
+                life.wither_ticks = life.wither_ticks.max(melee.wither_ticks);
+            }
+        }
+        Ok(out)
     }
 
     /// The mobs' `add_entity`, for the join.
@@ -293,6 +428,14 @@ impl Sim {
         {
             out.extend(self.hurt_player(MAGMA_DAMAGE, "hot_floor", "death.attack.hotFloor")?);
         }
+        // The wither effect, then the mobs that act.
+        if self.survival.life.wither_ticks > 0 {
+            if self.survival.life.wither_ticks.is_multiple_of(WITHER_EVERY) {
+                out.extend(self.hurt_player(1.0, "wither", "death.attack.wither")?);
+            }
+            self.survival.life.wither_ticks -= 1;
+        }
+        out.extend(self.tick_mobs()?);
         // Eating.
         if let Some((item, left)) = self.survival.life.using {
             if left > 1 {
