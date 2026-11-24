@@ -222,3 +222,31 @@ fn the_planner_tunnels_to_bricks_no_walk_reaches_round_hidden_lava() {
     assert!(count("tunnel step to") >= 1, "{notes:#?}");
     assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
 }
+
+/// A stair up with nothing to step onto is laid from held blocks, but only over ground near
+/// under it: on the flat one block, over a pit three deep the cell under the step too, and over
+/// a drop nothing (race 45340444298: stairs laid from a cliff's edge out over a cavern).
+#[test]
+fn stairs_are_laid_over_near_ground_only() {
+    let w = world_with(&[]);
+    assert_eq!(
+        plan::stairs::lays(&w, (0, 64, 0), (1, 65, 0)),
+        vec![((1, 64, 0), (1, 63, 0), 1)]
+    );
+    let w = world_with(&filled([1, 1], [61, 63], [0, 0], BlockKind::Air));
+    assert_eq!(
+        plan::stairs::lays(&w, (0, 64, 0), (1, 65, 0)),
+        vec![((1, 63, 0), (0, 63, 0), 5), ((1, 64, 0), (1, 63, 0), 1)]
+    );
+    let w = world_with(&filled([1, 1], [40, 63], [0, 0], BlockKind::Air));
+    assert!(plan::stairs::lays(&w, (0, 64, 0), (1, 65, 0)).is_empty());
+    // And the search does not build out over the drop either: a pit across the whole line.
+    let w = world_with(&filled([3, 12], [30, 63], [-40, 40], BlockKind::Air));
+    let r = tunnel::route(&w, (0, 64, 0), &[(30, 70, 0)], &none(), true, 40_000);
+    if let Some(r) = r {
+        for pair in r.cells.windows(2) {
+            let over_pit = (3..=12).contains(&pair[1].0) && pair[1].1 >= 31;
+            assert!(!over_pit, "{:?} is over the pit: {:?}", pair[1], r.cells);
+        }
+    }
+}

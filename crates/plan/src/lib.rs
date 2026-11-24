@@ -1925,14 +1925,15 @@ impl Plan {
                 return t;
             }
         }
-        if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
+        // No bricks to go to: in the Nether a search tunnel on a held heading first (bricks with
+        // an open face are seen as their columns load, through rock; explore walks turn a quarter
+        // a try and cross open ground among lava, ghasts and piglins), then a walk.
+        if world::stage::in_nether(w)
+            && let Some(t) = self.explore_tunnel(w, tick, "no fortress in view")
+        {
             return t;
         }
-        // No walk out either: a search tunnel on a held heading (the Nether's open ground is lava
-        // shores and soul sand; rock is the way that is always there).
-        if world::stage::in_nether(w)
-            && let Some(t) = self.explore_tunnel(w, tick, "no fortress in view and no walk out")
-        {
+        if let Some(t) = self.explore_walk(w, tick, "no fortress in view") {
             return t;
         }
         self.failed_in_row += 1;
