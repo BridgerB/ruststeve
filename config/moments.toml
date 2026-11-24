@@ -1431,3 +1431,64 @@ ticks = 60
 set = [["obsidian", 1, 0, 2], ["obsidian", 2, 0, 2], ["obsidian", 1, 4, 2], ["obsidian", 2, 4, 2], ["obsidian", 0, 1, 2], ["obsidian", 3, 1, 2], ["air", 1, 1, 2], ["air", 2, 1, 2], ["obsidian", 0, 2, 2], ["obsidian", 3, 2, 2], ["air", 1, 2, 2], ["air", 2, 2, 2], ["obsidian", 0, 3, 2], ["obsidian", 3, 3, 2], ["air", 1, 3, 2], ["air", 2, 3, 2]]
 give = ["flint_and_steel 1"]
 watch = [[1, 1, 2], [2, 1, 2], [1, 2, 2], [2, 2, 2], [1, 3, 2], [2, 3, 2]]
+
+# Client parity rows (docs/problems/client-parity.md), on two dry landings, each at its own corner
+# off every other row's ground, in a corridor laid from the feet. Magma: a walk over a magma floor
+# is burned (40 ticks, 8 blocks); the same floor crossed sneaking is not, which only a server that
+# was told the shift key (the `player_input` packet) grants. Edge: a sneaking walk toward a pit
+# three deep stops on the last block (its feet cell is the first pit cell, at the floor's height,
+# on the ground); nothing corrects it.
+
+[[moment]]
+id = "p00-magma"
+landing = 0
+dx = -16
+dz = 16
+script = "straight:0"
+ticks = 40
+set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["magma_block", 0, -1, 2], ["magma_block", 0, -1, 3], ["magma_block", 0, -1, 4], ["magma_block", 0, -1, 5], ["magma_block", 0, -1, 6], ["magma_block", 0, -1, 7], ["magma_block", 0, -1, 8], ["magma_block", 0, -1, 9], ["magma_block", 0, -1, 10], ["magma_block", 0, -1, 11], ["magma_block", 0, -1, 12], ["air", 0, 0, 1], ["air", 0, 1, 1], ["air", 0, 0, 2], ["air", 0, 1, 2], ["air", 0, 0, 3], ["air", 0, 1, 3], ["air", 0, 0, 4], ["air", 0, 1, 4], ["air", 0, 0, 5], ["air", 0, 1, 5], ["air", 0, 0, 6], ["air", 0, 1, 6], ["air", 0, 0, 7], ["air", 0, 1, 7], ["air", 0, 0, 8], ["air", 0, 1, 8], ["air", 0, 0, 9], ["air", 0, 1, 9], ["air", 0, 0, 10], ["air", 0, 1, 10], ["air", 0, 0, 11], ["air", 0, 1, 11], ["air", 0, 0, 12], ["air", 0, 1, 12]]
+
+[[moment]]
+id = "p00-magma-sneak"
+landing = 0
+dx = 16
+dz = -16
+script = "sneak:180"
+ticks = 120
+set = [["stone", 0, -1, 0], ["stone", 0, -1, -1], ["magma_block", 0, -1, -2], ["magma_block", 0, -1, -3], ["magma_block", 0, -1, -4], ["magma_block", 0, -1, -5], ["magma_block", 0, -1, -6], ["magma_block", 0, -1, -7], ["magma_block", 0, -1, -8], ["magma_block", 0, -1, -9], ["magma_block", 0, -1, -10], ["magma_block", 0, -1, -11], ["magma_block", 0, -1, -12], ["air", 0, 0, -1], ["air", 0, 1, -1], ["air", 0, 0, -2], ["air", 0, 1, -2], ["air", 0, 0, -3], ["air", 0, 1, -3], ["air", 0, 0, -4], ["air", 0, 1, -4], ["air", 0, 0, -5], ["air", 0, 1, -5], ["air", 0, 0, -6], ["air", 0, 1, -6], ["air", 0, 0, -7], ["air", 0, 1, -7], ["air", 0, 0, -8], ["air", 0, 1, -8], ["air", 0, 0, -9], ["air", 0, 1, -9], ["air", 0, 0, -10], ["air", 0, 1, -10], ["air", 0, 0, -11], ["air", 0, 1, -11], ["air", 0, 0, -12], ["air", 0, 1, -12]]
+
+[[moment]]
+id = "p00-edge"
+landing = 0
+dx = -16
+dz = -16
+script = "sneak:180"
+ticks = 120
+set = [["stone", 0, -1, 0], ["stone", 0, -1, -1], ["stone", 0, -1, -2], ["air", 0, 0, -1], ["air", 0, 1, -1], ["air", 0, 0, -2], ["air", 0, 1, -2], ["air", 0, 0, -3], ["air", 0, 1, -3], ["air", 0, 0, -4], ["air", 0, 1, -4], ["air", 0, 0, -5], ["air", 0, 1, -5], ["air", 0, 0, -6], ["air", 0, 1, -6], ["air", 0, 0, -7], ["air", 0, 1, -7], ["air", 0, 0, -8], ["air", 0, 1, -8], ["air", 0, -1, -3], ["air", 0, -2, -3], ["air", 0, -3, -3], ["air", 0, -1, -4], ["air", 0, -2, -4], ["air", 0, -3, -4], ["air", 0, -1, -5], ["air", 0, -2, -5], ["air", 0, -3, -5], ["air", 0, -1, -6], ["air", 0, -2, -6], ["air", 0, -3, -6], ["air", 0, -1, -7], ["air", 0, -2, -7], ["air", 0, -3, -7], ["air", 0, -1, -8], ["air", 0, -2, -8], ["air", 0, -3, -8]]
+
+[[moment]]
+id = "p01-magma"
+landing = 1
+dx = -16
+dz = 16
+script = "straight:0"
+ticks = 40
+set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["magma_block", 0, -1, 2], ["magma_block", 0, -1, 3], ["magma_block", 0, -1, 4], ["magma_block", 0, -1, 5], ["magma_block", 0, -1, 6], ["magma_block", 0, -1, 7], ["magma_block", 0, -1, 8], ["magma_block", 0, -1, 9], ["magma_block", 0, -1, 10], ["magma_block", 0, -1, 11], ["magma_block", 0, -1, 12], ["air", 0, 0, 1], ["air", 0, 1, 1], ["air", 0, 0, 2], ["air", 0, 1, 2], ["air", 0, 0, 3], ["air", 0, 1, 3], ["air", 0, 0, 4], ["air", 0, 1, 4], ["air", 0, 0, 5], ["air", 0, 1, 5], ["air", 0, 0, 6], ["air", 0, 1, 6], ["air", 0, 0, 7], ["air", 0, 1, 7], ["air", 0, 0, 8], ["air", 0, 1, 8], ["air", 0, 0, 9], ["air", 0, 1, 9], ["air", 0, 0, 10], ["air", 0, 1, 10], ["air", 0, 0, 11], ["air", 0, 1, 11], ["air", 0, 0, 12], ["air", 0, 1, 12]]
+
+[[moment]]
+id = "p01-magma-sneak"
+landing = 1
+dx = 16
+dz = -16
+script = "sneak:180"
+ticks = 120
+set = [["stone", 0, -1, 0], ["stone", 0, -1, -1], ["magma_block", 0, -1, -2], ["magma_block", 0, -1, -3], ["magma_block", 0, -1, -4], ["magma_block", 0, -1, -5], ["magma_block", 0, -1, -6], ["magma_block", 0, -1, -7], ["magma_block", 0, -1, -8], ["magma_block", 0, -1, -9], ["magma_block", 0, -1, -10], ["magma_block", 0, -1, -11], ["magma_block", 0, -1, -12], ["air", 0, 0, -1], ["air", 0, 1, -1], ["air", 0, 0, -2], ["air", 0, 1, -2], ["air", 0, 0, -3], ["air", 0, 1, -3], ["air", 0, 0, -4], ["air", 0, 1, -4], ["air", 0, 0, -5], ["air", 0, 1, -5], ["air", 0, 0, -6], ["air", 0, 1, -6], ["air", 0, 0, -7], ["air", 0, 1, -7], ["air", 0, 0, -8], ["air", 0, 1, -8], ["air", 0, 0, -9], ["air", 0, 1, -9], ["air", 0, 0, -10], ["air", 0, 1, -10], ["air", 0, 0, -11], ["air", 0, 1, -11], ["air", 0, 0, -12], ["air", 0, 1, -12]]
+
+[[moment]]
+id = "p01-edge"
+landing = 1
+dx = -16
+dz = -16
+script = "sneak:180"
+ticks = 120
+set = [["stone", 0, -1, 0], ["stone", 0, -1, -1], ["stone", 0, -1, -2], ["air", 0, 0, -1], ["air", 0, 1, -1], ["air", 0, 0, -2], ["air", 0, 1, -2], ["air", 0, 0, -3], ["air", 0, 1, -3], ["air", 0, 0, -4], ["air", 0, 1, -4], ["air", 0, 0, -5], ["air", 0, 1, -5], ["air", 0, 0, -6], ["air", 0, 1, -6], ["air", 0, 0, -7], ["air", 0, 1, -7], ["air", 0, 0, -8], ["air", 0, 1, -8], ["air", 0, -1, -3], ["air", 0, -2, -3], ["air", 0, -3, -3], ["air", 0, -1, -4], ["air", 0, -2, -4], ["air", 0, -3, -4], ["air", 0, -1, -5], ["air", 0, -2, -5], ["air", 0, -3, -5], ["air", 0, -1, -6], ["air", 0, -2, -6], ["air", 0, -3, -6], ["air", 0, -1, -7], ["air", 0, -2, -7], ["air", 0, -3, -7], ["air", 0, -1, -8], ["air", 0, -2, -8], ["air", 0, -3, -8]]

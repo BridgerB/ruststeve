@@ -20,6 +20,7 @@ use physics::{Body, Controls, Fluid, FluidKind};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::nbt::Death;
+use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT};
 use protocol::slot::{Slot, Wear};
 use protocol::{C2s, Out, S2c, Session};
 
@@ -585,6 +586,10 @@ pub struct World {
     pub sent_pos: Option<[f64; 3]>,
     pub sent_look: Option<(f32, f32)>,
     pub sent_tick: u64,
+    /// The keys last reported to the server (`C2s::PlayerInput`'s bits): a new report goes out
+    /// only when they change, as the client's `lastSentInput` does.
+    #[serde(default)]
+    pub sent_input: u8,
     /// Hits on the bot in the last `HITS_KEPT_TICKS` server ticks, oldest first.
     #[serde(default)]
     pub hits: Vec<Hit>,
@@ -738,12 +743,40 @@ impl World {
         Some(Fluid { kind, level })
     }
 
-    /// One tick of the body: physics, then the movement packet vanilla would send.
+    /// The keys held, as the server is told them: forward, jump and shift from the controls.
+    /// The bot has no backward, strafe or sprint key (it walks; sprinting is never reported).
+    pub fn input_flags(controls: &Controls) -> u8 {
+        (if controls.forward { INPUT_FORWARD } else { 0 })
+            | (if controls.jump { INPUT_JUMP } else { 0 })
+            | (if controls.sneak { INPUT_SHIFT } else { 0 })
+    }
+
+    /// One tick of the body: the keys when they changed, physics, then the movement packet
+    /// vanilla would send.
     fn tick(&mut self) -> Vec<Effect> {
         self.ticks += 1;
         let Some(body) = self.body else {
             return Vec::new();
         };
+        let mut out = self.report_input();
+        out.extend(self.move_body(body));
+        out
+    }
+
+    /// The keys, when they differ from the last report: vanilla's `LocalPlayer.tick` sends
+    /// `player_input` after the body's tick and before its position whenever the pressed keys
+    /// are not the last ones sent. This is the only way a server learns the bot sneaks: its
+    /// shift key spares it on magma (`MagmaBlock.stepOn`) and gives it the crouching pose.
+    fn report_input(&mut self) -> Vec<Effect> {
+        let flags = Self::input_flags(&self.controls);
+        if flags == self.sent_input {
+            return Vec::new();
+        }
+        self.sent_input = flags;
+        vec![Effect::Send(C2s::PlayerInput { flags })]
+    }
+
+    fn move_body(&mut self, body: Body) -> Vec<Effect> {
         let at = BlockPos::containing(body.pos[0], body.pos[1], body.pos[2]).chunk();
         if !self.columns.contains_key(&at) {
             // No physics without the ground, but still the once-a-second status: the server
@@ -1156,7 +1189,13 @@ impl World {
             S2c::Respawn {
                 dimension_type,
                 dimension,
-            } => self.enter(*dimension_type, dimension),
+            } => {
+                self.enter(*dimension_type, dimension);
+                // A respawn makes the client a new player whose last sent keys are none
+                // (`LocalPlayer`'s `lastSentInput` starts empty), and after a death the server's
+                // new player holds no shift key: keys still held are reported again.
+                self.sent_input = 0;
+            }
             S2c::LevelChunkWithLight { x, z, column } => {
                 let at = ChunkPos { x: *x, z: *z };
                 self.overlay.remove(&at);

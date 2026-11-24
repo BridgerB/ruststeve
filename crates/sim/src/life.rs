@@ -89,10 +89,8 @@ pub struct Life {
     /// The fire resistance effect: fire, lava and burning do no damage (`LivingEntity.hurt`
     /// refuses an `is_fire` source), though lava still slows and sets the body alight.
     pub fire_resistance: bool,
-    /// The shift key as the server holds it (`isShiftKeyDown`, set by the `player_input`
-    /// packet). The bot's protocol sends no `player_input`, so to a server it never sneaks and
-    /// nothing here sets this: sneaking over magma does not spare the bot until that packet is
-    /// sent. A test sets it by hand.
+    /// The shift key as the server holds it (`isShiftKeyDown`), set by the `player_input`
+    /// packet the bot's world sends when its keys change: sneaking over magma spares the bot.
     pub sneaking: bool,
     /// Ticks since the last swing (`attackStrengthTicker`).
     pub attack_ticker: u32,

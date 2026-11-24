@@ -61,6 +61,17 @@ pub const OUT_OF_LIQUID_IMPULSE: f64 = 0.3;
 pub const BANK_PROBE: f64 = 0.6;
 /// The movement input a held forward key gives (vanilla scales input by 0.98).
 pub const FORWARD_INPUT: f64 = 0.98;
+/// The movement input is scaled by this while sneaking: the default of the `sneaking_speed`
+/// attribute (`Attributes.SNEAKING_SPEED`, 0.3), which the client applies to its input vector
+/// while it is crouching (`LocalPlayer.modifyInput`; javap of the 26.1.2 jars, probe 45339873719).
+pub const SNEAKING_SPEED: f64 = 0.3;
+/// The step a sneaking body's move is cut back by until it no longer leaves the edge
+/// (`Player.maybeBackOffFromEdge`, 0.05).
+pub const EDGE_BACK_OFF: f64 = 0.05;
+/// The largest move the edge back-off is asked about, in blocks a tick: the server calls a
+/// player's move of more than this "moved too quickly" (`ServerGamePacketListenerImpl`, a
+/// squared distance over 100), so nothing real is left out.
+pub const MAX_BACK_OFF: f64 = 10.0;
 /// Ticks after a jump before the next one.
 pub const JUMP_COOLDOWN: i64 = 10;
 /// The box shrinks by this before asking "in water?".
@@ -311,6 +322,68 @@ pub fn rise_onto(
     (dx.abs() + dz.abs() > hx.abs() + hz.abs()).then_some([dx, up + down, dz])
 }
 
+/// Does any solid box overlap the region, by more than a touching face? Vanilla's `noCollision`,
+/// negated.
+pub fn collides(solid: &impl Solid, region: Aabb) -> bool {
+    solid_boxes(solid, region)
+        .iter()
+        .any(|c| (0..3).all(|axis| overlaps(&region, c, axis)))
+}
+
+/// Could the box, moved `(dx, dz)`, fall at least `h`: is the slab of that depth under it free?
+/// `Player.canFallAtLeast`, the box drawn in by 1.0E-7 at its sides.
+pub fn can_fall_at_least(solid: &impl Solid, b: &Aabb, dx: f64, dz: f64, h: f64) -> bool {
+    let e = COLLISION_EPSILON;
+    !collides(
+        solid,
+        [
+            b[0] + e + dx,
+            b[1] - h - e,
+            b[2] + e + dz,
+            b[3] - e + dx,
+            b[1],
+            b[5] - e + dz,
+        ],
+    )
+}
+
+/// The horizontal move a sneaking body is allowed: `(vx, vz)` cut back in steps of 0.05 until
+/// the box would still have ground within a step's height under it, so it stops at an edge
+/// instead of walking off. `Player.maybeBackOffFromEdge` (javap of the 26.1.2 server jar, probe
+/// 45339873719): only for a move that is not upward, from the ground or within a step's height
+/// of it; x alone, then z alone, then both.
+pub fn back_off_from_edge(solid: &impl Solid, body: &Body, [vx, vy, vz]: Vec3) -> (f64, f64) {
+    let b = aabb(body.pos);
+    let above_ground = body.on_ground
+        || (body.fall_distance < STEP_HEIGHT
+            && !can_fall_at_least(solid, &b, 0.0, 0.0, STEP_HEIGHT - body.fall_distance));
+    // A move no body makes (a velocity from a bad frame) is left alone: the loops below count
+    // down in steps of 0.05 and must end.
+    let sane = vx.abs() <= MAX_BACK_OFF && vz.abs() <= MAX_BACK_OFF;
+    if vy > 0.0 || !above_ground || !sane {
+        return (vx, vz);
+    }
+    let back = |d: f64| {
+        if d.abs() <= EDGE_BACK_OFF {
+            0.0
+        } else {
+            d - d.signum() * EDGE_BACK_OFF
+        }
+    };
+    let (mut dx, mut dz) = (vx, vz);
+    while dx != 0.0 && can_fall_at_least(solid, &b, dx, 0.0, STEP_HEIGHT) {
+        dx = back(dx);
+    }
+    while dz != 0.0 && can_fall_at_least(solid, &b, 0.0, dz, STEP_HEIGHT) {
+        dz = back(dz);
+    }
+    while dx != 0.0 && dz != 0.0 && can_fall_at_least(solid, &b, dx, dz, STEP_HEIGHT) {
+        dx = back(dx);
+        dz = back(dz);
+    }
+    (dx, dz)
+}
+
 /// One tick of land movement: `(pos', vel', landed, hit)`. The box is swept an axis at a time
 /// (y, then x, then z); a body on the ground stopped by something low steps onto it.
 pub fn land_tick(solid: &impl Solid, pos: Vec3, [vx, vy, vz]: Vec3) -> (Vec3, Vec3, bool, bool) {
@@ -374,10 +447,26 @@ pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Co
         AIR_ACCELERATION
     };
     let f = if controls.forward { FORWARD_INPUT } else { 0.0 };
+    // A sneaking client scales its input by the sneaking speed, in water as on land.
+    let f = if controls.sneak {
+        f * SNEAKING_SPEED
+    } else {
+        f
+    };
     let rad = controls.yaw.to_radians();
     let vx = vx - f * accel * rad.sin();
     let vz = vz + f * accel * rad.cos();
-    let (pos2, [vx, vy, vz], landed, hit) = land_tick(solid, pos, [vx, vy, vz]);
+    // Sneaking, the move (never the velocity) is cut back at an edge: vanilla backs the movement
+    // off before the sweep and keeps the velocity, which only a collision zeroes.
+    let (mx, mz) = if controls.sneak {
+        back_off_from_edge(solid, body, [vx, vy, vz])
+    } else {
+        (vx, vz)
+    };
+    let (pos2, [wx, vy, wz], landed, hit) = land_tick(solid, pos, [mx, vy, mz]);
+    // `land_tick` gives the move back unless it hit something, then zero.
+    let vx = if wx == mx { vx } else { 0.0 };
+    let vz = if wz == mz { vz } else { 0.0 };
     let inertia = if in_lava {
         LAVA_INERTIA
     } else if in_water {
@@ -505,6 +594,106 @@ mod tests {
         assert!(
             b.pos[2] > 3.0 && (highest - 64.0625).abs() < 1e-9,
             "did not step onto the carpet: {:?}, highest {highest}",
+            b.pos
+        );
+    }
+
+    /// A platform of full cubes at y = 63 for z <= 2, nothing beyond: an edge at z = 3.
+    fn platform(_: i32, y: i32, z: i32) -> Option<f64> {
+        (y == 63 && z <= 2).then_some(1.0)
+    }
+
+    #[test]
+    fn sneaking_stops_at_an_edge_walking_falls_off_it() {
+        let sneak = Controls {
+            forward: true,
+            sneak: true,
+            ..Controls::default()
+        };
+        let mut b = standing();
+        for _ in 0..400 {
+            b = step(&platform, &no_fluid, &b, &sneak);
+            assert!(b.pos[1] > 64.0 - 1e-9, "left the ground at {:?}", b.pos);
+        }
+        // The box (0.3 each side) may hang over the edge at z = 3 but never clear it, and
+        // vanilla's 0.05 steps stop it within 0.05 of the last hold.
+        assert!(
+            b.pos[2] > 3.2 && b.pos[2] < 3.3,
+            "stopped at the edge: z {}",
+            b.pos[2]
+        );
+        assert!(b.on_ground);
+        let walk = Controls {
+            forward: true,
+            ..Controls::default()
+        };
+        let mut b = standing();
+        for _ in 0..60 {
+            b = step(&platform, &no_fluid, &b, &walk);
+        }
+        assert!(b.pos[1] < 60.0, "walked off: {:?}", b.pos);
+    }
+
+    #[test]
+    fn sneaking_walks_at_three_tenths_of_the_pace() {
+        // Terminal ground speed is accel × input / (1 - inertia): the input is the only term
+        // sneaking changes, so the two speeds are in the ratio of the attribute, 0.3.
+        let speed = |c: Controls| {
+            let mut b = standing();
+            for _ in 0..200 {
+                b = step(&ground, &no_fluid, &b, &c);
+            }
+            let before = b.pos[2];
+            b = step(&ground, &no_fluid, &b, &c);
+            b.pos[2] - before
+        };
+        let walk = speed(Controls {
+            forward: true,
+            ..Controls::default()
+        });
+        let sneak = speed(Controls {
+            forward: true,
+            sneak: true,
+            ..Controls::default()
+        });
+        // Vanilla's walk is 4.317 blocks a second, its sneak 1.295.
+        assert!((walk * 20.0 - 4.317).abs() < 0.01, "walk {}", walk * 20.0);
+        assert!(
+            (sneak * 20.0 - 1.295).abs() < 0.01,
+            "sneak {}",
+            sneak * 20.0
+        );
+        assert!((sneak / walk - SNEAKING_SPEED).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_sneaking_body_still_steps_down_less_than_a_step() {
+        // A carpet's height down is not an edge (under the 0.6 step): the sneak walks off it.
+        let carpet = |_: i32, y: i32, z: i32| {
+            if y <= 63 {
+                Some(1.0)
+            } else if y == 64 && z <= 0 {
+                Some(0.0625)
+            } else {
+                None
+            }
+        };
+        let sneak = Controls {
+            forward: true,
+            sneak: true,
+            ..Controls::default()
+        };
+        let mut b = Body {
+            pos: [0.5, 64.0625, 0.5],
+            on_ground: true,
+            ..Body::default()
+        };
+        for _ in 0..100 {
+            b = step(&carpet, &no_fluid, &b, &sneak);
+        }
+        assert!(
+            b.pos[2] > 2.0 && (b.pos[1] - 64.0).abs() < 1e-9,
+            "walked off the carpet: {:?}",
             b.pos
         );
     }
