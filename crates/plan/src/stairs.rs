@@ -138,6 +138,9 @@ pub const LAY_ITEMS: [data::ItemKind; 3] = [
     data::ItemKind::Cobblestone,
     data::ItemKind::CobbledDeepslate,
 ];
+/// A laid stair has ground this near under it (open cells only between). Race 45340444298: a
+/// route laid stairs up from a cliff's edge out over a cavern, and the bot ended its run there.
+pub const LAY_OVER: i32 = 6;
 /// Ticks a laid block may take to show before the step fails.
 pub const LAY_TICKS: u64 = 40;
 
@@ -149,11 +152,18 @@ pub fn lay_item(w: &World) -> Option<data::ItemKind> {
 /// What a stair up from `from` to `to` must lay first, when the block it steps onto is missing:
 /// the cell under that block (clicked onto the side of the block the feet stand on) when it is
 /// open too, then the block itself (clicked onto the top of the one under it). Empty when the
-/// step has its floor or is not a stair up.
+/// step has its floor, is not a stair up, or has no ground within `LAY_OVER` under it: stairs
+/// are laid over a cavern's floor, never out over a drop or a lava sea.
 pub fn lays(w: &World, from: Cell, to: Cell) -> Vec<(Cell, Cell, i8)> {
     let (dx, dz) = (to.0 - from.0, to.2 - from.2);
     let floor = (to.0, to.1 - 1, to.2);
     if to.1 != from.1 + 1 || !open(kind(w, floor)) {
+        return Vec::new();
+    }
+    let ground = (1..=LAY_OVER)
+        .map(|d| kind(w, (floor.0, floor.1 - d, floor.2)))
+        .find(|k| !open(*k));
+    if !full(ground.flatten()) {
         return Vec::new();
     }
     let under = (floor.0, floor.1 - 1, floor.2);
