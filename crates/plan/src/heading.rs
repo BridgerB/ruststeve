@@ -899,7 +899,9 @@ impl Plan {
                     self.expanded += walk.expanded;
                     let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
                     let spare = path::bridge_blocks(w) - KEEP;
-                    if found && bridges <= spare {
+                    // A route with no bridge is taken whatever is held; one that bridges keeps
+                    // the keep.
+                    if found && (bridges == 0 || bridges <= spare) {
                         leg.planned = walk.waypoints.clone().unwrap_or_default();
                         let cells = leg.planned.len();
                         let n = leg.n;
@@ -987,7 +989,10 @@ impl Plan {
                             .map_or(0, |wps| wps.iter().filter(|c| blocked.contains(c)).count());
                         let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
                         // Only a route the cut alone refused: over cut cells, within the keep.
-                        if found && back > 0 && bridges <= path::bridge_blocks(w) - KEEP {
+                        if found
+                            && back > 0
+                            && (bridges == 0 || bridges <= path::bridge_blocks(w) - KEEP)
+                        {
                             self.note(
                                 tick,
                                 format!("heading leg {n} refused for cut (paced)"),

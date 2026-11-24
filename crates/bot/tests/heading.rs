@@ -176,26 +176,39 @@ fn a_dead_end_causeway_is_turned_from_and_never_walked_back() {
         2500,
     );
     let tail = out.tail();
-    assert_eq!(out.count("heading turned to (0, -1)"), 1, "{tail:#?}");
-    assert_eq!(out.count("heading turned"), 1, "{tail:#?}");
-    let turned = out
+    let turns: Vec<(u64, &String)> = out
         .notes
         .iter()
-        .find(|n| n.contains("heading turned"))
-        .and_then(|n| n.split(' ').next())
-        .and_then(|t| t.parse::<u64>().ok())
-        .unwrap();
-    // Every place after the turn: never back west along the causeway.
-    let after: Vec<[f64; 3]> = out
+        .filter(|n| n.contains("heading turned"))
+        .filter_map(|n| Some((n.split(' ').next()?.parse::<u64>().ok()?, n)))
+        .collect();
+    let at = |tick: u64| {
+        out.track
+            .get(usize::try_from(tick / 20).unwrap())
+            .or(out.track.last())
+            .copied()
+            .unwrap()
+    };
+    let (first, note) = turns.first().copied().unwrap();
+    assert!(note.contains("turned to (0, -1)"), "{note}: {tail:#?}");
+    // The one turn before the world's north end (z -200): any next is there.
+    let until = turns.get(1).map_or(u64::MAX, |t| t.0);
+    if until < u64::MAX {
+        let z = at(until)[2];
+        assert!(z <= -150.0, "a second turn at z {z}: {tail:#?}");
+    }
+    // From the turn to the next: never back west along the causeway.
+    let between: Vec<[f64; 3]> = out
         .track
         .iter()
-        .skip(usize::try_from(turned / 20).unwrap())
+        .skip(usize::try_from(first / 20).unwrap())
+        .take(usize::try_from(until.saturating_sub(first) / 20).unwrap_or(usize::MAX))
         .copied()
         .collect();
-    let min_x = after.iter().map(|p| p[0]).fold(f64::MAX, f64::min);
+    let min_x = between.iter().map(|p| p[0]).fold(f64::MAX, f64::min);
     assert!(min_x >= 35.0, "walked back to x {min_x}: {tail:#?}");
-    let z = out.run.world.body.map_or(0.0, |b| b.pos[2]);
-    assert!(z <= -20.0, "not north at z {z}: {tail:#?}");
+    let z = between.iter().map(|p| p[2]).fold(f64::MAX, f64::min);
+    assert!(z <= -100.0, "not north, at most z {z}: {tail:#?}");
     assert!(out.count("no way") >= 1, "the turn says why: {tail:#?}");
     assert!(!out.run.died);
 }
@@ -351,7 +364,11 @@ fn a_known_forest_replaces_the_heading_and_its_biome_ends_it() {
             .any(|n| n.contains("heading to the warped forest at column (2, 1)")),
         "{notes:#?}"
     );
-    let leg = p.headed.as_ref().unwrap().leg.clone().unwrap();
+    let leg = p
+        .headed
+        .as_ref()
+        .and_then(|h| h.leg.clone())
+        .unwrap_or_else(|| panic!("no leg: {:#?}", said(&p)));
     assert_eq!(leg.target, (40, feet.1, 24), "the forest's column centre");
     let warped = Signs {
         feet_biome: Some("warped_forest"),
