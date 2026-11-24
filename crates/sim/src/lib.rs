@@ -46,6 +46,10 @@ const SAFE_FALL: f64 = 3.0;
 /// The deflation vanilla gives boxes in "colliding with anything new" (1.0E-5 as a float).
 const DEFLATE: f64 = 9.999_999_747_378_752e-6;
 
+/// Chunks beyond the simulation distance that still tick entities (issue 17: read from
+/// `DistanceManager` and `TickingTracker` in the 26.1.2 jar, docs/problems/endermen-model.md).
+const TICKING_SLACK: i32 = 0;
+
 /// What the model is told: a client packet, or one server tick.
 #[derive(Clone, Debug, PartialEq)]
 pub enum In {
@@ -811,6 +815,7 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
     })
 }
 
+pub mod enderman;
 pub mod fluid;
 pub mod furnace;
 pub mod life;
@@ -835,6 +840,15 @@ impl Sim {
     /// The model's world, for a test's reading.
     pub fn world(&self) -> &ModelWorld {
         &self.world
+    }
+
+    /// Whether an entity at `pos` ticks: its chunk within the simulation distance of the
+    /// player's chunk (`DistanceManager.inEntityTickingRange`, issue 17). One farther out is
+    /// still sent but frozen: no movement, no attack, no teleport, no position updates.
+    pub fn ticking(&self, pos: [f64; 3]) -> bool {
+        let (px, pz) = column_of(self.pos[0], self.pos[2]);
+        let (cx, cz) = column_of(pos[0], pos[2]);
+        (cx - px).abs().max((cz - pz).abs()) <= self.config.simulation_distance + TICKING_SLACK
     }
 }
 

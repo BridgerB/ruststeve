@@ -207,6 +207,8 @@ pub enum Brain {
         unseen: u32,
         stroll: Option<[f64; 2]>,
     },
+    /// An enderman (issue 17, `crate::enderman`).
+    Enderman(crate::enderman::Ender),
 }
 
 impl Brain {
@@ -460,6 +462,8 @@ pub struct Life {
     /// Damage dealt to the player by damage type (after armour and invulnerability), so a
     /// test can say what a death was made of.
     pub hurt_by: std::collections::BTreeMap<String, f32>,
+    /// Endermen the world spawned in warped forests (issue 17).
+    pub ender_spawns: u64,
 }
 
 impl Default for Life {
@@ -505,6 +509,7 @@ impl Default for Life {
             mobs_knocked: 0,
             mobs_fell: 0,
             hurt_by: std::collections::BTreeMap::new(),
+            ender_spawns: 0,
         }
     }
 }
@@ -733,7 +738,7 @@ impl Sim {
             else {
                 continue;
             };
-            if m.dead_at.is_some() || self.health <= 0.0 {
+            if m.dead_at.is_some() || self.health <= 0.0 || !self.ticking(m.pos) {
                 continue;
             }
             let mut attack_time = attack_time - 1;
@@ -990,7 +995,7 @@ impl Sim {
     /// shield facing it stops it whole, knocks the mob 0.5 back (`blockedByItem`) and, from an
     /// axe, is disabled for `disables` ticks (`BlocksAttacks.disable`: the use stopped, a
     /// cooldown); else the hit lands with its knock. Whether it landed.
-    fn blow_from(
+    pub(crate) fn blow_from(
         &mut self,
         id: i32,
         damage: f32,
@@ -1224,7 +1229,11 @@ impl Sim {
             };
             // A `Still` mob stands where it was put (a parity row's or a placed target): only
             // mobs that act are knocked.
-            if m.dead_at.is_some() || m.push == [0.0; 2] || matches!(m.brain, Brain::Still) {
+            if m.dead_at.is_some()
+                || m.push == [0.0; 2]
+                || matches!(m.brain, Brain::Still)
+                || !self.ticking(m.pos)
+            {
                 continue;
             }
             let to = [m.pos[0] + m.push[0], m.pos[1], m.pos[2] + m.push[1]];
@@ -1288,7 +1297,7 @@ impl Sim {
             let Some(m) = self.survival.life.mobs.get(&id).copied() else {
                 continue;
             };
-            if m.dead_at.is_some() || !matches!(m.brain, Brain::Melee(_)) {
+            if m.dead_at.is_some() || !matches!(m.brain, Brain::Melee(_)) || !self.ticking(m.pos) {
                 continue;
             }
             let (x, z) = (m.pos[0].floor() as i32, m.pos[2].floor() as i32);
@@ -1374,7 +1383,7 @@ impl Sim {
             let Brain::Melee(melee) = m.brain else {
                 continue;
             };
-            if m.dead_at.is_some() {
+            if m.dead_at.is_some() || !self.ticking(m.pos) {
                 continue;
             }
             let (dx, dz) = (self.pos[0] - m.pos[0], self.pos[2] - m.pos[2]);
@@ -1581,6 +1590,8 @@ impl Sim {
         out.extend(self.tick_spawners()?);
         out.extend(self.tick_blazes()?);
         out.extend(self.tick_fireballs()?);
+        out.extend(self.tick_endermen()?);
+        out.extend(self.tick_ender_spawns()?);
         // Eating.
         if let Some((item, left)) = self.survival.life.using {
             if left > 1 {
@@ -1754,8 +1765,13 @@ impl Sim {
         let Some(m) = life.mobs.get_mut(&entity).filter(|m| m.dead_at.is_none()) else {
             return Ok(Vec::new());
         };
-        // The distance from the eye to the mob's box (0.6 wide, 1.95 tall for a zombie-sized one).
-        let (hw, h) = (0.3, 1.95);
+        // The distance from the eye to the mob's box (0.6 wide, 1.95 tall for a zombie-sized one;
+        // an enderman's 2.9).
+        let (hw, h) = if m.kind == EntityKind::Enderman {
+            (crate::enderman::HALF_WIDTH, crate::enderman::HEIGHT)
+        } else {
+            (0.3, 1.95)
+        };
         let axis = |e: f64, lo: f64, hi: f64| (lo - e).max(0.0).max(e - hi);
         let d = [
             axis(eye[0], m.pos[0] - hw, m.pos[0] + hw),
@@ -1794,6 +1810,11 @@ impl Sim {
             },
         )?];
         let (kind, at, loot) = (m.kind, m.pos, m.loot);
+        out.extend(self.ender_hurt_by_player(entity)?);
+        let life = &mut self.survival.life;
+        let Some(m) = life.mobs.get_mut(&entity) else {
+            return Ok(out);
+        };
         if health <= 0.0 {
             m.dead_at = Some(self.ticks);
             life.kills += 1;
