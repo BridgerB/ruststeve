@@ -197,6 +197,10 @@ const CORRIDOR_CHUNKS: i32 = 3;
 pub const LAVA_TRIPS: u32 = 2;
 /// Lava sources a fetch asks a scoop route of, nearest first.
 const LAVA_FETCH_TRIES: usize = 8;
+/// Eye to a source's centre within which a fetch walks toward it no more: a walk to within
+/// `scoop::REACH` of it ends at once (cast.md wall 2). A block over the reach, for the walk's
+/// own range measured from the feet.
+const FETCH_NEAR: f64 = scoop::REACH + 1.0;
 /// Walks toward lava a fetch takes for one site when no scoop routes (wall 47).
 const LAVA_FETCH_WALKS: u32 = 4;
 /// Failed walks in a row, with nothing done between, after which the planner stops: stuck,
@@ -1283,16 +1287,26 @@ impl Plan {
                 // The buckets held when the cast ended: a cast that lost its water says so here.
                 let held = |i| craft::count(w, i);
                 let at = format!(
-                    "{}; {}; buckets water {} lava {} empty {}; {uses}; {}",
+                    "{}; {}; {}; buckets water {} lava {} empty {}; {uses}; {}; {}",
                     k.current().map(build::op_text).unwrap_or_default(),
+                    k.tries_text(),
                     k.regression_text(),
                     held(data::ItemKind::WaterBucket),
                     held(data::ItemKind::LavaBucket),
                     held(data::ItemKind::Bucket),
+                    k.refused_text(),
                     k.refill_text()
                 );
+                let refused = k.refused_sources().to_vec();
                 let water = held(data::ItemKind::WaterBucket);
                 let lava = held(data::ItemKind::LavaBucket);
+                // A source the cast's scoop failed at is refused for the fetch too: the fetch
+                // took the very source the refill had failed at four times (cast.md wall 1).
+                if !matches!(status, cast::CastStatus::Running) {
+                    for c in refused {
+                        self.refuse(c, tick);
+                    }
+                }
                 let account = CastAccount {
                     ops,
                     at,
@@ -3696,13 +3710,31 @@ impl Plan {
             .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
             .take(LAVA_FETCH_TRIES)
             .collect();
+        // A source the eye is already within a bucket's reach of is no walk's target: the walk
+        // ends at once and the fetch, due again, finds it refused and gives the site up in the
+        // same tick (cast.md wall 2: "walk toward lava to fetch" then "no lava to fetch" at
+        // tick 29,920, 286 sources seen).
+        let eye = w
+            .body
+            .map(|b| [b.pos[0], b.pos[1] + physics::EYE_HEIGHT, b.pos[2]]);
+        let near = |c: &Cell| {
+            eye.is_some_and(|e| {
+                let p = [
+                    f64::from(c.0) + 0.5,
+                    f64::from(c.1) + 0.5,
+                    f64::from(c.2) + 0.5,
+                ];
+                (0..3).map(|i| (e[i] - p[i]).powi(2)).sum::<f64>().sqrt() <= FETCH_NEAR
+            })
+        };
         // Taken before the scoops refuse what they try: a source no scoop routes to now may be
         // walked toward, where more of its pool shows.
-        let far: Vec<Cell> = cast::lava_within(w, cast::FAR_RADIUS)
+        let (close, far): (Vec<Cell>, Vec<Cell>) = cast::lava_within(w, cast::FAR_RADIUS)
             .into_iter()
             .filter(|c| !ours(*c) && !self.refused_now(*c, tick))
-            .take(LAVA_FETCH_TRIES)
-            .collect();
+            .partition(near);
+        let skipped = close.len();
+        let far: Vec<Cell> = far.into_iter().take(LAVA_FETCH_TRIES).collect();
         for c in candidates {
             let mut s = scoop::Scoop::of(c, memory::Fluid::Lava, tick);
             if s.route_now(w, tick) {
@@ -3740,7 +3772,7 @@ impl Plan {
                     tick,
                     format!("walk toward lava to fetch at {c:?}"),
                     format!(
-                        "no scoop routes; walk {} of {LAVA_FETCH_WALKS}",
+                        "no scoop routes; walk {} of {LAVA_FETCH_WALKS}; {skipped} sources within reach skipped",
                         self.fetch_walks
                     ),
                 );
