@@ -1212,10 +1212,13 @@ name = "replay"
 version = "0.1.0"
 dependencies = [
  "data",
+ "memory",
  "observe",
+ "plan",
  "protocol",
  "record",
  "results",
+ "toml",
  "world",
 ]
 
