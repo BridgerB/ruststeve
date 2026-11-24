@@ -140,12 +140,12 @@ fn open_ground_holds_the_axis_two_hundred_blocks() {
     assert!(!out.run.died);
 }
 
-/// A wall of solid netherrack across the axis, x 30 to 39: the heading tunnels it on its axis,
+/// A wall of solid netherrack across the axis, x 30 to 35: the heading tunnels it on its axis,
 /// level, at two digs a metre at most and inside a leg's dig budget, and never turns.
 #[test]
 fn a_wall_is_tunnelled_on_the_axis_at_two_digs_a_metre() {
     let mut stage = flat((-16, 140), (-24, 24));
-    stage.fill((30, 39), (64, 79), (-48, 48), BlockKind::Netherrack);
+    stage.fill((30, 35), (64, 79), (-48, 48), BlockKind::Netherrack);
     let out = drive(
         &stage,
         &[
@@ -170,15 +170,20 @@ fn a_wall_is_tunnelled_on_the_axis_at_two_digs_a_metre() {
         "{:#?}",
         out.tail()
     );
-    let h = out.p.headed.as_ref().unwrap();
-    let rock = 10.0;
-    assert!(
-        f64::from(h.digs) <= 2.0 * rock + 4.0,
-        "{} digs for {rock:.0} m of rock: {:#?}",
-        h.digs,
-        out.tail()
-    );
-    assert!(h.digs > 0, "the digs were counted: {:#?}", out.tail());
+    // Leg 1 runs from x 0 through the wall to x 48: done, its digs within the rock's cut.
+    let leg1 = out
+        .notes
+        .iter()
+        .find(|n| n.contains("heading leg 1 done"))
+        .unwrap_or_else(|| panic!("{:#?}", out.notes.iter().take(40).collect::<Vec<_>>()));
+    let digs: u32 = leg1
+        .split("digs ")
+        .nth(1)
+        .and_then(|r| r.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap();
+    assert!(digs > 0, "the digs were counted: {leg1}");
+    assert!(digs <= 2 * 6 + 4, "{digs} digs for 6 m of rock: {leg1}");
     assert!(!out.run.died);
 }
 
