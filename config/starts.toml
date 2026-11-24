@@ -168,8 +168,8 @@ setup = [
 # `snapshot=race-45336326999/snapshot-spawner-45336326999-race-45336326999-lane-2.tar.zst` (the
 # healthy armoured bot the blaze fight's race 45338756013 started from, so the two compare). No
 # kit and no place: the snapshot's own. The 32 cooked beef are there so that the food a bot can
-# carry does not hide what the shield does (the orchestrator, 2026-11-23); the second shield is the
-# spare the kit row makes.
+# carry does not hide what the shield does (the orchestrator, 2026-11-23); the two more shields are
+# the spares a long fight wears through.
 [[start]]
 name = "dev-shield"
 stage = "spawner"
@@ -179,3 +179,16 @@ setup = [
   "give {bot} minecraft:shield 2",
   "give {bot} minecraft:cooked_beef 32",
 ]
+
+# A DEVELOPMENT start (2026-11-23; never issue-16 evidence, never the frontier): the blaze fight
+# with the food ceiling taken away. Race it only with
+# `snapshot=race-45336326999/snapshot-spawner-45336326999-race-45336326999-lane-2.tar.zst` (a bot
+# that walked to the spawner with the real kit, armour worn, 20 health): its 10 raw meat healed
+# about 26 health and one bot sat at 3.9 health with nothing to eat for 3,100 ticks (race
+# 45338756013 lane 1; docs/problems/blaze-fight.md). 32 cooked beef on top says what the fight
+# does when fed, and what its next wall is.
+[[start]]
+name = "dev-spawner-fed"
+stage = "spawner"
+place = "spawn"
+kit = [["cooked_beef", 32]]

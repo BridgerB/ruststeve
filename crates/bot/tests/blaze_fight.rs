@@ -15,13 +15,15 @@ fn state(k: BlockKind) -> u32 {
 }
 
 /// The bot stands at (0.5, 64, 0.5) on a flat floor at y 63: fire one cell east, lava in the floor
-/// one cell north, a hole two deep two cells west, and open floor south.
+/// one cell north, a hole four deep two cells west, and open floor south.
 fn hazards() -> world::World {
     let mut m = flat_world(2, 63).unwrap();
     m.set_block(1, 64, 0, state(BlockKind::Fire)).unwrap();
     m.set_block(0, 63, -1, state(BlockKind::Lava)).unwrap();
     m.set_block(-2, 63, 0, state(BlockKind::Air)).unwrap();
     m.set_block(-2, 62, 0, state(BlockKind::Air)).unwrap();
+    m.set_block(-2, 61, 0, state(BlockKind::Air)).unwrap();
+    m.set_block(-2, 60, 0, state(BlockKind::Air)).unwrap();
     bot::lockstep::run(Sim::new(CONFIG, m), "rs-bf", 1, 30, 20, |_, _| {
         physics::Controls::default()
     })
@@ -76,4 +78,13 @@ fn a_blaze_overhead_is_struck_by_its_box() {
     });
     assert!(run.world.kills >= 1, "no kill: {:#?}", p.events);
     assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
+}
+
+/// A cell beside a fall is no cover (a bot took cover on a bridge rail's top and fell from it):
+/// the cell beside the hole is an edge, one on open floor is not.
+#[test]
+fn a_cell_beside_a_fall_is_an_edge() {
+    let w = hazards();
+    assert!(plan::defend::edge(&w, (-1, 64, 0)), "beside the hole");
+    assert!(!plan::defend::edge(&w, (0, 64, 4)), "open floor");
 }

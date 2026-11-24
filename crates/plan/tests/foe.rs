@@ -143,3 +143,29 @@ fn a_shooter_far_overhead_is_not_gone_after() {
     add(&mut w, 8, EntityKind::Blaze, [8.5, 1.0, 0.5]);
     assert_eq!(foe(&w, &r, &[]), Some((8, EntityKind::Blaze)));
 }
+
+/// Blaze-fight wall 7: a fireball whose line passes within 1.5 blocks of the body's middle is
+/// stepped out of, away from the line; one passing 2 blocks off, or flying away, is left; one
+/// with no velocity yet is taken to fly at the body.
+#[test]
+fn a_fireball_s_line_is_stepped_out_of() {
+    use plan::defend::dodge_side;
+    let mid = [0.5, 64.9, 0.5];
+    let west = Some([-1.0, 0.0, 0.0]);
+    // Its line a block south (+z) of the body: step north.
+    let s = dodge_side(mid, [10.5, 64.9, 1.5], west).expect("a dodge");
+    assert!(s[1] < -0.9 && s[0].abs() < 0.1, "{s:?}");
+    // Two blocks off: no dodge.
+    assert_eq!(dodge_side(mid, [10.5, 64.9, 2.5], west), None);
+    // Flying away: no dodge.
+    assert_eq!(
+        dodge_side(mid, [10.5, 64.9, 0.5], Some([1.0, 0.0, 0.0])),
+        None
+    );
+    // Dead on: a step across its heading.
+    let s = dodge_side(mid, [10.5, 64.9, 0.5], west).expect("a dodge");
+    assert!(s[0].abs() < 0.1 && s[1].abs() > 0.9, "{s:?}");
+    // No velocity yet: as dead on.
+    let s = dodge_side(mid, [10.5, 64.9, 0.5], None).expect("a dodge");
+    assert!(s[0].abs() < 0.1 && s[1].abs() > 0.9, "{s:?}");
+}
