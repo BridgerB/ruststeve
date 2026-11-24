@@ -283,7 +283,6 @@ fn a_hurt_bot_rests_out_of_the_blazes_sight() {
 /// 178 ticks) hovers twelve blocks along a railed bridge, eight over the deck; the bot holds a
 /// shield with its sword. Over five volleys no fireball lands.
 #[test]
-#[ignore = "blaze fight: 3 fireballs hit, 0 blocked (the blaze then 3 up, in sword reach); owners A11, A4"]
 fn no_fireball_of_five_volleys_lands() {
     let wall = walls::fortress_bridge(3, true);
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
@@ -314,4 +313,10 @@ fn no_fireball_of_five_volleys_lands() {
     );
     assert!(!run.died, "died\n{story}");
     assert_eq!(life.fireballs_hit, 0, "burned\n{story}");
+    assert!(life.fireballs_blocked > 0, "none blocked\n{story}");
+    assert!(
+        run.sim.violations.is_empty(),
+        "{:?}\n{story}",
+        run.sim.violations
+    );
 }

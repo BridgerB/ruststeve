@@ -72,8 +72,10 @@ fn the_kit_is_met_with_two_shields_held_and_the_tools_come_first() {
     assert_eq!(next(&short, true), "craft:stone_pickaxe");
 }
 
+/// With no wood and no iron held the row goes for them, as it does for the pickaxes' wood: a
+/// gather first. `Plan::nether_task` bounds the kit at `KIT_TASKS` tasks, so the flow before
+/// it should hold the makings (two ingots or raw iron with fuel, twelve planks or three logs).
 #[test]
-fn nothing_to_make_it_from_is_stuck_not_a_trip() {
-    // No iron and no wood: the kit says so and the bot goes in without one.
-    assert_eq!(next(&TOOLS, true), "stuck");
+fn nothing_to_make_it_from_is_a_gather() {
+    assert_eq!(next(&TOOLS, true), "gather");
 }
