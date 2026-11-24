@@ -11,7 +11,8 @@
 //! (`ServerGamePacketListenerImpl.handleMovePlayer`, `Entity.checkFallDamage`,
 //! `LivingEntity.calculateFallDamage`): a correction is the server's verdict on a move. Issue
 //! 10b adds digging, drops and pickup and window 0's crafting (`survival`); 11a placing blocks,
-//! the crafting table's menu, tools and stack sizes.
+//! the crafting table's menu, tools and stack sizes. Issue 16 adds the Nether (`nether`): a
+//! world in that dimension, its fast lava and magma's burn.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -166,7 +167,7 @@ fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
 }
 
 /// The column holding a block position.
-fn column_of(x: f64, z: f64) -> (i32, i32) {
+pub(crate) fn column_of(x: f64, z: f64) -> (i32, i32) {
     ((x.floor() as i32) >> 4, (z.floor() as i32) >> 4)
 }
 
@@ -764,8 +765,29 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
 pub mod fluid;
 pub mod furnace;
 pub mod life;
+pub mod nether;
 pub mod survival;
 pub mod terrain;
+
+pub use nether::nether_world;
+
+impl Sim {
+    /// A `setblock` as a start's setup runs one: the block set and sent, the fluids it touches
+    /// told and its own fluid tick scheduled (`Level.setBlock` with updates). How a test opens a
+    /// lake's bank or drops a source without a bucket.
+    pub fn setblock(
+        &mut self,
+        (x, y, z): (i32, i32, i32),
+        state: u32,
+    ) -> Result<Vec<Wire>, EncodeError> {
+        self.set_and_update((x, y, z), state)
+    }
+
+    /// The model's world, for a test's reading.
+    pub fn world(&self) -> &ModelWorld {
+        &self.world
+    }
+}
 
 impl ModelWorld {
     /// Set one block (a start's place, a test's ledge): the column is re-encoded so the bytes

@@ -1554,7 +1554,7 @@ impl Sim {
                 // `FlintAndSteelItem.useOn` (issue 14a).
                 out.extend(self.strike(pos, face)?);
             } else {
-                self.place_held(pos, beside)?;
+                out.extend(self.place_held(pos, beside)?);
             }
         }
         out.push(self.block_update(pos)?);
@@ -1650,22 +1650,26 @@ impl Sim {
         Ok(out)
     }
 
-    /// `BlockItem.place` for the held stack.
+    /// `BlockItem.place` for the held stack. Water and lava are replaceable (their blocks'
+    /// `replaceable` property): a block goes into a fluid's cell, the fluid is gone from it, and
+    /// the fluids round it are told (`Level.setBlock` with updates), so a flow cut off by the
+    /// block drains and a lake's bank is sealed.
     fn place_held(
         &mut self,
         clicked: (i32, i32, i32),
         beside: (i32, i32, i32),
-    ) -> Result<(), EncodeError> {
+    ) -> Result<Vec<Wire>, EncodeError> {
         let held = self.survival.held_menu_slot();
         let Some((item, count)) = self.survival.slots.get(held).copied().flatten() else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         let Some(block) = item.name().and_then(BlockKind::from_name) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         let replaceable = |k: Option<BlockKind>| {
             is_air(k)
                 || k == Some(BlockKind::Water)
+                || k == Some(BlockKind::Lava)
                 || k.and_then(|k| k.info())
                     .is_some_and(|i| REPLACEABLE.contains(&i.definition))
         };
@@ -1675,15 +1679,15 @@ impl Sim {
             beside
         };
         if !replaceable(block_kind(self, at)) || self.player_in(at) {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let state = block.info().map_or(0, |i| i.default_state);
-        self.world.set_block(at.0, at.1, at.2, state)?;
+        let out = self.set_and_update(at, state)?;
         if let Some(s) = self.survival.slots.get_mut(held) {
             *s = (count > 1).then_some((item, count - 1));
         }
         self.survival.placed += 1;
-        Ok(())
+        Ok(out)
     }
 
     /// Whether the player's box overlaps a block cell (`isUnobstructed` for a full block).

@@ -25,6 +25,14 @@ pub const USE_RANGE: f64 = 4.5;
 /// `WaterFluid.getTickDelay`, `LavaFluid.getTickDelay` outside the Nether.
 const WATER_DELAY: u64 = 5;
 const LAVA_DELAY: u64 = 30;
+/// `LavaFluid.getTickDelay`, `getDropOff` and `getSlopeFindDistance` where the dimension has
+/// fast lava (the Nether alone: `ultrawarm` before 1.21.11, the `fast_lava` attribute since):
+/// 10, 1 and 4, against 30, 2 and 2 elsewhere. The wiki's numbers agree (Lava, "Flow": a block
+/// every 10 game ticks and 7 blocks from its source in the Nether, every 30 and 3 blocks in
+/// the Overworld and the End).
+const NETHER_LAVA_DELAY: u64 = 10;
+const NETHER_LAVA_DROP_OFF: i32 = 1;
+const NETHER_LAVA_SLOPE_FIND: i32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
@@ -39,23 +47,27 @@ impl Kind {
             Kind::Lava => BlockKind::Lava,
         }
     }
-    fn delay(self) -> u64 {
+    /// `getTickDelay`; `fast` is the dimension's fast lava (`ModelWorld::fast_lava`).
+    fn delay(self, fast: bool) -> u64 {
         match self {
             Kind::Water => WATER_DELAY,
+            Kind::Lava if fast => NETHER_LAVA_DELAY,
             Kind::Lava => LAVA_DELAY,
         }
     }
     /// `getDropOff`.
-    fn drop_off(self) -> i32 {
+    fn drop_off(self, fast: bool) -> i32 {
         match self {
             Kind::Water => 1,
+            Kind::Lava if fast => NETHER_LAVA_DROP_OFF,
             Kind::Lava => 2,
         }
     }
     /// `getSlopeFindDistance`.
-    fn slope_find(self) -> i32 {
+    fn slope_find(self, fast: bool) -> i32 {
         match self {
             Kind::Water => 4,
+            Kind::Lava if fast => NETHER_LAVA_SLOPE_FIND,
             Kind::Lava => 2,
         }
     }
@@ -254,7 +266,7 @@ impl Sim {
                 out.extend(converted);
                 continue;
             }
-            self.schedule(n, f.kind, f.kind.delay());
+            self.schedule(n, f.kind, f.kind.delay(self.world.fast_lava()));
         }
         Ok(out)
     }
@@ -277,7 +289,7 @@ impl Sim {
         if let Some(out) = self.spread_or_convert(p)? {
             return Ok(out);
         }
-        self.schedule(p, f.kind, f.kind.delay());
+        self.schedule(p, f.kind, f.kind.delay(self.world.fast_lava()));
         Ok(Vec::new())
     }
 
@@ -311,20 +323,70 @@ impl Sim {
         Ok(Some(self.set_and_update(p, state)?))
     }
 
-    /// The fluid ticks due now, in order (`LevelTicks.tick`).
+    /// The fluid ticks due now, in order (`LevelTicks.tick`), in the chunks that tick: those
+    /// within the simulation distance of the player. A tick due in a chunk farther off waits
+    /// there until the player comes near, as a server's does.
     pub(crate) fn tick_fluids(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
-        while let Some((&(at, n), &(p, kind))) = self.fluids.queue.first_key_value() {
-            if at > self.ticks {
-                break;
-            }
-            self.fluids.queue.remove(&(at, n));
+        let (cx, cz) = crate::column_of(self.pos[0], self.pos[2]);
+        let r = self.config.simulation_distance;
+        let due: Vec<((u64, u64), (Pos, Kind))> = self
+            .fluids
+            .queue
+            .range(..=(self.ticks, u64::MAX))
+            .filter(|(_, (p, _))| ((p.0 >> 4) - cx).abs() <= r && ((p.2 >> 4) - cz).abs() <= r)
+            .map(|(k, v)| (*k, *v))
+            .collect();
+        for (key, (p, kind)) in due {
+            self.fluids.queue.remove(&key);
             self.fluids.scheduled.remove(&(p, kind));
             if self.fluid_at(p).is_some_and(|f| f.kind == kind) {
                 out.extend(self.fluid_tick(p)?);
             }
         }
         Ok(out)
+    }
+
+    /// Wake the world's fluids: a tick scheduled for every fluid cell that is flowing, or has
+    /// under it or beside it a cell it could run into. A generated chunk's lava falls and
+    /// springs run when a player first brings the chunk to tick; columns captured as a server
+    /// sent them on arrival hold that lava still, and without this it would stay so (the lava
+    /// that came down on the Nether portal's ledge 700 ticks after each bot arrived:
+    /// docs/problems/nether-walk.md). How many cells were woken.
+    pub fn wake_fluids(&mut self) -> usize {
+        let mut cells: Vec<(Pos, Kind)> = Vec::new();
+        for (&(cx, cz), col) in &self.world.columns {
+            let column = &col.column;
+            for (si, section) in column.sections.iter().enumerate() {
+                if !section.blocks.may_contain(|s| fluid_of(s).is_some()) {
+                    continue;
+                }
+                let base = column.min_y + 16 * i32::try_from(si).unwrap_or(0);
+                for i in 0..4096usize {
+                    let Some(f) = section.blocks.get(i).and_then(fluid_of) else {
+                        continue;
+                    };
+                    let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
+                    cells.push(((cx * 16 + lx, base + ly, cz * 16 + lz), f.kind));
+                }
+            }
+        }
+        let fast = self.world.fast_lava();
+        let mut woken = 0;
+        for (p, kind) in cells {
+            let open = |n: Pos| {
+                // Only inside the world: a cell of a column not held is no room to run into.
+                self.state_at(n.0, n.1, n.2)
+                    .is_some_and(|s| holds_any(s) && fluid_of(s).is_none_or(|f| f.kind != kind))
+            };
+            let flowing = self.fluid_at(p).is_some_and(|f| !f.source);
+            let room = open((p.0, p.1 - 1, p.2)) || SIDES.iter().any(|d| open(side_of(p, *d)));
+            if flowing || room {
+                self.schedule(p, kind, kind.delay(fast));
+                woken += 1;
+            }
+        }
+        woken
     }
 
     /// `FlowingFluid.tick`.
@@ -346,7 +408,7 @@ impl Sim {
                     if let Some(s) = n.state() {
                         out.extend(self.set_and_update(p, s)?);
                     }
-                    self.schedule(p, n.kind, n.kind.delay());
+                    self.schedule(p, n.kind, n.kind.delay(self.world.fast_lava()));
                 }
                 Some(_) => {}
             }
@@ -385,7 +447,7 @@ impl Sim {
         if fluid_of(above).is_some_and(|a| a.kind == kind) && passes_wall(here, above) {
             return Some(FluidState::flowing(kind, 8, true));
         }
-        let amount = highest - kind.drop_off();
+        let amount = highest - kind.drop_off(self.world.fast_lava());
         (amount > 0).then(|| FluidState::flowing(kind, amount, false))
     }
 
@@ -446,7 +508,7 @@ impl Sim {
     }
 
     fn spread_sides(&mut self, p: Pos, f: FluidState) -> Result<Vec<Wire>, EncodeError> {
-        let mut amount = f.amount - f.kind.drop_off();
+        let mut amount = f.amount - f.kind.drop_off(self.world.fast_lava());
         if f.falling {
             amount = 7;
         }
@@ -518,7 +580,7 @@ impl Sim {
             if self.is_hole(kind, t) {
                 return pass;
             }
-            if pass >= kind.slope_find() {
+            if pass >= kind.slope_find(self.world.fast_lava()) {
                 continue;
             }
             let v = self.slope_distance(kind, t, pass + 1, (-d.0, -d.1));
