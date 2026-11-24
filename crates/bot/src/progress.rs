@@ -97,6 +97,8 @@ impl Progress {
                 | observe::Fact::Shot { .. }
                 | observe::Fact::Landed { .. }
                 | observe::Fact::Sign { .. }
+                | observe::Fact::Night { .. }
+                | observe::Fact::Day { .. }
                 | observe::Fact::Death
                 | observe::Fact::Won => {}
             }

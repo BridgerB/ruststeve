@@ -185,7 +185,9 @@ fn key_of(f: &Fact) -> Key {
         | Fact::Gone { .. }
         | Fact::Shot { .. }
         | Fact::Landed { .. }
-        | Fact::Sign { .. } => Key::Other(f.line()),
+        | Fact::Sign { .. }
+        | Fact::Night { .. }
+        | Fact::Day { .. } => Key::Other(f.line()),
     }
 }
 

@@ -446,6 +446,7 @@ mod tests {
             lava: ::observe::Touch::No,
             water: ::observe::Touch::No,
             cursor: None,
+            day_time: None,
         }
     }
 
