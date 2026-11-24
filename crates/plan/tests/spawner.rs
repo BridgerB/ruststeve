@@ -30,3 +30,54 @@ fn no_mark_nearer_than_the_feet_is_no_way_back() {
     assert!(trail_toward(&trail, [57.5, 63.0, 134.5], SPAWNER).is_empty());
     assert!(trail_toward(&[], [0.5, 64.0, 0.5], SPAWNER).is_empty());
 }
+
+/// The same wall in race 45336326999 (lanes 0 and 1): a retreat from a skeleton took the bot from
+/// (57, 64, 138), the nearest its dig had come, back to (43, 64, 133); three legs up its own
+/// tunnel were three stalls against that mark and the spawner was refused.
+#[test]
+fn a_bot_well_behind_its_nearest_is_pushed_back() {
+    // (57, 64, 138) to the spawner: 75 blocks.
+    let best = 75.0;
+    assert!(plan::pushed_back([43.5, 64.0, 133.5], SPAWNER, best));
+    assert!(
+        !plan::pushed_back([54.5, 64.0, 138.5], SPAWNER, best),
+        "three steps short of the mark is one leg's work, not a push"
+    );
+    assert!(!plan::pushed_back([60.5, 64.0, 138.5], SPAWNER, best));
+}
+
+/// Race 45346418004, lanes 1 and 2: rested at 15.8 and 16.8 health with food 17 and no meat left
+/// for 7,400 and 7,900 ticks. A rest heals only with food held or the food bar at 18 or more.
+#[test]
+fn a_rest_with_nothing_to_heal_with_is_no_rest() {
+    assert!(!plan::can_heal(Some(17), false));
+    assert!(plan::can_heal(Some(17), true), "meat held: eat, then heal");
+    assert!(plan::can_heal(Some(18), false), "the food bar still heals");
+    assert!(
+        plan::can_heal(None, false),
+        "before the first health packet"
+    );
+}
+
+/// Spawner wall 8 (race 45350452261, lane 0): at (128, 61, 176) the spawner is 17.2 off in a
+/// straight line (awake) while a route's measure (octile plus height) already puts the feet past
+/// 20: a leave walk with a goal of 20 ended at once, 300 times. The two measures disagree, so the
+/// leave's goal is set past the feet.
+#[test]
+fn awake_by_the_line_and_away_by_the_route() {
+    let feet = (128, 61, 176);
+    assert!(plan::cover::awake_at(SPAWNER, [128.5, 61.0, 176.3]));
+    let goal = plan::path::Goal::Away {
+        pos: SPAWNER,
+        range: plan::cover::SPAWNER_QUIET + 2.0,
+    };
+    assert!(goal.done(feet), "the dead band");
+    let range = plan::path::flat_distance(feet, SPAWNER) + 2.0;
+    assert!(
+        !plan::path::Goal::Away {
+            pos: SPAWNER,
+            range
+        }
+        .done(feet)
+    );
+}
