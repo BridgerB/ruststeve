@@ -35,7 +35,7 @@ on:
         description: Respawn after a death and play on, to the cap (true or false)
         default: "false"
       minutes:
-        description: The lane job's timeout; bots still running 15 minutes before it end Cut (72,000 ticks, a game hour, needs over 60 of play)
+        description: The lane job's timeout; bots still running 10 minutes before it end Cut (72,000 ticks, a game hour, needs over 60 of play)
         default: "60"
 
 permissions:
@@ -45,7 +45,10 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_TERM_COLOR: always
-  DATAGEN_WORK: ${{ github.workspace }}/../datagen-work
+  # An absolute path with no "..": actions/cache refuses to save a path with relative parts
+  # (datagen run 44386256865: "Relative pathing '.' and '..' is not allowed"), so the old
+  # workspace/../datagen-work was never saved and every lane fetched the jar again.
+  DATAGEN_WORK: /home/runner/work/datagen-work
 
 jobs:
   lanes:
@@ -55,6 +58,7 @@ jobs:
       contents: write
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
+      race_minutes: ${{ steps.m.outputs.race_minutes }}
     steps:
       - id: m
         env:
@@ -74,6 +78,9 @@ jobs:
             echo "cap $CAP needs minutes >= $need (got $MINUTES): every bot would be cut"; exit 1
           fi
           echo "matrix=$(seq 0 $((LANES - 1)) | paste -sd, | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+          # The race step's own limit (expressions cannot subtract): 9 minutes under the job's,
+          # so the steps after it (the lane's files, the replay) always get their time.
+          echo "race_minutes=$(( MINUTES - 9 ))" >> "$GITHUB_OUTPUT"
 
       # The release opens now, so each lane's progress is readable while the race runs (16e).
       # Its tag points at the default branch: the workflow token may not tag a commit that changes
@@ -100,26 +107,40 @@ jobs:
       matrix:
         lane: ${{ fromJSON(needs.lanes.outputs.matrix) }}
     steps:
+      - name: Mark the job's start
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - run: rustup show
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "25"
+      # The release build's dependencies, saved once by lane 0 (a cache is saved only when its
+      # key is new) and restored by every later lane of the branch: the old key was the datagen
+      # workflow's debug build, restore only, so every lane built everything.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: datagen
-          save-if: false
-      - uses: actions/cache/restore@v4
+          shared-key: race
+          save-if: ${{ matrix.lane == 0 }}
+      - id: work
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.DATAGEN_WORK }}
-          key: datagen-work-26.1.2-v1
+          key: datagen-work-26.1.2-v2
 
       - name: Get the server jar if the cache missed
         run: |
           if [ ! -f "$DATAGEN_WORK/server.jar" ]; then
             cargo run -q --locked -p datagen -- generate --work "$DATAGEN_WORK" --out "$RUNNER_TEMP/generated"
           fi
+
+      - name: Keep the server jar for later lanes
+        if: steps.work.outputs.cache-hit != 'true' && matrix.lane == 0
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DATAGEN_WORK }}
+          key: datagen-work-26.1.2-v2
 
       - name: Build
         run: cargo build -q --locked --release -p xtask -p bot -p results -p replay
@@ -177,6 +198,9 @@ jobs:
           exit 1
 
       - name: Race the lane
+        # Under the job's limit by 9 minutes (the lanes job works it out), and the race itself
+        # is ended earlier still from the job's start, so the lane's files always leave.
+        timeout-minutes: ${{ fromJSON(needs.lanes.outputs.race_minutes) }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -188,14 +212,25 @@ jobs:
           HOLD: ${{ inputs.hold }}
           REVIVE: ${{ inputs.revive }}
           MINUTES: ${{ inputs.minutes }}
-        # The wall limit is the job's end, not a cap: bots still running then end Cut (not counted).
-        # 15 minutes of the job go to the build, the server and the release.
+        # The wall limit is the job's end, not a cap: bots still running 10 minutes before it end
+        # Cut (not counted) and write their files; 7 minutes before it the race is killed. Both
+        # are counted from the job's start, so a slow build cannot eat the time the uploads need
+        # (races 45164371770 to 45204423376: lanes at the job limit uploaded nothing).
         run: |
+          set +e
+          set -o pipefail
           goal=()
           if [ -n "$GOAL" ]; then goal=(--goal "$GOAL"); fi
           memory=()
           if [ -n "${SNAP_MEMORY:-}" ]; then memory=(--memory "$SNAP_MEMORY"); fi
-          wall=$(( (MINUTES - 15) * 60 ))
+          now="$(date +%s)"
+          echo "RACE_START=$now" >> "$GITHUB_ENV"
+          end=$(( JOB_START + MINUTES * 60 ))
+          wall=$(( end - 600 - now ))
+          hard=$(( end - 420 - now ))
+          if [ "$wall" -lt 60 ]; then wall=60; fi
+          if [ "$hard" -lt 120 ]; then hard=120; fi
+          echo "race: $(( now - JOB_START )) s of setup; bots end Cut after $wall s, the race is killed after $hard s"
           # Progress while the race runs (issue 16e): every 10 minutes the bots' progress lines go
           # to the release as progress-lane-N.txt.
           (
@@ -205,24 +240,31 @@ jobs:
             done
           ) &
           uploader=$!
-          ./target/release/race --lane "$LANE" --bots "$BOTS" --start "$START" --cap "$CAP" \
+          timeout --kill-after=30 "$hard" ./target/release/race --lane "$LANE" --bots "$BOTS" --start "$START" --cap "$CAP" \
             --run "${{ github.run_id }}" --out "lane-$LANE" --wall-limit "$wall" \
             --hold-after-aim "$HOLD" --revive "$REVIVE" "${goal[@]}" "${memory[@]}" 2>&1 | tee "race-$LANE.log"
+          code=$?
           kill "$uploader" 2>/dev/null || true
+          echo "RACE_END=$(date +%s)" >> "$GITHUB_ENV"
+          echo "RACE_EXIT=$code" >> "$GITHUB_ENV"
+          # The race's exit never fails the lane (coverage under 1.0 is read in the summary); a
+          # kill at the hard limit is said aloud.
+          if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
+            echo "::warning::lane $LANE: the race was killed at the hard limit ($hard s): its batch may be missing"
+          elif [ "$code" -ne 0 ]; then
+            echo "::warning::lane $LANE: the race exited $code"
+          fi
+          exit 0
 
-      - name: Replay one recording at this commit
-        if: always()
-        env:
-          LANE: ${{ matrix.lane }}
-        run: |
-          f="$(find "lane-$LANE" -name '*.rsr' | sort | head -n 1)"
-          ./target/release/replay verify "$f" 2>&1 | tee -a "race-$LANE.log"
-
+      # The lane's files leave first: nothing after this step can lose them.
       - name: Keep the server log with the lane
         if: always()
         env:
           LANE: ${{ matrix.lane }}
-        run: cp server.log "lane-$LANE/server.log" && cp "race-$LANE.log" "lane-$LANE/race.log"
+        run: |
+          mkdir -p "lane-$LANE"
+          cp server.log "lane-$LANE/server.log" || true
+          cp "race-$LANE.log" "lane-$LANE/race.log" || true
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -231,6 +273,63 @@ jobs:
           path: lane-${{ matrix.lane }}
           if-no-files-found: warn
           retention-days: 30
+
+      # After the upload, bounded, and never the lane's failure: its result goes to the job
+      # summary, an annotation and verify-lane-N.txt on the release.
+      - name: Replay one recording at this commit
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LANE: ${{ matrix.lane }}
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          set +e
+          set -o pipefail
+          f="$(find "lane-$LANE" -name '*.rsr' | sort | head -n 1)"
+          if [ -z "$f" ]; then
+            echo "lane $LANE: replay verify: no recording" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # At most 5 minutes, and never past a minute before the job's end.
+          left=$(( JOB_START + MINUTES * 60 - $(date +%s) - 60 ))
+          limit=300
+          if [ "$left" -lt "$limit" ]; then limit="$left"; fi
+          if [ "$limit" -lt 10 ]; then
+            echo "::warning::lane $LANE: replay verify skipped, no time left in the job"
+            echo "lane $LANE: replay verify $f: skipped, no time left" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          from="$(date +%s)"
+          timeout --kill-after=10 "$limit" ./target/release/replay verify "$f" 2>&1 | tee "verify-lane-$LANE.txt"
+          code=$?
+          took=$(( $(date +%s) - from ))
+          case "$code" in
+            0) result="ok" ;;
+            124|137) result="TIMED OUT after $limit s" ;;
+            *) result="FAILED (exit $code)" ;;
+          esac
+          line="lane $LANE: replay verify $f: $result, $took s"
+          echo "$line" | tee -a "verify-lane-$LANE.txt" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then
+            echo "::warning::$line"
+            tail -n 5 "verify-lane-$LANE.txt" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          gh release upload "race-${{ github.run_id }}" "verify-lane-$LANE.txt" --clobber || true
+          exit "$code"
+
+      - name: Report the lane's times
+        if: always()
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          now="$(date +%s)"
+          rs="${RACE_START:-$now}"
+          re="${RACE_END:-$now}"
+          echo "lane $LANE: setup $(( rs - JOB_START )) s, race $(( re - rs )) s (exit ${RACE_EXIT:-none}), after the race $(( now - re )) s, job $(( now - JOB_START )) s" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
   publish:
     needs: [lanes, lane]
@@ -244,7 +343,7 @@ jobs:
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: datagen
+          shared-key: race
           save-if: false
       - uses: actions/download-artifact@v4
         with:
