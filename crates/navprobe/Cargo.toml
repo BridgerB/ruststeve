@@ -1,0 +1,17 @@
+[package]
+name = "navprobe"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "navmap: the terrain a recording's bot knew at a moment, as layer maps, and the route the pathfinder plans over it"
+
+[[bin]]
+name = "navmap"
+path = "src/main.rs"
+
+[dependencies]
+data = { path = "../data" }
+plan = { path = "../plan" }
+record = { path = "../record" }
+world = { path = "../world" }
