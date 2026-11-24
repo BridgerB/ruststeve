@@ -339,6 +339,13 @@ fn over_seeds(name: &str, kit: &[(ItemKind, i32)], shield: bool) {
             life.mobs_knocked,
             s.meals,
         );
+        // A seed that held 7 rods and died: how it ended, from the 7th on (blaze-fight wall 17).
+        if s.run.died && s.seven_at.is_some() {
+            let from = s.ledger.len().saturating_sub(60);
+            for l in &s.ledger[from..] {
+                println!("LATE {name} seed {seed}: {l}");
+            }
+        }
     }
     println!(
         "SEEDS {name}: {passed} of {} alive with 7 rods",
