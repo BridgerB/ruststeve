@@ -302,3 +302,109 @@ fn a_block_is_placed_into_lava_and_the_flow_behind_it_drains() {
     assert_eq!(trench(&sim), [0, 0, 7, 8], "the cut-off flow did not drain");
     assert_eq!(sim.health, 20.0);
 }
+
+/// A blaze five blocks east of the player on an open floor, and the model joined.
+fn blazed(give: &[data::ItemKind]) -> Sim {
+    let stage = Stage::new(1, 40, 60);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(3);
+    for k in give {
+        sim.survival.give((*k, 1));
+    }
+    sim.summon_with(
+        data::EntityKind::Blaze,
+        [5.5, 41.0, 0.5],
+        sim::life::Brain::blaze(),
+    );
+    for p in protocol::session::opening(775, "model", 0, "rs-test") {
+        send(&mut sim, p);
+    }
+    send(&mut sim, C2s::LoginAcknowledged);
+    send(&mut sim, C2s::SelectKnownPacks);
+    send(&mut sim, C2s::FinishConfiguration);
+    send(&mut sim, C2s::AcceptTeleportation { teleport_id: 1 });
+    send(&mut sim, C2s::MovePlayerStatusOnly { flags: 1 });
+    sim
+}
+
+/// `Blaze$BlazeAttackGoal.tick`: a charge of 60 ticks, three small fireballs 6 ticks apart, a
+/// rest of 100, and again: fireballs on ticks 61, 67 and 73, then 239.
+#[test]
+fn a_blaze_charges_sixty_ticks_and_looses_three_fireballs_six_apart() {
+    let mut sim = blazed(&[]);
+    let small = data::EntityKind::SmallFireball.id();
+    let mut loosed = Vec::new();
+    for t in 1..=250u32 {
+        for p in tick(&mut sim) {
+            if matches!(p, S2c::AddEntity { kind, .. } if kind == small) {
+                loosed.push(t);
+            }
+        }
+    }
+    assert_eq!(loosed, [61, 67, 73, 239, 245]);
+}
+
+/// `SmallFireball.onHitEntity`: 5 and alight. Over three volleys at five blocks a still player
+/// is hit; behind a wall the blaze has no sight and looses nothing.
+#[test]
+fn a_fireball_burns_a_player_in_sight_and_none_flies_at_one_behind_a_wall() {
+    let mut sim = blazed(&[]);
+    let mut lowest = 20.0f32;
+    let mut alight = false;
+    for _ in 0..500 {
+        tick(&mut sim);
+        lowest = lowest.min(sim.health);
+        alight |= sim.survival.life.fire_ticks > 0;
+    }
+    assert!(
+        sim.survival.life.fireballs_hit >= 1,
+        "nine fireballs missed"
+    );
+    assert!(lowest <= 15.0 && alight, "lowest {lowest}, alight {alight}");
+
+    let mut sim = blazed(&[]);
+    for y in 41..=43 {
+        for z in -1..=1 {
+            sim.setblock((3, y, z), state(BlockKind::NetherBricks))
+                .unwrap();
+        }
+    }
+    for _ in 0..500 {
+        tick(&mut sim);
+    }
+    assert_eq!(sim.survival.life.fireballs_hit, 0);
+    assert_eq!(sim.health, 20.0);
+}
+
+/// A shield up for 5 ticks stops what comes from the side the player faces, and nothing from
+/// behind.
+#[test]
+fn a_shield_stops_fireballs_from_the_side_it_faces() {
+    let hits = |yaw: f32| {
+        let mut sim = blazed(&[data::ItemKind::Shield]);
+        send(
+            &mut sim,
+            C2s::UseItem {
+                hand: 0,
+                sequence: 1,
+                yaw,
+                pitch: 0.0,
+            },
+        );
+        for _ in 0..500 {
+            tick(&mut sim);
+        }
+        let life = &sim.survival.life;
+        (life.fireballs_hit, life.fireballs_blocked)
+    };
+    // East is yaw -90 (south 0, west +90): the blaze's side.
+    let (hit, blocked) = hits(-90.0);
+    assert!(
+        hit == 0 && blocked >= 1,
+        "facing it: {hit} hit, {blocked} blocked"
+    );
+    let (hit, blocked) = hits(90.0);
+    assert!(
+        hit >= 1 && blocked == 0,
+        "back to it: {hit} hit, {blocked} blocked"
+    );
+}

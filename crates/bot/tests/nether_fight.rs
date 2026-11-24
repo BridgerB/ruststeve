@@ -273,3 +273,40 @@ fn a_hurt_bot_rests_out_of_the_blazes_sight() {
         f.story()
     );
 }
+
+/// The shield and the dodge: a blaze that shoots (`Brain::blaze`: three small fireballs each
+/// 178 ticks) hovers ten blocks along a railed bridge, three over the deck; the bot holds a
+/// shield with its sword. Over five volleys no fireball lands.
+#[test]
+#[ignore = "blaze fight: a shooting blaze, the shield and the dodge; unread; owners A11, A4"]
+fn no_fireball_of_five_volleys_lands() {
+    let wall = walls::fortress_bridge(3, true);
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut plan = Plan::with_table(Aim::Hold, table);
+    let mut sim = wall.sim(CONFIG).unwrap().seeded(3);
+    sim.survival.life.armor = IRON;
+    sim.survival.give((ItemKind::IronSword, 1));
+    sim.survival.give((ItemKind::Shield, 1));
+    sim.summon_with(EntityKind::Blaze, [10.5, deck() + 3.0, 0.5], Brain::blaze());
+    let mut ledger = Vec::new();
+    let run = bot::lockstep::run_acting(sim, "rs-fight", 1, 900, 20, |w, _| {
+        let c = plan.step(w);
+        ledger.extend(plan.take_records().into_iter().map(line));
+        (c, plan.take_acts())
+    });
+    let life = &run.sim.survival.life;
+    let story = format!(
+        "at {:?}, health {:?} (lowest {:?}), died {}, fireballs {} hit {} blocked, kills {}\n{}",
+        run.world.body.map(|b| b.pos),
+        run.world.player.health,
+        run.min_health_in_script,
+        run.died,
+        life.fireballs_hit,
+        life.fireballs_blocked,
+        life.kills,
+        ledger.join("\n"),
+    );
+    assert!(!run.died, "died\n{story}");
+    assert_eq!(life.fireballs_hit, 0, "burned\n{story}");
+}

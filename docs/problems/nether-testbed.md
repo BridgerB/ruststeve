@@ -17,6 +17,17 @@ A change to the route or the tunnel is tried on the four walls below in one CI r
 - Placing (`crates/sim/src/survival.rs`, `place_held`): lava is replaceable as water is, so a held block goes into a lava cell (a bridge's move, a seal's), and the placement runs with its updates: the fluids round it are told, a flow cut off drains. Before this the model refused every block placed into lava (found by the route's moat test: 8 clicks, none placed).
 - Magma (`crates/sim/src/life.rs`): on the ground with a magma block 0.2 under the feet and not sneaking, 1 `hot_floor` a tick, which the 20 ticks of invulnerability make 1 each 10 ticks; fire resistance refuses it.
 
+## The fight's model
+`crates/sim/src/life.rs`, each number read from the 26.1.2 jar with javap unless said:
+- `Brain::Melee`: a mob that walks straight at the player over ground that holds it and hits in reach every 20 ticks. `Melee::wither_skeleton()`: attack 4 plus its stone sword's 4, the wither effect for 200 ticks (`WitherSkeleton.doHurtTarget`), 0.198 blocks a tick (derived from its 0.25 speed and the melee goal's 1.2), reach 1.5 (approximate).
+- `Brain::blaze()` (`Blaze$BlazeAttackGoal.tick`): with the player in sight and within 48, a charge of 60 ticks, three small fireballs 6 ticks apart, a rest of 100; within 2 blocks a hit of 6 every 20. The blaze does not move.
+- Small fireballs (`AbstractHurtingProjectile`, `SmallFireball`): 0.1 a tick of acceleration along the aim, inertia 0.95, the aim spread by `2.297 × sqrt(sqrt(d²)) × 0.5` on x and z; a hit takes 5 and sets the player alight 5 s; a block hit leaves fire in the cell before it. They are entities the bot is sent (`add_entity`, `entity_position_sync`, `remove_entities`).
+- A shield in either hand, used for 5 ticks, stops a fireball from the half-plane the player faces. `Life::fireballs_hit` and `fireballs_blocked` count.
+- Armour (`CombatRules.getDamageAfterArmorAbsorb`) from `Life::armor`, which a test sets (the model wears nothing); the wither effect, 1 each 40 ticks.
+- Left out: mob navigation and knockback, the blaze's flight, a mob's own burning, the shield's wear and the axe that disables it; the client is not told of the wither effect.
+
+Arenas in `sim::nether::walls`: `fortress_bridge(walk, rails)` (a deck 20 over the lava sea, 1 or 3 wide, fenced or open), `fire_beside`, `shelter_wall`. Tests in `crates/bot/tests/nether_fight.rs`.
+
 ## The real exit
 `crates/bot/tests/fixtures/nether-exit.rsw`: the 77 chunk columns (x -1 to 5, z -4 to 6: blocks x -16 to 95, z -64 to 111) round this world's Nether portal exit and on to the bricks, byte for byte as the server sent them to lane 5 of race 45194253932 on its arrival, cut from its recording at server tick 25,500 by the ignored tool in `crates/bot/tests/nether_capture.rs` (probe 45336288184; 158 KB). The portal is at (22 to 23, 34 to 35, -20); the nearest bricks at (61, 30 to 37, 95), 121 blocks from the snapshot bot's place; 1,927 brick cells were on the bot's record. `crates/bot/tests/nether_exit.rs` plays it: the fixture holds blaze wall 22's block view, and the kit bot's own situation (the snapshot's `snap.toml` items and position, the fortress aim) is an ignored closed-loop test. Outside those columns the model is solid and the bot's world unloaded. It is the server's side of the test: the bot still sees by exposed faces only.
 
