@@ -120,7 +120,8 @@ fn a_cornered_retreat_under_the_danger_line_never_strikes() {
         set.push(((-1, y, 0), Stone));
         set.push(((3, y, 0), Stone));
     }
-    let (p, run, _) = run_in(6.0, EntityKind::Zombie, 300, &set);
+    // 150 ticks: health comes back a point every 80, and over the line (8) a strike is allowed.
+    let (p, run, _) = run_in(6.0, EntityKind::Zombie, 150, &set);
     assert!(
         p.events
             .iter()
