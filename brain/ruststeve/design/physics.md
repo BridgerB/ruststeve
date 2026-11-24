@@ -5,8 +5,8 @@ type: reference
 tags: [physics, movement, collision, water, packets, core]
 aliases: [physics crate, step, Body, Controls, move_player_pos_rot, movement packets, differential test, server corrections]
 status: verified
-lastUpdated: 2026-11-15
-verifiedAgainst: ruststeve@61fdf54 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/physics/src/lib.rs#pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Controls) -> Body {"
   - "ruststeve:crates/physics/src/lib.rs#pub fn land_tick(solid: &impl Solid, pos: Vec3, [vx, vy, vz]: Vec3) -> (Vec3, Vec3, bool, bool) {"
@@ -28,9 +28,9 @@ related:
 The server does not move the player: the client simulates its own movement each tick and reports where it is. The `physics` crate (core, no I/O) is clojurecraft's `physics.clj` in Rust ([[cc-physics]]), function for function and constant for constant.
 
 ## How it works
-- `step(solid, fluid, &Body, &Controls) -> Body` is pure. `Body` holds position, velocity, on-ground, against-a-wall, jump cooldown, fall distance and the in-water, in-lava and eye-in-water flags; `Controls` are forward, jump, sneak and yaw.
+- `step(solid, fluid, &Body, &Controls) -> Body` is pure. `Body` holds position, velocity, on-ground, against-a-wall, jump cooldown, fall distance and the in-water, in-lava and eye-in-water flags; `Controls` are forward, jump, sneak, yaw and an optional pitch.
 - The world is read through two oracles, as in clojurecraft. `World::solid` is a full cube (1.0), a flat box's top (a carpet's 0.0625, from the generated collision table, [[datagen]]) or nothing; **an unloaded cell is a full cube**, so the body never falls out of the world. `World::fluid` is water or lava with its level (the state's offset from the block's first state).
-- **When it runs**: on every `Event::Tick`, once a teleport has placed the body and its column is loaded. A teleport places the body and zeroes its velocity; a dimension change clears it.
+- **When it runs**: on every `Event::Tick`, once a teleport has placed the body and its column is loaded. A teleport places the body and zeroes its velocity; a dimension change clears it, and so does `Act::Respawn` after a death (the body waits for the server's next position).
 - **What it sends** (clojurecraft's `movement-packets`): `move_player_pos_rot` when the position or look changed, otherwise `move_player_status_only` every 20 ticks. Flags: bit 0 on the ground, bit 1 against a wall.
 - **What to press** arrives as `Event::Controls`, recorded like every event ([[recordings]]), so `replay verify` covers physics. Today `bot --walk square` sends a scripted staircase walk; the planner replaces it (issue 09).
 
@@ -42,7 +42,7 @@ The server does not move the player: the client simulates its own movement each 
 - **No ground, still the status**: a body whose column is not loaded runs no physics but still sends `move_player_status_only` once a second; the server re-centres a player's chunks only on a reported move, so a teleport far from the loaded columns otherwise deadlocks (found by the parity table, [[parity-table]]).
 - **Vanilla's collision tolerance** (`physics::COLLISION_EPSILON`, 1e-7, from `VoxelShape.collideX`): a face within 1e-7 of the box's own counts as ahead, and the other axes must overlap by more than 1e-7. clojurecraft's port had none, so a box whose edge rounded a hair past a face (-2.3 + 0.3 = -1.9999999999999998) walked into the block and the server corrected it; the server model's 1,000 generated worlds found it ([[server-model]]). The differential against clojurecraft stays bit-equal: its scenarios never sit on that edge.
 - A server correction is a `player_position` after the first: the server's verdict that the client moved wrongly. Counting them is the live test.
-- The world uses the controls' yaw for the look it sends; the pitch is the server's.
+- The world uses the controls' yaw for the look it sends; the pitch is the controls' when set (kept as the player's pitch from then on, and sent with `use_item` too), else the server's.
 - The walk can die on a normal-difficulty night (no survival yet, issue 12): `xtask server --difficulty peaceful` gives a quiet local server.
 
 ## Limits

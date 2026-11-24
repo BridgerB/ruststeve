@@ -1,5 +1,7 @@
 # The iron kit (issue 13)
 
+**Status: done** (issue 13, closed). The story continues in [`portal.md`](portal.md). Wall numbers cited elsewhere as "iron-kit wall N" are this file's.
+
 ## Needs
 From the `stone` start (stone and wooden pickaxes, a sword, a table, 3 logs, 3 sticks, 4 cobblestone), within 36,000 server ticks: a furnace placed, 7 iron ingots smelted with coal or planks, an iron pickaxe, a bucket, gravel dug until it drops flint, and flint and steel.
 
