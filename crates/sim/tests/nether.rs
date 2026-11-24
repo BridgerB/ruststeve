@@ -745,3 +745,32 @@ fn the_players_hit_knocks_a_blaze_away() {
     let x = sim.survival.life.mobs[&id].pos[0];
     assert!((5.3..5.6).contains(&x), "twenty ticks on it is at x {x}");
 }
+
+/// `FireBlock.tick`: a fire on nether bricks with nothing flammable by it ages and goes out
+/// (about 25 s); one on netherrack (`#infiniburn_nether`) burns on.
+#[test]
+fn a_fire_on_bricks_goes_out_and_one_on_netherrack_burns_on() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage.bricks((3, 3), (40, 40), (0, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    let fire = state(BlockKind::Fire);
+    sim.setblock((3, 41, 0), fire).unwrap();
+    sim.setblock((-3, 41, 0), fire).unwrap();
+    let kind =
+        |sim: &Sim, p: (i32, i32, i32)| sim.state_at(p.0, p.1, p.2).and_then(data::block_of_state);
+    let mut out_at = None;
+    for t in 0..2400 {
+        tick_alive(&mut sim);
+        if out_at.is_none() && kind(&sim, (3, 41, 0)) != Some(BlockKind::Fire) {
+            out_at = Some(t);
+        }
+    }
+    let out_at = out_at.expect("the fire on bricks still burns after 2,400 ticks");
+    assert!(
+        out_at > 100,
+        "it went out at tick {out_at}, before its age passed 3"
+    );
+    assert_eq!(kind(&sim, (-3, 41, 0)), Some(BlockKind::Fire));
+    assert_eq!(sim.survival.life.fires_out, 1);
+}

@@ -247,6 +247,10 @@ impl Sim {
         out.extend(self.liquid_placed(p)?);
         if kind_of(state) == Some(BlockKind::Fire) && kind_of(old) != Some(BlockKind::Fire) {
             out.extend(self.fire_placed(p)?);
+            // A fire that did not become a portal burns by its own clock (life.rs).
+            if kind_of(self.st(p)) == Some(BlockKind::Fire) {
+                self.fire_lit(p);
+            }
         }
         let around = [
             (p.0, p.1 - 1, p.2),
