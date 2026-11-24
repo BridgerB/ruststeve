@@ -13,7 +13,7 @@ The walls here are not the bot's: they are what made each experiment on issue 16
 | 5. A bot digging in place never ends | progress is a stage, a new item kind, more of a goal item, a new cube | 86d45e5 | unit tests (`bot::progress`); no race has run 24,000 idle ticks on it yet |
 | 6. No way to ask the planner again offline | `replan`, `why --blocks --radius --ys` | a5ae696 | probe 45337136275 (below) |
 | 7. A development start could become the frontier | `dev = true` in `snap.toml`, a `dev-` asset name, the frontier refuses both | 982cf5c | unit tests (`bot::devstart`); see wall 7 for the race |
-| 8. The insight job fails while another race runs | a release without batches is left out | c525230 | see wall 8 |
+| 8. The insight job fails while another race runs | a release without batches is left out | c525230 | race 45336625960: insight green, 7 releases left out |
 | 9. `brain-check` read another worktree's brain | the root is the working directory's | bbb3210 | unit test; `cargo run -q -p brain-check` from this worktree: four zeros |
 
 ## Wall 1: a lane at the job limit uploads nothing
@@ -22,7 +22,7 @@ The walls here are not the bot's: they are what made each experiment on issue 16
 - **Read**: `.github/workflows/race.yml` at ddae609. `Replay one recording at this commit` ran before `Keep the server log` and `upload-artifact`; the race step had no limit of its own and its wall limit was counted from the step's start, not the job's; the replay's output went through `| tee`, so its exit code was the tee's.
 - **Cause**: everything a lane keeps left the runner in the last step, behind a step of unbounded length (wall 2), inside a job with a hard limit.
 - **Fix**: the server log and `upload-artifact` run straight after the race. The race is ended from the job's start (`JOB_START`): bots end `Cut` 10 minutes before the job's limit, `timeout` kills the race 7 minutes before it, and the step's own `timeout-minutes` is the job's less 9 (worked out in the `lanes` job, since expressions cannot subtract). The replay runs last, under `timeout` (5 minutes, and never past a minute before the job's end) and a 6-minute step limit, with `pipefail` and `continue-on-error`: its result is a line in the job summary, a warning annotation when it fails, and `verify-lane-N.txt` on the release. Each lane prints `setup`, `race`, `after the race` and `job` seconds to the summary.
-- **Proof**: race 45334668363 (62b1c9f, 1 lane, the Nether snapshot, cap 6000, minutes 30). Lane steps: race 05:40:35 to 05:45:39 UTC, upload at 05:45:39, replay 05:45:40 to 05:45:44 with `FAILED (exit 1)` (the false mismatches of wall 2, on the old verify) and the lane still green; the artifact `race-45334668363-lane-0` holds 12 files (batch, case, ledger, senses, moments, truth, recording, both logs). The job ran 05:38:23 to 05:45:49, 7.4 minutes.
+- **Proof**: race 45334668363 (62b1c9f, 1 lane, the Nether snapshot, cap 6000, minutes 30). Race 45336625960's summary line: `lane 0: setup 63 s, race 452 s (exit 0), after the race 11 s, job 526 s`. Lane steps: race 05:40:35 to 05:45:39 UTC, upload at 05:45:39, replay 05:45:40 to 05:45:44 with `FAILED (exit 1)` (the false mismatches of wall 2, on the old verify) and the lane still green; the artifact `race-45334668363-lane-0` holds 12 files (batch, case, ledger, senses, moments, truth, recording, both logs). The job ran 05:38:23 to 05:45:49, 7.4 minutes.
 - **Not proven**: a lane actually reaching its limit. The arithmetic is in the step; no race here ran that long.
 
 ## Wall 2: `replay verify` took 12 to 60 minutes and failed every resumed run
@@ -98,6 +98,7 @@ route from (30, 31, -19) to Near { pos: (61, 33, 95), range: 2.0 }, at most 6000
 - **What happened**: race 45334668363 ended `failure` with every lane green: `insight / publish` stopped at `no assets to download`.
 - **Cause**: `ingest.yml` downloads `batches-*` from every `race-*` release, and a race still running has its release (opened for progress) with no batches yet.
 - **Fix**: such a release is left out with a line, and counted.
+- **Proof**: race 45336625960's insight job passed with six other races running: seven lines `left out: race-... has no batches`.
 
 ## Wall 9: `brain-check` read whichever worktree built it last
 
