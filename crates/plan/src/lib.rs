@@ -1905,23 +1905,26 @@ impl Plan {
         }
         // Inside a spawner's range with no cover cell beyond it: away from the spawner first, on
         // a found route, and the rest or the shelter is made out there.
+        // The walk's goal is measured as routes are (octile plus height), which runs longer than
+        // the straight line `awake_at` uses: from (128, 61, 176) a goal of 20 was already met
+        // while the spawner was 17.2 off, and "leave the spawner" ended at once 300 times in 380
+        // ticks, the bot standing in sight of three blazes until it died (race 45350452261 lane
+        // 0). So the goal is always 2 past where the feet are, and a goal met at the feet is no
+        // walk.
         if let Some(sp) = awake.first().copied() {
-            let mut walk = Walk::new(
-                sp,
-                Goal::Away {
-                    pos: sp,
-                    range: cover::SPAWNER_QUIET + 2.0,
-                },
-                Arrive::Goal,
-                tick,
-            );
-            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+            let range = (cover::SPAWNER_QUIET + 2.0).max(path::flat_distance(feet, sp) + 2.0);
+            let goal = Goal::Away { pos: sp, range };
+            let mut walk = Walk::new(sp, goal, Arrive::Goal, tick);
+            if !goal.done(feet)
+                && walk.route_now(w, tick)
+                && walk.route == Some(path::Status::Found)
+            {
                 self.walks += 1;
                 self.note(
                     tick,
                     format!("leave the spawner at {sp:?} to heal"),
                     format!(
-                        "health {:?}; a spawner within {} is awake and no cover cell beyond it",
+                        "health {:?}; a spawner within {} is awake and no cover cell beyond it; to {range:.1} by the route",
                         w.player.health,
                         cover::SPAWNER_QUIET
                     ),

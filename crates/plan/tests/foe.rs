@@ -169,3 +169,26 @@ fn a_fireball_s_line_is_stepped_out_of() {
     let s = dodge_side(mid, [10.5, 64.9, 0.5], None).expect("a dodge");
     assert!(s[0].abs() < 0.1 && s[1].abs() > 0.9, "{s:?}");
 }
+
+/// Spawner wall 7 and blaze-fight wall 13: with nothing to heal with (no food held, the food bar
+/// under 18) a retreat to cover leads to no rest, so a blaze at 9 to 13 health is fought, and only
+/// the danger line backs away. With food held the line of 13 stands.
+#[test]
+fn with_nothing_to_heal_with_the_blaze_line_is_the_danger_line() {
+    use plan::defend::{Defend, Stance, retreat_line};
+    let r = rules();
+    let mut w = beside(EntityKind::Blaze, 3.5);
+    w.player.health = Some(11.0);
+    w.player.food = Some(17);
+    assert_eq!(retreat_line(&w, &r), r.danger_health);
+    let d = Defend::new(&w, 118, EntityKind::Blaze, &r, 0);
+    assert_eq!(d.stance, Stance::Fight, "on with what it has");
+    w.player.health = Some(r.danger_health);
+    let d = Defend::new(&w, 118, EntityKind::Blaze, &r, 0);
+    assert_eq!(d.stance, Stance::Retreat, "never under the danger line");
+    w.player.health = Some(11.0);
+    w.player.food = Some(18);
+    assert_eq!(retreat_line(&w, &r), r.shooter_retreat_health);
+    let d = Defend::new(&w, 118, EntityKind::Blaze, &r, 0);
+    assert_eq!(d.stance, Stance::Retreat, "the food bar heals: to cover");
+}

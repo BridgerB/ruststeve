@@ -526,14 +526,25 @@ fn mob_health(w: &World, id: i32) -> Option<f32> {
     w.entities.get(&id).and_then(world::Entity::health)
 }
 
+/// The health at or under which a shooter's fight turns to a retreat to cover: `shooter_retreat_health`
+/// while a rest can heal (safe food held, or the food bar at 18 or more: `crate::can_heal`), else
+/// the danger line. A retreat is the way to a rest, and the spawner task takes no rest that cannot
+/// heal (spawner wall 7): at 9 to 13 health with nothing to eat the fight and the cover would hand
+/// the bot back and forth with nothing coming back.
+pub fn retreat_line(w: &World, rules: &SurvivalRules) -> f32 {
+    if crate::can_heal(w.player.food, crate::eat::best_food(w, rules).is_some()) {
+        rules.shooter_retreat_health
+    } else {
+        rules.danger_health
+    }
+}
+
 /// The stance a foe of `kind` is met with: a retreat from a `never_fight` kind, under the danger
 /// line, and from a shooter at or under its own line (a fight begun at 9.9 with two blazes in
 /// touch ended in 20 ticks: blaze-fight wall 4).
 fn stance_for(w: &World, kind: EntityKind, rules: &SurvivalRules) -> Stance {
     let hurt = rules.ranged.contains(&kind)
-        && w.player
-            .health
-            .is_some_and(|h| h <= rules.shooter_retreat_health);
+        && w.player.health.is_some_and(|h| h <= retreat_line(w, rules));
     if rules.never_fight.contains(&kind) || in_danger(w, rules) || hurt {
         Stance::Retreat
     } else {
@@ -877,10 +888,7 @@ impl Defend {
             } else {
                 NO_HIT_TICKS
             };
-            let hurt = shooter
-                && w.player
-                    .health
-                    .is_some_and(|h| h <= rules.shooter_retreat_health);
+            let hurt = shooter && w.player.health.is_some_and(|h| h <= retreat_line(w, rules));
             let stale = tick.saturating_sub(self.last_hit_at) > patience;
             if shooter && stale && !hurt && !in_danger(w, rules) {
                 self.notes.push(format!(
@@ -900,8 +908,9 @@ impl Defend {
                 self.stance = Stance::Retreat;
                 if shooter {
                     self.notes.push(format!(
-                        "shooter fight given up: health {:?}, {} ticks since a blow landed (patience {patience}), foe {:.1} over the eye at {d:.1}",
+                        "shooter fight given up: health {:?} (line {}), {} ticks since a blow landed (patience {patience}), foe {:.1} over the eye at {d:.1}",
                         w.player.health,
+                        retreat_line(w, rules),
                         tick.saturating_sub(self.last_hit_at),
                         pos[1] - eye_y
                     ));

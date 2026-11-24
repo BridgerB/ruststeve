@@ -5,8 +5,8 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@43bd9ba clojurecraft@be85a92
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@0ee129a clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -70,3 +70,4 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **Cover and shelter** (`plan::cover`, `Plan::take_cover`; spawner wall 3): under `engage_health` in the Nether the bot rests only where no shooter sees its body (blazes and ghasts within 48, piglins and skeletons within 16; lines to its eye and middle) and nothing burns. Seen, it walks to the nearest cell out of sight within 8 on a found route; with none it builds cover where it stands, a held block into each cell a line of sight comes in through (`cover::shelter_block`, one every 10 ticks, cobblestone first). The range was 16 until three armoured bots rested on an open bridge 16 to 24 blocks from blazes and died there (race 45335627948).
 - **Heal beyond the spawner's range** (spawner wall 5): a spawner runs only with a player within 16 blocks, so no rest and no cover cell lies within `cover::SPAWNER_QUIET` (18) of a spawner on record; a hurt bot inside it walks away from the spawner on a found route first ("leave the spawner at … to heal"). A cover cell stands on a full block, passes `seen_body` for a body standing in it, and is refused for 600 ticks once walked to.
 - **Cover is never beside a drop, and a rest must be able to heal** (spawner walls 6 and 7): `cover::beside_drop` keeps cells at a bridge's edge out of `cover_cells` (two bots fell 17 blocks heading for one); `take_cover` rests only while `can_heal` holds (safe food held, or the food bar at 18+), else the bot goes on over `danger_health` (two bots sat 7,400 and 7,900 ticks at 16 health with their meat eaten).
+- **The leave walk and the retreat line agree with the rest** (spawner wall 8, blaze-fight wall 13): the leave walk out of a spawner's range takes its goal 2 past the feet by the route's measure (octile plus height runs longer than the straight line `awake_at` uses; a goal of 20 was met at once 300 times while the spawner was 17.2 off); and a shooter's retreat line is `defend::retreat_line`: `shooter_retreat_health` while a rest can heal, else the danger line.

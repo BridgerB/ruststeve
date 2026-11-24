@@ -58,3 +58,26 @@ fn a_rest_with_nothing_to_heal_with_is_no_rest() {
         "before the first health packet"
     );
 }
+
+/// Spawner wall 8 (race 45350452261, lane 0): at (128, 61, 176) the spawner is 17.2 off in a
+/// straight line (awake) while a route's measure (octile plus height) already puts the feet past
+/// 20: a leave walk with a goal of 20 ended at once, 300 times. The two measures disagree, so the
+/// leave's goal is set past the feet.
+#[test]
+fn awake_by_the_line_and_away_by_the_route() {
+    let feet = (128, 61, 176);
+    assert!(plan::cover::awake_at(SPAWNER, [128.5, 61.0, 176.3]));
+    let goal = plan::path::Goal::Away {
+        pos: SPAWNER,
+        range: plan::cover::SPAWNER_QUIET + 2.0,
+    };
+    assert!(goal.done(feet), "the dead band");
+    let range = plan::path::flat_distance(feet, SPAWNER) + 2.0;
+    assert!(
+        !plan::path::Goal::Away {
+            pos: SPAWNER,
+            range
+        }
+        .done(feet)
+    );
+}
