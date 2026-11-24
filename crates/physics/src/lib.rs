@@ -223,6 +223,15 @@ pub fn block_jump_factor(
     surface(x, y, z).jump_factor
 }
 
+/// The pace of a steady walk on a block with this speed factor, as a share of the plain walk's:
+/// a walk settles at `accel / (1 - factor × inertia)` a tick, so the share is
+/// `(1 - inertia) / (1 - factor × inertia)`: 1 for a plain block, 0.581 for soul sand and honey
+/// (2.51 blocks a second against 4.32). A route's cost per block there is its inverse. The factor
+/// is `data::generated::movement::movement(block).speed_factor`, or `World::surface`'s.
+pub fn pace_factor(speed_factor: f64) -> f64 {
+    (1.0 - GROUND_INERTIA) / (1.0 - speed_factor * GROUND_INERTIA)
+}
+
 /// The player's body: what the step reads and writes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Body {
@@ -866,6 +875,10 @@ mod tests {
         // 2.51 blocks a second on soul sand, against the walk's 4.32.
         assert!((slow * 20.0 - 2.508).abs() < 0.001, "{}", slow * 20.0);
         assert!((plain * 20.0 - 4.317).abs() < 0.001, "{}", plain * 20.0);
+        // The share a route's cost can read is the same number.
+        assert!((pace_factor(k) - slow / plain).abs() < 1e-12);
+        assert!((pace_factor(k) - 0.581).abs() < 0.001);
+        assert_eq!(pace_factor(1.0), 1.0);
         // The same floor with nothing said about it is walked at the plain pace.
         let unsaid = pace(&sand, &no_fluid, &plain_surface, on_sand);
         assert!((unsaid - plain).abs() < 1e-12);
