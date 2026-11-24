@@ -5,8 +5,8 @@ type: reference
 tags: [plan, mine, ore, vein, flint, gravel, stairs]
 aliases: [mine-coal, mine-iron, dig-gravel, flint-from-gravel, Redig, redig, depth, tunnel, Stairs::level, vein, chance drops, make room, NoRoom]
 status: verified
-lastUpdated: 2026-11-13
-verifiedAgainst: ruststeve@7e42e00 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/redig.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>, RedigStatus) {"
   - "ruststeve:crates/plan/src/stairs.rs#pub fn level(dir: (i32, i32), tick: u64) -> Self {"
@@ -30,7 +30,11 @@ Issue 13b.
 - **The vein**: after each ore the planner decides again, and the exposed search runs out from the feet, so the ore the last dig uncovered beside it is the next taken while the row still wants its item: the whole vein before moving on (clojurecraft's `vein.clj`, by construction here).
 - **Chance drops**: a dig collects what the block always drops when nothing rarer does (gravel's gravel) and its chance drops before that (gravel's flint): either one picked up ends the collect.
 - **Flint** (`flint-from-gravel`, `Act::Redig`): a held gravel is put down beside the feet and dug again, one cycle a task; the planner asks again until flint is held (one in ten); the gravel is a need, so running out of it sends the bot for gravel.
-- **Room to place** ([[placing]]): with no free floor cell beside the feet (a one-wide staircase whose only free cell the table took), a wall block at the feet's height with a full floor under it, no fluid near, is dug first (at most two).
+- **Room to place** ([[placing]]): with no free floor cell beside the feet (a one-wide staircase whose only free cell the table took), a wall block at the feet's height with a full floor under it, no fluid near, is dug first (at most two). A floor whose block opens a menu (a table, furnace, chest, barrel) is never placed on.
+
+## Gotchas
+- A re-dig that never saw its pickup: the slot update for the gravel put down can come after the block update that ends the place, so a count taken at the dig's start never rose. `Redig` counts what was held before the place and the dig counts its pickup against one less (iron-kit wall 8). A failed re-dig names the dig's own failure (`RedigFailure::Dig(DigFailure)`).
+- The tunnel's level steps take the stair's refusals ([[stairs-down]]): never a magma floor (blaze wall 23: a step planned onto magma failed at once, for ever, with nothing refused), never under a block that falls (gravel, sand), and a missing floor only over a drop of at most `MAX_DROP` 3.
 
 ## Evidence
 - Model: the kit from the `stone` kit (three iron as a vein, coal, stone by stairs, the furnace placed after a wall was dug); flint from thirty held gravel by re-digging.

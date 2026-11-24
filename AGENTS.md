@@ -50,7 +50,12 @@ clojurecraft lost four weeks on its pearl stage, and most of its mistakes are ju
 4. **While a race runs**, read the release's `progress-lane-N.txt` (updated every 10 minutes); a bot with no progress for 20 game minutes ends `no-progress` with its case instead of sitting to the cap.
 5. **Name the structural cause** in `docs/problems/`, then fix it. Prefer structure (a progress invariant, a held target, a kept reserve) over a threshold.
 6. **Judge the fix** on tens of paired runs (same worlds, same seeds), count the new code path's firings in the ledger, and confirm a passing stage did not drop.
-7. **Sim numbers count only after the parity table** says sim and real agree (`brain/ruststeve/decisions/measurement-rules.md`). The real race is the metric.
+7. **Test in order; a race is the last check** (`brain/ruststeve/decisions/stage-loop-lessons.md`, issue 16's night of 2026-11-23): a unit test on a hand-built world, then a probe on a recorded world (`why` at the tick), then a short race from a snapshot taken right before the wall, with a short cap. Never a three-hour race from two stages back to test one fix.
+8. **A fix is not done until its own ledger line is counted.** Every new code path writes a ledger note when it fires (`self.note`); a path that writes nowhere reads as "fired 0 times" (the lava seal did, and was called dead while it worked). No count, or a worse outcome: revert it and write that down.
+9. **Senses rows round, cells floor.** A senses row "30,31,-18" can be the feet cell (30, 31, -19). Ask `why` for the exact position before naming a cell or centring a block view.
+10. **One world per snapshot**: every race from a snapshot replays one cave and one portal exit, so fixes get tuned to one place. Say which world judged a fix; take snapshots in several.
+11. **Split a chain of stages across agents** instead of walking it serially: each stage its own problem file, from a real snapshot where one exists and a development start where none does. Development starts (a made-up kit at a place) are for development only: never an issue's evidence, never the frontier (`brain/ruststeve/decisions/development-starts.md`).
+12. **Sim numbers count only after the parity table** says sim and real agree (`brain/ruststeve/decisions/measurement-rules.md`). The real race is the metric.
 
 Use SurrealDB (the `ingest` binary's insight store) for questions across many runs; use the recording and `why` for one run.
 
