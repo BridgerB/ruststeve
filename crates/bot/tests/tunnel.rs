@@ -302,8 +302,8 @@ fn rock() -> sim::nether::Stage {
 }
 
 /// No bricks in view and the fortress WEST: the search tunnel's first heading is south, the
-/// wrong way. It runs to where the world ends, has no way on, turns a quarter (west), turns
-/// again (north), and on that leg the bricks' column loads: the tunnel goes to them. One chunk
+/// wrong way. It runs to where the world ends, has no way on, turns a quarter (west), and on
+/// that leg the bricks' column loads: the tunnel goes to them, with no second turn. One chunk
 /// of view, so the bricks 40 blocks west are unseen from the start.
 #[test]
 fn the_search_tunnel_turns_when_its_heading_is_wrong_and_arrives() {
@@ -319,7 +319,7 @@ fn the_search_tunnel_turns_when_its_heading_is_wrong_and_arrives() {
     assert!(!run.died);
     assert!(count("search tunnel leg toward") >= 3, "{tail:#?}");
     assert!(count("search tunnel turned to (-1, 0)") >= 1, "{tail:#?}");
-    assert!(count("search tunnel turned to (0, -1)") >= 1, "{tail:#?}");
+    assert_eq!(count("search tunnel turned to (0, -1)"), 0, "{tail:#?}");
     assert!(count("toward the fortress at") >= 1, "{tail:#?}");
 }
 
