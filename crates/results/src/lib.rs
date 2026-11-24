@@ -12,6 +12,7 @@ pub mod observe;
 pub mod parity;
 pub mod snapshot;
 pub mod story;
+pub mod text;
 pub mod truth;
 
 use std::collections::BTreeMap;
@@ -21,6 +22,10 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use world::{Hit, Stage};
+
+/// The planner's ledger record, for readers that build a `Ledger` without the planner (the
+/// `ledger` binary re-reading a recording).
+pub use plan::TaskRecord;
 
 /// The results formats' version; a reader refuses one it does not know.
 pub const FORMAT_VERSION: u32 = 1;
@@ -211,6 +216,15 @@ impl Case {
                 self.stage_reached.map_or("none", Stage::name)
             ),
             format!("ending: {:?}", self.ending),
+        ];
+        // Where the bot stood at the end, in plain terms, before anything else is read.
+        if let Some(s) = &self.story
+            && !s.standing.is_empty()
+        {
+            lines.push("where:".to_owned());
+            lines.extend(s.standing.iter().map(|l| format!("  {l}")));
+        }
+        lines.extend([
             format!(
                 "death message: {}",
                 self.death_text.as_deref().unwrap_or("-")
@@ -227,10 +241,22 @@ impl Case {
                 "swings sent {}, landed {}",
                 self.swings_sent, self.swings_landed
             ),
+            // The feet's cell is the position floored, as the planner has it: a position
+            // rounded by eye reads one cell off (-18.3 is cell -19).
             format!(
-                "health {:?}  at {:?} in {}",
-                self.health,
-                self.pos,
+                "health {}  at {} in {}",
+                self.health
+                    .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
+                self.pos.map_or_else(
+                    || "-".to_owned(),
+                    |p| {
+                        let [x, y, z] = ::observe::feet_cell(p);
+                        format!(
+                            "{:.2},{:.2},{:.2} (feet cell {x},{y},{z})",
+                            p[0], p[1], p[2]
+                        )
+                    }
+                ),
                 self.dimension.as_deref().unwrap_or("-")
             ),
             format!(
@@ -239,7 +265,7 @@ impl Case {
                 self.wall_ms as f64 / 1000.0
             ),
             format!("replay: {}", self.replay),
-        ];
+        ]);
         if let Some(p) = &self.plan {
             lines.push(format!(
                 "plan {}: reached {}, stuck {}, {} walks, failures {:?}, longest stall {} ticks, {} expansions, tick us {:?}",
@@ -546,18 +572,27 @@ pub struct Ledger {
 }
 
 impl SensesFile {
-    /// One line every `every` rows (1 is every second).
+    /// One line every `every` rows (1 is every second): the tick, the position to one decimal,
+    /// the feet's cell as the planner has it (floored: a rounded position reads one cell off),
+    /// what the feet stand on and any lava or water against the body, then health, food, the
+    /// held item, the task with its reason, and the nearest hostiles. A change of dimension is
+    /// a line of its own.
     pub fn render(&self, every: usize) -> String {
         let mut out = format!(
-            "senses {} / {}: {} rows\n",
+            "senses {} / {}: {} rows (x,y,z to one decimal; cell is the feet's cell, floored, as the planner has it)\n",
             self.run,
             self.bot,
             self.rows.len()
         );
+        let mut dimension: Option<&str> = None;
         for r in self.rows.iter().step_by(every.max(1)) {
+            if r.dimension.is_some() && r.dimension.as_deref() != dimension {
+                dimension = r.dimension.as_deref();
+                out.push_str(&format!("{:>8} in {}\n", r.at, dimension.unwrap_or("-")));
+            }
             let pos = r.pos.map_or_else(
                 || "-".to_owned(),
-                |p| format!("{:.0},{:.0},{:.0}", p[0], p[1], p[2]),
+                |p| format!("{:.1},{:.1},{:.1}", p[0], p[1], p[2]),
             );
             let near: Vec<String> = r
                 .hostiles
@@ -579,14 +614,18 @@ impl SensesFile {
                 })
                 .collect();
             out.push_str(&format!(
-                "{:>8} {pos} hp {} food {} held {}{} | {} ({}) | {}\n",
+                "{:>8} {pos} {} hp {} food {} held {}{}{} | {} ({}) | {}\n",
                 r.at,
+                r.standing(),
                 r.health
                     .map_or_else(|| "-".to_owned(), |h| format!("{h:.1}")),
                 r.food.map_or_else(|| "-".to_owned(), |f| f.to_string()),
                 r.held.as_deref().unwrap_or("nothing"),
                 r.held_uses
                     .map_or_else(String::new, |u| format!(" ({u} uses)")),
+                r.cursor
+                    .as_ref()
+                    .map_or_else(String::new, |(i, n)| format!(" cursor {i} {n}")),
                 r.task,
                 r.why,
                 near.join(", ")
@@ -597,72 +636,25 @@ impl SensesFile {
 }
 
 impl Ledger {
-    /// Every task start and end and every fact, in order, one line each.
+    /// Every task start and end, every note and every fact, by tick (`text`): the planner's
+    /// records in its own order, a run of the same records once with its count, one second's
+    /// changes to an item on one line. The header counts what the file holds, not the lines.
+    pub fn lines(&self) -> Vec<(u64, String)> {
+        text::merged(&self.tasks, &self.facts)
+    }
+
     pub fn render(&self) -> String {
-        let mut lines: Vec<(u64, u8, String)> = Vec::new();
-        // A note that only repeats a task's start or end at the same tick is not shown twice.
-        let told: std::collections::BTreeSet<(u64, &str)> = self
-            .tasks
-            .iter()
-            .filter_map(|t| match t {
-                plan::TaskRecord::Started { at, what, .. } => what.as_deref().map(|w| (*at, w)),
-                plan::TaskRecord::Ended { at, outcome, .. } => outcome.as_deref().map(|o| (*at, o)),
-                plan::TaskRecord::Note { .. } => None,
-            })
-            .collect();
-        for t in &self.tasks {
-            match t {
-                plan::TaskRecord::Started {
-                    id,
-                    at,
-                    task,
-                    what,
-                    why,
-                } => lines.push((
-                    *at,
-                    1,
-                    format!(
-                        "start #{id} {task}: {} ({})",
-                        what.as_deref().unwrap_or("-"),
-                        why.as_deref().unwrap_or("no reason")
-                    ),
-                )),
-                plan::TaskRecord::Ended {
-                    id,
-                    at,
-                    task,
-                    ticks,
-                    outcome,
-                    why,
-                } => lines.push((
-                    *at,
-                    0,
-                    format!(
-                        "end #{id} {task} after {ticks} ticks: {} ({})",
-                        outcome.as_deref().unwrap_or("-"),
-                        why.as_deref().unwrap_or("-")
-                    ),
-                )),
-                plan::TaskRecord::Note { at, what, why } => {
-                    if !told.contains(&(*at, what.as_str())) {
-                        lines.push((*at, 1, format!("note {what} ({why})")));
-                    }
-                }
-            }
-        }
-        for f in &self.facts {
-            lines.push((f.at, 2, f.fact.line()));
-        }
-        lines.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let lines = self.lines();
         let mut out = format!(
-            "ledger {} / {}: {} task records, {} facts, {} dropped\n",
+            "ledger {} / {}: {} task records, {} facts, {} dropped, told in {} lines (a run of the same records is one line: [xN, to tick T])\n",
             self.run,
             self.bot,
             self.tasks.len(),
             self.facts.len(),
-            self.dropped
+            self.dropped,
+            lines.len()
         );
-        for (at, _, l) in lines {
+        for (at, l) in lines {
             out.push_str(&format!("{at:>8} {l}\n"));
         }
         out
@@ -903,5 +895,146 @@ mod coverage_tests {
             ..Coverage::default()
         });
         assert_eq!(b.ledgers, Some(5));
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    fn row(at: u64, pos: [f64; 3]) -> ::observe::Senses {
+        ::observe::Senses {
+            at,
+            pos: Some(pos),
+            dimension: Some("minecraft:the_nether".to_owned()),
+            health: Some(20.0),
+            food: Some(16),
+            saturation: None,
+            air: None,
+            on_fire: false,
+            held: Some("stone_pickaxe".to_owned()),
+            held_uses: Some(57),
+            tools: Vec::new(),
+            free_slots: 3,
+            task: "stairs".to_owned(),
+            why: "nether bricks seen, no walk to them".to_owned(),
+            hostiles: Vec::new(),
+            endermen: 0,
+            sound: None,
+            tick_us: None,
+            cell: None,
+            feet_block: None,
+            under: None,
+            lava: ::observe::Touch::No,
+            water: ::observe::Touch::No,
+            cursor: None,
+        }
+    }
+
+    /// Wall 1: the cell a row prints is the cell the planner works in, for every sign and
+    /// fraction (a rounded -18.3 read -18; the planner's feet cell is -19).
+    #[test]
+    fn the_printed_cell_is_the_planners_feet_cell() {
+        for pos in [
+            [30.499, 31.0, -18.3],
+            [-0.3, 63.875, 0.7],
+            [29.7, 36.42181483855212, -20.65643210844759],
+            [0.0, -64.0, -1.0],
+            [117.5, 70.5, -117.5],
+        ] {
+            let (x, y, z) = plan::path::feet_cell(pos);
+            assert_eq!(::observe::feet_cell(pos), [x, y, z], "{pos:?}");
+        }
+    }
+
+    /// Wall 1 as the senses text has it: an old row (no cell kept) prints the position to one
+    /// decimal and the floored cell; a new row adds what the feet stand on and the lava; the
+    /// dimension is a line of its own when it changes.
+    #[test]
+    fn a_senses_line_gives_the_cell_and_what_the_feet_stand_on() {
+        let old = row(31_300, [30.499, 31.0, -18.3]);
+        let mut new = row(31_500, [30.499, 31.88, -18.3]);
+        new.cell = Some([30, 31, -19]);
+        new.feet_block = Some("soul_sand".to_owned());
+        new.under = Some("netherrack".to_owned());
+        new.lava = ::observe::Touch::Beside;
+        new.cursor = Some(("bucket".to_owned(), 1));
+        let text = SensesFile {
+            format_version: FORMAT_VERSION,
+            run: "r".to_owned(),
+            bot: "b".to_owned(),
+            rows: vec![old, new],
+        }
+        .render(1);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[1], "   31300 in minecraft:the_nether");
+        assert_eq!(
+            lines[2],
+            "   31300 30.5,31.0,-18.3 cell 30,31,-19 hp 20.0 food 16 held stone_pickaxe (57 uses) | stairs (nether bricks seen, no walk to them) | "
+        );
+        assert_eq!(
+            lines[3],
+            "   31500 30.5,31.9,-18.3 cell 30,31,-19 in soul_sand over netherrack, lava beside hp 20.0 food 16 held stone_pickaxe (57 uses) cursor bucket 1 | stairs (nether bricks seen, no walk to them) | "
+        );
+        assert_eq!(lines.len(), 4);
+    }
+
+    /// Wall 5: the case's head says where the bot stood before anything else, and its position
+    /// line gives the feet's cell beside the position.
+    #[test]
+    fn a_case_opens_with_where_the_bot_stood() {
+        let case = Case {
+            format_version: FORMAT_VERSION,
+            run: "45204423376".to_owned(),
+            bot: "rs-l03-b00".to_owned(),
+            commit: "c".to_owned(),
+            lane: 3,
+            start: "snapshot".to_owned(),
+            source: Source::Real,
+            stage_reached: Some(Stage::Nether),
+            ending: Ending::NoProgress {
+                for_ticks: 24_000,
+                task: "idle".to_owned(),
+            },
+            death_text: None,
+            first_hit: None,
+            hits: Vec::new(),
+            doing: Doing {
+                task: "idle".to_owned(),
+                why: String::new(),
+            },
+            items_gained: BTreeMap::new(),
+            items_lost: BTreeMap::new(),
+            swings_sent: 0,
+            swings_landed: 0,
+            health: Some(20.0),
+            pos: Some([30.49940297953616, 31.0, -18.3]),
+            dimension: Some("minecraft:the_nether".to_owned()),
+            server_ticks: 55_940,
+            wall_ms: 0,
+            recording: None,
+            replay: String::new(),
+            stream: None,
+            plan: None,
+            story: Some(story::Story {
+                standing: vec![
+                    "in minecraft:the_nether at 30.50,31.00,-18.30: cell 30,31,-19 on soul_sand, lava beside".to_owned(),
+                ],
+                ..story::Story::default()
+            }),
+        };
+        let text = case.render();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[4], "where:");
+        assert_eq!(
+            lines[5],
+            "  in minecraft:the_nether at 30.50,31.00,-18.30: cell 30,31,-19 on soul_sand, lava beside"
+        );
+        assert!(
+            text.contains(
+                "health 20.0  at 30.50,31.00,-18.30 (feet cell 30,31,-19) in minecraft:the_nether"
+            ),
+            "{text}"
+        );
     }
 }

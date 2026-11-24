@@ -5,8 +5,8 @@ type: decision
 tags: [decision, mcp, tooling, agents]
 aliases: [rmcp, MCP server, ruststeve-mcp, .mcp.json, model context protocol, agent tools]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@cd6e03e
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@ddae609
 sourceRefs:
   - "ruststeve:crates/mcp/src/main.rs#//! ruststeve-mcp: an MCP server (the official Rust SDK, rmcp) that gives coding agents"
   - "ruststeve:crates/mcp/Cargo.toml#rmcp = { version = \"=3.9.0\", features = [\"server\", \"transport-io\"] }"
@@ -30,10 +30,12 @@ Tools today:
 | `probe_output` | download a probe's artifact and return `probe.log` |
 | `run_status`, `run_log` | a run's jobs and timings; its failed steps' log lines |
 | `ci_runs` | recent CI and probe runs, optionally for one branch |
+| `race_summary` | a race's release (`race-<run id>`): its summary body and its asset names |
+| `race_read` | a text file of a race's bundle (case, ledger, senses, a lane's progress), found by the end of its path; without a file, the list. The bundle is downloaded once into `target/races/<id>` |
 | `brain_check` | the brain checker: invariants, `drift`, or `touches` |
 | `brain_note`, `brain_search` | read a note by stem or hub path; find notes by title, description, aliases |
 
-New agent-facing tooling is added here as a tool, not as a script: the insight store's queries, a recording's `why`, the race's status, as their issues arrive.
+New agent-facing tooling is added here as a tool, not as a script: the insight store's queries, a recording's `why`, as their issues arrive.
 
 ## Why
 - One typed, discoverable interface that any MCP-capable agent can call, instead of each agent re-deriving `gh` and `cargo` invocations.
@@ -42,7 +44,7 @@ New agent-facing tooling is added here as a tool, not as a script: the insight s
 
 ## Boundaries
 - Shell-side tooling only. `rmcp` brings tokio; the core crates never depend on `ruststeve-mcp` (the `deps-boundary` check forbids `rmcp` in them, [[ci-on-runners]]).
-- The server runs locally as the agent's tool; it only shells out to `gh`, to `cargo run -p brain-check` and reads files.
+- The server runs locally as the agent's tool; it only shells out to `gh`, to `cargo run -p brain-check`, to `tar` (a race's bundle) and reads files.
 
 ## What would change the answer
 Bridger only.

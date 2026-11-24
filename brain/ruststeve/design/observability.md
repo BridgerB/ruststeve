@@ -5,8 +5,8 @@ type: reference
 tags: [observability, case-files, events, snapshots]
 aliases: [case files, senses, ledger, snapshot stream, coverage, flight recorder, tracing]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@3f7b5d8 clojurecraft@be85a92
+lastUpdated: 2026-11-23
+verifiedAgainst: ruststeve@e4e2305 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:FUNCTIONAL.md#Observability here means one thing: at any tick, a human can see what the bot believed, what it decided, why, and what actually happened, and compare them."
   - "clojurecraft:LOOP.md#Full observability is the rule (Bridger, Nov 6: \"otherwise you are a ship in the night\")."
@@ -50,6 +50,16 @@ At any tick a human must be able to see what the bot believed, what it decided, 
 - **Senses** (`observe::senses`): a row a second: position, health, food, saturation, air, fire, the held item and its uses, every tool's uses, free slots, the task and its reason, the six nearest hostiles with their signs and held item, endermen within 128, the newest sound, the planner's tick time.
 - **Moments**: the planner whole with that second's senses, once a minute for the last five and at the end; the world of the same minute is the recording's checkpoint.
 - **Files**: `<bot>.ledger.rsl` (tasks and facts), `<bot>.senses.rss`, `<bot>.moments.rsm`, beside the case and in the release's batches bundle; `results ledger <file>` and `results senses <file> [--every N]` print them.
+
+## Issue 16: the text reads right the first time (`docs/problems/observability-gaps.md`)
+The files were whole and were still misread twice in one night (race 45204423376). The rules since:
+- **One cell convention.** A senses row keeps `cell`, the position floored (`observe::feet_cell`, held equal to the planner's `plan::path::feet_cell` by a test): z -18.3 is cell -19, and the old text's rounded `30,31,-18` was read as the cell. With it `feet_block` (the block in the cell: air on a full block, soul sand or a fluid when the feet are inside its cell), `under`, and `lava` / `water` as `Touch::In | Beside | No` over the body's two cells and the cells against them. `Senses::standing()` says it in words: `cell 30,31,-19 on netherrack, lava beside`. These read only the bot's own world, for the files; nothing of them reaches the planner.
+- **Holdings include the cursor.** `Snapshot::items` counts the cursor's stack, `Fact::Cursor` says what is on it, and while a click waits for its answer (`CLICK_SETTLE`, 20 client ticks) the holdings are read as they last settled: the world forgets the cursor as it clicks, so a moved tool read `1 -> 0`, `0 -> 1`.
+- **A break is a break.** `tool broke` only when a tool's uses run out in its slot or it leaves the holdings on its last use (`BREAK_AT`); gone with uses left is `Fact::ToolGone`.
+- **The ledger text says each thing once** (`results::text`): the planner's records in the planner's order (ends were sorted before starts, so a task of one second read as ended before it began), a run of the same lines (a block of up to four, the same but for the task's number) once with `[xN, to tick T]`, one second's changes to an item, health, food or the cursor on one line with the count of changes. The stamp is the server's second: `set_time` comes every 20 ticks. The `.rsl` holds everything; a line is never cut.
+- **The case** opens with `where:` (dimension, position and cell, what the feet stand on, lava or water, held item and cursor, the task and its reason, the last stage and the ticks since), counts every note of the ledger by kind (`story::note_kind`: leading words to the first number or bracket, an item's name as `*`), lists every note carrying `trail:` whole, says how many tasks of a kind ended within the second they began, and tells the last two minutes as the ledger does.
+- **No loss of health is silent.** A fall in health with no damage event of its own (none within `HIT_WINDOW`, 10 client ticks, that an earlier fall had not taken) is `Fact::HealthDrop` with the nearest hostile and whether the bot burned; the case counts them. New blows are told from the newest blow's stamp (`Snapshot::hit_mark`), not from the length of `World::hits`, which stands still once the world prunes it.
+- `replay ledger <rsr> --force [--raw] [--senses N] [--story]` prints all of it for any recording.
 
 ## What was dropped
 Rerun and an in-process axum debug endpoint (`FUNCTIONAL.md`): ruststeve ships no viewer; steve is the front end, reading the SurrealDB insight store ([[data-out]]). Replays and the `why` binary are the REPL substitute.
