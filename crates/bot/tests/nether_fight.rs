@@ -161,11 +161,18 @@ fn a_wither_skeleton_walks_the_bridge_and_kills_an_idle_bot() {
         physics::Controls::default()
     });
     assert!(run.died, "health {:?}", run.world.player.health);
+    // It walked the bridge from x 10.5 to the bot. Not "within 2 of x 0.5": each hit knocks the
+    // bot 0.4 back along the bridge (LivingEntity.knockback), so it dies further west.
+    let skeleton = run
+        .world
+        .entities
+        .values()
+        .find(|e| e.kind == EntityKind::WitherSkeleton)
+        .map(|e| e.pos);
     assert!(
-        run.world
-            .entities
-            .values()
-            .any(|e| e.kind == EntityKind::WitherSkeleton && (e.pos[0] - 0.5).abs() < 2.0)
+        skeleton.is_some_and(|p| p[0] < 3.5),
+        "skeleton at {skeleton:?}, bot at {:?}",
+        run.world.body.map(|b| b.pos)
     );
 }
 

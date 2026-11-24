@@ -675,8 +675,10 @@ fn a_mobs_hit_knocks_the_player_away_and_up() {
         _ => None,
     });
     let v = motion.unwrap();
+    // The packet's velocity is quantised on the wire (-0.39998779 for -0.4), so the bound is
+    // a thousandth, not a millionth.
     assert!(
-        (v[0] + 0.4).abs() < 1e-6 && (v[1] - 0.4).abs() < 1e-6 && v[2].abs() < 1e-6,
+        (v[0] + 0.4).abs() < 1e-3 && (v[1] - 0.4).abs() < 1e-3 && v[2].abs() < 1e-3,
         "{v:?}"
     );
     assert_eq!(sim.health, 12.0, "8 unarmoured");
