@@ -126,3 +126,58 @@ fn a_roof_hangs_on_a_wall_three_high() {
         "the roof, on the west face of the wall's top"
     );
 }
+
+/// A spawner runs with a player within 16 blocks: a rest 14 to 17 from the blaze spawner saw its
+/// shooters go from 3 to 12 (races 45337168104 and 45338756013). Rest is 18 or more from one.
+#[test]
+fn a_spawner_within_eighteen_blocks_is_awake() {
+    let spawner = (129, 64, 159);
+    assert!(plan::cover::awake_at(spawner, [129.5, 61.0, 175.5]));
+    assert!(!plan::cover::awake_at(spawner, [129.5, 61.0, 178.5]));
+}
+
+/// A cover cell is one a body standing in it is not seen in, by the test the rest is judged
+/// by: behind the wall yes, in the open no, and never the top of the wall.
+#[test]
+fn cover_cells_are_out_of_sight_for_a_standing_body() {
+    let w = walled();
+    // A shooter's eye east of the wall, a little over it.
+    let eyes = [[8.5, 66.5, 0.5]];
+    let cells = plan::cover::cover_cells(&w, &eyes);
+    assert!(
+        cells.contains(&(2, 64, 0)),
+        "right behind the wall: {cells:?}"
+    );
+    assert!(!cells.contains(&(5, 64, 0)), "in the open");
+    assert!(!cells.contains(&(3, 67, 0)), "on the wall");
+    for c in &cells {
+        let pos = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+        assert!(!plan::cover::seen_body(&w, &eyes, pos), "{c:?}");
+    }
+}
+
+/// Race 45346418004: two bots heading for a cover cell at a bridge's edge fell 17 blocks. A cell
+/// with a drop beside it is no cover: on a deck three wide over nothing, only the middle row.
+#[test]
+fn a_cell_beside_a_drop_is_no_cover() {
+    // A deck at y 70, x 0 to 2, z -4 to 4, with a wall across it at z 0 hiding the south half.
+    let mut m = flat_world(2, 63).unwrap();
+    for x in 0..=2 {
+        for z in -4..=4 {
+            m.set_block(x, 70, z, state(BlockKind::Stone)).unwrap();
+        }
+        for y in 71..=73 {
+            m.set_block(x, y, 0, state(BlockKind::Stone)).unwrap();
+        }
+    }
+    let w = joined(m);
+    let mut cells = plan::path::Cells::new(&w);
+    assert!(plan::cover::beside_drop(&mut cells, (0, 71, 2)), "the edge");
+    assert!(plan::cover::beside_drop(&mut cells, (2, 71, 2)), "the edge");
+    assert!(
+        !plan::cover::beside_drop(&mut cells, (1, 71, 2)),
+        "the middle"
+    );
+    // On the ground: no drop anywhere.
+    assert!(!plan::cover::beside_drop(&mut cells, (5, 64, 5)));
+}
