@@ -32,6 +32,16 @@ The overworld leg's portal cast, for a real bot from the clean `ready` snapshot 
 - **Fix**: sources within `FETCH_NEAR` (reach plus a block) of the eye are no fetch walk's target; the walk note says how many were skipped.
 - **Open**: the site itself (floor y -52, the sea's surface y -55) passed `cast::station` by its "lava up to three below the landing, a tunnel reaches it" clause, and at the refill there was no station ("286 sources, no station") and a level tunnel at the floor's height never comes within reach of a surface three below. Read on the `sealava` races before any change: portal.md wall 23 refused such sites and lit fewer.
 
+## 3. Ops out of reach by their centre (baseline `sealava` race 45350748165: 7 casts `Op` at `:place :wall`, 3 at `:dig :room`)
+
+- **What happened**: places 5 and 6 failed `place :wall` in every lane at the wall behind the frame's top cells, (60, -50, -182) from the stand (61, -51, -178) and (-151, -48, 92) from (-147, -50, 92), 53 to 116 ops in (in race 45343519424 lane 1 too, after 116 ops and 6,440 ticks).
+- **Cause**: the approach takes an op as in reach when the eye is within `REACH` 4.0 of the cell's centre; from the top stair the wall's centre is 4.12 off and no stand of the room is nearer, so every try failed. The server takes a dig or a click when the eye is within 5.5 of the block's box (`canInteractWithBlock`, the 4.5 range plus 1).
+- **Fix**: the approach measures the eye to the cell's box (`cast::box_dist`), the 4.0 kept; the wall is 3.54 off by its box. Unit test `the_wall_behind_the_top_cell_is_in_reach_by_its_box` (plan, rays.rs). Notes: "box reach N" on every cast ending (ticks an op was taken as in reach by the box and not by the centre).
+
+## The baseline (race 45350748165, 8c3d038: the code before walls 1 to 3)
+
+`sealava`, 3 lanes x 9 bots, cap 24,000, goal `portal`: **15 of 27 lit** (55.6%), in 113 casts begun. Places 4 and 8 lit 3 of 3; place 0 none. Casts failed: `Op` `place :wall` 7, `NoRefill` `NoSight` 5, `NoRefill` "no route, tunnels" 3, `Op` `dig :room` 3, `Op` `pour :lava` 3, `NoRefill` `NoWay` 2, `place :floor` 3, `Exposed` 1; "cast out of lava" 38 times (17 at the first cell), "no lava to fetch" 9.
+
 ## Status
 
-- f449f5b: walls 1 and 2 written, clippy clean, not raced. Baseline `sealava` race 45350748165 (8c3d038, the code before them) running.
+- f449f5b (walls 1, 2), a0359ab (wall 2's tunnel down), c073b1a (wall 3): clippy clean, CI tests green on f449f5b. Raced together in `sealava` race 45354357884.
