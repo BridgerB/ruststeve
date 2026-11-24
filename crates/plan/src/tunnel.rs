@@ -459,8 +459,10 @@ pub fn route(
     })
 }
 
-/// The planner's memory of its tunnel: the target held, the route, the cells found bad.
+/// The planner's memory of its tunnel: the target held, the route, the cells found bad. Every
+/// field defaults: a moment written before a field was added still loads.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Travel {
     pub target: Option<Cell>,
     pub route: Vec<Cell>,
@@ -506,7 +508,7 @@ impl Plan {
     /// at the travel height. A leg with no way turns the heading a quarter, once a call.
     pub(crate) fn explore_tunnel(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {
         let body = w.body?;
-        let feet = path::feet_cell(body.pos);
+        let feet = path::stand_cell(w, body.pos);
         let leg = self
             .travel
             .target
@@ -586,7 +588,7 @@ impl Plan {
         tick: u64,
     ) -> Option<Task> {
         let body = w.body?;
-        let feet = path::feet_cell(body.pos);
+        let feet = path::stand_cell(w, body.pos);
         if self.travel.target != Some(target) {
             // A new target, or the same fortress's nearer brick: the cells found bad stay bad.
             let keep = self.travel.target.is_some_and(|t| flat(t, target) <= 32);

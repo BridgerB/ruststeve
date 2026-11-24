@@ -156,7 +156,10 @@ fn hits_on_the_bot_are_named_and_kept_a_minute() {
     let names: Vec<&str> = w.hits.iter().map(|h| h.damage_type.as_str()).collect();
     assert_eq!(names, ["mob_attack", "unknown:9999"]);
     for _ in 0..(HITS_KEPT_TICKS / 20 + 2) {
-        w.step(&Event::Packet(S2c::SetTime));
+        w.step(&Event::Packet(S2c::SetTime {
+            game_time: 0,
+            clocks: Vec::new(),
+        }));
     }
     w.step(&hit(7, mob_attack));
     assert_eq!(w.hits.len(), 1, "older than a minute is dropped");

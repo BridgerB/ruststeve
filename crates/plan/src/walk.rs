@@ -95,8 +95,11 @@ pub fn rock_to_tunnel(w: &World, (x, y, z): Cell) -> bool {
             .and_then(data::generated::shapes::collision)
             == Some(data::types::Collision::Full)
     };
+    // The block two under is read only when it shows a face (no X-ray): hidden, it is taken
+    // for rock; a causeway's lava or air under it is open to the sea beside.
+    let under = (x, y - 2, z);
     full((x, y - 1, z))
-        && full((x, y - 2, z))
+        && (full(under) || !crate::escape::exposed(w, under))
         && crate::escape::lava_door_at(w, (x, y, z)).is_none()
 }
 

@@ -335,9 +335,12 @@ act = "hunt"
 hungry_below = 14
 # Hunger points of safe food held before a portal is entered (issue 16a, Bridger 2026-11-20: food
 # first, then the Nether): the Nether has little to eat, and the heal between blaze fights needs
-# food over 18. 32 is eight raw beef or porkchop, or about five cooked (clojurecraft held four
-# items, blaze.clj food-reserve).
-food_reserve = 32
+# food over 18. 32 was eight raw beef or porkchop, or about five cooked (clojurecraft held four
+# items, blaze.clj food-reserve). 48 since the fight at the spawner was measured (2026-11-23,
+# docs/problems/overworld-leg.md wall 4): a fireball costs 6 to 9 health in armour and healing 13
+# health took 5 raw porkchops, and the bot arrived with about 8. 48 is 16 raw beef or porkchop.
+# The `ready` stage's own bar stays 32 (world::stage::READY_FOOD).
+food_reserve = 48
 # Never eaten: what poisons or makes hungry, what teleports, a random effect, and golden apples
 # (worth more than food) (clojurecraft's eat/unsafe).
 unsafe_foods = ["rotten_flesh", "spider_eye", "pufferfish", "poisonous_potato", "chicken", "chorus_fruit", "suspicious_stew", "golden_apple", "enchanted_golden_apple"]
@@ -365,6 +368,33 @@ travel_reserve_digs = 131
 # empty place costs minutes, never the run).
 stock_logs = 12
 provision_ticks = 6000
+# Pieces of meat held before the race goes down from the surface, the bot resumed from a ready
+# snapshot too (docs/problems/overworld-leg.md wall 4): hunted for one provision_ticks, then every
+# raw piece cooked in a furnace made on the spot, the fuel planks from held logs. 30: seven rods
+# are about 14 blazes at 6 to 8 health a kill, some 100 health to heal, and a cooked piece heals
+# about three times a raw one (8 hunger and 12.8 saturation against 3 and 1.8); ten raw pieces
+# were gone after three blazes (agent A4's spawner races, 2026-11-23).
+meat_stock = 30
+# Iron ingots held when the cook phase ends, smelted from held raw iron in the same furnace: a
+# shield is one ingot and six planks, the Nether kit wants two (a timed shield cut fireball hits
+# from 3.1 to 0.6 per 1,000 ticks at the spawner: agent A11's race 45345386828), and one spare.
+kit_ingots = 3
+# Shields crafted from those ingots at the cook's table before the descent (one ingot and six
+# planks each; docs/problems/overworld-leg.md wall 8): a development bot with a timed shield and
+# cooked food took 7 rods at 20 health (agent A11's race 45347052453), and two because a shield
+# is 336 uses and a blocked fireball takes 6. A made shield counts as an ingot of kit_ingots.
+kit_shields = 2
+# The portal is entered with this much safe food or more; under it the bot looks for animals only
+# under the open sky and for provision_ticks at most (docs/problems/overworld-leg.md wall 3). 24 is
+# the eight raw beef or porkchop the reserve was first counted as: the snapshot bot holds 36 and
+# the bots of race 45204423376 stood at their portals with 21 to 30, two of them hunting at y -53
+# for 24,000 ticks at 24 and 21. 36 since the reserve is 48: the trip down eats two to four pieces.
+portal_food = 36
+# Fewer stone pickaxes than this with spare_uses left and more are made from the pack before the
+# next task, up to the nether-kit row's four (overworld-leg wall 2). Two: one in the hand and one
+# for when it breaks inside a task (a cast digs up to 131 times; every bot of races 45194253932
+# and 45204423376 that reached a cast spent 1,940 to 58,960 ticks holding no pickaxe).
+spare_pickaxes = 2
 # Dropped a stack at a time when fewer than six main slots (two until wall 21) are free, each kept to its count (blaze
 # wall 13: lane 11 of race 45071679507 held eleven stacks of cobblestone and deepslate, dirt,
 # granite, andesite and diorite in every slot, so a dig's drop went uncollected and the bucket
@@ -375,6 +405,10 @@ junk = [
   ["andesite", 0], ["diorite", 0], ["granite", 0], ["tuff", 0], ["calcite", 0],
   ["smooth_basalt", 0], ["raw_copper", 0], ["lapis_lazuli", 0], ["glow_ink_sac", 0],
   ["rotten_flesh", 0], ["spider_eye", 0], ["bone", 0], ["leaf_litter", 0],
+  # The hunt's by-products (overworld-leg wall 10: a cook-site bot's pack held eggs, feathers,
+  # leather and three colours of wool when it filled and its crafts failed).
+  ["egg", 0], ["feather", 0], ["leather", 0], ["string", 0], ["white_wool", 0],
+  ["light_gray_wool", 0], ["gray_wool", 0], ["black_wool", 0], ["brown_wool", 0],
 ]
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
 # Wither skeletons were here from 2026-11-20 (8 a hit and the wither effect killed 5 of 7 bare bots,

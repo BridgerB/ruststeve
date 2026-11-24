@@ -59,6 +59,7 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 
 - **A foe no strike reaches** (blaze wall 15): a defend that never struck its foe, the bot no worse than at its start, leaves that foe alone for `FAILURE_MEMORY_TICKS` (any kind but `never_fight`; wall 30 had covered only shooters), and within `defend_radius` it is answered again only once its kind hits the bot.
 
+- **A retreat that strikes** (overworld-leg wall 1): backing away over the danger line from a kind it does fight (not `never_fight`, not `ranged`; a fight that went nowhere), the bot strikes that foe when it is within `STRIKE_REACH` and a swing is ready (`Defend::retreat_strike`), the feet still backing away; the defend line then reads swings with `Retreat`. Under the danger line a retreat never strikes.
 ## Issue 16: shooters at the blaze spawner (docs/problems/blaze-fight.md)
 - **Armour first**: in the Nether a held iron piece whose armour slot is empty is quick-moved on at the top of the always-rows (`unworn_armour`), since `equip` runs only when a task is chosen and a defend cuts in before that.
 - **A shooter's fight** (`ranged` kinds) strikes whichever mob of the foe's kind is in reach, measured from the eye to its box and only in plain sight (`in_reach`, `box_distance`, `sight`), and is given up after `shooter_patience` (100 ticks) with nothing landed.

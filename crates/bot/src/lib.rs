@@ -17,7 +17,7 @@ pub use script::Script;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -333,6 +333,24 @@ pub fn goals_table(path: &str) -> Result<plan::make::Table, String> {
     plan::make::Table::new(&goals)
 }
 
+/// Packets handled between two ticks at most: the queue is taken whole in all but a flood.
+pub const MAX_PACKETS_A_TURN: usize = 4096;
+
+/// `first` and every message already queued behind it, up to `max` in all, and whether the
+/// sender is gone. The loop takes the whole queue between two ticks, so a slow tick never leaves
+/// a keep-alive waiting behind a backlog (race 45350933958 lane 1).
+pub fn batch<T>(rx: &Receiver<T>, first: T, max: usize) -> (Vec<T>, bool) {
+    let mut out = vec![first];
+    while out.len() < max {
+        match rx.try_recv() {
+            Ok(m) => out.push(m),
+            Err(TryRecvError::Empty) => return (out, false),
+            Err(TryRecvError::Disconnected) => return (out, true),
+        }
+    }
+    (out, false)
+}
+
 pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -569,7 +587,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
 
     let mut deaths: u32 = 0;
     let mut snapshot_at_sent = false;
-    let ending = loop {
+    let ending = 'run: loop {
         if run.world.stage_reached > stage_told {
             stage_told = run.world.stage_reached;
             if let (Some(tx), Some(stage)) = (on_stage.as_ref(), stage_told) {
@@ -896,7 +914,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         let wait = next_tick
             .saturating_duration_since(Instant::now())
             .max(Duration::from_millis(1));
-        let msg = match conn.inbound.recv_timeout(wait) {
+        let first = match conn.inbound.recv_timeout(wait) {
             Ok(m) => m,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
@@ -905,57 +923,71 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 };
             }
         };
-        let (packet, raw) = match msg {
-            Inbound::Packet { packet, raw } => (packet, raw),
-            Inbound::DecodeError { state, id, error } => {
-                stats.decode_errors += 1;
-                eprintln!("bot {name}: cannot decode {state:?} id {id}: {error}");
-                continue;
+        // Every packet already queued is handled before the next tick, not one a tick: with ticks
+        // slowed to 130 ms by the planner, one packet a tick left the server's keep-alive queued
+        // past its 15 s and the server dropped the bot (race 45350933958 lane 1, "lost
+        // connection: Timed out", read by the bot as "the writer thread stopped").
+        let (msgs, gone) = batch(&conn.inbound, first, MAX_PACKETS_A_TURN);
+        'packets: for msg in msgs {
+            let (packet, raw) = match msg {
+                Inbound::Packet { packet, raw } => (packet, raw),
+                Inbound::DecodeError { state, id, error } => {
+                    stats.decode_errors += 1;
+                    eprintln!("bot {name}: cannot decode {state:?} id {id}: {error}");
+                    continue 'packets;
+                }
+                Inbound::Closed(why) => break 'run Ending::Lost { why },
+            };
+            *stats.per_state.entry(run.world.session.state).or_default() += 1;
+            match &packet {
+                S2c::Unknown { state, id, .. } => {
+                    *stats.unknown.entry((*state, *id)).or_default() += 1
+                }
+                S2c::LoginDisconnect { reason } => {
+                    break 'run Ending::Kicked {
+                        reason: reason.clone(),
+                    };
+                }
+                S2c::ConfigDisconnect { reason } | S2c::Disconnect { reason } => {
+                    break 'run Ending::Kicked {
+                        reason: printable(reason),
+                    };
+                }
+                S2c::Login {
+                    entity_id,
+                    dimension,
+                    ..
+                } => println!("bot {name}: in play as entity {entity_id} in {dimension}"),
+                _ => {}
             }
-            Inbound::Closed(why) => break Ending::Lost { why },
-        };
-        *stats.per_state.entry(run.world.session.state).or_default() += 1;
-        match &packet {
-            S2c::Unknown { state, id, .. } => *stats.unknown.entry((*state, *id)).or_default() += 1,
-            S2c::LoginDisconnect { reason } => {
-                break Ending::Kicked {
-                    reason: reason.clone(),
-                };
+            let before = run.world.session.state;
+            // What the stream will show of this packet, read before the step consumes it.
+            let shown = sink
+                .as_ref()
+                .map(|_| live::from_packet(&packet, Some(&raw.body)))
+                .unwrap_or_default();
+            let record = EventRecord::Packet {
+                state: raw.state,
+                id: raw.id,
+                body: raw.body,
+            };
+            if let Err(e) = run.step(&conn, record, Event::Packet(packet)) {
+                break 'run Ending::Error { why: e };
             }
-            S2c::ConfigDisconnect { reason } | S2c::Disconnect { reason } => {
-                break Ending::Kicked {
-                    reason: printable(reason),
-                };
+            if let Some(sink) = &sink {
+                for b in shown {
+                    sink.send(run.world.session.server_ticks, b);
+                }
             }
-            S2c::Login {
-                entity_id,
-                dimension,
-                ..
-            } => println!("bot {name}: in play as entity {entity_id} in {dimension}"),
-            _ => {}
+            if before != run.world.session.state && run.world.session.state == State::Play {
+                play_since.get_or_insert_with(Instant::now);
+                stats.play_ticks_from = run.world.session.server_ticks;
+            }
         }
-        let before = run.world.session.state;
-        // What the stream will show of this packet, read before the step consumes it.
-        let shown = sink
-            .as_ref()
-            .map(|_| live::from_packet(&packet, Some(&raw.body)))
-            .unwrap_or_default();
-        let record = EventRecord::Packet {
-            state: raw.state,
-            id: raw.id,
-            body: raw.body,
-        };
-        if let Err(e) = run.step(&conn, record, Event::Packet(packet)) {
-            break Ending::Error { why: e };
-        }
-        if let Some(sink) = &sink {
-            for b in shown {
-                sink.send(run.world.session.server_ticks, b);
-            }
-        }
-        if before != run.world.session.state && run.world.session.state == State::Play {
-            play_since.get_or_insert_with(Instant::now);
-            stats.play_ticks_from = run.world.session.server_ticks;
+        if gone {
+            break Ending::Lost {
+                why: "the reader thread stopped".to_owned(),
+            };
         }
     };
     // The last evidence is whole on disk before the run's end writes the same files.
@@ -1148,5 +1180,37 @@ mod notes_tests {
             lines.last().unwrap(),
             "99 cast at (1, 2, 3) facing south (a site)"
         );
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::batch;
+    use std::sync::mpsc::channel;
+
+    /// The whole queue is taken after one wait: a keep-alive behind a backlog is answered in the
+    /// same turn, not one packet a tick later (race 45350933958 lane 1).
+    #[test]
+    fn the_whole_queue_is_taken_in_one_turn() {
+        let (tx, rx) = channel();
+        for i in 1..=300 {
+            tx.send(i).unwrap();
+        }
+        let first = rx.recv().unwrap();
+        let (got, gone) = batch(&rx, first, 4096);
+        assert_eq!(got, (1..=300).collect::<Vec<_>>());
+        assert!(!gone);
+        // A cap bounds a flood; what is left waits for the next turn.
+        for i in 1..=10 {
+            tx.send(i).unwrap();
+        }
+        let first = rx.recv().unwrap();
+        assert_eq!(batch(&rx, first, 4).0, vec![1, 2, 3, 4]);
+        // The sender gone is said once the queue is empty.
+        drop(tx);
+        let first = rx.recv().unwrap();
+        let (got, gone) = batch(&rx, first, 4096);
+        assert_eq!(got, vec![5, 6, 7, 8, 9, 10]);
+        assert!(gone);
     }
 }
