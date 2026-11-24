@@ -176,6 +176,17 @@ fn raw_meat_is_cooked_through_the_needs_planner() {
     );
 }
 
+/// Wall 4, race 45343519424 lane 2: nine porkchops with five oak planks first in the burn order
+/// and twelve birch behind: the batch is the seven the oak burns for, then the birch takes the
+/// rest; no fuel known, the whole batch.
+#[test]
+fn a_cook_batch_is_what_one_fuel_burns_for() {
+    assert_eq!(plan::fuel_batch(Some(300), 5, 200, 9), 7);
+    assert_eq!(plan::fuel_batch(Some(300), 12, 200, 9), 9);
+    assert_eq!(plan::fuel_batch(Some(300), 0, 200, 9), 1);
+    assert_eq!(plan::fuel_batch(None, 0, 200, 9), 9);
+}
+
 /// A chicken is game now (its meat is cooked before it is eaten), and raw chicken is still
 /// never the food to eat.
 #[test]

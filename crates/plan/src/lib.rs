@@ -2649,6 +2649,17 @@ impl Plan {
                         .map(|i| craft::count(w, *i))
                         .sum::<i32>()
                         .min(64);
+                    // A cook's batch is what the first fuel held burns for: the furnace takes one
+                    // kind of fuel, and a batch needing two kinds of planks loaded the one, took
+                    // it out again for the other, and failed `TooManyClicks` 24 times in race
+                    // 45343519424 (overworld-leg wall 4).
+                    let count = if cook_row {
+                        let first = smelt::fuels_held(w).first().copied();
+                        let held = first.map_or(0, |(k, _)| craft::count(w, k));
+                        fuel_batch(first.map(|(_, t)| t), held, r.ticks, count)
+                    } else {
+                        count
+                    };
                     match smelt::Smelt::new(w, f, r, count, tick) {
                         Some(sm) => {
                             self.note(
@@ -4223,6 +4234,18 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
         make::Need::parse(&format!("item:{name}"))?,
         cooked + n,
     ))
+}
+
+/// The most of a batch of `count` that `held` items of a fuel burning `fuel_ticks` each cook, at
+/// `cook_ticks` an item; the whole batch when no fuel is known (the smelt then says what is
+/// missing), and never under one.
+pub fn fuel_batch(fuel_ticks: Option<u32>, held: i32, cook_ticks: u32, count: i32) -> i32 {
+    let Some(t) = fuel_ticks else {
+        return count;
+    };
+    let burns = i64::from(t) * i64::from(held.max(0));
+    let fits = i32::try_from(burns / i64::from(cook_ticks.max(1))).unwrap_or(i32::MAX);
+    count.min(fits).max(1)
 }
 
 /// The hunger points a portal is entered with: `portal_food`, or the whole reserve when unset.

@@ -13,6 +13,14 @@ const CONFIG: Config = Config {
 };
 
 fn smelt(give: &[(ItemKind, i32)], count: i32) -> (bot::lockstep::Run, Option<SmeltStatus>) {
+    smelt_for(give, count, 1200)
+}
+
+fn smelt_for(
+    give: &[(ItemKind, i32)],
+    count: i32,
+    ticks: u64,
+) -> (bot::lockstep::Run, Option<SmeltStatus>) {
     let mut m = flat_world(2, 63).unwrap();
     m.set_block(2, 64, 0, BlockKind::Furnace.info().unwrap().default_state)
         .unwrap();
@@ -32,7 +40,7 @@ fn smelt(give: &[(ItemKind, i32)], count: i32) -> (bot::lockstep::Run, Option<Sm
         .unwrap();
     let mut task: Option<Smelt> = None;
     let mut ended = None;
-    let run = bot::lockstep::run_acting(sim, "rs-smelt", 1, 1200, 20, |w, t| {
+    let run = bot::lockstep::run_acting(sim, "rs-smelt", 1, ticks, 20, |w, t| {
         if ended.is_some() {
             return (physics::Controls::default(), Vec::new());
         }
@@ -67,5 +75,26 @@ fn planks_burn_only_what_the_batch_needs() {
     assert_eq!(held(&run, ItemKind::IronIngot), 3);
     // 600 ticks of cooking, 300 a plank: two burned, two kept.
     assert_eq!(held(&run, ItemKind::OakPlanks), 2);
+    assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
+}
+
+/// Overworld-leg wall 4 (race 45343519424): five oak and twelve birch planks, and a batch of nine
+/// that neither five alone covers. The first kind is loaded and burned, then the next: nine
+/// results, six planks burned in all, and no fuel clicked in and out.
+#[test]
+fn two_kinds_of_planks_fuel_one_batch() {
+    let (run, ended) = smelt_for(
+        &[
+            (ItemKind::RawIron, 9),
+            (ItemKind::OakPlanks, 5),
+            (ItemKind::BirchPlanks, 12),
+        ],
+        9,
+        2600,
+    );
+    assert_eq!(ended, Some(SmeltStatus::Done));
+    assert_eq!(held(&run, ItemKind::IronIngot), 9);
+    let planks = held(&run, ItemKind::OakPlanks) + held(&run, ItemKind::BirchPlanks);
+    assert_eq!(planks, 11, "1,800 ticks of cooking, 300 a plank");
     assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
 }
