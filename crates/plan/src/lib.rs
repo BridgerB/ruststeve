@@ -1938,6 +1938,42 @@ impl Plan {
                 );
                 return Task::Explore(walk);
             }
+            // No plain route: one far search (`Walk::far`, the Nether walk's: weighed, 40,000
+            // expansions, bridging on the level with held blocks), as the fortress leg takes
+            // one. A real bot stood at the foot of a brick pillar over the lava sea, 68 blocks
+            // from this spawner, with no rock to dig (race 45337580375). Not found, the dig
+            // below goes on and no far search is made again for a while.
+            if tick >= self.far_search_at {
+                self.far_search_at = tick + walk::FAR_RETRY_TICKS;
+                let mut far = Walk::far(sp, world::stage::SPAWNER_NEAR - 2.0, tick);
+                let found = far.route_now(w, tick) && far.route == Some(path::Status::Found);
+                let steps = far.waypoints.as_ref().map_or(0, Vec::len);
+                if found {
+                    self.far_search_at = tick + walk::FAR_AGAIN_TICKS;
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("far walk toward the spawner at {sp:?}"),
+                        format!(
+                            "no plain route; {steps} cells, {} to bridge, found in {} expansions",
+                            far.bridges_ahead(),
+                            far.expanded
+                        ),
+                    );
+                    return Task::Explore(far);
+                }
+                self.expanded += far.expanded;
+                self.note(
+                    tick,
+                    format!("no far route to the spawner at {sp:?}"),
+                    format!(
+                        "{:?} after {} expansions; none again for {} ticks",
+                        far.route,
+                        far.expanded,
+                        walk::FAR_RETRY_TICKS
+                    ),
+                );
+            }
             // Pushed back (a retreat from a skeleton took the bot 14 blocks down its own
             // tunnel): the dig's stall count is against the nearest it ever came, so three legs
             // back up the tunnel were three stalls and the spawner was refused (spawner wall 2,
