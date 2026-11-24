@@ -6,12 +6,13 @@ tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
 lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@3453a59 clojurecraft@be85a92
+verifiedAgainst: ruststeve@58f99c0 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
   - "ruststeve:crates/plan/src/hunt.rs#pub fn swing_ticks(w: &World) -> f64 {"
   - "ruststeve:config/goals.toml#danger_health = 8.0"
+  - "ruststeve:crates/plan/src/shield.rs#pub fn should_raise(w: &World) -> bool {"
   - "ruststeve:crates/bot/tests/defend.rs#fn under_the_danger_line_it_backs_away_instead() {"
   - "clojurecraft:resources/clojurecraft/goals.edn#:goal/doc \"answer a hostile mob within 4 blocks\""
 related:
@@ -66,3 +67,9 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **Its notes** reach the ledger through `Defend::notes`: "struck N in reach, not M", "shooter fight given up", "retreat to cover at", "in cover at".
 - **Wither skeletons are fought** (spawner wall 1, `docs/problems/spawner.md`): they were `never_fight` from 2026-11-20, chosen for bare bots; a wither skeleton walks as fast as the bot, so a retreat from one never reaches `flee_clear`, and two armoured bots backed away 700 and 900 ticks and died with no swing (race 45334573113). `never_fight` is the creeper alone again.
 - **Cover and shelter** (`plan::cover`, `Plan::take_cover`; spawner wall 3): under `engage_health` in the Nether the bot rests only where no shooter sees its body (blazes and ghasts within 48, piglins and skeletons within 16; lines to its eye and middle) and nothing burns. Seen, it walks to the nearest cell out of sight within 8 on a found route; with none it builds cover where it stands, a held block into each cell a line of sight comes in through (`cover::shelter_block`, one every 10 ticks, cobblestone first). The range was 16 until three armoured bots rested on an open bridge 16 to 24 blocks from blazes and died there (race 45335627948).
+
+## Issue 16: the shield (docs/problems/shield.md)
+- **What it is**: `plan::shield`. A shield in the off hand (window slot 45) is raised with `Act::UseOffHand` (`use_item`, hand 1) and lowered with `Act::ReleaseUse`. Raised 5 ticks or more it stops what comes from the front half of the look, a blaze's fireball whole: no damage and no fire.
+- **When**: `threats` lists charged blazes within 48 that see the bot and small fireballs within 24 not flying away; `should_raise` and `facing` read it. The holder `Shield::step` raises `RAISE_AFTER` 15 ticks after a blaze's charge flag is first seen (the fireballs come 28 to 70 ticks after it) or at once for a fireball, sends `use_item` again every 20 ticks, and lowers 6 ticks after the last threat.
+- **The call site**: `Plan::shield_step`, called once from `Plan::step` after the tick's choice. While the shield is up the controls stand and face the threat and that tick's strike is dropped (a client using an item cannot attack and moves at a fifth of its speed); an escape, a meal, a hunt, a dig, a window or a block to place lowers it. A shield held elsewhere is swapped into the off hand first (`to_off_hand`: click mode 2, button 40).
+- **Its notes**: "shield raised against blaze N / fireball N", "shield lowered after N ticks", and each fireball that ended within 3.5 blocks judged: "vanished with no damage, the shield up / down" or "hit the bot with the shield up / down", with running counts.
