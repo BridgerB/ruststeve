@@ -536,8 +536,9 @@ fn a_spawner_sleeps_with_no_player_within_sixteen() {
 }
 
 /// `Blaze.customServerAiStep`: a blaze rises while the player's eye is over its own plus its
-/// offset, and never sinks through the floor. Under a player 12 up on a pillar, a blaze on the
-/// floor has climbed within a few seconds.
+/// offset, and never sinks through the floor. The rise is slow: each tick it gains
+/// `(0.3 - vy) × 0.3` and loses gravity's 0.08, which settles near 0.03 blocks a tick. Under a
+/// player 12 up on a pillar, a blaze on the floor is 2 to 3 blocks up after 90 ticks.
 #[test]
 fn a_blaze_rises_toward_a_player_above_it() {
     let mut stage = Stage::new(1, 40, 75);
@@ -563,6 +564,50 @@ fn a_blaze_rises_toward_a_player_above_it() {
         lowest = lowest.min(sim.survival.life.mobs[&id].pos[1]);
     }
     let y = sim.survival.life.mobs[&id].pos[1];
-    assert!(y > 44.0, "the blaze is at y {y}");
+    assert!((43.0..44.5).contains(&y), "the blaze is at y {y}");
     assert!(lowest >= 41.0, "it sank to {lowest}");
+}
+
+/// `loot_table/entities/blaze.json`: a blaze killed by the player drops 0 or 1 rod. Of 40
+/// blazes killed, some drop one and some none, and never more than one each.
+#[test]
+fn a_blaze_killed_by_the_player_drops_a_rod_or_none() {
+    let mut stage = Stage::new(1, 40, 60);
+    stage.spawn((0, 41, 0));
+    let (mut sim, _) = joined(stage.build().unwrap());
+    sim.survival.life.fire_resistance = true;
+    sim.survival.give((data::ItemKind::DiamondSword, 1));
+    let mut rods = 0;
+    for _ in 0..40 {
+        let id = sim.summon(data::EntityKind::Blaze, [1.0, 41.0, 0.5]);
+        let mut killed = false;
+        for _ in 0..12 {
+            for _ in 0..13 {
+                tick_alive(&mut sim);
+            }
+            let out = send(&mut sim, C2s::Attack { entity: id });
+            if out
+                .iter()
+                .any(|p| matches!(p, S2c::EntityEvent { status: 3, .. }))
+            {
+                killed = true;
+                break;
+            }
+        }
+        assert!(killed, "a blaze outlived twelve swings");
+        for _ in 0..40 {
+            tick_alive(&mut sim);
+        }
+        let held: i32 = sim
+            .survival
+            .slots
+            .iter()
+            .flatten()
+            .filter(|(k, _)| *k == data::ItemKind::BlazeRod)
+            .map(|(_, n)| *n)
+            .sum();
+        assert!(held - rods <= 1, "more than one rod from a blaze");
+        rods = held;
+    }
+    assert!((8..=32).contains(&rods), "{rods} rods of 40 blazes");
 }

@@ -1146,9 +1146,24 @@ impl Sim {
     /// random sideways push of up to 0.1, 0.2 up, the default pickup delay of 10 ticks).
     fn drop_loot(&mut self, kind: EntityKind, at: [f64; 3]) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
-        for d in data::generated::loot::mob_drops_of(kind) {
-            let span = (d.max - d.min + 1).max(1) as f64;
-            let n = d.min + (self.survival.next_double() * span).floor() as i64;
+        // The generated table holds the unconditioned pools. A pool that asks for
+        // `killed_by_player` is added here, since every kill in the model is the player's: a
+        // blaze's rod, 0 or 1 (`loot_table/entities/blaze.json` in the 26.1.2 jar).
+        let by_player: &[(EntityKind, ItemKind, i64, i64)] =
+            &[(EntityKind::Blaze, ItemKind::BlazeRod, 0, 1)];
+        let drops: Vec<(ItemKind, i64, i64)> = data::generated::loot::mob_drops_of(kind)
+            .iter()
+            .map(|d| (d.item, d.min, d.max))
+            .chain(
+                by_player
+                    .iter()
+                    .filter(|(k, ..)| *k == kind)
+                    .map(|(_, item, min, max)| (*item, *min, *max)),
+            )
+            .collect();
+        for (item, min, max) in drops {
+            let span = (max - min + 1).max(1) as f64;
+            let n = min + (self.survival.next_double() * span).floor() as i64;
             let Ok(count) = i32::try_from(n) else {
                 continue;
             };
@@ -1157,7 +1172,7 @@ impl Sim {
             }
             let vx = self.survival.next_double() * 0.2 - 0.1;
             let vz = self.survival.next_double() * 0.2 - 0.1;
-            out.extend(self.spawn_item((d.item, count), at, [vx, 0.2, vz], 10)?);
+            out.extend(self.spawn_item((item, count), at, [vx, 0.2, vz], 10)?);
         }
         Ok(out)
     }
