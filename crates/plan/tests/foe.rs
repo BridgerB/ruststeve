@@ -88,3 +88,58 @@ fn a_wither_skeleton_within_reach_is_fought() {
     let d = Defend::new(&c, 118, EntityKind::Creeper, &r, 0);
     assert_eq!(d.stance, Stance::Retreat);
 }
+
+fn add(w: &mut World, id: i32, kind: EntityKind, pos: [f64; 3]) {
+    w.step(&Event::Packet(S2c::AddEntity {
+        id,
+        uuid: [0; 16],
+        kind: kind.id(),
+        x: pos[0],
+        y: pos[1],
+        z: pos[2],
+    }));
+}
+
+fn standing() -> World {
+    let mut w = World::new();
+    w.body = Some(physics::Body {
+        pos: [0.5, 0.0, 0.5],
+        ..physics::Body::default()
+    });
+    w
+}
+
+/// Blaze-fight wall 6 (race 45337951964): a defend held on a blaze 10 blocks off turns to the
+/// wither skeleton that comes within `defend_radius`; a zombified piglin that has not hit is not
+/// turned to, and with nothing near there is nothing to turn to.
+#[test]
+fn a_melee_foe_in_reach_presses_a_defend_on_a_far_shooter() {
+    let r = rules();
+    let mut w = standing();
+    add(&mut w, 7, EntityKind::Blaze, [10.5, 1.0, 0.5]);
+    assert_eq!(plan::defend::pressing(&w, &r, 7), None);
+    add(&mut w, 8, EntityKind::ZombifiedPiglin, [2.5, 0.0, 0.5]);
+    assert_eq!(
+        plan::defend::pressing(&w, &r, 7),
+        None,
+        "a neutral mob waits"
+    );
+    add(&mut w, 9, EntityKind::WitherSkeleton, [3.5, 0.0, 0.5]);
+    assert_eq!(
+        plan::defend::pressing(&w, &r, 7),
+        Some((9, EntityKind::WitherSkeleton))
+    );
+}
+
+/// The same race: a blaze 18.9 over the eye was taken as the foe. A shooter whose feet are more
+/// than a strike's reach over the eye is not gone after; one at the bot's height is.
+#[test]
+fn a_shooter_far_overhead_is_not_gone_after() {
+    let r = rules();
+    let mut w = standing();
+    w.player.health = Some(20.0);
+    add(&mut w, 7, EntityKind::Blaze, [6.5, 12.0, 0.5]);
+    assert_eq!(foe(&w, &r, &[]), None);
+    add(&mut w, 8, EntityKind::Blaze, [8.5, 1.0, 0.5]);
+    assert_eq!(foe(&w, &r, &[]), Some((8, EntityKind::Blaze)));
+}

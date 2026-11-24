@@ -81,10 +81,16 @@ pub struct Defend {
     pub cover: Option<crate::walk::Walk>,
     #[serde(default)]
     pub covered_at: Option<u64>,
+    /// Cover cells walked to this retreat.
+    #[serde(default)]
+    pub cover_tried: Vec<crate::path::Cell>,
     /// Ticks stepped away from a shooter in touch, and ticks a swing was held for a neutral mob
     /// in the sweep (blaze-fight walls 4 and 5): in the fight's note.
     #[serde(default)]
     pub kept_off: u32,
+    /// Ticks in a row a shooter's fight has had no way to its foe.
+    #[serde(default)]
+    pub no_way: u32,
     #[serde(default)]
     pub sweeps_held: u32,
     /// What the fight did that the ledger should hold, taken by the planner each tick.
@@ -272,11 +278,53 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
     w.entities
         .iter()
         .filter(|(id, e)| !e.dead && rules.ranged.contains(&e.kind) && !ignored.contains(id))
+        // One whose feet are more than a strike's reach over the eye is no fight from the floor
+        // (a blaze 18.9 over the eye and a skeleton 16.2 over it were each held as the foe while
+        // a wither skeleton or a fall killed the bot: race 45337951964).
+        .filter(|(_, e)| e.pos[1] - (body.pos[1] + physics::EYE_HEIGHT) <= STRIKE_REACH)
         .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
         .filter(|(d, _, _)| *d <= rules.ranged_radius)
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
         .map(|(_, id, k)| (id, k))
 }
+
+/// Server ticks a hit keeps its dealer the pressing foe: two swings of a wither skeleton.
+pub const PRESSING_TICKS: u64 = 40;
+
+/// The foe a running defend should turn to while its own is farther than `defend_radius`: the
+/// nearest live hostile within `defend_radius` (a neutral kind only once provoked), else the
+/// nearest mob within `ranged_radius` of a kind that hit the bot in the last `PRESSING_TICKS`.
+/// Three bots died inside a defend held on a blaze or a skeleton out of reach while a wither
+/// skeleton struck them (race 45337951964); with no such defend in hand one was killed in four
+/// swings, unhurt.
+pub fn pressing(w: &World, rules: &SurvivalRules, current: i32) -> Option<(i32, EntityKind)> {
+    let body = w.body?;
+    let now = w.session.server_ticks;
+    let near = |radius: f64, want: &dyn Fn(&world::Entity) -> bool| {
+        w.entities
+            .iter()
+            .filter(|(id, e)| **id != current && !e.dead && hostile(e.kind) && want(e))
+            .map(|(id, e)| (distance(body.pos, e.pos), *id, e.kind))
+            .filter(|(d, _, _)| *d <= radius)
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .map(|(_, id, k)| (id, k))
+    };
+    near(rules.defend_radius, &|e| {
+        !rules.neutral.contains(&e.kind) || provoked(w, e.kind)
+    })
+    .or_else(|| {
+        near(rules.ranged_radius, &|e| {
+            w.hits
+                .iter()
+                .any(|h| h.cause == Some(e.kind) && h.at_tick + PRESSING_TICKS >= now)
+        })
+    })
+}
+
+/// Ticks a shooter's fight stands with its foe out of reach and no step to take toward it (a
+/// floor missing, fire or lava ahead, or the foe over the reach) before it is answered from
+/// cover: a second.
+pub const NO_WAY_TICKS: u32 = 20;
 
 /// Server ticks a hit from a neutral kind keeps it a foe: vanilla's anger lasts 20 to 39 seconds
 /// (`ZombifiedPiglin`'s persistent anger); the shortest, 400 ticks.
@@ -299,19 +347,24 @@ fn mob_health(w: &World, id: i32) -> Option<f32> {
     w.entities.get(&id).and_then(world::Entity::health)
 }
 
+/// The stance a foe of `kind` is met with: a retreat from a `never_fight` kind, under the danger
+/// line, and from a shooter at or under its own line (a fight begun at 9.9 with two blazes in
+/// touch ended in 20 ticks: blaze-fight wall 4).
+fn stance_for(w: &World, kind: EntityKind, rules: &SurvivalRules) -> Stance {
+    let hurt = rules.ranged.contains(&kind)
+        && w.player
+            .health
+            .is_some_and(|h| h <= rules.shooter_retreat_health);
+    if rules.never_fight.contains(&kind) || in_danger(w, rules) || hurt {
+        Stance::Retreat
+    } else {
+        Stance::Fight
+    }
+}
+
 impl Defend {
     pub fn new(w: &World, foe: i32, kind: EntityKind, rules: &SurvivalRules, tick: u64) -> Self {
-        // A shooter is not fought from under its own line either: a fight begun at 9.9 with two
-        // blazes in touch ended in 20 ticks (blaze-fight wall 4).
-        let hurt = rules.ranged.contains(&kind)
-            && w.player
-                .health
-                .is_some_and(|h| h <= rules.shooter_retreat_health);
-        let stance = if rules.never_fight.contains(&kind) || in_danger(w, rules) || hurt {
-            Stance::Retreat
-        } else {
-            Stance::Fight
-        };
+        let stance = stance_for(w, kind, rules);
         Self {
             foe,
             kind,
@@ -332,7 +385,9 @@ impl Defend {
             held_back: 0,
             cover: None,
             covered_at: None,
+            cover_tried: Vec::new(),
             kept_off: 0,
+            no_way: 0,
             sweeps_held: 0,
             notes: Vec::new(),
         }
@@ -368,8 +423,12 @@ impl Defend {
                 .is_none_or(|t| tick.saturating_sub(t) >= FLEE_RETRY_TICKS)
         {
             self.covered_at = Some(tick);
+            // A cell walked to and still seen from (a wall's top the body slides off, a blaze
+            // that moved) is not walked to again: one bot walked to (127, 62, 165) eleven times
+            // in 220 ticks and burned there (race 45338756013 lane 2).
             for c in crate::cover::cover_cells(w, &eyes)
                 .into_iter()
+                .filter(|c| !self.cover_tried.contains(c))
                 .take(COVER_TRIES)
             {
                 let mut walk = crate::walk::Walk::new(
@@ -391,7 +450,8 @@ impl Defend {
         let walk = self.cover.as_mut()?;
         let (c, status) = walk.step(w, tick);
         if status != crate::walk::TaskStatus::Running {
-            // There, or the walk failed: the next tick looks again.
+            // There, or the walk failed: the next tick looks again, for another cell.
+            self.cover_tried.push(walk.target);
             self.cover = None;
         }
         Some((c, None, DefendStatus::Running))
@@ -431,6 +491,32 @@ impl Defend {
         let Some(body) = w.body else {
             return (still, None, DefendStatus::Done);
         };
+        // A foe pressing the bot comes first: the defend turns to it while its own is farther
+        // than `defend_radius` or gone (blaze-fight wall 6).
+        let own = w
+            .entities
+            .get(&self.foe)
+            .filter(|e| !e.dead)
+            .map(|e| distance(body.pos, e.pos));
+        if own.is_none_or(|d| d > rules.defend_radius)
+            && let Some((id, kind)) = pressing(w, rules, self.foe)
+        {
+            self.notes.push(format!(
+                "defend switched to {kind:?} {id} from {:?} {} at {:.1}: it presses the bot",
+                self.kind,
+                self.foe,
+                own.unwrap_or(f64::NAN)
+            ));
+            self.foe = id;
+            self.kind = kind;
+            self.stance = stance_for(w, kind, rules);
+            self.last_health = mob_health(w, id);
+            self.last_hit_at = tick;
+            self.faced_at = None;
+            self.flee = None;
+            self.cover = None;
+            self.no_way = 0;
+        }
         let Some(pos) = w.entities.get(&self.foe).filter(|e| !e.dead).map(|e| e.pos) else {
             return (still, None, DefendStatus::Done);
         };
@@ -622,6 +708,21 @@ impl Defend {
                     } else {
                         safe_ahead(w, &body, toward)
                     };
+                    // A shooter with no step toward it, or over the reach, is answered from
+                    // cover after a second, not stood under (blaze-fight wall 6).
+                    if shooter && (!safe || pos[1] - eye_y > STRIKE_REACH) {
+                        self.no_way += 1;
+                        if self.no_way >= NO_WAY_TICKS {
+                            self.stance = Stance::Retreat;
+                            self.notes.push(format!(
+                                "shooter fight given up: no way to {:?} {} for {} ticks, {:.1} over the eye at {d:.1}",
+                                self.kind,
+                                self.foe,
+                                self.no_way,
+                                pos[1] - eye_y
+                            ));
+                        }
+                    }
                     if !safe {
                         self.held_back += 1;
                         return (face, None, DefendStatus::Running);
@@ -638,6 +739,7 @@ impl Defend {
                         DefendStatus::Running,
                     );
                 }
+                self.no_way = 0;
                 if let Some(wp) = crate::hunt::weapon(w) {
                     match hold::toward(w, wp) {
                         Hold::Held | Hold::Missing => {}
