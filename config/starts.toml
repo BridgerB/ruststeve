@@ -176,6 +176,6 @@ stage = "spawner"
 place = "spawn"
 setup = [
   "item replace entity {bot} weapon.offhand with minecraft:shield",
-  "give {bot} minecraft:shield 1",
+  "give {bot} minecraft:shield 2",
   "give {bot} minecraft:cooked_beef 32",
 ]
