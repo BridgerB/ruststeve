@@ -116,7 +116,21 @@ pub struct Stairs {
     pub steered: u32,
     #[serde(default)]
     pub laid: u32,
+    /// Digs begun for the stair being cut, and the feet's cell with the tick it was last seen to
+    /// change: a staircase that neither opens its cells nor moves ends, with the reason
+    /// (docs/problems/nether-tunnel.md wall 6: one stairs task ran 19,900 ticks).
+    #[serde(default)]
+    pub cut_tries: u32,
+    #[serde(default)]
+    pub stood: Option<(Cell, u64)>,
 }
+
+/// Digs one stair's cells may take before the staircase fails: three cells, each dug once, with
+/// room for a block that falls in.
+pub const MAX_CUT_TRIES: u32 = 8;
+/// Ticks the feet may stay in one cell before the staircase fails: a stair is three digs and a
+/// step, under 200 ticks by hand in netherrack and 900 in deepslate.
+pub const STAND_TICKS: u64 = 1200;
 
 /// Blocks a stair is laid with, the first held: what a tunnel leaves in the pack.
 pub const LAY_ITEMS: [data::ItemKind; 3] = [
@@ -309,6 +323,8 @@ impl Stairs {
             from: None,
             steered: 0,
             laid: 0,
+            cut_tries: 0,
+            stood: None,
         }
     }
 
@@ -455,6 +471,18 @@ impl Stairs {
         };
         let feet = path::feet_cell(body.pos);
         let from = *self.from.get_or_insert(feet);
+        match self.stood {
+            Some((c, since)) if c == feet => {
+                if tick.saturating_sub(since) > STAND_TICKS {
+                    self.refusals.push(format!(
+                        "the feet stayed at {feet:?} for {STAND_TICKS} ticks ({} digs begun for this stair)",
+                        self.cut_tries
+                    ));
+                    return (still, None, StairsStatus::Failed(StairsFailure::StepFailed));
+                }
+            }
+            Some(_) | None => self.stood = Some((feet, tick)),
+        }
         match &mut self.stage {
             StairStage::Lay {
                 lays,
@@ -609,7 +637,15 @@ impl Stairs {
                     };
                 }
                 match cells.iter().find(|c| !open(kind(w, **c))).copied() {
+                    Some(c) if self.cut_tries >= MAX_CUT_TRIES => {
+                        self.refusals.push(format!(
+                            "{:?} at {c:?} is still there after {MAX_CUT_TRIES} digs for one stair",
+                            kind(w, c)
+                        ));
+                        (still, None, StairsStatus::Failed(StairsFailure::DigFailed))
+                    }
                     Some(c) => {
+                        self.cut_tries += 1;
                         // No collect: the drop falls into the stair the bot steps onto next and
                         // is picked up there. Waiting for it cost the full collect time (300
                         // ticks) a stair: docs/problems/iron-kit.md wall 2.
@@ -651,6 +687,7 @@ impl Stairs {
                         self.stairs += 1;
                         self.turns = 0;
                     }
+                    self.cut_tries = 0;
                     self.stage = StairStage::Plan;
                     return (still, None, StairsStatus::Running);
                 }
