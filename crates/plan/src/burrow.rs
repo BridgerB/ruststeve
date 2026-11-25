@@ -236,6 +236,13 @@ pub fn refuse(w: &World, mem: &Memory, cells: &mut Cells<'_>, b: &Burrow) -> Opt
     {
         return Some("delta ground");
     }
+    // Never on a fungus cap (wart, shroomlight, a stem's top): the floor is below it.
+    if floors
+        .iter()
+        .any(|k| k.is_some_and(|k| crate::base::CAP_BLOCKS.contains(&k)))
+    {
+        return Some("a fungus cap");
+    }
     if !floors.contains(&Some(BlockKind::WarpedNylium)) && w.feet_biome() != Some("warped_forest") {
         return Some("no forest floor");
     }

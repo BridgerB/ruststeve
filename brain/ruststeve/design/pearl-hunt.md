@@ -39,6 +39,12 @@ Issue 18 (#23): twelve pearls from a bot that cannot heal (food 17, nothing to e
 - **In B** between strikes the bot presses back against the back wall (`press_back`, 0.1 or more behind B's middle): on a real server it drifted 0.14 toward M and the gap to the enderman's reach fell from 0.37 to 0.23 (P4's parity row e04). The weapon is held from the fight's start: a switch resets the attack strength.
 - **Outside the burrow** an angry enderman still gets issue 17's sealed pocket (`Plan::ender_threat` yields only to a bot in its built burrow); in the hunt the eyes-down hold is the rows'.
 
+## Since the first races (issue 18, races 45534591345 to 45551462309)
+- **Start**: a bot resumed in the warped forest with its rods goes straight to `EnderPhase::Hunt` ("resumed in the forest: on to the hunt"), no issue-17 pocket; the hunt runs in `EnderPhase::Hunt` alone (`Plan::hunting`); `ender_threat` always yields in the hunt: angry with no burrow built, the build goes on at B, else a pocket for `threat_hold_ticks` at most.
+- **Sites**: taken only with a route to B; the cheapest of the nearest 12 by blocks to place plus half the distance; never on delta ground (basalt, blackstone, magma) or a fungus cap, nylium under one of B, M, O; the mouth faces the endermen seen lately; refused sites skipped by the search itself.
+- **Waiting at O**, the yaw sweeping, in B whenever any enderman is within 8 of O or an angry one within 128 (ticking or frozen); provokes from M, else from O out to 40; none at an enderman hurt by no one or by magma, lava or fire.
+- **Filler**: under 60 burrow blocks the floor beside the feet and exposed netherrack are dug (a wooden pickaxe first); a move digs the old shell back with a wooden pickaxe ("reclaimed N blocks"); a move only with no enderman within 40 of B for 2,400 ticks.
+- **The base** (P5's `base_task`) is row 6, resumed after each kill; a wait over 600 ticks lets the hunt go on. Down off fungus caps first.
+
 ## Limits
-- Planner-level tests only until the model's endermen walk to a mouth (agent P4); no real race yet.
-- `Plan::hunting` reads `ender.left` and the forest at the feet until P2's `EnderPhase::Hunt` replaces it at integration.
+- Real kills from B with no damage (races 45537373222, 45548022681); 12 pearls in P4's model closed loop on one seed; not yet on a real server.
