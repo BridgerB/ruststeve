@@ -381,6 +381,35 @@ fn a_crimson_forest_at_the_feet_turns_the_heading_once() {
     assert_eq!(turned(&p), 1, "{:#?}", said(&p));
 }
 
+/// Basalt deltas are crossed, not turned from (issue 18c): with the feet in them the heading
+/// says so once and holds its axis.
+#[test]
+fn basalt_deltas_at_the_feet_are_crossed_not_turned_from() {
+    let (w, mut p, _) = joined();
+    let deltas = Signs {
+        feet_biome: Some("basalt_deltas"),
+        ..Signs::default()
+    };
+    let t = p.heading_with(&w, deltas, 100);
+    assert!(t.is_some(), "{:#?}", said(&p));
+    p.task = Task::Idle;
+    let _ = p.heading_with(&w, deltas, 140);
+    let notes = said(&p);
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|n| n.contains("heading crosses basalt deltas"))
+            .count(),
+        1,
+        "{notes:#?}"
+    );
+    assert!(
+        !notes.iter().any(|n| n.contains("heading turned")),
+        "{notes:#?}"
+    );
+    assert_eq!(p.headed.as_ref().unwrap().dir, (1, 0));
+}
+
 /// A forest known from warped blocks seen replaces the axis: the leg runs to it. A warped forest
 /// at the feet ends the heading (`None`: the endermen task takes over).
 #[test]

@@ -81,8 +81,13 @@ pub const AHEAD_WIDE: i32 = 2;
 /// The centroid of what is explored must be this far off before it decides the axis; nearer, the
 /// four axes tie and the count ahead decides.
 pub const AWAY_MIN: f64 = 16.0;
-/// Crimson or basalt signs seen in the columns 1 to `SIGNS_AHEAD` chunks ahead (±1) that turn a
-/// heading (hoglins and piglins; magma and broken ground): clojurecraft's forest threshold, 12.
+/// Crimson signs seen in the columns 1 to `SIGNS_AHEAD` chunks ahead (±1) that turn a heading
+/// (hoglins, and piglins hostile to a bot with no gold on): clojurecraft's forest threshold, 12.
+/// Basalt signs no longer turn it (issue 18c, docs/problems/pearls-travel.md): basalt deltas are
+/// crossed, on floors that are not magma (a magma block is never a route's floor) and clear of
+/// magma cubes by `path::SHUN_MAGMA`. A heading that turns from every delta never reaches a
+/// forest that lies past one (issue 18a.2: from the frontier, the one way to the nearest warped
+/// forest crosses about 300 blocks of them).
 pub const SIGNS_AHEAD: i32 = 4;
 pub const SIGNS_TURN: u32 = 12;
 /// Leg attempts one look may make: each is up to three searches (`walk::FAR_NODES` the dearest),
@@ -215,6 +220,8 @@ pub struct Heading {
     pub valleys: Vec<(i32, i32)>,
     /// Set when the heading is over (a warped forest at the feet, or turned out).
     pub over: bool,
+    /// Whether "heading crosses basalt deltas" was said.
+    pub deltas_noted: bool,
 }
 
 /// What a look knows of biomes (strict no X-ray: the feet's own, and blocks seen).
@@ -239,10 +246,9 @@ fn seen_columns(w: &World) -> BTreeSet<(i32, i32)> {
         .unwrap_or_default()
 }
 
-/// Crimson and basalt signs seen in one column.
+/// Crimson signs seen in one column.
 fn hostile_signs_in_column(w: &World, cx: i32, cz: i32) -> u32 {
-    let s = w.memory.biome_signs_in_column(cx, cz);
-    u32::try_from(s.crimson + s.basalt).unwrap_or(u32::MAX)
+    u32::try_from(w.memory.biome_signs_in_column(cx, cz).crimson).unwrap_or(u32::MAX)
 }
 
 /// Soul signs seen in one column.
@@ -711,11 +717,25 @@ impl Plan {
                 }
             }
         }
-        // Biome signs: crimson or basalt at the feet, or seen ahead, turn the axis once.
+        // Basalt deltas at the feet are crossed, not turned from: said once a heading.
+        if signs.feet_biome == Some("basalt_deltas") && !h.deltas_noted {
+            h.deltas_noted = true;
+            self.note(
+                tick,
+                "heading crosses basalt deltas".to_owned(),
+                format!(
+                    "the feet's biome at {feet:?}; on ({}, {}), no magma floor, magma cubes kept \
+                     {} off; health {:?}",
+                    h.dir.0,
+                    h.dir.1,
+                    path::SHUN_MAGMA,
+                    w.player.health
+                ),
+            );
+        }
+        // Biome signs: crimson at the feet, or seen ahead, turn the axis once.
         if h.forest.is_none() {
-            let feet_bad = signs
-                .feet_biome
-                .filter(|b| matches!(*b, "crimson_forest" | "basalt_deltas"));
+            let feet_bad = signs.feet_biome.filter(|b| matches!(*b, "crimson_forest"));
             if let Some(b) = feet_bad
                 && h.biome_turned.as_deref() != Some(b)
             {
@@ -739,7 +759,7 @@ impl Plan {
                         h,
                         feet,
                         tick,
-                        &format!("{ahead} crimson or basalt signs seen ahead"),
+                        &format!("{ahead} crimson signs seen ahead"),
                     )?;
                 }
             }
