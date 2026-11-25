@@ -29,7 +29,7 @@ Arena rows (e04, e05, e08) start in M: a stone floor 19 by 13, walls 4 high, a g
 
 ## The model (18g, b4d5a0d and on)
 - **The chase paths** (`crates/sim/src/enderman.rs`, `ender_path`): a breadth-first search over walk nodes for a mob 2.9 high (three cells clear over a floor, a step of one, a drop of up to three, corners only past two open sides, at most 1,024 nodes: `PathNavigation`'s follow range 64 × 16) to the node nearest the player's cell, ties to the first found; found again when the player's cell changes, when the next cell is reached, or every 10 ticks. A player in B is out of reach, so the path is partial and ends at O. Before this the model walked a straight line at the player: the gap that hid clojurecraft's stare-freeze.
-- **The blow needs a line of sight**, eye to eye (`MeleeAttackGoal.canPerformAttack`: `Sensing.hasLineOfSight`), and its damage event names the enderman as cause and direct; `Life::hurt_by_mob` counts landed blows by kind. Other mobs' blows still send no cause, so issue 16's fights are unchanged.
+- **The blow needs a line of sight** (the sampled `sight`, wall 6), eye to eye (`MeleeAttackGoal.canPerformAttack`: `Sensing.hasLineOfSight`), and its damage event names the enderman as cause and direct; `Life::hurt_by_mob` counts landed blows by kind. Other mobs' blows still send no cause, so issue 16's fights are unchanged.
 - **A knock fits the whole box**: `tick_pushes` checks an enderman's 0.6 by 2.9 box (`ender_fits`), not the 1.79 column of the others.
 - **Loot**: a summoned enderman keeps the generated table (an ender pearl 0 or 1); a parity row's `loot = true` keeps it in real too.
 - **Items** laid by a row: `Sim::place_item`, announced at the join.
