@@ -62,6 +62,7 @@ fn forest_with(ticks: u64, lay: impl Fn(&mut Stage), summon: impl Fn(&mut Sim)) 
     plan.ender.phase = plan::endermen::EnderPhase::Hunt;
     // The base (P5's row 6) waits for stems the model forest has none of: over, the burrow next.
     plan.base.over = true;
+    plan.pearls.at_hunt_point = true;
     let mut stage = Stage::new(4, FLOOR, FLOOR + 20);
     stage
         .biome((-64, 79), (-64, 79), Biome::WarpedForest)

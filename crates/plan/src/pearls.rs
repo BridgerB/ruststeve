@@ -72,6 +72,9 @@ pub struct PearlRules {
     pub hostile_near: f64,
     pub cube_near: f64,
     pub look_out_reach: i32,
+    /// Where the hunt goes first (x, z), by known geography (Bridger's ruling); `None` hunts
+    /// where the bot stands.
+    pub hunt_point: Option<[i32; 2]>,
     pub look_out_far_min: f64,
     pub look_out_far_max: f64,
     pub cube_clear: f64,
@@ -88,7 +91,7 @@ impl Default for PearlRules {
             pearls_wanted: 12,
             provoke_ticks: 60,
             provoke_min: 6.0,
-            provoke_max: 64.0,
+            provoke_max: 36.0,
             provoke_out_min: 12.0,
             provoke_out_max: 64.0,
             provoke_tries: 3,
@@ -117,6 +120,7 @@ impl Default for PearlRules {
             hostile_near: 16.0,
             cube_near: 3.0,
             look_out_reach: 4,
+            hunt_point: None,
             look_out_far_min: 24.0,
             look_out_far_max: 36.0,
             cube_clear: 8.0,
@@ -314,6 +318,11 @@ const LOOK_OUT_TICKS: u64 = 200;
 const SWEEP_TICKS: u64 = 400;
 /// Blocks within which the feet after a walk on count as not moved.
 const WALK_ON_STILL: i32 = 4;
+/// The hunt point: within this it is reached; searches with no route, and walks, before the
+/// hunt stays where it is.
+const HUNT_POINT_NEAR: f64 = 16.0;
+const HUNT_POINT_TRIES: u32 = 3;
+const HUNT_POINT_WALKS: u32 = 24;
 /// Blocks a walk on for a new site goes at least.
 const WALK_ON: i32 = 24;
 /// Blocks within which an angry enderman, ticking or frozen, stops a new provoke.
@@ -496,6 +505,13 @@ pub struct PearlState {
     /// A seal for a parked enderman opens at this tick whatever is near.
     #[serde(default)]
     pub seal_until: Option<u64>,
+    /// The hunt point reached (or given up), and the walks and the searches with no route.
+    #[serde(default)]
+    pub at_hunt_point: bool,
+    #[serde(default)]
+    pub hunt_point_walks: u32,
+    #[serde(default)]
+    pub hunt_point_fails: u32,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -2829,6 +2845,61 @@ impl Plan {
                 self.pearls.ledge_tries += 1;
             }
         }
+        // The hunt point first, before the first burrow (Bridger's ruling of 2026-11-24 allows
+        // steering by known geography to win): P1's measured spot in the forest's main body
+        // (race 45534565509: a ticking enderman within 32 in 60 of 61 rows, no cubes), by the far
+        // walk (piglins shunned at 24, cubes at 8); 3 failed searches and the hunt stays here.
+        if let Some([hx, hz]) = self.pearl_rules().hunt_point
+            && self.pearls.burrow.is_none()
+            && !self.pearls.at_hunt_point
+        {
+            let feet_c = path::stand_cell(w, body.pos);
+            let d = f64::from((hx - feet_c.0).pow(2) + (hz - feet_c.2).pow(2)).sqrt();
+            if d <= HUNT_POINT_NEAR
+                || self.pearls.hunt_point_fails >= HUNT_POINT_TRIES
+                || self.pearls.hunt_point_walks >= HUNT_POINT_WALKS
+            {
+                self.pearls.at_hunt_point = true;
+                self.note(
+                    tick,
+                    "hunt point: here".to_owned(),
+                    format!(
+                        "{d:.0} from ({hx}, {hz}); {} walks, {} with no route",
+                        self.pearls.hunt_point_walks, self.pearls.hunt_point_fails
+                    ),
+                );
+            } else {
+                let c = (hx, feet_c.1, hz);
+                let goal = Goal::Near {
+                    pos: c,
+                    range: HUNT_POINT_NEAR,
+                };
+                let mut walk = Walk::far_to(c, goal, tick);
+                if walk.route_now(w, tick) {
+                    self.pearls.hunt_point_walks += 1;
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        "to the hunt point".to_owned(),
+                        format!(
+                            "({hx}, {hz}), {d:.0} off; walk {}",
+                            self.pearls.hunt_point_walks
+                        ),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.pearls.hunt_point_fails += 1;
+                self.note(
+                    tick,
+                    "no way to the hunt point".to_owned(),
+                    format!(
+                        "({hx}, {hz}), {d:.0} off; try {} of {HUNT_POINT_TRIES}",
+                        self.pearls.hunt_point_fails
+                    ),
+                );
+                return None;
+            }
+        }
         // 6. base: its tasks, but not a wait of more than `base_wait_ticks` (the frontier race
         // 45542558792: all 8 bots waited 2,400 ticks a step for a stem with a way to it, and
         // every step after wood needs wood); then the hunt goes on and the base is asked again
@@ -3046,7 +3117,10 @@ impl Plan {
                         && e.kind == EntityKind::MagmaCube
                         && w.body.is_some_and(|b| dist(b.pos, e.pos) <= 24.0)
                 });
-                if n > 0 || cubes_near || !walk.route_now(w, tick) {
+                // After a move, the far walk only: it shuns piglins at 24 and cubes at 8 (race
+                // 45572123445 lane 1 died to piglins on a walk after its move).
+                let moved = !self.pearls.moved_from.is_empty();
+                if n > 0 || cubes_near || moved || !walk.route_now(w, tick) {
                     walk = Walk::far_to(target, goal, tick);
                 }
                 if walk.route_now(w, tick) {

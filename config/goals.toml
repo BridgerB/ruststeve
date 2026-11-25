@@ -493,7 +493,8 @@ provoke_ticks = 60
 # teleports toward the bot). clojurecraft saw none angered past 36 but never measured why: angers
 # are noted by band (6-16, 16-36, 36-64), and 36 comes back if 36-64 angers none in a race.
 provoke_min = 6.0
-provoke_max = 64.0
+# 36 again (race 45572123445: 36-64 angered 1 of 8, 2 of 10 over the races).
+provoke_max = 36.0
 # With none in sight from M, a provoke from O at one this far or farther: the step back to B is two
 # cells, some 10 ticks walking; an angry enderman walks within 16 (about 0.3 a tick) and teleports
 # from past 16 after 15 goal ticks (the 26.1.2 jar), so 12 leaves it 30 ticks or more out.
@@ -572,6 +573,10 @@ cube_near = 3.0
 # or more to come, the walk back 10 blocks about 46). 4 until P4's real parity row e09-lookout
 # confirms the long look-out; then 10.
 look_out_reach = 4
+# Where the hunt goes first: P1's measured spot in the warped forest's main body (race 45534565509:
+# a ticking enderman within 32 in 60 of 61 rows, within 16 in 27, no cubes), by Bridger's ruling of
+# 2026-11-24 that known geography may steer to win. The frontier stands in a thin strip by the deltas.
+hunt_point = [490, 5]
 look_out_far_min = 24.0
 look_out_far_max = 36.0
 cube_clear = 8.0
