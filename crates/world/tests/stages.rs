@@ -270,7 +270,7 @@ fn endermen_holds_within_32_of_one_that_ticks() {
     assert_eq!(world::stage::enderman_near(&w).map(|(id, _)| id), Some(41));
     assert_eq!(w.stage_reached, Some(Stage::Endermen));
     assert_eq!(Stage::from_name("endermen"), Some(Stage::Endermen));
-    assert_eq!(Stage::ALL.len(), 17);
+    assert_eq!(Stage::ALL.len(), 20);
 }
 
 /// An enderman near but frozen (its chunk beyond the simulation distance) does not count, and
@@ -413,4 +413,132 @@ fn every_stage_name_is_safe_in_a_snapshot_asset_name() {
         );
     }
     assert_eq!(Stage::Forest.name(), "forest");
+}
+
+fn teleport_to(x: f64, y: f64, z: f64) -> Event {
+    Event::Packet(S2c::PlayerPosition {
+        teleport_id: 2,
+        x,
+        y,
+        z,
+        yaw: 0.0,
+        pitch: 0.0,
+        flags: 0,
+    })
+}
+
+/// An air column (state 0) at chunk `(x, z)`, y 0 to 255.
+fn air_column(x: i32, z: i32) -> Event {
+    use protocol::chunk::{Column, Paletted, Section};
+    let air = Section {
+        block_count: 0,
+        fluid_count: 0,
+        blocks: Paletted::Single(0),
+        biomes: Paletted::Single(0),
+    };
+    Event::Packet(S2c::LevelChunkWithLight {
+        x,
+        z,
+        column: std::sync::Arc::new(Column {
+            min_y: 0,
+            sections: vec![air; 16],
+        }),
+    })
+}
+
+/// A frame ring (12 frames on a 5 by 5 square less its corners) at y `y` from (x0, z0): centre
+/// (x0 + 2.5, z0 + 2.5).
+fn ring(x0: i32, y: i32, z0: i32) -> Vec<Event> {
+    let frame = data::BlockKind::EndPortalFrame
+        .info()
+        .map(|i| i.default_state)
+        .unwrap();
+    (1..4)
+        .flat_map(|i| {
+            [
+                (x0 + i, z0),
+                (x0 + i, z0 + 4),
+                (x0, z0 + i),
+                (x0 + 4, z0 + i),
+            ]
+        })
+        .map(|(x, z)| {
+            Event::Packet(S2c::BlockUpdate {
+                pos: (x, y, z),
+                state: frame,
+            })
+        })
+        .collect()
+}
+
+/// A second's ticks: the stages that scan memory are looked at once a second.
+fn second(w: &mut World) {
+    (0..20).for_each(|_| {
+        w.step(&tick());
+    });
+}
+
+/// Issue 19's checkpoint `overworld`: in the overworld with 12 eyes and pearls together; not in
+/// the Nether with them, not with 11.
+#[test]
+fn overworld_holds_home_with_twelve_eyes_and_pearls() {
+    let mut w = World::new();
+    w.step(&login("minecraft:the_nether"));
+    w.step(&teleport());
+    w.step(&give(0, ItemKind::EnderEye, 12));
+    w.step(&tick());
+    assert!(!Stage::Overworld.holds(&w), "not in the Nether");
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    w.step(&give(0, ItemKind::EnderEye, 7));
+    w.step(&give(1, ItemKind::EnderPearl, 4));
+    w.step(&tick());
+    assert!(!Stage::Overworld.holds(&w));
+    w.step(&give(1, ItemKind::EnderPearl, 5));
+    w.step(&tick());
+    assert_eq!(w.stage_reached, Some(Stage::Overworld));
+    assert_eq!(world::stage::EYES_FULL, 12);
+    assert!(Stage::Pearls12 < Stage::Overworld && Stage::Overworld < Stage::Stronghold);
+    assert!(Stage::Stronghold < Stage::PortalRoom && Stage::PortalRoom < Stage::End);
+    assert_eq!(Stage::from_name("overworld"), Some(Stage::Overworld));
+    assert_eq!(Stage::from_name("stronghold"), Some(Stage::Stronghold));
+    assert_eq!(Stage::from_name("portal_room"), Some(Stage::PortalRoom));
+}
+
+/// Issue 19's `stronghold` and `portal_room`: a frame ring seen exposed within 128 is the
+/// stronghold; the feet in an air cell within 8 of the ring's centre at the room's height is the
+/// room. Far off on x, or above the room, is not; no frames in memory is neither.
+#[test]
+fn stronghold_and_portal_room_read_the_frame_ring() {
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    w.step(&air_column(0, 0));
+    w.step(&air_column(1, 0));
+    w.step(&air_column(1, 1));
+    second(&mut w);
+    assert_eq!(w.stage_reached, Some(Stage::InWorld));
+    assert!(!Stage::Stronghold.holds(&w));
+    // The ring at x 20 to 24, z 20 to 24, y 30: centre (22.5, 22.5).
+    for e in ring(20, 30, 20) {
+        w.step(&e);
+    }
+    assert_eq!(world::stage::frames_near(&w).len(), 12);
+    assert_eq!(world::stage::frame_ring(&w), Some(([22.5, 22.5], 30)));
+    second(&mut w);
+    assert_eq!(w.stage_reached, Some(Stage::Stronghold));
+    assert!(!Stage::PortalRoom.holds(&w), "22 off on both axes");
+    // Above the room (frame y + 3): not in it.
+    w.step(&teleport_to(18.5, 33.0, 22.5));
+    second(&mut w);
+    assert!(!Stage::PortalRoom.holds(&w));
+    // On the floor beside the ring (frame y - 2): in it.
+    w.step(&teleport_to(18.5, 28.0, 22.5));
+    second(&mut w);
+    assert_eq!(w.stage_reached, Some(Stage::PortalRoom));
+    // 9 off on x: outside the box.
+    w.step(&teleport_to(13.4, 28.0, 22.5));
+    w.step(&tick());
+    assert!(!Stage::PortalRoom.holds(&w));
 }
