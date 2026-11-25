@@ -382,9 +382,10 @@ const HURT_SKIP: u64 = 100;
 /// Blocks round the feet the site search looks for places with endermen seen, and how many.
 const SUPPLY_REACH: i32 = 64;
 const ANCHORS: usize = 3;
-/// Nylium cells seen in a chunk for it to be the forest's (a forest chunk's floor is 256 cells,
-/// most of them nylium; a wastes edge chunk has a few patches).
-pub const FOREST_NYLIUM: usize = 96;
+/// Exposed nylium cells seen in a chunk for it to be the forest's: memory keeps at most
+/// `memory::SIGNS_KEPT` (64) a kind a chunk, which a forest chunk's floor fills; a wastes edge has a
+/// few patches.
+pub const FOREST_NYLIUM: usize = 48;
 /// Blocks a restock trip goes under a pocket's filler.
 const RESERVE_TRIP: f64 = 8.0;
 /// Blocks within which an angry enderman or a hostile holds the reclaim's digs.
