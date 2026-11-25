@@ -538,6 +538,9 @@ collect_ticks = 200
 # An angry enderman this near with the bot out of B is a breach (18f); a breach's seal holds while
 # one ticks within calm_range (the jar: within 16 it walks, past it teleports in).
 breach_near = 4.0
+# Any enderman, calm or not, this near O and the bot holds in B, never in M or O: on the solid shell
+# B was never hit in 9 real rows over 4 runs, M in 2 of 4 runs (P4, the orchestrator 2026-11-24).
+near_o = 8.0
 calm_range = 16.0
 # <<< pearls
 # >>> base (P5, issue 18d, docs/problems/pearls-base.md): the forest base's rows, made where the

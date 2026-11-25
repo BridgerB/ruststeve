@@ -64,6 +64,7 @@ pub struct PearlRules {
     pub collect_reach: f64,
     pub collect_ticks: u64,
     pub breach_near: f64,
+    pub near_o: f64,
     pub calm_range: f64,
 }
 
@@ -94,6 +95,7 @@ impl Default for PearlRules {
             collect_reach: 4.0,
             collect_ticks: 200,
             breach_near: 4.0,
+            near_o: 8.0,
             calm_range: 16.0,
         }
     }
@@ -623,6 +625,9 @@ impl Plan {
         // 5. collect (it may take the bot out of the burrow onto O and beside it).
         if let Some(b) = self.pearls.burrow.filter(|_| self.pearls.built)
             && angry.is_empty()
+            && !endermen::endermen(w)
+                .iter()
+                .any(|s| dist(s.pos, Burrow::centre(b.o)) <= r.near_o)
             && let Some(c) = self.row_collect(w, tick, &r, b, feet)
         {
             self.cut_task(tick, "collect");
@@ -1317,6 +1322,24 @@ impl Plan {
         if idle >= r.kill_window || (idle >= r.burrow_idle_ticks && !calm_near) {
             self.move_burrow(tick, r, b, idle, calm_near);
             return Some(Controls::default());
+        }
+        // Any enderman within `near_o` of O, calm or not: the bot is in B, never out (P4's real
+        // runs on the solid shell: B never hit in 9 rows over 4 runs; M hit in 2 of 4 runs, once
+        // each, by one that came round angry).
+        let o = Burrow::centre(b.o);
+        if let Some(s) = endermen::endermen(w)
+            .into_iter()
+            .find(|s| dist(s.pos, o) <= r.near_o)
+        {
+            self.pearls.provoke = None;
+            self.pearls.provoke_from = None;
+            self.row(tick, "hold", || {
+                format!("enderman {} {:.1} from O: in B", s.id, dist(s.pos, o))
+            });
+            if feet != b.b {
+                return Some(step_to(pos, b.b).0);
+            }
+            return Some(press_back(w, pos, b, look(b.out_yaw(), 0.0)));
         }
         // 8. provoke.
         if let Some(c) = self.row_provoke(w, tick, r, b, feet) {
