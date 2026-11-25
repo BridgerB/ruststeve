@@ -112,6 +112,7 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - Ledger facts: `EndermanAngry` (the creepy flag, index 17, turning true, with whether it ticks), `EndermanHit` (its health, index 9, falling), `EndermanKilled` (entity event 3; `by_bot` when it was struck), `PearlDropped` (an ender pearl item within `PEARL_NEAR` 8 of a death of the last `KILL_LOOT_TICKS` 40), `PearlPicked` (`take_item_entity` for a pearl item known), `BlockTaken` (left for the burrow's owner). The bot's kill and a pearl picked are progress (`Gain::Hunt`); `[progress] items` adds `["ender_pearl", 12]`.
 - The senses row adds `pearls`, `kills`, angry endermen ticking and frozen within 128, and `swords` (uses left over every sword): `Senses::hunt`.
 - A batch row keeps `pearls` (`Case::pearls_gained`); the summary prints `pearls gained: 0 x5, 12 x1 (6 runs)` when a run reached the forest or gained a pearl.
+- Issue 19b: a batch row keeps `eyes` (`Case::eyes`, from the story: eyes held at the end, thrown, dropped, shattered, picked up, frames seen); the summary prints `eyes held at the end: …`, `eye throws per bot: …` and `frames seen: K of N runs, M most` when any run had eyes or saw a frame.
 
 ## See also
 - [[observability]] - what every run produces.
