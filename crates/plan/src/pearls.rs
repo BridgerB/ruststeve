@@ -2896,7 +2896,15 @@ impl Plan {
                 // A plain route first: the far walk bridges (one bot laid 52 bridge cells toward
                 // the endermen's middle in race 45548022681).
                 let mut walk = Walk::new(target, goal, Arrive::Goal, tick);
-                if n > 0 || !walk.route_now(w, tick) {
+                // The far walk shuns magma cubes at 8 (path::SHUN_MAGMA); a plain route does not:
+                // with one within 24 the far walk goes first (race 45560431011 lane 2 died to cubes
+                // on a walk on).
+                let cubes_near = w.entities.values().any(|e| {
+                    !e.dead
+                        && e.kind == EntityKind::MagmaCube
+                        && w.body.is_some_and(|b| dist(b.pos, e.pos) <= 24.0)
+                });
+                if n > 0 || cubes_near || !walk.route_now(w, tick) {
                     walk = Walk::far_to(target, goal, tick);
                 }
                 if walk.route_now(w, tick) {
