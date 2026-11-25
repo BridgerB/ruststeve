@@ -146,7 +146,7 @@ jobs:
           key: datagen-work-26.1.2-v2
 
       - name: Build
-        run: cargo build -q --locked --release -p xtask -p bot -p results -p replay
+        run: cargo build -q --locked --release -p xtask -p bot -p results -p replay -p rcon
 
       - name: Restore the snapshot into the server's world
         if: inputs.snapshot != ''
@@ -213,6 +213,21 @@ jobs:
           done
           cat server.log
           exit 1
+
+      # Each lane its own loot rolls (issue 18, docs/problems/pearls-hunt.md): vanilla mob loot
+      # draws from per-world random sequences kept in the world (data/minecraft/
+      # random_sequences.dat), so every lane restored from one snapshot, or made from one seed,
+      # rolled the same pearl at its nth enderman kill: eight lanes were one sample (race
+      # 45588764709: 23 kills, 2 pearls, both at the 5th kill in two lanes). The sequence is
+      # reset to a seed from the run and the lane: the drop chance is the game's, only the lanes'
+      # rolls are independent. Nothing is given to any bot.
+      - name: Each lane its own loot rolls
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -uo pipefail
+          seed=$(( (GITHUB_RUN_ID % 1000000) * 100 + LANE ))
+          ./target/release/rcon "randomsequence reset minecraft:entities/enderman $seed true true" || echo "::warning::lane $LANE: the loot sequence was not reset"
 
       - name: Race the lane
         # Under the job's limit by 9 minutes (the lanes job works it out), and the race itself
