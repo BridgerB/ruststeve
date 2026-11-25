@@ -219,6 +219,10 @@ pub struct Goals {
     #[serde(default)]
     pub pearls: crate::pearls::PearlRules,
     // <<< pearls
+    // >>> base (P5, issue 18d): `[base]`, the forest base's numbers.
+    #[serde(default)]
+    pub base: crate::base::Base,
+    // <<< base
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -555,6 +559,9 @@ pub struct Table {
     // >>> pearls
     pub pearls: crate::pearls::PearlRules,
     // <<< pearls
+    // >>> base
+    pub base: crate::base::Base,
+    // <<< base
 }
 
 impl Table {
@@ -752,6 +759,7 @@ impl Table {
                 forest_wait_ticks: g.survival.forest_wait_ticks,
                 valley_wait_ticks: g.survival.valley_wait_ticks,
             },
+            base: g.base.clone(),
         })
     }
 
@@ -1171,6 +1179,7 @@ mod tests {
             always: Vec::new(),
             survival: Survival::default(),
             pearls: crate::pearls::PearlRules::default(),
+            base: crate::base::Base::default(),
         };
         Table::new(&g).unwrap()
     }

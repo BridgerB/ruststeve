@@ -48,6 +48,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[portal-cast]] - the cast as a build plan, its executor, the site beside lava, refills, the portal row and kit start.
 - [[buckets-and-fluids]] - the look's pitch, buckets along the look, the model's fluids, obsidian, portal lighting.
 - [[fuel-and-smelt-needs]] - fuel as a need, smelt rows, spares, the batch.
+- [[forest-base]] - the hunt's kit made in a warped forest: stems by hand, swords in kills, a shield (issue 18d).
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.

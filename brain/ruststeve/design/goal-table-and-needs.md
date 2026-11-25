@@ -6,7 +6,7 @@ tags: [plan, goals, needs, make, crafting]
 aliases: [block needs, holds, place-table, mine-stone, stone-tools, goals.toml, goal table, needs planner, plan::make, make, producer rows, craft rows, kit, wood, Aim::Table, --goal table, producer order, craft-now, make differential]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@31545c1 clojurecraft@be85a92
+verifiedAgainst: ruststeve@3c35c72 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/make.rs#pub fn make<'a>("
   - "ruststeve:crates/plan/src/make.rs#fn producer_order(counts: &Counts, row: &Row) -> (i32, i32) {"
@@ -60,6 +60,9 @@ Smelt rows, the `fuel:ticks` need and `spares` are in [[fuel-and-smelt-needs]], 
 - The race does not plan toward one `until`: `Plan::decide` picks the row each time it is idle (`nether-kit` with a portal standing, `stock` while the clean flow stocks, `gear` until geared, else `portal`).
 - `[survival]` also carries the planner's numbers that are not always-rows': `spare_uses` and `travel_reserve_digs` ([[fuel-and-smelt-needs]]), `stock_logs`, `provision_ticks`, and `junk` (item and how many to keep, dropped when the main inventory is nearly full; an unknown item name fails `Table::new`). Issue 17 adds `travel_health` (14: rest in cover before travel when a ticking blaze or ghast sees the bot), `pickaxe_reserve` (40 uses no leg of travel spends below; the heading reads it too) `forest_wait_ticks` and `valley_wait_ticks` (12,000: the soul sand valley wait) ([[planner]]).
 - Issue 18: `[pearls]` (`Goals::pearls`, `Table::pearls`, `pearls::PearlRules`, every field defaulted) holds the hunt's numbers: provoke ticks and range, the fight's windows, the kill window, the burrow's idle and move, the bounce counter ([[pearl-hunt]]).
+
+## Issue 18d: the forest base
+Rows `base-table` (four sticks and a table near) and `base-iron-sword`, `base-stone-sword`, `base-iron-pickaxe`, `base-stone-pickaxe`, `base-shield`, each run for one more of its first provide than is held; `[base]` holds their numbers (`make::Table::base`). `plan::base` orders, bounds and acts on them where the bot stands ([[forest-base]]).
 
 ## Checked against clojurecraft
 `make-expected.txt` is clojurecraft's own `make/next-row` (at be85a92, a one-off oracle in its flake shell, outside this repo) toward the kit with a table of the kit and gather-log rows, for all 480 inventories of oak logs 0-3, planks 0-4, sticks 0-5 and tables 0-1: **480 of 480** choices equal. `make-expected-stone.txt` (issue 11b): toward `stone-pickaxe` with the stone-pickaxe, gather-log, place-table and mine-stone rows, 1,920 inventories of logs, planks, sticks, tables, cobblestone and wooden pickaxes, with and without a remembered table: **1,920 of 1,920** equal.

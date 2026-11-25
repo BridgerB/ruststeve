@@ -597,6 +597,11 @@ impl Plan {
             };
             return Some(step_to(body.pos, next).0);
         }
+        // Out of a built burrow with an angry enderman: issue 17's sealed pocket where the bot
+        // stands (`ender_threat`), not a walk or a base step in the open.
+        if !angry.is_empty() && !inside {
+            return None;
+        }
         // Rows 6 and 7 that are tasks (the base, a walk to B, a dig to reopen the mouth).
         if !matches!(self.task, Task::Idle) {
             return None;
@@ -610,6 +615,8 @@ impl Plan {
             return Some(Controls::default());
         }
         match self.pearls_task(w, tick) {
+            // The base waits (an act in flight, nothing seen): stand, and ask again next tick.
+            Some(Task::Idle) => Some(Controls::default()),
             Some(t) => {
                 self.begin(t);
                 None
@@ -1632,12 +1639,6 @@ impl Plan {
         }
         None
     }
-
-    // >>> base stub (agent P5's `base.rs` replaces this at its merge): the forest base's steps.
-    pub(crate) fn base_task(&mut self, _w: &World, _tick: u64) -> Option<Task> {
-        None
-    }
-    // <<< base stub
 }
 
 #[cfg(test)]
