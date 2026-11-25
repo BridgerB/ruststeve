@@ -81,6 +81,7 @@ pub struct PearlRules {
     /// where the bot stands.
     pub hunt_point: Option<[i32; 2]>,
     pub look_out_far_min: f64,
+    pub look_out_near_min: f64,
     pub look_out_far_max: f64,
     pub cube_clear: f64,
     pub piglin_near: f64,
@@ -99,7 +100,7 @@ impl Default for PearlRules {
             provoke_ticks: 60,
             provoke_min: 6.0,
             provoke_max: 36.0,
-            provoke_out_min: 12.0,
+            provoke_out_min: 20.0,
             provoke_out_max: 36.0,
             provoke_tries: 3,
             provoke_skip_ticks: 2400,
@@ -134,6 +135,7 @@ impl Default for PearlRules {
             look_out_reach: 4,
             hunt_point: None,
             look_out_far_min: 24.0,
+            look_out_near_min: 30.0,
             look_out_far_max: 36.0,
             cube_clear: 8.0,
             piglin_near: 12.0,
@@ -812,6 +814,20 @@ pub fn step_to(pos: [f64; 3], c: [i32; 3]) -> (Controls, bool) {
     )
 }
 
+/// A run to `c`: forward, never sneaking, facing it (a way-point on the run home).
+pub fn run_to(pos: [f64; 3], c: [i32; 3]) -> Controls {
+    Controls {
+        forward: true,
+        sneak: false,
+        yaw: yaw_to(pos, Burrow::centre(c)),
+        pitch: Some(0.0),
+        jump: false,
+    }
+}
+
+/// Blocks from O's middle at which the run home turns for B.
+pub const THROUGH_O: f64 = 0.8;
+
 /// Blocks behind B's middle (toward the back wall) the fight holds the body at: pressed against
 /// the wall it rests 0.2 back. On a real server the bot drifted 0.14 toward M once its forward
 /// key was let go, and the enderman's reach came within 0.23 of it, not 0.37 (P4's parity row
@@ -1122,8 +1138,15 @@ impl Plan {
             if !angry.is_empty() {
                 self.pearls.provoke_from = None;
                 self.pearls.look_out = None;
-                let on_line = feet == b.o || feet == b.m;
-                return Some(step_to(body.pos, if on_line { b.b } else { b.o }).0);
+                // At a run, no sneak short of B and no stop at O: race 45615781100 lane 3 took
+                // over 40 ticks from the look-out 4 off (sneaking to within 0.2 of O, then of M)
+                // and was hit at M by the one it provoked 24 off.
+                let on_line =
+                    feet == b.o || feet == b.m || flat(body.pos, Burrow::centre(b.o)) < THROUGH_O;
+                if on_line {
+                    return Some(step_to(body.pos, b.b).0);
+                }
+                return Some(run_to(body.pos, b.o));
             }
             let next = if feet == b.o { b.m } else { b.o };
             let next = if flat(body.pos, Burrow::centre(b.m)) < 0.8 {
@@ -2294,7 +2317,7 @@ impl Plan {
         let min = if far_spot {
             r.look_out_far_min
         } else {
-            r.provoke_out_min
+            r.look_out_near_min
         };
         let cand = provoke_candidates_from(w, eye_in(spot), min, &out)
             .into_iter()

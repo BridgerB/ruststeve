@@ -709,3 +709,47 @@ fn new_ground_is_forest_floor_only() {
         "a few nylium cells are no forest"
     );
 }
+
+/// Race 45615781100 lane 3: provoked from the look-out, the bot sneaked to within 0.2 of O and
+/// was hit at M. The run home from off the line is at a run to O (no sneak), and turns for B
+/// within `THROUGH_O` of O.
+#[test]
+fn the_run_home_from_the_look_out_does_not_sneak_and_turns_at_o() {
+    let (mut w, b) = built();
+    let mut p = hunter(&mut w, b);
+    let o = Burrow::centre(b.o);
+    let out = [o[0], o[1], o[2] - 3.0];
+    w.body = Some(physics::Body {
+        pos: out,
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    w.player.pos = Some(out);
+    enderman(&mut w, 70, [o[0] + 20.0, o[1], o[2]], true);
+    w.ticks = 100;
+    let c = p.step(&w);
+    assert!(c.forward && !c.sneak, "{c:?} {:?}", notes(&p));
+    assert!((c.yaw - plan::walk::yaw_to(out, o)).abs() < 1.0, "{c:?}");
+    // Within 0.8 of O: for B.
+    let near = [o[0], o[1], o[2] - 0.5];
+    w.body = Some(physics::Body {
+        pos: near,
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    w.player.pos = Some(near);
+    w.ticks = 101;
+    let c = p.step(&w);
+    let bc = Burrow::centre(b.b);
+    assert!((c.yaw - plan::walk::yaw_to(near, bc)).abs() < 1.0, "{c:?}");
+}
+
+/// The orchestrator's guard: from O no provoke nearer than 20, from the near look-out none
+/// nearer than 30 (`look_out_near_min`).
+#[test]
+fn provokes_from_o_and_the_look_out_keep_their_distance() {
+    let r = table().pearls.clone();
+    assert!(r.provoke_out_min >= 20.0);
+    assert!(r.look_out_near_min >= 30.0);
+    assert!(r.provoke_out_max <= 36.0);
+}
