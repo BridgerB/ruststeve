@@ -54,6 +54,9 @@ pub struct EyeRules {
     pub apex_out: f64,
     pub apex_up: f64,
     pub first_clear: i32,
+    pub ring_from: i32,
+    pub ring_to: i32,
+    pub ring_up: f64,
     pub open_walk: f64,
     pub open_walks_max: u32,
     pub max_throws: u32,
@@ -96,6 +99,9 @@ impl Default for EyeRules {
             apex_out: 12.0,
             apex_up: 9.1,
             first_clear: 6,
+            ring_from: 10,
+            ring_to: 14,
+            ring_up: 10.0,
             open_walk: 16.0,
             open_walks_max: 4,
             max_throws: 4,
@@ -551,28 +557,55 @@ pub fn frames_seen(w: &World, rules: &EyeRules) -> bool {
     !world::stage::kind_near(w, BlockKind::EndPortalFrame, rules.frame_chunks).is_empty()
 }
 
-/// The first solid block seen (loaded, with a collision box, a face showing) in the column the
-/// eye drops through: `apex_out` along `bearing` from the feet, from the feet's level up to
-/// `apex_up` over them. A canopy or a cliff there holds the dropped eye out of reach (Q5's parity
-/// 45688030470); `None` when the column is clear.
+/// The first solid block seen (loaded, with a collision box, a face showing) in the column `out`
+/// along `dir` from the feet, from the feet's level up `up` over them.
+fn column_blocked(
+    w: &World,
+    feet: [f64; 3],
+    dir: [f64; 2],
+    out: f64,
+    up: f64,
+) -> Option<path::Cell> {
+    let x = (feet[0] + dir[0] * out).floor() as i32;
+    let z = (feet[2] + dir[1] * out).floor() as i32;
+    let (low, high) = (feet[1].floor() as i32, (feet[1] + up).floor() as i32);
+    (low..=high).map(|y| (x, y, z)).find(|&(x, y, z)| {
+        w.state_at(world::BlockPos::new(x, y, z)).is_some()
+            && w.solid(x, y, z).is_some()
+            && crate::escape::exposed(w, (x, y, z))
+    })
+}
+
+/// The first solid block seen in the column the eye drops through: `apex_out` along `bearing`
+/// from the feet, from the feet's level up to `apex_up` over them. A canopy or a cliff there holds
+/// the dropped eye out of reach (Q5's parity 45688030470); `None` when the column is clear.
 pub fn apex_blocked(
     w: &World,
     feet: [f64; 3],
     bearing: [f64; 2],
     rules: &EyeRules,
 ) -> Option<path::Cell> {
-    let dir = unit(bearing)?;
-    let x = (feet[0] + dir[0] * rules.apex_out).floor() as i32;
-    let z = (feet[2] + dir[1] * rules.apex_out).floor() as i32;
-    let (low, high) = (
-        feet[1].floor() as i32,
-        (feet[1] + rules.apex_up).floor() as i32,
-    );
-    (low..=high).map(|y| (x, y, z)).find(|&(x, y, z)| {
-        w.state_at(world::BlockPos::new(x, y, z)).is_some()
-            && w.solid(x, y, z).is_some()
-            && crate::escape::exposed(w, (x, y, z))
+    column_blocked(w, feet, unit(bearing)?, rules.apex_out, rules.apex_up)
+}
+
+/// The eight sides, east first, turning counter-clockwise.
+fn sides() -> impl Iterator<Item = [f64; 2]> {
+    (0..8).map(|i| {
+        let a = f64::from(i) * std::f64::consts::FRAC_PI_4;
+        [a.cos(), a.sin()]
     })
+}
+
+/// The blocked columns of the ring the first throw's eye could come down in (no bearing yet):
+/// each of the eight sides, `ring_from` to `ring_to` out, the feet's level up `ring_up`; one cell
+/// for each side blocked, the nearest out. Q4's race 45698008920: a canopy 12 out caught throw 1.
+pub fn ring_blocked(w: &World, feet: [f64; 3], rules: &EyeRules) -> Vec<path::Cell> {
+    sides()
+        .filter_map(|d| {
+            (rules.ring_from..=rules.ring_to)
+                .find_map(|r| column_blocked(w, feet, d, f64::from(r), rules.ring_up))
+        })
+        .collect()
 }
 
 fn tree_block(k: BlockKind) -> bool {
@@ -606,22 +639,36 @@ pub fn trees_near(w: &World, feet: [f64; 3], rules: &EyeRules) -> Option<path::C
         .min_by_key(|t| ((t.0 - c.0).pow(2) + (t.2 - c.2).pow(2), *t))
 }
 
-/// The most open of the eight sides: the point `open_walk` out with the fewest logs and leaves
-/// seen within `first_clear` of it (the first of a tie, east first, turning counter-clockwise).
+/// What keeps the first throw from here: a blocked column of the ring, else a tree near the feet.
+pub fn first_blocked(w: &World, feet: [f64; 3], rules: &EyeRules) -> Option<path::Cell> {
+    ring_blocked(w, feet, rules)
+        .into_iter()
+        .next()
+        .or_else(|| trees_near(w, feet, rules))
+}
+
+/// The most open of the eight points `open_walk` out: the fewest sides of its ring blocked, then
+/// the fewest logs and leaves within `first_clear` (the first of a tie, east first).
 pub fn open_side(w: &World, feet: [f64; 3], rules: &EyeRules) -> path::Cell {
     let c = path::feet_cell(feet);
-    (0..8)
-        .map(|i| {
-            let a = f64::from(i) * std::f64::consts::FRAC_PI_4;
-            let p = (
-                (feet[0] + a.cos() * rules.open_walk).floor() as i32,
-                c.1,
-                (feet[2] + a.sin() * rules.open_walk).floor() as i32,
-            );
-            (trees_around(w, p, rules.first_clear, rules).len(), i, p)
+    sides()
+        .enumerate()
+        .map(|(i, d)| {
+            let at = [
+                feet[0] + d[0] * rules.open_walk,
+                feet[1],
+                feet[2] + d[1] * rules.open_walk,
+            ];
+            let p = path::feet_cell(at);
+            (
+                ring_blocked(w, at, rules).len(),
+                trees_around(w, p, rules.first_clear, rules).len(),
+                i,
+                p,
+            )
         })
         .min()
-        .map_or(c, |(_, _, p)| p)
+        .map_or(c, |(_, _, _, p)| p)
 }
 
 /// Where a throw stands.
@@ -1203,11 +1250,12 @@ impl Plan {
             }
             return None;
         }
-        // The first throw: a tree near the feet could catch its drop, so walk out to the most
-        // open side first, at most `open_walks_max` times.
+        // The first throw: no bearing, so its eye may come down on any side. A blocked column in
+        // the ring 10 to 14 out, or a tree near the feet, could catch it: walk out to the most
+        // open point first, at most `open_walks_max` times (Q4's race 45698008920).
         if bearing.is_none()
             && self.eyes.open_walks < rules.open_walks_max
-            && let Some(tree) = trees_near(w, feet, &rules)
+            && let Some(cell) = first_blocked(w, feet, &rules)
         {
             let to = open_side(w, feet, &rules);
             self.eyes.open_walks += 1;
@@ -1219,8 +1267,12 @@ impl Plan {
                     why.name()
                 ),
                 format!(
-                    "a log or leaf at {tree:?} within {} over the feet; walk {} to {to:?} (walk {} of {})",
-                    rules.first_clear, rules.open_walk, self.eyes.open_walks, rules.open_walks_max
+                    "{} of 8 sides blocked {}-{} out (first at {cell:?}), or a tree within {}; walk {} to {to:?} (walk {} of {})",
+                    ring_blocked(w, feet, &rules).len(),
+                    rules.ring_from,
+                    rules.ring_to,
+                    rules.first_clear,
+                    rules.open_walk, self.eyes.open_walks, rules.open_walks_max
                 ),
             );
             return Some(Task::Explore(Walk::new(
