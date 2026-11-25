@@ -326,10 +326,15 @@ fn twelve_pearls_in_a_model_forest_over_seeds_with_no_damage() {
 #[test]
 #[ignore = "a measurement: 12,000 ticks a seed"]
 fn the_model_forest_supply_against_the_real_counts() {
-    for seed in [21, 22, 23, 24] {
+    // The forest the whole cavern (half 120), or a patch round the bot (half 48 and 24) in nether
+    // wastes, as a real forest is a patch: spawns then fall nearer the bot.
+    for (half, seed) in [120, 48, 24]
+        .into_iter()
+        .flat_map(|h| [21u64, 22, 23, 24].into_iter().map(move |s| (h, s)))
+    {
         let mut stage = Stage::new(7, FLOOR, FLOOR + 20);
         stage
-            .biome((-112, 127), (-112, 127), Biome::WarpedForest)
+            .biome((-half, half - 1), (-half, half - 1), Biome::WarpedForest)
             .spawn((0, FEET, 0));
         let sim = Sim::new(CONFIG, stage.build().unwrap())
             .seeded(seed)
@@ -377,7 +382,7 @@ fn the_model_forest_supply_against_the_real_counts() {
             )
         });
         println!(
-            "MEASURES supply seed {seed}: rows {rows}, within 16 {}, within 32 {}, within 128 {}, distinct within 128 {} ({} in the first minute), spawns {}, despawns {}",
+            "MEASURES supply forest half {half} seed {seed}: rows {rows}, within 16 {}, within 32 {}, within 128 {}, distinct within 128 {} ({} in the first minute), spawns {}, despawns {}",
             within[0],
             within[1],
             within[2],
