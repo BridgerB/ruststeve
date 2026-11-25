@@ -68,6 +68,22 @@ pub struct Moment {
     /// cell's middle, no pickup delay (issue 18: a pearl at the mouth): `summon item` in real.
     #[serde(default)]
     pub items: Vec<(String, i32, i32, i32)>,
+    /// The stronghold an eye of ender thrown in this row flies to, `[x, z]` in blocks, as RCON's
+    /// `locate structure minecraft:stronghold` names it from the row's start (issue 19: the
+    /// model's target, and the bearing the real eye's line is judged against).
+    #[serde(default)]
+    pub stronghold: Option<(i32, i32)>,
+    /// The row's class takes the end portal frames memory holds (issue 19, y03).
+    #[serde(default)]
+    pub frames: bool,
+    /// Armour worn from the start, by item name (`iron_chestplate`): `item replace entity ...
+    /// armor.<slot>` in real, the model's slot and armour points in sim (issue 19, y04).
+    #[serde(default)]
+    pub armor: Vec<String>,
+    /// The feet's height, when not the surface's (issue 19, y04: a pocket dug beside the portal
+    /// room's wall, laid by the row's `fill`).
+    #[serde(default)]
+    pub feet_y: Option<i32>,
 }
 
 fn yes() -> bool {
@@ -84,6 +100,11 @@ pub struct Moments {
 pub struct Landing {
     pub x: i32,
     pub z: i32,
+    /// Columns captured round it each way, when not the capture's `--radius` (issue 19: a
+    /// stronghold's landing is captured to the view distance, so a bot 100 off still has the
+    /// portal room's chunks).
+    #[serde(default)]
+    pub radius: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +182,38 @@ pub struct Outcome {
     /// The placed mobs' outcomes, in the moment's order (issue 17).
     #[serde(default)]
     pub mobs: Vec<MobOutcome>,
+    /// The thrown eye of ender's outcome, for a row that throws one (issue 19, y01 and y02).
+    #[serde(default)]
+    pub eye: Option<EyeOutcome>,
+    /// The end portal frames memory holds at the end, for a row that asks (issue 19, y03).
+    #[serde(default)]
+    pub frames: Option<FramesOutcome>,
+}
+
+/// The end portal frames the bot's memory holds (sightings: an exposed face in chunk data), and
+/// the ring's centre: the middle of their box on the plane, at their height.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FramesOutcome {
+    pub count: u32,
+    pub centre: Option<[i32; 3]>,
+}
+
+/// What became of an eye of ender the bot threw (issue 19, docs/problems/eyes-model.md), as the
+/// bot's world saw it. Whether it dropped or shattered is the jar's roll, never the model's to
+/// match, so it is reported in the row's eye trace, not in the class.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EyeOutcome {
+    /// An eye entity was added near the bot after the throw.
+    pub seen: bool,
+    /// Its fitted line on the plane points within the row's tolerance of the bearing from the
+    /// throw to the row's stronghold.
+    pub on_line: bool,
+    /// The server removed it within the run (its life ended).
+    pub ended: bool,
+    /// For a row that fetches it: no dropped eye is left on the ground at the end (it shattered,
+    /// or it dropped and was picked up). `None` for a row that only throws.
+    #[serde(default)]
+    pub fetched: Option<bool>,
 }
 
 /// One run of a moment.
@@ -211,6 +264,8 @@ pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
                     ("kills", a.kills != b.kills),
                     ("blocks", a.blocks != b.blocks),
                     ("mobs", a.mobs != b.mobs),
+                    ("eye", a.eye != b.eye),
+                    ("frames", a.frames != b.frames),
                 ]
                 .into_iter()
                 .filter_map(|(n, d)| d.then_some(n))
@@ -256,7 +311,23 @@ pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
                     )
                 })
                 .collect();
-            let held = held + &life + &mobs;
+            let eye = o.eye.as_ref().map_or_else(String::new, |e| {
+                format!(
+                    " eye{}{}{}{}",
+                    if e.seen { "" } else { " unseen" },
+                    if e.on_line { " on line" } else { " off line" },
+                    if e.ended { " ended" } else { " flying" },
+                    match e.fetched {
+                        Some(true) => " fetched",
+                        Some(false) => " left",
+                        None => "",
+                    }
+                )
+            });
+            let frames = o.frames.as_ref().map_or_else(String::new, |f| {
+                format!(" frames {} centre {:?}", f.count, f.centre)
+            });
+            let held = held + &life + &mobs + &eye + &frames;
             format!(
                 "{:?} {} {} {} {:?}{held}",
                 o.cell,

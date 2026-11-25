@@ -288,7 +288,7 @@ impl Survival {
     }
 }
 
-fn slot_of(s: Option<Stack>) -> Slot {
+pub(crate) fn slot_of(s: Option<Stack>) -> Slot {
     match s {
         Some((item, count)) => Slot::item(item.id(), count),
         None => Slot::Empty,

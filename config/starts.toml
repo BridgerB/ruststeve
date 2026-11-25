@@ -226,3 +226,28 @@ stage = "endermen"
 place = { dimension = "minecraft:the_nether", x = 490.5, y = 45, z = 5.5 }
 spread = 8
 spread_under = 80
+
+# DEVELOPMENT starts for issue 19 (2026-11-25; never issue-19 evidence, never the frontier): the
+# pearls_12 frontier bot put on the overworld surface with its eyes made and food, so the eyes,
+# the overland walk and the stronghold are developed while real bots travel home. Race them only
+# with the frontier's snapshot (`snapshot=frontier`: its world, memory and player file). The
+# places are development knowledge only (RCON `locate structure minecraft:stronghold`, probe
+# 45685968956, docs/problems/eyes-observe.md): this world's stronghold at (1648, ~, -16), 1,537
+# blocks east of the overworld portal near (113, -50, -105); never read by the bot.
+# dev-overworld-eyes: the bot's old surface stairs at (55, 70, -133), where a real bot climbing
+# from its portal comes out. Each bot to the surface within 16.
+[[start]]
+name = "dev-overworld-eyes"
+stage = "pearls_12"
+place = { dimension = "minecraft:overworld", x = 55.5, y = 70, z = -132.5 }
+spread = 16
+kit = [["ender_eye", 14], ["cooked_beef", 32], ["crafting_table", 1], ["stick", 8]]
+
+# dev-stronghold: 150 blocks west of the located stronghold, on the surface within 16, for the
+# dig into the portal room (19f).
+[[start]]
+name = "dev-stronghold"
+stage = "pearls_12"
+place = { dimension = "minecraft:overworld", x = 1498.5, y = 90, z = -15.5 }
+spread = 16
+kit = [["ender_eye", 14], ["cooked_beef", 32], ["crafting_table", 1], ["stick", 8]]

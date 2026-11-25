@@ -22,7 +22,8 @@ use bot::captured::CapturedWorld;
 use results::Source;
 use results::config::RaceConfig;
 use results::parity::{
-    Health, Landings, MobOutcome, Moment, MomentResult, Moments, Outcome, compare, render,
+    EyeOutcome, FramesOutcome, Health, Landings, MobOutcome, Moment, MomentResult, Moments,
+    Outcome, compare, render,
 };
 use world::World;
 
@@ -30,8 +31,8 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows).
-const TOLERANCE: usize = 168;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows; 176 of 178 with issue 19's eye rows; 179 of 181 with its portal room rows, y04 differing until silverfish are modelled).
+const TOLERANCE: usize = 179;
 /// A placed mob that ends farther than this from where it was put moved (it ticked).
 const MOB_MOVED: f64 = 0.5;
 /// An enderman's creepy flag (`EnderMan.DATA_CREEPY`, entity data 17).
@@ -42,6 +43,211 @@ const STARED: u8 = 18;
 const HEALTH: u8 = 9;
 /// Server ticks between a trace's lines (issue 18: where a placed mob went, over time).
 const TRACE_EVERY: u64 = 10;
+
+/// A thrown eye is the bot's when first seen within this of its middle (it spawns there:
+/// `EnderEyeItem.use`, the player's `getY(0.5)`; clojurecraft stronghold.clj's seen-within).
+const EYE_OWN: f64 = 3.0;
+/// The bot's middle over its feet (half the 1.8 box).
+const EYE_MIDDLE: f64 = 0.9;
+/// A dropped eye's item is first seen within this of the eye's last place (it spawns there with
+/// a kick of at most 0.1 sideways and 0.2 up a tick, and the client hears of the eye every 4
+/// ticks).
+const EYE_DROP_NEAR: f64 = 2.5;
+/// An eye's line on the plane passes within this many degrees of the bearing to the stronghold
+/// (the plan's 19a.5 bar for y01).
+const EYE_LINE_DEG: f64 = 1.0;
+/// A dropped eye counts as left behind within this of the bot at the end.
+const EYE_LEFT_NEAR: f64 = 32.0;
+
+/// Issue 19's thrown eye, followed through a run by its entity id: every place the bot's world
+/// was told of, when it was removed, and how it ended (an item of the eye where it was, or the
+/// shatter's level event).
+#[derive(Default)]
+struct EyeTrack {
+    id: Option<i32>,
+    samples: Vec<(u64, [f64; 3])>,
+    ended: Option<u64>,
+    end: Option<&'static str>,
+}
+
+fn dist3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
+fn eye_step(w: &World, t: &mut EyeTrack) {
+    let Some(body) = w.body else {
+        return;
+    };
+    if t.id.is_none() {
+        let mid = [body.pos[0], body.pos[1] + EYE_MIDDLE, body.pos[2]];
+        t.id = w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == data::EntityKind::EyeOfEnder && dist3(e.pos, mid) <= EYE_OWN)
+            .map(|(id, _)| *id)
+            .min();
+    }
+    let Some(id) = t.id else {
+        return;
+    };
+    match (w.entities.get(&id), t.ended) {
+        (Some(e), None) => {
+            if t.samples.last().map(|s| s.1) != Some(e.pos) {
+                t.samples.push((w.ticks, e.pos));
+            }
+        }
+        (None, None) => t.ended = Some(w.ticks),
+        (_, Some(_)) => {}
+    }
+    let (Some(at), None, Some(&(_, last))) = (t.ended, t.end, t.samples.last()) else {
+        return;
+    };
+    let dropped = w.entities.values().any(|e| {
+        e.kind == data::EntityKind::Item
+            && e.item().is_some_and(|(k, _)| k == data::ItemKind::EnderEye)
+            && dist3(e.pos, last) <= EYE_DROP_NEAR
+    });
+    let shattered = w.level_events.iter().any(|l| {
+        l.id == sim::eye::SHATTER_EVENT
+            && l.at_tick + 1 >= at
+            && dist3(
+                [f64::from(l.pos.0), f64::from(l.pos.1), f64::from(l.pos.2)],
+                last,
+            ) <= EYE_DROP_NEAR + 1.0
+    });
+    t.end = match (dropped, shattered) {
+        (true, _) => Some("dropped"),
+        (false, true) => Some("shattered"),
+        (false, false) => None,
+    };
+}
+
+/// A yaw (0 south, 90 west) from `a` to `b` on the plane, in degrees.
+fn yaw_to(a: [f64; 3], b: [f64; 3]) -> f64 {
+    (-(b[0] - a[0])).atan2(b[2] - a[2]).to_degrees()
+}
+
+/// The signed difference of two yaws, in (-180, 180].
+fn yaw_diff(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(360.0);
+    if d > 180.0 { d - 360.0 } else { d }
+}
+
+/// A thrown eye's class and its report: the line from where it was first seen (its spawn) to the
+/// place on the plane farthest from it (every place an eye takes lies on the one line to its
+/// target), against the bearing from the same spawn to the row's stronghold.
+fn eye_report(
+    w: &World,
+    t: &EyeTrack,
+    stronghold: (i32, i32),
+    fetches: bool,
+) -> (EyeOutcome, Vec<String>) {
+    let f = |p: [f64; 3]| format!("({:.3} {:.3} {:.3})", p[0], p[1], p[2]);
+    let mut lines: Vec<String> = t
+        .samples
+        .iter()
+        .map(|(tick, p)| format!("t {tick} eye {}", f(*p)))
+        .collect();
+    let first = t.samples.first().copied();
+    let far = first.and_then(|(_, a)| {
+        t.samples
+            .iter()
+            .max_by(|x, y| {
+                let h = |p: [f64; 3]| (p[0] - a[0]).hypot(p[2] - a[2]);
+                h(x.1).total_cmp(&h(y.1))
+            })
+            .copied()
+    });
+    let point = [f64::from(stronghold.0), 0.0, f64::from(stronghold.1)];
+    let err = match (first, far) {
+        (Some((t0, a)), Some((t1, b))) if (b[0] - a[0]).hypot(b[2] - a[2]) > 1.0 => {
+            let heading = yaw_to(a, b);
+            let bearing = yaw_to(a, point);
+            let e = yaw_diff(heading, bearing);
+            let flown = (b[0] - a[0]).hypot(b[2] - a[2]);
+            let top = t.samples.iter().map(|s| s.1[1]).fold(f64::MIN, f64::max);
+            lines.push(format!(
+                "eye: spawn {} farthest {} at t {t1} ({} ticks), flew {flown:.3} on the plane, rose {:.3}; heading {heading:.4}, bearing to the stronghold ({}, {}) {bearing:.4}, error {e:.4} degrees, {:.1} blocks off",
+                f(a),
+                f(b),
+                t1 - t0,
+                top - a[1],
+                stronghold.0,
+                stronghold.1,
+                (point[0] - a[0]).hypot(point[2] - a[2])
+            ));
+            Some(e)
+        }
+        _ => None,
+    };
+    let left = w.body.is_some_and(|b| {
+        w.entities.values().any(|e| {
+            !e.dead
+                && e.kind == data::EntityKind::Item
+                && e.item().is_some_and(|(k, _)| k == data::ItemKind::EnderEye)
+                && dist3(e.pos, b.pos) <= EYE_LEFT_NEAR
+        })
+    });
+    lines.push(format!(
+        "eye: seen {}, removed at {:?}, end {}, left on the ground at the end {left}, held at the end {}",
+        t.id.is_some(),
+        t.ended,
+        t.end.unwrap_or("unknown"),
+        w.inventory
+            .slots
+            .values()
+            .filter(|(k, _)| *k == data::ItemKind::EnderEye)
+            .map(|(_, n)| n)
+            .sum::<i32>()
+    ));
+    (
+        EyeOutcome {
+            seen: t.id.is_some(),
+            on_line: err.is_some_and(|e| e.abs() <= EYE_LINE_DEG),
+            ended: t.ended.is_some(),
+            fetched: fetches.then_some(!left),
+        },
+        lines,
+    )
+}
+
+/// A piece of armour's equipment slot, window 0 slot and armour points (vanilla's
+/// `ArmorMaterials.IRON`: helmet 2, chestplate 6, leggings 5, boots 2).
+fn armor_piece(item: &str) -> Option<(&'static str, usize, f32)> {
+    match item {
+        "iron_helmet" => Some(("head", 5, 2.0)),
+        "iron_chestplate" => Some(("chest", 6, 6.0)),
+        "iron_leggings" => Some(("legs", 7, 5.0)),
+        "iron_boots" => Some(("feet", 8, 2.0)),
+        _ => None,
+    }
+}
+
+/// The end portal frames memory holds in the overworld, and their ring's centre (issue 19, y03).
+fn frames_outcome(w: &World) -> FramesOutcome {
+    let cells: Vec<memory::Cell> = w
+        .memory
+        .latest_index()
+        .iter()
+        .filter(|((dim, _), _)| dim == "minecraft:overworld")
+        .filter_map(|(_, i)| w.memory.log().get(*i))
+        .filter(|s| data::block_of_state(s.state) == Some(data::BlockKind::EndPortalFrame))
+        .map(|s| s.pos)
+        .collect();
+    let span = |f: fn(&memory::Cell) -> i32| {
+        let lo = cells.iter().map(f).min()?;
+        let hi = cells.iter().map(f).max()?;
+        Some((lo + hi).div_euclid(2))
+    };
+    let centre = match (span(|c| c.0), span(|c| c.1), span(|c| c.2)) {
+        (Some(x), Some(y), Some(z)) => Some([x, y, z]),
+        _ => None,
+    };
+    FramesOutcome {
+        count: u32::try_from(cells.len()).unwrap_or(u32::MAX),
+        centre,
+    }
+}
 
 /// Whether an entity's boolean data `i` is true.
 fn flag(e: &world::Entity, i: u8) -> bool {
@@ -123,9 +329,12 @@ fn start_of(
     let world = CapturedWorld::read(&CapturedWorld::path(&a.worlds, m.landing))?;
     let (x, z) = (l.x + m.dx, l.z + m.dz);
     let model = world.model([0.0; 3])?;
-    let y = model
-        .surface(x, z)
-        .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?;
+    let y = match m.feet_y {
+        Some(y) => f64::from(y),
+        None => model
+            .surface(x, z)
+            .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?,
+    };
     Ok((world, [f64::from(x) + 0.5, y, f64::from(z) + 0.5]))
 }
 
@@ -155,7 +364,9 @@ fn outcome(
         .filter(|(s, _)| **s >= 1)
         .map(|(_, st)| *st)
         .chain(w.inventory.carried);
-    for (k, n) in held.filter(|(k, _)| !chance_drop(*k)) {
+    // An eye of ender held at the end is the throw's 4 in 5 roll (issue 19): its class is
+    // `eye`, not the inventory.
+    for (k, n) in held.filter(|(k, _)| !chance_drop(*k) && *k != data::ItemKind::EnderEye) {
         *inventory.entry(name(k)).or_default() += n;
     }
     let grid = w
@@ -189,6 +400,8 @@ fn outcome(
             .iter()
             .map(|(kind, at)| mob_outcome(w, kind, *at))
             .collect(),
+        eye: None,
+        frames: None,
     })
 }
 
@@ -321,7 +534,11 @@ fn tracked(w: &World, tracks: &[Track]) -> Vec<MobOutcome> {
 
 /// A real run's trace, folded from its recording: a line every `TRACE_EVERY` ticks, and the
 /// placed mobs' tracks.
-fn trace_recording(path: &Path, tracks: &mut [Track]) -> Result<Vec<String>, String> {
+fn trace_recording(
+    path: &Path,
+    tracks: &mut [Track],
+    eye: &mut EyeTrack,
+) -> Result<Vec<String>, String> {
     let (_, records) = record::Recording::read_all(path)?;
     let mut folder = record::Folder::new();
     let mut lines = Vec::new();
@@ -338,6 +555,7 @@ fn trace_recording(path: &Path, tracks: &mut [Track]) -> Result<Vec<String>, Str
             }
             _ => continue,
         }
+        eye_step(&folder.world, eye);
         let t = folder.world.ticks;
         if t.is_multiple_of(TRACE_EVERY) && last != Some(t) {
             last = Some(t);
@@ -404,6 +622,21 @@ fn feet_cell(start: [f64; 3]) -> (i32, i32, i32) {
 fn give_of(g: &str) -> Option<(data::ItemKind, i32)> {
     let (item, count) = g.split_once(' ')?;
     Some((data::ItemKind::from_name(item)?, count.parse().ok()?))
+}
+
+/// A fetch row's script walks back to its start once the eye is fetched (issue 19: where the
+/// walk to the drop stops is the server's roll).
+fn homed(s: Option<Script>, start: [f64; 3]) -> Option<Script> {
+    match s {
+        Some(Script::Fetch { at, .. }) => {
+            let (x, y, z) = feet_cell(start);
+            Some(Script::Fetch {
+                at,
+                home: Some([x, y, z]),
+            })
+        }
+        other => other,
+    }
 }
 
 /// A row's script, or the planner's aim for a `plan:<aim>` row (issue 12b: the escape rows run
@@ -492,6 +725,7 @@ fn real_waves(
         for (i, m) in wave.iter().enumerate() {
             let (_, start) = start_of(a, landings, m)?;
             let (script, aim) = script_or_aim(m)?;
+            let script = homed(script, start);
             // A fresh player per run: the server saves a player's place, health and effects by
             // name, so a reused name would start where the last run left it.
             let name = format!("rs-m{:02}-{:04x}", w * a.wave + i, nonce);
@@ -522,6 +756,11 @@ fn real_waves(
                 .chain(m.set.iter().map(|(b, dx, dy, dz)| {
                     let (x, y, z) = feet_cell(start);
                     format!("setblock {} {} {} minecraft:{b}", x + dx, y + dy, z + dz)
+                }))
+                .chain(m.armor.iter().filter_map(|item| {
+                    armor_piece(item).map(|(slot, _, _)| {
+                        format!("item replace entity {name} armor.{slot} with minecraft:{item}")
+                    })
                 }))
                 .chain(m.effects.iter().map(|(e, secs, amp)| {
                     format!("effect give {name} minecraft:{e} {secs} {amp} true")
@@ -606,22 +845,28 @@ fn real_waves(
                 on_stage: None,
                 no_progress_ticks: None,
                 snapshot_at: None,
+                eyes: None,
                 progress: None,
             };
             let id = m.id.clone();
             let watch = watched(start, m);
             let mobs = mob_spots(start, m);
-            let traced = !m.mobs.is_empty() || !m.items.is_empty();
+            let traced =
+                !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some() || m.frames;
+            let eye_row = m.stronghold.map(|s| (s, m.script.starts_with("fetch:")));
+            let frames_row = m.frames;
             handles.push((
                 id,
                 watch,
                 mobs,
                 traced,
+                eye_row,
+                frames_row,
                 std::thread::spawn(move || bot::run(opts)),
             ));
             std::thread::sleep(Duration::from_millis(500));
         }
-        for (id, watch, mobs, traced, h) in handles {
+        for (id, watch, mobs, traced, eye_row, frames_row, h) in handles {
             let trace_id = id.clone();
             let r = match h.join() {
                 Ok(Ok(o)) => MomentResult {
@@ -639,11 +884,22 @@ fn real_waves(
                         if traced {
                             let rsr = a.out.join(format!("{trace_id}.real.rsr"));
                             let mut tracks = tracks_of(&mobs);
-                            let text = trace_recording(&rsr, &mut tracks)
+                            let mut eye = EyeTrack::default();
+                            let text = trace_recording(&rsr, &mut tracks, &mut eye)
                                 .unwrap_or_else(|e| vec![format!("no trace: {e}")]);
                             write_trace(&a.out, &trace_id, "real", &text)?;
                             if let Some(c) = class.as_mut() {
                                 c.mobs = tracked(&o.world, &tracks);
+                            }
+                            if frames_row && let Some(c) = class.as_mut() {
+                                c.frames = Some(frames_outcome(&o.world));
+                            }
+                            if let Some((at, fetches)) = eye_row {
+                                let (e, lines) = eye_report(&o.world, &eye, at, fetches);
+                                write_trace(&a.out, &trace_id, "real.eye", &lines)?;
+                                if let Some(c) = class.as_mut() {
+                                    c.eye = Some(e);
+                                }
                             }
                         }
                         class
@@ -687,6 +943,7 @@ fn sim(a: &Args) -> Result<(), String> {
     for (i, m) in moments.moment.iter().enumerate() {
         let (captured, start) = start_of(a, &landings, m)?;
         let (script, aim) = script_or_aim(m)?;
+        let script = homed(script, start);
         let mut world = captured.model(start)?;
         let state_of = |b: &str| {
             data::BlockKind::from_name(b)
@@ -719,12 +976,26 @@ fn sim(a: &Args) -> Result<(), String> {
             ..config
         };
         let mut model = sim::Sim::new(config, world).seeded(i as u64 + 1);
+        if let Some((x, z)) = m.stronghold {
+            // A chunk's lower corner, as `locate` names it (issue 19): y 0.
+            model = model.with_stronghold([f64::from(x), 0.0, f64::from(z)]);
+        }
         for g in &m.give {
             model
                 .survival
                 .give(give_of(g).ok_or_else(|| format!("{}: give {g}", m.id))?);
         }
         model.survival.life.water_breathing = m.breathe;
+        for item in &m.armor {
+            let (_, slot, points) =
+                armor_piece(item).ok_or_else(|| format!("{}: no armour {item}", m.id))?;
+            let kind = data::ItemKind::from_name(item)
+                .ok_or_else(|| format!("{}: no item {item}", m.id))?;
+            if let Some(s) = model.survival.slots.get_mut(slot) {
+                *s = Some((kind, 1));
+            }
+            model.survival.life.armor += points;
+        }
         for (e, secs, amp) in &m.effects {
             match e.as_str() {
                 "hunger" => model.survival.life.hunger = Some((secs * 20, *amp)),
@@ -777,7 +1048,8 @@ fn sim(a: &Args) -> Result<(), String> {
                 ],
             );
         }
-        let traced = !m.mobs.is_empty() || !m.items.is_empty();
+        let traced = !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some();
+        let mut eye = EyeTrack::default();
         let mut trace = Vec::new();
         let mut tracks = tracks_of(&mob_spots(start, m));
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
@@ -788,6 +1060,9 @@ fn sim(a: &Args) -> Result<(), String> {
             SETTLE + m.ticks,
             SETTLE,
             |w, t| {
+                if m.stronghold.is_some() {
+                    eye_step(w, &mut eye);
+                }
                 if traced && w.ticks.is_multiple_of(TRACE_EVERY) {
                     trace.extend(trace_line(w));
                     track_step(w, &mut tracks);
@@ -805,6 +1080,14 @@ fn sim(a: &Args) -> Result<(), String> {
         if traced {
             write_trace(&a.out, &m.id, "sim", &trace)?;
         }
+        let eye_class = match m.stronghold {
+            Some(at) => {
+                let (e, lines) = eye_report(&run.world, &eye, at, m.script.starts_with("fetch:"));
+                write_trace(&a.out, &m.id, "sim.eye", &lines)?;
+                Some(e)
+            }
+            None => None,
+        };
         let r = MomentResult {
             moment: m.id.clone(),
             source: Source::Sim,
@@ -819,6 +1102,10 @@ fn sim(a: &Args) -> Result<(), String> {
             .map(|mut c| {
                 if traced {
                     c.mobs = tracked(&run.world, &tracks);
+                }
+                c.eye = eye_class;
+                if m.frames {
+                    c.frames = Some(frames_outcome(&run.world));
                 }
                 c
             }),

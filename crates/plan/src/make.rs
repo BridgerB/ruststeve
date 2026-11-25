@@ -223,6 +223,10 @@ pub struct Goals {
     #[serde(default)]
     pub base: crate::base::Base,
     // <<< base
+    // >>> eyes (Q3, issue 19c): `[eyes]`, the throws' numbers.
+    #[serde(default)]
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -569,6 +573,9 @@ pub struct Table {
     // >>> base
     pub base: crate::base::Base,
     // <<< base
+    // >>> eyes
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 impl Table {
@@ -768,6 +775,9 @@ impl Table {
                 valley_wait_ticks: g.survival.valley_wait_ticks,
             },
             base: g.base.clone(),
+            // >>> eyes
+            eyes: g.eyes.clone(),
+            // <<< eyes
         })
     }
 
@@ -1188,6 +1198,7 @@ mod tests {
             survival: Survival::default(),
             pearls: crate::pearls::PearlRules::default(),
             base: crate::base::Base::default(),
+            eyes: crate::eyes::EyeRules::default(),
         };
         Table::new(&g).unwrap()
     }

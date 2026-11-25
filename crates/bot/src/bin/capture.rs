@@ -145,8 +145,9 @@ fn capture(a: &Args) -> Result<(), String> {
     );
     for (i, l) in landings.landing.iter().enumerate() {
         let (cx, cz) = (l.x >> 4, l.z >> 4);
-        let wanted: Vec<(i32, i32)> = (-a.radius..=a.radius)
-            .flat_map(|dx| (-a.radius..=a.radius).map(move |dz| (cx + dx, cz + dz)))
+        let radius = l.radius.unwrap_or(a.radius);
+        let wanted: Vec<(i32, i32)> = (-radius..=radius)
+            .flat_map(|dx| (-radius..=radius).map(move |dz| (cx + dx, cz + dz)))
             .collect();
         // Columns still held from an earlier landing are not sent again (the client has them); a
         // spectator changes nothing, so their bytes are still the world's.
@@ -193,7 +194,7 @@ fn capture(a: &Args) -> Result<(), String> {
             commit: record::COMMIT.to_owned(),
             seed: a.seed.clone(),
             landing: *l,
-            radius: a.radius,
+            radius,
             columns: wanted
                 .iter()
                 .filter_map(|k| {
