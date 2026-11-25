@@ -1220,6 +1220,9 @@ impl Plan {
 /// A junk kind that came back is held back this long (the coordinator's rule, 2026-11-25): the
 /// spares' retry, two game minutes.
 pub const JUNK_BACK_TICKS: u64 = 2400;
+/// A held-back block is placed for room only from a stack this small (eight tasks at most to free
+/// a slot); a bigger one is released and dropped whole.
+pub const JUNK_PLACE_MAX: i32 = 8;
 
 /// The block an item places, if any (cobblestone, netherrack; never leather).
 pub fn block_of(k: data::ItemKind) -> Option<BlockKind> {
@@ -1281,11 +1284,23 @@ impl Plan {
     }
 
     /// No main slot free and only held-back junk to make room with: a held-back block put down
-    /// beside the feet (backfill), never a drop. `None` with a slot free or no such block.
+    /// beside the feet (backfill) when its smallest stack is `JUNK_PLACE_MAX` or under, so a few
+    /// placings free a slot. A bigger stack is released from the hold instead, and the drop takes
+    /// the whole stack: race 45719263137 lane 0 placed cobblestone 270 times, one a task against
+    /// stacks of 64, a cell from the room, to the cap. `None` with a slot free or no such block.
     pub(crate) fn junk_place(&mut self, w: &World, tick: u64) -> Option<Task> {
         if (9i16..=44).any(|s| !w.inventory.slots.contains_key(&s)) {
             return None;
         }
+        let smallest = |k: data::ItemKind| {
+            w.inventory
+                .slots
+                .iter()
+                .filter(|(s, (j, _))| (9..=44).contains(*s) && *j == k)
+                .map(|(_, (_, n))| *n)
+                .min()
+                .unwrap_or(0)
+        };
         let (k, b) = self
             .stronghold
             .junk_held
@@ -1298,6 +1313,19 @@ impl Plan {
                     None
                 }
             })?;
+        if smallest(k) > JUNK_PLACE_MAX {
+            self.stronghold.junk_held.retain(|(h, _)| *h != k);
+            self.note(
+                tick,
+                format!("junk released: {k:?}"),
+                format!(
+                    "no main slot free and its smallest stack is {}: dropped whole, not placed one \
+                     by one",
+                    smallest(k)
+                ),
+            );
+            return None;
+        }
         let p = crate::place::Place::new(b, tick)?;
         self.note(
             tick,
