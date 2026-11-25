@@ -733,15 +733,32 @@ impl Plan {
                 <= SEAL_REACH
         };
         let mut cells = path::Cells::new(w);
-        let lava: Vec<Cell> = lit
+        let around = |c: &Cell| {
+            [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0)]
+                .map(|(dx, dy, dz)| (c.0 + dx, c.1 + dy, c.2 + dz))
+        };
+        // The standing cells in front of the portal: open cells beside its two lowest rows. The
+        // entry portal's one dry standing cell is (22, 35, -19), with lava at (21, 35, -19) beside
+        // it, under its neighbour (23, 35, -19) and at (24, 35, -19) beyond (Q1's probe
+        // 45688112814 of the frontier snapshot's region files).
+        let stand: Vec<Cell> = lit
+            .iter()
+            .filter(|c| c.1 == low || c.1 == low + 1)
+            .flat_map(|c| around(c).into_iter().take(4))
+            .filter(|n| !lit.contains(n))
+            .filter(|n| cells.at(*n) == path::Class::Clear)
+            .collect();
+        let mut lava: Vec<Cell> = Vec::new();
+        for n in lit
             .iter()
             .filter(|c| c.1 == low)
-            .flat_map(|c| {
-                [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0)]
-                    .map(|(dx, dy, dz)| (c.0 + dx, c.1 + dy, c.2 + dz))
-            })
-            .filter(|n| cells.at(*n) == path::Class::Lava)
-            .collect();
+            .chain(stand.iter())
+            .flat_map(around)
+        {
+            if !lava.contains(&n) && cells.at(n) == path::Class::Lava {
+                lava.push(n);
+            }
+        }
         let feet = path::feet_cell(body.pos);
         let item = endermen::FILLER
             .iter()

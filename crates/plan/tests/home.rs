@@ -400,3 +400,72 @@ fn lava_beside_the_portal_is_sealed_before_the_walk_in() {
         "one seal: the world never answered it"
     );
 }
+
+#[test]
+fn the_entry_portals_south_face_is_sealed_round_its_standing_cell() {
+    // The frontier's entry portal (Q1's probe 45688112814) shifted by (-11, 30, 28): cells x 11
+    // to 12, y 64 to 66, z 8; the south face z 9 holds cobblestone at (11, 64, 9) under the one
+    // dry standing cell (11, 65, 9), lava at (10, 64..65, 9), (12, 64, 9), (13, 64..65, 9).
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(39, (ItemKind::Netherrack, 64));
+    for x in 11..=12 {
+        set(&mut w, (x, 63, 8), BlockKind::Obsidian);
+        for y in 64..=66 {
+            set(&mut w, (x, y, 8), BlockKind::NetherPortal);
+            remember(&mut w, home::NETHER, (x, y, 8), BlockKind::NetherPortal);
+        }
+    }
+    set(&mut w, (11, 64, 9), BlockKind::Cobblestone);
+    for c in [
+        (10, 64, 9),
+        (10, 65, 9),
+        (12, 64, 9),
+        (13, 64, 9),
+        (13, 65, 9),
+    ] {
+        set(&mut w, c, BlockKind::Lava);
+    }
+    // The bot in its tunnel behind the face, on netherrack.
+    set(&mut w, (11, 64, 10), BlockKind::Netherrack);
+    w.body = w.body.map(|b| physics::Body {
+        pos: [11.5, 65.0, 10.5],
+        ..b
+    });
+    w.player.pos = Some([11.5, 65.0, 10.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    // The world answers each placement: the clicked face's neighbour becomes netherrack.
+    for t in 100..200 {
+        w.ticks = t;
+        p.step(&w);
+        for a in p.take_acts() {
+            if let world::Act::UseOn { pos, face } = a {
+                let (dx, dy, dz) = match face {
+                    0 => (0, -1, 0),
+                    1 => (0, 1, 0),
+                    2 => (0, 0, -1),
+                    3 => (0, 0, 1),
+                    4 => (-1, 0, 0),
+                    _ => (1, 0, 0),
+                };
+                set(
+                    &mut w,
+                    (pos.x + dx, pos.y + dy, pos.z + dz),
+                    BlockKind::Netherrack,
+                );
+            }
+        }
+    }
+    for c in ["(10, 65, 9)", "(12, 64, 9)", "(13, 65, 9)"] {
+        assert!(
+            noted(&p, &format!("home: lava sealed at {c}")),
+            "{c}: {:?}",
+            notes(&p)
+        );
+    }
+}
