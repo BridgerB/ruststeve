@@ -82,7 +82,7 @@ impl Default for PearlRules {
             parked_look_ticks: 40,
             fight_cap: 2400,
             kill_window: 12000,
-            burrow_idle_ticks: 6000,
+            burrow_idle_ticks: 2400,
             moves_without_kill: 2,
             burrow_move: 32,
             site_every: 100,
@@ -112,6 +112,10 @@ pub const BURROW_BLOCKS: &[ItemKind] = &[
 const BUILD_EVERY: u64 = 10;
 /// A step to a cell's middle is done this near it, on the plane.
 const STEP_DONE: f64 = 0.2;
+/// Blocks from the feet a forest floor cell walked to lies at least (a new place to search).
+const FLOOR_MIN: i32 = 8;
+/// Ticks a sighting is kept for the mouth's side.
+const SIGHTINGS_KEPT: u64 = 600;
 /// Ticks one step out of B takes at most, counted as one step.
 const STEP_OUT_TICKS: u64 = 40;
 /// Ticks between two notes of one standing row (a hold, a wait).
@@ -194,6 +198,15 @@ pub struct PearlState {
     /// near miss.
     #[serde(default)]
     pub provoked: Vec<i32>,
+    /// Ticking endermen's feet seen lately, with the tick: the burrow's mouth faces the most.
+    #[serde(default)]
+    pub sightings: Vec<(u64, [f64; 3])>,
+    /// The tick a provoke's creepy flag came, until the bot is back in B (noted).
+    #[serde(default)]
+    pub back_since: Option<u64>,
+    /// Forest floor cells walked to (or tried) for a new site search.
+    #[serde(default)]
+    pub floor_tried: Vec<[i32; 3]>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -708,10 +721,23 @@ impl Plan {
             );
         }
         self.pearls.pearls_seen = pearls;
+        // Ticking endermen seen, every 20 ticks, kept 600 (the mouth's side at site choice).
+        if tick.is_multiple_of(20) {
+            self.pearls
+                .sightings
+                .retain(|(t, _)| tick < t + SIGHTINGS_KEPT);
+            for s in endermen::endermen(w)
+                .iter()
+                .filter(|s| s.ticking && s.dist <= 64.0)
+            {
+                self.pearls.sightings.push((tick, s.pos));
+            }
+        }
         // A provoke that angered its target (the fight's rows take it from B on).
         if let Some((id, at)) = self.pearls.provoke
             && creepy(w, id)
         {
+            self.pearls.back_since = Some(tick);
             self.pearls.provoke = None;
             self.pearls.provoke_from = None;
             self.pearls.angers += 1;
@@ -957,6 +983,16 @@ impl Plan {
         }
         if feet != b.b {
             return step_to(pos, b.b).0;
+        }
+        if let Some(at) = self.pearls.back_since.take() {
+            self.note(
+                tick,
+                format!(
+                    "back in B {} ticks after the creepy flag",
+                    tick.saturating_sub(at)
+                ),
+                format!("enderman {id} {:.1} off", s.dist),
+            );
         }
         self.row(tick, "hold", || {
             format!("enderman {id} angry, {:.1} off", s.dist)
@@ -1579,6 +1615,62 @@ impl Plan {
         }
     }
 
+    /// A walk to a seen warped nylium cell with room over it, `FLOOR_MIN` to `SITE_RADIUS` off and
+    /// at least `burrow_move` from every burrow moved from, not tried before: the forest's own
+    /// floor, where the next site search starts. The nearest first, two tried a call.
+    fn walk_to_forest_floor(
+        &mut self,
+        w: &World,
+        tick: u64,
+        feet: [i32; 3],
+        r: &PearlRules,
+    ) -> Option<Task> {
+        let dim = w.dimension.as_ref()?.name.clone();
+        let (cx, cz) = (feet[0] >> 4, feet[2] >> 4);
+        let mut cells: Vec<(i32, [i32; 3])> = Vec::new();
+        for dx in -2..=2 {
+            for dz in -2..=2 {
+                for c in w
+                    .memory
+                    .indexed_in_column(&dim, cx + dx, cz + dz, data::BlockKind::WarpedNylium)
+                    .unwrap_or_default()
+                {
+                    let at = [c.0, c.1 + 1, c.2];
+                    let d2 = (at[0] - feet[0]).pow(2) + (at[2] - feet[2]).pow(2);
+                    let far = self.pearls.moved_from.iter().all(|m| {
+                        (m[0] - at[0]).pow(2) + (m[2] - at[2]).pow(2) >= r.burrow_move.pow(2)
+                    });
+                    if (FLOOR_MIN * FLOOR_MIN..=burrow::SITE_RADIUS * burrow::SITE_RADIUS)
+                        .contains(&d2)
+                        && far
+                        && !self.pearls.floor_tried.contains(&at)
+                        && w.block_at(world::BlockPos::new(at[0], at[1], at[2]))
+                            .and_then(data::generated::shapes::collision)
+                            == Some(data::types::Collision::Empty)
+                    {
+                        cells.push((d2 + (at[1] - feet[1]).pow(2), at));
+                    }
+                }
+            }
+        }
+        cells.sort();
+        for (_, at) in cells.into_iter().take(2) {
+            self.pearls.floor_tried.push(at);
+            let c = (at[0], at[1], at[2]);
+            let mut walk = Walk::new(c, Goal::Near { pos: c, range: 2.0 }, Arrive::Goal, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk to the forest floor at {at:?}"),
+                    "no burrow site here; a site is looked for from there".to_owned(),
+                );
+                return Some(Task::Explore(walk));
+            }
+        }
+        None
+    }
+
     /// The hunt's tasks, for a planner with no task in hand (agent P2's `EnderPhase::Hunt` calls
     /// this; so does `pearls_step`): the base (row 6), then the build row's walks and digs: a site
     /// found and walked to, the mouth reopened, a walk away after a move. `None` with nothing to
@@ -1600,15 +1692,17 @@ impl Plan {
             avoid.extend(self.pearls.moved_from.iter().copied());
             // A refused site is never tried again (within 1); a moved-from one is left by
             // `burrow_move` (a new place for spawns).
+            let seen: Vec<[f64; 3]> = self.pearls.sightings.iter().map(|(_, p)| *p).collect();
             let (found, why) = if self.pearls.moved_from.is_empty() {
-                burrow::site_avoiding(w, &w.memory, feet, &avoid, 1)
+                burrow::site_toward(w, &w.memory, feet, &avoid, 1, &seen)
             } else {
-                let (f, mut y) = burrow::site_avoiding(
+                let (f, mut y) = burrow::site_toward(
                     w,
                     &w.memory,
                     feet,
                     &self.pearls.moved_from,
                     r.burrow_move,
+                    &seen,
                 );
                 match f {
                     Some(b) if !self.pearls.refused.contains(&b.b) => (Some(b), y),
@@ -1639,7 +1733,12 @@ impl Plan {
                         ),
                     );
                 }
-                // Walk on, away from the last burrow (or the heading): somewhere else to look.
+                // Walk on to warped nylium seen (the forest's floor), never off into another biome
+                // (race 45534591345 lane 0 walked away from its feet on a cap into the basalt
+                // deltas, 71 blocks bridged, and died to a magma cube).
+                if let Some(t) = self.walk_to_forest_floor(w, tick, feet, &r) {
+                    return Some(t);
+                }
                 let from = self.pearls.moved_from.last().copied().unwrap_or(feet);
                 let goal = Goal::Away {
                     pos: (from[0], from[1], from[2]),
@@ -1668,8 +1767,10 @@ impl Plan {
                     b.b, b.dir[0], b.dir[1]
                 ),
                 format!(
-                    "nearest the feet {feet:?} within {}; refused: {reasons}",
-                    burrow::SITE_RADIUS
+                    "nearest the feet {feet:?} within {}; {} of {} endermen seen lately on the mouth's side; refused: {reasons}",
+                    burrow::SITE_RADIUS,
+                    burrow::side_score(b.b, b.dir, &seen),
+                    seen.len()
                 ),
             );
         }

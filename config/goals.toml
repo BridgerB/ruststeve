@@ -504,9 +504,11 @@ fight_cap = 2400
 # A kill at least this often, else the burrow moves; two moves without a kill end the hunt (18f).
 kill_window = 12000
 moves_without_kill = 2
-# No kill and no calm enderman in sight this long and the burrow moves (18e; to be sized from the
-# forest's supply probe, 18a.5), at least this far.
-burrow_idle_ticks = 6000
+# No kill and no calm enderman in sight this long and the burrow moves, at least this far: P1's
+# supply probe counted 18 endermen within 128 in 10 minutes and 0.4 new a minute, and the spot
+# matters threefold over 10 blocks; three dev-forest bots waited 3,300 to 4,000 ticks for one in the
+# mouth's sight (race 45534591345).
+burrow_idle_ticks = 2400
 burrow_move = 32
 # Ticks between site searches (the plan's risk 8: 24 cells round, not every tick).
 site_every = 100

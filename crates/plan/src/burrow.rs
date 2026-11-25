@@ -39,8 +39,10 @@ pub struct Burrow {
 
 /// Blocks round the feet a site is looked for in (the plan's 18e: nearest the feet within 24).
 pub const SITE_RADIUS: i32 = 24;
-/// Blocks above and below the feet a site's floor may lie: a forest floor's slope within a walk.
-pub const SITE_DY: i32 = 4;
+/// Blocks above and below the feet a site's floor may lie: a forest floor's slope within a walk,
+/// and the floor from a bot on a fungus's cap (race 45534591345 lane 0 stood at y 56 over a floor
+/// at 43 and found no site within 4).
+pub const SITE_DY: i32 = 8;
 /// Cells over O (and over its five outward neighbours) that must be clear: an enderman is 2.9
 /// tall and stands and teleports only where three cells are free (jar, `EnderMan.teleport`).
 pub const OPEN_OVER_O: i32 = 3;
@@ -300,6 +302,37 @@ pub fn site_avoiding(
     avoid: &[[i32; 3]],
     away: i32,
 ) -> (Option<Burrow>, Vec<(&'static str, u32)>) {
+    site_toward(w, mem, feet, avoid, away, &[])
+}
+
+/// Blocks within which a sighting counts toward a mouth's side (the provoke's reach, 36).
+pub const SIGHT_RANGE: f64 = 36.0;
+
+/// How many of `seen` (ticking endermen's feet) lie within `SIGHT_RANGE` of B on the mouth's
+/// side of the plane through B.
+pub fn side_score(b: [i32; 3], dir: [i32; 2], seen: &[[f64; 3]]) -> usize {
+    let c = Burrow::centre(b);
+    seen.iter()
+        .filter(|p| {
+            let (dx, dz) = (p[0] - c[0], p[2] - c[2]);
+            (dx * dx + dz * dz).sqrt() <= SIGHT_RANGE
+                && dx * f64::from(dir[0]) + dz * f64::from(dir[1]) > 0.0
+        })
+        .count()
+}
+
+/// `site_avoiding`, the nearest B taken with its mouth toward the side the most of `seen` lie on
+/// (endermen seen ticking lately: the mouth sees one way only, and three bots waited 3,300 to
+/// 4,000 ticks with endermen 15 to 30 off out of its line, race 45534591345); ties east, west,
+/// south, north.
+pub fn site_toward(
+    w: &World,
+    mem: &Memory,
+    feet: [i32; 3],
+    avoid: &[[i32; 3]],
+    away: i32,
+    seen: &[[f64; 3]],
+) -> (Option<Burrow>, Vec<(&'static str, u32)>) {
     let mut cand: Vec<(i32, [i32; 3])> = Vec::new();
     for dx in -SITE_RADIUS..=SITE_RADIUS {
         for dz in -SITE_RADIUS..=SITE_RADIUS {
@@ -326,7 +359,9 @@ pub fn site_avoiding(
         if !cells.standable(cell(c)) {
             continue;
         }
-        for dir in DIRS {
+        let mut dirs = DIRS;
+        dirs.sort_by_key(|d| std::cmp::Reverse(side_score(c, *d, seen)));
+        for dir in dirs {
             let b = Burrow::at(c, dir);
             match refuse(w, mem, &mut cells, &b) {
                 None => return (Some(b), why),
