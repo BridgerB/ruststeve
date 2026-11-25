@@ -58,8 +58,10 @@ pub const DROP_MAX: i32 = 2;
 /// Valid sites, nearest first, among which the cheapest (blocks to place, plus half the
 /// distance) is taken.
 pub const SITE_CHOICES: usize = 12;
-/// Blocks round O within which delta ground refuses a site.
-pub const DELTA_NEAR: i32 = 12;
+/// Blocks round O within which delta ground refuses a site: 3, not 12 (12 refused every site
+/// near the frontier, race 45556448579: no burrow in 4,800 ticks; the hostile hold keeps the
+/// bot in B when a magma cube comes).
+pub const DELTA_NEAR: i32 = 3;
 /// Ground of the basalt deltas a burrow never stands on.
 pub const DELTA_GROUND: &[BlockKind] = &[
     BlockKind::Basalt,
