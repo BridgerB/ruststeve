@@ -21,5 +21,19 @@ A case file from a race resumed at the frontier shows `stage reached: forest`, a
 - In `Travel`: no approach of endermen, no valley (the heading's valley signs are dropped too), no forest wait. A known forest is walked to by cell (`endermen::forest_target`: seen warped nylium in a known forest column with room for a body over it, within 12 of the feet's height first, then the nearest), ending within 1 of the cell; else the heading. A "to the forest" note every 1,200 ticks and every heading leg's note carry health, food, pickaxe uses and filler.
 - The feet's biome `warped_forest` moves to `Hunt` ("warped forest reached: on to the hunt"); `Plan::pearls_task` (P3) runs there (a stub returning `None` until it merges).
 
+## The rules chosen from 18a.2 (P1's geography, development knowledge only)
+From the frontier no compass axis to 640 crosses a warped forest; the nearest, about 516 blocks east-north-east at x 470 to 540, z -127 to 49, lies north of the east axis behind basalt deltas from x 160 to 640. The rules, written as what a player could see:
+- **Basalt deltas are crossed**, never a turn reason: they spawn no piglins or hoglins; a route never stands on a magma block (awkward, never a floor) and keeps 8 from a magma cube (`path::SHUN_MAGMA`). "heading crosses basalt deltas" once a heading.
+- **Crimson still turns** (hoglins, piglins hostile with no gold worn).
+- **In travel a fortress seen ahead turns** (12 or more nether bricks in the next 1 to 4 chunks of the axis, or a ticking blaze or wither skeleton ahead within 48): no healing, and blazes and wither skeletons live nowhere else.
+- **Past the endermen stage soul signs count for no axis**, and the heading's valley target is dropped.
+- Wither skeletons join the far route's shunned kinds; the radius is 24.
+- No axis rule here points east from the frontier: the heading's own choice (away from the explored, then the turns) decides, and that is the point of racing both snapshots.
+
 ## Walls
-(none yet)
+
+### 1. The first travel races (570fa62, before the forest stage merged: no `forest` snapshot possible)
+Races 45531575517 (frontier, 4 lanes) and 45531577912 (lane-2 snapshot, 2 lanes), cap 24,000.
+- **The hand-over works**: every read ledger has "endermen reached: on to the forest" and "out of the pocket to …" in 2 digs (2 pickaxe uses). A resumed frontier bot built a second pocket first (its roof block re-placed 16 times, "pocket given up" at 24): 240 ticks.
+- **Frontier lane 3** (`rs-l03-b00`): "heading chosen: (0, -1)" (away from the centroid of 111 seen columns at (76, 198)), turned at once to (-1, 0) by 503 crimson signs ahead; five legs west (walk and far walk, about 1 block placed a metre, no digs, 240 m), then into a second fortress (bricks x -320 to -180): "out of the fortress footprint" walked it along it, and a blaze's fireball and its fire took it from 12.5 to 5.6 at tick 3,900. It holds in a pocket with nothing to heal with. Fixed in 2daa2d8: in travel a fortress seen ahead turns the axis, and no footprint walk.
+- **Lane-2 snapshot, lane 1** (`rs-l01-b00`, health 17.1 throughout): north, crimson turns west twice, two tunnel legs over their dig budget (61 uses: 144 to 55), a re-choice and a crimson turn onto (1, 0); nine legs east, walk and far walk, about 0.8 placed a metre, "heading crosses basalt deltas" at x 197; at tick 7,160 "warped forest known" (chunk columns 29 to 33). The wall: from (437, 40, 4) at the end of its own bridge, 35 blocks short, every walk to a forest cell fails NoProgress at cell 0 with no block laid and every tunnel finds no route, from tick 8,500 on.

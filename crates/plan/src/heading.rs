@@ -221,6 +221,10 @@ pub struct Heading {
     pub valley: bool,
     /// Valleys reached: never run to again.
     pub valleys: Vec<(i32, i32)>,
+    /// Issue 18c: whether the column legs run to is a travel point (`travel_way`), and the
+    /// travel points' columns reached.
+    pub way: bool,
+    pub ways: Vec<(i32, i32)>,
     /// Set when the heading is over (a warped forest at the feet, or turned out).
     pub over: bool,
     /// Whether "heading crosses basalt deltas" was said.
@@ -236,6 +240,9 @@ pub struct Signs {
     /// A column with a soul sand valley's signs seen (soul sand and soul soil): the second
     /// choice, an enderman spawns there too (docs/problems/endermen.md, 17a).
     pub valley: Option<(i32, i32)>,
+    /// Issue 18c: the column of the next travel point (`travel_way`, known geography: Bridger
+    /// 2026-11-24), with the point.
+    pub way: Option<((i32, i32), (i32, i32))>,
 }
 
 // What memory and the world know (E1, issue 17b): seen columns, the forest and valleys known from
@@ -615,8 +622,29 @@ impl Plan {
                         .copied()
                 })
                 .flatten(),
+            way: self.travel_point(),
         };
         self.heading_with(w, signs, tick)
+    }
+
+    /// The next travel point not reached (`SurvivalRules::travel_way`), in travel only: its
+    /// column and the point.
+    fn travel_point(&self) -> Option<((i32, i32), (i32, i32))> {
+        if self.ender.phase != crate::endermen::EnderPhase::Travel {
+            return None;
+        }
+        let passed = self
+            .headed
+            .as_ref()
+            .map(|h| h.ways.clone())
+            .unwrap_or_default();
+        self.table
+            .as_ref()?
+            .survival
+            .travel_way
+            .iter()
+            .map(|[x, z]| ((x >> 4, z >> 4), (*x, *z)))
+            .find(|(c, _)| !passed.contains(c))
     }
 
     /// `heading_task` with what is known of biomes given: the tests' entry (the feet biome is
@@ -684,15 +712,39 @@ impl Plan {
         }
         // A forest known from blocks seen replaces the axis (and a valley): legs run to it.
         if let Some(col) = signs.forest
-            && (h.forest != Some(col) || h.valley)
+            && (h.forest != Some(col) || h.valley || h.way)
         {
             h.forest = Some(col);
             h.valley = false;
+            h.way = false;
             self.heading_leg_end(w, h, feet, tick, "replaced: a warped forest is known");
             self.note(
                 tick,
                 format!("heading to the warped forest at column {col:?}"),
                 "a forest known from warped blocks seen replaces the axis".to_owned(),
+            );
+        }
+        // Else (issue 18c, in travel) the next travel point: the world's known geography.
+        if signs.forest.is_none()
+            && let Some((col, point)) = signs.way
+            && h.forest != Some(col)
+        {
+            h.forest = Some(col);
+            h.valley = false;
+            h.way = true;
+            self.heading_leg_end(w, h, feet, tick, "replaced: a travel point");
+            self.note(
+                tick,
+                format!("heading to the travel point {point:?} at column {col:?}"),
+                format!(
+                    "known geography (travel_way; Bridger 2026-11-24); {} of {} reached; health \
+                     {:?}",
+                    h.ways.len(),
+                    self.table
+                        .as_ref()
+                        .map_or(0, |t| t.survival.travel_way.len()),
+                    w.player.health
+                ),
             );
         }
         // Else a soul sand valley known from soul blocks seen, once: endermen spawn there too.
@@ -727,7 +779,23 @@ impl Plan {
                         .forest
                         .filter(|_| h.leg.is_none() && feet_at_column(feet, h.forest))
                     {
-                        if h.valley {
+                        if h.way {
+                            // A travel point is passed: the next one, or the axis.
+                            h.ways.push(col);
+                            h.forest = None;
+                            h.way = false;
+                            self.note(
+                                tick,
+                                format!("travel point reached at column {col:?}"),
+                                format!(
+                                    "at {feet:?}; {}",
+                                    crate::endermen::travel_state(
+                                        w,
+                                        self.table.as_ref().map(|t| &t.survival)
+                                    )
+                                ),
+                            );
+                        } else if h.valley {
                             // The valley is crossed, not waited in: the axis goes on.
                             h.valleys.push(col);
                             h.forest = None;
