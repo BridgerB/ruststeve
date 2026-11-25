@@ -950,7 +950,8 @@ impl Plan {
         // >>> pearls (P3, the orchestrator 2026-11-24): a bot resumed in the warped forest with its
         // rods goes straight to the hunt, no issue-17 pocket first (the frontier race 45542558792:
         // all 8 bots walled themselves in at tick 40 in Reach, and the base found no way out).
-        if self.ender.phase != EnderPhase::Hunt
+        // In Reach only: from Travel, P2's hand-over below notes the forest reached.
+        if self.ender.phase == EnderPhase::Reach
             && craft::count(w, ItemKind::BlazeRod) >= crate::RODS_WANTED
             && (w.feet_biome() == Some("warped_forest")
                 || w.stage_reached
