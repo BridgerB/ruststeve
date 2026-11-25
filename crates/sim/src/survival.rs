@@ -714,6 +714,53 @@ impl Sim {
         self.spawn_item(stack, [px, py, pz], [vx, 0.2, vz], PICKUP_DELAY)
     }
 
+    /// Lay an item on the ground before the player joins (a parity row's `items`, issue 18: a
+    /// pearl at the mouth), at rest with no pickup delay, as the real side's `summon item …
+    /// {PickupDelay:0s}`. The join announces it.
+    pub fn place_item(&mut self, stack: Stack, pos: [f64; 3]) -> i32 {
+        let id = self.survival.next_id();
+        self.survival.items.insert(
+            id,
+            ItemEntity {
+                stack,
+                pos,
+                velocity: [0.0; 3],
+                on_ground: false,
+                pickup_delay: 0,
+                age: 0,
+            },
+        );
+        id
+    }
+
+    /// The items on the ground as the join tells a new player of them.
+    pub(crate) fn items_added(&self) -> Result<Vec<Wire>, EncodeError> {
+        let mut out = Vec::new();
+        for (id, it) in &self.survival.items {
+            let mut uuid = [0u8; 16];
+            uuid[12..].copy_from_slice(&id.to_be_bytes());
+            out.push(wire(
+                State::Play,
+                &S2c::AddEntity {
+                    id: *id,
+                    uuid,
+                    kind: data::EntityKind::Item.id(),
+                    x: it.pos[0],
+                    y: it.pos[1],
+                    z: it.pos[2],
+                },
+            )?);
+            out.push(wire(
+                State::Play,
+                &S2c::SetEntityData {
+                    id: *id,
+                    entries: vec![(ITEM_STACK_INDEX, MetaValue::Item(slot_of(Some(it.stack))))],
+                },
+            )?);
+        }
+        Ok(out)
+    }
+
     pub(crate) fn spawn_item(
         &mut self,
         stack: Stack,

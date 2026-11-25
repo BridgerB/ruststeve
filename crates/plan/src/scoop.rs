@@ -577,6 +577,7 @@ impl Scoop {
                             | Goal::Xz { .. }
                             | Goal::Away { .. }
                             | Goal::Afar { .. }
+                            | Goal::Plane { .. }
                             | Goal::Ahead { .. } => None,
                         };
                         if let (None, Some(pos)) = (aim, stand) {

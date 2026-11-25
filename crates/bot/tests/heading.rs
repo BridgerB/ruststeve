@@ -438,25 +438,27 @@ fn basalt_deltas_at_the_feet_are_crossed_not_turned_from() {
     assert_eq!(p.headed.as_ref().unwrap().dir, (1, 0));
 }
 
-/// A travel point (issue 18c, known geography) replaces the axis: the leg runs to its column; a
-/// forest known from blocks seen replaces the point.
+/// A travel point (issue 18c, known geography) aims the axis: the compass axis with the most of
+/// the way left; a forest known from blocks seen replaces it.
 #[test]
-fn a_travel_point_replaces_the_axis_and_a_seen_forest_replaces_it() {
-    let (w, mut p, feet) = joined();
+fn a_travel_point_aims_the_axis_and_a_seen_forest_replaces_it() {
+    let (w, mut p, _) = joined();
     let way = Signs {
-        way: Some(((2, 1), (40, 24))),
+        way: Some(((0, 6), (10, 100))),
         ..Signs::default()
     };
     assert!(p.heading_with(&w, way, 100).is_some(), "{:#?}", said(&p));
     assert!(
         said(&p)
             .iter()
-            .any(|n| n.contains("heading to the travel point (40, 24) at column (2, 1)")),
+            .any(|n| n.contains("heading to the travel point (10, 100) on (0, 1)")),
         "{:#?}",
         said(&p)
     );
-    let leg = p.headed.as_ref().and_then(|h| h.leg.clone()).unwrap();
-    assert_eq!(leg.target, (40, feet.1, 24), "the point's column centre");
+    let h = p.headed.as_ref().unwrap();
+    assert_eq!(h.dir, (0, 1));
+    assert!(h.way && h.forest.is_none());
+    assert_eq!(heading::aim((0, 64, 0), (100, -20)), (1, 0));
     let both = Signs {
         forest: Some((3, -1)),
         ..way

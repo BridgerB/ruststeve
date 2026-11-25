@@ -30,12 +30,26 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows).
-const TOLERANCE: usize = 162;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows).
+const TOLERANCE: usize = 168;
 /// A placed mob that ends farther than this from where it was put moved (it ticked).
 const MOB_MOVED: f64 = 0.5;
 /// An enderman's creepy flag (`EnderMan.DATA_CREEPY`, entity data 17).
 const CREEPY: u8 = 17;
+/// Its stared-at flag (`EnderMan.DATA_STARED_AT`, entity data 18).
+const STARED: u8 = 18;
+/// A living entity's health (`LivingEntity.DATA_HEALTH_ID`, entity data 9).
+const HEALTH: u8 = 9;
+/// Server ticks between a trace's lines (issue 18: where a placed mob went, over time).
+const TRACE_EVERY: u64 = 10;
+
+/// Whether an entity's boolean data `i` is true.
+fn flag(e: &world::Entity, i: u8) -> bool {
+    matches!(
+        e.metadata.get(&i),
+        Some(protocol::metadata::MetaValue::Bool(true))
+    )
+}
 
 struct Args {
     cmd: String,
@@ -190,13 +204,148 @@ fn mob_outcome(w: &World, kind: &str, at: [f64; 3]) -> MobOutcome {
         kind: kind.to_owned(),
         seen: found.is_some(),
         moved: found.is_some_and(|e| d(e.pos) > MOB_MOVED),
-        creepy: found.is_some_and(|e| {
-            matches!(
-                e.metadata.get(&CREEPY),
-                Some(protocol::metadata::MetaValue::Bool(true))
-            )
-        }),
+        creepy: found.is_some_and(|e| flag(e, CREEPY)),
+        stared: found.is_some_and(|e| flag(e, STARED)),
+        cell: found.map(|e| e.pos.map(|v| v.floor() as i32)),
     }
+}
+
+/// One line of a trace: the bot's feet and health, and every enderman and item within 32 (its
+/// id, feet, health, creepy and stared flags). Issue 18: a row that fails on the real server
+/// says what the enderman did, over time.
+fn trace_line(w: &World) -> Option<String> {
+    let body = w.body?;
+    let near = |p: [f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>() <= 1024.0;
+    let f = |p: [f64; 3]| format!("({:.2} {:.2} {:.2})", p[0], p[1], p[2]);
+    let others: String = w
+        .entities
+        .iter()
+        .filter(|(_, e)| {
+            near(e.pos) && matches!(e.kind, data::EntityKind::Enderman | data::EntityKind::Item)
+        })
+        .map(|(id, e)| {
+            let hp = match e.metadata.get(&HEALTH) {
+                Some(protocol::metadata::MetaValue::Float(h)) => format!(" hp {h}"),
+                _ => String::new(),
+            };
+            format!(
+                " | {:?} {id} {}{hp}{}{}{}",
+                e.kind,
+                f(e.pos),
+                if flag(e, CREEPY) { " creepy" } else { "" },
+                if flag(e, STARED) { " stared" } else { "" },
+                if e.dead { " dead" } else { "" }
+            )
+        })
+        .collect();
+    Some(format!(
+        "t {} bot {} hp {:?} look {:.1} {:.1}{others}",
+        w.ticks,
+        f(body.pos),
+        w.player.health,
+        w.controls.yaw,
+        w.controls.pitch.unwrap_or(w.player.pitch)
+    ))
+}
+
+/// A placed mob followed through a run by its entity id (issue 18): the first entity of its kind
+/// seen within `TRACK_NEAR` of where it was put, and the cells its feet were in at each trace
+/// sample. Its class takes the cell it was in most (an enderman at the mouth wanders a step and
+/// comes back: the last sample is luck), and never another of its kind (a natural spawn).
+struct Track {
+    kind: String,
+    at: [f64; 3],
+    id: Option<i32>,
+    cells: std::collections::BTreeMap<[i32; 3], u32>,
+}
+
+/// How near where it was put a placed mob is first found.
+const TRACK_NEAR: f64 = 32.0;
+
+fn tracks_of(spots: &[(String, [f64; 3])]) -> Vec<Track> {
+    spots
+        .iter()
+        .map(|(kind, at)| Track {
+            kind: kind.clone(),
+            at: *at,
+            id: None,
+            cells: std::collections::BTreeMap::new(),
+        })
+        .collect()
+}
+
+fn track_step(w: &World, tracks: &mut [Track]) {
+    for t in tracks.iter_mut() {
+        let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - t.at[i]).powi(2)).sum::<f64>().sqrt();
+        if t.id.is_none() {
+            t.id = w
+                .entities
+                .iter()
+                .filter(|(_, e)| {
+                    e.kind.name() == Some(t.kind.as_str()) && !e.dead && d(e.pos) <= TRACK_NEAR
+                })
+                .min_by(|a, b| d(a.1.pos).total_cmp(&d(b.1.pos)))
+                .map(|(id, _)| *id);
+        }
+        if let Some(e) = t.id.and_then(|id| w.entities.get(&id)).filter(|e| !e.dead) {
+            *t.cells
+                .entry(e.pos.map(|v| (v + 1e-7).floor() as i32))
+                .or_default() += 1;
+        }
+    }
+}
+
+/// The placed mobs' outcomes from their tracks, at the run's end.
+fn tracked(w: &World, tracks: &[Track]) -> Vec<MobOutcome> {
+    tracks
+        .iter()
+        .map(|t| {
+            let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - t.at[i]).powi(2)).sum::<f64>().sqrt();
+            let found = t.id.and_then(|id| w.entities.get(&id)).filter(|e| !e.dead);
+            let modal = t
+                .cells
+                .iter()
+                .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+                .map(|(c, _)| *c);
+            MobOutcome {
+                kind: t.kind.clone(),
+                seen: found.is_some(),
+                moved: found.is_some_and(|e| d(e.pos) > MOB_MOVED),
+                creepy: found.is_some_and(|e| flag(e, CREEPY)),
+                stared: found.is_some_and(|e| flag(e, STARED)),
+                cell: found.and(modal),
+            }
+        })
+        .collect()
+}
+
+/// A real run's trace, folded from its recording: a line every `TRACE_EVERY` ticks, and the
+/// placed mobs' tracks.
+fn trace_recording(path: &Path, tracks: &mut [Track]) -> Result<Vec<String>, String> {
+    let (_, records) = record::Recording::read_all(path)?;
+    let mut folder = record::Folder::new();
+    let mut lines = Vec::new();
+    let mut last = None;
+    for rec in &records {
+        match rec {
+            record::Record::Event(e) => {
+                folder.step(e)?;
+            }
+            record::Record::Checkpoint {
+                event_index, world, ..
+            } => {
+                folder.take_start(*event_index, world);
+            }
+            _ => continue,
+        }
+        let t = folder.world.ticks;
+        if t.is_multiple_of(TRACE_EVERY) && last != Some(t) {
+            last = Some(t);
+            lines.extend(trace_line(&folder.world));
+            track_step(&folder.world, tracks);
+        }
+    }
+    Ok(lines)
 }
 
 /// Where a moment's placed mobs go, absolute: the cell's middle on x and z.
@@ -267,6 +416,15 @@ fn script_or_aim(m: &Moment) -> Result<(Option<Script>, Option<plan::Aim>), Stri
     Script::parse(&m.script)
         .map(|s| (Some(s), None))
         .ok_or_else(|| format!("{}: no script {}", m.id, m.script))
+}
+
+/// A row's trace beside its result, `<id>.<tag>.trace.txt`.
+fn write_trace(out: &Path, id: &str, tag: &str, lines: &[String]) -> Result<(), String> {
+    std::fs::write(
+        out.join(format!("{id}.{tag}.trace.txt")),
+        lines.join("\n") + "\n",
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn save(out: &Path, r: &MomentResult) -> Result<(), String> {
@@ -349,6 +507,18 @@ fn real_waves(
                 .give
                 .iter()
                 .map(|g| format!("give {name} minecraft:{g}"))
+                .chain(m.fill.iter().map(|(b, x1, y1, z1, x2, y2, z2)| {
+                    let (x, y, z) = feet_cell(start);
+                    format!(
+                        "fill {} {} {} {} {} {} minecraft:{b}",
+                        x + x1,
+                        y + y1,
+                        z + z1,
+                        x + x2,
+                        y + y2,
+                        z + z2
+                    )
+                }))
                 .chain(m.set.iter().map(|(b, dx, dy, dz)| {
                     let (x, y, z) = feet_cell(start);
                     format!("setblock {} {} {} minecraft:{b}", x + dx, y + dy, z + dz)
@@ -366,10 +536,24 @@ fn real_waves(
                     )
                 }))
                 .chain(mob_spots(start, m).into_iter().map(|(e, p)| {
-                    // With its AI: kept, no loot (issue 17).
+                    // With its AI: kept, no loot unless the row keeps it (issue 17; 18's pearls).
+                    let loot = if m.loot {
+                        ""
+                    } else {
+                        "DeathLootTable:\"minecraft:empty\","
+                    };
                     format!(
-                        "summon minecraft:{e} {} {} {} {{DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b}}",
+                        "summon minecraft:{e} {} {} {} {{{loot}PersistenceRequired:1b}}",
                         p[0], p[1], p[2]
+                    )
+                }))
+                .chain(m.items.iter().map(|(item, dx, dy, dz)| {
+                    let (x, y, z) = feet_cell(start);
+                    format!(
+                        "summon minecraft:item {} {} {} {{Item:{{id:\"minecraft:{item}\",count:1}},PickupDelay:0s}}",
+                        f64::from(x + dx) + 0.5,
+                        y + dy,
+                        f64::from(z + dz) + 0.5
                     )
                 }))
                 .collect();
@@ -394,8 +578,13 @@ fn real_waves(
                     gives.iter().try_for_each(|g| {
                         for _ in 0..80 {
                             let reply = r.command(g)?;
-                            // A summon into a chunk not loaded yet says "Invalid position".
-                            if !reply.contains("not loaded") && !reply.contains("Invalid position")
+                            // A summon into a chunk not loaded yet says "Invalid position". A fill is
+                            // done only when the server says it filled ("Successfully filled", "No
+                            // blocks were filled"): issue 18's e05 once ran with no arena built.
+                            let filled = !g.starts_with("fill ") || reply.contains("filled");
+                            if filled
+                                && !reply.contains("not loaded")
+                                && !reply.contains("Invalid position")
                             {
                                 return Ok(());
                             }
@@ -422,22 +611,43 @@ fn real_waves(
             let id = m.id.clone();
             let watch = watched(start, m);
             let mobs = mob_spots(start, m);
-            handles.push((id, watch, mobs, std::thread::spawn(move || bot::run(opts))));
+            let traced = !m.mobs.is_empty() || !m.items.is_empty();
+            handles.push((
+                id,
+                watch,
+                mobs,
+                traced,
+                std::thread::spawn(move || bot::run(opts)),
+            ));
             std::thread::sleep(Duration::from_millis(500));
         }
-        for (id, watch, mobs, h) in handles {
+        for (id, watch, mobs, traced, h) in handles {
+            let trace_id = id.clone();
             let r = match h.join() {
                 Ok(Ok(o)) => MomentResult {
                     moment: id,
                     source: Source::Real,
                     commit: record::COMMIT.to_owned(),
-                    outcome: outcome(
-                        &o.world,
-                        o.teleports_at_script,
-                        o.min_health_in_script,
-                        &watch,
-                        &mobs,
-                    ),
+                    outcome: {
+                        let mut class = outcome(
+                            &o.world,
+                            o.teleports_at_script,
+                            o.min_health_in_script,
+                            &watch,
+                            &mobs,
+                        );
+                        if traced {
+                            let rsr = a.out.join(format!("{trace_id}.real.rsr"));
+                            let mut tracks = tracks_of(&mobs);
+                            let text = trace_recording(&rsr, &mut tracks)
+                                .unwrap_or_else(|e| vec![format!("no trace: {e}")]);
+                            write_trace(&a.out, &trace_id, "real", &text)?;
+                            if let Some(c) = class.as_mut() {
+                                c.mobs = tracked(&o.world, &tracks);
+                            }
+                        }
+                        class
+                    },
                     corrections: o
                         .teleports_at_script
                         .map_or(0, |t| o.world.session.teleports.saturating_sub(t)),
@@ -478,12 +688,27 @@ fn sim(a: &Args) -> Result<(), String> {
         let (captured, start) = start_of(a, &landings, m)?;
         let (script, aim) = script_or_aim(m)?;
         let mut world = captured.model(start)?;
-        for (b, dx, dy, dz) in &m.set {
-            let (x, y, z) = feet_cell(start);
-            let state = data::BlockKind::from_name(b)
+        let state_of = |b: &str| {
+            data::BlockKind::from_name(b)
                 .and_then(|k| k.info())
                 .map(|i| i.default_state)
-                .ok_or_else(|| format!("{}: no block {b}", m.id))?;
+                .ok_or_else(|| format!("{}: no block {b}", m.id))
+        };
+        for (b, x1, y1, z1, x2, y2, z2) in &m.fill {
+            let (x, y, z) = feet_cell(start);
+            let state = state_of(b)?;
+            for (cx, cy, cz) in (*x1.min(x2)..=*x1.max(x2)).flat_map(|cx| {
+                (*y1.min(y2)..=*y1.max(y2))
+                    .flat_map(move |cy| (*z1.min(z2)..=*z1.max(z2)).map(move |cz| (cx, cy, cz)))
+            }) {
+                world
+                    .set_block(x + cx, y + cy, z + cz, state)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        for (b, dx, dy, dz) in &m.set {
+            let (x, y, z) = feet_cell(start);
+            let state = state_of(b)?;
             world
                 .set_block(x + dx, y + dy, z + dz, state)
                 .map_err(|e| e.to_string())?;
@@ -533,12 +758,28 @@ fn sim(a: &Args) -> Result<(), String> {
                 "enderman" => {
                     let id = model.summon_enderman(p);
                     if let Some(mob) = model.survival.life.mobs.get_mut(&id) {
-                        mob.loot = false;
+                        mob.loot = m.loot;
                     }
                 }
                 other => return Err(format!("{}: the model places no {other} with its AI", m.id)),
             }
         }
+        for (item, dx, dy, dz) in &m.items {
+            let (x, y, z) = feet_cell(start);
+            let kind = data::ItemKind::from_name(item)
+                .ok_or_else(|| format!("{}: no item {item}", m.id))?;
+            model.place_item(
+                (kind, 1),
+                [
+                    f64::from(x + dx) + 0.5,
+                    f64::from(y + dy),
+                    f64::from(z + dz) + 0.5,
+                ],
+            );
+        }
+        let traced = !m.mobs.is_empty() || !m.items.is_empty();
+        let mut trace = Vec::new();
+        let mut tracks = tracks_of(&mob_spots(start, m));
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
         let run = bot::lockstep::run_acting(
             model,
@@ -546,15 +787,24 @@ fn sim(a: &Args) -> Result<(), String> {
             i as u64 + 1,
             SETTLE + m.ticks,
             SETTLE,
-            |w, t| match (&mut planner, script) {
-                (Some(p), _) => {
-                    let c = p.step(w);
-                    (c, p.take_acts())
+            |w, t| {
+                if traced && w.ticks.is_multiple_of(TRACE_EVERY) {
+                    trace.extend(trace_line(w));
+                    track_step(w, &mut tracks);
                 }
-                (None, Some(s)) => (s.controls(t), s.acts(t, w)),
-                (None, None) => (physics::Controls::default(), Vec::new()),
+                match (&mut planner, script) {
+                    (Some(p), _) => {
+                        let c = p.step(w);
+                        (c, p.take_acts())
+                    }
+                    (None, Some(s)) => (s.steer(t, w), s.acts(t, w)),
+                    (None, None) => (physics::Controls::default(), Vec::new()),
+                }
             },
         );
+        if traced {
+            write_trace(&a.out, &m.id, "sim", &trace)?;
+        }
         let r = MomentResult {
             moment: m.id.clone(),
             source: Source::Sim,
@@ -565,7 +815,13 @@ fn sim(a: &Args) -> Result<(), String> {
                 run.min_health_in_script,
                 &watched(start, m),
                 &mob_spots(start, m),
-            ),
+            )
+            .map(|mut c| {
+                if traced {
+                    c.mobs = tracked(&run.world, &tracks);
+                }
+                c
+            }),
             corrections: run
                 .teleports_at_script
                 .map_or(0, |t| run.world.session.teleports.saturating_sub(t)),
