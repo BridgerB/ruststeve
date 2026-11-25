@@ -73,6 +73,13 @@ pub struct Moment {
     /// model's target, and the bearing the real eye's line is judged against).
     #[serde(default)]
     pub stronghold: Option<(i32, i32)>,
+    /// The row's class takes the end portal frames memory holds (issue 19, y03).
+    #[serde(default)]
+    pub frames: bool,
+    /// Armour worn from the start, by item name (`iron_chestplate`): `item replace entity ...
+    /// armor.<slot>` in real, the model's slot and armour points in sim (issue 19, y04).
+    #[serde(default)]
+    pub armor: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -89,6 +96,11 @@ pub struct Moments {
 pub struct Landing {
     pub x: i32,
     pub z: i32,
+    /// Columns captured round it each way, when not the capture's `--radius` (issue 19: a
+    /// stronghold's landing is captured to the view distance, so a bot 100 off still has the
+    /// portal room's chunks).
+    #[serde(default)]
+    pub radius: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +181,17 @@ pub struct Outcome {
     /// The thrown eye of ender's outcome, for a row that throws one (issue 19, y01 and y02).
     #[serde(default)]
     pub eye: Option<EyeOutcome>,
+    /// The end portal frames memory holds at the end, for a row that asks (issue 19, y03).
+    #[serde(default)]
+    pub frames: Option<FramesOutcome>,
+}
+
+/// The end portal frames the bot's memory holds (sightings: an exposed face in chunk data), and
+/// the ring's centre: the middle of their box on the plane, at their height.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FramesOutcome {
+    pub count: u32,
+    pub centre: Option<[i32; 3]>,
 }
 
 /// What became of an eye of ender the bot threw (issue 19, docs/problems/eyes-model.md), as the
@@ -238,6 +261,7 @@ pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
                     ("blocks", a.blocks != b.blocks),
                     ("mobs", a.mobs != b.mobs),
                     ("eye", a.eye != b.eye),
+                    ("frames", a.frames != b.frames),
                 ]
                 .into_iter()
                 .filter_map(|(n, d)| d.then_some(n))
@@ -296,7 +320,10 @@ pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
                     }
                 )
             });
-            let held = held + &life + &mobs + &eye;
+            let frames = o.frames.as_ref().map_or_else(String::new, |f| {
+                format!(" frames {} centre {:?}", f.count, f.centre)
+            });
+            let held = held + &life + &mobs + &eye + &frames;
             format!(
                 "{:?} {} {} {} {:?}{held}",
                 o.cell,

@@ -98,6 +98,7 @@ fn write_the_nether_exit_fixture() {
         landing: results::parity::Landing {
             x: body[0].floor() as i32,
             z: body[2].floor() as i32,
+            radius: None,
         },
         radius: (x1 - x0).max(z1 - z0),
         columns,

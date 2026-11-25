@@ -22,6 +22,8 @@ Q3's throw, read and triangulation (`eyes-throw.md`) and Q4's dig into the porta
 
 ## The model (19g)
 - **The eye's flight** (`crates/sim/src/eye.rs`): the rules above, the stronghold's point told to the model (`Sim::with_stronghold`; a parity row's `stronghold`, from `locate`). Its place is sent every 4 ticks (the entity type's update interval). Tests: `crates/sim/tests/eyes.rs`, `crates/bot/tests/eyes.rs`.
+- **The synthetic stronghold** (`crates/sim/src/stronghold.rs`): `stronghold_world(radius, ground_y, origin, corridor)` lays the template's room (piece-local origin, door to the north) and a corridor north of the door in flat rock and returns its `Room` (frames, centre, floor_y, lava, spawner, door, infested). For Q4's tests of frames found, the dig to the floor, never over the pool, infested bricks never dug.
+- **Row plumbing for y03 and y04**: a landing may carry its own capture `radius`; a row may ask for `frames` (the class: frames memory holds and the ring's centre) and wear `armor`; script `break:<finish>:<dx>:<dy>:<dz>` digs a block beside the feet.
 - Not modelled: the frame fill (`useOn`), the eye's sounds and particles, the item entity's push out of a block when the eye ends inside terrain.
 
 ## Walls
