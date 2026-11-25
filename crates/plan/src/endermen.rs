@@ -99,6 +99,21 @@ pub enum EnderPhase {
     Travel,
     /// The feet in a warped forest: the base, the burrow and the hunt (issue 18d to 18f).
     Hunt,
+    /// Issue 19d (docs/problems/eyes-home.md): 12 pearls held under the race. The top-up, the
+    /// eyes, the kit for the overworld, the trip back to the entry portal, the climb and the food
+    /// (`crate::home`); over once fed on the overworld's surface.
+    Home,
+}
+
+impl EnderPhase {
+    /// Whether the bot is on a trip through the Nether (issue 18c's travel, issue 19d's way home):
+    /// the far route's shunned mobs, the tunnel's spare uses and the fortress turn apply.
+    pub fn travels(self) -> bool {
+        match self {
+            EnderPhase::Travel | EnderPhase::Home => true,
+            EnderPhase::Reach | EnderPhase::Hunt => false,
+        }
+    }
 }
 
 /// Blocks a forest target may lie above or below the feet before a lower or higher one is
@@ -221,6 +236,11 @@ pub struct EnderState {
     pub fortress: Option<(i32, i32, i32, i32)>,
     #[serde(default)]
     pub fortress_at: Option<u64>,
+    // >>> home (Q2, issue 19d)
+    /// The way home's state (`crate::home`).
+    #[serde(default)]
+    pub home: crate::home::HomeState,
+    // <<< home
 }
 
 /// One enderman as the planner sees it.
@@ -779,7 +799,7 @@ impl Plan {
         // >>> pearls (P3, issue 18f): in the hunt the hunt's rows answer a provoked enderman
         // (from the burrow, or a capped pocket with none built: P4's closed loop held this
         // pocket to the cap).
-        if self.pearls.started {
+        if self.pearls.started && !self.home_hunt_over() {
             return None;
         }
         // <<< pearls
@@ -984,6 +1004,14 @@ impl Plan {
                 ),
             );
         }
+        // >>> home (Q2, issue 19d): 12 pearls held under the race and the way home begins.
+        if self.ender.phase == EnderPhase::Hunt {
+            self.home_begin(w, tick);
+        }
+        if self.ender.phase == EnderPhase::Home {
+            return self.home_task(w, tick).unwrap_or(Task::Idle);
+        }
+        // <<< home
         if self.ender.phase == EnderPhase::Hunt {
             return self.pearls_task(w, tick).unwrap_or(Task::Idle);
         }
@@ -1407,7 +1435,7 @@ impl Plan {
         let found = match tries {
             0 => {
                 let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
-                walk.more.shun = self.ender.phase == EnderPhase::Travel;
+                walk.more.shun = self.ender.phase.travels();
                 walk.route_now(w, tick).then_some((walk, "a plain route"))
             }
             1 => {

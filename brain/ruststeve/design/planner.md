@@ -5,8 +5,8 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@3c35c72 clojurecraft@be85a92
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@25a0729 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -76,6 +76,9 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 
 ## Issue 15
 - The `fortress` aim (`Aim::Fortress`, a goal aim for its table and relocation): met when the feet are within `FORTRESS_NEAR` 6 of a nether-brick cell on record (`world::stage::at_fortress`); a walk to the nearest brick seen only on a found route, else `dig_toward` it (stairs down when below, a level tunnel else, three stalls refuse it), else explore. `dig_toward` is shared with the water bank's stairs (portal wall 40). Walking on partial routes across the Nether killed half the bots (fortress wall 3).
+
+## Issue 19d: the way home
+- `nether_task` asks `home_race_task` first ([[way-home]]): under the race, from 12 pearls in the Nether to fed on the overworld's surface. `Task::Enter` is done in any dimension other than the one it began in (`Enter::from`; none reads as the overworld).
 
 ## See also
 - [[phases-and-task-stack]] - the design this begins.

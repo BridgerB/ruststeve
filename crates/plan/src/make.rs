@@ -223,6 +223,10 @@ pub struct Goals {
     #[serde(default)]
     pub base: crate::base::Base,
     // <<< base
+    // >>> home (Q2, issue 19d): `[home]`, the way home's numbers.
+    #[serde(default)]
+    pub home: crate::home::HomeRules,
+    // <<< home
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -569,6 +573,9 @@ pub struct Table {
     // >>> base
     pub base: crate::base::Base,
     // <<< base
+    // >>> home
+    pub home: crate::home::HomeRules,
+    // <<< home
 }
 
 impl Table {
@@ -768,6 +775,9 @@ impl Table {
                 valley_wait_ticks: g.survival.valley_wait_ticks,
             },
             base: g.base.clone(),
+            // >>> home
+            home: g.home.clone(),
+            // <<< home
         })
     }
 
@@ -1188,6 +1198,7 @@ mod tests {
             survival: Survival::default(),
             pearls: crate::pearls::PearlRules::default(),
             base: crate::base::Base::default(),
+            home: crate::home::HomeRules::default(),
         };
         Table::new(&g).unwrap()
     }

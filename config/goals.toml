@@ -721,4 +721,74 @@ down_tries = 24
 wait_ticks = 200
 pause_ticks = 6000
 pause_max = 1
+# >>> home (Q2, issue 19d): the way home's kit, made in the forest after the top-up
+# (plan::base::HOME_STEPS). 16 stems are 64 planks: a carried table 4, two spare wooden pickaxes 6
+# and their sticks, 8 sticks for stone pickaxes on the overworld climb (2 each), a placed table 4,
+# and the rest for tables and sticks on the way (the plan's 19d.1). Warped planks do not burn.
+home_logs = 16
+home_sticks = 8
+# Two spare wooden pickaxes (59 uses each) for the climb from the overworld portal at about y -50
+# (the plan's 19d.6), each counted only with spare_uses' 40 uses or more left.
+home_picks = 2
+home_pick_uses = 40
+# <<< home
 # <<< base
+# >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home's goal rows, run by the base
+# machinery in the forest (plan::base::HOME_STEPS). Each makes one more of its provide a run.
+[[goal]]
+id = "home-eyes"
+priority = 16
+until = "home-eyes"
+doc = "one more eye of ender: a pearl and blaze powder (from a rod) in the 2x2 grid; Q3's eyes row is used first when the table holds it"
+provides = [["item:ender_eye", 1]]
+
+[[goal]]
+id = "home-sticks"
+priority = 16
+until = "home-sticks"
+doc = "four more sticks from warped planks, for the overworld's stone pickaxes"
+provides = [["item:stick", 4]]
+
+[[goal]]
+id = "home-table"
+priority = 16
+until = "home-table"
+doc = "a crafting table to carry home (four warped planks), held, not placed"
+provides = [["item:crafting_table", 1]]
+
+[home]
+# Pearls the top-up hunts to before the trip, and its clock from Home's start (Bridger,
+# 2026-11-25: 14 pearls so the 7 rods make 14 eyes, every throw spending issue 20's margin;
+# bounded at 6,000 ticks, five game minutes, as the plan's 19d.1).
+pearls_wanted = 14
+top_up_ticks = 6000
+# Way points (x, z) before the portal, known geography (Bridger's ruling of 2026-11-24). None
+# yet: the heading runs straight at the portal until Q1's read of the snapshot's memory and the
+# strip map says whether the deltas want points (docs/problems/eyes-home.md).
+way = []
+# The entry portal by geography, used only when memory holds no nether_portal sighting. Q1's
+# probe 45686594347 read the frontier snapshot's memory: nether_portal blocks at x 22 to 23, y 34
+# to 36, z -20, still lit, so memory is the way and this is the fallback: the lower inside cell.
+portal = [22, 34, -20]
+# The far lookup reads memory's index this many chunk columns round the feet: 48 is 768 blocks,
+# past the forest's 475 from the portal with room.
+portal_chunks = 48
+portal_every = 1200
+# Within this many blocks on the plane of the portal the approach replaces the heading: the
+# heading's own POINT_REACH (24).
+approach = 24
+note_every = 1200
+# Fed: natural healing needs food 18 (vanilla; plan::eat::HEALS_FROM). Then a rest toward 18
+# health for at most two game minutes before the eyes' phase.
+fed = 18
+heal_to = 18.0
+heal_ticks = 2400
+# Walks to look for animals on the surface before the look waits (overworld-leg wall 6: six
+# failed walks in a row end its look; twelve here, the way home has no other food).
+animal_walks = 12
+# Stone pickaxe uses under which the climb makes more from the stairs' cobblestone (a stair up
+# opens about three blocks: 30 is ten stairs' warning), at most pick_runs times (120 blocks of
+# climb at 3 a stair is about 360 uses, three stone pickaxes, with room).
+climb_pick_uses = 30
+pick_runs = 8
+# <<< home

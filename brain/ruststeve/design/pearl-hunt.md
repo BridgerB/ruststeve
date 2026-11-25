@@ -6,7 +6,7 @@ tags: [plan, pearls, endermen, burrow, combat, rules]
 aliases: [burrow, pearls hunt, provoke, pearls_task, pearls_step, keep_off_except, B M O]
 status: draft
 lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@31545c1
+verifiedAgainst: ruststeve@25a0729
 sourceRefs:
   - "ruststeve:crates/plan/src/burrow.rs#pub fn site_avoiding("
   - "ruststeve:crates/plan/src/burrow.rs#pub fn missing(w: &World, b: &Burrow) -> Vec<[i32; 3]> {"
@@ -25,6 +25,8 @@ related:
 # The pearl hunt
 
 Issue 18 (#23): twelve pearls from a bot that cannot heal (food 17, nothing to eat), so the hunt is built never to be hit. Rebuilt from a written problem statement (`docs/problems/pearls.md`, `docs/problems/pearls-hunt.md`), not ported from clojurecraft's 70 rows ([[cc-pearls-rule-table]]).
+
+In the way home (issue 19d, [[way-home]]) the hunt runs on as the top-up: `pearl_rules` gives `[home] pearls_wanted` (14) in `EnderPhase::Home`, and `hunting` is false once the top-up ends (14 held or `top_up_ticks`), so the pearls-done row never ends the race there.
 
 ## Key files
 - `crates/plan/src/burrow.rs` (pure): `Burrow { b, m, o, dir }`, `site`/`site_avoiding` (chosen by cell, nearest the feet within 24), `refuse` (why a site is not one), `missing` (the shell's blocks not there, read from the world each time).

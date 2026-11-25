@@ -25,6 +25,9 @@ pub mod endermen;
 pub mod escape;
 // >>> heading (E2, issue 17d)
 pub mod heading;
+// >>> home (Q2, issue 19d)
+pub mod home;
+// <<< home
 // <<< heading
 pub mod hold;
 pub mod hunt;
@@ -90,18 +93,24 @@ pub struct Enter {
     cell: Cell,
     /// The tick the feet were first in a portal block.
     inside_since: Option<u64>,
+    // >>> home (Q2, issue 19d): the dimension the walk began in; done once it differs. A task
+    // from before the field (none: tasks are not in a snapshot) reads as the overworld's.
+    #[serde(default)]
+    from: Option<String>,
+    // <<< home
 }
 
 impl Enter {
     /// Done once the world is in another dimension than the portal's; while the feet are in a
     /// portal block, stand still (a step out resets the game's count); else walk on.
     fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {
-        if w.dimension
-            .as_ref()
-            .is_some_and(|d| d.name != "minecraft:overworld")
-        {
+        // >>> home (Q2, issue 19d): done in any dimension other than the one it began in (the
+        // way home enters from the Nether).
+        let from = self.from.as_deref().unwrap_or("minecraft:overworld");
+        if w.dimension.as_ref().is_some_and(|d| d.name != from) {
             return (Controls::default(), TaskStatus::Done);
         }
+        // <<< home
         // Between dimensions the world holds no body: wait for it.
         let Some(body) = w.body else {
             return (Controls::default(), TaskStatus::Running);
@@ -2386,6 +2395,12 @@ impl Plan {
         {
             return Task::Idle;
         }
+        // >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home, in either dimension;
+        // `None` when not on it or once it is over.
+        if let Some(t) = self.home_race_task(w, tick) {
+            return t;
+        }
+        // <<< home
         if w.dimension
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
@@ -2502,6 +2517,7 @@ impl Plan {
                     walk,
                     cell: c,
                     inside_since: None,
+                    from: w.dimension.as_ref().map(|d| d.name.clone()),
                 }));
             }
             self.refuse(c, tick);

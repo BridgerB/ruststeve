@@ -3,7 +3,7 @@ title: Design
 type: moc
 tags: [moc, design]
 status: verified
-lastUpdated: 2026-11-15
+lastUpdated: 2026-11-25
 related:
   - "[[ruststeve/_moc|ruststeve]]"
 ---
@@ -52,6 +52,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.
+- [[way-home]] - from 12 pearls in the forest back through the entry portal to the overworld surface, fed (issue 19d).
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
 - [[parity-table]] - captured worlds, 160 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.
