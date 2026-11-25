@@ -132,6 +132,7 @@ fn hunter(w: &mut World, b: Burrow) -> Plan {
     w.held = 0;
     let mut p = Plan::with_table(Aim::Race, table());
     p.ender.left = true;
+    p.ender.phase = plan::endermen::EnderPhase::Hunt;
     p.base.over = true;
     p.pearls.burrow = Some(b);
     p.pearls.built = true;
@@ -417,7 +418,7 @@ fn outside_the_hunt_the_rows_do_nothing() {
     let o = Burrow::centre(b.o);
     enderman(&mut w, 54, [o[0], o[1], o[2]], true);
     let mut p = hunter(&mut w, b);
-    p.ender.left = false;
+    p.ender.phase = plan::endermen::EnderPhase::Travel;
     w.ticks = 100;
     p.step(&w);
     assert!(
@@ -436,6 +437,7 @@ fn a_hunter_with_no_burrow_finds_a_site_and_builds_from_b() {
     w.held = 0;
     let mut p = Plan::with_table(Aim::Race, table());
     p.ender.left = true;
+    p.ender.phase = plan::endermen::EnderPhase::Hunt;
     p.base.over = true;
     w.ticks = 100;
     p.step(&w);

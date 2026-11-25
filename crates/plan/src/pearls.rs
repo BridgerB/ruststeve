@@ -212,6 +212,9 @@ pub struct PearlState {
     /// Forest floor cells walked to (or tried) for a new site search.
     #[serde(default)]
     pub floor_tried: Vec<[i32; 3]>,
+    /// Weapon uses spent in fights, summed at each kill.
+    #[serde(default)]
+    pub weapon_spent: u64,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -477,11 +480,10 @@ impl Plan {
             .map_or_else(PearlRules::default, |t| t.pearls.clone())
     }
 
-    /// Whether the hunt runs: agent P2's `EnderPhase::Hunt`, or after the leave walk once the feet
-    /// are in a warped forest (a bot resumed there), and from then on.
-    pub(crate) fn hunting(&mut self, w: &World) -> bool {
-        let hunt = self.ender.phase == endermen::EnderPhase::Hunt;
-        if !self.pearls.started && (hunt || (self.ender.left && endermen::in_forest(w))) {
+    /// Whether the hunt runs: agent P2's `EnderPhase::Hunt` (its hand-over, "warped forest reached:
+    /// on to the hunt"), and from then on.
+    pub(crate) fn hunting(&mut self, _w: &World) -> bool {
+        if !self.pearls.started && self.ender.phase == endermen::EnderPhase::Hunt {
             self.pearls.started = true;
         }
         self.pearls.started
@@ -779,9 +781,13 @@ impl Plan {
             self.pearls.moves_no_kill = 0;
             self.pearls.fight = None;
             let held = craft::count(w, ItemKind::EnderPearl).max(1);
-            let weapon = self.pearls.start_weapons - weapon_uses(w);
-            let filler = self.pearls.start_filler - endermen::filler_held(w);
-            let picks = self.pearls.start_picks - endermen::pickaxe_uses_left(w);
+            // Weapon uses spent fight by fight (the base makes swords after the hunt begins: race
+            // 45537373222 wrote -245 a pearl from the run's start).
+            self.pearls.weapon_spent +=
+                u64::try_from((f.weapon_before - weapon_uses(w)).max(0)).unwrap_or(0);
+            let weapon = i32::try_from(self.pearls.weapon_spent).unwrap_or(i32::MAX);
+            let filler = (self.pearls.start_filler - endermen::filler_held(w)).max(0);
+            let picks = (self.pearls.start_picks - endermen::pickaxe_uses_left(w)).max(0);
             self.note(
                 tick,
                 format!("enderman {} killed", f.id),

@@ -59,6 +59,7 @@ fn forest_with(ticks: u64, lay: impl Fn(&mut Stage), summon: impl Fn(&mut Sim)) 
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
     let mut plan = Plan::with_table(Aim::Race, table);
     plan.ender.left = true;
+    plan.ender.phase = plan::endermen::EnderPhase::Hunt;
     // The base (P5's row 6) waits for stems the model forest has none of: over, the burrow next.
     plan.base.over = true;
     let mut stage = Stage::new(4, FLOOR, FLOOR + 20);
