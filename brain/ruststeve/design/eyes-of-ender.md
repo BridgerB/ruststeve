@@ -6,12 +6,13 @@ tags: [plan, eyes, stronghold, triangulation, crafting]
 aliases: [eyes, eye of ender, throw, Task::Throw, fix, triangulation, eyes_task, eyes_craft_task, eyes_way, EyeRules]
 status: draft
 lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@25a0729
+verifiedAgainst: ruststeve@c271faf
 sourceRefs:
   - "ruststeve:crates/plan/src/eyes.rs#pub fn fix_why(lines: &[Line]) -> Result<Fix, Refusal> {"
   - "ruststeve:crates/plan/src/eyes.rs#pub fn due(rules: &EyeRules, k: &Known<'_>, feet: [f64; 2]) -> Option<Why> {"
   - "ruststeve:crates/plan/src/eyes.rs#pub fn eyes_row(table: &make::Table, counts: &make::Counts) -> Option<make::Row> {"
   - "ruststeve:config/goals.toml#id = \"eyes\""
+  - "ruststeve:crates/results/src/snapshot.rs#pub fn read_eyes(path: &Path) -> Result<plan::eyes::Kept, String> {"
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[goal-table-and-needs]]"
@@ -35,3 +36,9 @@ Each line weighs `1 / (range * spread)^2`, its range the distance to the last cr
 
 ## The policy
 Throw 1 on the surface (open sky, no hostile within 16, by day); throw 2 once 200 out and 140 across the first line; a refine only at the fix with no frame seen; at most 4. `Plan.fix`, `Plan.throws` and `Plan.eyes` are serde-defaulted; `eyes_kept`/`restore_eyes` carry them across a snapshot.
+
+## Where the eye comes down (Q5's parity 45688030470)
+On the server the line is exact (8 throws within 0.0006 degrees), so the fix's error is only where the bot stood. The eye reaches 12.15 out and 8.18 up in 34 to 38 ticks and drops from there. A throw with a bearing waits until that column (`apex_blocked`: 12 out, from the feet's level up 9.1) has no solid block seen, and a drop that comes to rest more than 2 over the feet is given up at once (`rests_high`) instead of walked to for 600 ticks. The first throw has no bearing and goes unchecked.
+
+## Across a snapshot
+Every `StageUp` carries `eyes_kept()`; `race` writes it as `eyes.rsw` beside `memory.rsw` (MessagePack with named fields, zstd: `results::snapshot::write_eyes`). On a resume `race` reads `eyes.rsw` from the `--memory` file's directory (`read_eyes`; a snapshot without it reads as no lines and no fix) and passes it in `Opts.eyes`; the run restores it into the planner before the first tick, which notes `eyes: restored` with the lines and the fix at tick 0. Test: `results` `the_eyes_round_trip_through_the_snapshot_files`.

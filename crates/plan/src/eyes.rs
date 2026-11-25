@@ -49,6 +49,10 @@ pub struct EyeRules {
     pub pickup_rise: i32,
     pub pickup_ticks: u64,
     pub pickup_walks: u32,
+    pub rest_rise: f64,
+    pub rest_ticks: u64,
+    pub apex_out: f64,
+    pub apex_up: f64,
     pub max_throws: u32,
     pub baseline: f64,
     pub baseline_across: f64,
@@ -84,6 +88,10 @@ impl Default for EyeRules {
             pickup_rise: 2,
             pickup_ticks: 600,
             pickup_walks: 3,
+            rest_rise: 2.0,
+            rest_ticks: 8,
+            apex_out: 12.0,
+            apex_up: 9.1,
             max_throws: 4,
             baseline: 200.0,
             baseline_across: 140.0,
@@ -537,6 +545,30 @@ pub fn frames_seen(w: &World, rules: &EyeRules) -> bool {
     !world::stage::kind_near(w, BlockKind::EndPortalFrame, rules.frame_chunks).is_empty()
 }
 
+/// The first solid block seen (loaded, with a collision box, a face showing) in the column the
+/// eye drops through: `apex_out` along `bearing` from the feet, from the feet's level up to
+/// `apex_up` over them. A canopy or a cliff there holds the dropped eye out of reach (Q5's parity
+/// 45688030470); `None` when the column is clear.
+pub fn apex_blocked(
+    w: &World,
+    feet: [f64; 3],
+    bearing: [f64; 2],
+    rules: &EyeRules,
+) -> Option<path::Cell> {
+    let dir = unit(bearing)?;
+    let x = (feet[0] + dir[0] * rules.apex_out).floor() as i32;
+    let z = (feet[2] + dir[1] * rules.apex_out).floor() as i32;
+    let (low, high) = (
+        feet[1].floor() as i32,
+        (feet[1] + rules.apex_up).floor() as i32,
+    );
+    (low..=high).map(|y| (x, y, z)).find(|&(x, y, z)| {
+        w.state_at(world::BlockPos::new(x, y, z)).is_some()
+            && w.solid(x, y, z).is_some()
+            && crate::escape::exposed(w, (x, y, z))
+    })
+}
+
 /// Where a throw stands.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Phase {
@@ -554,7 +586,28 @@ pub enum Phase {
         since: u64,
         walks: u32,
         walk: Box<Walk>,
+        /// The drop's height and the tick it last changed: at rest once unchanged `rest_ticks`.
+        #[serde(default)]
+        rest: Option<(f64, u64)>,
     },
+}
+
+/// Whether a drop at `y` has come to rest more than `rest_rise` over the feet, out of reach.
+/// `rest` is updated with the height and the tick it last changed.
+fn rests_high(
+    rest: &mut Option<(f64, u64)>,
+    y: f64,
+    feet_y: f64,
+    rules: &EyeRules,
+    tick: u64,
+) -> bool {
+    match rest {
+        Some((h, _)) if (*h - y).abs() < 1e-3 => {}
+        _ => *rest = Some((y, tick)),
+    }
+    rest.is_some_and(|(h, since)| {
+        tick.saturating_sub(since) >= rules.rest_ticks && h - feet_y > rules.rest_rise
+    })
 }
 
 /// Why a throw failed.
@@ -808,6 +861,7 @@ impl Throw {
                             since: tick,
                             walks: 1,
                             walk: Box::new(pickup_walk(at_pos, rules.pickup_rise, tick)),
+                            rest: None,
                         };
                     } else {
                         out.said.push((
@@ -840,10 +894,13 @@ impl Throw {
                 since,
                 walks,
                 walk,
+                rest,
             } => {
                 let picked = w.pickups.iter().any(|p| p.item_entity == *item);
                 let lying = w.entities.get(item).map(|e| e.pos);
                 let back = craft::count(w, ItemKind::EnderEye) >= self.eyes_before;
+                let high =
+                    !picked && lying.is_some_and(|p| rests_high(rest, p[1], feet[1], rules, tick));
                 if picked || (lying.is_none() && back) {
                     out.said.push((
                         "eye picked up".to_owned(),
@@ -854,6 +911,20 @@ impl Throw {
                         ),
                     ));
                     self.end = Some(End::Kept);
+                    out.status = ThrowStatus::Done;
+                } else if let (true, Some(p)) = (high, lying) {
+                    out.said.push((
+                        "eye pickup given up: rests high".to_owned(),
+                        format!(
+                            "at rest at ({:.1}, {:.1}, {:.1}), {:.1} over the feet (over {}): a canopy or a ledge",
+                            p[0],
+                            p[1],
+                            p[2],
+                            p[1] - feet[1],
+                            rules.rest_rise
+                        ),
+                    ));
+                    self.end = Some(End::Lost);
                     out.status = ThrowStatus::Done;
                 } else if lying.is_none() || tick.saturating_sub(*since) > rules.pickup_ticks {
                     out.said.push((
@@ -956,8 +1027,24 @@ impl Plan {
         }
     }
 
-    /// The eyes' state read back on a resume.
+    /// The eyes' state read back on a resume, noted at tick 0 (the run's start) so a resume's
+    /// carried lines are counted in the ledger.
     pub fn restore_eyes(&mut self, kept: Kept) {
+        self.note(
+            0,
+            "eyes: restored".to_owned(),
+            format!(
+                "{} lines, fix {}",
+                kept.throws.len(),
+                kept.fix.map_or_else(
+                    || "none".to_owned(),
+                    |f| format!(
+                        "{:.0},{:.0} (along {:.0}, across {:.0})",
+                        f.point[0], f.point[1], f.err_along, f.err_across
+                    )
+                )
+            ),
+        );
         self.fix = kept.fix;
         self.throws = kept.throws;
         self.eyes = kept.state;
@@ -1042,6 +1129,22 @@ impl Plan {
             .fix
             .and_then(|f| unit(sub(f.point, flat)))
             .or_else(|| self.throws.iter().rev().find_map(|l| unit(l.dir)));
+        // The drop's column on the bearing: a throw with no bearing yet (the first) cannot know
+        // where its eye comes down, and goes; the rest-height rule bounds what that one loses.
+        if let Some(cell) = bearing.and_then(|b| apex_blocked(w, feet, b, &rules)) {
+            if self.eyes_note_due(tick, rules.note_every) {
+                self.eyes.noted_at = Some(tick);
+                self.note(
+                    tick,
+                    format!("eye throw {} ({}) waits", self.eyes.thrown + 1, why.name()),
+                    format!(
+                        "the drop's column {} out on the bearing is blocked at {cell:?} (a canopy or a cliff)",
+                        rules.apex_out
+                    ),
+                );
+            }
+            return None;
+        }
         let t = Throw::new(w, why, bearing, &rules, tick);
         self.note(
             tick,
@@ -1172,6 +1275,28 @@ mod tests {
 
     fn miss(f: &Fix, t: [f64; 2]) -> f64 {
         norm(sub(f.point, t))
+    }
+
+    /// Q5's parity 45688030470: a drop resting on a canopy at feet +4 is given up once still for
+    /// `rest_ticks`; one falling past that height, or resting within 2, is walked to.
+    #[test]
+    fn a_drop_resting_over_the_reach_is_given_up_and_a_falling_one_is_not() {
+        let r = EyeRules::default();
+        let feet = 64.0;
+        // Falling: a new height every 4 ticks, through feet +9 to feet +4 and on down.
+        let mut rest = None;
+        for (i, y) in [73.0, 71.5, 69.0, 66.0, 64.0].into_iter().enumerate() {
+            assert!(!rests_high(&mut rest, y, feet, &r, 100 + 4 * i as u64));
+        }
+        // On the canopy at feet +4: given up once still for `rest_ticks`, not before.
+        let mut rest = None;
+        assert!(!rests_high(&mut rest, 68.0, feet, &r, 200));
+        assert!(!rests_high(&mut rest, 68.0, feet, &r, 204));
+        assert!(rests_high(&mut rest, 68.0, feet, &r, 208));
+        // Still at feet +1.5: within reach, walked to however long it lies.
+        let mut rest = None;
+        assert!(!rests_high(&mut rest, 65.5, feet, &r, 300));
+        assert!(!rests_high(&mut rest, 65.5, feet, &r, 900));
     }
 
     #[test]
