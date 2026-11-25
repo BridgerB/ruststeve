@@ -270,7 +270,7 @@ fn endermen_holds_within_32_of_one_that_ticks() {
     assert_eq!(world::stage::enderman_near(&w).map(|(id, _)| id), Some(41));
     assert_eq!(w.stage_reached, Some(Stage::Endermen));
     assert_eq!(Stage::from_name("endermen"), Some(Stage::Endermen));
-    assert_eq!(Stage::ALL.len(), 16);
+    assert_eq!(Stage::ALL.len(), 17);
 }
 
 /// An enderman near but frozen (its chunk beyond the simulation distance) does not count, and
