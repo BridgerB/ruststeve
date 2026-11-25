@@ -187,6 +187,9 @@ pub const FILLER: &[data::ItemKind] = &[
     data::ItemKind::Andesite,
     data::ItemKind::Tuff,
     data::ItemKind::Dirt,
+    // The deltas' walls, bridge blocks since issue 19d (plan::path::BRIDGE_BLOCKS).
+    data::ItemKind::Basalt,
+    data::ItemKind::Blackstone,
 ];
 
 /// The filler held, every kind together.
