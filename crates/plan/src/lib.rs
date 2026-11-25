@@ -5725,9 +5725,13 @@ pub fn own_heading(feet: Cell, pool: Option<Cell>, legs: u32) -> (i32, i32) {
 /// A dry staircase's turns from water, for its ending note (overworld-leg wall 7); empty for
 /// any other staircase or none.
 fn water_turns(st: &Stairs) -> String {
-    match st.water_refusals() {
+    let water = match st.water_refusals() {
         0 => String::new(),
         n => format!(" ({n} turned from water beside)"),
+    };
+    match st.cave_refusals() {
+        0 => water,
+        n => format!("{water} ({n} turned from a cave ahead)"),
     }
 }
 

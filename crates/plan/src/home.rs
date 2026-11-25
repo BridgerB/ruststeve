@@ -124,6 +124,9 @@ pub struct HomeState {
     pub arrived_at: Option<u64>,
     #[serde(default)]
     pub climb_begun: bool,
+    /// Where the climb began (the feet's cell): the rock rule's start.
+    #[serde(default)]
+    pub climb_from: Option<Cell>,
     #[serde(default)]
     pub surface_at: Option<u64>,
     #[serde(default)]
@@ -1103,6 +1106,7 @@ impl Plan {
     fn home_climb(&mut self, w: &World, tick: u64, r: &HomeRules) -> Option<Task> {
         if !self.ender.home.climb_begun {
             self.ender.home.climb_begun = true;
+            self.ender.home.climb_from = w.body.map(|b| path::feet_cell(b.pos));
             let s = self.home_state(w);
             self.note(
                 tick,
@@ -1144,7 +1148,13 @@ impl Plan {
         {
             return Some(t);
         }
-        if let Some(t) = self.stairs_to_surface(w, tick) {
+        if let Some(mut t) = self.stairs_to_surface(w, tick) {
+            // Dry and in rock: a stair breaking into a cave or beside water turns its heading
+            // (the cave band, y -57 to 33 round the overworld portal: Q1's probe 45688112814).
+            if let Task::Stairs(s) = &mut t {
+                s.dry = true;
+                s.rock = self.ender.home.climb_from;
+            }
             return Some(t);
         }
         // Every heading refused: begin the round again later.

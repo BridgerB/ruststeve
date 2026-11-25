@@ -543,3 +543,36 @@ fn from_the_north_side_the_portal_is_not_walked_into() {
         "{n:?}"
     );
 }
+
+#[test]
+fn the_climbs_stairs_turn_from_a_cave_ahead() {
+    // Stone to y 95; the feet in a cell cut at y 40; a cave east, where the first stair would cut.
+    let mut w = world(
+        home::OVERWORLD,
+        0,
+        column(BlockKind::Stone, 6),
+        [8.5, 40.0, 8.5],
+    );
+    kit(&mut w);
+    for y in 40..=41 {
+        set(&mut w, (8, y, 8), BlockKind::Air);
+    }
+    for y in 41..=43 {
+        set(&mut w, (9, y, 8), BlockKind::CaveAir);
+    }
+    // The climb began far off: the rock rule holds here.
+    let mut s = plan::stairs::Stairs::up((1, 0), 0);
+    s.rock = Some((40, 40, 40));
+    let _ = s.step(&w, 1);
+    assert!(
+        s.cave_refusals() >= 1 && s.dir != (1, 0),
+        "{:?} {:?}",
+        s.refusals,
+        s.dir
+    );
+    // Within ROCK_FROM of where it began (the portal's room) the open cells are no cave.
+    let mut s = plan::stairs::Stairs::up((1, 0), 0);
+    s.rock = Some((8, 40, 8));
+    let _ = s.step(&w, 1);
+    assert_eq!(s.cave_refusals(), 0, "{:?}", s.refusals);
+}

@@ -115,6 +115,12 @@ pub struct Stairs {
     /// 20,000 ticks (race 45343519424 lane 2). Lava beside is refused for every staircase.
     #[serde(default)]
     pub dry: bool,
+    /// Stairs in rock only (the way home's climb, docs/problems/eyes-home.md; overworld-leg wall
+    /// 1: never through the caves): a stair whose cells to cut are already open breaks into a cave
+    /// and is refused, once the feet are more than `ROCK_FROM` from this cell (where the climb
+    /// began: the portal's own room is open).
+    #[serde(default)]
+    pub rock: Option<Cell>,
     /// Steps of a travel tunnel steered straight after their walk failed, and blocks laid: said
     /// in the task's end note.
     #[serde(default)]
@@ -218,6 +224,11 @@ fn full(k: Option<BlockKind>) -> bool {
 
 /// The head of a dry staircase's water refusal, counted for the ledger.
 pub const WATER_BESIDE: &str = "water beside";
+/// The head of a rock staircase's cave refusal, counted for the ledger.
+pub const CAVE_AT: &str = "cave at";
+/// Blocks on the plane from where a rock climb began within which open cells are not a cave: the
+/// overworld portal's room (its frame is 4 wide, the room a block or two round it).
+pub const ROCK_FROM: i32 = 4;
 
 const SIDES: [(i32, i32, i32); 6] = [
     (1, 0, 0),
@@ -340,6 +351,7 @@ impl Stairs {
             dug: 0,
             from: None,
             dry: false,
+            rock: None,
             steered: 0,
             laid: 0,
             cut_tries: 0,
@@ -347,8 +359,15 @@ impl Stairs {
         }
     }
 
-    /// `refusal`, and for a dry staircase water beside a cut cell as well.
-    fn refused(&self, w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
+    /// `refusal`, for a dry staircase water beside a cut cell as well, and for a rock staircase
+    /// away from its start a cell to cut that is already open (a cave).
+    fn refused(&self, w: &World, feet: Cell, cells: &[Cell], floor: Cell) -> Option<String> {
+        if let Some(from) = self.rock
+            && (feet.0 - from.0).abs().max((feet.2 - from.2).abs()) > ROCK_FROM
+            && let Some(c) = cells.iter().find(|c| open(kind(w, **c)))
+        {
+            return Some(format!("{CAVE_AT} {c:?}"));
+        }
         refusal(w, cells, floor).or_else(|| {
             if !self.dry {
                 return None;
@@ -362,6 +381,14 @@ impl Stairs {
                 })
                 .map(|c| format!("{WATER_BESIDE} {c:?}"))
         })
+    }
+
+    /// How many of this staircase's refusals were a cave ahead.
+    pub fn cave_refusals(&self) -> usize {
+        self.refusals
+            .iter()
+            .filter(|r| r.starts_with(CAVE_AT))
+            .count()
     }
 
     /// How many of this staircase's refusals were water beside a cut cell.
@@ -467,7 +494,7 @@ impl Stairs {
                 let to = (x + dx, y - 1, z + dz);
                 (to, vec![(x + dx, y + 1, z + dz), (x + dx, y, z + dz), to])
             };
-            match self.refused(w, &cells, (to.0, to.1 - 1, to.2)) {
+            match self.refused(w, feet, &cells, (to.0, to.1 - 1, to.2)) {
                 None => {
                     return Ok(StairStage::Cut {
                         cells,
@@ -489,7 +516,7 @@ impl Stairs {
             let (dx, dz) = self.dir;
             let to = (x + dx, y, z + dz);
             let cells = vec![(x + dx, y + 1, z + dz), to];
-            match self.refused(w, &cells, (to.0, to.1 - 1, to.2)) {
+            match self.refused(w, feet, &cells, (to.0, to.1 - 1, to.2)) {
                 None => {
                     self.level_steps += 1;
                     return Ok(StairStage::Cut {
