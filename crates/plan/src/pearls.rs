@@ -12,7 +12,7 @@
 //! | 6 | `base` | the forest base not done (`base_task`, agent P5) | its steps |
 //! | 7 | `build` | no burrow, the bot out of it, a block missing or the mouth closed | find, walk to, build, mend, reopen |
 //! | 8 | `provoke` | in M, a calm ticking enderman 6 to 36 off in sight, none angry | its eye until the creepy flag, at most `provoke_ticks` server ticks; then B |
-//! | 9 | `wait` | none of the above | in M, eyes level; the burrow moved after `burrow_idle_ticks` |
+//! | 9 | `wait` | none of the above | at O, the yaw sweeping, eyes level; the burrow moved after `burrow_idle_ticks` with none within `seen_near` |
 //!
 //! Progress invariants (each writes a note when it fires): provoke tries per enderman; a fight's
 //! health-fall window, its parked target and its cap with the mouth sealed; a kill per
@@ -67,6 +67,9 @@ pub struct PearlRules {
     pub breach_near: f64,
     pub near_o: f64,
     pub base_wait_ticks: u64,
+    pub seen_near: f64,
+    pub restock_below: i32,
+    pub restock_to: i32,
     pub threat_hold_ticks: u64,
     pub base_retry_ticks: u64,
     pub calm_range: f64,
@@ -102,6 +105,9 @@ impl Default for PearlRules {
             breach_near: 4.0,
             near_o: 8.0,
             base_wait_ticks: 600,
+            seen_near: 40.0,
+            restock_below: 60,
+            restock_to: 120,
             threat_hold_ticks: 1200,
             base_retry_ticks: 6000,
             calm_range: 16.0,
@@ -127,6 +133,11 @@ pub const BURROW_BLOCKS: &[ItemKind] = &[
 const BUILD_EVERY: u64 = 10;
 /// A step to a cell's middle is done this near it, on the plane.
 const STEP_DONE: f64 = 0.2;
+/// Burrow blocks held, every kind together.
+pub fn burrow_filler(w: &World) -> i32 {
+    BURROW_BLOCKS.iter().map(|k| craft::count(w, *k)).sum()
+}
+
 /// The middle of the endermen seen, as a cell, or `None` with none.
 fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
     if seen.is_empty() {
@@ -140,6 +151,8 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 
 /// Blocks from the feet a forest floor cell walked to lies at least (a new place to search).
 const FLOOR_MIN: i32 = 8;
+/// Ticks of one yaw sweep at O.
+const SWEEP_TICKS: u64 = 400;
 /// Blocks a walk on for a new site goes at least.
 const WALK_ON: i32 = 24;
 /// Blocks within which an angry enderman, ticking or frozen, stops a new provoke.
@@ -255,6 +268,14 @@ pub struct PearlState {
     /// Pearl items seen within 12 of O, by id (each noted once).
     #[serde(default)]
     pub drops: Vec<i32>,
+    /// Ticks waited at O, and when an enderman was last within `seen_near` of B.
+    #[serde(default)]
+    pub at_o_ticks: u64,
+    #[serde(default)]
+    pub last_near: Option<u64>,
+    /// Filler is being restocked (netherrack dug near the burrow).
+    #[serde(default)]
+    pub restock: bool,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -714,7 +735,7 @@ impl Plan {
             && !b.inside(feet)
             && flat(body.pos, Burrow::centre(b.b)) <= r.collect_reach + 1.0
             && matches!(self.task, Task::Idle)
-            && (self.pearls.provoke_from.is_none() || !angry.is_empty())
+            && (!angry.is_empty() || (self.pearls.provoke_from.is_none() && feet != b.o))
         {
             // An angry one with the bot out (a provoke from O): straight back to B.
             if !angry.is_empty() {
@@ -774,11 +795,9 @@ impl Plan {
             return None;
         }
         let provoking_out = self.pearls.provoke_from.is_some();
-        if self
-            .pearls
-            .burrow
-            .is_some_and(|b| b.inside(feet) || (provoking_out && feet == b.o))
-            && let Some(c) = self.row_standing(w, tick, &r, feet)
+        if self.pearls.burrow.is_some_and(|b| {
+            b.inside(feet) || (self.pearls.built && feet == b.o) || (provoking_out && feet == b.o)
+        }) && let Some(c) = self.row_standing(w, tick, &r, feet)
         {
             return Some(c);
         }
@@ -1435,6 +1454,21 @@ impl Plan {
             });
             return match self.place_burrow(w, tick, &missing, "burrow") {
                 Placed::Building | Placed::Done => Some(look(b.out_yaw(), 0.0)),
+                Placed::Cannot("no burrow block held") => {
+                    if !self.pearls.restock {
+                        self.pearls.restock = true;
+                        self.note(
+                            tick,
+                            "no burrow block held: restock".to_owned(),
+                            format!(
+                                "{} filler; netherrack dug near until {}",
+                                endermen::filler_held(w),
+                                r.restock_to
+                            ),
+                        );
+                    }
+                    None
+                }
                 Placed::Cannot(why) => {
                     self.refuse_site(tick, b, why);
                     Some(Controls::default())
@@ -1464,8 +1498,18 @@ impl Plan {
         // The hunt's clocks: a kill a `kill_window`, else the burrow moves.
         let last = self.pearls.last_kill.or(self.pearls.since).unwrap_or(tick);
         let idle = tick.saturating_sub(last);
-        let calm_near = !provoke_candidates(w, eye_in(b.m), r).is_empty();
-        if idle >= r.kill_window || (idle >= r.burrow_idle_ticks && !calm_near) {
+        // Moves are the expensive thing now (filler): only when no enderman has been seen within
+        // `seen_near` of B for `burrow_idle_ticks` (or no kill in `kill_window`).
+        let bc = Burrow::centre(b.b);
+        if endermen::endermen(w)
+            .iter()
+            .any(|s| dist(s.pos, bc) <= r.seen_near)
+        {
+            self.pearls.last_near = Some(tick);
+        }
+        let quiet = tick.saturating_sub(self.pearls.last_near.unwrap_or(last).max(last));
+        let calm_near = quiet < r.burrow_idle_ticks;
+        if idle >= r.kill_window || quiet >= r.burrow_idle_ticks {
             self.move_burrow(tick, r, b, idle, calm_near);
             return Some(Controls::default());
         }
@@ -1508,18 +1552,34 @@ impl Plan {
                 craft::count(w, ItemKind::EnderPearl)
             ),
         );
+        // At O, not in M: O sees all round where M sees one cone, and a calm enderman is harmless
+        // unless stared at (keep_off guards every look); the yaw sweeps 90 either side of the
+        // mouth's line every `SWEEP_TICKS` (the orchestrator; every burrow of race 45548022681
+        // waited 2,400 ticks with endermen 25 to 60 off out of M's sight).
         if feet == b.o {
-            self.pearls.provoke_from = None;
-            return Some(step_to(pos, b.m).0);
-        }
-        if feet == b.b && self.step_out_ok(tick, r) {
-            return Some(step_to(pos, b.m).0);
-        }
-        if feet == b.m {
-            let (c, _) = step_to(pos, b.m);
-            if c.forward {
+            let (c, there) = step_to(pos, b.o);
+            if !there {
                 return Some(c);
             }
+            self.pearls.at_o_ticks += 1;
+            self.pearl_note(
+                tick,
+                "at o",
+                "waiting at O".to_owned(),
+                format!(
+                    "{} ticks waited at O in the run, {} provokes, {} kills",
+                    self.pearls.at_o_ticks, self.pearls.provokes, self.pearls.kills
+                ),
+            );
+            #[allow(clippy::cast_precision_loss)]
+            let phase = (tick % SWEEP_TICKS) as f64 / SWEEP_TICKS as f64 * std::f64::consts::TAU;
+            return Some(look(b.out_yaw() + 90.0 * phase.sin(), 0.0));
+        }
+        if feet == b.b && self.step_out_ok(tick, r) {
+            return Some(step_to(pos, b.o).0);
+        }
+        if feet == b.m {
+            return Some(step_to(pos, b.o).0);
         }
         Some(look(b.out_yaw(), 0.0))
     }
@@ -1907,6 +1967,51 @@ impl Plan {
         None
     }
 
+    /// A walk to dig exposed netherrack (or nylium, which drops netherrack to a pickaxe) near the
+    /// feet, with a pickaxe above the reserve; `None` with none (noted once a `NOTE_EVERY`).
+    fn restock_task(&mut self, w: &World, tick: u64, filler: i32) -> Option<Task> {
+        let reserve = self
+            .table
+            .as_ref()
+            .map_or(0, |t| t.survival.pickaxe_reserve);
+        let uses = endermen::pickaxe_uses_left(w);
+        if uses <= reserve {
+            self.pearl_note(
+                tick,
+                "restock",
+                "no restock: the pickaxe reserve".to_owned(),
+                format!("{uses} pickaxe uses left, reserve {reserve}; {filler} filler"),
+            );
+            return None;
+        }
+        let kinds = [data::BlockKind::Netherrack, data::BlockKind::WarpedNylium];
+        let cands: Vec<path::Cell> = crate::exposed_near(w, &kinds)
+            .into_iter()
+            .filter(|c| !self.refused_now(*c, tick))
+            .take(3)
+            .collect();
+        for c in cands {
+            let mut walk = Walk::to_dig(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("restock: dig {c:?}"),
+                    format!("{filler} filler held; {uses} pickaxe uses left (reserve {reserve})"),
+                );
+                return Some(Task::ToLog(walk));
+            }
+            self.refuse(c, tick);
+        }
+        self.pearl_note(
+            tick,
+            "restock",
+            "no restock: no netherrack seen with a way".to_owned(),
+            format!("{filler} filler held"),
+        );
+        None
+    }
+
     /// A dig out of a pocket: with every side of the feet shut at the feet or the head, the shut
     /// cells on the side whose standing run beyond is longest (`cover::open_runs` from the cell
     /// beside), the feet's level first. `None` with a side open.
@@ -1992,6 +2097,23 @@ impl Plan {
             }
         }
         let feet = arr(path::stand_cell(w, body.pos));
+        // Filler low (under `restock_below`, or a burrow block wanted and none held): netherrack
+        // dug near with a pickaxe above the reserve, until `restock_to`.
+        let filler = burrow_filler(w);
+        if filler < r.restock_below {
+            self.pearls.restock = true;
+        }
+        if filler >= r.restock_to {
+            self.pearls.restock = false;
+        }
+        if self.pearls.restock {
+            if let Some(t) = self.restock_task(w, tick, filler) {
+                return Some(t);
+            }
+            if filler == 0 {
+                return None;
+            }
+        }
         // Walled in where it stands (a pocket of its own from before the hunt): out by the side
         // whose floor beyond runs longest, one block at a time.
         if self.pearls.burrow.is_none()

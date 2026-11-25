@@ -55,6 +55,9 @@ pub const LAVA_NEAR: i32 = 4;
 /// step).
 pub const DROP_NEAR: i32 = 3;
 pub const DROP_MAX: i32 = 2;
+/// Valid sites, nearest first, among which the cheapest (blocks to place, plus half the
+/// distance) is taken.
+pub const SITE_CHOICES: usize = 12;
 /// Ground of the basalt deltas a burrow never stands on.
 pub const DELTA_GROUND: &[BlockKind] = &[
     BlockKind::Basalt,
@@ -404,7 +407,14 @@ pub fn site_toward_skipping(
     cand.sort();
     let mut cells = Cells::new(w);
     let mut why: Vec<(&'static str, u32)> = Vec::new();
-    for (_, c) in cand {
+    // The nearest `SITE_CHOICES` sites, then the one with the fewest blocks to place for its
+    // distance: a burrow cut into solid ground costs a few blocks, one on open floor 38, and a
+    // move leaves its shell behind (P4's closed loop ran out of filler near the cap).
+    let mut found: Vec<(i32, Burrow)> = Vec::new();
+    for (d2, c) in cand {
+        if found.len() >= SITE_CHOICES {
+            break;
+        }
         // Most cells are rock or air: a standing cell first, before any direction.
         if !cells.standable(cell(c)) {
             continue;
@@ -414,7 +424,13 @@ pub fn site_toward_skipping(
         for dir in dirs {
             let b = Burrow::at(c, dir);
             match refuse(w, mem, &mut cells, &b) {
-                None => return (Some(b), why),
+                None => {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let d = f64::from(d2).sqrt() as i32;
+                    let cost = i32::try_from(missing(w, &b).len()).unwrap_or(i32::MAX) + d / 2;
+                    found.push((cost, b));
+                    break;
+                }
                 Some(r) => match why.iter_mut().find(|(k, _)| *k == r) {
                     Some(e) => e.1 += 1,
                     None => why.push((r, 1)),
@@ -422,5 +438,6 @@ pub fn site_toward_skipping(
             }
         }
     }
-    (None, why)
+    let best = found.iter().min_by_key(|(cost, _)| *cost).map(|(_, b)| *b);
+    (best, why)
 }
