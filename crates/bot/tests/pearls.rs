@@ -138,7 +138,8 @@ impl Hunt {
     }
 }
 
-/// A warped forest cavern 4 chunks round the origin and the forest kit of the frontier's other
+/// A warped forest cavern 7 chunks round the origin (4 put the burrow searches against the
+/// cavern's edge: "no burrow site" at x 69 of 79) and the forest kit of the frontier's other
 /// snapshot (race-45481633896 lane 2 moved to the forest: no coal, an iron sword, a shield, a
 /// porkchop, 263 filler, two stone pickaxes, 7 rods, iron armour), the planner hunting from the
 /// start (the base over: the model forest has no stems). `natural` spawns the forest's endermen.
@@ -155,9 +156,9 @@ fn hunt(
     plan.ender.left = true;
     plan.ender.phase = plan::endermen::EnderPhase::Hunt;
     plan.base.over = true;
-    let mut stage = Stage::new(4, FLOOR, FLOOR + 20);
+    let mut stage = Stage::new(7, FLOOR, FLOOR + 20);
     stage
-        .biome((-64, 79), (-64, 79), Biome::WarpedForest)
+        .biome((-112, 127), (-112, 127), Biome::WarpedForest)
         .spawn((0, FEET, 0));
     lay(&mut stage);
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(seed);
