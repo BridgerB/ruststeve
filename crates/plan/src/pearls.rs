@@ -190,6 +190,77 @@ pub fn near_delta(w: &World, c: [i32; 3], r: i32) -> bool {
     })
 }
 
+/// The nearest delta ground to `c` on the plane (Chebyshev rings, the floor two down to the
+/// level), within `r`: the forest's edge, where magma cubes and ghasts come from.
+pub fn delta_distance(w: &World, c: [i32; 3], r: i32) -> Option<i32> {
+    (0..=r).find(|k| {
+        (-k..=*k).any(|dx| {
+            (-k..=*k).any(|dz| {
+                (dx.abs().max(dz.abs()) == *k)
+                    && (-2..=0).any(|dy| {
+                        w.block_at(world::BlockPos::new(c[0] + dx, c[1] + dy, c[2] + dz))
+                            .is_some_and(|b| burrow::DELTA_GROUND.contains(&b))
+                    })
+            })
+        })
+    })
+}
+
+/// Places to search for a site from besides the feet: warped nylium seen within `SUPPLY_REACH`
+/// (one a chunk column) with the most endermen seen within 40, at least 16 from the feet, the
+/// best `ANCHORS`.
+fn supply_anchors(w: &World, seen: &[[f64; 3]], feet: [i32; 3]) -> Vec<[i32; 3]> {
+    let Some(dim) = w.dimension.as_ref() else {
+        return Vec::new();
+    };
+    let r = SUPPLY_REACH >> 4;
+    let mut v: Vec<(usize, [i32; 3])> = Vec::new();
+    for dx in -r..=r {
+        for dz in -r..=r {
+            let cells = w
+                .memory
+                .indexed_in_column(
+                    &dim.name,
+                    (feet[0] >> 4) + dx,
+                    (feet[2] >> 4) + dz,
+                    data::BlockKind::WarpedNylium,
+                )
+                .unwrap_or_default();
+            let Some(c) = cells.iter().min_by_key(|c| (c.1 - feet[1]).abs()) else {
+                continue;
+            };
+            let at = [c.0, c.1 + 1, c.2];
+            let d2 = (at[0] - feet[0]).pow(2) + (at[2] - feet[2]).pow(2);
+            if !(16 * 16..=SUPPLY_REACH * SUPPLY_REACH).contains(&d2) {
+                continue;
+            }
+            let p = Burrow::centre(at);
+            let n = seen.iter().filter(|s| flat(**s, p) <= 40.0).count();
+            v.push((n, at));
+        }
+    }
+    v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    v.into_iter().take(ANCHORS).map(|(_, c)| c).collect()
+}
+
+/// A site's expected supply in view: endermen seen within 40 of O, a quarter of the open floor
+/// cells round O within 8 (the full circle), less 10 with delta ground within 16.
+pub fn supply_score(w: &World, seen: &[[f64; 3]], b: Burrow) -> i64 {
+    let o = Burrow::centre(b.o);
+    let n = i64::try_from(seen.iter().filter(|s| flat(**s, o) <= 40.0).count()).unwrap_or(0);
+    let mut cells = path::Cells::new(w);
+    let mut open = 0i64;
+    for dx in -8..=8 {
+        for dz in -8..=8 {
+            if dx * dx + dz * dz <= 64 && cells.standable((b.o[0] + dx, b.o[1], b.o[2] + dz)) {
+                open += 1;
+            }
+        }
+    }
+    let delta = if near_delta(w, b.o, 16) { 10 } else { 0 };
+    n + open / 4 - delta
+}
+
 /// A provoke's distance band: 6 to 16 (it walks), 16 to 36, 36 to 64 (the jar's follow range;
 /// past 16 it teleports toward the bot).
 pub fn band(d: f64) -> usize {
@@ -243,12 +314,17 @@ const ANGRY_PRESENT: f64 = 128.0;
 /// target: such a hurt teleports it (the 26.1.2 jar), and the frontier race 45544744907's one
 /// provoke stared 80 server ticks at one that magma was hurting and teleporting.
 const HURT_SKIP: u64 = 100;
+/// Blocks round the feet the site search looks for places with endermen seen, and how many.
+const SUPPLY_REACH: i32 = 64;
+const ANCHORS: usize = 3;
 /// Ticks a site moved from is avoided by the site search.
 const MOVED_KEPT: u64 = 6000;
+/// Blocks out to which the burrow's note measures the nearest delta ground.
+const DELTA_MEASURE: i32 = 32;
 /// Blocks from delta ground a forest-floor walk target keeps.
 const DELTA_AVOID: i32 = 8;
 /// Ticks a sighting is kept for the mouth's side.
-const SIGHTINGS_KEPT: u64 = 600;
+const SIGHTINGS_KEPT: u64 = 2400;
 /// Ticks one step out of B takes at most, counted as one step.
 const STEP_OUT_TICKS: u64 = 40;
 /// Ticks between two notes of one standing row (a hold, a wait).
@@ -1685,8 +1761,12 @@ impl Plan {
                 tick,
                 format!("burrow built at {:?}", b.b),
                 format!(
-                    "mouth toward ({}, {}), {} blocks placed",
-                    b.dir[0], b.dir[1], self.pearls.site_blocks
+                    "mouth toward ({}, {}), {} blocks placed; delta ground {} from O",
+                    b.dir[0],
+                    b.dir[1],
+                    self.pearls.site_blocks,
+                    delta_distance(w, b.o, DELTA_MEASURE)
+                        .map_or_else(|| format!("over {DELTA_MEASURE}"), |d| format!("{d}"))
                 ),
             );
         }
@@ -1868,7 +1948,9 @@ impl Plan {
             if server.saturating_sub(at) > r.provoke_ticks || !seen || feet != from {
                 self.pearls.provoke = None;
                 self.pearls.provoke_from = None;
-                let t = self.provoke_try(id, tick, r);
+                // Past 36 one try, then skipped (the orchestrator: 2 in 5 angered there).
+                let far = self.pearls.provoke_band.take() == Some(2);
+                let t = self.provoke_try(id, tick, r, far);
                 self.note(
                     tick,
                     format!("provoke enderman {id}: no anger"),
@@ -2118,7 +2200,7 @@ impl Plan {
     }
 
     /// One more provoke try on `id`; past `provoke_tries` it is skipped `provoke_skip_ticks`.
-    fn provoke_try(&mut self, id: i32, tick: u64, r: &PearlRules) -> u32 {
+    fn provoke_try(&mut self, id: i32, tick: u64, r: &PearlRules, far: bool) -> u32 {
         let i = match self.pearls.tries.iter().position(|t| t.0 == id) {
             Some(i) => i,
             None => {
@@ -2128,7 +2210,7 @@ impl Plan {
         };
         self.pearls.tries[i].1 += 1;
         let n = self.pearls.tries[i].1;
-        if n >= r.provoke_tries {
+        if n >= r.provoke_tries || far {
             self.pearls.tries[i] = (id, 0, tick + r.provoke_skip_ticks);
             self.note(
                 tick,
@@ -2810,15 +2892,35 @@ impl Plan {
                 .filter(|(_, at)| tick < *at + MOVED_KEPT)
                 .map(|(m, _)| *m)
                 .collect();
-            let (found, why) = burrow::site_toward_skipping(
-                w,
-                &w.memory,
-                feet,
-                &recent_moves,
-                r.burrow_move,
-                &self.pearls.refused,
-                &seen,
-            );
+            // From the feet and up to `ANCHORS` places within `SUPPLY_REACH` where endermen were
+            // seen most (the orchestrator: the edge site was productive but by the deltas, and
+            // its view saw few): each place's best site scored by the endermen seen within 40
+            // of it, the open floor round O, less delta ground within 16; the best is taken.
+            let mut anchors = vec![feet];
+            anchors.extend(supply_anchors(w, &seen, feet));
+            let mut best: Option<(i64, Burrow)> = None;
+            let mut why: Vec<(&'static str, u32)> = Vec::new();
+            for a in anchors {
+                let (f, y) = burrow::site_toward_skipping(
+                    w,
+                    &w.memory,
+                    a,
+                    &recent_moves,
+                    r.burrow_move,
+                    &self.pearls.refused,
+                    &seen,
+                );
+                if why.is_empty() {
+                    why = y;
+                }
+                if let Some(b) = f {
+                    let score = supply_score(w, &seen, b);
+                    if best.is_none_or(|(sc, _)| score > sc) {
+                        best = Some((score, b));
+                    }
+                }
+            }
+            let found = best.map(|(_, b)| b);
             let reasons = why
                 .iter()
                 .map(|(k, n)| format!("{n} {k}"))
