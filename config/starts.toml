@@ -215,11 +215,14 @@ kit = [["cooked_beef", 32]]
 # `snapshot=race-45481633896/snapshot-endermen-45481633896-race-45481633896-lane-3.tar.zst` (the
 # frontier's world, memory and player file). The forest's place is development knowledge only
 # (`locate biome` from the frontier, probe 45529738504, docs/problems/pearls-observe.md): warped
-# forest at (488, -111), never read by the bot. Each bot to the highest safe floor under y 100
-# within 12 of it.
+# forest at (488, -111), never read by the bot. That point stands on a nether fortress (race
+# 45531362383: both bots burned on its bricks by tick 720), so the place is the forest floor a
+# real bot saw from the deltas at x 474 to 480, y 37 to 46, z about 4 (race 45531577912 lane 1),
+# 120 blocks south of the fortress. Each bot to the highest safe floor under y 80 within 8
+# of it.
 [[start]]
 name = "dev-forest"
 stage = "endermen"
-place = { dimension = "minecraft:the_nether", x = 488.5, y = 70, z = -110.5 }
-spread = 12
-spread_under = 100
+place = { dimension = "minecraft:the_nether", x = 490.5, y = 45, z = 5.5 }
+spread = 8
+spread_under = 80
