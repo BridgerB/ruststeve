@@ -467,8 +467,11 @@ impl Plan {
                 ),
             );
         }
+        // Once at the floor, the stairs are the tunnel's fallback only: its route climbs (to 22
+        // over the floor under a river), and stairs down from there alternated with it from tick
+        // 7,780 to the cap (race 45703184922 lane 1).
         let climb = if self.stronghold.at_floor {
-            crate::tunnel::RISE
+            i32::MAX / 2
         } else {
             1
         };
@@ -496,6 +499,44 @@ impl Plan {
         );
         if let Some(t) = self.tunnel_toward(w, target, ("the portal room", &why), tick) {
             return Some(t);
+        }
+        // The tunnel's route ends within `tunnel::REACH` of the target and goes no further: the
+        // last blocks by a walk (a drop into the room) or a wall step (race 45703184922 lane 0
+        // stood at (1620, 20, -30), 4 across and 3 over (1624, 17, -30), for 6,500 ticks).
+        if path::octile(feet, target) <= crate::tunnel::REACH + 2.0 {
+            let mut walk = Walk::new(
+                target,
+                Goal::Near {
+                    pos: target,
+                    range: 1.0,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("stronghold last steps: walk to {target:?}"),
+                    format!("from {feet:?}, the tunnel's end"),
+                );
+                return Some(Task::Explore(walk));
+            }
+            if let Some(t) = self.wall_step(w, feet, target, tick) {
+                self.note(
+                    tick,
+                    format!("stronghold last steps: dug toward {target:?}"),
+                    format!("from {feet:?}, the tunnel's end"),
+                );
+                return Some(t);
+            }
+        }
+        // No tunnel and no last steps, off the floor's height: a stairs leg toward it.
+        if feet.1 > target.1 + 1 {
+            return Some(self.stronghold_stairs(w, feet, target, centre, &rules, tick, false));
+        }
+        if feet.1 < target.1 - 1 {
+            return Some(self.stronghold_stairs(w, feet, target, centre, &rules, tick, true));
         }
         self.note(
             tick,

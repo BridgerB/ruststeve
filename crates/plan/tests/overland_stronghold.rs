@@ -598,3 +598,46 @@ fn within_a_leg_of_the_floor_the_tunnel_takes_over() {
         "{t:?} {n:#?}"
     );
 }
+
+/// The tunnel's end 4 across and 3 over the standing cell, inside its reach: the last blocks are
+/// dug or walked, never "no way" (race 45703184922 lane 0 waited 6,500 ticks at (1620, 20, -30)).
+#[test]
+fn the_last_steps_from_the_tunnel_end() {
+    let s0 = room_world((-40, 60), (-30, 40));
+    let w0 = load(&s0, [-20.5, 64.0, 10.5]);
+    let r = the_room(&w0);
+    let t = stronghold::stand_target(&w0, &r, (-20, 24, 10), 7).expect("a standing cell");
+    let feet = (t.0 - 4, t.1 + 3, t.2);
+    let mut s = room_world((-40, 60), (-30, 40));
+    s.fill(
+        (feet.0, feet.0),
+        (feet.1, feet.1 + 1),
+        (feet.2, feet.2),
+        BlockKind::Air,
+    );
+    let w = load(
+        &s,
+        [
+            f64::from(feet.0) + 0.5,
+            f64::from(feet.1),
+            f64::from(feet.2) + 0.5,
+        ],
+    );
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.stronghold.room = Some(r);
+    p.stronghold.looked = Some(0);
+    let task = p.stronghold_task(&w, 1);
+    let n = notes(&p);
+    assert!(
+        matches!(
+            task,
+            Some(Task::Dig(_)) | Some(Task::Explore(_)) | Some(Task::Stairs(_))
+        ),
+        "{t:?} from {feet:?}: {task:?} {n:#?}"
+    );
+    assert!(
+        !n.iter()
+            .any(|n| n.starts_with("stronghold tunnel has no way")),
+        "{n:#?}"
+    );
+}

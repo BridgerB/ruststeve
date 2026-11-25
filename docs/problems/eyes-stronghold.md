@@ -66,3 +66,19 @@ A development race on a3cfb50 (`dev-stronghold`, no `dev_fix`), 2 lanes x 1 bot,
 - **Fixes**:
   - `at_floor` latches within a stairs leg's cut (`STAIR_LEG`, 6) of the floor.
   - Far rooms are walked to on the surface first (`stronghold_surface`): both lanes began their stairs 112 to 118 off and reached the floor's height 78 to 92 off, leaving the tunnel the rest.
+
+### Wall 4: 4 blocks short; the tunnel's climb against the stairs (race 45703184922, 2026-11-25)
+A development race on 47589db (`dev-stronghold`, Q2's home merged), 2 lanes x 1 bot, cap 12,000, from the frontier. Development knowledge, never evidence.
+- **What worked**: every earlier fix fired.
+  - Home was over at tick 120-140, and the planner went to the eyes' phase (47589db).
+  - Q3's walks to open ground ran before throw 1.
+  - The room was found from the surface at tick 240-340.
+  - Two surface walks took the bots from 89-107 off to 73 off.
+  - Two pickaxe rounds a lane; no lane went without a pickaxe.
+  - `at_floor` latched at y 23.
+- **Cause 1, lane 0**: the tunnel took it to (1620, 20, -30), 4 across and 3 over its standing cell (1624, 17, -30). The tunnel's route ends within `tunnel::REACH` (5) of its target, and the plain walk needs the feet within 1 of the floor. So "stronghold tunnel has no way" 326 times, from tick 5,480 to the cap.
+- **Cause 2, lane 1**: at the floor, the tunnel's 40-step route climbed to y 40 under a river (3 cells blocked). At 22 over the floor, beyond `RISE`, the stairs down began again and alternated with the tunnel from tick 7,780 to the cap, with 3 water escapes.
+- **Fixes**:
+  - At the tunnel's end within `REACH` + 2: a walk to the cell (a drop into the room), else a wall step.
+  - Once at the floor, the stairs run only when the tunnel and the last steps have nothing.
+- **Still open**: the junk drop and pick-up churn: 167 leather drops in lane 0, one every 40 ticks while standing still. That is the shared junk mechanism, not this file's.
