@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use data::BlockKind;
-use plan::eyes::{EyeRules, apex_blocked};
+use plan::eyes::{EyeRules, apex_blocked, open_side, trees_near};
 use protocol::S2c;
 use protocol::chunk::{Column, Paletted, Section};
 use world::{Event, World};
@@ -109,4 +109,29 @@ fn no_bearing_checks_nothing() {
         apex_blocked(&w, FEET, [0.0, 0.0], &EyeRules::default()),
         None
     );
+}
+
+#[test]
+fn the_first_throw_sees_a_tree_near_and_walks_to_the_open_side() {
+    let r = EyeRules::default();
+    // Open plain: nothing near.
+    assert_eq!(trees_near(&plain(), FEET, &r), None);
+    // Leaves 4 east at feet +3, and more to the east: the walk goes to a side with none near.
+    let mut w = plain();
+    for (x, z) in [(12, 8), (13, 9), (14, 12), (12, 12), (20, 8), (22, 14)] {
+        set(&mut w, (x, 67, z), BlockKind::OakLeaves);
+    }
+    assert_eq!(trees_near(&w, FEET, &r), Some((12, 67, 8)));
+    let to = open_side(&w, FEET, &r);
+    assert!(to.0 <= 8, "{to:?}");
+    let there = [f64::from(to.0) + 0.5, FEET[1], f64::from(to.2) + 0.5];
+    assert_eq!(trees_near(&w, there, &r), None, "{to:?}");
+    // A log at the feet's own level is not over it: only blocks above the feet count.
+    let mut low = plain();
+    set(&mut low, (12, 64, 8), BlockKind::OakLog);
+    assert_eq!(trees_near(&low, FEET, &r), None);
+    // Past 6 on the plane is no matter.
+    let mut far = plain();
+    set(&mut far, (15, 67, 8), BlockKind::OakLeaves);
+    assert_eq!(trees_near(&far, FEET, &r), None);
 }

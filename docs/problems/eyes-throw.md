@@ -23,7 +23,7 @@ The heading is exactly the bearing (no curve), so a line's spread is only the po
 - The client sees the eye every 4 ticks or so: about 20 positions a flight.
 - A frame in the look's block hit throws nothing (pitch -10 up).
 - Resume: built. Every `StageUp` carries `eyes_kept()`; `race` writes it as `eyes.rsw` beside `memory.rsw` and reads it back on a resume (`Opts.eyes`, restored before the first tick, noted `eyes: restored`). A snapshot without the file starts with no lines.
-- The first throw has no bearing, so its drop column cannot be checked: a canopy there loses that eye (given up at once by the rest rule, not after 600 ticks).
+- The first throw has no bearing, so its drop column cannot be checked. Guard (the coordinator, 2026-11-25): with a log or leaf seen within 6 on the plane over the feet (`trees_near`), the plan walks 16 to the side with the fewest (`open_side`, `Task::Explore`, noted `eye throw 1 (why): walk to open ground`), at most 4 times, then throws anyway; a canopy that still catches it loses that eye at once by the rest rule.
 - Who calls `eyes_task`, `eyes_craft_task` and `eyes_way`: the eyes phase after Home (Q2 / Q4 / the orchestrator).
 
 ## Done (world terms)
