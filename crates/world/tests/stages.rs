@@ -366,7 +366,7 @@ fn forest_holds_with_the_rods_in_a_warped_forest() {
     assert!(Stage::Endermen < Stage::Forest && Stage::Forest < Stage::Pearls6);
 }
 
-/// `pearls_6` and `pearls_12` hold with the rods and 6 or 12 pearls; pearls without the rods are
+/// `pearls_6`, `pearls_9` and `pearls_12` hold with the rods and 6, 9 or 12 pearls; pearls without the rods are
 /// neither (the ladder stays a ladder).
 #[test]
 fn the_pearl_stages_need_the_rods_and_their_pearls() {
@@ -383,13 +383,19 @@ fn the_pearl_stages_need_the_rods_and_their_pearls() {
     w.step(&give(0, ItemKind::EnderPearl, 6));
     w.step(&tick());
     assert_eq!(w.stage_reached, Some(Stage::Pearls6));
+    assert!(!Stage::Pearls9.holds(&w) && !Stage::Pearls12.holds(&w));
+    w.step(&give(0, ItemKind::EnderPearl, 9));
+    w.step(&tick());
+    assert_eq!(w.stage_reached, Some(Stage::Pearls9));
     assert!(!Stage::Pearls12.holds(&w));
     w.step(&give(0, ItemKind::EnderPearl, 12));
     w.step(&tick());
     assert_eq!(w.stage_reached, Some(Stage::Pearls12));
     assert_eq!(world::stage::PEARLS_HALF, 6);
     assert_eq!(Stage::from_name("pearls_6"), Some(Stage::Pearls6));
-    assert!(Stage::Pearls6 < Stage::Pearls12);
+    assert!(Stage::Pearls6 < Stage::Pearls9 && Stage::Pearls9 < Stage::Pearls12);
+    assert_eq!(world::stage::PEARLS_THREE_QUARTERS, 9);
+    assert_eq!(Stage::from_name("pearls_9"), Some(Stage::Pearls9));
 }
 
 /// A race names a stage's snapshot `snapshot-<stage>-<run>-race-<run>-lane-<n>.tar.zst` from

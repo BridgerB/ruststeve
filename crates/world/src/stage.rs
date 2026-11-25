@@ -116,6 +116,9 @@ pub fn enderman_near(w: &World) -> Option<(i32, f64)> {
 pub const FOREST_BIOME: &str = "warped_forest";
 /// Pearls of the `pearls_6` checkpoint: half of issue 18's twelve.
 pub const PEARLS_HALF: u32 = 6;
+/// Pearls of the `pearls_9` checkpoint (issue 18, 2026-11-25): a bot at 9 pearls whose supply ran
+/// out (race 45602491038 lane 6) had no stage snapshot past 6 to resume from.
+pub const PEARLS_THREE_QUARTERS: u32 = 9;
 /// Pearls of the `pearls_12` stage (issue 18's done condition; issue 19's twelve eyes).
 pub const PEARLS_FULL: u32 = 12;
 
@@ -261,6 +264,9 @@ pub enum Stage {
     /// Holds the 7 rods and `PEARLS_HALF` pearls (issue 18's halfway checkpoint, Bridger
     /// 2026-11-24): a long hunt is not replayed from its first kill after a late failure.
     Pearls6,
+    /// Holds the 7 rods and `PEARLS_THREE_QUARTERS` pearls (issue 18, 2026-11-25): a third
+    /// checkpoint, so a hunt that stalls past 6 is resumed from where it got to.
+    Pearls9,
     /// Holds the 7 rods and 12 ender pearls (issue 18: "reach 12 pearls"). The rods are part of
     /// it so the ladder stays a ladder (issue 19 needs six of them for the eyes).
     Pearls12,
@@ -270,7 +276,7 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 16] = [
+    pub const ALL: [Stage; 17] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -285,6 +291,7 @@ impl Stage {
         Stage::Endermen,
         Stage::Forest,
         Stage::Pearls6,
+        Stage::Pearls9,
         Stage::Pearls12,
         Stage::End,
     ];
@@ -306,6 +313,7 @@ impl Stage {
             Stage::Endermen => "endermen",
             Stage::Forest => "forest",
             Stage::Pearls6 => "pearls_6",
+            Stage::Pearls9 => "pearls_9",
             Stage::Pearls12 => "pearls_12",
             Stage::End => "end",
         }
@@ -352,6 +360,10 @@ impl Stage {
             Stage::Forest => has(ItemKind::BlazeRod, 7) && w.feet_biome() == Some(FOREST_BIOME),
             Stage::Pearls6 => {
                 has(ItemKind::BlazeRod, 7) && has(ItemKind::EnderPearl, i64::from(PEARLS_HALF))
+            }
+            Stage::Pearls9 => {
+                has(ItemKind::BlazeRod, 7)
+                    && has(ItemKind::EnderPearl, i64::from(PEARLS_THREE_QUARTERS))
             }
             Stage::Pearls12 => {
                 has(ItemKind::BlazeRod, 7) && has(ItemKind::EnderPearl, i64::from(PEARLS_FULL))
