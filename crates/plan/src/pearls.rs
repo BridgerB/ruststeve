@@ -336,6 +336,8 @@ const LOOK_OUT_TICKS: u64 = 200;
 const SWEEP_TICKS: u64 = 400;
 /// Blocks within which the feet after a walk on count as not moved.
 const WALK_ON_STILL: i32 = 4;
+/// Walks to one new-ground place before it is dropped.
+const NEW_GROUND_TRIES: u32 = 3;
 /// Blocks round the hunt point a move's new place stays within.
 const HUNT_AREA: i32 = 96;
 /// The hunt point: within this it is reached; searches with no route, and walks, before the
@@ -531,6 +533,9 @@ pub struct PearlState {
     /// Kills at the burrow in hand.
     #[serde(default)]
     pub site_kills: u32,
+    /// New-ground places walked to after a move, and the walks begun to each.
+    #[serde(default)]
+    pub ground_tries: Vec<([i32; 3], u32)>,
     #[serde(default)]
     pub hunt_point_walks: u32,
     #[serde(default)]
@@ -3092,9 +3097,20 @@ impl Plan {
                 if let Some(last) = self.pearls.moved_from.last().copied()
                     && let Some(a) =
                         supply_anchors(w, &seen, feet, Some((last, r.burrow_move)), r.hunt_point)
-                            .first()
-                            .copied()
+                            .into_iter()
+                            // A place three walks failed to reach is dropped (race 45588764709
+                            // lane 4 began the same far walk 15 times, stuck at its first cell).
+                            .find(|a| {
+                                self.pearls
+                                    .ground_tries
+                                    .iter()
+                                    .all(|(g, n)| g != a || *n < NEW_GROUND_TRIES)
+                            })
                 {
+                    match self.pearls.ground_tries.iter_mut().find(|(g, _)| *g == a) {
+                        Some(e) => e.1 += 1,
+                        None => self.pearls.ground_tries.push((a, 1)),
+                    }
                     let c = (a[0], a[1], a[2]);
                     let mut walk = Walk::far_to(c, Goal::Near { pos: c, range: 6.0 }, tick);
                     if walk.route_now(w, tick) {

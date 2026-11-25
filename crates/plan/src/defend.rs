@@ -432,6 +432,18 @@ pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {
 /// `ignored`: ranged foes a fight landed nothing on lately (out of reach behind rock), left alone
 /// unless they come within `defend_radius` (wall 30).
 pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, EntityKind)> {
+    foe_except(w, rules, ignored, &[])
+}
+
+/// `foe`, never a mob of `never`'s kinds, hit or not (issue 18: in the hunt a magma cube is
+/// never fought: a no-heal bot loses every trade, and the hunt seals a pocket instead; race
+/// 45586888479 lane 2 was hit by one and then fought it as "provoked").
+pub fn foe_except(
+    w: &World,
+    rules: &SurvivalRules,
+    ignored: &[i32],
+    never: &[EntityKind],
+) -> Option<(i32, EntityKind)> {
     let body = w.body?;
     // A kind never fought (a creeper) first, from farther out: backed away from before its fuse.
     let flee = w
@@ -455,6 +467,7 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
             !e.dead
                 && hostile(e.kind)
                 && !NEVER_FOE.contains(&e.kind)
+                && !never.contains(&e.kind)
                 && (!rules.neutral.contains(&e.kind) || provoked(w, e.kind))
                 // A foe a fight never struck nor was hurt by (a spider in a pit 4.5 under the eye,
                 // fought 96 times: blaze wall 15) waits, unless its kind hits the bot.
