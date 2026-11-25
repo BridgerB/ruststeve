@@ -162,6 +162,14 @@ pub struct HomeState {
     pub cube_resume_at: Option<u64>,
     #[serde(default)]
     pub cube_breakouts: u32,
+    /// The tunnel out of a cube pocket in hand (its start and end), and the tunnels dug.
+    #[serde(default)]
+    pub cube_tunnel: Option<(Cell, Cell)>,
+    #[serde(default)]
+    pub cube_tunnels: u32,
+    /// The point the trip aims at now (a way point, else the portal).
+    #[serde(default)]
+    pub aim: Option<(i32, i32)>,
     #[serde(default)]
     pub done: bool,
 }
@@ -189,6 +197,34 @@ pub const CUBE_CLEAR_TICKS: u64 = 200;
 /// with no pocket for `CUBE_RESUME_TICKS` (cubes wait outside a sealed pocket for good).
 pub const CUBE_HOLD_MAX: u64 = 1200;
 pub const CUBE_RESUME_TICKS: u64 = 1200;
+/// The tunnel out of a cube pocket: this long, ended once `CUBE_TUNNEL_OUT` along with no cube
+/// within `CUBE_CLEAR` (a cube loses the bot past 16 or so).
+pub const CUBE_TUNNEL_LEN: i32 = 20;
+pub const CUBE_TUNNEL_OUT: i32 = 12;
+
+/// The tunnel out of a cube pocket's axis: toward `aim` (the longer axis first), never toward the
+/// side the cubes are on (one more than a block that way); with every side taken, toward `aim`.
+pub fn cube_tunnel_dir(feet: Cell, aim: (i32, i32), cubes: &[[f64; 3]]) -> (i32, i32) {
+    let (dx, dz) = (aim.0 - feet.0, aim.1 - feet.2);
+    let x = (if dx < 0 { -1 } else { 1 }, 0);
+    let z = (0, if dz < 0 { -1 } else { 1 });
+    let order = if dx.abs() >= dz.abs() {
+        [x, z, (0, -z.1), (-x.0, 0)]
+    } else {
+        [z, x, (-x.0, 0), (0, -z.1)]
+    };
+    let cubes_on = |d: (i32, i32)| {
+        cubes.iter().any(|c| {
+            (c[0] - (f64::from(feet.0) + 0.5)) * f64::from(d.0)
+                + (c[2] - (f64::from(feet.2) + 0.5)) * f64::from(d.1)
+                > 1.0
+        })
+    };
+    order
+        .into_iter()
+        .find(|d| !cubes_on(*d))
+        .unwrap_or(order[0])
+}
 
 /// The distance between two positions.
 pub fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -652,6 +688,45 @@ impl Plan {
         None
     }
 
+    /// The tunnel out of a cube pocket in hand: on through rock toward its end until
+    /// `CUBE_TUNNEL_OUT` along with no cube within `CUBE_CLEAR`; `None` with none in hand, or it
+    /// ended (noted). With no tunnel route the near cube is fought (the defence's rest window).
+    fn home_cube_tunnel(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let (start, target) = self.ender.home.cube_tunnel?;
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let along = flat(start, feet);
+        let clear = !w.entities.values().any(|e| {
+            !e.dead && e.kind == data::EntityKind::MagmaCube && dist(e.pos, body.pos) <= CUBE_CLEAR
+        });
+        if (along >= CUBE_TUNNEL_OUT && clear) || feet == target {
+            self.ender.home.cube_tunnel = None;
+            self.note(
+                tick,
+                "home: out of the cube tunnel".to_owned(),
+                format!(
+                    "{along} along from {start:?} at {feet:?}; no cube within {CUBE_CLEAR}: {clear}"
+                ),
+            );
+            return None;
+        }
+        if let Some(t) = self.tunnel_toward(
+            w,
+            target,
+            ("the cube tunnel", "out of a cube pocket through rock"),
+            tick,
+        ) {
+            return Some(t);
+        }
+        self.ender.home.cube_tunnel = None;
+        self.note(
+            tick,
+            "home: no cube tunnel".to_owned(),
+            format!("no way through rock from {feet:?} to {target:?}: the near cube is fought"),
+        );
+        None
+    }
+
     /// Magma cubes pressing on the trip: with `CUBE_CROWD` within `CUBE_NEAR`, or any within
     /// `CUBE_CLEAR` at or under the danger line, a sealed pocket where the bot stands, held until
     /// none is within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. Each pocket counted and noted.
@@ -660,6 +735,9 @@ impl Plan {
             return None;
         }
         let body = w.body?;
+        if let Some(t) = self.home_cube_tunnel(w, tick) {
+            return Some(t);
+        }
         let cubes: Vec<f64> = w
             .entities
             .values()
@@ -703,7 +781,40 @@ impl Plan {
                     self.ender.home.cube_breakouts
                 ),
             );
-            return None;
+            // Out through the rock on the side away from them, toward the next point: cubes do
+            // not follow through rock (the coordinator: a fight at 14 to 17 with no heal can kill).
+            let feet = path::feet_cell(body.pos);
+            let aim = self.ender.home.aim.unwrap_or((feet.0, feet.2));
+            let near_cubes: Vec<[f64; 3]> = w
+                .entities
+                .values()
+                .filter(|e| {
+                    !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        && dist(e.pos, body.pos) <= 12.0
+                })
+                .map(|e| e.pos)
+                .collect();
+            let dir = cube_tunnel_dir(feet, aim, &near_cubes);
+            let target = (
+                feet.0 + dir.0 * CUBE_TUNNEL_LEN,
+                feet.1,
+                feet.2 + dir.1 * CUBE_TUNNEL_LEN,
+            );
+            self.ender.home.cube_tunnel = Some((feet, target));
+            self.ender.home.cube_tunnels += 1;
+            self.note(
+                tick,
+                "home: left the cube pocket by tunnel".to_owned(),
+                format!(
+                    "on ({}, {}) toward {target:?}, away from {} cubes within 12, toward the point {aim:?}; tunnel {}",
+                    dir.0,
+                    dir.1,
+                    near_cubes.len(),
+                    self.ender.home.cube_tunnels
+                ),
+            );
+            return self.home_cube_tunnel(w, tick);
         }
         if within_clear {
             self.ender.home.cube_clear_since = None;
@@ -832,6 +943,7 @@ impl Plan {
             .find(|(c, _)| !passed.contains(c))
             // The portal's own point stays the aim after its column is reached.
             .or(Some(((portal.0 >> 4, portal.2 >> 4), (portal.0, portal.2))));
+        self.ender.home.aim = next.map(|(_, p)| p);
         let signs = Signs {
             // The forest at the feet would end the heading: the trip begins in it.
             feet_biome: w.feet_biome().filter(|b| *b != "warped_forest"),

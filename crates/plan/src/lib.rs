@@ -1912,7 +1912,8 @@ impl Plan {
             let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t);
             let over = w.player.health.is_some_and(|h| h > rules.danger_health)
                 && (crowd < crate::home::CUBE_CROWD || resting)
-                && self.ender.home.cube_pocket.is_none();
+                && self.ender.home.cube_pocket.is_none()
+                && self.ender.home.cube_tunnel.is_none();
             ignored.extend(
                 w.entities
                     .iter()

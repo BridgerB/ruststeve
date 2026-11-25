@@ -720,3 +720,33 @@ fn cubes_that_stay_end_the_pocket_after_its_hold() {
     );
     assert_eq!(p.ender.home.cube_breakouts, 1);
 }
+
+#[test]
+fn the_cube_tunnel_runs_toward_the_point_away_from_the_cubes() {
+    let feet = (404, 38, 171);
+    // Cubes outside the east wall, the next point west: west.
+    let east = [[407.5, 38.0, 171.5], [408.0, 38.0, 170.0]];
+    assert_eq!(home::cube_tunnel_dir(feet, (226, 194), &east), (-1, 0));
+    // Cubes west, the point west: the other axis toward the point (south, +z).
+    let west = [[401.0, 38.0, 171.5]];
+    assert_eq!(home::cube_tunnel_dir(feet, (226, 194), &west), (0, 1));
+    // The pocket's breakout takes the tunnel and notes it.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    add_cube(&mut w, 50, [11.5, 64.0, 8.5]);
+    add_cube(&mut w, 51, [12.5, 64.0, 9.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, home::CUBE_HOLD_MAX + 20);
+    assert!(
+        noted(&p, "home: left the cube pocket by tunnel"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.cube_tunnels, 1);
+}
