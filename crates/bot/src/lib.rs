@@ -729,7 +729,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 if let Some(h) = run.world.player.health {
                     min_health_in_script = Some(min_health_in_script.map_or(h, |m: f32| m.min(h)));
                 }
-                let c = s.controls(script_tick);
+                let c = s.steer(script_tick, &run.world);
                 let acts = s.acts(script_tick, &run.world);
                 script_tick += 1;
                 if Some(c) != last_controls {

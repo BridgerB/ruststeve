@@ -388,6 +388,7 @@ impl Sim {
         )?];
         out.extend(self.chunks_around()?);
         out.extend(self.mobs_added()?);
+        out.extend(self.items_added()?);
         out.push(self.teleport(self.pos)?);
         out.push(wire(
             State::Play,

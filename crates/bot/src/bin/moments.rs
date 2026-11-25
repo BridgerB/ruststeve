@@ -30,12 +30,26 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows).
-const TOLERANCE: usize = 162;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows).
+const TOLERANCE: usize = 168;
 /// A placed mob that ends farther than this from where it was put moved (it ticked).
 const MOB_MOVED: f64 = 0.5;
 /// An enderman's creepy flag (`EnderMan.DATA_CREEPY`, entity data 17).
 const CREEPY: u8 = 17;
+/// Its stared-at flag (`EnderMan.DATA_STARED_AT`, entity data 18).
+const STARED: u8 = 18;
+/// A living entity's health (`LivingEntity.DATA_HEALTH_ID`, entity data 9).
+const HEALTH: u8 = 9;
+/// Server ticks between a trace's lines (issue 18: where a placed mob went, over time).
+const TRACE_EVERY: u64 = 10;
+
+/// Whether an entity's boolean data `i` is true.
+fn flag(e: &world::Entity, i: u8) -> bool {
+    matches!(
+        e.metadata.get(&i),
+        Some(protocol::metadata::MetaValue::Bool(true))
+    )
+}
 
 struct Args {
     cmd: String,
@@ -190,13 +204,75 @@ fn mob_outcome(w: &World, kind: &str, at: [f64; 3]) -> MobOutcome {
         kind: kind.to_owned(),
         seen: found.is_some(),
         moved: found.is_some_and(|e| d(e.pos) > MOB_MOVED),
-        creepy: found.is_some_and(|e| {
-            matches!(
-                e.metadata.get(&CREEPY),
-                Some(protocol::metadata::MetaValue::Bool(true))
-            )
-        }),
+        creepy: found.is_some_and(|e| flag(e, CREEPY)),
+        stared: found.is_some_and(|e| flag(e, STARED)),
+        cell: found.map(|e| e.pos.map(|v| v.floor() as i32)),
     }
+}
+
+/// One line of a trace: the bot's feet and health, and every enderman and item within 32 (its
+/// id, feet, health, creepy and stared flags). Issue 18: a row that fails on the real server
+/// says what the enderman did, over time.
+fn trace_line(w: &World) -> Option<String> {
+    let body = w.body?;
+    let near = |p: [f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>() <= 1024.0;
+    let f = |p: [f64; 3]| format!("({:.2} {:.2} {:.2})", p[0], p[1], p[2]);
+    let others: String = w
+        .entities
+        .iter()
+        .filter(|(_, e)| {
+            near(e.pos) && matches!(e.kind, data::EntityKind::Enderman | data::EntityKind::Item)
+        })
+        .map(|(id, e)| {
+            let hp = match e.metadata.get(&HEALTH) {
+                Some(protocol::metadata::MetaValue::Float(h)) => format!(" hp {h}"),
+                _ => String::new(),
+            };
+            format!(
+                " | {:?} {id} {}{hp}{}{}{}",
+                e.kind,
+                f(e.pos),
+                if flag(e, CREEPY) { " creepy" } else { "" },
+                if flag(e, STARED) { " stared" } else { "" },
+                if e.dead { " dead" } else { "" }
+            )
+        })
+        .collect();
+    Some(format!(
+        "t {} bot {} hp {:?} look {:.1} {:.1}{others}",
+        w.ticks,
+        f(body.pos),
+        w.player.health,
+        w.controls.yaw,
+        w.controls.pitch.unwrap_or(w.player.pitch)
+    ))
+}
+
+/// A real run's trace, folded from its recording: a line every `TRACE_EVERY` ticks.
+fn trace_recording(path: &Path) -> Result<Vec<String>, String> {
+    let (_, records) = record::Recording::read_all(path)?;
+    let mut folder = record::Folder::new();
+    let mut lines = Vec::new();
+    let mut last = None;
+    for rec in &records {
+        match rec {
+            record::Record::Event(e) => {
+                folder.step(e)?;
+            }
+            record::Record::Checkpoint {
+                event_index, world, ..
+            } => {
+                folder.take_start(*event_index, world);
+            }
+            _ => continue,
+        }
+        let t = folder.world.ticks;
+        if t.is_multiple_of(TRACE_EVERY) && last != Some(t) {
+            last = Some(t);
+            lines.extend(trace_line(&folder.world));
+        }
+    }
+    Ok(lines)
 }
 
 /// Where a moment's placed mobs go, absolute: the cell's middle on x and z.
@@ -267,6 +343,15 @@ fn script_or_aim(m: &Moment) -> Result<(Option<Script>, Option<plan::Aim>), Stri
     Script::parse(&m.script)
         .map(|s| (Some(s), None))
         .ok_or_else(|| format!("{}: no script {}", m.id, m.script))
+}
+
+/// A row's trace beside its result, `<id>.<tag>.trace.txt`.
+fn write_trace(out: &Path, id: &str, tag: &str, lines: &[String]) -> Result<(), String> {
+    std::fs::write(
+        out.join(format!("{id}.{tag}.trace.txt")),
+        lines.join("\n") + "\n",
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn save(out: &Path, r: &MomentResult) -> Result<(), String> {
@@ -349,6 +434,18 @@ fn real_waves(
                 .give
                 .iter()
                 .map(|g| format!("give {name} minecraft:{g}"))
+                .chain(m.fill.iter().map(|(b, x1, y1, z1, x2, y2, z2)| {
+                    let (x, y, z) = feet_cell(start);
+                    format!(
+                        "fill {} {} {} {} {} {} minecraft:{b}",
+                        x + x1,
+                        y + y1,
+                        z + z1,
+                        x + x2,
+                        y + y2,
+                        z + z2
+                    )
+                }))
                 .chain(m.set.iter().map(|(b, dx, dy, dz)| {
                     let (x, y, z) = feet_cell(start);
                     format!("setblock {} {} {} minecraft:{b}", x + dx, y + dy, z + dz)
@@ -366,10 +463,24 @@ fn real_waves(
                     )
                 }))
                 .chain(mob_spots(start, m).into_iter().map(|(e, p)| {
-                    // With its AI: kept, no loot (issue 17).
+                    // With its AI: kept, no loot unless the row keeps it (issue 17; 18's pearls).
+                    let loot = if m.loot {
+                        ""
+                    } else {
+                        "DeathLootTable:\"minecraft:empty\","
+                    };
                     format!(
-                        "summon minecraft:{e} {} {} {} {{DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b}}",
+                        "summon minecraft:{e} {} {} {} {{{loot}PersistenceRequired:1b}}",
                         p[0], p[1], p[2]
+                    )
+                }))
+                .chain(m.items.iter().map(|(item, dx, dy, dz)| {
+                    let (x, y, z) = feet_cell(start);
+                    format!(
+                        "summon minecraft:item {} {} {} {{Item:{{id:\"minecraft:{item}\",count:1}},PickupDelay:0s}}",
+                        f64::from(x + dx) + 0.5,
+                        y + dy,
+                        f64::from(z + dz) + 0.5
                     )
                 }))
                 .collect();
@@ -422,10 +533,18 @@ fn real_waves(
             let id = m.id.clone();
             let watch = watched(start, m);
             let mobs = mob_spots(start, m);
-            handles.push((id, watch, mobs, std::thread::spawn(move || bot::run(opts))));
+            let traced = !m.mobs.is_empty() || !m.items.is_empty();
+            handles.push((
+                id,
+                watch,
+                mobs,
+                traced,
+                std::thread::spawn(move || bot::run(opts)),
+            ));
             std::thread::sleep(Duration::from_millis(500));
         }
-        for (id, watch, mobs, h) in handles {
+        for (id, watch, mobs, traced, h) in handles {
+            let trace_id = id.clone();
             let r = match h.join() {
                 Ok(Ok(o)) => MomentResult {
                     moment: id,
@@ -456,6 +575,11 @@ fn real_waves(
                 Err(_) => return Err("a bot thread panicked".to_owned()),
             };
             save(&a.out, &r)?;
+            if traced {
+                let rsr = a.out.join(format!("{trace_id}.real.rsr"));
+                let text = trace_recording(&rsr).unwrap_or_else(|e| vec![format!("no trace: {e}")]);
+                write_trace(&a.out, &trace_id, "real", &text)?;
+            }
         }
     }
     Ok(())
@@ -478,12 +602,27 @@ fn sim(a: &Args) -> Result<(), String> {
         let (captured, start) = start_of(a, &landings, m)?;
         let (script, aim) = script_or_aim(m)?;
         let mut world = captured.model(start)?;
-        for (b, dx, dy, dz) in &m.set {
-            let (x, y, z) = feet_cell(start);
-            let state = data::BlockKind::from_name(b)
+        let state_of = |b: &str| {
+            data::BlockKind::from_name(b)
                 .and_then(|k| k.info())
                 .map(|i| i.default_state)
-                .ok_or_else(|| format!("{}: no block {b}", m.id))?;
+                .ok_or_else(|| format!("{}: no block {b}", m.id))
+        };
+        for (b, x1, y1, z1, x2, y2, z2) in &m.fill {
+            let (x, y, z) = feet_cell(start);
+            let state = state_of(b)?;
+            for (cx, cy, cz) in (*x1.min(x2)..=*x1.max(x2)).flat_map(|cx| {
+                (*y1.min(y2)..=*y1.max(y2))
+                    .flat_map(move |cy| (*z1.min(z2)..=*z1.max(z2)).map(move |cz| (cx, cy, cz)))
+            }) {
+                world
+                    .set_block(x + cx, y + cy, z + cz, state)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        for (b, dx, dy, dz) in &m.set {
+            let (x, y, z) = feet_cell(start);
+            let state = state_of(b)?;
             world
                 .set_block(x + dx, y + dy, z + dz, state)
                 .map_err(|e| e.to_string())?;
@@ -533,12 +672,27 @@ fn sim(a: &Args) -> Result<(), String> {
                 "enderman" => {
                     let id = model.summon_enderman(p);
                     if let Some(mob) = model.survival.life.mobs.get_mut(&id) {
-                        mob.loot = false;
+                        mob.loot = m.loot;
                     }
                 }
                 other => return Err(format!("{}: the model places no {other} with its AI", m.id)),
             }
         }
+        for (item, dx, dy, dz) in &m.items {
+            let (x, y, z) = feet_cell(start);
+            let kind = data::ItemKind::from_name(item)
+                .ok_or_else(|| format!("{}: no item {item}", m.id))?;
+            model.place_item(
+                (kind, 1),
+                [
+                    f64::from(x + dx) + 0.5,
+                    f64::from(y + dy),
+                    f64::from(z + dz) + 0.5,
+                ],
+            );
+        }
+        let traced = !m.mobs.is_empty() || !m.items.is_empty();
+        let mut trace = Vec::new();
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
         let run = bot::lockstep::run_acting(
             model,
@@ -546,15 +700,23 @@ fn sim(a: &Args) -> Result<(), String> {
             i as u64 + 1,
             SETTLE + m.ticks,
             SETTLE,
-            |w, t| match (&mut planner, script) {
-                (Some(p), _) => {
-                    let c = p.step(w);
-                    (c, p.take_acts())
+            |w, t| {
+                if traced && w.ticks.is_multiple_of(TRACE_EVERY) {
+                    trace.extend(trace_line(w));
                 }
-                (None, Some(s)) => (s.controls(t), s.acts(t, w)),
-                (None, None) => (physics::Controls::default(), Vec::new()),
+                match (&mut planner, script) {
+                    (Some(p), _) => {
+                        let c = p.step(w);
+                        (c, p.take_acts())
+                    }
+                    (None, Some(s)) => (s.steer(t, w), s.acts(t, w)),
+                    (None, None) => (physics::Controls::default(), Vec::new()),
+                }
             },
         );
+        if traced {
+            write_trace(&a.out, &m.id, "sim", &trace)?;
+        }
         let r = MomentResult {
             moment: m.id.clone(),
             source: Source::Sim,
