@@ -760,6 +760,8 @@ scan_step = 8
 around = []
 # Development only: a fix (x, z) used while the eyes give none, for a dev start's race on a dev
 # branch. Never set on a merged branch (dev_fix = [x, z]).
+# DEV BRANCH ONLY (issue-19-q4-dev): the located stronghold (probe 45686839641).
+dev_fix = [1648.0, -16.0]
 
 [stronghold]
 # The portal room's template (StrongholdPieces$PortalRoom, Q5's probe 45685968956): frames at y 3,
