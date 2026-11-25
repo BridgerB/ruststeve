@@ -166,11 +166,11 @@ fn the_frontier_bot_skips_the_pickaxe_and_without_coal_the_smelt() {
     assert!(skip_why(Step::Wood, &wood, &b, false).is_some());
 }
 
-/// A hand-built forest: stems of three fungi at the feet's level, one stem high in a cap, one
-/// beyond the radius, nylium all round. The nearest low stems come first; a refused one and the
-/// high and far ones never.
+/// A hand-built forest: two stems 4 tall at the feet's level, a lone stem cell up in a cap, a stem
+/// 30 off, one 60 off, one far above, nylium all round. Each column comes once, from its lowest
+/// seen cell; the one beyond 48 and the one 19 over the feet never; a refused column is left out.
 #[test]
-fn stems_are_the_nearest_seen_at_the_feet_level_within_the_radius() {
+fn stems_are_dug_from_each_columns_lowest_cell_within_48() {
     let b = Base::default();
     let mut w = bare();
     for x in -6..=6 {
@@ -184,21 +184,99 @@ fn stems_are_the_nearest_seen_at_the_feet_level_within_the_radius() {
     }
     seen(&mut w, (1, 50, 1), BlockKind::WarpedStem);
     seen(&mut w, (30, 41, 0), BlockKind::WarpedStem);
+    seen(&mut w, (60, 41, 0), BlockKind::WarpedStem);
+    seen(&mut w, (6, 60, 0), BlockKind::WarpedStem);
     seen(&mut w, (2, 41, 2), BlockKind::WarpedWartBlock);
     let t = stem_targets(&w, &b, |_| false);
-    assert_eq!(
-        t,
-        vec![
-            (3, 41, 0),
-            (3, 42, 0),
-            (3, 43, 0),
-            (-5, 41, 2),
-            (-5, 42, 2),
-            (-5, 43, 2)
-        ]
+    assert_eq!(t, vec![(1, 50, 1), (3, 41, 0), (-5, 41, 2), (30, 41, 0)]);
+    let t = stem_targets(&w, &b, |c| c.0 == 1);
+    assert_eq!(t.first(), Some(&(3, 41, 0)));
+}
+
+/// A hand-built warped forest cavern of the model, loaded through the packets a server sends:
+/// nylium on the floor at y 40, one huge fungus at the origin (a stem to y 50, a wart cap at y 51
+/// from -3 to 3), the bot standing on the cap at `spawn`.
+fn cap_world(spawn: (i32, i32, i32)) -> World {
+    use protocol::S2c;
+    use sim::nether::{NETHER, Stage, nether_type};
+    use world::Event;
+    let mut stage = Stage::new(2, 40, 70);
+    stage
+        .fill((-32, 47), (40, 40), (-32, 47), BlockKind::WarpedNylium)
+        .fill((0, 0), (41, 50), (0, 0), BlockKind::WarpedStem)
+        .fill((-3, 3), (51, 51), (-3, 3), BlockKind::WarpedWartBlock)
+        .spawn(spawn);
+    let model = stage.build().unwrap();
+    let mut w = World::new();
+    w.step(&Event::Packet(S2c::Login {
+        entity_id: 1,
+        view_distance: 8,
+        simulation_distance: 3,
+        dimension_type: nether_type(),
+        dimension: NETHER.to_owned(),
+        game_type: 0,
+    }));
+    for ((x, z), c) in &model.columns {
+        w.step(&Event::Packet(S2c::LevelChunkWithLight {
+            x: *x,
+            z: *z,
+            column: c.column.clone(),
+        }));
+    }
+    let [x, y, z] = model.spawn;
+    w.step(&Event::Packet(S2c::PlayerPosition {
+        teleport_id: 1,
+        x,
+        y,
+        z,
+        yaw: 0.0,
+        pitch: 0.0,
+        flags: 0,
+    }));
+    w.body.get_or_insert(physics::Body {
+        pos: [x, y, z],
+        ..physics::Body::default()
+    });
+    w
+}
+
+/// Race 45537373222 lanes 0 and 2: a bot on a fungus cap is up in the cap. The floor to walk to
+/// is seen nylium 8 to 24 off with room over it; over the stem the cap block underfoot is dug
+/// (the stem under it is a floor), and off the stem, over the cap's hollow (a fall of 10), never.
+#[test]
+fn a_bot_on_a_fungus_cap_goes_down_to_the_floor() {
+    let b = Base::default();
+    let w = cap_world((0, 52, 0));
+    assert!(
+        base::on_cap(&w),
+        "on the wart: {:?}",
+        w.block_under_player()
     );
-    let t = stem_targets(&w, &b, |c| c.0 == 3);
-    assert_eq!(t.first(), Some(&(-5, 41, 2)));
+    let floor = base::floor_targets(&w, &b, |_| false);
+    assert!(!floor.is_empty());
+    for c in &floor {
+        assert_eq!(c.1, 41, "over the nylium: {c:?}");
+        let d2 = c.0 * c.0 + c.2 * c.2;
+        assert!((64..=576).contains(&d2), "8 to 24 off: {c:?}");
+    }
+    assert_eq!(
+        base::dig_down(&w),
+        Some((0, 51, 0)),
+        "the stem under it holds the bot"
+    );
+    let hollow = cap_world((2, 52, 2));
+    assert!(base::on_cap(&hollow));
+    assert_eq!(
+        base::dig_down(&hollow),
+        None,
+        "a fall of 10 is never dug into"
+    );
+    let floor = cap_world((10, 41, 10));
+    assert!(
+        !base::on_cap(&floor),
+        "on nylium: {:?}",
+        floor.block_under_player()
+    );
 }
 
 /// Fewer than four main slots free: granite goes before dirt; pearls and rods never.

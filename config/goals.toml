@@ -613,9 +613,17 @@ drop = ["granite", "tuff", "dirt", "diorite", "andesite", "calcite"]
 # 18d's progress invariant).
 step_ticks = 2400
 step_fails = 4
-# Stems within 24 flat of the feet (clojurecraft's search-radius) and 3 of their height: a huge
-# fungus's lowest stems, dug from the floor beside them (the dig walk's PICKUP_RISE, 2).
-stem_radius = 24
-stem_rise = 2
+# Stems seen within 48 flat of the feet (race 45537373222: two bots up on fungus caps saw none
+# within 24 with a way), each dug from its column's lowest seen cell, that cell within 12 of the
+# feet's height (a fungus is 4 to 13 tall; the dig walk decides what it reaches).
+stem_radius = 48
+stem_rise = 12
 note_every = 600
+# Off a fungus cap (race 45537373222 lanes 0 and 2 stood on warped wart at y 51 to 52 for 2,400
+# ticks): seen warped nylium with room over it 8 to 24 flat of the feet walked to by route (nearer
+# is under the cap itself), else the cap block underfoot dug by hand where the drop is at most 3;
+# at most 24 moves (a cap is up to about 13 over the floor, a dig or a walk each).
+floor_near = 8
+floor_far = 24
+down_tries = 24
 # <<< base
