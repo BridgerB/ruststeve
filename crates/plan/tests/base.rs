@@ -160,9 +160,9 @@ fn the_frontier_bot_skips_the_pickaxe_and_without_coal_the_smelt() {
     lane2.inventory.slots.remove(&10);
     let why = skip_why(Step::Smelt, &lane2, &b, false).unwrap();
     assert!(why.contains("no coal"), "{why}");
-    // Eight stems held: no wood step.
+    // Ten stems held: no wood step.
     let mut wood = w;
-    give(&mut wood, 21, ItemKind::WarpedStem, 8, None);
+    give(&mut wood, 21, ItemKind::WarpedStem, 10, None);
     assert!(skip_why(Step::Wood, &wood, &b, false).is_some());
 }
 
@@ -348,6 +348,11 @@ fn the_base_rows_make_the_kit_from_warped_wood() {
     );
     let shield = [(ItemKind::IronIngot, 1), (ItemKind::WarpedPlanks, 6)];
     assert_eq!(next("base-shield", &shield, true), "craft:shield");
+    let picks = [(ItemKind::WarpedPlanks, 3), (ItemKind::Stick, 2)];
+    assert_eq!(
+        next("base-wood-pickaxe", &picks, true),
+        "craft:wooden_pickaxe"
+    );
 }
 
 fn noted(p: &plan::Plan, what: &str) -> usize {
@@ -400,4 +405,29 @@ fn a_kill_resumes_a_paused_base() {
     p.base_resume();
     assert_eq!(p.base_task(&w, 260), Some(plan::Task::Idle));
     assert!(!p.base.over);
+}
+
+/// The hunt's filler pickaxe (P3): a wooden one, the most worn first, never a stone one; wooden
+/// uses count apart from the stone reserve, and three wooden pickaxes end the wood picks step.
+#[test]
+fn the_spare_pick_is_a_wooden_one_and_never_the_reserve() {
+    let b = Base::default();
+    let mut w = frontier();
+    assert_eq!(base::spare_pick(&w), None, "stone pickaxes are the reserve");
+    assert!(skip_why(Step::WoodPicks, &w, &b, true).is_none());
+    give(&mut w, 15, ItemKind::WoodenPickaxe, 1, Some(59));
+    give(&mut w, 16, ItemKind::WoodenPickaxe, 1, Some(20));
+    assert_eq!(base::spare_pick(&w), Some(16), "the most worn first");
+    assert_eq!(base::wood_pick_uses(&w), 79);
+    assert_eq!(
+        base::reserve_pick_uses(&w),
+        144,
+        "wood does not count in the reserve"
+    );
+    give(&mut w, 17, ItemKind::WoodenPickaxe, 1, Some(59));
+    give(&mut w, 18, ItemKind::WoodenPickaxe, 1, Some(59));
+    assert!(
+        skip_why(Step::WoodPicks, &w, &b, true).is_some(),
+        "197 uses held"
+    );
 }

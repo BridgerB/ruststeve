@@ -160,6 +160,12 @@ fn strikes_from_b_kill_it_at_the_mouth_and_a_hit_never_pushes_it_in() {
     );
     // 40 health at 6 a hit: 7.
     assert_eq!(hits, 7);
+    // A sword wears one use a landed hit (`hurtEnemy`), told as the slot's damage component.
+    assert_eq!(sim.survival.life.tools_worn, 7);
+    assert_eq!(
+        sim.survival.life.tool_wear.values().copied().sum::<i32>(),
+        7
+    );
     assert_eq!(sim.ender(id).unwrap().teleports, 0);
     assert!(sim.survival.life.hurt_by_mob.is_empty());
 }
