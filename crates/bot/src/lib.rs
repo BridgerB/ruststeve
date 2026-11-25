@@ -99,6 +99,11 @@ pub struct Opts {
     /// Ask for a snapshot (through `on_stage`) once the run has played this many server ticks:
     /// a place to resume from that is not a stage (`race --snapshot-at`).
     pub snapshot_at: Option<u64>,
+    // >>> eyes
+    /// The plan's eyes state from a snapshot's `eyes.rsw` (issue 19c): restored into the planner
+    /// at the start, so a resumed bot keeps the lines and the fix the snapshot bot had.
+    pub eyes: Option<plan::eyes::Kept>,
+    // <<< eyes
 }
 
 /// A run reaching a new stage, for the race's snapshot.
@@ -109,6 +114,10 @@ pub struct StageUp {
     pub stage: world::stage::Stage,
     pub world: Box<World>,
     pub kind: SnapKind,
+    // >>> eyes
+    /// The plan's eyes state then, written beside the snapshot as `eyes.rsw` (issue 19c).
+    pub eyes: Option<plan::eyes::Kept>,
+    // <<< eyes
 }
 
 /// Why a snapshot is asked for. Only `Stage` is a stage snapshot; the others are places to
@@ -458,6 +467,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         no_progress_ticks,
         progress,
         snapshot_at,
+        eyes,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -548,6 +558,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         Some(a) => Some(plan::Plan::new(a)),
         None => None,
     };
+    // >>> eyes (Q3, issue 19c)
+    if let (Some(p), Some(k)) = (planner.as_mut(), eyes) {
+        p.restore_eyes(k);
+    }
+    // <<< eyes
     let mut plan_seen: u64 = 0;
     let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut plan_notes = Notes::default();
@@ -596,6 +611,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                     stage,
                     world: Box::new(run.world.clone()),
                     kind: SnapKind::Stage,
+                    eyes: planner.as_ref().map(plan::Plan::eyes_kept),
                 });
             }
         }
@@ -640,6 +656,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                 stage: run.world.stage_reached.unwrap_or(world::Stage::InWorld),
                 world: Box::new(run.world.clone()),
                 kind: SnapKind::At(at),
+                eyes: planner.as_ref().map(plan::Plan::eyes_kept),
             });
         }
         if let (Some(cap), Some(_)) = (cap_ticks, play_since)
@@ -827,6 +844,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
                         stage: run.world.stage_reached.unwrap_or(world::Stage::InWorld),
                         world: Box::new(run.world.clone()),
                         kind: SnapKind::Stuck,
+                        eyes: planner.as_ref().map(plan::Plan::eyes_kept),
                     });
                 }
                 break Ending::NoProgress {

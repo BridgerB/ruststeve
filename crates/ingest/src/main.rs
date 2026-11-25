@@ -404,6 +404,7 @@ mod tests {
                     recording: None,
                     aim: None,
                     pearls: None,
+                    eyes: None,
                 }
             })
             .collect();

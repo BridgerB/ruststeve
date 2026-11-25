@@ -147,6 +147,11 @@ fn snapshot(
     });
     let files = results::snapshot::copy_dir(server_world, &dir.join("world"))?;
     results::snapshot::write_memory(&dir.join("memory.rsw"), &up.world.memory)?;
+    // >>> eyes (Q3, issue 19c)
+    if let Some(k) = &up.eyes {
+        results::snapshot::write_eyes(&dir.join("eyes.rsw"), k)?;
+    }
+    // <<< eyes
     let snap = results::snapshot::Snap {
         stage: up.stage.name().to_owned(),
         bot: up.bot.clone(),
@@ -241,6 +246,15 @@ fn race(a: &Args) -> Result<bool, String> {
         .as_deref()
         .map(results::snapshot::read_memory)
         .transpose()?;
+    // >>> eyes (Q3, issue 19c)
+    // The snapshot's `eyes.rsw` beside its memory; a missing file reads as the default.
+    let eyes = a
+        .memory
+        .as_ref()
+        .and_then(|m| m.parent())
+        .map(|d| results::snapshot::read_eyes(&d.join("eyes.rsw")))
+        .transpose()?;
+    // <<< eyes
     // The snapshot taker: the first bot to reach each stage above the start's (one-bot-first).
     let (tx, rx) = std::sync::mpsc::channel::<bot::StageUp>();
     let snapper = {
@@ -349,6 +363,7 @@ fn race(a: &Args) -> Result<bool, String> {
             no_progress_ticks: config.race.no_progress_ticks,
             progress: Some(a.out.join(format!("progress-{name}.txt"))),
             snapshot_at: a.snapshot_at,
+            eyes: eyes.clone(), // >>> eyes (Q3, issue 19c)
         };
         let watch = Watch::start(
             format!("{}:{}", a.host, a.rcon_port),
@@ -586,6 +601,7 @@ fn write_case(dir: &Path, case: &Case, coverage: &mut Coverage) -> Result<Row, S
         recording: case.recording.clone(),
         aim: case.plan.as_ref().map(|p| (p.aim.clone(), p.reached)),
         pearls: Some(case.pearls_gained()),
+        eyes: case.eyes(),
     })
 }
 
