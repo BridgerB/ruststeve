@@ -153,6 +153,8 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 const FLOOR_MIN: i32 = 8;
 /// Cells each way on the plane a floor block is dug for filler from where the bot stands.
 const FLOOR_REACH: i32 = 2;
+/// Moves down off fungus caps the hunt makes (each a walk or a dig).
+const CAP_TRIES: u32 = 24;
 /// Eye to a block's middle within which the old shell is dug back from where the bot stands.
 const RECLAIM_REACH: f64 = 4.4;
 /// Ticks of one yaw sweep at O.
@@ -293,6 +295,9 @@ pub struct PearlState {
     /// Where the last walk on for a site began, and how many in a row left the feet there.
     #[serde(default)]
     pub walk_on: Option<([i32; 3], u32)>,
+    /// Moves made down off fungus caps.
+    #[serde(default)]
+    pub cap_tries: u32,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -2001,6 +2006,41 @@ impl Plan {
         None
     }
 
+    /// Down off a fungus cap: a walk to the floor seen below, else the cap block under the feet
+    /// dug (`base::dig_down`: a landing within the safe fall, no lava).
+    fn cap_down(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
+        self.pearls.cap_tries += 1;
+        let table = self.table.clone()?;
+        let targets = crate::base::floor_targets(w, &table.base, |c| self.refused_now(c, tick));
+        for c in targets.into_iter().take(crate::CANDIDATES_PER_TICK) {
+            let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    "hunt: down off the fungus cap".to_owned(),
+                    format!(
+                        "walk from {feet:?} on {:?} to the floor at {c:?}; try {} of {CAP_TRIES}",
+                        w.block_under_player(),
+                        self.pearls.cap_tries
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.refuse(c, tick);
+        }
+        let under = crate::base::dig_down(w)?;
+        self.note(
+            tick,
+            "hunt: down off the fungus cap".to_owned(),
+            format!(
+                "dig {under:?} under the feet {feet:?}: no floor with a way; try {} of {CAP_TRIES}",
+                self.pearls.cap_tries
+            ),
+        );
+        Some(Task::Dig(crate::dig::Dig::new(w, under, tick)))
+    }
+
     /// The next block of the old shell to dig back (a cell placed by this hunt, full, within
     /// reach of the eye, not under the feet), with a wooden pickaxe; `None` and the reclaim over
     /// (noted with its count) when none is left or no wooden pickaxe is held.
@@ -2240,6 +2280,16 @@ impl Plan {
             }
         }
         let feet = arr(path::stand_cell(w, body.pos));
+        // On a fungus cap: down to the forest floor first (P5's floor targets, else the cap block
+        // under the feet dug, never a fall over 3): a cap is no site and no start of a walk on
+        // (race 45548022681: four bots sat on caps at y 71).
+        if self.pearls.burrow.is_none()
+            && crate::base::on_cap(w)
+            && self.pearls.cap_tries < CAP_TRIES
+            && let Some(t) = self.cap_down(w, tick, feet)
+        {
+            return Some(t);
+        }
         // A move's old shell dug back first, with a wooden pickaxe only (P5's spare_pick: never the
         // stone pickaxes' reserve), nearest first, never the block under the feet.
         if self.pearls.burrow.is_none()
