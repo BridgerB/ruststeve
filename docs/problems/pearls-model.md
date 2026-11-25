@@ -17,7 +17,15 @@ The hunt (P3, `docs/problems/pearls-hunt.md`) fights endermen from a level burro
 ## The rows (see config/moments.toml's comment)
 Arena rows (e04, e05, e08) start in M: a stone floor 19 by 13, walls 4 high, a glass roof at 4, the burrow in its west part (back wall, sides and roof at 2), an enderman 10 east of M with its AI. `burrow:hold` stares from M at its eye until creepy, walks west into B (the block west of the feet solid: the back wall) and looks at its torso; `burrow:strike` also strikes from B every 14th tick (an iron sword's full charge is 12.5) while its box is within 3.0 of the eye, the attack then the swing; `burrow:near` stays in M. Each row with mobs or items writes `<id>.real.trace.txt` and `<id>.sim.trace.txt` (the bot and every enderman and item within 32, every 10 ticks).
 
+## The real rows (parity 45531046147, b4d5a0d)
+- **e04-mouth pass**: creepy about 10 ticks into the stare from M; the bot walked into B; the enderman walked from 10 east to O within about 30 ticks of anger and held there (its centre 1.30 to 1.74 past the M/O face; one stray to 3.25) for about 400 ticks; the bot never hit. The bot stopped 0.14 toward M from B's centre (forward released once the back wall was behind it), so the gap to its attack box was about 0.23, not the plan's 0.37.
+- **e05-strike pass**: 7 iron hits (40, 34, 28, 22, 16, 10, 4, 0) from tick 88 to 240; never a teleport; each hit knocked it 1 to 1.7 east and it walked back, so about one hit in 25 to 30 ticks and about 150 ticks a kill; the bot never hit.
+- **e06-roof pass**: looked in the eye from B at O, neither stared (data 18) nor creepy.
+- **e07 pass**: the pearl at O not picked up from B, picked up from M.
+- **e08-near**: see wall 1.
+
 ## Walls
+1. **M under the roof is not hit either** (e08-near, parity 45531046147). The bot at M's centre, the angry enderman at O with its box at the face (centres 0.80 apart, inside the 1.43 reach) stood 240 ticks and never struck: its blow needs a line of sight eye to eye (`MeleeAttackGoal.canPerformAttack`, `Sensing.hasLineOfSight`), and the line from its eye (2.55) to the bot's (1.62) meets M's roof. So the burrow's depth buys the stare and teleport margin (from B the roof cuts every stare, e06) and the pickup reach (e07), not the hit margin against one enderman at O. Not tested: an enderman at a side cell, an M with no roof. The row stays as a measurement; the model now matches it.
 
 ## The model (18g, b4d5a0d and on)
 - **The chase paths** (`crates/sim/src/enderman.rs`, `ender_path`): a breadth-first search over walk nodes for a mob 2.9 high (three cells clear over a floor, a step of one, a drop of up to three, corners only past two open sides, at most 1,024 nodes: `PathNavigation`'s follow range 64 × 16) to the node nearest the player's cell, ties to the first found; found again when the player's cell changes, when the next cell is reached, or every 10 ticks. A player in B is out of reach, so the path is partial and ends at O. Before this the model walked a straight line at the player: the gap that hid clojurecraft's stare-freeze.

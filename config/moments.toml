@@ -1583,7 +1583,9 @@ set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0]
 # - e06-roof: the bot in B looks at the eye of a calm enderman penned at O: M's roof cuts the line,
 #   so neither stared (data 18) nor creepy.
 # - e07-pickup-b, e07-pickup-m: an ender pearl at O is not picked up from B and is from M.
-# - e08-near: the bot stays in M with the angry enderman at O: it is hit (the depth matters).
+# - e08-near: the bot stays in M with the angry enderman at O. Planned to prove the depth matters;
+#   on the real server (parity 45531046147) it is never hit: its blow needs a line of sight eye to
+#   eye and M's roof cuts it (docs/problems/pearls-model.md, wall 1).
 
 [[moment]]
 id = "e04-mouth"

@@ -200,3 +200,19 @@ fn a_pearl_at_o_is_picked_up_from_m_and_not_from_b() {
     assert_eq!(pearls_after((0, FEET, 0)), 0, "picked from B");
     assert_eq!(pearls_after((1, FEET, 0)), 1, "not picked from M");
 }
+
+#[test]
+fn the_bot_in_m_under_the_roof_is_not_hit_by_an_enderman_at_o() {
+    // Parity 45531046147 (e08-near): on the real server the enderman stood at O, its box at the
+    // face, centre to centre 0.8 (inside its 1.43), and never struck: M's roof cuts the line of
+    // sight eye to eye that its blow needs.
+    let mut sim = joined((1, FEET, 0));
+    let id = sim.summon_enderman([10.5, FEET_Y, 0.5]);
+    anger(&mut sim, id);
+    look(&mut sim, 270.0, 90.0);
+    for _ in 0..300 {
+        tick(&mut sim);
+    }
+    assert_eq!(cell(sim.survival.life.mobs[&id].pos), O);
+    assert!((sim.health - 20.0).abs() < 1e-6, "hit: {}", sim.health);
+}
