@@ -634,3 +634,42 @@ fn a_heading_with_a_point_turns_and_chooses_toward_it() {
     // Nothing left on the turned-to axis: the exploring turn decides.
     assert_eq!(turn_toward((-1, 0), (450, 40, -20), p), None);
 }
+
+fn add_cube(w: &mut World, id: i32, at: [f64; 3]) {
+    w.step(&Event::Packet(S2c::AddEntity {
+        id,
+        uuid: [0; 16],
+        kind: data::EntityKind::MagmaCube.id(),
+        x: at[0],
+        y: at[1],
+        z: at[2],
+        velocity: [0.0; 3],
+    }));
+}
+
+#[test]
+fn two_magma_cubes_near_on_the_trip_seal_a_pocket_and_clear_it() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    add_cube(&mut w, 50, [11.5, 64.0, 8.5]);
+    add_cube(&mut w, 51, [8.5, 64.0, 12.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 5);
+    assert!(
+        noted(&p, "home: pocket from magma cubes"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.cube_pockets, 1);
+    // Both gone: held CUBE_CLEAR_TICKS, then on.
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![50, 51] }));
+    run(&mut p, &mut w, 105, 230);
+    assert!(noted(&p, "home: out of the cube pocket"), "{:?}", notes(&p));
+    assert_eq!(p.ender.home.cube_pockets, 1);
+}

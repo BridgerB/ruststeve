@@ -146,6 +146,14 @@ pub struct HomeState {
     /// Walks to a log for the cook's fuel.
     #[serde(default)]
     pub fuel_walks: u32,
+    /// A pocket from magma cubes in hand (since), the tick the last cube left `CUBE_CLEAR`, and
+    /// the pockets made.
+    #[serde(default)]
+    pub cube_pocket: Option<u64>,
+    #[serde(default)]
+    pub cube_clear_since: Option<u64>,
+    #[serde(default)]
+    pub cube_pockets: u32,
     #[serde(default)]
     pub done: bool,
 }
@@ -160,6 +168,21 @@ pub const FUEL_LOG_REACH: f64 = 32.0;
 /// Food under which raw meat is eaten as it is rather than cooked first by day: 6 is where
 /// sprinting stops (vanilla).
 pub const COOK_FOOD_FLOOR: i32 = 6;
+/// Magma cubes on the trip (the coordinator, 2026-11-25; race 45698618366 lane 3 took five hits
+/// in 140 ticks): one within `CUBE_FIGHT` is fought over the danger line; `CUBE_CROWD` within
+/// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
+/// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
+pub const CUBE_FIGHT: f64 = 3.0;
+pub const CUBE_NEAR: f64 = 6.0;
+pub const CUBE_CROWD: usize = 2;
+pub const CUBE_CLEAR: f64 = 8.0;
+pub const CUBE_CLEAR_TICKS: u64 = 200;
+
+/// The distance between two positions.
+pub fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
 /// A seal is placed only this near the eye (`walk::REACH` 4 plus half a block for the far corner).
 pub const SEAL_REACH: f64 = 4.5;
 
@@ -572,6 +595,9 @@ impl Plan {
         let rules = self.table.as_ref().map(|t| t.survival.clone())?;
         let health = w.player.health?;
         let heal = crate::can_heal(w.player.food, eat::best_food(w, &rules).is_some());
+        if let Some(t) = self.home_cubes(w, tick, health, rules.danger_health) {
+            return Some(t);
+        }
         if health <= rules.danger_health && !heal {
             if self
                 .ender
@@ -612,6 +638,61 @@ impl Plan {
             return Some(t);
         }
         None
+    }
+
+    /// Magma cubes pressing on the trip: with `CUBE_CROWD` within `CUBE_NEAR`, or any within
+    /// `CUBE_CLEAR` at or under the danger line, a sealed pocket where the bot stands, held until
+    /// none is within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. Each pocket counted and noted.
+    fn home_cubes(&mut self, w: &World, tick: u64, health: f32, danger: f32) -> Option<Task> {
+        if !self.ender.home.top_up_over {
+            return None;
+        }
+        let body = w.body?;
+        let cubes: Vec<f64> = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && e.kind == data::EntityKind::MagmaCube)
+            .map(|e| dist(e.pos, body.pos))
+            .collect();
+        let near = cubes.iter().filter(|d| **d <= CUBE_NEAR).count();
+        let within_clear = cubes.iter().any(|d| *d <= CUBE_CLEAR);
+        let press = near >= CUBE_CROWD || (within_clear && health <= danger);
+        let held = self.ender.home.cube_pocket.is_some();
+        if press && !held {
+            self.ender.home.cube_pocket = Some(tick);
+            self.ender.home.cube_pockets += 1;
+            self.note(
+                tick,
+                "home: pocket from magma cubes".to_owned(),
+                format!(
+                    "{near} within {CUBE_NEAR}, {} within {CUBE_CLEAR}; health {health} (danger {danger}); pocket {}",
+                    cubes.iter().filter(|d| **d <= CUBE_CLEAR).count(),
+                    self.ender.home.cube_pockets
+                ),
+            );
+        }
+        let since = self.ender.home.cube_pocket?;
+        if within_clear {
+            self.ender.home.cube_clear_since = None;
+        } else {
+            let clear = *self.ender.home.cube_clear_since.get_or_insert(tick);
+            if tick.saturating_sub(clear) >= CUBE_CLEAR_TICKS {
+                self.ender.home.cube_pocket = None;
+                self.ender.home.cube_clear_since = None;
+                self.note(
+                    tick,
+                    "home: out of the cube pocket".to_owned(),
+                    format!(
+                        "none within {CUBE_CLEAR} for {CUBE_CLEAR_TICKS} ticks; held {} ticks; health {health}",
+                        tick.saturating_sub(since)
+                    ),
+                );
+                return None;
+            }
+        }
+        self.pocket_step(w, tick);
+        self.retry_at = tick + 1;
+        Some(Task::Idle)
     }
 
     /// The portal aimed at: memory's nearest, read again every `portal_every`; else geography.

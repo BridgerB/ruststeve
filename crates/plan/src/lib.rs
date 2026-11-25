@@ -1892,6 +1892,22 @@ impl Plan {
                     .filter(|(_, e)| e.kind == data::EntityKind::MagmaCube)
                     .map(|(id, _)| *id),
             );
+        } else if home_trip {
+            // On the trip a cube is fought only when it is on the bot (within
+            // `home::CUBE_FIGHT`) and the health is over the danger line: a large one splits and
+            // a no-heal bot loses a long fight; further off the legs shun it, and under the line
+            // or with two near the trip seals a pocket (`home_recover`).
+            let over = w.player.health.is_some_and(|h| h > rules.danger_health);
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| {
+                        e.kind == data::EntityKind::MagmaCube
+                            && (!over
+                                || crate::home::dist(e.pos, body.pos) > crate::home::CUBE_FIGHT)
+                    })
+                    .map(|(id, _)| *id),
+            );
         }
         let never_kinds: &[data::EntityKind] = if hunt_pocket {
             &[data::EntityKind::MagmaCube]
