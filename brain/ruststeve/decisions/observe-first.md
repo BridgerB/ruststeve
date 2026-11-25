@@ -5,8 +5,8 @@ type: decision
 tags: [decision, observability, coverage, ledger, senses]
 aliases: [observe first, full observability, the coverage gate, no blind spots]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: ruststeve@cfdd7d2
+lastUpdated: 2026-11-24
+verifiedAgainst: ruststeve@31545c1
 sourceRefs:
   - "ruststeve:crates/results/src/observe.rs#fn every_clientbound_packet_is_classified() {"
   - "ruststeve:crates/observe/src/lib.rs#pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {"
@@ -33,4 +33,5 @@ Before 16e: about 37 of 141 play packets decoded (2.5 million thrown away in one
 
 ## See also
 - [[observability]] - what each run leaves and how to read it.
+- Issue 18b adds the hunt's facts before the hunt is built: anger, blows, deaths, pearls dropped and picked ([[race-and-results]]).
 - [[one-bot-first]] - done is one real bot past the stage; observing is how to see why one did not.

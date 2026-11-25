@@ -596,3 +596,150 @@ fn an_enderman_seen_and_ticking_is_in_the_ledger() {
     }
     assert_eq!(still, 1);
 }
+
+/// Issue 18b: a provoke, the blows and the kill of one enderman, its pearl dropping beside the
+/// body and picked up, each a fact; the senses row counts the angry one, the kill and the pearl.
+#[test]
+fn an_enderman_angered_struck_killed_and_its_pearl_picked_are_in_the_ledger() {
+    let mut w = nether_bot_at(0.5, 0.5);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 21,
+        uuid: [2; 16],
+        kind: EntityKind::Enderman.id(),
+        x: 2.5,
+        y: 64.0,
+        z: 0.5,
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 21,
+        entries: vec![(9, MetaValue::Float(40.0)), (17, MetaValue::Bool(false))],
+    }));
+    let mut a = snapshot(&w);
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 21,
+        entries: vec![(17, MetaValue::Bool(true))],
+    }));
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::EndermanAngry {
+                id: 21,
+                ticking: true,
+                ..
+            }
+        )),
+        "{facts:?}"
+    );
+    let row = senses(&w, "t", "w", None);
+    assert_eq!((row.angry_ticking, row.angry_frozen), (Some(1), Some(0)));
+    // Angry still: told once.
+    let (b, facts) = facts_between(&b, &w);
+    assert!(
+        !facts
+            .iter()
+            .any(|f| matches!(f, Fact::EndermanAngry { .. })),
+        "{facts:?}"
+    );
+    w.entities.get_mut(&21).unwrap().struck = true;
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 21,
+        entries: vec![(9, MetaValue::Float(34.0))],
+    }));
+    let (b, facts) = facts_between(&b, &w);
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::EndermanHit {
+                id: 21,
+                before: 40.0,
+                after: 34.0
+            }
+        )),
+        "{facts:?}"
+    );
+    w.step(&Event::Packet(S2c::EntityEvent { id: 21, status: 3 }));
+    let (b, facts) = facts_between(&b, &w);
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::EndermanKilled {
+                id: 21,
+                by_bot: true
+            }
+        )),
+        "{facts:?}"
+    );
+    assert_eq!(b.deaths.len(), 1);
+    // The drop: an item entity whose data says ender pearl, a block from the body.
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 30,
+        uuid: [3; 16],
+        kind: EntityKind::Item.id(),
+        x: 3.0,
+        y: 64.0,
+        z: 1.0,
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 30,
+        entries: vec![(
+            8,
+            MetaValue::Item(protocol::slot::Slot::item(ItemKind::EnderPearl.id(), 1)),
+        )],
+    }));
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![21] }));
+    let (b, facts) = facts_between(&b, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|f| matches!(f, Fact::PearlDropped { id: 30, .. })),
+        "{facts:?}"
+    );
+    w.step(&Event::Packet(S2c::TakeItemEntity {
+        item: 30,
+        collector: 7,
+        amount: 1,
+    }));
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![30] }));
+    put(
+        &mut w,
+        36,
+        protocol::slot::Slot::item(ItemKind::EnderPearl.id(), 1),
+    );
+    let (_, facts) = facts_between(&b, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|f| matches!(f, Fact::PearlPicked { id: 30, amount: 1 })),
+        "{facts:?}"
+    );
+    let row = senses(&w, "t", "w", None);
+    assert_eq!(row.pearls, Some(1));
+    assert_eq!(row.kills, Some(1));
+    assert!(row.hunt().contains("pearls 1 kills 1"), "{}", row.hunt());
+    // A pearl lying far from any death is no drop of a kill.
+    a.deaths.clear();
+    a.pearl_items.clear();
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 31,
+        uuid: [4; 16],
+        kind: EntityKind::Item.id(),
+        x: 20.0,
+        y: 64.0,
+        z: 20.0,
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 31,
+        entries: vec![(
+            8,
+            MetaValue::Item(protocol::slot::Slot::item(ItemKind::EnderPearl.id(), 1)),
+        )],
+    }));
+    let (_, facts) = facts_between(&a, &w);
+    assert!(
+        !facts
+            .iter()
+            .any(|f| matches!(f, Fact::PearlDropped { id: 31, .. })),
+        "{facts:?}"
+    );
+}
