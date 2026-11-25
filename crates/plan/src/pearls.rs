@@ -2731,8 +2731,15 @@ impl Plan {
             .filter(|(d, _)| *d <= RECLAIM_REACH)
             .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
             .map(|(_, c)| c);
-        let pick = crate::base::spare_pick(w);
-        let (Some(c), Some(_)) = (next, pick) else {
+        // A wooden pickaxe first, else the pickaxe above its reserve (as the restock): race
+        // 45602491038 lane 6 used up its three wooden ones and left 18 blocks of a shell.
+        let wooden = crate::base::spare_pick(w).is_some();
+        let reserve = self
+            .table
+            .as_ref()
+            .map_or(0, |t| t.survival.pickaxe_reserve);
+        let pick = (wooden || endermen::pickaxe_uses_left(w) > reserve).then_some(());
+        let (Some(c), Some(())) = (next, pick) else {
             self.pearls.reclaim = false;
             self.pearls.placed.retain(|c| full(*c));
             self.pearls.old_shell.clear();
@@ -2742,7 +2749,7 @@ impl Plan {
                 format!(
                     "{}; {} burrow blocks held",
                     if pick.is_none() {
-                        "no wooden pickaxe held"
+                        "no wooden pickaxe held and the pickaxe at its reserve"
                     } else {
                         "none left in reach"
                     },
@@ -2754,6 +2761,9 @@ impl Plan {
         self.pearls.reclaimed += 1;
         self.pearls.placed.retain(|p| *p != c);
         self.pearls.old_shell.retain(|p| *p != c);
+        if !wooden {
+            return Some(Task::Dig(crate::dig::Dig::new(w, (c[0], c[1], c[2]), tick)));
+        }
         Some(Task::Dig(crate::dig::Dig::with_tool(
             w,
             (c[0], c[1], c[2]),
