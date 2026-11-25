@@ -82,3 +82,10 @@ A development race on 47589db (`dev-stronghold`, Q2's home merged), 2 lanes x 1 
   - At the tunnel's end within `REACH` + 2: a walk to the cell (a drop into the room), else a wall step.
   - Once at the floor, the stairs run only when the tunnel and the last steps have nothing.
 - **Still open**: the junk drop and pick-up churn: 167 leather drops in lane 0, one every 40 ticks while standing still. That is the shared junk mechanism, not this file's.
+
+### Wall 5: the climb under the river, the radius of 7 (races 45706776687 to 45716720148, 2026-11-25)
+Development races (`dev-stronghold`, from the frontier, 2 lanes x 1 bot, cap 12,000). Development knowledge, never evidence.
+- **Results**: `portal_room` 1/2 on dc2fee6 (45706776687), 2/2 on a6bc06d (45709849027), 1/2 on 11311c0 (45714294764), 2/2 on d867b43 (45716720148). Every bot that reached it broke the spawner, sealed a nook and waited at 20 health.
+- **Cause 1, the climb**: `tunnel::SAFE_Y`'s cost under y 40 is the Nether's lava sea. In the overworld it took the routes to a room at y 17 up to y 40, under the river at x 1583 to 1614 and into its water (4 escapes, the last still trapped at the cap). Fix (73e5562, 11311c0): `tunnel::Limits::max_y` (fenced; every other caller keeps the old box) caps the room's route at the floor + 6. With no capped way, the approach turns to the room's north or south side twice, then the uncapped route.
+- **Cause 2, inside by a radius**: `inside` was 7 from the ring's centre. A bot one cell into the west wall, 5 off on x, counted as in. It sealed and waited out of the stage's ±4.5 box. Fix (d867b43): `inside` reads the stage's own box, as `stand_target` does.
+- **The junk churn** (a6bc06d): "junk held back" and "junk placed" fire. Crimson fungus drops fell from 123 to 29 in a run; leather still comes back while walking.
