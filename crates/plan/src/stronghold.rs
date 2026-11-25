@@ -243,21 +243,24 @@ pub fn inside(room: &Room, feet: Cell, reach: i32) -> bool {
         && feet.1 <= room.centre[1] + 2
 }
 
-/// A standing cell in the room for the bot: on a floor, inside `reach` of the ring's centre and
-/// outside the ring itself, with no lava within two cells at the feet's and the floor's height
+/// A standing cell in the room for the bot: on a floor, inside the `portal_room` stage's box (and
+/// `reach` on each axis) about the ring's centre and outside the ring itself, with no lava within two cells at the feet's and the floor's height
 /// (the pool under the ring, the room's corner pools), at the floor's height up to the frames';
 /// the nearest `from` first. Only cells of the room's air and the blocks facing it are read.
 pub fn stand_target(w: &World, room: &Room, from: Cell, reach: i32) -> Option<Cell> {
     let [cx, fy, cz] = room.centre;
+    // The stage's own box (`world::stage::in_portal_room`): the whole cell within `ROOM_HALF` of
+    // the ring's middle (cx + 0.5, cz + 0.5) on each axis, and the feet's y within the frames' y
+    // less `ROOM_BELOW` and plus `ROOM_ABOVE`; so the stage cannot miss the cell by rounding.
+    let half = ((world::stage::ROOM_HALF - 0.5).floor() as i32).min(reach);
+    let low = (fy - world::stage::ROOM_BELOW).max(room.floor_y);
+    let high = fy + world::stage::ROOM_ABOVE;
     let mut cells = path::Cells::new(w);
     let mut best: Option<(i64, Cell)> = None;
-    for y in room.floor_y..=fy {
-        for dx in -reach..=reach {
-            for dz in -reach..=reach {
+    for y in low..=high {
+        for dx in -half..=half {
+            for dz in -half..=half {
                 if dx.abs() <= RING + 1 && dz.abs() <= RING + 1 {
-                    continue;
-                }
-                if f64::from(dx).hypot(f64::from(dz)) > f64::from(reach) {
                     continue;
                 }
                 let c = (cx + dx, y, cz + dz);

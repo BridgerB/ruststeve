@@ -501,3 +501,64 @@ fn the_stronghold_junk_names_are_items() {
         t.stronghold.junk
     );
 }
+
+/// The standing cell passes the `portal_room` stage's own test with the feet on it, from either
+/// side of the room.
+#[test]
+fn the_standing_cell_is_in_the_stage_box() {
+    let s = room_world((-40, 60), (-30, 40));
+    for from in [(40, 64, 10), (-30, 64, 10), (5, 64, 35)] {
+        let w = load(&s, [40.5, 64.0, 10.5]);
+        let r = the_room(&w);
+        let t = stronghold::stand_target(&w, &r, from, 7).expect("a standing cell");
+        let at = load(
+            &s,
+            [f64::from(t.0) + 0.5, f64::from(t.1), f64::from(t.2) + 0.5],
+        );
+        assert!(
+            world::stage::in_portal_room(&at),
+            "from {from:?}: {t:?} is outside the stage's box"
+        );
+    }
+}
+
+/// The stronghold's junk never names what the way on needs: eyes, pearls, rods, powder, food,
+/// tools, armour, a table, a furnace, sticks or planks.
+#[test]
+fn the_stronghold_junk_keeps_what_the_way_needs() {
+    let t = table();
+    let names: Vec<&str> = t.stronghold.junk.iter().map(|(n, _)| n.as_str()).collect();
+    for kept in [
+        "ender_eye",
+        "ender_pearl",
+        "blaze_rod",
+        "blaze_powder",
+        "cooked_beef",
+        "bread",
+        "crafting_table",
+        "furnace",
+        "stick",
+    ] {
+        assert!(!names.contains(&kept), "{kept} is in the junk");
+    }
+    for n in &names {
+        assert!(
+            !n.ends_with("_pickaxe")
+                && !n.ends_with("_sword")
+                && !n.ends_with("_axe")
+                && !n.ends_with("_shovel")
+                && !n.ends_with("_helmet")
+                && !n.ends_with("_chestplate")
+                && !n.ends_with("_leggings")
+                && !n.ends_with("_boots")
+                && !n.ends_with("_planks")
+                && !n.ends_with("shield"),
+            "{n} is in the junk"
+        );
+    }
+    let food = ItemKind::CookedBeef;
+    assert!(
+        !t.stronghold.junk_kinds().iter().any(|(k, _)| *k == food),
+        "food in the junk"
+    );
+}
