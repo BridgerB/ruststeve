@@ -273,18 +273,31 @@ fn nearest_eye_item(w: &World, feet: [f64; 3]) -> Option<[f64; 3]> {
 }
 
 /// A fetch script's controls: still until a dropped eye is seen, then forward at it, holding
-/// jump (a step or a slope is climbed), until it is under the feet.
-fn fetch_controls(w: &World) -> Controls {
+/// jump (a step or a slope is climbed), until it is under the feet; once thrown, with no eye in
+/// flight and none on the ground, back to `home`'s middle.
+fn fetch_controls(w: &World, thrown: bool, home: Option<[i32; 3]>) -> Controls {
     let Some(body) = w.body else {
         return Controls::default();
     };
-    let Some(at) = nearest_eye_item(w, body.pos) else {
-        return Controls {
-            pitch: Some(EYE_PITCH),
-            ..Controls::default()
-        };
+    let flying = w
+        .entities
+        .values()
+        .any(|e| e.kind == data::EntityKind::EyeOfEnder);
+    let to = match (nearest_eye_item(w, body.pos), home) {
+        (Some(at), _) => at,
+        (None, Some(h)) if thrown && !flying => [
+            f64::from(h[0]) + 0.5,
+            f64::from(h[1]),
+            f64::from(h[2]) + 0.5,
+        ],
+        (None, _) => {
+            return Controls {
+                pitch: Some(EYE_PITCH),
+                ..Controls::default()
+            };
+        }
     };
-    let (dx, dz) = (at[0] - body.pos[0], at[2] - body.pos[2]);
+    let (dx, dz) = (to[0] - body.pos[0], to[2] - body.pos[2]);
     if dx.hypot(dz) <= FETCH_STOP {
         return Controls::default();
     }
@@ -344,8 +357,9 @@ pub enum Script {
     Burrow(BurrowMode),
     /// Issue 19's y02 (`fetch:<tick>`): standing still looking up (`EYE_PITCH`), use the held
     /// item (an eye of ender) at tick `at`; then walk to the nearest dropped eye once one is
-    /// seen, until it is under the feet.
-    Fetch { at: u64 },
+    /// seen, until it is under the feet; then, given a `home` feet cell (the parity row's start:
+    /// the drop's kick is the server's roll, so where the walk stops is chance), back to it.
+    Fetch { at: u64, home: Option<[i32; 3]> },
     /// Issue 19's y04 (`break:<finish>:<dx>:<dy>:<dz>`): standing still, dig the block `dx dy dz`
     /// from the feet cell, START at tick 0 on its face toward the feet, FINISH at `finish`; then
     /// look at it.
@@ -377,7 +391,7 @@ impl Script {
     pub fn steer(self, tick: u64, w: &World) -> Controls {
         match self {
             Script::Burrow(mode) => burrow_controls(mode, w),
-            Script::Fetch { .. } => fetch_controls(w),
+            Script::Fetch { at, home } => fetch_controls(w, tick > at, home),
             other => other.controls(tick),
         }
     }
@@ -601,7 +615,7 @@ impl Script {
                 near.map(|(_, id)| vec![Act::Attack { entity: id }])
                     .unwrap_or_default()
             }
-            Script::Eat { at } | Script::Use { at, .. } | Script::Fetch { at } => {
+            Script::Eat { at } | Script::Use { at, .. } | Script::Fetch { at, .. } => {
                 if tick == at {
                     vec![Act::UseItem]
                 } else {
@@ -663,7 +677,7 @@ impl Script {
                 face,
             } => format!("light:{at}:{dx}:{dy}:{dz}:{face}"),
             Script::Burrow(mode) => format!("burrow:{}", mode.name()),
-            Script::Fetch { at } => format!("fetch:{at}"),
+            Script::Fetch { at, .. } => format!("fetch:{at}"),
             Script::Break { finish, dx, dy, dz } => format!("break:{finish}:{dx}:{dy}:{dz}"),
         }
     }
@@ -740,6 +754,7 @@ impl Script {
         if let Some(at) = s.strip_prefix("fetch:") {
             return Some(Script::Fetch {
                 at: at.parse().ok()?,
+                home: None,
             });
         }
         if let Some(at) = s.strip_prefix("eat:") {
@@ -787,7 +802,7 @@ mod tests {
             Script::Burrow(BurrowMode::Strike),
             Script::Burrow(BurrowMode::Eye),
             Script::Burrow(BurrowMode::Near),
-            Script::Fetch { at: 20 },
+            Script::Fetch { at: 20, home: None },
             Script::Break {
                 finish: 9,
                 dx: 1,

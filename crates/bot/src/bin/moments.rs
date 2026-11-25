@@ -621,6 +621,21 @@ fn give_of(g: &str) -> Option<(data::ItemKind, i32)> {
     Some((data::ItemKind::from_name(item)?, count.parse().ok()?))
 }
 
+/// A fetch row's script walks back to its start once the eye is fetched (issue 19: where the
+/// walk to the drop stops is the server's roll).
+fn homed(s: Option<Script>, start: [f64; 3]) -> Option<Script> {
+    match s {
+        Some(Script::Fetch { at, .. }) => {
+            let (x, y, z) = feet_cell(start);
+            Some(Script::Fetch {
+                at,
+                home: Some([x, y, z]),
+            })
+        }
+        other => other,
+    }
+}
+
 /// A row's script, or the planner's aim for a `plan:<aim>` row (issue 12b: the escape rows run
 /// the planner with `plan:hold`, the always-rows only).
 fn script_or_aim(m: &Moment) -> Result<(Option<Script>, Option<plan::Aim>), String> {
@@ -707,6 +722,7 @@ fn real_waves(
         for (i, m) in wave.iter().enumerate() {
             let (_, start) = start_of(a, landings, m)?;
             let (script, aim) = script_or_aim(m)?;
+            let script = homed(script, start);
             // A fresh player per run: the server saves a player's place, health and effects by
             // name, so a reused name would start where the last run left it.
             let name = format!("rs-m{:02}-{:04x}", w * a.wave + i, nonce);
@@ -923,6 +939,7 @@ fn sim(a: &Args) -> Result<(), String> {
     for (i, m) in moments.moment.iter().enumerate() {
         let (captured, start) = start_of(a, &landings, m)?;
         let (script, aim) = script_or_aim(m)?;
+        let script = homed(script, start);
         let mut world = captured.model(start)?;
         let state_of = |b: &str| {
             data::BlockKind::from_name(b)
@@ -1027,7 +1044,7 @@ fn sim(a: &Args) -> Result<(), String> {
                 ],
             );
         }
-        let traced = !m.mobs.is_empty() || !m.items.is_empty();
+        let traced = !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some();
         let mut eye = EyeTrack::default();
         let mut trace = Vec::new();
         let mut tracks = tracks_of(&mob_spots(start, m));

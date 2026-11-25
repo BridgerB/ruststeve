@@ -26,5 +26,11 @@ Q3's throw, read and triangulation (`eyes-throw.md`) and Q4's dig into the porta
 - **Row plumbing for y03 and y04**: a landing may carry its own capture `radius`; a row may ask for `frames` (the class: frames memory holds and the ring's centre) and wear `armor`; script `break:<finish>:<dx>:<dy>:<dz>` digs a block beside the feet.
 - Not modelled: the frame fill (`useOn`), the eye's sounds and particles, the item entity's push out of a block when the eye ends inside terrain.
 
+## The real rows (parity 45688030470, fe985fc): 173 of 178, eye rows 5 of 8 matching
+- **The line is exact.** All 8 real eyes (landings 0 to 5 and 8; both strongholds) flew the line to the located point within **0.0006 degrees** (the client's read: first place to the farthest, positions told every 4 ticks); the model's within 0.0000.
+- **The flight** (real and model alike): from the player's middle (feet + 0.9), **12.151 on the plane and 8.18 up** at its farthest, reached about 34 to 38 ticks after the throw, then it hovers there; it is removed 81 ticks after it was added. So a throw gives a bearing only, never a distance (more than 12 off).
+- **The end**: 7 of 8 dropped, 1 shattered (y01-throw-2): the jar's 4 in 5.
+- **Pickup**: y02-fetch-0 and -4 walked to the drop and picked it up, as the model did (their cells differed by a block or two: where the walk stops is the drop's random kick; the fetch now walks home after).
+
 ## Walls
-(none yet)
+1. **A dropped eye can land out of reach** (y02-fetch-5, parity 45688030470). The eye ended 8 up over a tree; its item came to rest on the canopy at y 76, the bot's feet at 72: the pickup box reaches about 2.3 over the feet, so the bot stood under it for 250 ticks and never took it. The model's eye fell to the ground (its item fell through what the real one stood on: under investigation, the row now writes the model's trace too). For Q3: a throw from under or beside trees, or near a cliff edge, can lose an eye that did not shatter; throw from open ground with no block over the 12-block point on the line, and give up a drop over the feet + 2 (clojurecraft's rule: picked up only within 2 of the feet's height).
