@@ -370,7 +370,10 @@ const HURT_SKIP: u64 = 100;
 const SUPPLY_REACH: i32 = 64;
 const ANCHORS: usize = 3;
 /// Ticks a site moved from is avoided by the site search.
-const MOVED_KEPT: u64 = 6000;
+/// 24,000, not 6,000: a move's restock and walk took ~6,000 ticks and every bot then built
+/// again within 20 of the site it left (race 45602491038 lanes 1, 3: 10 and 18 off); new
+/// endermen come about 0.4 a minute (P1), so a used-up site needs about 20 minutes.
+const MOVED_KEPT: u64 = 24_000;
 /// Blocks out to which the burrow's note measures the nearest delta ground.
 const DELTA_MEASURE: i32 = 32;
 /// Blocks from delta ground a forest-floor walk target keeps.
@@ -501,6 +504,11 @@ pub struct PearlState {
     pub reclaim: bool,
     #[serde(default)]
     pub reclaimed: u32,
+    /// The walls and roof of the burrow moved from (at or above B's level): dug back too, so a
+    /// shell not in `placed` is reclaimed (one a resumed snapshot's earlier run built: race
+    /// 45602491038 reclaimed 0 blocks at every move and restocked ~4,000 ticks instead).
+    #[serde(default)]
+    pub old_shell: Vec<[i32; 3]>,
     /// Where the last walk on for a site began, and how many in a row left the feet there.
     #[serde(default)]
     pub walk_on: Option<([i32; 3], u32)>,
@@ -2361,6 +2369,7 @@ impl Plan {
         self.pearls.reclaimed = 0;
         self.pearls.moved_from.push(b.b);
         self.pearls.moved_at.push(tick);
+        self.pearls.old_shell = b.shell().into_iter().filter(|c| c[1] >= b.b[1]).collect();
         self.pearls.burrow = None;
         self.pearls.built = false;
         self.pearls.since = None;
@@ -2677,6 +2686,7 @@ impl Plan {
             .pearls
             .placed
             .iter()
+            .chain(self.pearls.old_shell.iter())
             .copied()
             .filter(|c| *c != under && full(*c))
             .map(|c| {
@@ -2699,6 +2709,7 @@ impl Plan {
         let (Some(c), Some(_)) = (next, pick) else {
             self.pearls.reclaim = false;
             self.pearls.placed.retain(|c| full(*c));
+            self.pearls.old_shell.clear();
             self.note(
                 tick,
                 format!("reclaimed {} blocks", self.pearls.reclaimed),
@@ -2716,6 +2727,7 @@ impl Plan {
         };
         self.pearls.reclaimed += 1;
         self.pearls.placed.retain(|p| *p != c);
+        self.pearls.old_shell.retain(|p| *p != c);
         Some(Task::Dig(crate::dig::Dig::with_tool(
             w,
             (c[0], c[1], c[2]),
