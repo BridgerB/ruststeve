@@ -5,7 +5,7 @@ type: reference
 tags: [plan, pearls, endermen, burrow, combat, rules]
 aliases: [burrow, pearls hunt, provoke, pearls_task, pearls_step, keep_off_except, B M O]
 status: draft
-lastUpdated: 2026-11-24
+lastUpdated: 2026-11-25
 verifiedAgainst: ruststeve@31545c1
 sourceRefs:
   - "ruststeve:crates/plan/src/burrow.rs#pub fn site_avoiding("
@@ -45,6 +45,7 @@ Issue 18 (#23): twelve pearls from a bot that cannot heal (food 17, nothing to e
 - **Waiting at O**, the yaw sweeping, in B whenever any enderman is within 8 of O or an angry one within 128 (ticking or frozen); provokes from M, else from O out to 40; none at an enderman hurt by no one or by magma, lava or fire.
 - **Filler**: under 60 burrow blocks the floor beside the feet and exposed netherrack are dug (a wooden pickaxe first); a move digs the old shell back with a wooden pickaxe ("reclaimed N blocks"); a move only with no enderman within 40 of B for 2,400 ticks.
 - **The base** (P5's `base_task`) is row 6, resumed after each kill; a wait over 600 ticks lets the hunt go on. Down off fungus caps first.
+- **Moves and safety** (races 45578610032 to 45588764709): the hunt point [490, 5] first; a site that has had a kill moves after 4,800 quiet ticks (9,600 with none), 48+ blocks (new ticking chunks, new spawns) to the place with the most endermen seen, no delta ground within 16, within 96 of the hunt point, no piglin in sight within 24; three failed walks drop a place. Out of the burrow, a magma cube within 3 or a piglin within 12 seals a pocket where the bot stands (held until none within 8 or 16); a magma cube is never a foe in the hunt, hit or not (`defend::foe_except`). Race 45588764709 lane 1 lost 10.2 health to two piglins at a restock: the reason.
 
 ## Limits
 - Real kills from B with no damage (races 45537373222, 45548022681); 12 pearls in P4's model closed loop on one seed; not yet on a real server.

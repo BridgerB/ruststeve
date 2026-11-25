@@ -79,6 +79,8 @@ pub struct PearlRules {
     pub look_out_far_min: f64,
     pub look_out_far_max: f64,
     pub cube_clear: f64,
+    pub piglin_near: f64,
+    pub piglin_clear: f64,
     pub restock_below: i32,
     pub restock_to: i32,
     pub threat_hold_ticks: u64,
@@ -126,6 +128,8 @@ impl Default for PearlRules {
             look_out_far_min: 24.0,
             look_out_far_max: 36.0,
             cube_clear: 8.0,
+            piglin_near: 12.0,
+            piglin_clear: 16.0,
             restock_below: 60,
             restock_to: 120,
             threat_hold_ticks: 1200,
@@ -258,6 +262,11 @@ fn supply_anchors(
             // spawns: the locals were used up), never by delta ground, near the hunt point.
             if away_from.is_some_and(|(o, d)| (o[0] - at[0]).pow(2) + (o[2] - at[2]).pow(2) < d * d)
                 || near_delta(w, at, 16)
+                || w.entities.values().any(|e| {
+                    !e.dead
+                        && PIGLINS.contains(&e.kind)
+                        && flat(e.pos, Burrow::centre(at)) <= PIGLIN_AWAY
+                })
                 || near_point.is_some_and(|[x, z]| {
                     (x - at[0]).pow(2) + (z - at[2]).pow(2) > HUNT_AREA * HUNT_AREA
                 })
@@ -336,6 +345,10 @@ const LOOK_OUT_TICKS: u64 = 200;
 const SWEEP_TICKS: u64 = 400;
 /// Blocks within which the feet after a walk on count as not moved.
 const WALK_ON_STILL: i32 = 4;
+/// The piglin kinds a bot in iron with no gold is the foe of.
+const PIGLINS: [EntityKind; 2] = [EntityKind::Piglin, EntityKind::PiglinBrute];
+/// A new place is never within this of a piglin in sight (race 45588764709 lane 1's restock).
+const PIGLIN_AWAY: f64 = 24.0;
 /// Walks to one new-ground place before it is dropped.
 const NEW_GROUND_TRIES: u32 = 3;
 /// Blocks round the hunt point a move's new place stays within.
@@ -927,16 +940,32 @@ impl Plan {
             .map(|e| dist(e.pos, body.pos))
             .collect();
         let near = |r: f64| cubes.iter().any(|d| *d <= r);
-        if near(r.cube_near) || (self.pearls.cube_pocket && near(r.cube_clear)) {
+        // Piglins out of the burrow too (restocking, walking): a bot in iron and no gold is their
+        // foe, and the hunt has no heal (race 45588764709 lane 1: two piglins at a restock took
+        // it 19.8 to 9.6 in 20 ticks, and every lane of the pearls_6 frontier hunted at 9.6).
+        let out_of_b = !self.in_burrow(w);
+        let piglins: Vec<f64> = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && PIGLINS.contains(&e.kind))
+            .map(|e| dist(e.pos, body.pos))
+            .collect();
+        let piglin_near = |r: f64| out_of_b && piglins.iter().any(|d| *d <= r);
+        let near_any = |a: f64, b: f64| near(a) || piglin_near(b);
+        if near_any(r.cube_near, r.piglin_near)
+            || (self.pearls.cube_pocket && near_any(r.cube_clear, r.piglin_clear))
+        {
             if !self.pearls.cube_pocket {
                 self.pearls.cube_pocket = true;
                 self.note(
                     tick,
-                    "pocket from magma cube".to_owned(),
+                    "pocket from magma cube or piglin".to_owned(),
                     format!(
-                        "one within {:.1}; sealed where the bot stands until none within {}",
+                        "cube {:.1}, piglin {:.1}; sealed where the bot stands until none within {} (cubes) or {} (piglins)",
                         cubes.iter().copied().fold(f64::MAX, f64::min),
-                        r.cube_clear
+                        piglins.iter().copied().fold(f64::MAX, f64::min),
+                        r.cube_clear,
+                        r.piglin_clear
                     ),
                 );
             }
@@ -948,8 +977,11 @@ impl Plan {
             self.pearls.cube_pocket = false;
             self.note(
                 tick,
-                "magma cubes gone: the hunt goes on".to_owned(),
-                format!("none within {}", r.cube_clear),
+                "magma cubes and piglins gone: the hunt goes on".to_owned(),
+                format!(
+                    "no cube within {}, no piglin within {}",
+                    r.cube_clear, r.piglin_clear
+                ),
             );
         }
         let angry = angry_endermen(w);

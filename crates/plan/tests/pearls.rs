@@ -629,7 +629,9 @@ fn a_magma_cube_pressing_gets_a_pocket_not_a_fight() {
         "{acts:?}"
     );
     assert!(
-        notes(&p).iter().any(|n| n == "pocket from magma cube"),
+        notes(&p)
+            .iter()
+            .any(|n| n == "pocket from magma cube or piglin"),
         "{:?}",
         notes(&p)
     );
