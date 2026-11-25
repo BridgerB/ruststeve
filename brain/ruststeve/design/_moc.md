@@ -52,6 +52,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[overland-and-stronghold]] - the overworld walk to the eyes' fix and the dig into the portal room (issue 19e/f).
+- [[eyes-of-ender]] - the eyes made in the 2x2 grid, thrown and read into lines, crossed into a fix (issue 19c).
 - [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.

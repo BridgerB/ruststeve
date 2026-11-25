@@ -1656,3 +1656,94 @@ ticks = 300
 difficulty = "normal"
 mobs = [["enderman", 10, 0, 0]]
 fill = [["stone", -6, -1, -6, 12, -1, 6], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -3, 0, -2, 0, 2, -1], ["stone", -3, 0, 1, 0, 2, 2], ["stone", -3, 0, 0, -2, 2, 0], ["stone", -1, 2, 0, 0, 2, 0]]
+
+# Issue 19's eyes of ender (docs/problems/eyes-model.md): rows on the peaceful table, each 40
+# west of its landing's centre (off every other row's ground), the bot given one eye. `stronghold`
+# is the point RCON's `locate structure minecraft:stronghold` names from the landing (probe
+# 45685968956): [1648, ~, -16] from every landing but 8, [-1088, ~, -1728] from (-240, -240).
+# The model is told it; the real eye's line is judged against it. Each writes
+# `<id>.<real|sim>.eye.txt`: every place the bot's world was told of, the line, its error and the
+# end (dropped or shattered: the jar's 4 in 5 roll, reported, not in the class).
+# - y01-throw-N: `use:20:0:-20` throws looking 20 up (never at a block: a use at an end portal
+#   frame fills it); the eye's line within 1 degree of the bearing, and it ends.
+# - y02-fetch-N: `fetch:20` throws the same, then walks to the dropped eye: none is left.
+
+[[moment]]
+id = "y01-throw-0"
+landing = 0
+dx = -40
+dz = 0
+script = "use:20:0:-20"
+ticks = 140
+give = ["ender_eye 1"]
+stronghold = [1648, -16]
+
+[[moment]]
+id = "y01-throw-1"
+landing = 1
+dx = -40
+dz = 0
+script = "use:20:0:-20"
+ticks = 140
+give = ["ender_eye 1"]
+stronghold = [1648, -16]
+
+[[moment]]
+id = "y01-throw-2"
+landing = 2
+dx = -40
+dz = 0
+script = "use:20:0:-20"
+ticks = 140
+give = ["ender_eye 1"]
+stronghold = [1648, -16]
+
+[[moment]]
+id = "y01-throw-3"
+landing = 3
+dx = -40
+dz = 0
+script = "use:20:0:-20"
+ticks = 140
+give = ["ender_eye 1"]
+stronghold = [1648, -16]
+
+[[moment]]
+id = "y01-throw-8"
+landing = 8
+dx = -40
+dz = 0
+script = "use:20:0:-20"
+ticks = 140
+give = ["ender_eye 1"]
+stronghold = [-1088, -1728]
+
+[[moment]]
+id = "y02-fetch-0"
+landing = 0
+dx = 0
+dz = -40
+script = "fetch:20"
+ticks = 400
+give = ["ender_eye 1"]
+stronghold = [1648, -16]
+
+[[moment]]
+id = "y02-fetch-4"
+landing = 4
+dx = 0
+dz = -40
+script = "fetch:20"
+ticks = 400
+give = ["ender_eye 1"]
+stronghold = [1648, -16]
+
+[[moment]]
+id = "y02-fetch-5"
+landing = 5
+dx = 0
+dz = -40
+script = "fetch:20"
+ticks = 400
+give = ["ender_eye 1"]
+stronghold = [1648, -16]

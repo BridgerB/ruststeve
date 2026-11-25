@@ -229,6 +229,10 @@ pub struct Goals {
     #[serde(default)]
     pub stronghold: crate::stronghold::StrongholdRules,
     // <<< overland and stronghold
+    // >>> eyes (Q3, issue 19c): `[eyes]`, the throws' numbers.
+    #[serde(default)]
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -579,6 +583,9 @@ pub struct Table {
     pub overland: crate::overland::OverlandRules,
     pub stronghold: crate::stronghold::StrongholdRules,
     // <<< overland and stronghold
+    // >>> eyes
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 impl Table {
@@ -782,6 +789,9 @@ impl Table {
             overland: g.overland.clone(),
             stronghold: g.stronghold.clone(),
             // <<< overland and stronghold
+            // >>> eyes
+            eyes: g.eyes.clone(),
+            // <<< eyes
         })
     }
 
@@ -1204,6 +1214,7 @@ mod tests {
             base: crate::base::Base::default(),
             overland: crate::overland::OverlandRules::default(),
             stronghold: crate::stronghold::StrongholdRules::default(),
+            eyes: crate::eyes::EyeRules::default(),
         };
         Table::new(&g).unwrap()
     }

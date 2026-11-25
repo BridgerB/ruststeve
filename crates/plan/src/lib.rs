@@ -23,6 +23,9 @@ pub mod dig;
 pub mod eat;
 pub mod endermen;
 pub mod escape;
+// >>> eyes (Q3, issue 19c)
+pub mod eyes;
+// <<< eyes
 // >>> heading (E2, issue 17d)
 pub mod heading;
 // <<< heading
@@ -462,6 +465,10 @@ pub enum Task {
     Eat(eat::Eat),
     /// Killing an animal for its meat (issue 12c).
     Hunt(Box<hunt::Hunt>),
+    // >>> eyes (Q3, issue 19c)
+    /// An eye of ender thrown, followed, read and picked up again (`eyes`).
+    Throw(Box<eyes::Throw>),
+    // <<< eyes
 }
 
 impl Task {
@@ -484,6 +491,9 @@ impl Task {
             Task::Defend(_) => "defend",
             Task::Eat(_) => "eat",
             Task::Hunt(_) => "hunt",
+            // >>> eyes
+            Task::Throw(_) => "throw-eye",
+            // <<< eyes
         }
     }
 
@@ -504,6 +514,9 @@ impl Task {
             | Task::Defend(_)
             | Task::Eat(_)
             | Task::Hunt(_) => None,
+            // >>> eyes
+            Task::Throw(_) => None,
+            // <<< eyes
             Task::ToLog(w) | Task::Explore(w) => Some(w),
         }
     }
@@ -823,6 +836,15 @@ pub struct Plan {
     #[serde(default)]
     pub stronghold: stronghold::StrongholdState,
     // <<< overland and stronghold
+    // >>> eyes (Q3, issue 19c): the lines read, their fix, and the throws' record
+    // (docs/problems/eyes-throw.md).
+    #[serde(default)]
+    pub fix: Option<eyes::Fix>,
+    #[serde(default)]
+    pub throws: Vec<eyes::Line>,
+    #[serde(default)]
+    pub eyes: eyes::EyeState,
+    // <<< eyes
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -946,6 +968,11 @@ impl Plan {
             overland: overland::OverlandState::default(),
             stronghold: stronghold::StrongholdState::default(),
             // <<< overland and stronghold
+            // >>> eyes
+            fix: None,
+            throws: Vec::new(),
+            eyes: eyes::EyeState::default(),
+            // <<< eyes
             acts: Vec::new(),
         }
     }
@@ -1223,6 +1250,9 @@ impl Plan {
             | Task::Scoop(_)
             | Task::Cast(_)
             | Task::Enter(_)
+            // >>> eyes
+            | Task::Throw(_)
+            // <<< eyes
             | Task::Swim(..) => false,
         };
         // A strike, a change of the held slot or a click to place a block is weighed by the
@@ -1652,6 +1682,9 @@ impl Plan {
                 }
                 return c;
             }
+            // >>> eyes (Q3, issue 19c): the one call site of `eyes::Plan::throw_step`.
+            Task::Throw(_) => return self.throw_step(w, tick),
+            // <<< eyes
             // `always` runs these (and ends them).
             Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
                 return Controls::default();
@@ -1708,6 +1741,8 @@ impl Plan {
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
+                    // >>> eyes
+                    Task::Throw(_) => {} // <<< eyes
                 }
                 Controls::default()
             }
@@ -1775,6 +1810,8 @@ impl Plan {
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
+                    // >>> eyes
+                    Task::Throw(_) => {} // <<< eyes
                 }
                 if give_up {
                     self.maroon = w.body.is_some_and(|b| wet(w, &b));
@@ -1883,6 +1920,9 @@ impl Plan {
             | Task::Scoop(_)
             | Task::Cast(_)
             | Task::Enter(_)
+            // >>> eyes
+            | Task::Throw(_)
+            // <<< eyes
             | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
@@ -1938,6 +1978,9 @@ impl Plan {
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => String::new(),
+                    // >>> eyes
+                    Task::Throw(_) => String::new(),
+                    // <<< eyes
                 };
                 self.retry_at = tick;
                 self.note(
@@ -2139,6 +2182,9 @@ impl Plan {
             | Task::Scoop(_)
             | Task::Cast(_)
             | Task::Enter(_)
+            // >>> eyes
+            | Task::Throw(_)
+            // <<< eyes
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);

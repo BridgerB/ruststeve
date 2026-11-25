@@ -3,11 +3,12 @@ title: The server model
 description: How ruststeve plays without a Java server - the sim crate (the vanilla server as a pure reducer, grown per issue), S2c encoders that make the model's bytes a server's, the model as the bot's body behind the same channels a socket gives, and what it models so far.
 type: reference
 tags: [sim, model, server, body, closed-loop]
-aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds, nether_world, Stage, Wall, Nether stage, magma, hot_floor, fast lava, setblock, enderman, endermen, stare, simulation distance, frozen mobs, ticking, biome palette, warped forest, natural spawning]
+aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds, nether_world, Stage, Wall, Nether stage, magma, hot_floor, fast lava, setblock, enderman, endermen, stare, simulation distance, frozen mobs, ticking, biome palette, warped forest, natural spawning, eye of ender, stronghold, with_stronghold, eye flight]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@31545c1 clojurecraft@be85a92
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@25a0729 clojurecraft@be85a92
 sourceRefs:
+  - "ruststeve:crates/sim/src/eye.rs#pub fn eye_step(e: &mut Eye) {"
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/protocol/src/packets.rs#S2c::LoginFinished { uuid, username } => {"
@@ -129,6 +130,13 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **Random despawn** (`Mob.checkDespawn`): a natural enderman idle over 600 ticks and past 32 despawns 1 in 800 a tick (`Life::ender_despawns`); within 32 its idle count starts again.
 - **Tool wear**: a sword wears 1 a landed hit (another tool 2), a tool 1 a block that takes time (a sword 2), as the slot's damage component (`Life::tool_wear`, by slot; it moves with a number-key swap, click mode 2, now modelled); at its max damage the tool breaks.
 - Tests: `crates/sim/tests/pearls.rs`, closed loop `crates/bot/tests/pearls.rs`; the rows and walls in docs/problems/pearls-model.md.
+
+## Eyes of ender (issue 19, read from the 26.1.2 jar with javap)
+`crates/sim/src/eye.rs` (probe 45685968956; docs/problems/eyes-model.md):
+- **The throw** (`EnderEyeItem.use`): a look whose block hit is an end portal frame throws nothing. The target is the overworld's stronghold point the model was told (`Sim::with_stronghold`, from RCON's `locate`: the model has no structure generator); none, or another dimension, throws nothing and keeps the eye. Else one eye is spent and an `EyeOfEnder` (entity data 8 its item) is added at the player's middle (feet + 0.9), its delta zero.
+- **The flight** (`signalTo`, `tick`, `updateDeltaMovement`; the pure `eye_step`): beyond 12 on the plane its target is 12 along the line and 8 up, within 12 the point itself; each tick it moves by the old delta with no collision, then its horizontal speed lerps 0.0025 of the way to the distance left along the line to the target (both speeds times 0.8 within 1), its vertical speed 0.015 of the way to +1 below the target's y or -1 above. Every place lies on the one line from the spawn to the target. Its place is told every 4 ticks (the entity type's update interval, `EntityPositionSync`).
+- **The end**: at life 81 it is removed; 4 in 5 (`nextInt(5) > 0`, the model's seeded draw) an ender eye item where it was, kicked up to 0.1 sideways and 0.2 up with no pickup delay; else level event 2003 (the shatter). Counted in `eyes_thrown`, `eyes_dropped`, `eyes_shattered`.
+- Tests: `crates/sim/tests/eyes.rs` (the exact line, 12 out; near; 60 throws spend one eye each and end at 81, about 4 in 5 dropped; no stronghold throws nothing), the closed loop `crates/bot/tests/eyes.rs` (the bot's read line within 0.1 degree, a dropped eye fetched).
 
 ## Issue 14a
 - Fluids, buckets along the look, obsidian and portal lighting (`crates/sim/src/fluid.rs`), and the player's look kept from each move with rotation ([[buckets-and-fluids]]).
