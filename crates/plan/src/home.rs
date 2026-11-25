@@ -1042,6 +1042,13 @@ impl Plan {
         let body = w.body?;
         let feet = path::feet_cell(body.pos);
         if self.ender.home.done {
+            // >>> overland and stronghold (Q4): over, with eyes held or a room known, the eyes'
+            // phase takes the planner (`eyes_stronghold_task` holds it in the overworld); race
+            // 45701314227 idled 4,300 ticks here with 14 eyes and 12 frames on record.
+            if craft::count(w, ItemKind::EnderEye) > 0 || self.stronghold.room.is_some() {
+                return None;
+            }
+            // <<< overland and stronghold
             self.retry_at = tick + crate::RETRY_TICKS;
             return Some(Task::Idle);
         }
