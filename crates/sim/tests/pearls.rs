@@ -130,7 +130,9 @@ fn strikes_from_b_kill_it_at_the_mouth_and_a_hit_never_pushes_it_in() {
     let mut hits = 0;
     for t in 1..=2000u32 {
         tick(&mut sim);
-        let m = sim.survival.life.mobs[&id];
+        let Some(m) = sim.survival.life.mobs.get(&id).copied() else {
+            break;
+        };
         if m.dead_at.is_some() {
             break;
         }
@@ -149,7 +151,11 @@ fn strikes_from_b_kill_it_at_the_mouth_and_a_hit_never_pushes_it_in() {
         }
     }
     assert!(
-        sim.survival.life.mobs[&id].dead_at.is_some(),
+        sim.survival
+            .life
+            .mobs
+            .get(&id)
+            .is_none_or(|m| m.dead_at.is_some()),
         "dead after {hits} hits"
     );
     // 40 health at 6 a hit: 7.

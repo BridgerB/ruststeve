@@ -73,10 +73,15 @@ fn struck_from_b_on_a_full_charge_the_enderman_dies_at_the_mouth() {
     let (mut sim, id) = forest_burrow(4);
     sim.survival.give((data::ItemKind::IronSword, 1));
     let run = run(bot::Script::Burrow(bot::BurrowMode::Strike), sim, 600);
-    let m = run.sim.survival.life.mobs[&id];
-    assert!(m.dead_at.is_some(), "alive at {} health", m.health);
+    // A dead mob is removed a moment after it dies.
+    let m = run.sim.survival.life.mobs.get(&id);
+    assert!(
+        m.is_none_or(|m| m.dead_at.is_some()),
+        "alive at {:?} health",
+        m.map(|m| m.health)
+    );
     assert_eq!(run.world.kills, 1);
-    assert_eq!(run.sim.ender(id).unwrap().teleports, 0);
+    assert!(run.sim.ender(id).is_none_or(|e| e.teleports == 0));
     assert_eq!(feet_cell(&run), [B, FEET, 0]);
     assert_eq!(run.min_health_in_script, Some(20.0));
 }
