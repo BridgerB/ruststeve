@@ -138,31 +138,54 @@ const ENDER_HEIGHT: f64 = 2.9;
 const STRIKE_REACH: f64 = 3.0;
 /// Ticks between strikes: an iron sword's attack speed 1.6 charges in 12.5 ticks; 14 is full.
 const STRIKE_EVERY: u64 = 14;
-/// Endermen farther than this are not the script's.
-const ENDER_NEAR: f64 = 32.0;
+/// Endermen farther than this are not the script's (48: the look-out rows place one 33 beyond a
+/// spot 10 out).
+const ENDER_NEAR: f64 = 48.0;
 /// `EnderMan.DATA_CREEPY`.
 const CREEPY: u8 = 17;
 
-/// The nearest live enderman within `ENDER_NEAR` of the feet: its id and feet.
+/// Whether nothing solid the world knows lies on the line from `a` to `b` (sampled every 0.2).
+fn clear(w: &World, a: [f64; 3], b: [f64; 3]) -> bool {
+    let len = (0..3).map(|i| (b[i] - a[i]).powi(2)).sum::<f64>().sqrt();
+    let steps = (len / 0.2).ceil().max(1.0) as u32;
+    (1..steps).all(|s| {
+        let t = f64::from(s) / f64::from(steps);
+        let p = [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t);
+        w.block_at(world::BlockPos::new(
+            p[0].floor() as i32,
+            p[1].floor() as i32,
+            p[2].floor() as i32,
+        ))
+        .is_none_or(|k| k == data::BlockKind::Air || k == data::BlockKind::CaveAir)
+    })
+}
+
+/// The nearest live enderman within `ENDER_NEAR` of the feet that the eye sees (its eye or its
+/// torso in a clear line: another row's enderman behind a wall is not this row's): its id and
+/// feet.
 fn nearest_ender(w: &World, feet: [f64; 3]) -> Option<(i32, [f64; 3])> {
     let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - feet[i]).powi(2)).sum::<f64>();
+    let eye = [feet[0], feet[1] + physics::EYE_HEIGHT, feet[2]];
     w.entities
         .iter()
         .filter(|(_, e)| !e.dead && e.kind == data::EntityKind::Enderman)
         .map(|(id, e)| (*id, e.pos))
         .filter(|(_, p)| d(*p) <= ENDER_NEAR * ENDER_NEAR)
+        .filter(|(_, p)| {
+            [ENDER_EYE, ENDER_TORSO]
+                .iter()
+                .any(|h| clear(w, eye, [p[0], p[1] + h, p[2]]))
+        })
         .min_by(|a, b| d(a.1).total_cmp(&d(b.1)))
 }
 
-/// Whether any enderman the world knows is creepy.
-fn any_creepy(w: &World) -> bool {
-    w.entities.values().any(|e| {
-        !e.dead
-            && e.kind == data::EntityKind::Enderman
-            && matches!(
-                e.metadata.get(&CREEPY),
-                Some(protocol::metadata::MetaValue::Bool(true))
-            )
+/// Whether the enderman `id` is creepy.
+fn creepy_of(w: &World, id: i32) -> bool {
+    w.entities.get(&id).is_some_and(|e| {
+        matches!(
+            e.metadata.get(&CREEPY),
+            Some(protocol::metadata::MetaValue::Bool(true))
+        )
     })
 }
 
@@ -212,7 +235,7 @@ fn burrow_controls(mode: BurrowMode, w: &World) -> Controls {
             ..Controls::default()
         }
     };
-    let creepy = any_creepy(w);
+    let creepy = target.is_some_and(|(id, _)| creepy_of(w, id));
     match mode {
         BurrowMode::Eye => look(ENDER_EYE),
         BurrowMode::Near if creepy => look(ENDER_TORSO),

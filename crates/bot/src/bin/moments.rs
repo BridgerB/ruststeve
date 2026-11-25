@@ -210,12 +210,12 @@ fn mob_outcome(w: &World, kind: &str, at: [f64; 3]) -> MobOutcome {
     }
 }
 
-/// One line of a trace: the bot's feet and health, and every enderman and item within 32 (its
+/// One line of a trace: the bot's feet and health, and every enderman and item within 48 (its
 /// id, feet, health, creepy and stared flags). Issue 18: a row that fails on the real server
 /// says what the enderman did, over time.
 fn trace_line(w: &World) -> Option<String> {
     let body = w.body?;
-    let near = |p: [f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>() <= 1024.0;
+    let near = |p: [f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>() <= 2304.0;
     let f = |p: [f64; 3]| format!("({:.2} {:.2} {:.2})", p[0], p[1], p[2]);
     let others: String = w
         .entities
