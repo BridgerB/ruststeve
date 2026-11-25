@@ -71,6 +71,9 @@ pub struct PearlRules {
     pub seen_near: f64,
     pub hostile_near: f64,
     pub cube_near: f64,
+    pub look_out_reach: i32,
+    pub look_out_far_min: f64,
+    pub look_out_far_max: f64,
     pub cube_clear: f64,
     pub restock_below: i32,
     pub restock_to: i32,
@@ -113,6 +116,9 @@ impl Default for PearlRules {
             seen_near: 40.0,
             hostile_near: 16.0,
             cube_near: 3.0,
+            look_out_reach: 4,
+            look_out_far_min: 24.0,
+            look_out_far_max: 36.0,
             cube_clear: 8.0,
             restock_below: 60,
             restock_to: 120,
@@ -993,7 +999,8 @@ impl Plan {
         // Out of the burrow but by its line (back from a collect): home by steps.
         if let Some(b) = self.pearls.burrow.filter(|_| self.pearls.built)
             && !b.inside(feet)
-            && flat(body.pos, Burrow::centre(b.b)) <= f64::from(LOOK_OUT) + 3.0
+            && flat(body.pos, Burrow::centre(b.b))
+                <= f64::from(r.look_out_reach.max(LOOK_OUT)) + 3.0
             && matches!(self.task, Task::Idle)
             && (!angry.is_empty() || (self.pearls.provoke_from.is_none() && feet != b.o))
         {
@@ -2115,7 +2122,7 @@ impl Plan {
                         b.o[2] + (dz / len * f64::from(k)).round() as i32,
                     ]
                 };
-                let reach = (1..=LOOK_OUT)
+                let reach = (1..=r.look_out_reach.max(1))
                     .take_while(|k| {
                         let l = at_k(*k);
                         cells.standable((l[0], l[1], l[2]))
@@ -2154,10 +2161,22 @@ impl Plan {
             return Some(step_to(pos, spot).0);
         }
         let out = PearlRules {
-            provoke_max: r.provoke_max,
+            provoke_max: if flat(Burrow::centre(spot), o) > f64::from(LOOK_OUT) + 0.5 {
+                r.look_out_far_max
+            } else {
+                r.provoke_max
+            },
             ..r.clone()
         };
-        let cand = provoke_candidates_from(w, eye_in(spot), r.provoke_out_min, &out)
+        // Out past the near look-out, a target no nearer than `look_out_far_min` to the spot: the
+        // walk back is longer (the orchestrator: from 24 an angry one needs 50 ticks or more).
+        let far_spot = flat(Burrow::centre(spot), o) > f64::from(LOOK_OUT) + 0.5;
+        let min = if far_spot {
+            r.look_out_far_min
+        } else {
+            r.provoke_out_min
+        };
+        let cand = provoke_candidates_from(w, eye_in(spot), min, &out)
             .into_iter()
             .find(|s| {
                 !self

@@ -567,6 +567,13 @@ hostile_near = 16.0
 # split: race 45560431011 lane 2 died so with 3 pearls): one within cube_near and the bot seals a
 # pocket where it stands, held until none is within cube_clear.
 cube_near = 3.0
+# The look-out goes out up to look_out_reach from O along a straight standable line; past 4 the
+# target is look_out_far_min to look_out_far_max from the spot (an angry one from 24 needs 50 ticks
+# or more to come, the walk back 10 blocks about 46). 4 until P4's real parity row e09-lookout
+# confirms the long look-out; then 10.
+look_out_reach = 4
+look_out_far_min = 24.0
+look_out_far_max = 36.0
 cube_clear = 8.0
 # Under restock_below burrow blocks held, netherrack is dug near the burrow up to restock_to (a
 # burrow is up to 38; the frontier bot holds about 263 filler).
