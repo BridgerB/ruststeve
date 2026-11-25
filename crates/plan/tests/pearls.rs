@@ -545,3 +545,15 @@ fn delta_ground_is_no_burrow_site() {
         Some("magma or fire near O")
     );
 }
+
+/// Pearls-hunt wall 3: a drop of 3 or more within 2 of the feet is a ledge; the flat floor is not.
+#[test]
+fn a_ledge_is_a_drop_or_lava_beside_the_feet() {
+    let mut w = floor_world(B);
+    assert!(!pearls::ledge(&w, (B[0], B[1], B[2]), 2));
+    for y in 59..=63 {
+        set(&mut w, [B[0] + 2, y, B[2]], BlockKind::Air);
+    }
+    assert!(pearls::ledge(&w, (B[0], B[1], B[2]), 2));
+    assert!(!pearls::ledge(&w, (B[0] - 6, B[1], B[2]), 2));
+}

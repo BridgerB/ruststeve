@@ -138,6 +138,26 @@ pub fn burrow_filler(w: &World) -> i32 {
     BURROW_BLOCKS.iter().map(|k| craft::count(w, *k)).sum()
 }
 
+/// Whether a standing cell `f` has within `near` (on the plane, at its level) an open cell with
+/// no floor in the 3 below (a drop of 3 or more), or lava in the 4 below one.
+pub fn ledge(w: &World, f: path::Cell, near: i32) -> bool {
+    let at = |c: path::Cell| w.block_at(world::BlockPos::new(c.0, c.1, c.2));
+    let open = |c: path::Cell| {
+        at(c).and_then(data::generated::shapes::collision) == Some(data::types::Collision::Empty)
+    };
+    (-near..=near).any(|dx| {
+        (-near..=near).any(|dz| {
+            let c = (f.0 + dx, f.1, f.2 + dz);
+            if !open(c) {
+                return false;
+            }
+            let lava = (1..=4).any(|d| at((c.0, c.1 - d, c.2)) == Some(data::BlockKind::Lava));
+            let drop = (1..=3).all(|d| open((c.0, c.1 - d, c.2)));
+            lava || drop
+        })
+    })
+}
+
 /// The middle of the endermen seen, as a cell, or `None` with none.
 fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
     if seen.is_empty() {
@@ -153,6 +173,11 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 const FLOOR_MIN: i32 = 8;
 /// Cells each way on the plane a floor block is dug for filler from where the bot stands.
 const FLOOR_REACH: i32 = 2;
+/// Cells round the feet a drop or lava below makes a ledge, how far a safe cell is looked for,
+/// and the walks off ledges the hunt makes.
+const LEDGE_NEAR: i32 = 2;
+const LEDGE_SEARCH: i32 = 8;
+const LEDGE_TRIES: u32 = 6;
 /// Moves down off fungus caps the hunt makes (each a walk or a dig).
 const CAP_TRIES: u32 = 24;
 /// Eye to a block's middle within which the old shell is dug back from where the bot stands.
@@ -298,6 +323,9 @@ pub struct PearlState {
     /// Moves made down off fungus caps.
     #[serde(default)]
     pub cap_tries: u32,
+    /// Walks off ledges made.
+    #[serde(default)]
+    pub ledge_tries: u32,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -2248,6 +2276,46 @@ impl Plan {
     /// begin (the standing rows act).
     pub fn pearls_task(&mut self, w: &World, tick: u64) -> Option<Task> {
         let body = w.body?;
+        // Off a ledge first, before the base or any wait, with no burrow built: a fireball's
+        // knock-back off a ledge into lava killed a no-heal bot at tick 140 (race 45548022681
+        // lane 3, pearls-hunt wall 3).
+        if !self.pearls.built
+            && self.pearls.ledge_tries < LEDGE_TRIES
+            && let Some(body) = w.body
+        {
+            let f = path::stand_cell(w, body.pos);
+            if ledge(w, f, LEDGE_NEAR) {
+                let mut cells = path::Cells::new(w);
+                let mut safe: Vec<(i32, path::Cell)> = Vec::new();
+                for dx in -LEDGE_SEARCH..=LEDGE_SEARCH {
+                    for dz in -LEDGE_SEARCH..=LEDGE_SEARCH {
+                        for dy in -2..=2 {
+                            let c = (f.0 + dx, f.1 + dy, f.2 + dz);
+                            if cells.standable(c) && !ledge(w, c, LEDGE_NEAR) {
+                                safe.push((dx * dx + dy * dy + dz * dz, c));
+                            }
+                        }
+                    }
+                }
+                safe.sort();
+                for (_, c) in safe.into_iter().take(3) {
+                    let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+                    if walk.route_now(w, tick) {
+                        self.pearls.ledge_tries += 1;
+                        self.walks += 1;
+                        self.note(
+                            tick,
+                            "off the ledge".to_owned(),
+                            format!(
+                                "the feet {f:?} within {LEDGE_NEAR} of a drop of 3 or more or lava below; to {c:?}"
+                            ),
+                        );
+                        return Some(Task::Explore(walk));
+                    }
+                }
+                self.pearls.ledge_tries += 1;
+            }
+        }
         // 6. base: its tasks, but not a wait of more than `base_wait_ticks` (the frontier race
         // 45542558792: all 8 bots waited 2,400 ticks a step for a stem with a way to it, and
         // every step after wood needs wood); then the hunt goes on and the base is asked again
