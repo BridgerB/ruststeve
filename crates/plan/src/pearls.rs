@@ -1899,18 +1899,25 @@ impl Plan {
                 let mut cells = path::Cells::new(w);
                 let shell = b.shell();
                 #[allow(clippy::cast_possible_truncation)]
-                let pick = (1..=LOOK_OUT).rev().find_map(|k| {
-                    let l = [
+                // Every cell of the straight line out to it standable: a step goes straight (race
+                // 45560431011: look-outs 4 off past a stem or a cap, "no way there" each time).
+                let at_k = |k: i32| {
+                    [
                         b.o[0] + (dx / len * f64::from(k)).round() as i32,
                         b.o[1],
                         b.o[2] + (dz / len * f64::from(k)).round() as i32,
-                    ];
-                    (cells.standable((l[0], l[1], l[2]))
-                        && !shell.contains(&l)
-                        && !b.inside(l)
-                        && !ledge(w, (l[0], l[1], l[2]), 1))
-                    .then_some(l)
-                });
+                    ]
+                };
+                let reach = (1..=LOOK_OUT)
+                    .take_while(|k| {
+                        let l = at_k(*k);
+                        cells.standable((l[0], l[1], l[2]))
+                            && !shell.contains(&l)
+                            && !b.inside(l)
+                            && !ledge(w, (l[0], l[1], l[2]), 1)
+                    })
+                    .last();
+                let pick = reach.map(at_k);
                 let Some(l) = pick else {
                     self.pearls.last_cand = Some(tick);
                     return None;
