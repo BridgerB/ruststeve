@@ -68,6 +68,7 @@ pub struct PearlRules {
     pub near_o: f64,
     pub base_wait_ticks: u64,
     pub seen_near: f64,
+    pub hostile_near: f64,
     pub restock_below: i32,
     pub restock_to: i32,
     pub threat_hold_ticks: u64,
@@ -106,6 +107,7 @@ impl Default for PearlRules {
             near_o: 8.0,
             base_wait_ticks: 600,
             seen_near: 40.0,
+            hostile_near: 16.0,
             restock_below: 60,
             restock_to: 120,
             threat_hold_ticks: 1200,
@@ -1592,6 +1594,23 @@ impl Plan {
             self.move_burrow(tick, r, b, idle, calm_near);
             return Some(Controls::default());
         }
+        // Any other hostile within `hostile_near` of O: in B too (the frontier race 45553808358
+        // lane 6 stood at O by the deltas and magma cubes took it from 18.3 to 6.6).
+        let o_at = Burrow::centre(b.o);
+        if let Some((id, e)) = w.entities.iter().find(|(_, e)| {
+            !e.dead
+                && e.kind != EntityKind::Enderman
+                && defend::hostile(e.kind)
+                && dist(e.pos, o_at) <= r.hostile_near
+        }) {
+            let (id, kind) = (*id, e.kind);
+            self.provoke_hold(tick);
+            self.row(tick, "hold", || format!("{kind:?} {id} near O: in B"));
+            if feet != b.b {
+                return Some(step_to(pos, b.b).0);
+            }
+            return Some(press_back(w, pos, b, look(b.out_yaw(), 0.0)));
+        }
         // Any enderman within `near_o` of O, calm or not: the bot is in B, never out (P4's real
         // runs on the solid shell: B never hit in 9 rows over 4 runs; M hit in 2 of 4 runs, once
         // each, by one that came round angry).
@@ -1809,6 +1828,12 @@ impl Plan {
         let (yaw, pitch) = look_at(eye, eye_of(cand.pos));
         self.pearls.provoking = u32::try_from(cand.id).ok();
         Some(look(yaw, pitch))
+    }
+
+    /// A provoke in hand dropped for a hold.
+    fn provoke_hold(&mut self, _tick: u64) {
+        self.pearls.provoke = None;
+        self.pearls.provoke_from = None;
     }
 
     /// One more provoke try on `id`; past `provoke_tries` it is skipped `provoke_skip_ticks`.
