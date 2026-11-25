@@ -488,3 +488,16 @@ fn a_brick_under_the_feet_is_dug_down_to() {
         "{n:#?}"
     );
 }
+
+/// Every `[stronghold] junk` name is an item the game knows.
+#[test]
+fn the_stronghold_junk_names_are_items() {
+    let t = table();
+    assert!(!t.stronghold.junk.is_empty());
+    assert_eq!(
+        t.stronghold.junk_kinds().len(),
+        t.stronghold.junk.len(),
+        "{:?}",
+        t.stronghold.junk
+    );
+}

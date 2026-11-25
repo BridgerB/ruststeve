@@ -66,6 +66,20 @@ pub struct StrongholdRules {
     pub descent_stalls: u32,
     pub wall_breaks: u32,
     pub pick_tasks: u32,
+    /// The Nether's leftovers, dropped like `[survival] junk` (item name, count kept) in the
+    /// overworld while the stronghold is the aim.
+    pub junk: Vec<(String, i32)>,
+}
+
+impl StrongholdRules {
+    /// `junk` as item kinds; a name the game does not know is left out (the goal table's test
+    /// reads every name).
+    pub fn junk_kinds(&self) -> Vec<(data::ItemKind, i32)> {
+        self.junk
+            .iter()
+            .filter_map(|(n, keep)| data::ItemKind::from_name(n).map(|k| (k, *keep)))
+            .collect()
+    }
 }
 
 impl Default for StrongholdRules {
@@ -84,6 +98,7 @@ impl Default for StrongholdRules {
             descent_stalls: 4,
             wall_breaks: 4,
             pick_tasks: 8,
+            junk: Vec::new(),
         }
     }
 }
@@ -107,6 +122,8 @@ pub struct StrongholdState {
     pub spiral_target: Option<Cell>,
     /// The search reached its depth once (the stairs down are never begun again after it).
     pub descended: bool,
+    /// The way to a known room reached the floor's height once (the tunnel's from there).
+    pub at_floor: bool,
     /// Stone bricks broken in reach of the tunnel's end.
     pub wall_breaks: u32,
     /// Stone pickaxes being made (`stronghold_pickaxes`), tasks begun for them in this round,
@@ -311,7 +328,7 @@ pub fn spiral_point(centre: Cell, n: u32, first: i32, step: i32) -> Cell {
 }
 
 impl Plan {
-    fn stronghold_rules(&self) -> StrongholdRules {
+    pub(crate) fn stronghold_rules(&self) -> StrongholdRules {
         self.table
             .as_ref()
             .map(|t| t.stronghold.clone())
@@ -418,12 +435,32 @@ impl Plan {
                 return Some(Task::Explore(walk));
             }
         }
+        // At the floor's height once, the tunnel has the way from there: its route may climb (up to
+        // `tunnel::RISE`), and stairs down again from its first leg undid it (race 45695074789
+        // lane 0 at (1591, 24, 34), 103 off).
+        if (feet.1 - target.1).abs() <= 1 && !self.stronghold.at_floor {
+            self.stronghold.at_floor = true;
+            self.note(
+                tick,
+                format!("stronghold at the floor's height y {}", feet.1),
+                format!(
+                    "{:.0} off the target {target:?} on the plane; the tunnel from here; {}",
+                    path::octile(feet, target),
+                    self.stronghold_state(w)
+                ),
+            );
+        }
+        let climb = if self.stronghold.at_floor {
+            crate::tunnel::RISE
+        } else {
+            1
+        };
         // Over the floor's height: dry stairs down, out of the room's footprint.
-        if feet.1 > target.1 + 1 {
+        if feet.1 > target.1 + climb {
             return Some(self.stronghold_stairs(w, feet, target, centre, &rules, tick, false));
         }
         // Under it (a stair overshot): stairs up.
-        if feet.1 < target.1 - 1 {
+        if feet.1 < target.1 - climb {
             return Some(self.stronghold_stairs(w, feet, target, centre, &rules, tick, true));
         }
         // At the floor's level: the tunnel in, through the room's wall.
@@ -847,6 +884,11 @@ impl Plan {
             return self.carry_table(w, tick);
         }
         if tick < self.stronghold.picks_retry_at {
+            return None;
+        }
+        // A craft into a full pack fails with its stack left on the cursor (race 45695074789
+        // lane 1: eight of them): none begun until the junk drop has made room.
+        if (9i16..=44).all(|s| w.inventory.slots.contains_key(&s)) {
             return None;
         }
         let end = |p: &mut Self, why: String| {

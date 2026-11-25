@@ -2337,11 +2337,23 @@ impl Plan {
             return;
         }
         // A nearly full inventory drops a stack of junk first, by the same quick-move clock.
-        let junk = self
+        let mut junk = self
             .table
             .as_ref()
             .map(|t| t.survival.junk.clone())
             .unwrap_or_default();
+        // >>> overland and stronghold (Q4): the Nether's leftovers go in the overworld while the
+        // stronghold is the aim (race 45695074789 lane 0's full pack took no cobblestone from nine
+        // stair legs, and lane 1's crafts failed on a full pack).
+        if self.aim == Aim::Race
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == stronghold::OVERWORLD)
+            && (craft::count(w, data::ItemKind::EnderEye) > 0 || self.stronghold.room.is_some())
+        {
+            junk.extend(self.stronghold_rules().junk_kinds());
+        }
+        // <<< overland and stronghold
         // A click no reply came to, with the pack full of junk: window 0 asked for again, so the
         // drop below can go (overworld-leg wall 10: a craft's take into a full pack drew no
         // reply, the click stayed pending, and no junk was dropped for 1,600 ticks until the
