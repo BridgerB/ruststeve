@@ -156,6 +156,8 @@ fn hunt(
     plan.ender.left = true;
     plan.ender.phase = plan::endermen::EnderPhase::Hunt;
     plan.base.over = true;
+    // The race's hunt point is the real world's geography, not the model's.
+    plan.pearls.at_hunt_point = true;
     let mut stage = Stage::new(7, FLOOR, FLOOR + 20);
     stage
         .biome((-112, 127), (-112, 127), Biome::WarpedForest)

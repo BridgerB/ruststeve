@@ -134,6 +134,7 @@ fn hunter(w: &mut World, b: Burrow) -> Plan {
     p.ender.left = true;
     p.ender.phase = plan::endermen::EnderPhase::Hunt;
     p.base.over = true;
+    p.pearls.at_hunt_point = true;
     p.pearls.burrow = Some(b);
     p.pearls.built = true;
     p.pearls.since = Some(0);
@@ -439,6 +440,7 @@ fn a_hunter_with_no_burrow_finds_a_site_and_builds_from_b() {
     p.ender.left = true;
     p.ender.phase = plan::endermen::EnderPhase::Hunt;
     p.base.over = true;
+    p.pearls.at_hunt_point = true;
     w.ticks = 100;
     p.step(&w);
     let b = p
@@ -461,8 +463,12 @@ fn a_hunter_with_no_burrow_finds_a_site_and_builds_from_b() {
 #[test]
 fn the_rules_load_from_the_goal_table() {
     let t = table();
+    // The hunt point is the race's geography, not a default.
+    let mut loaded = t.pearls.clone();
+    assert_eq!(loaded.hunt_point, Some([490, 5]));
+    loaded.hunt_point = None;
     assert_eq!(
-        t.pearls,
+        loaded,
         PearlRules::default(),
         "goals.toml [pearls] and the defaults agree"
     );
@@ -507,6 +513,7 @@ fn an_angry_enderman_before_the_burrow_gets_a_capped_pocket() {
     p.ender.left = true;
     p.ender.phase = plan::endermen::EnderPhase::Hunt;
     p.base.over = true;
+    p.pearls.at_hunt_point = true;
     w.ticks = 100;
     let c = p.step(&w);
     let n = notes(&p);
@@ -579,6 +586,7 @@ fn a_hunter_in_a_pit_pillars_up() {
     p.ender.left = true;
     p.ender.phase = plan::endermen::EnderPhase::Hunt;
     p.base.over = true;
+    p.pearls.at_hunt_point = true;
     w.ticks = 100;
     let c = p.step(&w);
     assert!(
