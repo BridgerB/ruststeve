@@ -205,6 +205,13 @@ const FULL_WAIT_TICKS: u64 = 200;
 /// a new target for the overland: a quarter of the shortest leg (`[overland] leg_min` 64), so a
 /// leg is not begun again for the point's drift as the bot walks.
 const WAY_MOVED: f64 = 16.0;
+/// A throw waiting this long at its spot (`eyes_task` blocked: a canopy or a cliff on the
+/// bearing) moves the spot: half a minute.
+const WAY_WAIT: u64 = 600;
+/// The spot moved this far, east, south, west, north in turn: past a tree's crown (the canopy
+/// Q3 reads is 10 to 14 out) and within the baseline's slack.
+const WAY_NUDGE: f64 = 20.0;
+const WAY_NUDGES: u32 = 4;
 // <<< overland and stronghold
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
@@ -2667,16 +2674,49 @@ impl Plan {
         if let Some(t) = self.eyes_task(w, tick) {
             return Some(t);
         }
-        // No fix yet: the walk to the spot the next throw is due at (the baseline for throw 2).
+        // No fix yet: the walk to the spot the next throw is due at (the baseline for throw 2),
+        // measured from the spot's own point when a nudge moved the walk off it.
         if self.fix.is_none()
             && let Some(p) = self.eyes_way(w)
-            && (!self.overland.way
-                || self
-                    .overland
-                    .fix
-                    .is_none_or(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) > WAY_MOVED))
         {
-            self.overland.retarget((p, 0.0), true);
+            let base = self.overland.way_base.or(self.overland.fix.map(|(q, _)| q));
+            if !self.overland.way
+                || base.is_none_or(|q| (q[0] - p[0]).hypot(q[1] - p[1]) > WAY_MOVED)
+            {
+                self.overland.retarget((p, 0.0), true);
+                self.overland.way_base = None;
+                self.overland.nudges = 0;
+            }
+            // At the spot with the throw waiting (a canopy or a cliff on the bearing, race
+            // 45719263137 lane 1 idled 2,000 ticks): the spot moved `WAY_NUDGE` round the compass,
+            // `WAY_NUDGES` times at most.
+            if self.overland.way && self.overland.arrived {
+                let since = *self.overland.wait_from.get_or_insert(tick);
+                if tick.saturating_sub(since) > WAY_WAIT && self.overland.nudges < WAY_NUDGES {
+                    let base = self.overland.way_base.unwrap_or(p);
+                    let (dx, dz) = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)]
+                        [self.overland.nudges as usize % 4];
+                    let to = [base[0] + dx * WAY_NUDGE, base[1] + dz * WAY_NUDGE];
+                    let nudges = self.overland.nudges + 1;
+                    self.overland.retarget((to, 0.0), true);
+                    self.overland.way_base = Some(base);
+                    self.overland.nudges = nudges;
+                    self.note(
+                        tick,
+                        format!("overland throw spot moved ({nudges} of {WAY_NUDGES})"),
+                        format!(
+                            "the throw waited {} ticks at ({:.0}, {:.0}); to ({:.0}, {:.0})",
+                            tick.saturating_sub(since),
+                            base[0],
+                            base[1],
+                            to[0],
+                            to[1]
+                        ),
+                    );
+                }
+            } else {
+                self.overland.wait_from = None;
+            }
         }
         if let Some(t) = self.overland_task(w, tick) {
             return Some(t);

@@ -130,6 +130,11 @@ pub struct OverlandState {
     /// `fix` is a walk point for the next throw (`Plan::eyes_way`), not the eyes' fix: its
     /// arrival starts no search.
     pub way: bool,
+    /// A throw's spot moved off its point (`nudges` times) after the throw waited there from
+    /// `wait_from`: the point it came from, for the next `eyes_way` to be measured against.
+    pub way_base: Option<[f64; 2]>,
+    pub nudges: u32,
+    pub wait_from: Option<u64>,
     pub legs: u32,
     pub leg: Option<OverLeg>,
     /// The bearing's turn off the line to the fix, degrees (left positive), from stalls and
@@ -159,6 +164,7 @@ impl OverlandState {
         self.leg = None;
         self.mark = None;
         self.arrived = false;
+        self.wait_from = None;
     }
 }
 
