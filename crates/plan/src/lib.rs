@@ -1835,6 +1835,12 @@ impl Plan {
                     .map(|(id, _)| *id),
             );
         }
+        let never_kinds: &[data::EntityKind] =
+            if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
+                &[data::EntityKind::MagmaCube]
+            } else {
+                &[]
+            };
         // <<< pearls
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
@@ -1870,7 +1876,7 @@ impl Plan {
                 make::Always::Escape(k) => trap == Some(*k),
                 make::Always::Defend => {
                     running == Some(make::Always::Defend)
-                        || defend::foe(w, rules, &ignored).is_some()
+                        || defend::foe_except(w, rules, &ignored, never_kinds).is_some()
                 }
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
@@ -1964,18 +1970,20 @@ impl Plan {
                     }
                     Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
-                make::Always::Defend => defend::foe(w, rules, &ignored).map(|(foe, kind)| {
-                    let d = defend::Defend::new(w, foe, kind, rules, tick);
-                    self.note(
-                        tick,
-                        format!("defend {kind:?} {foe} ({:?})", d.stance),
-                        format!(
-                            "a hostile within {}; health {:?}; cut {cut}",
-                            rules.defend_radius, w.player.health
-                        ),
-                    );
-                    Task::Defend(Box::new(d))
-                }),
+                make::Always::Defend => {
+                    defend::foe_except(w, rules, &ignored, never_kinds).map(|(foe, kind)| {
+                        let d = defend::Defend::new(w, foe, kind, rules, tick);
+                        self.note(
+                            tick,
+                            format!("defend {kind:?} {foe} ({:?})", d.stance),
+                            format!(
+                                "a hostile within {}; health {:?}; cut {cut}",
+                                rules.defend_radius, w.player.health
+                            ),
+                        );
+                        Task::Defend(Box::new(d))
+                    })
+                }
                 make::Always::Eat => eat::best_food(w, rules).map(|f| {
                     self.note(
                         tick,
