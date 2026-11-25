@@ -1732,3 +1732,108 @@ ticks = 300
 difficulty = "normal"
 mobs = [["enderman", , 0, 0]]
 fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+# More look-out rows (the orchestrator, 2026-11-25): the spot 10 or 6 out from O, the enderman 27
+# (24 to 30) or 33 (30 to 36) beyond the spot, three runs each, 56 north of the landing centres.
+
+# More look-out rows (the orchestrator, 2026-11-25): the spot 10 or 6 out from O, the enderman 27
+# (24 to 30) or 33 (30 to 36) beyond the spot, three runs each, 56 north of the landing centres.
+
+[[moment]]
+id = "e11-out10-at33-a"
+landing = 1
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 33, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e11-out10-at33-b"
+landing = 2
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 33, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e11-out10-at33-c"
+landing = 3
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 33, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e11-out6-at27-a"
+landing = 4
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 27, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -10, 0, -2, -7, 2, -1], ["stone", -10, 0, 1, -7, 2, 2], ["stone", -10, 0, 0, -9, 2, 0], ["stone", -8, 2, 0, -7, 2, 0]]
+
+[[moment]]
+id = "e11-out6-at27-b"
+landing = 5
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 27, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -10, 0, -2, -7, 2, -1], ["stone", -10, 0, 1, -7, 2, 2], ["stone", -10, 0, 0, -9, 2, 0], ["stone", -8, 2, 0, -7, 2, 0]]
+
+[[moment]]
+id = "e11-out6-at27-c"
+landing = 6
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 27, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -10, 0, -2, -7, 2, -1], ["stone", -10, 0, 1, -7, 2, 2], ["stone", -10, 0, 0, -9, 2, 0], ["stone", -8, 2, 0, -7, 2, 0]]
+
+[[moment]]
+id = "e11-out6-at33-a"
+landing = 7
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 33, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -10, 0, -2, -7, 2, -1], ["stone", -10, 0, 1, -7, 2, 2], ["stone", -10, 0, 0, -9, 2, 0], ["stone", -8, 2, 0, -7, 2, 0]]
+
+[[moment]]
+id = "e11-out6-at33-b"
+landing = 8
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 33, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -10, 0, -2, -7, 2, -1], ["stone", -10, 0, 1, -7, 2, 2], ["stone", -10, 0, 0, -9, 2, 0], ["stone", -8, 2, 0, -7, 2, 0]]
+
+[[moment]]
+id = "e11-out6-at33-c"
+landing = 9
+dx = 0
+dz = -56
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 33, 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -10, 0, -2, -7, 2, -1], ["stone", -10, 0, 1, -7, 2, 2], ["stone", -10, 0, 0, -9, 2, 0], ["stone", -8, 2, 0, -7, 2, 0]]
