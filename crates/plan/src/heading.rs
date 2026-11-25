@@ -554,12 +554,16 @@ impl Plan {
         let signs = Signs {
             feet_biome: w.feet_biome(),
             forest: w.memory.forest_known(),
-            valley: w
-                .memory
-                .soul_valleys()
-                .iter()
-                .find(|c| !crossed.contains(c))
-                .copied(),
+            // Issue 18c: past the endermen stage a valley is no longer a target.
+            valley: (self.ender.phase == crate::endermen::EnderPhase::Reach)
+                .then(|| {
+                    w.memory
+                        .soul_valleys()
+                        .iter()
+                        .find(|c| !crossed.contains(c))
+                        .copied()
+                })
+                .flatten(),
         };
         self.heading_with(w, signs, tick)
     }
@@ -863,14 +867,17 @@ impl Plan {
             tick,
             format!("heading leg {} toward {target:?}", h.legs),
             format!(
-                "on ({}, {}), best {} from {:?}; pickaxe uses {}, filler {}, {} cells cut",
+                "on ({}, {}), best {} from {:?}; pickaxe uses {}, filler {}, {} cells cut; \
+                 health {:?}, food {:?}",
                 h.dir.0,
                 h.dir.1,
                 h.best,
                 h.origin,
                 leg.uses0,
                 leg.filler0,
-                h.cut.len()
+                h.cut.len(),
+                w.player.health,
+                w.player.food
             ),
         );
         h.leg = Some(leg);

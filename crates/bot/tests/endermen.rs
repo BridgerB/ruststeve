@@ -129,27 +129,6 @@ fn stared_or_angry(r: &Run) -> Vec<(i32, bool, bool)> {
         .collect()
 }
 
-/// Every cell beside the feet and the head, and over the head, is a block: the pocket is shut.
-fn sealed(r: &Run) -> bool {
-    let b = r.run.world.body.unwrap();
-    let (x, y, z) = (
-        b.pos[0].floor() as i32,
-        b.pos[1].floor() as i32,
-        b.pos[2].floor() as i32,
-    );
-    let solid = |p: (i32, i32, i32)| {
-        r.run
-            .sim
-            .state_at(p.0, p.1, p.2)
-            .and_then(data::block_of_state)
-            .is_some_and(|k| k != BlockKind::Air)
-    };
-    [(1, 0), (-1, 0), (0, 1), (0, -1)]
-        .iter()
-        .all(|(dx, dz)| solid((x + dx, y, z + dz)) && solid((x + dx, y + 1, z + dz)))
-        && solid((x, y + 2, z))
-}
-
 /// The race no longer ends at the rods (17c): no spawner on record, so no leave walk; the endermen
 /// task takes over, writes its provisions note and travels on.
 #[test]
@@ -182,10 +161,86 @@ fn a_ticking_enderman_near_is_met_in_a_sealed_pocket() {
     assert_eq!(stared_or_angry(&r), Vec::new(), "never stared at:\n{story}");
     assert!(r.has("endermen reached") >= 1, "{story}");
     assert!(r.has("pocket block") >= 5, "{story}");
-    assert!(r.has("endermen met") >= 1, "{story}");
-    assert!(r.plan.met, "{story}");
-    assert!(sealed(&r), "the pocket is shut:\n{story}");
+    // Issue 18c: the race goes on from the sealed pocket to the forest; `met` waits for pearls.
+    assert!(r.has("endermen reached: on to the forest") >= 1, "{story}");
+    assert!(!r.plan.met, "{story}");
+    assert_eq!(r.plan.ender.phase, plan::endermen::EnderPhase::Travel);
     assert_eq!(r.has("near miss"), 0, "{story}");
+}
+
+/// The hand-over (issue 18c): sealed in at the stage, the bot opens one side of its pocket (the
+/// side away from a ghast ticking 30 off to the east) and travels on, never walking to the
+/// enderman.
+#[test]
+fn the_hand_over_opens_the_pocket_away_from_a_ghast_and_travels() {
+    let r = cavern(Aim::Race, 2400, |sim| {
+        summon_enderman(sim, [-20.5, f64::from(FLOOR + 1), 0.5]);
+        sim.summon(EntityKind::Ghast, [30.5, f64::from(FLOOR + 6), 0.5]);
+    });
+    let story = r.story();
+    assert_eq!(stared_or_angry(&r), Vec::new(), "never stared at:\n{story}");
+    assert!(r.has("endermen reached: on to the forest") >= 1, "{story}");
+    assert!(r.has("pocket opened at") >= 1, "{story}");
+    assert!(r.has("out of the pocket to") >= 1, "{story}");
+    assert_eq!(
+        r.has("out of the pocket to (1, 0)"),
+        0,
+        "not toward the ghast:\n{story}"
+    );
+    assert_eq!(
+        r.has("approach enderman"),
+        0,
+        "the stage is passed:\n{story}"
+    );
+    assert!(r.has("note  to the forest") >= 1, "{story}");
+    assert!(r.has("heading") >= 1, "{story}");
+    assert!(!r.plan.met, "{story}");
+}
+
+/// A warped forest known from blocks seen (issue 18c): past the stage, the bot walks to the seen
+/// nylium cell nearest at its own level, and the forest at its feet ends the travel.
+#[test]
+fn a_known_forest_is_walked_to_by_the_cell_at_the_bots_level() {
+    let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
+    let mut plan = Plan::with_table(Aim::Race, table);
+    plan.ender.left = true;
+    plan.ender.phase = plan::endermen::EnderPhase::Travel;
+    let mut stage = Stage::new(4, FLOOR, CEILING);
+    stage.spawn((0, FLOOR + 1, 0));
+    stage.fill((40, 56), (FLOOR, FLOOR), (-8, 8), BlockKind::WarpedNylium);
+    stage.biome((40, 63), (-64, 63), sim::nether::Biome::WarpedForest);
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(5);
+    sim.survival.life.armor = IRON;
+    sim.survival.give((ItemKind::StonePickaxe, 1));
+    sim.survival.give((ItemKind::BlazeRod, 7));
+    sim.survival.give((ItemKind::Netherrack, 64));
+    let mut ledger = Vec::new();
+    let run = bot::lockstep::run_acting(sim, "rs-ender", 5, 1600, 20, |w, _| {
+        let seen = plan.event_count;
+        let c = plan.step(w);
+        ledger.extend(
+            plan.events_since(seen)
+                .iter()
+                .map(|e| format!("{:>6} note  {} ({})", e.tick, e.what, e.why)),
+        );
+        ledger.extend(plan.take_records().into_iter().map(line));
+        (c, plan.take_acts())
+    });
+    let story = ledger.join("\n");
+    let at = format!("to the warped forest at (40, {}, ", FLOOR + 1);
+    assert!(
+        ledger.iter().any(|l| l.contains(&at)),
+        "the nearest nylium cell at its level:\n{story}"
+    );
+    assert!(
+        ledger
+            .iter()
+            .any(|l| l.contains("warped forest reached: on to the hunt")),
+        "{story}"
+    );
+    assert_eq!(plan.ender.phase, plan::endermen::EnderPhase::Hunt);
+    assert_eq!(run.world.feet_biome(), Some("warped_forest"));
 }
 
 /// The approach (17e.1): a ticking enderman 44 off is walked to within 32.

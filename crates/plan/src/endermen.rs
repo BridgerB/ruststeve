@@ -85,9 +85,64 @@ pub const FILLER: &[ItemKind] = &[
 /// Filler kept unspent (the plan's keep: issue 17d raises the bridge reserve to it).
 pub const FILLER_KEEP: i32 = 32;
 
+/// Where the race stands after the rods (issue 18, docs/problems/pearls.md): on the way to a
+/// ticking enderman (issue 17's stage), on the way to a warped forest, or hunting in one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum EnderPhase {
+    /// To a ticking enderman within 32 (issue 17).
+    #[default]
+    Reach,
+    /// The endermen stage passed: to a warped forest (issue 18c, docs/problems/pearls-travel.md).
+    Travel,
+    /// The feet in a warped forest: the base, the burrow and the hunt (issue 18d to 18f).
+    Hunt,
+}
+
+/// Blocks a forest target may lie above or below the feet before a lower or higher one is
+/// taken only for want of one at the bot's level: the valley's `VALLEY_DY` (issue 17's valley
+/// lesson: a place is chosen by the cell stood on, not by its column).
+pub const FOREST_DY: i32 = VALLEY_DY;
+/// Known forest columns looked through for a target, nearest first.
+pub const FOREST_COLUMNS: usize = 32;
+/// Cells along a side of the pocket past its wall read for the way out (`OPEN_RUN`).
+pub const EXIT_RUN: i32 = 6;
+/// Digs the way out of the pocket may take before it is given up (two cells a side; a third
+/// for a block that came back, a fourth for a second side).
+pub const EXIT_DIGS: u32 = 4;
+/// The kinds whose side of the pocket is not opened while another side is free of them: they
+/// shoot or strike on sight a bot with no gold on (`cover::FAR_SHOOTERS`, `NEAR_SHOOTERS`,
+/// `path::SHUN_KINDS`), within `cover::COVER_RANGE`.
+pub const EXIT_THREATS: &[EntityKind] = &[
+    EntityKind::Ghast,
+    EntityKind::Blaze,
+    EntityKind::Skeleton,
+    EntityKind::WitherSkeleton,
+    EntityKind::Piglin,
+    EntityKind::PiglinBrute,
+    EntityKind::Hoglin,
+    EntityKind::MagmaCube,
+];
+
 /// The issue-17 planner state, kept in one field of `Plan` (`Plan::ender`).
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EnderState {
+    /// Issue 18: where the race stands after the rods.
+    #[serde(default)]
+    pub phase: EnderPhase,
+    /// The pocket's way out at the hand-over: the side and the cells (head first) to open, and
+    /// the digs begun.
+    #[serde(default)]
+    pub exit: Option<((i32, i32), Vec<Cell>)>,
+    #[serde(default)]
+    pub exit_digs: u32,
+    /// When the travel's progress was last noted (health, pickaxe uses, filler).
+    #[serde(default)]
+    pub travel_leg_at: Option<u64>,
+    /// The last forest target found and when, and when nylium refused for no room was noted.
+    #[serde(default)]
+    pub forest_cache: Option<(u64, Option<Cell>)>,
+    #[serde(default)]
+    pub forest_refused_at: Option<u64>,
     /// The leave walk from the spawner is over: `endermen_task` from here on.
     #[serde(default)]
     pub left: bool,
@@ -408,6 +463,163 @@ pub fn valley_target(w: &World, skip: &[Cell]) -> (Option<Cell>, usize) {
     (best, walled)
 }
 
+/// The warped forest cell to walk to (issue 18c): over a seen warped nylium cell in a known forest
+/// column, its standing cell and the one over it not solid (a body fits; roots and fungi are
+/// walked through), not in `skip`'s reach; one within `FOREST_DY` of the feet's height first
+/// (chosen by the cell stood on, issue 17's valley lesson), then the nearest. With how many seen
+/// nylium cells were refused for no room over them.
+pub fn forest_target(w: &World, skip: &[Cell]) -> (Option<Cell>, usize) {
+    let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
+        return (None, 0);
+    };
+    let feet = path::stand_cell(w, body.pos);
+    let rank = |c: Cell| {
+        (
+            (c.1 - feet.1).abs() > FOREST_DY,
+            (c.0 - feet.0).pow(2) + (c.1 - feet.1).pow(2) + (c.2 - feet.2).pow(2),
+            c,
+        )
+    };
+    let mut columns = w.memory.forests().to_vec();
+    columns.sort_by_key(|k| {
+        (
+            (k.0 * 16 + 8 - feet.0).pow(2) + (k.1 * 16 + 8 - feet.2).pow(2),
+            *k,
+        )
+    });
+    let room = |c: Cell| {
+        path::classify(w.state_at(world::BlockPos::new(c.0, c.1, c.2))) != path::Class::Solid
+    };
+    let mut shut = 0;
+    let mut best: Option<Cell> = None;
+    for k in columns.into_iter().take(FOREST_COLUMNS) {
+        for kind in FOREST_KINDS {
+            for c in w
+                .memory
+                .indexed_in_column(&dim.name, k.0, k.1, *kind)
+                .unwrap_or_default()
+            {
+                let at = (c.0, c.1 + 1, c.2);
+                if skip
+                    .iter()
+                    .any(|s| path::flat_distance(*s, at) <= PLACE_SAME)
+                    || best.is_some_and(|b| rank(b) <= rank(at))
+                {
+                    continue;
+                }
+                if !room(at) || !room((at.0, at.1 + 1, at.2)) {
+                    shut += 1;
+                    continue;
+                }
+                best = Some(at);
+            }
+        }
+    }
+    (best, shut)
+}
+
+/// The side of the pocket round `feet` to open for the way on, and its cells to dig (the head's
+/// first, then the feet's; only those not open already): never one with lava beside a cell it
+/// opens; a side not facing (within 60 degrees) a threat (`EXIT_THREATS`, live, within
+/// `cover::COVER_RANGE`) first, then the one with the longest run of standing cells past the
+/// wall (up to `EXIT_RUN`), then the one nearest `toward`, then east, west, south, north. `None`
+/// when every side has lava beside it.
+pub fn exit_side(
+    w: &World,
+    feet: Cell,
+    toward: Option<(i32, i32)>,
+) -> Option<((i32, i32), Vec<Cell>)> {
+    let kind = |c: Cell| w.block_at(world::BlockPos::new(c.0, c.1, c.2));
+    let clear = |c: Cell| path::classify(w.state_at(world::BlockPos::new(c.0, c.1, c.2)));
+    let centre = [
+        f64::from(feet.0) + 0.5,
+        f64::from(feet.1),
+        f64::from(feet.2) + 0.5,
+    ];
+    let threats: Vec<[f64; 3]> = w
+        .entities
+        .values()
+        .filter(|e| !e.dead && EXIT_THREATS.contains(&e.kind))
+        .filter(|e| distance(centre, e.pos) <= cover::COVER_RANGE)
+        .map(|e| e.pos)
+        .collect();
+    let faces = |(dx, dz): (i32, i32)| {
+        threats
+            .iter()
+            .filter(|p| {
+                let (vx, vz) = (p[0] - centre[0], p[2] - centre[2]);
+                let len = (vx * vx + vz * vz).sqrt();
+                len > 0.0 && (f64::from(dx) * vx + f64::from(dz) * vz) / len > 0.5
+            })
+            .count()
+    };
+    let run = |(dx, dz): (i32, i32)| {
+        (2..=EXIT_RUN)
+            .take_while(|k| {
+                let c = (feet.0 + dx * k, feet.1, feet.2 + dz * k);
+                clear(c) == path::Class::Clear
+                    && clear((c.0, c.1 + 1, c.2)) == path::Class::Clear
+                    && clear((c.0, c.1 - 1, c.2)) == path::Class::Solid
+            })
+            .count()
+    };
+    let lava_by = |c: Cell| {
+        memory::neighbours(c)
+            .iter()
+            .any(|n| kind(*n) == Some(BlockKind::Lava))
+    };
+    let along = |(dx, dz): (i32, i32)| {
+        toward.map_or(0, |(tx, tz)| {
+            let (vx, vz) = (tx - feet.0, tz - feet.2);
+            -(dx * vx + dz * vz)
+        })
+    };
+    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, d)| {
+            let cells: Vec<Cell> = [1, 0]
+                .iter()
+                .map(|dy| (feet.0 + d.0, feet.1 + dy, feet.2 + d.1))
+                .filter(|c| clear(*c) != path::Class::Clear)
+                .collect();
+            (!cells
+                .iter()
+                .any(|c| lava_by(*c) || kind(*c) == Some(BlockKind::Lava)))
+            .then(|| {
+                (
+                    (faces(d), std::cmp::Reverse(run(d)), along(d), i),
+                    (d, cells),
+                )
+            })
+        })
+        .min_by_key(|(k, _)| *k)
+        .map(|(_, v)| v)
+}
+
+/// A known place's walk ends within this of its cell (issue 17's valley and forest walks).
+pub const PLACE_GOAL: f64 = 4.0;
+/// The travel's forest walk ends on the nylium cell itself, or beside it: the feet's biome is
+/// the stage (`Stage::Forest`), and a walk stopped 4 short of a forest's edge stands outside it.
+pub const FOREST_GOAL: f64 = 1.0;
+
+/// Ticks between two notes of the trip's state (a minute of game time; a heading leg of 48
+/// blocks is about one at a walk).
+pub const TRAVEL_NOTE_EVERY: u64 = 1200;
+
+/// What the trip has left, for its notes: health, food, pickaxe uses, filler, rods.
+pub fn travel_state(w: &World, rules: Option<&crate::make::SurvivalRules>) -> String {
+    format!(
+        "health {:?} (danger {}), food {:?}, pickaxe uses {}, filler {}, rods {}",
+        w.player.health,
+        rules.map_or(0.0, |r| r.danger_health),
+        w.player.food,
+        pickaxe_uses_left(w),
+        filler_held(w),
+        craft::count(w, ItemKind::BlazeRod)
+    )
+}
+
 /// Targets of `go_toward` within this (by the route's measure) are one place: its tries add up.
 pub const PLACE_SAME: f64 = 8.0;
 
@@ -693,6 +905,44 @@ impl Plan {
             return Task::Idle;
         };
         let feet = path::feet_cell(body.pos);
+        // >>> travel (P2, issue 18c, docs/problems/pearls-travel.md): the forest at the feet ends
+        // the travel; the hunt is the next phase's.
+        if self.ender.phase == EnderPhase::Travel && w.feet_biome() == Some("warped_forest") {
+            self.ender.phase = EnderPhase::Hunt;
+            self.note(
+                tick,
+                "warped forest reached: on to the hunt".to_owned(),
+                format!(
+                    "the feet's biome at {feet:?}; {}",
+                    travel_state(w, self.table.as_ref().map(|t| &t.survival))
+                ),
+            );
+        }
+        if self.ender.phase == EnderPhase::Hunt {
+            return self.pearls_task(w, tick).unwrap_or(Task::Idle);
+        }
+        if self.ender.phase == EnderPhase::Travel
+            && let Some(t) = self.exit_step(w, tick)
+        {
+            return t;
+        }
+        // The stage seen by the world's ladder (a resumed bot's first look may come after it).
+        if self.ender.reached_at.is_none()
+            && self.ender.phase == EnderPhase::Reach
+            && w.stage_reached
+                .is_some_and(|s| s >= world::stage::Stage::Endermen)
+        {
+            self.ender.reached_at = Some(tick);
+            self.note(
+                tick,
+                "endermen reached".to_owned(),
+                format!(
+                    "the stage is held ({:?}); a sealed pocket and eyes down before the hand-over",
+                    w.stage_reached
+                ),
+            );
+        }
+        // <<< travel
         // The stage: a ticking enderman within 32. Sealed in, eyes down, then the aim is met.
         if self.ender.reached_at.is_none()
             && let Some(s) = near_ticking(w)
@@ -707,12 +957,25 @@ impl Plan {
                 ),
             );
         }
-        if self.ender.reached_at.is_some() {
+        if self.ender.reached_at.is_some() && self.ender.phase == EnderPhase::Reach {
             return match self.pocket_step(w, tick) {
                 Pocket::Building => {
                     self.retry_at = tick + 1;
                     Task::Idle
                 }
+                // >>> travel (P2, issue 18c): the race goes on from the sealed pocket to a warped
+                // forest; `met` waits for the pearls.
+                Pocket::Closed if self.aim == crate::Aim::Race => {
+                    self.hand_over(w, tick, feet, "sealed");
+                    self.retry_at = tick + 1;
+                    Task::Idle
+                }
+                Pocket::Cannot(why) if self.aim == crate::Aim::Race => {
+                    self.hand_over(w, tick, feet, why);
+                    self.retry_at = tick + 1;
+                    Task::Idle
+                }
+                // <<< travel
                 Pocket::Closed => {
                     self.met = true;
                     self.note(
@@ -814,9 +1077,22 @@ impl Plan {
                 }
             }
         }
-        if let Some(t) = self.approach(w, tick) {
+        let travel = self.ender.phase == EnderPhase::Travel;
+        // In travel the stage is passed: no enderman is walked to (the hunt waits for the forest).
+        if !travel && let Some(t) = self.approach(w, tick) {
             return t;
         }
+        // >>> travel (P2, issue 18c): a warped forest known from blocks seen is walked to by the
+        // cell stood on; a note of the trip's state every `TRAVEL_NOTE_EVERY`.
+        if travel {
+            self.travel_note(w, tick);
+            if let Some(c) = self.forest_cell(w, tick)
+                && let Some(t) = self.go_toward(w, tick, c, FOREST_GOAL, "the warped forest")
+            {
+                return t;
+            }
+        }
+        // <<< travel
         if self
             .ender
             .fortress_at
@@ -827,17 +1103,18 @@ impl Plan {
         }
         let bounds = self.ender.fortress;
         // A warped forest known from blocks seen comes first (the enderman is its only monster).
-        if !in_forest(w)
+        if !travel
+            && !in_forest(w)
             && let Some(c) = w
                 .memory
                 .forest_known()
                 .and_then(|k| column_target(w, k, FOREST_KINDS))
-            && let Some(t) = self.go_toward(w, tick, c, "the warped forest")
+            && let Some(t) = self.go_toward(w, tick, c, PLACE_GOAL, "the warped forest")
         {
             return t;
         }
         // In a warped forest with none near: wait for one to spawn.
-        if in_forest(w) && !self.ender.forest_over {
+        if !travel && in_forest(w) && !self.ender.forest_over {
             let wait = rules.as_ref().map_or(0, |r| r.forest_wait_ticks);
             let since = *self.ender.forest_since.get_or_insert(tick);
             if since == tick {
@@ -860,14 +1137,14 @@ impl Plan {
         }
         // A soul sand valley known (seen soul sand and soul soil), or stood in: there, in a nook,
         // wait for an enderman (docs/problems/endermen.md, the decision of 2026-11-24).
-        if !self.ender.valley_over {
+        if !travel && !self.ender.valley_over {
             if in_valley(w) {
                 let wait = rules.as_ref().map_or(0, |r| r.valley_wait_ticks);
                 if let Some(t) = self.valley_wait(w, tick, wait) {
                     return t;
                 }
             } else if let Some(c) = self.valley_cell(w, tick)
-                && let Some(t) = self.go_toward(w, tick, c, "the soul sand valley")
+                && let Some(t) = self.go_toward(w, tick, c, PLACE_GOAL, "the soul sand valley")
             {
                 return t;
             }
@@ -1026,7 +1303,7 @@ impl Plan {
     /// A walk toward a known place: a plain route, else the far walk, else (above the pickaxe
     /// reserve) the travel tunnel; at most `CHASE_TRIES` begun for one place, then it is noted
     /// given up and `None` from then on.
-    fn go_toward(&mut self, w: &World, tick: u64, c: Cell, what: &str) -> Option<Task> {
+    fn go_toward(&mut self, w: &World, tick: u64, c: Cell, range: f64, what: &str) -> Option<Task> {
         let i = match self
             .ender
             .place_tries
@@ -1052,7 +1329,7 @@ impl Plan {
             return Some(Task::Idle);
         }
         self.ender.place_tries[i].1 += 1;
-        let goal = Goal::Near { pos: c, range: 4.0 };
+        let goal = Goal::Near { pos: c, range };
         let reserve = self
             .table
             .as_ref()
@@ -1170,6 +1447,152 @@ impl Plan {
         self.retry_at = tick + crate::RETRY_TICKS;
         Some(Task::Idle)
     }
+
+    // >>> travel (P2, issue 18c, docs/problems/pearls-travel.md): the hand-over, the pocket's way
+    // out, the forest by cell, the trip's notes.
+    /// The endermen stage held in a pocket (sealed, or `why` not): on to a warped forest. The
+    /// pocket's way out is chosen now (`exit_side`) and dug by `exit_step`.
+    fn hand_over(&mut self, w: &World, tick: u64, feet: Cell, why: &str) {
+        self.ender.phase = EnderPhase::Travel;
+        let stand = w.body.map_or(feet, |b| path::stand_cell(w, b.pos));
+        let toward = w
+            .memory
+            .forest_known()
+            .map(|(cx, cz)| (cx * 16 + 8, cz * 16 + 8));
+        self.ender.exit = exit_side(w, stand, toward);
+        self.ender.exit_digs = 0;
+        self.note(
+            tick,
+            "endermen reached: on to the forest".to_owned(),
+            format!(
+                "the pocket at {stand:?} {why} ({} blocks); the way out {}; {}",
+                self.ender.pocket_blocks,
+                match &self.ender.exit {
+                    Some((d, cells)) => format!("to {d:?}, {} cells to open", cells.len()),
+                    None => "none: lava beside every side".to_owned(),
+                },
+                travel_state(w, self.table.as_ref().map(|t| &t.survival))
+            ),
+        );
+    }
+
+    /// The pocket's way out: its cells dug one at a time (the dig picks the pickaxe), at most
+    /// `EXIT_DIGS`; `None` once open or given up.
+    fn exit_step(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let (side, cells) = self.ender.exit.clone()?;
+        let shut: Vec<Cell> = cells
+            .iter()
+            .filter(|c| {
+                path::classify(w.state_at(world::BlockPos::new(c.0, c.1, c.2)))
+                    != path::Class::Clear
+            })
+            .copied()
+            .collect();
+        let Some(next) = shut.first().copied() else {
+            self.ender.exit = None;
+            self.note(
+                tick,
+                format!("out of the pocket to {side:?}"),
+                format!(
+                    "{} cells opened in {} digs; {}",
+                    cells.len(),
+                    self.ender.exit_digs,
+                    travel_state(w, self.table.as_ref().map(|t| &t.survival))
+                ),
+            );
+            return None;
+        };
+        if self.ender.exit_digs >= EXIT_DIGS {
+            self.ender.exit = None;
+            self.note(
+                tick,
+                "pocket exit given up".to_owned(),
+                format!(
+                    "{EXIT_DIGS} digs and {next:?} still shut; the travel's own ways from here"
+                ),
+            );
+            return None;
+        }
+        self.ender.exit_digs += 1;
+        self.note(
+            tick,
+            format!("pocket opened at {next:?}"),
+            format!(
+                "dig {} of the way out to {side:?}; pickaxe uses left {}",
+                self.ender.exit_digs,
+                pickaxe_uses_left(w)
+            ),
+        );
+        Some(Task::Dig(crate::dig::Dig::new(w, next, tick)))
+    }
+
+    /// The warped forest cell to go to (`forest_target`), skipping places given up; nylium
+    /// refused for no room noted at most once a `NOTE_EVERY`; the search once a `VALLEY_EVERY`.
+    fn forest_cell(&mut self, w: &World, tick: u64) -> Option<Cell> {
+        if w.memory.forests().is_empty() {
+            return None;
+        }
+        if let Some((at, cell)) = self.ender.forest_cache
+            && tick < at + VALLEY_EVERY
+        {
+            return cell;
+        }
+        let skip: Vec<Cell> = self
+            .ender
+            .place_tries
+            .iter()
+            .filter(|p| p.1 >= CHASE_TRIES)
+            .map(|p| p.0)
+            .collect();
+        let (cell, shut) = forest_target(w, &skip);
+        self.ender.forest_cache = Some((tick, cell));
+        if shut > 0
+            && self
+                .ender
+                .forest_refused_at
+                .is_none_or(|t| tick >= t + NOTE_EVERY)
+        {
+            self.ender.forest_refused_at = Some(tick);
+            self.note(
+                tick,
+                format!("{shut} nylium cells refused"),
+                format!("no room over them for a body; the target {cell:?}"),
+            );
+        }
+        cell
+    }
+
+    /// The trip's state, once a `TRAVEL_NOTE_EVERY`.
+    fn travel_note(&mut self, w: &World, tick: u64) {
+        if self
+            .ender
+            .travel_leg_at
+            .is_some_and(|t| tick < t + TRAVEL_NOTE_EVERY)
+        {
+            return;
+        }
+        self.ender.travel_leg_at = Some(tick);
+        let biome = w.feet_biome().unwrap_or("unknown");
+        self.note(
+            tick,
+            "to the forest".to_owned(),
+            format!(
+                "at {:?} in {biome}; {} forest columns known; {}",
+                w.body.map(|b| path::feet_cell(b.pos)),
+                w.memory.forests().len(),
+                travel_state(w, self.table.as_ref().map(|t| &t.survival))
+            ),
+        );
+    }
+
+    // >>> pearls stub (P3 replaces it with crates/plan/src/pearls.rs's `Plan::pearls_task`; drop
+    // this block at that merge): the hunt (issue 18d to 18f). `None` until it lands.
+    #[allow(clippy::unused_self)]
+    pub(crate) fn pearls_task(&mut self, _w: &World, _tick: u64) -> Option<Task> {
+        None
+    }
+    // <<< pearls stub
+    // <<< travel
 
     /// The way on with no enderman to go to: the heading (issue 17d).
     fn travel_on(&mut self, w: &World, tick: u64, reserve: i32) -> Task {
