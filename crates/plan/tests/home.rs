@@ -694,3 +694,29 @@ fn a_basalt_floor_with_no_wall_restocks_beside_the_feet() {
     let cells = plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK);
     assert!(!cells.contains(&(7, 63, 8)), "{cells:?}");
 }
+
+#[test]
+fn cubes_that_stay_end_the_pocket_after_its_hold() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    add_cube(&mut w, 50, [11.5, 64.0, 8.5]);
+    add_cube(&mut w, 51, [8.5, 64.0, 12.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, home::CUBE_HOLD_MAX + 20);
+    assert!(
+        noted(&p, "home: out of the cube pocket, the cubes stay"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(
+        p.ender.home.cube_pockets, 1,
+        "no second pocket while it rests"
+    );
+    assert_eq!(p.ender.home.cube_breakouts, 1);
+}

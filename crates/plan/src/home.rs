@@ -157,6 +157,11 @@ pub struct HomeState {
     pub cube_clear_since: Option<u64>,
     #[serde(default)]
     pub cube_pockets: u32,
+    /// No cube pocket before this tick (over the danger line), and the pockets given up.
+    #[serde(default)]
+    pub cube_resume_at: Option<u64>,
+    #[serde(default)]
+    pub cube_breakouts: u32,
     #[serde(default)]
     pub done: bool,
 }
@@ -180,6 +185,10 @@ pub const CUBE_NEAR: f64 = 6.0;
 pub const CUBE_CROWD: usize = 2;
 pub const CUBE_CLEAR: f64 = 8.0;
 pub const CUBE_CLEAR_TICKS: u64 = 200;
+/// A cube pocket over the danger line is held at most this long (a minute), then the trip goes on
+/// with no pocket for `CUBE_RESUME_TICKS` (cubes wait outside a sealed pocket for good).
+pub const CUBE_HOLD_MAX: u64 = 1200;
+pub const CUBE_RESUME_TICKS: u64 = 1200;
 
 /// The distance between two positions.
 pub fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -659,7 +668,11 @@ impl Plan {
             .collect();
         let near = cubes.iter().filter(|d| **d <= CUBE_NEAR).count();
         let within_clear = cubes.iter().any(|d| *d <= CUBE_CLEAR);
-        let press = near >= CUBE_CROWD || (within_clear && health <= danger);
+        // Over the danger line, a pocket given up waits `CUBE_RESUME_TICKS` before another: cubes
+        // sit outside a sealed pocket for good (race 45707489694 lanes 2 and 3 held 5,000 and
+        // 8,000 ticks with cubes at 4 to 7).
+        let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t) && health > danger;
+        let press = !resting && (near >= CUBE_CROWD || (within_clear && health <= danger));
         let held = self.ender.home.cube_pocket.is_some();
         if press && !held {
             self.ender.home.cube_pocket = Some(tick);
@@ -675,6 +688,23 @@ impl Plan {
             );
         }
         let since = self.ender.home.cube_pocket?;
+        // Held long enough over the danger line: on, the near one fought, the rest left to the
+        // shun, and no pocket for a while.
+        if health > danger && tick.saturating_sub(since) >= CUBE_HOLD_MAX {
+            self.ender.home.cube_pocket = None;
+            self.ender.home.cube_clear_since = None;
+            self.ender.home.cube_resume_at = Some(tick + CUBE_RESUME_TICKS);
+            self.ender.home.cube_breakouts += 1;
+            self.note(
+                tick,
+                "home: out of the cube pocket, the cubes stay".to_owned(),
+                format!(
+                    "held {CUBE_HOLD_MAX} ticks; {near} within {CUBE_NEAR}; health {health} over {danger}; no pocket for {CUBE_RESUME_TICKS}; breakout {}",
+                    self.ender.home.cube_breakouts
+                ),
+            );
+            return None;
+        }
         if within_clear {
             self.ender.home.cube_clear_since = None;
         } else {

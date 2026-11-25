@@ -1907,8 +1907,11 @@ impl Plan {
                         && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_NEAR
                 })
                 .count();
+            // After a pocket given up (`home::CUBE_HOLD_MAX`) the near one is fought though
+            // two are near: the pocket waits `CUBE_RESUME_TICKS`.
+            let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t);
             let over = w.player.health.is_some_and(|h| h > rules.danger_health)
-                && crowd < crate::home::CUBE_CROWD
+                && (crowd < crate::home::CUBE_CROWD || resting)
                 && self.ender.home.cube_pocket.is_none();
             ignored.extend(
                 w.entities
