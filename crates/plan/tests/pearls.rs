@@ -254,8 +254,26 @@ fn an_angry_enderman_out_of_reach_is_held_for_in_b() {
     w.ticks = 100;
     let c = p.step(&w);
     assert!(p.take_acts().is_empty());
-    assert!(!c.forward);
     assert_eq!(p.pearls.row, "hold");
+    // Pressed back against the back wall (facing west, sneaking), never toward the mouth
+    // (P4's real row e04: a bot left at B's middle drifted 0.14 toward M).
+    assert!(c.forward && c.sneak, "{c:?}");
+    assert!((c.yaw - 90.0).abs() < 1.0, "west: {}", c.yaw);
+    // Once 0.1 or more behind B's middle it stands, looking out.
+    let back = [
+        f64::from(B[0]) + 0.5 - 0.18,
+        f64::from(B[1]),
+        f64::from(B[2]) + 0.5,
+    ];
+    w.body = Some(physics::Body {
+        pos: back,
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    w.player.pos = Some(back);
+    w.ticks = 101;
+    let c = p.step(&w);
+    assert!(!c.forward, "{c:?}");
 }
 
 #[test]

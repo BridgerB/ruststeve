@@ -154,6 +154,10 @@ pub struct PearlState {
     /// Burrow blocks placed at the site in hand (built and mended; seals not counted).
     #[serde(default)]
     pub site_blocks: u32,
+    /// Built burrow cells found open (the `BlockTaken` fact's cells), each noted once until
+    /// mended.
+    #[serde(default)]
+    pub taken: Vec<[i32; 3]>,
     #[serde(default)]
     pub place_at: u64,
     #[serde(default)]
@@ -370,6 +374,35 @@ pub fn step_to(pos: [f64; 3], c: [i32; 3]) -> (Controls, bool) {
         },
         false,
     )
+}
+
+/// Blocks behind B's middle (toward the back wall) the fight holds the body at: pressed against
+/// the wall it rests 0.2 back. On a real server the bot drifted 0.14 toward M once its forward
+/// key was let go, and the enderman's reach came within 0.23 of it, not 0.37 (P4's parity row
+/// e04, parity 45531046147).
+pub const HOLD_BACK: f64 = 0.1;
+
+/// Between strikes, the body pressed back against B's back wall (facing it, sneaking: no stare
+/// at a wall), unless it is already `HOLD_BACK` behind B's middle or the wall is missing; else
+/// `c`.
+pub fn press_back(w: &World, pos: [f64; 3], b: Burrow, c: Controls) -> Controls {
+    let bc = Burrow::centre(b.b);
+    let off = (pos[0] - bc[0]) * f64::from(b.dir[0]) + (pos[2] - bc[2]) * f64::from(b.dir[1]);
+    let back = [b.b[0] - b.dir[0], b.b[1], b.b[2] - b.dir[1]];
+    let wall = w
+        .block_at(world::BlockPos::new(back[0], back[1], back[2]))
+        .and_then(data::generated::shapes::collision)
+        == Some(data::types::Collision::Full);
+    if off <= -HOLD_BACK || !wall {
+        return c;
+    }
+    Controls {
+        forward: true,
+        sneak: true,
+        yaw: b.out_yaw() + 180.0,
+        pitch: Some(0.0),
+        jump: false,
+    }
 }
 
 /// The look straight along `yaw` at `pitch`.
@@ -910,10 +943,10 @@ impl Plan {
                     );
                 }
             }
-            // Level at the mouth, at torso height over O.
+            // Level at the mouth, at torso height over O; pressed against the back wall.
             let o = Burrow::centre(b.o);
             let (yaw, pitch) = look_at(eye, [o[0], o[1] + TORSO, o[2]]);
-            return look(yaw, pitch);
+            return press_back(w, pos, b, look(yaw, pitch));
         }
         if let Some(f) = self.pearls.fight.as_mut() {
             f.out_since = None;
@@ -971,8 +1004,9 @@ impl Plan {
             // (clojurecraft).
             self.acts.push(world::Act::Attack { entity: id });
             self.acts.push(world::Act::Swing);
+            return look(yaw, pitch);
         }
-        look(yaw, pitch)
+        press_back(w, pos, b, look(yaw, pitch))
     }
 
     /// Whether a step out of B may be taken now (the bounce counter): one a `step_out_every`,
@@ -1102,6 +1136,21 @@ impl Plan {
         let pos = w.body.map_or([0.0; 3], |x| x.pos);
         // 7. a block missing: built or mended from B.
         let missing = burrow::missing(w, &b);
+        if self.pearls.built {
+            for c in &missing {
+                if !self.pearls.taken.contains(c) {
+                    self.pearls.taken.push(*c);
+                    self.note(
+                        tick,
+                        format!("burrow block taken at {c:?}"),
+                        "a built burrow cell is open with no dig of ours: mended from B".to_owned(),
+                    );
+                }
+            }
+        }
+        if missing.is_empty() {
+            self.pearls.taken.clear();
+        }
         if !missing.is_empty() {
             let (c, there) = step_to(pos, b.b);
             if feet != b.b || !there {
@@ -1331,6 +1380,23 @@ impl Plan {
     /// The next block of `cells` (a burrow's missing shell, the mouth's seal) from where the
     /// body stands, one a `BUILD_EVERY`, with a block no enderman can take.
     fn place_burrow(&mut self, w: &World, tick: u64, want: &[[i32; 3]], what: &str) -> Placed {
+        // The cells no support block may go into: B, M and O two high (O three), less the cells
+        // wanted (a seal fills M).
+        let keep: Vec<[i32; 3]> = self
+            .pearls
+            .burrow
+            .map(|b| {
+                let mut v = Vec::new();
+                for c in [b.b, b.m, b.o] {
+                    for y in 0..3 {
+                        v.push([c[0], c[1] + y, c[2]]);
+                    }
+                }
+                v.retain(|c| !want.contains(c) && !b.shell().contains(c));
+                v
+            })
+            .unwrap_or_default();
+        let keep_open = &keep[..];
         let Some(body) = w.body else {
             return Placed::Building;
         };
@@ -1346,7 +1412,9 @@ impl Plan {
         if missing.is_empty() {
             return Placed::Done;
         }
-        let Some((cell, click, face)) = cover::fill_block(w, &cells(&missing), body.pos) else {
+        let Some((cell, click, face)) =
+            cover::fill_block(w, &cells(&missing), body.pos, &cells(keep_open))
+        else {
             return Placed::Cannot("nothing to click for a burrow block");
         };
         if !body.on_ground {
