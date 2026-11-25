@@ -49,7 +49,7 @@ pub const FORTRESS_CHUNKS: i32 = 8;
 /// Blocks round the bricks' bounds that still count as the footprint (a bridge's edge).
 pub const FORTRESS_PAD: i32 = 4;
 /// Ticks between two notes of the same standing condition (a hold, a rest).
-const NOTE_EVERY: u64 = 600;
+pub(crate) const NOTE_EVERY: u64 = 600;
 /// Ticks between two "look kept off" notes (the count is in each).
 const LOOK_NOTE_EVERY: u64 = 200;
 /// Ticks after a fruitless search for a way to a known place before the next is made.

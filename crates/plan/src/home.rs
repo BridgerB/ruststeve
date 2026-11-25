@@ -412,7 +412,59 @@ impl Plan {
                 ),
             );
         }
+        if let Some(t) = self.home_recover(w, tick) {
+            return Some(t);
+        }
         self.home_trip(w, tick)
+    }
+
+    /// The travel's recovery (issue 18c's rules, `endermen_task`'s): at or under the danger line
+    /// with nothing to heal with, a sealed pocket where the bot stands, never a death as a plan;
+    /// under `travel_health` with a ticking ghast or blaze in sight, cover first.
+    fn home_recover(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let rules = self.table.as_ref().map(|t| t.survival.clone())?;
+        let health = w.player.health?;
+        let heal = crate::can_heal(w.player.food, eat::best_food(w, &rules).is_some());
+        if health <= rules.danger_health && !heal {
+            if self
+                .ender
+                .held_noted_at
+                .is_none_or(|t| tick >= t + endermen::NOTE_EVERY)
+            {
+                self.ender.held_noted_at = Some(tick);
+                self.note(
+                    tick,
+                    "home: hold in a pocket, nothing to heal with".to_owned(),
+                    format!(
+                        "health {health} at or under {}, food {:?}; never a death as a plan",
+                        rules.danger_health, w.player.food
+                    ),
+                );
+            }
+            self.pocket_step(w, tick);
+            self.retry_at = tick + 1;
+            return Some(Task::Idle);
+        }
+        if health < rules.travel_health && endermen::seen_by_far_shooter(w) {
+            let t = self.take_cover(w, tick)?;
+            if self
+                .ender
+                .recover_noted_at
+                .is_none_or(|t| tick >= t + endermen::NOTE_EVERY)
+            {
+                self.ender.recover_noted_at = Some(tick);
+                self.note(
+                    tick,
+                    "home: cover from a shooter".to_owned(),
+                    format!(
+                        "health {health} under {} with a ghast or blaze in sight",
+                        rules.travel_health
+                    ),
+                );
+            }
+            return Some(t);
+        }
+        None
     }
 
     /// The portal aimed at: memory's nearest, read again every `portal_every`; else geography.
