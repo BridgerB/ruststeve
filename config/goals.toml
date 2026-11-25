@@ -466,6 +466,14 @@ pickaxe_reserve = 40
 # groups of 4 at 24 blocks or more within the ticking chunks; to be sized from issue 17a's spawn
 # numbers).
 forest_wait_ticks = 1800
+# Issue 18c, the travel from the endermen pocket (docs/problems/pearls-travel.md): points (x, z)
+# the heading runs to in turn until a warped forest is known from blocks seen. Known geography,
+# not a sight: Bridger, 2026-11-24, allowed steering by the world's known geography to win. The
+# nearest warped forest from the frontier is at (488, -111) (locate biome, probe 45529738504); it
+# lies at x 470 to 540, z -127 to 49, north of the east axis behind basalt deltas from x 160
+# (P1's strip map, docs/problems/pearls-observe.md). So east along the deltas first, where race
+# 45531577912 lane 1 saw the forest from x 341 at z 64, then into it.
+travel_way = [[440, 60], [488, -111]]
 # Ticks the bot waits in its nook in a soul sand valley for an enderman to come within 32 before
 # the heading (docs/problems/endermen.md, the decision of 2026-11-24): a valley spawns endermen 1 in
 # 71 of its monsters, in fours; the census measured 1.75% of seconds with one within 32 in caves, a

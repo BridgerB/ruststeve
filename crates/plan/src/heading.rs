@@ -81,8 +81,13 @@ pub const AHEAD_WIDE: i32 = 2;
 /// The centroid of what is explored must be this far off before it decides the axis; nearer, the
 /// four axes tie and the count ahead decides.
 pub const AWAY_MIN: f64 = 16.0;
-/// Crimson or basalt signs seen in the columns 1 to `SIGNS_AHEAD` chunks ahead (±1) that turn a
-/// heading (hoglins and piglins; magma and broken ground): clojurecraft's forest threshold, 12.
+/// Crimson signs seen in the columns 1 to `SIGNS_AHEAD` chunks ahead (±1) that turn a heading
+/// (hoglins, and piglins hostile to a bot with no gold on): clojurecraft's forest threshold, 12.
+/// Basalt signs no longer turn it (issue 18c, docs/problems/pearls-travel.md): basalt deltas are
+/// crossed, on floors that are not magma (a magma block is never a route's floor) and clear of
+/// magma cubes by `path::SHUN_MAGMA`. A heading that turns from every delta never reaches a
+/// forest that lies past one (issue 18a.2: from the frontier, the one way to the nearest warped
+/// forest crosses about 300 blocks of them).
 pub const SIGNS_AHEAD: i32 = 4;
 pub const SIGNS_TURN: u32 = 12;
 /// Leg attempts one look may make: each is up to three searches (`walk::FAR_NODES` the dearest),
@@ -149,9 +154,12 @@ pub struct Leg {
     /// grew `PACE_GAIN` (the projection invariant).
     pub tried_at: i32,
     pub mark: (i32, u64),
-    /// Spend at its start: pickaxe uses left and filler held.
+    /// Spend at its start: pickaxe uses left and filler held, and the health (issue 18c: the
+    /// travel at no-heal health counts metres per health lost).
     pub uses0: i32,
     pub filler0: i64,
+    #[serde(default)]
+    pub health0: f32,
     /// Digs seen done (cells handed to a stretch that are now open) and filler they gave.
     pub digs: u32,
     pub gained: i64,
@@ -213,8 +221,14 @@ pub struct Heading {
     pub valley: bool,
     /// Valleys reached: never run to again.
     pub valleys: Vec<(i32, i32)>,
+    /// Issue 18c: whether the column legs run to is a travel point (`travel_way`), and the
+    /// travel points' columns reached.
+    pub way: bool,
+    pub ways: Vec<(i32, i32)>,
     /// Set when the heading is over (a warped forest at the feet, or turned out).
     pub over: bool,
+    /// Whether "heading crosses basalt deltas" was said.
+    pub deltas_noted: bool,
 }
 
 /// What a look knows of biomes (strict no X-ray: the feet's own, and blocks seen).
@@ -226,6 +240,9 @@ pub struct Signs {
     /// A column with a soul sand valley's signs seen (soul sand and soul soil): the second
     /// choice, an enderman spawns there too (docs/problems/endermen.md, 17a).
     pub valley: Option<(i32, i32)>,
+    /// Issue 18c: the column of the next travel point (`travel_way`, known geography: Bridger
+    /// 2026-11-24), with the point.
+    pub way: Option<((i32, i32), (i32, i32))>,
 }
 
 // What memory and the world know (E1, issue 17b): seen columns, the forest and valleys known from
@@ -239,10 +256,44 @@ fn seen_columns(w: &World) -> BTreeSet<(i32, i32)> {
         .unwrap_or_default()
 }
 
-/// Crimson and basalt signs seen in one column.
+/// A fortress's mobs (they spawn nowhere else): a blaze or a wither skeleton turns a heading in
+/// travel when it ticks within `FORTRESS_MOB_RANGE` and lies ahead (within 45 degrees of the axis).
+pub const FORTRESS_MOBS: &[data::EntityKind] =
+    &[data::EntityKind::Blaze, data::EntityKind::WitherSkeleton];
+/// A blaze shoots from 48 (`cover::COVER_RANGE`).
+pub const FORTRESS_MOB_RANGE: f64 = 48.0;
+
+/// The nearest live, ticking blaze or wither skeleton ahead on `dir`, with its distance.
+fn fortress_mob_ahead(w: &World, (dx, dz): Dir) -> Option<(data::EntityKind, f64)> {
+    let body = w.body?;
+    w.entities
+        .values()
+        .filter(|e| !e.dead && FORTRESS_MOBS.contains(&e.kind) && world::ticks(w, e.pos))
+        .filter_map(|e| {
+            let (vx, vz) = (e.pos[0] - body.pos[0], e.pos[2] - body.pos[2]);
+            let d = (vx * vx + vz * vz + (e.pos[1] - body.pos[1]).powi(2)).sqrt();
+            let flat = vx.hypot(vz);
+            let on = (f64::from(dx) * vx + f64::from(dz) * vz) / flat.max(1e-6);
+            (d <= FORTRESS_MOB_RANGE && flat > 0.0 && on >= std::f64::consts::FRAC_1_SQRT_2)
+                .then_some((e.kind, d))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// Nether bricks on record in one column of this dimension (memory's brick index).
+fn bricks_in_column(w: &World, cx: i32, cz: i32) -> u32 {
+    w.dimension
+        .as_ref()
+        .and_then(|d| {
+            w.memory
+                .indexed_in_column(&d.name, cx, cz, BlockKind::NetherBricks)
+        })
+        .map_or(0, |v| u32::try_from(v.len()).unwrap_or(u32::MAX))
+}
+
+/// Crimson signs seen in one column.
 fn hostile_signs_in_column(w: &World, cx: i32, cz: i32) -> u32 {
-    let s = w.memory.biome_signs_in_column(cx, cz);
-    u32::try_from(s.crimson + s.basalt).unwrap_or(u32::MAX)
+    u32::try_from(w.memory.biome_signs_in_column(cx, cz).crimson).unwrap_or(u32::MAX)
 }
 
 /// Soul signs seen in one column.
@@ -472,11 +523,18 @@ impl Heading {
         }
     }
 
-    /// The axis chosen once from what is seen (plan 17d): see `choose_dir`.
-    pub fn choose(w: &World, feet: Cell, tick: u64) -> Self {
+    /// The axis chosen once from what is seen (plan 17d): see `choose_dir`. With `souls` false
+    /// (issue 18c: past the endermen stage a valley is no longer a target) soul signs count for
+    /// no axis.
+    pub fn choose(w: &World, feet: Cell, tick: u64, souls: bool) -> Self {
         let seen = seen_columns(w);
-        let (dir, why) = choose_dir(feet, &seen, &soul_columns(w, &seen), &[])
-            .unwrap_or(((1, 0), "no axis scored".to_owned()));
+        let soul = if souls {
+            soul_columns(w, &seen)
+        } else {
+            BTreeMap::new()
+        };
+        let (dir, why) =
+            choose_dir(feet, &seen, &soul, &[]).unwrap_or(((1, 0), "no axis scored".to_owned()));
         Self::new(dir, feet, tick, why)
     }
 
@@ -554,14 +612,39 @@ impl Plan {
         let signs = Signs {
             feet_biome: w.feet_biome(),
             forest: w.memory.forest_known(),
-            valley: w
-                .memory
-                .soul_valleys()
-                .iter()
-                .find(|c| !crossed.contains(c))
-                .copied(),
+            // Issue 18c: past the endermen stage a valley is no longer a target.
+            valley: (self.ender.phase == crate::endermen::EnderPhase::Reach)
+                .then(|| {
+                    w.memory
+                        .soul_valleys()
+                        .iter()
+                        .find(|c| !crossed.contains(c))
+                        .copied()
+                })
+                .flatten(),
+            way: self.travel_point(),
         };
         self.heading_with(w, signs, tick)
+    }
+
+    /// The next travel point not reached (`SurvivalRules::travel_way`), in travel only: its
+    /// column and the point.
+    fn travel_point(&self) -> Option<((i32, i32), (i32, i32))> {
+        if self.ender.phase != crate::endermen::EnderPhase::Travel {
+            return None;
+        }
+        let passed = self
+            .headed
+            .as_ref()
+            .map(|h| h.ways.clone())
+            .unwrap_or_default();
+        self.table
+            .as_ref()?
+            .survival
+            .travel_way
+            .iter()
+            .map(|[x, z]| ((x >> 4, z >> 4), (*x, *z)))
+            .find(|(c, _)| !passed.contains(c))
     }
 
     /// `heading_task` with what is known of biomes given: the tests' entry (the feet biome is
@@ -576,7 +659,12 @@ impl Plan {
                 return None;
             }
             None => {
-                let h = Heading::choose(w, feet, tick);
+                let h = Heading::choose(
+                    w,
+                    feet,
+                    tick,
+                    self.ender.phase == crate::endermen::EnderPhase::Reach,
+                );
                 self.note(
                     tick,
                     format!("heading chosen: ({}, {})", h.dir.0, h.dir.1),
@@ -624,15 +712,39 @@ impl Plan {
         }
         // A forest known from blocks seen replaces the axis (and a valley): legs run to it.
         if let Some(col) = signs.forest
-            && (h.forest != Some(col) || h.valley)
+            && (h.forest != Some(col) || h.valley || h.way)
         {
             h.forest = Some(col);
             h.valley = false;
+            h.way = false;
             self.heading_leg_end(w, h, feet, tick, "replaced: a warped forest is known");
             self.note(
                 tick,
                 format!("heading to the warped forest at column {col:?}"),
                 "a forest known from warped blocks seen replaces the axis".to_owned(),
+            );
+        }
+        // Else (issue 18c, in travel) the next travel point: the world's known geography.
+        if signs.forest.is_none()
+            && let Some((col, point)) = signs.way
+            && h.forest != Some(col)
+        {
+            h.forest = Some(col);
+            h.valley = false;
+            h.way = true;
+            self.heading_leg_end(w, h, feet, tick, "replaced: a travel point");
+            self.note(
+                tick,
+                format!("heading to the travel point {point:?} at column {col:?}"),
+                format!(
+                    "known geography (travel_way; Bridger 2026-11-24); {} of {} reached; health \
+                     {:?}",
+                    h.ways.len(),
+                    self.table
+                        .as_ref()
+                        .map_or(0, |t| t.survival.travel_way.len()),
+                    w.player.health
+                ),
             );
         }
         // Else a soul sand valley known from soul blocks seen, once: endermen spawn there too.
@@ -667,7 +779,23 @@ impl Plan {
                         .forest
                         .filter(|_| h.leg.is_none() && feet_at_column(feet, h.forest))
                     {
-                        if h.valley {
+                        if h.way {
+                            // A travel point is passed: the next one, or the axis.
+                            h.ways.push(col);
+                            h.forest = None;
+                            h.way = false;
+                            self.note(
+                                tick,
+                                format!("travel point reached at column {col:?}"),
+                                format!(
+                                    "at {feet:?}; {}",
+                                    crate::endermen::travel_state(
+                                        w,
+                                        self.table.as_ref().map(|t| &t.survival)
+                                    )
+                                ),
+                            );
+                        } else if h.valley {
                             // The valley is crossed, not waited in: the axis goes on.
                             h.valleys.push(col);
                             h.forest = None;
@@ -695,11 +823,25 @@ impl Plan {
                 }
             }
         }
-        // Biome signs: crimson or basalt at the feet, or seen ahead, turn the axis once.
+        // Basalt deltas at the feet are crossed, not turned from: said once a heading.
+        if signs.feet_biome == Some("basalt_deltas") && !h.deltas_noted {
+            h.deltas_noted = true;
+            self.note(
+                tick,
+                "heading crosses basalt deltas".to_owned(),
+                format!(
+                    "the feet's biome at {feet:?}; on ({}, {}), no magma floor, magma cubes kept \
+                     {} off; health {:?}",
+                    h.dir.0,
+                    h.dir.1,
+                    path::SHUN_MAGMA,
+                    w.player.health
+                ),
+            );
+        }
+        // Biome signs: crimson at the feet, or seen ahead, turn the axis once.
         if h.forest.is_none() {
-            let feet_bad = signs
-                .feet_biome
-                .filter(|b| matches!(*b, "crimson_forest" | "basalt_deltas"));
+            let feet_bad = signs.feet_biome.filter(|b| matches!(*b, "crimson_forest"));
             if let Some(b) = feet_bad
                 && h.biome_turned.as_deref() != Some(b)
             {
@@ -717,13 +859,50 @@ impl Plan {
                         )
                     })
                     .sum();
+                // Past the endermen stage (no healing), a fortress seen ahead turns it too: its
+                // blazes and wither skeletons (race 45531575517 lane 3 walked west into a second
+                // fortress and a blaze's fireball and its fire took it from 12.5 to 5.6).
+                let bricks: u32 = if self.ender.phase == crate::endermen::EnderPhase::Travel {
+                    (1..=SIGNS_AHEAD)
+                        .flat_map(|d| (-1..=1).map(move |s| (d, s)))
+                        .map(|(d, s)| {
+                            bricks_in_column(
+                                w,
+                                chunk.0 + h.dir.0 * d + h.dir.1 * s,
+                                chunk.1 + h.dir.1 * d + h.dir.0 * s,
+                            )
+                        })
+                        .sum()
+                } else {
+                    0
+                };
                 if ahead >= SIGNS_TURN {
                     self.heading_turn(
                         w,
                         h,
                         feet,
                         tick,
-                        &format!("{ahead} crimson or basalt signs seen ahead"),
+                        &format!("{ahead} crimson signs seen ahead"),
+                    )?;
+                } else if let Some((kind, d)) = (self.ender.phase
+                    == crate::endermen::EnderPhase::Travel)
+                    .then(|| fortress_mob_ahead(w, h.dir))
+                    .flatten()
+                {
+                    self.heading_turn(
+                        w,
+                        h,
+                        feet,
+                        tick,
+                        &format!("a fortress seen ahead (a ticking {kind:?} {d:.0} off)"),
+                    )?;
+                } else if bricks >= SIGNS_TURN {
+                    self.heading_turn(
+                        w,
+                        h,
+                        feet,
+                        tick,
+                        &format!("a fortress seen ahead ({bricks} nether bricks)"),
                     )?;
                 }
             }
@@ -852,6 +1031,7 @@ impl Plan {
             mark: (0, tick),
             uses0: pickaxe_uses_left(w),
             filler0: path::bridge_blocks(w),
+            health0: w.player.health.unwrap_or(0.0),
             digs: 0,
             gained: 0,
             pending: Vec::new(),
@@ -863,14 +1043,17 @@ impl Plan {
             tick,
             format!("heading leg {} toward {target:?}", h.legs),
             format!(
-                "on ({}, {}), best {} from {:?}; pickaxe uses {}, filler {}, {} cells cut",
+                "on ({}, {}), best {} from {:?}; pickaxe uses {}, filler {}, {} cells cut; \
+                 health {:?}, food {:?}",
                 h.dir.0,
                 h.dir.1,
                 h.best,
                 h.origin,
                 leg.uses0,
                 leg.filler0,
-                h.cut.len()
+                h.cut.len(),
+                w.player.health,
+                w.player.food
             ),
         );
         h.leg = Some(leg);
@@ -910,6 +1093,7 @@ impl Plan {
                         Walk::new(leg.target, goal, crate::walk::Arrive::Goal, tick)
                     };
                     walk.more.blocked = blocked.clone();
+                    walk.more.shun = self.ender.phase == crate::endermen::EnderPhase::Travel;
                     let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
                     self.expanded += walk.expanded;
                     let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
@@ -1057,6 +1241,7 @@ impl Plan {
         let gain = leg.progress(h.dir, feet) - leg.progress(h.dir, leg.from);
         let uses = (leg.uses0 - pickaxe_uses_left(w)).max(0);
         let placed = (leg.filler0 + leg.gained - path::bridge_blocks(w)).max(0);
+        let lost = (leg.health0 - w.player.health.unwrap_or(leg.health0)).max(0.0);
         h.digs += leg.digs;
         h.placed += placed;
         h.uses_spent += uses;
@@ -1069,7 +1254,8 @@ impl Plan {
             format!("heading leg {} {how}", leg.n),
             format!(
                 "by {} in {} ticks: {gain} m; digs {} ({:.2}/m), placed {placed} ({:.2}/m), \
-                 pickaxe uses {uses} ({:.2}/m); uses left {}, filler {}, best {} on ({}, {})",
+                 pickaxe uses {uses} ({:.2}/m); uses left {}, filler {}, best {} on ({}, {}); \
+                 health {:.1} lost ({}), now {:?}",
                 leg.way.name(),
                 tick.saturating_sub(leg.began),
                 leg.digs,
@@ -1080,7 +1266,14 @@ impl Plan {
                 path::bridge_blocks(w),
                 h.best,
                 h.dir.0,
-                h.dir.1
+                h.dir.1,
+                lost,
+                if lost > 0.0 {
+                    format!("{:.0} m a health", f64::from(gain) / f64::from(lost))
+                } else {
+                    "none".to_owned()
+                },
+                w.player.health
             ),
         );
     }
@@ -1128,7 +1321,14 @@ impl Plan {
             h.choices += 1;
             let avoid = std::mem::take(&mut h.failed);
             let chosen = (h.choices < MAX_CHOICES)
-                .then(|| choose_dir(feet, &seen, &soul_columns(w, &seen), &[was]))
+                .then(|| {
+                    let soul = if self.ender.phase == crate::endermen::EnderPhase::Reach {
+                        soul_columns(w, &seen)
+                    } else {
+                        BTreeMap::new()
+                    };
+                    choose_dir(feet, &seen, &soul, &[was])
+                })
                 .flatten();
             let Some((dir, reason)) = chosen else {
                 h.over = true;

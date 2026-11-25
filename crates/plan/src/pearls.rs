@@ -477,10 +477,11 @@ impl Plan {
             .map_or_else(PearlRules::default, |t| t.pearls.clone())
     }
 
-    /// Whether the hunt runs: after the leave walk, once the feet are in a warped forest, and from
-    /// then on (until agent P2's `EnderPhase::Hunt` takes this place at integration).
+    /// Whether the hunt runs: agent P2's `EnderPhase::Hunt`, or after the leave walk once the feet
+    /// are in a warped forest (a bot resumed there), and from then on.
     pub(crate) fn hunting(&mut self, w: &World) -> bool {
-        if !self.pearls.started && self.ender.left && endermen::in_forest(w) {
+        let hunt = self.ender.phase == endermen::EnderPhase::Hunt;
+        if !self.pearls.started && (hunt || (self.ender.left && endermen::in_forest(w))) {
             self.pearls.started = true;
         }
         self.pearls.started
