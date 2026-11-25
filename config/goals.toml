@@ -541,6 +541,15 @@ breach_near = 4.0
 # Any enderman, calm or not, this near O and the bot holds in B, never in M or O: on the solid shell
 # B was never hit in 9 real rows over 4 runs, M in 2 of 4 runs (P4, the orchestrator 2026-11-24).
 near_o = 8.0
+# The base (P5's row 6) waiting with no task this long and the hunt goes on, the base asked again
+# after base_retry_ticks: the frontier race 45542558792 held all 8 bots 2,400 ticks a step on a stem
+# with no way to it, and the iron sword alone is about 23 kills.
+base_wait_ticks = 600
+# An angry enderman with no burrow built: issue 17's pocket where the bot stands for this long at
+# most, then the hunt goes on (anger with a target lasts; P4's closed loop held the pocket to the
+# cap).
+threat_hold_ticks = 1200
+base_retry_ticks = 6000
 calm_range = 16.0
 # <<< pearls
 # >>> base (P5, issue 18d, docs/problems/pearls-base.md): the forest base's rows, made where the

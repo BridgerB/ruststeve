@@ -467,3 +467,64 @@ fn the_rules_load_from_the_goal_table() {
         "goals.toml [pearls] and the defaults agree"
     );
 }
+
+/// P4's closed loop: an angry enderman frozen 80 off is present; no calm one is provoked.
+#[test]
+fn an_angry_enderman_far_off_stops_every_provoke() {
+    let (mut w, b) = built();
+    let m = Burrow::centre(b.m);
+    w.body = Some(physics::Body {
+        pos: m,
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    w.player.pos = Some(m);
+    enderman(&mut w, 52, [m[0] + 20.0, m[1], m[2]], false);
+    enderman(&mut w, 53, [m[0] + 80.0, m[1], m[2] + 40.0], true);
+    let mut p = hunter(&mut w, b);
+    w.ticks = 100;
+    w.session.server_ticks = 100;
+    p.step(&w);
+    let n = notes(&p);
+    assert!(!n.iter().any(|x| x == "provoke enderman 52"), "{n:?}");
+    assert!(
+        n.iter()
+            .any(|x| x.starts_with("no provoke: enderman 53 angry")),
+        "{n:?}"
+    );
+}
+
+/// P4's closed loop: angry with no burrow built, a pocket where the bot stands, never for good.
+#[test]
+fn an_angry_enderman_before_the_burrow_gets_a_capped_pocket() {
+    let mut w = floor_world(B);
+    enderman(
+        &mut w,
+        54,
+        [f64::from(B[0]) + 10.5, f64::from(B[1]), 8.5],
+        true,
+    );
+    w.inventory.slots.insert(36, (ItemKind::Cobblestone, 64));
+    w.held = 0;
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.ender.left = true;
+    p.ender.phase = plan::endermen::EnderPhase::Hunt;
+    p.base.over = true;
+    w.ticks = 100;
+    let c = p.step(&w);
+    let n = notes(&p);
+    assert!(
+        n.iter()
+            .any(|x| x == "enderman 54 angry with no burrow: a pocket"),
+        "{n:?}"
+    );
+    assert_eq!(c.pitch, Some(plan::endermen::EYES_DOWN));
+    // The hold's cap passed: the hunt goes on (a site looked for).
+    w.ticks = 100 + 1200 + 1;
+    p.step(&w);
+    assert!(
+        p.pearls.burrow.is_some() || notes(&p).iter().any(|x| x.starts_with("no burrow site")),
+        "{:?}",
+        notes(&p)
+    );
+}
