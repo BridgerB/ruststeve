@@ -28,6 +28,9 @@ pub mod eyes;
 // <<< eyes
 // >>> heading (E2, issue 17d)
 pub mod heading;
+// >>> home (Q2, issue 19d)
+pub mod home;
+// <<< home
 // <<< heading
 pub mod hold;
 pub mod hunt;
@@ -99,18 +102,24 @@ pub struct Enter {
     cell: Cell,
     /// The tick the feet were first in a portal block.
     inside_since: Option<u64>,
+    // >>> home (Q2, issue 19d): the dimension the walk began in; done once it differs. A task
+    // from before the field (none: tasks are not in a snapshot) reads as the overworld's.
+    #[serde(default)]
+    from: Option<String>,
+    // <<< home
 }
 
 impl Enter {
     /// Done once the world is in another dimension than the portal's; while the feet are in a
     /// portal block, stand still (a step out resets the game's count); else walk on.
     fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {
-        if w.dimension
-            .as_ref()
-            .is_some_and(|d| d.name != "minecraft:overworld")
-        {
+        // >>> home (Q2, issue 19d): done in any dimension other than the one it began in (the
+        // way home enters from the Nether).
+        let from = self.from.as_deref().unwrap_or("minecraft:overworld");
+        if w.dimension.as_ref().is_some_and(|d| d.name != from) {
             return (Controls::default(), TaskStatus::Done);
         }
+        // <<< home
         // Between dimensions the world holds no body: wait for it.
         let Some(body) = w.body else {
             return (Controls::default(), TaskStatus::Running);
@@ -697,6 +706,10 @@ pub struct Plan {
     pub cook_tasks: u32,
     #[serde(default)]
     pub cook_over: bool,
+    /// The way home's cook (issue 19d): set only around one `decide` call from Home's night in
+    /// the hut, which then takes the cook row as the clean flow's cook phase does.
+    #[serde(default)]
+    pub home_cook: bool,
     /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
     /// (closed, or none could be built).
     #[serde(default)]
@@ -919,6 +932,7 @@ impl Plan {
             portal_food_noted: false,
             cook_tasks: 0,
             cook_over: false,
+            home_cook: false,
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
@@ -2454,6 +2468,12 @@ impl Plan {
         {
             return Task::Idle;
         }
+        // >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home, in either dimension;
+        // `None` when not on it or once it is over.
+        if let Some(t) = self.home_race_task(w, tick) {
+            return t;
+        }
+        // <<< home
         // >>> overland and stronghold (Q4, issue 19e/f)
         if let Some(t) = self.eyes_stronghold_task(w, tick) {
             return t;
@@ -2575,6 +2595,7 @@ impl Plan {
                     walk,
                     cell: c,
                     inside_since: None,
+                    from: w.dimension.as_ref().map(|d| d.name.clone()),
                 }));
             }
             self.refuse(c, tick);
@@ -3750,7 +3771,9 @@ impl Plan {
         // come back up, stocked, before the cast.
         let mut stock_row = false;
         let mut cook_row = false;
-        if self.aim == Aim::Race && !self.kit_row {
+        if self.home_cook {
+            cook_row = true;
+        } else if self.aim == Aim::Race && !self.kit_row {
             match self.clean_flow(w, &table.survival, tick) {
                 Flow::Task(t) => return *t,
                 Flow::Stock => stock_row = true,
@@ -5804,9 +5827,13 @@ pub fn own_heading(feet: Cell, pool: Option<Cell>, legs: u32) -> (i32, i32) {
 /// A dry staircase's turns from water, for its ending note (overworld-leg wall 7); empty for
 /// any other staircase or none.
 fn water_turns(st: &Stairs) -> String {
-    match st.water_refusals() {
+    let water = match st.water_refusals() {
         0 => String::new(),
         n => format!(" ({n} turned from water beside)"),
+    };
+    match st.cave_refusals() {
+        0 => water,
+        n => format!("{water} ({n} turned from a cave ahead)"),
     }
 }
 
@@ -5912,11 +5939,16 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
             .and_then(|t| i32::try_from(t).ok())
             .unwrap_or(0)
     };
+    // Sticks over the reserve burn too (100 ticks, whatever planks made them: a stick is not in
+    // `#non_flammable_wood`), the smelt's own last fuel (`smelt::fuels_held`).
+    let sticks_over =
+        (counts.get(&data::ItemKind::Stick).copied().unwrap_or(0) - make::STICK_RESERVE).max(0);
     let have: i32 = counts
         .iter()
         .filter(|(k, _)| planks.contains(k) || coals.contains(k))
         .map(|(k, n)| n * burns(k))
-        .sum();
+        .sum::<i32>()
+        + sticks_over * burns(&data::ItemKind::Stick);
     let row = |id: &str, need: make::Need, count: i32| make::Row {
         id: id.to_owned(),
         needs: Vec::new(),
@@ -5928,15 +5960,52 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
     };
     if have < need {
         let plank = burns(&data::ItemKind::OakPlanks).max(1);
-        let held: i32 = counts
+        // Warped and crimson wood does not burn (the way home carries its stems): with any held,
+        // the fuel row names the planks of a log that burns, so no stem is crafted for fuel.
+        let logs = data::generated::tags::item_tag("logs").unwrap_or(&[]);
+        let nether_wood = counts
             .iter()
-            .filter(|(k, _)| planks.contains(k))
-            .map(|(_, n)| *n)
-            .sum();
+            .any(|(k, n)| *n > 0 && (planks.contains(k) || logs.contains(k)) && burns(k) == 0);
+        let burning_log = counts
+            .iter()
+            .filter(|(k, n)| **n > 0 && logs.contains(k) && burns(k) > 0)
+            .filter_map(|(k, _)| {
+                k.name()?
+                    .strip_suffix("_log")
+                    .map(|b| format!("{b}_planks"))
+            })
+            .find(|p| data::ItemKind::from_name(p).is_some());
+        let stick = burns(&data::ItemKind::Stick).max(1);
+        let (need_name, held) = match burning_log {
+            Some(p) if nether_wood => {
+                let held = data::ItemKind::from_name(&p)
+                    .and_then(|k| counts.get(&k).copied())
+                    .unwrap_or(0);
+                (format!("item:{p}"), held)
+            }
+            // Only nether wood: sticks, crafted from its planks (a warped stem is 8 sticks).
+            None if nether_wood => {
+                let held = counts.get(&data::ItemKind::Stick).copied().unwrap_or(0);
+                let more = (need - have + stick - 1) / stick;
+                return Some(row(
+                    "cook-fuel",
+                    make::Need::parse("item:stick")?,
+                    held + more,
+                ));
+            }
+            _ => (
+                "tag:planks".to_owned(),
+                counts
+                    .iter()
+                    .filter(|(k, _)| planks.contains(k) && burns(k) > 0)
+                    .map(|(_, n)| *n)
+                    .sum(),
+            ),
+        };
         let more = (need - have + plank - 1) / plank;
         return Some(row(
             "cook-fuel",
-            make::Need::parse("tag:planks")?,
+            make::Need::parse(&need_name)?,
             held + more,
         ));
     }

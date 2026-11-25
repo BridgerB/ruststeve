@@ -885,9 +885,21 @@ pub enum Placed {
 impl Plan {
     /// The hunt's numbers: the goal table's `[pearls]`, else the defaults.
     fn pearl_rules(&self) -> PearlRules {
-        self.table
+        let r = self
+            .table
             .as_ref()
-            .map_or_else(PearlRules::default, |t| t.pearls.clone())
+            .map_or_else(PearlRules::default, |t| t.pearls.clone());
+        // >>> home (Q2, issue 19d): the top-up in Home only (Bridger, 2026-11-25: 14 pearls, so 7
+        // rods make 14 eyes); the hunt's own rows are as they were.
+        if self.ender.phase == endermen::EnderPhase::Home {
+            let want = self.table.as_ref().map_or(14, |t| t.home.pearls_wanted);
+            return PearlRules {
+                pearls_wanted: want,
+                ..r
+            };
+        }
+        // <<< home
+        r
     }
 
     /// Whether the hunt runs: agent P2's `EnderPhase::Hunt` (its hand-over, "warped forest reached:
@@ -896,6 +908,15 @@ impl Plan {
         if !self.pearls.started && self.ender.phase == endermen::EnderPhase::Hunt {
             self.pearls.started = true;
         }
+        // >>> home (Q2, issue 19d): the top-up is the hunt (a bot resumed with 12 pearls goes
+        // straight to Home); once it is over, the hunt is over.
+        if self.home_hunt_over() {
+            return false;
+        }
+        if !self.pearls.started && self.ender.phase == endermen::EnderPhase::Home {
+            self.pearls.started = true;
+        }
+        // <<< home
         self.pearls.started
     }
 
@@ -976,9 +997,18 @@ impl Plan {
             );
         }
         let body = w.body?;
+        // >>> home (Q2, issue 19d): 12 pearls held under the race is the way home (before the
+        // rules are read: in it the top-up's count is the rules' own).
+        self.home_begin(w, tick);
+        // <<< home
         let r = self.pearl_rules();
         self.pearls_account(w, tick);
         let feet = arr(path::stand_cell(w, body.pos));
+        // >>> home (Q2, issue 19d): in the way home the top-up ends at its count or its clock.
+        if self.home_top_up_end(w, tick, r.pearls_wanted) {
+            return None;
+        }
+        // <<< home
         // 1. pearls-done.
         if craft::count(w, ItemKind::EnderPearl) >= r.pearls_wanted {
             return Some(self.row_done(w, tick, &r, feet));

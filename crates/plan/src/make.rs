@@ -229,6 +229,10 @@ pub struct Goals {
     #[serde(default)]
     pub stronghold: crate::stronghold::StrongholdRules,
     // <<< overland and stronghold
+    // >>> home (Q2, issue 19d): `[home]`, the way home's numbers.
+    #[serde(default)]
+    pub home: crate::home::HomeRules,
+    // <<< home
     // >>> eyes (Q3, issue 19c): `[eyes]`, the throws' numbers.
     #[serde(default)]
     pub eyes: crate::eyes::EyeRules,
@@ -583,6 +587,9 @@ pub struct Table {
     pub overland: crate::overland::OverlandRules,
     pub stronghold: crate::stronghold::StrongholdRules,
     // <<< overland and stronghold
+    // >>> home
+    pub home: crate::home::HomeRules,
+    // <<< home
     // >>> eyes
     pub eyes: crate::eyes::EyeRules,
     // <<< eyes
@@ -789,6 +796,9 @@ impl Table {
             overland: g.overland.clone(),
             stronghold: g.stronghold.clone(),
             // <<< overland and stronghold
+            // >>> home
+            home: g.home.clone(),
+            // <<< home
             // >>> eyes
             eyes: g.eyes.clone(),
             // <<< eyes
@@ -1214,6 +1224,7 @@ mod tests {
             base: crate::base::Base::default(),
             overland: crate::overland::OverlandRules::default(),
             stronghold: crate::stronghold::StrongholdRules::default(),
+            home: crate::home::HomeRules::default(),
             eyes: crate::eyes::EyeRules::default(),
         };
         Table::new(&g).unwrap()

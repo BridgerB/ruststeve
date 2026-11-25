@@ -931,21 +931,20 @@ impl Plan {
                 // fortress and a blaze's fireball and its fire took it from 12.5 to 5.6).
                 // Not while a travel point steers: from inside a fortress every axis has bricks
                 // ahead, and the heading would turn out in a second.
-                let bricks: u32 =
-                    if self.ender.phase == crate::endermen::EnderPhase::Travel && !h.way {
-                        (1..=SIGNS_AHEAD)
-                            .flat_map(|d| (-1..=1).map(move |s| (d, s)))
-                            .map(|(d, s)| {
-                                bricks_in_column(
-                                    w,
-                                    chunk.0 + h.dir.0 * d + h.dir.1 * s,
-                                    chunk.1 + h.dir.1 * d + h.dir.0 * s,
-                                )
-                            })
-                            .sum()
-                    } else {
-                        0
-                    };
+                let bricks: u32 = if self.ender.phase.travels() && !h.way {
+                    (1..=SIGNS_AHEAD)
+                        .flat_map(|d| (-1..=1).map(move |s| (d, s)))
+                        .map(|(d, s)| {
+                            bricks_in_column(
+                                w,
+                                chunk.0 + h.dir.0 * d + h.dir.1 * s,
+                                chunk.1 + h.dir.1 * d + h.dir.0 * s,
+                            )
+                        })
+                        .sum()
+                } else {
+                    0
+                };
                 if ahead >= SIGNS_TURN {
                     self.heading_turn(
                         w,
@@ -954,10 +953,9 @@ impl Plan {
                         tick,
                         &format!("{ahead} crimson signs seen ahead"),
                     )?;
-                } else if let Some((kind, d)) =
-                    (self.ender.phase == crate::endermen::EnderPhase::Travel && !h.way)
-                        .then(|| fortress_mob_ahead(w, h.dir))
-                        .flatten()
+                } else if let Some((kind, d)) = (self.ender.phase.travels() && !h.way)
+                    .then(|| fortress_mob_ahead(w, h.dir))
+                    .flatten()
                 {
                     self.heading_turn(
                         w,
@@ -1163,7 +1161,7 @@ impl Plan {
                         Walk::new(leg.target, goal, crate::walk::Arrive::Goal, tick)
                     };
                     walk.more.blocked = blocked.clone();
-                    walk.more.shun = self.ender.phase == crate::endermen::EnderPhase::Travel;
+                    walk.more.shun = self.ender.phase.travels();
                     let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
                     self.expanded += walk.expanded;
                     let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
@@ -1204,7 +1202,7 @@ impl Plan {
                     // In travel the hunt needs the reserve and only the forest base makes new
                     // pickaxes: bridge over the deltas (filler is plentiful), tunnel only with
                     // `TRAVEL_SPARE` over (race 45535712274 lane 0 tunnelled 84 uses in the deltas).
-                    let spare = if self.ender.phase == crate::endermen::EnderPhase::Travel {
+                    let spare = if self.ender.phase.travels() {
                         TRAVEL_SPARE
                     } else {
                         0
