@@ -210,6 +210,81 @@ pub fn portal_cells(w: &World, dim: &str, c: Cell) -> Vec<Cell> {
     v
 }
 
+/// The face a portal is entered from: `stand`, an open cell with a full block under it in front
+/// of one of its two lowest rows; `tunnel`, the cell one further out (dug to when it is rock);
+/// `normal`, the step from the portal's plane out to that face.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Front {
+    pub stand: Cell,
+    pub tunnel: Cell,
+    pub normal: (i32, i32),
+}
+
+/// The face of `lit` (the portal's lit cells) with a standing cell, the nearer to `at` when both
+/// have one; `None` when neither has. The entry portal's north face (z -21) has no floor over the
+/// lava sea and its south face one dry standing cell, (22, 35, -19), with netherrack at
+/// (22, 35, -18) behind it (Q1's probe 45688112814): its front is the south.
+pub fn portal_front(w: &World, lit: &[Cell], at: [f64; 3]) -> Option<Front> {
+    let low = lit.iter().map(|c| c.1).min()?;
+    let first = *lit.first()?;
+    // The plane runs along x when its cells differ in x, or when the low cell's x neighbours are
+    // its frame (obsidian) or portal; its faces are then the two z sides.
+    let along_x = lit.iter().any(|c| c.0 != first.0)
+        || (lit.iter().all(|c| c.2 == first.2)
+            && [first.0 - 1, first.0 + 1].iter().any(|x| {
+                matches!(
+                    w.block_at(world::BlockPos::new(*x, first.1, first.2)),
+                    Some(BlockKind::Obsidian | BlockKind::NetherPortal)
+                )
+            }));
+    let normals = if along_x {
+        [(0, 1), (0, -1)]
+    } else {
+        [(1, 0), (-1, 0)]
+    };
+    let mut cells = path::Cells::new(w);
+    let d2 = |c: Cell| {
+        let d = [
+            f64::from(c.0) + 0.5 - at[0],
+            f64::from(c.1) - at[1],
+            f64::from(c.2) + 0.5 - at[2],
+        ];
+        d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+    };
+    let mut best: Option<(f64, Front)> = None;
+    for normal in normals {
+        for c in lit.iter().filter(|c| c.1 == low || c.1 == low + 1) {
+            let s = (c.0 + normal.0, c.1, c.2 + normal.1);
+            if lit.contains(&s)
+                || cells.at(s) != path::Class::Clear
+                || cells.at((s.0, s.1 + 1, s.2)) == path::Class::Lava
+                || cells.at((s.0, s.1 - 1, s.2)) != path::Class::Solid
+            {
+                continue;
+            }
+            let f = Front {
+                stand: s,
+                tunnel: (s.0 + normal.0, s.1, s.2 + normal.1),
+                normal,
+            };
+            let d = d2(s);
+            if best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, f));
+            }
+        }
+    }
+    best.map(|(_, f)| f)
+}
+
+/// How far `c` lies out of the portal's plane toward `front`'s face (0 in the plane).
+fn out_of_plane(front: &Front, c: Cell) -> i32 {
+    let plane = (
+        front.stand.0 - front.normal.0,
+        front.stand.2 - front.normal.1,
+    );
+    (c.0 - plane.0) * front.normal.0 + (c.2 - plane.1) * front.normal.1
+}
+
 fn dimension(w: &World) -> Option<&str> {
     w.dimension.as_ref().map(|d| d.name.as_str())
 }
@@ -640,14 +715,26 @@ impl Plan {
         // Lava beside or under the portal's feet cells (the row in front of it turned to lava:
         // docs/problems/nether-walk.md) is sealed with filler from where the bot stands first:
         // no route enters a cell with lava beside it.
-        if let Some(t) = self.home_seal(w, tick, &lit) {
+        // The face with a floor is the only way in: the walk in starts on its side, the far walk
+        // and the tunnel go to the cell behind its standing cell (the entry portal's north face
+        // has no floor over the lava sea).
+        let front = portal_front(w, &lit, body.pos);
+        if let Some(t) = self.home_seal(w, tick, &lit, front.as_ref()) {
             return Some(t);
         }
+        let on_side = front.is_none_or(|f| out_of_plane(&f, feet) >= 1);
         let open: Vec<Cell> = lit
             .iter()
             .copied()
-            .filter(|c| !self.refused_now(*c, tick))
+            .filter(|c| on_side && !self.refused_now(*c, tick))
             .collect();
+        let (goal_cell, goal_what) = match front {
+            Some(f) => (
+                f.tunnel,
+                format!("{:?}, behind the standing cell {:?}", f.tunnel, f.stand),
+            ),
+            None => (portal, format!("{portal:?}, no face with a floor seen")),
+        };
         for c in open {
             let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
             if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
@@ -670,8 +757,9 @@ impl Plan {
         }
         self.ender.home.approach_tries += 1;
         let n = self.ender.home.approach_tries;
-        // A far walk to beside the portal: bridges over the lava in front of it.
-        if n % 2 == 1 {
+        // No face with a floor seen: a far walk to beside the portal, bridging the lava in front
+        // of it. With one, never: a bridge can cross to the face without a floor.
+        if front.is_none() && n % 2 == 1 {
             let goal = Goal::Near {
                 pos: portal,
                 range: 1.5,
@@ -691,18 +779,18 @@ impl Plan {
             }
             self.expanded += walk.expanded;
         }
-        // A tunnel at the portal's floor level from the dry side: the tunnel's stairs refuse
-        // lava beside a cell they open.
+        // A tunnel to the cell behind the standing cell (else to the portal): the tunnel's stairs
+        // refuse lava beside a cell they open.
         if let Some(t) = self.tunnel_toward(
             w,
-            portal,
+            goal_cell,
             ("the portal", "the way home's approach: no walk in"),
             tick,
         ) {
             self.note(
                 tick,
-                format!("home: approach {n} by tunnel to {portal:?}"),
-                format!("from {feet:?}"),
+                format!("home: approach {n} by tunnel to {goal_cell:?}"),
+                format!("from {feet:?} to {goal_what}; on the face's side {on_side}"),
             );
             return Some(t);
         }
@@ -710,7 +798,7 @@ impl Plan {
         self.note(
             tick,
             format!("home: approach {n} found no way"),
-            format!("from {feet:?} to {portal:?}: no walk, far walk or tunnel"),
+            format!("from {feet:?} to {goal_what}: no walk, far walk or tunnel"),
         );
         Some(Task::Idle)
     }
@@ -718,7 +806,13 @@ impl Plan {
     /// One filler block into a lava cell beside or under a portal feet cell (the lowest of `lit`),
     /// within reach of the eye, clicked on a full block beside it; noted "home: lava sealed at".
     /// `None` with no such lava in reach, no filler held, or `SEALS` placed.
-    fn home_seal(&mut self, w: &World, tick: u64, lit: &[Cell]) -> Option<Task> {
+    fn home_seal(
+        &mut self,
+        w: &World,
+        tick: u64,
+        lit: &[Cell],
+        front: Option<&Front>,
+    ) -> Option<Task> {
         let body = w.body?;
         if self.ender.home.seals >= SEALS {
             return None;
@@ -746,14 +840,18 @@ impl Plan {
             .filter(|c| c.1 == low || c.1 == low + 1)
             .flat_map(|c| around(c).into_iter().take(4))
             .filter(|n| !lit.contains(n))
+            .filter(|n| front.is_none_or(|f| out_of_plane(f, *n) >= 1))
             .filter(|n| cells.at(*n) == path::Class::Clear)
             .collect();
+        // With a front known, the lava behind the portal (the entry portal's north lava sea) is
+        // never sealed: the bot never stands there.
         let mut lava: Vec<Cell> = Vec::new();
         for n in lit
             .iter()
             .filter(|c| c.1 == low)
             .chain(stand.iter())
             .flat_map(around)
+            .filter(|n| front.is_none_or(|f| out_of_plane(f, *n) >= 0))
         {
             if !lava.contains(&n) && cells.at(n) == path::Class::Lava {
                 lava.push(n);

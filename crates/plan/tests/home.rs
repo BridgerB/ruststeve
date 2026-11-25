@@ -469,3 +469,77 @@ fn the_entry_portals_south_face_is_sealed_round_its_standing_cell() {
         );
     }
 }
+
+/// The entry portal shifted by (-11, 30, 28): cells x 11 to 12, y 64 to 66, z 8 over obsidian;
+/// the south face (z 9) with cobblestone under the standing cell (11, 65, 9) and lava round it;
+/// the north face's floor (y 63, z 7) lava, as the lava sea under the north face.
+fn entry_portal(w: &mut World) -> Vec<(i32, i32, i32)> {
+    let mut lit = Vec::new();
+    for x in 11..=12 {
+        set(w, (x, 63, 8), BlockKind::Obsidian);
+        for y in 64..=66 {
+            set(w, (x, y, 8), BlockKind::NetherPortal);
+            remember(w, home::NETHER, (x, y, 8), BlockKind::NetherPortal);
+            lit.push((x, y, 8));
+        }
+    }
+    set(w, (11, 64, 9), BlockKind::Cobblestone);
+    for c in [(10, 64, 9), (12, 64, 9), (13, 64, 9)] {
+        set(w, c, BlockKind::Lava);
+    }
+    for x in 8..=15 {
+        for z in 4..=7 {
+            set(w, (x, 63, z), BlockKind::Lava);
+        }
+    }
+    lit
+}
+
+#[test]
+fn the_north_face_without_a_floor_is_never_the_front() {
+    let mut w = nether();
+    kit(&mut w);
+    let lit = entry_portal(&mut w);
+    // The bot nearer the north face than the south one: the south is still the front.
+    for at in [[11.5, 64.0, 2.5], [11.5, 65.0, 10.5], [20.5, 64.0, 8.5]] {
+        let f = home::portal_front(&w, &lit, at);
+        assert_eq!(
+            f,
+            Some(home::Front {
+                stand: (11, 65, 9),
+                tunnel: (11, 65, 10),
+                normal: (0, 1),
+            }),
+            "from {at:?}"
+        );
+    }
+}
+
+#[test]
+fn from_the_north_side_the_portal_is_not_walked_into() {
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(39, (ItemKind::Netherrack, 64));
+    entry_portal(&mut w);
+    w.body = w.body.map(|b| physics::Body {
+        pos: [11.5, 64.0, 2.5],
+        ..b
+    });
+    w.player.pos = Some([11.5, 64.0, 2.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 30);
+    let n = notes(&p);
+    assert!(!noted(&p, "home: enter"), "{n:?}");
+    assert!(!n.iter().any(|s| s.contains("far walk")), "{n:?}");
+    assert!(
+        n.iter()
+            .filter(|s| s.starts_with("home: approach") && s.contains("tunnel"))
+            .all(|s| s.ends_with("(11, 65, 10)")),
+        "{n:?}"
+    );
+}
