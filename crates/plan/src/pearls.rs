@@ -2915,7 +2915,15 @@ impl Plan {
                 }
                 if let Some(b) = f {
                     let score = supply_score(w, &seen, b);
-                    if best.is_none_or(|(sc, _)| score > sc) {
+                    // A far anchor's site counts only with a plain route to its B now: one
+                    // refused for no route cost each search 100 ticks and the build came at
+                    // tick 1,640 to 4,540, not 820 (race 45572123445).
+                    let reachable = a == feet || {
+                        let c = (b.b[0], b.b[1], b.b[2]);
+                        let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+                        walk.route_now(w, tick)
+                    };
+                    if reachable && best.is_none_or(|(sc, _)| score > sc) {
                         best = Some((score, b));
                     }
                 }
