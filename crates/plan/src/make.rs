@@ -215,6 +215,10 @@ pub struct Goals {
     /// The eat and hunt rows' numbers (issue 12c).
     #[serde(default)]
     pub survival: Survival,
+    // >>> pearls (P3, issue 18f): the hunt's numbers.
+    #[serde(default)]
+    pub pearls: crate::pearls::PearlRules,
+    // <<< pearls
     // >>> base (P5, issue 18d): `[base]`, the forest base's numbers.
     #[serde(default)]
     pub base: crate::base::Base,
@@ -559,6 +563,9 @@ pub struct Table {
     /// The always-rows, by priority then as written (issue 12b).
     pub always: Vec<(String, Always)>,
     pub survival: SurvivalRules,
+    // >>> pearls
+    pub pearls: crate::pearls::PearlRules,
+    // <<< pearls
     // >>> base
     pub base: crate::base::Base,
     // <<< base
@@ -720,6 +727,9 @@ impl Table {
             goals,
             producers,
             always,
+            // >>> pearls
+            pearls: g.pearls.clone(),
+            // <<< pearls
             survival: SurvivalRules {
                 hungry_below: g.survival.hungry_below,
                 food_reserve: g.survival.food_reserve,
@@ -1176,6 +1186,7 @@ mod tests {
             ],
             always: Vec::new(),
             survival: Survival::default(),
+            pearls: crate::pearls::PearlRules::default(),
             base: crate::base::Base::default(),
         };
         Table::new(&g).unwrap()

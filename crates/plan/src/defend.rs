@@ -149,10 +149,28 @@ const COVER_TRIES: usize = 4;
 /// From `eye` to the nearest point of the box of a mob standing at `pos`: what the client's
 /// reach is measured to (its crosshair ray meets the box), where `middle` is 0.9 up the box.
 pub fn box_distance(eye: [f64; 3], pos: [f64; 3]) -> f64 {
+    box_distance_sized(eye, pos, SHOOTER_HALF_WIDTH, SHOOTER_HEIGHT)
+}
+
+/// An enderman's box (vanilla `EntityType.ENDERMAN`: 0.6 wide, 2.9 high): the hunt's strike reach
+/// is measured to it (issue 18f), not to the blaze's 1.8.
+pub const ENDERMAN_HALF_WIDTH: f64 = 0.3;
+pub const ENDERMAN_HEIGHT: f64 = 2.9;
+
+/// `box_distance` to the box of a mob of `kind`: an enderman's 2.9-high box, else the blaze's.
+pub fn box_distance_of(eye: [f64; 3], pos: [f64; 3], kind: EntityKind) -> f64 {
+    if kind == EntityKind::Enderman {
+        box_distance_sized(eye, pos, ENDERMAN_HALF_WIDTH, ENDERMAN_HEIGHT)
+    } else {
+        box_distance(eye, pos)
+    }
+}
+
+fn box_distance_sized(eye: [f64; 3], pos: [f64; 3], half: f64, height: f64) -> f64 {
     let near = [
-        eye[0].clamp(pos[0] - SHOOTER_HALF_WIDTH, pos[0] + SHOOTER_HALF_WIDTH),
-        eye[1].clamp(pos[1], pos[1] + SHOOTER_HEIGHT),
-        eye[2].clamp(pos[2] - SHOOTER_HALF_WIDTH, pos[2] + SHOOTER_HALF_WIDTH),
+        eye[0].clamp(pos[0] - half, pos[0] + half),
+        eye[1].clamp(pos[1], pos[1] + height),
+        eye[2].clamp(pos[2] - half, pos[2] + half),
     ];
     distance(eye, near)
 }

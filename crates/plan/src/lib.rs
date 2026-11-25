@@ -12,6 +12,9 @@
 pub mod base;
 // <<< base
 pub mod build;
+// >>> pearls (P3, issue 18e/f)
+pub mod burrow;
+// <<< pearls
 pub mod cast;
 pub mod cover;
 pub mod craft;
@@ -29,6 +32,9 @@ pub mod ledger;
 pub mod look;
 pub mod make;
 pub mod path;
+// >>> pearls (P3, issue 18f)
+pub mod pearls;
+// <<< pearls
 pub mod place;
 pub mod redig;
 pub mod scoop;
@@ -797,6 +803,10 @@ pub struct Plan {
     #[serde(default)]
     pub headed: Option<heading::Heading>,
     // <<< heading
+    // >>> pearls (P3, issue 18e/f): the burrow and the hunt (docs/problems/pearls-hunt.md).
+    #[serde(default)]
+    pub pearls: pearls::PearlState,
+    // <<< pearls
     // >>> base (P5, issue 18d): the forest base's steps.
     #[serde(default)]
     pub base: base::BaseState,
@@ -914,6 +924,9 @@ impl Plan {
             // >>> heading (E2)
             headed: None,
             // <<< heading
+            // >>> pearls
+            pearls: pearls::PearlState::default(),
+            // <<< pearls
             // >>> base
             base: base::BaseState::default(),
             // <<< base
@@ -1450,6 +1463,12 @@ impl Plan {
         if let Some(c) = self.always(w, &body, tick) {
             return c;
         }
+        // >>> pearls (P3, issue 18f): the hunt's rule table, in the warped forest
+        // (docs/problems/pearls-hunt.md). `None` lets the task in hand run.
+        if let Some(c) = self.pearls_step(w, tick) {
+            return c;
+        }
+        // <<< pearls
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
         if let Some(c) = self.ender_threat(w, tick) {
             return c;
