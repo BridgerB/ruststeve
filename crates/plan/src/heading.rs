@@ -68,6 +68,10 @@ pub const PLACED_PER_M: f64 = 2.0;
 pub const BUDGET_GRACE: i32 = 8;
 /// A tunnel leg's digs are estimated at this a metre against the uses left over the reserve.
 pub const TUNNEL_DIGS_PER_M: i32 = 2;
+/// In travel (issue 18c) a heading tunnel needs this many pickaxe uses over the reserve and the
+/// leg's own: the frontier holds 142 after the pocket, so about one tunnelled leg, then walks and
+/// bridges only.
+pub const TRAVEL_SPARE: i32 = 60;
 /// A leg's hard dig budget: 144 pickaxe uses in all in the frontier kit (13 + 131, 17a's read of
 /// the snapshot), 40 of them the reserve, so about four tunnelled legs' worth at 24 (a level
 /// tunnel's 2 a metre over half a leg). Walk and bridge are the legs' ways; a tunnel is the
@@ -1197,7 +1201,15 @@ impl Plan {
                     let reserve = pickaxe_reserve(self);
                     let need = (TUNNEL_DIGS_PER_M * (LEG - here.max(0)).max(LEG_REACH))
                         .min(i32::try_from(LEG_DIGS).unwrap_or(i32::MAX));
-                    if left > reserve + need {
+                    // In travel the hunt needs the reserve and only the forest base makes new
+                    // pickaxes: bridge over the deltas (filler is plentiful), tunnel only with
+                    // `TRAVEL_SPARE` over (race 45535712274 lane 0 tunnelled 84 uses in the deltas).
+                    let spare = if self.ender.phase == crate::endermen::EnderPhase::Travel {
+                        TRAVEL_SPARE
+                    } else {
+                        0
+                    };
+                    if left > reserve + need + spare {
                         let target = leg.target;
                         let n = leg.n;
                         let task = self.heading_tunnel(
@@ -1228,7 +1240,7 @@ impl Plan {
                     } else {
                         refusals.push(format!(
                             "tunnel: {left} pickaxe uses, the reserve {reserve} and {need} for \
-                             the leg"
+                             the leg, {spare} kept for the hunt"
                         ));
                     }
                 }
