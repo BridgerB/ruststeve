@@ -110,7 +110,8 @@ fn world_events(column: Arc<Column>) -> impl Strategy<Value = Event> {
                 kind,
                 x,
                 y,
-                z
+                z,
+                velocity: [0.0; 3],
             })),
         (id, any::<f32>(), any::<u8>()).prop_map(|(id, h, f)| Event::Packet(S2c::SetEntityData {
             id,

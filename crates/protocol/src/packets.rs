@@ -115,8 +115,8 @@ pub enum S2c {
         food: i32,
         saturation: f32,
     },
-    /// An entity appeared: its id, uuid, type id and position (velocity and the rest: an
-    /// ignored tail; field order from the game's ClientboundAddEntityPacket.write).
+    /// An entity appeared: its id, uuid, type id, position and velocity (the rotations and data
+    /// an ignored tail; field order from the game's ClientboundAddEntityPacket.write).
     AddEntity {
         id: i32,
         uuid: [u8; 16],
@@ -124,6 +124,9 @@ pub enum S2c {
         x: f64,
         y: f64,
         z: f64,
+        /// Its velocity at spawn in blocks a tick, an LpVec3 (issue 19b: a thrown eye's first
+        /// motion; zero for most mobs).
+        velocity: [f64; 3],
     },
     RemoveEntities {
         ids: Vec<i32>,
@@ -664,6 +667,7 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 x: finite(r.f64()?)?,
                 y: finite(r.f64()?)?,
                 z: finite(r.f64()?)?,
+                velocity: r.lpvec3()?,
             },
             Some(PlayIn::RemoveEntities) => {
                 let n = r.length()?;
@@ -1542,6 +1546,7 @@ impl S2c {
                 x,
                 y,
                 z,
+                velocity,
             } => {
                 // ClientboundAddEntityPacket.write: then the velocity (an LpVec3, 0 is one zero
                 // byte), pitch, yaw and head yaw as bytes, and the type's data.
@@ -1551,7 +1556,7 @@ impl S2c {
                 w.f64(*x);
                 w.f64(*y);
                 w.f64(*z);
-                w.u8(0);
+                w.lpvec3(*velocity);
                 w.u8(0);
                 w.u8(0);
                 w.u8(0);

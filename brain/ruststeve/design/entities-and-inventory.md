@@ -5,8 +5,8 @@ type: reference
 tags: [world, entities, metadata, inventory, slots]
 aliases: [kills, struck, air, on fire, uses_finished, Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@e96708e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -28,7 +28,7 @@ related:
 
 ## Entities
 - `World::entities: BTreeMap<i32, Entity>`: one entry per id by construction, never the player's own id. `Entity { kind, pos, metadata, first_seen, last_seen }`, times in server ticks.
-- `add_entity` inserts (id, uuid, type, position; the velocity tail is ignored), `remove_entities` drops, `move_entity_pos` and `move_entity_pos_rot` add deltas of 1/4096 block, `entity_position_sync` sets the position, `teleport_entity` sets it with relative flags as `player_position`'s. A move or data for an id the world does not hold is counted in `unknown_entity_updates`, never invented.
+- `add_entity` inserts (id, uuid, type, position, and since issue 19b its velocity at spawn, an LpVec3, kept as `spawn_velocity` apart from `velocity` so the fireball readers still take `velocity` as sent since; the rotations and data are an ignored tail), `remove_entities` drops, `move_entity_pos` and `move_entity_pos_rot` add deltas of 1/4096 block, `entity_position_sync` sets the position, `teleport_entity` sets it with relative flags as `player_position`'s. A move or data for an id the world does not hold is counted in `unknown_entity_updates`, never invented.
 - `set_entity_data` merges skimmed metadata ([[wire-entity-metadata]]); `Entity::health` reads index 9, `flags` index 0.
 - Non-finite coordinates are a `ParseError` at the boundary, and the fold ignores any that a built packet slips in.
 - A change of dimension drops every entity.

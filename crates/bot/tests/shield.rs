@@ -56,6 +56,7 @@ fn add(w: &mut World, id: i32, kind: EntityKind, pos: [f64; 3]) {
         x: pos[0],
         y: pos[1],
         z: pos[2],
+        velocity: [0.0; 3],
     }));
 }
 

@@ -5,8 +5,8 @@ type: decision
 tags: [decision, xray, perception, memory]
 aliases: [strict no X-ray, no danger reads, unexposed lava, refusal-only reads]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@d0cd4db
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#pub fn record_source(&mut self, seen: SeenSource) -> bool {"
 related:

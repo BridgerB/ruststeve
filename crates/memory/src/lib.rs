@@ -21,10 +21,11 @@ use data::types::Collision;
 pub type Cell = (i32, i32, i32);
 
 /// The kinds that start a record, besides the `logs` tag: what the plan looks for (tables,
-/// furnaces, a fortress's bricks, a spawner, a portal's obsidian). A position on record is then
-/// followed through every change. Water and lava are not cells here: clojurecraft found one fact
-/// per fluid cell froze a forest run (600,000 water cells); fluids become per-chunk pools later.
-const WATCHED: [BlockKind; 6] = [
+/// furnaces, a fortress's bricks, a spawner, a portal's obsidian, a stronghold's frames and
+/// bricks). A position on record is then followed through every change. Water and lava are not
+/// cells here: clojurecraft found one fact per fluid cell froze a forest run (600,000 water
+/// cells); fluids become per-chunk pools later.
+const WATCHED: [BlockKind; 19] = [
     BlockKind::CraftingTable,
     BlockKind::Furnace,
     BlockKind::NetherBricks,
@@ -32,6 +33,44 @@ const WATCHED: [BlockKind; 6] = [
     BlockKind::Obsidian,
     // A lit portal, walked back to and stepped into (issue 15c).
     BlockKind::NetherPortal,
+    // The stronghold (issue 19b): the portal room's frames face its air, so they are seen from
+    // chunk data within the view distance (the rule that found nether bricks); the End portal
+    // once lit (issue 20).
+    BlockKind::EndPortalFrame,
+    BlockKind::EndPortal,
+    // A stronghold's walls: the sign of its corridors when the dig is near (issue 19f).
+    BlockKind::StoneBricks,
+    BlockKind::MossyStoneBricks,
+    BlockKind::CrackedStoneBricks,
+    BlockKind::ChiseledStoneBricks,
+    // Infested blocks: never dug (a silverfish comes out of each and wakes others; issue 19f).
+    // Their kind is the server's own state, so a bot knows them from the chunk data it sees.
+    BlockKind::InfestedStone,
+    BlockKind::InfestedCobblestone,
+    BlockKind::InfestedStoneBricks,
+    BlockKind::InfestedMossyStoneBricks,
+    BlockKind::InfestedCrackedStoneBricks,
+    BlockKind::InfestedChiseledStoneBricks,
+    BlockKind::InfestedDeepslate,
+];
+
+/// The infested kinds (issue 19b): a block of one of these breaks into a silverfish.
+pub const INFESTED: [BlockKind; 7] = [
+    BlockKind::InfestedStone,
+    BlockKind::InfestedCobblestone,
+    BlockKind::InfestedStoneBricks,
+    BlockKind::InfestedMossyStoneBricks,
+    BlockKind::InfestedCrackedStoneBricks,
+    BlockKind::InfestedChiseledStoneBricks,
+    BlockKind::InfestedDeepslate,
+];
+
+/// The stronghold's brick kinds (issue 19b), infested ones not among them.
+pub const STONE_BRICKS: [BlockKind; 4] = [
+    BlockKind::StoneBricks,
+    BlockKind::MossyStoneBricks,
+    BlockKind::CrackedStoneBricks,
+    BlockKind::ChiseledStoneBricks,
 ];
 
 /// Whether a block state is a kind memory watches.
@@ -216,6 +255,17 @@ pub const INDEXED: &[BlockKind] = &[
     BlockKind::Spawner,
     BlockKind::NetherBricks,
     BlockKind::NetherPortal,
+    // Issue 19b: the stage ladder looks for frames within 8 columns every second.
+    BlockKind::EndPortalFrame,
+    BlockKind::EndPortal,
+    BlockKind::StoneBricks,
+    BlockKind::InfestedStone,
+    BlockKind::InfestedCobblestone,
+    BlockKind::InfestedStoneBricks,
+    BlockKind::InfestedMossyStoneBricks,
+    BlockKind::InfestedCrackedStoneBricks,
+    BlockKind::InfestedChiseledStoneBricks,
+    BlockKind::InfestedDeepslate,
 ];
 
 fn unindexed() -> bool {
@@ -831,5 +881,34 @@ mod tests {
         assert!(watched(state(BlockKind::OakLog)));
         assert!(watched(state(BlockKind::CraftingTable)));
         assert!(!watched(state(BlockKind::Stone)));
+    }
+
+    /// Issue 19b: a stronghold's frames, portal, bricks and infested blocks are watched, and the
+    /// frames are indexed (the stage ladder reads them every second).
+    #[test]
+    fn the_strongholds_blocks_are_watched_and_frames_indexed() {
+        for k in [
+            BlockKind::EndPortalFrame,
+            BlockKind::EndPortal,
+            BlockKind::Spawner,
+        ]
+        .into_iter()
+        .chain(INFESTED)
+        .chain(STONE_BRICKS)
+        {
+            assert!(watched(state(k)), "{k:?}");
+        }
+        assert!(!watched(state(BlockKind::Deepslate)));
+        let mut m = Memory::new();
+        let air = state(BlockKind::Air);
+        let frame = state(BlockKind::EndPortalFrame);
+        let mut n = [None; 6];
+        n[1] = Some(air);
+        let seen = Seen::check("minecraft:overworld", (1650, 30, -14), frame, n).unwrap();
+        assert!(m.record(seen, 5));
+        assert_eq!(
+            m.indexed_in_column("minecraft:overworld", 103, -1, BlockKind::EndPortalFrame),
+            Some(vec![(1650, 30, -14)])
+        );
     }
 }

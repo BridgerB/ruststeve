@@ -1,12 +1,12 @@
 ---
 title: Memory and sightings
-description: How ruststeve remembers watched blocks (logs, tables, furnaces, nether bricks, spawners, obsidian, nether portals) as append-only sightings with time, only when seen with an exposed face, indexed by position and chunk column; how the world decides what to look at.
+description: How ruststeve remembers watched blocks (logs, tables, furnaces, nether bricks, spawners, obsidian, nether portals, a stronghold's frames, bricks and infested blocks) as append-only sightings with time, only when seen with an exposed face, indexed by position and chunk column; how the world decides what to look at.
 type: reference
 tags: [memory, sightings, no-xray, facts, world]
 aliases: [Memory, Sighting, Seen, watched kinds, exposed face, memory crate, facts with time]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@c5791eb clojurecraft@be85a92
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@d0cd4db clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#/// A block seen with an exposed face. Only `Seen::check` makes one."
   - "ruststeve:crates/memory/src/lib.rs#pub fn record_source(&mut self, seen: SeenSource) -> bool {"
@@ -29,7 +29,7 @@ The `memory` crate (core, no I/O) is clojurecraft's sighting store in Rust ([[cc
 ## How it works
 - A `Sighting { dimension, pos, state, at_tick }` is appended only when the state differs from the latest sighting at that position; a dug log becomes a newer fact of air, and the history stays.
 - Indexes: the latest sighting by position, and positions by dimension and chunk column. Since issue 07a also every block kind ever sighted (`has_seen`), so the stage ladder asks "seen nether bricks?" without a scan. `refold_latest` rebuilds the index from the log; the property test holds them equal.
-- **Only watched kinds start a record**: the `logs` block tag, crafting table, furnace, nether bricks, spawner, obsidian, and (issue 15c) nether portal, a lit portal to walk back to. A position on record is then followed through every change, whatever it becomes.
+- **Only watched kinds start a record**: the `logs` block tag, crafting table, furnace, nether bricks, spawner, obsidian, and (issue 15c) nether portal, a lit portal to walk back to; (issue 19b) end portal frame and end portal (the portal room's frames face its air, so chunk data shows them within the view distance), stone bricks and their mossy, cracked and chiseled kinds (a stronghold's walls), and the seven infested kinds (`memory::INFESTED`: never dug). Frames, the End portal, stone bricks and the infested kinds are in the kind index (`INDEXED`) for the stage ladder's look every second. A position on record is then followed through every change, whatever it becomes.
 - **No X-ray by construction**: a `Sighting` needs a `Seen`, and only `Seen::check` makes one, when a neighbour is loaded and its collision (generated from the game, [[datagen]]) is not a full cube. An unloaded neighbour does not count.
 - **What the world looks at** (`World::observe_column`, `observe_around`): when a column loads, its sections whose palette may hold a watched kind, the positions already on record in it, and the facing edge cells of loaded neighbouring columns; after a block change, the cell and its six neighbours.
 
