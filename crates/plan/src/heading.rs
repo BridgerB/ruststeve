@@ -225,6 +225,8 @@ pub struct Heading {
     /// travel points' columns reached.
     pub way: bool,
     pub ways: Vec<(i32, i32)>,
+    /// The travel point the axis is aimed at.
+    pub point: Option<(i32, i32)>,
     /// Set when the heading is over (a warped forest at the feet, or turned out).
     pub over: bool,
     /// Whether "heading crosses basalt deltas" was said.
@@ -256,6 +258,20 @@ fn seen_columns(w: &World) -> BTreeSet<(i32, i32)> {
         .unwrap_or_default()
 }
 
+/// A travel point is reached within this on the plane (a leg's reach is 5, but its legs end
+/// where the ground lets them: half a leg).
+pub const POINT_REACH: i32 = 24;
+
+/// The compass axis from `feet` toward `point` (x, z) with the most of the way left.
+pub fn aim(feet: Cell, point: (i32, i32)) -> Dir {
+    let (dx, dz) = (point.0 - feet.0, point.1 - feet.2);
+    if dx.abs() >= dz.abs() {
+        (dx.signum(), 0)
+    } else {
+        (0, dz.signum())
+    }
+}
+
 /// A fortress's mobs (they spawn nowhere else): a blaze or a wither skeleton turns a heading in
 /// travel when it ticks within `FORTRESS_MOB_RANGE` and lies ahead (within 45 degrees of the axis).
 pub const FORTRESS_MOBS: &[data::EntityKind] =
@@ -278,6 +294,25 @@ fn fortress_mob_ahead(w: &World, (dx, dz): Dir) -> Option<(data::EntityKind, f64
                 .then_some((e.kind, d))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// The bridge blocks a leg's spend is counted from: those held, less the junk kinds the planner
+/// drops when the pack is nearly full (`SurvivalRules::junk`). A junk drop is not a block laid:
+/// 25 granite dropped at a leg's start failed it "25 blocks placed in 0 m" (race 45535712274
+/// lanes 0 and 3, issue 18c).
+fn leg_filler(p: &Plan, w: &World) -> i64 {
+    let junk: Vec<data::ItemKind> = p
+        .table
+        .as_ref()
+        .map(|t| t.survival.junk.iter().map(|(k, _)| *k).collect())
+        .unwrap_or_default();
+    w.inventory
+        .slots
+        .values()
+        .chain(w.inventory.carried.iter())
+        .filter(|(k, _)| path::BRIDGE_BLOCKS.contains(k) && !junk.contains(k))
+        .map(|(_, n)| i64::from(*n))
+        .sum()
 }
 
 /// Nether bricks on record in one column of this dimension (memory's brick index).
@@ -576,7 +611,7 @@ impl Leg {
 
     fn goal(&self, dir: Dir) -> Goal {
         match self.forest {
-            Some(f) => Goal::Near {
+            Some(f) => Goal::Plane {
                 pos: f,
                 range: f64::from(LEG_REACH - 1),
             },
@@ -717,6 +752,7 @@ impl Plan {
             h.forest = Some(col);
             h.valley = false;
             h.way = false;
+            h.point = None;
             self.heading_leg_end(w, h, feet, tick, "replaced: a warped forest is known");
             self.note(
                 tick,
@@ -724,28 +760,53 @@ impl Plan {
                 "a forest known from warped blocks seen replaces the axis".to_owned(),
             );
         }
-        // Else (issue 18c, in travel) the next travel point: the world's known geography.
+        // Else (issue 18c, in travel) the next travel point: the world's known geography steers
+        // the axis (the compass axis with the most of the way left), legs as ever; a leg that
+        // fails turns as ever (a detour), and the next leg done aims again.
         if signs.forest.is_none()
             && let Some((col, point)) = signs.way
-            && h.forest != Some(col)
         {
-            h.forest = Some(col);
-            h.valley = false;
-            h.way = true;
-            self.heading_leg_end(w, h, feet, tick, "replaced: a travel point");
-            self.note(
-                tick,
-                format!("heading to the travel point {point:?} at column {col:?}"),
-                format!(
-                    "known geography (travel_way; Bridger 2026-11-24); {} of {} reached; health \
-                     {:?}",
-                    h.ways.len(),
-                    self.table
-                        .as_ref()
-                        .map_or(0, |t| t.survival.travel_way.len()),
-                    w.player.health
-                ),
-            );
+            let at = (point.0, feet.1, point.1);
+            if path::octile(feet, at) <= f64::from(POINT_REACH) {
+                h.ways.push(col);
+                h.way = false;
+                h.point = None;
+                self.note(
+                    tick,
+                    format!("travel point reached: {point:?}"),
+                    format!(
+                        "at {feet:?}; {}",
+                        crate::endermen::travel_state(w, self.table.as_ref().map(|t| &t.survival))
+                    ),
+                );
+            } else if h.point != Some(point) {
+                h.point = Some(point);
+                h.way = true;
+                h.forest = None;
+                let dir = aim(feet, point);
+                self.heading_leg_end(w, h, feet, tick, "replaced: a travel point");
+                if h.dir != dir {
+                    h.dir = dir;
+                    h.origin = feet;
+                    h.best = 0;
+                }
+                self.note(
+                    tick,
+                    format!(
+                        "heading to the travel point {point:?} on ({}, {})",
+                        dir.0, dir.1
+                    ),
+                    format!(
+                        "known geography (travel_way; Bridger 2026-11-24); {} of {} reached; \
+                         health {:?}",
+                        h.ways.len(),
+                        self.table
+                            .as_ref()
+                            .map_or(0, |t| t.survival.travel_way.len()),
+                        w.player.health
+                    ),
+                );
+            }
         }
         // Else a soul sand valley known from soul blocks seen, once: endermen spawn there too.
         if h.forest.is_none()
@@ -775,27 +836,29 @@ impl Plan {
                 }
                 Look::Done => {
                     self.heading_leg_end(w, h, feet, tick, "done");
+                    // A leg done toward a travel point: aim at it again (after a detour).
+                    if h.way
+                        && let Some(p) = h.point
+                        && aim(feet, p) != h.dir
+                    {
+                        let was = h.dir;
+                        h.dir = aim(feet, p);
+                        h.origin = feet;
+                        h.best = 0;
+                        self.note(
+                            tick,
+                            format!("heading re-aimed at the travel point {p:?}"),
+                            format!(
+                                "from ({}, {}) to ({}, {}) at {feet:?}",
+                                was.0, was.1, h.dir.0, h.dir.1
+                            ),
+                        );
+                    }
                     if let Some(col) = h
                         .forest
                         .filter(|_| h.leg.is_none() && feet_at_column(feet, h.forest))
                     {
-                        if h.way {
-                            // A travel point is passed: the next one, or the axis.
-                            h.ways.push(col);
-                            h.forest = None;
-                            h.way = false;
-                            self.note(
-                                tick,
-                                format!("travel point reached at column {col:?}"),
-                                format!(
-                                    "at {feet:?}; {}",
-                                    crate::endermen::travel_state(
-                                        w,
-                                        self.table.as_ref().map(|t| &t.survival)
-                                    )
-                                ),
-                            );
-                        } else if h.valley {
+                        if h.valley {
                             // The valley is crossed, not waited in: the axis goes on.
                             h.valleys.push(col);
                             h.forest = None;
@@ -862,20 +925,23 @@ impl Plan {
                 // Past the endermen stage (no healing), a fortress seen ahead turns it too: its
                 // blazes and wither skeletons (race 45531575517 lane 3 walked west into a second
                 // fortress and a blaze's fireball and its fire took it from 12.5 to 5.6).
-                let bricks: u32 = if self.ender.phase == crate::endermen::EnderPhase::Travel {
-                    (1..=SIGNS_AHEAD)
-                        .flat_map(|d| (-1..=1).map(move |s| (d, s)))
-                        .map(|(d, s)| {
-                            bricks_in_column(
-                                w,
-                                chunk.0 + h.dir.0 * d + h.dir.1 * s,
-                                chunk.1 + h.dir.1 * d + h.dir.0 * s,
-                            )
-                        })
-                        .sum()
-                } else {
-                    0
-                };
+                // Not while a travel point steers: from inside a fortress every axis has bricks
+                // ahead, and the heading would turn out in a second.
+                let bricks: u32 =
+                    if self.ender.phase == crate::endermen::EnderPhase::Travel && !h.way {
+                        (1..=SIGNS_AHEAD)
+                            .flat_map(|d| (-1..=1).map(move |s| (d, s)))
+                            .map(|(d, s)| {
+                                bricks_in_column(
+                                    w,
+                                    chunk.0 + h.dir.0 * d + h.dir.1 * s,
+                                    chunk.1 + h.dir.1 * d + h.dir.0 * s,
+                                )
+                            })
+                            .sum()
+                    } else {
+                        0
+                    };
                 if ahead >= SIGNS_TURN {
                     self.heading_turn(
                         w,
@@ -884,10 +950,10 @@ impl Plan {
                         tick,
                         &format!("{ahead} crimson signs seen ahead"),
                     )?;
-                } else if let Some((kind, d)) = (self.ender.phase
-                    == crate::endermen::EnderPhase::Travel)
-                    .then(|| fortress_mob_ahead(w, h.dir))
-                    .flatten()
+                } else if let Some((kind, d)) =
+                    (self.ender.phase == crate::endermen::EnderPhase::Travel && !h.way)
+                        .then(|| fortress_mob_ahead(w, h.dir))
+                        .flatten()
                 {
                     self.heading_turn(
                         w,
@@ -980,7 +1046,7 @@ impl Plan {
             ));
         }
         let gain = here - leg.progress(dir, leg.from);
-        let placed = (leg.filler0 + leg.gained - path::bridge_blocks(w)).max(0);
+        let placed = (leg.filler0 + leg.gained - leg_filler(self, w)).max(0);
         let spent = BUDGET_GRACE.max(gain);
         if f64::from(leg.digs) > DIGS_PER_M * f64::from(spent) {
             return Look::Failed(format!(
@@ -1030,7 +1096,7 @@ impl Plan {
             tried_at: 0,
             mark: (0, tick),
             uses0: pickaxe_uses_left(w),
-            filler0: path::bridge_blocks(w),
+            filler0: leg_filler(self, w),
             health0: w.player.health.unwrap_or(0.0),
             digs: 0,
             gained: 0,
@@ -1240,7 +1306,7 @@ impl Plan {
         };
         let gain = leg.progress(h.dir, feet) - leg.progress(h.dir, leg.from);
         let uses = (leg.uses0 - pickaxe_uses_left(w)).max(0);
-        let placed = (leg.filler0 + leg.gained - path::bridge_blocks(w)).max(0);
+        let placed = (leg.filler0 + leg.gained - leg_filler(self, w)).max(0);
         let lost = (leg.health0 - w.player.health.unwrap_or(leg.health0)).max(0.0);
         h.digs += leg.digs;
         h.placed += placed;
