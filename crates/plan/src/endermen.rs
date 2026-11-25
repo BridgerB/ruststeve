@@ -776,9 +776,10 @@ impl Plan {
     /// until the enderman is calm, gone or farther than `APPROACH_FROM`. Never a swing. Ahead of
     /// every task but the always-rows (an escape from lava still comes first).
     pub(crate) fn ender_threat(&mut self, w: &World, tick: u64) -> Option<Controls> {
-        // >>> pearls (P3, issue 18f): in the hunt a provoked enderman is fought from the burrow
-        // (the hunt's rows), not pocketed; out of the burrow the pocket stands.
-        if self.pearls.started && self.in_burrow(w) {
+        // >>> pearls (P3, issue 18f): in the hunt the hunt's rows answer a provoked enderman
+        // (from the burrow, or a capped pocket with none built: P4's closed loop held this
+        // pocket to the cap).
+        if self.pearls.started {
             return None;
         }
         // <<< pearls

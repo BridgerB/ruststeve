@@ -545,6 +545,10 @@ near_o = 8.0
 # after base_retry_ticks: the frontier race 45542558792 held all 8 bots 2,400 ticks a step on a stem
 # with no way to it, and the iron sword alone is about 23 kills.
 base_wait_ticks = 600
+# An angry enderman with no burrow built: issue 17's pocket where the bot stands for this long at
+# most, then the hunt goes on (anger with a target lasts; P4's closed loop held the pocket to the
+# cap).
+threat_hold_ticks = 1200
 base_retry_ticks = 6000
 calm_range = 16.0
 # <<< pearls

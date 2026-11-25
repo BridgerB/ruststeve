@@ -66,6 +66,7 @@ pub struct PearlRules {
     pub breach_near: f64,
     pub near_o: f64,
     pub base_wait_ticks: u64,
+    pub threat_hold_ticks: u64,
     pub base_retry_ticks: u64,
     pub calm_range: f64,
 }
@@ -99,6 +100,7 @@ impl Default for PearlRules {
             breach_near: 4.0,
             near_o: 8.0,
             base_wait_ticks: 600,
+            threat_hold_ticks: 1200,
             base_retry_ticks: 6000,
             calm_range: 16.0,
         }
@@ -123,8 +125,25 @@ pub const BURROW_BLOCKS: &[ItemKind] = &[
 const BUILD_EVERY: u64 = 10;
 /// A step to a cell's middle is done this near it, on the plane.
 const STEP_DONE: f64 = 0.2;
+/// The middle of the endermen seen, as a cell, or `None` with none.
+fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
+    if seen.is_empty() {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let n = seen.len() as f64;
+    let m = |i: usize| seen.iter().map(|p| p[i]).sum::<f64>() / n;
+    Some(path::feet_cell([m(0), m(1), m(2)]))
+}
+
 /// Blocks from the feet a forest floor cell walked to lies at least (a new place to search).
 const FLOOR_MIN: i32 = 8;
+/// Blocks within which an angry enderman, ticking or frozen, stops a new provoke.
+const ANGRY_PRESENT: f64 = 128.0;
+/// Ticks within which an enderman hurt by no one (a magma block, fire, lava) is no provoke
+/// target: such a hurt teleports it (the 26.1.2 jar), and the frontier race 45544744907's one
+/// provoke stared 80 server ticks at one that magma was hurting and teleporting.
+const HURT_SKIP: u64 = 100;
 /// Ticks a sighting is kept for the mouth's side.
 const SIGHTINGS_KEPT: u64 = 600;
 /// Ticks one step out of B takes at most, counted as one step.
@@ -226,6 +245,9 @@ pub struct PearlState {
     pub base_wait_since: Option<u64>,
     #[serde(default)]
     pub base_skip_until: Option<u64>,
+    /// When an angry enderman with no burrow built was first seen (the pocket's hold).
+    #[serde(default)]
+    pub threat_since: Option<u64>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -341,6 +363,13 @@ pub fn provoke_candidates_from(
     endermen::endermen(w)
         .into_iter()
         .filter(|s| s.ticking && !creepy(w, s.id))
+        .filter(|s| {
+            w.entities.get(&s.id).is_none_or(|e| {
+                !e.hurts
+                    .iter()
+                    .any(|h| !h.by_bot && w.session.server_ticks < h.at_tick + HURT_SKIP)
+            })
+        })
         .filter(|s| {
             let d = dist(eye, eye_of(s.pos));
             d >= min && d <= r.provoke_max
@@ -665,7 +694,42 @@ impl Plan {
         // Out of a built burrow with an angry enderman: issue 17's sealed pocket where the bot
         // stands (`ender_threat`), not a walk or a base step in the open.
         if !angry.is_empty() && !inside {
-            return None;
+            // At B of a burrow going up: the build goes on (the shell is the answer).
+            if self.pearls.burrow.is_some_and(|b| b.b == feet)
+                && let Some(c) = self.row_standing(w, tick, &r, feet)
+            {
+                return Some(c);
+            }
+            // Else issue 17's pocket where it stands, for `threat_hold_ticks` at most: anger
+            // with a target lasts, and P4's closed loop held a pocket to the cap.
+            let since = *self.pearls.threat_since.get_or_insert(tick);
+            if tick.saturating_sub(since) < r.threat_hold_ticks {
+                self.cut_task(tick, "pocket");
+                if since == tick {
+                    self.note(
+                        tick,
+                        format!("enderman {} angry with no burrow: a pocket", angry[0].id),
+                        format!(
+                            "{:.1} off; held up to {} ticks, then the hunt goes on",
+                            angry[0].dist, r.threat_hold_ticks
+                        ),
+                    );
+                }
+                self.pocket_step(w, tick);
+                return Some(look(w.player.yaw.into(), EYES_DOWN));
+            }
+            if since + r.threat_hold_ticks == tick {
+                self.note(
+                    tick,
+                    "pocket hold over: the hunt goes on".to_owned(),
+                    format!(
+                        "{} ticks with enderman {} angry",
+                        r.threat_hold_ticks, angry[0].id
+                    ),
+                );
+            }
+        } else if angry.is_empty() {
+            self.pearls.threat_since = None;
         }
         // Rows 6 and 7 that are tasks (the base, a walk to B, a dig to reopen the mouth).
         if !matches!(self.task, Task::Idle) {
@@ -1402,6 +1466,41 @@ impl Plan {
     ) -> Option<Controls> {
         let server = w.session.server_ticks;
         let pos = w.body.map_or([0.0; 3], |x| x.pos);
+        // An angry enderman alive anywhere within 128, ticking or frozen, is present: no new
+        // provoke (it resumes the moment its chunk ticks; P4's closed loop provoked a calm one
+        // with an angry frozen one 80 off).
+        if self.pearls.provoke.is_none()
+            && let Some(s) = endermen::endermen(w)
+                .into_iter()
+                .find(|s| s.dist <= ANGRY_PRESENT && creepy(w, s.id))
+        {
+            self.pearl_note(
+                tick,
+                "angry far",
+                format!("no provoke: enderman {} angry {:.1} off", s.id, s.dist),
+                format!(
+                    "ticking {}; an angry one, frozen or not, is present",
+                    s.ticking
+                ),
+            );
+            return None;
+        }
+        // Its stared-at flag (index 18) seen set during a provoke: noted once a provoke.
+        if let Some((id, at)) = self.pearls.provoke
+            && w.entities.get(&id).is_some_and(|e| {
+                matches!(
+                    e.metadata.get(&endermen::STARED_INDEX),
+                    Some(MetaValue::Bool(true))
+                )
+            })
+        {
+            self.pearl_note_once(
+                tick,
+                &format!("stared {id} {at}"),
+                format!("provoke: enderman {id} stared-at flag set"),
+                format!("{} server ticks into the stare", server.saturating_sub(at)),
+            );
+        }
         if let Some((id, at)) = self.pearls.provoke {
             let from = self.pearls.provoke_from.unwrap_or(b.m);
             let seen = w
@@ -1674,6 +1773,9 @@ impl Plan {
     ) -> Option<Task> {
         let dim = w.dimension.as_ref()?.name.clone();
         let (cx, cz) = (feet[0] >> 4, feet[2] >> 4);
+        // Nearest the endermen seen lately when there are any: spawns are where they are.
+        let seen: Vec<[f64; 3]> = self.pearls.sightings.iter().map(|(_, p)| *p).collect();
+        let toward = centroid(&seen);
         let mut cells: Vec<(i32, [i32; 3])> = Vec::new();
         for dx in -2..=2 {
             for dz in -2..=2 {
@@ -1695,7 +1797,11 @@ impl Plan {
                             .and_then(data::generated::shapes::collision)
                             == Some(data::types::Collision::Empty)
                     {
-                        cells.push((d2 + (at[1] - feet[1]).pow(2), at));
+                        let key = match toward {
+                            Some(t) => (at[0] - t.0).pow(2) + (at[2] - t.2).pow(2),
+                            None => d2 + (at[1] - feet[1]).pow(2),
+                        };
+                        cells.push((key, at));
                     }
                 }
             }
@@ -1866,23 +1972,56 @@ impl Plan {
                 if let Some(t) = self.walk_to_forest_floor(w, tick, feet, &r) {
                     return Some(t);
                 }
+                // Toward the endermen seen lately (their centroid), else away from the last burrow.
                 let from = self.pearls.moved_from.last().copied().unwrap_or(feet);
-                let goal = Goal::Away {
-                    pos: (from[0], from[1], from[2]),
-                    range: f64::from(r.burrow_move + 8),
+                let goal = match centroid(&seen) {
+                    Some(c) => Goal::Near {
+                        pos: c,
+                        range: 12.0,
+                    },
+                    None => Goal::Away {
+                        pos: (from[0], from[1], from[2]),
+                        range: f64::from(r.burrow_move + 8),
+                    },
                 };
-                let mut walk = Walk::far_to((from[0], from[1], from[2]), goal, tick);
+                let target = match goal {
+                    Goal::Near { pos, .. } => pos,
+                    _ => (from[0], from[1], from[2]),
+                };
+                let mut walk = Walk::far_to(target, goal, tick);
                 if walk.route_now(w, tick) {
                     self.walks += 1;
                     self.note(
                         tick,
                         "walk on for a burrow site".to_owned(),
-                        format!("away from {from:?}"),
+                        format!("toward {target:?} ({} endermen seen lately)", seen.len()),
                     );
                     return Some(Task::Explore(walk));
                 }
                 return self.explore_walk(w, tick, "no burrow site and no walk away");
             };
+            // A site is taken only with a route to its B (the frontier race 45544744907: every
+            // bot took a site 23 off with no walk to it, three times in 60 ticks, then the next,
+            // and drifted 30 to 90 blocks off the forest).
+            let mut first: Option<Walk> = None;
+            if b.b != feet {
+                let c = (b.b[0], b.b[1], b.b[2]);
+                let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+                if !walk.route_now(w, tick) {
+                    walk = Walk::far_to(c, Goal::Block { pos: c }, tick);
+                    if !walk.route_now(w, tick) {
+                        self.pearls.refused.push(b.b);
+                        self.pearls.site_at = None;
+                        self.note(
+                            tick,
+                            format!("burrow site at {:?} refused: no route", b.b),
+                            format!("from {feet:?}; {} sites refused", self.pearls.refused.len()),
+                        );
+                        return None;
+                    }
+                }
+                first = Some(walk);
+            }
             self.pearls.burrow = Some(b);
             self.pearls.built = false;
             self.pearls.walks = 0;
@@ -1900,6 +2039,16 @@ impl Plan {
                     seen.len()
                 ),
             );
+            if let Some(walk) = first {
+                self.pearls.walks = 1;
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("walk to the burrow at {:?}", b.b),
+                    format!("walk 1 of {}", r.walk_tries),
+                );
+                return Some(Task::Explore(walk));
+            }
         }
         let b = self.pearls.burrow?;
         if !b.inside(feet) {
