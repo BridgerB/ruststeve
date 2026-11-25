@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "pearls_9"
-tag = "race-45615781100"
-asset = "snapshot-pearls_9-45615781100-race-45615781100-lane-6.tar.zst"
-commit = "e2e470772b435a1964a48ff43e71c4ed56af2fef"
-how = "rs-l06-b00 of race 45615781100, resumed from the real pearls_6 snapshot of race 45588764709 lane 0 (itself from the real stuck snapshot of race 45578610032 lane 6 and the real forest snapshot of race 45537545167 lane 0): hunting from its burrows in the main warped forest it picked up its ninth pearl at server tick 39,920 at (494.5, 41.0, -9.0), holding 7 rods, 9 pearls, its shield, an iron and a stone sword and 2 wooden pickaxes. Each lane rolled its own enderman loot (race.yml, 57dcf52). Real (no development mark, no kind)."
+stage = "pearls_12"
+tag = "race-45621953332"
+asset = "snapshot-pearls_12-45621953332-race-45621953332-lane-1.tar.zst"
+commit = "a41455347b94d792f5338f5fa938953e16c3cfba"
+how = "rs-l01-b00 of race 45621953332, resumed from the real pearls_9 snapshot of race 45615781100 lane 6 (itself from the real pearls_6 snapshot of race 45588764709 lane 0, the real stuck snapshot of race 45578610032 lane 6 and the real forest snapshot of race 45537545167 lane 0): hunting from its burrow in the main warped forest it picked up its twelfth ender pearl at server tick 11,360 at (494.7, 44.0, 19.7), holding 7 blaze rods, 12 pearls, its shield, an iron and two stone swords. Each lane rolled its own enderman loot (race.yml, 57dcf52). Real (no development mark, no kind)."
