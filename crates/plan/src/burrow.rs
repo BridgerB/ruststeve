@@ -55,6 +55,21 @@ pub const LAVA_NEAR: i32 = 4;
 /// step).
 pub const DROP_NEAR: i32 = 3;
 pub const DROP_MAX: i32 = 2;
+/// Ground of the basalt deltas a burrow never stands on.
+pub const DELTA_GROUND: &[BlockKind] = &[
+    BlockKind::Basalt,
+    BlockKind::PolishedBasalt,
+    BlockKind::SmoothBasalt,
+    BlockKind::Blackstone,
+    BlockKind::MagmaBlock,
+];
+/// Blocks that hurt an enderman standing by them (and teleport it: a hurt from no one).
+pub const HURTS: &[BlockKind] = &[
+    BlockKind::MagmaBlock,
+    BlockKind::Lava,
+    BlockKind::Fire,
+    BlockKind::SoulFire,
+];
 /// No nether brick seen within this of B (a fortress: wither skeletons, blazes).
 pub const BRICKS_NEAR: i32 = 8;
 
@@ -207,6 +222,20 @@ pub fn refuse(w: &World, mem: &Memory, cells: &mut Cells<'_>, b: &Burrow) -> Opt
     if !cells.standable(cell(b.b)) || !cells.standable(cell(b.m)) {
         return Some("no standing at B or M");
     }
+    // The forest's own ground: no floor of the basalt deltas (magma cubes, ghasts; magma blocks
+    // hurt endermen and teleport them: the frontier race 45544744907's one provoke on delta ground
+    // stared at one that magma was hurting), and nylium under one of B, M, O unless the feet
+    // stand in a warped forest.
+    let floors = [b.b, b.m, b.o].map(|c| kind(w, add(c, 0, -1, 0)));
+    if floors
+        .iter()
+        .any(|k| k.is_some_and(|k| DELTA_GROUND.contains(&k)))
+    {
+        return Some("delta ground");
+    }
+    if !floors.contains(&Some(BlockKind::WarpedNylium)) && w.feet_biome() != Some("warped_forest") {
+        return Some("no forest floor");
+    }
     let s = b.side();
     // O and its five outward neighbours: a floor under O and three clear cells over each.
     if !cells.floor(cell(add(b.o, 0, -1, 0))) {
@@ -254,8 +283,12 @@ pub fn refuse(w: &World, mem: &Memory, cells: &mut Cells<'_>, b: &Burrow) -> Opt
     for dx in -LAVA_NEAR..=LAVA_NEAR {
         for dy in -LAVA_NEAR..=LAVA_NEAR {
             for dz in -LAVA_NEAR..=LAVA_NEAR {
-                if kind(w, add(b.o, dx, dy, dz)) == Some(BlockKind::Lava) {
+                let k = kind(w, add(b.o, dx, dy, dz));
+                if k == Some(BlockKind::Lava) {
                     return Some("lava near O");
+                }
+                if k.is_some_and(|k| HURTS.contains(&k)) && dx.abs() <= 2 && dz.abs() <= 2 {
+                    return Some("magma or fire near O");
                 }
             }
         }
@@ -333,6 +366,21 @@ pub fn site_toward(
     away: i32,
     seen: &[[f64; 3]],
 ) -> (Option<Burrow>, Vec<(&'static str, u32)>) {
+    site_toward_skipping(w, mem, feet, avoid, away, &[], seen)
+}
+
+/// `site_toward`, never a B within 1 of a cell of `skip` (sites refused): P4's closed loop
+/// (seed 23) found the one refused site nearest the feet every search, and the hunt stood
+/// "refused before" from tick 30,000 to the cap.
+pub fn site_toward_skipping(
+    w: &World,
+    mem: &Memory,
+    feet: [i32; 3],
+    avoid: &[[i32; 3]],
+    away: i32,
+    skip: &[[i32; 3]],
+    seen: &[[f64; 3]],
+) -> (Option<Burrow>, Vec<(&'static str, u32)>) {
     let mut cand: Vec<(i32, [i32; 3])> = Vec::new();
     for dx in -SITE_RADIUS..=SITE_RADIUS {
         for dz in -SITE_RADIUS..=SITE_RADIUS {
@@ -344,6 +392,8 @@ pub fn site_toward(
                 let far = avoid.iter().all(|a| {
                     let (ax, az) = (a[0] - c[0], a[2] - c[2]);
                     ax * ax + az * az > away * away
+                }) && skip.iter().all(|a| {
+                    (a[0] - c[0]).abs() > 1 || (a[1] - c[1]).abs() > 1 || (a[2] - c[2]).abs() > 1
                 });
                 if far {
                     cand.push((dx * dx + dy * dy + dz * dz, c));
