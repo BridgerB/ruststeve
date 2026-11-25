@@ -487,11 +487,8 @@ fn an_angry_enderman_far_off_stops_every_provoke() {
     p.step(&w);
     let n = notes(&p);
     assert!(!n.iter().any(|x| x == "provoke enderman 52"), "{n:?}");
-    assert!(
-        n.iter()
-            .any(|x| x.starts_with("no provoke: enderman 53 angry")),
-        "{n:?}"
-    );
+    // Held in B (P4: an angry frozen one meant wait in M; the real server hits M).
+    assert_eq!(p.pearls.row, "hold", "{n:?}");
 }
 
 /// P4's closed loop: angry with no burrow built, a pocket where the bot stands, never for good.
@@ -526,5 +523,25 @@ fn an_angry_enderman_before_the_burrow_gets_a_capped_pocket() {
         p.pearls.burrow.is_some() || notes(&p).iter().any(|x| x.starts_with("no burrow site")),
         "{:?}",
         notes(&p)
+    );
+}
+
+/// The orchestrator's rule: never a burrow on the basalt deltas' ground.
+#[test]
+fn delta_ground_is_no_burrow_site() {
+    let mut w = floor_world(B);
+    set(&mut w, [B[0], 63, B[2]], BlockKind::Basalt);
+    let b = Burrow::at(B, DIR);
+    let mut cells = plan::path::Cells::new(&w);
+    assert_eq!(
+        burrow::refuse(&w, &w.memory, &mut cells, &b),
+        Some("delta ground")
+    );
+    let mut w = floor_world(B);
+    set(&mut w, [B[0] + 3, 63, B[2] + 1], BlockKind::MagmaBlock);
+    let mut cells = plan::path::Cells::new(&w);
+    assert_eq!(
+        burrow::refuse(&w, &w.memory, &mut cells, &b),
+        Some("magma or fire near O")
     );
 }
