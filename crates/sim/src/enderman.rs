@@ -905,6 +905,7 @@ impl Sim {
                             x: at[0],
                             y: at[1],
                             z: at[2],
+                            velocity: [0.0; 3],
                         },
                     )?);
                     total += 1;

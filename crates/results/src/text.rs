@@ -198,7 +198,13 @@ fn key_of(f: &Fact) -> Key {
         | Fact::EndermanKilled { .. }
         | Fact::PearlDropped { .. }
         | Fact::PearlPicked { .. }
-        | Fact::BlockTaken { .. } => Key::Other(f.line()),
+        | Fact::BlockTaken { .. }
+        | Fact::EyeThrown { .. }
+        | Fact::EyeFlight { .. }
+        | Fact::EyeEnded { .. }
+        | Fact::EyePicked { .. }
+        | Fact::FrameSeen { .. }
+        | Fact::SilverfishWoken { .. } => Key::Other(f.line()),
     }
 }
 

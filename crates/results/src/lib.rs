@@ -11,6 +11,7 @@ pub mod config;
 pub mod diagnose;
 pub mod observe;
 pub mod parity;
+pub mod region;
 pub mod snapshot;
 pub mod story;
 pub mod text;
@@ -626,7 +627,7 @@ impl SensesFile {
                 })
                 .collect();
             out.push_str(&format!(
-                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{}{} | {} ({}) | {}\n",
+                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{}{}{} | {} ({}) | {}\n",
                 r.at,
                 r.standing(),
                 r.health
@@ -648,6 +649,7 @@ impl SensesFile {
                 )),
                 r.travel(),
                 r.hunt(),
+                r.eyes(),
                 r.task,
                 r.why,
                 near.join(", ")
@@ -999,6 +1001,8 @@ mod text_tests {
             angry_ticking: None,
             angry_frozen: None,
             sword_uses: None,
+            eyes: None,
+            frames: None,
         }
     }
 
