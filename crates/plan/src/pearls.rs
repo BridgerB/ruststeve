@@ -213,6 +213,8 @@ const ANGRY_PRESENT: f64 = 128.0;
 /// target: such a hurt teleports it (the 26.1.2 jar), and the frontier race 45544744907's one
 /// provoke stared 80 server ticks at one that magma was hurting and teleporting.
 const HURT_SKIP: u64 = 100;
+/// Ticks a site moved from is avoided by the site search.
+const MOVED_KEPT: u64 = 6000;
 /// Ticks a sighting is kept for the mouth's side.
 const SIGHTINGS_KEPT: u64 = 600;
 /// Ticks one step out of B takes at most, counted as one step.
@@ -252,6 +254,9 @@ pub struct PearlState {
     pub refused: Vec<[i32; 3]>,
     #[serde(default)]
     pub moved_from: Vec<[i32; 3]>,
+    /// When each move was made (`moved_from`'s ticks).
+    #[serde(default)]
+    pub moved_at: Vec<u64>,
     #[serde(default)]
     pub site_at: Option<u64>,
     #[serde(default)]
@@ -1650,6 +1655,12 @@ impl Plan {
             !e.dead
                 && e.kind != EntityKind::Enderman
                 && defend::hostile(e.kind)
+                // Not a neutral one (a zombified piglin held a bot in B with nothing to fear,
+                // race 45560431011): the survival rules' neutral kinds.
+                && !self
+                    .table
+                    .as_ref()
+                    .is_some_and(|t| t.survival.neutral.contains(&e.kind))
                 && dist(e.pos, o_at) <= r.hostile_near
         }) {
             let (id, kind) = (*id, e.kind);
@@ -2082,6 +2093,7 @@ impl Plan {
         self.pearls.reclaim = true;
         self.pearls.reclaimed = 0;
         self.pearls.moved_from.push(b.b);
+        self.pearls.moved_at.push(tick);
         self.pearls.burrow = None;
         self.pearls.built = false;
         self.pearls.since = None;
@@ -2717,11 +2729,21 @@ impl Plan {
             // A refused site is never tried again (within 1); a moved-from one is left by
             // `burrow_move` (a new place for spawns). Searched from the feet where they are.
             let seen: Vec<[f64; 3]> = self.pearls.sightings.iter().map(|(_, p)| *p).collect();
+            // A site moved from may be taken again after `MOVED_KEPT` (the frontier's one good
+            // site made the kills; every move from it drifted to no site, race 45560431011).
+            let recent_moves: Vec<[i32; 3]> = self
+                .pearls
+                .moved_from
+                .iter()
+                .zip(self.pearls.moved_at.iter().chain(std::iter::repeat(&0)))
+                .filter(|(_, at)| tick < *at + MOVED_KEPT)
+                .map(|(m, _)| *m)
+                .collect();
             let (found, why) = burrow::site_toward_skipping(
                 w,
                 &w.memory,
                 feet,
-                &self.pearls.moved_from,
+                &recent_moves,
                 r.burrow_move,
                 &self.pearls.refused,
                 &seen,
