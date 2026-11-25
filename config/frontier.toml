@@ -3,6 +3,6 @@
 # a commit each time a bot first passes a stage.
 stage = "pearls_6"
 tag = "race-45588764709"
-asset = "snapshot-pearls_6-45588764709-race-45588764709-lane-1.tar.zst"
+asset = "snapshot-pearls_6-45588764709-race-45588764709-lane-0.tar.zst"
 commit = "64cd7d5719e3ab32931fbc9b15998679ea1590ee"
-how = "rs-l01-b00 of race 45588764709, resumed from the real stuck snapshot of race 45578610032 lane 6 (5 pearls; itself from the real forest snapshot of race 45537545167 lane 0): from its burrows in the main warped forest it provoked and killed endermen from the burrow and picked up its sixth pearl, at server tick 22,300 at (560.0, 36.0, -60.5), holding 7 rods, 6 pearls, its shield and the base's swords and wooden pickaxes. Real (no development mark)."
+how = "A sideways move within the stage (two stage snapshots of pearls_6): rs-l00-b00 of race 45588764709 (resumed from the real stuck snapshot of race 45578610032 lane 6, itself from the real forest snapshot of race 45537545167 lane 0) picked up its sixth pearl at server tick 40,920 at (513.1, 45.0, 26.5) and was at 19.8 health 7,000 ticks later (it cannot heal, so at least that at the snapshot), against lane 1's 9.6 (two piglin blows during a restock). 7 rods, 6 pearls. Real (no development mark, no kind)."
