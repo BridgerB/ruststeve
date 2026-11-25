@@ -375,7 +375,8 @@ fn hungry_on_the_surface_with_meat_held_eats_first() {
 fn lava_beside_the_portal_is_sealed_before_the_walk_in() {
     let mut w = nether();
     kit(&mut w);
-    w.inventory.slots.insert(39, (ItemKind::Netherrack, 64));
+    // Netherrack held (hotbar 0): the test world answers no swap.
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
     // A lit portal 3 east, lava in front of it (south), as at the entry portal's ledge.
     for y in 64..=65 {
         set(&mut w, (11, y, 8), BlockKind::NetherPortal);
@@ -408,7 +409,8 @@ fn the_entry_portals_south_face_is_sealed_round_its_standing_cell() {
     // dry standing cell (11, 65, 9), lava at (10, 64..65, 9), (12, 64, 9), (13, 64..65, 9).
     let mut w = nether();
     kit(&mut w);
-    w.inventory.slots.insert(39, (ItemKind::Netherrack, 64));
+    // Netherrack held (hotbar 0): the test world answers no swap.
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
     for x in 11..=12 {
         set(&mut w, (x, 63, 8), BlockKind::Obsidian);
         for y in 64..=66 {
@@ -519,7 +521,8 @@ fn the_north_face_without_a_floor_is_never_the_front() {
 fn from_the_north_side_the_portal_is_not_walked_into() {
     let mut w = nether();
     kit(&mut w);
-    w.inventory.slots.insert(39, (ItemKind::Netherrack, 64));
+    // Netherrack held (hotbar 0): the test world answers no swap.
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
     entry_portal(&mut w);
     w.body = w.body.map(|b| physics::Body {
         pos: [11.5, 64.0, 2.5],
