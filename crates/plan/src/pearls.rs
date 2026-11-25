@@ -110,6 +110,8 @@ pub const BURROW_BLOCKS: &[ItemKind] = &[
 const BUILD_EVERY: u64 = 10;
 /// A step to a cell's middle is done this near it, on the plane.
 const STEP_DONE: f64 = 0.2;
+/// Ticks one step out of B takes at most, counted as one step.
+const STEP_OUT_TICKS: u64 = 40;
 /// Ticks between two notes of one standing row (a hold, a wait).
 const NOTE_EVERY: u64 = 600;
 /// An enderman's torso over its feet: the strike's aim (the plan's section 3: about 30 degrees off
@@ -1013,6 +1015,11 @@ impl Plan {
     /// or any after a kill or a pickup since the last. Counted, and noted when held back.
     fn step_out_ok(&mut self, tick: u64, r: &PearlRules) -> bool {
         let last = self.pearls.last_step_out;
+        // A step out begun is walked to its end (a step is some 15 ticks sneaking): the closed
+        // loop held the bot in B for good when every tick of one step counted as another.
+        if last.is_some_and(|l| tick < l + STEP_OUT_TICKS) {
+            return true;
+        }
         let event = self
             .pearls
             .last_kill

@@ -110,9 +110,11 @@ fn a_hunting_bot_builds_its_burrow_by_its_feet() {
 
 #[test]
 fn a_calm_enderman_in_line_is_provoked_from_the_mouth() {
-    // The site at the feet faces east (the first side tried on open floor): one 22 east.
+    // The site at the feet faces east (the first side tried on open floor): one 16 east (the
+    // model's endermen stroll; one at 24 had wandered out of the ticking chunks by the build's
+    // end).
     let r = forest(1600, |sim| {
-        let id = sim.summon_enderman([24.5, f64::from(FLOOR + 1), 0.5]);
+        let id = sim.summon_enderman([18.5, f64::from(FLOOR + 1), 0.5]);
         if let Some(m) = sim.survival.life.mobs.get_mut(&id) {
             m.loot = false;
         }
