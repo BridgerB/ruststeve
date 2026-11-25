@@ -498,7 +498,9 @@ provoke_max = 36.0
 # With none in sight from M, a provoke from O at one this far or farther: the step back to B is two
 # cells, some 10 ticks walking; an angry enderman walks within 16 (about 0.3 a tick) and teleports
 # from past 16 after 15 goal ticks (the 26.1.2 jar), so 12 leaves it 30 ticks or more out.
-provoke_out_min = 12.0
+# 20, not 12 (the orchestrator, after race 45615781100 lane 3 was hit at M by one provoked 24 off
+# from the look-out): from O the run home is two cells.
+provoke_out_min = 20.0
 # From O the view is wide and the step back to B is two cells, but past 36 a stare angered about 2
 # in 10 (race 45578610032) and none in race 45602491038 lane 6 (60 to 63, 3 tries): capped at 36
 # everywhere (the orchestrator; clojurecraft: past 36 its stares angered none).
@@ -595,6 +597,9 @@ look_out_reach = 4
 # 2026-11-24 that known geography may steer to win. The frontier stands in a thin strip by the deltas.
 hunt_point = [490, 5]
 look_out_far_min = 24.0
+# From the near look-out (look_out_reach off O, some 6 cells from B) no target nearer than this:
+# race 45615781100 lane 3 provoked one 23.8 off from 4 out and was hit at M 40 ticks later.
+look_out_near_min = 30.0
 look_out_far_max = 36.0
 cube_clear = 8.0
 # Piglins out of the burrow (restocking, walking) seal a pocket too: race 45588764709 lane 1, in
