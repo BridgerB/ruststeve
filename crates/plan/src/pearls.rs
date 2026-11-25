@@ -792,6 +792,9 @@ impl Plan {
         if dead {
             self.pearls.kills += 1;
             self.pearls.last_kill = Some(tick);
+            // The base tries again at once after a kill (P5's pause), and so does the hunt's guard.
+            self.base_resume();
+            self.pearls.base_skip_until = None;
             self.pearls.moves_no_kill = 0;
             self.pearls.fight = None;
             let held = craft::count(w, ItemKind::EnderPearl).max(1);
