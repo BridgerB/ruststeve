@@ -8,6 +8,9 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// >>> base (P5, issue 18d)
+pub mod base;
+// <<< base
 pub mod build;
 pub mod cast;
 pub mod cover;
@@ -320,6 +323,9 @@ pub enum Aim {
     /// Every stage built so far, in order (the marathon's aim): a portal cast and entered, then a
     /// fortress reached. Each issue that adds a stage extends it.
     Race,
+    // >>> base (P5, issue 18d): a development aim, the forest base where the bot stands.
+    Base,
+    // <<< base
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -346,6 +352,7 @@ impl Aim {
             None if s == "fortress" => Some(Aim::Fortress),
             None if s == "nether" => Some(Aim::Nether),
             None if s == "race" => Some(Aim::Race),
+            None if s == "base" => Some(Aim::Base),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -375,6 +382,7 @@ impl Aim {
             Aim::Fortress => "fortress".to_owned(),
             Aim::Nether => "nether".to_owned(),
             Aim::Race => "race".to_owned(),
+            Aim::Base => "base".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -400,6 +408,7 @@ impl Aim {
             | Aim::Fortress
             | Aim::Nether
             | Aim::Race
+            | Aim::Base
             | Aim::Hold => true,
         }
     }
@@ -788,6 +797,10 @@ pub struct Plan {
     #[serde(default)]
     pub headed: Option<heading::Heading>,
     // <<< heading
+    // >>> base (P5, issue 18d): the forest base's steps.
+    #[serde(default)]
+    pub base: base::BaseState,
+    // <<< base
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -901,6 +914,9 @@ impl Plan {
             // >>> heading (E2)
             headed: None,
             // <<< heading
+            // >>> base
+            base: base::BaseState::default(),
+            // <<< base
             acts: Vec::new(),
         }
     }
@@ -1464,6 +1480,7 @@ impl Plan {
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Fortress => self.fortress_task(w, tick),
                 Aim::Nether | Aim::Race => self.nether_task(w, origin, tick),
+                Aim::Base => self.base_aim(w, tick),
                 Aim::Hold => Task::Idle,
             };
             self.begin(chosen);
@@ -3203,6 +3220,7 @@ impl Plan {
             | Aim::Fortress
             | Aim::Nether
             | Aim::Race
+            | Aim::Base
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -3232,6 +3250,7 @@ impl Plan {
                 | Aim::Fortress
                 | Aim::Nether
                 | Aim::Race
+                | Aim::Base
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {
