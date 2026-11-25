@@ -369,6 +369,8 @@ const HURT_SKIP: u64 = 100;
 /// Blocks round the feet the site search looks for places with endermen seen, and how many.
 const SUPPLY_REACH: i32 = 64;
 const ANCHORS: usize = 3;
+/// Blocks within which an angry enderman or a hostile holds the reclaim's digs.
+const RECLAIM_CLEAR: f64 = 16.0;
 /// Ticks a site moved from is avoided by the site search.
 /// 24,000, not 6,000: a move's restock and walk took ~6,000 ticks and every bot then built
 /// again within 20 of the site it left (race 45602491038 lanes 1, 3: 10 and 18 off); new
@@ -509,6 +511,9 @@ pub struct PearlState {
     /// 45602491038 reclaimed 0 blocks at every move and restocked ~4,000 ticks instead).
     #[serde(default)]
     pub old_shell: Vec<[i32; 3]>,
+    /// The floors of the old B, M and O: never dug by the reclaim (the orchestrator).
+    #[serde(default)]
+    pub old_floors: Vec<[i32; 3]>,
     /// Where the last walk on for a site began, and how many in a row left the feet there.
     #[serde(default)]
     pub walk_on: Option<([i32; 3], u32)>,
@@ -2370,6 +2375,11 @@ impl Plan {
         self.pearls.moved_from.push(b.b);
         self.pearls.moved_at.push(tick);
         self.pearls.old_shell = b.shell().into_iter().filter(|c| c[1] >= b.b[1]).collect();
+        self.pearls.old_floors = vec![
+            [b.b[0], b.b[1] - 1, b.b[2]],
+            [b.m[0], b.m[1] - 1, b.m[2]],
+            [b.o[0], b.o[1] - 1, b.o[2]],
+        ];
         self.pearls.burrow = None;
         self.pearls.built = false;
         self.pearls.since = None;
@@ -2676,7 +2686,18 @@ impl Plan {
     fn reclaim_step(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
         let body = w.body?;
         let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
-        let under = [feet[0], feet[1] - 1, feet[2]];
+        // No dig with an angry enderman or another hostile within `RECLAIM_CLEAR` (the
+        // orchestrator): the reclaim waits, its cells kept, and the rows answer the threat.
+        let threat = angry_endermen(w).iter().any(|s| s.dist <= RECLAIM_CLEAR)
+            || w.entities.values().any(|e| {
+                !e.dead
+                    && e.kind != EntityKind::Enderman
+                    && crate::defend::hostile(e.kind)
+                    && dist(e.pos, body.pos) <= RECLAIM_CLEAR
+            });
+        if threat {
+            return None;
+        }
         let full = |c: [i32; 3]| {
             w.block_at(world::BlockPos::new(c[0], c[1], c[2]))
                 .and_then(data::generated::shapes::collision)
@@ -2688,7 +2709,12 @@ impl Plan {
             .iter()
             .chain(self.pearls.old_shell.iter())
             .copied()
-            .filter(|c| *c != under && full(*c))
+            // Never the column the bot stands in (the block under or over it).
+            .filter(|c| {
+                (c[0], c[2]) != (feet[0], feet[2])
+                    && !self.pearls.old_floors.contains(c)
+                    && full(*c)
+            })
             .map(|c| {
                 (
                     dist(
