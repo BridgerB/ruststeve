@@ -184,6 +184,11 @@ const LEDGE_TRIES: u32 = 6;
 const CAP_TRIES: u32 = 24;
 /// Eye to a block's middle within which the old shell is dug back from where the bot stands.
 const RECLAIM_REACH: f64 = 4.4;
+/// The look-out: after this many ticks at O with none in sight, up to this far from O, for at
+/// most this long.
+const LOOK_OUT_AFTER: u64 = 600;
+const LOOK_OUT: i32 = 4;
+const LOOK_OUT_TICKS: u64 = 200;
 /// Ticks of one yaw sweep at O.
 const SWEEP_TICKS: u64 = 400;
 /// Blocks within which the feet after a walk on count as not moved.
@@ -334,6 +339,16 @@ pub struct PearlState {
     /// A pillar out of a hole in hand: the feet cell it began from.
     #[serde(default)]
     pub pillar: Option<[i32; 3]>,
+    /// The look-out: the last tick a provoke candidate was in sight, the spot and when it was
+    /// taken, and the counts.
+    #[serde(default)]
+    pub last_cand: Option<u64>,
+    #[serde(default)]
+    pub look_out: Option<([i32; 3], u64)>,
+    #[serde(default)]
+    pub look_outs: u32,
+    #[serde(default)]
+    pub look_out_provokes: u32,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -802,14 +817,17 @@ impl Plan {
         // Out of the burrow but by its line (back from a collect): home by steps.
         if let Some(b) = self.pearls.burrow.filter(|_| self.pearls.built)
             && !b.inside(feet)
-            && flat(body.pos, Burrow::centre(b.b)) <= r.collect_reach + 1.0
+            && flat(body.pos, Burrow::centre(b.b)) <= f64::from(LOOK_OUT) + 3.0
             && matches!(self.task, Task::Idle)
             && (!angry.is_empty() || (self.pearls.provoke_from.is_none() && feet != b.o))
         {
-            // An angry one with the bot out (a provoke from O): straight back to B.
+            // An angry one with the bot out (a provoke from O or the look-out): back to B, by
+            // O first from off the burrow's line (a straight line from a look-out hits the shell).
             if !angry.is_empty() {
                 self.pearls.provoke_from = None;
-                return Some(step_to(body.pos, b.b).0);
+                self.pearls.look_out = None;
+                let on_line = feet == b.o || feet == b.m;
+                return Some(step_to(body.pos, if on_line { b.b } else { b.o }).0);
             }
             let next = if feet == b.o { b.m } else { b.o };
             let next = if flat(body.pos, Burrow::centre(b.m)) < 0.8 {
@@ -875,7 +893,9 @@ impl Plan {
         }
         let provoking_out = self.pearls.provoke_from.is_some();
         if self.pearls.burrow.is_some_and(|b| {
-            b.inside(feet) || (self.pearls.built && feet == b.o) || (provoking_out && feet == b.o)
+            b.inside(feet)
+                || (self.pearls.built && feet == b.o)
+                || (self.pearls.built && provoking_out)
         }) && let Some(c) = self.row_standing(w, tick, &r, feet)
         {
             return Some(c);
@@ -1789,7 +1809,13 @@ impl Plan {
                 .find(|s| !skipped(s))
                 .map(|s| (s, b.o))
         };
-        let (cand, from) = from_m.or_else(from_o)?;
+        let found = from_m.or_else(from_o);
+        if found.is_some() {
+            self.pearls.last_cand = Some(tick);
+        }
+        let Some((cand, from)) = found else {
+            return self.look_out(w, tick, r, b, feet);
+        };
         self.row(tick, "provoke", || {
             format!("enderman {} calm and ticking {:.1} off", cand.id, cand.dist)
         });
@@ -1834,6 +1860,140 @@ impl Plan {
     fn provoke_hold(&mut self, _tick: u64) {
         self.pearls.provoke = None;
         self.pearls.provoke_from = None;
+    }
+
+    /// The look-out (the orchestrator): from O, with no calm enderman in sight for
+    /// `LOOK_OUT_AFTER` ticks while endermen were seen 25 to 60 off, a step out up to
+    /// `LOOK_OUT` from O toward them, on O's own floor with no drop, to look; a provoke from there
+    /// at one 12 to 36 off in line, then straight back to B (the hunt's home steps). Over after
+    /// `LOOK_OUT_TICKS` there with none in sight.
+    fn look_out(
+        &mut self,
+        w: &World,
+        tick: u64,
+        r: &PearlRules,
+        b: Burrow,
+        feet: [i32; 3],
+    ) -> Option<Controls> {
+        let pos = w.body.map_or([0.0; 3], |x| x.pos);
+        let o = Burrow::centre(b.o);
+        let started = self.pearls.last_cand.or(self.pearls.since).unwrap_or(tick);
+        if tick.saturating_sub(started) < LOOK_OUT_AFTER
+            || (feet != b.o && self.pearls.look_out.is_none())
+        {
+            return None;
+        }
+        let far: Vec<[f64; 3]> = self
+            .pearls
+            .sightings
+            .iter()
+            .map(|(_, p)| *p)
+            .filter(|p| (25.0..=60.0).contains(&flat(*p, o)))
+            .collect();
+        let c = centroid(&far)?;
+        let spot = match self.pearls.look_out {
+            Some((l, _)) => l,
+            None => {
+                let (dx, dz) = (f64::from(c.0) + 0.5 - o[0], f64::from(c.2) + 0.5 - o[2]);
+                let len = (dx * dx + dz * dz).sqrt().max(1e-6);
+                let mut cells = path::Cells::new(w);
+                let shell = b.shell();
+                #[allow(clippy::cast_possible_truncation)]
+                let pick = (1..=LOOK_OUT).rev().find_map(|k| {
+                    let l = [
+                        b.o[0] + (dx / len * f64::from(k)).round() as i32,
+                        b.o[1],
+                        b.o[2] + (dz / len * f64::from(k)).round() as i32,
+                    ];
+                    (cells.standable((l[0], l[1], l[2]))
+                        && !shell.contains(&l)
+                        && !b.inside(l)
+                        && !ledge(w, (l[0], l[1], l[2]), 1))
+                    .then_some(l)
+                });
+                let Some(l) = pick else {
+                    self.pearls.last_cand = Some(tick);
+                    return None;
+                };
+                self.pearls.look_out = Some((l, tick));
+                self.pearls.provoke_from = Some(l);
+                self.pearls.look_outs += 1;
+                self.note(
+                    tick,
+                    format!("look-out at {l:?}"),
+                    format!(
+                        "none in sight {} ticks; {} endermen seen 25 to 60 off; look-out {} in the run",
+                        tick.saturating_sub(started),
+                        far.len(),
+                        self.pearls.look_outs
+                    ),
+                );
+                l
+            }
+        };
+        if feet != spot {
+            let since = self.pearls.look_out.map_or(tick, |x| x.1);
+            if tick.saturating_sub(since) > LOOK_OUT_TICKS {
+                self.end_look_out(tick, "no way there");
+                return Some(step_to(pos, b.o).0);
+            }
+            return Some(step_to(pos, spot).0);
+        }
+        let out = PearlRules {
+            provoke_max: r.provoke_max,
+            ..r.clone()
+        };
+        let cand = provoke_candidates_from(w, eye_in(spot), r.provoke_out_min, &out)
+            .into_iter()
+            .find(|s| {
+                !self
+                    .pearls
+                    .tries
+                    .iter()
+                    .any(|(i, _, until)| *i == s.id && tick < *until)
+            });
+        let Some(cand) = cand else {
+            let since = self.pearls.look_out.map_or(tick, |x| x.1);
+            if tick.saturating_sub(since) > LOOK_OUT_TICKS {
+                self.end_look_out(tick, "none in sight from it");
+                return Some(step_to(pos, b.o).0);
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let phase = (tick % SWEEP_TICKS) as f64 / SWEEP_TICKS as f64 * std::f64::consts::TAU;
+            return Some(look(
+                yaw_to(o, [f64::from(c.0), o[1], f64::from(c.2)]) + 60.0 * phase.sin(),
+                0.0,
+            ));
+        };
+        let server = w.session.server_ticks;
+        self.pearls.provoke = Some((cand.id, server));
+        self.pearls.provoke_from = Some(spot);
+        self.pearls.look_out = None;
+        self.pearls.provokes += 1;
+        self.pearls.look_out_provokes += 1;
+        if !self.pearls.provoked.contains(&cand.id) {
+            self.pearls.provoked.push(cand.id);
+        }
+        self.note(
+            tick,
+            format!("provoke enderman {} from the look-out", cand.id),
+            format!(
+                "at {spot:?}, {:.1} off; {} look-out provokes of {} look-outs",
+                cand.dist, self.pearls.look_out_provokes, self.pearls.look_outs
+            ),
+        );
+        let eye = [pos[0], pos[1] + physics::EYE_HEIGHT, pos[2]];
+        let (yaw, pitch) = look_at(eye, eye_of(cand.pos));
+        self.pearls.provoking = u32::try_from(cand.id).ok();
+        Some(look(yaw, pitch))
+    }
+
+    /// The look-out given up: back to O, the wait's clock restarted.
+    fn end_look_out(&mut self, tick: u64, why: &str) {
+        self.pearls.look_out = None;
+        self.pearls.provoke_from = None;
+        self.pearls.last_cand = Some(tick);
+        self.note(tick, "look-out over".to_owned(), why.to_owned());
     }
 
     /// One more provoke try on `id`; past `provoke_tries` it is skipped `provoke_skip_ticks`.
