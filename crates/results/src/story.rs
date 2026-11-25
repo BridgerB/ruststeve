@@ -452,6 +452,11 @@ mod tests {
             enderman_frozen: None,
             pickaxe_uses: None,
             filler: None,
+            pearls: None,
+            kills: None,
+            angry_ticking: None,
+            angry_frozen: None,
+            sword_uses: None,
         }
     }
 

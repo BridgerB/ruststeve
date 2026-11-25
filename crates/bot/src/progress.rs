@@ -31,6 +31,9 @@ pub enum Gain {
     NewPlace,
     /// A feet biome not stood in before, or a warped forest known (issue 17b).
     Biome,
+    /// An enderman killed by the bot or a pearl picked up (issue 18b): a hunt that kills is
+    /// going on even when a pearl lost and found again is no more than the most held.
+    Hunt,
 }
 
 /// The run's progress so far.
@@ -76,6 +79,15 @@ impl Progress {
                 observe::Fact::ForestSeen { .. } | observe::Fact::SoulValleySeen { .. } => {
                     gain = gain.or(Some(Gain::Biome))
                 }
+                observe::Fact::EndermanKilled { by_bot: true, .. }
+                | observe::Fact::PearlPicked { .. } => gain = gain.or(Some(Gain::Hunt)),
+                // Another's kill, a blow, anger, a drop or a taken block is not progress by
+                // itself: a hunt that never kills is stuck.
+                observe::Fact::EndermanKilled { by_bot: false, .. }
+                | observe::Fact::EndermanAngry { .. }
+                | observe::Fact::EndermanHit { .. }
+                | observe::Fact::PearlDropped { .. }
+                | observe::Fact::BlockTaken { .. } => {}
                 observe::Fact::Item { item, to, .. } => {
                     let most = self.most.get(item).copied();
                     if most.is_none() && *to > 0 {
@@ -300,7 +312,48 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(race_items(&text).get("blaze_rod"), Some(&7));
+        assert_eq!(race_items(&text).get("ender_pearl"), Some(&12));
         assert!(race_items("[race]\ncap_ticks = 1").is_empty());
+    }
+
+    /// Issue 18b: the bot's kill and a pearl picked up are progress; another's kill, anger and a
+    /// blow are not; the twelfth pearl counts as a goal item (config/race.toml).
+    #[test]
+    fn a_kill_or_a_pearl_picked_is_progress() {
+        let fact = |at, fact| observe::Stamped { at, fact };
+        let mut p = Progress::new(BTreeMap::from([("ender_pearl".to_owned(), 12)]));
+        p.see(100, &[], HERE);
+        let quiet = [
+            observe::Fact::EndermanAngry {
+                id: 3,
+                d: 12.0,
+                ticking: true,
+            },
+            observe::Fact::EndermanHit {
+                id: 3,
+                before: 40.0,
+                after: 34.0,
+            },
+            observe::Fact::EndermanKilled {
+                id: 4,
+                by_bot: false,
+            },
+        ];
+        for (i, f) in quiet.into_iter().enumerate() {
+            assert_eq!(p.see(101 + i as u64, &[fact(101, f)], HERE), None);
+        }
+        let kill = observe::Fact::EndermanKilled {
+            id: 3,
+            by_bot: true,
+        };
+        assert_eq!(p.see(110, &[fact(110, kill)], HERE), Some(Gain::Hunt));
+        let picked = observe::Fact::PearlPicked { id: 9, amount: 1 };
+        assert_eq!(p.see(120, &[fact(120, picked)], HERE), Some(Gain::Hunt));
+        p.see(130, &[item(130, "ender_pearl", 0, 1)], HERE);
+        assert_eq!(
+            p.see(140, &[item(140, "ender_pearl", 1, 2)], HERE),
+            Some(Gain::GoalItem)
+        );
     }
 
     /// Issue 17b: a feet biome not stood in before is progress, the same one again is not, and

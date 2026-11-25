@@ -221,6 +221,7 @@ fn simrace(a: &Args) -> Result<bool, String> {
             case: Some(file),
             recording: None,
             aim: None,
+            pearls: Some(c.pearls_gained()),
         });
     }
     rows.sort_by(|x, y| x.bot.cmp(&y.bot));

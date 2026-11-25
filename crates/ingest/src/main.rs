@@ -403,6 +403,7 @@ mod tests {
                     case: Some(f),
                     recording: None,
                     aim: None,
+                    pearls: None,
                 }
             })
             .collect();
