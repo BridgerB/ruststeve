@@ -58,6 +58,8 @@ pub struct PearlRules {
     pub burrow_idle_after_kill: u64,
     pub repick_below: i32,
     pub repick_max: u32,
+    pub pocket_reserve: i32,
+    pub reserve_hold_ticks: u64,
     pub moves_without_kill: u32,
     pub burrow_move: i32,
     pub site_every: u64,
@@ -111,6 +113,8 @@ impl Default for PearlRules {
             burrow_idle_after_kill: 4800,
             repick_below: 30,
             repick_max: 4,
+            pocket_reserve: 20,
+            reserve_hold_ticks: 2400,
             moves_without_kill: 1000,
             burrow_move: 24,
             site_every: 100,
@@ -231,7 +235,7 @@ pub fn delta_distance(w: &World, c: [i32; 3], r: i32) -> Option<i32> {
 /// Places to search for a site from besides the feet: warped nylium seen within `SUPPLY_REACH`
 /// (one a chunk column) with the most endermen seen within 40, at least 16 from the feet, the
 /// best `ANCHORS`.
-fn supply_anchors(
+pub fn supply_anchors(
     w: &World,
     seen: &[[f64; 3]],
     feet: [i32; 3],
@@ -254,6 +258,11 @@ fn supply_anchors(
                     data::BlockKind::WarpedNylium,
                 )
                 .unwrap_or_default();
+            // Warped forest only: a chunk whose floor is mostly nylium (an edge chunk's few
+            // nylium cells led race 45609209398 lane 1 into the nether wastes).
+            if cells.len() < FOREST_NYLIUM {
+                continue;
+            }
             let Some(c) = cells.iter().min_by_key(|c| (c.1 - feet[1]).abs()) else {
                 continue;
             };
@@ -373,6 +382,11 @@ const HURT_SKIP: u64 = 100;
 /// Blocks round the feet the site search looks for places with endermen seen, and how many.
 const SUPPLY_REACH: i32 = 64;
 const ANCHORS: usize = 3;
+/// Nylium cells seen in a chunk for it to be the forest's (a forest chunk's floor is 256 cells,
+/// most of them nylium; a wastes edge chunk has a few patches).
+pub const FOREST_NYLIUM: usize = 96;
+/// Blocks a restock trip goes under a pocket's filler.
+const RESERVE_TRIP: f64 = 8.0;
 /// Blocks within which an angry enderman or a hostile holds the reclaim's digs.
 const RECLAIM_CLEAR: f64 = 16.0;
 /// Ticks a site moved from is avoided by the site search: 6,000. 24,000 (f4b65fd) cost every move
@@ -520,6 +534,9 @@ pub struct PearlState {
     /// Times the base was opened again for wooden pickaxes.
     #[serde(default)]
     pub repicks: u32,
+    /// When the bot began holding for a pocket's filler before a walk.
+    #[serde(default)]
+    pub reserve_since: Option<u64>,
     /// Where the last walk on for a site began, and how many in a row left the feet there.
     #[serde(default)]
     pub walk_on: Option<([i32; 3], u32)>,
@@ -2848,9 +2865,20 @@ impl Plan {
                 return Some(Task::Dig(dig));
             }
         }
+        // Under a pocket's filler the trip stays short (the orchestrator: restock where it
+        // stands first; lane 1's trip in 45609209398 was in the wastes).
+        let reserve_low = filler < self.pearl_rules().pocket_reserve;
+        let near = |c: &path::Cell| {
+            w.body.is_none_or(|b| {
+                !reserve_low
+                    || ((f64::from(c.0) + 0.5 - b.pos[0]).powi(2)
+                        + (f64::from(c.2) + 0.5 - b.pos[2]).powi(2))
+                        <= RESERVE_TRIP * RESERVE_TRIP
+            })
+        };
         let cands: Vec<path::Cell> = crate::exposed_near(w, &kinds)
             .into_iter()
-            .filter(|c| c.1 >= floor_y - 1 && !self.refused_now(*c, tick))
+            .filter(|c| c.1 >= floor_y - 1 && !self.refused_now(*c, tick) && near(c))
             .take(3)
             .collect();
         for c in cands {
@@ -3133,6 +3161,29 @@ impl Plan {
             && let Some(t) = self.unpocket(w, tick, feet)
         {
             return Some(t);
+        }
+        // A pocket's worth of filler before any walk off (a move, new ground, a site): race
+        // 45609209398 lane 1 walked into the wastes with 15 blocks, ran out mid-pocket and took
+        // two piglin hits. Held where it stands (the restock above digs there) up to
+        // `reserve_hold_ticks`, then on with what is held.
+        if self.pearls.burrow.is_none() && filler < r.pocket_reserve {
+            let since = *self.pearls.reserve_since.get_or_insert(tick);
+            if tick.saturating_sub(since) < r.reserve_hold_ticks {
+                self.pearl_note(
+                    tick,
+                    "reserve",
+                    "no walk: under a pocket's filler".to_owned(),
+                    format!(
+                        "{filler} burrow blocks held, {} wanted before a walk; held {} of {} ticks",
+                        r.pocket_reserve,
+                        tick.saturating_sub(since),
+                        r.reserve_hold_ticks
+                    ),
+                );
+                return Some(Task::Idle);
+            }
+        } else {
+            self.pearls.reserve_since = None;
         }
         if self.pearls.burrow.is_none() {
             if self.pearls.site_at.is_some_and(|t| tick < t + r.site_every) {

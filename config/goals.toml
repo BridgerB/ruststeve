@@ -543,6 +543,11 @@ burrow_idle_after_kill = 4800
 # 45602491038 lane 6 used up its three wooden pickaxes reclaiming and restocking).
 repick_below = 30
 repick_max = 4
+# A pocket's worth of filler (a 2-high pocket is up to 16 blocks, P2's issue-17 pocket) before any
+# walk off: under it the bot restocks where it stands, held up to reserve_hold_ticks (race
+# 45609209398 lane 1 walked off with 15, ran out mid-pocket and took two piglin hits).
+pocket_reserve = 20
+reserve_hold_ticks = 2400
 # Ticks between site searches (the plan's risk 8: 24 cells round, not every tick).
 site_every = 100
 # A weapon with this many uses or fewer is switched at once (18f).

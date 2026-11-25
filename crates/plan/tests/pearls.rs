@@ -637,3 +637,75 @@ fn a_magma_cube_pressing_gets_a_pocket_not_a_fight() {
     );
     assert_eq!(c.pitch, Some(plan::endermen::EYES_DOWN));
 }
+
+/// The orchestrator's reserve: under a pocket's filler (20) and with no way to restock, a bot
+/// with no burrow holds where it stands; no site is taken and no walk begun.
+#[test]
+fn under_a_pockets_filler_no_walk_is_begun() {
+    let mut w = floor_world(B);
+    w.inventory.slots.insert(36, (ItemKind::Cobblestone, 10));
+    w.held = 0;
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.ender.left = true;
+    p.ender.phase = plan::endermen::EnderPhase::Hunt;
+    p.base.over = true;
+    p.pearls.at_hunt_point = true;
+    w.ticks = 100;
+    p.step(&w);
+    assert!(p.pearls.burrow.is_none(), "{:?}", notes(&p));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "no walk: under a pocket's filler"),
+        "{:?}",
+        notes(&p)
+    );
+    // With a pocket's filler the site is taken.
+    w.inventory.slots.insert(36, (ItemKind::Cobblestone, 64));
+    w.ticks = 300;
+    p.step(&w);
+    assert!(p.pearls.burrow.is_some(), "{:?}", notes(&p));
+}
+
+/// A chunk whose floor is nylium is the forest's and gives anchors; a netherrack floor with a
+/// few nylium cells (a wastes edge) gives none (race 45609209398 lane 1's walk into the wastes).
+#[test]
+fn new_ground_is_forest_floor_only() {
+    let w = floor_world(B);
+    let seen = vec![[40.5, 64.0, 40.5]];
+    assert!(
+        !pearls::supply_anchors(&w, &seen, B, None, None).is_empty(),
+        "a nylium floor gives anchors"
+    );
+    let mut w = World::new();
+    w.step(&Event::Packet(S2c::Login {
+        entity_id: 1,
+        view_distance: 8,
+        simulation_distance: 3,
+        dimension_type: 3,
+        dimension: "minecraft:the_nether".to_owned(),
+        game_type: 0,
+    }));
+    let rack = Arc::new(Column {
+        min_y: 0,
+        sections: std::iter::repeat_n(section(BlockKind::Netherrack), 4)
+            .chain(std::iter::repeat_n(section(BlockKind::Air), 12))
+            .collect(),
+    });
+    for x in -3..=3 {
+        for z in -3..=3 {
+            w.step(&Event::Packet(S2c::LevelChunkWithLight {
+                x,
+                z,
+                column: Arc::clone(&rack),
+            }));
+        }
+    }
+    for i in 0..5 {
+        set(&mut w, [40 + i, 63, 40], BlockKind::WarpedNylium);
+    }
+    assert!(
+        pearls::supply_anchors(&w, &seen, B, None, None).is_empty(),
+        "a few nylium cells are no forest"
+    );
+}
