@@ -631,4 +631,11 @@ note_every = 600
 floor_near = 8
 floor_far = 24
 down_tries = 24
+# A wait of 200 ticks in a row (ten seconds) pauses the base for 6,000 (five minutes) or until a
+# kill, and the hunt runs with what is held; a step that waits that long again after one pause
+# gives up, and the steps it was to supply are skipped at once (race 45542558792: 8 bots waited
+# 2,400 ticks a step on missing wood and no hunt began).
+wait_ticks = 200
+pause_ticks = 6000
+pause_max = 1
 # <<< base

@@ -31,6 +31,15 @@ A bot's ledger in the forest shows "base: <step> done / skipped" for each of the
 - **Tests**: `a_bot_on_a_fungus_cap_goes_down_to_the_floor` (a hand-built cap of the model, through the server's packets: floor targets 8 to 24 off over nylium; the wart over the stem is dug; over the cap's hollow, a fall of 10, it never is), and `stems_are_dug_from_each_columns_lowest_cell_within_48`.
 - **Not yet counted**: the note's firings in a race. The frontier bot now has no coal, so the hunt will run the no-coal path (stone swords and a stone pickaxe). That path is proven in the model (`without_coal_the_base_makes_stone_tools`), not yet on a real server.
 
+### 3. The base waited on missing wood and the hunt never began (the real frontier race 45542558792, read by the orchestrator)
+- **What happened**: all 8 bots spent 2,400 ticks a step in the base. Wood gave up ("no stem seen within 24 with a way to it": the bot was walled in by a pocket at the start, which P3 is fixing). Then the table, the swords and the shield each waited their own 2,400 ticks on the same missing wood. All that time `base_task` returned `Some(Task::Idle)`, so the hunt never started.
+- **Cause**: a wait was a task, and a step given up starved the steps after it without saying so.
+- **Fix** (`plan::base`):
+  - A wait of `wait_ticks` 200 in a row pauses the base for `pause_ticks` 6,000, or until `Plan::base_resume` (for the hunt to call after a kill). While paused, `base_task` returns `None`, so the hunt runs ("base paused: the hunt goes on with what is held").
+  - After the pause the step in hand gets a fresh clock. If it waits that long again after `pause_max` 1 pause, it gives up.
+  - A step given up skips at once the steps it was to supply (`starved_by`): with no logs or planks and no table, every craft and the smelt; with no table, the 3x3 crafts and the smelt. One note covers it: "base: no wood: the hunt goes on with what is held". Then the base is over and returns `None`.
+- **Tests**: `no_wood_pauses_the_base_then_skips_what_wood_makes` (the frontier's makings with no stem: paused at 200, resumed at 6,200, wood given up at 6,400, the table never begun, all 7 steps ended), and `a_kill_resumes_a_paused_base`.
+
 ## Result: the base proven on a real server (race 45536739217, 054aac6, goal `base`, dev-forest at (490.5, 45, 5.5) on the frontier lane-3 snapshot, 2 x 1, cap 6,000; development only, never evidence)
 - **Base met 2 of 2**, both alive to the end at health 12.5 (the start's), no hits, no swings, no enderman angered, no near miss. Each ends "base over: the kit is held (swords worth 58 kills of 30, pickaxe uses 144 of 100, 1 shield; given up: none)", and the shield goes to the off hand.
 - **Steps and ticks** (lane 0 / lane 1):
