@@ -3,6 +3,6 @@
 # a commit each time a bot first passes a stage.
 stage = "pearls_12"
 tag = "race-45621953332"
-asset = "snapshot-pearls_12-45621953332-race-45621953332-lane-1.tar.zst"
+asset = "snapshot-pearls_12-45621953332-race-45621953332-lane-7.tar.zst"
 commit = "a41455347b94d792f5338f5fa938953e16c3cfba"
-how = "rs-l01-b00 of race 45621953332, resumed from the real pearls_9 snapshot of race 45615781100 lane 6 (itself from the real pearls_6 snapshot of race 45588764709 lane 0, the real stuck snapshot of race 45578610032 lane 6 and the real forest snapshot of race 45537545167 lane 0): hunting from its burrow in the main warped forest it picked up its twelfth ender pearl at server tick 11,360 at (494.7, 44.0, 19.7), holding 7 blaze rods, 12 pearls, its shield, an iron and two stone swords. Each lane rolled its own enderman loot (race.yml, 57dcf52). Real (no development mark, no kind)."
+how = "rs-l07-b00 of race 45621953332, a sideways move (issue 19, 2026-11-25) from lane 1 of the same race at the same stage: both resumed from the real pearls_9 snapshot of race 45615781100 lane 6 (itself from the real pearls_6 snapshot of race 45588764709 lane 0, the real stuck snapshot of race 45578610032 lane 6 and the real forest snapshot of race 45537545167 lane 0). Lane 7 picked up its twelfth pearl at server tick 21,620 at (496.5, 44.0, 17.9) and holds 19.8 health against lane 1's 10.0, food 11, the iron sword at 47 uses, 295 pickaxe uses and 67 netherrack (probe 45686594347, docs/problems/eyes-observe.md). Its memory holds the Nether portal at (22, 34, -20) and the overworld portal at (125, -51, -108). Real (no development mark, no kind)."
