@@ -1897,7 +1897,19 @@ impl Plan {
             // `home::CUBE_FIGHT`) and the health is over the danger line: a large one splits and
             // a no-heal bot loses a long fight; further off the legs shun it, and under the line
             // or with two near the trip seals a pocket (`home_recover`).
-            let over = w.player.health.is_some_and(|h| h > rules.danger_health);
+            // Two within `CUBE_NEAR`, or a cube pocket in hand: the pocket, no fight.
+            let crowd = w
+                .entities
+                .values()
+                .filter(|e| {
+                    !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_NEAR
+                })
+                .count();
+            let over = w.player.health.is_some_and(|h| h > rules.danger_health)
+                && crowd < crate::home::CUBE_CROWD
+                && self.ender.home.cube_pocket.is_none();
             ignored.extend(
                 w.entities
                     .iter()
