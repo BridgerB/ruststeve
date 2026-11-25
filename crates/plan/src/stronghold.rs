@@ -932,6 +932,32 @@ impl Plan {
     /// from the eye): the head's cell then the feet's on the axis toward it dug, then a walk into
     /// them. `None` at a liquid or a block a silverfish hides in (never opened).
     fn wall_step(&mut self, w: &World, feet: Cell, brick: Cell, tick: u64) -> Option<Task> {
+        // Bricks under the feet (race 45689919380 lane 1: 5 under, at (1660, 22, -18), in the
+        // tunnel's reach and out of a dig's): the block under the feet dug while the one under it
+        // holds, a drop of one each time.
+        let flat = (brick.0 - feet.0).abs().max((brick.2 - feet.2).abs());
+        if brick.1 < feet.1 - 1 && flat <= 1 {
+            let under = (feet.0, feet.1 - 1, feet.2);
+            let below = (feet.0, feet.1 - 2, feet.2);
+            let firm = |p: &Self, c: Cell| {
+                let k = kind(w, c);
+                k.is_some()
+                    && !open(k)
+                    && !lava(k)
+                    && k != Some(BlockKind::Water)
+                    && !stairs::infested(k)
+                    && !p.refused_now(c, tick)
+            };
+            if !firm(self, under) || !(firm(self, below) || below == brick) {
+                return None;
+            }
+            self.note(
+                tick,
+                format!("stronghold wall step down: dig {under:?}"),
+                format!("stone bricks at {brick:?} under the feet {feet:?}, out of a dig's reach"),
+            );
+            return Some(Task::Dig(crate::dig::Dig::new(w, under, tick)));
+        }
         let (dx, dz) = axis_toward(feet, brick);
         let next = (feet.0 + dx, feet.1, feet.2 + dz);
         for c in [(next.0, next.1 + 1, next.2), next] {

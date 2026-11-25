@@ -461,3 +461,30 @@ fn pickaxes_are_made_from_the_pack() {
         "{n:#?}"
     );
 }
+
+/// Stone bricks five under the feet (race 45689919380 lane 1 at (1660, 27, -18) over bricks at
+/// y 22): a way down toward them, never the spiral's turn away.
+#[test]
+fn a_brick_under_the_feet_is_dug_down_to() {
+    let (w, mut p) = deep(
+        (0, 30, 0),
+        &[
+            ((0, 25, 0), BlockKind::StoneBricks),
+            ((1, 25, 0), BlockKind::Air),
+        ],
+    );
+    p.stronghold.descended = true;
+    let t = p.stronghold_task(&w, 1);
+    let n = notes(&p);
+    assert!(
+        matches!(
+            t,
+            Some(Task::Dig(_)) | Some(Task::Stairs(_)) | Some(Task::Explore(_))
+        ),
+        "{t:?} {n:#?}"
+    );
+    assert!(
+        !n.iter().any(|n| n.starts_with("stronghold search leg")),
+        "{n:#?}"
+    );
+}
