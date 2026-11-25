@@ -1,6 +1,6 @@
 # Issue 18: from a ticking enderman to 12 ender pearls (one bot first)
 
-**Status: open.** The index for issue 18 (#23). Each part has its own wall file: [`pearls-observe.md`](pearls-observe.md) (measures, stages, facts), [`pearls-travel.md`](pearls-travel.md) (to the warped forest), [`pearls-hunt.md`](pearls-hunt.md) (the forest base, the burrow, provoke, fight, collect), [`pearls-model.md`](pearls-model.md) (the sim and the parity rows).
+**Status: the stage is passed (2026-11-25, 6:30 AM): a real bot holds 12 pearls.** The index for issue 18 (#23). Each part has its own wall file: [`pearls-observe.md`](pearls-observe.md) (measures, stages, facts), [`pearls-travel.md`](pearls-travel.md) (to the warped forest), [`pearls-hunt.md`](pearls-hunt.md) (the forest base, the burrow, provoke, fight, collect), [`pearls-model.md`](pearls-model.md) (the sim and the parity rows).
 
 ## Needs
 From the frontier `endermen` snapshot, one real bot holds 12 ender pearls and its 7 blaze rods; the race snapshots it as stage `pearls_12`, the snapshot is published and becomes the frontier (`brain/ruststeve/decisions/one-bot-first.md`). Races run `revive=false`. Checkpoints on the way (Bridger, 2026-11-24): `forest` (7 rods, the feet in a warped forest) and `pearls_6`; the frontier moves at each.
@@ -39,6 +39,9 @@ A level burrow one wide and two high on the forest floor, built from held filler
 ## The checkpoints reached
 - **forest** (2026-11-24, 8:15 PM): rs-l00-b00 of race 45537545167 (commit 1c17850), resumed from the real `endermen` snapshot of race 45481633896 lane 2: out of its pocket, east by the travel points through about 300 blocks of basalt deltas, feet in a warped forest at tick 4,020 at (476.3, 41.0, 152.5), health 18.3, 7 rods, a shield and a porkchop. `config/frontier.toml` moved (6f33cc4). The travel's walls are in `pearls-travel.md`.
 - The forest base on a real server (race 45536739217, dev-forest, development only): met 2 of 2 in 2,620 to 3,080 ticks, no hits (`pearls-base.md`).
+
+- **pearls_6** (race 45588764709 lane 0, resumed from the real stuck 5-pearl snapshot of race 45578610032 lane 6), **pearls_9** (race 45615781100 lane 6), **pearls_12** (race 45621953332 lane 1, tick 11,360, from the pearls_9 frontier). Every link real; the frontier moved at each (24c47dc, 129f879 sideways to the healthier pearls_6 bot, a414553, ca7e981).
+- What carried it: the burrow proven on a real server (a solid 4 x 5 shell, the bot two cells in), the hunt point in the main forest (Bridger's ruling: 8 kills by tick 4,800 against 1 to 3 a race at the forest's edge), no fight with magma cubes or piglins (a sealed pocket instead), reclaimed and restocked filler, and each lane its own enderman loot rolls (race.yml: every lane restored from one world had rolled the same pearl at its nth kill).
 
 ## Index of walls
 - **1. The burrow is a tie** (parity 45535279839, P4, `pearls-model.md`): on the second real run the enderman held O about 200 ticks, then walked round to the cell beside B and behind its back wall, out of strike reach; for a mob 2.9 tall O, the two cells beside B and the one behind it are all 2 from B, and the partial path takes any. The bot in M was hit once (7); in B never (0 hits in 4 rows). Fix under test: a solid shell 5 wide and 3 to 4 long round the tunnel, so O is the one nearest standing cell (every other at the square root of 5 or more), the roof's top unreachable; fight and wait only from B; M only to collect with none angry.
