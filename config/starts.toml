@@ -206,3 +206,20 @@ name = "dev-spawner-fed"
 stage = "spawner"
 place = "spawn"
 kit = [["cooked_beef", 32]]
+
+# A DEVELOPMENT start for the pearl hunt (issue 18, 2026-11-24; never issue-18 evidence, never the
+# frontier): the frontier bot as it is (12.5 health, food 17, no food, no shield, the iron sword at
+# 161 uses, 144 pickaxe uses, 7 rods, 7 raw iron and 1 coal) put in this world's nearest warped
+# forest, so the forest base, the burrow and the hunt are developed while real bots travel there.
+# Race it only with
+# `snapshot=race-45481633896/snapshot-endermen-45481633896-race-45481633896-lane-3.tar.zst` (the
+# frontier's world, memory and player file). The forest's place is development knowledge only
+# (`locate biome` from the frontier, probe 45529738504, docs/problems/pearls-observe.md): warped
+# forest at (488, -111), never read by the bot. Each bot to the highest safe floor under y 100
+# within 12 of it.
+[[start]]
+name = "dev-forest"
+stage = "endermen"
+place = { dimension = "minecraft:the_nether", x = 488.5, y = 70, z = -110.5 }
+spread = 12
+spread_under = 100
