@@ -528,3 +528,23 @@ fn an_angry_enderman_before_the_burrow_gets_a_capped_pocket() {
         notes(&p)
     );
 }
+
+/// The orchestrator's rule: never a burrow on the basalt deltas' ground.
+#[test]
+fn delta_ground_is_no_burrow_site() {
+    let mut w = floor_world(B);
+    set(&mut w, [B[0], 63, B[2]], BlockKind::Basalt);
+    let b = Burrow::at(B, DIR);
+    let mut cells = plan::path::Cells::new(&w);
+    assert_eq!(
+        burrow::refuse(&w, &w.memory, &mut cells, &b),
+        Some("delta ground")
+    );
+    let mut w = floor_world(B);
+    set(&mut w, [B[0] + 3, 63, B[2] + 1], BlockKind::MagmaBlock);
+    let mut cells = plan::path::Cells::new(&w);
+    assert_eq!(
+        burrow::refuse(&w, &w.memory, &mut cells, &b),
+        Some("magma or fire near O")
+    );
+}

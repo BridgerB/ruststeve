@@ -363,6 +363,18 @@ pub fn provoke_candidates_from(
     endermen::endermen(w)
         .into_iter()
         .filter(|s| s.ticking && !creepy(w, s.id))
+        // Not on or within 1 of magma, lava or fire: it is hurt there and teleports.
+        .filter(|s| {
+            let f = path::feet_cell(s.pos);
+            !(-1..=1).any(|dx| {
+                (-1..=0).any(|dy| {
+                    (-1..=1).any(|dz| {
+                        w.block_at(world::BlockPos::new(f.0 + dx, f.1 + dy, f.2 + dz))
+                            .is_some_and(|k| burrow::HURTS.contains(&k))
+                    })
+                })
+            })
+        })
         .filter(|s| {
             w.entities.get(&s.id).is_none_or(|e| {
                 !e.hurts
