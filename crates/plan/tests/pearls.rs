@@ -180,7 +180,7 @@ fn a_cap_over_the_mouth_moves_the_site() {
 #[test]
 fn lava_or_a_drop_near_the_mouth_refuses_it() {
     let mut w = floor_world(B);
-    set(&mut w, [B[0] + 4, 63, B[2]], BlockKind::Lava);
+    set(&mut w, [B[0] + 2, 60, B[2]], BlockKind::Lava);
     let b = Burrow::at(B, DIR);
     let mut cells = plan::path::Cells::new(&w);
     assert_eq!(

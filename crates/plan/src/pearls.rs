@@ -100,12 +100,17 @@ impl Default for PearlRules {
 }
 
 /// Blocks the burrow is built of: full, and none `#enderman_holdable` (the 26.1.2 tag: dirt,
-/// gravel and nylium are; these are not). Cobblestone first: netherrack burns on once lit.
+/// gravel and nylium are; these are not). The stone nothing else wants first (granite, tuff:
+/// the frontier bot holds 64 and 23), cobblestone last: the base makes stone swords of it.
 pub const BURROW_BLOCKS: &[ItemKind] = &[
-    ItemKind::Cobblestone,
-    ItemKind::CobbledDeepslate,
+    ItemKind::Granite,
+    ItemKind::Tuff,
+    ItemKind::Andesite,
+    ItemKind::Diorite,
     ItemKind::Blackstone,
     ItemKind::Netherrack,
+    ItemKind::CobbledDeepslate,
+    ItemKind::Cobblestone,
 ];
 /// Ticks between two burrow blocks (the shelter's `SHELTER_EVERY_TICKS`: the update arrives in
 /// a tick or two).
