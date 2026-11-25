@@ -160,6 +160,19 @@ pub fn ledge(w: &World, f: path::Cell, near: i32) -> bool {
     })
 }
 
+/// Whether every cell the eye-to-eye line crosses is loaded and has no collision shape: the
+/// server's stare clips against collision shapes, and `look::clear` (full blocks seen exposed only)
+/// passed lines a fungus, a slab or a vine cut (race 45563567457: six stares at one 58.8 off
+/// never set its stared-at flag). The first solid cell a line meets is exposed to it (the cell
+/// before it is open), so this reads no hidden block.
+pub fn line_open(w: &World, from: [f64; 3], to: [f64; 3]) -> bool {
+    crate::scoop::ray_cells(from, to).into_iter().all(|c| {
+        w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+            .and_then(data::generated::shapes::collision)
+            == Some(data::types::Collision::Empty)
+    })
+}
+
 /// A provoke's distance band: 6 to 16 (it walks), 16 to 36, 36 to 64 (the jar's follow range;
 /// past 16 it teleports toward the bot).
 pub fn band(d: f64) -> usize {
@@ -512,7 +525,7 @@ pub fn provoke_candidates_from(
             let d = dist(eye, eye_of(s.pos));
             d >= min && d <= r.provoke_max
         })
-        .filter(|s| look::clear(w, eye, eye_of(s.pos)))
+        .filter(|s| line_open(w, eye, eye_of(s.pos)))
         .collect()
 }
 
