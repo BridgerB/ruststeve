@@ -499,9 +499,10 @@ provoke_max = 36.0
 # cells, some 10 ticks walking; an angry enderman walks within 16 (about 0.3 a tick) and teleports
 # from past 16 after 15 goal ticks (the 26.1.2 jar), so 12 leaves it 30 ticks or more out.
 provoke_out_min = 12.0
-# From O the view is wide and the step back to B is two cells: out to 40 there when the line is
-# clear (the orchestrator; M stays at 36, past which clojurecraft's stares angered none).
-provoke_out_max = 64.0
+# From O the view is wide and the step back to B is two cells, but past 36 a stare angered about 2
+# in 10 (race 45578610032) and none in race 45602491038 lane 6 (60 to 63, 3 tries): capped at 36
+# everywhere (the orchestrator; clojurecraft: past 36 its stares angered none).
+provoke_out_max = 36.0
 # Provokes on one enderman with no anger before it is skipped, and for how long (the plan's 18f).
 provoke_tries = 3
 provoke_skip_ticks = 2400
@@ -535,6 +536,11 @@ burrow_move = 48
 # new endermen spawn only in ticking chunks 24+ from the bot, about 0.4 a minute (P1); a move goes
 # burrow_move (3 chunks) or more (race 45578610032: kills slowed after ~20,000 at every site).
 burrow_idle_after_kill = 4800
+# Wooden pickaxe uses under repick_below between burrows open the base again (wood, a table, wood
+# picks; the base's wood_pick_uses is the run's target), at most repick_max times (race
+# 45602491038 lane 6 used up its three wooden pickaxes reclaiming and restocking).
+repick_below = 30
+repick_max = 4
 # Ticks between site searches (the plan's risk 8: 24 cells round, not every tick).
 site_every = 100
 # A weapon with this many uses or fewer is switched at once (18f).

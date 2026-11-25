@@ -56,6 +56,8 @@ pub struct PearlRules {
     pub kill_window: u64,
     pub burrow_idle_ticks: u64,
     pub burrow_idle_after_kill: u64,
+    pub repick_below: i32,
+    pub repick_max: u32,
     pub moves_without_kill: u32,
     pub burrow_move: i32,
     pub site_every: u64,
@@ -96,7 +98,7 @@ impl Default for PearlRules {
             provoke_min: 6.0,
             provoke_max: 36.0,
             provoke_out_min: 12.0,
-            provoke_out_max: 64.0,
+            provoke_out_max: 36.0,
             provoke_tries: 3,
             provoke_skip_ticks: 2400,
             fall_window: 200,
@@ -107,6 +109,8 @@ impl Default for PearlRules {
             kill_window: 12000,
             burrow_idle_ticks: 9600,
             burrow_idle_after_kill: 4800,
+            repick_below: 30,
+            repick_max: 4,
             moves_without_kill: 1000,
             burrow_move: 48,
             site_every: 100,
@@ -514,6 +518,9 @@ pub struct PearlState {
     /// The floors of the old B, M and O: never dug by the reclaim (the orchestrator).
     #[serde(default)]
     pub old_floors: Vec<[i32; 3]>,
+    /// Times the base was opened again for wooden pickaxes.
+    #[serde(default)]
+    pub repicks: u32,
     /// Where the last walk on for a site began, and how many in a row left the feet there.
     #[serde(default)]
     pub walk_on: Option<([i32; 3], u32)>,
@@ -3020,6 +3027,41 @@ impl Plan {
         // every step after wood needs wood); then the hunt goes on and the base is asked again
         // after `base_retry_ticks`.
         let r = self.pearl_rules();
+        // Wooden pickaxes low between burrows (a move under way): the base again, its wood,
+        // table and wood-picks steps only (the orchestrator; race 45602491038 lane 6 used up its
+        // three and could reclaim no more). A table is made again where it stands: the forest
+        // has the wood, and carrying one costs a slot and a dig.
+        if self.base.over
+            && self.pearls.burrow.is_none()
+            && self.pearls.repicks < r.repick_max
+            && crate::base::wood_pick_uses(w) < r.repick_below
+        {
+            self.pearls.repicks += 1;
+            self.base.over = false;
+            self.base.step = None;
+            self.base.paused_until = None;
+            self.base.wait_since = None;
+            self.base.ended.retain(|(st, _)| {
+                !matches!(
+                    st,
+                    crate::base::Step::Wood
+                        | crate::base::Step::Table
+                        | crate::base::Step::WoodPicks
+                )
+            });
+            self.pearls.base_skip_until = None;
+            self.note(
+                tick,
+                "base again: wooden pickaxes".to_owned(),
+                format!(
+                    "{} wooden pickaxe uses held, under {}; wood, table and wood picks again (time {} of {})",
+                    crate::base::wood_pick_uses(w),
+                    r.repick_below,
+                    self.pearls.repicks,
+                    r.repick_max
+                ),
+            );
+        }
         if self.pearls.base_skip_until.is_none_or(|t| tick >= t) {
             match self.base_task(w, tick) {
                 Some(Task::Idle) => {
