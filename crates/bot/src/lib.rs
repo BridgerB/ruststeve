@@ -13,7 +13,7 @@ pub mod model;
 pub mod progress;
 pub mod script;
 
-pub use script::Script;
+pub use script::{BurrowMode, Script};
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

@@ -629,8 +629,8 @@ impl Sim {
                 &S2c::DamageEvent {
                     entity_id: PLAYER_ID,
                     source_type,
-                    cause: None,
-                    direct: None,
+                    cause: self.survival.life.blow_cause,
+                    direct: self.survival.life.blow_cause,
                 },
             )?,
             wire(

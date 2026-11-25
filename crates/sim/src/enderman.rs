@@ -26,11 +26,13 @@
 //!   and liquid (`Entity.randomTeleport`); one try per call. A hit by a living entity never
 //!   teleports it (`hurtServer`).
 //! - **Moving**: stroll (`WaterAvoidingRandomStrollGoal(1.0, 0)`: one start in 120 goal checks,
-//!   a land place within 10 across and 7 up or down) at 0.3 speed; targeted, straight at the
-//!   player at 0.45 (`MeleeAttackGoal`, the game finds a path; the model walks a straight line);
+//!   a land place within 10 across and 7 up or down) at 0.3 speed; targeted, at 0.45 along a
+//!   path (`MeleeAttackGoal`: a search over walk nodes for a mob 2.9 high to the node nearest the
+//!   player, a partial path when the player cannot be reached; issue 18);
 //!   frozen in place while targeted and stared at within 16 (`EndermanFreezeWhenLookedAt`). It
 //!   hits for 7 (`attack_damage`) every 20 ticks when its box grown 0.83 sideways meets the
-//!   player's.
+//!   player's and it sees the player eye to eye (`canPerformAttack`, issue 18); the damage event
+//!   names it. A knock moves it only where its whole box fits (issue 18: never into a burrow).
 //! - **Natural spawning** (`NaturalSpawner.spawnCategoryForPosition`): each tick, for each chunk
 //!   in entity-ticking range with its middle within 128 of the player and the monster cap (70)
 //!   not met: a place in the chunk at a height up to its top block + 1, not inside a full
@@ -47,7 +49,7 @@
 //! taken (`EndermanTakeBlockGoal`: the Nether has nothing it picks up but crimson and warped
 //! nylium, never sent here), water and rain hurting it, the random despawn (1 in 800 a tick
 //! past 32 blocks after 30 s idle; the 128-block despawn is in), the daylight teleport (the
-//! overworld at day), sounds, the head's rotation, pathfinding round walls.
+//! overworld at day), sounds, the head's rotation, the pathfinder's costs (every node costs the same here).
 
 use data::{BlockKind, EntityKind, ItemKind};
 use protocol::metadata::MetaValue;
@@ -100,6 +102,12 @@ const STROLL_RANGE: f64 = 10.0;
 const STROLL_DY: i32 = 7;
 /// `STEP_HEIGHT` 1.
 const STEP: i32 = 1;
+/// The chase's path search (issue 18): `PathNavigation.createPath`'s most nodes visited, the follow
+/// range 64 × 16; the furthest drop a walk node takes (`Mob.getMaxFallDistance` 3); the ticks
+/// a path is kept before it is found again (`MeleeAttackGoal` asks every 4 to 11).
+const PATH_NODES: usize = 1024;
+const PATH_DROP: i32 = 3;
+const PATH_EVERY: u64 = 10;
 /// `NaturalSpawner`: `MIN_SPAWN_DISTANCE` 24 (576 squared), `SPAWN_DISTANCE_BLOCK` 128, three
 /// packs, `ceil(nextFloat() × 4)` tries, a step of `nextInt(6) - nextInt(6)`, the monster
 /// category's 70 (`MobCategory.MONSTER`, over the 289 chunks one player's 8 counts), and
@@ -165,6 +173,11 @@ pub struct Ender {
     /// Counts for tests: teleports made, ticks it ticked.
     pub teleports: u32,
     pub ticked: u64,
+    /// The chase's path (issue 18): the next cell on it, the player's cell it was found for and
+    /// the tick it was found.
+    pub path_next: Option<[i32; 3]>,
+    pub path_for: Option<[i32; 3]>,
+    pub path_at: u64,
 }
 
 impl Ender {
@@ -180,6 +193,9 @@ impl Ender {
             natural: false,
             teleports: 0,
             ticked: 0,
+            path_next: None,
+            path_for: None,
+            path_at: 0,
         }
     }
 }
@@ -249,7 +265,7 @@ impl Sim {
     }
 
     /// Whether the body of an enderman at `at` fits: no block it collides with and no liquid.
-    fn ender_fits(&self, at: [f64; 3]) -> bool {
+    pub(crate) fn ender_fits(&self, at: [f64; 3]) -> bool {
         let lo = at[1].floor() as i32;
         let hi = (at[1] + HEIGHT - 1e-7).floor() as i32;
         let xs = [
@@ -390,6 +406,122 @@ impl Sim {
             })
     }
 
+    /// Whether an enderman stands in cell `c`: its body fits at the cell's middle and a floor
+    /// holds it (`WalkNodeEvaluator`'s walkable node for a mob 2.9 high: three cells clear).
+    fn ender_stands(&self, c: [i32; 3]) -> bool {
+        let at = [
+            f64::from(c[0]) + 0.5,
+            f64::from(c[1]),
+            f64::from(c[2]) + 0.5,
+        ];
+        self.ender_fits(at) && self.floored(at)
+    }
+
+    /// The node a walk from standing cell `c` reaches moving one cell (dx, dz): the same level,
+    /// one up (the body fitting over `c` too), or down as far as `PATH_DROP`.
+    fn ender_neighbour(&self, c: [i32; 3], dx: i32, dz: i32) -> Option<[i32; 3]> {
+        let (x, z) = (c[0] + dx, c[2] + dz);
+        let mid = |x: i32, y: i32, z: i32| [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5];
+        if self.ender_stands([x, c[1], z]) {
+            return Some([x, c[1], z]);
+        }
+        if self.ender_stands([x, c[1] + STEP, z]) && self.ender_fits(mid(c[0], c[1] + STEP, c[2])) {
+            return Some([x, c[1] + STEP, z]);
+        }
+        if !self.ender_fits(mid(x, c[1], z)) {
+            return None;
+        }
+        (1..=PATH_DROP)
+            .map(|d| [x, c[1] - d, z])
+            .find(|n| self.ender_stands(*n))
+    }
+
+    /// `PathFinder.findPath` toward the player's cell, as the chase's `MeleeAttackGoal` asks
+    /// for it: a search over walk nodes from the mob's cell, at most `PATH_NODES` of them, and
+    /// the path to the node nearest the target (a partial path when the target cannot be
+    /// reached: a player in a burrow too low for the mob). Ties go to the node found first.
+    /// The next cell on that path, or `None` when the mob already stands on the nearest node.
+    fn ender_path(&self, from: [f64; 3], target: [i32; 3]) -> Option<[i32; 3]> {
+        let start = [
+            from[0].floor() as i32,
+            (from[1] + 1e-7).floor() as i32,
+            from[2].floor() as i32,
+        ];
+        let d2 = |c: [i32; 3]| -> i64 {
+            (0..3)
+                .map(|i| i64::from(c[i] - target[i]).pow(2))
+                .sum::<i64>()
+        };
+        let mut came: std::collections::BTreeMap<[i32; 3], [i32; 3]> =
+            std::collections::BTreeMap::new();
+        let mut queue = std::collections::VecDeque::from([start]);
+        came.insert(start, start);
+        let mut best = (d2(start), start);
+        while let Some(c) = queue.pop_front() {
+            if d2(c) < best.0 {
+                best = (d2(c), c);
+            }
+            if came.len() >= PATH_NODES {
+                continue;
+            }
+            // The four sides, then the corners (a corner only past two open sides).
+            let sides = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+            let open: Vec<Option<[i32; 3]>> = sides
+                .iter()
+                .map(|&(dx, dz)| self.ender_neighbour(c, dx, dz))
+                .collect();
+            let level = |i: usize| open.get(i).copied().flatten().is_some_and(|n| n[1] == c[1]);
+            // Side indexes: +x 0, -x 1, +z 2, -z 3.
+            let corners = [(1, 1, 0, 2), (1, -1, 0, 3), (-1, 1, 1, 2), (-1, -1, 1, 3)];
+            let diagonal = corners
+                .iter()
+                .filter(|&&(_, _, a, b)| level(a) && level(b))
+                .filter_map(|&(dx, dz, _, _)| self.ender_neighbour(c, dx, dz));
+            let next: Vec<[i32; 3]> = open.iter().copied().flatten().chain(diagonal).collect();
+            for n in next {
+                if came.contains_key(&n) {
+                    continue;
+                }
+                came.insert(n, c);
+                queue.push_back(n);
+            }
+        }
+        // Back from the best node to the first step.
+        let mut at = best.1;
+        while let Some(&prev) = came.get(&at) {
+            if prev == start {
+                return (at != start).then_some(at);
+            }
+            at = prev;
+        }
+        None
+    }
+
+    /// Where the chase walks this tick (issue 18): the middle of the next cell on its path to
+    /// the player, found again when the player's cell changes, when the mob reaches that cell, or
+    /// every `PATH_EVERY` ticks (`MeleeAttackGoal` asks for a new path every 4 to 11 ticks).
+    /// `None` at the end of the path: it stands.
+    fn ender_waypoint(&self, e: &mut Ender, pos: [f64; 3]) -> Option<[f64; 2]> {
+        let player = [
+            self.pos[0].floor() as i32,
+            (self.pos[1] + 1e-7).floor() as i32,
+            self.pos[2].floor() as i32,
+        ];
+        let reached = |n: [i32; 3]| {
+            (f64::from(n[0]) + 0.5 - pos[0]).hypot(f64::from(n[2]) + 0.5 - pos[2]) < 0.1
+        };
+        let stale = e.path_for != Some(player)
+            || self.ticks >= e.path_at + PATH_EVERY
+            || e.path_next.is_some_and(reached);
+        if stale {
+            e.path_next = self.ender_path(pos, player);
+            e.path_for = Some(player);
+            e.path_at = self.ticks;
+        }
+        let n = e.path_next?;
+        Some([f64::from(n[0]) + 0.5, f64::from(n[2]) + 0.5])
+    }
+
     /// The endermen's tick.
     pub(crate) fn tick_endermen(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let mut out = Vec::new();
@@ -465,6 +597,8 @@ impl Sim {
                 pos = self.survival.life.mobs.get(&id).map_or(pos, |mm| mm.pos);
                 e.teleports += 1;
                 e.stroll = None;
+                e.path_next = None;
+                e.path_for = None;
                 e.vy = 0.0;
             }
             // Falling.
@@ -497,7 +631,7 @@ impl Sim {
                     None
                 } else if e.angry {
                     e.stroll = None;
-                    Some(([self.pos[0], self.pos[2]], CHASE_SPEED))
+                    self.ender_waypoint(&mut e, pos).map(|g| (g, CHASE_SPEED))
                 } else {
                     if e.stroll.is_none()
                         && (self.ticks - e.born).is_multiple_of(2)
@@ -528,7 +662,15 @@ impl Sim {
                     }
                 }
             }
-            if e.angry && self.in_attack_reach(pos) && self.ticks >= m.next_hit {
+            // `MeleeAttackGoal.canPerformAttack`: in the attack box, and seen (`Sensing.hasLineOfSight`,
+            // eye to eye: issue 18's burrow walls stop a blow through them).
+            let seen = || {
+                self.sight(
+                    [pos[0], pos[1] + EYE, pos[2]],
+                    [self.pos[0], self.pos[1] + physics::EYE_HEIGHT, self.pos[2]],
+                )
+            };
+            if e.angry && self.in_attack_reach(pos) && self.ticks >= m.next_hit && seen() {
                 if let Some(mm) = self.survival.life.mobs.get_mut(&id) {
                     mm.next_hit = self.ticks + ATTACK_EVERY;
                 }
@@ -761,6 +903,20 @@ impl Sim {
 
     /// An enderman's blow (7, `mob_attack`), through a raised shield's rule.
     fn ender_blow(&mut self, id: i32, at: [f64; 3]) -> Result<(bool, Vec<Wire>), EncodeError> {
-        self.blow_from(id, ATTACK, at, 0)
+        // The damage event names the enderman as cause and direct (`mob_attack` from a mob), as
+        // the real server sends it.
+        self.survival.life.blow_cause = Some(id);
+        let blow = self.blow_from(id, ATTACK, at, 0);
+        self.survival.life.blow_cause = None;
+        let (landed, out) = blow?;
+        if landed {
+            *self
+                .survival
+                .life
+                .hurt_by_mob
+                .entry("enderman".to_owned())
+                .or_insert(0) += 1;
+        }
+        Ok((landed, out))
     }
 }
