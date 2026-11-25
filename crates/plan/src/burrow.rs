@@ -58,6 +58,8 @@ pub const DROP_MAX: i32 = 2;
 /// Valid sites, nearest first, among which the cheapest (blocks to place, plus half the
 /// distance) is taken.
 pub const SITE_CHOICES: usize = 12;
+/// Blocks round O within which delta ground refuses a site.
+pub const DELTA_NEAR: i32 = 12;
 /// Ground of the basalt deltas a burrow never stands on.
 pub const DELTA_GROUND: &[BlockKind] = &[
     BlockKind::Basalt,
@@ -299,6 +301,17 @@ pub fn refuse(w: &World, mem: &Memory, cells: &mut Cells<'_>, b: &Burrow) -> Opt
                 }
                 if k.is_some_and(|k| HURTS.contains(&k)) && dx.abs() <= 2 && dz.abs() <= 2 {
                     return Some("magma or fire near O");
+                }
+            }
+        }
+    }
+    // No delta ground near O (magma cubes come out of the deltas: the frontier race 45553808358
+    // lane 6, by a burrow 1 cell off delta ground's reach, lost 11.7 health to them).
+    for dx in -DELTA_NEAR..=DELTA_NEAR {
+        for dz in -DELTA_NEAR..=DELTA_NEAR {
+            for dy in -2..=0 {
+                if kind(w, add(b.o, dx, dy - 1, dz)).is_some_and(|k| DELTA_GROUND.contains(&k)) {
+                    return Some("delta ground near O");
                 }
             }
         }
