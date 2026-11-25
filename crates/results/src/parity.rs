@@ -55,6 +55,19 @@ pub struct Moment {
     /// monster: peaceful removes it at once).
     #[serde(default)]
     pub difficulty: Option<String>,
+    /// Boxes filled at the start, before `set`, as `[block, dx1, dy1, dz1, dx2, dy2, dz2]` from the
+    /// feet cell: `fill` by RCON in real, each cell into the model in sim (issue 18: a burrow and
+    /// the arena round it).
+    #[serde(default)]
+    pub fill: Vec<(String, i32, i32, i32, i32, i32, i32)>,
+    /// The placed mobs (`mobs`) keep their loot table (issue 18: a pearl may drop); by default
+    /// they drop nothing.
+    #[serde(default)]
+    pub loot: bool,
+    /// Items laid on the ground at the start, as `[item, dx, dy, dz]` from the feet cell, the
+    /// cell's middle, no pickup delay (issue 18: a pearl at the mouth): `summon item` in real.
+    #[serde(default)]
+    pub items: Vec<(String, i32, i32, i32)>,
 }
 
 fn yes() -> bool {
@@ -112,6 +125,13 @@ pub struct MobOutcome {
     pub moved: bool,
     /// An enderman's creepy flag (entity data 17): it has a target.
     pub creepy: bool,
+    /// An enderman's stared-at flag (entity data 18): a player's stare started its look goal
+    /// (issue 18: the roof cuts the line from B).
+    #[serde(default)]
+    pub stared: bool,
+    /// The cell its feet ended in (issue 18: it came to the mouth).
+    #[serde(default)]
+    pub cell: Option<[i32; 3]>,
 }
 
 /// The outcome class of a moment: what the table compares, field by field.
@@ -226,11 +246,13 @@ pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
                 .iter()
                 .map(|m| {
                     format!(
-                        " {}{}{}{}",
+                        " {}{}{}{}{}{}",
                         m.kind,
                         if m.seen { "" } else { " unseen" },
                         if m.moved { " moved" } else { " still" },
-                        if m.creepy { " creepy" } else { "" }
+                        if m.creepy { " creepy" } else { "" },
+                        if m.stared { " stared" } else { "" },
+                        m.cell.map_or_else(String::new, |c| format!(" at {c:?}"))
                     )
                 })
                 .collect();

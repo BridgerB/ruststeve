@@ -1,9 +1,9 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 164 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 170 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
-aliases: [enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
+aliases: [burrow rows, e04-mouth, fill rows, trace, enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-24
 verifiedAgainst: ruststeve@31545c1
@@ -85,6 +85,12 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - A row may name a `difficulty` (`normal`): those rows run after the others, the real server's difficulty set by RCON for them and put back to peaceful after (an enderman is a monster: peaceful removes it at once); the model runs them off peaceful. `mobs` places mobs with their AI (`summon` kept and lootless in real, the model's own brain in sim; the model places endermen only).
 - The class gains `mobs`: for each placed mob, the entity of its kind nearest where it was put in the bot's world: seen, moved more than half a block, and creepy (entity data 17).
 - Tolerance 162 of 164. The first run (parity 45483333265, 764d798): **164 of 164**, the four enderman rows matching on both sides: frozen still at 64, ticking and fallen at 30, creepy under the stare, neutral 15 degrees aside.
+
+## Burrow rows (issue 18)
+- Rows `e04` to `e08` (`docs/problems/pearls-model.md`) prove the pearl hunt's burrow on a real server before any race: a level burrow one wide and two high of stone, B the bot's cell, M the mouth, O outside where the enderman stands. `e04-mouth` (it comes to O, the bot in B is never hit), `e05-strike` (struck on a full charge from B, it dies; loot kept), `e06-roof` (looked in the eye from B at O, M's roof cuts the line: not stared, not creepy), `e07-pickup-b` and `e07-pickup-m` (a pearl at O is out of reach from B, in reach from M), `e08-near` (the bot in M is hit).
+- A row may `fill` boxes before its `set` (`fill` by RCON, each cell in the model), keep its mobs' `loot`, and lay `items` on the ground (`summon item` with no pickup delay; `Sim::place_item`). Script `burrow:<mode>` (`hold`, `strike`, `eye`, `near`) reads the world each tick (`Script::steer`): the stare until creepy, the step into B, the torso look, the strike.
+- The class's `mobs` gains `stared` (entity data 18) and `cell` (where its feet ended). A row with mobs or items writes `<id>.real.trace.txt` (folded from its recording) and `<id>.sim.trace.txt`: the bot and every enderman and item within 32 every 10 ticks, for reading what the enderman did.
+- Tolerance 168 of 170.
 
 ## See also
 - [[server-model]] - what the model models.

@@ -465,6 +465,11 @@ pub struct Life {
     /// Endermen the world spawned (issue 17), and whether it spawns them (`Sim::with_natural_spawns`).
     pub ender_spawns: u64,
     pub natural_spawns: bool,
+    /// The mob whose blow is being dealt, for the damage event's cause and direct ids (issue 18:
+    /// an enderman's; other mobs' blows still send none, so issue 16's fights are unchanged).
+    pub blow_cause: Option<i32>,
+    /// Blows that landed on the player, by the kind of mob that dealt them (issue 18).
+    pub hurt_by_mob: std::collections::BTreeMap<String, u32>,
 }
 
 impl Default for Life {
@@ -512,6 +517,8 @@ impl Default for Life {
             hurt_by: std::collections::BTreeMap::new(),
             ender_spawns: 0,
             natural_spawns: false,
+            blow_cause: None,
+            hurt_by_mob: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -1249,7 +1256,13 @@ impl Sim {
             let walker = matches!(m.brain, Brain::Melee(_));
             // A walker is carried over an edge as the game carries it (its fall is
             // `tick_falls`'); a blaze keeps to where its body fits.
-            let fits = cell(to, 0.0).is_none() && cell(to, 1.79).is_none();
+            // An enderman is 2.9 high and 0.6 wide: its whole box must fit (issue 18: a hit never
+            // pushes one into a burrow two high).
+            let fits = if matches!(m.brain, Brain::Enderman(_)) {
+                self.ender_fits(to)
+            } else {
+                cell(to, 0.0).is_none() && cell(to, 1.79).is_none()
+            };
             let grounded = if walker {
                 m.vy == 0.0 && cell(m.pos, -0.05).is_some()
             } else {

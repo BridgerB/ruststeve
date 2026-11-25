@@ -88,6 +88,165 @@ impl Craft {
     }
 }
 
+/// What a burrow script does (issue 18's parity rows e04 to e08, docs/problems/pearls-model.md).
+/// The burrow runs east: the back wall west of B, the mouth M east of B, O east of M. The phase
+/// is read from the world each tick, so a script needs no memory: the feet are in B when the
+/// block west of them is solid (the back wall), else in M.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum BurrowMode {
+    /// From M, stare at the nearest enderman's eye until one is creepy (entity data 17), then
+    /// walk west into B; in B, look at the nearest enderman's torso (feet + 1.2), never its eye.
+    Hold,
+    /// As `Hold`, and in B strike the nearest enderman on a full charge (an iron sword's 1.6
+    /// attacks a second: 12.5 ticks; every 14th tick) while its box is within 3.0 of the eye:
+    /// the attack, then the swing.
+    Strike,
+    /// Look at the nearest enderman's eye, wherever the feet are; never step.
+    Eye,
+    /// From M, stare until one is creepy, then stay in M looking at its torso.
+    Near,
+}
+
+impl BurrowMode {
+    fn name(self) -> &'static str {
+        match self {
+            BurrowMode::Hold => "hold",
+            BurrowMode::Strike => "strike",
+            BurrowMode::Eye => "eye",
+            BurrowMode::Near => "near",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "hold" => Some(BurrowMode::Hold),
+            "strike" => Some(BurrowMode::Strike),
+            "eye" => Some(BurrowMode::Eye),
+            "near" => Some(BurrowMode::Near),
+            _ => None,
+        }
+    }
+}
+
+/// An enderman's eye and torso over its feet (`EntityType.ENDERMAN`: eye 2.55; the torso the
+/// plan's feet + 1.2), its half width and height (0.3, 2.9).
+const ENDER_EYE: f64 = 2.55;
+const ENDER_TORSO: f64 = 1.2;
+const ENDER_HALF: f64 = 0.3;
+const ENDER_HEIGHT: f64 = 2.9;
+/// The player's strike reach, eye to box (`Player.entityInteractionRange` 3.0).
+const STRIKE_REACH: f64 = 3.0;
+/// Ticks between strikes: an iron sword's attack speed 1.6 charges in 12.5 ticks; 14 is full.
+const STRIKE_EVERY: u64 = 14;
+/// Endermen farther than this are not the script's.
+const ENDER_NEAR: f64 = 32.0;
+/// `EnderMan.DATA_CREEPY`.
+const CREEPY: u8 = 17;
+
+/// The nearest live enderman within `ENDER_NEAR` of the feet: its id and feet.
+fn nearest_ender(w: &World, feet: [f64; 3]) -> Option<(i32, [f64; 3])> {
+    let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - feet[i]).powi(2)).sum::<f64>();
+    w.entities
+        .iter()
+        .filter(|(_, e)| !e.dead && e.kind == data::EntityKind::Enderman)
+        .map(|(id, e)| (*id, e.pos))
+        .filter(|(_, p)| d(*p) <= ENDER_NEAR * ENDER_NEAR)
+        .min_by(|a, b| d(a.1).total_cmp(&d(b.1)))
+}
+
+/// Whether any enderman the world knows is creepy.
+fn any_creepy(w: &World) -> bool {
+    w.entities.values().any(|e| {
+        !e.dead
+            && e.kind == data::EntityKind::Enderman
+            && matches!(
+                e.metadata.get(&CREEPY),
+                Some(protocol::metadata::MetaValue::Bool(true))
+            )
+    })
+}
+
+/// The yaw and pitch from `eye` to `at` (yaw 0 south, 90 west; pitch down positive).
+fn look_at(eye: [f64; 3], at: [f64; 3]) -> (f64, f32) {
+    let (dx, dy, dz) = (at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]);
+    let yaw = (-dx).atan2(dz).to_degrees();
+    let pitch = -dy.atan2(dx.hypot(dz)).to_degrees();
+    (yaw, pitch as f32)
+}
+
+/// The distance from `eye` to an enderman's box with feet at `at`.
+fn eye_to_box(eye: [f64; 3], at: [f64; 3]) -> f64 {
+    let lo = [at[0] - ENDER_HALF, at[1], at[2] - ENDER_HALF];
+    let hi = [at[0] + ENDER_HALF, at[1] + ENDER_HEIGHT, at[2] + ENDER_HALF];
+    (0..3)
+        .map(|i| (eye[i] - eye[i].clamp(lo[i], hi[i])).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// The feet are in B: the block west of the feet cell is solid (the back wall).
+fn in_back(w: &World, feet: [f64; 3]) -> bool {
+    let pos = world::BlockPos::new(
+        feet[0].floor() as i32 - 1,
+        (feet[1] + 0.01).floor() as i32,
+        feet[2].floor() as i32,
+    );
+    w.block_at(pos)
+        .is_some_and(|k| k != data::BlockKind::Air && k != data::BlockKind::CaveAir)
+}
+
+/// A burrow script's controls this tick.
+fn burrow_controls(mode: BurrowMode, w: &World) -> Controls {
+    let Some(body) = w.body else {
+        return Controls::default();
+    };
+    let feet = body.pos;
+    let eye = [feet[0], feet[1] + physics::EYE_HEIGHT, feet[2]];
+    let target = nearest_ender(w, feet);
+    let look = |h: f64| {
+        let (yaw, pitch) =
+            target.map_or((270.0, 0.0), |(_, p)| look_at(eye, [p[0], p[1] + h, p[2]]));
+        Controls {
+            yaw,
+            pitch: Some(pitch),
+            ..Controls::default()
+        }
+    };
+    let creepy = any_creepy(w);
+    match mode {
+        BurrowMode::Eye => look(ENDER_EYE),
+        BurrowMode::Near if creepy => look(ENDER_TORSO),
+        BurrowMode::Hold | BurrowMode::Strike if in_back(w, feet) => look(ENDER_TORSO),
+        BurrowMode::Hold | BurrowMode::Strike if creepy => Controls {
+            forward: true,
+            yaw: 90.0,
+            pitch: Some(0.0),
+            ..Controls::default()
+        },
+        BurrowMode::Hold | BurrowMode::Strike | BurrowMode::Near => look(ENDER_EYE),
+    }
+}
+
+/// A burrow script's acts this tick: only `Strike` acts, from B.
+fn burrow_acts(mode: BurrowMode, tick: u64, w: &World) -> Vec<Act> {
+    let Some(body) = w.body else {
+        return Vec::new();
+    };
+    if mode != BurrowMode::Strike
+        || tick % STRIKE_EVERY != STRIKE_EVERY - 1
+        || !in_back(w, body.pos)
+    {
+        return Vec::new();
+    }
+    let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+    match nearest_ender(w, body.pos) {
+        Some((id, at)) if eye_to_box(eye, at) <= STRIKE_REACH => {
+            vec![Act::Attack { entity: id }, Act::Swing]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// What a scripted bot presses.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Script {
@@ -130,9 +289,21 @@ pub enum Script {
         dz: i32,
         face: i8,
     },
+    /// Issue 18's burrow rows (`burrow:<mode>`): the look and the step read from the world each
+    /// tick (`steer`).
+    Burrow(BurrowMode),
 }
 
 impl Script {
+    /// The controls this tick, read from the world where a script needs it (a burrow script's
+    /// look follows the enderman); every other script's are `controls(tick)`.
+    pub fn steer(self, tick: u64, w: &World) -> Controls {
+        match self {
+            Script::Burrow(mode) => burrow_controls(mode, w),
+            other => other.controls(tick),
+        }
+    }
+
     pub fn controls(self, tick: u64) -> Controls {
         match self {
             Script::WalkSquare => {
@@ -176,7 +347,8 @@ impl Script {
             | Script::Craft(_)
             | Script::Eat { .. }
             | Script::Smelt { .. }
-            | Script::Light { .. } => Controls::default(),
+            | Script::Light { .. }
+            | Script::Burrow(_) => Controls::default(),
             Script::Use { yaw, pitch, .. } => Controls {
                 yaw,
                 pitch: Some(pitch),
@@ -195,6 +367,7 @@ impl Script {
     /// What the script does to the world this tick, read from what the world holds.
     pub fn acts(self, tick: u64, w: &World) -> Vec<Act> {
         match self {
+            Script::Burrow(mode) => burrow_acts(mode, tick, w),
             Script::DigDown { finish } => {
                 let Some(body) = w.body else {
                     return Vec::new();
@@ -374,6 +547,7 @@ impl Script {
                 dz,
                 face,
             } => format!("light:{at}:{dx}:{dy}:{dz}:{face}"),
+            Script::Burrow(mode) => format!("burrow:{}", mode.name()),
         }
     }
 
@@ -419,6 +593,9 @@ impl Script {
     }
 
     fn parse_craft(s: &str) -> Option<Script> {
+        if let Some(mode) = s.strip_prefix("burrow:") {
+            return BurrowMode::parse(mode).map(Script::Burrow);
+        }
         if let Some(rest) = s.strip_prefix("attack:") {
             let (every, yaw) = rest.split_once(':')?;
             return Some(Script::Attack {
@@ -472,6 +649,10 @@ mod tests {
             },
             Script::Eat { at: 220 },
             Script::Smelt { take: 460 },
+            Script::Burrow(BurrowMode::Hold),
+            Script::Burrow(BurrowMode::Strike),
+            Script::Burrow(BurrowMode::Eye),
+            Script::Burrow(BurrowMode::Near),
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
         }

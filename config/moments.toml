@@ -1568,3 +1568,90 @@ ticks = 40
 difficulty = "normal"
 mobs = [["enderman", 12, 0, 0]]
 set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0], ["air", 1, 2, 0], ["air", 2, 0, 0], ["air", 2, 1, 0], ["air", 2, 2, 0], ["air", 3, 0, 0], ["air", 3, 1, 0], ["air", 3, 2, 0], ["air", 4, 0, 0], ["air", 4, 1, 0], ["air", 4, 2, 0], ["air", 5, 0, 0], ["air", 5, 1, 0], ["air", 5, 2, 0], ["air", 6, 0, 0], ["air", 6, 1, 0], ["air", 6, 2, 0], ["air", 7, 0, 0], ["air", 7, 1, 0], ["air", 7, 2, 0], ["air", 8, 0, 0], ["air", 8, 1, 0], ["air", 8, 2, 0], ["air", 9, 0, 0], ["air", 9, 1, 0], ["air", 9, 2, 0], ["air", 10, 0, 0], ["air", 10, 1, 0], ["air", 10, 2, 0], ["stone", 12, -1, 0], ["air", 12, 0, 0], ["air", 12, 1, 0], ["air", 12, 2, 0], ["stone", 12, 3, 0], ["stone", 11, 0, 0], ["air", 11, 1, 0], ["air", 11, 2, 0], ["stone", 11, 3, 0], ["stone", 13, 0, 0], ["stone", 13, 1, 0], ["stone", 13, 2, 0], ["stone", 13, 3, 0], ["stone", 11, 0, -1], ["stone", 11, 0, 1], ["stone", 11, 1, -1], ["stone", 11, 1, 1], ["stone", 11, 2, -1], ["stone", 11, 2, 1], ["stone", 11, 3, -1], ["stone", 11, 3, 1], ["stone", 12, 0, -1], ["stone", 12, 0, 1], ["stone", 12, 1, -1], ["stone", 12, 1, 1], ["stone", 12, 2, -1], ["stone", 12, 2, 1], ["stone", 12, 3, -1], ["stone", 12, 3, 1], ["stone", 13, 0, -1], ["stone", 13, 0, 1], ["stone", 13, 1, -1], ["stone", 13, 1, 1], ["stone", 13, 2, -1], ["stone", 13, 2, 1], ["stone", 13, 3, -1], ["stone", 13, 3, 1]]
+
+# Issue 18's burrow (docs/problems/pearls-model.md): a level burrow one wide and two high, built of
+# stone and running east: B the bot's cell, M the mouth east of it, O east of M where the enderman
+# stands. Rows at Normal, each on its own landing 40 south of its centre. The arena rows (e04,
+# e05, e08) start in M: a stone floor 19 by 13, walls four high, a glass roof at 4 (so no
+# daylight teleport and no rain reach it, and no mob spawns in its light), the burrow in its west
+# part: a solid stone block 4 long, 5 wide and 3 high with the 1 by 2 tunnel B, M in it (since
+# parity 45535279839 the cells beside B and behind it are filled: with walls one thick they were 2
+# from B, as O is, and the enderman paced round to them; the top of the roof is cell 3 over the
+# floor, 3 from B, and under the glass only 1 high), an enderman 10 east of M with its AI. Script
+# `burrow:<mode>` (bot::script::BurrowMode): from M stare at its eye until it is creepy, then
+# (hold, strike) walk west into B and look at its torso, or (near) stay in M.
+# - e04-mouth: it comes to O and stays; the bot in B is never hit.
+# - e05-strike: the same with an iron sword, struck on a full charge from B: it dies; its loot
+#   kept (a pearl 0 or 1 at O).
+# - e06-roof: the bot in B looks at the eye of a calm enderman penned at O: M's roof cuts the line,
+#   so neither stared (data 18) nor creepy.
+# - e07-pickup-b, e07-pickup-m: an ender pearl at O is not picked up from B and is from M.
+# - e08-near: the bot stays in M with the angry enderman at O. Planned to prove the depth matters;
+#   on the real server (parity 45531046147) it is never hit: its blow needs a line of sight eye to
+#   eye and M's roof cuts it (docs/problems/pearls-model.md, wall 1).
+
+[[moment]]
+id = "e04-mouth"
+landing = 4
+dx = 0
+dz = 40
+script = "burrow:hold"
+ticks = 460
+difficulty = "normal"
+mobs = [["enderman", 10, 0, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
+
+[[moment]]
+id = "e05-strike"
+landing = 5
+dx = 0
+dz = 40
+script = "burrow:strike"
+ticks = 460
+difficulty = "normal"
+give = ["iron_sword 1"]
+loot = true
+mobs = [["enderman", 10, 0, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
+
+[[moment]]
+id = "e06-roof"
+landing = 6
+dx = 0
+dz = 40
+script = "burrow:eye"
+ticks = 60
+difficulty = "normal"
+mobs = [["enderman", 2, 0, 0]]
+fill = [["air", -1, 0, -2, 3, 4, 2], ["stone", -1, -1, -2, 3, -1, 2], ["stone", -1, 0, -1, -1, 2, 1], ["stone", 0, 0, -1, 1, 2, -1], ["stone", 0, 0, 1, 1, 2, 1], ["stone", 0, 2, 0, 1, 3, 0], ["stone", 3, 0, -1, 3, 3, 1], ["stone", 2, 0, -1, 2, 3, -1], ["stone", 2, 0, 1, 2, 3, 1], ["glass", 1, 4, -1, 3, 4, 1]]
+
+[[moment]]
+id = "e07-pickup-b"
+landing = 7
+dx = 0
+dz = 40
+script = "still"
+ticks = 60
+items = [["ender_pearl", 2, 0, 0]]
+fill = [["air", -1, 0, -2, 3, 3, 2], ["stone", -1, -1, -2, 3, -1, 2], ["stone", -1, 0, -1, -1, 2, 1], ["stone", 0, 0, -1, 1, 2, -1], ["stone", 0, 0, 1, 1, 2, 1], ["stone", 0, 2, 0, 1, 2, 0]]
+
+[[moment]]
+id = "e07-pickup-m"
+landing = 9
+dx = 0
+dz = 40
+script = "still"
+ticks = 60
+items = [["ender_pearl", 1, 0, 0]]
+fill = [["air", -2, 0, -2, 2, 3, 2], ["stone", -2, -1, -2, 2, -1, 2], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
+
+[[moment]]
+id = "e08-near"
+landing = 8
+dx = 0
+dz = 40
+script = "burrow:near"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", 10, 0, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
