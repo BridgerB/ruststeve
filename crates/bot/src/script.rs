@@ -269,12 +269,31 @@ fn nearest_eye_item(w: &World, feet: [f64; 3]) -> Option<[f64; 3]> {
         })
         .map(|e| e.pos)
         .filter(|p| d(*p) <= FETCH_NEAR * FETCH_NEAR)
+        .filter(|p| !on_tree(w, *p))
         .min_by(|a, b| d(*a).total_cmp(&d(*b)))
+}
+
+/// Whether an item rests on a tree, leaves or a log: a canopy or a trunk's top the walk cannot
+/// reach (issue 19, parities 45688030470, 45691653069 and 45694311575: dropped eyes on trees 5 to
+/// 9 over the feet, never taken, real and model alike). Its top face is the one the item lies
+/// on, so it is seen.
+fn on_tree(w: &World, p: [f64; 3]) -> bool {
+    let under = world::BlockPos::new(
+        p[0].floor() as i32,
+        (p[1] - 0.01).floor() as i32,
+        p[2].floor() as i32,
+    );
+    let tree = |k: &data::BlockKind| {
+        ["leaves", "logs"]
+            .iter()
+            .any(|t| data::generated::tags::block_tag(t).is_some_and(|kinds| kinds.contains(k)))
+    };
+    w.block_at(under).is_some_and(|k| tree(&k))
 }
 
 /// A fetch script's controls: still until a dropped eye is seen, then forward at it, holding
 /// jump (a step or a slope is climbed), until it is under the feet; once thrown, with no eye in
-/// flight and none on the ground, back to `home`'s middle.
+/// flight and none on the ground (one on a tree is given up), back to `home`'s middle.
 fn fetch_controls(w: &World, thrown: bool, home: Option<[i32; 3]>) -> Controls {
     let Some(body) = w.body else {
         return Controls::default();
