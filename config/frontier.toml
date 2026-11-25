@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "endermen"
-tag = "race-45481633896"
-asset = "snapshot-endermen-45481633896-race-45481633896-lane-3.tar.zst"
-commit = "c3193e6b25e1ce4e7366071d11f325f3e61931dd"
-how = "rs-l03-b00 of race 45481633896 (resumed from the real rods_7 snapshot of race 45363542882 lane 2, itself from the real spawner snapshot of race 45350933958 lane 0): holding its 7 rods it walked away from the spawner through skeletons and a wither skeleton, saw enderman 224 frozen at 78 blocks, approached it by the plain route and then the far walk (25 bridge blocks, up to y 85), and stood within 32 blocks of it ticking at server tick 3,400 at (13.7, 84.0, 71.7) in a soul sand valley; it sealed a 2-high pocket with the enderman ticking 21.6 off and ended alive at 12.5 health. No look was ever kept off an enderman and none was provoked."
+stage = "forest"
+tag = "race-45537545167"
+asset = "snapshot-forest-45537545167-race-45537545167-lane-0.tar.zst"
+commit = "1c17850c9bd97aeb0b84268d19fb49881a768b71"
+how = "rs-l00-b00 of race 45537545167 (resumed from the real endermen snapshot of race 45481633896 lane 2, itself from the real rods_7 snapshot of race 45363542882 lane 2): out of its sealed pocket, holding its 7 rods, it travelled east by the travel points (Bridger, 2026-11-24: steering by the world's known geography is allowed) through about 300 blocks of basalt deltas, bridging, and stood with its feet in a warped forest at server tick 4,020 at (476.3, 41.0, 152.5), health 18.3, food 17, 142 pickaxe uses, a shield and a raw porkchop held."
