@@ -132,6 +132,7 @@ fn hunter(w: &mut World, b: Burrow) -> Plan {
     w.held = 0;
     let mut p = Plan::with_table(Aim::Race, table());
     p.ender.left = true;
+    p.base.over = true;
     p.pearls.burrow = Some(b);
     p.pearls.built = true;
     p.pearls.since = Some(0);
@@ -435,6 +436,7 @@ fn a_hunter_with_no_burrow_finds_a_site_and_builds_from_b() {
     w.held = 0;
     let mut p = Plan::with_table(Aim::Race, table());
     p.ender.left = true;
+    p.base.over = true;
     w.ticks = 100;
     p.step(&w);
     let b = p
