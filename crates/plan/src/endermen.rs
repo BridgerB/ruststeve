@@ -60,6 +60,9 @@ const VALLEY_EVERY: u64 = 100;
 const VALLEY_NOTE_EVERY: u64 = 1200;
 /// Ticks the fortress footprint is kept before it is read again from memory's brick index.
 const FORTRESS_EVERY: u64 = 600;
+/// Clicks on one pocket cell before it is given up (a block that never shows: the frontier race
+/// 45542558792 clicked one cell 23 times).
+pub const POCKET_CLICKS: u32 = 3;
 /// The pitch the bot holds in its pocket: straight down at its own floor.
 pub const EYES_DOWN: f32 = 90.0;
 /// The enderman's creepy flag (`EnderMan.DATA_CREEPY`, metadata index 17, a boolean): set while
@@ -192,6 +195,9 @@ pub struct EnderState {
     pub pocket_blocks: u32,
     #[serde(default)]
     pub pocket_at: u64,
+    /// Clicks made for each pocket cell (P3: never more than `POCKET_CLICKS` on one).
+    #[serde(default)]
+    pub pocket_clicks: Vec<(Cell, u32)>,
     /// The provoked enderman answered now.
     #[serde(default)]
     pub threat: Option<i32>,
@@ -770,9 +776,10 @@ impl Plan {
     /// until the enderman is calm, gone or farther than `APPROACH_FROM`. Never a swing. Ahead of
     /// every task but the always-rows (an escape from lava still comes first).
     pub(crate) fn ender_threat(&mut self, w: &World, tick: u64) -> Option<Controls> {
-        // >>> pearls (P3, issue 18f): in the hunt a provoked enderman is fought from the burrow
-        // (the hunt's rows), not pocketed; out of the burrow the pocket stands.
-        if self.pearls.started && self.in_burrow(w) {
+        // >>> pearls (P3, issue 18f): in the hunt the hunt's rows answer a provoked enderman
+        // (from the burrow, or a capped pocket with none built: P4's closed loop held this
+        // pocket to the cap).
+        if self.pearls.started {
             return None;
         }
         // <<< pearls
@@ -850,6 +857,7 @@ impl Plan {
         if self.ender.pocket_cell != Some(feet) {
             self.ender.pocket_cell = Some(feet);
             self.ender.pocket_blocks = 0;
+            self.ender.pocket_clicks.clear();
         }
         let threat = self
             .ender
@@ -863,6 +871,17 @@ impl Plan {
         let Some((cell, click, face)) = next else {
             return Pocket::Closed;
         };
+        // >>> pearls (P3): a cell clicked 3 times and still open is given up (the frontier race
+        // 45542558792 clicked (475, 41, 152) 23 times).
+        if self
+            .ender
+            .pocket_clicks
+            .iter()
+            .any(|(c, n)| *c == cell && *n >= POCKET_CLICKS)
+        {
+            return Pocket::Cannot("a pocket cell clicked 3 times stays open");
+        }
+        // <<< pearls
         if !body.on_ground {
             return Pocket::Building;
         }
@@ -891,6 +910,17 @@ impl Plan {
             hold::Hold::Held => {
                 self.ender.pocket_at = tick + crate::SHELTER_EVERY_TICKS;
                 self.ender.pocket_blocks += 1;
+                // >>> pearls (P3)
+                match self
+                    .ender
+                    .pocket_clicks
+                    .iter_mut()
+                    .find(|(c, _)| *c == cell)
+                {
+                    Some(e) => e.1 += 1,
+                    None => self.ender.pocket_clicks.push((cell, 1)),
+                }
+                // <<< pearls
                 self.acts.push(world::Act::UseOn {
                     pos: world::BlockPos::new(click.0, click.1, click.2),
                     face,
@@ -918,6 +948,29 @@ impl Plan {
             return Task::Idle;
         };
         let feet = path::feet_cell(body.pos);
+        // >>> pearls (P3, the orchestrator 2026-11-24): a bot resumed in the warped forest with its
+        // rods goes straight to the hunt, no issue-17 pocket first (the frontier race 45542558792:
+        // all 8 bots walled themselves in at tick 40 in Reach, and the base found no way out).
+        // In Reach only: from Travel, P2's hand-over below notes the forest reached.
+        if self.ender.phase == EnderPhase::Reach
+            && craft::count(w, ItemKind::BlazeRod) >= crate::RODS_WANTED
+            && (w.feet_biome() == Some("warped_forest")
+                || w.stage_reached
+                    .is_some_and(|s| s >= world::stage::Stage::Forest))
+        {
+            self.ender.phase = EnderPhase::Hunt;
+            self.note(
+                tick,
+                "resumed in the forest: on to the hunt".to_owned(),
+                format!(
+                    "{} rods held, the feet's biome {:?}, the stage {:?}",
+                    craft::count(w, ItemKind::BlazeRod),
+                    w.feet_biome(),
+                    w.stage_reached
+                ),
+            );
+        }
+        // <<< pearls
         // >>> travel (P2, issue 18c, docs/problems/pearls-travel.md): the forest at the feet ends
         // the travel; the hunt is the next phase's.
         if self.ender.phase == EnderPhase::Travel && w.feet_biome() == Some("warped_forest") {
