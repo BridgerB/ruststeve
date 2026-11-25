@@ -151,10 +151,14 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 
 /// Blocks from the feet a forest floor cell walked to lies at least (a new place to search).
 const FLOOR_MIN: i32 = 8;
+/// Cells each way on the plane a floor block is dug for filler from where the bot stands.
+const FLOOR_REACH: i32 = 2;
 /// Eye to a block's middle within which the old shell is dug back from where the bot stands.
 const RECLAIM_REACH: f64 = 4.4;
 /// Ticks of one yaw sweep at O.
 const SWEEP_TICKS: u64 = 400;
+/// Blocks within which the feet after a walk on count as not moved.
+const WALK_ON_STILL: i32 = 4;
 /// Blocks a walk on for a new site goes at least.
 const WALK_ON: i32 = 24;
 /// Blocks within which an angry enderman, ticking or frozen, stops a new provoke.
@@ -286,6 +290,9 @@ pub struct PearlState {
     pub reclaim: bool,
     #[serde(default)]
     pub reclaimed: u32,
+    /// Where the last walk on for a site began, and how many in a row left the feet there.
+    #[serde(default)]
+    pub walk_on: Option<([i32; 3], u32)>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -644,6 +651,17 @@ impl Plan {
             return None;
         }
         self.pearls.provoking = None;
+        // The planner's give-up (12 failed walks in a row) never ends the hunt: the frontier race
+        // 45548022681 lane 5 stopped for good at tick ~12,000 of 36,000.
+        if self.stuck {
+            self.stuck = false;
+            self.failed_in_row = 0;
+            self.note(
+                tick,
+                "stuck cleared: the hunt goes on".to_owned(),
+                "the walks' give-up does not end the hunt".to_owned(),
+            );
+        }
         let body = w.body?;
         let r = self.pearl_rules();
         self.pearls_account(w, tick);
@@ -2064,6 +2082,52 @@ impl Plan {
             return None;
         }
         let kinds = [data::BlockKind::Netherrack, data::BlockKind::WarpedNylium];
+        // The floor counts: a floor cell beside the feet, in reach where the bot stands, dug
+        // straight (P4's seed 22 stood on a floor of exposed netherrack and found none "with a
+        // way"): never the cell under the bot, never one over a hole deeper than 1 or by lava.
+        if let Some(body) = w.body {
+            let f = path::stand_cell(w, body.pos);
+            let under = (f.0, f.1 - 1, f.2);
+            let at = |c: path::Cell| w.block_at(world::BlockPos::new(c.0, c.1, c.2));
+            let solid = |c: path::Cell| {
+                at(c).and_then(data::generated::shapes::collision)
+                    == Some(data::types::Collision::Full)
+            };
+            let mut floor: Vec<(i32, path::Cell)> = Vec::new();
+            for dx in -FLOOR_REACH..=FLOOR_REACH {
+                for dz in -FLOOR_REACH..=FLOOR_REACH {
+                    let c = (f.0 + dx, f.1 - 1, f.2 + dz);
+                    if c == under
+                        || !at(c).is_some_and(|k| kinds.contains(&k))
+                        || self.refused_now(c, tick)
+                        || !solid((c.0, c.1 - 1, c.2))
+                    {
+                        continue;
+                    }
+                    let lava = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(ax, az)| {
+                        at((c.0 + ax, c.1, c.2 + az)) == Some(data::BlockKind::Lava)
+                            || at((c.0 + ax, c.1 - 1, c.2 + az)) == Some(data::BlockKind::Lava)
+                    });
+                    if !lava {
+                        floor.push((dx * dx + dz * dz, c));
+                    }
+                }
+            }
+            floor.sort();
+            if let Some((_, c)) = floor.first().copied() {
+                self.refuse(c, tick);
+                self.note(
+                    tick,
+                    format!("restock: dig the floor at {c:?}"),
+                    format!("{filler} filler held; beside the feet {f:?}"),
+                );
+                let dig = match crate::base::spare_pick(w) {
+                    Some(_) => crate::dig::Dig::with_tool(w, c, tick, ItemKind::WoodenPickaxe),
+                    None => crate::dig::Dig::new(w, c, tick),
+                };
+                return Some(Task::Dig(dig));
+            }
+        }
         let cands: Vec<path::Cell> = crate::exposed_near(w, &kinds)
             .into_iter()
             .filter(|c| !self.refused_now(*c, tick))
@@ -2275,10 +2339,32 @@ impl Plan {
                     Goal::Near { pos, .. } => pos,
                     _ => (from[0], from[1], from[2]),
                 };
+                // A walk on that left the feet where they were (the frontier race 45548022681: a
+                // bot on a fungus cap at y 71 "explored to" the endermen's middle 46 off at once,
+                // a hundred times) escalates: the far walk, then the heading.
+                let stalled = self.pearls.walk_on.is_some_and(|(at, _)| {
+                    (0..3).all(|i| (at[i] - feet[i]).abs() <= WALK_ON_STILL)
+                });
+                let n = if stalled {
+                    self.pearls.walk_on.map_or(0, |x| x.1) + 1
+                } else {
+                    0
+                };
+                self.pearls.walk_on = Some((feet, n));
+                if n >= 2 {
+                    self.note(
+                        tick,
+                        format!("walk on stalled {n} times: the heading"),
+                        format!("the feet still at {feet:?}"),
+                    );
+                    if let Some(t) = self.explore_walk(w, tick, "the walk on for a site stalled") {
+                        return Some(t);
+                    }
+                }
                 // A plain route first: the far walk bridges (one bot laid 52 bridge cells toward
                 // the endermen's middle in race 45548022681).
                 let mut walk = Walk::new(target, goal, Arrive::Goal, tick);
-                if !walk.route_now(w, tick) {
+                if n > 0 || !walk.route_now(w, tick) {
                     walk = Walk::far_to(target, goal, tick);
                 }
                 if walk.route_now(w, tick) {
