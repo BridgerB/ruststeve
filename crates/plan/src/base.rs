@@ -63,6 +63,8 @@ pub struct Base {
     pub stem_rise: i32,
     /// Ticks between two notes of the same wait.
     pub note_every: u64,
+    /// Wooden pickaxe uses held after the `wood picks` step.
+    pub wood_pick_uses: i32,
     /// Off a fungus cap: seen warped nylium with room over it walked to between these flat
     /// distances, and the moves down (walks and digs) tried at most this often.
     pub floor_near: i32,
@@ -79,7 +81,7 @@ pub struct Base {
 impl Default for Base {
     fn default() -> Self {
         Self {
-            logs: 8,
+            logs: 10,
             kills: 30,
             hits_per_kill: vec![("iron_sword".to_owned(), 7), ("stone_sword".to_owned(), 8)],
             sword_floor: 10,
@@ -94,6 +96,7 @@ impl Default for Base {
             stem_radius: 48,
             stem_rise: 12,
             note_every: 600,
+            wood_pick_uses: 150,
             floor_near: 8,
             floor_far: 24,
             down_tries: 24,
@@ -114,11 +117,16 @@ pub enum Step {
     StoneSword,
     Pickaxe,
     Shield,
+    /// Wooden pickaxes for the hunt's filler (issue 18f: each burrow is about 39 blocks, and the
+    /// model's 12-pearl loop ran out near the sixth): reclaiming shells and netherrack without
+    /// spending the stone reserve. After the table, by the run order of `STEPS`.
+    WoodPicks,
 }
 
-pub const STEPS: [Step; 7] = [
+pub const STEPS: [Step; 8] = [
     Step::Wood,
     Step::Table,
+    Step::WoodPicks,
     Step::Smelt,
     Step::IronSword,
     Step::StoneSword,
@@ -136,6 +144,7 @@ impl Step {
             Step::StoneSword => "stone swords",
             Step::Pickaxe => "pickaxe",
             Step::Shield => "shield",
+            Step::WoodPicks => "wood picks",
         }
     }
 }
@@ -199,6 +208,7 @@ pub fn starved_by(gone: Step, w: &World, table_near: bool) -> Vec<Step> {
     match gone {
         Step::Wood if !wood && !table => vec![
             Step::Table,
+            Step::WoodPicks,
             Step::Smelt,
             Step::IronSword,
             Step::StoneSword,
@@ -206,6 +216,7 @@ pub fn starved_by(gone: Step, w: &World, table_near: bool) -> Vec<Step> {
             Step::Shield,
         ],
         Step::Table if !table => vec![
+            Step::WoodPicks,
             Step::Smelt,
             Step::IronSword,
             Step::StoneSword,
@@ -218,7 +229,8 @@ pub fn starved_by(gone: Step, w: &World, table_near: bool) -> Vec<Step> {
         | Step::IronSword
         | Step::StoneSword
         | Step::Pickaxe
-        | Step::Shield => Vec::new(),
+        | Step::Shield
+        | Step::WoodPicks => Vec::new(),
     }
 }
 
@@ -264,7 +276,7 @@ pub fn weapon_kills(w: &World, base: &Base) -> i32 {
 /// The hunt's kit is held: swords worth `kills`, `pickaxe_uses` of pickaxes, a shield.
 pub fn kit_held(w: &World, base: &Base) -> bool {
     weapon_kills(w, base) >= base.kills
-        && endermen::pickaxe_uses_left(w) >= base.pickaxe_uses
+        && reserve_pick_uses(w) >= base.pickaxe_uses
         && craft::count(w, ItemKind::Shield) >= 1
 }
 
@@ -534,13 +546,52 @@ pub fn skip_why(step: Step, w: &World, base: &Base, table_near: bool) -> Option<
         Step::IronSword => (ingots < 2).then(|| format!("{ingots} iron ingots, a sword is 2")),
         Step::StoneSword => None,
         Step::Pickaxe => {
-            let uses = endermen::pickaxe_uses_left(w);
+            let uses = reserve_pick_uses(w);
             (uses >= base.pickaxe_uses)
                 .then(|| format!("pickaxe uses {uses} held, of {}", base.pickaxe_uses))
         }
         Step::Shield if shield > 0 => Some(format!("{shield} shield held")),
         Step::Shield => (ingots < 1).then(|| "no iron ingot".to_owned()),
+        Step::WoodPicks => {
+            let uses = wood_pick_uses(w);
+            (uses >= base.wood_pick_uses).then(|| {
+                format!(
+                    "wooden pickaxe uses {uses} held, of {}",
+                    base.wood_pick_uses
+                )
+            })
+        }
     }
+}
+
+/// The pickaxe uses the burrows are kept from: every held pickaxe but the wooden ones, which are
+/// the hunt's for filler (`spare_pick`).
+pub fn reserve_pick_uses(w: &World) -> i32 {
+    endermen::pickaxe_uses_left(w) - wood_pick_uses(w)
+}
+
+/// The wooden pickaxes' uses left, summed (main inventory, hotbar and off hand).
+pub fn wood_pick_uses(w: &World) -> i32 {
+    w.inventory
+        .slots
+        .iter()
+        .filter(|(s, (k, _))| (9..=45).contains(*s) && *k == ItemKind::WoodenPickaxe)
+        .filter_map(|(s, _)| w.inventory.uses_left(*s))
+        .sum()
+}
+
+/// The hunt's pickaxe for filler (P3: reclaiming old shells, restocking netherrack), never the
+/// stone reserve: the slot of a held wooden pickaxe with uses left, the most worn first (one is
+/// used up before the next is begun), or `None`.
+pub fn spare_pick(w: &World) -> Option<i16> {
+    w.inventory
+        .slots
+        .iter()
+        .filter(|(s, (k, _))| (9..=45).contains(*s) && *k == ItemKind::WoodenPickaxe)
+        .filter_map(|(s, _)| w.inventory.uses_left(*s).map(|u| (u, *s)))
+        .filter(|(u, _)| *u > 0)
+        .min()
+        .map(|(_, s)| s)
 }
 
 /// The goal row a repeated step makes one run of, by what is held (`config/goals.toml`), or `None`
@@ -561,6 +612,7 @@ pub fn step_row(step: Step, w: &World) -> Option<&'static str> {
             }
         }
         Step::Shield => Some("base-shield"),
+        Step::WoodPicks => Some("base-wood-pickaxe"),
     }
 }
 
@@ -568,7 +620,8 @@ pub fn step_row(step: Step, w: &World) -> Option<&'static str> {
 fn again(step: Step, w: &World, base: &Base) -> bool {
     match step {
         Step::StoneSword => weapon_kills(w, base) < base.kills,
-        Step::Pickaxe => endermen::pickaxe_uses_left(w) < base.pickaxe_uses,
+        Step::Pickaxe => reserve_pick_uses(w) < base.pickaxe_uses,
+        Step::WoodPicks => wood_pick_uses(w) < base.wood_pick_uses,
         Step::Wood | Step::Table | Step::Smelt | Step::IronSword | Step::Shield => false,
     }
 }
@@ -699,7 +752,7 @@ impl Plan {
                         format!(
                             "swords worth {} kills, pickaxe uses {}, {} logs, {} planks, {} ingots, {} raw iron, {} coal, {} main slots free",
                             weapon_kills(w, &base),
-                            endermen::pickaxe_uses_left(w),
+                            reserve_pick_uses(w),
                             logs_held(w),
                             planks_held(w),
                             craft::count(w, ItemKind::IronIngot),
@@ -886,7 +939,7 @@ impl Plan {
                 "swords worth {} kills of {}, pickaxe uses {} of {}, {} shield; given up: {}",
                 weapon_kills(w, base),
                 base.kills,
-                endermen::pickaxe_uses_left(w),
+                reserve_pick_uses(w),
                 base.pickaxe_uses,
                 craft::count(w, ItemKind::Shield),
                 if gave_up.is_empty() {
@@ -916,9 +969,12 @@ impl Plan {
                 self.stem_step(w, base, tick)
             }
             Step::Smelt => self.smelt_step(w, tick),
-            Step::Table | Step::IronSword | Step::StoneSword | Step::Pickaxe | Step::Shield => {
-                self.row_step(w, table, base, step, tick)
-            }
+            Step::Table
+            | Step::IronSword
+            | Step::StoneSword
+            | Step::Pickaxe
+            | Step::Shield
+            | Step::WoodPicks => self.row_step(w, table, base, step, tick),
         }
     }
 
