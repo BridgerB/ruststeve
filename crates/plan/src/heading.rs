@@ -53,6 +53,13 @@ pub const MAX_CHOICES: u32 = 4;
 /// Filler kept unspent by a leg's bridges (the handoff's 32; `path::BRIDGE_RESERVE` is 16 for the
 /// fortress walk), and a restock from the wall runs to `RESTOCK_TO`, at most `RESTOCK_DIGS` digs.
 pub const KEEP: i64 = 32;
+/// The keep on the way home (issue 19d): the 32 is held for the hunt's sealed pocket, and the hunt
+/// is over; 16 is `path::BRIDGE_RESERVE`, the fortress walk's.
+pub const HOME_KEEP: i64 = 16;
+/// A leg refused only for want of filler restocks for its bridges first when they are at most
+/// this many over the spare (race 45698618366: legs in the deltas wanted 44 to 50 with 11 to 13
+/// spare, and failed "no way on" one after another).
+pub const RESTOCK_BRIDGES: i64 = 64;
 pub const RESTOCK_TO: i64 = 48;
 pub const RESTOCK_DIGS: u32 = 24;
 /// A wall cell is dug for filler from this near the eye (`walk::REACH`).
@@ -185,6 +192,10 @@ pub struct Restock {
     pub uses0: i32,
     pub digs: u32,
     pub began: u64,
+    /// The filler it digs to when over `RESTOCK_TO` (a leg's bridges over the keep); 0 is
+    /// `RESTOCK_TO`.
+    #[serde(default)]
+    pub to: i64,
 }
 
 /// The heading held (plan 17d). Every field defaults: a moment written before one was added loads.
@@ -442,6 +453,35 @@ pub fn choose_dir(
     Some((*best, why))
 }
 
+/// With a point to reach (a travel point, the way home's portal), the quarter turn from `dir` is
+/// the perpendicular axis toward it, by the sign of what is left on that axis; `None` with
+/// nothing left on it (the exploring turn then). Race 45698618366: the way home's bots, the portal
+/// to the -x and -z, turned by seen columns between (-1, 0) and (0, 1) and never tried (0, -1).
+pub fn turn_toward(dir: Dir, feet: Cell, point: (i32, i32)) -> Option<Dir> {
+    let (dx, dz) = (point.0 - feet.0, point.1 - feet.2);
+    let d = if dir.0 == 0 {
+        (dx.signum(), 0)
+    } else {
+        (0, dz.signum())
+    };
+    (d != (0, 0)).then_some(d)
+}
+
+/// With a point to reach, a fresh choice: the axis toward it with the most left on it, of those
+/// not in `avoid`; then the other axis toward it; `None` when both have failed or nothing is
+/// left (the exploring choice then). Never away from the point: the exploring choice heads away
+/// from the seen columns' centroid, and on the way home those columns are the route back, so
+/// every bot of race 45698618366 was sent east, away from the portal.
+pub fn choose_toward(feet: Cell, point: (i32, i32), avoid: &[Dir]) -> Option<Dir> {
+    let (dx, dz) = (point.0 - feet.0, point.1 - feet.2);
+    let x = (dx.signum(), 0);
+    let z = (0, dz.signum());
+    let order = if dx.abs() >= dz.abs() { [x, z] } else { [z, x] };
+    order
+        .into_iter()
+        .find(|d| *d != (0, 0) && !avoid.contains(d))
+}
+
 /// The quarter turn from `dir`: toward the side with fewer seen columns ahead, a tie to the side
 /// other than `last` (alternating). Returns the new axis and its side (1 left, -1 right). Pure.
 pub fn turn_dir(dir: Dir, chunk: (i32, i32), seen: &BTreeSet<(i32, i32)>, last: i8) -> (Dir, i8) {
@@ -470,8 +510,11 @@ pub fn projection(origin: Cell, dir: Dir, c: Cell) -> i32 {
 /// falls, and at the feet's height a floor under it, so no opening over a drop is made.
 fn restock_cell(w: &World, feet: Cell, c: Cell) -> bool {
     let kind = |c: Cell| w.block_at(BlockPos::new(c.0, c.1, c.2));
-    if kind(c) != Some(BlockKind::Netherrack)
-        || !crate::escape::exposed(w, c)
+    // Netherrack, and the deltas' basalt and blackstone (bridge blocks too, issue 19d).
+    if !matches!(
+        kind(c),
+        Some(BlockKind::Netherrack | BlockKind::Basalt | BlockKind::Blackstone)
+    ) || !crate::escape::exposed(w, c)
         || c.1 < feet.1
         || c.1 > feet.1 + WALL_RISE
     {
@@ -528,6 +571,8 @@ fn drops_filler(k: Option<BlockKind>) -> bool {
                 | BlockKind::Andesite
                 | BlockKind::Tuff
                 | BlockKind::Dirt
+                | BlockKind::Basalt
+                | BlockKind::Blackstone
         )
     )
 }
@@ -976,12 +1021,16 @@ impl Plan {
             }
         }
         // Under the keep: restock from the wall before the leg.
-        if path::bridge_blocks(w) < KEEP && h.restock.is_none() && tick >= h.restock_after {
+        if path::bridge_blocks(w) < self.heading_keep()
+            && h.restock.is_none()
+            && tick >= h.restock_after
+        {
             h.restock = Some(Restock {
                 filler0: path::bridge_blocks(w),
                 uses0: pickaxe_uses_left(w),
                 digs: 0,
                 began: tick,
+                to: 0,
             });
             if let Some(t) = self.heading_restock(w, h, tick) {
                 return Some(t);
@@ -1145,6 +1194,8 @@ impl Plan {
         if tick < leg.wait_until {
             return Some(Task::Idle);
         }
+        let keep = self.heading_keep();
+        let mut want_filler: Option<i64> = None;
         let mut refusals: Vec<String> = Vec::new();
         loop {
             leg.tries += 1;
@@ -1155,7 +1206,7 @@ impl Plan {
                     let far = leg.way == Way::Far;
                     let mut walk = if far {
                         let mut walk = Walk::far_to(leg.target, goal, tick);
-                        walk.more.keep = Some(KEEP);
+                        walk.more.keep = Some(keep);
                         walk
                     } else {
                         Walk::new(leg.target, goal, crate::walk::Arrive::Goal, tick)
@@ -1165,7 +1216,10 @@ impl Plan {
                     let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
                     self.expanded += walk.expanded;
                     let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
-                    let spare = path::bridge_blocks(w) - KEEP;
+                    let spare = path::bridge_blocks(w) - keep;
+                    if found && bridges > spare && bridges <= spare + RESTOCK_BRIDGES {
+                        want_filler = Some(keep + bridges);
+                    }
                     // A route with no bridge is taken whatever is held; one that bridges keeps
                     // the keep.
                     if found && (bridges == 0 || bridges <= spare) {
@@ -1296,6 +1350,34 @@ impl Plan {
                         }
                         self.expanded += walk.expanded;
                     }
+                    // Refused only for filler: dig it from the walls first, the leg kept.
+                    if let Some(want) = want_filler
+                        && h.restock.is_none()
+                        && tick >= h.restock_after
+                    {
+                        leg_now.way = Way::Walk;
+                        leg_now.tries = 0;
+                        let filler = path::bridge_blocks(w);
+                        h.restock = Some(Restock {
+                            filler0: filler,
+                            uses0: pickaxe_uses_left(w),
+                            digs: 0,
+                            began: tick,
+                            to: want,
+                        });
+                        self.note(
+                            tick,
+                            format!("heading leg {n} restocks for its bridges"),
+                            format!(
+                                "filler {filler}, {want} wanted (the keep {keep} and the far \
+                                 walk's bridges); {}",
+                                refusals.join("; ")
+                            ),
+                        );
+                        if let Some(t) = self.heading_restock(w, h, tick) {
+                            return Some(t);
+                        }
+                    }
                     self.note(
                         tick,
                         format!("heading leg {n} has no way"),
@@ -1396,16 +1478,31 @@ impl Plan {
         if h.idle_turns > IDLE_TURNS {
             h.choices += 1;
             let avoid = std::mem::take(&mut h.failed);
-            let chosen = (h.choices < MAX_CHOICES)
-                .then(|| {
-                    let soul = if self.ender.phase == crate::endermen::EnderPhase::Reach {
-                        soul_columns(w, &seen)
-                    } else {
-                        BTreeMap::new()
-                    };
-                    choose_dir(feet, &seen, &soul, &[was])
+            let toward = h.point.and_then(|p| {
+                let mut skip = avoid.clone();
+                skip.push(was);
+                choose_toward(feet, p, &skip).map(|d| {
+                    (
+                        d,
+                        format!("toward the point ({}, {}), never away from it", p.0, p.1),
+                    )
                 })
-                .flatten();
+            });
+            let chosen = (h.choices < MAX_CHOICES)
+                .then(|| toward.clone())
+                .flatten()
+                .or_else(|| {
+                    (h.choices < MAX_CHOICES)
+                        .then(|| {
+                            let soul = if self.ender.phase == crate::endermen::EnderPhase::Reach {
+                                soul_columns(w, &seen)
+                            } else {
+                                BTreeMap::new()
+                            };
+                            choose_dir(feet, &seen, &soul, &[was])
+                        })
+                        .flatten()
+                });
             let Some((dir, reason)) = chosen else {
                 h.over = true;
                 self.note(
@@ -1431,12 +1528,22 @@ impl Plan {
                 ),
             );
         } else {
-            let (dir, side) = turn_dir(was, (feet.0 >> 4, feet.2 >> 4), &seen, h.side);
+            let (dir, side) = match h.point.and_then(|p| turn_toward(was, feet, p)) {
+                Some(d) => (d, h.side),
+                None => turn_dir(was, (feet.0 >> 4, feet.2 >> 4), &seen, h.side),
+            };
             h.dir = dir;
             h.side = side;
             self.note(
                 tick,
-                format!("heading turned to ({}, {})", dir.0, dir.1),
+                format!(
+                    "heading turned to ({}, {}){}",
+                    dir.0,
+                    dir.1,
+                    h.point
+                        .map(|p| format!(" toward the point ({}, {})", p.0, p.1))
+                        .unwrap_or_default()
+                ),
                 format!(
                     "from ({}, {}) after {why}; best there {}; {} turns without {RECHOOSE_GAIN} \
                      gained",
@@ -1449,12 +1556,24 @@ impl Plan {
         Some(())
     }
 
+    /// Filler a leg's bridges leave unspent: `HOME_KEEP` on the way home, else `KEEP`.
+    fn heading_keep(&self) -> i64 {
+        if self.ender.phase == crate::endermen::EnderPhase::Home {
+            HOME_KEEP
+        } else {
+            KEEP
+        }
+    }
+
     /// The restock in hand: the next wall cell dug, or its end noted (filler back to `RESTOCK_TO`,
     /// `RESTOCK_DIGS` dug, or no cell to dig).
     fn heading_restock(&mut self, w: &World, h: &mut Heading, tick: u64) -> Option<Task> {
+        let keep = self.heading_keep();
         let r = h.restock.as_mut()?;
         let filler = path::bridge_blocks(w);
-        let cell = (filler < RESTOCK_TO && r.digs < RESTOCK_DIGS)
+        let to = r.to.max(RESTOCK_TO);
+        let max_digs = RESTOCK_DIGS.max(u32::try_from(to - r.filler0 + 8).unwrap_or(0));
+        let cell = (filler < to && r.digs < max_digs)
             .then(|| restock_cells(w).into_iter().next())
             .flatten();
         if let Some(c) = cell {
@@ -1463,12 +1582,12 @@ impl Plan {
             self.note(
                 tick,
                 format!("restock dig {c:?}"),
-                format!("filler {filler} under the keep {KEEP}; dig {n} of this restock"),
+                format!("filler {filler} under {to} (the keep {keep}); dig {n} of this restock"),
             );
             return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
         }
         let r = h.restock.take()?;
-        if filler < KEEP {
+        if filler < keep {
             h.restock_after = tick + PACE_TICKS;
         }
         self.note(
@@ -1480,7 +1599,7 @@ impl Plan {
                 r.digs,
                 (r.uses0 - pickaxe_uses_left(w)).max(0),
                 tick.saturating_sub(r.began),
-                if filler < KEEP {
+                if filler < keep {
                     " (no wall cell to dig: still under the keep)"
                 } else {
                     ""

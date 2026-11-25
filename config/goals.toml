@@ -762,10 +762,16 @@ provides = [["item:crafting_table", 1]]
 # bounded at 6,000 ticks, five game minutes, as the plan's 19d.1).
 pearls_wanted = 14
 top_up_ticks = 6000
-# Way points (x, z) before the portal, known geography (Bridger's ruling of 2026-11-24). None
-# yet: the heading runs straight at the portal until Q1's read of the snapshot's memory and the
-# strip map says whether the deltas want points (docs/problems/eyes-home.md).
-way = []
+# Way points (x, z) before the portal, known geography (Bridger's ruling of 2026-11-24): the chain's
+# own route east, reversed, which memory saw, so the far walks meet the old bridges and tunnels.
+# Straight at the portal, race 45698618366's bots stalled at x 448 to 465 in the deltas (no walk,
+# no tunnel route, bridges past the spare). The route east (docs/problems/pearls-travel.md, the
+# forest snapshot of race 45537545167 lane 0, an ancestor of the frontier): from the endermen
+# pocket at (8, 81) east along the deltas, "heading crosses basalt deltas" at (226, 41, 194), into
+# the forest at (464, 68, 160) and (497, 42, 153); the hunt then moved north to z 13 to 38. So
+# back: south to the forest's old cell, west along z 150 to 200 to x 226, then the pocket, then
+# the portal at (22, 34, -20).
+way = [[490, 150], [226, 194], [8, 81]]
 # The entry portal by geography, used only when memory holds no nether_portal sighting. Q1's
 # probe 45686594347 read the frontier snapshot's memory: nether_portal blocks at x 22 to 23, y 34
 # to 36, z -20, still lit, so memory is the way and this is the fallback: the lower inside cell.

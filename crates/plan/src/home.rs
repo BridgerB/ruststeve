@@ -72,7 +72,7 @@ impl Default for HomeRules {
         Self {
             pearls_wanted: 14,
             top_up_ticks: 6000,
-            way: Vec::new(),
+            way: vec![[490, 150], [226, 194], [8, 81]],
             portal: Some([22, 34, -20]),
             portal_chunks: 48,
             portal_every: 1200,

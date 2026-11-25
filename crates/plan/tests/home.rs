@@ -618,3 +618,19 @@ fn warped_wood_burns_as_sticks_and_the_cook_asks_for_them() {
     let row = plan::cook_goal(&c, &t.survival).unwrap_or_else(|| panic!("a cook row"));
     assert_eq!(row.id, "cook", "{row:?}");
 }
+
+#[test]
+fn a_heading_with_a_point_turns_and_chooses_toward_it() {
+    use plan::heading::{choose_toward, turn_toward};
+    // Race 45698618366 lane 3: at (450, 40, 51), the portal at (22, -20): -x and -z.
+    let feet = (450, 40, 51);
+    let p = (22, -20);
+    assert_eq!(turn_toward((-1, 0), feet, p), Some((0, -1)));
+    assert_eq!(turn_toward((0, 1), feet, p), Some((-1, 0)));
+    // The fresh choice: the longer axis toward it first, never away (east was chosen).
+    assert_eq!(choose_toward(feet, p, &[]), Some((-1, 0)));
+    assert_eq!(choose_toward(feet, p, &[(-1, 0)]), Some((0, -1)));
+    assert_eq!(choose_toward(feet, p, &[(-1, 0), (0, -1)]), None);
+    // Nothing left on the turned-to axis: the exploring turn decides.
+    assert_eq!(turn_toward((-1, 0), (450, 40, -20), p), None);
+}
