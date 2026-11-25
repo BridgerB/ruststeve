@@ -45,6 +45,7 @@ pub struct PearlRules {
     pub provoke_min: f64,
     pub provoke_max: f64,
     pub provoke_out_min: f64,
+    pub provoke_out_max: f64,
     pub provoke_tries: u32,
     pub provoke_skip_ticks: u64,
     pub fall_window: u64,
@@ -79,6 +80,7 @@ impl Default for PearlRules {
             provoke_min: 6.0,
             provoke_max: 36.0,
             provoke_out_min: 12.0,
+            provoke_out_max: 40.0,
             provoke_tries: 3,
             provoke_skip_ticks: 2400,
             fall_window: 200,
@@ -1606,12 +1608,25 @@ impl Plan {
                 .iter()
                 .any(|(i, _, until)| *i == s.id && tick < *until)
         };
+        // One a provoke from M failed on is tried from O next (the frontier race 45548022681 lane
+        // 6: three stares from M at one 13 off in our sight, its stared-at flag never set: the
+        // server's line from M was cut by what we do not see).
+        let failed_m = |s: &Sighting| {
+            self.pearls
+                .tries
+                .iter()
+                .any(|(i, n, _)| *i == s.id && *n > 0)
+        };
         let from_m = provoke_candidates(w, eye_in(b.m), r)
             .into_iter()
-            .find(|s| !skipped(s))
+            .find(|s| !skipped(s) && !failed_m(s))
             .map(|s| (s, b.m));
         let from_o = || {
-            provoke_candidates_from(w, eye_in(b.o), r.provoke_out_min, r)
+            let far = PearlRules {
+                provoke_max: r.provoke_out_max,
+                ..r.clone()
+            };
+            provoke_candidates_from(w, eye_in(b.o), r.provoke_out_min, &far)
                 .into_iter()
                 .find(|s| !skipped(s))
                 .map(|s| (s, b.o))
@@ -2051,7 +2066,12 @@ impl Plan {
                     Goal::Near { pos, .. } => pos,
                     _ => (from[0], from[1], from[2]),
                 };
-                let mut walk = Walk::far_to(target, goal, tick);
+                // A plain route first: the far walk bridges (one bot laid 52 bridge cells toward
+                // the endermen's middle in race 45548022681).
+                let mut walk = Walk::new(target, goal, Arrive::Goal, tick);
+                if !walk.route_now(w, tick) {
+                    walk = Walk::far_to(target, goal, tick);
+                }
                 if walk.route_now(w, tick) {
                     self.walks += 1;
                     self.note(
