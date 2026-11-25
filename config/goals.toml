@@ -496,6 +496,9 @@ provoke_max = 36.0
 # cells, some 10 ticks walking; an angry enderman walks within 16 (about 0.3 a tick) and teleports
 # from past 16 after 15 goal ticks (the 26.1.2 jar), so 12 leaves it 30 ticks or more out.
 provoke_out_min = 12.0
+# From O the view is wide and the step back to B is two cells: out to 40 there when the line is
+# clear (the orchestrator; M stays at 36, past which clojurecraft's stares angered none).
+provoke_out_max = 40.0
 # Provokes on one enderman with no anger before it is skipped, and for how long (the plan's 18f).
 provoke_tries = 3
 provoke_skip_ticks = 2400
@@ -545,6 +548,13 @@ near_o = 8.0
 # after base_retry_ticks: the frontier race 45542558792 held all 8 bots 2,400 ticks a step on a stem
 # with no way to it, and the iron sword alone is about 23 kills.
 base_wait_ticks = 600
+# The burrow moves only when no enderman has been within this of B for burrow_idle_ticks (moves cost
+# a 38-block shell: P4's closed loop ran out of filler near the cap).
+seen_near = 40.0
+# Under restock_below burrow blocks held, netherrack is dug near the burrow up to restock_to (a
+# burrow is up to 38; the frontier bot holds about 263 filler).
+restock_below = 60
+restock_to = 120
 # An angry enderman with no burrow built: issue 17's pocket where the bot stands for this long at
 # most, then the hunt goes on (anger with a target lasts; P4's closed loop held the pocket to the
 # cap).
