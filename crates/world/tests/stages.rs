@@ -508,7 +508,7 @@ fn overworld_holds_home_with_twelve_eyes_and_pearls() {
 }
 
 /// Issue 19's `stronghold` and `portal_room`: a frame ring seen exposed within 128 is the
-/// stronghold; the feet in an air cell within 8 of the ring's centre at the room's height is the
+/// stronghold; the feet in an air cell within 4.5 of the ring's centre at the room's height is the
 /// room. Far off on x, or above the room, is not; no frames in memory is neither.
 #[test]
 fn stronghold_and_portal_room_read_the_frame_ring() {
@@ -538,6 +538,11 @@ fn stronghold_and_portal_room_read_the_frame_ring() {
     w.step(&teleport_to(18.5, 28.0, 22.5));
     second(&mut w);
     assert_eq!(w.stage_reached, Some(Stage::PortalRoom));
+    // 5 off on x: past the room's short half (4.5), maybe in a wall or the corridor beyond.
+    w.step(&teleport_to(17.4, 28.0, 22.5));
+    w.step(&tick());
+    assert!(!Stage::PortalRoom.holds(&w));
+    assert_eq!(world::stage::ROOM_HALF, 4.5);
     // 9 off on x: outside the box.
     w.step(&teleport_to(13.4, 28.0, 22.5));
     w.step(&tick());

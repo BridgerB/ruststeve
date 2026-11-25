@@ -132,11 +132,14 @@ pub const EYES_FULL: i64 = 12;
 pub const FRAME_NEAR: f64 = 128.0;
 /// Chunk columns of memory looked through for frames: `FRAME_NEAR` / 16.
 pub const FRAME_CHUNKS: i32 = 8;
-/// The portal room's box about the frame ring's centre (issue 19a.4, the 26.1.2 jar's
-/// `StrongholdPieces.PortalRoom`, probe 45685968956): the piece is 11 by 16 with the ring near
-/// its middle, so the feet within 8 of the centre along each axis are inside the room or its
-/// walls (the feet cell must also be air).
-pub const ROOM_HALF: i32 = 8;
+/// The portal room's box about the frame ring's centre: within this along both axes the feet are
+/// inside the room whichever way it faces. The piece is 11 by 16 with its walls (the 26.1.2 jar,
+/// probe 45685968956); the race world's room (probe 45689842509: ring x 1626 to 1630, z -36 to
+/// -32, frames at y 19, walls at z -39 and -29 and x 1623 and 1638, the door at x 1638) has an
+/// inside 4.5 from the centre on its short axis and from -4.5 to +9.5 on its long one, the door's
+/// end. The 8 first proposed reached through the west wall into a corridor at x 1621 to 1622
+/// (air at y 19 to 20), so the box is the short axis's both ways.
+pub const ROOM_HALF: f64 = 4.5;
 /// The room's frames lie at piece y 3, its floor at y 0 (feet y 1), its stair landing higher:
 /// feet y from the frame y - 2 to the frame y + 2 (the same template).
 pub const ROOM_BELOW: i32 = 2;
@@ -200,7 +203,7 @@ pub fn in_portal_room(w: &World) -> bool {
         body.pos[1].floor() as i32,
         body.pos[2].floor() as i32,
     );
-    let half = f64::from(ROOM_HALF);
+    let half = ROOM_HALF;
     (body.pos[0] - centre[0]).abs() <= half
         && (body.pos[2] - centre[1]).abs() <= half
         && (fy - ROOM_BELOW..=fy + ROOM_ABOVE).contains(&feet.y)
