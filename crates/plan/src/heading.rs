@@ -512,6 +512,10 @@ pub fn projection(origin: Cell, dir: Dir, c: Cell) -> i32 {
 /// refusal reads the cells a cut opens: docs/problems/nether-tunnel.md), nothing over it that
 /// falls, and at the feet's height a floor under it, so no opening over a drop is made.
 fn restock_cell(w: &World, feet: Cell, ahead: Option<Dir>, c: Cell) -> bool {
+    // The floor only with a heading to keep clear of (the way home's restock).
+    if c.1 < feet.1 && ahead.is_none() {
+        return false;
+    }
     let kind = |c: Cell| w.block_at(BlockPos::new(c.0, c.1, c.2));
     // Netherrack, and the deltas' basalt and blackstone (bridge blocks too, issue 19d).
     if !matches!(
@@ -1598,9 +1602,13 @@ impl Plan {
         let filler = path::bridge_blocks(w);
         let to = r.to.max(RESTOCK_TO);
         let max_digs = RESTOCK_DIGS.max(u32::try_from(to - r.filler0 + 8).unwrap_or(0));
-        let dir = h.dir;
+        // The way home digs the floor too and looks within RESTOCK_LOOK (the deltas' open
+        // basalt); elsewhere the walls within reach, as before.
+        let home = self.ender.phase == crate::endermen::EnderPhase::Home;
+        let ahead = home.then_some(h.dir);
+        let look = if home { RESTOCK_LOOK } else { RESTOCK_REACH };
         let cell = (filler < to && r.digs < max_digs)
-            .then(|| restock_cells(w, Some(dir), RESTOCK_LOOK).into_iter().next())
+            .then(|| restock_cells(w, ahead, look).into_iter().next())
             .flatten();
         // Past the dig's reach: a walk to beside it first.
         if let Some(c) = cell
@@ -1626,11 +1634,7 @@ impl Plan {
             }
             self.expanded += walk.expanded;
         }
-        let cell = cell.and_then(|_| {
-            restock_cells(w, Some(dir), RESTOCK_REACH)
-                .into_iter()
-                .next()
-        });
+        let cell = cell.and_then(|_| restock_cells(w, ahead, RESTOCK_REACH).into_iter().next());
         if let Some(c) = cell {
             r.digs += 1;
             let n = r.digs;
