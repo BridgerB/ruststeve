@@ -1646,7 +1646,9 @@ impl Plan {
             return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
         }
         let r = h.restock.take()?;
-        if filler < keep {
+        // Short of what it dug for (under the keep, or a leg's bridges): no other restock here for a
+        // while (race 45715674818: six legs in one tick each began one and found no cell).
+        if filler < keep || (r.to > 0 && filler < r.to) {
             h.restock_after = tick + PACE_TICKS;
         }
         self.note(

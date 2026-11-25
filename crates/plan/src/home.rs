@@ -146,6 +146,9 @@ pub struct HomeState {
     /// Walks to a log for the cook's fuel.
     #[serde(default)]
     pub fuel_walks: u32,
+    /// Runs of stone pickaxes made on the trip (from blackstone).
+    #[serde(default)]
+    pub trip_pick_runs: u32,
     /// The way points' chunk columns reached, kept past any one heading.
     #[serde(default)]
     pub ways_passed: Vec<(i32, i32)>,
@@ -881,6 +884,44 @@ impl Plan {
         let r = self.home_rules();
         let body = w.body?;
         let feet = path::stand_cell(w, body.pos);
+        // Stone pickaxes on the way from the deltas' blackstone (`#stone_tool_materials`), with
+        // the kit's table and sticks, once the stone uses fall under the base's (the coordinator,
+        // 2026-11-25: the long way wears them; the walls are full of blackstone).
+        let picking = self.base.steps == base::CLIMB_STEPS.to_vec() && !self.base.over;
+        let want = self.table.as_ref().map_or(100, |t| t.base.pickaxe_uses);
+        let stone = craft::count(w, ItemKind::Blackstone)
+            + craft::count(w, ItemKind::Cobblestone)
+            + craft::count(w, ItemKind::CobbledDeepslate);
+        if !picking
+            && base::reserve_pick_uses(w) < want
+            && stone >= 3
+            && craft::count(w, ItemKind::Stick) >= 2
+            && self.ender.home.trip_pick_runs < r.pick_runs
+        {
+            self.ender.home.trip_pick_runs += 1;
+            self.base = base::BaseState {
+                steps: base::CLIMB_STEPS.to_vec(),
+                ..base::BaseState::default()
+            };
+            self.note(
+                tick,
+                format!("home: pickaxes on the way ({})", self.ender.home.trip_pick_runs),
+                format!(
+                    "stone pickaxe uses {} under {want}; {} blackstone, {} cobblestone, {} sticks, {} tables",
+                    base::reserve_pick_uses(w),
+                    craft::count(w, ItemKind::Blackstone),
+                    craft::count(w, ItemKind::Cobblestone),
+                    craft::count(w, ItemKind::Stick),
+                    craft::count(w, ItemKind::CraftingTable)
+                ),
+            );
+        }
+        if self.base.steps == base::CLIMB_STEPS.to_vec()
+            && !self.base.over
+            && let Some(t) = self.base_task(w, tick)
+        {
+            return Some(t);
+        }
         let Some(portal) = self.home_portal(w, tick) else {
             self.retry_at = tick + crate::RETRY_TICKS * 10;
             return Some(Task::Idle);
