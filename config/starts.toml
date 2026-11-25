@@ -241,7 +241,7 @@ name = "dev-overworld-eyes"
 stage = "pearls_12"
 place = { dimension = "minecraft:overworld", x = 55.5, y = 70, z = -132.5 }
 spread = 16
-kit = [["ender_eye", 14], ["cooked_beef", 32]]
+kit = [["ender_eye", 14], ["cooked_beef", 32], ["crafting_table", 1], ["stick", 8]]
 
 # dev-stronghold: 150 blocks west of the located stronghold, on the surface within 16, for the
 # dig into the portal room (19f).
@@ -250,4 +250,4 @@ name = "dev-stronghold"
 stage = "pearls_12"
 place = { dimension = "minecraft:overworld", x = 1498.5, y = 90, z = -15.5 }
 spread = 16
-kit = [["ender_eye", 14], ["cooked_beef", 32]]
+kit = [["ender_eye", 14], ["cooked_beef", 32], ["crafting_table", 1], ["stick", 8]]
