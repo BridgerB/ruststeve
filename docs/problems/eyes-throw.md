@@ -39,3 +39,6 @@ Fix (structural, two parts):
 - The rest rule: a drop whose height is unchanged for `rest_ticks` 8 more than `rest_rise` 2 over the feet is given up at once (`eye pickup given up: rests high`). Test: `a_drop_resting_over_the_reach_is_given_up_and_a_falling_one_is_not`.
 
 Not yet counted on a server: both notes are the count to read in the first real race.
+
+### Throw 1 rested 9 up with no walk first (Q4's race 45698008920, both lanes)
+The guard looked for trees within 6 of the feet, but the eye comes down about 12 out and 9 up: the canopy that caught it was outside the 6. Fix: `ring_blocked` checks the eight sides 10 to 14 out from the feet's level up 10 (the same column test as `apex_blocked`); any side blocked (`first_blocked`, or a tree within 6) walks 16 to the point whose ring has the fewest sides blocked (`open_side`), at most 4 walks. A clear side does not help: the eye flies the stronghold's bearing, not the look's. Test: `a_canopy_12_east_blocks_throw_1_and_the_walk_leaves_it`. Count to read in the next race: `walk to open ground` before throw 1, and no `rests high` on it.

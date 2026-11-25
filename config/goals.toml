@@ -939,6 +939,12 @@ apex_up = 9.1
 # leaf seen within 6 on the plane over the feet's level (a canopy that near could catch the drop),
 # else a walk 16 to the side with the fewest, at most 4 walks before throwing anyway.
 first_clear = 6
+# The first throw's ring (Q4's race 45698008920, both lanes: throw 1's eye rested 9 up on a canopy
+# about 12 out, past first_clear): each of the 8 sides, 10 to 14 out around the drop's 12, from the
+# feet's level up 10 (the drop's 9.1 and a block over); any blocked side walks first.
+ring_from = 10
+ring_to = 14
+ring_up = 10.0
 open_walk = 16.0
 open_walks_max = 4
 # At most 4 throws (the plan, 19c.6: 0.8 eyes lost at one in five).
