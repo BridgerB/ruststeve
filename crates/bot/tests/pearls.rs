@@ -25,10 +25,10 @@ fn forest_burrow(seed: u64) -> (Sim, i32) {
     let stone = data::BlockKind::Stone;
     stage
         .biome((-64, 79), (-64, 79), Biome::WarpedForest)
-        .fill((B - 1, B - 1), (FEET, FEET + 2), (-1, 1), stone)
-        .fill((B, M), (FEET, FEET + 2), (-1, -1), stone)
-        .fill((B, M), (FEET, FEET + 2), (1, 1), stone)
-        .fill((B, M), (FEET + 2, FEET + 2), (0, 0), stone)
+        // A solid block 4 long, 5 wide, 3 high with the tunnel in it: O the only cell 2 from B
+        // (parity 45535279839: walls one thick tied O with the cells beside and behind B).
+        .fill((B - 2, M), (FEET, FEET + 2), (-2, 2), stone)
+        .fill((B, M), (FEET, FEET + 1), (0, 0), data::BlockKind::Air)
         .spawn((M, FEET, 0));
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(seed);
     let id = sim.summon_enderman([f64::from(M + 10) + 0.5, f64::from(FEET), 0.5]);

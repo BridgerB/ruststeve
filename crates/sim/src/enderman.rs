@@ -408,6 +408,67 @@ impl Sim {
             })
     }
 
+    /// Whether the segment from `a` to `b` crosses no cell that collides, every cell it passes
+    /// visited (a voxel walk, Amanatides and Woo): the blow's line of sight (`ClipContext` from eye
+    /// to eye, issue 18). `sight`'s samples every few tenths miss a line that clips a roof's
+    /// corner for a tenth of a block (parity 45536742445: the bot in M under the roof was hit in
+    /// the model and not in real). A cell partly solid counts as solid, as in `sight`.
+    fn clear_line(&self, a: [f64; 3], b: [f64; 3]) -> bool {
+        let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let mut cell = a.map(|v| v.floor() as i32);
+        let end = b.map(|v| v.floor() as i32);
+        let step = d.map(|v| {
+            if v > 0.0 {
+                1
+            } else if v < 0.0 {
+                -1
+            } else {
+                0
+            }
+        });
+        let mut t_max = [0.0f64; 3];
+        let mut t_delta = [f64::INFINITY; 3];
+        for i in 0..3 {
+            if step[i] != 0 {
+                let next = if step[i] > 0 {
+                    f64::from(cell[i] + 1)
+                } else {
+                    f64::from(cell[i])
+                };
+                t_max[i] = (next - a[i]) / d[i];
+                t_delta[i] = 1.0 / d[i].abs();
+            } else {
+                t_max[i] = f64::INFINITY;
+            }
+        }
+        let blocks = |c: [i32; 3]| {
+            self.state_at(c[0], c[1], c[2]).is_some() && self.solid(c[0], c[1], c[2]).is_some()
+        };
+        // At most the cells a segment this long can cross.
+        let most = 3 + d.iter().map(|v| v.abs().ceil() as i32).sum::<i32>();
+        for _ in 0..most {
+            if blocks(cell) {
+                return false;
+            }
+            if cell == end {
+                return true;
+            }
+            let i = if t_max[0] <= t_max[1] && t_max[0] <= t_max[2] {
+                0
+            } else if t_max[1] <= t_max[2] {
+                1
+            } else {
+                2
+            };
+            if t_max[i] > 1.0 {
+                return true;
+            }
+            cell[i] += step[i];
+            t_max[i] += t_delta[i];
+        }
+        true
+    }
+
     /// Whether an enderman stands in cell `c`: its body fits at the cell's middle and a floor
     /// holds it (`WalkNodeEvaluator`'s walkable node for a mob 2.9 high: three cells clear).
     fn ender_stands(&self, c: [i32; 3]) -> bool {
@@ -667,7 +728,7 @@ impl Sim {
             // `MeleeAttackGoal.canPerformAttack`: in the attack box, and seen (`Sensing.hasLineOfSight`,
             // eye to eye: issue 18's burrow walls stop a blow through them).
             let seen = || {
-                self.sight(
+                self.clear_line(
                     [pos[0], pos[1] + EYE, pos[2]],
                     [self.pos[0], self.pos[1] + physics::EYE_HEIGHT, self.pos[2]],
                 )

@@ -248,8 +248,80 @@ fn trace_line(w: &World) -> Option<String> {
     ))
 }
 
-/// A real run's trace, folded from its recording: a line every `TRACE_EVERY` ticks.
-fn trace_recording(path: &Path) -> Result<Vec<String>, String> {
+/// A placed mob followed through a run by its entity id (issue 18): the first entity of its kind
+/// seen within `TRACK_NEAR` of where it was put, and the cells its feet were in at each trace
+/// sample. Its class takes the cell it was in most (an enderman at the mouth wanders a step and
+/// comes back: the last sample is luck), and never another of its kind (a natural spawn).
+struct Track {
+    kind: String,
+    at: [f64; 3],
+    id: Option<i32>,
+    cells: std::collections::BTreeMap<[i32; 3], u32>,
+}
+
+/// How near where it was put a placed mob is first found.
+const TRACK_NEAR: f64 = 32.0;
+
+fn tracks_of(spots: &[(String, [f64; 3])]) -> Vec<Track> {
+    spots
+        .iter()
+        .map(|(kind, at)| Track {
+            kind: kind.clone(),
+            at: *at,
+            id: None,
+            cells: std::collections::BTreeMap::new(),
+        })
+        .collect()
+}
+
+fn track_step(w: &World, tracks: &mut [Track]) {
+    for t in tracks.iter_mut() {
+        let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - t.at[i]).powi(2)).sum::<f64>().sqrt();
+        if t.id.is_none() {
+            t.id = w
+                .entities
+                .iter()
+                .filter(|(_, e)| {
+                    e.kind.name() == Some(t.kind.as_str()) && !e.dead && d(e.pos) <= TRACK_NEAR
+                })
+                .min_by(|a, b| d(a.1.pos).total_cmp(&d(b.1.pos)))
+                .map(|(id, _)| *id);
+        }
+        if let Some(e) = t.id.and_then(|id| w.entities.get(&id)).filter(|e| !e.dead) {
+            *t.cells
+                .entry(e.pos.map(|v| (v + 1e-7).floor() as i32))
+                .or_default() += 1;
+        }
+    }
+}
+
+/// The placed mobs' outcomes from their tracks, at the run's end.
+fn tracked(w: &World, tracks: &[Track]) -> Vec<MobOutcome> {
+    tracks
+        .iter()
+        .map(|t| {
+            let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - t.at[i]).powi(2)).sum::<f64>().sqrt();
+            let found = t.id.and_then(|id| w.entities.get(&id)).filter(|e| !e.dead);
+            let modal = t
+                .cells
+                .iter()
+                .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+                .map(|(c, _)| *c);
+            MobOutcome {
+                kind: t.kind.clone(),
+                seen: found.is_some(),
+                moved: found.is_some_and(|e| d(e.pos) > MOB_MOVED),
+                creepy: found.is_some_and(|e| flag(e, CREEPY)),
+                stared: found.is_some_and(|e| flag(e, STARED)),
+                cell: found.and(modal),
+            }
+        })
+        .collect()
+}
+
+/// A real run's trace, folded from its recording: a line every `TRACE_EVERY` ticks, and the
+/// placed mobs' tracks.
+fn trace_recording(path: &Path, tracks: &mut [Track]) -> Result<Vec<String>, String> {
     let (_, records) = record::Recording::read_all(path)?;
     let mut folder = record::Folder::new();
     let mut lines = Vec::new();
@@ -270,6 +342,7 @@ fn trace_recording(path: &Path) -> Result<Vec<String>, String> {
         if t.is_multiple_of(TRACE_EVERY) && last != Some(t) {
             last = Some(t);
             lines.extend(trace_line(&folder.world));
+            track_step(&folder.world, tracks);
         }
     }
     Ok(lines)
@@ -555,13 +628,26 @@ fn real_waves(
                     moment: id,
                     source: Source::Real,
                     commit: record::COMMIT.to_owned(),
-                    outcome: outcome(
-                        &o.world,
-                        o.teleports_at_script,
-                        o.min_health_in_script,
-                        &watch,
-                        &mobs,
-                    ),
+                    outcome: {
+                        let mut class = outcome(
+                            &o.world,
+                            o.teleports_at_script,
+                            o.min_health_in_script,
+                            &watch,
+                            &mobs,
+                        );
+                        if traced {
+                            let rsr = a.out.join(format!("{trace_id}.real.rsr"));
+                            let mut tracks = tracks_of(&mobs);
+                            let text = trace_recording(&rsr, &mut tracks)
+                                .unwrap_or_else(|e| vec![format!("no trace: {e}")]);
+                            write_trace(&a.out, &trace_id, "real", &text)?;
+                            if let Some(c) = class.as_mut() {
+                                c.mobs = tracked(&o.world, &tracks);
+                            }
+                        }
+                        class
+                    },
                     corrections: o
                         .teleports_at_script
                         .map_or(0, |t| o.world.session.teleports.saturating_sub(t)),
@@ -580,11 +666,6 @@ fn real_waves(
                 Err(_) => return Err("a bot thread panicked".to_owned()),
             };
             save(&a.out, &r)?;
-            if traced {
-                let rsr = a.out.join(format!("{trace_id}.real.rsr"));
-                let text = trace_recording(&rsr).unwrap_or_else(|e| vec![format!("no trace: {e}")]);
-                write_trace(&a.out, &trace_id, "real", &text)?;
-            }
         }
     }
     Ok(())
@@ -698,6 +779,7 @@ fn sim(a: &Args) -> Result<(), String> {
         }
         let traced = !m.mobs.is_empty() || !m.items.is_empty();
         let mut trace = Vec::new();
+        let mut tracks = tracks_of(&mob_spots(start, m));
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
         let run = bot::lockstep::run_acting(
             model,
@@ -708,6 +790,7 @@ fn sim(a: &Args) -> Result<(), String> {
             |w, t| {
                 if traced && w.ticks.is_multiple_of(TRACE_EVERY) {
                     trace.extend(trace_line(w));
+                    track_step(w, &mut tracks);
                 }
                 match (&mut planner, script) {
                     (Some(p), _) => {
@@ -732,7 +815,13 @@ fn sim(a: &Args) -> Result<(), String> {
                 run.min_health_in_script,
                 &watched(start, m),
                 &mob_spots(start, m),
-            ),
+            )
+            .map(|mut c| {
+                if traced {
+                    c.mobs = tracked(&run.world, &tracks);
+                }
+                c
+            }),
             corrections: run
                 .teleports_at_script
                 .map_or(0, |t| run.world.session.teleports.saturating_sub(t)),
