@@ -1534,9 +1534,11 @@ impl Plan {
         // Moves are the expensive thing now (filler): only when no enderman has been seen within
         // `seen_near` of B for `burrow_idle_ticks` (or no kill in `kill_window`).
         let bc = Burrow::centre(b.b);
+        // Only one in sight from O counts: an enderman parked out of sight 26 off kept a burrow
+        // from moving for 4,000 ticks with no provoke (the frontier race 45551462309).
         if endermen::endermen(w)
             .iter()
-            .any(|s| dist(s.pos, bc) <= r.seen_near)
+            .any(|s| dist(s.pos, bc) <= r.seen_near && look::clear(w, eye_in(b.o), eye_of(s.pos)))
         {
             self.pearls.last_near = Some(tick);
         }
