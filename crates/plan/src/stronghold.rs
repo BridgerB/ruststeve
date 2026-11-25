@@ -64,6 +64,8 @@ pub struct StrongholdRules {
     pub spiral_legs: u32,
     pub nook_max: u32,
     pub descent_stalls: u32,
+    pub wall_breaks: u32,
+    pub pick_tasks: u32,
 }
 
 impl Default for StrongholdRules {
@@ -80,6 +82,8 @@ impl Default for StrongholdRules {
             spiral_legs: 12,
             nook_max: 24,
             descent_stalls: 4,
+            wall_breaks: 4,
+            pick_tasks: 8,
         }
     }
 }
@@ -101,6 +105,15 @@ pub struct StrongholdState {
     /// The search's spiral legs begun (no frame seen).
     pub spiral: u32,
     pub spiral_target: Option<Cell>,
+    /// The search reached its depth once (the stairs down are never begun again after it).
+    pub descended: bool,
+    /// Stone bricks broken in reach of the tunnel's end.
+    pub wall_breaks: u32,
+    /// Stone pickaxes being made (`stronghold_pickaxes`), tasks begun for them in this round,
+    /// and the tick before which no round begins after one ended short.
+    pub picking: bool,
+    pub pick_tasks: u32,
+    pub picks_retry_at: u64,
     /// In the room: the spawner broken (or none), the nook sealed, and blocks placed for it.
     pub spawner_done: bool,
     pub sealed: bool,
@@ -678,7 +691,20 @@ impl Plan {
     ) -> Option<Task> {
         let [fx, fz] = self.stronghold.at_fix?;
         let centre = (fx, rules.search_y, fz);
-        if feet.1 > rules.search_y + 1 {
+        // Down once: a spiral leg's tunnel may climb a few blocks over the search's depth, and
+        // stairs down again from there went down and up at the wall (race 45689919380 lane 0).
+        if feet.1 <= rules.search_y + 1 && !self.stronghold.descended {
+            self.stronghold.descended = true;
+            self.note(
+                tick,
+                format!("stronghold search at depth y {}", feet.1),
+                format!(
+                    "the spiral and the bricks from here; {}",
+                    self.stronghold_state(w)
+                ),
+            );
+        }
+        if !self.stronghold.descended {
             // A spiral down near the fix: each leg turns a quarter.
             let again = match self.stronghold.leg_from {
                 Some((c, n)) if c == feet => n + 1,
@@ -715,10 +741,35 @@ impl Plan {
                 BlockKind::CrackedStoneBricks,
             ],
         );
+        let seen = bricks.len();
         if let Some(b) = bricks.into_iter().find(|b| !self.refused_now(*b, tick)) {
             let why = format!("stone bricks seen at {b:?}: the stronghold's wall");
             if let Some(t) = self.tunnel_toward(w, b, ("stone bricks", &why), tick) {
                 return Some(t);
+            }
+            // The tunnel ends within reach of the wall and goes no further: the brick is broken
+            // and the corridor behind it opened to the eye (race 45689919380 lane 0 stood at the
+            // wall and turned away). At most `wall_breaks` of them, then the spiral.
+            if self.stronghold.wall_breaks < rules.wall_breaks
+                && !within_reach(w, b)
+                && let Some(t) = self.wall_step(w, feet, b, tick)
+            {
+                return Some(t);
+            }
+            if self.stronghold.wall_breaks < rules.wall_breaks && within_reach(w, b) {
+                self.stronghold.wall_breaks += 1;
+                self.note(
+                    tick,
+                    format!(
+                        "stronghold wall broken at {b:?} ({} of {})",
+                        self.stronghold.wall_breaks, rules.wall_breaks
+                    ),
+                    format!(
+                        "stone bricks in reach, the tunnel at its end; {}",
+                        self.stronghold_state(w)
+                    ),
+                );
+                return Some(Task::Dig(crate::dig::Dig::new(w, b, tick)));
             }
         }
         if self.stronghold.spiral >= rules.spiral_legs {
@@ -744,7 +795,9 @@ impl Plan {
                     tick,
                     format!("stronghold search leg {} toward {t:?}", n + 1),
                     format!(
-                        "no frame and no stone bricks seen; {}",
+                        "no frame seen; {seen} stone bricks seen exposed, none with a way or in \
+                         reach ({} broken); {}",
+                        self.stronghold.wall_breaks,
                         self.stronghold_state(w)
                     ),
                 );
@@ -759,6 +812,176 @@ impl Plan {
         self.retry_at = tick + crate::RETRY_TICKS;
         Some(Task::Idle)
     }
+}
+
+impl Plan {
+    /// Stone pickaxes made from the stairs' cobblestone, the pack's sticks and its table, where
+    /// the bot stands, between the overland's and the stronghold's tasks: `spare_pickaxes` held
+    /// with `spare_uses` or more each (overworld-leg wall 2's row, which `spares_wanted` closes
+    /// once a portal is known). Race 45689919380 lane 0 came down the stairs to 13 uses on its one
+    /// stone pickaxe with 67 cobblestone in the pack. The table is placed beside the feet and dug
+    /// again once the round is done. `None` with nothing to do or nothing to make it from.
+    pub fn stronghold_pickaxes(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let table = self.table.clone()?;
+        let rules = &table.survival;
+        let shrules = self.stronghold_rules();
+        if rules.spare_pickaxes <= 0 || !in_overworld(w) {
+            return None;
+        }
+        let fresh = crate::fresh_pickaxes(w, rules.spare_uses);
+        let table_cell = self.at_hand(w, BlockKind::CraftingTable, tick);
+        if fresh >= rules.spare_pickaxes {
+            if !self.stronghold.picking {
+                return None;
+            }
+            self.stronghold.picking = false;
+            self.stronghold.pick_tasks = 0;
+            self.note(
+                tick,
+                "stronghold pickaxes held".to_owned(),
+                format!(
+                    "{fresh} stone pickaxes with {} uses or more",
+                    rules.spare_uses
+                ),
+            );
+            return self.carry_table(w, tick);
+        }
+        if tick < self.stronghold.picks_retry_at {
+            return None;
+        }
+        let end = |p: &mut Self, why: String| {
+            p.stronghold.picking = false;
+            p.stronghold.pick_tasks = 0;
+            p.stronghold.picks_retry_at = tick + crate::SPARES_RETRY_TICKS;
+            p.note(tick, "stronghold pickaxes not made".to_owned(), why);
+        };
+        if !crate::pickaxe_makeable(w, table_cell.is_some()) {
+            if self.stronghold.picking {
+                end(self, format!("{fresh} fresh held; no makings left"));
+            }
+            return None;
+        }
+        if self.stronghold.pick_tasks >= shrules.pick_tasks {
+            end(
+                self,
+                format!("{} tasks begun this round", self.stronghold.pick_tasks),
+            );
+            return self.carry_table(w, tick);
+        }
+        if !self.stronghold.picking {
+            self.stronghold.picking = true;
+            self.note(
+                tick,
+                "stronghold pickaxes".to_owned(),
+                format!(
+                    "{fresh} stone pickaxes with {} uses or more, under {}: made here; {}",
+                    rules.spare_uses,
+                    rules.spare_pickaxes,
+                    self.stronghold_state(w)
+                ),
+            );
+        }
+        // One more wanted: the row's one pickaxe counted from none held.
+        let mut counts = crate::held(w);
+        counts.insert(data::ItemKind::StonePickaxe, 0);
+        let near_table = table_cell.is_some();
+        let near = move |b: BlockKind| b == BlockKind::CraftingTable && near_table;
+        let Some(goal) = table.until("stone-pickaxe") else {
+            end(self, "no stone-pickaxe row".to_owned());
+            return None;
+        };
+        let task = match crate::make::make(&table, &counts, &near, goal) {
+            crate::make::Choice::Act(row) => match row.act {
+                Some(crate::make::Act::Craft(r)) if !crate::make::fits_grid(r) => {
+                    table_cell.map(|t| Task::Craft(crate::craft::Craft::at_table(r, t, tick)))
+                }
+                Some(crate::make::Act::Craft(r)) => {
+                    Some(Task::Craft(crate::craft::Craft::new(r, tick)))
+                }
+                Some(crate::make::Act::Place(b)) => {
+                    crate::place::Place::new(b, tick).map(Task::Place)
+                }
+                Some(_) | None => None,
+            },
+            crate::make::Choice::Done | crate::make::Choice::Stuck => None,
+        };
+        match task {
+            Some(t) => {
+                self.stronghold.pick_tasks += 1;
+                self.note(
+                    tick,
+                    format!("stronghold pickaxes step {}", self.stronghold.pick_tasks),
+                    match &t {
+                        Task::Place(_) => "the table placed beside the feet".to_owned(),
+                        _ => format!("a craft toward a stone pickaxe ({fresh} fresh held)"),
+                    },
+                );
+                Some(t)
+            }
+            None => {
+                end(
+                    self,
+                    format!("{fresh} fresh held; the row's next step is no craft here"),
+                );
+                self.carry_table(w, tick)
+            }
+        }
+    }
+
+    /// One step nearer a brick the tunnel ended short of (its reach is 5 to the cell, a dig's 4
+    /// from the eye): the head's cell then the feet's on the axis toward it dug, then a walk into
+    /// them. `None` at a liquid or a block a silverfish hides in (never opened).
+    fn wall_step(&mut self, w: &World, feet: Cell, brick: Cell, tick: u64) -> Option<Task> {
+        let (dx, dz) = axis_toward(feet, brick);
+        let next = (feet.0 + dx, feet.1, feet.2 + dz);
+        for c in [(next.0, next.1 + 1, next.2), next] {
+            let k = kind(w, c);
+            if open(k) {
+                continue;
+            }
+            if stairs::infested(k)
+                || lava(k)
+                || k == Some(BlockKind::Water)
+                || k.is_none()
+                || self.refused_now(c, tick)
+            {
+                return None;
+            }
+            self.note(
+                tick,
+                format!("stronghold wall step: dig {c:?}"),
+                format!("toward stone bricks at {brick:?} out of a dig's reach from {feet:?}"),
+            );
+            return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
+        }
+        let mut walk = Walk::new(next, Goal::Block { pos: next }, Arrive::Goal, tick);
+        if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+            self.walks += 1;
+            self.note(
+                tick,
+                format!("stronghold wall step: walk to {next:?}"),
+                format!("toward stone bricks at {brick:?}"),
+            );
+            return Some(Task::Explore(walk));
+        }
+        None
+    }
+}
+
+/// Air of any kind: nothing to dig.
+fn open(k: Option<BlockKind>) -> bool {
+    matches!(
+        k,
+        Some(BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir)
+    )
+}
+
+/// A block within a dig's reach of the eye.
+fn within_reach(w: &World, (x, y, z): Cell) -> bool {
+    let eye = [body_x(w), body_y(w) + physics::EYE_HEIGHT, body_z(w)];
+    let c = [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5];
+    let d = (0..3).map(|i| (eye[i] - c[i]).powi(2)).sum::<f64>().sqrt();
+    d <= crate::walk::REACH
 }
 
 fn body_x(w: &World) -> f64 {

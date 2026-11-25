@@ -366,3 +366,98 @@ fn arrival_hands_over_to_the_search() {
     let t = p.stronghold_task(&w, 1);
     assert!(matches!(t, Some(Task::Stairs(_))), "{t:?}");
 }
+
+/// Ground to y 63 with a pocket of air for the feet at `feet` (two cells tall), the search's
+/// centre at (0, 0).
+fn deep(feet: Cell, extra: &[(Cell, BlockKind)]) -> (World, Plan) {
+    let mut s = Stage::over((-48, 48), (-48, 48), 63, 127);
+    s.fill(
+        (feet.0, feet.0),
+        (feet.1, feet.1 + 1),
+        (feet.2, feet.2),
+        BlockKind::Air,
+    );
+    for (c, k) in extra {
+        s.set(*c, *k);
+    }
+    let w = load(
+        &s,
+        [
+            f64::from(feet.0) + 0.5,
+            f64::from(feet.1),
+            f64::from(feet.2) + 0.5,
+        ],
+    );
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.stronghold.at_fix = Some([0, 0]);
+    (w, p)
+}
+
+/// At the search's depth once, never stairs down again: race 45689919380 lane 0 went down at
+/// leg 7 from y 35 after a spiral leg's tunnel climbed.
+#[test]
+fn the_search_descends_once() {
+    let (w, mut p) = deep((0, 30, 0), &[]);
+    let _ = p.stronghold_task(&w, 1);
+    assert!(p.stronghold.descended, "{:#?}", notes(&p));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("stronghold search at depth")),
+        "{:#?}",
+        notes(&p)
+    );
+    let (w, mut p) = deep((0, 36, 0), &[]);
+    p.stronghold.descended = true;
+    let t = p.stronghold_task(&w, 1);
+    assert!(
+        !notes(&p)
+            .iter()
+            .any(|n| n.starts_with("stronghold search stairs down")),
+        "{t:?} {:#?}",
+        notes(&p)
+    );
+}
+
+/// Stone bricks within the tunnel's reach but out of a dig's: a step dug toward them, never the
+/// spiral's turn away (race 45689919380 lane 0 at (1646, 29, -8)).
+#[test]
+fn a_brick_short_of_reach_is_stepped_to() {
+    let (w, mut p) = deep(
+        (0, 30, 0),
+        &[
+            ((4, 29, 1), BlockKind::StoneBricks),
+            ((5, 29, 1), BlockKind::Air),
+        ],
+    );
+    p.stronghold.descended = true;
+    let t = p.stronghold_task(&w, 1);
+    let n = notes(&p);
+    assert!(
+        matches!(
+            t,
+            Some(Task::Dig(_)) | Some(Task::Stairs(_)) | Some(Task::Explore(_))
+        ),
+        "{t:?} {n:#?}"
+    );
+    assert!(
+        !n.iter().any(|n| n.starts_with("stronghold search leg")),
+        "{n:#?}"
+    );
+}
+
+/// No fresh stone pickaxe, cobblestone, sticks and a table in the pack: the table goes down
+/// beside the feet for the crafts.
+#[test]
+fn pickaxes_are_made_from_the_pack() {
+    let (mut w, mut p) = flat(None);
+    give(&mut w, 2, ItemKind::Stick, 8);
+    give(&mut w, 3, ItemKind::CraftingTable, 1);
+    let t = p.stronghold_pickaxes(&w, 0);
+    let n = notes(&p);
+    assert!(matches!(t, Some(Task::Place(_))), "{t:?} {n:#?}");
+    assert!(
+        n.iter().any(|n| n.starts_with("stronghold pickaxes (")),
+        "{n:#?}"
+    );
+}

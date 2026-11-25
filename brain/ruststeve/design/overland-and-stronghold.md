@@ -6,7 +6,7 @@ tags: [plan, overworld, stronghold, travel, stairs, tunnel]
 aliases: [overland, overland_task, stronghold_task, Room, room_of, stand_target, portal room, infested]
 status: draft
 lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@b09de3d
+verifiedAgainst: ruststeve@758e294
 sourceRefs:
   - "ruststeve:crates/plan/src/overland.rs#pub fn overland_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
   - "ruststeve:crates/plan/src/overland.rs#pub fn top(w: &World, x: i32, z: i32, near_y: i32) -> Option<Top> {"
@@ -41,4 +41,5 @@ Issue 19 (#24), parts e and f: from the overworld surface with the eyes' fix in 
 - **Way in**: dry stairs (`Stairs::dry`) down, toward the target while they end 10 or more off the centre, else away from it; a leg from the same cell turns a quarter, four end the stairs. At the floor's height the travel tunnel (`tunnel_toward`) breaks in; a plain walk only within 24 at that height.
 - **Infested blocks** are never opened: `stairs::refusal` refuses them and the tunnel's route reads them as walls.
 - **Inside**: the spawner broken, the standing cell walked to, a nook sealed; then the wait (issue 20 starts there).
-- **No frame at the fix**: dry stairs down to `search_y`, then a square spiral of tunnel legs, toward stone bricks seen exposed first.
+- **No frame at the fix**: dry stairs down to `search_y` once (`descended` latches: a spiral leg that climbs never starts the stairs again), then a square spiral of tunnel legs, toward stone bricks seen exposed first. Where the tunnel ends short of a brick (its reach is 5 to the cell, a dig's 4 from the eye) a wall step digs the head and feet cells toward it and walks in; in reach the brick is broken, `wall_breaks` at most (race 45689919380 lane 0 stood at the wall and turned away).
+- **Pickaxes** (`stronghold_pickaxes`): between tasks, outside the room, fewer than `spare_pickaxes` stone pickaxes with `spare_uses` left are made from the stairs' cobblestone, the pack's sticks and its table (placed beside the feet, dug again after), `pick_tasks` a round. Ledger: "stronghold pickaxes", "stronghold pickaxes held", "stronghold pickaxes not made", "stronghold wall step", "stronghold wall broken", "stronghold search at depth".

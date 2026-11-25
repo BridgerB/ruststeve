@@ -2588,6 +2588,11 @@ impl Plan {
         if !eyes && self.stronghold.room.is_none() {
             return None;
         }
+        // Fresh stone pickaxes first, between legs and stairs (not in the room: the nook's).
+        let in_room = self.stronghold.entered_noted;
+        if !in_room && let Some(t) = self.stronghold_pickaxes(w, tick) {
+            return Some(t);
+        }
         if let Some(t) = self.stronghold_task(w, tick) {
             return Some(t);
         }

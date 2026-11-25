@@ -784,6 +784,12 @@ spiral_legs = 12
 nook_max = 24
 # Stairs legs that leave the feet where they were, before the tunnel takes the descent.
 descent_stalls = 4
+# Stone bricks broken where the tunnel ends in reach of the wall (race 45689919380 lane 0 stood at
+# the wall at (1646, 29, -8) and turned away): four opens a corridor's side, then the spiral.
+wall_breaks = 4
+# Tasks a round of stone pickaxes may begin (a table placed, two crafts, the table dug: four; twice
+# that for a failed click), then the round ends and waits the spares' retry.
+pick_tasks = 8
 # <<< overland and stronghold
 
 # >>> eyes (Q3, issue 19c, docs/problems/eyes-throw.md): the eyes of ender, crafted in the 2x2 grid
