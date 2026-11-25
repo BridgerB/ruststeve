@@ -142,7 +142,14 @@ fn the_frontier_kit_makes_an_iron_sword_and_a_shield_in_the_forest() {
     let story = r.story();
     assert!(r.plan.met, "base met:\n{story}");
     assert!(r.has("base over: the kit is held") >= 1, "{story}");
-    for s in ["wood", "table", "smelt", "iron sword", "shield"] {
+    for s in [
+        "wood",
+        "table",
+        "wood picks",
+        "smelt",
+        "iron sword",
+        "shield",
+    ] {
         assert_eq!(r.has(&format!("base: {s} done")), 1, "{s}:\n{story}");
     }
     assert_eq!(r.has("base: pickaxe skipped"), 1, "{story}");
@@ -150,6 +157,11 @@ fn the_frontier_kit_makes_an_iron_sword_and_a_shield_in_the_forest() {
     assert_eq!(r.has("gave up"), 0, "{story}");
     assert_eq!(r.held(ItemKind::IronSword), 1, "{story}");
     assert_eq!(r.held(ItemKind::Shield), 1, "{story}");
+    assert_eq!(
+        r.held(ItemKind::WoodenPickaxe),
+        3,
+        "the hunt's filler pickaxes:\n{story}"
+    );
     assert_eq!(
         r.held(ItemKind::IronIngot),
         4,
@@ -176,6 +188,8 @@ fn without_coal_the_base_makes_stone_tools() {
     assert_eq!(r.has("base: iron sword skipped"), 1, "{story}");
     assert_eq!(r.has("base: stone swords done"), 1, "{story}");
     assert_eq!(r.has("base: pickaxe done"), 1, "{story}");
+    assert_eq!(r.has("base: wood picks done"), 1, "{story}");
+    assert_eq!(r.held(ItemKind::WoodenPickaxe), 3, "{story}");
     assert_eq!(r.held(ItemKind::StoneSword), 2, "{story}");
     assert_eq!(r.held(ItemKind::StonePickaxe), 1, "{story}");
     assert_eq!(r.held(ItemKind::RawIron), 7, "kept: {story}");

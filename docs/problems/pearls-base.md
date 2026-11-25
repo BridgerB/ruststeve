@@ -40,6 +40,11 @@ A bot's ledger in the forest shows "base: <step> done / skipped" for each of the
   - A step given up skips at once the steps it was to supply (`starved_by`): with no logs or planks and no table, every craft and the smelt; with no table, the 3x3 crafts and the smelt. One note covers it: "base: no wood: the hunt goes on with what is held". Then the base is over and returns `None`.
 - **Tests**: `no_wood_pauses_the_base_then_skips_what_wood_makes` (the frontier's makings with no stem: paused at 200, resumed at 6,200, wood given up at 6,400, the table never begun, all 7 steps ended), and `a_kill_resumes_a_paused_base`.
 
+### 4. The hunt runs out of filler (P4's 12-pearl model loop starves near the sixth burrow; the orchestrator, 2026-11-25)
+- **Need**: each burrow is about 39 blocks. P3 reclaims old shells and restocks netherrack, which needs a pickaxe that is not the stone reserve.
+- **Fix** (`plan::base`): a `wood picks` step after the table makes wooden pickaxes (`base-wood-pickaxe`) until `wood_pick_uses` 150 (three, 59 uses each). `spare_pick(w)` returns the slot of the most worn wooden pickaxe with uses left, for P3. Wooden uses never count in the reserve (`reserve_pick_uses`). `logs` rises from 8 to 10, so 2 stems' worth of planks are left for more pickaxes later.
+- **Tests**: `the_spare_pick_is_a_wooden_one_and_never_the_reserve`; the model closed loops end with 3 wooden pickaxes held.
+
 ## Result: the base proven on a real server (race 45536739217, 054aac6, goal `base`, dev-forest at (490.5, 45, 5.5) on the frontier lane-3 snapshot, 2 x 1, cap 6,000; development only, never evidence)
 - **Base met 2 of 2**, both alive to the end at health 12.5 (the start's), no hits, no swings, no enderman angered, no near miss. Each ends "base over: the kit is held (swords worth 58 kills of 30, pickaxe uses 144 of 100, 1 shield; given up: none)", and the shield goes to the off hand.
 - **Steps and ticks** (lane 0 / lane 1):

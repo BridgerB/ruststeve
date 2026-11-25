@@ -97,6 +97,10 @@ pub struct Dig {
     /// were held before: either kind collected ends the collect.
     #[serde(default)]
     pub others: Vec<(ItemKind, i32)>,
+    /// The tool to dig with when held, before the fastest (issue 18: the hunt's filler is dug
+    /// with a wooden pickaxe, never the stone ones' reserve).
+    #[serde(default)]
+    pub prefer: Option<ItemKind>,
 }
 
 fn pos((x, y, z): Cell) -> BlockPos {
@@ -162,6 +166,15 @@ impl Dig {
             drop_id: None,
             drop_last: tick,
             others,
+            prefer: None,
+        }
+    }
+
+    /// `new`, digging with `tool` while one is held.
+    pub fn with_tool(w: &World, target: Cell, tick: u64, tool: ItemKind) -> Self {
+        Self {
+            prefer: Some(tool),
+            ..Self::new(w, target, tick)
         }
     }
 
@@ -246,7 +259,8 @@ impl Dig {
                     .chain(w.inventory.carried.iter())
                     .map(|(k, _)| *k)
                     .collect();
-                if let Some(tool) = data::dig::best_tool(kind, items) {
+                let preferred = self.prefer.filter(|t| items.contains(t));
+                if let Some(tool) = preferred.or_else(|| data::dig::best_tool(kind, items)) {
                     match crate::hold::toward(w, tool) {
                         crate::hold::Hold::Held | crate::hold::Hold::Missing => {}
                         crate::hold::Hold::Act(a) => return (still, Some(a), DigStatus::Running),

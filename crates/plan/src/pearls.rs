@@ -92,7 +92,7 @@ impl Default for PearlRules {
             fight_cap: 2400,
             kill_window: 12000,
             burrow_idle_ticks: 2400,
-            moves_without_kill: 2,
+            moves_without_kill: 1000,
             burrow_move: 32,
             site_every: 100,
             weapon_min_uses: 10,
@@ -151,8 +151,16 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 
 /// Blocks from the feet a forest floor cell walked to lies at least (a new place to search).
 const FLOOR_MIN: i32 = 8;
+/// Cells each way on the plane a floor block is dug for filler from where the bot stands.
+const FLOOR_REACH: i32 = 2;
+/// Moves down off fungus caps the hunt makes (each a walk or a dig).
+const CAP_TRIES: u32 = 24;
+/// Eye to a block's middle within which the old shell is dug back from where the bot stands.
+const RECLAIM_REACH: f64 = 4.4;
 /// Ticks of one yaw sweep at O.
 const SWEEP_TICKS: u64 = 400;
+/// Blocks within which the feet after a walk on count as not moved.
+const WALK_ON_STILL: i32 = 4;
 /// Blocks a walk on for a new site goes at least.
 const WALK_ON: i32 = 24;
 /// Blocks within which an angry enderman, ticking or frozen, stops a new provoke.
@@ -276,6 +284,20 @@ pub struct PearlState {
     /// Filler is being restocked (netherrack dug near the burrow).
     #[serde(default)]
     pub restock: bool,
+    /// Cells this hunt put a block into (the shell, supports, seals): what a reclaim digs back.
+    #[serde(default)]
+    pub placed: Vec<[i32; 3]>,
+    /// A move's old shell being dug back, and blocks reclaimed so far.
+    #[serde(default)]
+    pub reclaim: bool,
+    #[serde(default)]
+    pub reclaimed: u32,
+    /// Where the last walk on for a site began, and how many in a row left the feet there.
+    #[serde(default)]
+    pub walk_on: Option<([i32; 3], u32)>,
+    /// Moves made down off fungus caps.
+    #[serde(default)]
+    pub cap_tries: u32,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -634,6 +656,17 @@ impl Plan {
             return None;
         }
         self.pearls.provoking = None;
+        // The planner's give-up (12 failed walks in a row) never ends the hunt: the frontier race
+        // 45548022681 lane 5 stopped for good at tick ~12,000 of 36,000.
+        if self.stuck {
+            self.stuck = false;
+            self.failed_in_row = 0;
+            self.note(
+                tick,
+                "stuck cleared: the hunt goes on".to_owned(),
+                "the walks' give-up does not end the hunt".to_owned(),
+            );
+        }
         let body = w.body?;
         let r = self.pearl_rules();
         self.pearls_account(w, tick);
@@ -1775,6 +1808,8 @@ impl Plan {
         }
         self.pearls.moves += 1;
         self.pearls.moves_no_kill += 1;
+        self.pearls.reclaim = true;
+        self.pearls.reclaimed = 0;
         self.pearls.moved_from.push(b.b);
         self.pearls.burrow = None;
         self.pearls.built = false;
@@ -1875,6 +1910,10 @@ impl Plan {
                 if what == "burrow" {
                     self.pearls.site_blocks += 1;
                 }
+                let placed = [cell.0, cell.1, cell.2];
+                if !self.pearls.placed.contains(&placed) {
+                    self.pearls.placed.push(placed);
+                }
                 self.acts.push(world::Act::UseOn {
                     pos: world::BlockPos::new(click.0, click.1, click.2),
                     face,
@@ -1967,6 +2006,104 @@ impl Plan {
         None
     }
 
+    /// Down off a fungus cap: a walk to the floor seen below, else the cap block under the feet
+    /// dug (`base::dig_down`: a landing within the safe fall, no lava).
+    fn cap_down(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
+        self.pearls.cap_tries += 1;
+        let table = self.table.clone()?;
+        let targets = crate::base::floor_targets(w, &table.base, |c| self.refused_now(c, tick));
+        for c in targets.into_iter().take(crate::CANDIDATES_PER_TICK) {
+            let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    "hunt: down off the fungus cap".to_owned(),
+                    format!(
+                        "walk from {feet:?} on {:?} to the floor at {c:?}; try {} of {CAP_TRIES}",
+                        w.block_under_player(),
+                        self.pearls.cap_tries
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.refuse(c, tick);
+        }
+        let under = crate::base::dig_down(w)?;
+        self.note(
+            tick,
+            "hunt: down off the fungus cap".to_owned(),
+            format!(
+                "dig {under:?} under the feet {feet:?}: no floor with a way; try {} of {CAP_TRIES}",
+                self.pearls.cap_tries
+            ),
+        );
+        Some(Task::Dig(crate::dig::Dig::new(w, under, tick)))
+    }
+
+    /// The next block of the old shell to dig back (a cell placed by this hunt, full, within
+    /// reach of the eye, not under the feet), with a wooden pickaxe; `None` and the reclaim over
+    /// (noted with its count) when none is left or no wooden pickaxe is held.
+    fn reclaim_step(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
+        let body = w.body?;
+        let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+        let under = [feet[0], feet[1] - 1, feet[2]];
+        let full = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2]))
+                .and_then(data::generated::shapes::collision)
+                == Some(data::types::Collision::Full)
+        };
+        let next = self
+            .pearls
+            .placed
+            .iter()
+            .copied()
+            .filter(|c| *c != under && full(*c))
+            .map(|c| {
+                (
+                    dist(
+                        eye,
+                        [
+                            f64::from(c[0]) + 0.5,
+                            f64::from(c[1]) + 0.5,
+                            f64::from(c[2]) + 0.5,
+                        ],
+                    ),
+                    c,
+                )
+            })
+            .filter(|(d, _)| *d <= RECLAIM_REACH)
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .map(|(_, c)| c);
+        let pick = crate::base::spare_pick(w);
+        let (Some(c), Some(_)) = (next, pick) else {
+            self.pearls.reclaim = false;
+            self.pearls.placed.retain(|c| full(*c));
+            self.note(
+                tick,
+                format!("reclaimed {} blocks", self.pearls.reclaimed),
+                format!(
+                    "{}; {} burrow blocks held",
+                    if pick.is_none() {
+                        "no wooden pickaxe held"
+                    } else {
+                        "none left in reach"
+                    },
+                    burrow_filler(w)
+                ),
+            );
+            return None;
+        };
+        self.pearls.reclaimed += 1;
+        self.pearls.placed.retain(|p| *p != c);
+        Some(Task::Dig(crate::dig::Dig::with_tool(
+            w,
+            (c[0], c[1], c[2]),
+            tick,
+            ItemKind::WoodenPickaxe,
+        )))
+    }
+
     /// A walk to dig exposed netherrack (or nylium, which drops netherrack to a pickaxe) near the
     /// feet, with a pickaxe above the reserve; `None` with none (noted once a `NOTE_EVERY`).
     fn restock_task(&mut self, w: &World, tick: u64, filler: i32) -> Option<Task> {
@@ -1975,7 +2112,7 @@ impl Plan {
             .as_ref()
             .map_or(0, |t| t.survival.pickaxe_reserve);
         let uses = endermen::pickaxe_uses_left(w);
-        if uses <= reserve {
+        if uses <= reserve && crate::base::spare_pick(w).is_none() {
             self.pearl_note(
                 tick,
                 "restock",
@@ -1985,6 +2122,52 @@ impl Plan {
             return None;
         }
         let kinds = [data::BlockKind::Netherrack, data::BlockKind::WarpedNylium];
+        // The floor counts: a floor cell beside the feet, in reach where the bot stands, dug
+        // straight (P4's seed 22 stood on a floor of exposed netherrack and found none "with a
+        // way"): never the cell under the bot, never one over a hole deeper than 1 or by lava.
+        if let Some(body) = w.body {
+            let f = path::stand_cell(w, body.pos);
+            let under = (f.0, f.1 - 1, f.2);
+            let at = |c: path::Cell| w.block_at(world::BlockPos::new(c.0, c.1, c.2));
+            let solid = |c: path::Cell| {
+                at(c).and_then(data::generated::shapes::collision)
+                    == Some(data::types::Collision::Full)
+            };
+            let mut floor: Vec<(i32, path::Cell)> = Vec::new();
+            for dx in -FLOOR_REACH..=FLOOR_REACH {
+                for dz in -FLOOR_REACH..=FLOOR_REACH {
+                    let c = (f.0 + dx, f.1 - 1, f.2 + dz);
+                    if c == under
+                        || !at(c).is_some_and(|k| kinds.contains(&k))
+                        || self.refused_now(c, tick)
+                        || !solid((c.0, c.1 - 1, c.2))
+                    {
+                        continue;
+                    }
+                    let lava = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(ax, az)| {
+                        at((c.0 + ax, c.1, c.2 + az)) == Some(data::BlockKind::Lava)
+                            || at((c.0 + ax, c.1 - 1, c.2 + az)) == Some(data::BlockKind::Lava)
+                    });
+                    if !lava {
+                        floor.push((dx * dx + dz * dz, c));
+                    }
+                }
+            }
+            floor.sort();
+            if let Some((_, c)) = floor.first().copied() {
+                self.refuse(c, tick);
+                self.note(
+                    tick,
+                    format!("restock: dig the floor at {c:?}"),
+                    format!("{filler} filler held; beside the feet {f:?}"),
+                );
+                let dig = match crate::base::spare_pick(w) {
+                    Some(_) => crate::dig::Dig::with_tool(w, c, tick, ItemKind::WoodenPickaxe),
+                    None => crate::dig::Dig::new(w, c, tick),
+                };
+                return Some(Task::Dig(dig));
+            }
+        }
         let cands: Vec<path::Cell> = crate::exposed_near(w, &kinds)
             .into_iter()
             .filter(|c| !self.refused_now(*c, tick))
@@ -2097,6 +2280,24 @@ impl Plan {
             }
         }
         let feet = arr(path::stand_cell(w, body.pos));
+        // On a fungus cap: down to the forest floor first (P5's floor targets, else the cap block
+        // under the feet dug, never a fall over 3): a cap is no site and no start of a walk on
+        // (race 45548022681: four bots sat on caps at y 71).
+        if self.pearls.burrow.is_none()
+            && crate::base::on_cap(w)
+            && self.pearls.cap_tries < CAP_TRIES
+            && let Some(t) = self.cap_down(w, tick, feet)
+        {
+            return Some(t);
+        }
+        // A move's old shell dug back first, with a wooden pickaxe only (P5's spare_pick: never the
+        // stone pickaxes' reserve), nearest first, never the block under the feet.
+        if self.pearls.burrow.is_none()
+            && self.pearls.reclaim
+            && let Some(t) = self.reclaim_step(w, tick, feet)
+        {
+            return Some(t);
+        }
         // Filler low (under `restock_below`, or a burrow block wanted and none held): netherrack
         // dug near with a pickaxe above the reserve, until `restock_to`.
         let filler = burrow_filler(w);
@@ -2188,10 +2389,32 @@ impl Plan {
                     Goal::Near { pos, .. } => pos,
                     _ => (from[0], from[1], from[2]),
                 };
+                // A walk on that left the feet where they were (the frontier race 45548022681: a
+                // bot on a fungus cap at y 71 "explored to" the endermen's middle 46 off at once,
+                // a hundred times) escalates: the far walk, then the heading.
+                let stalled = self.pearls.walk_on.is_some_and(|(at, _)| {
+                    (0..3).all(|i| (at[i] - feet[i]).abs() <= WALK_ON_STILL)
+                });
+                let n = if stalled {
+                    self.pearls.walk_on.map_or(0, |x| x.1) + 1
+                } else {
+                    0
+                };
+                self.pearls.walk_on = Some((feet, n));
+                if n >= 2 {
+                    self.note(
+                        tick,
+                        format!("walk on stalled {n} times: the heading"),
+                        format!("the feet still at {feet:?}"),
+                    );
+                    if let Some(t) = self.explore_walk(w, tick, "the walk on for a site stalled") {
+                        return Some(t);
+                    }
+                }
                 // A plain route first: the far walk bridges (one bot laid 52 bridge cells toward
                 // the endermen's middle in race 45548022681).
                 let mut walk = Walk::new(target, goal, Arrive::Goal, tick);
-                if !walk.route_now(w, tick) {
+                if n > 0 || !walk.route_now(w, tick) {
                     walk = Walk::far_to(target, goal, tick);
                 }
                 if walk.route_now(w, tick) {

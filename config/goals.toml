@@ -514,7 +514,9 @@ parked_look_ticks = 40
 fight_cap = 2400
 # A kill at least this often, else the burrow moves; two moves without a kill end the hunt (18f).
 kill_window = 12000
-moves_without_kill = 2
+# (2 ended the hunt sealed in at tick 12,000 of a 36,000 cap, race 45548022681 lane 1: the win
+# wants every tick; the moves go on.)
+moves_without_kill = 1000
 # No kill and no calm enderman in sight this long and the burrow moves, at least this far: P1's
 # supply probe counted 18 endermen within 128 in 10 minutes and 0.4 new a minute, and the spot
 # matters threefold over 10 blocks; three dev-forest bots waited 3,300 to 4,000 ticks for one in the
@@ -609,10 +611,19 @@ until = "base-shield"
 doc = "one shield, for issue 19's trip back: six planks and an ingot at the table"
 provides = [["item:shield", 1]]
 
+[[goal]]
+id = "base-wood-pickaxe"
+priority = 16
+until = "base-wood-pickaxe"
+doc = "one more wooden pickaxe, the hunt's for filler: three planks and two sticks at the table"
+provides = [["item:wooden_pickaxe", 1]]
+
 [base]
-# 8 stems are 32 planks: a table 4, a shield 6, sticks for eight tools 8, and spare (the plan,
-# 18d.1). Stew is not a row: the warped forest places no nether mushrooms (P1's jar read).
-logs = 8
+# 10 stems are 40 planks: a table 4, a shield 6, three wooden pickaxes 9 and their sticks 3, sticks
+# for the swords and pickaxes 4, and 2 stems' worth (8) kept for more pickaxes later (the plan,
+# 18d.1; the orchestrator, 2026-11-25). Stew is not a row: the warped forest places no nether
+# mushrooms (P1's jar read).
+logs = 10
 # Twelve pearls at one in two (loot 0 to 1) are about 24 kills, about 31 for nine chances in ten
 # (docs/problems/pearls.md); 30 kills' worth of swords besides the kill in hand.
 kills = 30
@@ -638,6 +649,10 @@ step_fails = 4
 stem_radius = 48
 stem_rise = 12
 note_every = 600
+# Wooden pickaxe uses held after the wood picks step: three pickaxes (59 uses each), for the hunt's
+# filler (each burrow is about 39 blocks; P4's 12-pearl model loop ran out near the sixth burrow),
+# never counted in the stone reserve's pickaxe_uses.
+wood_pick_uses = 150
 # Off a fungus cap (race 45537373222 lanes 0 and 2 stood on warped wart at y 51 to 52 for 2,400
 # ticks): seen warped nylium with room over it 8 to 24 flat of the feet walked to by route (nearer
 # is under the cap itself), else the cap block underfoot dug by hand where the drop is at most 3;
