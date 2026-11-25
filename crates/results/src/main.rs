@@ -8,7 +8,7 @@
 //! cargo run -p results -- player-dat <gunzipped .dat>     # a player file as text (issue 17a)
 //! cargo run -p results -- endermen <dirs>...               # seconds near endermen by place (17a)
 //! cargo run -p results -- memory <memory.rsw> [kind]...    # a snapshot memory by dimension and kind (19a)
-//! cargo run -p results -- region-find <region dir> <block>...      # every cell of a block (19a)
+//! cargo run -p results -- region-find <region dir> <block|*>... [--box x0,y0,z0,x1,y1,z1]  # a block's cells (19a)
 //! cargo run -p results -- region-strip <region dir> x0,z0 x1,z1 step   # column tops and biomes (19a)
 //! ```
 
@@ -114,8 +114,23 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         Some("region-find") => {
             let dir = args.get(1).ok_or("region-find needs a region directory")?;
+            // --box x0,y0,z0,x1,y1,z1 keeps the cells inside two corners.
+            let boxed = args.iter().position(|a| a == "--box");
+            let within = match boxed.and_then(|i| args.get(i + 1)) {
+                Some(s) => {
+                    let v: Vec<i32> = s
+                        .split(',')
+                        .map(|p| p.trim().parse().map_err(|e| format!("--box {s}: {e}")))
+                        .collect::<Result<_, String>>()?;
+                    match v[..] {
+                        [a, b, c, d, e, f] => Some(([a, b, c], [d, e, f])),
+                        _ => return Err("--box needs six numbers".to_owned()),
+                    }
+                }
+                None => None,
+            };
             let names: Vec<String> = args
-                .get(2..)
+                .get(2..boxed.unwrap_or(args.len()))
                 .unwrap_or(&[])
                 .iter()
                 .map(|n| {
@@ -126,7 +141,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     }
                 })
                 .collect();
-            for (n, p, biome) in results::region::find(Path::new(dir), &names)? {
+            for (n, p, biome) in results::region::find(Path::new(dir), &names, within)? {
                 println!("{n} {} {} {} {biome}", p[0], p[1], p[2]);
             }
             Ok(())

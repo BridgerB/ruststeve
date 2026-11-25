@@ -193,20 +193,54 @@ pub fn regions(dir: &Path) -> Vec<std::path::PathBuf> {
     v
 }
 
-/// Every cell of a block name in a region directory, with its biome: `(x, y, z, biome)`.
-pub fn find(dir: &Path, names: &[String]) -> Result<Vec<(String, [i32; 3], String)>, String> {
+/// A found block: its name, cell and biome.
+pub type Found = (String, [i32; 3], String);
+
+fn is_air(b: &str) -> bool {
+    matches!(
+        b,
+        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "?"
+    )
+}
+
+/// Every cell of a block name in a region directory, with its biome, inside `within` (two
+/// corners, inclusive) when given. The name `*` is any block but air.
+pub fn find(
+    dir: &Path,
+    names: &[String],
+    within: Option<([i32; 3], [i32; 3])>,
+) -> Result<Vec<Found>, String> {
+    let any = names.iter().any(|n| n == "minecraft:*" || n == "*");
+    let inside = |p: [i32; 3]| {
+        within.is_none_or(|(a, b)| (0..3).all(|k| p[k] >= a[k].min(b[k]) && p[k] <= a[k].max(b[k])))
+    };
     let mut out = Vec::new();
     for r in regions(dir) {
         for c in read_region(&r)? {
+            if let Some((a, b)) = within {
+                let (x0, x1) = (a[0].min(b[0]) >> 4, a[0].max(b[0]) >> 4);
+                let (z0, z1) = (a[2].min(b[2]) >> 4, a[2].max(b[2]) >> 4);
+                if c.cx < x0 || c.cx > x1 || c.cz < z0 || c.cz > z1 {
+                    continue;
+                }
+            }
             for s in &c.sections {
                 for (i, b) in s.blocks.iter().enumerate() {
-                    if !names.iter().any(|n| n == b) {
+                    let wanted = if any {
+                        !is_air(b)
+                    } else {
+                        names.iter().any(|n| n == b)
+                    };
+                    if !wanted {
                         continue;
                     }
                     let (lx, ly, lz) = (i % 16, i / 256, (i / 16) % 16);
                     let x = c.cx * 16 + lx as i32;
                     let z = c.cz * 16 + lz as i32;
                     let y = s.y * 16 + ly as i32;
+                    if !inside([x, y, z]) {
+                        continue;
+                    }
                     let biome = s
                         .biomes
                         .get((ly / 4) * 16 + (lz / 4) * 4 + lx / 4)
@@ -230,10 +264,7 @@ pub fn top(chunks: &[Chunk], x: i32, z: i32) -> Option<(String, i32, String)> {
     c.sections.iter().rev().find_map(|s| {
         (0..16usize).rev().find_map(|ly| {
             let b = s.blocks.get(ly * 256 + lz * 16 + lx)?;
-            if matches!(
-                b.as_str(),
-                "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "?"
-            ) {
+            if is_air(b) {
                 return None;
             }
             let biome = s
