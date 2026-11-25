@@ -1093,6 +1093,7 @@ impl Plan {
                         Walk::new(leg.target, goal, crate::walk::Arrive::Goal, tick)
                     };
                     walk.more.blocked = blocked.clone();
+                    walk.more.shun = self.ender.phase == crate::endermen::EnderPhase::Travel;
                     let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
                     self.expanded += walk.expanded;
                     let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);

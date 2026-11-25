@@ -257,7 +257,8 @@ fn a_ticking_enderman_at_44_is_walked_to() {
     );
     assert!(r.has("approach enderman") >= 1, "{story}");
     assert!(r.has("endermen reached") >= 1, "{story}");
-    assert!(r.plan.met, "{story}");
+    // Issue 18c: from the stage on to the forest, not met.
+    assert!(r.has("endermen reached: on to the forest") >= 1, "{story}");
 }
 
 /// The soul sand valley wait (the decision of 2026-11-24): standing on soul sand with no enderman

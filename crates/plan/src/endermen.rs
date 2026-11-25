@@ -1341,6 +1341,7 @@ impl Plan {
         let found = match tries {
             0 => {
                 let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
+                walk.more.shun = self.ender.phase == EnderPhase::Travel;
                 walk.route_now(w, tick).then_some((walk, "a plain route"))
             }
             1 => {
