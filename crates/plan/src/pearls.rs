@@ -3032,6 +3032,7 @@ impl Plan {
         // three and could reclaim no more). A table is made again where it stands: the forest
         // has the wood, and carrying one costs a slot and a dig.
         if self.base.over
+            && self.pearls.moves > 0
             && self.pearls.burrow.is_none()
             && self.pearls.repicks < r.repick_max
             && crate::base::wood_pick_uses(w) < r.repick_below
