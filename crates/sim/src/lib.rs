@@ -836,6 +836,7 @@ pub mod fluid;
 pub mod furnace;
 pub mod life;
 pub mod nether;
+pub mod stronghold;
 pub mod survival;
 pub mod terrain;
 

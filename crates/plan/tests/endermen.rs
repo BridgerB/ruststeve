@@ -37,6 +37,7 @@ fn with(mut w: World, id: i32, kind: EntityKind, at: [f64; 3]) -> World {
         x: at[0],
         y: at[1],
         z: at[2],
+        velocity: [0.0; 3],
     }));
     w
 }

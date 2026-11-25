@@ -1237,6 +1237,7 @@ name = "results"
 version = "0.1.0"
 dependencies = [
  "data",
+ "flate2",
  "md-5",
  "memory",
  "observe",

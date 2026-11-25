@@ -334,3 +334,28 @@ fn lpvec3_round_trips_within_its_precision() {
         }
     }
 }
+
+/// Issue 19b: `add_entity` carries the entity's velocity at spawn (a thrown eye's first motion),
+/// read back within the LpVec3's precision; a still mob's is the zero vector.
+#[test]
+fn add_entity_carries_its_spawn_velocity() {
+    for v in [[0.0, 0.0, 0.0], [0.3, 0.2, -0.45]] {
+        let p = S2c::AddEntity {
+            id: 9,
+            uuid: [1; 16],
+            kind: 40,
+            x: 10.5,
+            y: 70.0,
+            z: -3.5,
+            velocity: v,
+        };
+        let (id, body) = p.encode().unwrap();
+        let S2c::AddEntity { velocity, x, .. } = decode(State::Play, id, &body).unwrap() else {
+            panic!("not add_entity");
+        };
+        assert_eq!(x, 10.5);
+        for i in 0..3 {
+            assert!((velocity[i] - v[i]).abs() < 1e-3, "{v:?} -> {velocity:?}");
+        }
+    }
+}

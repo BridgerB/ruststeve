@@ -5,8 +5,8 @@ type: decision
 tags: [decision, observability, coverage, ledger, senses]
 aliases: [observe first, full observability, the coverage gate, no blind spots]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@31545c1
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@7c9069f
 sourceRefs:
   - "ruststeve:crates/results/src/observe.rs#fn every_clientbound_packet_is_classified() {"
   - "ruststeve:crates/observe/src/lib.rs#pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {"
@@ -34,4 +34,5 @@ Before 16e: about 37 of 141 play packets decoded (2.5 million thrown away in one
 ## See also
 - [[observability]] - what each run leaves and how to read it.
 - Issue 18b adds the hunt's facts before the hunt is built: anger, blows, deaths, pearls dropped and picked ([[race-and-results]]).
+- Issue 19b adds the eyes' and the stronghold's before they are built: `EyeThrown` (an eye of ender appearing within 4 of the bot, with its spawn velocity's heading from `add_entity`), `EyeFlight` (first and last position and the heading between, told when the eye is removed), `EyeEnded` (dropped when an `ender_eye` item appears within 2 of where it ended within 10 ticks, else shattered), `EyePicked`, `FrameSeen` (an end portal frame on record within 128), `SilverfishWoken` (one appearing within 16), and `Dimension` names where the bot came from. The senses row gains the eyes held, frames seen and the dimension outside the Nether.
 - [[one-bot-first]] - done is one real bot past the stage; observing is how to see why one did not.

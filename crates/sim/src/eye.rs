@@ -178,6 +178,8 @@ impl Sim {
                     x: at[0],
                     y: at[1],
                     z: at[2],
+                    // The jar spawns the eye with no motion (EyeOfEnder: delta 0).
+                    velocity: [0.0; 3],
                 },
             )?,
             wire(

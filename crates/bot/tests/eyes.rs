@@ -38,7 +38,10 @@ fn held_eyes(w: &world::World) -> i32 {
 
 /// The eye's places as the bot's world was told them, the spawn first.
 fn run_fetch(seed: u64) -> (bot::lockstep::Run, Vec<[f64; 3]>) {
-    let script = bot::Script::Fetch { at: THROW_AT };
+    let script = bot::Script::Fetch {
+        at: THROW_AT,
+        home: None,
+    };
     let mut places: Vec<[f64; 3]> = Vec::new();
     let run = bot::lockstep::run_acting(eye_sim(seed), "rs-eye", seed, 20 + 400, 20, |w, t| {
         if let Some(e) = w

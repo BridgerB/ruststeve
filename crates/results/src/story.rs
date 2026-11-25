@@ -457,6 +457,8 @@ mod tests {
             angry_ticking: None,
             angry_frozen: None,
             sword_uses: None,
+            eyes: None,
+            frames: None,
         }
     }
 

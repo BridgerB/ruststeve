@@ -1747,3 +1747,46 @@ script = "fetch:20"
 ticks = 400
 give = ["ender_eye 1"]
 stronghold = [1648, -16]
+
+# Issue 19's portal room (docs/problems/eyes-model.md), landing 10 over its ring. Feet height
+# from the room's template (`StrongholdPieces$PortalRoom`): frames at piece y 3 = 19, so the
+# floor is y 16 and the feet's level y 17; the spawner (1632, 19, -34) puts the door to the east
+# (piece z 0 = x 1638), the side walls at z -39 and -29, x 1623 to 1638.
+# - y03-frames-N: still on the surface, 100 and 60 west of the ring: memory holds its 12 frames
+#   (an exposed face: the room's air over them) and their centre (1628, 19, -34).
+# - y04-wall: in a stone pocket against the side wall's outside (z -28, x 1625: past the ring,
+#   off the lava ledges and the stairs), full iron, normal, an iron pickaxe: breaks the wall at
+#   the head into the room; silverfish from the spawner (within 16) or an infested brick, and
+#   their damage through the armour. Silverfish are not modelled: this row is the real side's
+#   evidence and differs in sim until they are.
+
+[[moment]]
+id = "y03-frames-0"
+landing = 10
+dx = -100
+dz = 0
+script = "still"
+ticks = 100
+frames = true
+
+[[moment]]
+id = "y03-frames-1"
+landing = 10
+dx = -60
+dz = 6
+script = "still"
+ticks = 100
+frames = true
+
+[[moment]]
+id = "y04-wall"
+landing = 10
+dx = -3
+dz = 6
+feet_y = 17
+script = "break:30:0:1:-1"
+ticks = 400
+difficulty = "normal"
+give = ["iron_pickaxe 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+fill = [["stone", -1, -1, 0, 1, 2, 1], ["air", 0, 0, 0, 0, 1, 0]]
