@@ -186,6 +186,10 @@ pub struct More {
     /// piglins and a hoglin, 5.2 a blow, and died in two).
     #[serde(default)]
     pub shun: bool,
+    // >>> overland (Q4, issue 19e): a far walk that may bridge over water (a river).
+    #[serde(default)]
+    pub water: bool,
+    // <<< overland
 }
 
 fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -395,6 +399,9 @@ impl Walk {
     /// The cells this walk reads: a far walk's bridge and shun, with its own keep.
     fn cells<'a>(&self, w: &'a World) -> path::Cells<'a> {
         match (self.more.far, self.more.keep) {
+            (true, keep) if self.more.water => {
+                path::Cells::far_over_water(w, keep.unwrap_or(path::BRIDGE_RESERVE))
+            }
             (false, _) if self.more.shun => path::Cells::far_keeping(w, i64::MAX),
             (false, _) => path::Cells::new(w),
             (true, None) => path::Cells::far(w),

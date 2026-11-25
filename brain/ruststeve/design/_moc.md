@@ -51,6 +51,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[forest-base]] - the hunt's kit made in a warped forest: stems by hand, swords in kills, a shield (issue 18d).
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
+- [[overland-and-stronghold]] - the overworld walk to the eyes' fix and the dig into the portal room (issue 19e/f).
 - [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.

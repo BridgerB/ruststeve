@@ -223,6 +223,12 @@ pub struct Goals {
     #[serde(default)]
     pub base: crate::base::Base,
     // <<< base
+    // >>> overland and stronghold (Q4, issue 19e/f): `[overland]` and `[stronghold]`.
+    #[serde(default)]
+    pub overland: crate::overland::OverlandRules,
+    #[serde(default)]
+    pub stronghold: crate::stronghold::StrongholdRules,
+    // <<< overland and stronghold
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -569,6 +575,10 @@ pub struct Table {
     // >>> base
     pub base: crate::base::Base,
     // <<< base
+    // >>> overland and stronghold (Q4)
+    pub overland: crate::overland::OverlandRules,
+    pub stronghold: crate::stronghold::StrongholdRules,
+    // <<< overland and stronghold
 }
 
 impl Table {
@@ -768,6 +778,10 @@ impl Table {
                 valley_wait_ticks: g.survival.valley_wait_ticks,
             },
             base: g.base.clone(),
+            // >>> overland and stronghold (Q4)
+            overland: g.overland.clone(),
+            stronghold: g.stronghold.clone(),
+            // <<< overland and stronghold
         })
     }
 
@@ -1188,6 +1202,8 @@ mod tests {
             survival: Survival::default(),
             pearls: crate::pearls::PearlRules::default(),
             base: crate::base::Base::default(),
+            overland: crate::overland::OverlandRules::default(),
+            stronghold: crate::stronghold::StrongholdRules::default(),
         };
         Table::new(&g).unwrap()
     }

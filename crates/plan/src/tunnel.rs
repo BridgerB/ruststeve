@@ -151,6 +151,8 @@ impl<'a> Sight<'a> {
                 | BlockKind::CryingObsidian
                 | BlockKind::Bedrock,
             ) => WALL,
+            // Issue 19f: an infested block is never opened (a silverfish wakes).
+            Some(k) if stairs::infested(Some(k)) => WALL,
             Some(k) => match path::classify(state) {
                 Class::Water => WATER,
                 Class::Lava => LAVA,

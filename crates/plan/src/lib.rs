@@ -31,6 +31,9 @@ pub mod hunt;
 pub mod ledger;
 pub mod look;
 pub mod make;
+// >>> overland (Q4, issue 19e)
+pub mod overland;
+// <<< overland
 pub mod path;
 // >>> pearls (P3, issue 18f)
 pub mod pearls;
@@ -42,6 +45,9 @@ pub mod shield;
 pub mod smelt;
 pub mod stairs;
 pub mod station;
+// >>> stronghold (Q4, issue 19f)
+pub mod stronghold;
+// <<< stronghold
 pub mod tunnel;
 pub mod walk;
 
@@ -811,6 +817,12 @@ pub struct Plan {
     #[serde(default)]
     pub base: base::BaseState,
     // <<< base
+    // >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md).
+    #[serde(default)]
+    pub overland: overland::OverlandState,
+    #[serde(default)]
+    pub stronghold: stronghold::StrongholdState,
+    // <<< overland and stronghold
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -930,6 +942,10 @@ impl Plan {
             // >>> base
             base: base::BaseState::default(),
             // <<< base
+            // >>> overland and stronghold (Q4)
+            overland: overland::OverlandState::default(),
+            stronghold: stronghold::StrongholdState::default(),
+            // <<< overland and stronghold
             acts: Vec::new(),
         }
     }
@@ -2386,6 +2402,11 @@ impl Plan {
         {
             return Task::Idle;
         }
+        // >>> overland and stronghold (Q4, issue 19e/f)
+        if let Some(t) = self.eyes_stronghold_task(w, tick) {
+            return t;
+        }
+        // <<< overland and stronghold
         if w.dimension
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
@@ -2508,6 +2529,25 @@ impl Plan {
         }
         self.decide(w, origin, tick)
     }
+
+    // >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md)
+    /// In the overworld with eyes held (or a portal room known): into the room if its frames are
+    /// seen, else overland toward the fix (`OverlandState::fix`, set from the eyes' fix), else
+    /// `None` (the eyes' throws come first; the orchestrator orders the calls).
+    fn eyes_stronghold_task(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.aim != Aim::Race {
+            return None;
+        }
+        let eyes = craft::count(w, data::ItemKind::EnderEye) > 0;
+        if !eyes && self.stronghold.room.is_none() {
+            return None;
+        }
+        if let Some(t) = self.stronghold_task(w, tick) {
+            return Some(t);
+        }
+        self.overland_task(w, tick)
+    }
+    // <<< overland and stronghold
 
     /// Under the engage health in the Nether: rest where no shooter in range sees the body and
     /// nothing burns; seen or burning, the nearest cell out of sight on a found route; with none,
