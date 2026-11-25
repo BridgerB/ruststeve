@@ -65,6 +65,8 @@ pub struct PearlRules {
     pub collect_ticks: u64,
     pub breach_near: f64,
     pub near_o: f64,
+    pub base_wait_ticks: u64,
+    pub base_retry_ticks: u64,
     pub calm_range: f64,
 }
 
@@ -96,6 +98,8 @@ impl Default for PearlRules {
             collect_ticks: 200,
             breach_near: 4.0,
             near_o: 8.0,
+            base_wait_ticks: 600,
+            base_retry_ticks: 6000,
             calm_range: 16.0,
         }
     }
@@ -217,6 +221,11 @@ pub struct PearlState {
     /// Weapon uses spent in fights, summed at each kill.
     #[serde(default)]
     pub weapon_spent: u64,
+    /// The base's wait (`Some(Task::Idle)`) began here; the base is not asked before this tick.
+    #[serde(default)]
+    pub base_wait_since: Option<u64>,
+    #[serde(default)]
+    pub base_skip_until: Option<u64>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -1706,18 +1715,98 @@ impl Plan {
         None
     }
 
+    /// A dig out of a pocket: with every side of the feet shut at the feet or the head, the shut
+    /// cells on the side whose standing run beyond is longest (`cover::open_runs` from the cell
+    /// beside), the feet's level first. `None` with a side open.
+    fn unpocket(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
+        let open = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2]))
+                .and_then(data::generated::shapes::collision)
+                == Some(data::types::Collision::Empty)
+        };
+        let sides = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        let shut = |d: [i32; 2]| {
+            let c = [feet[0] + d[0], feet[1], feet[2] + d[1]];
+            !open(c) || !open([c[0], c[1] + 1, c[2]])
+        };
+        if !sides.iter().all(|d| shut(*d)) {
+            return None;
+        }
+        let run = |d: [i32; 2]| {
+            let c = (feet[0] + d[0], feet[1], feet[2] + d[1]);
+            cover::open_runs(w, c)
+                .iter()
+                .find(|(dd, _)| *dd == (d[0], d[1]))
+                .map_or(0, |(_, n)| *n)
+        };
+        let best = sides.into_iter().max_by_key(|d| (run(*d), d[0], d[1]))?;
+        let c = [feet[0] + best[0], feet[1], feet[2] + best[1]];
+        let cell = if open(c) { [c[0], c[1] + 1, c[2]] } else { c };
+        self.note(
+            tick,
+            format!("out of the pocket: dig {cell:?}"),
+            format!(
+                "every side of the feet {feet:?} shut; toward ({}, {}), {} open beyond; {} pickaxe uses left",
+                best[0],
+                best[1],
+                run(best),
+                endermen::pickaxe_uses_left(w)
+            ),
+        );
+        Some(Task::Dig(crate::dig::Dig::new(
+            w,
+            (cell[0], cell[1], cell[2]),
+            tick,
+        )))
+    }
+
     /// The hunt's tasks, for a planner with no task in hand (agent P2's `EnderPhase::Hunt` calls
     /// this; so does `pearls_step`): the base (row 6), then the build row's walks and digs: a site
     /// found and walked to, the mouth reopened, a walk away after a move. `None` with nothing to
     /// begin (the standing rows act).
     pub fn pearls_task(&mut self, w: &World, tick: u64) -> Option<Task> {
         let body = w.body?;
-        // 6. base.
-        if let Some(t) = self.base_task(w, tick) {
+        // 6. base: its tasks, but not a wait of more than `base_wait_ticks` (the frontier race
+        // 45542558792: all 8 bots waited 2,400 ticks a step for a stem with a way to it, and
+        // every step after wood needs wood); then the hunt goes on and the base is asked again
+        // after `base_retry_ticks`.
+        let r = self.pearl_rules();
+        if self.pearls.base_skip_until.is_none_or(|t| tick >= t) {
+            match self.base_task(w, tick) {
+                Some(Task::Idle) => {
+                    let since = *self.pearls.base_wait_since.get_or_insert(tick);
+                    if tick.saturating_sub(since) < r.base_wait_ticks {
+                        return Some(Task::Idle);
+                    }
+                    self.pearls.base_wait_since = None;
+                    self.pearls.base_skip_until = Some(tick + r.base_retry_ticks);
+                    self.note(
+                        tick,
+                        "base waits too long: the hunt goes on".to_owned(),
+                        format!(
+                            "{} ticks with no base task; weapon uses {}, pickaxe uses {}; the base asked again in {}",
+                            r.base_wait_ticks,
+                            weapon_uses(w),
+                            endermen::pickaxe_uses_left(w),
+                            r.base_retry_ticks
+                        ),
+                    );
+                }
+                Some(t) => {
+                    self.pearls.base_wait_since = None;
+                    return Some(t);
+                }
+                None => {}
+            }
+        }
+        let feet = arr(path::stand_cell(w, body.pos));
+        // Walled in where it stands (a pocket of its own from before the hunt): out by the side
+        // whose floor beyond runs longest, one block at a time.
+        if self.pearls.burrow.is_none()
+            && let Some(t) = self.unpocket(w, tick, feet)
+        {
             return Some(t);
         }
-        let r = self.pearl_rules();
-        let feet = arr(path::stand_cell(w, body.pos));
         if self.pearls.burrow.is_none() {
             if self.pearls.site_at.is_some_and(|t| tick < t + r.site_every) {
                 return None;
