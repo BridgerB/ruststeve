@@ -514,7 +514,9 @@ parked_look_ticks = 40
 fight_cap = 2400
 # A kill at least this often, else the burrow moves; two moves without a kill end the hunt (18f).
 kill_window = 12000
-moves_without_kill = 2
+# (2 ended the hunt sealed in at tick 12,000 of a 36,000 cap, race 45548022681 lane 1: the win
+# wants every tick; the moves go on.)
+moves_without_kill = 1000
 # No kill and no calm enderman in sight this long and the burrow moves, at least this far: P1's
 # supply probe counted 18 endermen within 128 in 10 minutes and 0.4 new a minute, and the spot
 # matters threefold over 10 blocks; three dev-forest bots waited 3,300 to 4,000 ticks for one in the

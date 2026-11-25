@@ -92,7 +92,7 @@ impl Default for PearlRules {
             fight_cap: 2400,
             kill_window: 12000,
             burrow_idle_ticks: 2400,
-            moves_without_kill: 2,
+            moves_without_kill: 1000,
             burrow_move: 32,
             site_every: 100,
             weapon_min_uses: 10,
@@ -151,6 +151,8 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 
 /// Blocks from the feet a forest floor cell walked to lies at least (a new place to search).
 const FLOOR_MIN: i32 = 8;
+/// Eye to a block's middle within which the old shell is dug back from where the bot stands.
+const RECLAIM_REACH: f64 = 4.4;
 /// Ticks of one yaw sweep at O.
 const SWEEP_TICKS: u64 = 400;
 /// Blocks a walk on for a new site goes at least.
@@ -276,6 +278,14 @@ pub struct PearlState {
     /// Filler is being restocked (netherrack dug near the burrow).
     #[serde(default)]
     pub restock: bool,
+    /// Cells this hunt put a block into (the shell, supports, seals): what a reclaim digs back.
+    #[serde(default)]
+    pub placed: Vec<[i32; 3]>,
+    /// A move's old shell being dug back, and blocks reclaimed so far.
+    #[serde(default)]
+    pub reclaim: bool,
+    #[serde(default)]
+    pub reclaimed: u32,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -1775,6 +1785,8 @@ impl Plan {
         }
         self.pearls.moves += 1;
         self.pearls.moves_no_kill += 1;
+        self.pearls.reclaim = true;
+        self.pearls.reclaimed = 0;
         self.pearls.moved_from.push(b.b);
         self.pearls.burrow = None;
         self.pearls.built = false;
@@ -1875,6 +1887,10 @@ impl Plan {
                 if what == "burrow" {
                     self.pearls.site_blocks += 1;
                 }
+                let placed = [cell.0, cell.1, cell.2];
+                if !self.pearls.placed.contains(&placed) {
+                    self.pearls.placed.push(placed);
+                }
                 self.acts.push(world::Act::UseOn {
                     pos: world::BlockPos::new(click.0, click.1, click.2),
                     face,
@@ -1967,6 +1983,69 @@ impl Plan {
         None
     }
 
+    /// The next block of the old shell to dig back (a cell placed by this hunt, full, within
+    /// reach of the eye, not under the feet), with a wooden pickaxe; `None` and the reclaim over
+    /// (noted with its count) when none is left or no wooden pickaxe is held.
+    fn reclaim_step(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
+        let body = w.body?;
+        let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+        let under = [feet[0], feet[1] - 1, feet[2]];
+        let full = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2]))
+                .and_then(data::generated::shapes::collision)
+                == Some(data::types::Collision::Full)
+        };
+        let next = self
+            .pearls
+            .placed
+            .iter()
+            .copied()
+            .filter(|c| *c != under && full(*c))
+            .map(|c| {
+                (
+                    dist(
+                        eye,
+                        [
+                            f64::from(c[0]) + 0.5,
+                            f64::from(c[1]) + 0.5,
+                            f64::from(c[2]) + 0.5,
+                        ],
+                    ),
+                    c,
+                )
+            })
+            .filter(|(d, _)| *d <= RECLAIM_REACH)
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .map(|(_, c)| c);
+        let pick = crate::base::spare_pick(w);
+        let (Some(c), Some(_)) = (next, pick) else {
+            self.pearls.reclaim = false;
+            self.pearls.placed.retain(|c| full(*c));
+            self.note(
+                tick,
+                format!("reclaimed {} blocks", self.pearls.reclaimed),
+                format!(
+                    "{}; {} burrow blocks held",
+                    if pick.is_none() {
+                        "no wooden pickaxe held"
+                    } else {
+                        "none left in reach"
+                    },
+                    burrow_filler(w)
+                ),
+            );
+            return None;
+        };
+        self.pearls.reclaimed += 1;
+        self.pearls.placed.retain(|p| *p != c);
+        Some(Task::Dig(crate::dig::Dig::with_tool(
+            w,
+            (c[0], c[1], c[2]),
+            tick,
+            ItemKind::WoodenPickaxe,
+        )))
+    }
+
     /// A walk to dig exposed netherrack (or nylium, which drops netherrack to a pickaxe) near the
     /// feet, with a pickaxe above the reserve; `None` with none (noted once a `NOTE_EVERY`).
     fn restock_task(&mut self, w: &World, tick: u64, filler: i32) -> Option<Task> {
@@ -1975,7 +2054,7 @@ impl Plan {
             .as_ref()
             .map_or(0, |t| t.survival.pickaxe_reserve);
         let uses = endermen::pickaxe_uses_left(w);
-        if uses <= reserve {
+        if uses <= reserve && crate::base::spare_pick(w).is_none() {
             self.pearl_note(
                 tick,
                 "restock",
@@ -2097,6 +2176,14 @@ impl Plan {
             }
         }
         let feet = arr(path::stand_cell(w, body.pos));
+        // A move's old shell dug back first, with a wooden pickaxe only (P5's spare_pick: never the
+        // stone pickaxes' reserve), nearest first, never the block under the feet.
+        if self.pearls.burrow.is_none()
+            && self.pearls.reclaim
+            && let Some(t) = self.reclaim_step(w, tick, feet)
+        {
+            return Some(t);
+        }
         // Filler low (under `restock_below`, or a burrow block wanted and none held): netherrack
         // dug near with a pickaxe above the reserve, until `restock_to`.
         let filler = burrow_filler(w);
