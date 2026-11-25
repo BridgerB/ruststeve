@@ -137,14 +137,24 @@ pub fn write_eyes(path: &Path, kept: &plan::eyes::Kept) -> Result<(), String> {
 }
 
 /// The eyes state a snapshot kept; a snapshot from before issue 19c has no `eyes.rsw` and reads
-/// as the default (no lines, no fix).
+/// as the default (no lines, no fix). One that cannot be read is said on stderr and read as the
+/// default too: the eyes state is a help to a resume, never a reason to lose the race.
 pub fn read_eyes(path: &Path) -> Result<plan::eyes::Kept, String> {
     if !path.exists() {
         return Ok(plan::eyes::Kept::default());
     }
-    let packed = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let bytes = zstd::decode_all(packed.as_slice()).map_err(|e| e.to_string())?;
-    rmp_serde::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+    let read = || -> Result<plan::eyes::Kept, String> {
+        let packed = std::fs::read(path).map_err(|e| e.to_string())?;
+        let bytes = zstd::decode_all(packed.as_slice()).map_err(|e| e.to_string())?;
+        rmp_serde::from_slice(&bytes).map_err(|e| e.to_string())
+    };
+    Ok(read().unwrap_or_else(|e| {
+        eprintln!(
+            "eyes: {} unreadable ({e}): resumed with no eyes state",
+            path.display()
+        );
+        plan::eyes::Kept::default()
+    }))
 }
 
 /// Copy a directory tree, leaving out the server's `session.lock` (held while it runs).
@@ -225,6 +235,12 @@ mod tests {
         assert_eq!(to.eyes_kept(), kept);
         assert_eq!(
             read_eyes(&dir.join("missing.rsw")).expect("missing"),
+            Kept::default()
+        );
+        // A corrupt file warns and reads as the default: the race goes on.
+        std::fs::write(dir.join("bad.rsw"), b"not zstd").expect("bad");
+        assert_eq!(
+            read_eyes(&dir.join("bad.rsw")).expect("corrupt"),
             Kept::default()
         );
         std::fs::remove_dir_all(&dir).expect("clean");

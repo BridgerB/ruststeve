@@ -176,6 +176,11 @@ impl Case {
         n(&self.items_gained) - n(&self.items_lost)
     }
 
+    /// The run's eyes of ender (issue 19b), from its story.
+    pub fn eyes(&self) -> Option<story::EyeCounts> {
+        self.story.as_ref().and_then(|s| s.eyes)
+    }
+
     /// `[ending killer doing why]`: what the batch groups endings by.
     pub fn signature(&self) -> [String; 4] {
         let killer = match &self.ending {
@@ -319,6 +324,9 @@ pub struct Row {
     /// before it was kept.
     #[serde(default)]
     pub pearls: Option<i64>,
+    /// The run's eyes (`Case::eyes`, issue 19b); `None` when it had none or in older rows.
+    #[serde(default)]
+    pub eyes: Option<story::EyeCounts>,
 }
 
 /// What a batch could see: full sight is every ratio 1.0 and the counts 0 (issue 16e). A column
@@ -810,6 +818,11 @@ pub fn render_summary(
         lines.push(String::new());
         lines.push(line);
     }
+    let eyes = eyes_lines(batches);
+    if !eyes.is_empty() {
+        lines.push(String::new());
+        lines.extend(eyes);
+    }
     // The planner's aims, when runs had one: met over counted runs, per aim.
     let mut aims: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for row in batches
@@ -888,6 +901,52 @@ pub fn pearls_line(batches: &[Batch]) -> Option<String> {
         parts.join(", "),
         rows.len()
     ))
+}
+
+/// The eyes lines (issue 19b), only when a run had eyes or saw a frame: counted runs by the eyes
+/// held at the end, throws per bot with their ends, and frames seen.
+/// `eyes held at the end: 0 x2, 12 x1 (3 runs)`,
+/// `eye throws per bot: 0 x2, 3 x1; 3 thrown, 2 dropped, 1 shattered, 2 picked up`,
+/// `frames seen: 1 of 3 runs, 12 most`.
+pub fn eyes_lines(batches: &[Batch]) -> Vec<String> {
+    let rows: Vec<&Row> = batches
+        .iter()
+        .flat_map(|b| &b.rows)
+        .filter(|r| r.ending.counted())
+        .collect();
+    if !rows.iter().any(|r| r.eyes.is_some()) {
+        return Vec::new();
+    }
+    let e = |r: &Row| r.eyes.unwrap_or_default();
+    let hist = |f: &dyn Fn(&Row) -> i64| {
+        let mut by: BTreeMap<i64, u64> = BTreeMap::new();
+        for r in &rows {
+            *by.entry(f(r)).or_default() += 1;
+        }
+        by.iter()
+            .map(|(k, n)| format!("{k} x{n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let sum = |f: fn(story::EyeCounts) -> u32| rows.iter().map(|r| u64::from(f(e(r)))).sum::<u64>();
+    let seen = rows.iter().filter(|r| e(r).frames > 0).count();
+    let most = rows.iter().map(|r| e(r).frames).max().unwrap_or(0);
+    vec![
+        format!(
+            "eyes held at the end: {} ({} runs)",
+            hist(&|r| i64::from(e(r).held)),
+            rows.len()
+        ),
+        format!(
+            "eye throws per bot: {}; {} thrown, {} dropped, {} shattered, {} picked up",
+            hist(&|r| i64::from(e(r).thrown)),
+            sum(|c| c.thrown),
+            sum(|c| c.dropped),
+            sum(|c| c.shattered),
+            sum(|c| c.picked)
+        ),
+        format!("frames seen: {seen} of {} runs, {most} most", rows.len()),
+    ]
 }
 
 #[cfg(test)]
@@ -1136,6 +1195,7 @@ mod pearls_tests {
             recording: None,
             aim: None,
             pearls,
+            eyes: None,
         }
     }
 
@@ -1176,5 +1236,46 @@ mod pearls_tests {
         assert_eq!(pearls_line(&[quiet]), None);
         let text = render_summary(&summarize(std::slice::from_ref(&b)), &[b], None);
         assert!(text.contains("pearls gained: 0 x2"), "{text}");
+    }
+
+    /// Issue 19b: the eyes lines count counted runs by eyes held and by throws, sum the throws'
+    /// ends, and count the runs that saw frames; a race with no eyes has none.
+    #[test]
+    fn the_eyes_lines_count_held_throws_and_frames() {
+        let eyes = |held, thrown, dropped, shattered, picked, frames| {
+            Some(story::EyeCounts {
+                held,
+                thrown,
+                dropped,
+                shattered,
+                picked,
+                frames,
+            })
+        };
+        let with = |stage, e| Row {
+            eyes: e,
+            ..row(stage, Some(0), Ending::Cap)
+        };
+        let b = batch(vec![
+            with(Stage::Overworld, eyes(12, 0, 0, 0, 0, 0)),
+            with(Stage::Stronghold, eyes(10, 3, 2, 1, 2, 12)),
+            with(Stage::Pearls12, None),
+            Row {
+                ending: Ending::Cut,
+                ..with(Stage::Overworld, eyes(5, 9, 0, 9, 0, 0))
+            },
+        ]);
+        assert_eq!(
+            eyes_lines(std::slice::from_ref(&b)),
+            vec![
+                "eyes held at the end: 0 x1, 10 x1, 12 x1 (3 runs)".to_owned(),
+                "eye throws per bot: 0 x2, 3 x1; 3 thrown, 2 dropped, 1 shattered, 2 picked up"
+                    .to_owned(),
+                "frames seen: 1 of 3 runs, 12 most".to_owned(),
+            ]
+        );
+        assert!(eyes_lines(&[batch(vec![row(Stage::Forest, Some(1), Ending::Cap)])]).is_empty());
+        let text = render_summary(&summarize(std::slice::from_ref(&b)), &[b], None);
+        assert!(text.contains("frames seen: 1 of 3 runs"), "{text}");
     }
 }
