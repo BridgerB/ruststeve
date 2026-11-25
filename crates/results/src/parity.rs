@@ -300,3 +300,19 @@ pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
     lines.push(format!("disagreements by field: {per_field:?}"));
     (lines.join("\n") + "\n", pass)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The table's moments read whole, ids unique (issue 18: a row appended with an empty mob
+    /// distance broke the file, and the parity run only said so at its real step).
+    #[test]
+    fn the_moments_file_reads_with_unique_ids() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/moments.toml");
+        let m = Moments::read(path).unwrap();
+        let ids: std::collections::BTreeSet<&str> =
+            m.moment.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids.len(), m.moment.len(), "a repeated id");
+    }
+}
