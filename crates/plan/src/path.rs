@@ -433,13 +433,28 @@ pub fn bridge_blocks(w: &World) -> i64 {
     w.inventory
         .slots
         .values()
+        .chain(w.inventory.carried.iter())
         .filter(|(k, _)| BRIDGE_BLOCKS.contains(k))
         .map(|(_, n)| i64::from(*n))
         .sum()
 }
 
-/// The next bridge block to hold: the kind with the most held.
+/// The next bridge block to hold: the one in hand, else the one on the cursor, else the kind
+/// with the most held.
 pub fn bridge_item(w: &World) -> Option<data::ItemKind> {
+    // The bridge block in hand first, then one on the cursor: with the kind with the most held
+    // chosen afresh each look, a stack lifted onto the cursor for the swap stopped counting, the
+    // other kind became the most held and was put back in hand, and the swap undid itself for
+    // 3,500 ticks 35 blocks from the warped forest (race 45531577912 lane 1, issue 18c).
+    let held = crate::hold::held_item(w).filter(|k| BRIDGE_BLOCKS.contains(k));
+    let carried = w
+        .inventory
+        .carried
+        .map(|(k, _)| k)
+        .filter(|k| BRIDGE_BLOCKS.contains(k));
+    if let Some(k) = held.or(carried) {
+        return Some(k);
+    }
     BRIDGE_BLOCKS
         .iter()
         .copied()
@@ -1026,5 +1041,33 @@ mod pickup_tests {
         assert!(!g.done((2, 70, 0)), "too far");
         assert_eq!(g.heuristic((1, 70, 0)), 0.0);
         assert!(g.heuristic((5, 70, 0)) > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod bridge_item_tests {
+    use super::*;
+    use data::ItemKind;
+
+    /// Race 45531577912 lane 1: cobblestone in hand, netherrack the most held. Lifting the
+    /// netherrack onto the cursor must not make cobblestone the choice again (the swap undid
+    /// itself for 3,500 ticks): the block in hand is kept, and a lifted stack still counts.
+    #[test]
+    fn the_bridge_block_choice_holds_through_a_swap() {
+        let mut w = World::new();
+        w.held = 0;
+        w.inventory.slots.insert(36, (ItemKind::Cobblestone, 40));
+        w.inventory.slots.insert(10, (ItemKind::Netherrack, 64));
+        w.inventory.slots.insert(11, (ItemKind::Netherrack, 64));
+        assert_eq!(bridge_item(&w), Some(ItemKind::Cobblestone), "in hand");
+        assert_eq!(bridge_blocks(&w), 168);
+        w.inventory.slots.remove(&36);
+        assert_eq!(bridge_item(&w), Some(ItemKind::Netherrack), "the most held");
+        let lifted = w.inventory.slots.remove(&10);
+        w.inventory.carried = lifted;
+        w.inventory.slots.insert(36, (ItemKind::Cobblestone, 100));
+        w.held = 1;
+        assert_eq!(bridge_item(&w), Some(ItemKind::Netherrack), "on the cursor");
+        assert_eq!(bridge_blocks(&w), 228, "the cursor's stack counts");
     }
 }
