@@ -257,13 +257,17 @@ fn lava(k: Option<BlockKind>) -> bool {
     k == Some(BlockKind::Lava)
 }
 
-/// Is `feet` inside the room: within `reach` of the ring's centre on the plane, at the floor's
-/// height up to the frames' and two over.
+/// Is `feet` inside the room: the `portal_room` stage's own box (`world::stage::ROOM_HALF` of the
+/// ring's middle on each axis, the frames' y less `ROOM_BELOW` to plus `ROOM_ABOVE`), and within
+/// `reach` on each axis. A radius of 7 took a bot one cell into the room's west wall, 5 off on
+/// x, for inside: it sealed there and waited out of the stage (race 45714294764 lane 0).
 pub fn inside(room: &Room, feet: Cell, reach: i32) -> bool {
+    let half = ((world::stage::ROOM_HALF - 0.5).floor() as i32).min(reach);
     let (dx, dz) = (feet.0 - room.centre[0], feet.2 - room.centre[2]);
-    f64::from(dx).hypot(f64::from(dz)) <= f64::from(reach)
-        && feet.1 >= room.floor_y
-        && feet.1 <= room.centre[1] + 2
+    dx.abs() <= half
+        && dz.abs() <= half
+        && feet.1 >= (room.centre[1] - world::stage::ROOM_BELOW).max(room.floor_y)
+        && feet.1 <= room.centre[1] + world::stage::ROOM_ABOVE
 }
 
 /// A standing cell in the room for the bot: on a floor, inside the `portal_room` stage's box (and

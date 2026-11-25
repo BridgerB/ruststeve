@@ -703,3 +703,15 @@ fn a_capped_route_to_the_room_stays_low() {
     let top = route.cells.iter().map(|c| c.1).max().unwrap_or(0);
     assert!(top <= cap, "the route rises to y {top}, over {cap}");
 }
+
+/// Inside is the stage's own box: a cell one into the west wall, 5 off the ring's centre on x, is
+/// not (race 45714294764 lane 0 sealed and waited there, out of the stage).
+#[test]
+fn inside_is_the_stage_box() {
+    let w = load(&room_world((-40, 60), (-30, 40)), [40.5, 64.0, 10.5]);
+    let r = the_room(&w);
+    let [cx, _, cz] = r.centre;
+    assert!(stronghold::inside(&r, (cx - 4, r.floor_y, cz + 4), 7));
+    assert!(!stronghold::inside(&r, (cx - 5, r.floor_y + 1, cz + 4), 7));
+    assert!(!stronghold::inside(&r, (cx, r.floor_y, cz + 5), 7));
+}
