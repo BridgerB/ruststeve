@@ -535,7 +535,7 @@ impl Plan {
                     && matches!(e.metadata.get(&STARED_INDEX), Some(MetaValue::Bool(true)))
                     && !self.ender.near_misses.contains(id)
                     // >>> pearls (P3): the provoke row's target is stared at on purpose.
-                    && self.pearls.provoke.is_none_or(|(p, _)| p != **id)
+                    && !self.pearls.provoked.contains(id)
                 // <<< pearls
             })
             .map(|(id, _)| *id)

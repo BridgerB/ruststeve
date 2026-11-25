@@ -185,6 +185,10 @@ pub struct PearlState {
     pub tries: Vec<(i32, u32, u64)>,
     #[serde(default)]
     pub provokes: u32,
+    /// Endermen stared at on purpose (the provoke row's targets): their stared-at flag is no
+    /// near miss.
+    #[serde(default)]
+    pub provoked: Vec<i32>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -1298,6 +1302,9 @@ impl Plan {
         }
         self.pearls.provoke = Some((cand.id, server));
         self.pearls.provokes += 1;
+        if !self.pearls.provoked.contains(&cand.id) {
+            self.pearls.provoked.push(cand.id);
+        }
         self.note(
             tick,
             format!("provoke enderman {}", cand.id),
