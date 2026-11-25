@@ -801,6 +801,16 @@ wall_breaks = 4
 # Tasks a round of stone pickaxes may begin (a table placed, two crafts, the table dug: four; twice
 # that for a failed click), then the round ends and waits the spares' retry.
 pick_tasks = 8
+# The Nether's leftovers, dropped like [survival] junk (name, count kept) in the overworld while the
+# stronghold is the aim: the frontier's pack came up full (67 netherrack, 50 soul soil, warped
+# blocks and roots) and took no cobblestone from nine stair legs (race 45695074789 lane 0). 64
+# netherrack covers the overland's bridges (bridge_keep 32 and bridge_max 40).
+junk = [
+  ["netherrack", 64], ["soul_soil", 0], ["soul_sand", 0], ["warped_roots", 0],
+  ["crimson_roots", 0], ["warped_wart_block", 0], ["nether_wart_block", 0],
+  ["warped_nylium", 0], ["crimson_nylium", 0], ["warped_fungus", 0], ["crimson_fungus", 0],
+  ["gold_nugget", 0], ["quartz", 0], ["basalt", 0], ["magma_cream", 0],
+]
 # <<< overland and stronghold
 # >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home's goal rows, run by the base
 # machinery in the forest (plan::base::HOME_STEPS). Each makes one more of its provide a run.

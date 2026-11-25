@@ -39,3 +39,18 @@ A development race (`dev-stronghold`, `dev_fix` (1648, -16) on the throwaway bra
   - The spiral's note gives the bricks seen.
   - `stronghold_pickaxes` makes `spare_pickaxes` stone pickaxes from the pack's table and sticks (added to both dev kits) between tasks.
 - **Count to confirm**: "portal room found" from the surface; "stronghold wall step" and "stronghold wall broken" firing only when no frame is seen; "stronghold pickaxes held".
+
+### Wall 2: the room is found from the surface; a full pack and the floor-level flip (race 45695074789, 2026-11-25)
+A development race on b09cf7b (`dev-stronghold`, no `dev_fix`: the eyes thrown 150 west of the stronghold), 2 lanes x 1 bot, cap 12,000, from the frontier. Development knowledge, never evidence.
+- **What worked**:
+  - Both lanes found the room from the surface, with Q1's frames: "portal room found: ring centre [1628, 19, -34] (12 frames seen, floor feet y 17)". That matches Q5's probe 45690314001 exactly.
+  - Lane 1 found it at tick 300, 133 off, after one throw. Lane 0 found it at tick 1,240 on the overland's first leg, 116 off.
+  - Lane 0's throw 1 shattered, and the craft safety net made the eye back from a rod and a pearl.
+  - Lane 1 made a stone pickaxe at tick 1,300: table placed, crafted, table dug again.
+  - Both reached stage `stronghold`, and the dry stairs went down 6 a leg with no water.
+- **Cause 1, a full pack**: the frontier's pack came up full (67 netherrack, 50 soul soil, warped blocks and roots).
+  - Lane 0 took no cobblestone from 9 stair legs, so it never had the makings of a pickaxe. Its one stone pickaxe was down to 5 uses at tick 4,780.
+  - Lane 1's second round crafted planks into a full pack 8 times ("Missing", the stack left on the cursor) until `pick_tasks` ended the round.
+  - Fix: `[stronghold] junk` (the Nether's leftovers, 64 netherrack kept) joins the junk drop in the overworld while the stronghold is the aim, and no pickaxe round begins on a full pack.
+- **Cause 2, the floor-level flip**: lane 0's stairs reached the floor's height at (1591, 24, 34), 103 blocks off the target. The tunnel's 102-step route climbs (to y 40), and after its first leg the stairs down began again, the same down-and-up as wall 1. Fix: `at_floor` latches. From then on the stairs take over only beyond `tunnel::RISE` (16) above or below.
+- **Stand target**: (1624, 17, -30), on the south-west side of the ring for a bot coming from the south-west. It is outside the ring's ±3 box, with no lava within 2. Not yet walked to.

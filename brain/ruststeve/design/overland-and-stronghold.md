@@ -38,7 +38,7 @@ Issue 19 (#24), parts e and f: from the overworld surface with the eyes' fix in 
 
 ## The stronghold (`crates/plan/src/stronghold.rs`)
 - `room_of` (pure): the ring's centre is the one cell every frame seen is a ring member of (three a side, two out), else the middle of the frames' bounds; the feet's floor is two under the frames (the `PortalRoom` piece: frames at y 3, floor at y 0).
-- `stand_target`: a standing cell within 7 of the centre, out of the ring, with no lava within two at the feet's and the floor's height (the pool under the ring, the side pools by the door).
+- `stand_target`: a standing cell inside the `portal_room` stage's own box (`world::stage::ROOM_HALF`, `ROOM_BELOW`, `ROOM_ABOVE`, so the stage cannot miss it by rounding), nearest the bot, out of the ring, with no lava within two at the feet's and the floor's height (the pool under the ring, the side pools by the door).
 - **Way in**: dry stairs (`Stairs::dry`) down, toward the target while they end 10 or more off the centre, else away from it; a leg from the same cell turns a quarter, four end the stairs. At the floor's height the travel tunnel (`tunnel_toward`) breaks in; a plain walk only within 24 at that height.
 - **Infested blocks** are never opened: `stairs::refusal` refuses them and the tunnel's route reads them as walls.
 - **Inside**: the spawner broken, the standing cell walked to, a nook sealed; then the wait (issue 20 starts there).
