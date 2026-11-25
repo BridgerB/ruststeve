@@ -143,6 +143,9 @@ pub struct HomeState {
     pub cook_noted: bool,
     #[serde(default)]
     pub cook_ended: bool,
+    /// Walks to a log for the cook's fuel.
+    #[serde(default)]
+    pub fuel_walks: u32,
     #[serde(default)]
     pub done: bool,
 }
@@ -150,6 +153,13 @@ pub struct HomeState {
 /// Lava cells sealed beside the portal at most: two rows of five in front of it and its sides
 /// (the row (21 to 25, 34, -19) was lava by tick 25,700: docs/problems/nether-walk.md), with room.
 pub const SEALS: u32 = 24;
+/// Walks to a log for the cook's fuel at most (the coordinator, 2026-11-25: the overland route is
+/// forest and plains, logs are near), and how far a log seen may be (32, the coordinator's).
+pub const FUEL_WALKS: u32 = 6;
+pub const FUEL_LOG_REACH: f64 = 32.0;
+/// Food under which raw meat is eaten as it is rather than cooked first by day: 6 is where
+/// sprinting stops (vanilla).
+pub const COOK_FOOD_FLOOR: i32 = 6;
 /// A seal is placed only this near the eye (`walk::REACH` 4 plus half a block for the far corner).
 pub const SEAL_REACH: f64 = 4.5;
 
@@ -293,9 +303,24 @@ fn out_of_plane(front: &Front, c: Cell) -> i32 {
     (c.0 - plane.0) * front.normal.0 + (c.2 - plane.1) * front.normal.1
 }
 
-/// Ticks of furnace fuel held: planks and coal by their burn time, a log as the four planks it
-/// makes. Warped and crimson wood has no burn time, so the forest's stems count nothing.
+/// Ticks of furnace fuel held or made where the bot stands: planks and coal by their burn time, a
+/// log that burns as the four planks it makes, sticks over `make::STICK_RESERVE` at 100. Warped
+/// and crimson wood is in `#non_flammable_wood` and burns nothing itself, but a stick is fuel
+/// whatever planks made it (the generated fuel table: stick 100, no warped item): a stem is 4
+/// planks, 8 sticks, 800 ticks; a warped plank 2 sticks, 200.
 pub fn fuel_ticks_held(counts: &crate::make::Counts) -> i32 {
+    let sticks = counts.get(&ItemKind::Stick).copied().unwrap_or(0);
+    let stick = data::generated::fuel::fuel_ticks(ItemKind::Stick)
+        .and_then(|t| i32::try_from(t).ok())
+        .unwrap_or(0);
+    burning_fuel_ticks(counts) + (sticks - crate::make::STICK_RESERVE).max(0) * stick
+}
+
+/// `fuel_ticks_held` without the sticks already held.
+fn burning_fuel_ticks(counts: &crate::make::Counts) -> i32 {
+    let stick = data::generated::fuel::fuel_ticks(ItemKind::Stick)
+        .and_then(|t| i32::try_from(t).ok())
+        .unwrap_or(0);
     let planks = data::generated::tags::item_tag("planks").unwrap_or(&[]);
     let coals = data::generated::tags::item_tag("coals").unwrap_or(&[]);
     let logs = data::generated::tags::item_tag("logs").unwrap_or(&[]);
@@ -306,11 +331,16 @@ pub fn fuel_ticks_held(counts: &crate::make::Counts) -> i32 {
             let t = data::generated::fuel::fuel_ticks(*k)
                 .and_then(|t| i32::try_from(t).ok())
                 .unwrap_or(0);
-            if planks.contains(k) || coals.contains(k) {
+            if (planks.contains(k) || coals.contains(k)) && t > 0 {
                 n * t
             } else if logs.contains(k) && t > 0 {
                 // Four planks of 300 ticks each (the generated fuel table's planks).
                 n * 4 * 300
+            } else if logs.contains(k) {
+                // Nether wood: four planks, eight sticks.
+                n * 8 * stick
+            } else if planks.contains(k) {
+                n * 2 * stick
             } else {
                 0
             }
@@ -1070,13 +1100,21 @@ impl Plan {
             if let Some(t) = self.hut_step(w, tick) {
                 return Some(t);
             }
-            if let Some(t) = self.home_cook(w, tick, &rules) {
+            if let Some(t) = self.home_cook(w, tick, &rules, true) {
                 return Some(t);
             }
         } else {
             self.dusk_noted = false;
         }
         let food = w.player.food.unwrap_or(0);
+        // By day the raw meat is cooked first (8 food a piece against 3), and a log fetched for
+        // the fuel when short; under COOK_FOOD_FLOOR it is eaten as it is.
+        if !dusk
+            && food >= COOK_FOOD_FLOOR
+            && let Some(t) = self.home_cook(w, tick, &rules, false)
+        {
+            return Some(t);
+        }
         if food < r.fed {
             if let Some(f) = eat::best_food(w, &rules) {
                 self.note(
@@ -1148,6 +1186,7 @@ impl Plan {
         w: &World,
         tick: u64,
         rules: &crate::make::SurvivalRules,
+        night: bool,
     ) -> Option<Task> {
         let counts = crate::held(w);
         let raw: i32 = eat::raw_held(&counts, rules).iter().map(|r| r.1).sum();
@@ -1169,13 +1208,23 @@ impl Plan {
         let fuel = fuel_ticks_held(&counts);
         let need = raw * 200;
         if self.batch.is_none() && fuel < need {
+            // By day: a log from a tree seen within FUEL_LOG_REACH, at most FUEL_WALKS walks.
+            if !night
+                && self.ender.home.fuel_walks < FUEL_WALKS
+                && let Some(t) = self.home_fuel_log(w, tick, raw, need, fuel)
+            {
+                return Some(t);
+            }
             if !self.ender.home.cook_noted {
                 self.ender.home.cook_noted = true;
                 self.ender.home.cook_ended = true;
                 self.note(
                     tick,
                     "home: no cook, the fuel short".to_owned(),
-                    format!("{raw} raw pieces want {need} ticks of fuel; {fuel} held (warped wood does not burn)"),
+                    format!(
+                        "{raw} raw pieces want {need} ticks of fuel; {fuel} held or made of sticks; {} log walks",
+                        self.ender.home.fuel_walks
+                    ),
                 );
             }
             return None;
@@ -1185,7 +1234,7 @@ impl Plan {
             self.ender.home.cook_ended = false;
             self.note(
                 tick,
-                "home: cook in the hut".to_owned(),
+                format!("home: cook {}", if night { "in the hut" } else { "by day" }),
                 format!(
                     "{raw} raw pieces, {fuel} ticks of fuel, {} furnaces and {} tables held",
                     craft::count(w, ItemKind::Furnace),
@@ -1198,6 +1247,47 @@ impl Plan {
         let t = self.decide(w, origin, tick);
         self.home_cook = false;
         Some(t)
+    }
+
+    /// A walk to dig the nearest log seen within `FUEL_LOG_REACH` that burns, for the cook's fuel.
+    fn home_fuel_log(
+        &mut self,
+        w: &World,
+        tick: u64,
+        raw: i32,
+        need: i32,
+        fuel: i32,
+    ) -> Option<Task> {
+        let body = w.body?;
+        let log = self.nearest_log(w, body.pos, 0.0, tick)?;
+        let feet = path::feet_cell(body.pos);
+        let d = f64::from((log.0 - feet.0).pow(2) + (log.2 - feet.2).pow(2)).sqrt();
+        let burns = w
+            .block_at(world::BlockPos::new(log.0, log.1, log.2))
+            .and_then(|b| b.name())
+            .and_then(ItemKind::from_name)
+            .and_then(data::generated::fuel::fuel_ticks)
+            .is_some();
+        if d > FUEL_LOG_REACH || !burns {
+            return None;
+        }
+        self.ender.home.fuel_walks += 1;
+        let mut walk = Walk::to_dig(log, tick);
+        if !walk.route_now(w, tick) {
+            self.expanded += walk.expanded;
+            self.refuse(log, tick);
+            return None;
+        }
+        self.walks += 1;
+        self.note(
+            tick,
+            format!("home: a log for the cook's fuel at {log:?}"),
+            format!(
+                "{raw} raw pieces want {need} ticks of fuel, {fuel} held; {d:.0} off; walk {} of {FUEL_WALKS}",
+                self.ender.home.fuel_walks
+            ),
+        );
+        Some(Task::ToLog(walk))
     }
 
     /// Up to the open sky by stairs in rock (overworld-leg wall 1: never through the caves),

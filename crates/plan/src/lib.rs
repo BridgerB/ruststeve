@@ -5844,11 +5844,16 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
             .and_then(|t| i32::try_from(t).ok())
             .unwrap_or(0)
     };
+    // Sticks over the reserve burn too (100 ticks, whatever planks made them: a stick is not in
+    // `#non_flammable_wood`), the smelt's own last fuel (`smelt::fuels_held`).
+    let sticks_over =
+        (counts.get(&data::ItemKind::Stick).copied().unwrap_or(0) - make::STICK_RESERVE).max(0);
     let have: i32 = counts
         .iter()
         .filter(|(k, _)| planks.contains(k) || coals.contains(k))
         .map(|(k, n)| n * burns(k))
-        .sum();
+        .sum::<i32>()
+        + sticks_over * burns(&data::ItemKind::Stick);
     let row = |id: &str, need: make::Need, count: i32| make::Row {
         id: id.to_owned(),
         needs: Vec::new(),
@@ -5875,12 +5880,23 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
                     .map(|b| format!("{b}_planks"))
             })
             .find(|p| data::ItemKind::from_name(p).is_some());
+        let stick = burns(&data::ItemKind::Stick).max(1);
         let (need_name, held) = match burning_log {
             Some(p) if nether_wood => {
                 let held = data::ItemKind::from_name(&p)
                     .and_then(|k| counts.get(&k).copied())
                     .unwrap_or(0);
                 (format!("item:{p}"), held)
+            }
+            // Only nether wood: sticks, crafted from its planks (a warped stem is 8 sticks).
+            None if nether_wood => {
+                let held = counts.get(&data::ItemKind::Stick).copied().unwrap_or(0);
+                let more = (need - have + stick - 1) / stick;
+                return Some(row(
+                    "cook-fuel",
+                    make::Need::parse("item:stick")?,
+                    held + more,
+                ));
             }
             _ => (
                 "tag:planks".to_owned(),

@@ -595,19 +595,26 @@ fn the_climbs_stairs_turn_from_a_cave_ahead() {
 }
 
 #[test]
-fn warped_wood_is_no_fuel_and_the_cook_wants_burning_planks() {
+fn warped_wood_burns_as_sticks_and_the_cook_asks_for_them() {
     let mut c = make::Counts::new();
     c.insert(ItemKind::WarpedStem, 8);
     c.insert(ItemKind::WarpedPlanks, 12);
-    assert_eq!(home::fuel_ticks_held(&c), 0, "warped wood burns nothing");
-    c.insert(ItemKind::OakLog, 2);
-    c.insert(ItemKind::Coal, 1);
-    // Two logs as eight planks of 300, a coal 1,600.
-    assert_eq!(home::fuel_ticks_held(&c), 2 * 4 * 300 + 1600);
-    c.remove(&ItemKind::Coal);
+    // A stem is 8 sticks of 100 ticks, a warped plank 2: no item of warped wood burns itself.
+    assert_eq!(home::fuel_ticks_held(&c), 8 * 800 + 12 * 200);
     c.insert(ItemKind::Beef, 6);
     let t = table();
     let row = plan::cook_goal(&c, &t.survival).unwrap_or_else(|| panic!("a cook row"));
     assert_eq!(row.id, "cook-fuel", "{row:?}");
+    assert_eq!(row.provides[0].0.key, "item:stick", "{row:?}");
+    // Six pieces at 200 ticks: 12 sticks.
+    assert_eq!(row.provides[0].1, 12, "{row:?}");
+    // With a log that burns held, its planks are the fuel.
+    c.insert(ItemKind::OakLog, 2);
+    let row = plan::cook_goal(&c, &t.survival).unwrap_or_else(|| panic!("a cook row"));
     assert_eq!(row.provides[0].0.key, "item:oak_planks", "{row:?}");
+    // Sticks over the reserve held: they count.
+    c.remove(&ItemKind::OakLog);
+    c.insert(ItemKind::Stick, 14);
+    let row = plan::cook_goal(&c, &t.survival).unwrap_or_else(|| panic!("a cook row"));
+    assert_eq!(row.id, "cook", "{row:?}");
 }
