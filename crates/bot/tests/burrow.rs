@@ -50,6 +50,11 @@ impl Run {
 /// A warped forest cavern round the origin, the frontier's kit (an iron sword, two stone
 /// pickaxes, cobblestone and netherrack, 7 rods, iron armour), the planner hunting.
 fn forest(ticks: u64, summon: impl Fn(&mut Sim)) -> Run {
+    forest_with(ticks, |_| {}, summon)
+}
+
+/// `forest`, with `lay` laying more of the stage first.
+fn forest_with(ticks: u64, lay: impl Fn(&mut Stage), summon: impl Fn(&mut Sim)) -> Run {
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
     let mut plan = Plan::with_table(Aim::Race, table);
@@ -58,6 +63,7 @@ fn forest(ticks: u64, summon: impl Fn(&mut Sim)) -> Run {
     stage
         .biome((-64, 79), (-64, 79), Biome::WarpedForest)
         .spawn((0, FLOOR + 1, 0));
+    lay(&mut stage);
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(11);
     sim.survival.life.armor = IRON;
     sim.survival.give((ItemKind::IronSword, 1));
@@ -110,10 +116,19 @@ fn a_hunting_bot_builds_its_burrow_by_its_feet() {
 
 #[test]
 fn a_calm_enderman_in_line_is_provoked_from_the_mouth() {
-    // The site at the feet faces east (the first side tried on open floor): one 16 east (the
-    // model's endermen stroll; one at 24 had wandered out of the ticking chunks by the build's
-    // end).
-    let r = forest(1600, |sim| {
+    // The site at the feet faces east (the first side tried on open floor): one 18 east, penned
+    // two high so its eye shows over the pen (the model's endermen stroll: one at 24 had
+    // wandered out of sight by the build's end).
+    let pen = |st: &mut Stage| {
+        st.fill(
+            (17, 19),
+            (FLOOR + 1, FLOOR + 2),
+            (-1, 1),
+            BlockKind::Netherrack,
+        )
+        .fill((18, 18), (FLOOR + 1, FLOOR + 3), (0, 0), BlockKind::Air);
+    };
+    let r = forest_with(1600, pen, |sim| {
         let id = sim.summon_enderman([18.5, f64::from(FLOOR + 1), 0.5]);
         if let Some(m) = sim.survival.life.mobs.get_mut(&id) {
             m.loot = false;
