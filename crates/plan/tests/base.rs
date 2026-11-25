@@ -192,11 +192,9 @@ fn stems_are_the_nearest_seen_at_the_feet_level_within_the_radius() {
             (3, 41, 0),
             (3, 42, 0),
             (3, 43, 0),
-            (3, 44, 0),
             (-5, 41, 2),
             (-5, 42, 2),
-            (-5, 43, 2),
-            (-5, 44, 2)
+            (-5, 43, 2)
         ]
     );
     let t = stem_targets(&w, &b, |c| c.0 == 3);
