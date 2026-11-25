@@ -318,6 +318,34 @@ fn joined() -> (world::World, Plan, (i32, i32, i32)) {
     (w, p, feet)
 }
 
+/// In travel (issue 18c) a fortress seen ahead turns the heading: a wall of nether bricks 24 to
+/// 30 east, seen from the start, turns an east axis once; before the endermen stage it does not.
+#[test]
+fn in_travel_a_fortress_seen_ahead_turns_the_heading() {
+    let mut stage = flat((-16, 120), (-40, 40));
+    stage.bricks((24, 30), (64, 70), (-6, 6));
+    let sim = Sim::new(CONFIG, stage.build().unwrap());
+    let run = bot::lockstep::run(sim, "rs-hd", 1, 30, 20, |_, _| physics::Controls::default());
+    let w = run.world;
+    let feet = plan::path::stand_cell(&w, w.body.unwrap().pos);
+    let turned = |p: &Plan| {
+        said(p)
+            .iter()
+            .filter(|n| n.contains("heading turned to") && n.contains("a fortress seen ahead"))
+            .count()
+    };
+    let mut reach = Plan::with_table(Aim::Hold, table());
+    reach.headed = Some(Heading::new((1, 0), feet, 0, "set by the test".to_owned()));
+    let _ = reach.heading_with(&w, Signs::default(), 100);
+    assert_eq!(turned(&reach), 0, "{:#?}", said(&reach));
+    let mut p = Plan::with_table(Aim::Hold, table());
+    p.ender.phase = plan::endermen::EnderPhase::Travel;
+    p.headed = Some(Heading::new((1, 0), feet, 0, "set by the test".to_owned()));
+    let _ = p.heading_with(&w, Signs::default(), 100);
+    assert_eq!(turned(&p), 1, "{:#?}", said(&p));
+    assert_ne!(p.headed.as_ref().unwrap().dir, (1, 0));
+}
+
 fn said(p: &Plan) -> Vec<String> {
     p.events
         .iter()

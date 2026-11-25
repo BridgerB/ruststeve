@@ -1151,7 +1151,9 @@ impl Plan {
         }
         // Out of the fortress's footprint on a plain walk first: no stairs down inside it, where
         // the floors are thin over the lava sea (clojurecraft #715).
-        if let Some(b) = bounds.filter(|b| in_footprint(*b, feet)) {
+        // Not in travel: the heading turns from a fortress seen ahead, and its tunnel takes no stair
+        // down in a footprint (race 45531575517 lane 3: this walk led it along a second fortress).
+        if let Some(b) = bounds.filter(|b| !travel && in_footprint(*b, feet)) {
             let centre = ((b.0 + b.2) / 2, feet.1, (b.1 + b.3) / 2);
             let half = (b.2 - b.0).max(b.3 - b.1) / 2;
             let range = f64::from(half + FORTRESS_PAD + 2);

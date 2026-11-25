@@ -154,9 +154,12 @@ pub struct Leg {
     /// grew `PACE_GAIN` (the projection invariant).
     pub tried_at: i32,
     pub mark: (i32, u64),
-    /// Spend at its start: pickaxe uses left and filler held.
+    /// Spend at its start: pickaxe uses left and filler held, and the health (issue 18c: the
+    /// travel at no-heal health counts metres per health lost).
     pub uses0: i32,
     pub filler0: i64,
+    #[serde(default)]
+    pub health0: f32,
     /// Digs seen done (cells handed to a stretch that are now open) and filler they gave.
     pub digs: u32,
     pub gained: i64,
@@ -244,6 +247,41 @@ fn seen_columns(w: &World) -> BTreeSet<(i32, i32)> {
         .as_ref()
         .map(|d| w.memory.seen_columns(&d.name).into_iter().collect())
         .unwrap_or_default()
+}
+
+/// A fortress's mobs (they spawn nowhere else): a blaze or a wither skeleton turns a heading in
+/// travel when it ticks within `FORTRESS_MOB_RANGE` and lies ahead (within 45 degrees of the axis).
+pub const FORTRESS_MOBS: &[data::EntityKind] =
+    &[data::EntityKind::Blaze, data::EntityKind::WitherSkeleton];
+/// A blaze shoots from 48 (`cover::COVER_RANGE`).
+pub const FORTRESS_MOB_RANGE: f64 = 48.0;
+
+/// The nearest live, ticking blaze or wither skeleton ahead on `dir`, with its distance.
+fn fortress_mob_ahead(w: &World, (dx, dz): Dir) -> Option<(data::EntityKind, f64)> {
+    let body = w.body?;
+    w.entities
+        .values()
+        .filter(|e| !e.dead && FORTRESS_MOBS.contains(&e.kind) && world::ticks(w, e.pos))
+        .filter_map(|e| {
+            let (vx, vz) = (e.pos[0] - body.pos[0], e.pos[2] - body.pos[2]);
+            let d = (vx * vx + vz * vz + (e.pos[1] - body.pos[1]).powi(2)).sqrt();
+            let flat = vx.hypot(vz);
+            let on = (f64::from(dx) * vx + f64::from(dz) * vz) / flat.max(1e-6);
+            (d <= FORTRESS_MOB_RANGE && flat > 0.0 && on >= std::f64::consts::FRAC_1_SQRT_2)
+                .then_some((e.kind, d))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// Nether bricks on record in one column of this dimension (memory's brick index).
+fn bricks_in_column(w: &World, cx: i32, cz: i32) -> u32 {
+    w.dimension
+        .as_ref()
+        .and_then(|d| {
+            w.memory
+                .indexed_in_column(&d.name, cx, cz, BlockKind::NetherBricks)
+        })
+        .map_or(0, |v| u32::try_from(v.len()).unwrap_or(u32::MAX))
 }
 
 /// Crimson signs seen in one column.
@@ -753,6 +791,23 @@ impl Plan {
                         )
                     })
                     .sum();
+                // Past the endermen stage (no healing), a fortress seen ahead turns it too: its
+                // blazes and wither skeletons (race 45531575517 lane 3 walked west into a second
+                // fortress and a blaze's fireball and its fire took it from 12.5 to 5.6).
+                let bricks: u32 = if self.ender.phase == crate::endermen::EnderPhase::Travel {
+                    (1..=SIGNS_AHEAD)
+                        .flat_map(|d| (-1..=1).map(move |s| (d, s)))
+                        .map(|(d, s)| {
+                            bricks_in_column(
+                                w,
+                                chunk.0 + h.dir.0 * d + h.dir.1 * s,
+                                chunk.1 + h.dir.1 * d + h.dir.0 * s,
+                            )
+                        })
+                        .sum()
+                } else {
+                    0
+                };
                 if ahead >= SIGNS_TURN {
                     self.heading_turn(
                         w,
@@ -760,6 +815,26 @@ impl Plan {
                         feet,
                         tick,
                         &format!("{ahead} crimson signs seen ahead"),
+                    )?;
+                } else if let Some((kind, d)) = (self.ender.phase
+                    == crate::endermen::EnderPhase::Travel)
+                    .then(|| fortress_mob_ahead(w, h.dir))
+                    .flatten()
+                {
+                    self.heading_turn(
+                        w,
+                        h,
+                        feet,
+                        tick,
+                        &format!("a fortress seen ahead (a ticking {kind:?} {d:.0} off)"),
+                    )?;
+                } else if bricks >= SIGNS_TURN {
+                    self.heading_turn(
+                        w,
+                        h,
+                        feet,
+                        tick,
+                        &format!("a fortress seen ahead ({bricks} nether bricks)"),
                     )?;
                 }
             }
@@ -888,6 +963,7 @@ impl Plan {
             mark: (0, tick),
             uses0: pickaxe_uses_left(w),
             filler0: path::bridge_blocks(w),
+            health0: w.player.health.unwrap_or(0.0),
             digs: 0,
             gained: 0,
             pending: Vec::new(),
@@ -1096,6 +1172,7 @@ impl Plan {
         let gain = leg.progress(h.dir, feet) - leg.progress(h.dir, leg.from);
         let uses = (leg.uses0 - pickaxe_uses_left(w)).max(0);
         let placed = (leg.filler0 + leg.gained - path::bridge_blocks(w)).max(0);
+        let lost = (leg.health0 - w.player.health.unwrap_or(leg.health0)).max(0.0);
         h.digs += leg.digs;
         h.placed += placed;
         h.uses_spent += uses;
@@ -1108,7 +1185,8 @@ impl Plan {
             format!("heading leg {} {how}", leg.n),
             format!(
                 "by {} in {} ticks: {gain} m; digs {} ({:.2}/m), placed {placed} ({:.2}/m), \
-                 pickaxe uses {uses} ({:.2}/m); uses left {}, filler {}, best {} on ({}, {})",
+                 pickaxe uses {uses} ({:.2}/m); uses left {}, filler {}, best {} on ({}, {}); \
+                 health {:.1} lost ({}), now {:?}",
                 leg.way.name(),
                 tick.saturating_sub(leg.began),
                 leg.digs,
@@ -1119,7 +1197,14 @@ impl Plan {
                 path::bridge_blocks(w),
                 h.best,
                 h.dir.0,
-                h.dir.1
+                h.dir.1,
+                lost,
+                if lost > 0.0 {
+                    format!("{:.0} m a health", f64::from(gain) / f64::from(lost))
+                } else {
+                    "none".to_owned()
+                },
+                w.player.health
             ),
         );
     }
