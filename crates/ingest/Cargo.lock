@@ -2996,6 +2996,7 @@ dependencies = [
  "data",
  "memory",
  "physics",
+ "protocol",
  "serde",
  "world",
 ]

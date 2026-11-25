@@ -447,6 +447,11 @@ mod tests {
             water: ::observe::Touch::No,
             cursor: None,
             day_time: None,
+            biome: None,
+            enderman_ticking: None,
+            enderman_frozen: None,
+            pickaxe_uses: None,
+            filler: None,
         }
     }
 

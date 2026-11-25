@@ -6,7 +6,7 @@ tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@d2c76ef clojurecraft@be85a92
+verifiedAgainst: ruststeve@5657899 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
@@ -17,6 +17,8 @@ sourceRefs:
   - "clojurecraft:src/clojurecraft/plan.clj#(def max-unwalkable 12)"
   - "ruststeve:crates/plan/src/lib.rs#fn decide(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
   - "ruststeve:crates/plan/src/lib.rs#pub fn take_acts(&mut self) -> Vec<world::Act> {"
+  - "ruststeve:crates/plan/src/endermen.rs#pub(crate) fn endermen_task(&mut self, w: &World, tick: u64) -> Task {"
+  - "ruststeve:crates/plan/src/look.rs#pub fn stares(w: &World, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<u32> {"
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[phases-and-task-stack]]"
@@ -92,4 +94,5 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 
 - **The clean flow** (issue 16, Bridger 2026-11-22; `Plan::clean_flow`): the race aim stocks 12 logs (the `stock` row) and food to the reserve above ground before its first descent, and with its kit made (gear, both buckets, flint and steel) climbs back under the open sky (`stairs_to_surface`) and stocks again before the cast; each phase is bounded by `[survival] provision_ticks`. `world::stage::Stage::Ready` (between `gear` and `iron_kit`) reads the result, and its snapshot is the clean one later races resume from. Before it every `gear` snapshot was a bot in a cave with a stick or two (blaze walls 5 to 16).
 - **A full pack and a stale click** (overworld-leg wall 10): `equip` sends a resync when a click is unanswered past `craft::CLICK_PATIENCE_TICKS` with junk to drop ("resync a stale click"), and `nether_task` begins nothing while no main slot is free and junk is held. The hunt's by-products (egg, feather, leather, string, wool) are junk. After the cook, the logs phase is skipped once `kit_shields` shields are held.
+- **After the rods** (issue 17, `plan::endermen`, `docs/problems/endermen-leave.md`): the race no longer ends at 7 rods. The leave walk runs as before; then `Plan::endermen_task` (state in `Plan::ender`): a ticking enderman within 32 is the stage, and the aim is met only once a 2-high pocket is sealed round the bot (`cover::pocket_block`, the cook's hut ordered toward a threat), eyes down; hurt under `travel_health` with a ticking blaze or ghast in sight it rests in cover first, and at or under the danger line with nothing to heal with it holds in a pocket; one "provisions" note (pickaxe uses left against `pickaxe_reserve`, filler, rods, food); a ticking enderman within 64 or a frozen one seen within 128 walked toward (3 walks or 6,000 ticks each); a warped forest known is walked to and a warped-nylium floor waits `forest_wait_ticks`; a soul sand valley known or stood in gets a nook of held filler (`cover::nook_block`, open toward the most open floor, never toward a ticking ghast or skeleton) and a wait of `valley_wait_ticks`; inside the fortress's brick footprint a plain walk out first (no stairs down there); then the heading (issue 16's search tunnel until 17d's lands, never below the reserve). **Never stare**: `Plan::step` passes every tick's controls through `look::keep_off` (the jar's `isBeingStaredBy`), so no look leaves the planner unfiltered ("look kept off enderman N"; a stared-at flag seen is a counted "near miss"). A provoked enderman (creepy flag, or one hit the bot) cuts in after the always-rows: a pocket where the bot stands, never a swing (`Plan::ender_threat`).
 - **The spawner leg** (`Plan::spawner_task`, `docs/problems/spawner.md`): hurt, cover first (`take_cover`, [[combat-and-pacing]]); a rod lying near; at the spawner, hold. To a spawner on record: a plain walk on a found route; else one far search (`Walk::far`, every `FAR_RETRY_TICKS`); else `dig_toward`, its stall count started again when the bot stands 6 or more behind the nearest the dig came (`pushed_back`: a retreat is not a stall); refused all the same, back along the trail to the mark nearest the spawner (`trail_toward`) and wait there. It explores only with no spawner on record, or one refused for good.

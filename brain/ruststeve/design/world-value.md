@@ -6,7 +6,7 @@ tags: [world, chunks, overlay, fold, state]
 aliases: [World, World::step, block_at, state_at, overlay, chunk columns, Event, Effect, world crate]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@064c33e clojurecraft@be85a92
+verifiedAgainst: ruststeve@c5791eb clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn step(&mut self, e: &Event) -> Vec<Effect> {"
   - "ruststeve:crates/world/src/lib.rs#pub fn state_at(&self, pos: BlockPos) -> Option<u32> {"
@@ -56,6 +56,11 @@ related:
 ## Limits
 - Intentions in memory are a later issue.
 - Collision shapes per state and prediction of the bot's own digs are later issues.
+
+## Issue 17b: biomes and ticking
+- `World::feet_biome()` reads the biome container of the section at the feet (index `((y>>2)&3)<<4 | ((z>>2)&3)<<2 | ((x>>2)&3)`), named by `biome_registry` (the `registry_data` packet for `minecraft:worldgen/biome`, entry names in the server's order) or, before it, the generated `BIOME` table (sorted by name, the order the server syncs). `biome_at` is private to the crate: the planner reads only its feet (Bridger, 2026-11-24). Tested on clojurecraft's real Nether columns (`biome::tests`).
+- `world::ticks(w, pos)`: the entity's chunk within `simulation_distance` of the body's chunk on both axes (the jar: entity-ticking chunks are a square, probe 45472254333); false with no body or no distance told. At distance 3 anything within 32 blocks ticks.
+- Chunk biome updates (`chunks_biomes`) are still only counted (`biome_updates`), not applied.
 
 ## See also
 - [[world-model-fold]] - the design this implements.

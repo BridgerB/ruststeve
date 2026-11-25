@@ -223,6 +223,9 @@ pub struct Cells<'a> {
     bridge: bool,
     /// Where the mobs a far route keeps clear of stand (`SHUN_KINDS`).
     shun: Vec<[f64; 3]>,
+    /// Cells a route never enters: a heading's cut cells behind the feet (docs/problems/heading.md:
+    /// a leg never walks back over ground the heading already covered).
+    blocked: BTreeSet<Cell>,
 }
 
 impl<'a> Cells<'a> {
@@ -234,7 +237,28 @@ impl<'a> Cells<'a> {
             clear: BTreeMap::new(),
             bridge: false,
             shun: Vec::new(),
+            blocked: BTreeSet::new(),
         }
+    }
+
+    /// The cells for a far search that bridges only with `keep` blocks held (a heading's leg
+    /// keeps 32: docs/problems/heading.md), and never with `keep` at `i64::MAX`.
+    pub fn far_keeping(world: &'a World, keep: i64) -> Self {
+        Self {
+            bridge: in_the_nether(world) && bridge_blocks(world) >= keep,
+            ..Self::far(world)
+        }
+    }
+
+    /// The same cells with `blocked` never entered.
+    pub fn blocking(mut self, blocked: BTreeSet<Cell>) -> Self {
+        self.blocked = blocked;
+        self
+    }
+
+    /// Is `c` one a route may not enter.
+    pub fn blocked(&self, c: Cell) -> bool {
+        self.blocked.contains(&c)
     }
 
     /// The cells for a far search (`plan_far`): it may bridge, and it keeps clear of the mobs
@@ -418,10 +442,13 @@ pub fn bridge_item(w: &World) -> Option<data::ItemKind> {
 /// May a route bridge in this world: in the Nether (its seas are lava and its ground is in
 /// pieces; the overworld's walks are left as they were), with blocks to spare.
 fn bridges(w: &World) -> bool {
+    in_the_nether(w) && bridge_blocks(w) >= BRIDGE_RESERVE
+}
+
+fn in_the_nether(w: &World) -> bool {
     w.dimension
         .as_ref()
         .is_some_and(|d| d.name == "minecraft:the_nether")
-        && bridge_blocks(w) >= BRIDGE_RESERVE
 }
 
 /// Do the feet stand on a sheet of ice (clojurecraft's `on-ice?`).
@@ -638,6 +665,20 @@ pub enum Goal {
     /// Where a block dug at `pos` drops within the pickup box (clojurecraft's `:pickup`):
     /// within `range` of it on the plane, with `pos` at the feet's height or up to `rise` above.
     Pickup { pos: Cell, range: f64, rise: i32 },
+    /// `gain` or more along the compass heading `dir` from `from` (the feet's projection on the
+    /// axis), no more than `gain` aside: a heading's leg (docs/problems/heading.md), which ends
+    /// wherever the ground lets it, not at one cell that may be rock.
+    Ahead {
+        from: Cell,
+        dir: (i32, i32),
+        gain: i32,
+    },
+}
+
+/// A cell's projection on a compass heading from `from`, and how far aside of the axis it is.
+pub fn along(from: Cell, (dx, dz): (i32, i32), c: Cell) -> (i32, i32) {
+    let (x, z) = (c.0 - from.0, c.2 - from.2);
+    (x * dx + z * dz, (x * dz - z * dx).abs())
 }
 
 /// Octile distance on the plane: diagonals at their real cost.
@@ -663,6 +704,10 @@ impl Goal {
             Goal::Pickup { pos, range, rise } => {
                 octile(node, pos) <= range && node.1 <= pos.1 && pos.1 <= node.1 + rise
             }
+            Goal::Ahead { from, dir, gain } => {
+                let (on, aside) = along(from, dir, node);
+                on >= gain && aside <= gain
+            }
         }
     }
 
@@ -682,6 +727,10 @@ impl Goal {
                     0
                 };
                 (octile(node, pos) - range).max(0.0) + f64::from(up)
+            }
+            Goal::Ahead { from, dir, gain } => {
+                let (on, aside) = along(from, dir, node);
+                f64::from((gain - on).max(0) + (aside - gain).max(0))
             }
         }
     }
@@ -796,7 +845,7 @@ pub fn search_weighted(
             best_h = hn;
         }
         for s in neighbors(cells, node) {
-            if cells.shunned(s.node, start) {
+            if cells.shunned(s.node, start) || cells.blocked(s.node) {
                 continue;
             }
             let g2 = gn + s.cost;
@@ -896,7 +945,15 @@ pub fn plan_far(world: &World, from: Cell, goal: &Goal, max_nodes: u32, weight: 
     plan_over(Cells::far(world), from, goal, max_nodes, weight)
 }
 
-fn plan_over(mut cells: Cells<'_>, from: Cell, goal: &Goal, max_nodes: u32, weight: f64) -> Route {
+/// A route over cells made by the caller (`Cells::far_keeping`, `Cells::blocking`): as
+/// `plan`, weighed.
+pub fn plan_over(
+    mut cells: Cells<'_>,
+    from: Cell,
+    goal: &Goal,
+    max_nodes: u32,
+    weight: f64,
+) -> Route {
     let world = cells.world;
     // Feet resting in soul sand's own cell search from the cell over it.
     let asked = from;

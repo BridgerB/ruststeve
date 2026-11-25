@@ -461,3 +461,138 @@ fn a_blow_is_seen_when_the_list_of_blows_does_not_grow() {
     let (_, facts) = facts_between(&b, &w);
     assert!(facts.is_empty(), "{facts:?}");
 }
+
+fn nether_bot_at(x: f64, z: f64) -> World {
+    let mut w = World::new();
+    w.step(&Event::Packet(S2c::Login {
+        entity_id: 7,
+        view_distance: 8,
+        simulation_distance: 3,
+        dimension_type: 3,
+        dimension: "minecraft:the_nether".to_owned(),
+        game_type: 0,
+    }));
+    w.step(&Event::Packet(S2c::PlayerPosition {
+        teleport_id: 1,
+        x,
+        y: 64.0,
+        z,
+        yaw: 0.0,
+        pitch: 0.0,
+        flags: 0,
+    }));
+    w
+}
+
+/// A Nether column of one biome everywhere (sections of air).
+fn column_of(biome: &str) -> std::sync::Arc<protocol::chunk::Column> {
+    use protocol::chunk::{Column, Paletted, Section};
+    let id = data::generated::registries::BIOME
+        .iter()
+        .position(|b| *b == biome)
+        .unwrap() as u32;
+    let section = Section {
+        block_count: 0,
+        fluid_count: 0,
+        blocks: Paletted::Single(0),
+        biomes: Paletted::Single(id),
+    };
+    std::sync::Arc::new(Column {
+        min_y: 0,
+        sections: vec![section; 16],
+    })
+}
+
+/// Issue 17b: the feet biome is a fact when it changes, and the senses row carries it.
+#[test]
+fn a_new_feet_biome_is_a_fact() {
+    let mut w = nether_bot_at(8.5, 8.5);
+    w.columns.insert(
+        world::ChunkPos { x: 0, z: 0 },
+        column_of("soul_sand_valley"),
+    );
+    w.columns
+        .insert(world::ChunkPos { x: 1, z: 0 }, column_of("warped_forest"));
+    assert_eq!(w.feet_biome(), Some("soul_sand_valley"));
+    let a = snapshot(&w);
+    w.body.as_mut().unwrap().pos[0] = 20.5;
+    assert_eq!(w.feet_biome(), Some("warped_forest"));
+    let mut b = snapshot(&w);
+    let facts: Vec<Fact> = diff(&a, &mut b, &w).into_iter().map(|s| s.fact).collect();
+    assert!(
+        facts
+            .iter()
+            .any(|f| matches!(f, Fact::Biome { name } if name == "warped_forest")),
+        "{facts:?}"
+    );
+    let row = senses(&w, "t", "w", None);
+    assert_eq!(row.biome.as_deref(), Some("warped_forest"));
+    assert!(row.travel().contains("biome warped_forest"));
+}
+
+/// Issue 17b: an enderman first seen is a fact with whether it ticks; walking near enough
+/// makes it tick (a fact again); one that ticks and stands still for `STILL_TICKS` is noted.
+#[test]
+fn an_enderman_seen_and_ticking_is_in_the_ledger() {
+    let mut w = nether_bot_at(0.5, 0.5);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 11,
+        uuid: [1; 16],
+        kind: EntityKind::Enderman.id(),
+        x: 70.0,
+        y: 64.0,
+        z: 0.5,
+    }));
+    let a = snapshot(&w);
+    let mut b = snapshot(&w);
+    let none = observe::Snapshot {
+        endermen: Default::default(),
+        ..a.clone()
+    };
+    let facts: Vec<Fact> = diff(&none, &mut b, &w)
+        .into_iter()
+        .map(|s| s.fact)
+        .collect();
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::Enderman {
+                id: 11,
+                ticking: false,
+                ..
+            }
+        )),
+        "chunk 4 is beyond 3: frozen; {facts:?}"
+    );
+    let row = senses(&w, "t", "w", None);
+    assert_eq!(row.enderman_ticking, None);
+    assert!(row.enderman_frozen.is_some());
+    // The bot walks 20 east: the enderman's chunk is 3 from the bot's now.
+    w.body.as_mut().unwrap().pos[0] = 20.5;
+    let mut c = snapshot(&w);
+    let facts: Vec<Fact> = diff(&b, &mut c, &w).into_iter().map(|s| s.fact).collect();
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::Enderman {
+                id: 11,
+                ticking: true,
+                ..
+            }
+        )),
+        "{facts:?}"
+    );
+    // It ticks and never moves: one note once STILL_TICKS have passed, and only one.
+    let mut prev = c;
+    let mut still = 0;
+    for _ in 0..40 {
+        w.session.server_ticks += 20;
+        let mut next = snapshot(&w);
+        still += diff(&prev, &mut next, &w)
+            .iter()
+            .filter(|s| matches!(s.fact, Fact::EndermanStill { id: 11, .. }))
+            .count();
+        prev = next;
+    }
+    assert_eq!(still, 1);
+}

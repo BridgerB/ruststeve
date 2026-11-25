@@ -10,13 +10,14 @@ description = "The planner: tasks, the pathfinder (a port of clojurecraft's path
 data = { path = "../data" }
 memory = { path = "../memory" }
 physics = { path = "../physics" }
+# Entity metadata values (an enderman's creepy and stared-at flags, issue 17).
+protocol = { path = "../protocol" }
 serde = { version = "1", features = ["derive"] }
 world = { path = "../world" }
 
 [dev-dependencies]
 toml = "1"
 proptest = "1"
-protocol = { path = "../protocol" }
 sim = { path = "../sim" }
 # The build differential's fixture is zstd text (issue 14c: 4.9 MB plain).
 zstd = "0.13"

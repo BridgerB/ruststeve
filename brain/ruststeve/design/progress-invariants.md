@@ -5,12 +5,13 @@ type: reference
 tags: [design, progress, loops, cpu, watchdog]
 aliases: [progress invariant, no-progress loops, resources per progress, CPU budget, spatial index, chunk buckets, churn]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve@c87ac55
+lastUpdated: 2026-11-24
+verifiedAgainst: clojurecraft@be85a92 ruststeve@5657899
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Build a progress invariant into every long intent (distance to target must shrink, or digs must open new cells) and fail fast when it doesn't."
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Measure resources spent per unit of progress (digs per block of distance, blocks placed versus kept), not just endings."
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Index spatial data (chunk-column buckets) from the start."
+  - "ruststeve:crates/plan/src/heading.rs#pub fn heading_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
   - "ruststeve:FUNCTIONAL.md#Every task kind defines a numeric progress metric and a patience budget. The watchdog is generic and doesn't know anything about blazes."
 related:
   - "[[ruststeve/design/_moc|Design]]"
@@ -36,6 +37,12 @@ clojurecraft's stage 18 died of loops that made no progress, each invisible in c
 - Targets are held; the churn invariant holds by construction (every candidate routed before it is chosen) and is tested over generated worlds; 12 failures in a row stop the planner, said so ([[planner]]).
 - Spatial questions read memory's chunk-column index in rings; searches are budgeted in node expansions ([[pathfinding]]).
 - **The CPU budget per bot per tick is measured in CI** (the `walk` job): the planner's step timed by the shell over every tick of the 200-landing measure, against `config/race.toml`'s `[budget]` (mean 500 µs, p99 5 ms); first measure mean 22 µs, p99 74 µs ([[planner]]).
+
+## The heading (issue 17d, docs/problems/heading.md)
+The three unmerged fixes clojurecraft left for this leg (`cage-line`, `heading-no-pace`, `filler-keep`) are built in as the heading's invariants (`crates/plan/src/heading.rs`), not ported:
+- **Holds direction**: the axis changes only by a quarter turn after a failed leg (toward fewer seen columns, alternating on a tie), or a noted re-choice after 3 turns with none gaining 48. No clock turns it.
+- **Never paces**: the furthest projection of the feet on the axis grows 6 blocks every 1,200 server ticks or the leg fails `NoProgress`; a leg's route never enters a cell the heading cut or stood in at or behind the feet (`Goal::Ahead` with blocked cells, the tunnel's `paced`); a way only back over the cut is noted "paced".
+- **Spends in proportion**: digs, blocks placed and pickaxe uses per metre in every leg's end note; over 3 digs or 1 block a metre ends the leg. Walk, far walk with a keep of 32, tunnel only over a pickaxe reserve; under the keep it restocks from netherrack walls first.
 
 ## See also
 - [[expectations-and-watchdog]] - the mechanism that fails a task.

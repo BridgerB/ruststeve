@@ -5,6 +5,8 @@
 //! cargo run -p results -- diagnose <dir>...               # by place, note kinds, cast failures (markdown)
 //! cargo run -p results -- case <file.case.rsc>            # one case as text
 //! cargo run -p results -- offline-uuid <name>              # the player file's UUID (snapshots)
+//! cargo run -p results -- player-dat <gunzipped .dat>     # a player file as text (issue 17a)
+//! cargo run -p results -- endermen <dirs>...               # seconds near endermen by place (17a)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -90,6 +92,27 @@ fn run(args: &[String]) -> Result<(), String> {
         Some("case") => {
             let path = args.get(1).ok_or("case needs a file")?;
             print!("{}", results::read_case(Path::new(path))?.render());
+            Ok(())
+        }
+        Some("player-dat") => {
+            let path = args.get(1).ok_or("player-dat needs a gunzipped .dat")?;
+            let raw = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+            print!("{}", results::census::player_dat(&raw)?);
+            Ok(())
+        }
+        Some("endermen") => {
+            let files = files_under(args.get(1..).unwrap_or(&[]), |n| n.ends_with(".senses.rss"));
+            let mut census = results::census::EndermanCensus::default();
+            for f in &files {
+                match results::read::<results::SensesFile>(f) {
+                    Ok(s) => census.add(&s.rows),
+                    Err(e) => {
+                        eprintln!("skipped {e}");
+                        census.unreadable += 1;
+                    }
+                }
+            }
+            print!("{}", census.render());
             Ok(())
         }
         _ => Err(

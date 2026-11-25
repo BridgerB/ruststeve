@@ -384,6 +384,11 @@ pub fn hostile(kind: EntityKind) -> bool {
         .any(|m| m.entity == kind && m.category == data::generated::mobs::MobCategory::Monster)
 }
 
+/// Kinds never taken as a foe, provoked or not (issue 17: never a swing at an enderman; one that
+/// is provoked is answered by the pocket, `Plan::ender_threat`: 40 health and 7 a hit, in the
+/// open the bot loses).
+pub const NEVER_FOE: &[EntityKind] = &[EntityKind::Enderman];
+
 fn middle(p: [f64; 3]) -> [f64; 3] {
     [p[0], p[1] + 0.9, p[2]]
 }
@@ -431,6 +436,7 @@ pub fn foe(w: &World, rules: &SurvivalRules, ignored: &[i32]) -> Option<(i32, En
         .filter(|(id, e)| {
             !e.dead
                 && hostile(e.kind)
+                && !NEVER_FOE.contains(&e.kind)
                 && (!rules.neutral.contains(&e.kind) || provoked(w, e.kind))
                 // A foe a fight never struck nor was hurt by (a spider in a pit 4.5 under the eye,
                 // fought 96 times: blaze wall 15) waits, unless its kind hits the bot.
@@ -489,6 +495,7 @@ pub fn pressing(w: &World, rules: &SurvivalRules, current: i32) -> Option<(i32, 
                 **id != current
                     && !e.dead
                     && hostile(e.kind)
+                    && !NEVER_FOE.contains(&e.kind)
                     && !rules.ranged.contains(&e.kind)
                     && !rules.never_fight.contains(&e.kind)
                     && want(e)

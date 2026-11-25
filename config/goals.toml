@@ -451,3 +451,23 @@ flee_radius = 8.0
 # waits 600 ticks: a creeper follows its target from 16 blocks, and retreats that stopped at 12
 # walked back to the same ore beside it until it blew (docs/problems/iron-kit.md wall 29).
 flee_clear = 20.0
+# Issue 17 (docs/problems/endermen-leave.md). travel_health: under it, with a ticking blaze or ghast
+# seeing the bot, it rests in cover before the next leg: one fireball and its fire take 6 to 9 in
+# iron (docs/problems/blaze-fight.md), so 14 leaves the danger line of 8 one hit away (the plan's
+# starting figure; the frontier run left the spawner at 9.2 and lived).
+travel_health = 14.0
+# Pickaxe uses (the held pickaxes' uses summed) no leg of travel spends below: issue 18's burrow
+# (a 2-high tunnel the enderman stops at) and the way out of trouble. Two stone pickaxes are at
+# most 262 uses with no table or wood held (the rods_7 snapshots); 40 is one tunnel's level steps
+# and a seal or two (spare_uses' figure). The heading (issue 17d) reads it too.
+pickaxe_reserve = 40
+# Ticks the bot stands in a warped forest with no ticking enderman within 32 before it goes on: a
+# minute and a half of spawn attempts (the enderman is the forest's only monster, spawned in
+# groups of 4 at 24 blocks or more within the ticking chunks; to be sized from issue 17a's spawn
+# numbers).
+forest_wait_ticks = 1800
+# Ticks the bot waits in its nook in a soul sand valley for an enderman to come within 32 before
+# the heading (docs/problems/endermen.md, the decision of 2026-11-24): a valley spawns endermen 1 in
+# 71 of its monsters, in fours; the census measured 1.75% of seconds with one within 32 in caves, a
+# comparable rate, so ten game minutes are worth waiting before 450 blocks of travel.
+valley_wait_ticks = 12000

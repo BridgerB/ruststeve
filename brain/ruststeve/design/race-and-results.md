@@ -6,7 +6,7 @@ tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@adfcb00 clojurecraft@be85a92
+verifiedAgainst: ruststeve@c5791eb clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -101,6 +101,11 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - `.ledger.txt`: planner lines in the planner's order, then that second's facts; `[xN, to tick T (#id)]` closes a line told once for a run; `item x 164 -> 177 (3 changes)` is one second. The header counts the file's records and facts, and the lines they are told in.
 - `.case.txt`: `where:` under the ending; `notes by kind` (every note of the ledger, with first and last tick: a fix's firings); `escape trails (whole)`; `tasks by time` with those that ended within the second they began.
 - `summary.md`: the diagnosis's "notes by kind" table is the race's total over every note of every ledger (it was built from each case's kept notes, which leave repeats out); it says for how many runs it had the whole ledger.
+
+## Issue 17b: the endermen stage
+- `Stage::Endermen` (`endermen`) sits between `rods_7` and `pearls_12`: 7 rods held and the feet within `ENDERMAN_NEAR` (32) of an enderman that ticks (`stage::enderman_near`, `world::ticks`). The rods are part of it so an enderman passing a bot at the spawner before rod 7 does not jump the ladder (race 45358767468 lane 1 had one at 31). It reads entities only, so it is checked every tick; the snapshot taker needs no change (it names a snapshot by `Stage::name` and orders by the ladder).
+- Ledger facts: `Biome`, `Enderman` (first seen within 128, or begun or stopped ticking), `EndermanStill` (ticking by distance but unmoved for `STILL_TICKS`), `ForestSeen`. A new feet biome or a known forest is progress (`Gain::Biome`). The senses row adds the feet biome, the nearest ticking and frozen enderman, pickaxe uses left and filler held.
+- `results endermen <dirs>` counts senses seconds with an enderman within 128 and 32 by place; `results player-dat` prints a gunzipped player file (17a, probes 45472883583 and 45472888528).
 
 ## See also
 - [[observability]] - what every run produces.

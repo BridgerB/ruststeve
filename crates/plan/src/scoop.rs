@@ -576,7 +576,8 @@ impl Scoop {
                             Goal::Near { .. }
                             | Goal::Xz { .. }
                             | Goal::Away { .. }
-                            | Goal::Afar { .. } => None,
+                            | Goal::Afar { .. }
+                            | Goal::Ahead { .. } => None,
                         };
                         if let (None, Some(pos)) = (aim, stand) {
                             let mid = [f64::from(pos.0) + 0.5, body.pos[1], f64::from(pos.2) + 0.5];
