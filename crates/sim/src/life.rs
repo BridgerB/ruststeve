@@ -464,6 +464,8 @@ pub struct Life {
     pub hurt_by: std::collections::BTreeMap<String, f32>,
     /// Endermen the world spawned (issue 17), and whether it spawns them (`Sim::with_natural_spawns`).
     pub ender_spawns: u64,
+    /// Natural endermen gone by the random despawn (issue 18).
+    pub ender_despawns: u64,
     pub natural_spawns: bool,
     /// The mob whose blow is being dealt, for the damage event's cause and direct ids (issue 18:
     /// an enderman's; other mobs' blows still send none, so issue 16's fights are unchanged).
@@ -521,6 +523,7 @@ impl Default for Life {
             mobs_fell: 0,
             hurt_by: std::collections::BTreeMap::new(),
             ender_spawns: 0,
+            ender_despawns: 0,
             natural_spawns: false,
             blow_cause: None,
             hurt_by_mob: std::collections::BTreeMap::new(),

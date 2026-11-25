@@ -138,7 +138,8 @@ impl Hunt {
     }
 }
 
-/// A warped forest cavern 4 chunks round the origin and the forest kit of the frontier's other
+/// A warped forest cavern 7 chunks round the origin (4 put the burrow searches against the
+/// cavern's edge: "no burrow site" at x 69 of 79) and the forest kit of the frontier's other
 /// snapshot (race-45481633896 lane 2 moved to the forest: no coal, an iron sword, a shield, a
 /// porkchop, 263 filler, two stone pickaxes, 7 rods, iron armour), the planner hunting from the
 /// start (the base over: the model forest has no stems). `natural` spawns the forest's endermen.
@@ -155,9 +156,9 @@ fn hunt(
     plan.ender.left = true;
     plan.ender.phase = plan::endermen::EnderPhase::Hunt;
     plan.base.over = true;
-    let mut stage = Stage::new(4, FLOOR, FLOOR + 20);
+    let mut stage = Stage::new(7, FLOOR, FLOOR + 20);
     stage
-        .biome((-64, 79), (-64, 79), Biome::WarpedForest)
+        .biome((-112, 127), (-112, 127), Biome::WarpedForest)
         .spawn((0, FEET, 0));
     lay(&mut stage);
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(seed);
@@ -315,4 +316,80 @@ fn twelve_pearls_in_a_model_forest_over_seeds_with_no_damage() {
         }
     }
     assert!(lines.is_empty(), "{}", lines.join("\n\n"));
+}
+
+/// The model forest's enderman supply against the real one (P1's race 45534565509: two idle bots
+/// in the warped forest, 12,000 ticks, a senses row every 200 ticks; docs/problems/
+/// pearls-observe.md): an enderman within 128 in 60 of 61 rows, within 32 in 60 and 22 of 61,
+/// within 16 in 27 of 61 (lane 0), 18 distinct within 128 a lane over 10 minutes (13 to 15 in
+/// the first). The model's idle bot in its 7-chunk forest, the same rows; printed, not asserted.
+#[test]
+#[ignore = "a measurement: 12,000 ticks a seed"]
+fn the_model_forest_supply_against_the_real_counts() {
+    // The forest the whole cavern (half 120), or a patch round the bot (half 48 and 24) in nether
+    // wastes, as a real forest is a patch: spawns then fall nearer the bot.
+    for (half, seed) in [120, 48, 24]
+        .into_iter()
+        .flat_map(|h| [21u64, 22, 23, 24].into_iter().map(move |s| (h, s)))
+    {
+        let mut stage = Stage::new(7, FLOOR, FLOOR + 20);
+        stage
+            .biome((-half, half - 1), (-half, half - 1), Biome::WarpedForest)
+            .spawn((0, FEET, 0));
+        let sim = Sim::new(CONFIG, stage.build().unwrap())
+            .seeded(seed)
+            .with_natural_spawns();
+        let mut rows = 0u32;
+        let mut within = [0u32; 3];
+        let mut first_minute = 0usize;
+        let mut seen: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
+        let run = bot::lockstep::run_acting(sim, "rs-supply", seed, 12_000, 20, |w, t| {
+            if t % 200 == 0
+                && let Some(b) = w.body
+            {
+                rows += 1;
+                let d: Vec<(i32, f64)> = w
+                    .entities
+                    .iter()
+                    .filter(|(_, e)| !e.dead && e.kind == data::EntityKind::Enderman)
+                    .map(|(id, e)| {
+                        (
+                            *id,
+                            (0..3)
+                                .map(|i| (e.pos[i] - b.pos[i]).powi(2))
+                                .sum::<f64>()
+                                .sqrt(),
+                        )
+                    })
+                    .collect();
+                for (k, r) in [16.0, 32.0, 128.0].iter().enumerate() {
+                    if d.iter().any(|(_, x)| x <= r) {
+                        within[k] += 1;
+                    }
+                }
+                seen.extend(d.iter().filter(|(_, x)| *x <= 128.0).map(|(id, _)| *id));
+                if t <= 1200 {
+                    first_minute = seen.len();
+                }
+            }
+            // Eyes down, as an idle bot: no stare angers one.
+            (
+                physics::Controls {
+                    pitch: Some(90.0),
+                    ..physics::Controls::default()
+                },
+                Vec::new(),
+            )
+        });
+        println!(
+            "MEASURES supply forest half {half} seed {seed}: rows {rows}, within 16 {}, within 32 {}, within 128 {}, distinct within 128 {} ({} in the first minute), spawns {}, despawns {}",
+            within[0],
+            within[1],
+            within[2],
+            seen.len(),
+            first_minute,
+            run.sim.survival.life.ender_spawns,
+            run.sim.survival.life.ender_despawns
+        );
+    }
 }

@@ -126,6 +126,7 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **A knock fits the whole 0.6 by 2.9 box** (`tick_pushes`): a hit never pushes an enderman into a two-high space.
 - **Its blow's damage event names it** as cause and direct (other mobs' still send none, so issue 16's fights are unchanged); `Life::hurt_by_mob` counts the blows that landed by kind.
 - Loot: a summoned enderman keeps the generated table (an ender pearl, 0 or 1).
+- **Random despawn** (`Mob.checkDespawn`): a natural enderman idle over 600 ticks and past 32 despawns 1 in 800 a tick (`Life::ender_despawns`); within 32 its idle count starts again.
 - **Tool wear**: a sword wears 1 a landed hit (another tool 2), a tool 1 a block that takes time (a sword 2), as the slot's damage component (`Life::tool_wear`, by slot; it moves with a number-key swap, click mode 2, now modelled); at its max damage the tool breaks.
 - Tests: `crates/sim/tests/pearls.rs`, closed loop `crates/bot/tests/pearls.rs`; the rows and walls in docs/problems/pearls-model.md.
 
