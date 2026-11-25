@@ -139,6 +139,11 @@ fn chunk(root: &Nbt) -> Option<Chunk> {
 /// full).
 pub fn read_region(path: &Path) -> Result<Vec<Chunk>, String> {
     let raw = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // A region file the server has made but not yet written (or written empty) has no header:
+    // it holds no chunk (probe 45688112814: three such files under a forceloaded strip).
+    if raw.len() < 8192 {
+        return Ok(Vec::new());
+    }
     let mut out = Vec::new();
     for i in 0..1024 {
         let loc = raw.get(i * 4..i * 4 + 4).ok_or("a short header")?;
