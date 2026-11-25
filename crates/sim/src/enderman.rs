@@ -119,6 +119,11 @@ const PACK_TRIES: f64 = 4.0;
 const PACK_STEP: f64 = 6.0;
 const MONSTER_CAP: usize = 70;
 const CLUSTER: u32 = 4;
+/// `Mob.checkDespawn` for a monster: `noActionTime` over 600, past the no-despawn distance 32 (1,024
+/// squared), a chance in 800 a tick.
+const DESPAWN_IDLE: u32 = 600;
+const DESPAWN_NEAR_SQ: f64 = 1024.0;
+const DESPAWN_CHANCE: f64 = 800.0;
 
 /// A Nether biome's `spawners.monster` (kind, weight, min, max), from
 /// `data/minecraft/worldgen/biome/<biome>.json` in the 26.1.2 jar (probes 45472254333 and
@@ -170,6 +175,8 @@ pub struct Ender {
     pub vy: f64,
     /// Spawned by the world (despawns past 128 blocks), not placed by a test.
     pub natural: bool,
+    /// `Mob.noActionTime`: ticks it ticked since the player was last within 32 (issue 18).
+    pub idle: u32,
     /// Counts for tests: teleports made, ticks it ticked.
     pub teleports: u32,
     pub ticked: u64,
@@ -191,6 +198,7 @@ impl Ender {
             stroll: None,
             vy: 0.0,
             natural: false,
+            idle: 0,
             teleports: 0,
             ticked: 0,
             path_next: None,
@@ -544,10 +552,34 @@ impl Sim {
                 out.push(wire(State::Play, &S2c::RemoveEntities { ids: vec![id] })?);
                 continue;
             }
+            // Then the random despawn (issue 18; `Mob.checkDespawn`): idle over 600 ticks, past 32
+            // blocks, one chance in 800 a tick; within 32 the idle count starts again. An angry one
+            // is left (its target keeps it busy). Without it the model's forest filled to its spawn
+            // budget in the first minute and never changed: P1's real forest (race 45534565509) had
+            // 13 to 15 endermen in the first minute and about 0.4 new a minute after.
+            if e.natural && !e.angry {
+                let d2 = dist_sq(m.pos, self.pos);
+                if d2 > DESPAWN_NEAR_SQ
+                    && e.idle > DESPAWN_IDLE
+                    && self.survival.next_double() < 1.0 / DESPAWN_CHANCE
+                {
+                    self.survival.life.mobs.remove(&id);
+                    self.survival.life.ender_despawns += 1;
+                    out.push(wire(State::Play, &S2c::RemoveEntities { ids: vec![id] })?);
+                    continue;
+                }
+                if d2 < DESPAWN_NEAR_SQ {
+                    e.idle = 0;
+                }
+            }
             if !self.ticking(m.pos) || self.health <= 0.0 {
+                if let Some(mm) = self.survival.life.mobs.get_mut(&id) {
+                    mm.brain = Brain::Enderman(e);
+                }
                 continue;
             }
             e.ticked += 1;
+            e.idle = e.idle.saturating_add(1);
             let mut pos = m.pos;
             let mut moved = false;
             let mut meta = Vec::new();

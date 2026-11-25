@@ -367,16 +367,24 @@ fn the_model_forest_supply_against_the_real_counts() {
                     first_minute = seen.len();
                 }
             }
-            (physics::Controls::default(), Vec::new())
+            // Eyes down, as an idle bot: no stare angers one.
+            (
+                physics::Controls {
+                    pitch: Some(90.0),
+                    ..physics::Controls::default()
+                },
+                Vec::new(),
+            )
         });
         println!(
-            "MEASURES supply seed {seed}: rows {rows}, within 16 {}, within 32 {}, within 128 {}, distinct within 128 {} ({} in the first minute), spawns {}",
+            "MEASURES supply seed {seed}: rows {rows}, within 16 {}, within 32 {}, within 128 {}, distinct within 128 {} ({} in the first minute), spawns {}, despawns {}",
             within[0],
             within[1],
             within[2],
             seen.len(),
             first_minute,
-            run.sim.survival.life.ender_spawns
+            run.sim.survival.life.ender_spawns,
+            run.sim.survival.life.ender_despawns
         );
     }
 }
