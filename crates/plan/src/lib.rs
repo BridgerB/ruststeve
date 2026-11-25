@@ -1827,7 +1827,7 @@ impl Plan {
         }
         // >>> pearls (P3, the orchestrator 2026-11-25): in the hunt a magma cube is never fought
         // by choice (a no-heal bot loses every trade, and they split): the hunt seals a pocket.
-        if self.pearls.started {
+        if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
             ignored.extend(
                 w.entities
                     .iter()
