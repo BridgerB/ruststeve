@@ -22,11 +22,20 @@ The heading is exactly the bearing (no curve), so a line's spread is only the po
 - An always-row (defend, hunt) cutting a throw mid-flight loses that line and the eye's pickup.
 - The client sees the eye every 4 ticks or so: about 20 positions a flight.
 - A frame in the look's block hit throws nothing (pitch -10 up).
-- Resume: Plan state is not in the snapshot. `Plan::eyes_kept` / `restore_eyes` (serde struct `eyes::Kept`) are ready; the snapshot must write and read them (Q1 / the orchestrator own `results` and `race.rs`).
+- Resume: built. Every `StageUp` carries `eyes_kept()`; `race` writes it as `eyes.rsw` beside `memory.rsw` and reads it back on a resume (`Opts.eyes`, restored before the first tick, noted `eyes: restored`). A snapshot without the file starts with no lines.
+- The first throw has no bearing, so its drop column cannot be checked: a canopy there loses that eye (given up at once by the rest rule, not after 600 ticks).
 - Who calls `eyes_task`, `eyes_craft_task` and `eyes_way`: the eyes phase after Home (Q2 / Q4 / the orchestrator).
 
 ## Done (world terms)
 A dev-start race on the surface: the ledger shows a throw, a flight with its heading, the end, the pickup, and after throw 2 a fix within 128 of the stronghold.
 
 ## Walls
-(none yet)
+
+### A drop at rest on a canopy (Q5's parity 45688030470)
+8 real throws on 7 landings, two strongholds: every line within 0.0006 degrees of the bearing, the eye out to 12.15 and up 8.18 about 34 to 38 ticks after the throw, then hovering, removed at 81 ticks. 7 of 8 dropped, 1 shattered; 2 of 3 drops picked up. The third came to rest on a tree canopy at feet +4: a pickup reaches about feet +2.3, so the 600-tick walk could never end in a pickup.
+
+Fix (structural, two parts):
+- `apex_blocked`: a throw with a bearing waits (noted `eye throw N (why) waits`, "the drop's column ... is blocked at ...") until the column `apex_out` 12 out on the bearing, from the feet's level up `apex_up` 9.1, holds no solid block seen. Tests: `crates/plan/tests/eyes_drop.rs`.
+- The rest rule: a drop whose height is unchanged for `rest_ticks` 8 more than `rest_rise` 2 over the feet is given up at once (`eye pickup given up: rests high`). Test: `a_drop_resting_over_the_reach_is_given_up_and_a_falling_one_is_not`.
+
+Not yet counted on a server: both notes are the count to read in the first real race.
