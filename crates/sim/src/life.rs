@@ -470,6 +470,11 @@ pub struct Life {
     pub blow_cause: Option<i32>,
     /// Blows that landed on the player, by the kind of mob that dealt them (issue 18).
     pub hurt_by_mob: std::collections::BTreeMap<String, u32>,
+    /// Wear on tools and weapons by window-0 slot (issue 18; the shield's is `shield_wear`), and
+    /// the uses spent and tools broken in the run.
+    pub tool_wear: std::collections::BTreeMap<usize, i32>,
+    pub tools_worn: u64,
+    pub tools_broken: u64,
 }
 
 impl Default for Life {
@@ -519,6 +524,9 @@ impl Default for Life {
             natural_spawns: false,
             blow_cause: None,
             hurt_by_mob: std::collections::BTreeMap::new(),
+            tool_wear: std::collections::BTreeMap::new(),
+            tools_worn: 0,
+            tools_broken: 0,
         }
     }
 }
@@ -1844,6 +1852,18 @@ impl Sim {
         )?];
         let (kind, at, loot) = (m.kind, m.pos, m.loot);
         out.extend(self.ender_hurt_by_player(entity)?);
+        // The weapon wears for a hit that landed (`ItemStack.hurtEnemy`; issue 18): a sword 1, any
+        // other item that wears 2 (a tool's `item_damage_per_attack`).
+        let per_hit = match held {
+            Some(k)
+                if data::generated::item_props::weapon_of(k).is_some()
+                    && k.name().is_some_and(|n| n.ends_with("_sword")) =>
+            {
+                1
+            }
+            _ => 2,
+        };
+        out.extend(self.wear_held(per_hit)?);
         let life = &mut self.survival.life;
         let Some(m) = life.mobs.get_mut(&entity) else {
             return Ok(out);

@@ -214,7 +214,7 @@ impl Survival {
         self.held_menu_slot()
     }
 
-    fn held_menu_slot(&self) -> usize {
+    pub(crate) fn held_menu_slot(&self) -> usize {
         HOTBAR + usize::from(self.held)
     }
 
@@ -641,6 +641,16 @@ impl Sim {
         let mut out = self.set_and_update(pos, air)?;
         self.survival.broken += 1;
         self.mined();
+        // The held tool wears for a block that takes time to break (`ItemStack.mineBlock`; issue
+        // 18): 1 a block, a sword 2 (its tool's `damage_per_block`); an instant one wears nothing.
+        if data::generated::hardness::hardness(k).unwrap_or(0.0) > 0.0 {
+            let sword = self
+                .survival
+                .held_stack()
+                .and_then(|(i, _)| i.name())
+                .is_some_and(|n| n.ends_with("_sword"));
+            out.extend(self.wear_held(if sword { 2 } else { 1 })?);
+        }
         // setBlock's neighbour updates run before the broken block's own drops: what rested on
         // it pops off first.
         out.extend(self.pop_unsupported((pos.0, pos.1 + 1, pos.2))?);
@@ -1134,19 +1144,56 @@ impl Sim {
     /// `damage` (life.rs, `shield_wear`).
     fn slot_wire(&self, i: usize, s: Option<Stack>) -> Slot {
         let worn = (self.menu_id() == 0)
-            .then(|| self.survival.life.shield_wear.get(&i).copied())
+            .then(|| {
+                self.survival
+                    .life
+                    .shield_wear
+                    .get(&i)
+                    .or_else(|| self.survival.life.tool_wear.get(&i))
+                    .copied()
+            })
             .flatten();
         match (s, worn) {
-            (Some((item, count)), Some(d)) if item == ItemKind::Shield => Slot::Item {
-                item: item.id(),
-                count,
-                wear: protocol::slot::Wear {
-                    damage: Some(d),
-                    max_damage: None,
-                },
-            },
+            (Some((item, count)), Some(d)) if data::generated::item_props::max_damage(item) > 0 => {
+                Slot::Item {
+                    item: item.id(),
+                    count,
+                    wear: protocol::slot::Wear {
+                        damage: Some(d),
+                        max_damage: None,
+                    },
+                }
+            }
             _ => slot_of(s),
         }
+    }
+
+    /// Wear on the held tool or weapon (issue 18; `ItemStack.hurtAndBreak`): `n` uses, its `damage`
+    /// component sent at once; at its max damage it breaks and its slot empties. A held item that
+    /// does not wear, or a shield (worn by its own blocking rule), is left alone.
+    pub(crate) fn wear_held(&mut self, n: i32) -> Result<Vec<Wire>, EncodeError> {
+        let slot = self.survival.held_menu_slot();
+        let Some((item, _)) = self.survival.held_stack() else {
+            return Ok(Vec::new());
+        };
+        let max = data::generated::item_props::max_damage(item);
+        if max <= 0 || item == ItemKind::Shield || n <= 0 {
+            return Ok(Vec::new());
+        }
+        let life = &mut self.survival.life;
+        let worn = life.tool_wear.get(&slot).copied().unwrap_or(0) + n;
+        life.tools_worn += u64::try_from(n).unwrap_or(0);
+        if worn >= max {
+            life.tool_wear.remove(&slot);
+            life.tools_broken += 1;
+            if let Some(s) = self.survival.slots.get_mut(slot) {
+                *s = None;
+            }
+            // The emptied slot goes out with the tick's `broadcast_changes`.
+            return Ok(Vec::new());
+        }
+        life.tool_wear.insert(slot, worn);
+        self.wear_sent(slot)
     }
 
     /// A worn shield's slot told at once (`broadcastChanges` sends a changed component as a
@@ -1343,6 +1390,23 @@ impl Sim {
                     let (here, off) = (self.get(l), self.get(Loc::Inv(45)));
                     self.put(l, off);
                     self.put(Loc::Inv(45), here);
+                    self.swap_wear(n, 45);
+                }
+                _ => self.violations.push(format!("swap click on slot {slot}")),
+            }
+            return Ok(Vec::new());
+        }
+        // Mode 2 with a hotbar button 0 to 8 (a number key over a slot): that slot's stack and the
+        // hotbar slot's change places (issue 18: the hunt holds its weapon so; the model took it
+        // for a bad click and moved nothing).
+        if mode == 2 && (0..=8).contains(&button) {
+            match l {
+                Loc::Inv(n) if (9..=44).contains(&n) => {
+                    let bar = HOTBAR + usize::try_from(button).unwrap_or(0);
+                    let (here, there) = (self.get(l), self.get(Loc::Inv(bar)));
+                    self.put(l, there);
+                    self.put(Loc::Inv(bar), here);
+                    self.swap_wear(n, bar);
                 }
                 _ => self.violations.push(format!("swap click on slot {slot}")),
             }
@@ -1358,6 +1422,20 @@ impl Sim {
             other => {
                 self.violations.push(format!("click mode {other}"));
                 Ok(Vec::new())
+            }
+        }
+    }
+
+    /// A swap's wear moves with its stacks (the shield's and the tools', keyed by slot).
+    fn swap_wear(&mut self, a: usize, b: usize) {
+        let life = &mut self.survival.life;
+        for map in [&mut life.shield_wear, &mut life.tool_wear] {
+            let (wa, wb) = (map.remove(&a), map.remove(&b));
+            if let Some(w) = wa {
+                map.insert(b, w);
+            }
+            if let Some(w) = wb {
+                map.insert(a, w);
             }
         }
     }
