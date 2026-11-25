@@ -1878,7 +1878,14 @@ impl Plan {
         }
         // >>> pearls (P3, the orchestrator 2026-11-25): in the hunt a magma cube is never fought
         // by choice (a no-heal bot loses every trade, and they split): the hunt seals a pocket.
-        if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
+        // The way home (issue 19d) is not the hunt, though the top-up started it: on the trip a
+        // magma cube that strikes is fought (race 45698618366 lane 3 walked on through five
+        // magma cube hits, 19.8 to 1.8 health in 140 ticks, its defence ignoring every cube).
+        let home_trip =
+            self.ender.phase == endermen::EnderPhase::Home && self.ender.home.top_up_over;
+        let hunt_pocket =
+            (self.pearls.started && !home_trip) || self.ender.phase == endermen::EnderPhase::Hunt;
+        if hunt_pocket {
             ignored.extend(
                 w.entities
                     .iter()
@@ -1886,12 +1893,11 @@ impl Plan {
                     .map(|(id, _)| *id),
             );
         }
-        let never_kinds: &[data::EntityKind] =
-            if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
-                &[data::EntityKind::MagmaCube]
-            } else {
-                &[]
-            };
+        let never_kinds: &[data::EntityKind] = if hunt_pocket {
+            &[data::EntityKind::MagmaCube]
+        } else {
+            &[]
+        };
         // <<< pearls
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
