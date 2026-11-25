@@ -102,6 +102,34 @@ pub struct EnderSeen {
     pub pos: [f64; 3],
     pub still_since: u64,
     pub still_noted: bool,
+    /// Its creepy flag (data index 17, issue 18b): it has a target.
+    #[serde(default)]
+    pub angry: bool,
+    /// Its health (data index 9), when sent: a fall is a blow on it.
+    #[serde(default)]
+    pub health: Option<f32>,
+    /// The bot has sent it an `attack` (`world::Entity::struck`): its death is the bot's kill.
+    #[serde(default)]
+    pub struck: bool,
+    /// The server said it died (entity event 3).
+    #[serde(default)]
+    pub dead: bool,
+}
+
+/// Server ticks after an enderman's death in which a pearl item appearing within `PEARL_NEAR`
+/// of it is its drop: the loot spawns in the tick of the death (`LivingEntity.die`), and its
+/// item data may come a tick or two after its `add_entity`. Two seconds.
+pub const KILL_LOOT_TICKS: u64 = 40;
+/// Blocks from a death within which a pearl item is its drop (issue 18b): the drop spawns at
+/// the body and scatters by at most a block or so; 8 leaves room for a knocked-back body.
+pub const PEARL_NEAR: f64 = 8.0;
+
+/// An enderman's death the ledger keeps for `KILL_LOOT_TICKS`: when, which and where.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Death {
+    pub at: u64,
+    pub id: i32,
+    pub pos: [f64; 3],
 }
 
 /// The bridge blocks the planner spends (`plan::path::BRIDGE_BLOCKS`; a test in `results`
@@ -138,11 +166,12 @@ pub fn pickaxe_uses(w: &World) -> i32 {
         .sum()
 }
 
-/// Endermen within `ENDERMAN_WATCH` of `here`, by id.
+/// Endermen within `ENDERMAN_WATCH` of `here`, by id, the dead among them until the server
+/// removes them (a death is a fact).
 fn endermen_near(w: &World, here: [f64; 3], at: u64) -> BTreeMap<i32, EnderSeen> {
     w.entities
         .iter()
-        .filter(|(_, e)| !e.dead && e.kind == EntityKind::Enderman)
+        .filter(|(_, e)| e.kind == EntityKind::Enderman)
         .filter(|(_, e)| dist(e.pos, here) <= ENDERMAN_WATCH)
         .map(|(id, e)| {
             (
@@ -152,10 +181,38 @@ fn endermen_near(w: &World, here: [f64; 3], at: u64) -> BTreeMap<i32, EnderSeen>
                     pos: e.pos,
                     still_since: at,
                     still_noted: false,
+                    angry: meta_bool(e, ENDERMAN_CREEPY),
+                    health: e.health(),
+                    struck: e.struck,
+                    dead: e.dead,
                 },
             )
         })
         .collect()
+}
+
+/// Ender pearl item entities within `ENDERMAN_WATCH` of `here`, by id, with where they lie.
+fn pearls_near(w: &World, here: [f64; 3]) -> BTreeMap<i32, [f64; 3]> {
+    w.entities
+        .iter()
+        .filter(|(_, e)| e.kind == EntityKind::Item && dist(e.pos, here) <= ENDERMAN_WATCH)
+        .filter(|(_, e)| {
+            e.item()
+                .is_some_and(|(k, _)| k == data::ItemKind::EnderPearl)
+        })
+        .map(|(id, e)| (*id, e.pos))
+        .collect()
+}
+
+/// Uses left over every sword held (issue 18: the sword breaks before the twelfth pearl).
+pub fn sword_uses(w: &World) -> i32 {
+    let swords = data::generated::tags::item_tag("swords").unwrap_or(&[]);
+    w.inventory
+        .slots
+        .iter()
+        .filter(|(_, (k, _))| swords.contains(k))
+        .filter_map(|(slot, _)| w.inventory.uses_left(*slot))
+        .sum()
 }
 
 fn projectile(kind: EntityKind) -> bool {
@@ -236,6 +293,12 @@ pub struct Snapshot {
     /// Soul sand valleys known from blocks seen (`Memory::soul_valleys`).
     #[serde(default)]
     pub soul_valleys: usize,
+    /// Ender pearl items on the ground within `ENDERMAN_WATCH`, by id (issue 18b).
+    #[serde(default)]
+    pub pearl_items: BTreeMap<i32, [f64; 3]>,
+    /// Enderman deaths of the last `KILL_LOOT_TICKS` (carried by `diff`).
+    #[serde(default)]
+    pub deaths: Vec<Death>,
 }
 
 /// A fact for the ledger.
@@ -374,6 +437,40 @@ pub enum Fact {
     /// A Nether chunk column became a known soul sand valley from blocks seen.
     SoulValleySeen {
         column: (i32, i32),
+    },
+    /// An enderman within `ENDERMAN_WATCH` turned angry (its creepy flag, data index 17, went
+    /// true; issue 18b): whether it ticks, so a provoke is counted and a frozen angry one kept.
+    EndermanAngry {
+        id: i32,
+        d: f64,
+        ticking: bool,
+    },
+    /// An enderman's health (data index 9) fell: a blow landed, by the bot or not.
+    EndermanHit {
+        id: i32,
+        before: f32,
+        after: f32,
+    },
+    /// The server said an enderman died (entity event 3); `by_bot` when the bot had struck it.
+    EndermanKilled {
+        id: i32,
+        by_bot: bool,
+    },
+    /// An ender pearl item appeared within `PEARL_NEAR` of an enderman's death of the last
+    /// `KILL_LOOT_TICKS`: its drop (`id` is the item entity's).
+    PearlDropped {
+        id: i32,
+        pos: [f64; 3],
+    },
+    /// The bot picked up a pearl item (`take_item_entity` for one on the ground).
+    PearlPicked {
+        id: i32,
+        amount: i32,
+    },
+    /// A cell the planner holds as its own (a burrow block) turned to air with no dig of the
+    /// bot's (issue 18e; an enderman takes a holdable block). Emitted by its owner.
+    BlockTaken {
+        cell: [i32; 3],
     },
 }
 
@@ -524,6 +621,8 @@ pub fn snapshot(w: &World) -> Snapshot {
         endermen: endermen_near(w, bot, at),
         forests: w.memory.forests().len(),
         soul_valleys: w.memory.soul_valleys().len(),
+        pearl_items: pearls_near(w, bot),
+        deaths: Vec::new(),
     }
 }
 
@@ -743,6 +842,61 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
             });
         }
     }
+    // Issue 18b: anger, blows, deaths and pearls (`EnderSeen` carries the flags).
+    next.deaths = prev
+        .deaths
+        .iter()
+        .filter(|k| k.at + KILL_LOOT_TICKS >= at)
+        .cloned()
+        .collect();
+    for (id, n) in &next.endermen {
+        let d = dist(n.pos, bot);
+        let p = prev.endermen.get(id);
+        if n.angry && !n.dead && !p.is_some_and(|p| p.angry) {
+            out.push(Fact::EndermanAngry {
+                id: *id,
+                d,
+                ticking: n.ticking,
+            });
+        }
+        if let (Some(before), Some(after)) = (p.and_then(|p| p.health), n.health)
+            && after < before
+        {
+            out.push(Fact::EndermanHit {
+                id: *id,
+                before,
+                after,
+            });
+        }
+        if n.dead && !p.is_some_and(|p| p.dead) {
+            out.push(Fact::EndermanKilled {
+                id: *id,
+                by_bot: n.struck,
+            });
+            next.deaths.push(Death {
+                at,
+                id: *id,
+                pos: n.pos,
+            });
+        }
+    }
+    for (id, pos) in &next.pearl_items {
+        if !prev.pearl_items.contains_key(id)
+            && next.deaths.iter().any(|k| dist(k.pos, *pos) <= PEARL_NEAR)
+        {
+            out.push(Fact::PearlDropped { id: *id, pos: *pos });
+        }
+    }
+    for id in prev.pearl_items.keys() {
+        if !next.pearl_items.contains_key(id)
+            && let Some(p) = w.pickups.iter().find(|p| p.item_entity == *id)
+        {
+            out.push(Fact::PearlPicked {
+                id: *id,
+                amount: p.amount,
+            });
+        }
+    }
     for column in w.memory.forests().iter().skip(prev.forests) {
         out.push(Fact::ForestSeen { column: *column });
     }
@@ -938,6 +1092,18 @@ pub struct Senses {
     pub pickaxe_uses: Option<i32>,
     #[serde(default)]
     pub filler: Option<i64>,
+    /// Issue 18b: ender pearls held, the bot's kills so far (`World::kills`), angry endermen
+    /// within `ENDERMAN_WATCH` that tick and that are frozen, and uses left over every sword.
+    #[serde(default)]
+    pub pearls: Option<i32>,
+    #[serde(default)]
+    pub kills: Option<u64>,
+    #[serde(default)]
+    pub angry_ticking: Option<u32>,
+    #[serde(default)]
+    pub angry_frozen: Option<u32>,
+    #[serde(default)]
+    pub sword_uses: Option<i32>,
 }
 
 /// How a fluid touches the body (the feet's cell and the one over it).
@@ -1013,6 +1179,29 @@ impl Senses {
         }
         if let Some(f) = self.filler {
             s.push_str(&format!(" filler {f}"));
+        }
+        s
+    }
+
+    /// Issue 18's part of the row, each piece only when it says something (older rows print
+    /// nothing): ` pearls 3 kills 5 angry 1 ticking, 0 frozen swords 120`.
+    pub fn hunt(&self) -> String {
+        let mut s = String::new();
+        if let Some(p) = self.pearls.filter(|p| *p > 0) {
+            s.push_str(&format!(" pearls {p}"));
+        }
+        if let Some(k) = self.kills.filter(|k| *k > 0) {
+            s.push_str(&format!(" kills {k}"));
+        }
+        let (t, f) = (
+            self.angry_ticking.unwrap_or(0),
+            self.angry_frozen.unwrap_or(0),
+        );
+        if t + f > 0 {
+            s.push_str(&format!(" angry {t} ticking, {f} frozen"));
+        }
+        if let Some(u) = self.sword_uses {
+            s.push_str(&format!(" swords {u}"));
         }
         s
     }
@@ -1108,6 +1297,14 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
             .filter(|d| *d <= ENDERMAN_WATCH)
             .min_by(f64::total_cmp)
     };
+    let angry = |ticking: bool| {
+        w.entities
+            .values()
+            .filter(|e| !e.dead && e.kind == EntityKind::Enderman)
+            .filter(|e| meta_bool(e, ENDERMAN_CREEPY) && dist(e.pos, here) <= ENDERMAN_WATCH)
+            .filter(|e| world::ticks(w, e.pos) == ticking)
+            .count() as u32
+    };
     Senses {
         at: w.session.server_ticks,
         pos: bot,
@@ -1139,6 +1336,13 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
         enderman_frozen: nearest(false),
         pickaxe_uses: Some(pickaxe_uses(w)),
         filler: Some(filler(w)),
+        pearls: Some(
+            i32::try_from(w.inventory.count(data::ItemKind::EnderPearl)).unwrap_or(i32::MAX),
+        ),
+        kills: Some(w.kills),
+        angry_ticking: Some(angry(true)),
+        angry_frozen: Some(angry(false)),
+        sword_uses: Some(sword_uses(w)),
     }
 }
 
@@ -1227,6 +1431,29 @@ impl Fact {
             }
             Fact::SoulValleySeen { column: (cx, cz) } => {
                 format!("soul sand valley known from blocks seen: chunk column {cx},{cz}")
+            }
+            Fact::EndermanAngry { id, d, ticking } => format!(
+                "enderman#{id} angry at {d:.1}, {}",
+                if *ticking { "ticking" } else { "frozen" }
+            ),
+            Fact::EndermanHit { id, before, after } => {
+                format!("enderman#{id} hit: health {before:.1} -> {after:.1}")
+            }
+            Fact::EndermanKilled { id, by_bot } => format!(
+                "enderman#{id} killed{}",
+                if *by_bot {
+                    " by the bot"
+                } else {
+                    ", not by the bot"
+                }
+            ),
+            Fact::PearlDropped { id, pos } => format!(
+                "pearl dropped (item#{id}) at {:.1},{:.1},{:.1}",
+                pos[0], pos[1], pos[2]
+            ),
+            Fact::PearlPicked { id, amount } => format!("pearl picked up (item#{id}, {amount})"),
+            Fact::BlockTaken { cell: [x, y, z] } => {
+                format!("block taken at {x},{y},{z} (no dig of ours)")
             }
         }
     }

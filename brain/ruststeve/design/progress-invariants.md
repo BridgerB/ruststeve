@@ -6,7 +6,7 @@ tags: [design, progress, loops, cpu, watchdog]
 aliases: [progress invariant, no-progress loops, resources per progress, CPU budget, spatial index, chunk buckets, churn]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: clojurecraft@be85a92 ruststeve@5657899
+verifiedAgainst: clojurecraft@be85a92 ruststeve@31545c1
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Build a progress invariant into every long intent (distance to target must shrink, or digs must open new cells) and fail fast when it doesn't."
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Measure resources spent per unit of progress (digs per block of distance, blocks placed versus kept), not just endings."
@@ -43,6 +43,9 @@ The three unmerged fixes clojurecraft left for this leg (`cage-line`, `heading-n
 - **Holds direction**: the axis changes only by a quarter turn after a failed leg (toward fewer seen columns, alternating on a tie), or a noted re-choice after 3 turns with none gaining 48. No clock turns it.
 - **Never paces**: the furthest projection of the feet on the axis grows 6 blocks every 1,200 server ticks or the leg fails `NoProgress`; a leg's route never enters a cell the heading cut or stood in at or behind the feet (`Goal::Ahead` with blocked cells, the tunnel's `paced`); a way only back over the cut is noted "paced".
 - **Spends in proportion**: digs, blocks placed and pickaxe uses per metre in every leg's end note; over 3 digs or 1 block a metre ends the leg. Walk, far walk with a keep of 32, tunnel only over a pickaxe reserve; under the keep it restocks from netherrack walls first.
+- **Issue 18c's travel** (`plan::endermen`, docs/problems/pearls-travel.md): the pocket's way out is at most 4 digs (`EXIT_DIGS`), then given up; a forest place is tried 3 times (plain, far, tunnel above the reserve) and skipped after; the trip's state (health, food, pickaxe uses, filler, rods) is noted every 1,200 ticks and in every heading leg's note.
+- **Biome signs** (issue 18c): crimson at the feet or 12 crimson signs seen ahead turn the axis; basalt deltas no longer do (from the frontier the only way to the nearest warped forest crosses about 300 blocks of them): they are crossed on floors that are not magma, clear of magma cubes by 8, and said once ("heading crosses basalt deltas"). Past the endermen stage soul signs count for no axis.
+- **Travel points** (issue 18c, Bridger 2026-11-24: steering by known geography is allowed): `[survival] travel_way` in config/goals.toml aims the axis at each point in turn (the compass axis with the most of the way left); a failed leg turns as ever (a detour) and the next leg done aims again; a point is reached within 24 on the plane; a forest known from blocks seen replaces the point. No fortress turn while a point steers.
 
 ## See also
 - [[expectations-and-watchdog]] - the mechanism that fails a task.

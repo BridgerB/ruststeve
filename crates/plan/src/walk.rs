@@ -181,6 +181,11 @@ pub struct More {
     pub keep: Option<i64>,
     #[serde(default)]
     pub blocked: std::collections::BTreeSet<Cell>,
+    /// A plain walk that still keeps clear of the mobs a far route shuns (`path::shun_radius`):
+    /// issue 18c's travel at no-heal health (race 45531575517: three bots on plain walks met
+    /// piglins and a hoglin, 5.2 a blow, and died in two).
+    #[serde(default)]
+    pub shun: bool,
 }
 
 fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -390,6 +395,7 @@ impl Walk {
     /// The cells this walk reads: a far walk's bridge and shun, with its own keep.
     fn cells<'a>(&self, w: &'a World) -> path::Cells<'a> {
         match (self.more.far, self.more.keep) {
+            (false, _) if self.more.shun => path::Cells::far_keeping(w, i64::MAX),
             (false, _) => path::Cells::new(w),
             (true, None) => path::Cells::far(w),
             (true, Some(keep)) => path::Cells::far_keeping(w, keep),
@@ -399,7 +405,7 @@ impl Walk {
     /// A far walk's own reason to plan again: a mob its route keeps clear of (`path::SHUN_KINDS`)
     /// has come within its radius of the next `SHUN_AHEAD` waypoints.
     fn foe_ahead(&self, w: &World) -> bool {
-        if !self.more.far {
+        if !self.more.far && !self.more.shun {
             return false;
         }
         let cells = self.cells(w);

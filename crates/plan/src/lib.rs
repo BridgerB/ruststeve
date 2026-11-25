@@ -8,7 +8,13 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// >>> base (P5, issue 18d)
+pub mod base;
+// <<< base
 pub mod build;
+// >>> pearls (P3, issue 18e/f)
+pub mod burrow;
+// <<< pearls
 pub mod cast;
 pub mod cover;
 pub mod craft;
@@ -26,6 +32,9 @@ pub mod ledger;
 pub mod look;
 pub mod make;
 pub mod path;
+// >>> pearls (P3, issue 18f)
+pub mod pearls;
+// <<< pearls
 pub mod place;
 pub mod redig;
 pub mod scoop;
@@ -320,6 +329,9 @@ pub enum Aim {
     /// Every stage built so far, in order (the marathon's aim): a portal cast and entered, then a
     /// fortress reached. Each issue that adds a stage extends it.
     Race,
+    // >>> base (P5, issue 18d): a development aim, the forest base where the bot stands.
+    Base,
+    // <<< base
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -346,6 +358,7 @@ impl Aim {
             None if s == "fortress" => Some(Aim::Fortress),
             None if s == "nether" => Some(Aim::Nether),
             None if s == "race" => Some(Aim::Race),
+            None if s == "base" => Some(Aim::Base),
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -375,6 +388,7 @@ impl Aim {
             Aim::Fortress => "fortress".to_owned(),
             Aim::Nether => "nether".to_owned(),
             Aim::Race => "race".to_owned(),
+            Aim::Base => "base".to_owned(),
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -400,6 +414,7 @@ impl Aim {
             | Aim::Fortress
             | Aim::Nether
             | Aim::Race
+            | Aim::Base
             | Aim::Hold => true,
         }
     }
@@ -788,6 +803,14 @@ pub struct Plan {
     #[serde(default)]
     pub headed: Option<heading::Heading>,
     // <<< heading
+    // >>> pearls (P3, issue 18e/f): the burrow and the hunt (docs/problems/pearls-hunt.md).
+    #[serde(default)]
+    pub pearls: pearls::PearlState,
+    // <<< pearls
+    // >>> base (P5, issue 18d): the forest base's steps.
+    #[serde(default)]
+    pub base: base::BaseState,
+    // <<< base
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -901,6 +924,12 @@ impl Plan {
             // >>> heading (E2)
             headed: None,
             // <<< heading
+            // >>> pearls
+            pearls: pearls::PearlState::default(),
+            // <<< pearls
+            // >>> base
+            base: base::BaseState::default(),
+            // <<< base
             acts: Vec::new(),
         }
     }
@@ -1434,6 +1463,12 @@ impl Plan {
         if let Some(c) = self.always(w, &body, tick) {
             return c;
         }
+        // >>> pearls (P3, issue 18f): the hunt's rule table, in the warped forest
+        // (docs/problems/pearls-hunt.md). `None` lets the task in hand run.
+        if let Some(c) = self.pearls_step(w, tick) {
+            return c;
+        }
+        // <<< pearls
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
         if let Some(c) = self.ender_threat(w, tick) {
             return c;
@@ -1464,6 +1499,7 @@ impl Plan {
                 | Aim::StoneTools => self.decide(w, origin, tick),
                 Aim::Fortress => self.fortress_task(w, tick),
                 Aim::Nether | Aim::Race => self.nether_task(w, origin, tick),
+                Aim::Base => self.base_aim(w, tick),
                 Aim::Hold => Task::Idle,
             };
             self.begin(chosen);
@@ -1789,6 +1825,23 @@ impl Plan {
                     .map(|(id, _)| *id),
             );
         }
+        // >>> pearls (P3, the orchestrator 2026-11-25): in the hunt a magma cube is never fought
+        // by choice (a no-heal bot loses every trade, and they split): the hunt seals a pocket.
+        if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| e.kind == data::EntityKind::MagmaCube)
+                    .map(|(id, _)| *id),
+            );
+        }
+        let never_kinds: &[data::EntityKind] =
+            if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
+                &[data::EntityKind::MagmaCube]
+            } else {
+                &[]
+            };
+        // <<< pearls
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
         if matches!(self.task, Task::Swim(..))
@@ -1823,7 +1876,7 @@ impl Plan {
                 make::Always::Escape(k) => trap == Some(*k),
                 make::Always::Defend => {
                     running == Some(make::Always::Defend)
-                        || defend::foe(w, rules, &ignored).is_some()
+                        || defend::foe_except(w, rules, &ignored, never_kinds).is_some()
                 }
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
@@ -1917,18 +1970,20 @@ impl Plan {
                     }
                     Some(Task::Escape(Box::new(escape::Escape::new(k, w, tick))))
                 }
-                make::Always::Defend => defend::foe(w, rules, &ignored).map(|(foe, kind)| {
-                    let d = defend::Defend::new(w, foe, kind, rules, tick);
-                    self.note(
-                        tick,
-                        format!("defend {kind:?} {foe} ({:?})", d.stance),
-                        format!(
-                            "a hostile within {}; health {:?}; cut {cut}",
-                            rules.defend_radius, w.player.health
-                        ),
-                    );
-                    Task::Defend(Box::new(d))
-                }),
+                make::Always::Defend => {
+                    defend::foe_except(w, rules, &ignored, never_kinds).map(|(foe, kind)| {
+                        let d = defend::Defend::new(w, foe, kind, rules, tick);
+                        self.note(
+                            tick,
+                            format!("defend {kind:?} {foe} ({:?})", d.stance),
+                            format!(
+                                "a hostile within {}; health {:?}; cut {cut}",
+                                rules.defend_radius, w.player.health
+                            ),
+                        );
+                        Task::Defend(Box::new(d))
+                    })
+                }
                 make::Always::Eat => eat::best_food(w, rules).map(|f| {
                     self.note(
                         tick,
@@ -3203,6 +3258,7 @@ impl Plan {
             | Aim::Fortress
             | Aim::Nether
             | Aim::Race
+            | Aim::Base
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -3232,6 +3288,7 @@ impl Plan {
                 | Aim::Fortress
                 | Aim::Nether
                 | Aim::Race
+                | Aim::Base
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {

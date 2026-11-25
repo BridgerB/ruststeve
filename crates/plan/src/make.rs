@@ -215,6 +215,14 @@ pub struct Goals {
     /// The eat and hunt rows' numbers (issue 12c).
     #[serde(default)]
     pub survival: Survival,
+    // >>> pearls (P3, issue 18f): the hunt's numbers.
+    #[serde(default)]
+    pub pearls: crate::pearls::PearlRules,
+    // <<< pearls
+    // >>> base (P5, issue 18d): `[base]`, the forest base's numbers.
+    #[serde(default)]
+    pub base: crate::base::Base,
+    // <<< base
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -325,6 +333,10 @@ pub struct Survival {
     /// Ticks the bot waits in a warped forest for an enderman to spawn before it goes on.
     #[serde(default)]
     pub forest_wait_ticks: u64,
+    /// Issue 18c: points (x, z) the travel's heading runs to in turn, the last in the warped
+    /// forest, until a forest is known from blocks seen (known geography: Bridger, 2026-11-24).
+    #[serde(default)]
+    pub travel_way: Vec<[i32; 2]>,
     /// Ticks the bot waits in its nook in a soul sand valley before it goes on.
     #[serde(default)]
     pub valley_wait_ticks: u64,
@@ -403,6 +415,7 @@ impl Default for Survival {
             travel_health: 0.0,
             pickaxe_reserve: 0,
             forest_wait_ticks: 0,
+            travel_way: Vec::new(),
             valley_wait_ticks: 0,
         }
     }
@@ -451,6 +464,8 @@ pub struct SurvivalRules {
     pub pickaxe_reserve: i32,
     pub forest_wait_ticks: u64,
     pub valley_wait_ticks: u64,
+    /// Issue 18c: the travel's points (x, z), in order.
+    pub travel_way: Vec<[i32; 2]>,
     /// Kinds dropped when the main inventory is nearly full, each with how many to keep.
     pub junk: Vec<(data::ItemKind, i32)>,
     pub stock_logs: i32,
@@ -548,6 +563,12 @@ pub struct Table {
     /// The always-rows, by priority then as written (issue 12b).
     pub always: Vec<(String, Always)>,
     pub survival: SurvivalRules,
+    // >>> pearls
+    pub pearls: crate::pearls::PearlRules,
+    // <<< pearls
+    // >>> base
+    pub base: crate::base::Base,
+    // <<< base
 }
 
 impl Table {
@@ -706,6 +727,9 @@ impl Table {
             goals,
             producers,
             always,
+            // >>> pearls
+            pearls: g.pearls.clone(),
+            // <<< pearls
             survival: SurvivalRules {
                 hungry_below: g.survival.hungry_below,
                 food_reserve: g.survival.food_reserve,
@@ -740,8 +764,10 @@ impl Table {
                 travel_health: g.survival.travel_health,
                 pickaxe_reserve: g.survival.pickaxe_reserve,
                 forest_wait_ticks: g.survival.forest_wait_ticks,
+                travel_way: g.survival.travel_way.clone(),
                 valley_wait_ticks: g.survival.valley_wait_ticks,
             },
+            base: g.base.clone(),
         })
     }
 
@@ -1160,6 +1186,8 @@ mod tests {
             ],
             always: Vec::new(),
             survival: Survival::default(),
+            pearls: crate::pearls::PearlRules::default(),
+            base: crate::base::Base::default(),
         };
         Table::new(&g).unwrap()
     }

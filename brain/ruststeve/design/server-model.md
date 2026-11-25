@@ -6,7 +6,7 @@ tags: [sim, model, server, body, closed-loop]
 aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds, nether_world, Stage, Wall, Nether stage, magma, hot_floor, fast lava, setblock, enderman, endermen, stare, simulation distance, frozen mobs, ticking, biome palette, warped forest, natural spawning]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@5657899 clojurecraft@be85a92
+verifiedAgainst: ruststeve@31545c1 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/lib.rs#fn chunks_around(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -119,6 +119,16 @@ The 26.1.2 server jar is not obfuscated, so the rules are read with `javap` from
 - **Natural spawning** (`NaturalSpawner`): each tick, each entity-ticking chunk whose middle is within 128: a place up to the top block + 1, three packs, a pack's kind drawn by weight from the biome's monster list at its first try the right distance away (warped forest: enderman alone; soul sand valley: skeleton 20, ghast 50, enderman 1; nether wastes: ghast 50, zombified piglin 100, magma cube 2, enderman 1, piglin 15), its group size then its tries, each moved `nextInt(6) - nextInt(6)`; a try spawns an enderman where the player is 24 to 128 away, the body fits over a floor and the biome's spawn cost allows; the call stops at 4; the monster cap 70. Only endermen are spawned, and only in a model built `with_natural_spawns` (off by default, so earlier issues' worlds keep their mobs). A natural one despawns past 128. No light rule (the model holds none), no random despawn.
 - **Biomes** (`nether::Biome`, `Stage::biome`): a stage's sections carry `nether_wastes` by default and any of the five Nether biomes per 4x4 column, indexed in the synced (name-sorted) biome registry; `ModelWorld::biome_at` reads them back.
 - Tests: `crates/sim/tests/endermen.rs`, closed loop `crates/bot/tests/endermen_model.rs`.
+
+## The pearl hunt (issue 18)
+- `Sim::place_item(stack, pos)` lays an item on the ground before the join, at rest with no pickup delay (a parity row's `items`: a pearl at the burrow's mouth); the join announces every item on the ground (`items_added`).
+- **The chase paths** (`MeleeAttackGoal`, `PathFinder`): an angry enderman walks a breadth-first search over walk nodes for a mob 2.9 high (three cells clear over a floor; a step of one up, a drop of up to three; corners only past two open sides; at most 1,024 nodes) to the node nearest the player's cell, ties to the first found: a partial path when the player is in a burrow too low for it, so it stops at the mouth. The path is found again when the player's cell changes, when the next cell is reached, or every 10 ticks. Its blow needs a line of sight eye to eye (`canPerformAttack`), sampled as `sight` samples it: the real server hit the bot in M under the roof in 3 of 5 runs, and an exact line never did, so the model is never kinder than the game there.
+- **A knock fits the whole 0.6 by 2.9 box** (`tick_pushes`): a hit never pushes an enderman into a two-high space.
+- **Its blow's damage event names it** as cause and direct (other mobs' still send none, so issue 16's fights are unchanged); `Life::hurt_by_mob` counts the blows that landed by kind.
+- Loot: a summoned enderman keeps the generated table (an ender pearl, 0 or 1).
+- **Random despawn** (`Mob.checkDespawn`): a natural enderman idle over 600 ticks and past 32 despawns 1 in 800 a tick (`Life::ender_despawns`); within 32 its idle count starts again.
+- **Tool wear**: a sword wears 1 a landed hit (another tool 2), a tool 1 a block that takes time (a sword 2), as the slot's damage component (`Life::tool_wear`, by slot; it moves with a number-key swap, click mode 2, now modelled); at its max damage the tool breaks.
+- Tests: `crates/sim/tests/pearls.rs`, closed loop `crates/bot/tests/pearls.rs`; the rows and walls in docs/problems/pearls-model.md.
 
 ## Issue 14a
 - Fluids, buckets along the look, obsidian and portal lighting (`crates/sim/src/fluid.rs`), and the player's look kept from each move with rotation ([[buckets-and-fluids]]).

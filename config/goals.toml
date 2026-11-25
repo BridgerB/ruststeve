@@ -466,8 +466,259 @@ pickaxe_reserve = 40
 # groups of 4 at 24 blocks or more within the ticking chunks; to be sized from issue 17a's spawn
 # numbers).
 forest_wait_ticks = 1800
+# Issue 18c, the travel from the endermen pocket (docs/problems/pearls-travel.md): points (x, z)
+# the heading runs to in turn until a warped forest is known from blocks seen. Known geography,
+# not a sight: Bridger, 2026-11-24, allowed steering by the world's known geography to win. The
+# nearest warped forest from the frontier is at (488, -111) (locate biome, probe 45529738504); it
+# lies at x 470 to 540, z -127 to 49, north of the east axis behind basalt deltas from x 160
+# (P1's strip map, docs/problems/pearls-observe.md). So east along the deltas first, where race
+# 45531577912 lane 1 saw the forest from x 341 at z 64, then into it.
+travel_way = [[440, 60], [488, -111]]
 # Ticks the bot waits in its nook in a soul sand valley for an enderman to come within 32 before
 # the heading (docs/problems/endermen.md, the decision of 2026-11-24): a valley spawns endermen 1 in
 # 71 of its monsters, in fours; the census measured 1.75% of seconds with one within 32 in caves, a
 # comparable rate, so ten game minutes are worth waiting before 450 blocks of travel.
 valley_wait_ticks = 12000
+
+# >>> pearls (P3, issue 18f, docs/problems/pearls-hunt.md): the hunt's numbers (plan::pearls).
+[pearls]
+# Twelve pearls: issue 19's twelve eyes (issue #23's done-condition).
+pearls_wanted = 12
+# Server ticks a stare from the mouth is held for the creepy flag: the jar angers 4 to 6 ticks
+# after a held stare (probe 45472254333); clojurecraft's loaded servers took 1.7 to 5.1 s of wall
+# time, which is server ticks under load: 60 is three times the jar's worst with room.
+provoke_ticks = 60
+# Eye to eye: within 4 an angry enderman stared at teleports away (jar); out to the follow range 64
+# (the jar's stare works there: dot > 1 - 0.025/d, 1.6 degrees at 60, and past 16 an angry one
+# teleports toward the bot). clojurecraft saw none angered past 36 but never measured why: angers
+# are noted by band (6-16, 16-36, 36-64), and 36 comes back if 36-64 angers none in a race.
+provoke_min = 6.0
+# 36 again (race 45572123445: 36-64 angered 1 of 8, 2 of 10 over the races).
+provoke_max = 36.0
+# With none in sight from M, a provoke from O at one this far or farther: the step back to B is two
+# cells, some 10 ticks walking; an angry enderman walks within 16 (about 0.3 a tick) and teleports
+# from past 16 after 15 goal ticks (the 26.1.2 jar), so 12 leaves it 30 ticks or more out.
+# 20, not 12 (the orchestrator, after race 45615781100 lane 3 was hit at M by one provoked 24 off
+# from the look-out): from O the run home is two cells.
+provoke_out_min = 20.0
+# From O the view is wide and the step back to B is two cells, but past 36 a stare angered about 2
+# in 10 (race 45578610032) and none in race 45602491038 lane 6 (60 to 63, 3 tries): capped at 36
+# everywhere (the orchestrator; clojurecraft: past 36 its stares angered none).
+provoke_out_max = 36.0
+# Provokes on one enderman with no anger before it is skipped, and for how long (the plan's 18f).
+provoke_tries = 3
+provoke_skip_ticks = 2400
+# A target in reach whose health has not fallen this long is noted: a full charge is 13 ticks with
+# an iron sword, so 200 is fifteen swings with none landed.
+fall_window = 200
+# Out of reach this long is a parked target (clojurecraft's main stall: endermen jittered 1 to 2
+# blocks off for up to 90 minutes); then a look from M, this many ticks, with no stare.
+parked_ticks = 600
+parked_look_ticks = 40
+# A parked enderman (out of reach parked_ticks) gets the mouth sealed this long: it loses its path,
+# may wander and come back through O (the orchestrator; race 45572123445 lane 6).
+parked_seal_ticks = 1200
+# A fight over this long is given up with the mouth sealed (the plan's 18f: about 300 to 450 ticks
+# a kill expected, so 2,400 is five kills' time on one).
+fight_cap = 2400
+# A kill at least this often, else the burrow moves; two moves without a kill end the hunt (18f).
+kill_window = 12000
+# (2 ended the hunt sealed in at tick 12,000 of a 36,000 cap, race 45548022681 lane 1: the win
+# wants every tick; the moves go on.)
+moves_without_kill = 1000
+# No kill and no calm enderman in sight this long and the burrow moves, at least this far: P1's
+# supply probe counted 18 endermen within 128 in 10 minutes and 0.4 new a minute, and the spot
+# matters threefold over 10 blocks; three dev-forest bots waited 3,300 to 4,000 ticks for one in the
+# mouth's sight (race 45534591345).
+# 9,600 since the frontier races 45551462309 to 45557307097: the one good site near the frontier
+# made the kills, and every move from it drifted to no site at all (none in 4,800 ticks).
+burrow_idle_ticks = 9600
+# 24, not 48: one to two new chunks; 48 with a 24,000-tick avoid sent bots off buildable ground for
+# 20,000+ ticks a move (race 45609209398).
+burrow_move = 24
+# A site that has had kills is moved from after this many quiet ticks: its locals are used up, and
+# new endermen spawn only in ticking chunks 24+ from the bot, about 0.4 a minute (P1); a move goes
+# burrow_move or more (race 45578610032: kills slowed after ~20,000 at every site).
+burrow_idle_after_kill = 4800
+# Wooden pickaxe uses under repick_below between burrows open the base again (wood, a table, wood
+# picks; the base's wood_pick_uses is the run's target), at most repick_max times (race
+# 45602491038 lane 6 used up its three wooden pickaxes reclaiming and restocking).
+repick_below = 30
+repick_max = 4
+# A pocket's worth of filler (a 2-high pocket is up to 16 blocks, P2's issue-17 pocket) before any
+# walk off: under it the bot restocks where it stands, held up to reserve_hold_ticks (race
+# 45609209398 lane 1 walked off with 15, ran out mid-pocket and took two piglin hits).
+pocket_reserve = 20
+reserve_hold_ticks = 2400
+# Ticks between site searches (the plan's risk 8: 24 cells round, not every tick).
+site_every = 100
+# A weapon with this many uses or fewer is switched at once (18f).
+weapon_min_uses = 10
+# One step out of B this often without a kill or a pickup between (clojurecraft bounced between
+# its burrow's end and mouth 119 to 1,241 times a run).
+step_out_every = 1200
+# Burrow blocks placed at one site before it is given up: 12 shell blocks and 2 floors, with room
+# for support blocks and mends.
+build_max = 40
+# Walks to B before a site is given up (issue 17's CHASE_TRIES).
+walk_tries = 3
+# Pearls within this of O are collected, never farther than collect_reach from B (18f), each for
+# at most collect_ticks; a hit knocks an enderman about 3 back (jar), so its drop lands near O.
+collect_range = 6.0
+collect_reach = 4.0
+collect_ticks = 200
+# An angry enderman this near with the bot out of B is a breach (18f); a breach's seal holds while
+# one ticks within calm_range (the jar: within 16 it walks, past it teleports in).
+breach_near = 4.0
+# Any enderman, calm or not, this near O and the bot holds in B, never in M or O: on the solid shell
+# B was never hit in 9 real rows over 4 runs, M in 2 of 4 runs (P4, the orchestrator 2026-11-24).
+near_o = 8.0
+# The base (P5's row 6) waiting with no task this long and the hunt goes on, the base asked again
+# after base_retry_ticks: the frontier race 45542558792 held all 8 bots 2,400 ticks a step on a stem
+# with no way to it, and the iron sword alone is about 23 kills.
+base_wait_ticks = 600
+# The burrow moves only when no enderman has been within this of B for burrow_idle_ticks (moves cost
+# a 38-block shell: P4's closed loop ran out of filler near the cap).
+seen_near = 40.0
+# Any other hostile (magma cube, piglin, skeleton) this near O and the bot holds in B, never out
+# at O (the frontier race 45553808358 lane 6: magma cubes, 18.3 to 6.6 health).
+hostile_near = 16.0
+# In the hunt a magma cube is never fought by choice (a no-heal bot loses every trade, and they
+# split: race 45560431011 lane 2 died so with 3 pearls): one within cube_near and the bot seals a
+# pocket where it stands, held until none is within cube_clear.
+cube_near = 3.0
+# The look-out goes out up to look_out_reach from O along a straight standable line; past 4 the
+# target is look_out_far_min to look_out_far_max from the spot (an angry one from 24 needs 50 ticks
+# or more to come, the walk back 10 blocks about 46). 4 until P4's real parity row e09-lookout
+# confirms the long look-out; then 10.
+look_out_reach = 4
+# Where the hunt goes first: P1's measured spot in the warped forest's main body (race 45534565509:
+# a ticking enderman within 32 in 60 of 61 rows, within 16 in 27, no cubes), by Bridger's ruling of
+# 2026-11-24 that known geography may steer to win. The frontier stands in a thin strip by the deltas.
+hunt_point = [490, 5]
+look_out_far_min = 24.0
+# From the near look-out (look_out_reach off O, some 6 cells from B) no target nearer than this:
+# race 45615781100 lane 3 provoked one 23.8 off from 4 out and was hit at M 40 ticks later.
+look_out_near_min = 30.0
+look_out_far_max = 36.0
+cube_clear = 8.0
+# Piglins out of the burrow (restocking, walking) seal a pocket too: race 45588764709 lane 1, in
+# iron with no gold, was hit twice by two piglins at a restock, 19.8 to 9.6 in 20 ticks, with no
+# heal in the hunt. Within piglin_near: sealed until none within piglin_clear.
+piglin_near = 12.0
+piglin_clear = 16.0
+# Under restock_below burrow blocks held, netherrack is dug near the burrow up to restock_to (a
+# burrow is up to 38; the frontier bot holds about 263 filler).
+restock_below = 60
+restock_to = 120
+# An angry enderman with no burrow built: issue 17's pocket where the bot stands for this long at
+# most, then the hunt goes on (anger with a target lasts; P4's closed loop held the pocket to the
+# cap).
+threat_hold_ticks = 1200
+base_retry_ticks = 6000
+calm_range = 16.0
+# <<< pearls
+# >>> base (P5, issue 18d, docs/problems/pearls-base.md): the forest base's rows, made where the
+# bot stands in the warped forest before the first provoke (plan::base). Warped stems are in #logs
+# and their planks in #planks, so the generated recipes make the table, sticks, swords, pickaxes
+# and the shield from them. The repeated rows (all but base-table) make one more of their first
+# provide than is held when a run begins; plan::base repeats a run while its step wants it.
+[[goal]]
+id = "base-table"
+priority = 16
+until = "base-table"
+doc = "four sticks and a crafting table placed where the bot stands, from warped stems"
+provides = [["item:stick", 4], ["block:crafting_table", 1]]
+
+[[goal]]
+id = "base-iron-sword"
+priority = 16
+until = "base-iron-sword"
+doc = "one more iron sword: two ingots and a stick at the table"
+provides = [["item:iron_sword", 1]]
+
+[[goal]]
+id = "base-stone-sword"
+priority = 16
+until = "base-stone-sword"
+doc = "one more stone sword: two cobblestone and a stick at the table"
+provides = [["item:stone_sword", 1]]
+
+[[goal]]
+id = "base-iron-pickaxe"
+priority = 16
+until = "base-iron-pickaxe"
+doc = "one more iron pickaxe: three ingots and two sticks at the table"
+provides = [["item:iron_pickaxe", 1]]
+
+[[goal]]
+id = "base-stone-pickaxe"
+priority = 16
+until = "base-stone-pickaxe"
+doc = "one more stone pickaxe: three cobblestone and two sticks at the table"
+provides = [["item:stone_pickaxe", 1]]
+
+[[goal]]
+id = "base-shield"
+priority = 16
+until = "base-shield"
+doc = "one shield, for issue 19's trip back: six planks and an ingot at the table"
+provides = [["item:shield", 1]]
+
+[[goal]]
+id = "base-wood-pickaxe"
+priority = 16
+until = "base-wood-pickaxe"
+doc = "one more wooden pickaxe, the hunt's for filler: three planks and two sticks at the table"
+provides = [["item:wooden_pickaxe", 1]]
+
+[base]
+# 10 stems are 40 planks: a table 4, a shield 6, three wooden pickaxes 9 and their sticks 3, sticks
+# for the swords and pickaxes 4, and 2 stems' worth (8) kept for more pickaxes later (the plan,
+# 18d.1; the orchestrator, 2026-11-25). Stew is not a row: the warped forest places no nether
+# mushrooms (P1's jar read).
+logs = 10
+# Twelve pearls at one in two (loot 0 to 1) are about 24 kills, about 31 for nine chances in ten
+# (docs/problems/pearls.md); 30 kills' worth of swords besides the kill in hand.
+kills = 30
+# 40 health over the sword's damage: iron 6 is 7 hits, stone 5 is 8 (the plan, section 1).
+hits_per_kill = [["iron_sword", 7], ["stone_sword", 8]]
+# The hunt switches a sword under 10 uses (the plan, 18f's weapon invariant): it counts for nothing.
+sword_floor = 10
+# The pickaxe reserve (survival.pickaxe_reserve, 40) and 60 for the burrows and their mending.
+pickaxe_uses = 100
+# Free main slots kept: pearls need a slot (clojurecraft: a run with none free lost every pickup
+# after the third), and the base's planks, sticks and tools want three more.
+free_slots = 4
+# Dropped first to keep them, never pearls, rods or eyes (plan::base::NEVER_DROP). Dirt is taken by
+# endermen (P1's jar read: #enderman_holdable), so it is no burrow block either.
+drop = ["granite", "tuff", "dirt", "diorite", "andesite", "calcite"]
+# Each step ends done or given up within 2,400 ticks (two minutes) and 4 failed tasks (the plan,
+# 18d's progress invariant).
+step_ticks = 2400
+step_fails = 4
+# Stems seen within 48 flat of the feet (race 45537373222: two bots up on fungus caps saw none
+# within 24 with a way), each dug from its column's lowest seen cell, that cell within 12 of the
+# feet's height (a fungus is 4 to 13 tall; the dig walk decides what it reaches).
+stem_radius = 48
+stem_rise = 12
+note_every = 600
+# Wooden pickaxe uses held after the wood picks step: three pickaxes (59 uses each), for the hunt's
+# filler (each burrow is about 39 blocks; P4's 12-pearl model loop ran out near the sixth burrow),
+# never counted in the stone reserve's pickaxe_uses.
+wood_pick_uses = 150
+# Off a fungus cap (race 45537373222 lanes 0 and 2 stood on warped wart at y 51 to 52 for 2,400
+# ticks): seen warped nylium with room over it 8 to 24 flat of the feet walked to by route (nearer
+# is under the cap itself), else the cap block underfoot dug by hand where the drop is at most 3;
+# at most 24 moves (a cap is up to about 13 over the floor, a dig or a walk each).
+floor_near = 8
+floor_far = 24
+down_tries = 24
+# A wait of 200 ticks in a row (ten seconds) pauses the base for 6,000 (five minutes) or until a
+# kill, and the hunt runs with what is held; a step that waits that long again after one pause
+# gives up, and the steps it was to supply are skipped at once (race 45542558792: 8 bots waited
+# 2,400 ticks a step on missing wood and no hunt began).
+wait_ticks = 200
+pause_ticks = 6000
+pause_max = 1
+# <<< base

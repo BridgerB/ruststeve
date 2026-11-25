@@ -318,6 +318,34 @@ fn joined() -> (world::World, Plan, (i32, i32, i32)) {
     (w, p, feet)
 }
 
+/// In travel (issue 18c) a fortress seen ahead turns the heading: a wall of nether bricks 24 to
+/// 30 east, seen from the start, turns an east axis once; before the endermen stage it does not.
+#[test]
+fn in_travel_a_fortress_seen_ahead_turns_the_heading() {
+    let mut stage = flat((-16, 120), (-40, 40));
+    stage.bricks((24, 30), (64, 70), (-6, 6));
+    let sim = Sim::new(CONFIG, stage.build().unwrap());
+    let run = bot::lockstep::run(sim, "rs-hd", 1, 30, 20, |_, _| physics::Controls::default());
+    let w = run.world;
+    let feet = plan::path::stand_cell(&w, w.body.unwrap().pos);
+    let turned = |p: &Plan| {
+        said(p)
+            .iter()
+            .filter(|n| n.contains("heading turned to") && n.contains("a fortress seen ahead"))
+            .count()
+    };
+    let mut reach = Plan::with_table(Aim::Hold, table());
+    reach.headed = Some(Heading::new((1, 0), feet, 0, "set by the test".to_owned()));
+    let _ = reach.heading_with(&w, Signs::default(), 100);
+    assert_eq!(turned(&reach), 0, "{:#?}", said(&reach));
+    let mut p = Plan::with_table(Aim::Hold, table());
+    p.ender.phase = plan::endermen::EnderPhase::Travel;
+    p.headed = Some(Heading::new((1, 0), feet, 0, "set by the test".to_owned()));
+    let _ = p.heading_with(&w, Signs::default(), 100);
+    assert_eq!(turned(&p), 1, "{:#?}", said(&p));
+    assert_ne!(p.headed.as_ref().unwrap().dir, (1, 0));
+}
+
 fn said(p: &Plan) -> Vec<String> {
     p.events
         .iter()
@@ -379,6 +407,72 @@ fn a_crimson_forest_at_the_feet_turns_the_heading_once() {
     p.task = Task::Idle;
     let _ = p.heading_with(&w, crimson, 140);
     assert_eq!(turned(&p), 1, "{:#?}", said(&p));
+}
+
+/// Basalt deltas are crossed, not turned from (issue 18c): with the feet in them the heading
+/// says so once and holds its axis.
+#[test]
+fn basalt_deltas_at_the_feet_are_crossed_not_turned_from() {
+    let (w, mut p, _) = joined();
+    let deltas = Signs {
+        feet_biome: Some("basalt_deltas"),
+        ..Signs::default()
+    };
+    let t = p.heading_with(&w, deltas, 100);
+    assert!(t.is_some(), "{:#?}", said(&p));
+    p.task = Task::Idle;
+    let _ = p.heading_with(&w, deltas, 140);
+    let notes = said(&p);
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|n| n.contains("heading crosses basalt deltas"))
+            .count(),
+        1,
+        "{notes:#?}"
+    );
+    assert!(
+        !notes.iter().any(|n| n.contains("heading turned")),
+        "{notes:#?}"
+    );
+    assert_eq!(p.headed.as_ref().unwrap().dir, (1, 0));
+}
+
+/// A travel point (issue 18c, known geography) aims the axis: the compass axis with the most of
+/// the way left; a forest known from blocks seen replaces it.
+#[test]
+fn a_travel_point_aims_the_axis_and_a_seen_forest_replaces_it() {
+    let (w, mut p, _) = joined();
+    let way = Signs {
+        way: Some(((0, 6), (10, 100))),
+        ..Signs::default()
+    };
+    assert!(p.heading_with(&w, way, 100).is_some(), "{:#?}", said(&p));
+    assert!(
+        said(&p)
+            .iter()
+            .any(|n| n.contains("heading to the travel point (10, 100) on (0, 1)")),
+        "{:#?}",
+        said(&p)
+    );
+    let h = p.headed.as_ref().unwrap();
+    assert_eq!(h.dir, (0, 1));
+    assert!(h.way && h.forest.is_none());
+    assert_eq!(heading::aim((0, 64, 0), (100, -20)), (1, 0));
+    let both = Signs {
+        forest: Some((3, -1)),
+        ..way
+    };
+    p.task = Task::Idle;
+    let _ = p.heading_with(&w, both, 140);
+    assert!(
+        said(&p)
+            .iter()
+            .any(|n| n.contains("heading to the warped forest at column (3, -1)")),
+        "{:#?}",
+        said(&p)
+    );
+    assert!(!p.headed.as_ref().unwrap().way);
 }
 
 /// A forest known from warped blocks seen replaces the axis: the leg runs to it. A warped forest

@@ -221,6 +221,7 @@ fn simrace(a: &Args) -> Result<bool, String> {
             case: Some(file),
             recording: None,
             aim: None,
+            pearls: Some(c.pearls_gained()),
         });
     }
     rows.sort_by(|x, y| x.bot.cmp(&y.bot));
@@ -279,6 +280,7 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
         | plan::Aim::Fortress
         | plan::Aim::Nether
         | plan::Aim::Race
+        | plan::Aim::Base
         | plan::Aim::Hold => Some(std::sync::Arc::new(bot::goals_table(&a.goals)?)),
     };
     let kit: Vec<(data::ItemKind, i32)> = match &a.start {

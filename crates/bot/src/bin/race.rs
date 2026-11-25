@@ -585,6 +585,7 @@ fn write_case(dir: &Path, case: &Case, coverage: &mut Coverage) -> Result<Row, S
         case: Some(file),
         recording: case.recording.clone(),
         aim: case.plan.as_ref().map(|p| (p.aim.clone(), p.reached)),
+        pearls: Some(case.pearls_gained()),
     })
 }
 

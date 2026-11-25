@@ -222,7 +222,7 @@ pub struct Cells<'a> {
     /// (`Cells::far`), in the Nether, with `BRIDGE_RESERVE` blocks held.
     bridge: bool,
     /// Where the mobs a far route keeps clear of stand (`SHUN_KINDS`).
-    shun: Vec<[f64; 3]>,
+    shun: Vec<([f64; 3], f64)>,
     /// Cells a route never enters: a heading's cut cells behind the feet (docs/problems/heading.md:
     /// a leg never walks back over ground the heading already covered).
     blocked: BTreeSet<Cell>,
@@ -269,14 +269,14 @@ impl<'a> Cells<'a> {
             shun: world
                 .entities
                 .values()
-                .filter(|e| SHUN_KINDS.contains(&e.kind))
-                .map(|e| e.pos)
+                .filter(|e| !e.dead)
+                .filter_map(|e| shun_radius(e.kind).map(|r| (e.pos, r)))
                 .collect(),
             ..Self::new(world)
         }
     }
 
-    /// Is `c` within `SHUN_RADIUS` of a mob to keep clear of? Never within `SHUN_FREE` of the
+    /// Is `c` within its kind's `shun_radius` of a mob to keep clear of? Never within `SHUN_FREE` of the
     /// search's `start`: a bot already beside one must still be given a way off.
     pub fn shunned(&self, c: Cell, start: Cell) -> bool {
         let at = |c: Cell| [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
@@ -285,7 +285,7 @@ impl<'a> Cells<'a> {
         };
         !self.shun.is_empty()
             && d(at(c), at(start)) > SHUN_FREE
-            && self.shun.iter().any(|m| d(at(c), *m) <= SHUN_RADIUS)
+            && self.shun.iter().any(|(m, r)| d(at(c), *m) <= *r)
     }
 
     /// Can a held block be laid at `c` as a floor: air or lava there (a block replaces a fluid),
@@ -403,9 +403,34 @@ pub const SHUN_KINDS: &[data::EntityKind] = &[
     data::EntityKind::Piglin,
     data::EntityKind::PiglinBrute,
     data::EntityKind::Hoglin,
+    // Issue 18c: the travel at no-heal health (docs/problems/pearls-travel.md): a wither
+    // skeleton's blow withers as well (race 45481633896 lane 0 died to them, 18.3 to 0).
+    data::EntityKind::WitherSkeleton,
 ];
-/// A far route enters no cell within this of one: a piglin sees a player at 16.
-pub const SHUN_RADIUS: f64 = 20.0;
+/// A far route enters no cell within this of one: a piglin sees a player at 16, and the travel
+/// at no-heal health keeps 8 more (issue 18c; it was 20 through issue 17).
+pub const SHUN_RADIUS: f64 = 24.0;
+/// Magma cubes (basalt deltas) are shunned nearer: they hop, but follow from 16 only once they
+/// see the bot, and a route round each at 24 would close the deltas (issue 18c's basalt rule).
+pub const SHUN_MAGMA: f64 = 8.0;
+/// Skeletons are shunned at their bow's reach: they shoot from 15 (`RangedBowAttackGoal`'s
+/// 15-block attack radius); a soul sand valley spawns them in fives, and three arrows took two
+/// frontier bots from 12.5 to under 6 at no-heal health (race 45535712274 lanes 1 and 3).
+pub const SHUN_SKELETON: f64 = 16.0;
+
+/// How near a far route comes to a mob of `kind`: `SHUN_RADIUS` for `SHUN_KINDS`, `SHUN_MAGMA`
+/// for a magma cube, `SHUN_SKELETON` for a skeleton, `None` for the rest.
+pub fn shun_radius(kind: data::EntityKind) -> Option<f64> {
+    if SHUN_KINDS.contains(&kind) {
+        Some(SHUN_RADIUS)
+    } else if kind == data::EntityKind::MagmaCube {
+        Some(SHUN_MAGMA)
+    } else if kind == data::EntityKind::Skeleton {
+        Some(SHUN_SKELETON)
+    } else {
+        None
+    }
+}
 /// Cells this near the search's start are free of the rule.
 pub const SHUN_FREE: f64 = 6.0;
 
@@ -414,13 +439,28 @@ pub fn bridge_blocks(w: &World) -> i64 {
     w.inventory
         .slots
         .values()
+        .chain(w.inventory.carried.iter())
         .filter(|(k, _)| BRIDGE_BLOCKS.contains(k))
         .map(|(_, n)| i64::from(*n))
         .sum()
 }
 
-/// The next bridge block to hold: the kind with the most held.
+/// The next bridge block to hold: the one in hand, else the one on the cursor, else the kind
+/// with the most held.
 pub fn bridge_item(w: &World) -> Option<data::ItemKind> {
+    // The bridge block in hand first, then one on the cursor: with the kind with the most held
+    // chosen afresh each look, a stack lifted onto the cursor for the swap stopped counting, the
+    // other kind became the most held and was put back in hand, and the swap undid itself for
+    // 3,500 ticks 35 blocks from the warped forest (race 45531577912 lane 1, issue 18c).
+    let held = crate::hold::held_item(w).filter(|k| BRIDGE_BLOCKS.contains(k));
+    let carried = w
+        .inventory
+        .carried
+        .map(|(k, _)| k)
+        .filter(|k| BRIDGE_BLOCKS.contains(k));
+    if let Some(k) = held.or(carried) {
+        return Some(k);
+    }
     BRIDGE_BLOCKS
         .iter()
         .copied()
@@ -673,6 +713,10 @@ pub enum Goal {
         dir: (i32, i32),
         gain: i32,
     },
+    /// Within `range` of `pos` on the plane, at any height (issue 18c: a travel leg toward a
+    /// far point ends where the ground there is, not at the height it began; race 45535712274
+    /// lane 0's legs at y 86 in the basalt deltas had no walk and tunnelled 84 pickaxe uses).
+    Plane { pos: Cell, range: f64 },
 }
 
 /// A cell's projection on a compass heading from `from`, and how far aside of the axis it is.
@@ -701,6 +745,7 @@ impl Goal {
             Goal::Xz { pos } => node.0 == pos.0 && node.2 == pos.2,
             Goal::Away { pos, range } => flat_distance(node, pos) > range,
             Goal::Afar { pos, range } => octile(node, pos) > range,
+            Goal::Plane { pos, range } => octile(node, pos) <= range,
             Goal::Pickup { pos, range, rise } => {
                 octile(node, pos) <= range && node.1 <= pos.1 && pos.1 <= node.1 + rise
             }
@@ -718,6 +763,7 @@ impl Goal {
             Goal::Xz { pos } => octile(node, pos),
             Goal::Away { pos, range } => (range - flat_distance(node, pos)).max(0.0),
             Goal::Afar { pos, range } => (range - octile(node, pos)).max(0.0),
+            Goal::Plane { pos, range } => (octile(node, pos) - range).max(0.0),
             Goal::Pickup { pos, range, rise } => {
                 let up = if pos.1 < node.1 {
                     node.1 - pos.1
@@ -1007,5 +1053,33 @@ mod pickup_tests {
         assert!(!g.done((2, 70, 0)), "too far");
         assert_eq!(g.heuristic((1, 70, 0)), 0.0);
         assert!(g.heuristic((5, 70, 0)) > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod bridge_item_tests {
+    use super::*;
+    use data::ItemKind;
+
+    /// Race 45531577912 lane 1: cobblestone in hand, netherrack the most held. Lifting the
+    /// netherrack onto the cursor must not make cobblestone the choice again (the swap undid
+    /// itself for 3,500 ticks): the block in hand is kept, and a lifted stack still counts.
+    #[test]
+    fn the_bridge_block_choice_holds_through_a_swap() {
+        let mut w = World::new();
+        w.held = 0;
+        w.inventory.slots.insert(36, (ItemKind::Cobblestone, 40));
+        w.inventory.slots.insert(10, (ItemKind::Netherrack, 64));
+        w.inventory.slots.insert(11, (ItemKind::Netherrack, 64));
+        assert_eq!(bridge_item(&w), Some(ItemKind::Cobblestone), "in hand");
+        assert_eq!(bridge_blocks(&w), 168);
+        w.inventory.slots.remove(&36);
+        assert_eq!(bridge_item(&w), Some(ItemKind::Netherrack), "the most held");
+        let lifted = w.inventory.slots.remove(&10);
+        w.inventory.carried = lifted;
+        w.inventory.slots.insert(36, (ItemKind::Cobblestone, 100));
+        w.held = 1;
+        assert_eq!(bridge_item(&w), Some(ItemKind::Netherrack), "on the cursor");
+        assert_eq!(bridge_blocks(&w), 228, "the cursor's stack counts");
     }
 }

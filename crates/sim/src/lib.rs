@@ -388,6 +388,7 @@ impl Sim {
         )?];
         out.extend(self.chunks_around()?);
         out.extend(self.mobs_added()?);
+        out.extend(self.items_added()?);
         out.push(self.teleport(self.pos)?);
         out.push(wire(
             State::Play,
@@ -628,8 +629,8 @@ impl Sim {
                 &S2c::DamageEvent {
                     entity_id: PLAYER_ID,
                     source_type,
-                    cause: None,
-                    direct: None,
+                    cause: self.survival.life.blow_cause,
+                    direct: self.survival.life.blow_cause,
                 },
             )?,
             wire(

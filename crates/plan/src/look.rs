@@ -65,6 +65,18 @@ fn pumpkin_worn(w: &World) -> bool {
 /// The entity id of an enderman that a look from `eye` along `yaw` and `pitch` would provoke, the
 /// nearest first; `None` when the look is safe.
 pub fn stares(w: &World, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<u32> {
+    stares_except(w, eye, yaw, pitch, None)
+}
+
+/// `stares`, leaving `except` out: the one enderman the hunt's provoke row stares at on purpose
+/// (issue 18f), and only while that row runs.
+pub fn stares_except(
+    w: &World,
+    eye: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+    except: Option<u32>,
+) -> Option<u32> {
     if pumpkin_worn(w) {
         return None;
     }
@@ -75,6 +87,7 @@ pub fn stares(w: &World, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<u32> {
     w.entities
         .iter()
         .filter(|(_, e)| e.kind == EntityKind::Enderman && !e.dead)
+        .filter(|(id, _)| except.is_none_or(|x| u32::try_from(**id).ok() != Some(x)))
         .filter_map(|(id, e)| {
             let range = (0..3)
                 .map(|i| (e.pos[i] - feet[i]).powi(2))
@@ -112,6 +125,32 @@ pub fn eye(pos: [f64; 3], c: &Controls) -> [f64; 3] {
 /// else the same yaw (the walk's heading is the yaw) with the first of `SAFE_PITCHES` that
 /// provokes none. With the enderman it would have provoked, when changed.
 pub fn keep_off(w: &World, c: Controls) -> (Controls, Option<u32>) {
+    keep_off_controls(w, c, None)
+}
+
+/// A look from `eye` kept off every enderman but `except` (issue 18f: the provoke row stares at
+/// its one target on purpose; every other look stays filtered): the same yaw (a walk's heading)
+/// and the first of `SAFE_PITCHES` that stares at none, or the look unchanged when it is safe.
+pub fn keep_off_except(
+    w: &World,
+    eye: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+    except: Option<u32>,
+) -> (f32, f32) {
+    if stares_except(w, eye, yaw, pitch, except).is_none() {
+        return (yaw, pitch);
+    }
+    let safe = SAFE_PITCHES
+        .into_iter()
+        .find(|p| stares_except(w, eye, yaw, *p, except).is_none())
+        .unwrap_or(SAFE_PITCHES[0]);
+    (yaw, safe)
+}
+
+/// `keep_off` with one enderman exempt (`keep_off_except`): the provoke row's target. With the
+/// enderman the look would have provoked, when changed.
+pub fn keep_off_controls(w: &World, c: Controls, except: Option<u32>) -> (Controls, Option<u32>) {
     let Some(body) = w.body else {
         return (c, None);
     };
@@ -119,13 +158,10 @@ pub fn keep_off(w: &World, c: Controls) -> (Controls, Option<u32>) {
     let yaw = c.yaw as f32;
     let pitch = c.pitch.unwrap_or(w.player.pitch);
     let eye = eye(body.pos, &c);
-    let Some(id) = stares(w, eye, yaw, pitch) else {
+    let Some(id) = stares_except(w, eye, yaw, pitch, except) else {
         return (c, None);
     };
-    let safe = SAFE_PITCHES
-        .into_iter()
-        .find(|p| stares(w, eye, yaw, *p).is_none())
-        .unwrap_or(SAFE_PITCHES[0]);
+    let (_, safe) = keep_off_except(w, eye, yaw, pitch, except);
     (
         Controls {
             pitch: Some(safe),
