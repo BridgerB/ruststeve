@@ -348,9 +348,16 @@ fn fed_on_the_surface_home_is_over() {
         notes(&p)
     );
     assert!(p.home_done());
-    // Never back into a portal once over.
-    run(&mut p, &mut w, 104, 20);
-    assert!(matches!(p.task, Task::Idle));
+    // Never back into a portal once over: with 12 pearls and 7 rods held the eyes are makeable,
+    // so the eyes' phase takes the planner (Q4) and its first task is the eyes' craft (60 ticks:
+    // past a `RETRY_TICKS` wait set as home ended).
+    run(&mut p, &mut w, 104, 60);
+    assert!(!matches!(p.task, Task::Enter(_)), "{:?}", notes(&p));
+    assert!(
+        p.events.iter().any(|e| e.what.starts_with("eyes: craft")),
+        "{:?}",
+        notes(&p)
+    );
 }
 
 #[test]

@@ -1042,10 +1042,14 @@ impl Plan {
         let body = w.body?;
         let feet = path::feet_cell(body.pos);
         if self.ender.home.done {
-            // >>> overland and stronghold (Q4): over, with eyes held or a room known, the eyes'
-            // phase takes the planner (`eyes_stronghold_task` holds it in the overworld); race
-            // 45701314227 idled 4,300 ticks here with 14 eyes and 12 frames on record.
-            if craft::count(w, ItemKind::EnderEye) > 0 || self.stronghold.room.is_some() {
+            // >>> overland and stronghold (Q4): over, with eyes held or makeable (pearls and
+            // powder or rods) or a room known, the eyes' phase takes the planner
+            // (`eyes_stronghold_task` crafts the eyes and holds the overworld); race 45701314227
+            // idled 4,300 ticks here with 14 eyes and 12 frames on record.
+            let count = |k: ItemKind| craft::count(w, k);
+            let makeable = count(ItemKind::EnderPearl) > 0
+                && (count(ItemKind::BlazePowder) > 0 || count(ItemKind::BlazeRod) > 0);
+            if count(ItemKind::EnderEye) > 0 || makeable || self.stronghold.room.is_some() {
                 return None;
             }
             // <<< overland and stronghold
