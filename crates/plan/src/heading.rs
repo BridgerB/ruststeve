@@ -64,6 +64,9 @@ pub const RESTOCK_TO: i64 = 48;
 pub const RESTOCK_DIGS: u32 = 24;
 /// A wall cell is dug for filler from this near the eye (`walk::REACH`).
 pub const RESTOCK_REACH: f64 = 4.0;
+/// Restock cells are looked for this far from the eye; one past `RESTOCK_REACH` is walked to
+/// first (the coordinator, 2026-11-25: filler decides the deltas).
+pub const RESTOCK_LOOK: f64 = 6.0;
 /// A leg's budget per metre of `best` gained, read only past `BUDGET_GRACE` metres of spend: a
 /// level tunnel cuts 2 a metre and a stair 3 (docs/problems/nether-tunnel.md), a straight bridge
 /// lays 1 a metre (the plan's starting numbers, to be refined from races). Blocks placed are let
@@ -508,15 +511,30 @@ pub fn projection(origin: Cell, dir: Dir, c: Cell) -> i32 {
 /// `WALL_RISE` over them, never the floor), with no lava beside it (read as the staircase's
 /// refusal reads the cells a cut opens: docs/problems/nether-tunnel.md), nothing over it that
 /// falls, and at the feet's height a floor under it, so no opening over a drop is made.
-fn restock_cell(w: &World, feet: Cell, c: Cell) -> bool {
+fn restock_cell(w: &World, feet: Cell, ahead: Option<Dir>, c: Cell) -> bool {
     let kind = |c: Cell| w.block_at(BlockPos::new(c.0, c.1, c.2));
     // Netherrack, and the deltas' basalt and blackstone (bridge blocks too, issue 19d).
     if !matches!(
         kind(c),
-        Some(BlockKind::Netherrack | BlockKind::Basalt | BlockKind::Blackstone)
+        Some(
+            BlockKind::Netherrack
+                | BlockKind::Basalt
+                | BlockKind::Blackstone
+                | BlockKind::Stone
+                | BlockKind::Deepslate
+        )
     ) || !crate::escape::exposed(w, c)
-        || c.1 < feet.1
+        || c.1 < feet.1 - 1
         || c.1 > feet.1 + WALL_RISE
+    {
+        return false;
+    }
+    // The floor beside the feet (never under them), a full block under it: a hole one deep
+    // beside the bot, no drop (race 45707489694: on the deltas' open basalt "no wall cell to dig",
+    // filler 15). The forest-to-deltas trip restocked from the floor this way.
+    if c.1 == feet.1 - 1
+        && ((c.0, c.2) == (feet.0, feet.2)
+            || ahead.is_some_and(|d| (c.0, c.2) == (feet.0 + d.0, feet.2 + d.1)))
     {
         return false;
     }
@@ -529,18 +547,23 @@ fn restock_cell(w: &World, feet: Cell, c: Cell) -> bool {
     !lava && !falls_over && (c.1 > feet.1 || floor_under)
 }
 
+/// Whether a restock cell is in the floor (dug after the walls).
+fn floor_cell(feet: Cell, c: Cell) -> bool {
+    c.1 < feet.1
+}
+
 /// Wall cells dug for filler are at most this over the feet (reach from the eye bounds it too).
 pub const WALL_RISE: i32 = 3;
 
-/// Exposed netherrack within `RESTOCK_REACH` of the eye that `restock_cell` allows, nearest
-/// first.
-pub fn restock_cells(w: &World) -> Vec<Cell> {
+/// Exposed filler stone within `reach` of the eye that `restock_cell` allows (never the floor
+/// under the feet or under the next step along `ahead`), walls first, then nearest.
+pub fn restock_cells(w: &World, ahead: Option<Dir>, reach: f64) -> Vec<Cell> {
     let Some(body) = w.body else {
         return Vec::new();
     };
     let feet = path::stand_cell(w, body.pos);
     let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
-    let r = RESTOCK_REACH.ceil() as i32;
+    let r = reach.ceil() as i32;
     let mut out: Vec<(i64, Cell)> = (-r..=r)
         .flat_map(|dx| (-r..=r).flat_map(move |dy| (-r..=r).map(move |dz| (dx, dy, dz))))
         .map(|(dx, dy, dz)| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
@@ -548,8 +571,10 @@ pub fn restock_cells(w: &World) -> Vec<Cell> {
             let d = (f64::from(c.0) + 0.5 - eye[0]).powi(2)
                 + (f64::from(c.1) + 0.5 - eye[1]).powi(2)
                 + (f64::from(c.2) + 0.5 - eye[2]).powi(2);
-            (d.sqrt() <= RESTOCK_REACH && restock_cell(w, feet, c))
-                .then_some(((d * 100.0) as i64, c))
+            (d.sqrt() <= reach && restock_cell(w, feet, ahead, c)).then_some((
+                (d * 100.0) as i64 + if floor_cell(feet, c) { 1_000_000 } else { 0 },
+                c,
+            ))
         })
         .collect();
     out.sort();
@@ -1573,9 +1598,39 @@ impl Plan {
         let filler = path::bridge_blocks(w);
         let to = r.to.max(RESTOCK_TO);
         let max_digs = RESTOCK_DIGS.max(u32::try_from(to - r.filler0 + 8).unwrap_or(0));
+        let dir = h.dir;
         let cell = (filler < to && r.digs < max_digs)
-            .then(|| restock_cells(w).into_iter().next())
+            .then(|| restock_cells(w, Some(dir), RESTOCK_LOOK).into_iter().next())
             .flatten();
+        // Past the dig's reach: a walk to beside it first.
+        if let Some(c) = cell
+            && let Some(body) = w.body
+            && {
+                let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+                ((f64::from(c.0) + 0.5 - eye[0]).powi(2)
+                    + (f64::from(c.1) + 0.5 - eye[1]).powi(2)
+                    + (f64::from(c.2) + 0.5 - eye[2]).powi(2))
+                .sqrt()
+                    > RESTOCK_REACH
+            }
+        {
+            let mut walk = Walk::to_dig(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("restock walk to {c:?}"),
+                    format!("filler {filler} under {to}; the nearest cell is past the dig's reach"),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+        }
+        let cell = cell.and_then(|_| {
+            restock_cells(w, Some(dir), RESTOCK_REACH)
+                .into_iter()
+                .next()
+        });
         if let Some(c) = cell {
             r.digs += 1;
             let n = r.digs;

@@ -673,3 +673,24 @@ fn two_magma_cubes_near_on_the_trip_seal_a_pocket_and_clear_it() {
     assert!(noted(&p, "home: out of the cube pocket"), "{:?}", notes(&p));
     assert_eq!(p.ender.home.cube_pockets, 1);
 }
+
+#[test]
+fn a_basalt_floor_with_no_wall_restocks_beside_the_feet() {
+    // The feet at (8, 64, 8) on a delta floor of basalt, no wall in reach.
+    let mut w = nether();
+    for x in 5..=11 {
+        for z in 5..=11 {
+            set(&mut w, (x, 63, z), BlockKind::Basalt);
+        }
+    }
+    let cells = plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK);
+    assert!(!cells.is_empty(), "a floor cell to dig");
+    assert!(cells.iter().all(|c| c.1 == 63), "{cells:?}");
+    // Never under the feet, nor under the next step east.
+    assert!(!cells.contains(&(8, 63, 8)), "{cells:?}");
+    assert!(!cells.contains(&(9, 63, 8)), "{cells:?}");
+    // Lava beside a cell refuses it.
+    set(&mut w, (7, 62, 8), BlockKind::Lava);
+    let cells = plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK);
+    assert!(!cells.contains(&(7, 63, 8)), "{cells:?}");
+}
