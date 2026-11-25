@@ -32,5 +32,8 @@ Q3's throw, read and triangulation (`eyes-throw.md`) and Q4's dig into the porta
 - **The end**: 7 of 8 dropped, 1 shattered (y01-throw-2): the jar's 4 in 5.
 - **Pickup**: y02-fetch-0 and -4 walked to the drop and picked it up, as the model did (their cells differed by a block or two: where the walk stops is the drop's random kick; the fetch now walks home after).
 
-## Walls
+## The real portal room (probe 45690314001, the parity seed)
+- The stronghold located at (1648, -16) has its portal room's **12 frames at y 19**, the ring's cells x 1626 to 1630, z -36 to -32 (centre cell (1628, 19, -34)); the **spawner at (1632, 19, -34)**, 4 east of the ring's centre. The located point is 20 blocks east and 18 south of the ring: the bearing leads to the stronghold, not to the room.
+- For y03/y04: a row's `feet_y` (new, optional) sets the start's feet height when it is not the surface (a pocket beside the room's wall).
+
 1. **A dropped eye can land out of reach** (y02-fetch-5, parity 45688030470). The eye ended 8 up over a tree; its item came to rest on the canopy at y 76, the bot's feet at 72: the pickup box reaches about 2.3 over the feet, so the bot stood under it for 250 ticks and never took it. The model's eye fell to the ground (its item fell through what the real one stood on: under investigation, the row now writes the model's trace too). For Q3: a throw from under or beside trees, or near a cliff edge, can lose an eye that did not shatter; throw from open ground with no block over the 12-block point on the line, and give up a drop over the feet + 2 (clojurecraft's rule: picked up only within 2 of the feet's height).

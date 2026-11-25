@@ -80,6 +80,10 @@ pub struct Moment {
     /// armor.<slot>` in real, the model's slot and armour points in sim (issue 19, y04).
     #[serde(default)]
     pub armor: Vec<String>,
+    /// The feet's height, when not the surface's (issue 19, y04: a pocket dug beside the portal
+    /// room's wall, laid by the row's `fill`).
+    #[serde(default)]
+    pub feet_y: Option<i32>,
 }
 
 fn yes() -> bool {

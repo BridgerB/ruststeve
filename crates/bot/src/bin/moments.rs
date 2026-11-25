@@ -329,9 +329,12 @@ fn start_of(
     let world = CapturedWorld::read(&CapturedWorld::path(&a.worlds, m.landing))?;
     let (x, z) = (l.x + m.dx, l.z + m.dz);
     let model = world.model([0.0; 3])?;
-    let y = model
-        .surface(x, z)
-        .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?;
+    let y = match m.feet_y {
+        Some(y) => f64::from(y),
+        None => model
+            .surface(x, z)
+            .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?,
+    };
     Ok((world, [f64::from(x) + 0.5, y, f64::from(z) + 0.5]))
 }
 
