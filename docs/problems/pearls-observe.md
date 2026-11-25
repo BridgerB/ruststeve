@@ -75,6 +75,19 @@ The strip map, every 16 blocks to 640 on 8 axes from (8, 81) (the biome at y 64 
 - The race summary prints `pearls gained: 0 x5, 12 x1 (6 runs)` once a run reached the forest or gained a pearl (batch rows keep `pearls`).
 - Coverage: `entity_event`, `take_item_entity` and `set_entity_data` were already decoded (no `config/observe.toml` change); nothing the hunt needs is thrown away.
 
+## 18a.5: the forest supply (race 45531362383, not done: wall 1)
+
+Two idle bots from the frontier snapshot, put down at `dev-forest` (488.5, 70, -110.5, spread 12), cap 12,000. The `forest` stage held at tick 80 for both, and the race published `dev-snapshot-forest-…` for each lane (the stage name works as an asset name). The bots did not stand under a roof: an idle bot is not given one.
+
+**Wall 1: dev-forest stands on a fortress.** Both bots landed on nether bricks and fences at (493 to 496, 65 to 70, -113 to -120): blazes at 4 to 8 blocks, wither skeletons at 19 to 29. Both burned to death, lane 0 at tick 720 (9 hits: 2 fireballs and the burning) and lane 1 by tick 260. That 12,000-tick count was never made. A warped forest with a fortress in it is no base at that cell: the burrow site needs nether bricks never within 8 (plan 18e), and a start must be placed off the fortress.
+
+**What was seen in the 34 s:**
+- 11 distinct endermen within 128 in lane 0, 15 in lane 1, nearly all ticking (one frozen).
+- The nearest ticking one was at 25 to 26 blocks.
+- Within 32 and ticking: 1 in lane 0, 4 in lane 1.
+- None turned angry, though three idle-looking "facing" signs were noted.
+- This is the supply the plan expected (more than one enderman per spawn group within 64), but it was not counted per second or per minute.
+
 ## Known gaps
 
 - `PearlDropped` needs the item's data (index 8) to say ender pearl; a pearl whose data comes later than 40 ticks after the death is not called a drop.
