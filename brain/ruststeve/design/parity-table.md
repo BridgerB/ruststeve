@@ -91,6 +91,7 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - A row may `fill` boxes before its `set` (`fill` by RCON, each cell in the model), keep its mobs' `loot`, and lay `items` on the ground (`summon item` with no pickup delay; `Sim::place_item`). Script `burrow:<mode>` (`hold`, `strike`, `eye`, `near`) reads the world each tick (`Script::steer`): the stare until creepy, the step into B, the torso look, the strike.
 - The class's `mobs` gains `stared` (entity data 18) and `cell` (where its feet ended). A row with mobs or items writes `<id>.real.trace.txt` (folded from its recording) and `<id>.sim.trace.txt`: the bot and every enderman and item within 32 every 10 ticks, for reading what the enderman did.
 - Tolerance 168 of 170.
+- Look-out rows `e09-lookout-a/b/c` (a calm enderman 27 beyond the bot, which stands 10 out from O) and `e10-edge-a/b/c` (18 beyond): the bot stares until creepy, then walks back along the line into B; its trace says whether it is in B before the enderman comes within 4. Tolerance 174 of 176.
 
 ## See also
 - [[server-model]] - what the model models.

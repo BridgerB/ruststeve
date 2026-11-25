@@ -1656,3 +1656,79 @@ ticks = 300
 difficulty = "normal"
 mobs = [["enderman", 10, 0, 0]]
 fill = [["stone", -6, -1, -6, 12, -1, 6], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -3, 0, -2, 0, 2, -1], ["stone", -3, 0, 1, 0, 2, 2], ["stone", -3, 0, 0, -2, 2, 0], ["stone", -1, 2, 0, 0, 2, 0]]
+
+# Issue 18's look-out (the hunt's provoke from out on the floor): the solid-block burrow (B 12
+# west of the start, M 11, O 10), the bot standing 10 out from O on open level floor in a
+# glass-roofed arena 63 long; a calm enderman in line beyond it. `burrow:hold` stares at its eye
+# until creepy, then walks west along the line (the bot has no sprint) through O and M into B and
+# looks at its torso. Each row's trace gives the enderman's distance to the bot every 10 ticks and
+# the tick the bot reaches B: it passes when the bot is in B before the enderman is within 4, and
+# is never hit. Three of each, on landings 1 to 6, 40 north of the centre.
+# - e09-lookout-a/b/c: the enderman 27 beyond the bot (37 from O).
+# - e10-edge-a/b/c: 18 beyond (inside 16 to 20: the edge where it walks rather than teleports).
+
+[[moment]]
+id = "e09-lookout-a 1 27"
+landing = 
+dx = 0
+dz = -40
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", , 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e09-lookout-b 2 27"
+landing = 
+dx = 0
+dz = -40
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", , 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e09-lookout-c 3 27"
+landing = 
+dx = 0
+dz = -40
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", , 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e10-edge-a 4 18"
+landing = 
+dx = 0
+dz = -40
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", , 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e10-edge-b 5 18"
+landing = 
+dx = 0
+dz = -40
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", , 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
+
+[[moment]]
+id = "e10-edge-c 6 18"
+landing = 
+dx = 0
+dz = -40
+script = "burrow:hold"
+ticks = 300
+difficulty = "normal"
+mobs = [["enderman", , 0, 0]]
+fill = [["stone", -17, -1, -6, 46, -1, 6], ["stone", -17, 0, -6, 46, 3, -6], ["stone", -17, 0, 6, 46, 3, 6], ["stone", -17, 0, -5, -17, 3, 5], ["stone", 46, 0, -5, 46, 3, 5], ["glass", -17, 4, -6, 46, 4, 6], ["air", -16, 0, -5, 45, 3, 5], ["stone", -14, 0, -2, -11, 2, -1], ["stone", -14, 0, 1, -11, 2, 2], ["stone", -14, 0, 0, -13, 2, 0], ["stone", -12, 2, 0, -11, 2, 0]]
