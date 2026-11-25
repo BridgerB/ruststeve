@@ -2374,8 +2374,10 @@ impl Plan {
                 // from the feet (P4's seed 23 walked on about a block a 100 ticks for 6,000).
                 let here = (feet[0], feet[1], feet[2]);
                 let goal = match centroid(&seen) {
+                    // At the feet's height: the middle of endermen seen on caps and ledges was at y 87
+                    // over a floor at 46 (race 45551462309).
                     Some(c) if path::flat_distance(c, here) >= f64::from(WALK_ON) => Goal::Near {
-                        pos: c,
+                        pos: (c.0, feet[1], c.2),
                         range: 12.0,
                     },
                     _ if self.pearls.moved_from.is_empty() => Goal::Away {
