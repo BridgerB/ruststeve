@@ -1763,6 +1763,12 @@ impl Sim {
             self.survival.life.blocking_since = Some(self.ticks);
             self.survival.life.blocking_slot = slot;
         }
+        // An eye of ender is thrown toward the stronghold (`EnderEyeItem.use`, issue 19).
+        if let Some(thrown) = self.use_eye() {
+            let mut out = thrown?;
+            out.push(wire(State::Play, &S2c::BlockChangedAck { sequence })?);
+            return Ok(out);
+        }
         // A bucket is used along the look (`BucketItem.use`, issue 14a).
         if let Some(used) = self.use_bucket() {
             let mut out = used?;

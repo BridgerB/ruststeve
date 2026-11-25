@@ -51,6 +51,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[forest-base]] - the hunt's kit made in a warped forest: stems by hand, swords in kills, a shield (issue 18d).
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
+- [[eyes-of-ender]] - the eyes made in the 2x2 grid, thrown and read into lines, crossed into a fix (issue 19c).
 - [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.
 - [[way-home]] - from 12 pearls in the forest back through the entry portal to the overworld surface, fed (issue 19d).
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.

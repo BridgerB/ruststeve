@@ -227,6 +227,10 @@ pub struct Goals {
     #[serde(default)]
     pub home: crate::home::HomeRules,
     // <<< home
+    // >>> eyes (Q3, issue 19c): `[eyes]`, the throws' numbers.
+    #[serde(default)]
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -576,6 +580,9 @@ pub struct Table {
     // >>> home
     pub home: crate::home::HomeRules,
     // <<< home
+    // >>> eyes
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 impl Table {
@@ -778,6 +785,9 @@ impl Table {
             // >>> home
             home: g.home.clone(),
             // <<< home
+            // >>> eyes
+            eyes: g.eyes.clone(),
+            // <<< eyes
         })
     }
 
@@ -1199,6 +1209,7 @@ mod tests {
             pearls: crate::pearls::PearlRules::default(),
             base: crate::base::Base::default(),
             home: crate::home::HomeRules::default(),
+            eyes: crate::eyes::EyeRules::default(),
         };
         Table::new(&g).unwrap()
     }

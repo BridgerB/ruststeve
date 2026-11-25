@@ -166,6 +166,14 @@ pub struct Sim {
     /// The clocks went out: a real server sends them once, at the join, and then the game time
     /// alone (race 45355573039: one 33-byte `set_time`, then 599 of 9 bytes).
     clocks_sent: bool,
+    /// The overworld's nearest stronghold, as the model was told it (issue 19, `eye`): where a
+    /// thrown eye of ender flies. None: an eye thrown finds nothing, as in the Nether.
+    pub stronghold: Option<[f64; 3]>,
+    /// Eyes of ender in flight, by entity id, and the counts of thrown, dropped and shattered.
+    pub eyes: BTreeMap<i32, eye::Eye>,
+    pub eyes_thrown: u64,
+    pub eyes_dropped: u64,
+    pub eyes_shattered: u64,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -210,6 +218,11 @@ impl Sim {
             fluids: fluid::Fluids::default(),
             day_time: 0,
             clocks_sent: false,
+            stronghold: None,
+            eyes: BTreeMap::new(),
+            eyes_thrown: 0,
+            eyes_dropped: 0,
+            eyes_shattered: 0,
         }
     }
 
@@ -723,6 +736,7 @@ impl Sim {
         out.extend(self.tick_fluids()?);
         out.extend(self.tick_digging()?);
         out.extend(self.tick_items()?);
+        out.extend(self.tick_eyes()?);
         out.extend(self.tick_life()?);
         out.extend(self.tick_furnaces()?);
         out.extend(self.tick_menu()?);
@@ -817,6 +831,7 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
 }
 
 pub mod enderman;
+pub mod eye;
 pub mod fluid;
 pub mod furnace;
 pub mod life;

@@ -247,6 +247,56 @@ fn burrow_acts(mode: BurrowMode, tick: u64, w: &World) -> Vec<Act> {
     }
 }
 
+/// A thrown eye's look up (degrees, pitch negative is up): never down at a block, where a use
+/// would go to the block (clojurecraft stronghold.clj's throw-pitch: a use at an end portal
+/// frame fills it).
+const EYE_PITCH: f32 = -20.0;
+/// How far a dropped eye is fetched from (the plan's pickup radius, 19c).
+const FETCH_NEAR: f64 = 24.0;
+/// On the plane, this near the dropped eye the walk stops (the touch box reaches 1.3 from the
+/// feet's middle: the player's half width 0.3 grown by 1).
+const FETCH_STOP: f64 = 0.4;
+
+/// The nearest dropped eye of ender within `FETCH_NEAR` of the feet: its feet.
+fn nearest_eye_item(w: &World, feet: [f64; 3]) -> Option<[f64; 3]> {
+    let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - feet[i]).powi(2)).sum::<f64>();
+    w.entities
+        .values()
+        .filter(|e| {
+            !e.dead
+                && e.kind == data::EntityKind::Item
+                && e.item().is_some_and(|(k, _)| k == data::ItemKind::EnderEye)
+        })
+        .map(|e| e.pos)
+        .filter(|p| d(*p) <= FETCH_NEAR * FETCH_NEAR)
+        .min_by(|a, b| d(*a).total_cmp(&d(*b)))
+}
+
+/// A fetch script's controls: still until a dropped eye is seen, then forward at it, holding
+/// jump (a step or a slope is climbed), until it is under the feet.
+fn fetch_controls(w: &World) -> Controls {
+    let Some(body) = w.body else {
+        return Controls::default();
+    };
+    let Some(at) = nearest_eye_item(w, body.pos) else {
+        return Controls {
+            pitch: Some(EYE_PITCH),
+            ..Controls::default()
+        };
+    };
+    let (dx, dz) = (at[0] - body.pos[0], at[2] - body.pos[2]);
+    if dx.hypot(dz) <= FETCH_STOP {
+        return Controls::default();
+    }
+    Controls {
+        forward: true,
+        jump: true,
+        yaw: (-dx).atan2(dz).to_degrees(),
+        pitch: Some(0.0),
+        ..Controls::default()
+    }
+}
+
 /// What a scripted bot presses.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Script {
@@ -292,6 +342,10 @@ pub enum Script {
     /// Issue 18's burrow rows (`burrow:<mode>`): the look and the step read from the world each
     /// tick (`steer`).
     Burrow(BurrowMode),
+    /// Issue 19's y02 (`fetch:<tick>`): standing still looking up (`EYE_PITCH`), use the held
+    /// item (an eye of ender) at tick `at`; then walk to the nearest dropped eye once one is
+    /// seen, until it is under the feet.
+    Fetch { at: u64 },
 }
 
 impl Script {
@@ -300,6 +354,7 @@ impl Script {
     pub fn steer(self, tick: u64, w: &World) -> Controls {
         match self {
             Script::Burrow(mode) => burrow_controls(mode, w),
+            Script::Fetch { .. } => fetch_controls(w),
             other => other.controls(tick),
         }
     }
@@ -349,6 +404,10 @@ impl Script {
             | Script::Smelt { .. }
             | Script::Light { .. }
             | Script::Burrow(_) => Controls::default(),
+            Script::Fetch { .. } => Controls {
+                pitch: Some(EYE_PITCH),
+                ..Controls::default()
+            },
             Script::Use { yaw, pitch, .. } => Controls {
                 yaw,
                 pitch: Some(pitch),
@@ -486,7 +545,7 @@ impl Script {
                 near.map(|(_, id)| vec![Act::Attack { entity: id }])
                     .unwrap_or_default()
             }
-            Script::Eat { at } | Script::Use { at, .. } => {
+            Script::Eat { at } | Script::Use { at, .. } | Script::Fetch { at } => {
                 if tick == at {
                     vec![Act::UseItem]
                 } else {
@@ -548,6 +607,7 @@ impl Script {
                 face,
             } => format!("light:{at}:{dx}:{dy}:{dz}:{face}"),
             Script::Burrow(mode) => format!("burrow:{}", mode.name()),
+            Script::Fetch { at } => format!("fetch:{at}"),
         }
     }
 
@@ -608,6 +668,11 @@ impl Script {
                 take: take.parse().ok()?,
             });
         }
+        if let Some(at) = s.strip_prefix("fetch:") {
+            return Some(Script::Fetch {
+                at: at.parse().ok()?,
+            });
+        }
         if let Some(at) = s.strip_prefix("eat:") {
             return Some(Script::Eat {
                 at: at.parse().ok()?,
@@ -653,6 +718,7 @@ mod tests {
             Script::Burrow(BurrowMode::Strike),
             Script::Burrow(BurrowMode::Eye),
             Script::Burrow(BurrowMode::Near),
+            Script::Fetch { at: 20 },
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
         }
