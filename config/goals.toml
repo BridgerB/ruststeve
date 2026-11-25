@@ -488,17 +488,19 @@ pearls_wanted = 12
 # after a held stare (probe 45472254333); clojurecraft's loaded servers took 1.7 to 5.1 s of wall
 # time, which is server ticks under load: 60 is three times the jar's worst with room.
 provoke_ticks = 60
-# Eye to eye: within 4 an angry enderman stared at teleports away (jar), and stares from past 36
-# angered none in clojurecraft's real races.
+# Eye to eye: within 4 an angry enderman stared at teleports away (jar); out to the follow range 64
+# (the jar's stare works there: dot > 1 - 0.025/d, 1.6 degrees at 60, and past 16 an angry one
+# teleports toward the bot). clojurecraft saw none angered past 36 but never measured why: angers
+# are noted by band (6-16, 16-36, 36-64), and 36 comes back if 36-64 angers none in a race.
 provoke_min = 6.0
-provoke_max = 36.0
+provoke_max = 64.0
 # With none in sight from M, a provoke from O at one this far or farther: the step back to B is two
 # cells, some 10 ticks walking; an angry enderman walks within 16 (about 0.3 a tick) and teleports
 # from past 16 after 15 goal ticks (the 26.1.2 jar), so 12 leaves it 30 ticks or more out.
 provoke_out_min = 12.0
 # From O the view is wide and the step back to B is two cells: out to 40 there when the line is
 # clear (the orchestrator; M stays at 36, past which clojurecraft's stares angered none).
-provoke_out_max = 40.0
+provoke_out_max = 64.0
 # Provokes on one enderman with no anger before it is skipped, and for how long (the plan's 18f).
 provoke_tries = 3
 provoke_skip_ticks = 2400
