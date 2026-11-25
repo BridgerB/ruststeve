@@ -1454,27 +1454,45 @@ impl Sim {
 
     /// The mobs' `add_entity`, for the join.
     pub(crate) fn mobs_added(&self) -> Result<Vec<Wire>, EncodeError> {
-        self.survival
+        let mut out = Vec::new();
+        for (id, m) in self
+            .survival
             .life
             .mobs
             .iter()
             .filter(|(_, m)| m.dead_at.is_none())
-            .map(|(id, m)| {
-                let mut uuid = [0u8; 16];
-                uuid[12..].copy_from_slice(&id.to_be_bytes());
-                wire(
+        {
+            let mut uuid = [0u8; 16];
+            uuid[12..].copy_from_slice(&id.to_be_bytes());
+            out.push(wire(
+                State::Play,
+                &S2c::AddEntity {
+                    id: *id,
+                    uuid,
+                    kind: m.kind.id(),
+                    x: m.pos[0],
+                    y: m.pos[1],
+                    z: m.pos[2],
+                },
+            )?);
+            // An enderman a test placed already angry (issue 18: a frozen angry one holding the
+            // bot) shows its creepy flag from the join, as a server sends its data with it.
+            if let Brain::Enderman(e) = m.brain
+                && e.angry
+            {
+                out.push(wire(
                     State::Play,
-                    &S2c::AddEntity {
+                    &S2c::SetEntityData {
                         id: *id,
-                        uuid,
-                        kind: m.kind.id(),
-                        x: m.pos[0],
-                        y: m.pos[1],
-                        z: m.pos[2],
+                        entries: vec![(
+                            crate::enderman::META_CREEPY,
+                            protocol::metadata::MetaValue::Bool(true),
+                        )],
                     },
-                )
-            })
-            .collect()
+                )?);
+            }
+        }
+        Ok(out)
     }
 
     fn box_touches(&self, kinds: &[BlockKind]) -> bool {
