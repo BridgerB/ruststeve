@@ -531,10 +531,12 @@ moves_without_kill = 1000
 # 9,600 since the frontier races 45551462309 to 45557307097: the one good site near the frontier
 # made the kills, and every move from it drifted to no site at all (none in 4,800 ticks).
 burrow_idle_ticks = 9600
-burrow_move = 48
+# 24, not 48: one to two new chunks; 48 with a 24,000-tick avoid sent bots off buildable ground for
+# 20,000+ ticks a move (race 45609209398).
+burrow_move = 24
 # A site that has had kills is moved from after this many quiet ticks: its locals are used up, and
 # new endermen spawn only in ticking chunks 24+ from the bot, about 0.4 a minute (P1); a move goes
-# burrow_move (3 chunks) or more (race 45578610032: kills slowed after ~20,000 at every site).
+# burrow_move or more (race 45578610032: kills slowed after ~20,000 at every site).
 burrow_idle_after_kill = 4800
 # Wooden pickaxe uses under repick_below between burrows open the base again (wood, a table, wood
 # picks; the base's wood_pick_uses is the run's target), at most repick_max times (race

@@ -112,7 +112,7 @@ impl Default for PearlRules {
             repick_below: 30,
             repick_max: 4,
             moves_without_kill: 1000,
-            burrow_move: 48,
+            burrow_move: 24,
             site_every: 100,
             weapon_min_uses: 10,
             step_out_every: 1200,
@@ -375,11 +375,10 @@ const SUPPLY_REACH: i32 = 64;
 const ANCHORS: usize = 3;
 /// Blocks within which an angry enderman or a hostile holds the reclaim's digs.
 const RECLAIM_CLEAR: f64 = 16.0;
-/// Ticks a site moved from is avoided by the site search.
-/// 24,000, not 6,000: a move's restock and walk took ~6,000 ticks and every bot then built
-/// again within 20 of the site it left (race 45602491038 lanes 1, 3: 10 and 18 off); new
-/// endermen come about 0.4 a minute (P1), so a used-up site needs about 20 minutes.
-const MOVED_KEPT: u64 = 24_000;
+/// Ticks a site moved from is avoided by the site search: 6,000. 24,000 (f4b65fd) cost every move
+/// 20,000+ ticks and most bots never built again (race 45609209398: no site within 24 of the
+/// feet, new-ground walks NoPath, one into the nether wastes and two piglin hits).
+const MOVED_KEPT: u64 = 6000;
 /// Blocks out to which the burrow's note measures the nearest delta ground.
 const DELTA_MEASURE: i32 = 32;
 /// Blocks from delta ground a forest-floor walk target keeps.
