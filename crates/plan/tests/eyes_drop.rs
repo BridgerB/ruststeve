@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use data::BlockKind;
-use plan::eyes::{EyeRules, apex_blocked, open_side, trees_near};
+use plan::eyes::{EyeRules, apex_blocked, first_blocked, open_side, ring_blocked, trees_near};
 use protocol::S2c;
 use protocol::chunk::{Column, Paletted, Section};
 use world::{Event, World};
@@ -134,4 +134,25 @@ fn the_first_throw_sees_a_tree_near_and_walks_to_the_open_side() {
     let mut far = plain();
     set(&mut far, (15, 67, 8), BlockKind::OakLeaves);
     assert_eq!(trees_near(&far, FEET, &r), None);
+}
+
+/// Q4's race 45698008920: throw 1's eye rested 9 up on a canopy about 12 out, past the 6 checked
+/// for trees. The ring catches it, and the walk goes where no side of the ring is blocked.
+#[test]
+fn a_canopy_12_east_blocks_throw_1_and_the_walk_leaves_it() {
+    let r = EyeRules::default();
+    assert!(ring_blocked(&plain(), FEET, &r).is_empty());
+    assert_eq!(first_blocked(&plain(), FEET, &r), None);
+    let mut w = plain();
+    // A canopy at 12 east (x 20), 9 over the feet, 3 wide: nothing within 6.
+    for z in 7..=9 {
+        set(&mut w, (20, 73, z), BlockKind::OakLeaves);
+    }
+    assert_eq!(trees_near(&w, FEET, &r), None);
+    assert_eq!(ring_blocked(&w, FEET, &r), vec![(20, 73, 8)]);
+    assert_eq!(first_blocked(&w, FEET, &r), Some((20, 73, 8)));
+    let to = open_side(&w, FEET, &r);
+    let there = [f64::from(to.0) + 0.5, FEET[1], f64::from(to.2) + 0.5];
+    assert!(ring_blocked(&w, there, &r).is_empty(), "{to:?}");
+    assert_eq!(first_blocked(&w, there, &r), None, "{to:?}");
 }
