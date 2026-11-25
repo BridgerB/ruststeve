@@ -192,7 +192,13 @@ fn key_of(f: &Fact) -> Key {
         | Fact::Enderman { .. }
         | Fact::EndermanStill { .. }
         | Fact::ForestSeen { .. }
-        | Fact::SoulValleySeen { .. } => Key::Other(f.line()),
+        | Fact::SoulValleySeen { .. }
+        | Fact::EndermanAngry { .. }
+        | Fact::EndermanHit { .. }
+        | Fact::EndermanKilled { .. }
+        | Fact::PearlDropped { .. }
+        | Fact::PearlPicked { .. }
+        | Fact::BlockTaken { .. } => Key::Other(f.line()),
     }
 }
 
