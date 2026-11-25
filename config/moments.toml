@@ -1577,7 +1577,8 @@ set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0]
 # part: a solid stone block 4 long, 5 wide and 3 high with the 1 by 2 tunnel B, M in it (since
 # parity 45535279839 the cells beside B and behind it are filled: with walls one thick they were 2
 # from B, as O is, and the enderman paced round to them; the top of the roof is cell 3 over the
-# floor, 3 from B, and under the glass only 1 high), an enderman 10 east of M with its AI. Script
+# floor, 3 from B, and under the glass only 1 high), laid shell first (floor, walls, glass, then the
+# air inside, then the block round the tunnel, never over the bot) so water outside cannot flow in, an enderman 10 east of M with its AI. Script
 # `burrow:<mode>` (bot::script::BurrowMode): from M stare at its eye until it is creepy, then
 # (hold, strike) walk west into B and look at its torso, or (near) stay in M.
 # - e04-mouth: it comes to O and stays; the bot in B is never hit.
@@ -1599,7 +1600,7 @@ script = "burrow:hold"
 ticks = 460
 difficulty = "normal"
 mobs = [["enderman", 10, 0, 0]]
-fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -3, 0, -2, 0, 2, -1], ["stone", -3, 0, 1, 0, 2, 2], ["stone", -3, 0, 0, -2, 2, 0], ["stone", -1, 2, 0, 0, 2, 0]]
 
 [[moment]]
 id = "e05-strike"
@@ -1612,7 +1613,7 @@ difficulty = "normal"
 give = ["iron_sword 1"]
 loot = true
 mobs = [["enderman", 10, 0, 0]]
-fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -3, 0, -2, 0, 2, -1], ["stone", -3, 0, 1, 0, 2, 2], ["stone", -3, 0, 0, -2, 2, 0], ["stone", -1, 2, 0, 0, 2, 0]]
 
 [[moment]]
 id = "e06-roof"
@@ -1654,4 +1655,4 @@ script = "burrow:near"
 ticks = 300
 difficulty = "normal"
 mobs = [["enderman", 10, 0, 0]]
-fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -3, 0, -2, 0, 2, -1], ["stone", -3, 0, 1, 0, 2, 2], ["stone", -3, 0, 0, -2, 2, 0], ["stone", -1, 2, 0, 0, 2, 0]]
