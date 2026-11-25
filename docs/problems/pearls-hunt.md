@@ -16,7 +16,7 @@ A bot in a warped forest (health about 12.5 that it cannot heal, an iron sword w
 - One world: every race from the frontier is one forest.
 
 ## What is built (branch `issue-18-p3-hunt`)
-- `plan::burrow` (pure): the site by cell, nearest the feet within 24 (B, M, O level; O and its outward neighbours three clear; four walkable beyond O; no lava within 4, no drop over 2 within 3, no bricks within 8; walls only non-holdable blocks or room for one), the shell (12 blocks at most), the missing blocks.
+- `plan::burrow` (pure): the site by cell, nearest the feet within 24 (B, M, O level; O and its outward neighbours three clear; four walkable beyond O; no lava within 4, no drop over 2 within 3, no bricks within 8; walls only non-holdable blocks or room for one), the shell (38 blocks at most: the tunnel in a solid 4 by 5), the missing blocks.
 - `plan::pearls`: the nine-row table (`pearls_step` after the always-rows, `pearls_task` for the walks and digs) with its invariants; `[pearls]` in `config/goals.toml`.
 - `look::keep_off_except` / `stares_except` (the provoke target only), `count_near_misses` skips it; `ender_threat` yields to a bot in its built burrow; `keep_look`'s eyes-down not in the hunt; `defend::box_distance_of` (2.9-high box); `cover::fill_block`.
 - Tests: `crates/plan/tests/pearls.rs`.

@@ -148,8 +148,9 @@ fn a_flat_floor_gives_a_site_at_the_feet() {
     let s = burrow::site(&w, &w.memory, B).unwrap_or_else(|| panic!("a site"));
     assert_eq!(s.b, B, "nearest the feet: the feet");
     assert_eq!(s.m, [B[0] + s.dir[0], B[1], B[2] + s.dir[1]]);
-    // Built of nothing yet: 12 shell blocks wanted, the floors there.
-    assert_eq!(burrow::missing(&w, &s).len(), 12);
+    // Built of nothing yet: 38 shell blocks wanted (the tunnel in a solid 4 by 5), the floors
+    // there.
+    assert_eq!(burrow::missing(&w, &s).len(), 38);
 }
 
 #[test]

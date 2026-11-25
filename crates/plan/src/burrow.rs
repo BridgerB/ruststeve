@@ -80,21 +80,58 @@ impl Burrow {
         [-self.dir[1], self.dir[0]]
     }
 
-    /// The cells the built burrow is made of: the back wall, the side walls of B and M at the
-    /// feet and the head, the roof over B and M (12 blocks at most). The floors are `floors`.
+    /// The cells the built burrow is made of, in build order: the walls round B and M at the feet
+    /// and the head (sides, back, back corners), the roof over B and M, then the outer ring two
+    /// out on each side and behind the back wall: a solid block 4 long and 5 wide with the 1x2
+    /// tunnel in it (38 blocks at most). For a mob 2.9 tall O is then the one standing cell 2
+    /// from B, every other at sqrt(5) or more: with the cells beside B and behind its back wall
+    /// open, an enderman held O about 200 ticks, then walked round to them, a tie for its partial
+    /// path at 2, and paced there out of strike reach (P4's real parity run 45535279839; race
+    /// 45534591345 lane 1). The floors are `floors`.
     pub fn shell(&self) -> Vec<[i32; 3]> {
         let s = self.side();
+        let d = self.dir;
+        // (along, aside): along 0 is B, 1 is M, -1 the back wall, -2 behind it.
+        let at = |along: i32, aside: i32, y: i32| {
+            add(
+                self.b,
+                d[0] * along + s[0] * aside,
+                y,
+                d[1] * along + s[1] * aside,
+            )
+        };
         let mut v = Vec::new();
         for y in 0..2 {
-            v.push(add(self.b, -self.dir[0], y, -self.dir[1]));
-            for c in [self.b, self.m] {
-                v.push(add(c, s[0], y, s[1]));
-                v.push(add(c, -s[0], y, -s[1]));
+            for along in [0, 1] {
+                v.push(at(along, 1, y));
+                v.push(at(along, -1, y));
             }
+            v.push(at(-1, 0, y));
+            v.push(at(-1, 1, y));
+            v.push(at(-1, -1, y));
         }
         v.push(add(self.b, 0, 2, 0));
         v.push(add(self.m, 0, 2, 0));
+        for y in 0..2 {
+            for along in -2..=1 {
+                v.push(at(along, 2, y));
+                v.push(at(along, -2, y));
+            }
+            for aside in -1..=1 {
+                v.push(at(-2, aside, y));
+            }
+        }
         v
+    }
+
+    /// Whether `feet` stand on the burrow's top (over its roof or its walls): an enderman there is
+    /// at 2 or so from B, over the roof, out of strike reach.
+    pub fn on_top(&self, feet: [i32; 3]) -> bool {
+        let rel = [feet[0] - self.b[0], feet[2] - self.b[2]];
+        let s = self.side();
+        let along = rel[0] * self.dir[0] + rel[1] * self.dir[1];
+        let aside = rel[0] * s[0] + rel[1] * s[1];
+        feet[1] >= self.b[1] + 2 && (-2..=1).contains(&along) && (-2..=2).contains(&aside)
     }
 
     /// The floor cells under B and M.

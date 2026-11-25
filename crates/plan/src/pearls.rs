@@ -942,15 +942,18 @@ impl Plan {
             );
             return look(b.out_yaw(), EYES_DOWN);
         }
-        // A parked target's look from M, while it lasts.
-        if let Some(until) = self.pearls.parked_until {
-            if tick < until && angry.len() == 1 && s.dist > 2.0 * r.breach_near {
-                if feet != b.m {
-                    return step_to(pos, b.m).0;
-                }
-                return look(yaw_to(pos, s.pos), 0.0);
-            }
-            self.pearls.parked_until = None;
+        self.pearls.parked_until = None;
+        // On the burrow's top: 2 or so from B over the roof, out of reach (P4's note).
+        if b.on_top(arr(path::feet_cell(s.pos))) {
+            self.pearl_note_once(
+                tick,
+                &format!("roof {id}"),
+                format!("enderman {id} on the roof"),
+                format!(
+                    "at ({:.1}, {:.1}, {:.1}) over the burrow at {:?}; held in B",
+                    s.pos[0], s.pos[1], s.pos[2], b.b
+                ),
+            );
         }
         if feet != b.b {
             return step_to(pos, b.b).0;
@@ -992,18 +995,9 @@ impl Plan {
             let out = *f.out_since.get_or_insert(tick);
             if tick.saturating_sub(out) >= r.parked_ticks {
                 f.out_since = Some(tick);
-                let can = angry.len() == 1 && s.dist > 2.0 * r.breach_near;
-                if can && self.step_out_ok(tick, r) {
-                    self.pearls.parked_until = Some(tick + r.parked_look_ticks);
-                    self.note(
-                        tick,
-                        format!("enderman {id} parked: a look from M"),
-                        format!(
-                            "out of reach {} ticks, {:.1} off; no stare",
-                            r.parked_ticks, s.dist
-                        ),
-                    );
-                } else {
+                // Never a look from M with an angry one present: the bot in M was hit once by one
+                // that came back at an angle (P4's parity run 45535279839); B never was.
+                {
                     self.note(
                         tick,
                         format!("enderman {id} parked: wait in B"),
