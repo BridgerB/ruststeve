@@ -366,7 +366,7 @@ pub struct Limits {
     /// resource, so its tunnel walks what is open and cuts only what is not. A fortress's tunnel
     /// keeps to rock, out of the open where ghasts and piglins are.
     pub open_cheap: bool,
-    // >>> overland and stronghold (Q4): the box's top (a portal room's floor + 6). `SAFE_Y`'s
+    // >>> overland and stronghold (Q4): the highest feet y (a portal room's floor + 6). `SAFE_Y`'s
     // cost under y 40 is the Nether's lava sea; in the overworld it took two routes to a room at
     // y 17 up to y 40 under a river and into its water (races 45703184922, 45706776687).
     pub max_y: Option<i32>,
@@ -401,7 +401,8 @@ pub fn route_keeping(
     );
     // >>> overland and stronghold (Q4): the cap, never under the feet or the target.
     let hi = match limits.max_y {
-        Some(top) => (hi.0, hi.1.min(top.max(from.1).max(target.1)), hi.2),
+        // `max_y` is the highest feet y: the box holds the head one over it.
+        Some(top) => (hi.0, hi.1.min(top.max(from.1).max(target.1) + 1), hi.2),
         None => hi,
     };
     // <<< overland and stronghold
