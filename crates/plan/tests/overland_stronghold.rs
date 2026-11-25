@@ -673,3 +673,33 @@ fn junk_that_came_back_is_held_back() {
     assert!(stronghold::block_of(ItemKind::Cobblestone).is_some());
     assert!(stronghold::block_of(ItemKind::Leather).is_none());
 }
+
+/// A route to the room under a river, capped at the floor + 6 (`Limits::max_y`), never rises above
+/// it: uncapped, `SAFE_Y`'s cost took two routes to y 40 under a river and into its water (races
+/// 45703184922, 45706776687).
+#[test]
+fn a_capped_route_to_the_room_stays_low() {
+    let mut s = room_world((-40, 90), (-30, 40));
+    // A river over the way, y 55 to 63, x 20 to 60.
+    s.fill((20, 60), (55, 63), (-30, 40), BlockKind::Water);
+    s.fill((70, 70), (24, 25), (10, 10), BlockKind::Air);
+    let w = load(&s, [70.5, 24.0, 10.5]);
+    let r = the_room(&w);
+    let t = stronghold::stand_target(&w, &r, (70, 24, 10), 7).expect("a standing cell");
+    let cap = r.floor_y + stronghold::STAIR_LEG;
+    let route = plan::tunnel::route_keeping(
+        &w,
+        (70, 24, 10),
+        &[t],
+        &std::collections::BTreeSet::new(),
+        false,
+        plan::tunnel::MAX_NODES,
+        plan::tunnel::Limits {
+            max_y: Some(cap),
+            ..plan::tunnel::Limits::default()
+        },
+    )
+    .expect("a capped route");
+    let top = route.cells.iter().map(|c| c.1).max().unwrap_or(0);
+    assert!(top <= cap, "the route rises to y {top}, over {cap}");
+}

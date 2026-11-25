@@ -366,6 +366,11 @@ pub struct Limits {
     /// resource, so its tunnel walks what is open and cuts only what is not. A fortress's tunnel
     /// keeps to rock, out of the open where ghasts and piglins are.
     pub open_cheap: bool,
+    // >>> overland and stronghold (Q4): the box's top (a portal room's floor + 6). `SAFE_Y`'s
+    // cost under y 40 is the Nether's lava sea; in the overworld it took two routes to a room at
+    // y 17 up to y 40 under a river and into its water (races 45703184922, 45706776687).
+    pub max_y: Option<i32>,
+    // <<< overland and stronghold
 }
 
 /// `route` within `limits`.
@@ -394,6 +399,12 @@ pub fn route_keeping(
         from.1.max(near.1).max(SAFE_Y) + RISE,
         from.2.max(near.2) + MARGIN,
     );
+    // >>> overland and stronghold (Q4): the cap, never under the feet or the target.
+    let hi = match limits.max_y {
+        Some(top) => (hi.0, hi.1.min(top.max(from.1).max(target.1)), hi.2),
+        None => hi,
+    };
+    // <<< overland and stronghold
     let mut sight = Sight::new(w, lo, hi);
     let mut suspect: BTreeSet<Cell> = BTreeSet::new();
     for b in blocked {
@@ -532,6 +543,10 @@ pub struct Travel {
     /// A heading tunnel's: open cells cost a step (`Limits::open_cheap`).
     #[serde(default)]
     pub open_cheap: bool,
+    // >>> overland and stronghold (Q4): `Limits::max_y`, set by `tunnel_toward_capped` only.
+    #[serde(default)]
+    pub max_y: Option<i32>,
+    // <<< overland and stronghold
 }
 
 /// What a stretch of route does, for the note: "stairs up", "level" or "stairs down".
@@ -613,6 +628,7 @@ impl Plan {
         self.travel.paced.clear();
         self.travel.footprint = None;
         self.travel.open_cheap = false;
+        self.travel.max_y = None;
         self.tunnel(w, target, true, (what, why), tick)
     }
 
@@ -630,8 +646,28 @@ impl Plan {
         self.travel.paced = paced;
         self.travel.footprint = crate::endermen::fortress_bounds(w);
         self.travel.open_cheap = true;
+        self.travel.max_y = None;
         self.tunnel(w, target, false, (what, why), tick)
     }
+
+    // >>> overland and stronghold (Q4)
+    /// `tunnel_toward` with the route's box topped at `max_y` (a portal room's floor + 6).
+    pub fn tunnel_toward_capped(
+        &mut self,
+        w: &World,
+        target: Cell,
+        max_y: i32,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        self.travel.exploring = false;
+        self.travel.paced.clear();
+        self.travel.footprint = None;
+        self.travel.open_cheap = false;
+        self.travel.max_y = Some(max_y);
+        self.tunnel(w, target, false, (what, why), tick)
+    }
+    // <<< overland and stronghold
 
     /// The travel tunnel to one cell (a spawner, a place): as `travel_tunnel`, but the route ends
     /// only within `REACH` of `target` itself, never at a brick near it. For any task that has a
@@ -647,6 +683,7 @@ impl Plan {
         self.travel.paced.clear();
         self.travel.footprint = None;
         self.travel.open_cheap = false;
+        self.travel.max_y = None;
         self.tunnel(w, target, false, (what, why), tick)
     }
 
@@ -772,6 +809,7 @@ impl Plan {
                 let limits = Limits {
                     footprint: self.travel.footprint,
                     open_cheap: self.travel.open_cheap,
+                    max_y: self.travel.max_y,
                 };
                 let Some(r) = route_keeping(w, feet, &goals, &blocked, lay, MAX_NODES, limits)
                 else {

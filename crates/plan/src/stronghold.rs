@@ -47,6 +47,11 @@ pub const SURFACE_WALKS: u32 = 6;
 /// The height a stairs leg cuts ("cut 6 stairs" in every leg of races 45695074789 and
 /// 45698008920): within this of the floor the tunnel takes over.
 pub const STAIR_LEG: i32 = 6;
+/// Capped tunnels with no way (each turning to the room's side) before the uncapped one.
+pub const CAP_TRIES: u32 = 2;
+/// The side approach's point: off the ring's centre on z past the room's half-width (the room is
+/// 11 by 16, the door in the east wall) and a wall.
+pub const SIDE_OFF: i32 = 12;
 
 /// The portal room as memory knows it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -136,6 +141,8 @@ pub struct StrongholdState {
     pub at_floor: bool,
     /// Surface walks toward a known room before the stairs.
     pub surface_walks: u32,
+    /// Capped tunnels toward the room that had no way (`CAP_TRIES`, then uncapped).
+    pub cap_fails: u32,
     /// The junk drop's memory (`Plan::junk_watch`): each kind's last drop (tick, count left), and
     /// the kinds held back after one came back (until the tick).
     pub junk_drops: Vec<(data::ItemKind, u64, i32)>,
@@ -501,8 +508,45 @@ impl Plan {
             "the portal room's floor at {target:?}, ring centre {:?}",
             room.centre
         );
-        if let Some(t) = self.tunnel_toward(w, target, ("the portal room", &why), tick) {
+        // The route kept within a stairs leg over the floor (`tunnel::Limits::max_y`): uncapped it
+        // rose to y 40 under a river into its water (races 45703184922, 45706776687).
+        let cap = room.floor_y + STAIR_LEG;
+        if let Some(t) = self.tunnel_toward_capped(w, target, cap, ("the portal room", &why), tick)
+        {
             return Some(t);
+        }
+        if path::octile(feet, target) > crate::tunnel::REACH + 2.0 {
+            self.stronghold.cap_fails += 1;
+            if self.stronghold.cap_fails <= CAP_TRIES {
+                // In from the room's north or south side, the bot's: the door is in the east wall.
+                let dz = if feet.2 <= centre.2 { -1 } else { 1 };
+                let side = (centre.0, room.floor_y, centre.2 + dz * SIDE_OFF);
+                self.note(
+                    tick,
+                    format!(
+                        "stronghold capped tunnel has no way ({} of {CAP_TRIES})",
+                        self.stronghold.cap_fails
+                    ),
+                    format!("toward {target:?} under y {cap}; in from the side at {side:?}"),
+                );
+                let why = format!("the portal room's side at {side:?}, under y {cap}");
+                if let Some(t) =
+                    self.tunnel_toward_capped(w, side, cap, ("the room's side", &why), tick)
+                {
+                    return Some(t);
+                }
+            } else {
+                if self.stronghold.cap_fails == CAP_TRIES + 1 {
+                    self.note(
+                        tick,
+                        "stronghold tunnel uncapped".to_owned(),
+                        format!("{CAP_TRIES} capped tries had no way toward {target:?}"),
+                    );
+                }
+                if let Some(t) = self.tunnel_toward(w, target, ("the portal room", &why), tick) {
+                    return Some(t);
+                }
+            }
         }
         // The tunnel's route ends within `tunnel::REACH` of the target and goes no further: the
         // last blocks by a walk (a drop into the room) or a wall step (race 45703184922 lane 0
