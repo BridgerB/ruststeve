@@ -6,7 +6,7 @@ tags: [parity, sim, measurement, capture, moments, real]
 aliases: [enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@764d798
+verifiedAgainst: ruststeve@31545c1
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
