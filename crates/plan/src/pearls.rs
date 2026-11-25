@@ -50,6 +50,7 @@ pub struct PearlRules {
     pub provoke_skip_ticks: u64,
     pub fall_window: u64,
     pub parked_ticks: u64,
+    pub parked_seal_ticks: u64,
     pub parked_look_ticks: u64,
     pub fight_cap: u64,
     pub kill_window: u64,
@@ -91,6 +92,7 @@ impl Default for PearlRules {
             provoke_skip_ticks: 2400,
             fall_window: 200,
             parked_ticks: 600,
+            parked_seal_ticks: 1200,
             parked_look_ticks: 40,
             fight_cap: 2400,
             kill_window: 12000,
@@ -485,6 +487,9 @@ pub struct PearlState {
     /// The pocket from magma cubes is held.
     #[serde(default)]
     pub cube_pocket: bool,
+    /// A seal for a parked enderman opens at this tick whatever is near.
+    #[serde(default)]
+    pub seal_until: Option<u64>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -1339,7 +1344,9 @@ impl Plan {
             .iter()
             .filter(|s| s.ticking && s.dist <= r.calm_range)
             .count();
-        if placed == Placed::Done && near == 0 && !self.pearls.over {
+        let timed_out = self.pearls.seal_until.is_some_and(|u| tick >= u);
+        if placed == Placed::Done && (near == 0 || timed_out) && !self.pearls.over {
+            self.pearls.seal_until = None;
             self.pearls.sealed = None;
             self.pearls.fight = None;
             self.note(
@@ -1494,15 +1501,21 @@ impl Plan {
                 f.out_since = Some(tick);
                 // Never a look from M with an angry one present: the bot in M was hit once by one
                 // that came back at an angle (P4's parity run 45535279839); B never was.
+                // The mouth sealed `parked_seal_ticks`: it loses its path, may wander and come
+                // back through O (the orchestrator; race 45572123445 lane 6 had one parked 3.6
+                // off beside the shell).
                 {
+                    self.pearls.sealed = Some(format!("enderman {id} parked out of reach"));
+                    self.pearls.seal_until = Some(tick + r.parked_seal_ticks);
                     self.note(
                         tick,
-                        format!("enderman {id} parked: wait in B"),
+                        format!("enderman {id} parked: the mouth sealed"),
                         format!(
-                            "out of reach {} ticks, {:.1} off; {} angry",
+                            "out of reach {} ticks, {:.1} off; {} angry; sealed {} ticks",
                             r.parked_ticks,
                             s.dist,
-                            angry.len()
+                            angry.len(),
+                            r.parked_seal_ticks
                         ),
                     );
                 }

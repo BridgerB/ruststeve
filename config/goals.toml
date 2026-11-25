@@ -511,6 +511,9 @@ fall_window = 200
 # blocks off for up to 90 minutes); then a look from M, this many ticks, with no stare.
 parked_ticks = 600
 parked_look_ticks = 40
+# A parked enderman (out of reach parked_ticks) gets the mouth sealed this long: it loses its path,
+# may wander and come back through O (the orchestrator; race 45572123445 lane 6).
+parked_seal_ticks = 1200
 # A fight over this long is given up with the mouth sealed (the plan's 18f: about 300 to 450 ticks
 # a kill expected, so 2,400 is five kills' time on one).
 fight_cap = 2400
