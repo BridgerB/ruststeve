@@ -50,6 +50,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[fuel-and-smelt-needs]] - fuel as a need, smelt rows, spares, the batch.
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
+- [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
 - [[parity-table]] - captured worlds, 160 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.

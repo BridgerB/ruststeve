@@ -483,7 +483,9 @@ impl Plan {
     /// Every tick's controls, their look kept off every enderman (`look::keep_off`); in the
     /// pocket at the stage, eyes down. The one place a look leaves the planner.
     pub(crate) fn keep_look(&mut self, w: &World, c: Controls) -> Controls {
-        let c = if self.met && self.ender.reached_at.is_some() {
+        // >>> pearls (P3): in the hunt the eyes are the hunt's rows' (issue 18f).
+        let c = if self.met && self.ender.reached_at.is_some() && !self.pearls.started {
+            // <<< pearls
             Controls {
                 pitch: Some(EYES_DOWN),
                 ..c
@@ -492,7 +494,9 @@ impl Plan {
             c
         };
         self.count_near_misses(w);
-        let (kept, id) = crate::look::keep_off(w, c);
+        // >>> pearls (P3): the provoke row's one target is exempt while that row runs.
+        let (kept, id) = crate::look::keep_off_controls(w, c, self.pearls.provoking);
+        // <<< pearls
         if let Some(id) = id {
             self.ender.looks_kept += 1;
             let tick = w.ticks;
@@ -530,6 +534,9 @@ impl Plan {
                 e.kind == EntityKind::Enderman
                     && matches!(e.metadata.get(&STARED_INDEX), Some(MetaValue::Bool(true)))
                     && !self.ender.near_misses.contains(id)
+                    // >>> pearls (P3): the provoke row's target is stared at on purpose.
+                    && self.pearls.provoke.is_none_or(|(p, _)| p != **id)
+                // <<< pearls
             })
             .map(|(id, _)| *id)
             .collect();
@@ -551,6 +558,12 @@ impl Plan {
     /// until the enderman is calm, gone or farther than `APPROACH_FROM`. Never a swing. Ahead of
     /// every task but the always-rows (an escape from lava still comes first).
     pub(crate) fn ender_threat(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        // >>> pearls (P3, issue 18f): in the hunt a provoked enderman is fought from the burrow
+        // (the hunt's rows), not pocketed; out of the burrow the pocket stands.
+        if self.pearls.started && self.in_burrow(w) {
+            return None;
+        }
+        // <<< pearls
         let Some(id) = angry(w) else {
             if let Some(old) = self.ender.threat.take() {
                 self.note(

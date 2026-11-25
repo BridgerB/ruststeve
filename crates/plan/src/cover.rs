@@ -372,6 +372,17 @@ fn shell_block(
         .find_map(|c| support(w, c, &body, SUPPORT_DEPTH))
 }
 
+/// The next block toward filling `cells` (issue 18e, the burrow: its missing shell, a mended
+/// wall, the mouth's seal) with the body at `pos`: the first cell in order that can be filled now,
+/// or what it needs under or beside it first (a roof cell over the head waits on a wall three
+/// high). The cell to fill, the full block to click and its face; `None` when none can be.
+pub fn fill_block(w: &World, cells: &[Cell], pos: [f64; 3]) -> Option<(Cell, Cell, i8)> {
+    let body = occupied(pos);
+    cells
+        .iter()
+        .find_map(|c| support(w, *c, &body, SUPPORT_DEPTH))
+}
+
 /// Steps down a support chain: a roof needs a wall cell three high beside the head.
 pub const SUPPORT_DEPTH: u32 = 3;
 

@@ -471,3 +471,58 @@ forest_wait_ticks = 1800
 # 71 of its monsters, in fours; the census measured 1.75% of seconds with one within 32 in caves, a
 # comparable rate, so ten game minutes are worth waiting before 450 blocks of travel.
 valley_wait_ticks = 12000
+
+# >>> pearls (P3, issue 18f, docs/problems/pearls-hunt.md): the hunt's numbers (plan::pearls).
+[pearls]
+# Twelve pearls: issue 19's twelve eyes (issue #23's done-condition).
+pearls_wanted = 12
+# Server ticks a stare from the mouth is held for the creepy flag: the jar angers 4 to 6 ticks
+# after a held stare (probe 45472254333); clojurecraft's loaded servers took 1.7 to 5.1 s of wall
+# time, which is server ticks under load: 60 is three times the jar's worst with room.
+provoke_ticks = 60
+# Eye to eye: within 4 an angry enderman stared at teleports away (jar), and stares from past 36
+# angered none in clojurecraft's real races.
+provoke_min = 6.0
+provoke_max = 36.0
+# Provokes on one enderman with no anger before it is skipped, and for how long (the plan's 18f).
+provoke_tries = 3
+provoke_skip_ticks = 2400
+# A target in reach whose health has not fallen this long is noted: a full charge is 13 ticks with
+# an iron sword, so 200 is fifteen swings with none landed.
+fall_window = 200
+# Out of reach this long is a parked target (clojurecraft's main stall: endermen jittered 1 to 2
+# blocks off for up to 90 minutes); then a look from M, this many ticks, with no stare.
+parked_ticks = 600
+parked_look_ticks = 40
+# A fight over this long is given up with the mouth sealed (the plan's 18f: about 300 to 450 ticks
+# a kill expected, so 2,400 is five kills' time on one).
+fight_cap = 2400
+# A kill at least this often, else the burrow moves; two moves without a kill end the hunt (18f).
+kill_window = 12000
+moves_without_kill = 2
+# No kill and no calm enderman in sight this long and the burrow moves (18e; to be sized from the
+# forest's supply probe, 18a.5), at least this far.
+burrow_idle_ticks = 6000
+burrow_move = 32
+# Ticks between site searches (the plan's risk 8: 24 cells round, not every tick).
+site_every = 100
+# A weapon with this many uses or fewer is switched at once (18f).
+weapon_min_uses = 10
+# One step out of B this often without a kill or a pickup between (clojurecraft bounced between
+# its burrow's end and mouth 119 to 1,241 times a run).
+step_out_every = 1200
+# Burrow blocks placed at one site before it is given up: 12 shell blocks and 2 floors, with room
+# for support blocks and mends.
+build_max = 40
+# Walks to B before a site is given up (issue 17's CHASE_TRIES).
+walk_tries = 3
+# Pearls within this of O are collected, never farther than collect_reach from B (18f), each for
+# at most collect_ticks; a hit knocks an enderman about 3 back (jar), so its drop lands near O.
+collect_range = 6.0
+collect_reach = 4.0
+collect_ticks = 200
+# An angry enderman this near with the bot out of B is a breach (18f); a breach's seal holds while
+# one ticks within calm_range (the jar: within 16 it walks, past it teleports in).
+breach_near = 4.0
+calm_range = 16.0
+# <<< pearls
