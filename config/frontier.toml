@@ -2,7 +2,7 @@
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
 stage = "forest"
-tag = "race-45578610032"
-asset = "snapshot-stuck-rs-l06-b00-45578610032-race-45578610032-lane-6.tar.zst"
-commit = "dbcd4292e3184cf56a546f22c74ceaafc1eed38e"
-how = "A sideways move within the stage (as issue 17's): rs-l06-b00 of race 45578610032 (resumed from the real forest snapshot of race 45537545167 lane 0), the same stage `forest` and the same world, holding 5 ender pearls, 7 rods, the forest base made (stone sword, wooden pickaxes, warped stems and planks) and its shield: from the hunt point it built its burrow, provoked and killed 9 endermen from the burrow and collected 5 pearls with no damage, then ran down the race's no-progress clock waiting for supply; the race snapshotted it as `stuck` at server tick 67,340 at (495.6, 44.0, 19.5). Real (no development mark)."
+tag = "race-45537545167"
+asset = "snapshot-forest-45537545167-race-45537545167-lane-0.tar.zst"
+commit = "1c17850c9bd97aeb0b84268d19fb49881a768b71"
+how = "rs-l00-b00 of race 45537545167 (resumed from the real endermen snapshot of race 45481633896 lane 2, itself from the real rods_7 snapshot of race 45363542882 lane 2): out of its sealed pocket, holding its 7 rods, it travelled east by the travel points (Bridger, 2026-11-24: steering by the world's known geography is allowed) through about 300 blocks of basalt deltas, bridging, and stood with its feet in a warped forest at server tick 4,020 at (476.3, 41.0, 152.5), health 18.3, food 17, 142 pickaxe uses, a shield and a raw porkchop held."
