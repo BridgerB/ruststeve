@@ -11,6 +11,7 @@ pub mod config;
 pub mod diagnose;
 pub mod observe;
 pub mod parity;
+pub mod region;
 pub mod snapshot;
 pub mod story;
 pub mod text;

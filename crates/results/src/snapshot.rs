@@ -58,6 +58,76 @@ pub fn read_memory(path: &Path) -> Result<memory::Memory, String> {
     rmp_serde::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// A snapshot's memory as text (issue 19a.2: is the way home in memory?): per dimension, the
+/// positions on record by their latest kind and the seen columns' extent; every portal and
+/// obsidian position with its latest kind; every sighting ever of a kind in `list` (by name,
+/// such as `nether_portal`), so a portal lit then broken shows both.
+pub fn memory_report(m: &memory::Memory, list: &[String]) -> String {
+    use std::collections::BTreeMap;
+    use std::fmt::Write as _;
+    let name = |state: u32| {
+        data::block_of_state(state)
+            .and_then(|k| k.info())
+            .map_or("?", |i| i.name)
+    };
+    let mut out = String::new();
+    let mut kinds: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    let mut keep: BTreeMap<(&str, &str), Vec<memory::Cell>> = BTreeMap::new();
+    for ((dim, pos), i) in m.latest_index() {
+        let Some(s) = m.log().get(*i) else { continue };
+        let n = name(s.state);
+        *kinds.entry((dim.as_str(), n)).or_default() += 1;
+        if matches!(n, "minecraft:nether_portal" | "minecraft:obsidian") {
+            keep.entry((dim.as_str(), n)).or_default().push(*pos);
+        }
+    }
+    let _ = writeln!(
+        out,
+        "sightings {} ever, {} positions on record",
+        m.log().len(),
+        m.latest_index().len()
+    );
+    let dims: std::collections::BTreeSet<&str> = kinds.keys().map(|(d, _)| *d).collect();
+    for d in dims {
+        let cols = m.seen_columns(d);
+        let (x0, x1) = cols
+            .iter()
+            .fold((i32::MAX, i32::MIN), |(a, b), c| (a.min(c.0), b.max(c.0)));
+        let (z0, z1) = cols
+            .iter()
+            .fold((i32::MAX, i32::MIN), |(a, b), c| (a.min(c.1), b.max(c.1)));
+        let _ = writeln!(
+            out,
+            "\n[{d}] {} columns seen, chunk x {x0}..{x1}, z {z0}..{z1}",
+            cols.len()
+        );
+        for ((_, k), n) in kinds.range((d, "")..=(d, "\u{10ffff}")) {
+            let _ = writeln!(out, "  {k}: {n}");
+        }
+        for ((_, k), cells) in keep.range((d, "")..=(d, "\u{10ffff}")) {
+            let _ = writeln!(out, "  latest {k} cells ({}):", cells.len());
+            for c in cells {
+                let _ = writeln!(out, "    {} {} {}", c.0, c.1, c.2);
+            }
+        }
+    }
+    if !list.is_empty() {
+        let _ = writeln!(out, "\nevery sighting of {}:", list.join(", "));
+        for s in m.log() {
+            let n = name(s.state);
+            let short = n.trim_start_matches("minecraft:");
+            if list.iter().any(|l| l == short || l == n) {
+                let _ = writeln!(
+                    out,
+                    "  {} {} {} {} {n} state {} at tick {}",
+                    s.dimension, s.pos.0, s.pos.1, s.pos.2, s.state, s.at_tick
+                );
+            }
+        }
+    }
+    out
+}
+
 /// Copy a directory tree, leaving out the server's `session.lock` (held while it runs).
 pub fn copy_dir(from: &Path, to: &Path) -> Result<u64, String> {
     std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 data = { path = "../data" }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 protocol = { path = "../protocol" }
 md-5 = "0.10"
 memory = { path = "../memory" }

@@ -7,6 +7,9 @@
 //! cargo run -p results -- offline-uuid <name>              # the player file's UUID (snapshots)
 //! cargo run -p results -- player-dat <gunzipped .dat>     # a player file as text (issue 17a)
 //! cargo run -p results -- endermen <dirs>...               # seconds near endermen by place (17a)
+//! cargo run -p results -- memory <memory.rsw> [kind]...    # a snapshot memory by dimension and kind (19a)
+//! cargo run -p results -- region-find <region dir> <block>...      # every cell of a block (19a)
+//! cargo run -p results -- region-strip <region dir> x0,z0 x1,z1 step   # column tops and biomes (19a)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -98,6 +101,67 @@ fn run(args: &[String]) -> Result<(), String> {
             let path = args.get(1).ok_or("player-dat needs a gunzipped .dat")?;
             let raw = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
             print!("{}", results::census::player_dat(&raw)?);
+            Ok(())
+        }
+        Some("memory") => {
+            let path = args.get(1).ok_or("memory needs a memory.rsw")?;
+            let m = results::snapshot::read_memory(Path::new(path))?;
+            print!(
+                "{}",
+                results::snapshot::memory_report(&m, args.get(2..).unwrap_or(&[]))
+            );
+            Ok(())
+        }
+        Some("region-find") => {
+            let dir = args.get(1).ok_or("region-find needs a region directory")?;
+            let names: Vec<String> = args
+                .get(2..)
+                .unwrap_or(&[])
+                .iter()
+                .map(|n| {
+                    if n.contains(':') {
+                        n.clone()
+                    } else {
+                        format!("minecraft:{n}")
+                    }
+                })
+                .collect();
+            for (n, p, biome) in results::region::find(Path::new(dir), &names)? {
+                println!("{n} {} {} {} {biome}", p[0], p[1], p[2]);
+            }
+            Ok(())
+        }
+        Some("region-strip") => {
+            // region-strip <dir> x0,z0 x1,z1 step: the top block, its y and biome every step.
+            let dir = args.get(1).ok_or("region-strip needs a region directory")?;
+            let point = |i: usize| -> Result<(i32, i32), String> {
+                let s = args.get(i).ok_or("region-strip needs x0,z0 x1,z1 step")?;
+                let (a, b) = s.split_once(',').ok_or("a point is x,z")?;
+                Ok((
+                    a.trim().parse().map_err(|e| format!("{s}: {e}"))?,
+                    b.trim().parse().map_err(|e| format!("{s}: {e}"))?,
+                ))
+            };
+            let ((x0, z0), (x1, z1)) = (point(2)?, point(3)?);
+            let step: f64 = args
+                .get(4)
+                .and_then(|s| s.parse().ok())
+                .ok_or("region-strip needs a step")?;
+            let chunks = results::region::all_chunks(Path::new(dir))?;
+            let (dx, dz) = (f64::from(x1 - x0), f64::from(z1 - z0));
+            let len = dx.hypot(dz);
+            let n = (len / step).floor() as i32;
+            for k in 0..=n {
+                let t = f64::from(k) * step / len.max(1.0);
+                let x = x0 + (dx * t).round() as i32;
+                let z = z0 + (dz * t).round() as i32;
+                match results::region::top(&chunks, x, z) {
+                    Some((b, y, biome)) => {
+                        println!("{:>5} {x} {z} {y} {b} {biome}", (f64::from(k) * step) as i32)
+                    }
+                    None => println!("{:>5} {x} {z} not generated", (f64::from(k) * step) as i32),
+                }
+            }
             Ok(())
         }
         Some("endermen") => {
