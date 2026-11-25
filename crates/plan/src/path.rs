@@ -413,14 +413,20 @@ pub const SHUN_RADIUS: f64 = 24.0;
 /// Magma cubes (basalt deltas) are shunned nearer: they hop, but follow from 16 only once they
 /// see the bot, and a route round each at 24 would close the deltas (issue 18c's basalt rule).
 pub const SHUN_MAGMA: f64 = 8.0;
+/// Skeletons are shunned at their bow's reach: they shoot from 15 (`RangedBowAttackGoal`'s
+/// 15-block attack radius); a soul sand valley spawns them in fives, and three arrows took two
+/// frontier bots from 12.5 to under 6 at no-heal health (race 45535712274 lanes 1 and 3).
+pub const SHUN_SKELETON: f64 = 16.0;
 
 /// How near a far route comes to a mob of `kind`: `SHUN_RADIUS` for `SHUN_KINDS`, `SHUN_MAGMA`
-/// for a magma cube, `None` for the rest.
+/// for a magma cube, `SHUN_SKELETON` for a skeleton, `None` for the rest.
 pub fn shun_radius(kind: data::EntityKind) -> Option<f64> {
     if SHUN_KINDS.contains(&kind) {
         Some(SHUN_RADIUS)
     } else if kind == data::EntityKind::MagmaCube {
         Some(SHUN_MAGMA)
+    } else if kind == data::EntityKind::Skeleton {
+        Some(SHUN_SKELETON)
     } else {
         None
     }
@@ -707,6 +713,10 @@ pub enum Goal {
         dir: (i32, i32),
         gain: i32,
     },
+    /// Within `range` of `pos` on the plane, at any height (issue 18c: a travel leg toward a
+    /// far point ends where the ground there is, not at the height it began; race 45535712274
+    /// lane 0's legs at y 86 in the basalt deltas had no walk and tunnelled 84 pickaxe uses).
+    Plane { pos: Cell, range: f64 },
 }
 
 /// A cell's projection on a compass heading from `from`, and how far aside of the axis it is.
@@ -735,6 +745,7 @@ impl Goal {
             Goal::Xz { pos } => node.0 == pos.0 && node.2 == pos.2,
             Goal::Away { pos, range } => flat_distance(node, pos) > range,
             Goal::Afar { pos, range } => octile(node, pos) > range,
+            Goal::Plane { pos, range } => octile(node, pos) <= range,
             Goal::Pickup { pos, range, rise } => {
                 octile(node, pos) <= range && node.1 <= pos.1 && pos.1 <= node.1 + rise
             }
@@ -752,6 +763,7 @@ impl Goal {
             Goal::Xz { pos } => octile(node, pos),
             Goal::Away { pos, range } => (range - flat_distance(node, pos)).max(0.0),
             Goal::Afar { pos, range } => (range - octile(node, pos)).max(0.0),
+            Goal::Plane { pos, range } => (octile(node, pos) - range).max(0.0),
             Goal::Pickup { pos, range, rise } => {
                 let up = if pos.1 < node.1 {
                     node.1 - pos.1
