@@ -118,8 +118,27 @@ impl Hunt {
 
     fn story(&self) -> String {
         let n = self.ledger.len();
-        // The last 200 lines: enough to read a wall, short enough to print.
-        self.ledger[n.saturating_sub(200)..].join("\n")
+        // The whole run's notes by kind (their first three words), then the last 200 lines: what
+        // the bot did most, and the wall it ended at.
+        let mut kinds: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+        for l in &self.ledger {
+            if let Some(rest) = l.split_once(" note  ").map(|(_, r)| r) {
+                let k: Vec<&str> = rest.split_whitespace().take(3).collect();
+                *kinds.entry(k.join(" ")).or_default() += 1;
+            }
+        }
+        let mut top: Vec<(String, u32)> = kinds.into_iter().collect();
+        top.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        let head: Vec<String> = top
+            .iter()
+            .take(12)
+            .map(|(k, c)| format!("  {c:>6}  {k}"))
+            .collect();
+        format!(
+            "notes by kind:\n{}\n{}",
+            head.join("\n"),
+            self.ledger[n.saturating_sub(200)..].join("\n")
+        )
     }
 
     fn pearls(&self) -> i32 {
