@@ -27,7 +27,8 @@ related:
 Issue 19 (#24), parts e and f: from the overworld surface with the eyes' fix in hand to standing in the portal room. The walls are in `docs/problems/eyes-stronghold.md`.
 
 ## Overland (`crates/plan/src/overland.rs`)
-- `OverlandState.fix` is set by the caller from the eyes' `Plan.fix` (the point and the larger of its two errors).
+- `OverlandState.fix` is set by the caller from the eyes' `Plan.fix` (the point and the larger of its two errors). With no fix yet it is the next throw's walk point (`Plan::eyes_way`, `way` set): its arrival starts no search. `retarget` drops the leg, the mark and the arrival.
+- **Order** (`Plan::eyes_stronghold_task`): stone pickaxes, the stronghold (frames seen, or the search after arrival), the eyes' throw due here (`eyes_task`), the overland; eyes held in the overworld with none of it now is `Task::Idle`, never the Nether task's portal.
 - **Legs** of 64 to 128 blocks on the bearing to the fix (plus a held turn), each to a cell on seen ground: `top` reads the first block from the top of a loaded column that is not air, a plant, leaves or a log; a full block with two open cells over it is ground. Sky-facing faces are exposed: no X-ray.
 - **Rivers** are crossed by the far walk's bridge move over water (`path::Cells::far_over_water`, `walk::More::water`), 32 blocks kept back, 40 laid at most a leg.
 - **Oceans** (64 or more of water on the bearing): the bearing turns 60 to the side with more land seen. `around` in `[overland]` holds travel points round a known ocean (Bridger's geography ruling).

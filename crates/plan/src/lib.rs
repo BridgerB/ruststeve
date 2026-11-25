@@ -191,6 +191,12 @@ const REPICKUP_JUMP: i32 = 4;
 /// Ticks a full pack holds tasks back while its junk is dropped: three drops at `EQUIP_TICKS`
 /// and their resyncs, with room (overworld-leg wall 10).
 const FULL_WAIT_TICKS: u64 = 200;
+// >>> overland and stronghold (Q4)
+/// A throw's walk point (`eyes_way`, read from the feet each call) that moved more than this is
+/// a new target for the overland: a quarter of the shortest leg (`[overland] leg_min` 64), so a
+/// leg is not begun again for the point's drift as the bot walks.
+const WAY_MOVED: f64 = 16.0;
+// <<< overland and stronghold
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
 pub const TRAIL_TOWARD: f64 = 4.0;
@@ -2593,10 +2599,45 @@ impl Plan {
         if !in_room && let Some(t) = self.stronghold_pickaxes(w, tick) {
             return Some(t);
         }
+        // The eyes' fix is the overland's target from the moment it is crossed.
+        if let Some(f) = self.fix {
+            let fix = (f.point, f.err_along.max(f.err_across));
+            if self.overland.fix != Some(fix) || self.overland.way {
+                self.overland.retarget(fix, false);
+            }
+        }
+        // Into the room when its frames are seen, or the search from the fix's arrival.
         if let Some(t) = self.stronghold_task(w, tick) {
             return Some(t);
         }
-        self.overland_task(w, tick)
+        // A throw due here, or the eye of the last one followed and picked up (Q3).
+        if let Some(t) = self.eyes_task(w, tick) {
+            return Some(t);
+        }
+        // No fix yet: the walk to the spot the next throw is due at (the baseline for throw 2).
+        if self.fix.is_none()
+            && let Some(p) = self.eyes_way(w)
+            && (!self.overland.way
+                || self
+                    .overland
+                    .fix
+                    .is_none_or(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) > WAY_MOVED))
+        {
+            self.overland.retarget((p, 0.0), true);
+        }
+        if let Some(t) = self.overland_task(w, tick) {
+            return Some(t);
+        }
+        // Eyes held in the overworld and nothing to do now (a throw that waits on the night or
+        // a hostile): a look again, never on to the Nether task's portal below.
+        if w.dimension
+            .as_ref()
+            .is_some_and(|d| d.name == stronghold::OVERWORLD)
+        {
+            self.retry_at = tick + RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        None
     }
     // <<< overland and stronghold
 

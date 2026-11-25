@@ -127,6 +127,9 @@ pub struct OverlandState {
     /// The fix walked to: its point on the plane and its error (the larger of along and across);
     /// set from `Plan.fix` (the eyes', Q3) by the caller.
     pub fix: Option<([f64; 2], f64)>,
+    /// `fix` is a walk point for the next throw (`Plan::eyes_way`), not the eyes' fix: its
+    /// arrival starts no search.
+    pub way: bool,
     pub legs: u32,
     pub leg: Option<OverLeg>,
     /// The bearing's turn off the line to the fix, degrees (left positive), from stalls and
@@ -145,6 +148,18 @@ pub struct OverlandState {
     pub turns: u32,
     pub stalls: u32,
     pub oceans: u32,
+}
+
+impl OverlandState {
+    /// A new target: the eyes' fix (`way` false) or a throw's walk point (`way` true). The leg,
+    /// the progress mark and the arrival go with the old one; the turn and the counts stay.
+    pub fn retarget(&mut self, fix: ([f64; 2], f64), way: bool) {
+        self.fix = Some(fix);
+        self.way = way;
+        self.leg = None;
+        self.mark = None;
+        self.arrived = false;
+    }
 }
 
 /// What a column's top shows.
@@ -343,6 +358,20 @@ impl Plan {
         // The hut: night, or hurt with a way to heal.
         if let Some(t) = self.overland_hut(w, &rules, feet, fix, tick) {
             return Some(t);
+        }
+        if d <= rules.arrive && self.overland.way {
+            if !self.overland.arrived {
+                self.overland.arrived = true;
+                self.note(
+                    tick,
+                    "overland at the throw's spot".to_owned(),
+                    format!(
+                        "the eyes' next reading here; {}",
+                        self.overland_state(w, d, err)
+                    ),
+                );
+            }
+            return None;
         }
         if d <= rules.arrive {
             if !self.overland.arrived {
