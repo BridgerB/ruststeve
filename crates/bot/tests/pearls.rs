@@ -317,3 +317,66 @@ fn twelve_pearls_in_a_model_forest_over_seeds_with_no_damage() {
     }
     assert!(lines.is_empty(), "{}", lines.join("\n\n"));
 }
+
+/// The model forest's enderman supply against the real one (P1's race 45534565509: two idle bots
+/// in the warped forest, 12,000 ticks, a senses row every 200 ticks; docs/problems/
+/// pearls-observe.md): an enderman within 128 in 60 of 61 rows, within 32 in 60 and 22 of 61,
+/// within 16 in 27 of 61 (lane 0), 18 distinct within 128 a lane over 10 minutes (13 to 15 in
+/// the first). The model's idle bot in its 7-chunk forest, the same rows; printed, not asserted.
+#[test]
+#[ignore = "a measurement: 12,000 ticks a seed"]
+fn the_model_forest_supply_against_the_real_counts() {
+    for seed in [21, 22, 23, 24] {
+        let mut stage = Stage::new(7, FLOOR, FLOOR + 20);
+        stage
+            .biome((-112, 127), (-112, 127), Biome::WarpedForest)
+            .spawn((0, FEET, 0));
+        let sim = Sim::new(CONFIG, stage.build().unwrap())
+            .seeded(seed)
+            .with_natural_spawns();
+        let mut rows = 0u32;
+        let mut within = [0u32; 3];
+        let mut first_minute = 0usize;
+        let mut seen: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
+        let run = bot::lockstep::run_acting(sim, "rs-supply", seed, 12_000, 20, |w, t| {
+            if t % 200 == 0
+                && let Some(b) = w.body
+            {
+                rows += 1;
+                let d: Vec<(i32, f64)> = w
+                    .entities
+                    .iter()
+                    .filter(|(_, e)| !e.dead && e.kind == data::EntityKind::Enderman)
+                    .map(|(id, e)| {
+                        (
+                            *id,
+                            (0..3)
+                                .map(|i| (e.pos[i] - b.pos[i]).powi(2))
+                                .sum::<f64>()
+                                .sqrt(),
+                        )
+                    })
+                    .collect();
+                for (k, r) in [16.0, 32.0, 128.0].iter().enumerate() {
+                    if d.iter().any(|(_, x)| x <= r) {
+                        within[k] += 1;
+                    }
+                }
+                seen.extend(d.iter().filter(|(_, x)| *x <= 128.0).map(|(id, _)| *id));
+                if t <= 1200 {
+                    first_minute = seen.len();
+                }
+            }
+            (physics::Controls::default(), Vec::new())
+        });
+        println!(
+            "MEASURES supply seed {seed}: rows {rows}, within 16 {}, within 32 {}, within 128 {}, distinct within 128 {} ({} in the first minute), spawns {}",
+            within[0],
+            within[1],
+            within[2],
+            seen.len(),
+            first_minute,
+            run.sim.survival.life.ender_spawns
+        );
+    }
+}
