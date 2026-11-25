@@ -51,6 +51,9 @@ pub struct OverlandRules {
     /// Travel points (x, z) round a known ocean, in order (Bridger's geography ruling; each
     /// with its source in the config). Empty: none.
     pub around: Vec<[i32; 2]>,
+    /// Development only (a dev start's race before the eyes' fix exists): a fix (x, z) used
+    /// while none is held, noted as such. Never set on a merged branch.
+    pub dev_fix: Option<[f64; 2]>,
 }
 
 impl Default for OverlandRules {
@@ -73,6 +76,7 @@ impl Default for OverlandRules {
             heal_ticks: 2400,
             scan_step: 8,
             around: Vec::new(),
+            dev_fix: None,
         }
     }
 }
@@ -302,8 +306,18 @@ impl Plan {
         {
             return None;
         }
-        let (fix, err) = self.overland.fix?;
         let rules = self.overland_rules();
+        if self.overland.fix.is_none()
+            && let Some(p) = rules.dev_fix
+        {
+            self.overland.fix = Some((p, 0.0));
+            self.note(
+                tick,
+                format!("overland dev fix {p:?}"),
+                "development only: [overland] dev_fix, never a real race's".to_owned(),
+            );
+        }
+        let (fix, err) = self.overland.fix?;
         let body = w.body?;
         let feet = path::stand_cell(w, body.pos);
         let here = centre_of(feet);

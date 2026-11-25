@@ -758,6 +758,8 @@ scan_step = 8
 # Travel points round a known ocean (Bridger's geography ruling): none known on this world's way
 # east (the strip map is Q1's, docs/problems/eyes-observe.md).
 around = []
+# Development only: a fix (x, z) used while the eyes give none, for a dev start's race on a dev
+# branch. Never set on a merged branch (dev_fix = [x, z]).
 
 [stronghold]
 # The portal room's template (StrongholdPieces$PortalRoom, Q5's probe 45685968956): frames at y 3,
