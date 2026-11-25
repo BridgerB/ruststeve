@@ -396,9 +396,16 @@ fn lava_beside_the_portal_is_sealed_before_the_walk_in() {
         "{:?}",
         notes(&p)
     );
-    assert_eq!(
-        p.ender.home.seals, 1,
-        "one seal: the world never answered it"
+    // The world never answers: the seal is tried again, one a SHELTER_EVERY_TICKS, never into
+    // any other cell.
+    assert!(p.ender.home.seals >= 1, "{}", p.ender.home.seals);
+    assert!(
+        notes(&p)
+            .iter()
+            .filter(|n| n.starts_with("home: lava sealed"))
+            .all(|n| n == "home: lava sealed at (11, 64, 9)"),
+        "{:?}",
+        notes(&p)
     );
 }
 
@@ -428,8 +435,15 @@ fn the_entry_portals_south_face_is_sealed_round_its_standing_cell() {
     ] {
         set(&mut w, c, BlockKind::Lava);
     }
-    // The bot in its tunnel behind the face, on netherrack.
-    set(&mut w, (11, 64, 10), BlockKind::Netherrack);
+    // The bot in its tunnel behind the face: the row behind it netherrack (z -18 at the entry
+    // portal, solid at x 19 to 26, y 33 to 35), the tunnel cell and its head cut.
+    for x in 8..=15 {
+        for y in 64..=66 {
+            if x != 11 || y == 64 {
+                set(&mut w, (x, y, 10), BlockKind::Netherrack);
+            }
+        }
+    }
     w.body = w.body.map(|b| physics::Body {
         pos: [11.5, 65.0, 10.5],
         ..b
