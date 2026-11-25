@@ -472,11 +472,18 @@ impl Heading {
         }
     }
 
-    /// The axis chosen once from what is seen (plan 17d): see `choose_dir`.
-    pub fn choose(w: &World, feet: Cell, tick: u64) -> Self {
+    /// The axis chosen once from what is seen (plan 17d): see `choose_dir`. With `souls` false
+    /// (issue 18c: past the endermen stage a valley is no longer a target) soul signs count for
+    /// no axis.
+    pub fn choose(w: &World, feet: Cell, tick: u64, souls: bool) -> Self {
         let seen = seen_columns(w);
-        let (dir, why) = choose_dir(feet, &seen, &soul_columns(w, &seen), &[])
-            .unwrap_or(((1, 0), "no axis scored".to_owned()));
+        let soul = if souls {
+            soul_columns(w, &seen)
+        } else {
+            BTreeMap::new()
+        };
+        let (dir, why) =
+            choose_dir(feet, &seen, &soul, &[]).unwrap_or(((1, 0), "no axis scored".to_owned()));
         Self::new(dir, feet, tick, why)
     }
 
@@ -580,7 +587,12 @@ impl Plan {
                 return None;
             }
             None => {
-                let h = Heading::choose(w, feet, tick);
+                let h = Heading::choose(
+                    w,
+                    feet,
+                    tick,
+                    self.ender.phase == crate::endermen::EnderPhase::Reach,
+                );
                 self.note(
                     tick,
                     format!("heading chosen: ({}, {})", h.dir.0, h.dir.1),
@@ -1135,7 +1147,14 @@ impl Plan {
             h.choices += 1;
             let avoid = std::mem::take(&mut h.failed);
             let chosen = (h.choices < MAX_CHOICES)
-                .then(|| choose_dir(feet, &seen, &soul_columns(w, &seen), &[was]))
+                .then(|| {
+                    let soul = if self.ender.phase == crate::endermen::EnderPhase::Reach {
+                        soul_columns(w, &seen)
+                    } else {
+                        BTreeMap::new()
+                    };
+                    choose_dir(feet, &seen, &soul, &[was])
+                })
                 .flatten();
             let Some((dir, reason)) = chosen else {
                 h.over = true;

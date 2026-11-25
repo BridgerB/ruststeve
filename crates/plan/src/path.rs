@@ -222,7 +222,7 @@ pub struct Cells<'a> {
     /// (`Cells::far`), in the Nether, with `BRIDGE_RESERVE` blocks held.
     bridge: bool,
     /// Where the mobs a far route keeps clear of stand (`SHUN_KINDS`).
-    shun: Vec<[f64; 3]>,
+    shun: Vec<([f64; 3], f64)>,
     /// Cells a route never enters: a heading's cut cells behind the feet (docs/problems/heading.md:
     /// a leg never walks back over ground the heading already covered).
     blocked: BTreeSet<Cell>,
@@ -269,14 +269,14 @@ impl<'a> Cells<'a> {
             shun: world
                 .entities
                 .values()
-                .filter(|e| SHUN_KINDS.contains(&e.kind))
-                .map(|e| e.pos)
+                .filter(|e| !e.dead)
+                .filter_map(|e| shun_radius(e.kind).map(|r| (e.pos, r)))
                 .collect(),
             ..Self::new(world)
         }
     }
 
-    /// Is `c` within `SHUN_RADIUS` of a mob to keep clear of? Never within `SHUN_FREE` of the
+    /// Is `c` within its kind's `shun_radius` of a mob to keep clear of? Never within `SHUN_FREE` of the
     /// search's `start`: a bot already beside one must still be given a way off.
     pub fn shunned(&self, c: Cell, start: Cell) -> bool {
         let at = |c: Cell| [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
@@ -285,7 +285,7 @@ impl<'a> Cells<'a> {
         };
         !self.shun.is_empty()
             && d(at(c), at(start)) > SHUN_FREE
-            && self.shun.iter().any(|m| d(at(c), *m) <= SHUN_RADIUS)
+            && self.shun.iter().any(|(m, r)| d(at(c), *m) <= *r)
     }
 
     /// Can a held block be laid at `c` as a floor: air or lava there (a block replaces a fluid),
@@ -403,9 +403,28 @@ pub const SHUN_KINDS: &[data::EntityKind] = &[
     data::EntityKind::Piglin,
     data::EntityKind::PiglinBrute,
     data::EntityKind::Hoglin,
+    // Issue 18c: the travel at no-heal health (docs/problems/pearls-travel.md): a wither
+    // skeleton's blow withers as well (race 45481633896 lane 0 died to them, 18.3 to 0).
+    data::EntityKind::WitherSkeleton,
 ];
-/// A far route enters no cell within this of one: a piglin sees a player at 16.
-pub const SHUN_RADIUS: f64 = 20.0;
+/// A far route enters no cell within this of one: a piglin sees a player at 16, and the travel
+/// at no-heal health keeps 8 more (issue 18c; it was 20 through issue 17).
+pub const SHUN_RADIUS: f64 = 24.0;
+/// Magma cubes (basalt deltas) are shunned nearer: they hop, but follow from 16 only once they
+/// see the bot, and a route round each at 24 would close the deltas (issue 18c's basalt rule).
+pub const SHUN_MAGMA: f64 = 8.0;
+
+/// How near a far route comes to a mob of `kind`: `SHUN_RADIUS` for `SHUN_KINDS`, `SHUN_MAGMA`
+/// for a magma cube, `None` for the rest.
+pub fn shun_radius(kind: data::EntityKind) -> Option<f64> {
+    if SHUN_KINDS.contains(&kind) {
+        Some(SHUN_RADIUS)
+    } else if kind == data::EntityKind::MagmaCube {
+        Some(SHUN_MAGMA)
+    } else {
+        None
+    }
+}
 /// Cells this near the search's start are free of the rule.
 pub const SHUN_FREE: f64 = 6.0;
 
