@@ -388,7 +388,9 @@ impl Sim {
     /// One step along the ground toward (gx, gz) at `speed`, stepping up one block or down to a
     /// floor under, the body fitting; `None` where it cannot go.
     fn ender_step(&self, at: [f64; 3], goal: [f64; 2], speed: f64) -> Option<[f64; 3]> {
-        let (dx, dz) = (goal[0] - at[0], goal[1] - at[1]);
+        // The goal is (x, z); `at` is (x, y, z). Issue 17's model read z from at[1], the height:
+        // every stroll and chase ran along z toward 40 blocks off (issue 18's parity rows found it).
+        let (dx, dz) = (goal[0] - at[0], goal[1] - at[2]);
         let far = dx.hypot(dz);
         if far < 0.1 {
             return None;

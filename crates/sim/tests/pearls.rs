@@ -107,13 +107,6 @@ fn an_angry_enderman_walks_to_the_mouth_and_never_reaches_the_bot_in_b() {
     for t in 1..=400u32 {
         tick(&mut sim);
         let pos = sim.survival.life.mobs[&id].pos;
-        if t <= 40 {
-            let e = sim.ender(id).unwrap();
-            eprintln!(
-                "t {t} pos {pos:?} next {:?} for {:?}",
-                e.path_next, e.path_for
-            );
-        }
         assert!(pos[0] >= 2.3 - 1e-9, "into the mouth at tick {t}: {pos:?}");
         if first.is_none() && cell(pos) == O {
             first = Some(t);
