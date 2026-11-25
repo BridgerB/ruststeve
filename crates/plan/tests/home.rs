@@ -370,3 +370,33 @@ fn hungry_on_the_surface_with_meat_held_eats_first() {
     assert!(noted(&p, "home: eat"), "{:?}", notes(&p));
     assert!(!p.home_done());
 }
+
+#[test]
+fn lava_beside_the_portal_is_sealed_before_the_walk_in() {
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(39, (ItemKind::Netherrack, 64));
+    // A lit portal 3 east, lava in front of it (south), as at the entry portal's ledge.
+    for y in 64..=65 {
+        set(&mut w, (11, y, 8), BlockKind::NetherPortal);
+        remember(&mut w, home::NETHER, (11, y, 8), BlockKind::NetherPortal);
+    }
+    set(&mut w, (11, 63, 8), BlockKind::Obsidian);
+    set(&mut w, (11, 64, 9), BlockKind::Lava);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 30);
+    assert!(
+        noted(&p, "home: lava sealed at (11, 64, 9)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(
+        p.ender.home.seals, 1,
+        "one seal: the world never answered it"
+    );
+}

@@ -116,6 +116,9 @@ pub struct HomeState {
     pub approach_tries: u32,
     #[serde(default)]
     pub enters: u32,
+    /// Filler blocks placed into lava beside the portal's feet cells.
+    #[serde(default)]
+    pub seals: u32,
     /// Overworld: when the bot arrived, when it reached the surface, when it was fed.
     #[serde(default)]
     pub arrived_at: Option<u64>,
@@ -135,6 +138,12 @@ pub struct HomeState {
     #[serde(default)]
     pub done: bool,
 }
+
+/// Lava cells sealed beside the portal at most: two rows of five in front of it and its sides
+/// (the row (21 to 25, 34, -19) was lava by tick 25,700: docs/problems/nether-walk.md), with room.
+pub const SEALS: u32 = 24;
+/// A seal is placed only this near the eye (`walk::REACH` 4 plus half a block for the far corner).
+pub const SEAL_REACH: f64 = 4.5;
 
 /// The nearest nether portal block on record in `dim` within `chunks` chunk columns of `at` (a
 /// ring over memory's index of sightings, so a portal seen hundreds of blocks back counts; never a
@@ -628,6 +637,12 @@ impl Plan {
                 return Some(t);
             }
         }
+        // Lava beside or under the portal's feet cells (the row in front of it turned to lava:
+        // docs/problems/nether-walk.md) is sealed with filler from where the bot stands first:
+        // no route enters a cell with lava beside it.
+        if let Some(t) = self.home_seal(w, tick, &lit) {
+            return Some(t);
+        }
         let open: Vec<Cell> = lit
             .iter()
             .copied()
@@ -698,6 +713,89 @@ impl Plan {
             format!("from {feet:?} to {portal:?}: no walk, far walk or tunnel"),
         );
         Some(Task::Idle)
+    }
+
+    /// One filler block into a lava cell beside or under a portal feet cell (the lowest of `lit`),
+    /// within reach of the eye, clicked on a full block beside it; noted "home: lava sealed at".
+    /// `None` with no such lava in reach, no filler held, or `SEALS` placed.
+    fn home_seal(&mut self, w: &World, tick: u64, lit: &[Cell]) -> Option<Task> {
+        let body = w.body?;
+        if self.ender.home.seals >= SEALS {
+            return None;
+        }
+        let low = lit.iter().map(|c| c.1).min()?;
+        let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
+        let reach = |c: Cell| {
+            (0..3)
+                .map(|i| (eye[i] - (f64::from([c.0, c.1, c.2][i]) + 0.5)).powi(2))
+                .sum::<f64>()
+                .sqrt()
+                <= SEAL_REACH
+        };
+        let mut cells = path::Cells::new(w);
+        let lava: Vec<Cell> = lit
+            .iter()
+            .filter(|c| c.1 == low)
+            .flat_map(|c| {
+                [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0)]
+                    .map(|(dx, dy, dz)| (c.0 + dx, c.1 + dy, c.2 + dz))
+            })
+            .filter(|n| cells.at(*n) == path::Class::Lava)
+            .collect();
+        let feet = path::feet_cell(body.pos);
+        let item = endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        let (target, click, face) = lava
+            .into_iter()
+            .filter(|c| reach(*c) && *c != feet)
+            .find_map(|c| {
+                [
+                    ((c.0, c.1 - 1, c.2), 1),
+                    ((c.0 + 1, c.1, c.2), 4),
+                    ((c.0 - 1, c.1, c.2), 5),
+                    ((c.0, c.1, c.2 + 1), 2),
+                    ((c.0, c.1, c.2 - 1), 3),
+                    ((c.0, c.1 + 1, c.2), 0),
+                ]
+                .into_iter()
+                .find(|(n, _)| cells.at(*n) == path::Class::Solid)
+                .map(|(n, f)| (c, n, f))
+            })?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.seals += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("home: lava sealed at {target:?}"),
+                    format!(
+                        "beside the portal's feet cells; {item:?} on {click:?} face {face}; seal {} of {SEALS}",
+                        self.ender.home.seals
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
     }
 
     /// The portal is out: flint and steel on the frame's bottom obsidian, from where the bot

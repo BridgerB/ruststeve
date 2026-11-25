@@ -22,7 +22,7 @@ A case file from a race resumed at the frontier shows `stage reached: overworld`
 3. **The kit** (`base::HOME_STEPS`): eyes (Q3's `eyes` row when present, else `home-eyes`), stems to 16, a table placed with sticks, 2 wooden pickaxes with 40 uses, sticks to 8, a table carried.
 4. **The portal**: `home::portal_far`, memory's `NetherPortal` index in 48 chunk columns round the feet, lowered to the bottom cell; else `[home] portal` (22, 34, -20), geography. Q1's probe 45686594347: the frontier snapshot's memory holds the portal, lit, at x 22 to 23, y 34 to 36, z -20, and the whole way from it to the forest (385 columns); the overworld portal at x 125 to 126, y -52 to -50, z -108.
 5. **The trip**: the heading's legs to `[home] way` (empty: straight at the portal until the strip map says otherwise), then the portal's column, with the travel's rules (`EnderPhase::travels`).
-6. **The approach** within 24: the plain walk into a lit cell (`Task::Enter`), else a far walk beside it (bridging the lava), else a tunnel; a portal seen out is lit with flint and steel when held.
+6. **The approach** within 24: lava beside or under the portal's feet cells sealed with filler first (`home_seal`, at most 24); the plain walk into a lit cell (`Task::Enter`), else a far walk beside it (bridging the lava), else a tunnel; a portal seen out is lit with flint and steel when held.
 7. **`Task::Enter`** is done in any dimension but the one it began in.
 8. **The overworld**: stairs up in rock to the open sky (`stairs_to_surface`), stone pickaxes from the stairs' cobblestone (`base::CLIMB_STEPS`) when the stone uses fall under 30; on the surface a hut each night, eat to 18, hunt, look for animals; then a rest toward 18 health for at most 2,400 ticks; "home: over, fed on the surface".
 
@@ -30,7 +30,7 @@ Unit tests: `crates/plan/tests/home.rs` (Home begun with 12 and not 11, both top
 
 ## Not built yet
 - The bot's old surface stairs as the way up (memory holds no air; the climb is dry stairs only).
-- A seal of lava faces by the approach's own tunnel (its stairs refuse lava beside a cell instead).
+- A seal of lava faces met inside the approach's tunnel (its stairs refuse lava beside a cell instead); only the portal's own feet cells are sealed.
 - Cooking on the surface (raw meat raises the bar; saturation stays low). Warped planks do not burn.
 
 ## Walls
