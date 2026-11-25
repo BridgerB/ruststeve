@@ -75,6 +75,30 @@ The strip map, every 16 blocks to 640 on 8 axes from (8, 81) (the biome at y 64 
 - The race summary prints `pearls gained: 0 x5, 12 x1 (6 runs)` once a run reached the forest or gained a pearl (batch rows keep `pearls`).
 - Coverage: `entity_event`, `take_item_entity` and `set_entity_data` were already decoded (no `config/observe.toml` change); nothing the hunt needs is thrown away.
 
+## 18a.5: the forest supply (race 45531362383, not done: wall 1)
+
+Two idle bots from the frontier snapshot, put down at `dev-forest` (488.5, 70, -110.5, spread 12), cap 12,000. The `forest` stage held at tick 80 for both, and the race published `dev-snapshot-forest-…` for each lane (the stage name works as an asset name). The bots did not stand under a roof: an idle bot is not given one.
+
+**Wall 1: dev-forest stands on a fortress.** Both bots landed on nether bricks and fences at (493 to 496, 65 to 70, -113 to -120): blazes at 4 to 8 blocks, wither skeletons at 19 to 29. Both burned to death, lane 0 at tick 720 (9 hits: 2 fireballs and the burning) and lane 1 by tick 260. That 12,000-tick count was never made. A warped forest with a fortress in it is no base at that cell: the burrow site needs nether bricks never within 8 (plan 18e), and a start must be placed off the fortress.
+
+**What was seen in the 34 s:**
+- 11 distinct endermen within 128 in lane 0, 15 in lane 1, nearly all ticking (one frozen).
+- The nearest ticking one was at 25 to 26 blocks.
+- Within 32 and ticking: 1 in lane 0, 4 in lane 1.
+- None turned angry, though three idle-looking "facing" signs were noted.
+- This is the supply the plan expected (more than one enderman per spawn group within 64), but it was not counted per second or per minute.
+
+**The rerun (race 45534565509, dev-forest moved to (490.5, 45, 5.5), spread 8 under y 80).** Two idle bots in the open, frontier kit, cap 12,000. Both lived to the cap, at 12.5 health and no hits, standing on netherrack and basalt at (484, 41, 8) and (482, 41, 13), with the feet in warped_forest from tick 60. Counted from the senses rows, one every 200 ticks (61 rows a bot), and the ledgers:
+- Rows with a ticking enderman within 128: 60 of 61 in both lanes.
+- Rows whose nearest ticking enderman was within 32: lane 0 had 60 of 61 (27 of them within 16); lane 1 had 22 of 61.
+- Endermen among the three nearest hostiles, on average: 2.1 in lane 0 and 0.34 in lane 1.
+- Distinct endermen seen within 128 over the 10 minutes: 18 in each lane. Most were there when the chunks loaded (13 and 15 in the first minute). After that 5 and 3 more came in, about 0.4 new a minute.
+- 10 and 4 endermen went out of watch.
+- None turned angry and no blow landed, though the bots stood in the open for 12,000 ticks with their look never kept off an eye.
+- Other monsters: a magma cube within 8 to 20 for most of lane 0.
+- The supply on this floor is plentiful: more than one ticking enderman within 32 most of the time at lane 0's cell. It varies by about 3 times within 10 blocks.
+- The burrow can wait for one: the 6,000-tick `burrow_idle_ticks` is generous here.
+
 ## Known gaps
 
 - `PearlDropped` needs the item's data (index 8) to say ender pearl; a pearl whose data comes later than 40 ticks after the death is not called a drop.
