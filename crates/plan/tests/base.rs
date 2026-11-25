@@ -349,3 +349,55 @@ fn the_base_rows_make_the_kit_from_warped_wood() {
     let shield = [(ItemKind::IronIngot, 1), (ItemKind::WarpedPlanks, 6)];
     assert_eq!(next("base-shield", &shield, true), "craft:shield");
 }
+
+fn noted(p: &plan::Plan, what: &str) -> usize {
+    p.events.iter().filter(|e| e.what.contains(what)).count()
+}
+
+/// Race 45542558792: walled in with no stem in view, every bot waited 2,400 ticks a step and no
+/// hunt began. Now the wait pauses the base after 200 ticks (`None`: the hunt runs); after the
+/// pause the wood looks again, and a second long wait gives it up, which skips at once every step
+/// the wood was to supply, with one note, and ends the base.
+#[test]
+fn no_wood_pauses_the_base_then_skips_what_wood_makes() {
+    let mut p = plan::Plan::with_table(plan::Aim::Race, std::sync::Arc::new(table()));
+    let mut w = frontier();
+    w.held = 3;
+    assert_eq!(p.base_task(&w, 0), Some(plan::Task::Idle), "the wood waits");
+    assert_eq!(p.base_task(&w, 100), Some(plan::Task::Idle));
+    assert_eq!(p.base_task(&w, 200), None, "paused: the hunt runs");
+    assert_eq!(
+        noted(&p, "base paused: the hunt goes on with what is held"),
+        1
+    );
+    assert_eq!(p.base_task(&w, 3000), None, "still paused");
+    assert_eq!(
+        p.base_task(&w, 6200),
+        Some(plan::Task::Idle),
+        "the wood looks again"
+    );
+    assert_eq!(noted(&p, "base resumed"), 1);
+    assert_eq!(p.base_task(&w, 6400), None);
+    assert!(p.base.over, "{:?}", p.events);
+    assert_eq!(noted(&p, "base: wood gave up"), 1);
+    assert_eq!(
+        noted(&p, "base: no wood: the hunt goes on with what is held"),
+        1
+    );
+    assert_eq!(p.base.ended.len(), STEPS.len(), "{:?}", p.base.ended);
+    assert_eq!(noted(&p, "base: table begun"), 0, "never waited on");
+    assert_eq!(p.base_task(&w, 6420), None);
+}
+
+/// A kill resumes a paused base at once (`base_resume`, the hunt's call).
+#[test]
+fn a_kill_resumes_a_paused_base() {
+    let mut p = plan::Plan::with_table(plan::Aim::Race, std::sync::Arc::new(table()));
+    let mut w = frontier();
+    w.held = 3;
+    p.base_task(&w, 0);
+    assert_eq!(p.base_task(&w, 200), None);
+    p.base_resume();
+    assert_eq!(p.base_task(&w, 260), Some(plan::Task::Idle));
+    assert!(!p.base.over);
+}

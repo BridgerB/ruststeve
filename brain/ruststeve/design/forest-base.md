@@ -6,11 +6,12 @@ tags: [plan, base, forest, pearls, crafting]
 aliases: [fungus cap, on_cap, dig_down, base_task, base_done, forest base, forest kit, base rows, weapon kills, plan::base, Aim::Base, --goal base]
 status: verified
 lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@e927314
+verifiedAgainst: ruststeve@2b04564
 sourceRefs:
   - "ruststeve:crates/plan/src/base.rs#pub fn base_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
   - "ruststeve:crates/plan/src/base.rs#pub fn weapon_kills(w: &World, base: &Base) -> i32 {"
   - "ruststeve:crates/plan/src/base.rs#pub fn dig_down(w: &World) -> Option<Cell> {"
+  - "ruststeve:crates/plan/src/base.rs#pub fn starved_by(gone: Step, w: &World, table_near: bool) -> Vec<Step> {"
   - "ruststeve:crates/plan/src/base.rs#pub fn skip_why(step: Step, w: &World, base: &Base, table_near: bool) -> Option<String> {"
   - "ruststeve:config/goals.toml#id = \"base-shield\""
   - "ruststeve:crates/bot/tests/base.rs#fn the_frontier_kit_makes_an_iron_sword_and_a_shield_in_the_forest() {"
@@ -37,6 +38,7 @@ Issue 18d (`docs/problems/pearls-base.md`). The frontier bot reaches a warped fo
 - **Rows**: the table, sword, pickaxe and shield steps ask the needs planner for their `base-*` row; the repeated rows make one more of their first provide than was held when the run began, and the step runs again while it wants (stone swords until 30 kills, pickaxes until 100 uses; an iron pickaxe only with 3 ingots over the shield's). The act is done where the bot stands: a craft (at the table near for 3x3), a placing, or a stem; a smelt, mine or trip gives the step up.
 - **Smelt**: only with coal or charcoal held (warped planks have no burn time; sticks and rods are never this step's fuel), as much raw iron as the coal cooks (1,600 / 200 = 8 a coal), in the held furnace placed where the bot stands.
 - **Swords in kills**: uses left over hits a kill (`hits_per_kill`: iron 7, stone 8, from 40 health over 6 and 5), a sword under 10 uses counting for nothing.
+- **Never waits long** (race 45542558792: 8 bots waited 2,400 ticks a step on missing wood and no hunt began): a wait of `wait_ticks` 200 in a row pauses the base for `pause_ticks` 6,000 or until `Plan::base_resume` (the hunt's call after a kill), and `base_task` returns `None` so the hunt runs ("base paused: the hunt goes on with what is held"). A step that waits that long again after `pause_max` 1 pause gives up. A step given up skips at once every step it was to supply (`starved_by`: with no logs or planks, every craft and the smelt; with no table, the 3x3 crafts and the smelt), with one note ("base: no wood: the hunt goes on with what is held").
 - **Never** with an angry enderman (`endermen::angry`): the base waits, noted. Under 4 free main slots a stack of `drop` goes (granite, tuff, dirt first), never pearls, rods, powder or eyes. Every look leaves through `Plan::keep_look`.
 - **The hunt** calls `base_task` in its `base` row; `Aim::Base` (`--goal base`) runs it alone for development and tests.
 

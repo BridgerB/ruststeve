@@ -68,6 +68,12 @@ pub struct Base {
     pub floor_near: i32,
     pub floor_far: i32,
     pub down_tries: u32,
+    /// A wait longer than `wait_ticks` in a row pauses the base for `pause_ticks` (or until
+    /// `Plan::base_resume`, after a kill), so the hunt runs with what is held; a step that waits
+    /// that long again after `pause_max` pauses gives up.
+    pub wait_ticks: u64,
+    pub pause_ticks: u64,
+    pub pause_max: u32,
 }
 
 impl Default for Base {
@@ -91,6 +97,9 @@ impl Default for Base {
             floor_near: 8,
             floor_far: 24,
             down_tries: 24,
+            wait_ticks: 200,
+            pause_ticks: 6000,
+            pause_max: 1,
         }
     }
 }
@@ -160,6 +169,57 @@ pub struct BaseState {
     /// Moves begun to get down off a fungus cap.
     #[serde(default)]
     pub down_tries: u32,
+    /// When the wait in hand began, until when the base is paused, and the pauses of the step in
+    /// hand.
+    #[serde(default)]
+    pub wait_since: Option<u64>,
+    #[serde(default)]
+    pub paused_until: Option<u64>,
+    #[serde(default)]
+    pub pauses: u32,
+}
+
+/// What a wait comes to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Waited {
+    /// Wait on: look again shortly.
+    On,
+    /// Waited `wait_ticks`: the base pauses and the hunt runs.
+    Paused,
+    /// Waited that long again after `pause_max` pauses: the step gives up.
+    Over,
+}
+
+/// The steps that need what `gone` was to supply, when it gave up with none of it held: with no
+/// wood (no logs, no planks) every craft (the table, sticks, swords, pickaxes, shield) and the smelt
+/// (its ingots make nothing without a table); with no table every 3x3 craft and the smelt.
+pub fn starved_by(gone: Step, w: &World, table_near: bool) -> Vec<Step> {
+    let wood = logs_held(w) + planks_held(w) > 0;
+    let table = table_near || craft::count(w, ItemKind::CraftingTable) > 0;
+    match gone {
+        Step::Wood if !wood && !table => vec![
+            Step::Table,
+            Step::Smelt,
+            Step::IronSword,
+            Step::StoneSword,
+            Step::Pickaxe,
+            Step::Shield,
+        ],
+        Step::Table if !table => vec![
+            Step::Smelt,
+            Step::IronSword,
+            Step::StoneSword,
+            Step::Pickaxe,
+            Step::Shield,
+        ],
+        Step::Wood
+        | Step::Table
+        | Step::Smelt
+        | Step::IronSword
+        | Step::StoneSword
+        | Step::Pickaxe
+        | Step::Shield => Vec::new(),
+    }
 }
 
 /// What a step does next.
@@ -519,6 +579,8 @@ impl Plan {
         self.equip(w, tick);
         match self.base_task(w, tick) {
             Some(t) => t,
+            // Paused, not over: the development aim waits it out (the race hunts meanwhile).
+            None if !self.base.over => Task::Idle,
             None => {
                 self.met = true;
                 self.note(
@@ -539,9 +601,29 @@ impl Plan {
         }
         let table = self.table.clone()?;
         let base = table.base.clone();
+        match self.base.paused_until {
+            Some(t) if tick < t => return None,
+            Some(_) => {
+                self.base.paused_until = None;
+                self.base.wait_since = None;
+                // The step in hand gets a fresh clock: the pause was the hunt's time.
+                self.base.since = tick;
+                self.note(
+                    tick,
+                    "base resumed".to_owned(),
+                    format!(
+                        "the step in hand: {}",
+                        self.base.step.map_or("none", Step::name)
+                    ),
+                );
+            }
+            None => {}
+        }
         if let Some(id) = endermen::angry(w) {
-            self.base_wait(tick, format!("enderman {id} is angry"));
-            return Some(Task::Idle);
+            return match self.base_wait(tick, format!("enderman {id} is angry"), false) {
+                Waited::On => Some(Task::Idle),
+                Waited::Paused | Waited::Over => None,
+            };
         }
         // A batch left cooking is collected first (a smelt cut while loaded).
         if let Some((furnace, result, count)) = self.batch {
@@ -580,6 +662,7 @@ impl Plan {
             && self.base.down_tries < base.down_tries
             && let Some(t) = self.down_step(w, &base, tick)
         {
+            self.base.wait_since = None;
             return Some(t);
         }
         loop {
@@ -607,6 +690,8 @@ impl Plan {
                     self.base.tasks = 0;
                     self.base.fails = 0;
                     self.base.target = None;
+                    self.base.pauses = 0;
+                    self.base.wait_since = None;
                     self.base.failures_seen = self.failures.values().sum();
                     self.note(
                         tick,
@@ -648,6 +733,7 @@ impl Plan {
             };
             match next {
                 Next::Task(t) => {
+                    self.base.wait_since = None;
                     self.base.tasks += 1;
                     self.base.failures_seen = self.failures.values().sum();
                     return Some(*t);
@@ -658,19 +744,29 @@ impl Plan {
                     return Some(Task::Idle);
                 }
                 Next::Wait(why) => {
-                    self.base_wait(tick, format!("{}: {why}", step.name()));
-                    return Some(Task::Idle);
+                    match self.base_wait(tick, format!("{}: {why}", step.name()), true) {
+                        Waited::On => return Some(Task::Idle),
+                        Waited::Paused => return None,
+                        Waited::Over => self.base_end(
+                            w,
+                            step,
+                            false,
+                            format!("waited again after {} pauses: {why}", self.base.pauses),
+                            tick,
+                        ),
+                    }
                 }
-                Next::Done(why) => self.base_end(step, true, why, tick),
-                Next::GaveUp(why) => self.base_end(step, false, why, tick),
+                Next::Done(why) => self.base_end(w, step, true, why, tick),
+                Next::GaveUp(why) => self.base_end(w, step, false, why, tick),
             }
         }
     }
 
     /// A step over: done (or skipped) or given up, with its note.
-    fn base_end(&mut self, step: Step, done: bool, why: String, tick: u64) {
+    fn base_end(&mut self, w: &World, step: Step, done: bool, why: String, tick: u64) {
         self.base.ended.push((step, done));
         self.base.step = None;
+        self.base.wait_since = None;
         self.note(
             tick,
             format!(
@@ -684,19 +780,90 @@ impl Plan {
                 tick.saturating_sub(self.base.since)
             ),
         );
+        if done {
+            return;
+        }
+        // A step whose inputs this one was to supply is skipped at once, never waited on (race
+        // 45542558792: 8 bots waited 2,400 ticks a step on the missing wood, and no hunt began).
+        let table_near = self
+            .near_block(w, data::BlockKind::CraftingTable, tick)
+            .is_some();
+        let starved: Vec<Step> = starved_by(step, w, table_near)
+            .into_iter()
+            .filter(|s| !self.base.ended.iter().any(|(e, _)| e == s))
+            .collect();
+        if starved.is_empty() {
+            return;
+        }
+        for s in &starved {
+            self.base.ended.push((*s, false));
+        }
+        self.note(
+            tick,
+            format!(
+                "base: no {}: the hunt goes on with what is held",
+                if step == Step::Wood { "wood" } else { "table" }
+            ),
+            format!(
+                "skipped: {}; {} logs, {} planks, {} sticks held",
+                starved
+                    .iter()
+                    .map(|s| s.name())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                logs_held(w),
+                planks_held(w),
+                craft::count(w, ItemKind::Stick)
+            ),
+        );
     }
 
-    /// A wait, noted once every `note_every` ticks; the choice is made again shortly.
-    fn base_wait(&mut self, tick: u64, why: String) {
-        let every = self
+    /// Lets a paused base run again at the next choice (the hunt calls it after a kill).
+    pub fn base_resume(&mut self) {
+        if self.base.paused_until.is_some() {
+            self.base.paused_until = Some(0);
+        }
+    }
+
+    /// A wait, noted once every `note_every` ticks; the choice is made again shortly. Past
+    /// `wait_ticks` in a row the base pauses for `pause_ticks` (the hunt runs); a step's wait
+    /// that long after `pause_max` pauses is over (`for_step`).
+    fn base_wait(&mut self, tick: u64, why: String, for_step: bool) -> Waited {
+        let base = self
             .table
             .as_ref()
-            .map_or(Base::default().note_every, |t| t.base.note_every);
+            .map_or_else(Base::default, |t| t.base.clone());
         self.retry_at = tick + crate::RETRY_TICKS;
-        if self.base.noted_at.is_none_or(|t| tick >= t + every) {
+        let since = *self.base.wait_since.get_or_insert(tick);
+        if tick.saturating_sub(since) >= base.wait_ticks {
+            self.base.wait_since = None;
+            if for_step && self.base.pauses >= base.pause_max {
+                return Waited::Over;
+            }
+            if for_step {
+                self.base.pauses += 1;
+            }
+            self.base.paused_until = Some(tick + base.pause_ticks);
+            self.note(
+                tick,
+                "base paused: the hunt goes on with what is held".to_owned(),
+                format!(
+                    "waited {} ticks ({why}); again at tick {} or after a kill",
+                    tick.saturating_sub(since),
+                    tick + base.pause_ticks
+                ),
+            );
+            return Waited::Paused;
+        }
+        if self
+            .base
+            .noted_at
+            .is_none_or(|t| tick >= t + base.note_every)
+        {
             self.base.noted_at = Some(tick);
             self.note(tick, "base waits".to_owned(), why);
         }
+        Waited::On
     }
 
     fn base_over(&mut self, w: &World, base: &Base, tick: u64) {
