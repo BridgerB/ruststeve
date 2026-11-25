@@ -22,8 +22,8 @@ use bot::captured::CapturedWorld;
 use results::Source;
 use results::config::RaceConfig;
 use results::parity::{
-    EyeOutcome, Health, Landings, MobOutcome, Moment, MomentResult, Moments, Outcome, compare,
-    render,
+    EyeOutcome, FramesOutcome, Health, Landings, MobOutcome, Moment, MomentResult, Moments,
+    Outcome, compare, render,
 };
 use world::World;
 
@@ -31,8 +31,8 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows; 176 of 178 with issue 19's eye rows).
-const TOLERANCE: usize = 176;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows; 176 of 178 with issue 19's eye rows; 179 of 181 with its portal room rows, y04 differing until silverfish are modelled).
+const TOLERANCE: usize = 179;
 /// A placed mob that ends farther than this from where it was put moved (it ticked).
 const MOB_MOVED: f64 = 0.5;
 /// An enderman's creepy flag (`EnderMan.DATA_CREEPY`, entity data 17).
@@ -211,6 +211,44 @@ fn eye_report(
     )
 }
 
+/// A piece of armour's equipment slot, window 0 slot and armour points (vanilla's
+/// `ArmorMaterials.IRON`: helmet 2, chestplate 6, leggings 5, boots 2).
+fn armor_piece(item: &str) -> Option<(&'static str, usize, f32)> {
+    match item {
+        "iron_helmet" => Some(("head", 5, 2.0)),
+        "iron_chestplate" => Some(("chest", 6, 6.0)),
+        "iron_leggings" => Some(("legs", 7, 5.0)),
+        "iron_boots" => Some(("feet", 8, 2.0)),
+        _ => None,
+    }
+}
+
+/// The end portal frames memory holds in the overworld, and their ring's centre (issue 19, y03).
+fn frames_outcome(w: &World) -> FramesOutcome {
+    let cells: Vec<memory::Cell> = w
+        .memory
+        .latest_index()
+        .iter()
+        .filter(|((dim, _), _)| dim == "minecraft:overworld")
+        .filter_map(|(_, i)| w.memory.log().get(*i))
+        .filter(|s| data::block_of_state(s.state) == Some(data::BlockKind::EndPortalFrame))
+        .map(|s| s.pos)
+        .collect();
+    let span = |f: fn(&memory::Cell) -> i32| {
+        let lo = cells.iter().map(f).min()?;
+        let hi = cells.iter().map(f).max()?;
+        Some((lo + hi).div_euclid(2))
+    };
+    let centre = match (span(|c| c.0), span(|c| c.1), span(|c| c.2)) {
+        (Some(x), Some(y), Some(z)) => Some([x, y, z]),
+        _ => None,
+    };
+    FramesOutcome {
+        count: u32::try_from(cells.len()).unwrap_or(u32::MAX),
+        centre,
+    }
+}
+
 /// Whether an entity's boolean data `i` is true.
 fn flag(e: &world::Entity, i: u8) -> bool {
     matches!(
@@ -291,9 +329,12 @@ fn start_of(
     let world = CapturedWorld::read(&CapturedWorld::path(&a.worlds, m.landing))?;
     let (x, z) = (l.x + m.dx, l.z + m.dz);
     let model = world.model([0.0; 3])?;
-    let y = model
-        .surface(x, z)
-        .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?;
+    let y = match m.feet_y {
+        Some(y) => f64::from(y),
+        None => model
+            .surface(x, z)
+            .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?,
+    };
     Ok((world, [f64::from(x) + 0.5, y, f64::from(z) + 0.5]))
 }
 
@@ -360,6 +401,7 @@ fn outcome(
             .map(|(kind, at)| mob_outcome(w, kind, *at))
             .collect(),
         eye: None,
+        frames: None,
     })
 }
 
@@ -582,6 +624,21 @@ fn give_of(g: &str) -> Option<(data::ItemKind, i32)> {
     Some((data::ItemKind::from_name(item)?, count.parse().ok()?))
 }
 
+/// A fetch row's script walks back to its start once the eye is fetched (issue 19: where the
+/// walk to the drop stops is the server's roll).
+fn homed(s: Option<Script>, start: [f64; 3]) -> Option<Script> {
+    match s {
+        Some(Script::Fetch { at, .. }) => {
+            let (x, y, z) = feet_cell(start);
+            Some(Script::Fetch {
+                at,
+                home: Some([x, y, z]),
+            })
+        }
+        other => other,
+    }
+}
+
 /// A row's script, or the planner's aim for a `plan:<aim>` row (issue 12b: the escape rows run
 /// the planner with `plan:hold`, the always-rows only).
 fn script_or_aim(m: &Moment) -> Result<(Option<Script>, Option<plan::Aim>), String> {
@@ -668,6 +725,7 @@ fn real_waves(
         for (i, m) in wave.iter().enumerate() {
             let (_, start) = start_of(a, landings, m)?;
             let (script, aim) = script_or_aim(m)?;
+            let script = homed(script, start);
             // A fresh player per run: the server saves a player's place, health and effects by
             // name, so a reused name would start where the last run left it.
             let name = format!("rs-m{:02}-{:04x}", w * a.wave + i, nonce);
@@ -698,6 +756,11 @@ fn real_waves(
                 .chain(m.set.iter().map(|(b, dx, dy, dz)| {
                     let (x, y, z) = feet_cell(start);
                     format!("setblock {} {} {} minecraft:{b}", x + dx, y + dy, z + dz)
+                }))
+                .chain(m.armor.iter().filter_map(|item| {
+                    armor_piece(item).map(|(slot, _, _)| {
+                        format!("item replace entity {name} armor.{slot} with minecraft:{item}")
+                    })
                 }))
                 .chain(m.effects.iter().map(|(e, secs, amp)| {
                     format!("effect give {name} minecraft:{e} {secs} {amp} true")
@@ -788,19 +851,22 @@ fn real_waves(
             let id = m.id.clone();
             let watch = watched(start, m);
             let mobs = mob_spots(start, m);
-            let traced = !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some();
+            let traced =
+                !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some() || m.frames;
             let eye_row = m.stronghold.map(|s| (s, m.script.starts_with("fetch:")));
+            let frames_row = m.frames;
             handles.push((
                 id,
                 watch,
                 mobs,
                 traced,
                 eye_row,
+                frames_row,
                 std::thread::spawn(move || bot::run(opts)),
             ));
             std::thread::sleep(Duration::from_millis(500));
         }
-        for (id, watch, mobs, traced, eye_row, h) in handles {
+        for (id, watch, mobs, traced, eye_row, frames_row, h) in handles {
             let trace_id = id.clone();
             let r = match h.join() {
                 Ok(Ok(o)) => MomentResult {
@@ -824,6 +890,9 @@ fn real_waves(
                             write_trace(&a.out, &trace_id, "real", &text)?;
                             if let Some(c) = class.as_mut() {
                                 c.mobs = tracked(&o.world, &tracks);
+                            }
+                            if frames_row && let Some(c) = class.as_mut() {
+                                c.frames = Some(frames_outcome(&o.world));
                             }
                             if let Some((at, fetches)) = eye_row {
                                 let (e, lines) = eye_report(&o.world, &eye, at, fetches);
@@ -874,6 +943,7 @@ fn sim(a: &Args) -> Result<(), String> {
     for (i, m) in moments.moment.iter().enumerate() {
         let (captured, start) = start_of(a, &landings, m)?;
         let (script, aim) = script_or_aim(m)?;
+        let script = homed(script, start);
         let mut world = captured.model(start)?;
         let state_of = |b: &str| {
             data::BlockKind::from_name(b)
@@ -916,6 +986,16 @@ fn sim(a: &Args) -> Result<(), String> {
                 .give(give_of(g).ok_or_else(|| format!("{}: give {g}", m.id))?);
         }
         model.survival.life.water_breathing = m.breathe;
+        for item in &m.armor {
+            let (_, slot, points) =
+                armor_piece(item).ok_or_else(|| format!("{}: no armour {item}", m.id))?;
+            let kind = data::ItemKind::from_name(item)
+                .ok_or_else(|| format!("{}: no item {item}", m.id))?;
+            if let Some(s) = model.survival.slots.get_mut(slot) {
+                *s = Some((kind, 1));
+            }
+            model.survival.life.armor += points;
+        }
         for (e, secs, amp) in &m.effects {
             match e.as_str() {
                 "hunger" => model.survival.life.hunger = Some((secs * 20, *amp)),
@@ -968,7 +1048,7 @@ fn sim(a: &Args) -> Result<(), String> {
                 ],
             );
         }
-        let traced = !m.mobs.is_empty() || !m.items.is_empty();
+        let traced = !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some();
         let mut eye = EyeTrack::default();
         let mut trace = Vec::new();
         let mut tracks = tracks_of(&mob_spots(start, m));
@@ -1024,6 +1104,9 @@ fn sim(a: &Args) -> Result<(), String> {
                     c.mobs = tracked(&run.world, &tracks);
                 }
                 c.eye = eye_class;
+                if m.frames {
+                    c.frames = Some(frames_outcome(&run.world));
+                }
                 c
             }),
             corrections: run
