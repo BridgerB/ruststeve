@@ -55,6 +55,7 @@ pub struct PearlRules {
     pub fight_cap: u64,
     pub kill_window: u64,
     pub burrow_idle_ticks: u64,
+    pub burrow_idle_after_kill: u64,
     pub moves_without_kill: u32,
     pub burrow_move: i32,
     pub site_every: u64,
@@ -103,8 +104,9 @@ impl Default for PearlRules {
             fight_cap: 2400,
             kill_window: 12000,
             burrow_idle_ticks: 9600,
+            burrow_idle_after_kill: 4800,
             moves_without_kill: 1000,
-            burrow_move: 32,
+            burrow_move: 48,
             site_every: 100,
             weapon_min_uses: 10,
             step_out_every: 1200,
@@ -221,7 +223,13 @@ pub fn delta_distance(w: &World, c: [i32; 3], r: i32) -> Option<i32> {
 /// Places to search for a site from besides the feet: warped nylium seen within `SUPPLY_REACH`
 /// (one a chunk column) with the most endermen seen within 40, at least 16 from the feet, the
 /// best `ANCHORS`.
-fn supply_anchors(w: &World, seen: &[[f64; 3]], feet: [i32; 3]) -> Vec<[i32; 3]> {
+fn supply_anchors(
+    w: &World,
+    seen: &[[f64; 3]],
+    feet: [i32; 3],
+    away_from: Option<([i32; 3], i32)>,
+    near_point: Option<[i32; 2]>,
+) -> Vec<[i32; 3]> {
     let Some(dim) = w.dimension.as_ref() else {
         return Vec::new();
     };
@@ -244,6 +252,16 @@ fn supply_anchors(w: &World, seen: &[[f64; 3]], feet: [i32; 3]) -> Vec<[i32; 3]>
             let at = [c.0, c.1 + 1, c.2];
             let d2 = (at[0] - feet[0]).pow(2) + (at[2] - feet[2]).pow(2);
             if !(16 * 16..=SUPPLY_REACH * SUPPLY_REACH).contains(&d2) {
+                continue;
+            }
+            // A move's next place: `burrow_move` or more from the old B (new chunks tick, new
+            // spawns: the locals were used up), never by delta ground, near the hunt point.
+            if away_from.is_some_and(|(o, d)| (o[0] - at[0]).pow(2) + (o[2] - at[2]).pow(2) < d * d)
+                || near_delta(w, at, 16)
+                || near_point.is_some_and(|[x, z]| {
+                    (x - at[0]).pow(2) + (z - at[2]).pow(2) > HUNT_AREA * HUNT_AREA
+                })
+            {
                 continue;
             }
             let p = Burrow::centre(at);
@@ -318,6 +336,8 @@ const LOOK_OUT_TICKS: u64 = 200;
 const SWEEP_TICKS: u64 = 400;
 /// Blocks within which the feet after a walk on count as not moved.
 const WALK_ON_STILL: i32 = 4;
+/// Blocks round the hunt point a move's new place stays within.
+const HUNT_AREA: i32 = 96;
 /// The hunt point: within this it is reached; searches with no route, and walks, before the
 /// hunt stays where it is.
 const HUNT_POINT_NEAR: f64 = 16.0;
@@ -508,6 +528,9 @@ pub struct PearlState {
     /// The hunt point reached (or given up), and the walks and the searches with no route.
     #[serde(default)]
     pub at_hunt_point: bool,
+    /// Kills at the burrow in hand.
+    #[serde(default)]
+    pub site_kills: u32,
     #[serde(default)]
     pub hunt_point_walks: u32,
     #[serde(default)]
@@ -1251,6 +1274,7 @@ impl Plan {
         let dead = e.is_some_and(|e| e.dead) || health.is_some_and(|h| h <= 0.0);
         if dead {
             self.pearls.kills += 1;
+            self.pearls.site_kills += 1;
             self.pearls.last_kill = Some(tick);
             // The base tries again at once after a kill (P5's pause), and so does the hunt's guard.
             self.base_resume();
@@ -1829,8 +1853,14 @@ impl Plan {
             self.pearls.last_near = Some(tick);
         }
         let quiet = tick.saturating_sub(self.pearls.last_near.unwrap_or(last).max(last));
-        let calm_near = quiet < r.burrow_idle_ticks;
-        if idle >= r.kill_window || quiet >= r.burrow_idle_ticks {
+        // A site that has had kills has used its locals up: moved after `burrow_idle_after_kill`.
+        let idle_limit = if self.pearls.site_kills > 0 {
+            r.burrow_idle_after_kill
+        } else {
+            r.burrow_idle_ticks
+        };
+        let calm_near = quiet < idle_limit;
+        if idle >= r.kill_window || quiet >= idle_limit {
             self.move_burrow(tick, r, b, idle, calm_near);
             return Some(Controls::default());
         }
@@ -3000,7 +3030,8 @@ impl Plan {
             // its view saw few): each place's best site scored by the endermen seen within 40
             // of it, the open floor round O, less delta ground within 16; the best is taken.
             let mut anchors = vec![feet];
-            anchors.extend(supply_anchors(w, &seen, feet));
+            let away = self.pearls.moved_from.last().map(|m| (*m, r.burrow_move));
+            anchors.extend(supply_anchors(w, &seen, feet, away, r.hunt_point));
             let mut best: Option<(i64, Burrow)> = None;
             let mut why: Vec<(&'static str, u32)> = Vec::new();
             for a in anchors {
@@ -3056,6 +3087,29 @@ impl Plan {
                 // Walk on to warped nylium seen (the forest's floor), never off into another biome
                 // (race 45534591345 lane 0 walked away from its feet on a cap into the basalt
                 // deltas, 71 blocks bridged, and died to a magma cube).
+                // After a move: a far walk to the best place 48 or more from the old B (endermen
+                // seen there lately, no delta ground, near the hunt point).
+                if let Some(last) = self.pearls.moved_from.last().copied()
+                    && let Some(a) =
+                        supply_anchors(w, &seen, feet, Some((last, r.burrow_move)), r.hunt_point)
+                            .first()
+                            .copied()
+                {
+                    let c = (a[0], a[1], a[2]);
+                    let mut walk = Walk::far_to(c, Goal::Near { pos: c, range: 6.0 }, tick);
+                    if walk.route_now(w, tick) {
+                        self.walks += 1;
+                        self.note(
+                            tick,
+                            format!("to new ground at {a:?}"),
+                            format!(
+                                "{}+ from the old burrow {last:?}: new chunks, new spawns",
+                                r.burrow_move
+                            ),
+                        );
+                        return Some(Task::Explore(walk));
+                    }
+                }
                 if let Some(t) = self.walk_to_forest_floor(w, tick, feet, &r) {
                     return Some(t);
                 }
@@ -3160,6 +3214,7 @@ impl Plan {
             self.pearls.built = false;
             self.pearls.walks = 0;
             self.pearls.site_blocks = 0;
+            self.pearls.site_kills = 0;
             self.note(
                 tick,
                 format!(
