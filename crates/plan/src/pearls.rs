@@ -92,7 +92,7 @@ impl Default for PearlRules {
             parked_look_ticks: 40,
             fight_cap: 2400,
             kill_window: 12000,
-            burrow_idle_ticks: 2400,
+            burrow_idle_ticks: 9600,
             moves_without_kill: 1000,
             burrow_move: 32,
             site_every: 100,

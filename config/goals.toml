@@ -521,7 +521,9 @@ moves_without_kill = 1000
 # supply probe counted 18 endermen within 128 in 10 minutes and 0.4 new a minute, and the spot
 # matters threefold over 10 blocks; three dev-forest bots waited 3,300 to 4,000 ticks for one in the
 # mouth's sight (race 45534591345).
-burrow_idle_ticks = 2400
+# 9,600 since the frontier races 45551462309 to 45557307097: the one good site near the frontier
+# made the kills, and every move from it drifted to no site at all (none in 4,800 ticks).
+burrow_idle_ticks = 9600
 burrow_move = 32
 # Ticks between site searches (the plan's risk 8: 24 cells round, not every tick).
 site_every = 100
