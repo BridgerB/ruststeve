@@ -326,6 +326,12 @@ pub struct PearlState {
     /// Walks off ledges made.
     #[serde(default)]
     pub ledge_tries: u32,
+    /// The feet's height when the restock began: no dig below it.
+    #[serde(default)]
+    pub restock_floor: Option<i32>,
+    /// A pillar out of a hole in hand: the feet cell it began from.
+    #[serde(default)]
+    pub pillar: Option<[i32; 3]>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -850,6 +856,16 @@ impl Plan {
             }
         } else if angry.is_empty() {
             self.pearls.threat_since = None;
+        }
+        // In a hole (every side shut at the head's height, so no step out): a pillar up, a block
+        // under the feet at the top of each jump (P4's seed 21 ended 9 below the floor with every
+        // walk failing NoPath).
+        if !self.pearls.built
+            && matches!(self.task, Task::Idle)
+            && !self.pearls.burrow.is_some_and(|b| b.inside(feet))
+            && let Some(c) = self.out_of_hole(w, tick, feet)
+        {
+            return Some(c);
         }
         // Rows 6 and 7 that are tasks (the base, a walk to B, a dig to reopen the mouth).
         if !matches!(self.task, Task::Idle) {
@@ -2036,6 +2052,75 @@ impl Plan {
         None
     }
 
+    /// The pillar out of a hole: with every side of the feet shut one up (no step out) and
+    /// open sky over the head for two, jump, and at the top put a burrow block into the cell the
+    /// feet left (clicking the floor's top). `None` when not in a hole.
+    fn out_of_hole(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Controls> {
+        let body = w.body?;
+        let at = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2]))
+                .and_then(data::generated::shapes::collision)
+        };
+        let open = |c: [i32; 3]| at(c) == Some(data::types::Collision::Empty);
+        let start = match self.pearls.pillar {
+            Some(p) => p,
+            None => {
+                let walled = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+                    .iter()
+                    .all(|d| !open([feet[0] + d[0], feet[1] + 1, feet[2] + d[1]]));
+                let sky =
+                    open([feet[0], feet[1] + 2, feet[2]]) && open([feet[0], feet[1] + 3, feet[2]]);
+                if !walled || !sky || !body.on_ground {
+                    return None;
+                }
+                self.pearls.pillar = Some(feet);
+                self.note(
+                    tick,
+                    "out of the hole".to_owned(),
+                    format!("every side of the feet {feet:?} shut a block up; a pillar up"),
+                );
+                feet
+            }
+        };
+        // Up a block from where it began, on the ground: done (the walks take it from here).
+        if body.on_ground && feet[1] > start[1] {
+            self.pearls.pillar = None;
+            return None;
+        }
+        let Some(item) = BURROW_BLOCKS
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)
+        else {
+            self.pearls.pillar = None;
+            return None;
+        };
+        if let hold::Hold::Act(a) = hold::toward(w, item) {
+            if self.acts.is_empty() {
+                self.acts.push(a);
+            }
+            return Some(look(w.player.yaw.into(), EYES_DOWN));
+        }
+        // At the top of the jump: the block into the cell the feet left.
+        if !body.on_ground
+            && body.pos[1] >= f64::from(start[1]) + 1.0
+            && open(start)
+            && self.acts.is_empty()
+            && w.click.is_none()
+        {
+            self.acts.push(world::Act::UseOn {
+                pos: world::BlockPos::new(start[0], start[1] - 1, start[2]),
+                face: 1,
+            });
+        }
+        Some(Controls {
+            jump: body.on_ground,
+            pitch: Some(EYES_DOWN),
+            yaw: w.player.yaw.into(),
+            ..Controls::default()
+        })
+    }
+
     /// Down off a fungus cap: a walk to the floor seen below, else the cap block under the feet
     /// dug (`base::dig_down`: a landing within the safe fall, no lava).
     fn cap_down(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
@@ -2155,7 +2240,13 @@ impl Plan {
         // The floor counts: a floor cell beside the feet, in reach where the bot stands, dug
         // straight (P4's seed 22 stood on a floor of exposed netherrack and found none "with a
         // way"): never the cell under the bot, never one over a hole deeper than 1 or by lava.
-        if let Some(body) = w.body {
+        // Never below the floor the restock began on: digs beside the feet, walked into for
+        // their drops, carved a pit 9 deep (P4's seed 21, 0e9fa0f).
+        let floor_y = *self
+            .pearls
+            .restock_floor
+            .get_or_insert(w.body.map_or(0, |b| path::stand_cell(w, b.pos).1));
+        if let Some(body) = w.body.filter(|b| path::stand_cell(w, b.pos).1 >= floor_y) {
             let f = path::stand_cell(w, body.pos);
             let under = (f.0, f.1 - 1, f.2);
             let at = |c: path::Cell| w.block_at(world::BlockPos::new(c.0, c.1, c.2));
@@ -2200,7 +2291,7 @@ impl Plan {
         }
         let cands: Vec<path::Cell> = crate::exposed_near(w, &kinds)
             .into_iter()
-            .filter(|c| !self.refused_now(*c, tick))
+            .filter(|c| c.1 >= floor_y - 1 && !self.refused_now(*c, tick))
             .take(3)
             .collect();
         for c in cands {
@@ -2376,6 +2467,7 @@ impl Plan {
         }
         if filler >= r.restock_to {
             self.pearls.restock = false;
+            self.pearls.restock_floor = None;
         }
         if self.pearls.restock {
             if let Some(t) = self.restock_task(w, tick, filler) {

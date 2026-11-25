@@ -557,3 +557,50 @@ fn a_ledge_is_a_drop_or_lava_beside_the_feet() {
     assert!(pearls::ledge(&w, (B[0], B[1], B[2]), 2));
     assert!(!pearls::ledge(&w, (B[0] - 6, B[1], B[2]), 2));
 }
+
+/// P4's seed 21 ended in a pit 9 deep: a hunter in a shaft (every side shut a block up, the sky
+/// open) pillars up.
+#[test]
+fn a_hunter_in_a_pit_pillars_up() {
+    let mut w = floor_world(B);
+    for y in 61..=63 {
+        set(&mut w, [B[0], y, B[2]], BlockKind::Air);
+    }
+    let feet = [f64::from(B[0]) + 0.5, 61.0, f64::from(B[2]) + 0.5];
+    w.body = Some(physics::Body {
+        pos: feet,
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    w.player.pos = Some(feet);
+    w.inventory.slots.insert(36, (ItemKind::Cobblestone, 64));
+    w.held = 0;
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.ender.left = true;
+    p.ender.phase = plan::endermen::EnderPhase::Hunt;
+    p.base.over = true;
+    w.ticks = 100;
+    let c = p.step(&w);
+    assert!(
+        notes(&p).iter().any(|n| n == "out of the hole"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(c.jump, "{c:?}");
+    // At the top of the jump, the block goes into the cell the feet left.
+    w.body = Some(physics::Body {
+        pos: [feet[0], 62.1, feet[2]],
+        on_ground: false,
+        ..physics::Body::default()
+    });
+    w.ticks = 101;
+    p.step(&w);
+    let acts = p.take_acts();
+    assert!(
+        acts.contains(&Act::UseOn {
+            pos: BlockPos::new(B[0], 60, B[2]),
+            face: 1
+        }),
+        "{acts:?}"
+    );
+}
