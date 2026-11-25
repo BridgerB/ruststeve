@@ -366,6 +366,21 @@ pub fn site_toward(
     away: i32,
     seen: &[[f64; 3]],
 ) -> (Option<Burrow>, Vec<(&'static str, u32)>) {
+    site_toward_skipping(w, mem, feet, avoid, away, &[], seen)
+}
+
+/// `site_toward`, never a B within 1 of a cell of `skip` (sites refused): P4's closed loop
+/// (seed 23) found the one refused site nearest the feet every search, and the hunt stood
+/// "refused before" from tick 30,000 to the cap.
+pub fn site_toward_skipping(
+    w: &World,
+    mem: &Memory,
+    feet: [i32; 3],
+    avoid: &[[i32; 3]],
+    away: i32,
+    skip: &[[i32; 3]],
+    seen: &[[f64; 3]],
+) -> (Option<Burrow>, Vec<(&'static str, u32)>) {
     let mut cand: Vec<(i32, [i32; 3])> = Vec::new();
     for dx in -SITE_RADIUS..=SITE_RADIUS {
         for dz in -SITE_RADIUS..=SITE_RADIUS {
@@ -377,6 +392,8 @@ pub fn site_toward(
                 let far = avoid.iter().all(|a| {
                     let (ax, az) = (a[0] - c[0], a[2] - c[2]);
                     ax * ax + az * az > away * away
+                }) && skip.iter().all(|a| {
+                    (a[0] - c[0]).abs() > 1 || (a[1] - c[1]).abs() > 1 || (a[2] - c[2]).abs() > 1
                 });
                 if far {
                     cand.push((dx * dx + dy * dy + dz * dz, c));

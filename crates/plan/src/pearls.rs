@@ -138,6 +138,8 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 
 /// Blocks from the feet a forest floor cell walked to lies at least (a new place to search).
 const FLOOR_MIN: i32 = 8;
+/// Blocks a walk on for a new site goes at least.
+const WALK_ON: i32 = 24;
 /// Blocks within which an angry enderman, ticking or frozen, stops a new provoke.
 const ANGRY_PRESENT: f64 = 128.0;
 /// Ticks within which an enderman hurt by no one (a magma block, fire, lava) is no provoke
@@ -248,6 +250,9 @@ pub struct PearlState {
     /// When an angry enderman with no burrow built was first seen (the pocket's hold).
     #[serde(default)]
     pub threat_since: Option<u64>,
+    /// Pearl items seen within 12 of O, by id (each noted once).
+    #[serde(default)]
+    pub drops: Vec<i32>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -671,6 +676,25 @@ impl Plan {
                 return Some(self.row_fight(w, tick, &r, b, feet, &angry));
             }
             self.pearls.fight = None;
+            // An angry one beyond the fight's 64, ticking or frozen, is present too: in B,
+            // never in M (P4's closed loop stood in M with an angry frozen one 80 off; the real
+            // server hit M 4 times in 6).
+            if let Some(s) = endermen::endermen(w)
+                .into_iter()
+                .find(|s| s.dist <= ANGRY_PRESENT && creepy(w, s.id))
+            {
+                self.cut_task(tick, "hold");
+                self.row(tick, "hold", || {
+                    format!(
+                        "enderman {} angry {:.1} off, ticking {}",
+                        s.id, s.dist, s.ticking
+                    )
+                });
+                if feet != b.b {
+                    return Some(step_to(body.pos, b.b).0);
+                }
+                return Some(press_back(w, body.pos, b, look(b.out_yaw(), 0.0)));
+            }
         }
         // 5. collect (it may take the bot out of the burrow onto O and beside it).
         if let Some(b) = self.pearls.burrow.filter(|_| self.pearls.built)
@@ -819,6 +843,38 @@ impl Plan {
             );
         }
         self.pearls.pearls_seen = pearls;
+        // Pearl items seen by the burrow, each once: dropped against picked (P4's closed loops got
+        // 0.42 a kill where the loot gives 0.5).
+        if let Some(b) = self.pearls.burrow {
+            let o = Burrow::centre(b.o);
+            let new: Vec<(i32, [f64; 3])> = w
+                .entities
+                .iter()
+                .filter(|(id, e)| {
+                    e.item().is_some_and(|(k, _)| k == ItemKind::EnderPearl)
+                        && !self.pearls.drops.contains(id)
+                        && dist(e.pos, o) <= 12.0
+                })
+                .map(|(id, e)| (*id, e.pos))
+                .collect();
+            for (id, at) in new {
+                self.pearls.drops.push(id);
+                self.note(
+                    tick,
+                    format!("pearl dropped (item {id})"),
+                    format!(
+                        "at ({:.1}, {:.1}, {:.1}), {:.1} from O; {} dropped, {} picked, {} kills",
+                        at[0],
+                        at[1],
+                        at[2],
+                        dist(at, o),
+                        self.pearls.drops.len(),
+                        self.pearls.picked,
+                        self.pearls.kills
+                    ),
+                );
+            }
+        }
         // Ticking endermen seen, every 20 ticks, kept 600 (the mouth's side at site choice).
         if tick.is_multiple_of(20) {
             self.pearls
@@ -1933,30 +1989,18 @@ impl Plan {
                 return None;
             }
             self.pearls.site_at = Some(tick);
-            let mut avoid = self.pearls.refused.clone();
-            avoid.extend(self.pearls.moved_from.iter().copied());
             // A refused site is never tried again (within 1); a moved-from one is left by
-            // `burrow_move` (a new place for spawns).
+            // `burrow_move` (a new place for spawns). Searched from the feet where they are.
             let seen: Vec<[f64; 3]> = self.pearls.sightings.iter().map(|(_, p)| *p).collect();
-            let (found, why) = if self.pearls.moved_from.is_empty() {
-                burrow::site_toward(w, &w.memory, feet, &avoid, 1, &seen)
-            } else {
-                let (f, mut y) = burrow::site_toward(
-                    w,
-                    &w.memory,
-                    feet,
-                    &self.pearls.moved_from,
-                    r.burrow_move,
-                    &seen,
-                );
-                match f {
-                    Some(b) if !self.pearls.refused.contains(&b.b) => (Some(b), y),
-                    _ => {
-                        y.push(("refused before", 1));
-                        (None, y)
-                    }
-                }
-            };
+            let (found, why) = burrow::site_toward_skipping(
+                w,
+                &w.memory,
+                feet,
+                &self.pearls.moved_from,
+                r.burrow_move,
+                &self.pearls.refused,
+                &seen,
+            );
             let reasons = why
                 .iter()
                 .map(|(k, n)| format!("{n} {k}"))
@@ -1986,12 +2030,19 @@ impl Plan {
                 }
                 // Toward the endermen seen lately (their centroid), else away from the last burrow.
                 let from = self.pearls.moved_from.last().copied().unwrap_or(feet);
+                // In one walk of 24 or more: toward their middle when it is farther, else away
+                // from the feet (P4's seed 23 walked on about a block a 100 ticks for 6,000).
+                let here = (feet[0], feet[1], feet[2]);
                 let goal = match centroid(&seen) {
-                    Some(c) => Goal::Near {
+                    Some(c) if path::flat_distance(c, here) >= f64::from(WALK_ON) => Goal::Near {
                         pos: c,
                         range: 12.0,
                     },
-                    None => Goal::Away {
+                    _ if self.pearls.moved_from.is_empty() => Goal::Away {
+                        pos: here,
+                        range: f64::from(WALK_ON),
+                    },
+                    _ => Goal::Away {
                         pos: (from[0], from[1], from[2]),
                         range: f64::from(r.burrow_move + 8),
                     },

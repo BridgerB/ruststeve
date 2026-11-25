@@ -487,11 +487,8 @@ fn an_angry_enderman_far_off_stops_every_provoke() {
     p.step(&w);
     let n = notes(&p);
     assert!(!n.iter().any(|x| x == "provoke enderman 52"), "{n:?}");
-    assert!(
-        n.iter()
-            .any(|x| x.starts_with("no provoke: enderman 53 angry")),
-        "{n:?}"
-    );
+    // Held in B (P4: an angry frozen one meant wait in M; the real server hits M).
+    assert_eq!(p.pearls.row, "hold", "{n:?}");
 }
 
 /// P4's closed loop: angry with no burrow built, a pocket where the bot stands, never for good.
