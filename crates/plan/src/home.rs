@@ -138,6 +138,11 @@ pub struct HomeState {
     /// The night a hut was begun for (the day count), so one hut a night.
     #[serde(default)]
     pub hut_night: Option<i64>,
+    /// The night's cook begun (or found short of fuel) and its end noted.
+    #[serde(default)]
+    pub cook_noted: bool,
+    #[serde(default)]
+    pub cook_ended: bool,
     #[serde(default)]
     pub done: bool,
 }
@@ -286,6 +291,31 @@ fn out_of_plane(front: &Front, c: Cell) -> i32 {
         front.stand.2 - front.normal.1,
     );
     (c.0 - plane.0) * front.normal.0 + (c.2 - plane.1) * front.normal.1
+}
+
+/// Ticks of furnace fuel held: planks and coal by their burn time, a log as the four planks it
+/// makes. Warped and crimson wood has no burn time, so the forest's stems count nothing.
+pub fn fuel_ticks_held(counts: &crate::make::Counts) -> i32 {
+    let planks = data::generated::tags::item_tag("planks").unwrap_or(&[]);
+    let coals = data::generated::tags::item_tag("coals").unwrap_or(&[]);
+    let logs = data::generated::tags::item_tag("logs").unwrap_or(&[]);
+    counts
+        .iter()
+        .filter(|(_, n)| **n > 0)
+        .map(|(k, n)| {
+            let t = data::generated::fuel::fuel_ticks(*k)
+                .and_then(|t| i32::try_from(t).ok())
+                .unwrap_or(0);
+            if planks.contains(k) || coals.contains(k) {
+                n * t
+            } else if logs.contains(k) && t > 0 {
+                // Four planks of 300 ticks each (the generated fuel table's planks).
+                n * 4 * 300
+            } else {
+                0
+            }
+        })
+        .sum()
 }
 
 fn dimension(w: &World) -> Option<&str> {
@@ -1027,6 +1057,10 @@ impl Plan {
                 self.ender.home.hut_night = Some(day);
                 self.hut_done = false;
                 self.hut_blocks = 0;
+                // A cook a night: its task budget and its end are the night's.
+                self.cook_over = false;
+                self.cook_tasks = 0;
+                self.ender.home.cook_noted = false;
                 self.note(
                     tick,
                     "home: a hut for the night".to_owned(),
@@ -1034,6 +1068,9 @@ impl Plan {
                 );
             }
             if let Some(t) = self.hut_step(w, tick) {
+                return Some(t);
+            }
+            if let Some(t) = self.home_cook(w, tick, &rules) {
                 return Some(t);
             }
         } else {
@@ -1099,6 +1136,68 @@ impl Plan {
             ),
         );
         Some(Task::Idle)
+    }
+
+    /// The night's cook in the hut (overworld-leg wall 4's cook phase, its `cook-*` rows): with
+    /// raw meat held and the fuel to cook all of it (overworld planks, logs as their four planks,
+    /// coal; warped wood is no fuel), table and furnace placed where the bot stands and the meat
+    /// smelted, cooked meat 8 food a piece against raw's 3. `None` with nothing to cook, the fuel
+    /// short (noted), or the night's cook over.
+    fn home_cook(
+        &mut self,
+        w: &World,
+        tick: u64,
+        rules: &crate::make::SurvivalRules,
+    ) -> Option<Task> {
+        let counts = crate::held(w);
+        let raw: i32 = eat::raw_held(&counts, rules).iter().map(|r| r.1).sum();
+        if self.cook_over || (raw == 0 && self.batch.is_none()) {
+            if self.ender.home.cook_noted && !self.ender.home.cook_ended {
+                self.ender.home.cook_ended = true;
+                self.note(
+                    tick,
+                    "home: the cook over".to_owned(),
+                    format!(
+                        "{raw} raw left, {} food points held, after {} cook tasks",
+                        eat::food_points(w, rules),
+                        self.cook_tasks
+                    ),
+                );
+            }
+            return None;
+        }
+        let fuel = fuel_ticks_held(&counts);
+        let need = raw * 200;
+        if self.batch.is_none() && fuel < need {
+            if !self.ender.home.cook_noted {
+                self.ender.home.cook_noted = true;
+                self.ender.home.cook_ended = true;
+                self.note(
+                    tick,
+                    "home: no cook, the fuel short".to_owned(),
+                    format!("{raw} raw pieces want {need} ticks of fuel; {fuel} held (warped wood does not burn)"),
+                );
+            }
+            return None;
+        }
+        if !self.ender.home.cook_noted {
+            self.ender.home.cook_noted = true;
+            self.ender.home.cook_ended = false;
+            self.note(
+                tick,
+                "home: cook in the hut".to_owned(),
+                format!(
+                    "{raw} raw pieces, {fuel} ticks of fuel, {} furnaces and {} tables held",
+                    craft::count(w, ItemKind::Furnace),
+                    craft::count(w, ItemKind::CraftingTable)
+                ),
+            );
+        }
+        let origin = w.body?.pos;
+        self.home_cook = true;
+        let t = self.decide(w, origin, tick);
+        self.home_cook = false;
+        Some(t)
     }
 
     /// Up to the open sky by stairs in rock (overworld-leg wall 1: never through the caves),

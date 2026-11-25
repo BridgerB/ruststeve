@@ -593,3 +593,21 @@ fn the_climbs_stairs_turn_from_a_cave_ahead() {
     let _ = s.step(&w, 1);
     assert_eq!(s.cave_refusals(), 0, "{:?}", s.refusals);
 }
+
+#[test]
+fn warped_wood_is_no_fuel_and_the_cook_wants_burning_planks() {
+    let mut c = make::Counts::new();
+    c.insert(ItemKind::WarpedStem, 8);
+    c.insert(ItemKind::WarpedPlanks, 12);
+    assert_eq!(home::fuel_ticks_held(&c), 0, "warped wood burns nothing");
+    c.insert(ItemKind::OakLog, 2);
+    c.insert(ItemKind::Coal, 1);
+    // Two logs as eight planks of 300, a coal 1,600.
+    assert_eq!(home::fuel_ticks_held(&c), 2 * 4 * 300 + 1600);
+    c.remove(&ItemKind::Coal);
+    c.insert(ItemKind::Beef, 6);
+    let t = table();
+    let row = plan::cook_goal(&c, &t.survival).unwrap_or_else(|| panic!("a cook row"));
+    assert_eq!(row.id, "cook-fuel", "{row:?}");
+    assert_eq!(row.provides[0].0.key, "item:oak_planks", "{row:?}");
+}

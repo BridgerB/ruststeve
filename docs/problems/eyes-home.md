@@ -24,14 +24,14 @@ A case file from a race resumed at the frontier shows `stage reached: overworld`
 5. **The trip**: the heading's legs to `[home] way` (empty: straight at the portal until the strip map says otherwise), then the portal's column, with the travel's rules (`EnderPhase::travels`).
 6. **The approach** within 24: lava beside or under the portal's feet cells and the standing cells in front of its two lowest rows sealed with filler first (`home_seal`, at most 24); the plain walk into a lit cell (`Task::Enter`), else (only with no front known) a far walk beside it (bridging the lava), else a tunnel; a portal seen out is lit with flint and steel when held. The front (`portal_front`) is the face with a floored standing cell: the walk in starts only on its side, no far walk once a front is known, the tunnel goes to the cell behind the standing cell ((22, 35, -18) at the entry portal); the north face (no floor over the lava sea) is never chosen.
 7. **`Task::Enter`** is done in any dimension but the one it began in.
-8. **The overworld**: stairs up in rock to the open sky (`stairs_to_surface`), dry and in rock: past 4 from the climb's start a stair that would cut an open cell (a cave) turns its heading (`Stairs::rock`, "cave at"), stone pickaxes from the stairs' cobblestone (`base::CLIMB_STEPS`) when the stone uses fall under 30; on the surface a hut each night, eat to 18, hunt, look for animals; then a rest toward 18 health for at most 2,400 ticks; "home: over, fed on the surface".
+8. **The overworld**: stairs up in rock to the open sky (`stairs_to_surface`), dry and in rock: past 4 from the climb's start a stair that would cut an open cell (a cave) turns its heading (`Stairs::rock`, "cave at"), stone pickaxes from the stairs' cobblestone (`base::CLIMB_STEPS`) when the stone uses fall under 30; on the surface a hut each night, the night's cook in it when raw meat and the fuel for it are held (`home_cook`), eat to 18, hunt, look for animals; then a rest toward 18 health for at most 2,400 ticks; "home: over, fed on the surface".
 
 Unit tests: `crates/plan/tests/home.rs` (Home begun with 12 and not 11, both top-up ends, the eyes first, the far lookup past the loaded chunks, the trip aimed at the remembered portal, a lit portal walked into, the climb from under rock, fed on the surface is over and never back to the portal, meat eaten first) and `home::tests` (`Enter`'s done check both ways).
 
 ## Not built yet
 - The bot's old surface stairs as the way up (memory holds no air; the climb is dry stairs only).
 - A seal of lava faces met inside the approach's tunnel (its stairs refuse lava beside a cell instead); only the portal's own feet cells are sealed.
-- Cooking on the surface (raw meat raises the bar; saturation stays low). Warped planks do not burn.
+- Cooking by day, and fuel gathered on the surface: the night's cook needs overworld wood or coal already held (warped wood does not burn); short, the bot eats the meat raw.
 
 ## Walls
 (none yet)

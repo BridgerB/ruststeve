@@ -694,6 +694,10 @@ pub struct Plan {
     pub cook_tasks: u32,
     #[serde(default)]
     pub cook_over: bool,
+    /// The way home's cook (issue 19d): set only around one `decide` call from Home's night in
+    /// the hut, which then takes the cook row as the clean flow's cook phase does.
+    #[serde(default)]
+    pub home_cook: bool,
     /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
     /// (closed, or none could be built).
     #[serde(default)]
@@ -910,6 +914,7 @@ impl Plan {
             portal_food_noted: false,
             cook_tasks: 0,
             cook_over: false,
+            home_cook: false,
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
@@ -3671,7 +3676,9 @@ impl Plan {
         // come back up, stocked, before the cast.
         let mut stock_row = false;
         let mut cook_row = false;
-        if self.aim == Aim::Race && !self.kit_row {
+        if self.home_cook {
+            cook_row = true;
+        } else if self.aim == Aim::Race && !self.kit_row {
             match self.clean_flow(w, &table.survival, tick) {
                 Flow::Task(t) => return *t,
                 Flow::Stock => stock_row = true,
@@ -5853,15 +5860,41 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
     };
     if have < need {
         let plank = burns(&data::ItemKind::OakPlanks).max(1);
-        let held: i32 = counts
+        // Warped and crimson wood does not burn (the way home carries its stems): with any held,
+        // the fuel row names the planks of a log that burns, so no stem is crafted for fuel.
+        let logs = data::generated::tags::item_tag("logs").unwrap_or(&[]);
+        let nether_wood = counts
             .iter()
-            .filter(|(k, _)| planks.contains(k))
-            .map(|(_, n)| *n)
-            .sum();
+            .any(|(k, n)| *n > 0 && (planks.contains(k) || logs.contains(k)) && burns(k) == 0);
+        let burning_log = counts
+            .iter()
+            .filter(|(k, n)| **n > 0 && logs.contains(k) && burns(k) > 0)
+            .filter_map(|(k, _)| {
+                k.name()?
+                    .strip_suffix("_log")
+                    .map(|b| format!("{b}_planks"))
+            })
+            .find(|p| data::ItemKind::from_name(p).is_some());
+        let (need_name, held) = match burning_log {
+            Some(p) if nether_wood => {
+                let held = data::ItemKind::from_name(&p)
+                    .and_then(|k| counts.get(&k).copied())
+                    .unwrap_or(0);
+                (format!("item:{p}"), held)
+            }
+            _ => (
+                "tag:planks".to_owned(),
+                counts
+                    .iter()
+                    .filter(|(k, _)| planks.contains(k) && burns(k) > 0)
+                    .map(|(_, n)| *n)
+                    .sum(),
+            ),
+        };
         let more = (need - have + plank - 1) / plank;
         return Some(row(
             "cook-fuel",
-            make::Need::parse("tag:planks")?,
+            make::Need::parse(&need_name)?,
             held + more,
         ));
     }
