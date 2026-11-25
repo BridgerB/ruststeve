@@ -505,8 +505,13 @@ fn real_waves(
                     gives.iter().try_for_each(|g| {
                         for _ in 0..80 {
                             let reply = r.command(g)?;
-                            // A summon into a chunk not loaded yet says "Invalid position".
-                            if !reply.contains("not loaded") && !reply.contains("Invalid position")
+                            // A summon into a chunk not loaded yet says "Invalid position". A fill is
+                            // done only when the server says it filled ("Successfully filled", "No
+                            // blocks were filled"): issue 18's e05 once ran with no arena built.
+                            let filled = !g.starts_with("fill ") || reply.contains("filled");
+                            if filled
+                                && !reply.contains("not loaded")
+                                && !reply.contains("Invalid position")
                             {
                                 return Ok(());
                             }

@@ -1573,8 +1573,11 @@ set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0]
 # stone and running east: B the bot's cell, M the mouth east of it, O east of M where the enderman
 # stands. Rows at Normal, each on its own landing 40 south of its centre. The arena rows (e04,
 # e05, e08) start in M: a stone floor 19 by 13, walls four high, a glass roof at 4 (so no
-# daylight teleport and no rain reach it, and no mob spawns in its light), the burrow (back wall,
-# sides, roof at 2) in its west part, an enderman 10 east of M with its AI. Script
+# daylight teleport and no rain reach it, and no mob spawns in its light), the burrow in its west
+# part: a solid stone block 4 long, 5 wide and 3 high with the 1 by 2 tunnel B, M in it (since
+# parity 45535279839 the cells beside B and behind it are filled: with walls one thick they were 2
+# from B, as O is, and the enderman paced round to them; the top of the roof is cell 3 over the
+# floor, 3 from B, and under the glass only 1 high), an enderman 10 east of M with its AI. Script
 # `burrow:<mode>` (bot::script::BurrowMode): from M stare at its eye until it is creepy, then
 # (hold, strike) walk west into B and look at its torso, or (near) stay in M.
 # - e04-mouth: it comes to O and stays; the bot in B is never hit.
@@ -1596,7 +1599,7 @@ script = "burrow:hold"
 ticks = 460
 difficulty = "normal"
 mobs = [["enderman", 10, 0, 0]]
-fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -2, 0, -1, -2, 2, 1], ["stone", -1, 0, -1, 0, 2, -1], ["stone", -1, 0, 1, 0, 2, 1], ["stone", -1, 2, 0, 0, 2, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
 
 [[moment]]
 id = "e05-strike"
@@ -1609,7 +1612,7 @@ difficulty = "normal"
 give = ["iron_sword 1"]
 loot = true
 mobs = [["enderman", 10, 0, 0]]
-fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -2, 0, -1, -2, 2, 1], ["stone", -1, 0, -1, 0, 2, -1], ["stone", -1, 0, 1, 0, 2, 1], ["stone", -1, 2, 0, 0, 2, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
 
 [[moment]]
 id = "e06-roof"
@@ -1640,7 +1643,7 @@ dz = 40
 script = "still"
 ticks = 60
 items = [["ender_pearl", 1, 0, 0]]
-fill = [["air", -2, 0, -2, 2, 3, 2], ["stone", -2, -1, -2, 2, -1, 2], ["stone", -2, 0, -1, -2, 2, 1], ["stone", -1, 0, -1, 0, 2, -1], ["stone", -1, 0, 1, 0, 2, 1], ["stone", -1, 2, 0, 0, 2, 0]]
+fill = [["air", -2, 0, -2, 2, 3, 2], ["stone", -2, -1, -2, 2, -1, 2], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
 
 [[moment]]
 id = "e08-near"
@@ -1651,4 +1654,4 @@ script = "burrow:near"
 ticks = 300
 difficulty = "normal"
 mobs = [["enderman", 10, 0, 0]]
-fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -2, 0, -1, -2, 2, 1], ["stone", -1, 0, -1, 0, 2, -1], ["stone", -1, 0, 1, 0, 2, 1], ["stone", -1, 2, 0, 0, 2, 0]]
+fill = [["stone", -6, -1, -6, 12, -1, 6], ["air", -5, 0, -5, 11, 3, 5], ["stone", -6, 0, -6, 12, 3, -6], ["stone", -6, 0, 6, 12, 3, 6], ["stone", -6, 0, -5, -6, 3, 5], ["stone", 12, 0, -5, 12, 3, 5], ["glass", -6, 4, -6, 12, 4, 6], ["stone", -3, 0, -2, 0, 2, 2], ["air", -1, 0, 0, 0, 1, 0]]
