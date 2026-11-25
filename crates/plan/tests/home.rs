@@ -750,3 +750,40 @@ fn the_cube_tunnel_runs_toward_the_point_away_from_the_cubes() {
     );
     assert_eq!(p.ender.home.cube_tunnels, 1);
 }
+
+#[test]
+fn a_stack_left_on_the_cursor_is_put_down() {
+    // Race 45715674818 lane 0: netherrack 33 on the cursor, stairs stood 1,200 ticks.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.carried = Some((ItemKind::Netherrack, 33));
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    let mut put = false;
+    for t in 100..260 {
+        w.ticks = t;
+        w.session.server_ticks = t;
+        p.step(&w);
+        put |= p.take_acts().iter().any(|a| {
+            matches!(
+                a,
+                world::Act::Click {
+                    button: 0,
+                    mode: 0,
+                    ..
+                }
+            )
+        });
+    }
+    assert!(
+        noted(&p, "cursor put down (Netherrack 33)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(put, "a click puts it in a free slot");
+    assert_eq!(p.cursor_puts, 1);
+}

@@ -169,6 +169,9 @@ const SHELTER_BLOCKS: &[data::ItemKind] = &[
 /// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
 /// `SEAL_EVERY_TICKS`).
 const SHELTER_EVERY_TICKS: u64 = 10;
+/// Ticks a stack may sit on the cursor with no window and no click before it is put down: a swap
+/// through the cursor is a few ticks (a click and its answer), five seconds is stuck.
+const CURSOR_STUCK_TICKS: u64 = 100;
 /// Shelter blocks in one run before the bot stops building: a closed box round one cell is 10
 /// (eight wall cells, one more for the roof to hang on, the roof); eight boxes.
 const SHELTER_MAX: u32 = 80;
@@ -698,6 +701,11 @@ pub struct Plan {
     /// the hut, which then takes the cook row as the clean flow's cook phase does.
     #[serde(default)]
     pub home_cook: bool,
+    /// A stack on the cursor since (no window, no click), and the stacks put down from it.
+    #[serde(default)]
+    pub cursor_since: Option<u64>,
+    #[serde(default)]
+    pub cursor_puts: u32,
     /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
     /// (closed, or none could be built).
     #[serde(default)]
@@ -915,6 +923,8 @@ impl Plan {
             cook_tasks: 0,
             cook_over: false,
             home_cook: false,
+            cursor_since: None,
+            cursor_puts: 0,
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
@@ -1035,6 +1045,7 @@ impl Plan {
         // swing count before the tick: a strike the raised shield drops is given back.
         let swings_before = self.swing_count();
         let c = self.step_inner(w);
+        self.cursor_watch(w);
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
@@ -1042,6 +1053,45 @@ impl Plan {
         let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
         c
+    }
+
+    /// A stack left on the cursor with no window and no click pending for `CURSOR_STUCK_TICKS` is
+    /// put down in a free main slot (else the window is asked for again), noted: every task
+    /// begins with an empty cursor (race 45715674818 lane 0: netherrack 33 on the cursor, a
+    /// tunnel's stairs at (418, 40, 158) stood 1,200 ticks twice with no dig begun).
+    fn cursor_watch(&mut self, w: &World) {
+        let tick = w.session.server_ticks;
+        let Some((kind, n)) = w.inventory.carried else {
+            self.cursor_since = None;
+            return;
+        };
+        if w.window.is_some() || w.click.is_some() {
+            return;
+        }
+        let since = *self.cursor_since.get_or_insert(tick);
+        if tick.saturating_sub(since) < CURSOR_STUCK_TICKS || !self.acts.is_empty() {
+            return;
+        }
+        self.cursor_since = None;
+        self.cursor_puts += 1;
+        let act = match hold::put_down_slot(w) {
+            Some(slot) => world::Act::Click {
+                slot,
+                button: 0,
+                mode: 0,
+            },
+            None => world::Act::Resync,
+        };
+        self.note(
+            tick,
+            format!("cursor put down ({kind:?} {n})"),
+            format!(
+                "on the cursor {} ticks with no window and no click; {act:?}; {} in the run",
+                tick.saturating_sub(since),
+                self.cursor_puts
+            ),
+        );
+        self.acts.push(act);
     }
 
     /// A junk stack dropped and its kind back by `REPICKUP_JUMP` or more at once within

@@ -146,6 +146,14 @@ pub struct HomeState {
     /// Walks to a log for the cook's fuel.
     #[serde(default)]
     pub fuel_walks: u32,
+    /// The last cell stood on with filler to dig in reach, when it was last looked for, and the
+    /// walks back to it.
+    #[serde(default)]
+    pub ground: Option<Cell>,
+    #[serde(default)]
+    pub ground_at: Option<u64>,
+    #[serde(default)]
+    pub ground_walks: u32,
     /// Runs of stone pickaxes made on the trip (from blackstone).
     #[serde(default)]
     pub trip_pick_runs: u32,
@@ -192,6 +200,8 @@ pub const COOK_FOOD_FLOOR: i32 = 6;
 /// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
 /// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
 pub const CUBE_FIGHT: f64 = 3.0;
+/// How often the trip notes the last ground with filler to dig (a second).
+pub const GROUND_EVERY: u64 = 20;
 pub const CUBE_NEAR: f64 = 6.0;
 pub const CUBE_CROWD: usize = 2;
 pub const CUBE_CLEAR: f64 = 8.0;
@@ -887,6 +897,20 @@ impl Plan {
         // Stone pickaxes on the way from the deltas' blackstone (`#stone_tool_materials`), with
         // the kit's table and sticks, once the stone uses fall under the base's (the coordinator,
         // 2026-11-25: the long way wears them; the walls are full of blackstone).
+        // The last ground with filler to dig, every GROUND_EVERY ticks.
+        if self
+            .ender
+            .home
+            .ground_at
+            .is_none_or(|t| tick >= t + GROUND_EVERY)
+        {
+            self.ender.home.ground_at = Some(tick);
+            if !crate::heading::restock_cells(w, Some((1, 0)), crate::heading::RESTOCK_REACH)
+                .is_empty()
+            {
+                self.ender.home.ground = Some(path::feet_cell(body.pos));
+            }
+        }
         let picking = self.base.steps == base::CLIMB_STEPS.to_vec() && !self.base.over;
         let want = self.table.as_ref().map_or(100, |t| t.base.pickaxe_uses);
         let stone = craft::count(w, ItemKind::Blackstone)
@@ -1021,6 +1045,31 @@ impl Plan {
                 format!("the heading is over; {d} off"),
             );
             return Some(Task::Explore(walk));
+        }
+        self.expanded += walk.expanded;
+        // Stranded short of filler (on its own bridge, race 45715674818 lane 3 at (293, 38, 188)
+        // with 15, one under the 16 a far search needs to bridge at all): back to the last ground
+        // that had filler to dig, where the heading's restock runs.
+        if path::bridge_blocks(w) < crate::heading::HOME_KEEP + crate::heading::RESTOCK_BRIDGES
+            && let Some(g) = self.ender.home.ground
+            && flat(g, feet) > 2
+        {
+            let mut back = Walk::new(g, Goal::Near { pos: g, range: 1.5 }, Arrive::Goal, tick);
+            if back.route_now(w, tick) && back.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.ender.home.ground_walks += 1;
+                self.note(
+                    tick,
+                    format!("home: back to ground at {g:?} for filler"),
+                    format!(
+                        "no way on from {feet:?} with filler {}; walk {}",
+                        path::bridge_blocks(w),
+                        self.ender.home.ground_walks
+                    ),
+                );
+                return Some(Task::Explore(back));
+            }
+            self.expanded += back.expanded;
         }
         self.retry_at = tick + crate::RETRY_TICKS * 10;
         self.note(
