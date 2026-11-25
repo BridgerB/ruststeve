@@ -292,7 +292,7 @@ const RAW: [ItemKind; 4] = [
 ];
 
 impl Plan {
-    fn overland_rules(&self) -> OverlandRules {
+    pub(crate) fn overland_rules(&self) -> OverlandRules {
         self.table
             .as_ref()
             .map(|t| t.overland.clone())

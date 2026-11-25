@@ -213,7 +213,7 @@ fn the_standing_cell_is_clear_of_the_lava() {
 /// The descent: dry stairs, toward the room from far out, away from its centre when over it.
 #[test]
 fn the_descent_is_dry_and_keeps_out_of_the_footprint() {
-    for (x, want) in [(80, (-1, 0)), (12, (1, 0))] {
+    for (x, want) in [(60, (-1, 0)), (12, (1, 0))] {
         let w = load(
             &room_world((-40, 100), (-30, 40)),
             [f64::from(x) + 0.5, 64.0, 10.5],
@@ -560,5 +560,22 @@ fn the_stronghold_junk_keeps_what_the_way_needs() {
     assert!(
         !t.stronghold.junk_kinds().iter().any(|(k, _)| *k == food),
         "food in the junk"
+    );
+}
+
+/// The room far out on the surface: a far walk toward it before any stairs (race 45698008920
+/// began its stairs 112 to 118 off and reached the floor's height 78 to 92 off).
+#[test]
+fn a_far_room_is_walked_to_on_the_surface() {
+    let w = load(&room_world((-40, 140), (-30, 40)), [100.5, 64.0, 10.5]);
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.stronghold.room = Some(the_room(&w));
+    p.stronghold.looked = Some(0);
+    let t = p.stronghold_task(&w, 1);
+    let n = notes(&p);
+    assert!(matches!(t, Some(Task::Explore(_))), "{t:?} {n:#?}");
+    assert!(
+        n.iter().any(|n| n.starts_with("stronghold surface walk 1")),
+        "{n:#?}"
     );
 }

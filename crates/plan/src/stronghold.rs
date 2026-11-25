@@ -38,6 +38,13 @@ pub const WALK_NEAR: f64 = 24.0;
 /// frames a side, each side two from the centre on one axis.
 pub const RING: i32 = 2;
 
+/// The stairs begin within the floor's depth, `approach` and this of the room: a leg's
+/// `leg_reach` (6) and a stair's turn of the heading (2).
+pub const SURFACE_SLACK: f64 = 8.0;
+/// Surface walks toward the room at most: 118 off (race 45698008920) is one leg of 128, so six
+/// cover detours round water and hills.
+pub const SURFACE_WALKS: u32 = 6;
+
 /// The portal room as memory knows it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Room {
@@ -124,6 +131,8 @@ pub struct StrongholdState {
     pub descended: bool,
     /// The way to a known room reached the floor's height once (the tunnel's from there).
     pub at_floor: bool,
+    /// Surface walks toward a known room before the stairs.
+    pub surface_walks: u32,
     /// Stone bricks broken in reach of the tunnel's end.
     pub wall_breaks: u32,
     /// Stone pickaxes being made (`stronghold_pickaxes`), tasks begun for them in this round,
@@ -458,6 +467,15 @@ impl Plan {
         } else {
             1
         };
+        // Far out on the surface: walked nearer first. A stair moves one across for one down, so
+        // stairs begun 112 to 118 off ended 78 to 92 off at the floor's height and left the tunnel
+        // the rest (race 45698008920); a surface walk costs no pickaxe uses.
+        if self.stronghold.legs == 0
+            && !self.stronghold.at_floor
+            && let Some(t) = self.stronghold_surface(w, feet, target, &rules, tick)
+        {
+            return Some(t);
+        }
         // Over the floor's height: dry stairs down, out of the room's footprint.
         if feet.1 > target.1 + climb {
             return Some(self.stronghold_stairs(w, feet, target, centre, &rules, tick, false));
@@ -855,6 +873,68 @@ impl Plan {
 }
 
 impl Plan {
+    /// A far walk on the surface toward the room while it is more than the floor's depth and
+    /// `approach` and `SURFACE_SLACK` off: a leg of up to `[overland] leg_max` to seen ground on
+    /// the bearing, ending that far off at the nearest; `SURFACE_WALKS` at most. `None` when near
+    /// enough, out of walks, or with no route (the stairs then).
+    fn stronghold_surface(
+        &mut self,
+        w: &World,
+        feet: Cell,
+        target: Cell,
+        rules: &StrongholdRules,
+        tick: u64,
+    ) -> Option<Task> {
+        let height = (feet.1 - target.1).max(0);
+        let near = f64::from(height + rules.approach) + SURFACE_SLACK;
+        let off = f64::from(feet.0 - target.0).hypot(f64::from(feet.2 - target.2));
+        if off <= near || self.stronghold.surface_walks >= SURFACE_WALKS {
+            return None;
+        }
+        let over = self.overland_rules();
+        let deg = crate::overland::bearing(
+            [f64::from(feet.0), f64::from(feet.2)],
+            [f64::from(target.0), f64::from(target.2)],
+        );
+        let len = ((off - near).round() as i32).min(over.leg_max);
+        let to = crate::overland::leg_target(w, feet, deg, len, 16, over.scan_step)?;
+        self.stronghold.surface_walks += 1;
+        let goal = Goal::Plane {
+            pos: to,
+            range: over.leg_reach - 1.0,
+        };
+        let mut walk = Walk::far_to(to, goal, tick);
+        walk.more.keep = Some(over.bridge_keep);
+        walk.more.water = true;
+        let ok = walk.route_now(w, tick);
+        self.expanded += walk.expanded;
+        if !ok || walk.bridges_ahead() > over.bridge_max {
+            self.note(
+                tick,
+                format!(
+                    "stronghold surface walk {} refused",
+                    self.stronghold.surface_walks
+                ),
+                format!("toward {to:?}: {:?}; the stairs from here", walk.route),
+            );
+            self.stronghold.surface_walks = SURFACE_WALKS;
+            return None;
+        }
+        self.walks += 1;
+        self.note(
+            tick,
+            format!(
+                "stronghold surface walk {} to {to:?}",
+                self.stronghold.surface_walks
+            ),
+            format!(
+                "{off:.0} off the room's floor at {target:?}, the stairs within {near:.0}; {}",
+                self.stronghold_state(w)
+            ),
+        );
+        Some(Task::Explore(walk))
+    }
+
     /// Stone pickaxes made from the stairs' cobblestone, the pack's sticks and its table, where
     /// the bot stands, between the overland's and the stronghold's tasks: `spare_pickaxes` held
     /// with `spare_uses` or more each (overworld-leg wall 2's row, which `spares_wanted` closes
