@@ -855,6 +855,12 @@ rest_ticks = 8
 # spot whose column there, from the feet's level up to that point, holds no solid block seen.
 apex_out = 12.0
 apex_up = 9.1
+# Before the first throw, which has no bearing to check (the coordinator, 2026-11-25): no log or
+# leaf seen within 6 on the plane over the feet's level (a canopy that near could catch the drop),
+# else a walk 16 to the side with the fewest, at most 4 walks before throwing anyway.
+first_clear = 6
+open_walk = 16.0
+open_walks_max = 4
 # At most 4 throws (the plan, 19c.6: 0.8 eyes lost at one in five).
 max_throws = 4
 # Throw 2 once 200 out from throw 1 and 140 across its line (the coordinator from the jar's exact

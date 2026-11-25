@@ -53,6 +53,9 @@ pub struct EyeRules {
     pub rest_ticks: u64,
     pub apex_out: f64,
     pub apex_up: f64,
+    pub first_clear: i32,
+    pub open_walk: f64,
+    pub open_walks_max: u32,
     pub max_throws: u32,
     pub baseline: f64,
     pub baseline_across: f64,
@@ -92,6 +95,9 @@ impl Default for EyeRules {
             rest_ticks: 8,
             apex_out: 12.0,
             apex_up: 9.1,
+            first_clear: 6,
+            open_walk: 16.0,
+            open_walks_max: 4,
             max_throws: 4,
             baseline: 200.0,
             baseline_across: 140.0,
@@ -569,6 +575,55 @@ pub fn apex_blocked(
     })
 }
 
+fn tree_block(k: BlockKind) -> bool {
+    ["leaves", "logs"]
+        .iter()
+        .filter_map(|t| data::generated::tags::block_tag(t))
+        .any(|ks| ks.contains(&k))
+}
+
+/// The log and leaf blocks seen (a face showing) within `r` on the plane of `(x, z)`, from one
+/// over `y` up `apex_up`: what could catch an eye coming down near there.
+fn trees_around(w: &World, (x, y, z): path::Cell, r: i32, rules: &EyeRules) -> Vec<path::Cell> {
+    let top = y + rules.apex_up.ceil() as i32;
+    (x - r..=x + r)
+        .flat_map(|cx| (z - r..=z + r).map(move |cz| (cx, cz)))
+        .flat_map(|(cx, cz)| (y + 1..=top).map(move |cy| (cx, cy, cz)))
+        .filter(|&(cx, cy, cz)| {
+            w.block_at(world::BlockPos::new(cx, cy, cz))
+                .is_some_and(tree_block)
+                && crate::escape::exposed(w, (cx, cy, cz))
+        })
+        .collect()
+}
+
+/// Before the first throw (no bearing to check its drop): a log or leaf within `first_clear` of
+/// the feet over their level, the nearest first, or `None` when the spot is open.
+pub fn trees_near(w: &World, feet: [f64; 3], rules: &EyeRules) -> Option<path::Cell> {
+    let c = path::feet_cell(feet);
+    trees_around(w, c, rules.first_clear, rules)
+        .into_iter()
+        .min_by_key(|t| ((t.0 - c.0).pow(2) + (t.2 - c.2).pow(2), *t))
+}
+
+/// The most open of the eight sides: the point `open_walk` out with the fewest logs and leaves
+/// seen within `first_clear` of it (the first of a tie, east first, turning counter-clockwise).
+pub fn open_side(w: &World, feet: [f64; 3], rules: &EyeRules) -> path::Cell {
+    let c = path::feet_cell(feet);
+    (0..8)
+        .map(|i| {
+            let a = f64::from(i) * std::f64::consts::FRAC_PI_4;
+            let p = (
+                (feet[0] + a.cos() * rules.open_walk).floor() as i32,
+                c.1,
+                (feet[2] + a.sin() * rules.open_walk).floor() as i32,
+            );
+            (trees_around(w, p, rules.first_clear, rules).len(), i, p)
+        })
+        .min()
+        .map_or(c, |(_, _, p)| p)
+}
+
 /// Where a throw stands.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Phase {
@@ -981,6 +1036,9 @@ pub struct EyeState {
     pub spots: Vec<[f64; 2]>,
     /// When a throw that is due and blocked, or a craft that cannot go on, was last noted.
     pub noted_at: Option<u64>,
+    /// Walks out from trees before the first throw (`open_side`).
+    #[serde(default)]
+    pub open_walks: u32,
 }
 
 /// What survives a resume: written beside the snapshot and read back (`Plan::eyes_kept`,
@@ -1144,6 +1202,37 @@ impl Plan {
                 );
             }
             return None;
+        }
+        // The first throw: a tree near the feet could catch its drop, so walk out to the most
+        // open side first, at most `open_walks_max` times.
+        if bearing.is_none()
+            && self.eyes.open_walks < rules.open_walks_max
+            && let Some(tree) = trees_near(w, feet, &rules)
+        {
+            let to = open_side(w, feet, &rules);
+            self.eyes.open_walks += 1;
+            self.note(
+                tick,
+                format!(
+                    "eye throw {} ({}): walk to open ground",
+                    self.eyes.thrown + 1,
+                    why.name()
+                ),
+                format!(
+                    "a log or leaf at {tree:?} within {} over the feet; walk {} to {to:?} (walk {} of {})",
+                    rules.first_clear, rules.open_walk, self.eyes.open_walks, rules.open_walks_max
+                ),
+            );
+            return Some(Task::Explore(Walk::new(
+                to,
+                // Near enough: the spot is re-checked on arrival, and walked from again if needed.
+                Goal::Near {
+                    pos: to,
+                    range: 3.0,
+                },
+                Arrive::Goal,
+                tick,
+            )));
         }
         let t = Throw::new(w, why, bearing, &rules, tick);
         self.note(

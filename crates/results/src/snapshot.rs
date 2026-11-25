@@ -214,6 +214,7 @@ mod tests {
                 shattered: 1,
                 spots: vec![[10.5, 20.5], [180.0, 25.0]],
                 noted_at: Some(4_400),
+                open_walks: 1,
             },
         };
         let mut from = plan::Plan::new(plan::Aim::Hold);
