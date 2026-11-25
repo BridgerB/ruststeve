@@ -44,6 +44,7 @@ pub struct PearlRules {
     pub provoke_ticks: u64,
     pub provoke_min: f64,
     pub provoke_max: f64,
+    pub provoke_out_min: f64,
     pub provoke_tries: u32,
     pub provoke_skip_ticks: u64,
     pub fall_window: u64,
@@ -73,6 +74,7 @@ impl Default for PearlRules {
             provoke_ticks: 60,
             provoke_min: 6.0,
             provoke_max: 36.0,
+            provoke_out_min: 12.0,
             provoke_tries: 3,
             provoke_skip_ticks: 2400,
             fall_window: 200,
@@ -180,6 +182,9 @@ pub struct PearlState {
     /// The provoke in hand: the target and the server tick it began.
     #[serde(default)]
     pub provoke: Option<(i32, u64)>,
+    /// Where the provoke in hand is made from: M, or O when none is in sight from M.
+    #[serde(default)]
+    pub provoke_from: Option<[i32; 3]>,
     /// Provoke tries per enderman, and until when it is skipped.
     #[serde(default)]
     pub tries: Vec<(i32, u32, u64)>,
@@ -291,12 +296,22 @@ fn torso_of(e: [f64; 3]) -> [f64; 3] {
 /// `provoke_min` to `provoke_max`, whose eye the eye sees past every block seen; the nearest
 /// first.
 pub fn provoke_candidates(w: &World, eye: [f64; 3], r: &PearlRules) -> Vec<Sighting> {
+    provoke_candidates_from(w, eye, r.provoke_min, r)
+}
+
+/// `provoke_candidates` no nearer than `min`, eye to eye.
+pub fn provoke_candidates_from(
+    w: &World,
+    eye: [f64; 3],
+    min: f64,
+    r: &PearlRules,
+) -> Vec<Sighting> {
     endermen::endermen(w)
         .into_iter()
         .filter(|s| s.ticking && !creepy(w, s.id))
         .filter(|s| {
             let d = dist(eye, eye_of(s.pos));
-            d >= r.provoke_min && d <= r.provoke_max
+            d >= min && d <= r.provoke_max
         })
         .filter(|s| look::clear(w, eye, eye_of(s.pos)))
         .collect()
@@ -476,6 +491,15 @@ impl Plan {
         self.note(tick, what, why);
     }
 
+    /// A note once for `key` in the run.
+    fn pearl_note_once(&mut self, tick: u64, key: &str, what: String, why: String) {
+        if self.pearls.noted.contains_key(key) {
+            return;
+        }
+        self.pearls.noted.insert(key.to_owned(), tick);
+        self.note(tick, what, why);
+    }
+
     /// The row that acts this tick, noted when it changes (strike and hold are one fight).
     fn row(&mut self, tick: u64, id: &str, why: impl FnOnce() -> String) {
         let fight = |r: &str| r == "strike" || r == "hold";
@@ -588,7 +612,13 @@ impl Plan {
             && !b.inside(feet)
             && flat(body.pos, Burrow::centre(b.b)) <= r.collect_reach + 1.0
             && matches!(self.task, Task::Idle)
+            && (self.pearls.provoke_from.is_none() || !angry.is_empty())
         {
+            // An angry one with the bot out (a provoke from O): straight back to B.
+            if !angry.is_empty() {
+                self.pearls.provoke_from = None;
+                return Some(step_to(body.pos, b.b).0);
+            }
             let next = if feet == b.o { b.m } else { b.o };
             let next = if flat(body.pos, Burrow::centre(b.m)) < 0.8 {
                 b.b
@@ -606,7 +636,11 @@ impl Plan {
         if !matches!(self.task, Task::Idle) {
             return None;
         }
-        if self.pearls.burrow.is_some_and(|b| b.inside(feet))
+        let provoking_out = self.pearls.provoke_from.is_some();
+        if self
+            .pearls
+            .burrow
+            .is_some_and(|b| b.inside(feet) || (provoking_out && feet == b.o))
             && let Some(c) = self.row_standing(w, tick, &r, feet)
         {
             return Some(c);
@@ -679,6 +713,7 @@ impl Plan {
             && creepy(w, id)
         {
             self.pearls.provoke = None;
+            self.pearls.provoke_from = None;
             self.pearls.angers += 1;
             self.note(
                 tick,
@@ -926,7 +961,32 @@ impl Plan {
         let eye = [pos[0], pos[1] + physics::EYE_HEIGHT, pos[2]];
         let reach = defend::box_distance_of(eye, s.pos, EntityKind::Enderman);
         let torso = torso_of(s.pos);
-        let in_reach = reach <= defend::STRIKE_REACH && look::clear(w, eye, torso);
+        let clear = look::clear(w, eye, torso);
+        let in_reach = reach <= defend::STRIKE_REACH && clear;
+        // The weapon in the hand from the fight's start: a change of the held item resets the
+        // attack strength (race 45534591345 lane 1: the first swing went out the tick after the
+        // switch, `attack.weak`, 1.2 damage).
+        if let Some(slot) = weapon_slot(w, r.weapon_min_uses)
+            && let Some(a) = hold_slot(w, slot)
+        {
+            if self.acts.is_empty() {
+                self.acts.push(a);
+                self.pearls.last_swing = Some(tick);
+            }
+            return press_back(w, pos, b, look(b.out_yaw(), 0.0));
+        }
+        // Close by the mouth and out of reach: where, once a fight (the closed loop's question).
+        if !in_reach && s.dist <= 3.5 {
+            self.pearl_note_once(
+                tick,
+                &format!("close {id}"),
+                format!("enderman {id} close but out of reach"),
+                format!(
+                    "it at ({:.2}, {:.2}, {:.2}), the bot at ({:.2}, {:.2}, {:.2}), O {:?}; eye to box {reach:.2}, line to the torso clear {clear}",
+                    s.pos[0], s.pos[1], s.pos[2], pos[0], pos[1], pos[2], b.o
+                ),
+            );
+        }
         if !in_reach {
             let f = self.pearls.fight.get_or_insert_with(Fight::default);
             let out = *f.out_since.get_or_insert(tick);
@@ -962,7 +1022,10 @@ impl Plan {
             return press_back(w, pos, b, look(yaw, pitch));
         }
         if let Some(f) = self.pearls.fight.as_mut() {
-            f.out_since = None;
+            // Into reach: the health-fall window starts here, not at the provoke.
+            if f.out_since.take().is_some() {
+                f.last_fall = tick;
+            }
             if tick.saturating_sub(f.last_fall) >= r.fall_window && !f.fall_noted {
                 f.fall_noted = true;
                 let (falls, swings) = (f.falls, f.swings);
@@ -1234,6 +1297,10 @@ impl Plan {
                 craft::count(w, ItemKind::EnderPearl)
             ),
         );
+        if feet == b.o {
+            self.pearls.provoke_from = None;
+            return Some(step_to(pos, b.m).0);
+        }
         if feet == b.b && self.step_out_ok(tick, r) {
             return Some(step_to(pos, b.m).0);
         }
@@ -1259,12 +1326,14 @@ impl Plan {
         let server = w.session.server_ticks;
         let pos = w.body.map_or([0.0; 3], |x| x.pos);
         if let Some((id, at)) = self.pearls.provoke {
+            let from = self.pearls.provoke_from.unwrap_or(b.m);
             let seen = w
                 .entities
                 .get(&id)
-                .is_some_and(|e| !e.dead && look::clear(w, eye_in(b.m), eye_of(e.pos)));
-            if server.saturating_sub(at) > r.provoke_ticks || !seen || feet != b.m {
+                .is_some_and(|e| !e.dead && look::clear(w, eye_in(from), eye_of(e.pos)));
+            if server.saturating_sub(at) > r.provoke_ticks || !seen || feet != from {
                 self.pearls.provoke = None;
+                self.pearls.provoke_from = None;
                 let t = self.provoke_try(id, tick, r);
                 self.note(
                     tick,
@@ -1282,29 +1351,45 @@ impl Plan {
                 return Some(look(yaw, pitch));
             }
         }
-        let cand = provoke_candidates(w, eye_in(b.m), r)
+        // From M first; with none in sight there, from O at one far enough that the step back
+        // to B (two cells, some 10 ticks) is made before it can come (the 26.1.2 jar: within 16 it
+        // walks; past 16 it teleports after 15 goal ticks). M's mouth sees one way only: three
+        // dev-forest bots waited 3,300 to 4,000 ticks with endermen 15 to 30 off out of its sight
+        // (race 45534591345).
+        let skipped = |s: &Sighting| {
+            self.pearls
+                .tries
+                .iter()
+                .any(|(i, _, until)| *i == s.id && tick < *until)
+        };
+        let from_m = provoke_candidates(w, eye_in(b.m), r)
             .into_iter()
-            .find(|s| {
-                !self
-                    .pearls
-                    .tries
-                    .iter()
-                    .any(|(i, _, until)| *i == s.id && tick < *until)
-            })?;
+            .find(|s| !skipped(s))
+            .map(|s| (s, b.m));
+        let from_o = || {
+            provoke_candidates_from(w, eye_in(b.o), r.provoke_out_min, r)
+                .into_iter()
+                .find(|s| !skipped(s))
+                .map(|s| (s, b.o))
+        };
+        let (cand, from) = from_m.or_else(from_o)?;
         self.row(tick, "provoke", || {
             format!("enderman {} calm and ticking {:.1} off", cand.id, cand.dist)
         });
         if feet == b.b {
             if self.step_out_ok(tick, r) {
-                return Some(step_to(pos, b.m).0);
+                self.pearls.provoke_from = Some(from);
+                return Some(step_to(pos, from).0);
             }
             return Some(look(b.out_yaw(), 0.0));
         }
-        let (c, there) = step_to(pos, b.m);
+        self.pearls.provoke_from = Some(from);
+        let (c, there) = step_to(pos, from);
         if !there {
             return Some(c);
         }
         if !burrow::missing(w, &b).is_empty() {
+            self.pearls.provoke_from = None;
             return None;
         }
         self.pearls.provoke = Some((cand.id, server));
@@ -1316,8 +1401,10 @@ impl Plan {
             tick,
             format!("provoke enderman {}", cand.id),
             format!(
-                "from M at {:?}, {:.1} off, ticking; up to {} server ticks; burrow checked whole",
-                b.m, cand.dist, r.provoke_ticks
+                "from {} at {from:?}, {:.1} off, ticking; up to {} server ticks; burrow checked whole",
+                if from == b.m { "M" } else { "O" },
+                cand.dist,
+                r.provoke_ticks
             ),
         );
         let eye = [pos[0], pos[1] + physics::EYE_HEIGHT, pos[2]];

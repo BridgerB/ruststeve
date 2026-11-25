@@ -484,6 +484,10 @@ provoke_ticks = 60
 # angered none in clojurecraft's real races.
 provoke_min = 6.0
 provoke_max = 36.0
+# With none in sight from M, a provoke from O at one this far or farther: the step back to B is two
+# cells, some 10 ticks walking; an angry enderman walks within 16 (about 0.3 a tick) and teleports
+# from past 16 after 15 goal ticks (the 26.1.2 jar), so 12 leaves it 30 ticks or more out.
+provoke_out_min = 12.0
 # Provokes on one enderman with no anger before it is skipped, and for how long (the plan's 18f).
 provoke_tries = 3
 provoke_skip_ticks = 2400
