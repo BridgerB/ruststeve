@@ -82,9 +82,9 @@ impl Default for PearlRules {
             pearls_wanted: 12,
             provoke_ticks: 60,
             provoke_min: 6.0,
-            provoke_max: 36.0,
+            provoke_max: 64.0,
             provoke_out_min: 12.0,
-            provoke_out_max: 40.0,
+            provoke_out_max: 64.0,
             provoke_tries: 3,
             provoke_skip_ticks: 2400,
             fall_window: 200,
@@ -158,6 +158,18 @@ pub fn ledge(w: &World, f: path::Cell, near: i32) -> bool {
             lava || drop
         })
     })
+}
+
+/// A provoke's distance band: 6 to 16 (it walks), 16 to 36, 36 to 64 (the jar's follow range;
+/// past 16 it teleports toward the bot).
+pub fn band(d: f64) -> usize {
+    if d < 16.0 {
+        0
+    } else if d < 36.0 {
+        1
+    } else {
+        2
+    }
 }
 
 /// The middle of the endermen seen, as a cell, or `None` with none.
@@ -349,6 +361,14 @@ pub struct PearlState {
     pub look_outs: u32,
     #[serde(default)]
     pub look_out_provokes: u32,
+    /// Provokes and angers by distance band (6-16, 16-36, 36-64), and the band of the one in
+    /// hand.
+    #[serde(default)]
+    pub band_provokes: [u32; 3],
+    #[serde(default)]
+    pub band_angers: [u32; 3],
+    #[serde(default)]
+    pub provoke_band: Option<usize>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -1015,14 +1035,23 @@ impl Plan {
             self.pearls.provoke = None;
             self.pearls.provoke_from = None;
             self.pearls.angers += 1;
+            if let Some(i) = self.pearls.provoke_band.take() {
+                self.pearls.band_angers[i] += 1;
+            }
             self.note(
                 tick,
                 format!("provoked enderman {id}"),
                 format!(
-                    "its creepy flag after {} server ticks; {} angers of {} provokes; back to B",
+                    "its creepy flag after {} server ticks; {} angers of {} provokes; by band 6-16 {}/{}, 16-36 {}/{}, 36-64 {}/{}; back to B",
                     w.session.server_ticks.saturating_sub(at),
                     self.pearls.angers,
-                    self.pearls.provokes
+                    self.pearls.provokes,
+                    self.pearls.band_angers[0],
+                    self.pearls.band_provokes[0],
+                    self.pearls.band_angers[1],
+                    self.pearls.band_provokes[1],
+                    self.pearls.band_angers[2],
+                    self.pearls.band_provokes[2]
                 ),
             );
         }
@@ -1836,6 +1865,8 @@ impl Plan {
             return None;
         }
         self.pearls.provoke = Some((cand.id, server));
+        self.pearls.provoke_band = Some(band(cand.dist));
+        self.pearls.band_provokes[band(cand.dist)] += 1;
         self.pearls.provokes += 1;
         if !self.pearls.provoked.contains(&cand.id) {
             self.pearls.provoked.push(cand.id);
@@ -1899,18 +1930,25 @@ impl Plan {
                 let mut cells = path::Cells::new(w);
                 let shell = b.shell();
                 #[allow(clippy::cast_possible_truncation)]
-                let pick = (1..=LOOK_OUT).rev().find_map(|k| {
-                    let l = [
+                // Every cell of the straight line out to it standable: a step goes straight (race
+                // 45560431011: look-outs 4 off past a stem or a cap, "no way there" each time).
+                let at_k = |k: i32| {
+                    [
                         b.o[0] + (dx / len * f64::from(k)).round() as i32,
                         b.o[1],
                         b.o[2] + (dz / len * f64::from(k)).round() as i32,
-                    ];
-                    (cells.standable((l[0], l[1], l[2]))
-                        && !shell.contains(&l)
-                        && !b.inside(l)
-                        && !ledge(w, (l[0], l[1], l[2]), 1))
-                    .then_some(l)
-                });
+                    ]
+                };
+                let reach = (1..=LOOK_OUT)
+                    .take_while(|k| {
+                        let l = at_k(*k);
+                        cells.standable((l[0], l[1], l[2]))
+                            && !shell.contains(&l)
+                            && !b.inside(l)
+                            && !ledge(w, (l[0], l[1], l[2]), 1)
+                    })
+                    .last();
+                let pick = reach.map(at_k);
                 let Some(l) = pick else {
                     self.pearls.last_cand = Some(tick);
                     return None;
@@ -1967,6 +2005,8 @@ impl Plan {
         };
         let server = w.session.server_ticks;
         self.pearls.provoke = Some((cand.id, server));
+        self.pearls.provoke_band = Some(band(cand.dist));
+        self.pearls.band_provokes[band(cand.dist)] += 1;
         self.pearls.provoke_from = Some(spot);
         self.pearls.look_out = None;
         self.pearls.provokes += 1;
