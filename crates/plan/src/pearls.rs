@@ -68,6 +68,7 @@ pub struct PearlRules {
     pub near_o: f64,
     pub base_wait_ticks: u64,
     pub seen_near: f64,
+    pub hostile_near: f64,
     pub restock_below: i32,
     pub restock_to: i32,
     pub threat_hold_ticks: u64,
@@ -106,6 +107,7 @@ impl Default for PearlRules {
             near_o: 8.0,
             base_wait_ticks: 600,
             seen_near: 40.0,
+            hostile_near: 16.0,
             restock_below: 60,
             restock_to: 120,
             threat_hold_ticks: 1200,
@@ -138,6 +140,26 @@ pub fn burrow_filler(w: &World) -> i32 {
     BURROW_BLOCKS.iter().map(|k| craft::count(w, *k)).sum()
 }
 
+/// Whether a standing cell `f` has within `near` (on the plane, at its level) an open cell with
+/// no floor in the 3 below (a drop of 3 or more), or lava in the 4 below one.
+pub fn ledge(w: &World, f: path::Cell, near: i32) -> bool {
+    let at = |c: path::Cell| w.block_at(world::BlockPos::new(c.0, c.1, c.2));
+    let open = |c: path::Cell| {
+        at(c).and_then(data::generated::shapes::collision) == Some(data::types::Collision::Empty)
+    };
+    (-near..=near).any(|dx| {
+        (-near..=near).any(|dz| {
+            let c = (f.0 + dx, f.1, f.2 + dz);
+            if !open(c) {
+                return false;
+            }
+            let lava = (1..=4).any(|d| at((c.0, c.1 - d, c.2)) == Some(data::BlockKind::Lava));
+            let drop = (1..=3).all(|d| open((c.0, c.1 - d, c.2)));
+            lava || drop
+        })
+    })
+}
+
 /// The middle of the endermen seen, as a cell, or `None` with none.
 fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
     if seen.is_empty() {
@@ -153,6 +175,11 @@ fn centroid(seen: &[[f64; 3]]) -> Option<path::Cell> {
 const FLOOR_MIN: i32 = 8;
 /// Cells each way on the plane a floor block is dug for filler from where the bot stands.
 const FLOOR_REACH: i32 = 2;
+/// Cells round the feet a drop or lava below makes a ledge, how far a safe cell is looked for,
+/// and the walks off ledges the hunt makes.
+const LEDGE_NEAR: i32 = 2;
+const LEDGE_SEARCH: i32 = 8;
+const LEDGE_TRIES: u32 = 6;
 /// Moves down off fungus caps the hunt makes (each a walk or a dig).
 const CAP_TRIES: u32 = 24;
 /// Eye to a block's middle within which the old shell is dug back from where the bot stands.
@@ -298,6 +325,15 @@ pub struct PearlState {
     /// Moves made down off fungus caps.
     #[serde(default)]
     pub cap_tries: u32,
+    /// Walks off ledges made.
+    #[serde(default)]
+    pub ledge_tries: u32,
+    /// The feet's height when the restock began: no dig below it.
+    #[serde(default)]
+    pub restock_floor: Option<i32>,
+    /// A pillar out of a hole in hand: the feet cell it began from.
+    #[serde(default)]
+    pub pillar: Option<[i32; 3]>,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -822,6 +858,16 @@ impl Plan {
             }
         } else if angry.is_empty() {
             self.pearls.threat_since = None;
+        }
+        // In a hole (every side shut at the head's height, so no step out): a pillar up, a block
+        // under the feet at the top of each jump (P4's seed 21 ended 9 below the floor with every
+        // walk failing NoPath).
+        if !self.pearls.built
+            && matches!(self.task, Task::Idle)
+            && !self.pearls.burrow.is_some_and(|b| b.inside(feet))
+            && let Some(c) = self.out_of_hole(w, tick, feet)
+        {
+            return Some(c);
         }
         // Rows 6 and 7 that are tasks (the base, a walk to B, a dig to reopen the mouth).
         if !matches!(self.task, Task::Idle) {
@@ -1548,6 +1594,23 @@ impl Plan {
             self.move_burrow(tick, r, b, idle, calm_near);
             return Some(Controls::default());
         }
+        // Any other hostile within `hostile_near` of O: in B too (the frontier race 45553808358
+        // lane 6 stood at O by the deltas and magma cubes took it from 18.3 to 6.6).
+        let o_at = Burrow::centre(b.o);
+        if let Some((id, e)) = w.entities.iter().find(|(_, e)| {
+            !e.dead
+                && e.kind != EntityKind::Enderman
+                && defend::hostile(e.kind)
+                && dist(e.pos, o_at) <= r.hostile_near
+        }) {
+            let (id, kind) = (*id, e.kind);
+            self.provoke_hold(tick);
+            self.row(tick, "hold", || format!("{kind:?} {id} near O: in B"));
+            if feet != b.b {
+                return Some(step_to(pos, b.b).0);
+            }
+            return Some(press_back(w, pos, b, look(b.out_yaw(), 0.0)));
+        }
         // Any enderman within `near_o` of O, calm or not: the bot is in B, never out (P4's real
         // runs on the solid shell: B never hit in 9 rows over 4 runs; M hit in 2 of 4 runs, once
         // each, by one that came round angry).
@@ -1765,6 +1828,12 @@ impl Plan {
         let (yaw, pitch) = look_at(eye, eye_of(cand.pos));
         self.pearls.provoking = u32::try_from(cand.id).ok();
         Some(look(yaw, pitch))
+    }
+
+    /// A provoke in hand dropped for a hold.
+    fn provoke_hold(&mut self, _tick: u64) {
+        self.pearls.provoke = None;
+        self.pearls.provoke_from = None;
     }
 
     /// One more provoke try on `id`; past `provoke_tries` it is skipped `provoke_skip_ticks`.
@@ -2008,6 +2077,75 @@ impl Plan {
         None
     }
 
+    /// The pillar out of a hole: with every side of the feet shut one up (no step out) and
+    /// open sky over the head for two, jump, and at the top put a burrow block into the cell the
+    /// feet left (clicking the floor's top). `None` when not in a hole.
+    fn out_of_hole(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Controls> {
+        let body = w.body?;
+        let at = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2]))
+                .and_then(data::generated::shapes::collision)
+        };
+        let open = |c: [i32; 3]| at(c) == Some(data::types::Collision::Empty);
+        let start = match self.pearls.pillar {
+            Some(p) => p,
+            None => {
+                let walled = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+                    .iter()
+                    .all(|d| !open([feet[0] + d[0], feet[1] + 1, feet[2] + d[1]]));
+                let sky =
+                    open([feet[0], feet[1] + 2, feet[2]]) && open([feet[0], feet[1] + 3, feet[2]]);
+                if !walled || !sky || !body.on_ground {
+                    return None;
+                }
+                self.pearls.pillar = Some(feet);
+                self.note(
+                    tick,
+                    "out of the hole".to_owned(),
+                    format!("every side of the feet {feet:?} shut a block up; a pillar up"),
+                );
+                feet
+            }
+        };
+        // Up a block from where it began, on the ground: done (the walks take it from here).
+        if body.on_ground && feet[1] > start[1] {
+            self.pearls.pillar = None;
+            return None;
+        }
+        let Some(item) = BURROW_BLOCKS
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)
+        else {
+            self.pearls.pillar = None;
+            return None;
+        };
+        if let hold::Hold::Act(a) = hold::toward(w, item) {
+            if self.acts.is_empty() {
+                self.acts.push(a);
+            }
+            return Some(look(w.player.yaw.into(), EYES_DOWN));
+        }
+        // At the top of the jump: the block into the cell the feet left.
+        if !body.on_ground
+            && body.pos[1] >= f64::from(start[1]) + 1.0
+            && open(start)
+            && self.acts.is_empty()
+            && w.click.is_none()
+        {
+            self.acts.push(world::Act::UseOn {
+                pos: world::BlockPos::new(start[0], start[1] - 1, start[2]),
+                face: 1,
+            });
+        }
+        Some(Controls {
+            jump: body.on_ground,
+            pitch: Some(EYES_DOWN),
+            yaw: w.player.yaw.into(),
+            ..Controls::default()
+        })
+    }
+
     /// Down off a fungus cap: a walk to the floor seen below, else the cap block under the feet
     /// dug (`base::dig_down`: a landing within the safe fall, no lava).
     fn cap_down(&mut self, w: &World, tick: u64, feet: [i32; 3]) -> Option<Task> {
@@ -2127,7 +2265,13 @@ impl Plan {
         // The floor counts: a floor cell beside the feet, in reach where the bot stands, dug
         // straight (P4's seed 22 stood on a floor of exposed netherrack and found none "with a
         // way"): never the cell under the bot, never one over a hole deeper than 1 or by lava.
-        if let Some(body) = w.body {
+        // Never below the floor the restock began on: digs beside the feet, walked into for
+        // their drops, carved a pit 9 deep (P4's seed 21, 0e9fa0f).
+        let floor_y = *self
+            .pearls
+            .restock_floor
+            .get_or_insert(w.body.map_or(0, |b| path::stand_cell(w, b.pos).1));
+        if let Some(body) = w.body.filter(|b| path::stand_cell(w, b.pos).1 >= floor_y) {
             let f = path::stand_cell(w, body.pos);
             let under = (f.0, f.1 - 1, f.2);
             let at = |c: path::Cell| w.block_at(world::BlockPos::new(c.0, c.1, c.2));
@@ -2172,7 +2316,7 @@ impl Plan {
         }
         let cands: Vec<path::Cell> = crate::exposed_near(w, &kinds)
             .into_iter()
-            .filter(|c| !self.refused_now(*c, tick))
+            .filter(|c| c.1 >= floor_y - 1 && !self.refused_now(*c, tick))
             .take(3)
             .collect();
         for c in cands {
@@ -2248,6 +2392,46 @@ impl Plan {
     /// begin (the standing rows act).
     pub fn pearls_task(&mut self, w: &World, tick: u64) -> Option<Task> {
         let body = w.body?;
+        // Off a ledge first, before the base or any wait, with no burrow built: a fireball's
+        // knock-back off a ledge into lava killed a no-heal bot at tick 140 (race 45548022681
+        // lane 3, pearls-hunt wall 3).
+        if !self.pearls.built
+            && self.pearls.ledge_tries < LEDGE_TRIES
+            && let Some(body) = w.body
+        {
+            let f = path::stand_cell(w, body.pos);
+            if ledge(w, f, LEDGE_NEAR) {
+                let mut cells = path::Cells::new(w);
+                let mut safe: Vec<(i32, path::Cell)> = Vec::new();
+                for dx in -LEDGE_SEARCH..=LEDGE_SEARCH {
+                    for dz in -LEDGE_SEARCH..=LEDGE_SEARCH {
+                        for dy in -2..=2 {
+                            let c = (f.0 + dx, f.1 + dy, f.2 + dz);
+                            if cells.standable(c) && !ledge(w, c, LEDGE_NEAR) {
+                                safe.push((dx * dx + dy * dy + dz * dz, c));
+                            }
+                        }
+                    }
+                }
+                safe.sort();
+                for (_, c) in safe.into_iter().take(3) {
+                    let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+                    if walk.route_now(w, tick) {
+                        self.pearls.ledge_tries += 1;
+                        self.walks += 1;
+                        self.note(
+                            tick,
+                            "off the ledge".to_owned(),
+                            format!(
+                                "the feet {f:?} within {LEDGE_NEAR} of a drop of 3 or more or lava below; to {c:?}"
+                            ),
+                        );
+                        return Some(Task::Explore(walk));
+                    }
+                }
+                self.pearls.ledge_tries += 1;
+            }
+        }
         // 6. base: its tasks, but not a wait of more than `base_wait_ticks` (the frontier race
         // 45542558792: all 8 bots waited 2,400 ticks a step for a stem with a way to it, and
         // every step after wood needs wood); then the hunt goes on and the base is asked again
@@ -2308,6 +2492,7 @@ impl Plan {
         }
         if filler >= r.restock_to {
             self.pearls.restock = false;
+            self.pearls.restock_floor = None;
         }
         if self.pearls.restock {
             if let Some(t) = self.restock_task(w, tick, filler) {
@@ -2374,8 +2559,10 @@ impl Plan {
                 // from the feet (P4's seed 23 walked on about a block a 100 ticks for 6,000).
                 let here = (feet[0], feet[1], feet[2]);
                 let goal = match centroid(&seen) {
+                    // At the feet's height: the middle of endermen seen on caps and ledges was at y 87
+                    // over a floor at 46 (race 45551462309).
                     Some(c) if path::flat_distance(c, here) >= f64::from(WALK_ON) => Goal::Near {
-                        pos: c,
+                        pos: (c.0, feet[1], c.2),
                         range: 12.0,
                     },
                     _ if self.pearls.moved_from.is_empty() => Goal::Away {
