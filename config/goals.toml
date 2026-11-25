@@ -722,3 +722,76 @@ wait_ticks = 200
 pause_ticks = 6000
 pause_max = 1
 # <<< base
+
+# >>> eyes (Q3, issue 19c, docs/problems/eyes-throw.md): the eyes of ender, crafted in the 2x2 grid
+# where the bot stands (blaze_powder from a rod, two a rod; ender_eye from a pearl and a powder:
+# the generated recipes, no table). plan::eyes::eyes_row sets the count to what the held pearls,
+# powder and rods make, up to [eyes] eyes_max, so the needs planner spends a rod only for powder it
+# needs: 12 pearls and 7 rods make 12 eyes and keep a rod; 14 pearls make 14 and keep none.
+[[goal]]
+id = "eyes"
+priority = 17
+until = "eyes"
+doc = "the eyes of ender the held pearls make, up to 14, powder from rods in the 2x2 grid"
+provides = [["item:ender_eye", 14]]
+
+[eyes]
+# 7 rods make 14 powder; 14 pearls with the top-up (Bridger, 2026-11-25).
+eyes_max = 14
+# Up a little (the brief, 19c.3): a use whose look hits an end portal frame throws nothing (the
+# jar, Q5's probe 45685968956); clojurecraft looked up 20.
+throw_pitch = -10.0
+# No hostile within 16 of the feet, and no throw by night (the brief, 19c.3): the bot stands still
+# for 80 ticks and walks to the drop.
+hostile_clear = 16.0
+night_throws = false
+# Ticks the look is held before the use (scoop's settle: the look reaches the server first).
+settle_ticks = 2
+# The eye spawns at the thrower's (x, y + 0.9, z) (the jar, probe 45685968956); a new eye within 3
+# of that is the throw's own (clojurecraft's seen-within).
+seen_within = 3.0
+# The eye must be seen within 60 ticks of the use (clojurecraft's answer-ms, 3 s).
+answer_ticks = 60
+# It lives 81 ticks (the jar); followed at most 120.
+flight_max = 120
+# Positions skipped before the fit (the first may predate the first move), and the least the eye
+# must fly on the plane for its line to count (clojurecraft's min-flight).
+fit_skip = 2
+min_flight = 1.0
+# The least angular spread a line is given, degrees: the heading is the exact bearing with no curve
+# (the jar), so only the positions' quantization is left; 0.2 is margin over it.
+spread_floor_deg = 0.2
+# The dropped item appears at the eye's last position with a small kick (the jar): within 3 on the
+# plane, within 20 ticks (clojurecraft's drop-grace-ms, 1 s); else it shattered.
+drop_radius = 3.0
+drop_grace = 20
+# The near rule (the jar): with the stronghold point within 12 on the plane the eye flies to it and
+# descends; a sink of 1 under where it was first seen marks it, and the point is good to about 2.
+near_radius = 12.0
+near_sink = 1.0
+near_err = 2.0
+# Pickup (the brief, 19c.3): a routed walk to a drop within 24, the drop at the feet's height or up
+# to 2 over (clojurecraft: picked only within 2 of the feet), given up after 600 ticks or 3 walks.
+pickup_radius = 24.0
+pickup_rise = 2
+pickup_ticks = 600
+pickup_walks = 3
+# At most 4 throws (the plan, 19c.6: 0.8 eyes lost at one in five).
+max_throws = 4
+# Throw 2 once 200 out from throw 1 and 140 across its line (the coordinator from the jar's exact
+# heading: about 150 across). At a 0.2 degree spread 1,500 off, 140 across gives about 75 along.
+# The way there turns the bearing 45 degrees.
+baseline = 200.0
+baseline_across = 140.0
+baseline_turn_deg = 45.0
+# A refine only at the fix with no frame seen (the coordinator, 2026-11-25): within 64 of it, from
+# the fix itself (no side spot); a further throw only from 150 off every earlier spot.
+refine_from = 64.0
+refine_offset = 0.0
+final_within = 64.0
+respot = 150.0
+# Frames are looked for within 8 chunk columns (the view distance: the frames face the room's air).
+frame_chunks = 8
+# A due throw that waits, or a craft that cannot go on, is noted at most every 600 ticks.
+note_every = 600
+# <<< eyes
