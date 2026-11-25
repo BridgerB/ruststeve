@@ -560,6 +560,11 @@ seen_near = 40.0
 # Any other hostile (magma cube, piglin, skeleton) this near O and the bot holds in B, never out
 # at O (the frontier race 45553808358 lane 6: magma cubes, 18.3 to 6.6 health).
 hostile_near = 16.0
+# In the hunt a magma cube is never fought by choice (a no-heal bot loses every trade, and they
+# split: race 45560431011 lane 2 died so with 3 pearls): one within cube_near and the bot seals a
+# pocket where it stands, held until none is within cube_clear.
+cube_near = 3.0
+cube_clear = 8.0
 # Under restock_below burrow blocks held, netherrack is dug near the burrow up to restock_to (a
 # burrow is up to 38; the frontier bot holds about 263 filler).
 restock_below = 60

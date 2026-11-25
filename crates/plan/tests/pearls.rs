@@ -604,3 +604,26 @@ fn a_hunter_in_a_pit_pillars_up() {
         "{acts:?}"
     );
 }
+
+/// The orchestrator's rule: in the hunt a magma cube within 3 is answered by a sealed pocket
+/// where the bot stands, never a swing.
+#[test]
+fn a_magma_cube_pressing_gets_a_pocket_not_a_fight() {
+    let (mut w, b) = built();
+    let o = Burrow::centre(b.o);
+    add(&mut w, 80, EntityKind::MagmaCube, [o[0] - 0.5, o[1], o[2]]);
+    let mut p = hunter(&mut w, b);
+    w.ticks = 100;
+    let c = p.step(&w);
+    let acts = p.take_acts();
+    assert!(
+        !acts.iter().any(|a| matches!(a, Act::Attack { .. })),
+        "{acts:?}"
+    );
+    assert!(
+        notes(&p).iter().any(|n| n == "pocket from magma cube"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(c.pitch, Some(plan::endermen::EYES_DOWN));
+}

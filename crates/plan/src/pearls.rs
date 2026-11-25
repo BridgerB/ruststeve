@@ -69,6 +69,8 @@ pub struct PearlRules {
     pub base_wait_ticks: u64,
     pub seen_near: f64,
     pub hostile_near: f64,
+    pub cube_near: f64,
+    pub cube_clear: f64,
     pub restock_below: i32,
     pub restock_to: i32,
     pub threat_hold_ticks: u64,
@@ -108,6 +110,8 @@ impl Default for PearlRules {
             base_wait_ticks: 600,
             seen_near: 40.0,
             hostile_near: 16.0,
+            cube_near: 3.0,
+            cube_clear: 8.0,
             restock_below: 60,
             restock_to: 120,
             threat_hold_ticks: 1200,
@@ -156,6 +160,32 @@ pub fn ledge(w: &World, f: path::Cell, near: i32) -> bool {
             let lava = (1..=4).any(|d| at((c.0, c.1 - d, c.2)) == Some(data::BlockKind::Lava));
             let drop = (1..=3).all(|d| open((c.0, c.1 - d, c.2)));
             lava || drop
+        })
+    })
+}
+
+/// Whether every cell the eye-to-eye line crosses is loaded and has no collision shape: the
+/// server's stare clips against collision shapes, and `look::clear` (full blocks seen exposed only)
+/// passed lines a fungus, a slab or a vine cut (race 45563567457: six stares at one 58.8 off
+/// never set its stared-at flag). The first solid cell a line meets is exposed to it (the cell
+/// before it is open), so this reads no hidden block.
+pub fn line_open(w: &World, from: [f64; 3], to: [f64; 3]) -> bool {
+    crate::scoop::ray_cells(from, to).into_iter().all(|c| {
+        w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+            .and_then(data::generated::shapes::collision)
+            == Some(data::types::Collision::Empty)
+    })
+}
+
+/// Whether delta ground (basalt, blackstone, magma) lies under or at the level of a cell within
+/// `r` on the plane: the ground magma cubes come from.
+pub fn near_delta(w: &World, c: [i32; 3], r: i32) -> bool {
+    (-r..=r).any(|dx| {
+        (-r..=r).any(|dz| {
+            (-2..=0).any(|dy| {
+                w.block_at(world::BlockPos::new(c[0] + dx, c[1] + dy, c[2] + dz))
+                    .is_some_and(|k| burrow::DELTA_GROUND.contains(&k))
+            })
         })
     })
 }
@@ -213,6 +243,10 @@ const ANGRY_PRESENT: f64 = 128.0;
 /// target: such a hurt teleports it (the 26.1.2 jar), and the frontier race 45544744907's one
 /// provoke stared 80 server ticks at one that magma was hurting and teleporting.
 const HURT_SKIP: u64 = 100;
+/// Ticks a site moved from is avoided by the site search.
+const MOVED_KEPT: u64 = 6000;
+/// Blocks from delta ground a forest-floor walk target keeps.
+const DELTA_AVOID: i32 = 8;
 /// Ticks a sighting is kept for the mouth's side.
 const SIGHTINGS_KEPT: u64 = 600;
 /// Ticks one step out of B takes at most, counted as one step.
@@ -252,6 +286,9 @@ pub struct PearlState {
     pub refused: Vec<[i32; 3]>,
     #[serde(default)]
     pub moved_from: Vec<[i32; 3]>,
+    /// When each move was made (`moved_from`'s ticks).
+    #[serde(default)]
+    pub moved_at: Vec<u64>,
     #[serde(default)]
     pub site_at: Option<u64>,
     #[serde(default)]
@@ -369,6 +406,9 @@ pub struct PearlState {
     pub band_angers: [u32; 3],
     #[serde(default)]
     pub provoke_band: Option<usize>,
+    /// The pocket from magma cubes is held.
+    #[serde(default)]
+    pub cube_pocket: bool,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -507,7 +547,7 @@ pub fn provoke_candidates_from(
             let d = dist(eye, eye_of(s.pos));
             d >= min && d <= r.provoke_max
         })
-        .filter(|s| look::clear(w, eye, eye_of(s.pos)))
+        .filter(|s| line_open(w, eye, eye_of(s.pos)))
         .collect()
 }
 
@@ -745,6 +785,41 @@ impl Plan {
         // 1. pearls-done.
         if craft::count(w, ItemKind::EnderPearl) >= r.pearls_wanted {
             return Some(self.row_done(w, tick, &r, feet));
+        }
+        // A magma cube pressing (within `cube_near`): the sealed pocket where the bot stands, held
+        // until none is within `cube_clear` (the orchestrator; race 45560431011 lane 2 died
+        // fighting cubes with 3 pearls held).
+        let cubes: Vec<f64> = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && e.kind == EntityKind::MagmaCube)
+            .map(|e| dist(e.pos, body.pos))
+            .collect();
+        let near = |r: f64| cubes.iter().any(|d| *d <= r);
+        if near(r.cube_near) || (self.pearls.cube_pocket && near(r.cube_clear)) {
+            if !self.pearls.cube_pocket {
+                self.pearls.cube_pocket = true;
+                self.note(
+                    tick,
+                    "pocket from magma cube".to_owned(),
+                    format!(
+                        "one within {:.1}; sealed where the bot stands until none within {}",
+                        cubes.iter().copied().fold(f64::MAX, f64::min),
+                        r.cube_clear
+                    ),
+                );
+            }
+            self.cut_task(tick, "pocket");
+            self.pocket_step(w, tick);
+            return Some(look(w.player.yaw.into(), EYES_DOWN));
+        }
+        if self.pearls.cube_pocket {
+            self.pearls.cube_pocket = false;
+            self.note(
+                tick,
+                "magma cubes gone: the hunt goes on".to_owned(),
+                format!("none within {}", r.cube_clear),
+            );
         }
         let angry = angry_endermen(w);
         let inside = self.in_burrow(w);
@@ -1650,6 +1725,12 @@ impl Plan {
             !e.dead
                 && e.kind != EntityKind::Enderman
                 && defend::hostile(e.kind)
+                // Not a neutral one (a zombified piglin held a bot in B with nothing to fear,
+                // race 45560431011): the survival rules' neutral kinds.
+                && !self
+                    .table
+                    .as_ref()
+                    .is_some_and(|t| t.survival.neutral.contains(&e.kind))
                 && dist(e.pos, o_at) <= r.hostile_near
         }) {
             let (id, kind) = (*id, e.kind);
@@ -2082,6 +2163,7 @@ impl Plan {
         self.pearls.reclaim = true;
         self.pearls.reclaimed = 0;
         self.pearls.moved_from.push(b.b);
+        self.pearls.moved_at.push(tick);
         self.pearls.burrow = None;
         self.pearls.built = false;
         self.pearls.since = None;
@@ -2242,8 +2324,9 @@ impl Plan {
                     let far = self.pearls.moved_from.iter().all(|m| {
                         (m[0] - at[0]).pow(2) + (m[2] - at[2]).pow(2) >= r.burrow_move.pow(2)
                     });
-                    if (FLOOR_MIN * FLOOR_MIN..=burrow::SITE_RADIUS * burrow::SITE_RADIUS)
-                        .contains(&d2)
+                    if !near_delta(w, at, DELTA_AVOID)
+                        && (FLOOR_MIN * FLOOR_MIN..=burrow::SITE_RADIUS * burrow::SITE_RADIUS)
+                            .contains(&d2)
                         && far
                         && !self.pearls.floor_tried.contains(&at)
                         && w.block_at(world::BlockPos::new(at[0], at[1], at[2]))
@@ -2717,11 +2800,21 @@ impl Plan {
             // A refused site is never tried again (within 1); a moved-from one is left by
             // `burrow_move` (a new place for spawns). Searched from the feet where they are.
             let seen: Vec<[f64; 3]> = self.pearls.sightings.iter().map(|(_, p)| *p).collect();
+            // A site moved from may be taken again after `MOVED_KEPT` (the frontier's one good
+            // site made the kills; every move from it drifted to no site, race 45560431011).
+            let recent_moves: Vec<[i32; 3]> = self
+                .pearls
+                .moved_from
+                .iter()
+                .zip(self.pearls.moved_at.iter().chain(std::iter::repeat(&0)))
+                .filter(|(_, at)| tick < *at + MOVED_KEPT)
+                .map(|(m, _)| *m)
+                .collect();
             let (found, why) = burrow::site_toward_skipping(
                 w,
                 &w.memory,
                 feet,
-                &self.pearls.moved_from,
+                &recent_moves,
                 r.burrow_move,
                 &self.pearls.refused,
                 &seen,
@@ -2803,7 +2896,15 @@ impl Plan {
                 // A plain route first: the far walk bridges (one bot laid 52 bridge cells toward
                 // the endermen's middle in race 45548022681).
                 let mut walk = Walk::new(target, goal, Arrive::Goal, tick);
-                if n > 0 || !walk.route_now(w, tick) {
+                // The far walk shuns magma cubes at 8 (path::SHUN_MAGMA); a plain route does not:
+                // with one within 24 the far walk goes first (race 45560431011 lane 2 died to cubes
+                // on a walk on).
+                let cubes_near = w.entities.values().any(|e| {
+                    !e.dead
+                        && e.kind == EntityKind::MagmaCube
+                        && w.body.is_some_and(|b| dist(b.pos, e.pos) <= 24.0)
+                });
+                if n > 0 || cubes_near || !walk.route_now(w, tick) {
                     walk = Walk::far_to(target, goal, tick);
                 }
                 if walk.route_now(w, tick) {

@@ -1825,6 +1825,17 @@ impl Plan {
                     .map(|(id, _)| *id),
             );
         }
+        // >>> pearls (P3, the orchestrator 2026-11-25): in the hunt a magma cube is never fought
+        // by choice (a no-heal bot loses every trade, and they split): the hunt seals a pocket.
+        if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| e.kind == data::EntityKind::MagmaCube)
+                    .map(|(id, _)| *id),
+            );
+        }
+        // <<< pearls
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
         if matches!(self.task, Task::Swim(..))
