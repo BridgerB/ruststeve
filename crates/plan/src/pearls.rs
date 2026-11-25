@@ -190,6 +190,22 @@ pub fn near_delta(w: &World, c: [i32; 3], r: i32) -> bool {
     })
 }
 
+/// The nearest delta ground to `c` on the plane (Chebyshev rings, the floor two down to the
+/// level), within `r`: the forest's edge, where magma cubes and ghasts come from.
+pub fn delta_distance(w: &World, c: [i32; 3], r: i32) -> Option<i32> {
+    (0..=r).find(|k| {
+        (-k..=*k).any(|dx| {
+            (-k..=*k).any(|dz| {
+                (dx.abs().max(dz.abs()) == *k)
+                    && (-2..=0).any(|dy| {
+                        w.block_at(world::BlockPos::new(c[0] + dx, c[1] + dy, c[2] + dz))
+                            .is_some_and(|b| burrow::DELTA_GROUND.contains(&b))
+                    })
+            })
+        })
+    })
+}
+
 /// A provoke's distance band: 6 to 16 (it walks), 16 to 36, 36 to 64 (the jar's follow range;
 /// past 16 it teleports toward the bot).
 pub fn band(d: f64) -> usize {
@@ -245,6 +261,8 @@ const ANGRY_PRESENT: f64 = 128.0;
 const HURT_SKIP: u64 = 100;
 /// Ticks a site moved from is avoided by the site search.
 const MOVED_KEPT: u64 = 6000;
+/// Blocks out to which the burrow's note measures the nearest delta ground.
+const DELTA_MEASURE: i32 = 32;
 /// Blocks from delta ground a forest-floor walk target keeps.
 const DELTA_AVOID: i32 = 8;
 /// Ticks a sighting is kept for the mouth's side.
@@ -1685,8 +1703,12 @@ impl Plan {
                 tick,
                 format!("burrow built at {:?}", b.b),
                 format!(
-                    "mouth toward ({}, {}), {} blocks placed",
-                    b.dir[0], b.dir[1], self.pearls.site_blocks
+                    "mouth toward ({}, {}), {} blocks placed; delta ground {} from O",
+                    b.dir[0],
+                    b.dir[1],
+                    self.pearls.site_blocks,
+                    delta_distance(w, b.o, DELTA_MEASURE)
+                        .map_or_else(|| format!("over {DELTA_MEASURE}"), |d| format!("{d}"))
                 ),
             );
         }
