@@ -58,6 +58,25 @@ pub fn read_memory(path: &Path) -> Result<memory::Memory, String> {
     rmp_serde::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The plan's eyes of ender state (issue 19c: the lines thrown, the fix, the throws' tally) to
+/// `eyes.rsw` beside `memory.rsw`, in the same encoding.
+pub fn write_eyes(path: &Path, kept: &plan::eyes::Kept) -> Result<(), String> {
+    let bytes = rmp_serde::to_vec_named(kept).map_err(|e| e.to_string())?;
+    let packed = zstd::encode_all(bytes.as_slice(), 3).map_err(|e| e.to_string())?;
+    std::fs::write(path, packed).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The eyes state a snapshot kept; a snapshot from before issue 19c has no `eyes.rsw` and reads
+/// as the default (no lines, no fix).
+pub fn read_eyes(path: &Path) -> Result<plan::eyes::Kept, String> {
+    if !path.exists() {
+        return Ok(plan::eyes::Kept::default());
+    }
+    let packed = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes = zstd::decode_all(packed.as_slice()).map_err(|e| e.to_string())?;
+    rmp_serde::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// Copy a directory tree, leaving out the server's `session.lock` (held while it runs).
 pub fn copy_dir(from: &Path, to: &Path) -> Result<u64, String> {
     std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
@@ -90,6 +109,54 @@ mod tests {
             offline_uuid("Notch"),
             "b50ad385-829d-3141-a216-7e7d7539ba7f"
         );
+    }
+
+    /// Issue 19c: a plan's eyes state goes out to `eyes.rsw` and comes back into a fresh plan
+    /// whole; a snapshot without the file reads as no lines and no fix.
+    #[test]
+    fn the_eyes_round_trip_through_the_snapshot_files() {
+        use plan::eyes::{EyeState, Fix, Kept, Line};
+        let dir = std::env::temp_dir().join(format!("rs-snap-eyes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("eyes.rsw");
+        let kept = Kept {
+            fix: Some(Fix {
+                point: [1_204.5, -873.25],
+                err_along: 61.0,
+                err_across: 9.5,
+            }),
+            throws: vec![
+                Line {
+                    from: [10.5, 20.5],
+                    dir: [0.6, -0.8],
+                    spread: 0.004,
+                },
+                Line {
+                    from: [180.0, 25.0],
+                    dir: [0.0, 0.0],
+                    spread: 0.0,
+                },
+            ],
+            state: EyeState {
+                thrown: 3,
+                kept: 2,
+                lost: 0,
+                shattered: 1,
+                spots: vec![[10.5, 20.5], [180.0, 25.0]],
+                noted_at: Some(4_400),
+            },
+        };
+        let mut from = plan::Plan::new(plan::Aim::Hold);
+        from.restore_eyes(kept.clone());
+        write_eyes(&path, &from.eyes_kept()).expect("write");
+        let mut to = plan::Plan::new(plan::Aim::Hold);
+        to.restore_eyes(read_eyes(&path).expect("read"));
+        assert_eq!(to.eyes_kept(), kept);
+        assert_eq!(
+            read_eyes(&dir.join("missing.rsw")).expect("missing"),
+            Kept::default()
+        );
+        std::fs::remove_dir_all(&dir).expect("clean");
     }
 
     #[test]

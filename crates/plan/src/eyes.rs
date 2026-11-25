@@ -956,8 +956,24 @@ impl Plan {
         }
     }
 
-    /// The eyes' state read back on a resume.
+    /// The eyes' state read back on a resume, noted at tick 0 (the run's start) so a resume's
+    /// carried lines are counted in the ledger.
     pub fn restore_eyes(&mut self, kept: Kept) {
+        self.note(
+            0,
+            "eyes: restored".to_owned(),
+            format!(
+                "{} lines, fix {}",
+                kept.throws.len(),
+                kept.fix.map_or_else(
+                    || "none".to_owned(),
+                    |f| format!(
+                        "{:.0},{:.0} (along {:.0}, across {:.0})",
+                        f.point[0], f.point[1], f.err_along, f.err_across
+                    )
+                )
+            ),
+        );
         self.fix = kept.fix;
         self.throws = kept.throws;
         self.eyes = kept.state;

@@ -782,6 +782,7 @@ fn real_waves(
                 on_stage: None,
                 no_progress_ticks: None,
                 snapshot_at: None,
+                eyes: None,
                 progress: None,
             };
             let id = m.id.clone();
