@@ -25,6 +25,12 @@ All hold 7 rods, 12 pearls, a shield, iron armour, stone and wooden tools, and n
 - **Strongholds of the first ring lie 1,280 to 2,816 blocks from the origin**: a long overland trip, by day and night, with no food until the bot hunts.
 - **The portal room is found by its frames**: `end_portal_frame` blocks face the room's air, so memory sees them from chunk data within the view distance; the eyes only need to bring the bot within about 100 blocks.
 
+## Measured (19a)
+- **The eye** (Q5, probe 45685968956, the 26.1.2 jar): it spawns at the feet +0.9 and flies through terrain toward a point 12 blocks along the exact bearing to the stronghold and 8 up (within 12, to the stronghold itself, descending). It ends after 81 ticks: 4 in 5 as a dropped `ender_eye` item, 1 in 5 shattered. In the Nether, or with the look on an end portal frame, there is no throw and no eye is spent. The heading is the bearing with no curve: a line's error is only the position's rounding.
+- **The stronghold** (development knowledge, RCON `locate`): (1648, ~, -16), 1,537 blocks almost due east of the overworld portal near (113, -105) and nearest from the bot's old stairs at (55, -133).
+- **The portal room** (`StrongholdPieces$PortalRoom`, 11 x 8 x 16): frames at the floor +3 round a lava pool at floor +1 under the ring; side lava pools by the door end; the silverfish spawner at the top of the stair, facing the ring.
+- Dev starts `dev-overworld-eyes` and `dev-stronghold` (1355826): the frontier bot on the surface with 14 eyes and food, development only.
+
 ## Risks
 - The lava ledge at the portal; the cave band at the overworld exit.
 - No healing until food is eaten.
