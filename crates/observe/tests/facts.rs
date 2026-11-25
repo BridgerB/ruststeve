@@ -750,3 +750,200 @@ fn an_enderman_angered_struck_killed_and_its_pearl_picked_are_in_the_ledger() {
         "{facts:?}"
     );
 }
+
+fn overworld_bot() -> World {
+    let mut w = World::new();
+    w.step(&Event::Packet(S2c::Login {
+        entity_id: 7,
+        view_distance: 8,
+        simulation_distance: 3,
+        dimension_type: 0,
+        dimension: "minecraft:overworld".to_owned(),
+        game_type: 0,
+    }));
+    w.step(&Event::Packet(S2c::PlayerPosition {
+        teleport_id: 1,
+        x: 0.5,
+        y: 64.0,
+        z: 0.5,
+        yaw: 0.0,
+        pitch: 0.0,
+        flags: 0,
+    }));
+    w
+}
+
+fn add(w: &mut World, id: i32, kind: EntityKind, pos: [f64; 3], velocity: [f64; 3]) {
+    w.step(&Event::Packet(S2c::AddEntity {
+        id,
+        uuid: [id as u8; 16],
+        kind: kind.id(),
+        x: pos[0],
+        y: pos[1],
+        z: pos[2],
+        velocity,
+    }));
+}
+
+/// Issue 19b: an eye thrown east from the bot (its spawn velocity's heading), its flight, its
+/// end as a dropped item and the pickup are each a fact; one that leaves no item shattered.
+#[test]
+fn an_eye_thrown_flown_dropped_and_picked_is_in_the_ledger() {
+    let mut w = overworld_bot();
+    let a = snapshot(&w);
+    add(
+        &mut w,
+        40,
+        EntityKind::EyeOfEnder,
+        [0.5, 65.6, 0.5],
+        [0.3, 0.1, 0.0],
+    );
+    let (b, facts) = facts_between(&a, &w);
+    let yaw = facts.iter().find_map(|f| match f {
+        Fact::EyeThrown { id: 40, yaw, .. } => *yaw,
+        _ => None,
+    });
+    assert!(yaw.is_some_and(|y| (y + 90.0).abs() < 0.5), "{facts:?}");
+    w.step(&Event::Packet(S2c::EntityPositionSync {
+        id: 40,
+        x: 10.5,
+        y: 70.0,
+        z: 0.5,
+    }));
+    let (c, _) = facts_between(&b, &w);
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![40] }));
+    let (d, facts) = facts_between(&c, &w);
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::EyeFlight { id: 40, samples: 2, heading: Some(h), .. } if (h + 90.0).abs() < 0.5
+        )),
+        "{facts:?}"
+    );
+    assert!(
+        !facts.iter().any(|f| matches!(f, Fact::EyeEnded { .. })),
+        "waits for its drop"
+    );
+    assert_eq!(d.eyes_gone.len(), 1);
+    add(&mut w, 41, EntityKind::Item, [10.5, 70.0, 0.5], [0.0; 3]);
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 41,
+        entries: vec![(8, MetaValue::Item(Slot::item(ItemKind::EnderEye.id(), 1)))],
+    }));
+    let (e, facts) = facts_between(&d, &w);
+    assert!(
+        facts.iter().any(|f| matches!(
+            f,
+            Fact::EyeEnded {
+                id: 40,
+                dropped: true,
+                ..
+            }
+        )),
+        "{facts:?}"
+    );
+    w.step(&Event::Packet(S2c::TakeItemEntity {
+        item: 41,
+        collector: 7,
+        amount: 1,
+    }));
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![41] }));
+    put(&mut w, 36, Slot::item(ItemKind::EnderEye.id(), 1));
+    let (mut f, facts) = facts_between(&e, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::EyePicked { id: 41, amount: 1 })),
+        "{facts:?}"
+    );
+    let row = senses(&w, "t", "w", None);
+    assert_eq!(row.eyes, Some(1));
+    assert!(row.eyes().contains("overworld eyes 1"), "{}", row.eyes());
+    // A second eye with no item after it: shattered once the wait is over.
+    add(
+        &mut w,
+        42,
+        EntityKind::EyeOfEnder,
+        [0.5, 65.6, 0.5],
+        [0.0; 3],
+    );
+    let (g, _) = facts_between(&f, &w);
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![42] }));
+    let (mut h, _) = facts_between(&g, &w);
+    h.at += observe::EYE_DROP_TICKS;
+    let mut i = snapshot(&w);
+    i.at = h.at + 1;
+    let facts: Vec<Fact> = diff(&h, &mut i, &w).into_iter().map(|s| s.fact).collect();
+    assert!(
+        facts.iter().any(|x| matches!(
+            x,
+            Fact::EyeEnded {
+                id: 42,
+                dropped: false,
+                ..
+            }
+        )),
+        "{facts:?}"
+    );
+    // A silverfish within 16 is woken; the dimension fact names where the bot came from.
+    add(
+        &mut w,
+        50,
+        EntityKind::Silverfish,
+        [3.5, 64.0, 0.5],
+        [0.0; 3],
+    );
+    f.dimension = Some("minecraft:the_nether".to_owned());
+    let (_, facts) = facts_between(&f, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::SilverfishWoken { id: 50, .. })),
+        "{facts:?}"
+    );
+    assert!(
+        facts.iter().any(|x| matches!(
+            x,
+            Fact::Dimension { to, from: Some(from) }
+                if to == "minecraft:overworld" && from == "minecraft:the_nether"
+        )),
+        "{facts:?}"
+    );
+}
+
+/// Issue 19b: an end portal frame seen exposed within 128 is a fact, once.
+#[test]
+fn a_frame_seen_is_in_the_ledger_once() {
+    use protocol::chunk::{Column, Paletted, Section};
+    let mut w = overworld_bot();
+    let air = Section {
+        block_count: 0,
+        fluid_count: 0,
+        blocks: Paletted::Single(0),
+        biomes: Paletted::Single(0),
+    };
+    w.step(&Event::Packet(S2c::LevelChunkWithLight {
+        x: 0,
+        z: 0,
+        column: std::sync::Arc::new(Column {
+            min_y: 0,
+            sections: vec![air; 16],
+        }),
+    }));
+    let a = snapshot(&w);
+    let frame = BlockKind::EndPortalFrame.info().unwrap().default_state;
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (5, 30, 5),
+        state: frame,
+    }));
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::FrameSeen { cell: [5, 30, 5] })),
+        "{facts:?}"
+    );
+    let (_, facts) = facts_between(&b, &w);
+    assert!(!facts.iter().any(|x| matches!(x, Fact::FrameSeen { .. })));
+    assert_eq!(senses(&w, "t", "w", None).frames, Some(1));
+}

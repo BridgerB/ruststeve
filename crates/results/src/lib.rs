@@ -627,7 +627,7 @@ impl SensesFile {
                 })
                 .collect();
             out.push_str(&format!(
-                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{}{} | {} ({}) | {}\n",
+                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{}{}{} | {} ({}) | {}\n",
                 r.at,
                 r.standing(),
                 r.health
@@ -649,6 +649,7 @@ impl SensesFile {
                 )),
                 r.travel(),
                 r.hunt(),
+                r.eyes(),
                 r.task,
                 r.why,
                 near.join(", ")
@@ -1000,6 +1001,8 @@ mod text_tests {
             angry_ticking: None,
             angry_frozen: None,
             sword_uses: None,
+            eyes: None,
+            frames: None,
         }
     }
 

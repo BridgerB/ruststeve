@@ -6,7 +6,7 @@ tags: [race, results, measurement, case-files, starts, stages, coverage]
 aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
 lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@d0cd4db clojurecraft@be85a92
+verifiedAgainst: ruststeve@7c9069f clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
@@ -55,7 +55,7 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - **The replay never fails a lane.** It runs last, at most 5 minutes, with `continue-on-error`; its result is a line in the job summary, a warning when it fails and `verify-lane-N.txt` on the release ([[replay-and-why]]).
 - **While the race runs**: every 2,400 ticks each bot rewrites `progress-<bot>.txt` and, beside it, `<bot>.ledger.txt`, `<bot>.senses.txt` and `<bot>.case.txt` (`bot::evidence`; the case text starts `RUNNING` and holds the story so far, and the run's end writes the real case over it). The lane uploads `progress-lane-N.txt` and `evidence-lane-N.tar.zst` to the release every 5 minutes (10 with more than 8 lanes: the workflow token has 1,000 requests an hour), and a snapshot within 30 seconds of its `snap.toml`. Read them with `gh release download race-<id> -p 'evidence-lane-*' -p 'progress-lane-*'`.
 - **Each lane reports its seconds** (setup, race, after the race, job) in the job summary.
-- **`NoProgress`** (`bot::progress`, `config/race.toml` `no_progress_ticks` and `[progress] items`): progress is a new stage, an item kind the run has not held, more of a goal item than the run ever held (up to the most any goal row asks for) or a 16-block cube not stood in before. "Any count went up" was progress until issue 16, and a bot digging in place gained netherrack and never ended.
+- **`NoProgress`** (`bot::progress`, `config/race.toml` `no_progress_ticks` and `[progress] items`): progress is a new stage, an item kind the run has not held, more of a goal item than the run ever held (up to the most any goal row asks for) or a 16-block cube not stood in before; since issue 19b also an eye thrown or picked up, a frame seen or a dimension entered (`Gain::Eyes`), and `[progress] items` holds 12 eyes of ender. "Any count went up" was progress until issue 16, and a bot digging in place gained netherrack and never ended.
 
 ## Evidence
 - Runners, run 43181608927 on main 409c473: 4 lanes × 14 bots on `spawn`, cap 6000: **56/56 `in_world`, 0/56 above, coverage cases 56/56 and recordings 56/56**, every lane in about 7 minutes; the server ticked 20.1 a second with 14 bots (headroom for more).
