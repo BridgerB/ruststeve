@@ -242,6 +242,10 @@ pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {
         if let Some(f) = fluid(kind(w, *c)) {
             return Some(format!("{f} at {c:?}"));
         }
+        // Issue 19f: a block broken that hides a silverfish wakes it and its neighbours.
+        if infested(kind(w, *c)) {
+            return Some(format!("{INFESTED_AT} {c:?}"));
+        }
         for (dx, dy, dz) in SIDES {
             let n = (c.0 + dx, c.1 + dy, c.2 + dz);
             if fluid(kind(w, n)) == Some("lava") {
@@ -293,6 +297,26 @@ fn short_drop(w: &World, floor: Cell) -> bool {
         }
     }
     false
+}
+
+/// The refusal's words for an infested block (issue 19f).
+pub const INFESTED_AT: &str = "infested at";
+
+/// A block a silverfish hides in (issue 19f, the stronghold): never dug. The kind is in chunk
+/// data as it is for lava beside a cell (memory knows it), though it looks like its plain block.
+pub fn infested(k: Option<BlockKind>) -> bool {
+    matches!(
+        k,
+        Some(
+            BlockKind::InfestedStone
+                | BlockKind::InfestedCobblestone
+                | BlockKind::InfestedStoneBricks
+                | BlockKind::InfestedMossyStoneBricks
+                | BlockKind::InfestedCrackedStoneBricks
+                | BlockKind::InfestedChiseledStoneBricks
+                | BlockKind::InfestedDeepslate
+        )
+    )
 }
 
 /// A full block that burns what stands on it: `path::classify` never takes it as a floor.

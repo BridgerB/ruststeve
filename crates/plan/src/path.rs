@@ -226,6 +226,9 @@ pub struct Cells<'a> {
     /// Cells a route never enters: a heading's cut cells behind the feet (docs/problems/heading.md:
     /// a leg never walks back over ground the heading already covered).
     blocked: BTreeSet<Cell>,
+    // >>> overland (Q4, issue 19e): a bridge may be laid over water (a river), in any dimension.
+    water: bool,
+    // <<< overland
 }
 
 impl<'a> Cells<'a> {
@@ -238,8 +241,21 @@ impl<'a> Cells<'a> {
             bridge: false,
             shun: Vec::new(),
             blocked: BTreeSet::new(),
+            water: false,
         }
     }
+
+    // >>> overland (Q4, issue 19e, docs/problems/eyes-stronghold.md)
+    /// The cells for an overland leg's far search: it bridges in the overworld too, laying held
+    /// blocks over water (a river) as over lava, with `keep` blocks held back.
+    pub fn far_over_water(world: &'a World, keep: i64) -> Self {
+        Self {
+            bridge: bridge_blocks(world) >= keep.max(BRIDGE_RESERVE),
+            water: true,
+            ..Self::far(world)
+        }
+    }
+    // <<< overland
 
     /// The cells for a far search that bridges only with `keep` blocks held (a heading's leg
     /// keeps 32: docs/problems/heading.md), and never with `keep` at `i64::MAX`.
@@ -301,7 +317,9 @@ impl<'a> Cells<'a> {
                 self.world.block_at(BlockPos::new(c.0, c.1, c.2)),
                 Some(BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir)
             ),
-            Class::Solid | Class::Water | Class::Awkward | Class::Unknown => false,
+            // A block replaces water too: an overland leg's bridge over a river (issue 19e).
+            Class::Water => self.water,
+            Class::Solid | Class::Awkward | Class::Unknown => false,
         }
     }
 

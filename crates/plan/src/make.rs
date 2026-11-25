@@ -223,6 +223,12 @@ pub struct Goals {
     #[serde(default)]
     pub base: crate::base::Base,
     // <<< base
+    // >>> overland and stronghold (Q4, issue 19e/f): `[overland]` and `[stronghold]`.
+    #[serde(default)]
+    pub overland: crate::overland::OverlandRules,
+    #[serde(default)]
+    pub stronghold: crate::stronghold::StrongholdRules,
+    // <<< overland and stronghold
     // >>> eyes (Q3, issue 19c): `[eyes]`, the throws' numbers.
     #[serde(default)]
     pub eyes: crate::eyes::EyeRules,
@@ -573,6 +579,10 @@ pub struct Table {
     // >>> base
     pub base: crate::base::Base,
     // <<< base
+    // >>> overland and stronghold (Q4)
+    pub overland: crate::overland::OverlandRules,
+    pub stronghold: crate::stronghold::StrongholdRules,
+    // <<< overland and stronghold
     // >>> eyes
     pub eyes: crate::eyes::EyeRules,
     // <<< eyes
@@ -775,6 +785,10 @@ impl Table {
                 valley_wait_ticks: g.survival.valley_wait_ticks,
             },
             base: g.base.clone(),
+            // >>> overland and stronghold (Q4)
+            overland: g.overland.clone(),
+            stronghold: g.stronghold.clone(),
+            // <<< overland and stronghold
             // >>> eyes
             eyes: g.eyes.clone(),
             // <<< eyes
@@ -1198,6 +1212,8 @@ mod tests {
             survival: Survival::default(),
             pearls: crate::pearls::PearlRules::default(),
             base: crate::base::Base::default(),
+            overland: crate::overland::OverlandRules::default(),
+            stronghold: crate::stronghold::StrongholdRules::default(),
             eyes: crate::eyes::EyeRules::default(),
         };
         Table::new(&g).unwrap()

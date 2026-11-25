@@ -34,6 +34,9 @@ pub mod hunt;
 pub mod ledger;
 pub mod look;
 pub mod make;
+// >>> overland (Q4, issue 19e)
+pub mod overland;
+// <<< overland
 pub mod path;
 // >>> pearls (P3, issue 18f)
 pub mod pearls;
@@ -45,6 +48,9 @@ pub mod shield;
 pub mod smelt;
 pub mod stairs;
 pub mod station;
+// >>> stronghold (Q4, issue 19f)
+pub mod stronghold;
+// <<< stronghold
 pub mod tunnel;
 pub mod walk;
 
@@ -185,6 +191,12 @@ const REPICKUP_JUMP: i32 = 4;
 /// Ticks a full pack holds tasks back while its junk is dropped: three drops at `EQUIP_TICKS`
 /// and their resyncs, with room (overworld-leg wall 10).
 const FULL_WAIT_TICKS: u64 = 200;
+// >>> overland and stronghold (Q4)
+/// A throw's walk point (`eyes_way`, read from the feet each call) that moved more than this is
+/// a new target for the overland: a quarter of the shortest leg (`[overland] leg_min` 64), so a
+/// leg is not begun again for the point's drift as the bot walks.
+const WAY_MOVED: f64 = 16.0;
+// <<< overland and stronghold
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
 pub const TRAIL_TOWARD: f64 = 4.0;
@@ -824,6 +836,12 @@ pub struct Plan {
     #[serde(default)]
     pub base: base::BaseState,
     // <<< base
+    // >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md).
+    #[serde(default)]
+    pub overland: overland::OverlandState,
+    #[serde(default)]
+    pub stronghold: stronghold::StrongholdState,
+    // <<< overland and stronghold
     // >>> eyes (Q3, issue 19c): the lines read, their fix, and the throws' record
     // (docs/problems/eyes-throw.md).
     #[serde(default)]
@@ -952,6 +970,10 @@ impl Plan {
             // >>> base
             base: base::BaseState::default(),
             // <<< base
+            // >>> overland and stronghold (Q4)
+            overland: overland::OverlandState::default(),
+            stronghold: stronghold::StrongholdState::default(),
+            // <<< overland and stronghold
             // >>> eyes
             fix: None,
             throws: Vec::new(),
@@ -2432,6 +2454,11 @@ impl Plan {
         {
             return Task::Idle;
         }
+        // >>> overland and stronghold (Q4, issue 19e/f)
+        if let Some(t) = self.eyes_stronghold_task(w, tick) {
+            return t;
+        }
+        // <<< overland and stronghold
         if w.dimension
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
@@ -2554,6 +2581,74 @@ impl Plan {
         }
         self.decide(w, origin, tick)
     }
+
+    // >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md)
+    /// In the overworld with eyes held (or a portal room known): into the room if its frames are
+    /// seen, else overland toward the fix (`OverlandState::fix`, set from the eyes' fix), else
+    /// `None` (the eyes' throws come first; the orchestrator orders the calls).
+    fn eyes_stronghold_task(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.aim != Aim::Race {
+            return None;
+        }
+        // The eyes made from the pearls and rods held, before anything else (a safety net: Q2's
+        // Home phase crafts them in the forest, so this normally finds nothing to do).
+        let overworld = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == stronghold::OVERWORLD);
+        if overworld && let Some(t) = self.eyes_craft_task(w, tick) {
+            return Some(t);
+        }
+        let eyes = craft::count(w, data::ItemKind::EnderEye) > 0;
+        if !eyes && self.stronghold.room.is_none() {
+            return None;
+        }
+        // Fresh stone pickaxes first, between legs and stairs (not in the room: the nook's).
+        let in_room = self.stronghold.entered_noted;
+        if !in_room && let Some(t) = self.stronghold_pickaxes(w, tick) {
+            return Some(t);
+        }
+        // The eyes' fix is the overland's target from the moment it is crossed.
+        if let Some(f) = self.fix {
+            let fix = (f.point, f.err_along.max(f.err_across));
+            if self.overland.fix != Some(fix) || self.overland.way {
+                self.overland.retarget(fix, false);
+            }
+        }
+        // Into the room when its frames are seen, or the search from the fix's arrival.
+        if let Some(t) = self.stronghold_task(w, tick) {
+            return Some(t);
+        }
+        // A throw due here, or the eye of the last one followed and picked up (Q3).
+        if let Some(t) = self.eyes_task(w, tick) {
+            return Some(t);
+        }
+        // No fix yet: the walk to the spot the next throw is due at (the baseline for throw 2).
+        if self.fix.is_none()
+            && let Some(p) = self.eyes_way(w)
+            && (!self.overland.way
+                || self
+                    .overland
+                    .fix
+                    .is_none_or(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) > WAY_MOVED))
+        {
+            self.overland.retarget((p, 0.0), true);
+        }
+        if let Some(t) = self.overland_task(w, tick) {
+            return Some(t);
+        }
+        // Eyes held in the overworld and nothing to do now (a throw that waits on the night or
+        // a hostile): a look again, never on to the Nether task's portal below.
+        if w.dimension
+            .as_ref()
+            .is_some_and(|d| d.name == stronghold::OVERWORLD)
+        {
+            self.retry_at = tick + RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        None
+    }
+    // <<< overland and stronghold
 
     /// Under the engage health in the Nether: rest where no shooter in range sees the body and
     /// nothing burns; seen or burning, the nearest cell out of sight on a found route; with none,

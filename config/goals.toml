@@ -722,6 +722,75 @@ wait_ticks = 200
 pause_ticks = 6000
 pause_max = 1
 # <<< base
+# >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md)
+[overland]
+# Legs of 64 to 128 blocks (the plan's 19e: four to eight chunks, so each leg loads new columns
+# ahead within the server's view distance), each ended within leg_reach of its cell on seen ground.
+leg_min = 64
+leg_max = 128
+leg_reach = 6.0
+# A leg that comes no nearer its target in 600 ticks turns the bearing 30 degrees (plan 19e.1);
+# three walks begun on one leg without arriving end it the same way.
+leg_stall_ticks = 600
+leg_tries = 3
+turn_deg = 30.0
+# The way's invariant: the fix 32 blocks nearer every 1,200 walking ticks (plan 19e.5: walking is
+# about 4 blocks a second, 80 a minute; 32 a minute leaves room for detours and bridges).
+progress_blocks = 32.0
+progress_ticks = 1200
+# Water 64 or wider on the bearing is an ocean, gone round (plan 19e.2); narrower is bridged.
+ocean_wide = 64
+# A leg's bridge keeps 32 held blocks back (the heading's KEEP, docs/problems/heading.md) and lays
+# at most 40 (rivers run 8 to 30 wide; a wider crossing is an ocean's).
+bridge_keep = 32
+bridge_max = 40
+# Within 24 of the fix with no frame seen the stronghold's search starts (Q5's probe 45685968956:
+# the eye heads exactly at the stronghold, so the fix is expected within tens of blocks).
+arrive = 24.0
+# A hut is the cook's (overworld-leg wall 11: HUT_MAX 24 blocks).
+hut_max = 24
+# Hurt under the danger line with food: in the hut until 16 health or 2,400 ticks (two meals'
+# regeneration at food 18 and over: half a heart every 80 ticks).
+heal_to = 16.0
+heal_ticks = 2400
+# Columns read on a bearing every 8 blocks for ground and water.
+scan_step = 8
+# Travel points round a known ocean (Bridger's geography ruling): none known on this world's way
+# east (the strip map is Q1's, docs/problems/eyes-observe.md).
+around = []
+# Development only: a fix (x, z) used while the eyes give none, for a dev start's race on a dev
+# branch. Never set on a merged branch (dev_fix = [x, z]).
+
+[stronghold]
+# The portal room's template (StrongholdPieces$PortalRoom, Q5's probe 45685968956): frames at y 3,
+# the floor at y 0, feet at y 1: the feet two under the frames.
+frame_over_feet = 2
+# The room's air within 7 of the ring's centre on the plane (the room is 11 by 16; the plan's
+# portal_room box).
+room_reach = 7
+# The dry stairs end 10 blocks or more out from the ring's centre (the room's half-length 8, and 2
+# of rock), then the tunnel at the floor's level breaks in through its wall.
+approach = 10
+# Frames are looked for within 8 chunk columns (the view distance) every 100 ticks.
+frame_chunks = 8
+look_every = 100
+# No frame seen at the fix: down to y 30 (Q1's jar read; the first ring's strongholds start at
+# y 10 to 40 in this world's measures), then a spiral of 12 tunnel legs from 16, 8 longer a pair.
+search_y = 30
+spiral_first = 16
+spiral_step = 8
+spiral_legs = 12
+# The nook in the room: a hut's blocks at most.
+nook_max = 24
+# Stairs legs that leave the feet where they were, before the tunnel takes the descent.
+descent_stalls = 4
+# Stone bricks broken where the tunnel ends in reach of the wall (race 45689919380 lane 0 stood at
+# the wall at (1646, 29, -8) and turned away): four opens a corridor's side, then the spiral.
+wall_breaks = 4
+# Tasks a round of stone pickaxes may begin (a table placed, two crafts, the table dug: four; twice
+# that for a failed click), then the round ends and waits the spares' retry.
+pick_tasks = 8
+# <<< overland and stronghold
 
 # >>> eyes (Q3, issue 19c, docs/problems/eyes-throw.md): the eyes of ender, crafted in the 2x2 grid
 # where the bot stands (blaze_powder from a rod, two a rod; ender_eye from a pearl and a powder:

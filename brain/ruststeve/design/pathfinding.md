@@ -5,8 +5,8 @@ type: reference
 tags: [plan, path, astar, routes, core]
 aliases: [path, pathfinder, A*, route, waypoints, Cells, classify, awkward, moves, goals, Near, Afar, budget, expansions, start_cell]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@31545c1 clojurecraft@be85a92
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@b09de3d clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/path.rs#pub fn classify(state: Option<u32>) -> Class {"
   - "ruststeve:crates/plan/src/path.rs#pub fn search(cells: &mut Cells<'_>, start: Cell, goal: &Goal, max_nodes: u32) -> Route {"
@@ -51,6 +51,7 @@ Issue 09a: clojurecraft's `path.clj` in Rust (`plan::path`), constant for consta
 ## Issue 17d: the heading's legs (docs/problems/heading.md)
 - **`Goal::Ahead { from, dir, gain }`**: `gain` or more along a compass axis from `from` (`path::along` gives a cell's projection and how far aside), no more than `gain` aside. A heading's leg ends wherever the ground lets it, not at one cell that may be rock.
 - **Blocked cells** (`Cells::blocking`): a search never enters them. The heading gives its cut cells at or behind the feet, so a leg never walks back over ground it covered (clojurecraft's causeway pacing).
+- **Bridges over water** (issue 19e, `Cells::far_over_water`, `walk::More::water`): an overland leg's far search may lay held blocks over water (a river) in the overworld, with its keep; every other search still never lays into water.
 - **A keep for bridging** (`Cells::far_keeping`): a far search bridges only with that many blocks held; the heading keeps 32, the fortress walk `BRIDGE_RESERVE` 16. `plan_over` searches cells the caller made.
 
 ## See also
