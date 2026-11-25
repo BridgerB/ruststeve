@@ -69,6 +69,7 @@ fn a_creeper_fusing_is_a_sign_and_in_the_senses_row() {
         x: 3.0,
         y: 0.0,
         z: 0.0,
+        velocity: [0.0; 3],
     }));
     w.player.pos = Some([0.0, 0.0, 0.0]);
     let a = snapshot(&w);
@@ -104,6 +105,7 @@ fn a_fireballs_closest_pass_is_told_when_it_goes() {
             x,
             y: 0.0,
             z: 0.0,
+            velocity: [0.0; 3],
         }));
     };
     at(&mut w, 6.0);
@@ -390,6 +392,7 @@ fn a_fall_in_health_with_no_damage_event_is_a_fact_of_its_own() {
         x: 2.0,
         y: 0.0,
         z: 0.0,
+        velocity: [0.0; 3],
     }));
     health(&mut w, 20.0);
     let a = snapshot(&w);
@@ -542,6 +545,7 @@ fn an_enderman_seen_and_ticking_is_in_the_ledger() {
         x: 70.0,
         y: 64.0,
         z: 0.5,
+        velocity: [0.0; 3],
     }));
     let a = snapshot(&w);
     let mut b = snapshot(&w);
@@ -609,6 +613,7 @@ fn an_enderman_angered_struck_killed_and_its_pearl_picked_are_in_the_ledger() {
         x: 2.5,
         y: 64.0,
         z: 0.5,
+        velocity: [0.0; 3],
     }));
     w.step(&Event::Packet(S2c::SetEntityData {
         id: 21,
@@ -679,6 +684,7 @@ fn an_enderman_angered_struck_killed_and_its_pearl_picked_are_in_the_ledger() {
         x: 3.0,
         y: 64.0,
         z: 1.0,
+        velocity: [0.0; 3],
     }));
     w.step(&Event::Packet(S2c::SetEntityData {
         id: 30,
@@ -727,6 +733,7 @@ fn an_enderman_angered_struck_killed_and_its_pearl_picked_are_in_the_ledger() {
         x: 20.0,
         y: 64.0,
         z: 20.0,
+        velocity: [0.0; 3],
     }));
     w.step(&Event::Packet(S2c::SetEntityData {
         id: 31,

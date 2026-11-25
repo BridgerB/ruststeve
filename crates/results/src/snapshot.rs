@@ -77,7 +77,7 @@ pub fn memory_report(m: &memory::Memory, list: &[String]) -> String {
         let Some(s) = m.log().get(*i) else { continue };
         let n = name(s.state);
         *kinds.entry((dim.as_str(), n)).or_default() += 1;
-        if matches!(n, "minecraft:nether_portal" | "minecraft:obsidian") {
+        if matches!(n, "nether_portal" | "obsidian" | "end_portal_frame") {
             keep.entry((dim.as_str(), n)).or_default().push(*pos);
         }
     }

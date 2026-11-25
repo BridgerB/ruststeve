@@ -660,6 +660,7 @@ impl Sim {
                                 x,
                                 y,
                                 z,
+                                velocity: [0.0; 3],
                             },
                         )?);
                         spawned += 1;
@@ -815,6 +816,7 @@ impl Sim {
                             x: pos[0],
                             y: pos[1],
                             z: pos[2],
+                            velocity: [0.0; 3],
                         },
                     )?);
                 }
@@ -1484,6 +1486,7 @@ impl Sim {
                     x: m.pos[0],
                     y: m.pos[1],
                     z: m.pos[2],
+                    velocity: [0.0; 3],
                 },
             )?);
             // An enderman a test placed already angry (issue 18: a frozen angry one holding the

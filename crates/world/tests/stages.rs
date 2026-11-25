@@ -247,6 +247,7 @@ fn enderman(id: i32, x: f64, z: f64) -> Event {
         x,
         y: 64.0,
         z,
+        velocity: [0.0; 3],
     })
 }
 
