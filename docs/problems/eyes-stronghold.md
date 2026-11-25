@@ -54,3 +54,15 @@ A development race on b09cf7b (`dev-stronghold`, no `dev_fix`: the eyes thrown 1
   - Fix: `[stronghold] junk` (the Nether's leftovers, 64 netherrack kept) joins the junk drop in the overworld while the stronghold is the aim, and no pickaxe round begins on a full pack.
 - **Cause 2, the floor-level flip**: lane 0's stairs reached the floor's height at (1591, 24, 34), 103 blocks off the target. The tunnel's 102-step route climbs (to y 40), and after its first leg the stairs down began again, the same down-and-up as wall 1. Fix: `at_floor` latches. From then on the stairs take over only beyond `tunnel::RISE` (16) above or below.
 - **Stand target**: (1624, 17, -30), on the south-west side of the ring for a bot coming from the south-west. It is outside the ring's ±3 box, with no lava within 2. Not yet walked to.
+
+### Wall 3: the yo-yo round the floor; 19 off at the cap (race 45698008920, 2026-11-25)
+A development race on a3cfb50 (`dev-stronghold`, no `dev_fix`), 2 lanes x 1 bot, cap 12,000, from the frontier. Development knowledge, never evidence.
+- **What worked**:
+  - Both lanes found the room from the surface at tick 1,160.
+  - The junk drop made room: quartz, nuggets, soul soil, warped roots and nylium, then the stairs' stone.
+  - Stone pickaxes were made three times in all (lane 0 at 1,600; lane 1 at 2,040, 4,800 and 8,720, after its pickaxe broke at 8,260). No lane went without one.
+  - Lane 0 ended at (1616, 17, -24) on mossy stone bricks, tunnelling at the floor's level, 19 off its standing cell (step 12 of 25).
+- **Cause**: lane 1's stairs legs cut 6. From y 19 a leg ended at 13, under the floor's band (16 to 18), and the stairs up went back to 19. `at_floor` latched only within 1 of the floor, so it never latched, and the bot repeated the same two cells from tick 8,820 to the cap.
+- **Fixes**:
+  - `at_floor` latches within a stairs leg's cut (`STAIR_LEG`, 6) of the floor.
+  - Far rooms are walked to on the surface first (`stronghold_surface`): both lanes began their stairs 112 to 118 off and reached the floor's height 78 to 92 off, leaving the tunnel the rest.

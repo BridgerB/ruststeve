@@ -579,3 +579,22 @@ fn a_far_room_is_walked_to_on_the_surface() {
         "{n:#?}"
     );
 }
+
+/// Six over the floor, a stairs leg's cut: the floor's height is latched and no stairs begin
+/// (race 45698008920 lane 1 went down to 13 and up to 19 round a floor at 17 for 3,000 ticks).
+#[test]
+fn within_a_leg_of_the_floor_the_tunnel_takes_over() {
+    let mut s = room_world((-40, 60), (-30, 40));
+    s.fill((22, 22), (27, 28), (10, 10), BlockKind::Air);
+    let w = load(&s, [22.5, 27.0, 10.5]);
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.stronghold.room = Some(the_room(&w));
+    p.stronghold.looked = Some(0);
+    let t = p.stronghold_task(&w, 1);
+    let n = notes(&p);
+    assert!(p.stronghold.at_floor, "{t:?} {n:#?}");
+    assert!(
+        !n.iter().any(|n| n.starts_with("stronghold stairs")),
+        "{t:?} {n:#?}"
+    );
+}

@@ -44,6 +44,9 @@ pub const SURFACE_SLACK: f64 = 8.0;
 /// Surface walks toward the room at most: 118 off (race 45698008920) is one leg of 128, so six
 /// cover detours round water and hills.
 pub const SURFACE_WALKS: u32 = 6;
+/// The height a stairs leg cuts ("cut 6 stairs" in every leg of races 45695074789 and
+/// 45698008920): within this of the floor the tunnel takes over.
+pub const STAIR_LEG: i32 = 6;
 
 /// The portal room as memory knows it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -449,8 +452,10 @@ impl Plan {
         }
         // At the floor's height once, the tunnel has the way from there: its route may climb (up to
         // `tunnel::RISE`), and stairs down again from its first leg undid it (race 45695074789
-        // lane 0 at (1591, 24, 34), 103 off).
-        if (feet.1 - target.1).abs() <= 1 && !self.stronghold.at_floor {
+        // lane 0 at (1591, 24, 34), 103 off). Within a stairs leg's cut of it, not only on it: a
+        // leg of 6 from 19 ended at 13 under a floor at 17, the next up at 19 again, and the bot
+        // went up and down from tick 8,820 to the cap (race 45698008920 lane 1).
+        if (feet.1 - target.1).abs() <= STAIR_LEG && !self.stronghold.at_floor {
             self.stronghold.at_floor = true;
             self.note(
                 tick,
