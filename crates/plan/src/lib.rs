@@ -2590,6 +2590,15 @@ impl Plan {
         if self.aim != Aim::Race {
             return None;
         }
+        // The eyes made from the pearls and rods held, before anything else (a safety net: Q2's
+        // Home phase crafts them in the forest, so this normally finds nothing to do).
+        let overworld = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == stronghold::OVERWORLD);
+        if overworld && let Some(t) = self.eyes_craft_task(w, tick) {
+            return Some(t);
+        }
         let eyes = craft::count(w, data::ItemKind::EnderEye) > 0;
         if !eyes && self.stronghold.room.is_none() {
             return None;
