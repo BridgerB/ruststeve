@@ -1248,17 +1248,27 @@ impl Plan {
         let Some(id) = step_row(step, w) else {
             return Next::GaveUp("no row".to_owned());
         };
-        // >>> home (Q2): Q3's `eyes` row first when it is in the table.
-        let found = if step == Step::HomeEyes {
-            table.until("eyes").or_else(|| table.until(id))
+        // >>> home (Q2): Q3's `eyes` row first when it is in the table, at the count the held
+        // pearls, powder and rods make (`eyes::eyes_row`; the table's own 14 is its cap: 12
+        // pearls asked for 14 eyes and the step gave up, run 45694981697), the run making all the
+        // rest of them.
+        let eyes = if step == Step::HomeEyes {
+            crate::eyes::eyes_row(table, &crate::held(w)).map(|mut r| {
+                if let Some(p) = r.provides.first_mut()
+                    && let Some(k) = p.0.items.first().copied()
+                {
+                    p.1 = (p.1 - craft::count(w, k)).max(1);
+                }
+                r
+            })
         } else {
-            table.until(id)
+            None
         };
+        let found = eyes.or_else(|| table.until(id).cloned());
         // <<< home
-        let Some(goal) = found else {
+        let Some(mut row) = found else {
             return Next::GaveUp(format!("no goal row {id}"));
         };
-        let mut row = goal.clone();
         // The table's row is as written (four sticks and a table near); the others make one
         // more of their first provide per run, repeated while the step wants it.
         if step != Step::Table {
