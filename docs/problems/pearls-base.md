@@ -22,6 +22,15 @@ A bot's ledger in the forest shows "base: <step> done / skipped" for each of the
 - **Cause**: the development start, not the base. The base has to start on the forest's own floor.
 - **Next**: the orchestrator moves `dev-forest` onto warped nylium inside the "warped forest known" columns (about x 470 to 540, z 0 to 40), away from the fortress, and the race runs again. Until then the base's steps are proven only in the model (`crates/bot/tests/base.rs`), not on a real server.
 
+### 2. Up on a fungus cap with no stem in reach (P3's dev race 45537373222, lanes 0 and 2; read by the orchestrator)
+- **What happened**: two bots stood on warped wart at y 51 to 52, on top of huge fungus caps, for more than 2,400 ticks. Their notes were "base waits: stone swords / shield: no stem seen within 24 with a way to it". From a cap the only stems in band are the cap's own cells, and there is no route down off a cap (a walk falls at most 3).
+- **Fix** (`plan::base`):
+  - A bot standing on wart, shroomlight or a stem (`on_cap`) first gets down. It walks by route to seen warped nylium 8 to 24 off with room over it (`floor_targets`). With no route, it digs the cap block underfoot by hand, only where it comes to rest within 3 below with no lava on the way (`dig_down`; a fall of more hurts, and the bot cannot heal).
+  - Each move is noted "base: down off the fungus cap", at most `down_tries` 24.
+  - Stems are searched within 48, each column from its lowest seen cell within 12 of the feet, and the dig walk decides what it reaches.
+- **Tests**: `a_bot_on_a_fungus_cap_goes_down_to_the_floor` (a hand-built cap of the model, through the server's packets: floor targets 8 to 24 off over nylium; the wart over the stem is dug; over the cap's hollow, a fall of 10, it never is), and `stems_are_dug_from_each_columns_lowest_cell_within_48`.
+- **Not yet counted**: the note's firings in a race. The frontier bot now has no coal, so the hunt will run the no-coal path (stone swords and a stone pickaxe). That path is proven in the model (`without_coal_the_base_makes_stone_tools`), not yet on a real server.
+
 ## Result: the base proven on a real server (race 45536739217, 054aac6, goal `base`, dev-forest at (490.5, 45, 5.5) on the frontier lane-3 snapshot, 2 x 1, cap 6,000; development only, never evidence)
 - **Base met 2 of 2**, both alive to the end at health 12.5 (the start's), no hits, no swings, no enderman angered, no near miss. Each ends "base over: the kit is held (swords worth 58 kills of 30, pickaxe uses 144 of 100, 1 shield; given up: none)", and the shield goes to the off hand.
 - **Steps and ticks** (lane 0 / lane 1):

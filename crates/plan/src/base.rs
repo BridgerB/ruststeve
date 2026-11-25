@@ -63,6 +63,11 @@ pub struct Base {
     pub stem_rise: i32,
     /// Ticks between two notes of the same wait.
     pub note_every: u64,
+    /// Off a fungus cap: seen warped nylium with room over it walked to between these flat
+    /// distances, and the moves down (walks and digs) tried at most this often.
+    pub floor_near: i32,
+    pub floor_far: i32,
+    pub down_tries: u32,
 }
 
 impl Default for Base {
@@ -80,9 +85,12 @@ impl Default for Base {
                 .collect(),
             step_ticks: 2400,
             step_fails: 4,
-            stem_radius: 24,
-            stem_rise: 2,
+            stem_radius: 48,
+            stem_rise: 12,
             note_every: 600,
+            floor_near: 8,
+            floor_far: 24,
+            down_tries: 24,
         }
     }
 }
@@ -149,6 +157,9 @@ pub struct BaseState {
     /// When a wait was last noted.
     #[serde(default)]
     pub noted_at: Option<u64>,
+    /// Moves begun to get down off a fungus cap.
+    #[serde(default)]
+    pub down_tries: u32,
 }
 
 /// What a step does next.
@@ -288,8 +299,11 @@ pub fn bare_hand(w: &World) -> Option<Act> {
         .map(|slot| Act::Hold { slot })
 }
 
-/// Logs seen with an exposed face (memory's sightings), within `stem_radius` flat of the feet and
-/// `stem_rise` of their height, nearest first; `skip` leaves out refused cells.
+/// Stems (logs) seen with an exposed face (memory's sightings), each column's lowest seen cell
+/// only, the cell a stem is dug from (race 45537373222: the cells round the feet of bots on a
+/// fungus cap were all in the cap), within `stem_radius` flat of the feet and `stem_rise` of
+/// their height, nearest first; `skip` leaves out refused cells (a column whose lowest is refused
+/// is left out whole: the cells over it are no nearer a way).
 pub fn stem_targets(w: &World, base: &Base, skip: impl Fn(Cell) -> bool) -> Vec<Cell> {
     let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
         return Vec::new();
@@ -305,26 +319,119 @@ pub fn stem_targets(w: &World, base: &Base, skip: impl Fn(Cell) -> bool) -> Vec<
             + (f64::from(c.2) + 0.5 - body.pos[2]).powi(2))
         .sqrt()
     };
-    let mut v: Vec<(f64, Cell)> = Vec::new();
+    let mut lowest: std::collections::BTreeMap<(i32, i32), Cell> =
+        std::collections::BTreeMap::new();
     for dx in -r..=r {
         for dz in -r..=r {
             for s in w.memory.in_column(&dim.name, cx + dx, cz + dz) {
                 let c = s.pos;
                 let is_log = data::block_of_state(s.state).is_some_and(|k| logs.contains(&k));
-                if !is_log
-                    || (c.1 - feet.1).abs() > base.stem_rise
-                    || flat(c) > f64::from(base.stem_radius)
-                    || skip(c)
-                    || crate::crowded(w, c)
-                {
+                if !is_log || flat(c) > f64::from(base.stem_radius) {
                     continue;
                 }
-                v.push((flat(c), c));
+                let e = lowest.entry((c.0, c.2)).or_insert(c);
+                if c.1 < e.1 {
+                    *e = c;
+                }
             }
         }
     }
+    let mut v: Vec<(f64, Cell)> = lowest
+        .into_values()
+        .filter(|c| (c.1 - feet.1).abs() <= base.stem_rise && !skip(*c) && !crate::crowded(w, *c))
+        .map(|c| (flat(c), c))
+        .collect();
     v.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     v.into_iter().map(|(_, c)| c).collect()
+}
+
+/// What a huge fungus's cap and stem are made of: a bot standing on one is up in the cap, not on
+/// the forest floor (race 45537373222 lanes 0 and 2 stood on warped wart at y 51 to 52 for 2,400
+/// ticks). All are soft by hand (wart 1.0, shroomlight 1.0, stems 2.0).
+pub const CAP_BLOCKS: &[data::BlockKind] = &[
+    data::BlockKind::WarpedWartBlock,
+    data::BlockKind::NetherWartBlock,
+    data::BlockKind::Shroomlight,
+    data::BlockKind::WarpedStem,
+    data::BlockKind::WarpedHyphae,
+    data::BlockKind::CrimsonStem,
+    data::BlockKind::CrimsonHyphae,
+];
+
+/// The bot stands on a fungus cap (or a stem's top).
+pub fn on_cap(w: &World) -> bool {
+    w.block_under_player()
+        .is_some_and(|k| CAP_BLOCKS.contains(&k))
+}
+
+/// The forest floor to walk down to: warped nylium seen (memory's sign index) between
+/// `floor_near` and `floor_far` flat of the feet, under them, with room for a body over it; the
+/// cell over it, nearest first.
+pub fn floor_targets(w: &World, base: &Base, skip: impl Fn(Cell) -> bool) -> Vec<Cell> {
+    let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
+        return Vec::new();
+    };
+    let feet = path::feet_cell(body.pos);
+    let r = (base.floor_far >> 4) + 1;
+    let mut cells = path::Cells::new(w);
+    let mut v: Vec<(i32, Cell)> = Vec::new();
+    for dx in -r..=r {
+        for dz in -r..=r {
+            let seen = w
+                .memory
+                .indexed_in_column(
+                    &dim.name,
+                    (feet.0 >> 4) + dx,
+                    (feet.2 >> 4) + dz,
+                    data::BlockKind::WarpedNylium,
+                )
+                .unwrap_or_default();
+            for n in seen {
+                let c = (n.0, n.1 + 1, n.2);
+                let d2 = (c.0 - feet.0).pow(2) + (c.2 - feet.2).pow(2);
+                if d2 < base.floor_near.pow(2)
+                    || d2 > base.floor_far.pow(2)
+                    || c.1 >= feet.1
+                    || skip(c)
+                    || !cells.standable(c)
+                {
+                    continue;
+                }
+                v.push((d2, c));
+            }
+        }
+    }
+    v.sort();
+    v.into_iter().map(|(_, c)| c).collect()
+}
+
+/// The cap block under the feet to dig by hand, when the body would come to rest within
+/// `path::MAX_FALL` below it on a floor, with no lava on the way (a fall of more hurts, and the
+/// bot cannot heal).
+pub fn dig_down(w: &World) -> Option<Cell> {
+    let body = w.body?;
+    let (x, y, z) = path::feet_cell(body.pos);
+    let under = (x, y - 1, z);
+    let kind = w.block_at(world::BlockPos::new(under.0, under.1, under.2))?;
+    if !CAP_BLOCKS.contains(&kind) {
+        return None;
+    }
+    let mut cells = path::Cells::new(w);
+    // The feet go to `under` once it is dug, then fall while the cell below is clear.
+    for fall in 0..=path::MAX_FALL {
+        let feet = (x, under.1 - fall, z);
+        let below = (x, feet.1 - 1, z);
+        if fall > 0 && cells.at(feet) != path::Class::Clear {
+            return None;
+        }
+        if cells.at(below) == path::Class::Lava {
+            return None;
+        }
+        if cells.floor(below) {
+            return Some(under);
+        }
+    }
+    None
 }
 
 /// Why a step is not wanted (its things held, or nothing to make it from), or `None` to run it.
@@ -468,6 +575,12 @@ impl Plan {
                 ),
             );
             return Some(Task::Idle);
+        }
+        if on_cap(w)
+            && self.base.down_tries < base.down_tries
+            && let Some(t) = self.down_step(w, &base, tick)
+        {
+            return Some(t);
         }
         loop {
             let step = match self.base.step {
@@ -640,6 +753,54 @@ impl Plan {
                 self.row_step(w, table, base, step, tick)
             }
         }
+    }
+
+    /// Down off a fungus cap to the forest floor: a walk to seen nylium with room over it, by
+    /// route; with none, the cap block under the feet dug by hand when the drop is safe. Noted
+    /// "base: down off the fungus cap". `None` when neither can be done now.
+    fn down_step(&mut self, w: &World, base: &Base, tick: u64) -> Option<Task> {
+        self.base.down_tries += 1;
+        let feet = w.body.map(|b| path::feet_cell(b.pos));
+        let targets = floor_targets(w, base, |c| self.refused_now(c, tick));
+        for c in targets.into_iter().take(crate::CANDIDATES_PER_TICK) {
+            let mut walk = Walk::new(
+                c,
+                path::Goal::Block { pos: c },
+                crate::walk::Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    "base: down off the fungus cap".to_owned(),
+                    format!(
+                        "walk from {feet:?} on {:?} to the floor at {c:?}; move {} of {}",
+                        w.block_under_player(),
+                        self.base.down_tries,
+                        base.down_tries
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            self.refuse(c, tick);
+        }
+        let under = dig_down(w)?;
+        if let Some(a) = bare_hand(w) {
+            self.acts.push(a);
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        self.note(
+            tick,
+            "base: down off the fungus cap".to_owned(),
+            format!(
+                "dig {under:?} under the feet {feet:?} by hand: no floor with a way; move {} of {}",
+                self.base.down_tries, base.down_tries
+            ),
+        );
+        Some(Task::Dig(crate::dig::Dig::new(w, under, tick)))
     }
 
     /// The nearest stem with a way to beside it, dug by hand (the dig follows the walk, as every
