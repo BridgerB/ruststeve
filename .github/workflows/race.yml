@@ -224,10 +224,18 @@ jobs:
       - name: Each lane its own loot rolls
         env:
           LANE: ${{ matrix.lane }}
+        # The command is `random reset <sequence> <seed>` (probe 45601982494: "Reset random
+        # sequence minecraft:entities/enderman"; `randomsequence` is unknown, and the seed is a
+        # 32-bit int). The rcon binary exits 0 on an unknown command, so the reply is checked.
         run: |
-          set -uo pipefail
+          set -euo pipefail
           seed=$(( (GITHUB_RUN_ID % 1000000) * 100 + LANE ))
-          ./target/release/rcon "randomsequence reset minecraft:entities/enderman $seed true true" || echo "::warning::lane $LANE: the loot sequence was not reset"
+          reply="$(./target/release/rcon "random reset minecraft:entities/enderman $seed")"
+          echo "$reply"
+          if ! grep -q 'Reset random sequence' <<< "$reply"; then
+            echo "::error::lane $LANE: the enderman loot sequence was not reset"
+            exit 1
+          fi
 
       - name: Race the lane
         # Under the job's limit by 9 minutes (the lanes job works it out), and the race itself
