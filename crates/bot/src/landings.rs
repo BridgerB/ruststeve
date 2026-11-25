@@ -170,6 +170,7 @@ pub fn run_one(
         | plan::Aim::Fortress
         | plan::Aim::Nether
         | plan::Aim::Race
+        | plan::Aim::Base
         | plan::Aim::Hold => 0.0,
     };
     let mut p = match table {
