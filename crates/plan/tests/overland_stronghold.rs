@@ -641,3 +641,35 @@ fn the_last_steps_from_the_tunnel_end() {
         "{n:#?}"
     );
 }
+
+/// A junk kind that came back is not dropped again while a main slot is free: leather only while
+/// a walk is the task (the bot walks off before the pick-up), cobblestone not at all (race
+/// 45703184922 lane 0: 167 leather drops to a bot standing still).
+#[test]
+fn junk_that_came_back_is_held_back() {
+    let mut slots = std::collections::BTreeMap::new();
+    for s in 9i16..=40 {
+        slots.insert(s, (ItemKind::Stick, 1));
+    }
+    slots.insert(41, (ItemKind::Leather, 4));
+    slots.insert(42, (ItemKind::Cobblestone, 64));
+    slots.insert(43, (ItemKind::Cobblestone, 64));
+    let junk = [(ItemKind::Leather, 0), (ItemKind::Cobblestone, 64)];
+    assert!(
+        plan::junk_slot(&slots, &junk).is_some(),
+        "one slot free: a drop is due"
+    );
+    let held = [(ItemKind::Leather, 3000), (ItemKind::Cobblestone, 3000)];
+    let still = stronghold::junk_now(&junk, &held, 100, false);
+    assert_eq!(plan::junk_slot(&slots, &still), None, "{still:?}");
+    let walking = stronghold::junk_now(&junk, &held, 100, true);
+    assert_eq!(
+        plan::junk_slot(&slots, &walking),
+        Some((41, ItemKind::Leather)),
+        "{walking:?}"
+    );
+    let later = stronghold::junk_now(&junk, &held, 3000, false);
+    assert!(plan::junk_slot(&slots, &later).is_some(), "{later:?}");
+    assert!(stronghold::block_of(ItemKind::Cobblestone).is_some());
+    assert!(stronghold::block_of(ItemKind::Leather).is_none());
+}

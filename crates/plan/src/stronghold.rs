@@ -136,6 +136,10 @@ pub struct StrongholdState {
     pub at_floor: bool,
     /// Surface walks toward a known room before the stairs.
     pub surface_walks: u32,
+    /// The junk drop's memory (`Plan::junk_watch`): each kind's last drop (tick, count left), and
+    /// the kinds held back after one came back (until the tick).
+    pub junk_drops: Vec<(data::ItemKind, u64, i32)>,
+    pub junk_held: Vec<(data::ItemKind, u64)>,
     /// Stone bricks broken in reach of the tunnel's end.
     pub wall_breaks: u32,
     /// Stone pickaxes being made (`stronghold_pickaxes`), tasks begun for them in this round,
@@ -1162,6 +1166,97 @@ impl Plan {
             return Some(Task::Explore(walk));
         }
         None
+    }
+}
+
+/// A junk kind that came back is held back this long (the coordinator's rule, 2026-11-25): the
+/// spares' retry, two game minutes.
+pub const JUNK_BACK_TICKS: u64 = 2400;
+
+/// The block an item places, if any (cobblestone, netherrack; never leather).
+pub fn block_of(k: data::ItemKind) -> Option<BlockKind> {
+    k.name().and_then(BlockKind::from_name)
+}
+
+/// The junk that may be dropped now: a kind held back (it came back within `REPICKUP_TICKS` of
+/// its drop) is not, except a kind with no block form while a walk is the task (the bot walks off
+/// before the pick-up delay ends). Pure.
+pub fn junk_now(
+    junk: &[(data::ItemKind, i32)],
+    held: &[(data::ItemKind, u64)],
+    tick: u64,
+    walking: bool,
+) -> Vec<(data::ItemKind, i32)> {
+    junk.iter()
+        .copied()
+        .filter(|(k, _)| {
+            let back = held.iter().any(|(h, until)| h == k && *until > tick);
+            !back || (walking && block_of(*k).is_none())
+        })
+        .collect()
+}
+
+impl Plan {
+    /// The junk drop's churn (race 45703184922 lane 0: 167 leather drops, one every 40 ticks to a
+    /// bot standing still, overworld-leg wall 12's measure): a kind back by `REPICKUP_JUMP` or
+    /// more within `REPICKUP_TICKS` of its drop is held back for `JUNK_BACK_TICKS`, noted.
+    pub(crate) fn junk_watch(&mut self, w: &World, tick: u64) {
+        let drops = std::mem::take(&mut self.stronghold.junk_drops);
+        for (k, at, after) in drops {
+            if tick.saturating_sub(at) > crate::REPICKUP_TICKS {
+                continue;
+            }
+            let now = crate::craft::count(w, k);
+            if now >= after + crate::REPICKUP_JUMP {
+                self.stronghold.junk_held.retain(|(h, _)| *h != k);
+                self.stronghold.junk_held.push((k, tick + JUNK_BACK_TICKS));
+                self.note(
+                    tick,
+                    format!("junk held back: {k:?}"),
+                    format!(
+                        "{now} held, {after} after its drop {} ticks before: not dropped for \
+                         {JUNK_BACK_TICKS} ticks",
+                        tick.saturating_sub(at)
+                    ),
+                );
+            } else {
+                self.stronghold.junk_drops.push((k, at, after));
+            }
+        }
+        self.stronghold.junk_held.retain(|(_, until)| *until > tick);
+    }
+
+    /// A junk stack dropped: its kind and the count left, for `junk_watch`.
+    pub(crate) fn junk_dropped(&mut self, k: data::ItemKind, left: i32, tick: u64) {
+        self.stronghold.junk_drops.retain(|(d, _, _)| *d != k);
+        self.stronghold.junk_drops.push((k, tick, left));
+    }
+
+    /// No main slot free and only held-back junk to make room with: a held-back block put down
+    /// beside the feet (backfill), never a drop. `None` with a slot free or no such block.
+    pub(crate) fn junk_place(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if (9i16..=44).any(|s| !w.inventory.slots.contains_key(&s)) {
+            return None;
+        }
+        let (k, b) = self
+            .stronghold
+            .junk_held
+            .iter()
+            .filter(|(_, until)| *until > tick)
+            .find_map(|(k, _)| {
+                if crate::craft::count(w, *k) > 0 {
+                    block_of(*k).map(|b| (*k, b))
+                } else {
+                    None
+                }
+            })?;
+        let p = crate::place::Place::new(b, tick)?;
+        self.note(
+            tick,
+            format!("junk placed: {k:?}"),
+            "no main slot free and the kind held back: put down, not dropped".to_owned(),
+        );
+        Some(Task::Place(p))
     }
 }
 

@@ -2367,6 +2367,10 @@ impl Plan {
         {
             junk.extend(self.stronghold_rules().junk_kinds());
         }
+        // A kind that came back after its drop is held back (`junk_watch`, `junk_now`).
+        self.junk_watch(w, tick);
+        let walking = matches!(self.task, Task::Explore(_));
+        let junk = stronghold::junk_now(&junk, &self.stronghold.junk_held, tick, walking);
         // <<< overland and stronghold
         // A click no reply came to, with the pack full of junk: window 0 asked for again, so the
         // drop below can go (overworld-leg wall 10: a craft's take into a full pack drew no
@@ -2415,6 +2419,9 @@ impl Plan {
             // Kept to count a pick-up of it again (wall 12).
             let stack = w.inventory.slots.get(&slot).map_or(0, |(_, n)| *n);
             self.dropped = Some((kind, -(craft::count(w, kind) - stack).max(0) - 1, tick));
+            // >>> overland and stronghold (Q4): the drop kept per kind for `junk_watch`.
+            self.junk_dropped(kind, (craft::count(w, kind) - stack).max(0), tick);
+            // <<< overland and stronghold
             // Mode 4 button 1: drop the whole stack (the client's ctrl+Q over the slot).
             self.acts.push(world::Act::Click {
                 slot,
@@ -2635,6 +2642,10 @@ impl Plan {
         let eyes = craft::count(w, data::ItemKind::EnderEye) > 0;
         if !eyes && self.stronghold.room.is_none() {
             return None;
+        }
+        // A full pack with only held-back junk: a block of it put down, never dropped.
+        if let Some(t) = self.junk_place(w, tick) {
+            return Some(t);
         }
         // Fresh stone pickaxes first, between legs and stairs (not in the room: the nook's).
         let in_room = self.stronghold.entered_noted;
