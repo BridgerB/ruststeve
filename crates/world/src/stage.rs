@@ -112,6 +112,13 @@ pub fn enderman_near(w: &World) -> Option<(i32, f64)> {
         .map(|(id, d, _)| (id, d))
 }
 
+/// The biome of the `forest` stage, as `World::feet_biome` names it.
+pub const FOREST_BIOME: &str = "warped_forest";
+/// Pearls of the `pearls_6` checkpoint: half of issue 18's twelve.
+pub const PEARLS_HALF: u32 = 6;
+/// Pearls of the `pearls_12` stage (issue 18's done condition; issue 19's twelve eyes).
+pub const PEARLS_FULL: u32 = 12;
+
 /// In the Nether: a fortress and its blaze spawner are nowhere else. A dungeon's monster spawner
 /// at y -21 in the overworld made a stone-tool bot `spawner`, and so every stage under it
 /// (race 44804466844; blaze wall 4).
@@ -246,7 +253,16 @@ pub enum Stage {
     /// The rods are part of it so the ladder stays a ladder: an enderman passing a bot at the
     /// spawner before rod 7 (race 45358767468 lane 1, one at 31 blocks) is not this stage.
     Endermen,
-    /// Holds 12 ender pearls (issue 18: "reach 12 pearls").
+    /// Holds the 7 rods with the feet in a warped forest (`World::feet_biome`; issue 18's
+    /// "checkpoint start: forest", Bridger 2026-11-24): the only enderman-dense biome (the 26.1.2
+    /// jar: its one monster spawn, 17a), and the base whose stems are wood. The fight races
+    /// start here.
+    Forest,
+    /// Holds the 7 rods and `PEARLS_HALF` pearls (issue 18's halfway checkpoint, Bridger
+    /// 2026-11-24): a long hunt is not replayed from its first kill after a late failure.
+    Pearls6,
+    /// Holds the 7 rods and 12 ender pearls (issue 18: "reach 12 pearls"). The rods are part of
+    /// it so the ladder stays a ladder (issue 19 needs six of them for the eyes).
     Pearls12,
     /// In the End (issue 20).
     End,
@@ -254,7 +270,7 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 14] = [
+    pub const ALL: [Stage; 16] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -267,6 +283,8 @@ impl Stage {
         Stage::Spawner,
         Stage::Rods7,
         Stage::Endermen,
+        Stage::Forest,
+        Stage::Pearls6,
         Stage::Pearls12,
         Stage::End,
     ];
@@ -286,6 +304,8 @@ impl Stage {
             Stage::Spawner => "spawner",
             Stage::Rods7 => "rods_7",
             Stage::Endermen => "endermen",
+            Stage::Forest => "forest",
+            Stage::Pearls6 => "pearls_6",
             Stage::Pearls12 => "pearls_12",
             Stage::End => "end",
         }
@@ -329,7 +349,13 @@ impl Stage {
             Stage::Spawner => at_spawner(w),
             Stage::Rods7 => has(ItemKind::BlazeRod, 7),
             Stage::Endermen => has(ItemKind::BlazeRod, 7) && enderman_near(w).is_some(),
-            Stage::Pearls12 => has(ItemKind::EnderPearl, 12),
+            Stage::Forest => has(ItemKind::BlazeRod, 7) && w.feet_biome() == Some(FOREST_BIOME),
+            Stage::Pearls6 => {
+                has(ItemKind::BlazeRod, 7) && has(ItemKind::EnderPearl, i64::from(PEARLS_HALF))
+            }
+            Stage::Pearls12 => {
+                has(ItemKind::BlazeRod, 7) && has(ItemKind::EnderPearl, i64::from(PEARLS_FULL))
+            }
             Stage::End => dim == Some("minecraft:the_end"),
         }
     }

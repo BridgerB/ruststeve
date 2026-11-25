@@ -168,6 +168,13 @@ pub struct StreamCounts {
 }
 
 impl Case {
+    /// Ender pearls gained between the start and the end, net (issue 18b): from a start with
+    /// none, the pearls held at the end.
+    pub fn pearls_gained(&self) -> i64 {
+        let n = |m: &BTreeMap<String, i64>| m.get("ender_pearl").copied().unwrap_or(0);
+        n(&self.items_gained) - n(&self.items_lost)
+    }
+
     /// `[ending killer doing why]`: what the batch groups endings by.
     pub fn signature(&self) -> [String; 4] {
         let killer = match &self.ending {
@@ -307,6 +314,10 @@ pub struct Row {
     /// With an aim (issue 09): the aim and whether the planner met it.
     #[serde(default)]
     pub aim: Option<(String, bool)>,
+    /// Ender pearls gained over the run (`Case::pearls_gained`, issue 18b); `None` in rows from
+    /// before it was kept.
+    #[serde(default)]
+    pub pearls: Option<i64>,
 }
 
 /// What a batch could see: full sight is every ratio 1.0 and the counts 0 (issue 16e). A column
@@ -615,7 +626,7 @@ impl SensesFile {
                 })
                 .collect();
             out.push_str(&format!(
-                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{} | {} ({}) | {}\n",
+                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{}{} | {} ({}) | {}\n",
                 r.at,
                 r.standing(),
                 r.health
@@ -636,6 +647,7 @@ impl SensesFile {
                     }
                 )),
                 r.travel(),
+                r.hunt(),
                 r.task,
                 r.why,
                 near.join(", ")
@@ -792,6 +804,10 @@ pub fn render_summary(
             ));
         }
     }
+    if let Some(line) = pearls_line(batches) {
+        lines.push(String::new());
+        lines.push(line);
+    }
     // The planner's aims, when runs had one: met over counted runs, per aim.
     let mut aims: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for row in batches
@@ -836,6 +852,40 @@ pub fn render_summary(
         ));
     }
     lines.join("\n") + "\n"
+}
+
+/// The pearls histogram (issue 18b): counted runs by the pearls they gained, fewest first, as
+/// `pearls gained: 0 x5, 2 x1, 12 x1 (7 runs)`. Only when a run reached the forest or gained a
+/// pearl: no other race has anything to say here.
+pub fn pearls_line(batches: &[Batch]) -> Option<String> {
+    let rows: Vec<&Row> = batches
+        .iter()
+        .flat_map(|b| &b.rows)
+        .filter(|r| r.ending.counted())
+        .collect();
+    let any = rows.iter().any(|r| {
+        r.pearls.is_some_and(|p| p > 0) || r.stage_reached.is_some_and(|s| s >= Stage::Forest)
+    });
+    if !any {
+        return None;
+    }
+    let mut by: BTreeMap<i64, u64> = BTreeMap::new();
+    let mut unknown = 0u64;
+    for r in &rows {
+        match r.pearls {
+            Some(p) => *by.entry(p).or_default() += 1,
+            None => unknown += 1,
+        }
+    }
+    let mut parts: Vec<String> = by.iter().map(|(p, n)| format!("{p} x{n}")).collect();
+    if unknown > 0 {
+        parts.push(format!("not kept x{unknown}"));
+    }
+    Some(format!(
+        "pearls gained: {} ({} runs)",
+        parts.join(", "),
+        rows.len()
+    ))
 }
 
 #[cfg(test)]
@@ -944,6 +994,11 @@ mod text_tests {
             enderman_frozen: None,
             pickaxe_uses: None,
             filler: None,
+            pearls: None,
+            kills: None,
+            angry_ticking: None,
+            angry_frozen: None,
+            sword_uses: None,
         }
     }
 
@@ -1058,5 +1113,64 @@ mod text_tests {
             ),
             "{text}"
         );
+    }
+}
+
+#[cfg(test)]
+mod pearls_tests {
+    use super::*;
+
+    fn row(stage: Stage, pearls: Option<i64>, ending: Ending) -> Row {
+        Row {
+            bot: "b".to_owned(),
+            stage_reached: Some(stage),
+            ending,
+            signature: Default::default(),
+            server_ticks: 0,
+            wall_ms: 0,
+            case: None,
+            recording: None,
+            aim: None,
+            pearls,
+        }
+    }
+
+    fn batch(rows: Vec<Row>) -> Batch {
+        Batch {
+            format_version: FORMAT_VERSION,
+            run: "r".to_owned(),
+            commit: "c".to_owned(),
+            lane: 0,
+            start: "s".to_owned(),
+            source: Source::Real,
+            config_hash: String::new(),
+            bots: 1,
+            server: String::new(),
+            server_tick_rate: 20.0,
+            rows,
+            coverage: Coverage::default(),
+        }
+    }
+
+    /// Issue 18b: the histogram counts counted runs by pearls gained, says which rows did not
+    /// keep it, and is left out of a race with nothing to say.
+    #[test]
+    fn the_pearls_histogram_counts_runs_by_pearls_gained() {
+        let b = batch(vec![
+            row(Stage::Forest, Some(0), Ending::Cap),
+            row(Stage::Forest, Some(0), Ending::Cap),
+            row(Stage::Pearls6, Some(7), Ending::Cap),
+            row(Stage::Pearls12, Some(12), Ending::Cap),
+            row(Stage::Forest, None, Ending::Cap),
+            row(Stage::Forest, Some(3), Ending::Cut),
+        ]);
+        assert_eq!(
+            pearls_line(std::slice::from_ref(&b)).as_deref(),
+            Some("pearls gained: 0 x2, 7 x1, 12 x1, not kept x1 (5 runs)")
+        );
+        let quiet = batch(vec![row(Stage::Endermen, Some(0), Ending::Cap)]);
+        assert_eq!(pearls_line(&[quiet]), None);
+        let text = render_summary(&summarize(std::slice::from_ref(&b)), &[b], None);
+        assert!(text.contains("pearls gained: 0 x2"), "{text}");
     }
 }
