@@ -146,6 +146,9 @@ pub struct HomeState {
     /// Walks to a log for the cook's fuel.
     #[serde(default)]
     pub fuel_walks: u32,
+    /// The way points' chunk columns reached, kept past any one heading.
+    #[serde(default)]
+    pub ways_passed: Vec<(i32, i32)>,
     /// A pocket from magma cubes in hand (since), the tick the last cube left `CUBE_CLEAR`, and
     /// the pockets made.
     #[serde(default)]
@@ -777,11 +780,19 @@ impl Plan {
         if d <= r.approach {
             return self.home_approach(w, tick, portal);
         }
-        let passed = self
+        // The points passed are Home's, not the heading's: a heading turned out is dropped, and
+        // race 45707489694 lane 3, past (490, 150) and 140 blocks on, was sent back east to it.
+        for c in self
             .headed
             .as_ref()
             .map(|h| h.ways.clone())
-            .unwrap_or_default();
+            .unwrap_or_default()
+        {
+            if !self.ender.home.ways_passed.contains(&c) {
+                self.ender.home.ways_passed.push(c);
+            }
+        }
+        let passed = self.ender.home.ways_passed.clone();
         let next = r
             .way
             .iter()
@@ -798,7 +809,18 @@ impl Plan {
             valley: None,
             way: next,
         };
-        if let Some(t) = self.heading_with(w, signs, tick) {
+        let t = self.heading_with(w, signs, tick);
+        for c in self
+            .headed
+            .as_ref()
+            .map(|h| h.ways.clone())
+            .unwrap_or_default()
+        {
+            if !self.ender.home.ways_passed.contains(&c) {
+                self.ender.home.ways_passed.push(c);
+            }
+        }
+        if let Some(t) = t {
             return Some(t);
         }
         // The heading turned out: a far walk toward the portal, then a fresh heading.
