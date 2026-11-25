@@ -30,5 +30,11 @@ The other real `endermen` snapshot, lane 2 of the same race, stands at the blaze
 ## The burrow (to be proven on a real server first: parity rows e04 to e08)
 A level burrow one wide and two high on the forest floor, built from held filler: the bot's cell B, the mouth cell M, the outside cell O where the enderman stands with three or more clear above it. The enderman (2.9 tall) cannot enter M and its reach (its box grown 0.83 sideways, 1.43 centre to centre) stops 0.37 short of B; the bot's 3.0 reaches its box. From B the roof cuts the line from the bot's eye to the enderman's at O, so no stare can freeze it there. Provoke from M at a calm ticking enderman 6 to 36 off until the creepy flag, then B; strike the torso on a full charge; collect from M only with no angry enderman present.
 
+## Measured (18a)
+- The bots (probe 45529738504): the frontier 12.47 health, food 17, saturation 0, sword 161 uses, pickaxes 13 + 131, coal 1, no shield; lane 2 16.3, food 20, sword 176, shield 48, a porkchop (about 4 health of healing in all). `pearls-observe.md`.
+- The way (development knowledge only): the warped forest at (488, -111), 516 blocks east-north-east of the frontier; no compass axis crosses one within 640; east is basalt deltas from 160 to 640; the forest lies north of that axis about x 470 to 540, so the way is east then north through about 300 blocks of deltas.
+- The jar (probe 45529798802): melee is the box grown 0.828 sideways and needs a line of sight; an enderman needs 1 x 3 x 1 cells and walks to the node nearest an unreachable target; a player's hit never teleports it; holdable blocks are dirt, gravel, nylium, fungi and roots; no usable mushrooms in the warped forest (on the way only).
+- **The burrow on a real server** (parity 45531046147, P4, `pearls-model.md`): e04 the stare from M angered it in about 10 ticks, it walked to O in about 30 and stood there 400 ticks, the bot never hit; e05 seven iron hits from B, no teleport, a kill in about 150 ticks (each hit knocks it 1 to 1.7 back); e06 the roof cuts the stare from B; e07 a pearl at O is picked up from M, not from B; e08 even in a roofed M the bot is not hit (the melee needs a line of sight eye to eye). The bot drifted 0.14 toward M when its forward key was let go: the hunt holds it at B's centre or back.
+
 ## Index of walls
 (none yet)
