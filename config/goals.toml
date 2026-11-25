@@ -584,6 +584,11 @@ hunt_point = [490, 5]
 look_out_far_min = 24.0
 look_out_far_max = 36.0
 cube_clear = 8.0
+# Piglins out of the burrow (restocking, walking) seal a pocket too: race 45588764709 lane 1, in
+# iron with no gold, was hit twice by two piglins at a restock, 19.8 to 9.6 in 20 ticks, with no
+# heal in the hunt. Within piglin_near: sealed until none within piglin_clear.
+piglin_near = 12.0
+piglin_clear = 16.0
 # Under restock_below burrow blocks held, netherrack is dug near the burrow up to restock_to (a
 # burrow is up to 38; the frontier bot holds about 263 filler).
 restock_below = 60
