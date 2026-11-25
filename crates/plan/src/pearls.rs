@@ -69,6 +69,8 @@ pub struct PearlRules {
     pub base_wait_ticks: u64,
     pub seen_near: f64,
     pub hostile_near: f64,
+    pub cube_near: f64,
+    pub cube_clear: f64,
     pub restock_below: i32,
     pub restock_to: i32,
     pub threat_hold_ticks: u64,
@@ -108,6 +110,8 @@ impl Default for PearlRules {
             base_wait_ticks: 600,
             seen_near: 40.0,
             hostile_near: 16.0,
+            cube_near: 3.0,
+            cube_clear: 8.0,
             restock_below: 60,
             restock_to: 120,
             threat_hold_ticks: 1200,
@@ -173,6 +177,19 @@ pub fn line_open(w: &World, from: [f64; 3], to: [f64; 3]) -> bool {
     })
 }
 
+/// Whether delta ground (basalt, blackstone, magma) lies under or at the level of a cell within
+/// `r` on the plane: the ground magma cubes come from.
+pub fn near_delta(w: &World, c: [i32; 3], r: i32) -> bool {
+    (-r..=r).any(|dx| {
+        (-r..=r).any(|dz| {
+            (-2..=0).any(|dy| {
+                w.block_at(world::BlockPos::new(c[0] + dx, c[1] + dy, c[2] + dz))
+                    .is_some_and(|k| burrow::DELTA_GROUND.contains(&k))
+            })
+        })
+    })
+}
+
 /// A provoke's distance band: 6 to 16 (it walks), 16 to 36, 36 to 64 (the jar's follow range;
 /// past 16 it teleports toward the bot).
 pub fn band(d: f64) -> usize {
@@ -228,6 +245,8 @@ const ANGRY_PRESENT: f64 = 128.0;
 const HURT_SKIP: u64 = 100;
 /// Ticks a site moved from is avoided by the site search.
 const MOVED_KEPT: u64 = 6000;
+/// Blocks from delta ground a forest-floor walk target keeps.
+const DELTA_AVOID: i32 = 8;
 /// Ticks a sighting is kept for the mouth's side.
 const SIGHTINGS_KEPT: u64 = 600;
 /// Ticks one step out of B takes at most, counted as one step.
@@ -387,6 +406,9 @@ pub struct PearlState {
     pub band_angers: [u32; 3],
     #[serde(default)]
     pub provoke_band: Option<usize>,
+    /// The pocket from magma cubes is held.
+    #[serde(default)]
+    pub cube_pocket: bool,
     #[serde(default)]
     pub angers: u32,
     #[serde(default)]
@@ -763,6 +785,41 @@ impl Plan {
         // 1. pearls-done.
         if craft::count(w, ItemKind::EnderPearl) >= r.pearls_wanted {
             return Some(self.row_done(w, tick, &r, feet));
+        }
+        // A magma cube pressing (within `cube_near`): the sealed pocket where the bot stands, held
+        // until none is within `cube_clear` (the orchestrator; race 45560431011 lane 2 died
+        // fighting cubes with 3 pearls held).
+        let cubes: Vec<f64> = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && e.kind == EntityKind::MagmaCube)
+            .map(|e| dist(e.pos, body.pos))
+            .collect();
+        let near = |r: f64| cubes.iter().any(|d| *d <= r);
+        if near(r.cube_near) || (self.pearls.cube_pocket && near(r.cube_clear)) {
+            if !self.pearls.cube_pocket {
+                self.pearls.cube_pocket = true;
+                self.note(
+                    tick,
+                    "pocket from magma cube".to_owned(),
+                    format!(
+                        "one within {:.1}; sealed where the bot stands until none within {}",
+                        cubes.iter().copied().fold(f64::MAX, f64::min),
+                        r.cube_clear
+                    ),
+                );
+            }
+            self.cut_task(tick, "pocket");
+            self.pocket_step(w, tick);
+            return Some(look(w.player.yaw.into(), EYES_DOWN));
+        }
+        if self.pearls.cube_pocket {
+            self.pearls.cube_pocket = false;
+            self.note(
+                tick,
+                "magma cubes gone: the hunt goes on".to_owned(),
+                format!("none within {}", r.cube_clear),
+            );
         }
         let angry = angry_endermen(w);
         let inside = self.in_burrow(w);
@@ -2267,8 +2324,9 @@ impl Plan {
                     let far = self.pearls.moved_from.iter().all(|m| {
                         (m[0] - at[0]).pow(2) + (m[2] - at[2]).pow(2) >= r.burrow_move.pow(2)
                     });
-                    if (FLOOR_MIN * FLOOR_MIN..=burrow::SITE_RADIUS * burrow::SITE_RADIUS)
-                        .contains(&d2)
+                    if !near_delta(w, at, DELTA_AVOID)
+                        && (FLOOR_MIN * FLOOR_MIN..=burrow::SITE_RADIUS * burrow::SITE_RADIUS)
+                            .contains(&d2)
                         && far
                         && !self.pearls.floor_tried.contains(&at)
                         && w.block_at(world::BlockPos::new(at[0], at[1], at[2]))
