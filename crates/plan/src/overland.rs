@@ -135,6 +135,8 @@ pub struct OverlandState {
     pub way_base: Option<[f64; 2]>,
     pub nudges: u32,
     pub wait_from: Option<u64>,
+    /// Leg walks refused in a row (`TUNNEL_AFTER` of them: the leg by tunnel).
+    pub walk_fails: u32,
     pub legs: u32,
     pub leg: Option<OverLeg>,
     /// The bearing's turn off the line to the fix, degrees (left positive), from stalls and
@@ -615,8 +617,25 @@ impl Plan {
                     walk.route, rules.bridge_max, walk.expanded
                 ),
             );
+            // In a hollow with no walk out (race 45747459284 lane 0 fell in at (525, 57, -4) in a
+            // fight and its far walks failed for 17,000 ticks, each failure backed off 6,400): the
+            // leg by the tunnel, which digs its own way, after `TUNNEL_AFTER` refusals in a row.
+            self.overland.walk_fails += 1;
+            if self.overland.walk_fails >= TUNNEL_AFTER {
+                let why = format!(
+                    "{} far walks refused in a row at {:?}",
+                    self.overland.walk_fails,
+                    w.body.map(|b| path::stand_cell(w, b.pos))
+                );
+                if let Some(t) = self.tunnel_toward(w, leg.target, ("the overland leg", &why), tick)
+                {
+                    self.note(tick, format!("overland leg {} by tunnel", leg.n), why);
+                    return Some(t);
+                }
+            }
             return None;
         }
+        self.overland.walk_fails = 0;
         self.walks += 1;
         self.note(
             tick,
@@ -866,6 +885,10 @@ const HUT_JUNK: &[ItemKind] = &[
     ItemKind::WarpedWartBlock,
     ItemKind::NetherWartBlock,
 ];
+
+/// Leg walks refused in a row before the leg goes by tunnel: two, the first may be a mob in the
+/// way (the walk plans round it) or water past `bridge_max`.
+pub const TUNNEL_AFTER: u32 = 2;
 
 /// A far walk that dies within this many expansions is boxed in where it stands.
 pub const ENCLOSED_EXPANSIONS: u64 = 8;
