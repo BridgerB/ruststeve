@@ -89,3 +89,25 @@ Development races (`dev-stronghold`, from the frontier, 2 lanes x 1 bot, cap 12,
 - **Cause 1, the climb**: `tunnel::SAFE_Y`'s cost under y 40 is the Nether's lava sea. In the overworld it took the routes to a room at y 17 up to y 40, under the river at x 1583 to 1614 and into its water (4 escapes, the last still trapped at the cap). Fix (73e5562, 11311c0): `tunnel::Limits::max_y` (fenced; every other caller keeps the old box) caps the room's route at the floor + 6. With no capped way, the approach turns to the room's north or south side twice, then the uncapped route.
 - **Cause 2, inside by a radius**: `inside` was 7 from the ring's centre. A bot one cell into the west wall, 5 off on x, counted as in. It sealed and waited out of the stage's ±4.5 box. Fix (d867b43): `inside` reads the stage's own box, as `stand_target` does.
 - **The junk churn** (a6bc06d): "junk held back" and "junk placed" fire. Crimson fungus drops fell from 123 to 29 in a run; leather still comes back while walking.
+
+### Wall 6: the whole overland; a throw that waits, junk placed one block at a time (race 45719263137, 2026-11-25)
+A development race on d52804d (`dev-overworld-eyes`, the bot at the surface by the overworld portal, from the frontier), 2 lanes x 1 bot, cap 48,000. Development knowledge, never evidence.
+- **Lane 0, what worked**:
+  - The throws gave a fix with err 70.
+  - 11 legs east, with 3 turns, 26 bridge blocks (the rivers at x 464-528 and 1583-1614) and a night hut of 11 blocks at (647, 72, 79), from tick 5,660 to dawn.
+  - 1 meal; the food never fell under 19 and the health ended at 20.
+  - Stage `stronghold` at tick 27,440. Then the stairs, 2 pickaxe rounds (one pickaxe broke at 38,260), 10 silverfish fights, 15 last steps and 12 wall steps, to (1623, 18, -28), a cell from its standing cell.
+- **Cause 1, lane 1**: at throw 2's spot (tick 2,660), Q3's guard read a canopy 12 out on the bearing, and the throw waited for good. Nothing moved the bot; it idled 21,000 ticks, its stuck snapshot published. Fix (b3293bc): after 600 ticks waiting at the spot, it moves 20 blocks round the compass, 4 times at most ("overland throw spot moved").
+- **Cause 2, lane 0**: from tick 35,500 to the cap, `junk_place` put cobblestone down 270 times, one item a task against stacks of 64 that never freed a slot. Each placed block was dug back by the last steps. Fix: a held-back block is placed only from a stack of 8 or under (`JUNK_PLACE_MAX`); a bigger stack is released from the hold and dropped whole ("junk released").
+- **Leather** is off `[survival] junk` (d52804d): kept, 4 items in one slot.
+
+### Wall 7: boxed in by its own hut (race 45725479883, 2026-11-25)
+A development race on 5c62f28 (`dev-overworld-eyes`, from the frontier), 2 lanes x 1 bot, cap 48,000. Development knowledge, never evidence.
+- **What worked**: lane 1's throw spot moved after 620 ticks of waiting ("overland throw spot moved (1 of 4)"); throw 2 went and the fix came (err 70). Both lanes walked east and huted at dusk.
+- **Cause**: the hut's exit digs one cell on the fix's axis at the feet and the head. Lane 1's hut took 22 blocks (the body moved while it was built), so those cells were air inside it and the wall stood beyond. From dawn (tick 17,660) every far walk died in 4 expansions: 302 failed in a row, turning the bearing each time, to the cap. Lane 0 was the same at (55, 80, -36), 2 expansions.
+- **Fix**: a far walk that dies within `ENCLOSED_EXPANSIONS` (8) is boxed in. A wall cell is dug toward the leg's target, else on any side, head before feet, never infested or the furnace ("overland dig out").
+
+### Wall 8: the moved spot counted as reached (race 45729721263, 2026-11-25)
+A development race on bbfe300 (`dev-overworld-eyes`, from the frontier), 2 lanes x 1 bot, cap 48,000. Development knowledge, never evidence.
+- **Cause**: a throw's walk point was reached at `[overland] arrive` (24), the fix's radius. The spot moved 20 ("overland throw spot moved", 4 of 4 in lane 0) counted as reached where the bot stood, and the throw waited on the same canopy at (216, 75, 29) from tick 2,320 through the night, idle 14,600 ticks. Both lanes did the same.
+- **Fix**: a walk point is reached at a leg's own reach (`leg_reach`, 6), and never hands over to the search. A leg with nothing seen at its length looks no farther than its aim (a 20-block move is not overshot by a 32-block leg).

@@ -130,6 +130,11 @@ pub struct OverlandState {
     /// `fix` is a walk point for the next throw (`Plan::eyes_way`), not the eyes' fix: its
     /// arrival starts no search.
     pub way: bool,
+    /// A throw's spot moved off its point (`nudges` times) after the throw waited there from
+    /// `wait_from`: the point it came from, for the next `eyes_way` to be measured against.
+    pub way_base: Option<[f64; 2]>,
+    pub nudges: u32,
+    pub wait_from: Option<u64>,
     pub legs: u32,
     pub leg: Option<OverLeg>,
     /// The bearing's turn off the line to the fix, degrees (left positive), from stalls and
@@ -159,6 +164,7 @@ impl OverlandState {
         self.leg = None;
         self.mark = None;
         self.arrived = false;
+        self.wait_from = None;
     }
 }
 
@@ -359,7 +365,10 @@ impl Plan {
         if let Some(t) = self.overland_hut(w, &rules, feet, fix, tick) {
             return Some(t);
         }
-        if d <= rules.arrive && self.overland.way {
+        // A throw's walk point is reached at a leg's own reach, not the fix's `arrive` (24): a
+        // spot moved 20 off counted as reached on the spot, and the throw waited on the same
+        // canopy through four moves (race 45729721263 lane 0).
+        if self.overland.way && d <= rules.leg_reach {
             if !self.overland.arrived {
                 self.overland.arrived = true;
                 self.note(
@@ -373,7 +382,7 @@ impl Plan {
             }
             return None;
         }
-        if d <= rules.arrive {
+        if !self.overland.way && d <= rules.arrive {
             if !self.overland.arrived {
                 self.overland.arrived = true;
                 self.stronghold.at_fix = Some([fix[0].floor() as i32, fix[1].floor() as i32]);
@@ -509,12 +518,13 @@ impl Plan {
             );
         }
         let target = leg_target(w, feet, deg, len, rules.leg_min, rules.scan_step).or_else(|| {
-            // Nothing seen that far: the nearest seen ground on the bearing.
+            // Nothing seen that far: the nearest seen ground on the bearing, never past the aim (a
+            // throw's spot moved 20 off is not overshot by a 32-block leg).
             leg_target(
                 w,
                 feet,
                 deg,
-                rules.leg_min / 2,
+                (rules.leg_min / 2).min(len.max(rules.scan_step)),
                 rules.scan_step,
                 rules.scan_step / 2,
             )
@@ -587,6 +597,15 @@ impl Plan {
         let ok = walk.route_now(w, tick);
         self.expanded += walk.expanded;
         let bridges = walk.bridges_ahead();
+        // Boxed in where it stands (a hut built wider than its exit's one cell: race 45725479883
+        // lane 1, 22 blocks, and every far walk died in 4 expansions from dawn to the cap): a
+        // wall dug toward the leg's target, else on any side, at the head and the feet.
+        if !ok
+            && walk.expanded <= ENCLOSED_EXPANSIONS
+            && let Some(t) = self.overland_dig_out(w, leg.target, tick)
+        {
+            return Some(t);
+        }
         if !ok || bridges > rules.bridge_max {
             self.note(
                 tick,
@@ -822,6 +841,47 @@ impl Plan {
             if solid && !crate::stairs::infested(k) && hut.out_digs < 4 {
                 hut.out_digs += 1;
                 return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
+            }
+        }
+        None
+    }
+}
+
+/// A far walk that dies within this many expansions is boxed in where it stands.
+pub const ENCLOSED_EXPANSIONS: u64 = 8;
+
+impl Plan {
+    /// One wall cell dug out of an enclosure: on the axis toward `to` first, then the other three,
+    /// the head's cell before the feet's; never a block a silverfish hides in, a liquid's
+    /// neighbour or the furnace. `None` with none to dig (noted).
+    fn overland_dig_out(&mut self, w: &World, to: Cell, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::stand_cell(w, body.pos);
+        let first = crate::stronghold::axis_toward(feet, to);
+        let dirs = [
+            first,
+            (-first.1, first.0),
+            (first.1, -first.0),
+            (-first.0, -first.1),
+        ];
+        for (dx, dz) in dirs {
+            for dy in [1, 0] {
+                let c = (feet.0 + dx, feet.1 + dy, feet.2 + dz);
+                let p = BlockPos::new(c.0, c.1, c.2);
+                let k = w.block_at(p);
+                let solid = path::classify(w.state_at(p)) == Class::Solid;
+                if solid
+                    && !crate::stairs::infested(k)
+                    && k != Some(BlockKind::Furnace)
+                    && !self.refused_now(c, tick)
+                {
+                    self.note(
+                        tick,
+                        format!("overland dig out at {c:?}"),
+                        format!("boxed in at {feet:?}: the far walk died within {ENCLOSED_EXPANSIONS} expansions"),
+                    );
+                    return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
+                }
             }
         }
         None
