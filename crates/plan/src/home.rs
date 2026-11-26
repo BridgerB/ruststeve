@@ -397,7 +397,7 @@ pub const GUARD_TRIES: u32 = 6;
 /// Guard cells given up, kept (the last).
 pub const GUARD_REFUSED_KEPT: usize = 32;
 /// Blocks laid or dug to step up onto a span from below, a trip.
-pub const STEP_UPS: u32 = 16;
+pub const STEP_UPS: u32 = 48;
 /// On the way home a pocket from one provoked enderman is held at most this long (a minute, as
 /// the cube pocket's `CUBE_HOLD_MAX`), then it is left.
 pub const ENDER_HOLD_MAX: u64 = 1200;
@@ -576,8 +576,9 @@ pub const JOIN_REACH: i32 = 6;
 
 /// A walk on an old bridge goes this far at a time.
 pub const BRIDGE_LEG: i32 = 24;
-/// A known bridge this far below (race 45738826162: 5 under the west span) is joined from below.
-pub const BRIDGE_BELOW: i32 = 6;
+/// A known bridge this far below (race 45738826162: 5 under the west span; race 45768618919: 7) is
+/// joined from below.
+pub const BRIDGE_BELOW: i32 = 10;
 /// A known bridge this near on the plane (across it) is walked onto first.
 pub const BRIDGE_NEAR: i32 = 8;
 
@@ -1445,7 +1446,7 @@ impl Plan {
                 // at the feet's level, on a full floor, then the walk again (Q10's races 45764230971
                 // and 45764234506: 8 of 8 lanes at y 34 under the span top at 36, "tunnel route …
                 // 0 steps, ends within reach", every tick).
-                if (1..=2).contains(&(target.1 - feet.1))
+                if (1..=BRIDGE_BELOW).contains(&(target.1 - feet.1))
                     && let Some(t) = self.home_step_up(w, tick, feet, target)
                 {
                     return Some(t);
@@ -1613,12 +1614,14 @@ impl Plan {
         if self.ender.home.step_ups >= STEP_UPS {
             return None;
         }
-        let (dx, dz) = if target.2 != feet.2 {
+        // Toward the span when there is room for the climb, else along the trip (west, the spans'
+        // axis): the last step comes level beside the span (race 45768618919: lanes 4 to 7 below
+        // the west span, one off its line).
+        let dy = target.1 - feet.1;
+        let (dx, dz) = if (target.2 - feet.2).abs() >= dy {
             (0, (target.2 - feet.2).signum())
-        } else if target.0 != feet.0 {
-            ((target.0 - feet.0).signum(), 0)
         } else {
-            return None;
+            (-1, 0)
         };
         let mut cells = path::Cells::new(w);
         let lava_by = |cells: &mut path::Cells, c: Cell| {
@@ -1647,8 +1650,47 @@ impl Plan {
                         );
                         return Some(Task::Dig(crate::dig::Dig::new(w, h, tick)));
                     }
+                    // Onto it: the stair goes on from there (from the feet, a step at a time).
+                    let top = (c.0, c.1 + 1, c.2);
+                    let mut walk = Walk::new(
+                        top,
+                        Goal::Near {
+                            pos: top,
+                            range: 0.5,
+                        },
+                        Arrive::Goal,
+                        tick,
+                    );
+                    if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                        self.walks += 1;
+                        self.note(
+                            tick,
+                            format!("home: up the step at {top:?}"),
+                            format!("from {feet:?} toward {target:?}"),
+                        );
+                        return Some(Task::Explore(walk));
+                    }
+                    self.expanded += walk.expanded;
                 }
-                path::Class::Clear if cells.at(under) == path::Class::Solid => {
+                path::Class::Clear => {
+                    // On the floor under it, else the floor itself first, clicked onto the last
+                    // step's side.
+                    let prev = (c.0 - dx, c.1 - 1, c.2 - dz);
+                    let face_to = match (dx, dz) {
+                        (1, _) => 5,
+                        (-1, _) => 4,
+                        (_, 1) => 3,
+                        _ => 2,
+                    };
+                    let (at, click, face) = if cells.at(under) == path::Class::Solid {
+                        (c, under, 1)
+                    } else if cells.at(under) == path::Class::Clear
+                        && cells.at(prev) == path::Class::Solid
+                    {
+                        (under, prev, face_to)
+                    } else {
+                        return None;
+                    };
                     let item = endermen::FILLER
                         .iter()
                         .copied()
@@ -1665,14 +1707,14 @@ impl Plan {
                             self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
                             self.ender.home.step_ups += 1;
                             self.acts.push(world::Act::UseOn {
-                                pos: world::BlockPos::new(under.0, under.1, under.2),
-                                face: 1,
+                                pos: world::BlockPos::new(click.0, click.1, click.2),
+                                face,
                             });
                             self.note(
                                 tick,
-                                format!("home: step up toward the old bridge at {c:?}"),
+                                format!("home: step up toward the old bridge at {at:?}"),
                                 format!(
-                                    "from {feet:?}, {} below {target:?}; {item:?} on {under:?}; {} laid",
+                                    "from {feet:?}, {} below {target:?}; {item:?} on {click:?} face {face}; {} laid",
                                     target.1 - feet.1,
                                     self.ender.home.step_ups
                                 ),
@@ -1688,8 +1730,7 @@ impl Plan {
                         crate::hold::Hold::Missing => None,
                     };
                 }
-                path::Class::Clear
-                | path::Class::Water
+                path::Class::Water
                 | path::Class::Lava
                 | path::Class::Awkward
                 | path::Class::Unknown => return None,

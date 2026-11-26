@@ -1534,3 +1534,35 @@ fn on_the_join_between_spans_the_next_span_is_the_target() {
         notes(&p)
     );
 }
+
+#[test]
+fn four_below_a_span_one_off_its_line_the_stair_runs_along_it() {
+    // Race 45768618919: lanes at y 34 to 37 beside and under the west span (top 41), one off its
+    // line: no room to climb toward it, so the stair runs west along it.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 1, 68, 9]];
+    goals.home.way = vec![[-200, 9]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    for x in 1..=15 {
+        for y in 66..=67 {
+            set(&mut w, (x, y, 9), BlockKind::Netherrack);
+        }
+    }
+    let mut p = tripper(Some(t));
+    run(&mut p, &mut w, 100, 5);
+    assert!(
+        noted(&p, "home: step up toward the old bridge at (7, 64, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+}
