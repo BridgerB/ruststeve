@@ -25,6 +25,7 @@ The resume stands at about (311, 36, 194) on the old bridge's east span. A lane 
 | 45777976793 | 387478d | at-5000 of 45771610530 lane 0 (44, 71, 106) | 8000 | 30000 | 6 | 5 of 6 idle at (22, 69, 57) on soul sand from ~3,560: "dig in at (22, 68, 57)" failed Gone x336 (feet y 69.875 floored to 69: the block stood on is at 69, the cell under was already dug); lane 1 at (20, 55, -7) with 0 pickaxe uses |
 | 45783611857 | 7a51121 | at-5000 of 45771610530 lane 0 (44, 71, 106): the door test | 9000 | 30000 | 6 | **6 of 6 reached `overworld`** (snapshot-overworld-45783611857-race-45783611857-lane-0 … 5), by hand past the last pickaxe at 4,020; then idle in the overworld portal (125, -52, -108), "every heading refused", 0 pickaxe uses, hp 15.6, food 7 |
 | 45791091467 | 52bc390 | the frontier: overworld (125, -52, -108), race 45783611857 lane 0 | 12000 | 36000 | 6 | cancelled at ~13,000: 6 of 6 in the portal cell; "arrival: no shaft … (cave beside (125, -50, -108) at (125, -50, -107))", every stair "DigFailed … a dig for the stair to (125, -51, -107) failed Refused" with 0 pickaxe uses; "no stairs up from here" x58 |
+| 45796947442 | 9594322 | the frontier: overworld (125, -52, -108) | 12000 | 36000 | 6 | cancelled: Q8's F2 on the same commit held all 6 in the portal ("exit 162": the step-out over the room's air) |
 
 ## Resume points (real snapshots past the join, from earlier races' case files)
 | snapshot | where | health | note |
