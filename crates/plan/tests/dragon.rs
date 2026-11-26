@@ -417,7 +417,7 @@ fn a_breath_on_the_way_to_the_stand_is_waited_out_where_the_feet_are() {
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
     assert_eq!(
         decide(&w, &ask()),
-        Want::Hold("a breath on the way to the stand")
+        Want::Hold("a breath on the way to the head stand")
     );
 }
 
