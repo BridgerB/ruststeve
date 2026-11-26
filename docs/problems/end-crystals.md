@@ -65,3 +65,8 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The water clutch (7c08206) catches the fall.
   - The way down no longer waits to collect each block's drop (the next commit): the drop falls into the cell the body falls into, so the bot spends less time up high.
   - Both are to be counted in race 2.
+- **The structural answer** (the orchestrator, from e03's reach-not-sight; commit after 7f2d5fa):
+  - **The box:** the stand is closed in end stone, every side at the feet's and the eye's height plus a roof, the blast wall part of it. That is 9 blocks, 12 on a one-wide pillar with its ledges, and is noted "stand closed at … (N blocks)".
+  - **The climb:** it begins only with the dragon far or perched, and once begun it goes on to the box, with no waits half way ("climb on through").
+  - **Out of the box:** only with the dragon far or perched ("hold in the box").
+  - A blow inside the box is noted ("blow in the box").
