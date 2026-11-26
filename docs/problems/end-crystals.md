@@ -99,3 +99,10 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - "hold in the box" while the dragon is near and not perched;
   - a blow inside the box ("blow in the box") within 200 ticks ends that hold, and the bot goes down at once, the clutch under it.
 - **Race 4 counts both.**
+
+### Wall 5: the box stranded a wide spike's bot (E6's sim, CI runs 45880795371 and 45881998970; fixed)
+- **What happened:**
+  - It pillared to (38, 76, 0), walked onto the spike to its stand at (39, 76, 0) and walled (40, 76..77, 0).
+  - It then put a box side at (38, 76, 0), the cell over its own pillar's top.
+  - From then on its way back read "stranded on a spike's top", with no strike to the cap.
+- **The fix:** at the stand, the blast's two blocks and then the strike at once: no other block first. A box's blows were not kept out anyway (wall 4), and each block was more time up high. The box (`box_gap`) is kept as a function only, for a later hold up high. The note is "stand walled at".

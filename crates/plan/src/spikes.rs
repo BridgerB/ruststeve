@@ -731,16 +731,15 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
         let p = a.plan;
         if feet == p.stand {
-            // The blast's line first, then the rest of the box.
+            // The blast's line, then the strike at once: no other block first. Race 45880674581
+            // took its blows while the rest of a box went up, and E6's sim (CI run 45880795371)
+            // stranded a wide spike's bot behind a box side over its own pillar's top.
             if let Some(c) = wall_gap(w, &p, st.bars_shield) {
                 return if kind(w, c) == Some(BlockKind::IronBars) {
                     Next::Bar(c)
                 } else {
                     Next::Build(c, Role::Wall)
                 };
-            }
-            if let Some((c, role)) = box_gap(w, feet, &p.walls) {
-                return Next::Build(c, role);
             }
             return Next::Strike(id);
         }
@@ -1120,7 +1119,7 @@ impl Plan {
                     self.spikes.closed_at = Some(feet);
                     self.note(
                         tick,
-                        format!("spikes: stand closed at {feet:?}"),
+                        format!("spikes: stand walled at {feet:?}"),
                         format!(
                             "{} blocks put at the top; health {health:?}, the dragon {:?}",
                             self.spikes.placed.saturating_sub(self.spikes.top_placed),
