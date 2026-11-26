@@ -31,6 +31,13 @@ The crystal plan (a pillar 3 off, a wall at 2 off, a strike by reach), the drago
 - **e01**: the use of an eye on the empty frame's top set `eye=true`. The ring with every frame facing out did not light; `e01-frame-in` tries them facing in.
 - **e05**: a dragon with no AI never moves its parts. No strike on part 1 or 2 landed (health 200 throughout), and walking into where the head should be drew no blow. The rows now summon it with its AI in phase 6 (sitting scanning).
 
+## The rerun (parity 45866776019, 3c7b5eb)
+- **e01-frame-in**: with every frame facing **in** (toward the ring's centre), the eye in the 12th lit the whole 3x3 (`end_portal`). Facing out does not light.
+- **e05-head**: a sitting dragon (phase 6, with its AI, yaw 0), the bot 2.0 off the head box predicted at 6.5 along (sin yaw, -cos yaw) and from y - 1 to y. Strikes on part id + 1 every 14 ticks with an iron sword: 200, 194, 188, 182, 176, 170. **Every strike landed the full 6.0, and the bot was never hurt** (it stood outside the blow's box, the head's grown by 1).
+- **e05-neck**: part id + 2 takes 2.5 a strike (6 / 4 + 1); the dragon's own id is its body, the same rule.
+- **e05-blow**: walking into the head's box: 20 to 14.0, then 14.83 to 8.83 ten ticks later. **One head blow is 6.0 through full iron with boots**, and they come every 10 ticks.
+- **e06-drop** (dry ground): the 21 fall with no water cost 18 (20 to 2). Set against e06-clutch's 0, the pour is the whole difference.
+
 ## The model (20h)
 - `crates/sim/src/end.rs`: the synthetic End (`EndStage`, `Layout::small()`) and the crystal's blast, with exposure as `getSeenPercent` counts it (iron bars by their post and arms). The model's floor matched the real 0.42 to the hundredth.
 - **Not modelled:** the blocks a blast breaks (the real wall at 2 off is spent, above); the dragon; the portal's travel; the frame fill.
