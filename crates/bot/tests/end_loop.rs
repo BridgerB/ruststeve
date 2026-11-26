@@ -21,6 +21,9 @@ const IRON: f32 = 15.0;
 /// island's lip is end stone at y 52 from x 68 to 72, the void from 73 to 97.
 const LIP_TOP: i32 = 52;
 const LIP_EDGE: i32 = 72;
+/// The island's end stone is this deep (a test's, well over the bunker's three down: vanilla's is
+/// noise tens deep near the fountain); E1's lip is the one thin part.
+const DEPTH: i32 = 20;
 
 fn line(r: TaskRecord) -> String {
     match r {
@@ -138,13 +141,13 @@ fn kit(sim: &mut Sim, end_stone: i32) {
     }
 }
 
-/// The island flat at `top`, three deep, round (0, 0) out to `radius`, with the fountain; the
+/// The island flat at `top`, `DEPTH` deep, round (0, 0) out to `radius`, with the fountain; the
 /// platform; `spikes`.
 fn island(radius: i32, top: i32, spikes: Vec<Spike>) -> EndStage {
     EndStage::of(&Layout {
         island_radius: radius,
         island_top: top,
-        island_depth: 3,
+        island_depth: DEPTH,
         spikes,
         platform: true,
         fountain: true,
@@ -157,8 +160,10 @@ fn island(radius: i32, top: i32, spikes: Vec<Spike>) -> EndStage {
 /// platform.
 #[test]
 fn the_bridge_from_the_platform_has_rails_and_reaches_the_lip() {
-    let mut stage = island(LIP_EDGE, LIP_TOP, Vec::new());
-    // The lip: a straight edge across the bridge's line, so the step off is onto a full row.
+    // The island deep to x 64; the lip from 65 to 72 three thick, with a straight edge across the
+    // bridge's line so the step off is onto a full row.
+    let mut stage = island(LIP_EDGE - 8, LIP_TOP, Vec::new());
+    stage.island(LIP_EDGE, LIP_TOP, 3);
     stage.fill(
         (LIP_EDGE - 4, LIP_EDGE),
         (LIP_TOP - 2, LIP_TOP),
