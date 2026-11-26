@@ -413,6 +413,32 @@ pub fn drop_slot(w: &World, base: &Base) -> Option<(i16, ItemKind)> {
         })
 }
 
+/// On the way home with no main slot free: the main stack of the Nether's blocks whose kind is
+/// held most (netherrack, basalt, soul soil or sand, blackstone, nylium, wart blocks, roots).
+pub fn home_free_slot(w: &World) -> Option<(i16, ItemKind)> {
+    const KINDS: [ItemKind; 9] = [
+        ItemKind::Netherrack,
+        ItemKind::Basalt,
+        ItemKind::SoulSoil,
+        ItemKind::SoulSand,
+        ItemKind::Blackstone,
+        ItemKind::WarpedNylium,
+        ItemKind::WarpedWartBlock,
+        ItemKind::WarpedRoots,
+        ItemKind::CrimsonRoots,
+    ];
+    let kind = KINDS
+        .iter()
+        .copied()
+        .filter(|k| craft::count(w, *k) > 0)
+        .max_by_key(|k| craft::count(w, *k))?;
+    w.inventory
+        .slots
+        .iter()
+        .find(|(s, (h, _))| (9..=44).contains(*s) && *h == kind)
+        .map(|(s, _)| (*s, kind))
+}
+
 /// Whether an item wears when it digs (a sword loses 2 a block, a pickaxe 1): not for stems.
 fn wears(k: ItemKind) -> bool {
     data::generated::item_props::max_damage(k) > 0
@@ -816,6 +842,30 @@ impl Plan {
                 w, furnace, result, count, tick,
             ))));
         }
+        // >>> Q8 (issue 19): on the way home a craft never begins with no main slot free: the
+        // biggest stack of the Nether's blocks is dropped first (Q11's race 45766983995: every
+        // wooden pickaxe craft failed StaleWindow on a full pack, all 8 trip runs spent).
+        if free_slots(w) == 0
+            && self.ender.phase == crate::endermen::EnderPhase::Home
+            && w.click.is_none()
+            && w.window.is_none()
+            && w.inventory.carried.is_none()
+            && let Some((slot, kind)) = home_free_slot(w)
+        {
+            self.acts.push(Act::Click {
+                slot,
+                button: 1,
+                mode: 4,
+            });
+            self.retry_at = tick + crate::RETRY_TICKS;
+            self.note(
+                tick,
+                format!("base: a main slot freed: drop {kind:?} from slot {slot}"),
+                "no main slot free before a craft on the way home".to_owned(),
+            );
+            return Some(Task::Idle);
+        }
+        // <<< Q8
         if w.click.is_none()
             && w.window.is_none()
             && w.inventory.carried.is_none()

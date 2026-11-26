@@ -15,11 +15,70 @@
 //!    lanes turned south 48 blocks at tick 60 ("a fortress seen ahead (9300 nether bricks)" or "a
 //!    ticking WitherSkeleton 33 off") in the one tick between a point reached and the next aimed
 //!    at, then walked back under ghast and blaze fire. The way crosses the fortress by design.
+//! 3. **The covered tunnel** (`Plan::fortress_way`): within `[fortress_way] reach` 250 of the
+//!    portal and out of `[portal_way] reach`, the trip goes by Q6's covered tunnel in rock
+//!    (`tunnel_toward_covered`: 2 of rock over the head where it can, deep first, the fortress's
+//!    blocks a wall) toward the portal itself, the same target Q6's last leg tunnels to while its
+//!    chunk is unloaded, so the leg runs on unbroken. Race 45763915181's heading legs over the
+//!    fortress and the valley wandered for 4,000 ticks; race 45760537530 lane 3 burned to death in
+//!    the open. With no tunnel route the heading's legs run as before.
+//! 4. **The pack kept open** (`FortressRules::junk`, read by `Plan::equip`'s junk drop): once
+//!    the tunnel has begun, the blocks it picks up go over their keep (race 45766983995: 448
+//!    netherrack and 50 soul soil filled the pack; every wooden pickaxe craft failed StaleWindow
+//!    and the tunnel stood with no pickaxe).
 
 use world::World;
 
 use crate::path::Cell;
-use crate::{Plan, home, path};
+use crate::{Plan, Task, home, path};
+
+/// `[fortress_way]` in `config/goals.toml`; the defaults are the config's (a test holds them equal).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct FortressRules {
+    /// Blocks on the plane from the portal inside which (and out of `[portal_way] reach`) the
+    /// trip goes by the covered tunnel.
+    pub reach: i32,
+    /// Dropped like `[survival] junk` (name, count kept) once the stretch's tunnel has begun.
+    pub junk: Vec<(String, i32)>,
+}
+
+impl FortressRules {
+    /// `junk` with its names read as item kinds (an unknown name is skipped).
+    pub fn junk_kinds(&self) -> Vec<(data::ItemKind, i32)> {
+        self.junk
+            .iter()
+            .filter_map(|(n, keep)| data::ItemKind::from_name(n).map(|k| (k, *keep)))
+            .collect()
+    }
+}
+
+impl Default for FortressRules {
+    fn default() -> Self {
+        let junk: &[(&str, i32)] = &[
+            ("netherrack", 128),
+            ("soul_soil", 0),
+            ("soul_sand", 0),
+            ("warped_roots", 0),
+            ("crimson_roots", 0),
+            ("warped_wart_block", 0),
+            ("nether_wart_block", 0),
+            ("warped_nylium", 0),
+            ("crimson_nylium", 0),
+            ("warped_fungus", 0),
+            ("crimson_fungus", 0),
+            ("gold_nugget", 0),
+            ("quartz", 0),
+            ("basalt", 0),
+            ("magma_cream", 0),
+            ("gravel", 0),
+        ];
+        Self {
+            reach: 250,
+            junk: junk.iter().map(|(n, k)| ((*n).to_owned(), *k)).collect(),
+        }
+    }
+}
 
 /// Fortress-stretch state, `HomeState::fortress`. Every field defaults.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -30,6 +89,13 @@ pub struct FortressState {
     pub guard_noted_at: Option<u64>,
     /// Heading turns for a fortress refused while the way steered home.
     pub turns_refused: u32,
+    /// The covered tunnel: begun, the pickaxe uses at its start, stretches begun, the routes
+    /// refused (the heading ran instead), and the last refusal's note tick.
+    pub begun: bool,
+    pub uses0: Option<i32>,
+    pub tunnels: u32,
+    pub no_routes: u32,
+    pub no_route_noted_at: Option<u64>,
 }
 
 /// Ticks between two notes of the same rule (a minute of game time).
@@ -74,9 +140,82 @@ pub fn home_way_steers(p: &Plan, heading_way: bool) -> bool {
 }
 
 impl Plan {
-    /// The stretch's per-tick notes on the trip (`home_trip`): the guard skips counted. Never a
-    /// task of its own yet.
-    pub(crate) fn fortress_way(&mut self, w: &World, tick: u64) -> Option<crate::Task> {
+    pub(crate) fn fortress_rules(&self) -> FortressRules {
+        self.table
+            .as_ref()
+            .map_or_else(FortressRules::default, |t| t.fortress_way.clone())
+    }
+
+    /// The stretch on the trip (`home_trip`, `d` the feet's distance on the plane from
+    /// `portal`): the guard skips noted; within `reach` and out of Q6's, the covered tunnel
+    /// toward the portal. `None` hands back to the trip (Q6's last leg, the heading).
+    pub(crate) fn fortress_way(
+        &mut self,
+        w: &World,
+        tick: u64,
+        portal: Cell,
+        d: i32,
+    ) -> Option<Task> {
+        self.fortress_guard_note(w, tick);
+        let last_leg = self.table.as_ref().map_or(120, |t| t.portal_way.reach);
+        if d > self.fortress_rules().reach || d <= last_leg {
+            return None;
+        }
+        // Every task begins with an empty cursor (Q6's rule: a stack on it is put down first).
+        if w.inventory.carried.is_some() {
+            return None;
+        }
+        let feet = path::stand_cell(w, w.body?.pos);
+        let uses = crate::endermen::pickaxe_uses_left(w);
+        if !self.ender.home.fortress.begun {
+            self.ender.home.fortress.begun = true;
+            self.ender.home.fortress.uses0 = Some(uses);
+            self.note(
+                tick,
+                format!("fortress way: the covered tunnel toward {portal:?}"),
+                format!(
+                    "from {feet:?}, {d} off on the plane (the last leg from {last_leg}); the heading stands down; pickaxe uses {uses}, filler {}",
+                    path::bridge_blocks(w)
+                ),
+            );
+        }
+        let Some(t) = self.tunnel_toward_covered(
+            w,
+            portal,
+            ("the portal", "the way home's fortress stretch"),
+            tick,
+        ) else {
+            let f = &mut self.ender.home.fortress;
+            f.no_routes += 1;
+            if f.no_route_noted_at.is_none_or(|t| tick >= t + NOTE_EVERY) {
+                f.no_route_noted_at = Some(tick);
+                let n = f.no_routes;
+                self.note(
+                    tick,
+                    "fortress way: no covered tunnel, the heading's legs".to_owned(),
+                    format!("from {feet:?}, {d} off; refusal {n}"),
+                );
+            }
+            return None;
+        };
+        let f = &mut self.ender.home.fortress;
+        f.tunnels += 1;
+        let (n, spent) = (f.tunnels, f.uses0.map_or(0, |u0| u0 - uses));
+        if n % 10 == 1 {
+            self.note(
+                tick,
+                format!("fortress way: tunnel toward {portal:?}"),
+                format!(
+                    "from {feet:?}, {d} off; stretch {n}; pickaxe uses {spent} spent on the stretch, {uses} left; health {:?}",
+                    w.player.health
+                ),
+            );
+        }
+        Some(t)
+    }
+
+    /// The guard's skips of the body's own cell, counted and noted.
+    fn fortress_guard_note(&mut self, w: &World, tick: u64) {
         let skipped = guard_sides_in_body(w, self.ender.home.axis);
         if !skipped.is_empty() {
             let f = &mut self.ender.home.fortress;
@@ -95,7 +234,6 @@ impl Plan {
                 );
             }
         }
-        None
     }
 
     /// A fortress turn refused while the way steers home: counted and noted (`crate::heading`).

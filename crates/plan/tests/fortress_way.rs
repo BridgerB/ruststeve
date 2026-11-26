@@ -184,3 +184,51 @@ fn no_fortress_turn_while_the_way_steers_home() {
     );
     assert!(fortress_way::home_way_steers(&p, false));
 }
+
+#[test]
+fn fortress_rules_match_the_config() {
+    assert_eq!(table().fortress_way, fortress_way::FortressRules::default());
+}
+
+#[test]
+fn within_the_stretch_the_trip_tunnels_covered_toward_the_portal() {
+    // 208 off on the plane: inside [fortress_way] reach 250, out of the last leg's 120.
+    let mut w = nether([8.5, 64.0, 8.5]);
+    remember(&mut w, (-200, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(table());
+    for tick in 100..104 {
+        w.ticks = tick;
+        p.step(&w);
+        p.take_acts();
+    }
+    let notes: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.starts_with("fortress way: the covered tunnel toward")),
+        "{notes:?}"
+    );
+    assert!(p.ender.home.fortress.tunnels >= 1, "{notes:?}");
+    assert!(matches!(p.task, plan::Task::Stairs(_)), "{notes:?}");
+}
+
+#[test]
+fn past_the_stretch_the_heading_runs() {
+    // 308 off: out of reach, no tunnel of the stretch.
+    let mut w = nether([8.5, 64.0, 8.5]);
+    remember(&mut w, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(table());
+    for tick in 100..104 {
+        w.ticks = tick;
+        p.step(&w);
+        p.take_acts();
+    }
+    assert!(!p.ender.home.fortress.begun);
+}
+
+#[test]
+fn the_stretch_junk_names_are_all_items() {
+    let r = fortress_way::FortressRules::default();
+    assert_eq!(r.junk_kinds().len(), r.junk.len());
+    assert!(r.junk_kinds().contains(&(ItemKind::Netherrack, 128)));
+}

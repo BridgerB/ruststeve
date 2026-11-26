@@ -2134,6 +2134,37 @@ impl Plan {
                 "a mob that knocks back near and no floor beside the feet".to_owned(),
             );
         }
+        // >>> Q8 (issue 19): a shooter that first sees the bot on the trip cuts a walk or a tunnel
+        // under way, so the trip's cover runs (Q10's race 45768707240 lane 1: three ghast fireballs
+        // in a level tunnel at (75, 33, 179), 15.6 to dead, no cover note). Once a sighting.
+        if home_trip
+            && matches!(
+                self.task,
+                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+            )
+            && self
+                .ender
+                .home
+                .shooter_seen_at
+                .is_none_or(|t| tick >= t + crate::home::SHOOTER_CLEAR_TICKS)
+            && (crate::home::ghast_sees(w)
+                || crate::home::skeleton_sees(w)
+                || endermen::seen_by_far_shooter(w))
+        {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.retry_at = tick;
+            self.ender.home.shooter_cuts += 1;
+            self.note(
+                tick,
+                format!("home: {cut} cut for cover"),
+                format!(
+                    "a ghast, blaze or skeleton has the bot in sight; cut {}",
+                    self.ender.home.shooter_cuts
+                ),
+            );
+        }
+        // <<< Q8
         if home_trip {
             ignored.extend(
                 w.entities
@@ -2616,6 +2647,41 @@ impl Plan {
         {
             junk.extend(self.stronghold_rules().junk_kinds());
         }
+        // >>> Q11 (issue 19): the fortress stretch's tunnel fills the pack (race 45766983995: every
+        // wooden pickaxe craft failed on a full pack) (`crate::fortress_way`).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(self.fortress_rules().junk_kinds());
+        }
+        // <<< Q11
+        // >>> Q8 (issue 19): the same leftovers on the whole trip home in the Nether, the top-up over
+        // (the coordinator, 2026-11-26: Q11's race 45766983995 filled every pack before its
+        // tunnel), basalt kept to 64 for the guard and the bridges (the deltas' restock digs it).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.top_up_over
+            && !self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(
+                self.fortress_rules()
+                    .junk_kinds()
+                    .into_iter()
+                    .map(|(k, n)| {
+                        if k == data::ItemKind::Basalt {
+                            (k, crate::home::BASALT_KEPT)
+                        } else {
+                            (k, n)
+                        }
+                    }),
+            );
+        }
+        // <<< Q8
         // A kind that came back after its drop is held back (`junk_watch`, `junk_now`).
         self.junk_watch(w, tick);
         let walking = matches!(self.task, Task::Explore(_));

@@ -1466,3 +1466,182 @@ fn a_provoked_enderman_on_the_way_home_is_held_from_at_most_a_minute() {
     // Then the trip: no new hold from it.
     assert!(noted(&p, "home: the trip begun"), "{:?}", notes(&p));
 }
+
+#[test]
+fn a_full_pack_on_the_way_home_frees_a_slot_and_drops_the_nether_junk() {
+    // Q11's race 45766983995: 448 netherrack and 50 soul soil, 0 main slots free, every wooden
+    // pickaxe craft failed StaleWindow.
+    let mut w = nether();
+    kit(&mut w);
+    for s in 9..=35 {
+        w.inventory.slots.insert(s, (ItemKind::Netherrack, 64));
+    }
+    w.inventory.slots.insert(39, (ItemKind::SoulSoil, 50));
+    for s in 40..=44 {
+        w.inventory.slots.insert(s, (ItemKind::Netherrack, 64));
+    }
+    assert_eq!(plan::base::free_slots(&w), 0);
+    let (slot, kind) = plan::base::home_free_slot(&w).unwrap_or_else(|| panic!("a slot"));
+    assert_eq!(kind, ItemKind::Netherrack, "the kind held most");
+    assert!((9..=44).contains(&slot));
+    // The trip drops the leftovers: soul soil goes (keep 0), netherrack down to its 128.
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(None);
+    let mut dropped = Vec::new();
+    for t in 100..140 {
+        w.ticks = t;
+        p.step(&w);
+        for a in p.take_acts() {
+            if let world::Act::Click { slot, mode: 4, .. } = a {
+                dropped.push(w.inventory.slots.get(&slot).map(|(k, _)| *k));
+                w.inventory.slots.remove(&slot);
+            }
+        }
+    }
+    assert!(!dropped.is_empty(), "{:?}", notes(&p));
+    assert!(plan::base::free_slots(&w) > 0);
+}
+
+#[test]
+fn on_the_join_between_spans_the_next_span_is_the_target() {
+    // Race 45768618919: four lanes stood on the join's island at x 309 and 310, in no span's
+    // reach, the heading bridging the sea instead.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 11, 64, 8], [7, 1, 68, 8]];
+    goals.home.way = vec![[-200, 8]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.body = w.body.map(|b| physics::Body {
+        pos: [9.5, 64.0, 12.5],
+        ..b
+    });
+    w.player.pos = Some([9.5, 64.0, 12.5]);
+    let mut p = tripper(Some(t));
+    run(&mut p, &mut w, 100, 3);
+    // The next span, 4 up and 4 north: a stair toward it, its first step at the feet's level.
+    let why: Vec<String> = p.events.iter().map(|e| e.why.clone()).collect();
+    assert!(
+        noted(&p, "home: step up toward the old bridge at (9, 64, 11)")
+            && why.iter().any(|y| y.contains("(7, 68, 8)")),
+        "{:?} {why:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn four_below_a_span_one_off_its_line_the_stair_runs_along_it() {
+    // Race 45768618919: lanes at y 34 to 37 beside and under the west span (top 41), one off its
+    // line: no room to climb toward it, so the stair runs west along it.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 1, 68, 9]];
+    goals.home.way = vec![[-200, 9]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    for x in 1..=15 {
+        for y in 66..=67 {
+            set(&mut w, (x, y, 9), BlockKind::Netherrack);
+        }
+    }
+    let mut p = tripper(Some(t));
+    run(&mut p, &mut w, 100, 5);
+    assert!(
+        noted(&p, "home: step up toward the old bridge at (7, 64, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn short_of_pickaxes_a_stem_seen_near_is_gathered_by_hand() {
+    // Q10's race 45768707240 lane 2: 17 off the portal at 15.6 health with 0 pickaxe uses, the
+    // kit's stems spent, a crimson forest round it.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.remove(&37);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (14, 64, 8), BlockKind::CrimsonStem);
+    remember(&mut w, home::NETHER, (14, 64, 8), BlockKind::CrimsonStem);
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: wood by hand at (14, 64, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.wood_walks, 1);
+}
+
+#[test]
+fn a_ghast_that_sees_the_bot_cuts_the_walk_for_cover() {
+    // Q10's race 45768707240 lane 1: three ghast fireballs in a level tunnel, no cover note.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 80,
+        uuid: [0; 16],
+        kind: data::EntityKind::Ghast.id(),
+        x: 8.5,
+        y: 72.0,
+        z: 40.5,
+        velocity: [0.0; 3],
+    }));
+    assert!(home::ghast_sees(&w));
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    p.task = Task::Explore(plan::walk::Walk::new(
+        (-20, 64, 8),
+        plan::path::Goal::Near {
+            pos: (-20, 64, 8),
+            range: 1.0,
+        },
+        plan::walk::Arrive::Goal,
+        100,
+    ));
+    run(&mut p, &mut w, 100, 1);
+    assert!(noted(&p, "home: explore cut for cover"), "{:?}", notes(&p));
+    assert_eq!(p.ender.home.shooter_cuts, 1);
+}
+
+#[test]
+fn the_trips_pickaxe_run_refuses_a_far_table() {
+    // Q9's race 45770564199: each run walked 35 to 50 back east to the forest's table though the
+    // bot carried one.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (40, 64, 8), BlockKind::CraftingTable);
+    remember(&mut w, home::NETHER, (40, 64, 8), BlockKind::CraftingTable);
+    w.inventory.slots.insert(12, (ItemKind::CraftingTable, 1));
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    p.base = plan::base::BaseState {
+        steps: home::TRIP_WOOD_STEPS.to_vec(),
+        ..plan::base::BaseState::default()
+    };
+    run(&mut p, &mut w, 100, 2);
+    assert!(
+        noted(&p, "arrival: the table at (40, 64, 8) is far"),
+        "{:?}",
+        notes(&p)
+    );
+}
