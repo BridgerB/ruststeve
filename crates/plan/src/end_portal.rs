@@ -175,8 +175,9 @@ pub struct EndPortalState {
     pub failures_seen: u64,
     pub up_walks: u32,
     pub climb_noted: bool,
-    /// The way point walked to next.
+    /// The way point walked to next, and whether a surface phase is climbing back up.
     pub way_at: Option<usize>,
+    pub reclimb: bool,
     pub log_walks: u32,
     pub look_walks: u32,
     pub eat_tasks: u32,
@@ -657,6 +658,12 @@ impl Plan {
             self.end_kit_advance(w, tick, &format!("on the surface at {feet:?}"));
             return None;
         }
+        self.end_kit_climb(w, r, tick)
+    }
+
+    /// The climb up the bot's own way from where the feet are (the up phase's, and the surface
+    /// phases' when a fight's retreat took the bot back down its stairs).
+    fn end_kit_climb(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
         // The way: the legs' ends from the room up, then the stairs' top; walked a leg at a time
         // from the point after the nearest one (a single route of 100 cells through the stairs
         // and the tunnel ran out of the search's budget).
@@ -684,7 +691,7 @@ impl Plan {
         while let Some(i) = self.end_portal.way_at
             && let Some(p) = way.get(i).copied()
         {
-            if near(feet, p) <= 2.0 {
+            if near(feet, p) <= 3.0 {
                 self.end_portal.way_at = Some(i + 1);
                 self.end_portal.up_walks = 0;
                 self.note(
@@ -759,7 +766,7 @@ impl Plan {
             // From a way point up to the next: the bot's own leg back up, cell by cell
             // (`climb_route`), only the head room its downward cut left out dug (race 45871438675:
             // the shaft straight up met an aquifer at y 30 beside the old stairs, which are dry).
-            if i > 0 && p.1 > feet.1 && way.get(i - 1).is_some_and(|q| near(feet, *q) <= 2.0) {
+            if i > 0 && p.1 > feet.1 && way.get(i - 1).is_some_and(|q| near(feet, *q) <= 3.0) {
                 let route = climb_route(feet, p);
                 self.note(
                     tick,
@@ -827,6 +834,27 @@ impl Plan {
         tick: u64,
     ) -> Option<Task> {
         let rules = self.table.as_ref().map(|t| t.survival.clone())?;
+        // Back down its own stairs (race 45880017656 lane 0: a creeper's retreat took the bot
+        // from the trees to (1597, 47, -38), and the wood's legs then tunnelled by hand): up again
+        // first, by the same way.
+        let feet = path::feet_cell(w.body?.pos);
+        if feet.1 < r.way_up[1] - 4 && !world::stage::open_sky(w) {
+            if !self.end_portal.reclimb {
+                self.end_portal.reclimb = true;
+                self.end_portal.way_at = None;
+                self.end_portal.up_walks = 0;
+                self.note(
+                    tick,
+                    format!(
+                        "end kit: under the surface at {feet:?} in the {} phase",
+                        phase.name()
+                    ),
+                    "up its own way again first".to_owned(),
+                );
+            }
+            return self.end_kit_climb(w, r, tick);
+        }
+        self.end_portal.reclimb = false;
         let night = self.dusk_near(w, tick) || w.is_night() == Some(true);
         if night {
             let day = w.day_time().unwrap_or(0) / 24_000;
