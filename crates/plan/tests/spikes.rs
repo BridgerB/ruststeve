@@ -140,7 +140,17 @@ fn walled() -> World {
     for c in [(9, 69, 5), (7, 69, 5), (8, 69, 4)] {
         set(&mut w, c, BlockKind::EndStone);
     }
-    for c in [(9, 70, 5), (7, 70, 5), (8, 70, 4), (8, 70, 6), (8, 71, 6)] {
+    for c in [
+        (8, 70, 6),
+        (8, 71, 6),
+        (9, 70, 5),
+        (7, 70, 5),
+        (8, 70, 4),
+        (9, 71, 5),
+        (7, 71, 5),
+        (8, 71, 4),
+        (8, 72, 5),
+    ] {
         set(&mut w, c, BlockKind::EndStone);
     }
     w
@@ -222,24 +232,8 @@ fn the_planner_walks_pillars_walls_strikes_and_digs_down() {
     at(&mut w, [8.5, 70.0, 5.5]);
     assert_eq!(
         spikes::next(&w, &st, 0),
-        Next::Build((9, 69, 5), Role::Ledge),
-        "at the stand, the guard ring first: a ledge where nothing would hold a guard"
-    );
-    for c in [(9, 69, 5), (7, 69, 5), (8, 69, 4)] {
-        set(&mut w, c, BlockKind::EndStone);
-    }
-    assert_eq!(
-        spikes::next(&w, &st, 0),
-        Next::Build((9, 70, 5), Role::Guard),
-        "then the guard on it"
-    );
-    for c in [(9, 70, 5), (7, 70, 5), (8, 70, 4)] {
-        set(&mut w, c, BlockKind::EndStone);
-    }
-    assert_eq!(
-        spikes::next(&w, &st, 0),
         Next::Build((8, 70, 6), Role::Wall),
-        "the ring whole, a block between at the feet's height"
+        "at the stand, the blast's line first: a block between at the feet's height"
     );
     set(&mut w, (8, 70, 6), BlockKind::EndStone);
     assert_eq!(
@@ -250,8 +244,39 @@ fn the_planner_walks_pillars_walls_strikes_and_digs_down() {
     set(&mut w, (8, 71, 6), BlockKind::EndStone);
     assert_eq!(
         spikes::next(&w, &st, 0),
+        Next::Build((9, 69, 5), Role::Ledge),
+        "then the box: a ledge where nothing would hold a side"
+    );
+    for c in [(9, 69, 5), (7, 69, 5), (8, 69, 4)] {
+        set(&mut w, c, BlockKind::EndStone);
+    }
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Build((9, 70, 5), Role::Guard),
+        "the side on it"
+    );
+    for c in [(9, 70, 5), (7, 70, 5), (8, 70, 4)] {
+        set(&mut w, c, BlockKind::EndStone);
+    }
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Build((9, 71, 5), Role::Guard),
+        "the sides at the eye's height"
+    );
+    for c in [(9, 71, 5), (7, 71, 5), (8, 71, 4)] {
+        set(&mut w, c, BlockKind::EndStone);
+    }
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Build((8, 72, 5), Role::Roof),
+        "the roof"
+    );
+    set(&mut w, (8, 72, 5), BlockKind::EndStone);
+    assert!(spikes::boxed(&w, (8, 70, 5)), "the box whole");
+    assert_eq!(
+        spikes::next(&w, &st, 0),
         Next::Strike(CRYSTAL),
-        "the wall up, the strike"
+        "the box closed, the strike"
     );
     gone(&mut w);
     let rec = SpikeState {
@@ -307,6 +332,13 @@ fn the_planner_walks_pillars_walls_strikes_and_digs_down() {
             approach: None
         }
     );
+    // Boxed in on the wide spike's top: the side toward the pillar opened first.
+    for c in [(8, 70, 4), (8, 71, 4)] {
+        set(&mut wide, c, BlockKind::EndStone);
+    }
+    assert_eq!(spikes::next(&wide, &wrec, 0), Next::Open((8, 70, 4)));
+    set(&mut wide, (8, 70, 4), BlockKind::Air);
+    assert_eq!(spikes::next(&wide, &wrec, 0), Next::Open((8, 71, 4)));
 }
 
 #[test]
@@ -402,7 +434,7 @@ fn hurt_on_the_ground_the_crystals_wait_for_the_health() {
 }
 
 #[test]
-fn the_dragon_near_holds_the_climb_and_a_charge_sends_the_bot_down() {
+fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
     // Strafing 50 off: no climb.
     let mut w = world(2, [8.5, 64.0, 5.5]);
     dragon(&mut w, [8.5, 64.0, 55.5], 0);
@@ -429,30 +461,56 @@ fn the_dragon_near_holds_the_climb_and_a_charge_sends_the_bot_down() {
             .iter()
             .any(|n| n.starts_with("spikes: pillar up from"))
     );
-    // Charging 30 off with the bot half way up an unguarded pillar: down.
+    // Charging 30 off with the bot half way up a pillar: no wait there, on up to the box.
     let mut w = world(2, [8.5, 67.0, 5.5]);
-    pillar(&mut w, (8, 5), 64, 66, BlockKind::Cobblestone);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
     dragon(&mut w, [8.5, 67.0, 35.5], 8);
     let mut p = Plan::new(Aim::Race);
-    match p.spikes_task(&w, 100) {
-        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
-        t => panic!("{t:?} {:?}", notes(&p)),
-    }
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
     assert!(
+        notes(&p).iter().any(|n| n == "spikes: climb on through"),
+        "{:?}",
         notes(&p)
-            .iter()
-            .any(|n| n.starts_with("spikes: dig down from the dragon"))
     );
-    // Charging 30 off with the bot at its stand in a whole guard ring: held there.
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
+    // Charging 30 off with the bot boxed in at its stand: the strike, the stand noted closed.
     let mut w = walled();
     dragon(&mut w, [8.5, 70.0, 35.5], 8);
     let mut p = Plan::new(Aim::Race);
     assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Strike(_))));
     assert!(
         notes(&p)
             .iter()
-            .any(|n| n == "spikes: hold in the guard ring")
+            .any(|n| n == "spikes: stand closed at (8, 70, 5)")
     );
+    // The crystal gone, the dragon strafing 30 off: held in the box, not down.
+    gone(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(notes(&p).iter().any(|n| n == "spikes: hold in the box"));
+    // The dragon gone far: down.
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![DRAGON] }));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 69, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
 }
 
 #[test]
@@ -553,5 +611,196 @@ fn a_blast_takes_the_wall_and_a_crystal_left_gets_it_again() {
     assert_eq!(
         spikes::next(&w, &SpikeState::default(), 0),
         Next::Build((8, 70, 6), Role::Wall)
+    );
+}
+
+#[test]
+fn the_spikes_read_from_end_toml_rows() {
+    // E1's `[[spike]]` rows (config/end.toml, probe 45863427332), with its extra fields.
+    #[derive(serde::Deserialize)]
+    struct Rows {
+        spike: Vec<Spike>,
+    }
+    let text =
+        "[[spike]]\ncentre = [-34, 24]\ntop_y = 79\nradius = 2\ncaged = true\nground_y = 62\n";
+    let rows: Rows = toml::from_str(text).unwrap();
+    assert_eq!(
+        rows.spike,
+        vec![Spike {
+            centre: [-34, 24],
+            radius: 2,
+            top_y: 79,
+            caged: true,
+        }]
+    );
+}
+
+#[test]
+fn config_end_toml_holds_the_ten_spikes() {
+    // E1's measured rows (config/end.toml, probe 45863427332), as the shell loads them.
+    #[derive(serde::Deserialize)]
+    struct Rows {
+        spike: Vec<Spike>,
+    }
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/end.toml"
+    ))
+    .unwrap();
+    let rows: Rows = toml::from_str(&text).unwrap();
+    assert_eq!(rows.spike.len(), 10);
+    assert_eq!(rows.spike.iter().filter(|s| s.caged).count(), 2);
+    let first = Spike {
+        centre: [12, 39],
+        radius: 2,
+        top_y: 76,
+        caged: false,
+    };
+    assert_eq!(rows.spike.first(), Some(&first));
+}
+
+#[test]
+fn out_of_blocks_half_way_up_the_bot_digs_down() {
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    w.inventory.slots.remove(&36);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+}
+
+#[test]
+fn a_blow_inside_the_box_is_noted() {
+    let mut w = walled();
+    let mut p = Plan::new(Aim::Race);
+    p.spikes_step(&w, 100);
+    w.player.health = Some(15.0);
+    p.spikes_step(&w, 101);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: blow in the box at (8, 70, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back() {
+    // Parity e06 (E6): a 21-block fall onto water poured while falling cost 0. Race 45871173293
+    // lane 0 fell 8 for 7.5 with a water bucket held.
+    let mut w = world(2, [8.5, 75.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    let fall = |w: &mut World, y: f64| {
+        at(w, [8.5, y, 5.5]);
+        if let Some(b) = w.body.as_mut() {
+            b.on_ground = false;
+            b.vel = [0.0, -0.8, 0.0];
+        }
+    };
+    fall(&mut w, 75.0);
+    let mut p = Plan::new(Aim::Race);
+    let c = p.spikes_step(&w, 100);
+    assert_eq!(c.and_then(|c| c.pitch), Some(90.0), "looking straight down");
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch begun")),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::Hold { slot: 1 }],
+        "the bucket to hand"
+    );
+    w.held = 1;
+    fall(&mut w, 70.0);
+    p.spikes_step(&w, 101);
+    assert!(p.take_acts().is_empty(), "too high to pour yet");
+    fall(&mut w, 66.5);
+    p.spikes_step(&w, 102);
+    assert_eq!(p.take_acts(), vec![Act::UseItem], "poured near the ground");
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    fall(&mut w, 65.5);
+    p.spikes_step(&w, 103);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch poured"))
+    );
+    set(&mut w, (8, 64, 5), BlockKind::Water);
+    at(&mut w, [8.5, 64.0, 5.5]);
+    if let Some(b) = w.body.as_mut() {
+        b.in_water = true;
+    }
+    p.take_acts();
+    p.spikes_step(&w, 104);
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::UseItem],
+        "landed: the water taken back"
+    );
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    assert!(p.spikes_step(&w, 105).is_none());
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch over")),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.spikes.clutches, 1);
+}
+
+#[test]
+fn a_breath_at_a_pillars_foot_is_walked_out_of() {
+    // Race 45875049490 lane 0: held still at (42, 59, 3) in a fireball's cloud, three blows of 6.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    w.player.health = Some(12.0);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle), "hurt: a hold");
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 50,
+        uuid: [2; 16],
+        kind: EntityKind::AreaEffectCloud.id(),
+        x: 8.5,
+        y: 64.0,
+        z: 4.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 50,
+        entries: vec![(8, MetaValue::Float(3.0))],
+    }));
+    assert!(p.spikes_step(&w, 101).is_none(), "the hold ends");
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: hold ended by a breath"))
+    );
+    match p.spikes_task(&w, 102) {
+        Some(Task::Explore(walk)) => {
+            let t = walk.target;
+            let d = ((f64::from(t.0) + 0.5 - 8.5).powi(2) + (f64::from(t.2) + 0.5 - 4.5).powi(2))
+                .sqrt();
+            assert!(d > 4.5, "out of its reach: {t:?}");
+        }
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: out of the breath to"))
     );
 }
