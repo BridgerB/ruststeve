@@ -1350,3 +1350,28 @@ fn by_a_lava_edge_over_the_danger_line_no_cube_pocket_is_sealed() {
     assert!(p.ender.home.cube_pocket.is_none());
     assert_eq!(p.ender.home.cube_pockets, 0);
 }
+
+#[test]
+fn a_guard_the_server_never_answers_is_given_up() {
+    // Race 45760537530: one guard clicked 221 to 411 times, filler unchanged, under blazes.
+    let mut w = span_over_lava();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(None);
+    p.ender.home.axis = Some((-1, 0));
+    p.ender.home.last_feet = Some((8, 64, 8));
+    // The world never answers: every click is refused.
+    run(&mut p, &mut w, 100, 200);
+    assert!(
+        noted(&p, "home: guard given up at (8, 63, 7)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.ender.home.guard_refused.contains(&(8, 63, 7)));
+    assert!(
+        p.ender.home.guards <= 2 * (home::GUARD_TRIES + 1),
+        "{} clicks",
+        p.ender.home.guards
+    );
+}
