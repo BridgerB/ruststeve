@@ -65,6 +65,10 @@ pub struct EndKitRules {
     pub eye_every: u64,
     /// Dig tasks begun on the spawner before it is left.
     pub spawner_tries: u32,
+    /// The way in: walks to its start, block clicks, and steps in, before the next frame's way.
+    pub entry_walks: u32,
+    pub entry_clicks: u32,
+    pub entries: u32,
 }
 
 impl Default for EndKitRules {
@@ -86,6 +90,9 @@ impl Default for EndKitRules {
             eye_tries: 4,
             eye_every: 20,
             spawner_tries: 6,
+            entry_walks: 4,
+            entry_clicks: 9,
+            entries: 3,
         }
     }
 }
@@ -157,6 +164,14 @@ pub struct EndPortalState {
     pub eye_uses: u32,
     pub frames_noted: bool,
     pub lit_noted: bool,
+    /// The way in chosen (`Entry`), the walks to its start, the blocks clicked, the steps in.
+    pub entry: Option<Entry>,
+    pub entry_walks: u32,
+    pub entry_clicks: u32,
+    pub entry_clicked_at: u64,
+    pub entries: u32,
+    /// Frames whose way in was given up.
+    pub entry_refused: Vec<[i32; 3]>,
 }
 
 // ------------------------------------------------------------------ pure
@@ -318,6 +333,113 @@ pub fn portal_cells(w: &World, room: &Room) -> Vec<Cell> {
         .flat_map(|dx| (-1..=1).map(move |dz| (cx + dx, y, cz + dz)))
         .filter(|c| w.block_at(BlockPos::new(c.0, c.1, c.2)) == Some(BlockKind::EndPortal))
         .collect()
+}
+
+/// A way into the lit portal by a frame: two blocks laid on its outward side, `high` (two
+/// high, its top level with the frame's foot) next to the frame and `low` (one high) beyond it;
+/// the bot starts on the floor at `start`, beside `low`, steps up both and over the frame's
+/// top, and falls into the portal cell `inside`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Entry {
+    pub frame: [i32; 3],
+    pub high: Cell,
+    pub low: Cell,
+    pub start: Cell,
+    pub inside: Cell,
+}
+
+impl Entry {
+    /// The blocks to lay, in order, each with the cell whose top face is clicked.
+    pub fn blocks(&self) -> Vec<(Cell, Cell)> {
+        let below = |c: Cell| (c.0, c.1 - 1, c.2);
+        let over = (self.high.0, self.high.1 + 1, self.high.2);
+        vec![
+            (self.high, below(self.high)),
+            (over, self.high),
+            (self.low, below(self.low)),
+        ]
+    }
+
+    /// The forced route: onto `low`, onto `high`'s top, onto the frame, into the portal.
+    pub fn way(&self) -> Vec<Cell> {
+        vec![
+            (self.low.0, self.low.1 + 1, self.low.2),
+            (self.high.0, self.high.1 + 2, self.high.2),
+            (self.frame[0], self.frame[1] + 1, self.frame[2]),
+            self.inside,
+        ]
+    }
+}
+
+/// Every way in (`Entry`) the room's floor allows, by each frame of a side: `high` and `low`
+/// on the floor outward of the frame, open, not lava, on a solid floor; a start beside `low`
+/// across the axis (or beyond it) on the floor with head room; head room over the steps and the
+/// frame's top; no lava within one of the cells walked. Pure over the world as loaded.
+pub fn entries(w: &World, room: &Room) -> Vec<Entry> {
+    let mut cells = path::Cells::new(w);
+    let [cx, fy, cz] = room.centre;
+    let floor = room.floor_y;
+    let mut v = Vec::new();
+    for f in &room.frames {
+        let (dx, dz) = ((f[0] - cx).signum(), (f[2] - cz).signum());
+        // A side's frame only: the outward axis is the one the frame is RING off on.
+        let d = if (f[0] - cx).abs() == stronghold::RING && (f[2] - cz).abs() < stronghold::RING {
+            (dx, 0)
+        } else if (f[2] - cz).abs() == stronghold::RING && (f[0] - cx).abs() < stronghold::RING {
+            (0, dz)
+        } else {
+            continue;
+        };
+        let high = (f[0] + d.0, floor, f[2] + d.1);
+        let low = (f[0] + 2 * d.0, floor, f[2] + 2 * d.1);
+        let inside = (f[0] - d.0, fy, f[2] - d.1);
+        let clear = |cells: &mut path::Cells, c: Cell| matches!(cells.at(c), path::Class::Clear);
+        let solid = |cells: &mut path::Cells, c: Cell| cells.at(c) == path::Class::Solid;
+        let ok = [high, (high.0, high.1 + 1, high.2), low]
+            .iter()
+            .all(|c| clear(&mut cells, *c) || solid(&mut cells, *c))
+            && solid(&mut cells, (high.0, high.1 - 1, high.2))
+            && solid(&mut cells, (low.0, low.1 - 1, low.2))
+            && [
+                (low.0, low.1 + 1, low.2),
+                (low.0, low.1 + 2, low.2),
+                (high.0, high.1 + 2, high.2),
+                (high.0, high.1 + 3, high.2),
+                (f[0], f[1] + 1, f[2]),
+                (f[0], f[1] + 2, f[2]),
+            ]
+            .iter()
+            .all(|c| clear(&mut cells, *c));
+        if !ok {
+            continue;
+        }
+        let hot = [high, low].iter().any(|c| {
+            (-1..=1).any(|ax| {
+                (-1..=1).any(|az| {
+                    (-1..=0).any(|ay| cells.at((c.0 + ax, c.1 + ay, c.2 + az)) == path::Class::Lava)
+                })
+            })
+        });
+        if hot {
+            continue;
+        }
+        let across = (d.1, d.0);
+        let starts = [
+            (low.0 + across.0, floor, low.2 + across.1),
+            (low.0 - across.0, floor, low.2 - across.1),
+            (low.0 + d.0, floor, low.2 + d.1),
+        ];
+        if let Some(start) = starts.into_iter().find(|s| cells.standable(*s)) {
+            v.push(Entry {
+                frame: *f,
+                high,
+                low,
+                start,
+                inside,
+            });
+        }
+    }
+    v
 }
 
 fn overworld(w: &World) -> bool {
@@ -926,9 +1048,176 @@ impl Plan {
                 ),
             );
         }
-        // The step in waits for E1's room measurements (docs/problems/end-portal.md).
-        self.retry_at = tick + crate::RETRY_TICKS * 5;
-        Some(Task::Idle)
+        self.end_entry(w, &room, &r, feet, tick)
+    }
+
+    /// The step in: two steps of held blocks laid outside a frame (`entry_for`), then a forced
+    /// walk up them, over the frame's top and into the lit portal (`Task::Enter`, done in the
+    /// End). Each block, walk and step noted; a way whose blocks will not go in is given up for
+    /// the next frame.
+    fn end_entry(
+        &mut self,
+        w: &World,
+        room: &Room,
+        r: &EndKitRules,
+        feet: Cell,
+        tick: u64,
+    ) -> Option<Task> {
+        let e = match self.end_portal.entry.clone() {
+            Some(e) => e,
+            None => {
+                let refused = self.end_portal.entry_refused.clone();
+                let Some(e) = entries(w, room)
+                    .into_iter()
+                    .filter(|e| !refused.contains(&e.frame))
+                    .min_by_key(|e| (e.start.0 - feet.0).abs() + (e.start.2 - feet.2).abs())
+                else {
+                    if self.end_portal.entry_walks == 0 {
+                        self.end_portal.entry_walks = 1;
+                        self.note(
+                            tick,
+                            "end portal: no way in found".to_owned(),
+                            format!("from {feet:?}; frames refused {refused:?}"),
+                        );
+                    }
+                    self.retry_at = tick + crate::RETRY_TICKS * 10;
+                    return Some(Task::Idle);
+                };
+                self.note(
+                    tick,
+                    format!("end portal: the way in by the frame at {:?}", e.frame),
+                    format!(
+                        "steps at {:?} and {:?}, from {:?}, into {:?}",
+                        e.high, e.low, e.start, e.inside
+                    ),
+                );
+                self.end_portal.entry = Some(e.clone());
+                self.end_portal.entry_walks = 0;
+                self.end_portal.entry_clicks = 0;
+                e
+            }
+        };
+        let give_up = |p: &mut Plan, why: String, tick: u64| {
+            p.end_portal.entry_refused.push(e.frame);
+            p.end_portal.entry = None;
+            p.note(
+                tick,
+                format!("end portal: the way in by {:?} given up", e.frame),
+                why,
+            );
+            Some(Task::Idle)
+        };
+        let mut cells = path::Cells::new(w);
+        let todo: Vec<(Cell, Cell)> = e
+            .blocks()
+            .into_iter()
+            .filter(|(c, _)| cells.at(*c) != path::Class::Solid)
+            .collect();
+        let at_start = feet == e.start;
+        if !at_start && (feet.1 <= e.start.1 || !todo.is_empty()) {
+            if self.end_portal.entry_walks >= r.entry_walks {
+                return give_up(
+                    self,
+                    format!("{} walks to {:?}", r.entry_walks, e.start),
+                    tick,
+                );
+            }
+            let mut walk = Walk::new(e.start, Goal::Block { pos: e.start }, Arrive::Goal, tick);
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.end_portal.entry_walks += 1;
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("end portal: walk to the way in's start {:?}", e.start),
+                    format!("from {feet:?}; walk {}", self.end_portal.entry_walks),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            return give_up(
+                self,
+                format!("no walk to {:?} from {feet:?}", e.start),
+                tick,
+            );
+        }
+        if let Some((cell, click)) = todo.first().copied() {
+            if self.end_portal.entry_clicks >= r.entry_clicks {
+                return give_up(
+                    self,
+                    format!("{} clicks and {cell:?} still open", r.entry_clicks),
+                    tick,
+                );
+            }
+            if tick < self.end_portal.entry_clicked_at + r.eye_every
+                || w.window.is_some()
+                || w.click.is_some()
+                || !self.acts.is_empty()
+            {
+                return Some(Task::Idle);
+            }
+            let Some(item) = crate::SHELTER_BLOCKS
+                .iter()
+                .copied()
+                .find(|k| craft::count(w, *k) > 0)
+            else {
+                return give_up(self, "no block held for the steps".to_owned(), tick);
+            };
+            return match crate::hold::toward(w, item) {
+                crate::hold::Hold::Held => {
+                    self.end_portal.entry_clicks += 1;
+                    self.end_portal.entry_clicked_at = tick;
+                    self.acts.push(Act::UseOn {
+                        pos: BlockPos::new(click.0, click.1, click.2),
+                        face: 1,
+                    });
+                    self.note(
+                        tick,
+                        format!("end portal: step block at {cell:?}"),
+                        format!(
+                            "{item:?} on {click:?} from {feet:?}; click {}",
+                            self.end_portal.entry_clicks
+                        ),
+                    );
+                    Some(Task::Idle)
+                }
+                crate::hold::Hold::Act(a) => {
+                    self.acts.push(a);
+                    Some(Task::Idle)
+                }
+                crate::hold::Hold::Wait => Some(Task::Idle),
+                crate::hold::Hold::Missing => {
+                    give_up(self, "the steps' block went missing".to_owned(), tick)
+                }
+            };
+        }
+        if self.end_portal.entries >= r.entries {
+            return give_up(self, format!("{} steps in", r.entries), tick);
+        }
+        self.end_portal.entries += 1;
+        let mut walk = Walk::new(e.inside, Goal::Block { pos: e.inside }, Arrive::Goal, tick);
+        walk.waypoints = Some(e.way());
+        walk.more.kinds = vec![
+            path::MoveKind::JumpUp,
+            path::MoveKind::JumpUp,
+            path::MoveKind::JumpUp,
+            path::MoveKind::Walk,
+        ];
+        walk.route = Some(path::Status::Found);
+        self.walks += 1;
+        self.note(
+            tick,
+            format!("end portal: step in by the frame at {:?}", e.frame),
+            format!(
+                "from {feet:?} up {:?}, {:?}, over the frame into {:?}; step in {}",
+                e.low, e.high, e.inside, self.end_portal.entries
+            ),
+        );
+        Some(Task::Enter(Box::new(crate::Enter {
+            walk,
+            cell: e.inside,
+            inside_since: None,
+            from: Some(OVERWORLD.to_owned()),
+        })))
     }
 
     /// The room's spawner: dug with the pickaxe from a cell in reach not over lava, walked to on

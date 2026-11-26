@@ -18,7 +18,8 @@ A race from the frontier (`snapshot=frontier`, revive false) reaches stage `arme
 ## What is built (branch `issue-20-e2-portal`)
 - The kit's phases (up, wood, row, cook, eat, down), each noted at its end with the kit held, each bounded by `[end_kit] phase_ticks` and `phase_fails`.
 - The `end-kit` goal row (`config/goals.toml`): 3 stone pickaxes, an iron sword, iron boots.
-- The spawner and the eyes (`frame_has_eye`, `empty_frames`, `eye_stands`). The step in is not built: it waits for E1's stand cells.
+- The spawner and the eyes (`frame_has_eye`, `empty_frames`, `eye_stands`).
+- The step in (`entries`): E1's room has the frames at y 19 floating two over the floor (feet y 17), the lava pool at (1628, 17, -34) with air over it. Two blocks are laid outward of a side's frame on the floor (two high next to the frame, one beyond), then a forced walk up them, over the frame's top (19.81) and into the portal cell at y 19. Ledger: "end portal: the way in by the frame at", "step block at", "step in by the frame at", "given up".
 
 ## Walls
 (none yet)

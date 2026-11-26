@@ -13,6 +13,7 @@ sourceRefs:
   - "ruststeve:crates/plan/src/end_portal.rs#pub fn eye_stands(w: &World, room: &Room, frame: [i32; 3], from: Cell, reach: f64) -> Vec<Cell> {"
   - "ruststeve:config/goals.toml#id = \"end-kit\""
   - "ruststeve:config/goals.toml#way_up = [1608, 63, -32]"
+  - "ruststeve:crates/plan/src/end_portal.rs#pub fn entries(w: &World, room: &Room) -> Vec<Entry> {"
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[overland-and-stronghold]]"
@@ -40,7 +41,7 @@ Each phase is noted as it ends ("end kit: <phase> over, <next> next" with the ki
 ## The portal
 - `frame_has_eye` reads the frame's `eye` property from the block report (state 9469 to 9472 hold one).
 - The spawner is dug from a cell not over lava; an eye goes into each empty frame by `Act::UseOn` on its top face from a feet cell outside the 5x5 ring with no lava within one, the eye within `frame_reach` of the top (`eye_stands`). The state is read again after each.
-- The step in is not built yet (it waits for the room's measured stand cells).
+- **The step in** (`entries`, `Entry`): the frames float two over the floor, so the bot lays two steps outward of a side's frame (`high`, two blocks, its top level with the frame's foot; `low`, one block, beyond it), clicked onto the floor's top from a start beside `low`, then a forced walk (`Task::Enter`) up both, over the frame's top and down into the portal cell; done in the End. A way whose start has no walk, whose blocks will not go in, or whose steps in fail is given up for the next frame's.
 
 ## Limits
 One world: the stairs' top and the room are the frontier's.

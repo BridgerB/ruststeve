@@ -232,3 +232,75 @@ fn an_eye_goes_into_the_frame_in_reach() {
             .any(|e| e.what.starts_with("end portal: eye into the frame at"))
     );
 }
+
+/// The ways in: by each side's frames, two steps laid outward on the floor, a start beside the
+/// lower; the south middle frame's is (1628, 17, -37) and (1628, 17, -38).
+#[test]
+fn the_ways_in_are_laid_outside_the_frames() {
+    let w = load(&room_world(C, &[]), [1624.5, 17.0, -37.5]);
+    let room = the_room(&w);
+    let ways = end_portal::entries(&w, &room);
+    assert_eq!(ways.len(), 12, "{ways:#?}");
+    let south = ways
+        .iter()
+        .find(|e| e.frame == [1628, 19, -36])
+        .expect("the south middle frame's way");
+    assert_eq!(south.high, (1628, 17, -37));
+    assert_eq!(south.low, (1628, 17, -38));
+    assert_eq!(south.inside, (1628, 19, -35));
+    assert_eq!(south.start.2, -38);
+    assert_eq!(
+        south.way(),
+        vec![
+            (1628, 18, -38),
+            (1628, 19, -37),
+            (1628, 20, -36),
+            (1628, 19, -35)
+        ]
+    );
+}
+
+/// Every frame eyed and the portal lit: the way in is chosen, the bot walks to its start, and
+/// from there lays the first step.
+#[test]
+fn a_lit_portal_is_stepped_into_by_laid_steps() {
+    let eyed: Vec<Cell> = (-1..=1)
+        .flat_map(|k| {
+            [
+                (C.0 + k, C.1, C.2 - 2),
+                (C.0 + k, C.1, C.2 + 2),
+                (C.0 - 2, C.1, C.2 + k),
+                (C.0 + 2, C.1, C.2 + k),
+            ]
+        })
+        .collect();
+    let mut s = room_world(C, &eyed);
+    s.fill(
+        (C.0 - 1, C.0 + 1),
+        (C.1, C.1),
+        (C.2 - 1, C.2 + 1),
+        BlockKind::EndPortal,
+    );
+    // On the floor south-east of the ring.
+    let mut w = load(&s, [1631.5, 17.0, -38.5]);
+    give(&mut w, 0, ItemKind::Cobblestone, 64);
+    w.stage_reached = Some(world::stage::Stage::PortalRoom);
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.end_portal.begun = true;
+    p.end_portal.phase = KitPhase::Over;
+    p.end_portal.spawner_done = true;
+    let t = p.end_portal_task(&w, 1);
+    let what: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert!(what.iter().any(|n| n == "end portal: lit"), "{what:#?}");
+    assert!(
+        what.iter()
+            .any(|n| n.starts_with("end portal: the way in by the frame at")),
+        "{what:#?}"
+    );
+    let e = p.end_portal.entry.clone().expect("a way chosen");
+    if (1631, 17, -39) == e.start || w.body.map(|b| plan::path::feet_cell(b.pos)) == Some(e.start) {
+        assert!(matches!(t, Some(Task::Idle)), "{t:?}");
+    } else {
+        assert!(matches!(t, Some(Task::Explore(_))), "{t:?} {what:#?}");
+    }
+}

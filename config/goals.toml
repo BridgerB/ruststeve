@@ -1097,4 +1097,9 @@ frame_reach = 4.5
 eye_tries = 4
 eye_every = 20
 spawner_tries = 6
+# The way in: 4 walks to its start, 9 clicks for its 3 blocks (3 tries each), 3 steps in; then
+# the next frame's way.
+entry_walks = 4
+entry_clicks = 9
+entries = 3
 # <<< E2
