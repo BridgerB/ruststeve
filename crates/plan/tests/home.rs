@@ -815,10 +815,10 @@ fn resumed_mid_trip_with_the_eyes_made_skips_the_top_up_and_points_behind() {
         notes(&p)
     );
     assert!(p.ender.home.top_up_over && p.ender.home.kit_over);
-    // At (8, 64, 8) the nearest point is (8, 81), the last: every one before it is behind.
+    // At (8, 64, 8) the nearest point is (24, 1), the last but one: every one before it is behind.
     assert_eq!(
         p.ender.home.ways_passed.len(),
-        home::HomeRules::default().way.len() - 1,
+        home::HomeRules::default().way.len() - 2,
         "{:?}",
         p.ender.home.ways_passed
     );
