@@ -570,3 +570,36 @@ fn on_a_laid_block_within_reach_of_the_fountain_the_bunker_is_dug_there() {
         notes(&p)
     );
 }
+
+#[test]
+fn the_bunker_opened_the_bot_walks_up_its_stair_onto_the_ground() {
+    // Race 45890445738: both bots stood half on the stair's first step for 14,000 ticks.
+    let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+    for c in [
+        (12, 60, 0),
+        (12, 61, 0),
+        (12, 62, 0),
+        (11, 61, 0),
+        (11, 62, 0),
+        (11, 63, 0),
+        (10, 62, 0),
+        (10, 63, 0),
+        (9, 63, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.end.exit_walk = true;
+    p.step(&w);
+    assert!(
+        noted(&p, "end: up the bunker's stair to (8, 64, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.task.name(), "explore");
+}

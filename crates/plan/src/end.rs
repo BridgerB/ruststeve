@@ -521,6 +521,9 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// The bunker opened to leave: the walk up its stair is due.
+    #[serde(default)]
+    pub exit_walk: bool,
     /// Rounds of site walks begun again.
     #[serde(default)]
     pub site_rounds: u32,
@@ -820,6 +823,36 @@ impl Plan {
                     tick,
                 ));
                 return None;
+            }
+            // Up the stair onto the ground first (race 45890445738: both bots stood half on the
+            // stair's first step, the feet cell over the bunker's air, and every route from there
+            // was refused for 14,000 ticks).
+            if self.end.exit_walk {
+                self.end.exit_walk = false;
+                let out = (b.0 + 4 * door.0, b.1 + 4, b.2 + 4 * door.1);
+                let mut walk = Walk::new(
+                    out,
+                    Goal::Near {
+                        pos: out,
+                        range: 1.5,
+                    },
+                    Arrive::Goal,
+                    tick,
+                );
+                if found(&mut walk, w, tick) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("end: up the bunker's stair to {out:?}"),
+                        "onto the ground before the hand-off".to_owned(),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.note(
+                    tick,
+                    format!("end: no walk up the bunker's stair to {out:?}"),
+                    format!("from {feet:?}; the hand-off from here"),
+                );
             }
             self.end.handoffs += 1;
             self.end.hold_noted = false;
@@ -1365,11 +1398,14 @@ impl Plan {
                 format!("end: pillar up to the bridge's height at {feet:?}"),
                 format!("{} ops; floor {BRIDGE_FLOOR}", work.done),
             ),
-            WorkKind::Open => self.note(
-                tick,
-                "end: bunker opened".to_owned(),
-                format!("the roof and the stair out dug; {} ops", work.done),
-            ),
+            WorkKind::Open => {
+                self.end.exit_walk = true;
+                self.note(
+                    tick,
+                    "end: bunker opened".to_owned(),
+                    format!("the roof and the stair out dug; {} ops", work.done),
+                );
+            }
         }
     }
 
