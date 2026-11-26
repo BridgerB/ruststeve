@@ -730,6 +730,12 @@ impl Plan {
                     ),
                 );
             }
+            // >>> Q6 (issue 19): never a pocket on a ledge (race 45727347488 lane 0 fell off its
+            // own, shot): a dig down one first (`crate::portal_way`).
+            if let Some(t) = self.ledge_dig(w, tick) {
+                return Some(t);
+            }
+            // <<< Q6
             self.pocket_step(w, tick);
             self.retry_at = tick + 1;
             return Some(Task::Idle);

@@ -174,9 +174,9 @@ fn the_cut_ends_exactly_at_the_tunnel_cell() {
 }
 
 #[test]
-fn far_over_the_portal_the_last_leg_tunnels_not_heads() {
-    // On the hill's top, 15 up and 12 out (the real bot at y 97 was 60 up and 44 out): the
-    // heading stands down for the tunnel to the front's tunnel cell.
+fn in_the_open_over_the_portal_the_last_leg_digs_in_first() {
+    // On the hill's top in the open, 15 up and 12 out: the heading stands down and the bot digs
+    // straight down where it stands, out of the skeletons' line.
     let mut w = nether([11.5, 80.0, 20.5]);
     portal_and_hill(&mut w, 79);
     let mut p = homeward();
@@ -188,16 +188,91 @@ fn far_over_the_portal_the_last_leg_tunnels_not_heads() {
     let n = notes(&p);
     assert!(
         n.iter()
-            .any(|s| s.starts_with("portal way: the last leg to the front at (11, 65, 10)")),
+            .any(|s| s.starts_with("portal way: the last leg to (11, 65, 10)")),
         "{n:?}"
     );
     assert!(
         n.iter()
-            .any(|s| s.starts_with("portal way: tunnel to the front at (11, 65, 10)")),
+            .any(|s| s.starts_with("portal way: dig in at (11, 79, 20)")),
+        "{n:?}"
+    );
+    assert!(!n.iter().any(|s| s.starts_with("heading leg")), "{n:?}");
+    assert!(matches!(p.task, Task::Dig(_)), "{}", p.task.name());
+}
+
+#[test]
+fn under_cover_the_last_leg_tunnels_not_heads() {
+    // Inside the hill, 3 of rock over the head, 15 up and 10 out: the tunnel to the front.
+    let mut w = nether([11.5, 80.0, 18.5]);
+    portal_and_hill(&mut w, 84);
+    for y in 80..=81 {
+        set(&mut w, (11, y, 18), BlockKind::Air);
+    }
+    let mut p = homeward();
+    for t in 100..104 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let n = notes(&p);
+    assert!(
+        n.iter()
+            .any(|s| s.starts_with("portal way: tunnel to (11, 65, 10)")),
+        "{n:?}"
+    );
+    assert!(
+        !n.iter().any(|s| s.starts_with("portal way: dig in")),
         "{n:?}"
     );
     assert!(!n.iter().any(|s| s.starts_with("heading leg")), "{n:?}");
     assert!(matches!(p.task, Task::Stairs(_)), "{}", p.task.name());
+}
+
+#[test]
+fn a_covered_route_keeps_rock_over_the_head() {
+    // From the hill's top to the tunnel cell: with cover, no step of the route past its first
+    // four (the stairs down from the top) has open air in the two cells over the head.
+    let mut w = nether([11.5, 80.0, 22.5]);
+    portal_and_hill(&mut w, 79);
+    let none = std::collections::BTreeSet::new();
+    let r = plan::tunnel::route_keeping(
+        &w,
+        (11, 80, 22),
+        &[(11, 65, 10)],
+        &none,
+        false,
+        plan::tunnel::MAX_NODES,
+        plan::tunnel::Limits {
+            cover: true,
+            ..plan::tunnel::Limits::default()
+        },
+    )
+    .unwrap_or_else(|| panic!("no route"));
+    let open = |c: (i32, i32, i32)| c.1 + 2 >= 80 || c.1 + 3 >= 80;
+    let exposed = r.cells.iter().filter(|c| open(**c)).count();
+    assert!(exposed <= 4, "{exposed} exposed: {:?}", r.cells);
+}
+
+#[test]
+fn a_pocket_on_a_ledge_digs_down_first() {
+    // Health at the danger line, nothing to eat, on the edge of a drop: dig down one first.
+    let mut w = nether([11.5, 64.0, 11.5]);
+    w.player.health = Some(6.0);
+    for y in 60..=63 {
+        set(&mut w, (12, y, 11), BlockKind::Air);
+    }
+    let mut p = homeward();
+    for t in 100..104 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let n = notes(&p);
+    assert!(
+        n.iter()
+            .any(|s| s.starts_with("pocket on a ledge: dig down at (11, 63, 11)")),
+        "{n:?}"
+    );
 }
 
 #[test]

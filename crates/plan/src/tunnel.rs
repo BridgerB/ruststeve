@@ -371,7 +371,18 @@ pub struct Limits {
     // y 17 up to y 40 under a river and into its water (races 45703184922, 45706776687).
     pub max_y: Option<i32>,
     // <<< overland and stronghold
+    // >>> Q6 (issue 19): a step with open air in the two cells over the head pays `COVER_COST`:
+    // the way home's last leg keeps 2 of rock over it from the soul sand valley's skeletons
+    // (race 45727347488 lane 0: 8 arrows on the walk, the last off a ledge).
+    pub cover: bool,
+    // <<< Q6
 }
+
+// >>> Q6 (issue 19): a step under open air costs as much as a step by a cell found bad
+// (`SUSPECT_COST`): a stair down through rock (about 3 digs) is cheaper than two steps in the
+// open, so a route from the open goes under first and stays under.
+pub const COVER_COST: u32 = 8;
+// <<< Q6
 
 /// `route` within `limits`.
 pub fn route_keeping(
@@ -480,6 +491,14 @@ pub fn route_keeping(
                 if !limits.open_cheap && sight.open_sides(to) > 4 {
                     cost += OPEN_COST;
                 }
+                // >>> Q6
+                if limits.cover
+                    && (sight.at((to.0, to.1 + 2, to.2)) == OPEN
+                        || sight.at((to.0, to.1 + 3, to.2)) == OPEN)
+                {
+                    cost += COVER_COST;
+                }
+                // <<< Q6
                 let g2 = g + cost;
                 if best.get(&to).is_none_or(|(old, _)| g2 < *old) {
                     best.insert(to, (g2, c));
@@ -548,6 +567,11 @@ pub struct Travel {
     #[serde(default)]
     pub max_y: Option<i32>,
     // <<< overland and stronghold
+    // >>> Q6 (issue 19): the target whose routes keep cover (`Limits::cover`), set by
+    // `tunnel_toward_covered` only; any other target's route has none.
+    #[serde(default)]
+    pub cover: Option<Cell>,
+    // <<< Q6
 }
 
 /// What a stretch of route does, for the note: "stairs up", "level" or "stairs down".
@@ -669,6 +693,25 @@ impl Plan {
         self.tunnel(w, target, false, (what, why), tick)
     }
     // <<< overland and stronghold
+
+    // >>> Q6 (issue 19)
+    /// `tunnel_toward` keeping 2 of rock over the head where it can (`Limits::cover`).
+    pub fn tunnel_toward_covered(
+        &mut self,
+        w: &World,
+        target: Cell,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        self.travel.exploring = false;
+        self.travel.paced.clear();
+        self.travel.footprint = None;
+        self.travel.open_cheap = false;
+        self.travel.max_y = None;
+        self.travel.cover = Some(target);
+        self.tunnel(w, target, false, (what, why), tick)
+    }
+    // <<< Q6
 
     /// The travel tunnel to one cell (a spawner, a place): as `travel_tunnel`, but the route ends
     /// only within `REACH` of `target` itself, never at a brick near it. For any task that has a
@@ -811,6 +854,9 @@ impl Plan {
                     footprint: self.travel.footprint,
                     open_cheap: self.travel.open_cheap,
                     max_y: self.travel.max_y,
+                    // >>> Q6
+                    cover: self.travel.cover == Some(target),
+                    // <<< Q6
                 };
                 let Some(r) = route_keeping(w, feet, &goals, &blocked, lay, MAX_NODES, limits)
                 else {

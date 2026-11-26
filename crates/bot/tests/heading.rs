@@ -570,6 +570,7 @@ fn no_stair_down_is_cut_in_a_fortress_footprint() {
             footprint: Some((-40, -40, 60, 40)),
             open_cheap: false,
             max_y: None,
+            ..plan::tunnel::Limits::default()
         },
     );
     // The footprint padded by 4: no stair down ends inside it (the route may go round it).
@@ -602,6 +603,7 @@ fn a_heading_tunnel_walks_open_ground_and_cuts_nothing_there() {
             footprint: None,
             open_cheap: true,
             max_y: None,
+            ..plan::tunnel::Limits::default()
         },
     )
     .unwrap();
