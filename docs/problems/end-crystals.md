@@ -1,6 +1,6 @@
 # Issue 20f: the crystals by pillar and strike (agent E4)
 
-**Status: built and unit-tested on hand-built worlds (2026-11-26); not yet raced.** Code: `crates/plan/src/spikes.rs`; tests: `crates/plan/tests/spikes.rs`; brain: `brain/ruststeve/design/end-crystals.md`. Index: [`end.md`](end.md).
+**Status: racing from dev-end-island (2026-11-26).** Code: `crates/plan/src/spikes.rs`; tests: `crates/plan/tests/spikes.rs`; brain: `brain/ruststeve/design/end-crystals.md`. Index: [`end.md`](end.md).
 
 ## Needs
 From the island (stage `island`), every end crystal destroyed with the bot alive and on the ground: stage `crystals`. Nothing alive heals the dragon then (it heals 2 a second from the nearest crystal within 32, E1).
@@ -20,7 +20,7 @@ A case file with stage `crystals`: the ledger shows a `spikes: crystal gone N` f
 
 ## Rules
 - A climb (checked before each jump) needs the dragon more than 64 off or perched (phases 5 to 7), and health over danger + 6.
-- If the dragon strafes (1) or charges (8) within 40: inside a whole guard ring, hold crouched. On an unguarded pillar, dig down.
+- If the dragon strafes (1) or charges (8) within 64 (40 until wall 1): inside a whole guard ring, hold crouched. On an unguarded pillar, dig down.
 - Never a strike at or under danger health.
 - A pillar that rises no block in 1,200 ticks fails, the note says why, and that approach is refused for 1,200 ticks.
 
@@ -34,5 +34,75 @@ A case file with stage `crystals`: the ledger shows a `spikes: crystal gone N` f
 - The walk from a wide spike's pillar top onto the spike (1 to 2 cells at height 76 to 103) relies on the pathfinder. Untested real.
 - Endermen: every look goes through `Plan::step`'s `keep_look`; the strike looks at the crystal, everything else looks down.
 
+## First race: 45871173293 (dev-end-island, 2 lanes, cap 12,000, commit 415d61c, development only)
+Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
+- **Both bots broke 2 crystals each:** the caged (42, 0) and (12, 39).
+  - Caged: struck through the intact bars, as e03 says.
+  - Each strike lost 1.0 (`player_explosion`); the guard ring and wall took 6 to 8 blocks.
+  - Pillars rose 34 blocks in 150 ticks and 15 in 155.
+  - The dig down was a block every 40 ticks, back to the pillar's base, noted.
+- **Notes counted** (lane 0): `pillar up to` 2, `pillar down at` 1 (the second still digging), `strike` 2, `crystal gone` 2, about 18 `dig down from the dragon` while it strafed.
+
 ## Walls
-(none raced yet)
+### Wall 1: held on an unguarded pillar while the dragon strafed from 62 (fixed)
+- **What happened** (race 45871173293 lane 0, ticks 1,020 to 1,120): the climb paused at (42, 69, -3) with the dragon 62 off in phase 1 (strafe). The bot held there, then a fireball took 6 (`indirect_magic`) and it fell 8 blocks for 7.5 more (health 8.3). The bunker healed it, and it came back.
+- **The cause:** strafing within 40 was the only "threat". A strafing dragon fires from up to 64 (`DragonStrafePlayerPhase`), and a hold was never re-checked.
+- **The fix:**
+  - `THREAT_NEAR` is now `CLIMB_FAR` (64).
+  - A hold on an unguarded pillar ends the tick the dragon strafes or charges near ("spikes: hold ended by the dragon"), and the planner digs down.
+  - Unit test `a_hold_on_an_unguarded_pillar_ends_when_the_dragon_strafes_within_64`.
+- **The second guard** (Bridger: a taller spike's fall would kill): the water clutch, proven by parity e06 (a 21-block fall onto water poured while falling cost 0, with none 18).
+  - In the End, falling with more than 4 under the feet and a water bucket held: the bucket to hand, looking down, used every tick from 3 over the ground until it pours.
+  - Landed, the water is taken back.
+  - Notes "spikes: clutch begun / poured / missed / over"; unit test `a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back`. Not yet counted in a race.
+
+### Wall 2: struck off a tall pillar by the circling dragon, and the fall killed (both bots of race 45871173293)
+- **Lane 0:** crystal 3 broke at (33, 24), from the stand on the spike's top at y 94. 280 ticks into the dig down, at y 93, the dragon hit twice (`mob_attack`, 20 to 12.8), and the bot died of the fall (`death.fell.assist ender_dragon`, tick 6,000).
+- **Lane 1:** it held at (28, 85, 24), 9 under the goal, with the dragon 61 to 63 off in phase 0 or 1 (`no climb`). One blow took 10 and another 5, then it fell to its death (tick 6,260).
+- **Totals:** 5 crystals in 2 runs (3 and 2). Every strike cost 1.0. No death was a blast.
+- **The cause:** the dragon's holding pattern flies past the spikes' tops (its path nodes sit over them), so a bot high on a pillar is in its way whatever the phase. The blows themselves were survivable (10 and 5 from 20). The falls of 25 to 33 were not.
+- **The fixes:**
+  - The water clutch (7c08206) catches the fall.
+  - The way down no longer waits to collect each block's drop (the next commit): the drop falls into the cell the body falls into, so the bot spends less time up high.
+  - Both are to be counted in race 2.
+- **The structural answer** (the orchestrator, from e03's reach-not-sight; commit after 7f2d5fa):
+  - **The box:** the stand is closed in end stone, every side at the feet's and the eye's height plus a roof, the blast wall part of it. That is 9 blocks, 12 on a one-wide pillar with its ledges, and is noted "stand closed at … (N blocks)".
+  - **The climb:** it begins only with the dragon far or perched, and once begun it goes on to the box, with no waits half way ("climb on through").
+  - **Out of the box:** only with the dragon far or perched ("hold in the box").
+  - A blow inside the box is noted ("blow in the box").
+
+## Second race: 45875049490 (dev-end-island, 2 lanes, cap 12,000, commit 7c08206, development only)
+- **The clutch fired once and worked.** Lane 1 was struck off at y 77 and fell 19.6 (health 14). It poured 1.3 over the ground, landed at 16 health with no fall damage, and took the water back. Noted "clutch begun / poured / over".
+- **No crystal broke.** Both bots died of `indirectMagic` from the dragon, a breath cloud or fireball, on the ground:
+  - Lane 0 at tick 1,080 held still at its pillar's foot (42, 59, 3), "hold in the guard ring" while the dragon strafed 23 off, and took 6 three times.
+  - Lane 1 at tick 2,780 was on E3's walk back to the bunker, an enderman provoked as well.
+- The holds on a half-built pillar and the dig from the top ("dig down from the dragon" at y 82) are the b15c51b logic, which f8cc3da replaces (climb on through, the box, hold in the box).
+
+### Wall 3: a breath cloud at the feet, held in (fixed)
+- **The cause:** no step of the crystals looked at the dragon's breath, so a hold on the ground stood in a cloud.
+- **The fix:** 8311848 walked out of a breath at the feet. E5's global rule (`dragon::Plan::breath_step`, bb3b247), run ahead of every task in the End, now does the same for every agent, so the local version is gone. Nothing box- or pillar-specific was needed.
+- **Not mine:** lane 1's death on E3's bunker walk (`end: back to the bunker`, through the breath), reported to the orchestrator.
+
+## Third race: 45880674581 (dev-end-island, 2 lanes, be02c32, development only)
+- **No crystal broke; both bots died at their first stand** (the caged (42, 0), y 82).
+- Each built the walls (the bars), the three other sides at the feet's and eye's height, and the ledges: 9 blocks. Then "nothing holds" the roof, 617 times. The roof has no face of its own to go against.
+- **While there, the dragon struck through the open-topped box:**
+  - Lane 1: wings 5 and 5, then the head 10.
+  - Lane 0: two wing hits, then two breaths of 6.
+- The box held both bodies on the pillar: no fall.
+- **Fixed in 6805ab7:** a block over one side goes first, then the roof. E6's sim (`end_loop`) failed the same way and is the check.
+
+### Wall 4: blows land inside the box
+- **What we know:** the dragon's wings and head hurt through the walls (the jar's part boxes; no line-of-sight test), so the box keeps the body on the pillar but not out of harm.
+- **The open question:** whether a roofed box keeps the breath off. A cloud's box is about 0.5 high, so one on the roof should miss a body 1.8 high under it, but that is not yet measured.
+- **The rule now:**
+  - "hold in the box" while the dragon is near and not perched;
+  - a blow inside the box ("blow in the box") within 200 ticks ends that hold, and the bot goes down at once, the clutch under it.
+- **Race 4 counts both.**
+
+### Wall 5: the box stranded a wide spike's bot (E6's sim, CI runs 45880795371 and 45881998970; fixed)
+- **What happened:**
+  - It pillared to (38, 76, 0), walked onto the spike to its stand at (39, 76, 0) and walled (40, 76..77, 0).
+  - It then put a box side at (38, 76, 0), the cell over its own pillar's top.
+  - From then on its way back read "stranded on a spike's top", with no strike to the cap.
+- **The fix:** at the stand, the blast's two blocks and then the strike at once: no other block first. A box's blows were not kept out anyway (wall 4), and each block was more time up high. The box (`box_gap`) is kept as a function only, for a later hold up high. The note is "stand walled at".

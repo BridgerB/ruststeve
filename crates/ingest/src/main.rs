@@ -405,6 +405,7 @@ mod tests {
                     aim: None,
                     pearls: None,
                     eyes: None,
+                    end: None,
                 }
             })
             .collect();

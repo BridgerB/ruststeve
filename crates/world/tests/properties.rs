@@ -91,12 +91,26 @@ fn events(fixture: Arc<Column>) -> impl Strategy<Value = Event> {
         }),
         proptest::collection::vec(id.clone(), 0..4)
             .prop_map(|ids| Event::Packet(S2c::RemoveEntities { ids })),
-        (id.clone(), -8.0f64..8.0, -8.0f64..8.0, -8.0f64..8.0)
-            .prop_map(|(id, dx, dy, dz)| Event::Packet(S2c::MoveEntity { id, dx, dy, dz })),
+        (id.clone(), -8.0f64..8.0, -8.0f64..8.0, -8.0f64..8.0).prop_map(|(id, dx, dy, dz)| {
+            Event::Packet(S2c::MoveEntity {
+                id,
+                dx,
+                dy,
+                dz,
+                yaw: Some(dx as f32),
+            })
+        }),
         (id.clone(), coord(), coord(), coord())
             .prop_map(|(id, x, y, z)| Event::Packet(S2c::EntityPositionSync { id, x, y, z })),
         (id.clone(), coord(), coord(), coord(), 0u32..32).prop_map(|(id, x, y, z, flags)| {
-            Event::Packet(S2c::TeleportEntity { id, x, y, z, flags })
+            Event::Packet(S2c::TeleportEntity {
+                id,
+                x,
+                y,
+                z,
+                flags,
+                yaw: 0.0,
+            })
         }),
         (id.clone(), any::<f32>()).prop_map(|(id, h)| Event::Packet(S2c::SetEntityData {
             id,

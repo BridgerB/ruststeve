@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "portal_room"
-tag = "race-45800967549"
-asset = "snapshot-portal_room-45800967549-race-45800967549-lane-4.tar.zst"
-commit = "1e39129851fec99613f692f0b4839dd0292c2578"
-how = "rs-l04-b00 of race 45800967549 (issue 19, 2026-11-26), resumed from the real overworld frontier (race 45783611857 lane 0, standing in its own overworld portal at (125, -52, -108) with no pickaxe): out of the portal, a hand-dug shaft to the surface, wood and pickaxes, food, eye throws and the fix, about 1,500 blocks east overland with night huts, then stairs and a tunnel down to the stronghold's portal room, standing on its floor at (1624.4, 17.0, -35.7), about 4 blocks from the frame ring's centre (1628, 19, -34), at server tick 55,560. Holds 13 eyes of ender, iron armour, a shield, food. Lane 3 of the same race passed the stronghold stage first. Real (no development mark, no kind)."
+stage = "end"
+tag = "race-45887747475"
+asset = "snapshot-end-45887747475-race-45887747475-lane-1.tar.zst"
+commit = "808d77b346ab098d79be218b3f8cb973781d2f2d"
+how = "rs-l01-b00 of race 45887747475 (issue 20, 2026-11-26), resumed from the real armed frontier (race 45882199358 lane 0, on the surface over the stronghold with its kit): down its own way to the portal room, the silverfish spawner broken, 11 eyes into the 11 empty frames, the portal lit and stepped into, arriving in the End at (100.5, 49, 0.5) at server tick 2,600. Holds full iron armour, an iron sword, a shield, 3 stone pickaxes, 23 cooked food, 2 water buckets, 2 eyes. Real (no development mark, no kind)."

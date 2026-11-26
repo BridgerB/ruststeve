@@ -1005,9 +1005,9 @@ impl Plan {
         self.spikes_task(w, tick)
     }
 
-    /// The dragon's hand-off: E5's `Plan::dragon_task` once it lands.
-    fn end_dragon(&mut self, _w: &World, _tick: u64) -> Option<Task> {
-        None
+    /// The dragon's hand-off: E5's `Plan::dragon_task` (issue 20g), the fight and the exit portal.
+    fn end_dragon(&mut self, w: &World, tick: u64) -> Option<Task> {
+        self.dragon_task(w, tick)
     }
 
     /// The feet-level or head-level cell ahead along the bridge is end stone: a cliff.

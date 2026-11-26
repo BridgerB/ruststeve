@@ -33,8 +33,8 @@ fn the_small_end_holds_the_platform_the_gap_the_island_and_two_spikes() {
     }
     assert_eq!(kind(&sim, 78, 60, 0), Some(BlockKind::EndStone));
     // The fountain's pillar and floor.
-    assert_eq!(kind(&sim, 0, 65, 0), Some(BlockKind::Bedrock));
-    assert_eq!(kind(&sim, 2, 61, 0), Some(BlockKind::Bedrock));
+    assert_eq!(kind(&sim, 0, 64, 0), Some(BlockKind::Bedrock));
+    assert_eq!(kind(&sim, 2, 60, 0), Some(BlockKind::Bedrock));
     // The open spike: obsidian under its height within the radius, bedrock on top.
     let open = layout.spikes[0];
     let [cx, cz] = open.centre;
