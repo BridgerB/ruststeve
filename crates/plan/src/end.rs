@@ -96,6 +96,8 @@ pub const WORK_STALL: u64 = 900;
 pub const CLIFF_RUNS: u32 = 8;
 /// Stair runs up out of the stock tunnels at most, when no walk leads back to the bunker.
 pub const OUT_RUNS: u32 = 8;
+/// Rounds of site walks begun again from out of the island's reach.
+pub const SITE_ROUNDS: u32 = 3;
 /// Walks to the bunker's site at most.
 pub const SITE_WALKS: u32 = 10;
 /// Retreat to the bunker under this health (the danger line 8 plus 6, the plan's climb line).
@@ -519,6 +521,9 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// Rounds of site walks begun again.
+    #[serde(default)]
+    pub site_rounds: u32,
     /// Bunker shafts begun, cells over the head laid in them, dragon waits before one.
     #[serde(default)]
     pub shafts: u32,
@@ -1055,7 +1060,11 @@ impl Plan {
         let body = w.body?;
         let d = flat_to_fountain(body.pos);
         let floor = kind(w, (feet.0, feet.1 - 1, feet.2));
-        let here = floor == Some(BlockKind::EndStone)
+        // On end stone, or on a block the bot laid over it (a pocket's, a guard's: race 45888713362
+        // lane 0 stood on cobblestone 25 from the fountain through ten site walks).
+        let ground = floor == Some(BlockKind::EndStone)
+            || floor.is_some_and(|k| crate::spikes::PLACED.contains(&k));
+        let here = ground
             && body.on_ground
             && d >= BUNKER_MIN
             && (d <= BUNKER_FROM_FOUNTAIN + SITE_RANGE + 1.0
@@ -1088,6 +1097,11 @@ impl Plan {
                 format!("{SITE_WALKS} walks; {d:.0} from the fountain, floor {floor:?}"),
             );
             self.retry_at = tick + crate::RETRY_TICKS * 10;
+            // Out of reach of the fountain: the walks again, a round at a time.
+            if d > ISLAND_REACH && self.end.site_rounds < SITE_ROUNDS {
+                self.end.site_rounds += 1;
+                self.end.site_walks = 0;
+            }
             return None;
         }
         let turn = SITE_TURNS[(self.end.site_walks as usize) % SITE_TURNS.len()];

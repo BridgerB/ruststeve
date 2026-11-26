@@ -554,3 +554,19 @@ fn deep_in_the_tunnels_with_no_way_back_the_bot_cuts_stairs_up_to_hand_over() {
     );
     assert_eq!(p.task.name(), "stairs", "{:?}", notes(&p));
 }
+
+#[test]
+fn on_a_laid_block_within_reach_of_the_fountain_the_bunker_is_dug_there() {
+    // Race 45888713362 lane 0: 25 from the fountain on a cobblestone block, ten site walks done.
+    let mut w = world(4, 0..=7, [23.5, 64.0, -7.5]);
+    set(&mut w, (23, 63, -8), BlockKind::Cobblestone);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.site_walks = plan::end::SITE_WALKS;
+    p.step(&w);
+    assert!(
+        noted(&p, "end: dig the bunker at (23, 64, -8)"),
+        "{:?}",
+        notes(&p)
+    );
+}
