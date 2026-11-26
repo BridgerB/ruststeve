@@ -310,6 +310,9 @@ pub struct HomeState {
     /// Walks out of the portal's own cell on arrival.
     #[serde(default)]
     pub portal_exits: u32,
+    /// Wooden pickaxe runs on the overworld's surface.
+    #[serde(default)]
+    pub surface_pick_runs: u32,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -2332,6 +2335,9 @@ impl Plan {
     /// Pickaxe uses the trip wants held: `WOOD_SHORT_USES`, or within `WOOD_LEG_FROM` of the portal
     /// the last leg's own budget (`WOOD_USES_A_BLOCK` a block to go on the plane).
     fn wood_wanted_uses(&self, w: &World) -> i32 {
+        if dimension(w) != Some(NETHER) {
+            return WOOD_SHORT_USES;
+        }
         let Some(body) = w.body else {
             return WOOD_SHORT_USES;
         };
@@ -2993,6 +2999,52 @@ impl Plan {
         }
     }
 
+    /// On the overworld's surface with fewer than `WOOD_SHORT_USES` pickaxe uses: logs by hand
+    /// (`home_wood`), then wooden pickaxes from them at the carried table (`TRIP_WOOD_STEPS`, a
+    /// far table refused). Noted; `None` with the uses held or nothing to make them from.
+    fn home_surface_tools(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let uses = endermen::pickaxe_uses_left(w);
+        let picking = picking_now(self);
+        if uses >= WOOD_SHORT_USES && !picking {
+            return None;
+        }
+        if !picking {
+            if let Some(t) = self.home_wood(w, tick) {
+                return Some(t);
+            }
+            let wood = base::logs_held(w) + base::planks_held(w);
+            if wood < 2 {
+                return None;
+            }
+            self.ender.home.surface_pick_runs += 1;
+            self.base = base::BaseState {
+                steps: TRIP_WOOD_STEPS.to_vec(),
+                ..base::BaseState::default()
+            };
+            self.note(
+                tick,
+                format!(
+                    "home: pickaxes on the surface ({})",
+                    self.ender.home.surface_pick_runs
+                ),
+                format!(
+                    "pickaxe uses {uses} under {WOOD_SHORT_USES}; {} logs, {} planks, {} sticks, {} tables",
+                    base::logs_held(w),
+                    base::planks_held(w),
+                    craft::count(w, ItemKind::Stick),
+                    craft::count(w, ItemKind::CraftingTable)
+                ),
+            );
+        }
+        if let Some(t) = self.arrival_table(w, tick, picking_now(self)) {
+            return Some(t);
+        }
+        if picking_now(self) {
+            return self.base_task(w, tick);
+        }
+        None
+    }
+
     /// Out of the portal's own cell: the first cell beside the feet (south, north, east, west)
     /// that is open with its head cell, on a full floor, and not a portal block, walked to. Noted
     /// and counted; `None` with none.
@@ -3009,6 +3061,16 @@ impl Plan {
                     && cells.at(*c) == path::Class::Clear
                     && cells.at((c.0, c.1 + 1, c.2)) == path::Class::Clear
                     && cells.at((c.0, c.1 - 1, c.2)) == path::Class::Solid
+            })
+            // Else the south face (Q1's region read: the overworld portal's way out, z -107), open
+            // at the feet and the head and no lava under it.
+            .or_else(|| {
+                let c = (feet.0, feet.1, feet.2 + 1);
+                (!portal(c)
+                    && cells.at(c) == path::Class::Clear
+                    && cells.at((c.0, c.1 + 1, c.2)) == path::Class::Clear
+                    && cells.at((c.0, c.1 - 1, c.2)) != path::Class::Lava)
+                    .then_some(c)
             })?;
         let mut walk = Walk::new(
             out,
@@ -3019,9 +3081,22 @@ impl Plan {
             Arrive::Goal,
             tick,
         );
-        if !walk.route_now(w, tick) {
+        if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
             self.expanded += walk.expanded;
-            return None;
+            // A plain step forward: the route is the one cell (F1, race 45791152151: six bots in
+            // the portal, the step-out found no route from a portal block).
+            walk = Walk::new(
+                out,
+                Goal::Near {
+                    pos: out,
+                    range: 0.5,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            walk.waypoints = Some(vec![out]);
+            walk.more.kinds = vec![path::MoveKind::Walk];
+            walk.route = Some(path::Status::Found);
         }
         self.walks += 1;
         self.ender.home.portal_exits += 1;
@@ -3101,6 +3176,13 @@ impl Plan {
                 return self.home_climb(w, tick, &r);
             }
         }
+        // >>> Q8: tools before the hand-over (the frontier bot reaches the surface with 0 pickaxe uses;
+        // Q4's dig needs a pickaxe and its stone ones need cobblestone, which a hand dig never drops):
+        // wood by hand from the trees seen, then wooden pickaxes at the carried table.
+        if let Some(t) = self.home_surface_tools(w, tick) {
+            return Some(t);
+        }
+        // <<< Q8
         // >>> Q7: on the surface by day, food 6 or more: over, the eyes take over (the done
         // branch above: Q4's exit with eyes held).
         match self.arrival_hand_over(w, tick) {
