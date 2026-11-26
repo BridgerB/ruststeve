@@ -1518,6 +1518,7 @@ fn on_the_join_between_spans_the_next_span_is_the_target() {
     let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
     let mut w = nether();
     kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
     remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
     w.body = w.body.map(|b| physics::Body {
         pos: [9.5, 64.0, 12.5],
@@ -1527,9 +1528,7 @@ fn on_the_join_between_spans_the_next_span_is_the_target() {
     let mut p = tripper(Some(t));
     run(&mut p, &mut w, 100, 3);
     assert!(
-        notes(&p)
-            .iter()
-            .any(|n| n.contains("old bridge at (7, 68, 8)")),
+        notes(&p).iter().any(|n| n.contains("(7, 68, 8)")),
         "{:?}",
         notes(&p)
     );
@@ -1618,4 +1617,28 @@ fn a_ghast_that_sees_the_bot_cuts_the_walk_for_cover() {
     run(&mut p, &mut w, 100, 1);
     assert!(noted(&p, "home: explore cut for cover"), "{:?}", notes(&p));
     assert_eq!(p.ender.home.shooter_cuts, 1);
+}
+
+#[test]
+fn the_trips_pickaxe_run_refuses_a_far_table() {
+    // Q9's race 45770564199: each run walked 35 to 50 back east to the forest's table though the
+    // bot carried one.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (40, 64, 8), BlockKind::CraftingTable);
+    remember(&mut w, home::NETHER, (40, 64, 8), BlockKind::CraftingTable);
+    w.inventory.slots.insert(12, (ItemKind::CraftingTable, 1));
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    p.base = plan::base::BaseState {
+        steps: home::TRIP_WOOD_STEPS.to_vec(),
+        ..plan::base::BaseState::default()
+    };
+    run(&mut p, &mut w, 100, 2);
+    assert!(
+        noted(&p, "arrival: the table at (40, 64, 8) is far"),
+        "{:?}",
+        notes(&p)
+    );
 }

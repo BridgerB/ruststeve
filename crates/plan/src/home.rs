@@ -2348,6 +2348,13 @@ impl Plan {
                 ),
             );
         }
+        // >>> Q8: Q7's table rule on the trip: a table past `arrival::TABLE_REACH` is refused for the
+        // run, so the carried one is placed where the bot stands, and dug back after (Q9's race
+        // 45770564199: each run walked 35 to 50 back east to the forest's table at (494, 41, -7)).
+        if let Some(t) = self.arrival_table(w, tick, picking_now(self)) {
+            return Some(t);
+        }
+        // <<< Q8
         if picking_now(self)
             && let Some(t) = self.base_task(w, tick)
         {
