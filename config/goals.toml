@@ -1082,20 +1082,32 @@ way = [[1620, 17, -36], [1609, 23, -38], [1602, 27, -38], [1596, 33, -38], [1590
 # fight with the spawner's silverfish cutting it; the frontier bot fought 10 in its first 800 ticks).
 up_walks = 3
 # Logs before the row: a table 4 planks, 4 more sticks 2, fuel for 7 raw iron (1,400 ticks, 5
-# planks) and 30 meat (6,000 ticks, 20 planks) at a plank's 300: 31 planks, 8 logs; 10 with margin.
-logs = 10
+# planks) and 30 meat (6,000 ticks, 20 planks) at a plank's 300: 31 planks, 8 logs; the way home's
+# cook counts shields' planks too (1,800 ticks), and race 45877404722 had 7,600 ticks of fuel
+# after the row from 10 logs and walked for more: 14.
+logs = 14
 # Trees walked to within 48 flat (the forest base's stem_radius), 24 walks at most; 8 walks to look.
 log_reach = 48.0
+# Logs on record more than 16 over or under the feet are not trees to walk to (race 45875661476:
+# memory held logs at y -33 to -44 under the plain by the stairs' top).
+log_rise = 16
 log_walks = 24
-look_walks = 8
+# Legs retargeted at most 24 times. With no log on record, the overland's legs (seen ground,
+# rivers bridged) go to these points (x, z) in turn, reached within 12: first west along the
+# bot's own way in (race 45800967549 lane 4 walked from (1491, 70, -50) to (1613, 64, -32) over
+# plains), then 100 north, south and east of the stairs' top, then further west; race
+# 45873894148 saw no log within 48 of the top (plains and a river).
+look_walks = 24
+wood_points = [[1530, -45], [1610, -130], [1610, 60], [1700, -35], [1420, -70]]
+point_reach = 12.0
 stone_pickaxes = 3
 # Eaten to 20 before the End: no food grows there (the plan, risk 8).
 fed = 20
 eat_tasks = 12
-# Each phase ends within 6,000 ticks (the plan's armed budget is 6,000 to 12,000 for all) or 8
-# failed tasks.
+# Each phase ends within 6,000 ticks (the plan's armed budget is 6,000 to 12,000 for all) or 16
+# failed tasks (race 45873894148: eight NoPath walks for trees ended the wood in 860 ticks).
 phase_ticks = 6000
-phase_fails = 8
+phase_fails = 16
 down_walks = 8
 # The server takes a UseOn within the block interaction range, 4.5 from the eye (the plan, 20d.2).
 frame_reach = 4.5

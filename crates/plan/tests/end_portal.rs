@@ -255,7 +255,8 @@ fn the_ways_in_are_laid_outside_the_frames() {
             (1628, 18, -38),
             (1628, 19, -37),
             (1628, 20, -36),
-            (1628, 19, -35)
+            (1628, 19, -35),
+            (1628, 19, -34)
         ]
     );
 }
@@ -303,4 +304,32 @@ fn a_lit_portal_is_stepped_into_by_laid_steps() {
     } else {
         assert!(matches!(t, Some(Task::Explore(_))), "{t:?} {what:#?}");
     }
+}
+
+/// The climb back up a downward leg: level first, then a step up a block (the bot's leg 7 ran
+/// down from (1602, 27, -38) 4 stairs east, then 3 level steps to (1609, 23, -38)).
+#[test]
+fn the_climb_route_reverses_a_downward_leg() {
+    let r = end_portal::climb_route((1609, 23, -38), (1602, 27, -38));
+    assert_eq!(
+        r,
+        vec![
+            (1609, 23, -38),
+            (1608, 23, -38),
+            (1607, 23, -38),
+            (1606, 23, -38),
+            (1605, 24, -38),
+            (1604, 25, -38),
+            (1603, 26, -38),
+            (1602, 27, -38)
+        ]
+    );
+    // Off the line by one: across first.
+    let r = end_portal::climb_route((1600, 24, -37), (1596, 27, -38));
+    assert_eq!(r[1], (1600, 24, -38));
+    assert_eq!(*r.last().unwrap(), (1596, 27, -38));
+    assert!(r.windows(2).all(|p| {
+        let (a, b) = (p[0], p[1]);
+        (a.0 - b.0).abs() + (a.2 - b.2).abs() == 1 && (0..=1).contains(&(b.1 - a.1))
+    }));
 }
