@@ -783,6 +783,36 @@ impl Plan {
         if !self.end.stock_over {
             return self.stock_step(w, b, door, feet, inside, sealed, tick);
         }
+        // The bunker opened to hand over: up its stair before any hand-off is asked (the
+        // crystals' task, once asked, holds the bot in its own wait).
+        if self.end.exit_walk {
+            self.end.exit_walk = false;
+            // Up the stair a step at a time, steered (race 45898928805 lane 0: from (14, 59, 0),
+            // half on the first step after the open's digs walked to their drops, no route
+            // was found up the stair to the ground, and the hand-off sat 14,000 ticks).
+            let steps = [door_cells[0], door_cells[3], door_cells[5]];
+            self.note(
+                tick,
+                format!("end: up the bunker's stair by {steps:?}"),
+                format!("from {feet:?}; onto the ground before the hand-off"),
+            );
+            self.end.exit_up = true;
+            // Each step's cells dug again first if shut (the bot's own blocks: a pocket laid in
+            // the stair), then the step.
+            let ops = steps
+                .into_iter()
+                .flat_map(|c| {
+                    [
+                        Op::Dig((c.0 - door.0, c.1 + 1, c.2 - door.1)),
+                        Op::Dig((c.0, c.1 + 1, c.2)),
+                        Op::Dig(c),
+                        Op::Step(c),
+                    ]
+                })
+                .collect();
+            self.end.work = Some(Work::new(WorkKind::Exit, ops, tick));
+            return None;
+        }
         // 5. The hand-offs: the crystals while one is alive, then the dragon.
         let next = if crystals_alive(w) > 0 {
             self.end_spikes(w, tick)
@@ -841,34 +871,6 @@ impl Plan {
             // Up the stair onto the ground first (race 45890445738: both bots stood half on the
             // stair's first step, the feet cell over the bunker's air, and every route from there
             // was refused for 14,000 ticks).
-            if self.end.exit_walk {
-                self.end.exit_walk = false;
-                // Up the stair a step at a time, steered (race 45898928805 lane 0: from (14, 59, 0),
-                // half on the first step after the open's digs walked to their drops, no route
-                // was found up the stair to the ground, and the hand-off sat 14,000 ticks).
-                let steps = [door_cells[0], door_cells[3], door_cells[5]];
-                self.note(
-                    tick,
-                    format!("end: up the bunker's stair by {steps:?}"),
-                    format!("from {feet:?}; onto the ground before the hand-off"),
-                );
-                self.end.exit_up = true;
-                // Each step's cells dug again first if shut (the bot's own blocks: a pocket laid in
-                // the stair), then the step.
-                let ops = steps
-                    .into_iter()
-                    .flat_map(|c| {
-                        [
-                            Op::Dig((c.0 - door.0, c.1 + 1, c.2 - door.1)),
-                            Op::Dig((c.0, c.1 + 1, c.2)),
-                            Op::Dig(c),
-                            Op::Step(c),
-                        ]
-                    })
-                    .collect();
-                self.end.work = Some(Work::new(WorkKind::Exit, ops, tick));
-                return None;
-            }
             // At the stair's top with no sky over it (the ground higher there): stairs up on.
             if self.end.exit_up && !world::stage::open_sky(w) && self.end.out_runs < OUT_RUNS {
                 self.end.out_runs += 1;
