@@ -106,3 +106,21 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - It then put a box side at (38, 76, 0), the cell over its own pillar's top.
   - From then on its way back read "stranded on a spike's top", with no strike to the cap.
 - **The fix:** at the stand, the blast's two blocks and then the strike at once: no other block first. A box's blows were not kept out anyway (wall 4), and each block was more time up high. The box (`box_gap`) is kept as a function only, for a later hold up high. The note is "stand walled at".
+
+## Fourth race: 45885217441 (dev-end-island, 2 lanes, 5c16f26, development only)
+- **5 crystals struck in 2 runs (3 and 2).** "stand walled" ×5, each strike 1.0.
+- **Lane 0 lived to the cap** with 3 crystals.
+- **Lane 1 died at tick 5,680**, struck by the charging dragon (10, then 5) while digging down 2 over the ground at (12, 63, 42). The blow flung it to (-92, 101, 56), 48 over the ground.
+  - The clutch began there ("clutch begun", water bucket in hand) but never poured, and the fall killed it.
+  - A fall that fast crosses the pour's reach (the eye within 4.5 of the ground) in about one tick, so a miss is possible; no "clutch missed" was written because the landing killed it first. Watch for it.
+
+### Wall 6: the way down left the body beside its shaft (fixed)
+- **What happened** (lane 0, tick 4,060):
+  - It walked from the wide spike's stand back to its pillar's top (28, 94, 24), off the column's centre, and dug (28, 93, 24).
+  - The body stayed up, held by the spike's edge beside the hole, neither on the pillar nor on the spike.
+  - It looked for the next crystal from up there ("no way to", "no approach"). Then, on the spike's top, it was "stranded ... no pillar down" from 5,680 to the cap: the filter wanted the pillar's top whole.
+- **The fix:**
+  - The dig down centres over the column first ("centre over the pillar").
+  - A body over a recorded pillar's dug shaft steps into it ("step into the shaft").
+  - From a spike's top, a dug shaft is walked to beside it and stepped into.
+  - Unit test `the_way_down_centres_first_and_steps_into_a_dug_shaft`.

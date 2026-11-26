@@ -128,6 +128,10 @@ pub const SWING_EVERY: u64 = 10;
 pub const STRIKE_TICKS: u64 = 200;
 /// Ticks an approach that failed (a walk with no route, a stalled pillar) is refused.
 pub const REFUSE_TICKS: u64 = 1200;
+/// How near a cell's centre (blocks, each axis) a step ends, and the most it takes. A body 0.6
+/// wide within 0.2 of the centre stands on its cell alone.
+pub const STEP_NEAR: f64 = 0.2;
+pub const STEP_TICKS: u64 = 60;
 /// Ticks after a blow inside the box in which the bot leaves it for the way down.
 pub const BOX_BLOW_TICKS: u64 = 200;
 /// Ticks a repeated note waits before it is written again.
@@ -577,6 +581,8 @@ pub enum Next {
     Bar(Cell),
     /// Dig a side of the box open, the way back to the pillar's top from a wide spike's stand.
     Open(Cell),
+    /// Move to this cell's centre (sneaking, or not: into a pillar's dug shaft).
+    Step { to: Cell, sneak: bool },
     /// Attack this crystal.
     Strike(i32),
     /// Dig this cell, the one under the feet: the pillar back down.
@@ -679,6 +685,12 @@ pub enum Doing {
     Climb(Climb),
     Build(Build),
     Strike(Strike),
+    /// To a cell's centre, until a tick.
+    Step {
+        to: Cell,
+        sneak: bool,
+        until: u64,
+    },
 }
 
 /// A pillar's climb.
@@ -758,15 +770,29 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             };
         }
     }
+    // Over a pillar's dug shaft, held up by the cell beside (the body off the column's centre):
+    // into the shaft (race 45885217441 lane 0: the dig under (28, 93, 24) left the body on the
+    // spike's edge, and it waited "no approach" up there for 1,600 ticks).
+    if st
+        .pillars
+        .iter()
+        .any(|r| (r.x, r.z) == (feet.0, feet.2) && feet.1 > r.base)
+        && open(kind(w, (feet.0, feet.1 - 1, feet.2)))
+    {
+        return Next::Step {
+            to: feet,
+            sneak: false,
+        };
+    }
     if on_spike(w, feet) {
-        // Back to a pillar's top at the feet's height, the way down.
+        // Back to a pillar's top at the feet's height, or into its shaft once dug: the way down.
         return st
             .pillars
             .iter()
             .filter(|r| {
                 (r.x - feet.0).abs() <= SPIKE_SEARCH
                     && (r.z - feet.2).abs() <= SPIKE_SEARCH
-                    && full(kind(w, (r.x, feet.1 - 1, r.z)))
+                    && feet.1 > r.base
                     && open(kind(w, (r.x, feet.1, r.z)))
                     && open(kind(w, (r.x, feet.1 + 1, r.z)))
             })
@@ -774,15 +800,27 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             .map_or_else(
                 || Next::Wait("stranded on a spike's top with no pillar down".to_owned()),
                 |r| {
-                    // The box's side toward the pillar opened first (its feet and eye cells).
                     let (dx, dz) = ((r.x - feet.0).signum(), (r.z - feet.2).signum());
+                    // The box's side toward the pillar opened first (its feet and eye cells).
                     let way = (0..=1)
                         .map(|dy| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
                         .find(|c| !open(kind(w, *c)) && kind(w, *c) != Some(BlockKind::Obsidian));
+                    let top = (r.x, feet.1, r.z);
+                    let next_to = (r.x - feet.0).abs() + (r.z - feet.2).abs() <= 1;
+                    let shaft = !full(kind(w, (r.x, feet.1 - 1, r.z)));
                     match way {
                         Some(c) => Next::Open(c),
+                        // A dug shaft: walk to beside it on the spike, then step in.
+                        None if shaft && next_to => Next::Step {
+                            to: top,
+                            sneak: false,
+                        },
+                        None if shaft => Next::Walk {
+                            to: (r.x - dx, feet.1, r.z - dz),
+                            approach: None,
+                        },
                         None => Next::Walk {
-                            to: (r.x, feet.1, r.z),
+                            to: top,
                             approach: None,
                         },
                     }
@@ -1136,12 +1174,45 @@ impl Plan {
                 Some(Task::Idle)
             }
             Next::DigDown(c) => {
+                // Centred over the column first: a body over its edge stays on the cell beside
+                // when the block goes (race 45885217441 lane 0).
+                let off = (f64::from(feet.0) + 0.5 - body.pos[0])
+                    .abs()
+                    .max((f64::from(feet.2) + 0.5 - body.pos[2]).abs());
+                if off > STEP_NEAR {
+                    self.spikes_note(
+                        tick,
+                        format!("spikes: centre over the pillar at {feet:?}"),
+                        format!("{off:.2} off its centre before the dig down"),
+                    );
+                    self.spikes.doing = Some(Doing::Step {
+                        to: feet,
+                        sneak: true,
+                        until: tick + STEP_TICKS,
+                    });
+                    self.retry_at = tick + 1;
+                    return Some(Task::Idle);
+                }
                 self.spikes_note(
                     tick,
                     format!("spikes: dig down at {c:?}"),
                     format!("on a pillar at {feet:?}"),
                 );
                 Some(Task::Dig(dig_down(w, c, tick)))
+            }
+            Next::Step { to, sneak } => {
+                self.spikes_note(
+                    tick,
+                    format!("spikes: step into the shaft at {to:?}"),
+                    format!("from {feet:?}, sneaking {sneak}"),
+                );
+                self.spikes.doing = Some(Doing::Step {
+                    to,
+                    sneak,
+                    until: tick + STEP_TICKS,
+                });
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
             }
         }
     }
@@ -1374,6 +1445,21 @@ impl Plan {
                 })
             }
             Doing::Climb(c) => self.spikes_climb(w, tick, &body, c, down),
+            Doing::Step { to, sneak, until } => {
+                let (dx, dz) = (
+                    f64::from(to.0) + 0.5 - body.pos[0],
+                    f64::from(to.2) + 0.5 - body.pos[2],
+                );
+                if (dx.abs() <= STEP_NEAR && dz.abs() <= STEP_NEAR) || tick >= *until {
+                    return None;
+                }
+                Some(Controls {
+                    forward: true,
+                    sneak: *sneak,
+                    yaw: (-dx).atan2(dz).to_degrees(),
+                    ..down
+                })
+            }
             Doing::Build(b) => self.spikes_build(w, tick, b, down),
             Doing::Strike(s) => self.spikes_strike(w, tick, &body, s, down),
         }

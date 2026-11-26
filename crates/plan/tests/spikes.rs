@@ -762,3 +762,60 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     );
     assert_eq!(p.spikes.clutches, 1);
 }
+
+#[test]
+fn the_way_down_centres_first_and_steps_into_a_dug_shaft() {
+    // Race 45885217441 lane 0: the dig under a wide spike's pillar top left the body on the
+    // spike's edge beside the shaft, "no approach" and then "stranded" to the cap.
+    let mut w = world(4, [8.5, 70.0, 3.85]);
+    pillar(&mut w, (8, 3), 64, 69, BlockKind::EndStone);
+    gone(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 3,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: centre over the pillar")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(
+        p.spikes.doing,
+        Some(spikes::Doing::Step { sneak: true, .. })
+    ));
+    // The shaft dug with the body held up beside it: into it.
+    set(&mut w, (8, 69, 3), BlockKind::Air);
+    let rec = SpikeState {
+        pillars: p.spikes.pillars.clone(),
+        ..SpikeState::default()
+    };
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Step {
+            to: (8, 70, 3),
+            sneak: false
+        }
+    );
+    // On the spike's top beside it: a step in; farther off, the walk to beside it.
+    at(&mut w, [8.5, 70.0, 4.5]);
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Step {
+            to: (8, 70, 3),
+            sneak: false
+        }
+    );
+    at(&mut w, [8.5, 70.0, 7.5]);
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Walk {
+            to: (8, 70, 4),
+            approach: None
+        }
+    );
+}
