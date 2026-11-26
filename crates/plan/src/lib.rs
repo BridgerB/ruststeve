@@ -2378,6 +2378,13 @@ impl Plan {
         self.junk_watch(w, tick);
         let walking = matches!(self.task, Task::Explore(_));
         let junk = stronghold::junk_now(&junk, &self.stronghold.junk_held, tick, walking);
+        // In a hut nothing is dropped: a drop lands inside and comes back (Q7's race
+        // 45741154601); its blocks are the hut's walls instead (`overland_hut_step`).
+        let junk = if self.overland.hut.is_some() {
+            Vec::new()
+        } else {
+            junk
+        };
         // <<< overland and stronghold
         // A click no reply came to, with the pack full of junk: window 0 asked for again, so the
         // drop below can go (overworld-leg wall 10: a craft's take into a full pack drew no

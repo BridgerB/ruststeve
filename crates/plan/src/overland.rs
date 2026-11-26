@@ -749,8 +749,11 @@ impl Plan {
         }
         if !hut.closed {
             let next = crate::cover::hut_block(w, body.pos);
-            let item = crate::SHELTER_BLOCKS
+            // Junk blocks first (andesite, dirt, the Nether's soul soil: what would be dropped),
+            // then the shelter's own; the hut is where junk goes, never a drop that comes back.
+            let item = HUT_JUNK
                 .iter()
+                .chain(crate::SHELTER_BLOCKS.iter())
                 .copied()
                 .find(|k| crate::craft::count(w, *k) > 0);
             let end = match (item, next) {
@@ -846,6 +849,23 @@ impl Plan {
         None
     }
 }
+
+/// Junk a hut is built of before the shelter's own blocks: full blocks that do not fall (never
+/// gravel or sand) and are not a plant's (never leaf litter), all on `[survival] junk` or
+/// `[stronghold] junk`.
+const HUT_JUNK: &[ItemKind] = &[
+    ItemKind::Dirt,
+    ItemKind::Andesite,
+    ItemKind::Diorite,
+    ItemKind::Granite,
+    ItemKind::Tuff,
+    ItemKind::Calcite,
+    ItemKind::SmoothBasalt,
+    ItemKind::SoulSoil,
+    ItemKind::Basalt,
+    ItemKind::WarpedWartBlock,
+    ItemKind::NetherWartBlock,
+];
 
 /// A far walk that dies within this many expansions is boxed in where it stands.
 pub const ENCLOSED_EXPANSIONS: u64 = 8;
