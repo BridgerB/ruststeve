@@ -1855,3 +1855,27 @@ fn the_shaft_pillars_through_a_room_and_passes_a_cave_beside_with_blocks_held() 
     );
     assert!(matches!(step(&w, (8, 40, 8), None, &[]), Step::Refused(_)));
 }
+
+#[test]
+fn on_the_surface_with_no_pickaxe_wood_comes_first() {
+    // The frontier bot (race 45783611857 lane 0) reaches the surface with 0 pickaxe uses; oak logs
+    // over the climb are in memory.
+    let mut w = world(
+        home::OVERWORLD,
+        0,
+        column(BlockKind::Stone, 4),
+        [8.5, 64.0, 8.5],
+    );
+    kit(&mut w);
+    w.inventory.slots.remove(&37);
+    set(&mut w, (12, 64, 8), BlockKind::OakLog);
+    remember(&mut w, home::OVERWORLD, (12, 64, 8), BlockKind::OakLog);
+    w.stage_reached = Some(world::stage::Stage::Pearls12);
+    let mut p = racer();
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: wood by hand at (12, 64, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+}
