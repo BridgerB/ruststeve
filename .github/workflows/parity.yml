@@ -8,6 +8,15 @@ run-name: "parity table"
 
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Run only the rows whose id starts with one of these, comma-separated (issue 20: e01-frame,e03-); empty runs the table"
+        required: false
+        default: ""
+      tolerance:
+        description: "Rows that must match, when not the table's own (set it with only)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -67,16 +76,22 @@ jobs:
         run: ./target/release/capture --out parity/worlds 2>&1 | tee capture.log
 
       - name: The moments in real
-        run: ./target/release/moments real --worlds parity/worlds --out parity/real 2>&1 | tee real.log
+        env:
+          ONLY: ${{ inputs.only }}
+        run: ./target/release/moments real --worlds parity/worlds --out parity/real ${ONLY:+--only "$ONLY"} 2>&1 | tee real.log
 
       - name: The moments against the model
-        run: ./target/release/moments sim --worlds parity/worlds --out parity/sim 2>&1 | tee sim.log
+        env:
+          ONLY: ${{ inputs.only }}
+        run: ./target/release/moments sim --worlds parity/worlds --out parity/sim ${ONLY:+--only "$ONLY"} 2>&1 | tee sim.log
 
       - name: Compare
         id: compare
+        env:
+          TOLERANCE: ${{ inputs.tolerance }}
         run: |
           set -o pipefail
-          ./target/release/moments compare parity/real parity/sim --report parity/parity.md
+          ./target/release/moments compare parity/real parity/sim --report parity/parity.md ${TOLERANCE:+--tolerance "$TOLERANCE"}
           {
             echo "## parity table, commit $(git rev-parse --short HEAD)"
             echo

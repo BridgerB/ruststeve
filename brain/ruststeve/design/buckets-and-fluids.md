@@ -5,8 +5,8 @@ type: reference
 tags: [fluids, buckets, water, lava, obsidian, portal, look, sim, parity]
 aliases: [bucket, buckets, look_at, pitch, Controls.pitch, FlowingFluid, fluid tick, tick_fluids, use_bucket, obsidian, portal lighting, PortalShape, flint and steel, use script, light script, watch cells]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-26
+verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn tick_fluids(&mut self) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn use_bucket(&mut self) -> Option<Result<Vec<Wire>, EncodeError>> {"

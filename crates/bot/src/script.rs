@@ -329,6 +329,52 @@ fn fetch_controls(w: &World, thrown: bool, home: Option<[i32; 3]>) -> Controls {
     }
 }
 
+/// An end crystal's box over its position (`EntityType.END_CRYSTAL`: 2.0 wide, 2.0 tall).
+const CRYSTAL_HALF: f64 = 1.0;
+const CRYSTAL_HEIGHT: f64 = 2.0;
+/// Crystals and dragons farther than this are not a script's.
+const END_NEAR: f64 = 32.0;
+
+/// The nearest live entity of `kind` within `END_NEAR` of the feet: its id and position.
+fn nearest_of(w: &World, kind: data::EntityKind, feet: [f64; 3]) -> Option<(i32, [f64; 3])> {
+    let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - feet[i]).powi(2)).sum::<f64>();
+    w.entities
+        .iter()
+        .filter(|(_, e)| !e.dead && e.kind == kind)
+        .map(|(id, e)| (*id, e.pos))
+        .filter(|(_, p)| d(*p) <= END_NEAR * END_NEAR)
+        .min_by(|a, b| d(a.1).total_cmp(&d(b.1)))
+}
+
+/// The distance from `eye` to a box of half width `half` and height `h` with its feet at `at`.
+fn eye_to(eye: [f64; 3], at: [f64; 3], half: f64, h: f64) -> f64 {
+    let lo = [at[0] - half, at[1], at[2] - half];
+    let hi = [at[0] + half, at[1] + h, at[2] + half];
+    (0..3)
+        .map(|i| (eye[i] - eye[i].clamp(lo[i], hi[i])).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// The top of the first block under the feet with a collision box, within 64: what a fall
+/// lands on (a fluid has none).
+fn ground_under(w: &World, feet: [f64; 3]) -> Option<f64> {
+    let (x, z) = (feet[0].floor() as i32, feet[2].floor() as i32);
+    let top = (feet[1] - 0.01).floor() as i32;
+    (0..64).map(|d| top - d).find_map(|y| {
+        let k = w.block_at(world::BlockPos::new(x, y, z))?;
+        let solid = !matches!(
+            k,
+            data::BlockKind::Air
+                | data::BlockKind::CaveAir
+                | data::BlockKind::VoidAir
+                | data::BlockKind::Water
+                | data::BlockKind::Lava
+        );
+        solid.then_some(f64::from(y + 1))
+    })
+}
+
 /// What a scripted bot presses.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Script {
@@ -388,6 +434,20 @@ pub enum Script {
         dy: i32,
         dz: i32,
     },
+    /// Issue 20's e03 (`crystal:<every>`): standing still looking at the nearest end crystal's
+    /// middle, attack it every `every` ticks while its box is within the strike's reach (3.0)
+    /// of the eye.
+    Crystal { every: u64 },
+    /// Issue 20's e05 (`dragon:<every>:<part>`): standing still looking at the nearest dragon,
+    /// attack its part `part` (the dragon's id + part: 1 the head, 2 the neck, 3 the body,
+    /// `EnderDragon`'s sub-entities in order) every `every` ticks. The server judges the reach
+    /// on the part's own box; the client is never told where the parts are.
+    Dragon { every: u64, part: i32 },
+    /// Issue 20's e06 (`clutch:<yaw>:<walk>:<above>`): looking straight down, forward along
+    /// `yaw` for the first `walk` ticks (off a pillar's edge), then use the held item (a water
+    /// bucket), falling, every tick from when the feet are `above` or less over the ground under
+    /// them until it is poured.
+    Clutch { yaw: f64, walk: u64, above: f64 },
 }
 
 /// The face of a block `dx dy dz` from the feet cell that looks back at the feet (0 down, 1 up,
@@ -411,6 +471,27 @@ impl Script {
         match self {
             Script::Burrow(mode) => burrow_controls(mode, w),
             Script::Fetch { at, home } => fetch_controls(w, tick > at, home),
+            Script::Crystal { .. } | Script::Dragon { .. } => {
+                let kind = match self {
+                    Script::Crystal { .. } => data::EntityKind::EndCrystal,
+                    _ => data::EntityKind::EnderDragon,
+                };
+                let Some(body) = w.body else {
+                    return Controls::default();
+                };
+                let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+                match nearest_of(w, kind, body.pos) {
+                    Some((_, p)) => {
+                        let (yaw, pitch) = look_at(eye, [p[0], p[1] + 1.0, p[2]]);
+                        Controls {
+                            yaw,
+                            pitch: Some(pitch),
+                            ..Controls::default()
+                        }
+                    }
+                    None => Controls::default(),
+                }
+            }
             other => other.controls(tick),
         }
     }
@@ -477,6 +558,13 @@ impl Script {
                 pitch: Some(EYE_PITCH),
                 ..Controls::default()
             },
+            Script::Crystal { .. } | Script::Dragon { .. } => Controls::default(),
+            Script::Clutch { yaw, walk, .. } => Controls {
+                forward: tick < walk,
+                yaw,
+                pitch: Some(90.0),
+                ..Controls::default()
+            },
             Script::Use { yaw, pitch, .. } => Controls {
                 yaw,
                 pitch: Some(pitch),
@@ -496,6 +584,50 @@ impl Script {
     pub fn acts(self, tick: u64, w: &World) -> Vec<Act> {
         match self {
             Script::Burrow(mode) => burrow_acts(mode, tick, w),
+            Script::Crystal { every } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                if tick % every.max(1) != every.max(1) - 1 {
+                    return Vec::new();
+                }
+                let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+                match nearest_of(w, data::EntityKind::EndCrystal, body.pos) {
+                    Some((id, at))
+                        if eye_to(eye, at, CRYSTAL_HALF, CRYSTAL_HEIGHT) <= STRIKE_REACH =>
+                    {
+                        vec![Act::Attack { entity: id }, Act::Swing]
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            Script::Dragon { every, part } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                if tick % every.max(1) != every.max(1) - 1 {
+                    return Vec::new();
+                }
+                match nearest_of(w, data::EntityKind::EnderDragon, body.pos) {
+                    Some((id, _)) => vec![Act::Attack { entity: id + part }, Act::Swing],
+                    None => Vec::new(),
+                }
+            }
+            Script::Clutch { walk, above, .. } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                // Every tick until the held water bucket is poured: a use the server's look does
+                // not carry to a block (beyond its 4.5 reach, from where it last heard the
+                // player) does nothing, and the next tick tries again.
+                let held = w.inventory.slots.get(&(36 + i16::from(w.held)));
+                let full = held.is_some_and(|(k, _)| *k == data::ItemKind::WaterBucket);
+                let falling = !body.on_ground && tick >= walk && full;
+                match ground_under(w, body.pos) {
+                    Some(g) if falling && body.pos[1] - g <= above => vec![Act::UseItem],
+                    _ => Vec::new(),
+                }
+            }
             Script::Break { finish, dx, dy, dz } => {
                 let Some(body) = w.body else {
                     return Vec::new();
@@ -698,6 +830,9 @@ impl Script {
             Script::Burrow(mode) => format!("burrow:{}", mode.name()),
             Script::Fetch { at, .. } => format!("fetch:{at}"),
             Script::Break { finish, dx, dy, dz } => format!("break:{finish}:{dx}:{dy}:{dz}"),
+            Script::Crystal { every } => format!("crystal:{every}"),
+            Script::Dragon { every, part } => format!("dragon:{every}:{part}"),
+            Script::Clutch { yaw, walk, above } => format!("clutch:{yaw}:{walk}:{above}"),
         }
     }
 
@@ -770,6 +905,29 @@ impl Script {
                 dz: dz.parse().ok()?,
             });
         }
+        if let Some(every) = s.strip_prefix("crystal:") {
+            return Some(Script::Crystal {
+                every: every.parse().ok()?,
+            });
+        }
+        if let Some(rest) = s.strip_prefix("dragon:") {
+            let (every, part) = rest.split_once(':')?;
+            return Some(Script::Dragon {
+                every: every.parse().ok()?,
+                part: part.parse().ok()?,
+            });
+        }
+        if let Some(rest) = s.strip_prefix("clutch:") {
+            let v: Vec<&str> = rest.split(':').collect();
+            let [yaw, walk, above] = v.as_slice() else {
+                return None;
+            };
+            return Some(Script::Clutch {
+                yaw: yaw.parse().ok()?,
+                walk: walk.parse().ok()?,
+                above: above.parse().ok()?,
+            });
+        }
         if let Some(at) = s.strip_prefix("fetch:") {
             return Some(Script::Fetch {
                 at: at.parse().ok()?,
@@ -827,6 +985,13 @@ mod tests {
                 dx: 1,
                 dy: 0,
                 dz: 0,
+            },
+            Script::Crystal { every: 14 },
+            Script::Dragon { every: 14, part: 1 },
+            Script::Clutch {
+                yaw: 90.0,
+                walk: 6,
+                above: 3.5,
             },
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
