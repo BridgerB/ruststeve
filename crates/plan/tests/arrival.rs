@@ -182,3 +182,21 @@ fn table() -> Arc<make::Table> {
     let goals: make::Goals = toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
     Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")))
 }
+
+#[test]
+fn gravel_over_the_head_steps_aside_to_rock() {
+    let mut w = in_rock();
+    set(&mut w, (8, 42, 8), BlockKind::Gravel);
+    assert!(matches!(
+        arrival::step(&w, (8, 40, 8), None, &PICK),
+        Step::Refused(_)
+    ));
+    assert_eq!(arrival::side_cell(&w, (8, 40, 8), &PICK), Some((9, 40, 8)));
+    // Gravel over the east side too: another side.
+    set(&mut w, (9, 42, 8), BlockKind::Gravel);
+    assert_eq!(arrival::side_cell(&w, (8, 40, 8), &PICK), Some((7, 40, 8)));
+    // A cave beside the side cell: not that side.
+    set(&mut w, (6, 41, 8), BlockKind::CaveAir);
+    let c = arrival::side_cell(&w, (8, 40, 8), &PICK);
+    assert!(c != Some((7, 40, 8)) && c.is_some(), "{c:?}");
+}
