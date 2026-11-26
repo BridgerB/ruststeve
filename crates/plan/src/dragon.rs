@@ -459,6 +459,27 @@ pub fn breath_on(breaths: &[Breath], feet: [f64; 3]) -> Option<Breath> {
 /// (`breath_on`), not before a grounded dragon's head nor on a way past it; `None` when none
 /// is loaded.
 pub fn out_of_breath(w: &World, feet: [f64; 3]) -> Option<[i32; 3]> {
+    out_of_breath_except(w, feet, &[])
+}
+
+/// Blocks more than a breath's reach, and the body's height a block more, a cell out of it keeps:
+/// a cell only just out is reached with the feet still in (race 45882663266 lane 0 held 370 ticks
+/// at 6.4 off a reach of 6.5, the walk to its own cell done each tick).
+pub const OUT_SLACK: f64 = 1.0;
+
+/// Is a body with its feet at `p` well clear of every breath (`breath_on` with `OUT_SLACK` more)?
+pub fn clear_of_breath(breaths: &[Breath], p: [f64; 3]) -> bool {
+    !breaths.iter().any(|b| {
+        flat(b.pos, p) <= b.reach() + OUT_SLACK
+            && p[1] <= b.pos[1] + BREATH_OVER + OUT_SLACK
+            && p[1] + physics::HEIGHT + BREATH_UNDER + OUT_SLACK >= b.pos[1]
+    })
+}
+
+/// `out_of_breath`, never the feet's own column (race 45882663266 lane 2: on the bunker's stair at
+/// y 60.25, the cell under it read clear and was walked to 211 times, 20 health to dead), nor a
+/// cell in `refused` (reached with the feet still in a breath).
+pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> Option<[i32; 3]> {
     let clouds = breaths(w);
     let v = view(w).map(|(_, v)| v).filter(grounded);
     let fc = cell_of(feet);
@@ -478,7 +499,9 @@ pub fn out_of_breath(w: &World, feet: [f64; 3]) -> Option<[i32; 3]> {
             };
             let c = [x, y, z];
             let p = mid(c);
-            if breath_on(&clouds, p).is_some()
+            if (x == fc[0] && z == fc[2])
+                || refused.contains(&c)
+                || !clear_of_breath(&clouds, p)
                 || v.is_some_and(|v| before_head(&v, p) || !way_clear(&v, feet, p))
             {
                 continue;
@@ -1174,6 +1197,11 @@ pub struct DragonState {
     pub breath_walk: Option<Walk>,
     #[serde(default)]
     pub breath_outs: u32,
+    /// Cells reached with the feet still in a breath, refused until out; the last cell noted.
+    #[serde(default)]
+    pub breath_refused: Vec<[i32; 3]>,
+    #[serde(default)]
+    pub breath_noted: Option<[i32; 3]>,
     #[serde(default)]
     pub breath_waits: u64,
     #[serde(default)]
@@ -1711,6 +1739,8 @@ impl Plan {
         let feet = w.body?.pos;
         let clouds = breaths(w);
         let Some(on) = breath_on(&clouds, feet) else {
+            self.dragon.breath_refused.clear();
+            self.dragon.breath_noted = None;
             if let Some(wk) = self.dragon.breath_walk.take() {
                 self.note(
                     tick,
@@ -1731,11 +1761,11 @@ impl Plan {
             .breath_walk
             .as_ref()
             .map(|wk| [wk.target.0, wk.target.1, wk.target.2])
-            .filter(|c| breath_on(&clouds, mid(*c)).is_none());
+            .filter(|c| clear_of_breath(&clouds, mid(*c)) && *c != cell_of(feet));
         let target = match held {
             Some(c) => c,
             None => {
-                let Some(c) = out_of_breath(w, feet) else {
+                let Some(c) = out_of_breath_except(w, feet, &self.dragon.breath_refused) else {
                     if self.dragon.breath_walk.take().is_some() || self.dragon.breath_outs == 0 {
                         self.note(
                             tick,
@@ -1758,6 +1788,10 @@ impl Plan {
                     Arrive::Goal,
                     tick,
                 ));
+                if self.dragon.breath_noted == Some(c) {
+                    return self.breath_walk_step(w, tick, c);
+                }
+                self.dragon.breath_noted = Some(c);
                 self.note(
                     tick,
                     format!("out of the breath to {c:?}"),
@@ -1774,6 +1808,11 @@ impl Plan {
                 c
             }
         };
+        self.breath_walk_step(w, tick, target)
+    }
+
+    /// One tick of the walk out of a breath to `target`.
+    fn breath_walk_step(&mut self, w: &World, tick: u64, target: [i32; 3]) -> Option<Controls> {
         let wk = self.dragon.breath_walk.as_mut()?;
         let (mut c, status) = wk.step(w, tick);
         let (acts, said) = wk.take_out();
@@ -1782,8 +1821,12 @@ impl Plan {
             self.note(tick, what, why);
         }
         if !matches!(status, TaskStatus::Running) {
-            // Arrived (the breath grew onto it) or failed: the next tick looks again.
+            // Arrived with the feet still in a breath (it grew onto the cell) or failed: that cell
+            // is refused until out, and the next tick looks again.
             self.dragon.breath_walk = None;
+            if self.dragon.breath_refused.len() < 32 {
+                self.dragon.breath_refused.push(target);
+            }
             if let TaskStatus::Failed(e) = status {
                 self.note(
                     tick,

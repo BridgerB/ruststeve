@@ -730,3 +730,22 @@ fn the_flame_is_waited_out_of_its_reach() {
         "and while it burns"
     );
 }
+
+#[test]
+fn a_cell_out_of_the_breath_is_never_the_feets_own_and_well_clear() {
+    // Race 45882663266: lane 0 held 370 ticks at 6.4 off a reach of 6.5, the walk to its own cell
+    // done each tick; lane 2 walked 211 times to the cell under it on the bunker's stair.
+    let mut w = end_at([13.9, 64.0, 0.5]);
+    cloud(&mut w, 50, [9.5, 64.0, 0.5], 3.0);
+    let b = breaths(&w);
+    assert!(
+        dragon::breath_on(&b, [13.9, 64.0, 0.5]).is_some(),
+        "4.4 off a reach of 4.5"
+    );
+    let c = dragon::out_of_breath(&w, [13.9, 64.0, 0.5]).unwrap();
+    assert_ne!([c[0], c[2]], [13, 0], "not its own column");
+    assert!(
+        dragon::flat(feet_of(c), [9.5, 64.0, 0.5]) > 5.5,
+        "a block past the reach: {c:?}"
+    );
+}

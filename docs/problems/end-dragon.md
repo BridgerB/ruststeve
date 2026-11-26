@@ -72,5 +72,17 @@ Development start. Lane 1 ran to the cap; lanes 0 and 2 died. 26 head strikes in
 
 **The flame's 3.0, answered before it comes.** The attacking turn lasts 40 ticks (`DragonSittingAttackingPhase`) and ends in the flame's cloud, radius 5 at the head (`DragonSittingFlamingPhase`). That cloud lies over the head stand, 2.5 from the head. Now the bot strikes in the turn's first 15 ticks (`FLAME_LEAVE_TICKS`), then walks to the nearest cell 7.5 or more from the head's point (`flame_clear_cell`), not before the head, and holds there while the dragon is flaming. A walk of 5 takes about 20 ticks, so it is out before the cloud forms. Note: "dragon: go … out of the flame's way". Not yet raced.
 
+### Race 45882663266 (issue-20-end e14dd1e, dev-end-no-crystals, 3 lanes, cap 12,000): 0/3 win
+Development start. Lanes 0 and 1 ran to the cap; lane 2 died. 25 head strikes in all. The dragon went to 148 (lane 0), 171 (lane 1) and 169 (lane 2). "dragon takeoff count over" never fired: no lane dealt 50 in total. "dig down" never fired either. No bot died in a pocket ("dragon first" fired 53 times).
+
+**Wall 7: the walk out of the breath chose a cell the feet were already in** ("out of the breath to" 3,181 times).
+- Lane 2 was on the bunker's stair at y 60.25. The cell under it (y 59) read clear, because its body top is 1.2 under the cloud. That cell was walked to 211 times while the bot took 3.0 a second, 20 to dead.
+- Lane 0 stood 6.4 off a reach of 6.5. The cell's middle was just out, so the walk was done each tick, and the bot held at the edge for 370 ticks with every other task stopped.
+- **Fix:**
+  - A cell out (`clear_of_breath`) keeps a block more than the trigger, on the plane and in height (`OUT_SLACK`).
+  - The feet's own column is never the target.
+  - A cell reached with the feet still in a breath is refused until out.
+  - "out of the breath to" is noted only when the cell changes.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
