@@ -548,6 +548,18 @@ fn restock_cell(w: &World, feet: Cell, ahead: Option<Dir>, c: Cell) -> bool {
         return false;
     }
     let kind = |c: Cell| w.block_at(BlockPos::new(c.0, c.1, c.2));
+    // A floor cell is never dug with lava within 2 of it at its height or under (race 45743712658
+    // lane 0 restocked the floor of the lava sea's shore at y 31 to 32, stepped into the lava,
+    // burned from 19.8 to 0.9).
+    if c.1 < feet.1
+        && (-2..=2).any(|dx| {
+            (-2..=2).any(|dz| {
+                (-2..=0).any(|dy| kind((c.0 + dx, c.1 + dy, c.2 + dz)) == Some(BlockKind::Lava))
+            })
+        })
+    {
+        return false;
+    }
     // Netherrack, and the deltas' basalt and blackstone (bridge blocks too, issue 19d).
     if !matches!(
         kind(c),
