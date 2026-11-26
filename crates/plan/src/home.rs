@@ -265,6 +265,51 @@ pub const COOK_FOOD_FLOOR: i32 = 6;
 /// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
 /// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
 pub const CUBE_FIGHT: f64 = 3.0;
+/// The floor cell beside the feet to lay (and the face of the block stood on to click), with a
+/// mob that knocks back near: a cube within `CUBE_CLEAR`, or a `KNOCKERS` mob within
+/// `KNOCK_RANGE` with the bot in sight (race 45743712658: lane 1 knocked into lava by a cube at
+/// tick 4,220, lane 3 by a blaze at 3,940, both on the one-wide span). `None` with none near,
+/// no solid block stood on, or no open side.
+pub fn rail_wanted(w: &World) -> Option<(Cell, i8, bool, bool)> {
+    let body = w.body?;
+    let cube = w.entities.values().any(|e| {
+        !e.dead && e.kind == data::EntityKind::MagmaCube && dist(e.pos, body.pos) <= CUBE_CLEAR
+    });
+    let eyes: Vec<[f64; 3]> = w
+        .entities
+        .values()
+        .filter(|e| !e.dead && KNOCKERS.contains(&e.kind) && dist(e.pos, body.pos) <= KNOCK_RANGE)
+        .map(|e| [e.pos[0], e.pos[1] + 1.2, e.pos[2]])
+        .collect();
+    let knocker = !eyes.is_empty() && crate::cover::seen_body(w, &eyes, body.pos);
+    if !cube && !knocker {
+        return None;
+    }
+    let feet = path::feet_cell(body.pos);
+    let under = (feet.0, feet.1 - 1, feet.2);
+    let mut cells = path::Cells::new(w);
+    if cells.at(under) != path::Class::Solid {
+        return None;
+    }
+    [((1, 0), 5i8), ((-1, 0), 4), ((0, 1), 3), ((0, -1), 2)]
+        .into_iter()
+        .map(|((dx, dz), f)| ((feet.0 + dx, feet.1 - 1, feet.2 + dz), f))
+        .find(|(c, _)| matches!(cells.at(*c), path::Class::Lava | path::Class::Clear))
+        .map(|(c, f)| (c, f, cube, knocker))
+}
+
+/// Mobs whose hit or blast knocks the bot back a block: with one within `KNOCK_RANGE` in sight,
+/// the floor beside the feet is laid before the next step (`home_rail`).
+pub const KNOCKERS: &[data::EntityKind] = &[
+    data::EntityKind::MagmaCube,
+    data::EntityKind::Blaze,
+    data::EntityKind::Ghast,
+    data::EntityKind::Skeleton,
+    data::EntityKind::Piglin,
+    data::EntityKind::ZombifiedPiglin,
+];
+pub const KNOCK_RANGE: f64 = 16.0;
+
 /// A skeleton within this has the trip take cover as from a blaze (its bow's 15 and margin).
 pub const SKELETON_COVER: f64 = 24.0;
 
@@ -945,23 +990,10 @@ impl Plan {
     /// magma cube knocked it into lava 560 ticks after the resume). Noted and counted; `None`
     /// with no cube near, no edge beside, or no filler held.
     fn home_rail(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let (target, face, cube, knocker) = rail_wanted(w)?;
         let body = w.body?;
-        let cube = w.entities.values().any(|e| {
-            !e.dead && e.kind == data::EntityKind::MagmaCube && dist(e.pos, body.pos) <= CUBE_CLEAR
-        });
-        if !cube {
-            return None;
-        }
         let feet = path::feet_cell(body.pos);
         let under = (feet.0, feet.1 - 1, feet.2);
-        let mut cells = path::Cells::new(w);
-        if cells.at(under) != path::Class::Solid {
-            return None;
-        }
-        let (target, face) = [((1, 0), 5i8), ((-1, 0), 4), ((0, 1), 3), ((0, -1), 2)]
-            .into_iter()
-            .map(|((dx, dz), f)| ((feet.0 + dx, feet.1 - 1, feet.2 + dz), f))
-            .find(|(c, _)| matches!(cells.at(*c), path::Class::Lava | path::Class::Clear))?;
         let item = endermen::FILLER
             .iter()
             .copied()
@@ -985,7 +1017,7 @@ impl Plan {
                     tick,
                     format!("home: rail beside the feet at {target:?}"),
                     format!(
-                        "a magma cube within {CUBE_CLEAR} and no floor beside {feet:?}; {item:?} on {under:?} face {face}; rail {}",
+                        "a mob that knocks near (cube within {CUBE_CLEAR}: {cube}; one within {KNOCK_RANGE} in sight: {knocker}) and no floor beside {feet:?}; {item:?} on {under:?} face {face}; rail {}",
                         self.ender.home.rails
                     ),
                 );
@@ -1126,6 +1158,32 @@ impl Plan {
         );
         if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
             self.expanded += walk.expanded;
+            // A few cells short on the span's line (race 45743712658 lane 0 stood at x 313 for
+            // 8,000 ticks, "no walk" to (311, 37, 194)): a solid block in the feet or head cells
+            // between is dug, never one with lava beside.
+            if target.2 == feet.2 && (feet.0 - target.0).abs() <= 3 && feet.1 == target.1 {
+                let mut cells = path::Cells::new(w);
+                let step = if target.0 < feet.0 { -1 } else { 1 };
+                let block = (1..=(feet.0 - target.0).abs())
+                    .map(|i| feet.0 + step * i)
+                    .flat_map(|x| [(x, feet.1, feet.2), (x, feet.1 + 1, feet.2)])
+                    .find(|c| {
+                        cells.at(*c) == path::Class::Solid
+                            && ![(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 0, 1), (0, 0, -1)]
+                                .iter()
+                                .any(|(dx, dy, dz)| {
+                                    cells.at((c.0 + dx, c.1 + dy, c.2 + dz)) == path::Class::Lava
+                                })
+                    });
+                if let Some(c) = block {
+                    self.note(
+                        tick,
+                        format!("home: cleared the old bridge at {c:?}"),
+                        format!("no walk from {feet:?} to {target:?}"),
+                    );
+                    return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
+                }
+            }
             if self
                 .ender
                 .home

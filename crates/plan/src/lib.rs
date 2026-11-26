@@ -2026,6 +2026,28 @@ impl Plan {
         }
         // On the way home a blaze or a ghast is never fought, at any health (a fireball costs 6 to
         // 9 through iron and nothing heals): the trip's cover takes it (`home_recover`).
+        // A rail wanted with a knocker near (`home::rail_wanted`) cuts a walk under way: the
+        // planner lays the floor beside the feet before the next step.
+        if home_trip
+            && matches!(
+                self.task,
+                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+            )
+            && crate::home::rail_wanted(w).is_some()
+            && craft::count(w, data::ItemKind::Netherrack)
+                + craft::count(w, data::ItemKind::Basalt)
+                + craft::count(w, data::ItemKind::Cobblestone)
+                > 0
+        {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.retry_at = tick;
+            self.note(
+                tick,
+                format!("home: {cut} cut for a rail"),
+                "a mob that knocks back near and no floor beside the feet".to_owned(),
+            );
+        }
         if home_trip {
             ignored.extend(
                 w.entities
