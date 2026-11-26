@@ -1274,3 +1274,48 @@ fn no_climb_begins_without_a_water_bucket_in_the_hotbar() {
     p.spikes_task(&w, 100);
     assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
 }
+
+#[test]
+fn the_waterfall_ride_is_kept_and_its_pour_is_no_bar_to_the_way_back() {
+    // Race 45912100302 lane 1: mid-ride the escape out of water walked the bot back onto the
+    // spike's top, and the pillar's watered top then read as no way down: stranded to the cap.
+    let mut w = world(4, [7.5, 66.0, 3.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    if let Some(b) = w.body.as_mut() {
+        b.on_ground = false;
+        b.in_water = true;
+        b.vel = [0.0, -0.3, 0.0];
+    }
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.riding = Some((8, 3));
+    let c = p.spikes_clutch(&w, 100);
+    assert_eq!(c.and_then(|c| c.pitch), Some(90.0));
+    assert!(c.is_some_and(|c| !c.forward), "carried down, no other step");
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: riding the waterfall")
+    );
+    // On the spike's top with the pillar's top watered: the walk back to it.
+    let mut w = world(4, [8.5, 70.0, 5.5]);
+    pillar(&mut w, (8, 3), 64, 69, BlockKind::EndStone);
+    set(&mut w, (8, 70, 3), BlockKind::Water);
+    gone(&mut w);
+    let st = SpikeState {
+        pillars: vec![PillarRec {
+            x: 8,
+            z: 3,
+            base: 64,
+        }],
+        ..SpikeState::default()
+    };
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Walk {
+            to: (8, 70, 3),
+            approach: None
+        }
+    );
+}

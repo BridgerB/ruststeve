@@ -260,6 +260,11 @@ pub fn open(k: Option<BlockKind>) -> bool {
     )
 }
 
+/// A cell a body passes through: open, or water (a waterfall's pour on a pillar's top).
+fn passable(k: Option<BlockKind>) -> bool {
+    open(k) || k == Some(BlockKind::Water)
+}
+
 fn full(k: Option<BlockKind>) -> bool {
     k.and_then(data::generated::shapes::collision) == Some(data::types::Collision::Full)
 }
@@ -857,8 +862,8 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
                 (r.x - feet.0).abs() <= SPIKE_SEARCH
                     && (r.z - feet.2).abs() <= SPIKE_SEARCH
                     && feet.1 > r.base
-                    && open(kind(w, (r.x, feet.1, r.z)))
-                    && open(kind(w, (r.x, feet.1 + 1, r.z)))
+                    && passable(kind(w, (r.x, feet.1, r.z)))
+                    && passable(kind(w, (r.x, feet.1 + 1, r.z)))
             })
             .min_by_key(|r| (r.x - feet.0).abs() + (r.z - feet.2).abs())
             .map_or_else(
@@ -1626,6 +1631,21 @@ impl Plan {
             pitch: Some(crate::endermen::EYES_DOWN),
             ..Controls::default()
         };
+        // A waterfall ridden: the water carries the body down, and no other row (the escape out
+        // of water) takes it off the fall (race 45912100302 lane 1: "trapped in water" at y 77
+        // walked it back onto the spike's top, stranded to the cap).
+        if self.spikes.riding.is_some()
+            && !body.on_ground
+            && (body.in_water || body.eye_in_water)
+            && self.spikes.clutch.is_none()
+        {
+            self.spikes_note(
+                tick,
+                "spikes: riding the waterfall".to_owned(),
+                format!("at {:?}", path::feet_cell(body.pos)),
+            );
+            return Some(down);
+        }
         let ground = ground_under(w, body.pos);
         let height = ground.map(|g| body.pos[1] - g);
         let Some(mut c) = self.spikes.clutch.take() else {
