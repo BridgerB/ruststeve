@@ -66,6 +66,11 @@ pub const SITE_TURNS: [f64; 5] = [0.0, 30.0, -30.0, 60.0, -60.0];
 /// End stone held before the stock is over (the plan, 20e: about 160 for the pillars and walls
 /// of 20f; spikes' tops at 76 to 103 over ground at 60 to 65).
 pub const STOCK_WANTED: i32 = 160;
+/// The stock's level tunnels run this far under the bunker's feet (stairs down first): the
+/// ground's top within 30 of the fountain runs 57 to 64 (E1), and a tunnel one or two under it
+/// came out under the sky where the ground dipped and a dragon fireball's cloud killed the bot in
+/// it (races 45872058898 and 45876313549).
+pub const STOCK_DEPTH: i32 = 6;
 /// Stock tunnels (`Stairs::level`, six cells and twelve blocks a run) at most.
 pub const STOCK_RUNS: u32 = 24;
 /// The bridge is cut only while the dragon is farther than this, or perched (the plan, 20e).
@@ -674,14 +679,26 @@ impl Plan {
             }
             let dir = stock_dir(door, self.end.stock_runs);
             self.end.stock_runs += 1;
+            // Down to `STOCK_DEPTH` under the bunker first, then level.
+            let down = feet.1 > b.1 - STOCK_DEPTH;
             self.note(
                 tick,
                 format!("end: stock run {} toward {dir:?}", self.end.stock_runs),
                 format!(
-                    "{stone} end stone held, {STOCK_WANTED} wanted; a level tunnel under the roof"
+                    "{stone} end stone held, {STOCK_WANTED} wanted; {}",
+                    if down {
+                        "stairs down under the bunker"
+                    } else {
+                        "a level tunnel deep under the ground"
+                    }
                 ),
             );
-            let mut st = Stairs::level(dir, tick);
+            let mut st = if down {
+                Stairs::new(dir, tick)
+            } else {
+                Stairs::level(dir, tick)
+            };
+            st.dry = true;
             // An open cell past the start is a hole to the sky or the void: refused, turned.
             st.rock = Some(feet);
             return Some(Task::Stairs(Box::new(st)));
