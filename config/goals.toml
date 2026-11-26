@@ -914,6 +914,20 @@ dig_ins = 4
 ledge_digs = 4
 # <<< Q6
 
+# >>> Q11 (issue 19, docs/problems/eyes-fortress.md): the way home's fortress stretch
+# (plan::fortress_way).
+[fortress_way]
+# Within this many blocks on the plane of the portal (and out of [portal_way] reach) the trip goes
+# by the covered tunnel in rock toward the portal, as Q6's last leg does, instead of the heading's
+# legs: race 45763915181's heading legs over the fortress and the soul sand valley wandered 3,000
+# to 4,000 ticks (lane 1 north to z 244 and up to y 101, 171 pickaxe uses spent; lane 2 "no way
+# on" on every side at (86, 78, 178)), and race 45760537530 lane 3 burned to death on blaze fire
+# at (91, 73, 169) in the open; Q6's covered tunnel ran 156 blocks with no hit (race 45742933645
+# lane 1). 250 takes in the dev start at (100, 205) (236 off) and the trip from about x 127 on
+# z 207 (the old bridges' last point (146, 208) is 259 off), 40 from the blaze spawner.
+reach = 250
+# <<< Q11
+
 # >>> eyes (Q3, issue 19c, docs/problems/eyes-throw.md): the eyes of ender, crafted in the 2x2 grid
 # where the bot stands (blaze_powder from a rod, two a rod; ender_eye from a pearl and a powder:
 # the generated recipes, no table). plan::eyes::eyes_row sets the count to what the held pearls,
