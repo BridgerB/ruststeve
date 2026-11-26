@@ -1381,11 +1381,16 @@ impl Plan {
                     // mid-way): to the keep and the gap to the next floor, at most HOME_FILLER_MAX.
                     let home = self.ender.phase == crate::endermen::EnderPhase::Home;
                     if found && bridges > spare && (home || bridges <= spare + RESTOCK_BRIDGES) {
+                        // >>> Q8: the next known gap only, when one is seen (Q10's race 45765424576:
+                        // 41 to 128 on the shore west of the fortress, slow); else the route's own.
                         let gap = if home {
-                            gap_ahead(w, feet, dir).max(bridges)
+                            Some(gap_ahead(w, feet, dir))
+                                .filter(|g| *g > 0)
+                                .unwrap_or(bridges)
                         } else {
                             bridges
                         };
+                        // <<< Q8
                         let want = keep + gap;
                         want_filler = Some(if home {
                             want.min(HOME_FILLER_MAX)
@@ -1515,6 +1520,27 @@ impl Plan {
                             .map_or(0, |wps| wps.iter().filter(|c| blocked.contains(c)).count());
                         // Only a route the cut alone refused: over cut cells.
                         if found && back > 0 {
+                            // >>> Q8: on the way home, with a point steering, the cells behind are
+                            // the way it came: the only route is taken (Q10's race 45765424576:
+                            // all five lanes threw an 83-cell walk away at (50, 33, 206) and drifted
+                            // east restocking).
+                            if self.ender.phase == crate::endermen::EnderPhase::Home && h.way {
+                                self.ender.home.cut_routes_taken += 1;
+                                leg_now.planned = walk.waypoints.clone().unwrap_or_default();
+                                self.walks += 1;
+                                self.expanded += walk.expanded;
+                                self.note(
+                                    tick,
+                                    format!("home: heading leg {n} takes the route back over its cut"),
+                                    format!(
+                                        "the only route found, {} cells, {back} of them cut; taken {}",
+                                        leg_now.planned.len(),
+                                        self.ender.home.cut_routes_taken
+                                    ),
+                                );
+                                return Some(Task::Explore(walk));
+                            }
+                            // <<< Q8
                             self.note(
                                 tick,
                                 format!("heading leg {n} refused for cut (paced)"),

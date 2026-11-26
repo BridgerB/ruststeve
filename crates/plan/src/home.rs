@@ -283,6 +283,9 @@ pub struct HomeState {
     /// Blocks laid or dug to step up onto a span from below.
     #[serde(default)]
     pub step_ups: u32,
+    /// Routes back over the heading's own cut taken, the only way toward the point.
+    #[serde(default)]
+    pub cut_routes_taken: u32,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
