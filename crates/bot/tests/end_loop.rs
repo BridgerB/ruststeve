@@ -209,7 +209,7 @@ fn crystal(sp: Spike) -> Run {
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(7);
     kit(&mut sim, 192);
     sim.summon_crystal(sp.crystal());
-    drive(sim, 8000, |p| {
+    drive(sim, 2500, |p| {
         p.end.arrived = true;
         p.end.bridged = true;
         p.end.stock_over = true;
