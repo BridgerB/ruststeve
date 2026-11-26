@@ -512,7 +512,8 @@ fn never_a_strike_under_danger_health() {
 }
 
 #[test]
-fn a_cages_bars_in_the_wall_are_dug_and_end_stone_put_in() {
+fn a_cage_is_struck_through_its_bars() {
+    // Parity e03 (E6, run 45864998071): through the intact bars at 2 off, 0.42 lost.
     let mut w = walled();
     for c in [(8, 70, 6), (8, 71, 6)] {
         set(&mut w, c, BlockKind::IronBars);
@@ -521,22 +522,36 @@ fn a_cages_bars_in_the_wall_are_dug_and_end_stone_put_in() {
     assert_eq!(caged.map(|s| s.caged), Some(true));
     assert_eq!(
         spikes::next(&w, &SpikeState::default(), 0),
-        Next::Bar((8, 70, 6)),
-        "bars no shield (E1: the blast's rays pass them): dug, and end stone put back"
+        Next::Strike(CRYSTAL),
+        "through the bars"
     );
-    let shield = SpikeState {
-        bars_shield: true,
+    let fallback = SpikeState {
+        bars_shield: false,
         ..SpikeState::default()
     };
     assert_eq!(
-        spikes::next(&w, &shield, 0),
-        Next::Strike(CRYSTAL),
-        "bars as the wall: through them"
+        spikes::next(&w, &fallback, 0),
+        Next::Bar((8, 70, 6)),
+        "the fallback: dug, and end stone put back"
     );
     set(&mut w, (8, 70, 6), BlockKind::Air);
     assert_eq!(
-        spikes::next(&w, &SpikeState::default(), 0),
+        spikes::next(&w, &fallback, 0),
         Next::Build((8, 70, 6), Role::Wall),
         "the bar dug: end stone in its place"
+    );
+}
+
+#[test]
+fn a_blast_takes_the_wall_and_a_crystal_left_gets_it_again() {
+    // Parity e03: both wall cells are air after the blast. A crystal still there is walled
+    // again before any strike.
+    let mut w = walled();
+    for c in [(8, 70, 6), (8, 71, 6)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    assert_eq!(
+        spikes::next(&w, &SpikeState::default(), 0),
+        Next::Build((8, 70, 6), Role::Wall)
     );
 }

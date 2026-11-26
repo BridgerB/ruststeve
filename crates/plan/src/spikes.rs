@@ -27,10 +27,15 @@
 //! nothing holds it: a knock-back or the dragon's wings cannot push the body off.
 //!
 //! **Cages.** Two small spikes are caged in iron bars two out from the column, at the bedrock's
-//! height to three over it: the bars are in the wall's own cells. Their thin collision lets the
-//! blast's rays through (E1), so with `bars_shield` false (the default) each wall cell's bar is
-//! dug with the pickaxe and end stone put in its place, then the strike; `bars_shield` true would
-//! count the bars as the wall.
+//! height to three over it: the bars are in the wall's own cells. Parity e03 (E6, run
+//! 45864998071, Normal, full iron) struck through the intact bars and lost 0.42, the blast's
+//! least (a bar on the ring's edge is a full-width pane facing the stand), so with `bars_shield`
+//! (the default) the bars are the wall and the strike goes through them. Turned off, each wall
+//! cell's bar is dug with the pickaxe and end stone put in its place first (the fallback).
+//!
+//! **One blast, one wall.** e03: the blast leaves both wall cells air (end stone or bars). The
+//! wall is read from the world before every strike, so a crystal still standing (a strike that
+//! missed) gets its wall again first; the crystal gone, the bot goes down.
 //!
 //! **Down** is the pillar dug back from on top of it, one cell under the feet at a time
 //! (`portal_way.rs`'s one-cell dig). No jump.
@@ -355,15 +360,19 @@ pub enum Role {
     Wall,
 }
 
-/// The next block of the stand's guard ring: a side at the feet's height that drops (open, open
-/// air under it) and is open, its ledge first when nothing holds it. `None` with the ring whole.
-pub fn guard_gap(w: &World, stand: Cell) -> Option<(Cell, Role)> {
+/// The next block of the stand's guard ring: a side at the feet's height that is open and not
+/// over the spike's own top (obsidian) nor over a recorded pillar's top (the way back from a
+/// wide spike's stand), its ledge first when its cell under is open. A ledge alone is no guard:
+/// the block at the feet's height is what a knock-back meets. `None` with the ring whole.
+pub fn guard_gap(w: &World, stand: Cell, pillars: &[PillarRec]) -> Option<(Cell, Role)> {
     let (x, y, z) = stand;
     Axis::ALL.iter().find_map(|a| {
         let (dx, dz) = a.step();
         let side = (x + dx, y, z + dz);
         let under = (x + dx, y - 1, z + dz);
-        if !open(kind(w, side)) || !open(kind(w, under)) {
+        let safe = kind(w, under) == Some(BlockKind::Obsidian)
+            || pillars.iter().any(|p| (p.x, p.z) == (side.0, side.2));
+        if !open(kind(w, side)) || safe {
             return None;
         }
         Some(if support(w, side).is_some() {
@@ -374,9 +383,9 @@ pub fn guard_gap(w: &World, stand: Cell) -> Option<(Cell, Role)> {
     })
 }
 
-/// Is the guard ring round the feet whole: no side at the feet's height drops?
-pub fn guarded(w: &World, feet: Cell) -> bool {
-    guard_gap(w, feet).is_none()
+/// Is the guard ring round the feet whole?
+pub fn guarded(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
+    guard_gap(w, feet, pillars).is_none()
 }
 
 /// The first wall cell still open, or one holding a bar when bars are no shield (dug, then a
@@ -523,15 +532,15 @@ pub enum Next {
 }
 
 /// The state the crystals keep.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct SpikeState {
     /// The spikes' geography from `config/end.toml` (E1), set by the shell; empty reads the
     /// blocks round each crystal.
     pub geography: Vec<Spike>,
-    /// Bars count as the wall. False: their thin collision lets the blast's rays through (E1,
-    /// jar 26.1.2's `getSeenPercent` over COLLIDER shapes), so a cage's wall cells are dug and
-    /// end stone put in.
+    /// Bars count as the wall (true, the default: parity e03 struck through intact bars for
+    /// 0.42, the blast's least). False is the fallback: a cage's wall cells are dug and end
+    /// stone put in.
     pub bars_shield: bool,
     /// The step the driver runs while no task does (`Plan::spikes_step`).
     pub doing: Option<Doing>,
@@ -552,6 +561,27 @@ pub struct SpikeState {
     pub stalls: u32,
     /// The last note's what and tick, so a held wait is not written every tick.
     pub last_note: Option<(String, u64)>,
+}
+
+impl Default for SpikeState {
+    fn default() -> Self {
+        Self {
+            geography: Vec::new(),
+            bars_shield: true,
+            doing: None,
+            pillars: Vec::new(),
+            refused: Vec::new(),
+            struck: None,
+            pillars_up: 0,
+            risen: 0,
+            pillars_down: 0,
+            strikes: 0,
+            gone: 0,
+            placed: 0,
+            stalls: 0,
+            last_note: None,
+        }
+    }
 }
 
 /// What the driver runs.
@@ -616,7 +646,7 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
         let p = a.plan;
         if feet == p.stand {
-            if let Some((c, role)) = guard_gap(w, feet) {
+            if let Some((c, role)) = guard_gap(w, feet, &st.pillars) {
                 return Next::Build(c, role);
             }
             if let Some(c) = wall_gap(w, &p, st.bars_shield) {
@@ -775,7 +805,7 @@ impl Plan {
         ) || up;
         if threatens(d.as_ref()) && high && body.on_ground {
             let d = d.as_ref().map(|d| (d.dist, d.phase));
-            if guarded(w, feet) || !on_pillar(w, feet, &self.spikes.pillars) {
+            if guarded(w, feet, &self.spikes.pillars) || !on_pillar(w, feet, &self.spikes.pillars) {
                 self.spikes_note(
                     tick,
                     "spikes: hold in the guard ring".to_owned(),
