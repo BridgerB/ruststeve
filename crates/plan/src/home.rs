@@ -395,8 +395,13 @@ fn picking_now(p: &Plan) -> bool {
 /// Whether `c` is a cell of the span `[x_east, x_west, feet_y, z]` or within 1 of its line at
 /// its height (its floor and the feet cells over it, one each side).
 pub fn near_span([e, wst, y, z]: [i32; 4], c: Cell) -> bool {
-    (c.2 - z).abs() <= 1 && c.0 <= e + 1 && c.0 >= wst - 1 && c.1 >= y - 2 && c.1 <= y + 1
+    // West of the span by up to JOIN_REACH (the join to the next span is built there) and down to
+    // 4 under its feet (race 45749508716 lane 2 dug its own step at (309, 34..35, 194)).
+    (c.2 - z).abs() <= 1 && c.0 <= e + 1 && c.0 >= wst - JOIN_REACH && c.1 >= y - 5 && c.1 <= y + 4
 }
+
+/// West of a span, the join to the next is built this far out: never a restock cell.
+pub const JOIN_REACH: i32 = 6;
 
 /// A walk on an old bridge goes this far at a time.
 pub const BRIDGE_LEG: i32 = 24;

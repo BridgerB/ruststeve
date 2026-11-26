@@ -1037,7 +1037,7 @@ fn a_known_span_is_never_a_restock_cell() {
         "one past its west end"
     );
     assert!(!home::near_span(span, (320, 36, 197)), "three off the line");
-    assert!(!home::near_span(span, (320, 32, 194)), "well under it");
+    assert!(!home::near_span(span, (320, 30, 194)), "well under it");
 }
 
 #[test]
@@ -1073,4 +1073,13 @@ fn a_lava_fall_beside_the_portal_is_sealed_from_the_top() {
         "{:?}",
         notes(&p)
     );
+}
+
+#[test]
+fn the_join_west_of_a_span_is_never_a_restock_cell() {
+    // Race 45749508716 lane 2 dug its own step at (309, 34, 194) and (310, 34, 194).
+    let span = [400, 311, 37, 194];
+    assert!(home::near_span(span, (309, 34, 194)));
+    assert!(home::near_span(span, (310, 34, 194)));
+    assert!(home::near_span(span, (308, 39, 194)));
 }
