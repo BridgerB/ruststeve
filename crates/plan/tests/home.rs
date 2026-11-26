@@ -1375,3 +1375,23 @@ fn a_guard_the_server_never_answers_is_given_up() {
         p.ender.home.guards
     );
 }
+
+#[test]
+fn no_guard_while_a_restock_is_in_hand() {
+    // Race 45764179359: the guard filled the cells the restock dug, filler flat for 4,000 ticks.
+    let mut w = span_over_lava();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(None);
+    p.ender.home.axis = Some((-1, 0));
+    p.ender.home.last_feet = Some((8, 64, 8));
+    let mut h = plan::heading::Heading::new((-1, 0), (8, 64, 8), 0, "test".to_owned());
+    h.restock = Some(plan::heading::Restock {
+        to: 152,
+        ..plan::heading::Restock::default()
+    });
+    p.headed = Some(h);
+    run(&mut p, &mut w, 100, 3);
+    assert_eq!(p.ender.home.guards, 0, "{:?}", notes(&p));
+}

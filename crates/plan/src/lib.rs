@@ -2113,8 +2113,9 @@ impl Plan {
             )
             && (crate::home::rail_wanted(w).is_some()
                 // >>> Q8
-                || crate::home::guard_next(w, self.ender.home.axis, &self.ender.home.guard_refused)
-                    .is_some())
+                || (crate::home::guard_next(w, self.ender.home.axis, &self.ender.home.guard_refused)
+                    .is_some()
+                    && self.headed.as_ref().is_none_or(|h| h.restock.is_none())))
                 // <<< Q8
             && craft::count(w, data::ItemKind::Netherrack)
                 + craft::count(w, data::ItemKind::Basalt)

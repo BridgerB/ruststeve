@@ -1198,6 +1198,11 @@ impl Plan {
     /// before the next step, mob or no mob. Noted and counted; `None` with nothing to guard or no filler.
     fn home_guard(&mut self, w: &World, tick: u64) -> Option<Task> {
         let axis = self.home_axis(w);
+        // Never while a restock is in hand: its digs open sides the guard would fill again (race
+        // 45764179359: six lanes dug 58 to 74 cells by the join, filler flat at 47 to 59).
+        if self.headed.as_ref().is_some_and(|h| h.restock.is_some()) {
+            return None;
+        }
         let (at, click, face) = guard_next(w, axis, &self.ender.home.guard_refused)?;
         // The progress invariant: a guard clicked `GUARD_TRIES` times and still open is given up
         // (race 45760537530: one guard clicked 221 to 411 times, filler unchanged, blazes near).
