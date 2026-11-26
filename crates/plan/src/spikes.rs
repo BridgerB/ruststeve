@@ -128,6 +128,8 @@ pub const SWING_EVERY: u64 = 10;
 pub const STRIKE_TICKS: u64 = 200;
 /// Ticks an approach that failed (a walk with no route, a stalled pillar) is refused.
 pub const REFUSE_TICKS: u64 = 1200;
+/// Ticks after a blow inside the box in which the bot leaves it for the way down.
+pub const BOX_BLOW_TICKS: u64 = 200;
 /// Ticks a repeated note waits before it is written again.
 pub const NOTE_EVERY: u64 = 200;
 /// The dragon's phase is its metadata index 16, an INT (`EnderDragon.DATA_PHASE`, after the
@@ -623,6 +625,8 @@ pub struct SpikeState {
     pub top_placed: u32,
     pub closed_at: Option<Cell>,
     pub last_health: Option<f32>,
+    /// When a blow last landed inside the box.
+    pub box_blow_at: Option<u64>,
 }
 
 /// A fall caught with the water bucket (parity e06, E6: a 21-block fall onto water poured while
@@ -660,6 +664,7 @@ impl Default for SpikeState {
             top_placed: 0,
             closed_at: None,
             last_health: None,
+            box_blow_at: None,
         }
     }
 }
@@ -924,7 +929,15 @@ impl Plan {
             .any(|p| (p.x, p.z) == (feet.0, feet.2) && feet.1 > p.base);
         // Out of the box (down, or out toward the pillar's top) only with the dragon far or
         // perched: inside it a blow pushes nothing out; on the way down it can.
+        // A blow inside the box within `BOX_BLOW_TICKS` says the box is no shelter from this
+        // dragon: down at once (race 45880674581: the wings and head struck through an open-topped
+        // box, 5, 5 and 10).
+        let struck = self
+            .spikes
+            .box_blow_at
+            .is_some_and(|t| tick.saturating_sub(t) <= BOX_BLOW_TICKS);
         if boxed(w, feet)
+            && !struck
             && matches!(n, Next::DigDown(_) | Next::Open(_) | Next::Walk { .. })
             && let Some(why) = dragon_refusal(d.as_ref())
         {
@@ -1311,6 +1324,9 @@ impl Plan {
                         self.spikes.struck
                     ),
                 );
+            }
+            if self.spikes.last_health.is_some_and(|l| h + 0.01 < l) && boxed(w, feet) {
+                self.spikes.box_blow_at = Some(tick);
             }
             self.spikes.last_health = Some(h);
         }
