@@ -2109,7 +2109,8 @@ impl Plan {
         if home_trip
             && matches!(
                 self.task,
-                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+                // Not a tunnel's stairs (Q8: race 45779137282, the guard filled its own stair).
+                Task::Explore(_) | Task::ToLog(_)
             )
             && (crate::home::rail_wanted(w).is_some()
                 // >>> Q8
@@ -2672,6 +2673,8 @@ impl Plan {
                     .map(|(k, n)| {
                         if k == data::ItemKind::Basalt {
                             (k, crate::home::BASALT_KEPT)
+                        } else if k == data::ItemKind::Netherrack {
+                            (k, crate::home::NETHERRACK_KEPT)
                         } else {
                             (k, n)
                         }
