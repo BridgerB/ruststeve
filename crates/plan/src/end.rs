@@ -853,11 +853,20 @@ impl Plan {
                     format!("from {feet:?}; onto the ground before the hand-off"),
                 );
                 self.end.exit_up = true;
-                self.end.work = Some(Work::new(
-                    WorkKind::Exit,
-                    steps.into_iter().map(Op::Step).collect(),
-                    tick,
-                ));
+                // Each step's cells dug again first if shut (the bot's own blocks: a pocket laid in
+                // the stair), then the step.
+                let ops = steps
+                    .into_iter()
+                    .flat_map(|c| {
+                        [
+                            Op::Dig((c.0 - door.0, c.1 + 1, c.2 - door.1)),
+                            Op::Dig((c.0, c.1 + 1, c.2)),
+                            Op::Dig(c),
+                            Op::Step(c),
+                        ]
+                    })
+                    .collect();
+                self.end.work = Some(Work::new(WorkKind::Exit, ops, tick));
                 return None;
             }
             // At the stair's top with no sky over it (the ground higher there): stairs up on.
@@ -1473,8 +1482,12 @@ impl Plan {
                 }
             }
             Op::Dig(c) => {
+                // Open already: skipped in the same tick (a stair's cells are dug only when shut).
                 if work.dig.is_none() && open(w, c) {
-                    return next(work);
+                    work.ops.remove(0);
+                    work.op_at = tick;
+                    work.done += 1;
+                    return self.work_tick(w, tick, work);
                 }
                 let d = work.dig.get_or_insert_with(|| Dig::new(w, c, tick));
                 let (ctl, act, status) = d.step(w, tick);
@@ -1821,7 +1834,14 @@ impl Plan {
     /// In the End, covered (`covered`) with an angry enderman near: no pocket is sealed, the work
     /// goes on; noted every `COVERED_NOTE_EVERY` ticks with the count.
     pub(crate) fn end_covered(&mut self, w: &World, tick: u64) -> bool {
-        if !in_end(w) || crate::endermen::angry(w).is_none() || !covered(w) {
+        if !in_end(w) || crate::endermen::angry(w).is_none() {
+            return false;
+        }
+        // In or on the bunker, its stair too: it is the shelter, and a pocket sealed there shuts
+        // its own door (race 45898928805 lanes 0 and 1: pocket blocks at (12, 60, 0) and
+        // (13, 61, 0), the stair's steps, laid while the bunker opened; every way out refused).
+        let at_bunker = self.at_bunker(w);
+        if !at_bunker && !covered(w) {
             return false;
         }
         self.end.covered_ticks += 1;
@@ -1841,6 +1861,19 @@ impl Plan {
             );
         }
         true
+    }
+
+    /// The feet in the bunker's column (its cell to its roof) or on its stair.
+    pub fn at_bunker(&self, w: &World) -> bool {
+        let (Some([x, y, z]), Some(door), Some(body)) = (self.bunker, self.end.door, w.body) else {
+            return false;
+        };
+        let b = (x, y, z);
+        let f = path::stand_cell(w, body.pos);
+        let (_, _, door_cells) = bunker_cells(b, door);
+        (f.0 == b.0 && f.2 == b.2 && (b.1..=b.1 + 3).contains(&f.1))
+            || door_cells.contains(&f)
+            || door_cells.contains(&(f.0, f.1 - 1, f.2))
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes
