@@ -1810,3 +1810,14 @@ fn under_the_danger_line_in_rock_and_quiet_the_trip_goes_on_by_covered_tunnel() 
     run(&mut p2, &mut w2, 100, 1);
     assert_eq!(p2.ender.home.danger_tunnels, 0);
 }
+
+#[test]
+fn with_no_pickaxe_the_shaft_digs_stone_and_deepslate_by_hand() {
+    // The frontier bot (race 45783611857 lane 0) stands in the overworld portal with no pickaxe.
+    use plan::arrival::{MAX_BREAK, MAX_BREAK_HAND, max_break};
+    assert_eq!(max_break(&[ItemKind::Netherrack]), MAX_BREAK_HAND);
+    assert_eq!(max_break(&[ItemKind::StonePickaxe]), MAX_BREAK);
+    let by_hand = |b: BlockKind| data::dig::break_ticks(b, None, false, true);
+    assert!(by_hand(BlockKind::Stone).is_some_and(|t| t <= MAX_BREAK_HAND));
+    assert!(by_hand(BlockKind::Deepslate).is_some_and(|t| t <= MAX_BREAK_HAND));
+}
