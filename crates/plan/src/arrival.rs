@@ -518,9 +518,16 @@ impl Plan {
             return None;
         }
         self.ender.home.arrival.table_out = false;
+        // >>> Q8: never the floor under the body (F3, race 45800967549: the table placed under the
+        // shaft's cell and dug back left the shaft over a hole; the centring, sneaking, could not
+        // step over it, no rise for 900 ticks in four lanes).
+        let feet = crate::path::stand_cell(w, body.pos);
+        let under_body =
+            |c: Cell| c.1 == feet.1 - 1 && (c.0 - feet.0).abs() <= 1 && (c.2 - feet.2).abs() <= 1;
+        // <<< Q8
         let c = self
             .near_block(w, BlockKind::CraftingTable, tick)
-            .filter(|c| d(*c) <= TABLE_REACH)?;
+            .filter(|c| d(*c) <= TABLE_REACH && !under_body(*c))?;
         self.ender.home.arrival.tables_taken += 1;
         self.note(
             tick,
