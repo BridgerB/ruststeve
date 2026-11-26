@@ -167,7 +167,9 @@ impl EndStage {
         }
         s.island(layout.island_radius, layout.island_top, layout.island_depth);
         if layout.fountain {
-            s.fountain(layout.island_top + 1);
+            // Flush with the island's top, as the jar lays it (config/end.toml `[fountain]`:
+            // the bowl's floor y 62, the end stone top at (0, 0) 62).
+            s.fountain(layout.island_top);
         }
         for spike in &layout.spikes {
             s.spike(spike);

@@ -296,7 +296,7 @@ fn the_perched_dragon_is_struck_dead_and_the_credits_answered() {
     stage.spawn((0, top + 1, 20));
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(7);
     kit(&mut sim, 192);
-    sim.summon_dragon(top + 1, 0.0);
+    sim.summon_dragon(top, 0.0);
     let r = drive(sim, 16000, |p| {
         p.end.arrived = true;
         p.end.bridged = true;
