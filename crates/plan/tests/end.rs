@@ -360,3 +360,35 @@ fn in_a_roofed_tunnel_an_angry_enderman_seals_no_pocket() {
     }
     assert!(!end::covered(&w));
 }
+
+#[test]
+fn up_a_pillar_with_no_crystal_left_the_crystals_task_brings_the_bot_down() {
+    // E6's closed loop: the last crystal gone, the bot stayed 18 up on its pillar.
+    let mut w = world(4, 0..=7, [20.5, 74.0, 0.5]);
+    for y in 64..=73 {
+        set(&mut w, (20, y, 0), BlockKind::EndStone);
+    }
+    for c in [(12, 61, 0), (12, 62, 0)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.spikes.pillars.push(plan::spikes::PillarRec {
+        x: 20,
+        z: 0,
+        base: 63,
+    });
+    for _ in 0..3 {
+        p.step(&w);
+    }
+    assert!(
+        noted(&p, "end: up a pillar at (20, 74, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: no walk to the bunker"), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
+}

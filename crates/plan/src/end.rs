@@ -394,6 +394,9 @@ pub struct EndState {
     pub covered_ticks: u64,
     #[serde(default)]
     pub covered_noted: Option<u64>,
+    /// Up a pillar handed to the crystals' task for the way down, noted.
+    #[serde(default)]
+    pub down_noted: bool,
 }
 
 /// Where a work stands after a tick.
@@ -536,6 +539,28 @@ impl Plan {
         let (_, roof, door_cells) = bunker_cells(b, door);
         let inside = feet == b;
         let sealed = !open(w, roof) && !open(w, door_cells[0]);
+        // Up a pillar or a spike, or a pillar of E4's still standing: the crystals' task brings
+        // the bot down first, crystals left or not (E6's closed loop: the last crystal gone, the
+        // bot stayed 18 up and asked for walks to the bunker 24 times).
+        let up = crate::spikes::on_pillar(w, feet, &self.spikes.pillars)
+            || crate::spikes::on_spike(w, feet)
+            || !self.spikes.pillars.is_empty();
+        if up && let Some(t) = self.end_spikes(w, tick) {
+            if !self.end.down_noted {
+                self.end.down_noted = true;
+                self.note(
+                    tick,
+                    format!("end: up a pillar at {feet:?}, the crystals' task first"),
+                    format!(
+                        "{} crystals alive, {} pillars standing",
+                        crystals_alive(w),
+                        self.spikes.pillars.len()
+                    ),
+                );
+            }
+            return Some(t);
+        }
+        self.end.down_noted = false;
         // 3. Retreat, eat and heal.
         let health = w.player.health.unwrap_or(20.0);
         let food = w.player.food.unwrap_or(20);
