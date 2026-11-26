@@ -58,7 +58,8 @@ struct Run {
     plan: Plan,
     run: bot::lockstep::Run,
     ledger: Vec<String>,
-    /// The lowest the feet went while the planner ran.
+    /// The lowest the feet went before the bot was on the island (the bridge's span: the stock
+    /// tunnels after it go under the platform's height).
     low: f64,
 }
 
@@ -102,7 +103,9 @@ fn drive(sim: Sim, ticks: u64, prime: impl FnOnce(&mut Plan)) -> Run {
     let mut ledger = Vec::new();
     let mut low = f64::MAX;
     let run = bot::lockstep::run_acting(sim, "rs-end", 7, ticks, 20, |w, _| {
-        if let Some(b) = w.body {
+        if let Some(b) = w.body
+            && !plan.end.bridged
+        {
             low = low.min(b.pos[1]);
         }
         let seen = plan.event_count;
