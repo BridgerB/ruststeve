@@ -284,6 +284,25 @@ pub fn skeleton_sees(w: &World) -> bool {
     !eyes.is_empty() && crate::cover::seen_body(w, &eyes, body.pos)
 }
 
+/// A ghast shoots from farther than the cover rule's 48 and from outside the ticking chunks
+/// (race 45742350492 lane 0: two fireballs from 46 and 56, 19.8 to 15.6, no cover): on the way
+/// home one within `GHAST_COVER` with the bot in sight, ticking or not, sends it to cover.
+pub const GHAST_COVER: f64 = 72.0;
+
+pub fn ghast_sees(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let eyes: Vec<[f64; 3]> = w
+        .entities
+        .values()
+        .filter(|e| !e.dead && e.kind == data::EntityKind::Ghast)
+        .filter(|e| dist(e.pos, body.pos) <= GHAST_COVER)
+        .map(|e| [e.pos[0], e.pos[1] + 2.0, e.pos[2]])
+        .collect();
+    !eyes.is_empty() && crate::cover::seen_body(w, &eyes, body.pos)
+}
+
 /// Air under the feet, or under a cell beside them: a ledge, where no pocket is sealed.
 pub fn on_ledge(w: &World) -> bool {
     let Some(body) = w.body else {
@@ -884,8 +903,8 @@ impl Plan {
         }
         // A blaze or ghast in sight on the trip: cover at any health, held until it has been out
         // of sight SHOOTER_CLEAR_TICKS; never a fight (the defence ignores them in Home).
-        let seen =
-            endermen::seen_by_far_shooter(w) || (self.ender.home.top_up_over && skeleton_sees(w));
+        let seen = endermen::seen_by_far_shooter(w)
+            || (self.ender.home.top_up_over && (skeleton_sees(w) || ghast_sees(w)));
         if seen && self.ender.home.top_up_over {
             self.ender.home.shooter_seen_at = Some(tick);
         }
