@@ -902,7 +902,7 @@ fn eye(body: &physics::Body) -> [f64; 3] {
 
 impl Plan {
     // >>> E4 (issue 20f)
-    fn spikes_note(&mut self, tick: u64, what: String, why: String) {
+    pub(crate) fn spikes_note(&mut self, tick: u64, what: String, why: String) {
         if let Some((last, at)) = &self.spikes.last_note
             && *last == what
             && tick.saturating_sub(*at) < NOTE_EVERY
@@ -911,6 +911,24 @@ impl Plan {
         }
         self.spikes.last_note = Some((what.clone(), tick));
         self.note(tick, what, why);
+    }
+
+    /// Is the bot up high on the crystals' work in the End: on a pillar it put up, on a spike's
+    /// top, or climbing or stepping in its column?
+    pub fn spikes_up_high(&self, w: &World) -> bool {
+        if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
+            return false;
+        }
+        let Some(body) = w.body else {
+            return false;
+        };
+        let feet = path::stand_cell(w, body.pos);
+        on_pillar(w, feet, &self.spikes.pillars)
+            || on_spike(w, feet)
+            || matches!(
+                self.spikes.doing,
+                Some(Doing::Climb(_) | Doing::Step { .. } | Doing::Build(_) | Doing::Strike(_))
+            )
     }
 
     fn spikes_danger(&self) -> f32 {

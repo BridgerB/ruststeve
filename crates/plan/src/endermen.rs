@@ -810,6 +810,20 @@ impl Plan {
             return None;
         }
         // <<< E3
+        // >>> E4 (issue 20f): up a pillar or a spike the crystals' work goes on (the strike, or the
+        // way down): no enderman reaches a one-wide column's top, and a pocket sealed there held
+        // the bot still for the charging dragon (race 45890149072 lane 0: struck off at y 80).
+        if self.spikes_up_high(w) {
+            if let Some(id) = angry(w) {
+                self.spikes_note(
+                    tick,
+                    "spikes: up high, no enderman pocket".to_owned(),
+                    format!("enderman {id} provoked; the crystals' work goes on"),
+                );
+            }
+            return None;
+        }
+        // <<< E4
         // >>> Q8 (issue 19): on the way home a provoked enderman's hold is capped at
         // `home::ENDER_HOLD_MAX`, then that enderman is left (Q9's race 45764756002 lane 2: the
         // top-up ended on its clock in the tick one was provoked, and the bot held a 0-block pocket

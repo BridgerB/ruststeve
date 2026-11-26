@@ -883,3 +883,53 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
         assert_eq!(n, 1, "a fall from {h}");
     }
 }
+
+#[test]
+fn up_a_pillar_a_provoked_enderman_gets_no_pocket() {
+    // Race 45890149072 lane 0: a sealed pocket on the pillar at y 80 held the bot still for the
+    // charging dragon. No enderman reaches a one-wide column's top: the crystals' work goes on.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 60,
+        uuid: [3; 16],
+        kind: EntityKind::Enderman.id(),
+        x: 14.5,
+        y: 64.0,
+        z: 0.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 60,
+        entries: vec![(17, MetaValue::Bool(true))],
+    }));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert!(p.spikes_up_high(&w));
+    for t in 100..110 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let n = notes(&p);
+    assert!(
+        n.iter().any(|n| n == "spikes: up high, no enderman pocket"),
+        "{n:?}"
+    );
+    assert!(
+        !n.iter().any(|n| n.starts_with("provoked enderman")),
+        "{n:?}"
+    );
+    // On the ground the enderman rule answers as before.
+    let mut ground = w.clone();
+    at(&mut ground, [12.5, 64.0, 12.5]);
+    let fresh = Plan::new(Aim::Race);
+    assert!(!fresh.spikes_up_high(&ground));
+}

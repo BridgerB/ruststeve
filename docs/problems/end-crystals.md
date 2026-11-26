@@ -139,3 +139,4 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 ### Wall 8: the clutch never ran while another row held the planner (fixed)
 - **What happened** (lane 0, ticks 1,240 to 1,580): provoked endermen put the planner "into a sealed pocket" (`ender_threat`, ahead of `spikes_step`) on the pillar at y 80. The charging dragon struck it (5) and knocked it off. It fell 22 with the water bucket held and no clutch ("death.fell.assist").
 - **The fix:** `Plan::spikes_clutch` has its own call site in `step_inner`, ahead of every row (E5's breath step included), fenced E4.
+- **And its cause:** up a pillar or a spike, `ender_threat` is held off by a fenced E4 guard (`Plan::spikes_up_high`, noted "spikes: up high, no enderman pocket"). No enderman reaches a one-wide column's top, and the crystals' work goes on: the strike, or the way down. Unit test `up_a_pillar_a_provoked_enderman_gets_no_pocket`.
