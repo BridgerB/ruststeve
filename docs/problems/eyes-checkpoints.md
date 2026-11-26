@@ -23,6 +23,7 @@ The resume stands at about (311, 36, 194) on the old bridge's east span. A lane 
 | 45771663969 | 5ea5a66 | frontier (pearls_12, the forest) | 12000 | 24000 | 2 | done; at 16,800 lane 0 at (310, 34, 195) "no far walk" (the join), lane 1 at (428, 36, 154) restocking, hp 12.6 |
 | 45774326055 | 5ea5a66 | at-5000 of 45771610530 lane 0 (44, 71, 106) | 7600 | 36000 | 6 | all 6 by hand to (22, 39, -16), 4 from the portal, then idle: the tunnel to the standing cell (22, 35, -18) "0 steps (ends within reach at (22, 39, -16))", "approach found no way" x101; no pickaxe from ~10,500 (175 uses on the last leg) |
 | 45777976793 | 387478d | at-5000 of 45771610530 lane 0 (44, 71, 106) | 8000 | 30000 | 6 | 5 of 6 idle at (22, 69, 57) on soul sand from ~3,560: "dig in at (22, 68, 57)" failed Gone x336 (feet y 69.875 floored to 69: the block stood on is at 69, the cell under was already dug); lane 1 at (20, 55, -7) with 0 pickaxe uses |
+| 45783611857 | 7a51121 | at-5000 of 45771610530 lane 0 (44, 71, 106): the door test | 9000 | 30000 | 6 | **6 of 6 reached `overworld`** (snapshot-overworld-45783611857-race-45783611857-lane-0 … 5), by hand past the last pickaxe at 4,020; then idle in the overworld portal (125, -52, -108), "every heading refused", 0 pickaxe uses, hp 15.6, food 7 |
 
 ## Resume points (real snapshots past the join, from earlier races' case files)
 | snapshot | where | health | note |
