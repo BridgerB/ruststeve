@@ -392,3 +392,34 @@ fn up_a_pillar_with_no_crystal_left_the_crystals_task_brings_the_bot_down() {
     assert!(!noted(&p, "end: no walk to the bunker"), "{:?}", notes(&p));
     assert!(!noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
 }
+
+#[test]
+fn hurt_the_walk_to_the_bunker_waits_while_a_cloud_lies_on_the_way() {
+    // The bunker at (12, 61, 0), its shaft open to the surface; the bot 18 east at 10 health.
+    let mut w = world(4, 0..=7, [30.5, 64.0, 0.5]);
+    for y in 61..=63 {
+        set(&mut w, (12, y, 0), BlockKind::Air);
+    }
+    w.player.health = Some(10.0);
+    with_entity(&mut w, 11, EntityKind::AreaEffectCloud, [21.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&11) {
+        e.metadata.insert(8, MetaValue::Float(3.0));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.step(&w);
+    assert!(noted(&p, "end: retreat to the bunker"), "{:?}", notes(&p));
+    assert!(
+        noted(&p, "end: the way to the bunker waits for a cloud"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.task.name(), "idle");
+    // The cloud gone, the walk begins.
+    w.entities.remove(&11);
+    p.retry_at = 0;
+    p.step(&w);
+    assert!(noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
+}
