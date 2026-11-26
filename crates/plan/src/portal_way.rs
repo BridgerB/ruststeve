@@ -398,6 +398,16 @@ impl Plan {
         }
         let floor = (feet.0, feet.1 - 1, feet.2);
         let under = (feet.0, feet.1 - 2, feet.2);
+        // >>> Q8: never a dig at an open cell (Q10's race 45777976793: "Gone" 336 times).
+        if open(floor) {
+            self.note(
+                tick,
+                format!("portal way: no dig in at {floor:?}"),
+                "the cell is open already; the tunnel from where it stands".to_owned(),
+            );
+            return None;
+        }
+        // <<< Q8
         if let Some(why) = crate::stairs::refusal(w, &[floor], under) {
             // A dig-in stopped short counts as done here: no new one in this column.
             if let Some(s0) = digging {

@@ -415,6 +415,9 @@ pub const ENDER_HOLD_MAX: u64 = 1200;
 /// Basalt kept on the trip when the pack fills (the guard's and the bridges' filler with the
 /// netherrack's 128; the deltas' restock digs it).
 pub const BASALT_KEPT: i32 = 64;
+/// Netherrack kept on the trip (three stacks: the spans' guard restock wants up to 152; Q10's race
+/// 45777976793 dropped 36 at 128 and walked back over them four times).
+pub const NETHERRACK_KEPT: i32 = 192;
 /// Wood by hand (`Plan::home_wood`; Q10's race 45768707240 lane 2 ran out of pickaxes 17 off the
 /// portal): under this many pickaxe uses, logs or stems within `WOOD_REACH` are gathered by hand
 /// to `WOOD_GATHER`, at most `WOOD_WALKS` walks a trip; within `WOOD_LEG_FROM` of the portal the

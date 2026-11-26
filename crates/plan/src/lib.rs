@@ -2672,6 +2672,8 @@ impl Plan {
                     .map(|(k, n)| {
                         if k == data::ItemKind::Basalt {
                             (k, crate::home::BASALT_KEPT)
+                        } else if k == data::ItemKind::Netherrack {
+                            (k, crate::home::NETHERRACK_KEPT)
                         } else {
                             (k, n)
                         }

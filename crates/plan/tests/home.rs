@@ -1712,3 +1712,17 @@ fn a_tunnel_to_a_standing_cell_ends_with_the_feet_in_it() {
     assert!(r.cells.len() > 1, "{:?}", r.cells);
     assert_eq!(r.cells.last(), Some(&(8, 48, 10)), "{:?}", r.cells);
 }
+
+#[test]
+fn feet_at_a_soul_sand_top_over_a_dug_cell_stand_in_the_cell_over_it() {
+    // Q10's race 45777976793: feet 69.875 at (22, 69, 57), the centre's cell dug, held by the
+    // soul sand beside; the dig-in aimed at (22, 68, 57), air, "Gone" 336 times.
+    let w = nether();
+    assert_eq!(
+        plan::path::stand_cell(&w, [22.5, 69.875, 57.5]),
+        (22, 70, 57)
+    );
+    // Off soul sand's top nothing changes.
+    assert_eq!(plan::path::stand_cell(&w, [22.5, 69.9, 57.5]), (22, 69, 57));
+    assert_eq!(plan::path::stand_cell(&w, [22.5, 70.0, 57.5]), (22, 70, 57));
+}
