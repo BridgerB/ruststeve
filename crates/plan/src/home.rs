@@ -401,6 +401,9 @@ pub const STEP_UPS: u32 = 16;
 /// On the way home a pocket from one provoked enderman is held at most this long (a minute, as
 /// the cube pocket's `CUBE_HOLD_MAX`), then it is left.
 pub const ENDER_HOLD_MAX: u64 = 1200;
+/// Basalt kept on the trip when the pack fills (the guard's and the bridges' filler with the
+/// netherrack's 128; the deltas' restock digs it).
+pub const BASALT_KEPT: i32 = 64;
 
 /// The next block of the guard (`Plan::home_guard`): for each side across `axis`, an open
 /// feet-level cell (no floor under it, or only a rail over a drop) is guarded. Its block is clicked onto a
@@ -1392,6 +1395,9 @@ impl Plan {
                 return Some(t);
             }
             self.ender.home.guard_restock_done = true;
+            // It went with what it had: nothing owed from it (race 45768618919: owed restocks ran
+            // again and again on the join's island).
+            self.ender.home.filler_owed = None;
         }
         // <<< Q8
         let on = r.bridges.iter().position(|[e, wst, y, z]| {
@@ -1404,7 +1410,10 @@ impl Plan {
         // Beside a span but not on it (race 45733362772's bots stood on their own bridge at y 36
         // a few blocks south of it): onto it first, at the feet's x.
         let Some(on) = on else {
-            let [e, wst, y, z] = *r
+            // >>> Q8: the join west of a span (up to `JOIN_REACH`) counts as beside it, and from the
+            // join the next span's east end is the target (race 45768618919: four lanes stood on the
+            // join's island at x 309 and 310, in no span's reach, the heading bridging the sea).
+            let (i, [e, wst, y, z]) = r
                 .bridges
                 .iter()
                 .enumerate()
@@ -1412,11 +1421,15 @@ impl Plan {
                     !out.contains(i)
                         && (feet.2 - z).abs() <= BRIDGE_NEAR
                         && feet.0 <= *e + 1
-                        && feet.0 >= *wst
+                        && feet.0 >= *wst - JOIN_REACH
                         && (feet.1 - y).abs() <= BRIDGE_BELOW
-                })?
-                .1;
-            let target = (feet.0.clamp(wst, e), y, z);
+                })
+                .map(|(i, s)| (i, *s))?;
+            let target = match r.bridges.get(i + 1) {
+                Some([e2, _, y2, z2]) if feet.0 < wst => (*e2, *y2, *z2),
+                Some(_) | None => (feet.0.clamp(wst, e), y, z),
+            };
+            // <<< Q8
             let mut walk = Walk::new(
                 target,
                 Goal::Near {

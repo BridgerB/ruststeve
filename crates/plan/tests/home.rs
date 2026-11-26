@@ -1466,3 +1466,71 @@ fn a_provoked_enderman_on_the_way_home_is_held_from_at_most_a_minute() {
     // Then the trip: no new hold from it.
     assert!(noted(&p, "home: the trip begun"), "{:?}", notes(&p));
 }
+
+#[test]
+fn a_full_pack_on_the_way_home_frees_a_slot_and_drops_the_nether_junk() {
+    // Q11's race 45766983995: 448 netherrack and 50 soul soil, 0 main slots free, every wooden
+    // pickaxe craft failed StaleWindow.
+    let mut w = nether();
+    kit(&mut w);
+    for s in 9..=35 {
+        w.inventory.slots.insert(s, (ItemKind::Netherrack, 64));
+    }
+    w.inventory.slots.insert(39, (ItemKind::SoulSoil, 50));
+    for s in 40..=44 {
+        w.inventory.slots.insert(s, (ItemKind::Netherrack, 64));
+    }
+    assert_eq!(plan::base::free_slots(&w), 0);
+    let (slot, kind) = plan::base::home_free_slot(&w).unwrap_or_else(|| panic!("a slot"));
+    assert_eq!(kind, ItemKind::Netherrack, "the kind held most");
+    assert!((9..=44).contains(&slot));
+    // The trip drops the leftovers: soul soil goes (keep 0), netherrack down to its 128.
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(None);
+    let mut dropped = Vec::new();
+    for t in 100..140 {
+        w.ticks = t;
+        p.step(&w);
+        for a in p.take_acts() {
+            if let world::Act::Click { slot, mode: 4, .. } = a {
+                dropped.push(w.inventory.slots.get(&slot).map(|(k, _)| *k));
+                w.inventory.slots.remove(&slot);
+            }
+        }
+    }
+    assert!(!dropped.is_empty(), "{:?}", notes(&p));
+    assert!(plan::base::free_slots(&w) > 0);
+}
+
+#[test]
+fn on_the_join_between_spans_the_next_span_is_the_target() {
+    // Race 45768618919: four lanes stood on the join's island at x 309 and 310, in no span's
+    // reach, the heading bridging the sea instead.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 11, 64, 8], [7, 1, 68, 8]];
+    goals.home.way = vec![[-200, 8]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.body = w.body.map(|b| physics::Body {
+        pos: [9.5, 64.0, 12.5],
+        ..b
+    });
+    w.player.pos = Some([9.5, 64.0, 12.5]);
+    let mut p = tripper(Some(t));
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.contains("old bridge at (7, 68, 8)")),
+        "{:?}",
+        notes(&p)
+    );
+}

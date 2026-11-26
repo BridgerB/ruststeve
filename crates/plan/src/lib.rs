@@ -2624,6 +2624,30 @@ impl Plan {
             junk.extend(self.fortress_rules().junk_kinds());
         }
         // <<< Q11
+        // >>> Q8 (issue 19): the same leftovers on the whole trip home in the Nether, the top-up over
+        // (the coordinator, 2026-11-26: Q11's race 45766983995 filled every pack before its
+        // tunnel), basalt kept to 64 for the guard and the bridges (the deltas' restock digs it).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.top_up_over
+            && !self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(
+                self.fortress_rules()
+                    .junk_kinds()
+                    .into_iter()
+                    .map(|(k, n)| {
+                        if k == data::ItemKind::Basalt {
+                            (k, crate::home::BASALT_KEPT)
+                        } else {
+                            (k, n)
+                        }
+                    }),
+            );
+        }
+        // <<< Q8
         // A kind that came back after its drop is held back (`junk_watch`, `junk_now`).
         self.junk_watch(w, tick);
         let walking = matches!(self.task, Task::Explore(_));
