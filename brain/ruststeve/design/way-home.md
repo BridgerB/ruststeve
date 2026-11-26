@@ -6,7 +6,7 @@ tags: [plan, home, portal, nether, overworld, eyes]
 aliases: [EnderPhase::Home, home_task, home_race_task, home_done, portal_far, HomeRules, HomeState, HOME_STEPS, CLIMB_STEPS, way home, the way home, "[home]"]
 status: draft
 lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@b8dc00e
+verifiedAgainst: ruststeve@62ea711
 sourceRefs:
   - "ruststeve:crates/plan/src/home.rs#pub fn portal_far(w: &World, dim: &str, at: [f64; 3], chunks: i32) -> Option<Cell> {"
   - "ruststeve:crates/plan/src/home.rs#pub(crate) fn home_race_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
@@ -15,6 +15,7 @@ sourceRefs:
   - "ruststeve:config/goals.toml#top_up_ticks = 6000"
   - "ruststeve:crates/plan/tests/home.rs#fn the_far_lookup_finds_a_portal_past_the_loaded_chunks() {"
   - "ruststeve:crates/plan/src/portal_way.rs#pub fn cut("
+  - "ruststeve:crates/plan/src/fortress_way.rs#pub fn body_in_cell(w: &World, c: Cell) -> bool {"
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[pearl-hunt]]"
@@ -32,6 +33,7 @@ Issue 19d (`docs/problems/eyes-home.md`). Eyes do not fly in the Nether and no p
 - `crates/plan/src/pearls.rs`: `pearl_rules` reads `[home] pearls_wanted` in Home; `hunting` stands down once the top-up is over.
 - `crates/plan/tests/home.rs`; `Enter`'s done check's test in `home.rs`.
 - `crates/plan/src/portal_way.rs` (agent Q6, `docs/problems/eyes-portal.md`): the last leg, `WayRules` (`[portal_way]`), `WayIn` (`HomeState::way_in`), `cut`, `Plan::portal_way`; `crates/plan/tests/portal_way.rs`.
+- `crates/plan/src/fortress_way.rs` (agent Q11, `docs/problems/eyes-fortress.md`): the fortress stretch from the blaze spawner's detour to the last leg, `FortressState` (`HomeState::fortress`), `body_in_cell`, `home_way_steers`, `Plan::fortress_way`; `crates/plan/tests/fortress_way.rs`.
 
 ## How it works
 - **Begun** (`home_begin`) under `Aim::Race`: in the Nether with 12 pearls and eyes held (the `[pearls]` count), from any earlier phase (a resumed bot has none); or in the overworld at stage `pearls_12` or past it (the top-up, the kit and the trip behind it). Note "home: 12 pearls held, on to the way home" or "home: resumed in the overworld".
@@ -47,6 +49,7 @@ Issue 19d (`docs/problems/eyes-home.md`). Eyes do not fly in the Nether and no p
 - **The overworld**: stairs up in rock (`stairs_to_surface`) to the open sky, never the caves (overworld-leg wall 1): the climb's stairs are dry (water beside a cut cell refused) and in rock (`Stairs::rock`, the climb's first cell: past `ROCK_FROM` 4 on the plane from it, a cell to cut that is already open is a cave and refused, "cave at", the heading turned; the stairs' end note counts "turned from a cave ahead"); stone pickaxes from the stairs' cobblestone when the stone uses fall under `climb_pick_uses` (`CLIMB_STEPS`: a table placed, then pickaxes to the base's 100 uses), at most `pick_runs`. On the surface: a hut each night (`hut_step`), and in it the night's cook (`home_cook`: with raw meat held and the fuel for all of it, `fuel_ticks_held` counting overworld planks, logs as four planks, coal, and sticks over the reserve with what nether wood makes of them (a stick burns 100 whatever planks made it; a warped stem is 8 sticks); by day too, before eating, from food `COOK_FOOD_FLOOR` 6; by day with the fuel short a walk to a log that burns seen within `FUEL_LOG_REACH` 32, at most `FUEL_WALKS` 6 ("home: a log for the cook's fuel"); the clean flow's cook phase runs through `decide` with `home_cook` set: table and furnace placed, the meat smelted; "home: cook in the hut", "home: the cook over", or "home: no cook, the fuel short"), eat any safe food under `fed` 18, else hunt (`choose_prey`), else look for animals (`animal_walks`); fed, a rest toward `heal_to` for at most `heal_ticks`; then "home: over, fed on the surface" and `home_done()`; the planner then idles in the overworld (never back into the portal) until the eyes' phase takes it.
 
 - **Lava edges** (agent Q8, walls 21 to 25 of `docs/problems/eyes-home.md`): any touch of lava is a death in the Nether (the fire is not put out). Walks and the bridge move sneak at a lava edge, and so does an idle body (`walk::lava_edge`, [[walk-and-watchdog]]). Rails (`rail_wanted`) are laid down to `RAIL_FLOOR` 4 filler, under the keep, on a side that drops to lava. By a lava edge (`near_lava_edge`) a large or medium cube (`cube_size`, metadata 16) is never struck: a split puts two to four cubes by the edge ("home: a large cube not struck by a lava edge"). A span whose west end is reached with no span beyond is walked out (`spans_out`, "home: the old bridges walked out at"). A restock that dug for filler and found no cell leaves it owed (`filler_owed`), run at the next place with cells before the next leg ("home: the restock owed begun at"). A tunnel on the way home never cuts a fortress block (`tunnel::Limits::bricks_wall`; race 45753006452 lane 1 opened a corridor and met wither skeletons). The guard (`guard_wanted`, `home_guard`; Bridger: "do the rails always"): a feet-level block on each open side across the axis of travel, laid before the next step, mob or none, filler down to 0; its filler restocked once at the first span met (2 a span cell, at most `GUARD_EXTRA` 128 over the keep). A fight at a lava edge sneaks; a cube the trip does not fight is never fought though it struck. The restock never digs a floor cell within `SEA_FLOOR` 2 over lava near.
+- **The fortress stretch** (agent Q11, `docs/problems/eyes-fortress.md`): the guard never lays a block in a cell the body's box overhangs (`fortress_way::body_in_cell`, in `guard_wanted`; the rail under it still): race 45760537530's three lanes clicked one refused guard 300 times while blazes burned one to 2.4 ("fortress way: no guard in the body's own cell"). No fortress turn in Home while a point steers (`home_way_steers`, also in the tick between a point reached and the next aimed at): the same lanes turned 48 south at their first point ("fortress way: no fortress turn on the way home").
 
 ## Gotchas
 - Warped planks do not burn: overworld cooking needs overworld wood or coal.
