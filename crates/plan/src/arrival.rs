@@ -206,6 +206,10 @@ pub struct Shaft {
     /// Since when a stack has been on the cursor.
     #[serde(default)]
     pub cursor_at: Option<u64>,
+    // >>> E2 (issue 20c): a shaft that ends once the feet stand at this y (`arrival_rise_to`).
+    #[serde(default)]
+    pub stop_at: Option<i32>,
+    // <<< E2
 }
 
 /// The shaft's next step from the feet.
@@ -478,6 +482,17 @@ impl Plan {
     /// leg (refused here, noted once). `Some(Task::Idle)` while a shaft runs: `arrival_step`
     /// drives it.
     pub(crate) fn arrival_climb(&mut self, w: &World, tick: u64) -> Option<Task> {
+        self.arrival_shaft(w, tick, None)
+    }
+
+    // >>> E2 (issue 20c, docs/problems/end-portal.md): the same shaft, ended once the feet stand
+    // at `top` (the End kit's way up: a drop of 4 in its own way from the portal room).
+    pub(crate) fn arrival_rise_to(&mut self, w: &World, tick: u64, top: i32) -> Option<Task> {
+        self.arrival_shaft(w, tick, Some(top))
+    }
+    // <<< E2
+
+    fn arrival_shaft(&mut self, w: &World, tick: u64, stop_at: Option<i32>) -> Option<Task> {
         let body = w.body?;
         let feet = path::feet_cell(body.pos);
         if self.ender.home.arrival.shaft.is_some() {
@@ -524,6 +539,7 @@ impl Plan {
                     sides: 0,
                     sides_all: 0,
                     cursor_at: None,
+                    stop_at,
                 });
                 self.note(
                     tick,
@@ -854,6 +870,15 @@ impl Plan {
             }
             s.clicked = false;
         }
+        // >>> E2: risen to its stop.
+        if let Some(top) = s.stop_at
+            && body.on_ground
+            && feet.1 >= top
+        {
+            self.shaft_end(tick, s, feet, "risen to its stop", false);
+            return None;
+        }
+        // <<< E2
         // In the air on a jump: at its top, the block into the cell the feet left.
         if let Some(j) = s.jump_from
             && !body.on_ground
@@ -936,7 +961,12 @@ impl Plan {
                     && craft::count(w, ItemKind::Cobblestone)
                         + craft::count(w, ItemKind::CobbledDeepslate)
                         >= 3
-                    && self.ender.home.pick_runs < r.pick_runs;
+                    && self.ender.home.pick_runs < r.pick_runs
+                    // >>> E2: a shaft with a stop (the End kit's) digs by hand: no table or wood
+                    // under the room makes a pickaxe (race 45870075221: "the pickaxes first"
+                    // ended both pillars at once).
+                    && s.stop_at.is_none();
+                // <<< E2
                 if low {
                     self.shaft_end(tick, s, feet, "the pickaxes first", false);
                     return None;

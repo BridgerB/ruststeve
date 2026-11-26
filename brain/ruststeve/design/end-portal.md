@@ -31,7 +31,7 @@ Issue 20 (#25), parts c and d: from the frontier bot on the portal room's floor 
 
 ## The kit (`KitPhase`)
 Each phase is noted as it ends ("end kit: <phase> over, <next> next" with the kit held) and ends within `phase_ticks` or `phase_fails` failed tasks.
-1. **Up**: a walk to `way_up`, the top of the bot's own stairs (cells it dug, sent by the server as air); with no route, the dry stairs up (`stairs_to_surface`).
+1. **Up**: the bot's own way, a leg at a time: `[end_kit] way` (its legs' ends from the room up) then `way_up`, the stairs' top, walked from the point after the nearest one, each noted reached or skipped. With no walk to a point, the route's reach under it is walked to, then a shaft straight up to the sky (`arrival_rise_to`, Q7's shaft by hand, never ended for the pickaxes), else stairs up toward it (race 45865135195: from the room the reach ends in a corridor 4 under the bot's own stair; race 45870075221: the stairs it cut going down have no head room to climb). With the points spent, the dry stairs up (`stairs_to_surface`).
 2. **Wood**: logs seen within `log_reach` walked to and dug by hand (`Task::ToLog`, the hand emptied of a wearing tool first) to `logs`; with none, explore walks.
 3. **Row**: the needs planner on `end-kit` where the bot stands: crafts, a table and the carried furnace placed, the raw iron smelted with planks; boots are put on by `equip`.
 4. **Cook**: the way home's cook (`home_cook`: a hut by night, its fuel fetched by day).

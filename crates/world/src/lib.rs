@@ -83,6 +83,10 @@ pub struct Entity {
     /// Where its head points, degrees (`rotate_head`): an enderman facing the bot.
     #[serde(default)]
     pub head_yaw: Option<f32>,
+    /// Its body's yaw, degrees, from the moves that carry one (issue 20g: the perched dragon's
+    /// facing, `plan::dragon`). `None` until one comes.
+    #[serde(default)]
+    pub yaw: Option<f32>,
     /// What it holds and wears, by equipment slot (0 main hand, 1 off hand, 2 to 5 feet to
     /// head, 6 body, 7 saddle): a wither skeleton's sword, a piglin's crossbow.
     #[serde(default)]
@@ -1415,6 +1419,7 @@ impl World {
                             statuses: Vec::new(),
                             hurts: Vec::new(),
                             head_yaw: None,
+                            yaw: None,
                             equipment: BTreeMap::new(),
                             swung_at: None,
                             power: None,
@@ -1431,7 +1436,13 @@ impl World {
                     self.entities.remove(id);
                 }
             }
-            S2c::MoveEntity { id, dx, dy, dz } => {
+            S2c::MoveEntity {
+                id,
+                dx,
+                dy,
+                dz,
+                yaw,
+            } => {
                 let tick = self.session.server_ticks;
                 match self.entities.get_mut(id) {
                     Some(e) => {
@@ -1439,21 +1450,44 @@ impl World {
                         if moved.iter().all(|v| v.is_finite()) {
                             e.pos = moved;
                         }
+                        if let Some(y) = yaw {
+                            e.yaw = Some(*y);
+                        }
                         e.last_seen = tick;
                     }
                     None => self.unknown_entity_updates += 1,
                 }
             }
-            S2c::MoveEntityRot { id } => {
+            S2c::MoveEntityRot { id, yaw } => {
                 let tick = self.session.server_ticks;
                 match self.entities.get_mut(id) {
-                    Some(e) => e.last_seen = tick,
+                    Some(e) => {
+                        e.yaw = Some(*yaw);
+                        e.last_seen = tick;
+                    }
                     None => self.unknown_entity_updates += 1,
                 }
             }
             S2c::EntityPositionSync { id, x, y, z } => self.place_entity(*id, [*x, *y, *z], 0),
-            S2c::TeleportEntity { id, x, y, z, flags } => {
-                self.place_entity(*id, [*x, *y, *z], *flags)
+            S2c::TeleportEntity {
+                id,
+                x,
+                y,
+                z,
+                flags,
+                yaw,
+            } => {
+                self.place_entity(*id, [*x, *y, *z], *flags);
+                if let Some(e) = self.entities.get_mut(id)
+                    && yaw.is_finite()
+                {
+                    // Flag bit 3: the yaw is relative (`PositionMoveRotation.calculateAbsolute`).
+                    e.yaw = Some(if flags & (1 << 3) != 0 {
+                        e.yaw.unwrap_or(0.0) + yaw
+                    } else {
+                        *yaw
+                    });
+                }
             }
             S2c::SetEntityData { id, entries } if Some(*id) == self.player.entity_id => {
                 self.count_unread(entries);
@@ -2043,6 +2077,7 @@ mod blaze_charge {
             statuses: Vec::new(),
             hurts: Vec::new(),
             head_yaw: None,
+            yaw: None,
             equipment: BTreeMap::new(),
             swung_at: None,
             power: None,

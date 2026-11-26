@@ -29,5 +29,14 @@ From the `end` frontier (or `dev-end-arrival` for development only), the ledger 
 - A walk on the island is not cut when the dragon charges; only the bridge waits.
 - The hand-offs are stubs until E4's `spikes_task` and E5's `dragon_task` land.
 
+## Evidence so far
+- E6's parity e04 (gaze, an enderman 12 east): a look 3 degrees aside of its eye angered it, 6 degrees aside left it calm, straight down (pitch 90) left it calm: the cone at 12 is about 3.7 degrees, as the jar says; looking down by default holds.
+- E6's e02: the arrival is (100.500, 49.000, 0.500).
+
 ## Walls
-(None yet.)
+
+### 1. Held in a pocket in its own tunnel (race 45869900923, 0900b8c, dev-end-arrival, 2 lanes x 1 bot, cap 6,000)
+- **What happened** (lane 0; lane 1 the same): the pillar (4 up by tick 100), the bridge from (100, 53, 0) to the lip at (72, 53, 0) in 600 ticks: 27 floor blocks, 58 guards and rails, 0 dragon waits, 128 cobblestone down to 39 (about 3.3 blocks a cell). "end: on the island at (72, 53, 0)" at tick 720; the walk to the site (12, 62, 0) in 380 ticks; "end: bunker dug at (14, 59, 0)" at 1,240 (three down, roofed, 10 ops). Stock runs 1 to 3 cut 6 cells each in 460 ticks (12 end stone a run, about 38 ticks a block). At 2,600, in run 3, enderman 215 (hurt 40 to 35 while the dragon flew within 15) turned creepy: "provoked enderman 215: into a sealed pocket", and from 3,480 four more did the same; the pocket was held to the cap, 44 end stone. **No damage to the bot** (20 health the whole run), no near miss, no look kept off.
+- **Cause**: issue 17's provoked-enderman pocket answers any angry enderman, but the bot was already in a roofed 2-high tunnel no enderman can stand in. The endermen were angered while the dragon was near and hurt them, not by a look.
+- **Fix**: in the End, in a roofed 2-high cell whose open sides are 2-high and roofed too (`end::covered`), no pocket is sealed and the work goes on ("end: covered from an angry enderman, no pocket", every 600 ticks; `EndState::covered_ticks`). A fenced addition at the top of `Plan::ender_threat`. On the open island the pocket is as before. Test `in_a_roofed_tunnel_an_angry_enderman_seals_no_pocket`.
+- **Open**: blocks: the bridge's 89 of 128 left 39; the real frontier holds 116 cobblestone, 64 cobbled deepslate and 150 netherrack.
