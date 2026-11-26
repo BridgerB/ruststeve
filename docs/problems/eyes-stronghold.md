@@ -111,3 +111,9 @@ A development race on 5c62f28 (`dev-overworld-eyes`, from the frontier), 2 lanes
 A development race on bbfe300 (`dev-overworld-eyes`, from the frontier), 2 lanes x 1 bot, cap 48,000. Development knowledge, never evidence.
 - **Cause**: a throw's walk point was reached at `[overland] arrive` (24), the fix's radius. The spot moved 20 ("overland throw spot moved", 4 of 4 in lane 0) counted as reached where the bot stood, and the throw waited on the same canopy at (216, 75, 29) from tick 2,320 through the night, idle 14,600 ticks. Both lanes did the same.
 - **Fix**: a walk point is reached at a leg's own reach (`leg_reach`, 6), and never hands over to the search. A leg with nothing seen at its length looks no farther than its aim (a 20-block move is not overshot by a 32-block leg).
+
+### Wall 9: a wide canopy, a hollow after a fight (race 45747459284, 2026-11-26)
+A development race on af03d06 (`dev-overworld-eyes`, from the frontier), 2 lanes x 1 bot, cap 48,000. Development knowledge, never evidence.
+- **Lane 1**: `portal_room` at tick 36,260. 1 eye fetched and 1 given up; 11 pearls left; 16 junk placed and 3 released.
+- **Lane 0, cause 1**: one wide canopy blocked throw 2's column at all four moved spots (ticks 2,800 to 5,540). The throw went only after the night, at the last spot (17,880), and that eye was fetched. Fixes: 12 moves in three rings of 20, 40 and 60 (9df4d21). With the moves spent, the throw goes anyway (`EyeState::force_throw`, 01c1764).
+- **Lane 0, cause 2**: a creeper and two skeletons at tick 22,000-23,000 left it in a hollow at (525, 57, -4), at 17 health, healed. Every far walk out failed (31 to 140 expansions, no route), each failure backing off 6,400 ticks: idle from 23,520 to the cap. Fix: after `TUNNEL_AFTER` (2) refused leg walks in a row, the leg goes by the tunnel, which digs its own way ("overland leg N by tunnel").
