@@ -456,6 +456,37 @@ pub fn entries(w: &World, room: &Room) -> Vec<Entry> {
     v
 }
 
+/// The cells of a climb from `from` to `to` the way the bot's own stairs ran down it, reversed:
+/// first across the minor axis, then level along the major axis for the run the rise does not
+/// take, then a step up a cell for each block of rise (a downward leg cut its stairs first and its
+/// level steps after). Each step is one cell on an axis, level or one up (`tunnel::opened`).
+pub fn climb_route(from: Cell, to: Cell) -> Vec<Cell> {
+    let (dx, dz) = (to.0 - from.0, to.2 - from.2);
+    let x_major = dx.abs() >= dz.abs();
+    let (major, minor) = if x_major { (dx, dz) } else { (dz, dx) };
+    let rise = (to.1 - from.1).max(0);
+    let mut c = from;
+    let mut v = vec![c];
+    let step = |c: Cell, along_x: bool, s: i32, up: i32| {
+        if along_x {
+            (c.0 + s, c.1 + up, c.2)
+        } else {
+            (c.0, c.1 + up, c.2 + s)
+        }
+    };
+    for _ in 0..minor.abs() {
+        c = step(c, !x_major, minor.signum(), 0);
+        v.push(c);
+    }
+    let run = major.abs();
+    for k in 0..run {
+        let up = i32::from(k >= run - rise.min(run));
+        c = step(c, x_major, major.signum(), up);
+        v.push(c);
+    }
+    v
+}
+
 fn overworld(w: &World) -> bool {
     w.dimension.as_ref().is_some_and(|d| d.name == OVERWORLD)
 }
@@ -665,7 +696,11 @@ impl Plan {
             // way's reach ends in the corridor at (1609, 19, -38), 4 under the stair it dropped
             // from): walked to, then stairs up toward the point from there.
             let end = walk.waypoints.as_ref().and_then(|v| v.last().copied());
-            if let Some(e) = end.filter(|e| near(feet, *e) > 1.5) {
+            // Only a reach nearer the point than the feet (from a way point the reach can be back
+            // down in the corridor).
+            if let Some(e) =
+                end.filter(|e| near(feet, *e) > 1.5 && near(*e, p) + 2.0 < near(feet, p))
+            {
                 let mut to_end = Walk::new(e, Goal::Block { pos: e }, Arrive::Goal, tick);
                 if to_end.route_now(w, tick) && to_end.route == Some(path::Status::Found) {
                     self.walks += 1;
@@ -677,6 +712,36 @@ impl Plan {
                     return Some(Task::Explore(to_end));
                 }
                 self.expanded += to_end.expanded;
+            }
+            // Right under it: pillared up to its height on held blocks (Q7's shaft, stopped there;
+            // race 45865135195: the corridor 4 under the bot's own tunnel start).
+            if p.1 > feet.1 + 1
+                && flat(feet, p) <= 1.0
+                && let Some(t) = self.arrival_rise_to(w, tick, p.1)
+            {
+                self.note(
+                    tick,
+                    format!("end kit: pillar up to point {i} at {p:?}"),
+                    format!("from {feet:?}, no walk (route {found:?})"),
+                );
+                return Some(t);
+            }
+            // From a way point up to the next: the bot's own leg back up, cell by cell
+            // (`climb_route`), only the head room its downward cut left out dug (race 45871438675:
+            // the shaft straight up met an aquifer at y 30 beside the old stairs, which are dry).
+            if i > 0 && p.1 > feet.1 && way.get(i - 1).is_some_and(|q| near(feet, *q) <= 2.0) {
+                let route = climb_route(feet, p);
+                self.note(
+                    tick,
+                    format!("end kit: up the old leg to point {i} at {p:?}"),
+                    format!(
+                        "from {feet:?}, {} steps, no walk (route {found:?})",
+                        route.len()
+                    ),
+                );
+                return Some(Task::Stairs(Box::new(crate::stairs::Stairs::along(
+                    route, tick,
+                ))));
             }
             // No walk up: a shaft straight up from here (Q7's, one dig a block by hand and a block
             // under the feet) to the sky. The bot's own stairs were cut going down and no walk
