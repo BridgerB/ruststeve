@@ -65,6 +65,21 @@ impl Fetch {
         assert!(self.started, "the eye was never seen\n{story}");
         assert!(self.has("eye at rest high: fetch it"), "{story}");
         assert!(self.has("eye fetch: pillar up"), "{story}");
+        // Never a pillar begun further off than the pickup reaches (race 45740169100 lane 0: one
+        // begun 3.2 off waited 600 ticks with 0 blocks up).
+        for l in self
+            .ledger
+            .iter()
+            .filter(|l| l.contains("eye fetch: pillar up"))
+        {
+            let off: f64 = l
+                .rsplit("; ")
+                .next()
+                .and_then(|s| s.strip_suffix(" off)"))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(f64::MAX);
+            assert!(off <= 1.2, "a pillar begun {off} off: {l}\n{story}");
+        }
         assert!(self.has("eye fetched from a canopy"), "{story}");
         assert!(self.has("eye fetch: back down"), "{story}");
         assert!(!self.has("given up"), "{story}");
@@ -154,6 +169,45 @@ fn an_eye_behind_a_wall_with_no_way_round_is_fetched_through_a_cut() {
         for z in -80..=80 {
             for y in 65..=66 {
                 m.set_block(2, y, z, state(BlockKind::Stone)).unwrap();
+            }
+        }
+    });
+    assert!(f.has("eye fetch: cut toward the drop"), "{}", f.story());
+    f.assert_fetched();
+}
+
+/// Race 45740169100 lane 0: the cut's first step had no path (no floor under it). The wall test's
+/// world with the ground under the first step gone: the cut lays a floor and steps on.
+#[test]
+fn a_cut_step_onto_a_missing_floor_lays_one() {
+    let f = fetch(6.5, 5..=7, |m| {
+        for z in -80..=80 {
+            for y in 65..=66 {
+                m.set_block(2, y, z, state(BlockKind::Stone)).unwrap();
+            }
+        }
+        m.set_block(1, 64, 0, state(BlockKind::Air)).unwrap();
+    });
+    assert!(f.has("eye fetch: cut toward the drop"), "{}", f.story());
+    assert!(
+        f.has("floors laid") && !f.has("(0 floors laid)"),
+        "{}",
+        f.story()
+    );
+    f.assert_fetched();
+}
+
+/// Race 45740169100 lane 0: a pillar begun 3.2 off the drop never reached the pickup. The ground
+/// under the canopy is a block 2 high that no walk gets beside: the walk ends 3 off, the pillar is
+/// refused there, and a cut takes it beside the column first.
+#[test]
+fn a_pillar_is_refused_3_off_and_a_cut_goes_beside_first() {
+    let f = fetch(3.5, 2..=4, |m| {
+        for x in 2..=4 {
+            for z in -1..=1 {
+                for y in 65..=66 {
+                    m.set_block(x, y, z, state(BlockKind::Stone)).unwrap();
+                }
             }
         }
     });
