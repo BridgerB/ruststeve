@@ -58,6 +58,9 @@ pub mod redig;
 pub mod scoop;
 pub mod shield;
 pub mod smelt;
+// >>> E4 (issue 20f): the crystals by pillar and strike.
+pub mod spikes;
+// <<< E4
 pub mod stairs;
 pub mod station;
 // >>> stronghold (Q4, issue 19f)
@@ -890,6 +893,10 @@ pub struct Plan {
     #[serde(default)]
     pub eyes: eyes::EyeState,
     // <<< eyes
+    // >>> E4 (issue 20f): the crystals' state (docs/problems/end-crystals.md).
+    #[serde(default)]
+    pub spikes: spikes::SpikeState,
+    // <<< E4
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1021,6 +1028,9 @@ impl Plan {
             throws: Vec::new(),
             eyes: eyes::EyeState::default(),
             // <<< eyes
+            // >>> E4
+            spikes: spikes::SpikeState::default(),
+            // <<< E4
             acts: Vec::new(),
         }
     }
@@ -1624,6 +1634,11 @@ impl Plan {
             return c;
         }
         // <<< Q7
+        // >>> E4 (issue 20f): the crystals' climb, block, strike or hold, while no task runs.
+        if let Some(c) = self.spikes_step(w, tick) {
+            return c;
+        }
+        // <<< E4
         if self.finished() {
             return Controls::default();
         }
