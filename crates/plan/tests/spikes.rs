@@ -841,6 +841,16 @@ fn the_way_down_centres_first_and_steps_into_a_dug_shaft() {
             approach: None
         }
     );
+    // Off the axis (race 45895161187 lane 0 walked to a diagonal "beside" 900 times): the cell
+    // beside it along an axis.
+    at(&mut w, [9.5, 70.0, 5.5]);
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Walk {
+            to: (8, 70, 4),
+            approach: None
+        }
+    );
 }
 
 #[test]

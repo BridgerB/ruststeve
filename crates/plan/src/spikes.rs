@@ -824,19 +824,38 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
                         .map(|dy| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
                         .find(|c| !open(kind(w, *c)) && kind(w, *c) != Some(BlockKind::Obsidian));
                     let top = (r.x, feet.1, r.z);
-                    let next_to = (r.x - feet.0).abs() + (r.z - feet.2).abs() <= 1;
                     let shaft = !full(kind(w, (r.x, feet.1 - 1, r.z)));
+                    // The cells beside the shaft along an axis a body can stand in (race
+                    // 45895161187 lane 0: a diagonal "beside" was walked to 900 times).
+                    let beside: Vec<Cell> = Axis::ALL
+                        .iter()
+                        .map(|a| {
+                            let (ax, az) = a.step();
+                            (r.x + ax, feet.1, r.z + az)
+                        })
+                        .filter(|c| {
+                            full(kind(w, (c.0, c.1 - 1, c.2)))
+                                && open(kind(w, *c))
+                                && open(kind(w, (c.0, c.1 + 1, c.2)))
+                        })
+                        .collect();
                     match way {
                         Some(c) => Next::Open(c),
                         // A dug shaft: walk to beside it on the spike, then step in.
-                        None if shaft && next_to => Next::Step {
+                        None if shaft && beside.contains(&feet) => Next::Step {
                             to: top,
                             sneak: false,
                         },
-                        None if shaft => Next::Walk {
-                            to: (r.x - dx, feet.1, r.z - dz),
-                            approach: None,
-                        },
+                        None if shaft => beside
+                            .iter()
+                            .min_by_key(|c| (c.0 - feet.0).abs() + (c.2 - feet.2).abs())
+                            .map_or_else(
+                                || Next::Wait("no cell beside the pillar's shaft".to_owned()),
+                                |c| Next::Walk {
+                                    to: *c,
+                                    approach: None,
+                                },
+                            ),
                         None => Next::Walk {
                             to: top,
                             approach: None,

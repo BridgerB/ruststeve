@@ -147,3 +147,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - E3 walks up the bunker's stair before the hand-off.
   - On my side, a body held up by the floor beside the feet's cell first steps onto that cell ("step onto the floor at").
   - Unit test `a_body_held_up_by_the_floor_beside_steps_onto_it_first`.
+
+## Sixth race: 45895161187 (dev-end-island, 2 lanes, a102cfa, development only)
+- **7 crystals struck in 2 runs (4 and 3), the best yet.**
+- **The clutch** began 5 times and poured 4. Lane 1 lived through two falls of 11.6 and 4.8 on it, the water taken back each time.
+- **Other counts:** "up high, no enderman pocket" 73, "hold in the shaft from the charge" 13, "centre over the pillar" 3.
+- **Lane 1 died at tick 8,200 of a blow** (`mob_attack`, health 9 to 0) as it went down from (33, 24)'s pillar; the clutch had just begun. The blow itself, not the fall.
+- **Lane 0 lived to the cap**, but spent ticks 10,980 to 12,000 walking to a diagonal "beside" cell of its pillar's shaft. That is wall 10.
+
+### Wall 10: the cell beside a dug shaft was a diagonal one (fixed)
+- **The cause:** E5's breath walk took the body off along the spike's top, and the way back to the shaft picked the cell beside it by the signs of both axes, (-9, 97, -41) for the shaft at (-8, -40). From there the shaft was not "next to" (two off), so the walk was asked again, 900 times.
+- **The fix:** the cells beside the shaft along an axis with a floor and room, the nearest walked to, then the step in. Unit test case added.
