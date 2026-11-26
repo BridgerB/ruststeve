@@ -50,9 +50,6 @@ pub struct HomeRules {
     /// walked west from `x_east` to `x_west` at `feet_y` with no new bridging.
     #[serde(default)]
     pub bridges: Vec<[i32; 4]>,
-    /// Blocks placed (in order) to join two bridges where the step between them is too high.
-    #[serde(default)]
-    pub steps: Vec<[i32; 3]>,
     /// Chunk columns round the feet the far portal lookup reads memory's index in.
     pub portal_chunks: i32,
     /// Ticks between two far lookups.
@@ -80,12 +77,6 @@ impl Default for HomeRules {
             pearls_wanted: 14,
             top_up_ticks: 6000,
             bridges: vec![[400, 311, 37, 194], [307, 201, 41, 194]],
-            steps: vec![
-                [310, 36, 194],
-                [310, 37, 194],
-                [308, 38, 194],
-                [308, 39, 194],
-            ],
             way: vec![
                 [477, 152],
                 [448, 152],
@@ -317,6 +308,8 @@ fn picking_now(p: &Plan) -> bool {
 
 /// A walk on an old bridge goes this far at a time.
 pub const BRIDGE_LEG: i32 = 24;
+/// A known bridge this far below (race 45738826162: 5 under the west span) is joined from below.
+pub const BRIDGE_BELOW: i32 = 6;
 /// A known bridge this near on the plane (across it) is walked onto first.
 pub const BRIDGE_NEAR: i32 = 8;
 
@@ -976,7 +969,7 @@ impl Plan {
                 (feet.2 - z).abs() <= BRIDGE_NEAR
                     && feet.0 <= *e + 1
                     && feet.0 >= *wst
-                    && (feet.1 - y).abs() <= 4
+                    && (feet.1 - y).abs() <= BRIDGE_BELOW
             })?;
             let target = (feet.0.clamp(wst, e), y, z);
             let mut walk = Walk::new(
@@ -990,6 +983,19 @@ impl Plan {
             );
             if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
                 self.expanded += walk.expanded;
+                // From below (race 45738826162: its own bridge 5 under the west span): the travel
+                // tunnel's stairs up, laying blocks where there is no floor.
+                if target.1 > feet.1 + 1
+                    && let Some(t) =
+                        self.tunnel_toward(w, target, ("the old bridge", "joined from below"), tick)
+                {
+                    self.note(
+                        tick,
+                        format!("home: up onto the old bridge at {target:?}"),
+                        format!("from {feet:?}, {} below it", target.1 - feet.1),
+                    );
+                    return Some(t);
+                }
                 return None;
             }
             self.walks += 1;
@@ -1063,65 +1069,95 @@ impl Plan {
         Some(Task::Explore(walk))
     }
 
-    /// The next step block not yet in place, placed from where the bot stands on the top of the
-    /// block under it (`None` when all are placed, or none is in reach or clickable).
+    /// The join from the span the bot is on to the next one west, built from the world as it is
+    /// (the snapshot's world is not the frontier's: race 45738826162): from the bot at the span's
+    /// west end, each column between rises by one from the last feet toward the next span's feet;
+    /// a column lower than that gets blocks placed from its top up (bottom first), any solid cell
+    /// in the two over the new feet is dug (none with lava beside). The bot stands at the span's
+    /// west end first, so nothing is placed in its own body. `None` once the join is whole.
     fn home_step(&mut self, w: &World, tick: u64, r: &HomeRules) -> Option<Task> {
         let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let on = r.bridges.iter().position(|[e, wst, y, z]| {
+            (feet.2 - z).abs() <= 1 && feet.0 <= *e + 1 && feet.0 >= *wst && (feet.1 - y).abs() <= 1
+        })?;
+        let [_, west, y, z] = r.bridges[on];
+        let [e2, _, y2, _] = *r.bridges.get(on + 1)?;
+        let stand = (west, y, z);
         let mut cells = path::Cells::new(w);
-        let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
-        let Some(c) = r
-            .steps
+        let solid = |cells: &mut path::Cells, c: Cell| cells.at(c) == path::Class::Solid;
+        let lava_by = |cells: &mut path::Cells, c: Cell| {
+            [
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 1, 0),
+                (0, -1, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+            ]
             .iter()
-            .map(|[x, y, z]| (*x, *y, *z))
-            .find(|c| !matches!(cells.at(*c), path::Class::Solid))
-        else {
-            // Every step placed: the two cells over each step's new feet are opened (the head
-            // room over x 308 to 310 is not known), never one with lava beside it.
-            let head: Vec<Cell> = r
-                .steps
-                .iter()
-                .map(|[x, y, z]| (*x, *y, *z))
-                .filter(|c| {
-                    !r.steps
-                        .iter()
-                        .any(|[x, y, z]| (*x, *y, *z) == (c.0, c.1 + 1, c.2))
-                })
-                .flat_map(|c| [(c.0, c.1 + 1, c.2), (c.0, c.1 + 2, c.2)])
-                .collect();
-            let dig = head.into_iter().find(|h| {
-                cells.at(*h) == path::Class::Solid
-                    && ![(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 0, 1), (0, 0, -1)]
-                        .iter()
-                        .any(|(dx, dy, dz)| {
-                            cells.at((h.0 + dx, h.1 + dy, h.2 + dz)) == path::Class::Lava
-                        })
-                    && (0..3)
-                        .map(|i| (eye[i] - (f64::from([h.0, h.1, h.2][i]) + 0.5)).powi(2))
-                        .sum::<f64>()
-                        .sqrt()
-                        <= crate::heading::RESTOCK_REACH
-            })?;
-            self.ender.home.steps_placed += 1;
-            self.note(
-                tick,
-                format!("home: head room over the step at {dig:?}"),
-                "a block over a step's new feet dug before the walk up".to_owned(),
-            );
-            return Some(Task::Dig(crate::dig::Dig::new(w, dig, tick)));
+            .any(|(dx, dy, dz)| cells.at((c.0 + dx, c.1 + dy, c.2 + dz)) == path::Class::Lava)
         };
-        let lava_beside = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
-            .iter()
-            .any(|(dx, dy, dz)| cells.at((c.0 + dx, c.1 + dy, c.2 + dz)) == path::Class::Lava);
-        let under = (c.0, c.1 - 1, c.2);
+        // What the join wants, column by column going west: a place, a dig or nothing.
+        let mut want: Option<(Cell, bool)> = None;
+        let mut last = y;
+        for x in (e2 + 1..west).rev() {
+            let f = (last + 1).min(y2.max(last));
+            last = f;
+            let top = f - 1;
+            // The column's own top at or under the new floor: the cells from it up are placed.
+            let base = (top - 6..=top)
+                .rev()
+                .find(|yy| solid(&mut cells, (x, *yy, z)));
+            let from = base.map_or(top - 6, |b| b + 1);
+            if let Some(c) = (from..=top)
+                .map(|yy| (x, yy, z))
+                .find(|c| !solid(&mut cells, *c))
+            {
+                want = Some((c, true));
+                break;
+            }
+            if let Some(c) = [(x, f, z), (x, f + 1, z)]
+                .into_iter()
+                .find(|c| solid(&mut cells, *c))
+            {
+                want = Some((c, false));
+                break;
+            }
+        }
+        let (c, place) = want?;
+        if feet != stand {
+            let mut walk = Walk::new(
+                stand,
+                Goal::Near {
+                    pos: stand,
+                    range: 0.5,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("home: to the bridge's end at {stand:?} for the step"),
+                    format!("from {feet:?}; {c:?} wanted"),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            return None;
+        }
+        let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
         let reach = (0..3)
             .map(|i| (eye[i] - (f64::from([c.0, c.1, c.2][i]) + 0.5)).powi(2))
             .sum::<f64>()
             .sqrt();
-        if cells.at(c) != path::Class::Clear
-            || lava_beside
-            || cells.at(under) != path::Class::Solid
+        let under = (c.0, c.1 - 1, c.2);
+        let blocked = lava_by(&mut cells, c)
             || reach > crate::heading::RESTOCK_REACH
-        {
+            || (place && !solid(&mut cells, under));
+        if blocked {
             if self
                 .ender
                 .home
@@ -1131,15 +1167,25 @@ impl Plan {
                 self.ender.home.bridge_noted_at = Some(tick);
                 self.note(
                     tick,
-                    format!("home: the step block at {c:?} cannot be placed"),
+                    format!("home: the step at {c:?} cannot be made"),
                     format!(
-                        "{:?}, lava beside {lava_beside}, under {:?}, {reach:.1} off",
-                        cells.at(c),
-                        cells.at(under)
+                        "{}, under {:?}, {reach:.1} off, lava beside {}",
+                        if place { "a place" } else { "a dig" },
+                        cells.at(under),
+                        lava_by(&mut cells, c)
                     ),
                 );
             }
             return None;
+        }
+        if !place {
+            self.ender.home.steps_placed += 1;
+            self.note(
+                tick,
+                format!("home: head room over the step at {c:?}"),
+                "a block over a step's new feet dug before the walk up".to_owned(),
+            );
+            return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
         }
         let item = endermen::FILLER
             .iter()
@@ -1164,7 +1210,7 @@ impl Plan {
                     tick,
                     format!("home: step block at {c:?}"),
                     format!(
-                        "joining the old bridges; {item:?} on {under:?}; {} placed",
+                        "joining the old bridges from {stand:?}; {item:?} on {under:?}; {} made",
                         self.ender.home.steps_placed
                     ),
                 );

@@ -783,9 +783,8 @@ portal = [22, 34, -20]
 # (feet 37) from x 400 to 311, the west span's at y 40 (feet 41) from x 307 to 201 (head room
 # clear). [x_east, x_west, feet_y, z]: walked on its own blocks, no new bridging.
 bridges = [[400, 311, 37, 194], [307, 201, 41, 194]]
-# The step between them is a climb of 3 twice (x 310 top 35, 309 top 38, 308 top 37, 307 top 40):
-# blocks placed in order raise x 310 to feet 38 and x 308 to feet 40, so no rise is over 1.
-steps = [[310, 36, 194], [310, 37, 194], [308, 38, 194], [308, 39, 194]]
+# Between two spans the join is built from the world as it is (home_step): each column rises one
+# from the last feet toward the next span, blocks placed under, head room dug over.
 # The far lookup reads memory's index this many chunk columns round the feet: 48 is 768 blocks,
 # past the forest's 475 from the portal with room.
 portal_chunks = 48

@@ -979,7 +979,6 @@ fn the_old_bridges_step_is_built_and_walked_west() {
     let mut goals: make::Goals =
         toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
     goals.home.bridges = vec![[15, 11, 64, 8], [7, 1, 68, 8]];
-    goals.home.steps = vec![[10, 63, 8], [10, 64, 8], [8, 65, 8], [8, 66, 8]];
     goals.home.way = vec![[-200, 8]];
     let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
     let mut p = Plan::with_table(Aim::Race, t);
