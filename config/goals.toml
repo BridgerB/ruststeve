@@ -937,13 +937,16 @@ rest_ticks = 8
 # to within 1.2 of its column on the plane (else from within 4, as near as the ground lets it), a
 # pillar of held filler till the feet are within 1.5 under it (the pickup reaches about +2.3),
 # leaves over the head dug through; a block every 4 ticks at most (a block update comes in one
-# or two); given up after 400 ticks, and the pillar dug back down either way.
+# or two); given up after climb_ticks, and the pillar dug back down either way.
 climb_rise_max = 12.0
 climb_near = 4.0
 climb_beside = 1.2
 climb_within = 1.5
-climb_ticks = 400
+# With no walk to within 4 (Q4's race 45732530352 lane 0: NoPath, the drop 12 off): a level cut
+# toward its column, 16 steps at most; the whole fetch given up after 600 ticks (the coordinator).
+climb_ticks = 600
 climb_every = 4
+climb_cut_max = 16
 # Where the eye drops from (Q5's parity 45688030470, 8 real throws): 12.15 out on the bearing and
 # 8.18 over its spawn at feet + 0.9, so about 9.1 over the feet. A throw with a bearing waits for a
 # spot whose column there, from the feet's level up to that point, holds no solid block seen.

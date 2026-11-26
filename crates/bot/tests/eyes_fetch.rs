@@ -42,27 +42,71 @@ fn held_eyes(w: &world::World) -> i32 {
         .sum()
 }
 
-#[test]
-fn an_eye_resting_on_leaves_9_up_is_fetched_with_a_pillar_and_the_pillar_dug_back() {
+struct Fetch {
+    ledger: Vec<String>,
+    top: f64,
+    run: bot::lockstep::Run,
+    plan: Plan,
+    started: bool,
+}
+
+impl Fetch {
+    fn has(&self, what: &str) -> bool {
+        self.ledger.iter().any(|l| l.contains(what))
+    }
+
+    fn story(&self) -> String {
+        self.ledger.join("\n")
+    }
+
+    /// Fetched, the pillar dug, back on the ground with the eye.
+    fn assert_fetched(&self) {
+        let story = self.story();
+        assert!(self.started, "the eye was never seen\n{story}");
+        assert!(self.has("eye at rest high: fetch it"), "{story}");
+        assert!(self.has("eye fetch: pillar up"), "{story}");
+        assert!(self.has("eye fetched from a canopy"), "{story}");
+        assert!(self.has("eye fetch: back down"), "{story}");
+        assert!(!self.has("given up"), "{story}");
+        assert!(
+            self.top >= 72.0,
+            "the pillar rose only to {}\n{story}",
+            self.top
+        );
+        assert_eq!(held_eyes(&self.run.world), 1, "{story}");
+        let feet = self.run.world.body.unwrap().pos;
+        assert!(feet[1] < FEET_Y + 0.5, "not back down: {feet:?}\n{story}");
+        assert!(matches!(self.plan.task, Task::Idle), "{story}");
+        assert_eq!(self.plan.eyes.kept, 1, "{story}");
+    }
+}
+
+/// A canopy 9 over the feet: oak leaves at y 73 (its top at 74) over `xs` and z -1 to 1, the eye
+/// let fall onto it at `(eye_x, 0.5)`; the plan fetches it from the start.
+fn fetch(
+    eye_x: f64,
+    xs: std::ops::RangeInclusive<i32>,
+    more: impl Fn(&mut sim::ModelWorld),
+) -> Fetch {
     let mut m = flat_world(4, GROUND).unwrap();
-    // A canopy 9 over the feet: oak leaves at y 73, x 2 to 4, z -1 to 1 (its top at 74).
-    for x in 2..=4 {
+    for x in xs {
         for z in -1..=1 {
             m.set_block(x, 73, z, state(BlockKind::OakLeaves)).unwrap();
         }
     }
+    more(&mut m);
     let mut sim = Sim::new(CONFIG, m).seeded(19);
     sim.survival.give((ItemKind::Cobblestone, 32));
     // The overland bot holds pickaxes: cobblestone by hand is about 200 ticks a block (CI run
     // 45727672998 ran the way down out of its 400 ticks without one).
     sim.survival.give((ItemKind::StonePickaxe, 1));
-    // The eye falls onto the leaves and rests at y 74: 9 over the feet, 3 east.
-    sim.place_item((ItemKind::EnderEye, 1), [3.5, 74.5, 0.5]);
+    // The eye falls onto the leaves and rests at y 74: 9 over the feet.
+    sim.place_item((ItemKind::EnderEye, 1), [eye_x, 74.5, 0.5]);
     let mut plan = Plan::new(Aim::Hold);
     let mut ledger: Vec<String> = Vec::new();
     let mut started = false;
     let mut top = FEET_Y;
-    let run = bot::lockstep::run_acting(sim, "rs-fetch", 19, 1_600, 20, |w, _| {
+    let run = bot::lockstep::run_acting(sim, "rs-fetch", 19, 2_000, 20, |w, _| {
         if let Some(b) = w.body {
             top = top.max(b.pos[1]);
         }
@@ -87,18 +131,32 @@ fn an_eye_resting_on_leaves_9_up_is_fetched_with_a_pillar_and_the_pillar_dug_bac
         ledger.extend(plan.take_records().into_iter().map(line));
         (c, plan.take_acts())
     });
-    let story = ledger.join("\n");
-    let has = |what: &str| ledger.iter().any(|l| l.contains(what));
-    assert!(started, "the eye was never seen\n{story}");
-    assert!(has("eye at rest high: fetch it"), "{story}");
-    assert!(has("eye fetch: pillar up"), "{story}");
-    assert!(has("eye fetched from a canopy"), "{story}");
-    assert!(has("eye fetch: back down"), "{story}");
-    assert!(!has("given up"), "{story}");
-    assert!(top >= 72.0, "the pillar rose only to {top}\n{story}");
-    assert_eq!(held_eyes(&run.world), 1, "{story}");
-    let feet = run.world.body.unwrap().pos;
-    assert!(feet[1] < FEET_Y + 0.5, "not back down: {feet:?}\n{story}");
-    assert!(matches!(plan.task, Task::Idle), "{story}");
-    assert_eq!(plan.eyes.kept, 1, "{story}");
+    Fetch {
+        ledger,
+        top,
+        run,
+        plan,
+        started,
+    }
+}
+
+#[test]
+fn an_eye_resting_on_leaves_9_up_is_fetched_with_a_pillar_and_the_pillar_dug_back() {
+    // 3 east of the feet.
+    fetch(3.5, 2..=4, |_| {}).assert_fetched();
+}
+
+/// Q4's race 45732530352 lane 0: no walk within 4 of the drop (NoPath). A wall 2 high at x 2
+/// across the whole loaded world, the eye on leaves 6 east beyond it: the fetch cuts through.
+#[test]
+fn an_eye_behind_a_wall_with_no_way_round_is_fetched_through_a_cut() {
+    let f = fetch(6.5, 5..=7, |m| {
+        for z in -80..=80 {
+            for y in 65..=66 {
+                m.set_block(2, y, z, state(BlockKind::Stone)).unwrap();
+            }
+        }
+    });
+    assert!(f.has("eye fetch: cut toward the drop"), "{}", f.story());
+    f.assert_fetched();
 }

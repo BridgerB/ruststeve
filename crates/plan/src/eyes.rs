@@ -59,6 +59,7 @@ pub struct EyeRules {
     pub climb_within: f64,
     pub climb_ticks: u64,
     pub climb_every: u64,
+    pub climb_cut_max: u32,
     pub first_clear: i32,
     pub ring_from: i32,
     pub ring_to: i32,
@@ -108,8 +109,9 @@ impl Default for EyeRules {
             climb_near: 4.0,
             climb_beside: 1.2,
             climb_within: 1.5,
-            climb_ticks: 400,
+            climb_ticks: 600,
             climb_every: 4,
+            climb_cut_max: 16,
             first_clear: 6,
             ring_from: 10,
             ring_to: 14,
@@ -804,6 +806,8 @@ fn flat(a: [f64; 3], b: [f64; 3]) -> f64 {
 pub enum ClimbStage {
     /// Walking on the ground to the drop's column (or beside it).
     Approach,
+    /// No walk near enough: a level cut toward the drop's column, a block at a time.
+    Cut,
     /// The pillar going up: jump, and a block into the cell the feet left.
     Up,
     /// At the drop's height: waiting for the pickup.
@@ -828,6 +832,11 @@ pub struct Climb {
     pub dig: Option<crate::dig::Dig>,
     pub picked: bool,
     pub down_since: Option<u64>,
+    /// Steps the cut has made toward the drop, and the cell it is stepping into.
+    #[serde(default)]
+    pub cuts: u32,
+    #[serde(default)]
+    pub step: Option<path::Cell>,
 }
 
 /// What a climb's tick gives the throw.
@@ -850,6 +859,38 @@ fn open_cell(w: &World, (x, y, z): path::Cell) -> bool {
     w.state_at(world::BlockPos::new(x, y, z)).is_some() && w.solid(x, y, z).is_none()
 }
 
+/// The next cell of a level cut from `feet` toward the column under `p`: a step on the axis
+/// it is furthest off on.
+fn cut_step(feet: path::Cell, p: [f64; 3]) -> path::Cell {
+    let dx = p[0].floor() as i32 - feet.0;
+    let dz = p[2].floor() as i32 - feet.2;
+    if dx.abs() >= dz.abs() {
+        (feet.0 + dx.signum(), feet.1, feet.2)
+    } else {
+        (feet.0, feet.1, feet.2 + dz.signum())
+    }
+}
+
+/// Lava or water seen in a cell next to `c` (or in it): a cut there would let it in.
+fn near_fluid(w: &World, (x, y, z): path::Cell) -> bool {
+    [
+        (0, 0, 0),
+        (1, 0, 0),
+        (-1, 0, 0),
+        (0, 1, 0),
+        (0, -1, 0),
+        (0, 0, 1),
+        (0, 0, -1),
+    ]
+    .iter()
+    .any(|(dx, dy, dz)| {
+        matches!(
+            w.block_at(world::BlockPos::new(x + dx, y + dy, z + dz)),
+            Some(BlockKind::Lava | BlockKind::Water)
+        )
+    })
+}
+
 impl Climb {
     pub fn new(item: i32, tick: u64) -> Self {
         Self {
@@ -863,6 +904,8 @@ impl Climb {
             dig: None,
             picked: false,
             down_since: None,
+            cuts: 0,
+            step: None,
         }
     }
 
@@ -973,16 +1016,111 @@ impl Climb {
                                 ),
                             ));
                         } else {
+                            // No walk near enough (Q4's race 45732530352 lane 0: NoPath, 12 off):
+                            // a cut toward the drop's column.
+                            self.stage = ClimbStage::Cut;
+                            out.said.push((
+                                "eye fetch: cut toward the drop".to_owned(),
+                                format!(
+                                    "no way within {} of the drop ({status:?}), {off:.1} off: a level cut from {feet:?}, {} blocks at most",
+                                    rules.climb_near, rules.climb_cut_max
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+            ClimbStage::Cut => {
+                let Some(p) = lying else {
+                    self.down(tick);
+                    return out;
+                };
+                if flat(p, body.pos) <= rules.climb_beside {
+                    self.stage = ClimbStage::Up;
+                    self.walk = None;
+                    self.dig = None;
+                    out.said.push((
+                        "eye fetch: pillar up".to_owned(),
+                        format!(
+                            "from {feet:?} after a cut of {}, the drop {:.1} over the feet",
+                            self.cuts,
+                            p[1] - body.pos[1]
+                        ),
+                    ));
+                    return out;
+                }
+                let next = match self.step {
+                    Some(s) => s,
+                    None => {
+                        if self.cuts >= rules.climb_cut_max {
                             out.said.push((
                                 "eye fetch given up".to_owned(),
                                 format!(
-                                    "no way within {} of the drop ({status:?})",
-                                    rules.climb_near
+                                    "the cut made {} steps and is {:.1} off the drop",
+                                    self.cuts,
+                                    flat(p, body.pos)
                                 ),
                             ));
                             self.down(tick);
+                            return out;
                         }
+                        let s = cut_step(feet, p);
+                        self.step = Some(s);
+                        s
                     }
+                };
+                // The feet and head cells of the step, dug while solid; never into lava or water.
+                let head = (next.0, next.1 + 1, next.2);
+                if let Some(c) = [next, head].into_iter().find(|c| !open_cell(w, *c)) {
+                    if near_fluid(w, c) {
+                        out.said.push((
+                            "eye fetch given up".to_owned(),
+                            format!("the cut at {c:?} would open lava or water"),
+                        ));
+                        self.down(tick);
+                        return out;
+                    }
+                    let dig = self
+                        .dig
+                        .get_or_insert_with(|| crate::dig::Dig::new(w, c, tick));
+                    if dig.target != c {
+                        *dig = crate::dig::Dig::new(w, c, tick);
+                    }
+                    let (ctl, act, status) = dig.step(w, tick);
+                    out.controls = Controls {
+                        forward: false,
+                        jump: false,
+                        ..ctl
+                    };
+                    out.acts.extend(act);
+                    if !matches!(status, crate::dig::DigStatus::Running) {
+                        self.dig = None;
+                    }
+                    return out;
+                }
+                self.dig = None;
+                if feet == next {
+                    self.cuts += 1;
+                    self.step = None;
+                    self.walk = None;
+                    return out;
+                }
+                let walk = self.walk.get_or_insert_with(|| {
+                    Walk::new(next, Goal::Block { pos: next }, Arrive::Goal, tick)
+                });
+                let (c, status) = walk.step(w, tick);
+                let (acts, said) = walk.take_out();
+                out.acts.extend(acts);
+                out.said.extend(said);
+                out.controls = c;
+                if let TaskStatus::Failed(f) = status {
+                    out.said.push((
+                        "eye fetch given up".to_owned(),
+                        format!("the step of the cut into {next:?} failed ({f:?})"),
+                    ));
+                    self.down(tick);
+                } else if status == TaskStatus::Done {
+                    self.walk = None;
                 }
             }
             ClimbStage::Up => {
