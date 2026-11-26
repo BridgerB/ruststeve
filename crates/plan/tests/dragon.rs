@@ -117,6 +117,7 @@ fn ask() -> Ask {
         dead: false,
         food: true,
         way: None,
+        sat_damage: 0.0,
     }
 }
 
@@ -288,9 +289,18 @@ fn the_wait_is_behind_the_sitting_dragons_head() {
         }
         other => panic!("out to the ring, not {other:?}"),
     }
-    let mut w = end_at([-12.5, 64.0, 0.5]);
+    let mut w = end_at([-16.5, 64.0, 0.5]);
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 3, 90.0);
     assert_eq!(decide(&w, &ask()), Want::Hold("the dragon not yet sat"));
+    // With a bunker: the wait is there.
+    let a = Ask {
+        bunker: Some([14, FLOOR - 3, 0]),
+        ..ask()
+    };
+    assert_eq!(
+        decide(&w, &a),
+        Want::Go([14, FLOOR - 3, 0], "to the bunker")
+    );
     // In front of it under the head: out sideways first, never along under it.
     let mut w = end_at([-1.5, 64.0, 0.5]);
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 270.0);
@@ -647,4 +657,41 @@ fn a_walk_waits_at_a_breaths_edge() {
         ..toward
     };
     assert!(p.breath_ahead(&w, away).forward, "away from it: on");
+}
+
+#[test]
+fn the_strike_that_makes_it_take_off_is_struck_from_under_the_wings() {
+    // Race 45876898172 lane 2: the strike over 50 was struck from the surface; the head and wings
+    // took 15 and threw the bot 120 blocks off the island.
+    assert!(!dragon::crossing(42.0), "one more strike stays under 50");
+    assert!(dragon::crossing(44.5));
+    let mut w = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut w, [0.5, 67.0, 0.5], 6, 90.0);
+    let v = dragon::view(&w).unwrap().1;
+    assert!(!dragon::under_wings(&v, 64.0), "feet 64, the wings from 65");
+    assert!(dragon::under_wings(&v, 63.0), "a block down: under them");
+    let a = Ask {
+        sat_damage: 45.0,
+        ..ask()
+    };
+    assert_eq!(
+        decide(&w, &a),
+        Want::Dig([9, FLOOR - 1, 0]),
+        "one dig of end stone down first"
+    );
+    assert_eq!(
+        decide(&w, &ask()),
+        Want::Dig([9, FLOOR - 1, 0]),
+        "every strike from under the sweep where one dig makes it so"
+    );
+    let mut low = end_at([9.5, 63.0, 0.5]);
+    low.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (9, 63, 0),
+        state: state(BlockKind::Air),
+    }));
+    with_dragon(&mut low, [0.5, 67.0, 0.5], 6, 90.0);
+    assert!(
+        matches!(decide(&low, &a), Want::Strike { head: true, .. }),
+        "down in it: the strike"
+    );
 }
