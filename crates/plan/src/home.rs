@@ -72,7 +72,7 @@ impl Default for HomeRules {
         Self {
             pearls_wanted: 14,
             top_up_ticks: 6000,
-            way: Vec::new(),
+            way: vec![[490, 150], [226, 194], [8, 81]],
             portal: Some([22, 34, -20]),
             portal_chunks: 48,
             portal_every: 1200,
@@ -146,6 +146,46 @@ pub struct HomeState {
     /// Walks to a log for the cook's fuel.
     #[serde(default)]
     pub fuel_walks: u32,
+    /// The last cell stood on with filler to dig in reach, when it was last looked for, and the
+    /// walks back to it.
+    #[serde(default)]
+    pub ground: Option<Cell>,
+    #[serde(default)]
+    pub ground_at: Option<u64>,
+    #[serde(default)]
+    pub ground_walks: u32,
+    /// The bridge blocks laid on the trip (the last `LAID_KEPT`), and those dug back.
+    #[serde(default)]
+    pub laid: Vec<Cell>,
+    #[serde(default)]
+    pub unbridged: u32,
+    /// Runs of stone pickaxes made on the trip (from blackstone).
+    #[serde(default)]
+    pub trip_pick_runs: u32,
+    /// The way points' chunk columns reached, kept past any one heading.
+    #[serde(default)]
+    pub ways_passed: Vec<(i32, i32)>,
+    /// A pocket from magma cubes in hand (since), the tick the last cube left `CUBE_CLEAR`, and
+    /// the pockets made.
+    #[serde(default)]
+    pub cube_pocket: Option<u64>,
+    #[serde(default)]
+    pub cube_clear_since: Option<u64>,
+    #[serde(default)]
+    pub cube_pockets: u32,
+    /// No cube pocket before this tick (over the danger line), and the pockets given up.
+    #[serde(default)]
+    pub cube_resume_at: Option<u64>,
+    #[serde(default)]
+    pub cube_breakouts: u32,
+    /// The tunnel out of a cube pocket in hand (its start and end), and the tunnels dug.
+    #[serde(default)]
+    pub cube_tunnel: Option<(Cell, Cell)>,
+    #[serde(default)]
+    pub cube_tunnels: u32,
+    /// The point the trip aims at now (a way point, else the portal).
+    #[serde(default)]
+    pub aim: Option<(i32, i32)>,
     #[serde(default)]
     pub done: bool,
 }
@@ -160,6 +200,70 @@ pub const FUEL_LOG_REACH: f64 = 32.0;
 /// Food under which raw meat is eaten as it is rather than cooked first by day: 6 is where
 /// sprinting stops (vanilla).
 pub const COOK_FOOD_FLOOR: i32 = 6;
+/// Magma cubes on the trip (the coordinator, 2026-11-25; race 45698618366 lane 3 took five hits
+/// in 140 ticks): one within `CUBE_FIGHT` is fought over the danger line; `CUBE_CROWD` within
+/// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
+/// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
+pub const CUBE_FIGHT: f64 = 3.0;
+/// Bridge blocks the trip keeps on record (the last laid), to dig back when stranded.
+pub const LAID_KEPT: usize = 64;
+
+/// A cell as `{:?}` prints it, "(x, y, z)".
+pub fn parse_cell(s: &str) -> Option<Cell> {
+    let mut it = s
+        .trim()
+        .strip_prefix('(')?
+        .strip_suffix(')')?
+        .split(',')
+        .map(|p| p.trim().parse::<i32>());
+    let c = (it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
+    it.next().is_none().then_some(c)
+}
+
+/// How often the trip notes the last ground with filler to dig (a second).
+pub const GROUND_EVERY: u64 = 20;
+pub const CUBE_NEAR: f64 = 6.0;
+pub const CUBE_CROWD: usize = 2;
+pub const CUBE_CLEAR: f64 = 8.0;
+pub const CUBE_CLEAR_TICKS: u64 = 200;
+/// A cube pocket over the danger line is held at most this long (a minute), then the trip goes on
+/// with no pocket for `CUBE_RESUME_TICKS` (cubes wait outside a sealed pocket for good).
+pub const CUBE_HOLD_MAX: u64 = 1200;
+pub const CUBE_RESUME_TICKS: u64 = 1200;
+/// The tunnel out of a cube pocket: this long, ended once `CUBE_TUNNEL_OUT` along with no cube
+/// within `CUBE_CLEAR` (a cube loses the bot past 16 or so).
+pub const CUBE_TUNNEL_LEN: i32 = 20;
+pub const CUBE_TUNNEL_OUT: i32 = 12;
+
+/// The tunnel out of a cube pocket's axis: toward `aim` (the longer axis first), never toward the
+/// side the cubes are on (one more than a block that way); with every side taken, toward `aim`.
+pub fn cube_tunnel_dir(feet: Cell, aim: (i32, i32), cubes: &[[f64; 3]]) -> (i32, i32) {
+    let (dx, dz) = (aim.0 - feet.0, aim.1 - feet.2);
+    let x = (if dx < 0 { -1 } else { 1 }, 0);
+    let z = (0, if dz < 0 { -1 } else { 1 });
+    let order = if dx.abs() >= dz.abs() {
+        [x, z, (0, -z.1), (-x.0, 0)]
+    } else {
+        [z, x, (-x.0, 0), (0, -z.1)]
+    };
+    let cubes_on = |d: (i32, i32)| {
+        cubes.iter().any(|c| {
+            (c[0] - (f64::from(feet.0) + 0.5)) * f64::from(d.0)
+                + (c[2] - (f64::from(feet.2) + 0.5)) * f64::from(d.1)
+                > 1.0
+        })
+    };
+    order
+        .into_iter()
+        .find(|d| !cubes_on(*d))
+        .unwrap_or(order[0])
+}
+
+/// The distance between two positions.
+pub fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
 /// A seal is placed only this near the eye (`walk::REACH` 4 plus half a block for the far corner).
 pub const SEAL_REACH: f64 = 4.5;
 
@@ -404,11 +508,42 @@ impl Plan {
         let held = craft::count(w, ItemKind::EnderPearl) + craft::count(w, ItemKind::EnderEye);
         match dimension(w) {
             Some(NETHER) if held >= wanted => {
+                // Resumed past the kit (a snapshot on the trip, race 45725323112): the pearls are
+                // eyes and the kit is held, so no top-up and no kit again (it walked 258 back to
+                // the hunt point).
+                let eyes = craft::count(w, ItemKind::EnderEye);
+                let made = eyes >= wanted;
+                let kit = made
+                    && craft::count(w, ItemKind::Stick)
+                        >= self.table.as_ref().map_or(8, |t| t.base.home_sticks)
+                    && craft::count(w, ItemKind::CraftingTable) >= 1;
                 self.ender.phase = EnderPhase::Home;
                 self.ender.home = HomeState {
                     since: Some(tick),
+                    top_up_over: made,
+                    kit_begun: kit,
+                    kit_over: kit,
                     ..HomeState::default()
                 };
+                if made {
+                    // The way points before the nearest one are behind a bot resumed mid-trip.
+                    let feet = w.body.map(|b| path::feet_cell(b.pos)).unwrap_or_default();
+                    let way = self.home_rules().way;
+                    let nearest = way
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|(_, [x, z])| flat(feet, (*x, feet.1, *z)))
+                        .map(|(i, _)| i);
+                    if let Some(k) = nearest {
+                        self.ender.home.ways_passed =
+                            way.iter().take(k).map(|[x, z]| (x >> 4, z >> 4)).collect();
+                    }
+                    self.note(
+                        tick,
+                        "home: resumed with the eyes made".to_owned(),
+                        format!("{eyes} eyes held: no top-up; the kit held: {kit}"),
+                    );
+                }
                 let s = self.home_state(w);
                 self.note(
                     tick,
@@ -572,6 +707,9 @@ impl Plan {
         let rules = self.table.as_ref().map(|t| t.survival.clone())?;
         let health = w.player.health?;
         let heal = crate::can_heal(w.player.food, eat::best_food(w, &rules).is_some());
+        if let Some(t) = self.home_cubes(w, tick, health, rules.danger_health) {
+            return Some(t);
+        }
         if health <= rules.danger_health && !heal {
             if self
                 .ender
@@ -612,6 +750,157 @@ impl Plan {
             return Some(t);
         }
         None
+    }
+
+    /// The tunnel out of a cube pocket in hand: on through rock toward its end until
+    /// `CUBE_TUNNEL_OUT` along with no cube within `CUBE_CLEAR`; `None` with none in hand, or it
+    /// ended (noted). With no tunnel route the near cube is fought (the defence's rest window).
+    fn home_cube_tunnel(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let (start, target) = self.ender.home.cube_tunnel?;
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let along = flat(start, feet);
+        let clear = !w.entities.values().any(|e| {
+            !e.dead && e.kind == data::EntityKind::MagmaCube && dist(e.pos, body.pos) <= CUBE_CLEAR
+        });
+        if (along >= CUBE_TUNNEL_OUT && clear) || feet == target {
+            self.ender.home.cube_tunnel = None;
+            self.note(
+                tick,
+                "home: out of the cube tunnel".to_owned(),
+                format!(
+                    "{along} along from {start:?} at {feet:?}; no cube within {CUBE_CLEAR}: {clear}"
+                ),
+            );
+            return None;
+        }
+        if let Some(t) = self.tunnel_toward(
+            w,
+            target,
+            ("the cube tunnel", "out of a cube pocket through rock"),
+            tick,
+        ) {
+            return Some(t);
+        }
+        self.ender.home.cube_tunnel = None;
+        self.note(
+            tick,
+            "home: no cube tunnel".to_owned(),
+            format!("no way through rock from {feet:?} to {target:?}: the near cube is fought"),
+        );
+        None
+    }
+
+    /// Magma cubes pressing on the trip: with `CUBE_CROWD` within `CUBE_NEAR`, or any within
+    /// `CUBE_CLEAR` at or under the danger line, a sealed pocket where the bot stands, held until
+    /// none is within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. Each pocket counted and noted.
+    fn home_cubes(&mut self, w: &World, tick: u64, health: f32, danger: f32) -> Option<Task> {
+        if !self.ender.home.top_up_over {
+            return None;
+        }
+        let body = w.body?;
+        if let Some(t) = self.home_cube_tunnel(w, tick) {
+            return Some(t);
+        }
+        let cubes: Vec<f64> = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && e.kind == data::EntityKind::MagmaCube)
+            .map(|e| dist(e.pos, body.pos))
+            .collect();
+        let near = cubes.iter().filter(|d| **d <= CUBE_NEAR).count();
+        let within_clear = cubes.iter().any(|d| *d <= CUBE_CLEAR);
+        // Over the danger line, a pocket given up waits `CUBE_RESUME_TICKS` before another: cubes
+        // sit outside a sealed pocket for good (race 45707489694 lanes 2 and 3 held 5,000 and
+        // 8,000 ticks with cubes at 4 to 7).
+        let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t) && health > danger;
+        let press = !resting && (near >= CUBE_CROWD || (within_clear && health <= danger));
+        let held = self.ender.home.cube_pocket.is_some();
+        if press && !held {
+            self.ender.home.cube_pocket = Some(tick);
+            self.ender.home.cube_pockets += 1;
+            self.note(
+                tick,
+                "home: pocket from magma cubes".to_owned(),
+                format!(
+                    "{near} within {CUBE_NEAR}, {} within {CUBE_CLEAR}; health {health} (danger {danger}); pocket {}",
+                    cubes.iter().filter(|d| **d <= CUBE_CLEAR).count(),
+                    self.ender.home.cube_pockets
+                ),
+            );
+        }
+        let since = self.ender.home.cube_pocket?;
+        // Held long enough over the danger line: on, the near one fought, the rest left to the
+        // shun, and no pocket for a while.
+        if health > danger && tick.saturating_sub(since) >= CUBE_HOLD_MAX {
+            self.ender.home.cube_pocket = None;
+            self.ender.home.cube_clear_since = None;
+            self.ender.home.cube_resume_at = Some(tick + CUBE_RESUME_TICKS);
+            self.ender.home.cube_breakouts += 1;
+            self.note(
+                tick,
+                "home: out of the cube pocket, the cubes stay".to_owned(),
+                format!(
+                    "held {CUBE_HOLD_MAX} ticks; {near} within {CUBE_NEAR}; health {health} over {danger}; no pocket for {CUBE_RESUME_TICKS}; breakout {}",
+                    self.ender.home.cube_breakouts
+                ),
+            );
+            // Out through the rock on the side away from them, toward the next point: cubes do
+            // not follow through rock (the coordinator: a fight at 14 to 17 with no heal can kill).
+            let feet = path::feet_cell(body.pos);
+            let aim = self.ender.home.aim.unwrap_or((feet.0, feet.2));
+            let near_cubes: Vec<[f64; 3]> = w
+                .entities
+                .values()
+                .filter(|e| {
+                    !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        && dist(e.pos, body.pos) <= 12.0
+                })
+                .map(|e| e.pos)
+                .collect();
+            let dir = cube_tunnel_dir(feet, aim, &near_cubes);
+            let target = (
+                feet.0 + dir.0 * CUBE_TUNNEL_LEN,
+                feet.1,
+                feet.2 + dir.1 * CUBE_TUNNEL_LEN,
+            );
+            self.ender.home.cube_tunnel = Some((feet, target));
+            self.ender.home.cube_tunnels += 1;
+            self.note(
+                tick,
+                "home: left the cube pocket by tunnel".to_owned(),
+                format!(
+                    "on ({}, {}) toward {target:?}, away from {} cubes within 12, toward the point {aim:?}; tunnel {}",
+                    dir.0,
+                    dir.1,
+                    near_cubes.len(),
+                    self.ender.home.cube_tunnels
+                ),
+            );
+            return self.home_cube_tunnel(w, tick);
+        }
+        if within_clear {
+            self.ender.home.cube_clear_since = None;
+        } else {
+            let clear = *self.ender.home.cube_clear_since.get_or_insert(tick);
+            if tick.saturating_sub(clear) >= CUBE_CLEAR_TICKS {
+                self.ender.home.cube_pocket = None;
+                self.ender.home.cube_clear_since = None;
+                self.note(
+                    tick,
+                    "home: out of the cube pocket".to_owned(),
+                    format!(
+                        "none within {CUBE_CLEAR} for {CUBE_CLEAR_TICKS} ticks; held {} ticks; health {health}",
+                        tick.saturating_sub(since)
+                    ),
+                );
+                return None;
+            }
+        }
+        self.pocket_step(w, tick);
+        self.retry_at = tick + 1;
+        Some(Task::Idle)
     }
 
     /// The portal aimed at: memory's nearest, read again every `portal_every`; else geography.
@@ -656,6 +945,58 @@ impl Plan {
         let r = self.home_rules();
         let body = w.body?;
         let feet = path::stand_cell(w, body.pos);
+        // Stone pickaxes on the way from the deltas' blackstone (`#stone_tool_materials`), with
+        // the kit's table and sticks, once the stone uses fall under the base's (the coordinator,
+        // 2026-11-25: the long way wears them; the walls are full of blackstone).
+        // The last ground with filler to dig, every GROUND_EVERY ticks.
+        if self
+            .ender
+            .home
+            .ground_at
+            .is_none_or(|t| tick >= t + GROUND_EVERY)
+        {
+            self.ender.home.ground_at = Some(tick);
+            if !crate::heading::restock_cells(w, Some((1, 0)), crate::heading::RESTOCK_REACH)
+                .is_empty()
+            {
+                self.ender.home.ground = Some(path::feet_cell(body.pos));
+            }
+        }
+        let picking = self.base.steps == base::CLIMB_STEPS.to_vec() && !self.base.over;
+        let want = self.table.as_ref().map_or(100, |t| t.base.pickaxe_uses);
+        let stone = craft::count(w, ItemKind::Blackstone)
+            + craft::count(w, ItemKind::Cobblestone)
+            + craft::count(w, ItemKind::CobbledDeepslate);
+        if !picking
+            && base::reserve_pick_uses(w) < want
+            && stone >= 3
+            && craft::count(w, ItemKind::Stick) >= 2
+            && self.ender.home.trip_pick_runs < r.pick_runs
+        {
+            self.ender.home.trip_pick_runs += 1;
+            self.base = base::BaseState {
+                steps: base::CLIMB_STEPS.to_vec(),
+                ..base::BaseState::default()
+            };
+            self.note(
+                tick,
+                format!("home: pickaxes on the way ({})", self.ender.home.trip_pick_runs),
+                format!(
+                    "stone pickaxe uses {} under {want}; {} blackstone, {} cobblestone, {} sticks, {} tables",
+                    base::reserve_pick_uses(w),
+                    craft::count(w, ItemKind::Blackstone),
+                    craft::count(w, ItemKind::Cobblestone),
+                    craft::count(w, ItemKind::Stick),
+                    craft::count(w, ItemKind::CraftingTable)
+                ),
+            );
+        }
+        if self.base.steps == base::CLIMB_STEPS.to_vec()
+            && !self.base.over
+            && let Some(t) = self.base_task(w, tick)
+        {
+            return Some(t);
+        }
         let Some(portal) = self.home_portal(w, tick) else {
             self.retry_at = tick + crate::RETRY_TICKS * 10;
             return Some(Task::Idle);
@@ -696,11 +1037,19 @@ impl Plan {
         if d <= r.approach {
             return self.home_approach(w, tick, portal);
         }
-        let passed = self
+        // The points passed are Home's, not the heading's: a heading turned out is dropped, and
+        // race 45707489694 lane 3, past (490, 150) and 140 blocks on, was sent back east to it.
+        for c in self
             .headed
             .as_ref()
             .map(|h| h.ways.clone())
-            .unwrap_or_default();
+            .unwrap_or_default()
+        {
+            if !self.ender.home.ways_passed.contains(&c) {
+                self.ender.home.ways_passed.push(c);
+            }
+        }
+        let passed = self.ender.home.ways_passed.clone();
         let next = r
             .way
             .iter()
@@ -710,6 +1059,7 @@ impl Plan {
             .find(|(c, _)| !passed.contains(c))
             // The portal's own point stays the aim after its column is reached.
             .or(Some(((portal.0 >> 4, portal.2 >> 4), (portal.0, portal.2))));
+        self.ender.home.aim = next.map(|(_, p)| p);
         let signs = Signs {
             // The forest at the feet would end the heading: the trip begins in it.
             feet_biome: w.feet_biome().filter(|b| *b != "warped_forest"),
@@ -717,7 +1067,18 @@ impl Plan {
             valley: None,
             way: next,
         };
-        if let Some(t) = self.heading_with(w, signs, tick) {
+        let t = self.heading_with(w, signs, tick);
+        for c in self
+            .headed
+            .as_ref()
+            .map(|h| h.ways.clone())
+            .unwrap_or_default()
+        {
+            if !self.ender.home.ways_passed.contains(&c) {
+                self.ender.home.ways_passed.push(c);
+            }
+        }
+        if let Some(t) = t {
             return Some(t);
         }
         // The heading turned out: a far walk toward the portal, then a fresh heading.
@@ -735,6 +1096,64 @@ impl Plan {
                 format!("the heading is over; {d} off"),
             );
             return Some(Task::Explore(walk));
+        }
+        self.expanded += walk.expanded;
+        // Stranded short of filler (on its own bridge, race 45715674818 lane 3 at (293, 38, 188)
+        // with 15, one under the 16 a far search needs to bridge at all): back to the last ground
+        // that had filler to dig, where the heading's restock runs.
+        if path::bridge_blocks(w) < crate::heading::HOME_KEEP + crate::heading::RESTOCK_BRIDGES
+            && let Some(g) = self.ender.home.ground
+            && flat(g, feet) > 2
+        {
+            let mut back = Walk::new(g, Goal::Near { pos: g, range: 1.5 }, Arrive::Goal, tick);
+            if back.route_now(w, tick) && back.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.ender.home.ground_walks += 1;
+                self.note(
+                    tick,
+                    format!("home: back to ground at {g:?} for filler"),
+                    format!(
+                        "no way on from {feet:?} with filler {}; walk {}",
+                        path::bridge_blocks(w),
+                        self.ender.home.ground_walks
+                    ),
+                );
+                return Some(Task::Explore(back));
+            }
+            self.expanded += back.expanded;
+        }
+        // No ground known (or no way to it) and under what a far search needs to bridge: the
+        // bridge's own last blocks behind the bot are dug back, never the one under the feet, for
+        // a short retreat to land (the coordinator, 2026-11-25).
+        if path::bridge_blocks(w) < path::BRIDGE_RESERVE
+            && let Some(body) = w.body
+        {
+            let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
+            let under = (feet.0, feet.1 - 1, feet.2);
+            let mut cells = path::Cells::new(w);
+            let pick = self.ender.home.laid.iter().rev().copied().find(|c| {
+                *c != under
+                    && cells.at(*c) == path::Class::Solid
+                    && (0..3)
+                        .map(|i| (eye[i] - (f64::from([c.0, c.1, c.2][i]) + 0.5)).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= crate::heading::RESTOCK_REACH
+            });
+            if let Some(c) = pick {
+                self.ender.home.laid.retain(|l| *l != c);
+                self.ender.home.unbridged += 1;
+                self.note(
+                    tick,
+                    format!("home: dig back own bridge block at {c:?}"),
+                    format!(
+                        "stranded at {feet:?} with filler {}; dig {} of the run",
+                        path::bridge_blocks(w),
+                        self.ender.home.unbridged
+                    ),
+                );
+                return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
+            }
         }
         self.retry_at = tick + crate::RETRY_TICKS * 10;
         self.note(
