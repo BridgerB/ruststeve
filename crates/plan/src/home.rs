@@ -210,6 +210,9 @@ pub struct HomeState {
     pub cube_resume_at: Option<u64>,
     #[serde(default)]
     pub cube_breakouts: u32,
+    /// Floor blocks laid beside the feet with a cube near.
+    #[serde(default)]
+    pub rails: u32,
     /// The last tick a blaze or ghast had the bot in sight on the trip.
     #[serde(default)]
     pub shooter_seen_at: Option<u64>,
@@ -869,6 +872,68 @@ impl Plan {
         None
     }
 
+    /// A cube within `CUBE_CLEAR` and an edge beside the feet (no floor beside them: lava or air
+    /// under the next cell): the floor beside the feet is laid first, a block clicked onto the side
+    /// of the one stood on, so a cube's knock-back lands on a block (race 45733362772 lane 0: a
+    /// magma cube knocked it into lava 560 ticks after the resume). Noted and counted; `None`
+    /// with no cube near, no edge beside, or no filler held.
+    fn home_rail(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        let cube = w.entities.values().any(|e| {
+            !e.dead && e.kind == data::EntityKind::MagmaCube && dist(e.pos, body.pos) <= CUBE_CLEAR
+        });
+        if !cube {
+            return None;
+        }
+        let feet = path::feet_cell(body.pos);
+        let under = (feet.0, feet.1 - 1, feet.2);
+        let mut cells = path::Cells::new(w);
+        if cells.at(under) != path::Class::Solid {
+            return None;
+        }
+        let (target, face) = [((1, 0), 5i8), ((-1, 0), 4), ((0, 1), 3), ((0, -1), 2)]
+            .into_iter()
+            .map(|((dx, dz), f)| ((feet.0 + dx, feet.1 - 1, feet.2 + dz), f))
+            .find(|(c, _)| matches!(cells.at(*c), path::Class::Lava | path::Class::Clear))?;
+        let item = endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.rails += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(under.0, under.1, under.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("home: rail beside the feet at {target:?}"),
+                    format!(
+                        "a magma cube within {CUBE_CLEAR} and no floor beside {feet:?}; {item:?} on {under:?} face {face}; rail {}",
+                        self.ender.home.rails
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
+    }
+
     /// The tunnel out of a cube pocket in hand: on through rock toward its end until
     /// `CUBE_TUNNEL_OUT` along with no cube within `CUBE_CLEAR`; `None` with none in hand, or it
     /// ended (noted). With no tunnel route the near cube is fought (the defence's rest window).
@@ -917,6 +982,9 @@ impl Plan {
         }
         let body = w.body?;
         if let Some(t) = self.home_cube_tunnel(w, tick) {
+            return Some(t);
+        }
+        if let Some(t) = self.home_rail(w, tick) {
             return Some(t);
         }
         let cubes: Vec<f64> = w

@@ -927,3 +927,28 @@ fn the_gap_ahead_is_measured_to_the_next_floor() {
     }
     assert_eq!(plan::heading::gap_ahead(&w, (8, 64, 8), (1, 0)), 12);
 }
+
+#[test]
+fn a_cube_near_with_lava_beside_the_feet_lays_a_rail_first() {
+    // Race 45733362772 lane 0: knocked into lava by a magma cube 560 ticks after the resume.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (9, 63, 8), BlockKind::Lava);
+    add_cube(&mut w, 50, [8.5, 64.0, 13.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: rail beside the feet at (9, 63, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.rails, 1);
+    assert!(matches!(p.task, Task::Idle), "{}", p.task.name());
+}
