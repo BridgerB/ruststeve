@@ -124,3 +124,10 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - A body over a recorded pillar's dug shaft steps into it ("step into the shaft").
   - From a spike's top, a dug shaft is walked to beside it and stepped into.
   - Unit test `the_way_down_centres_first_and_steps_into_a_dug_shaft`.
+
+### Wall 7: the clutch missed a fast fall, and a charge caught the way down (both answered, the orchestrator's design)
+- **The pour is predicted** (`pour_now`). The position this tick's movement sends is the feet plus the velocity (the move comes before gravity 0.08 and drag 0.98). The pour goes in the last tick that position has the eye within 4.4 of the ground's top face with the feet still over it; if two ticks qualify, the later. It is not waited for.
+  - Under 2.78 a tick (falls from rest up to about 100 blocks) one tick always lands in that band.
+  - At terminal speed (3.9 a tick) a fall's phase can skip the band; the unit test's 48-block fall at terminal speed does not.
+  - Unit test `a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach`, plus every start from rest from 5 to 60 over the ground.
+- **A charge** (phase 8) within 40, with the bot on its pillar digging down, climbing or stepping: it holds still in the column ("hold in the shaft from the charge"). The climb's driver stops for it too ("climb held from the charge").
