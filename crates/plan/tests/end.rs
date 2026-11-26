@@ -640,7 +640,8 @@ fn from_the_first_end_tick_every_look_is_straight_down() {
 
 #[test]
 fn a_pocket_is_built_from_end_stone_when_that_is_all_that_is_held() {
-    // E5's race 45886819862 lane 1: "no block held for a pocket" with 192 end stone.
+    // E5's race 45886819862 lane 1: "no block held for a pocket" with 192 end stone. Since E5's
+    // wall 15 no pocket is sealed in the End at all (`dragon::Plan::end_enderman_step`).
     let mut w = world(4, 0..=7, [12.5, 64.0, 0.5]);
     w.inventory.slots.clear();
     w.inventory.slots.insert(36, (ItemKind::EndStone, 64));
@@ -654,8 +655,13 @@ fn a_pocket_is_built_from_end_stone_when_that_is_all_that_is_held() {
     for _ in 0..3 {
         p.step(&w);
     }
-    assert!(noted(&p, "pocket block 1"), "{:?}", notes(&p));
+    assert!(!noted(&p, "pocket block 1"), "{:?}", notes(&p));
     assert!(!noted(&p, "no block held"), "{:?}", notes(&p));
+    assert!(
+        noted(&p, "end: no pocket for enderman 9"),
+        "{:?}",
+        notes(&p)
+    );
 }
 
 #[test]
