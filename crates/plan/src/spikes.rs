@@ -132,6 +132,10 @@ pub const REFUSE_TICKS: u64 = 1200;
 /// wide within 0.2 of the centre stands on its cell alone.
 pub const STEP_NEAR: f64 = 0.2;
 pub const STEP_TICKS: u64 = 60;
+/// One blow of the dragon's (its breath's 6 through iron, race 45875049490; a wing's 5, a head's
+/// 10): on the way down under danger plus this, the bot holds in its shaft while the dragon is
+/// near.
+pub const ONE_BLOW: f32 = 6.0;
 /// Ticks after a blow inside the box in which the bot leaves it for the way down.
 pub const BOX_BLOW_TICKS: u64 = 200;
 /// Ticks a repeated note waits before it is written again.
@@ -591,6 +595,8 @@ pub enum Next {
     Bar(Cell),
     /// Dig a side of the box open, the way back to the pillar's top from a wide spike's stand.
     Open(Cell),
+    /// Dig this cell, shutting the bot in, toward an approach's foot.
+    DigOut { cell: Cell, toward: Cell },
     /// Move to this cell's centre (sneaking, or not: into a pillar's dug shaft).
     Step { to: Cell, sneak: bool },
     /// Attack this crystal.
@@ -794,6 +800,14 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             sneak: false,
         };
     }
+    // Held up by the floor beside the feet's cell (a body over an edge: E3's race 45890445738,
+    // x 14.2 half on a stair's step over the bunker's air, every walk refused from there for
+    // 14,000 ticks): onto the cell whose floor holds it first.
+    if !full(kind(w, (feet.0, feet.1 - 1, feet.2)))
+        && let Some(c) = held_by(w, body.pos, feet)
+    {
+        return Next::Step { to: c, sneak: true };
+    }
     if on_spike(w, feet) {
         // Back to a pillar's top at the feet's height, or into its shaft once dug: the way down.
         return st
@@ -816,19 +830,38 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
                         .map(|dy| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
                         .find(|c| !open(kind(w, *c)) && kind(w, *c) != Some(BlockKind::Obsidian));
                     let top = (r.x, feet.1, r.z);
-                    let next_to = (r.x - feet.0).abs() + (r.z - feet.2).abs() <= 1;
                     let shaft = !full(kind(w, (r.x, feet.1 - 1, r.z)));
+                    // The cells beside the shaft along an axis a body can stand in (race
+                    // 45895161187 lane 0: a diagonal "beside" was walked to 900 times).
+                    let beside: Vec<Cell> = Axis::ALL
+                        .iter()
+                        .map(|a| {
+                            let (ax, az) = a.step();
+                            (r.x + ax, feet.1, r.z + az)
+                        })
+                        .filter(|c| {
+                            full(kind(w, (c.0, c.1 - 1, c.2)))
+                                && open(kind(w, *c))
+                                && open(kind(w, (c.0, c.1 + 1, c.2)))
+                        })
+                        .collect();
                     match way {
                         Some(c) => Next::Open(c),
                         // A dug shaft: walk to beside it on the spike, then step in.
-                        None if shaft && next_to => Next::Step {
+                        None if shaft && beside.contains(&feet) => Next::Step {
                             to: top,
                             sneak: false,
                         },
-                        None if shaft => Next::Walk {
-                            to: (r.x - dx, feet.1, r.z - dz),
-                            approach: None,
-                        },
+                        None if shaft => beside
+                            .iter()
+                            .min_by_key(|c| (c.0 - feet.0).abs() + (c.2 - feet.2).abs())
+                            .map_or_else(
+                                || Next::Wait("no cell beside the pillar's shaft".to_owned()),
+                                |c| Next::Walk {
+                                    to: *c,
+                                    approach: None,
+                                },
+                            ),
                         None => Next::Walk {
                             to: top,
                             approach: None,
@@ -845,10 +878,22 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             to: a.foot,
             approach: Some((spike.centre[0], spike.centre[1], a.plan.axis)),
         },
-        (Some((_, pos)), None) => Next::Wait(format!(
-            "no approach to the crystal at ({:.1}, {:.1}, {:.1})",
-            pos[0], pos[1], pos[2]
-        )),
+        (Some((_, pos)), None) => {
+            // Every approach refused for want of a way: the cells shutting the bot in dug toward
+            // the nearest approach (the frontier race 45898928805 lane 1: an enderman's pocket put
+            // blocks on the bunker's stair, (12, 60, 0) and (13, 61, 0), and every walk from
+            // (13, 59, 0) was refused for 12,000 ticks).
+            let out = spike_for(w, &st.geography, pos)
+                .and_then(|sp| best_approach(w, &sp, body.pos, &[], tick))
+                .and_then(|a| dig_out(w, feet, a.foot).map(|c| (c, a.foot)));
+            match out {
+                Some((cell, toward)) => Next::DigOut { cell, toward },
+                None => Next::Wait(format!(
+                    "no approach to the crystal at ({:.1}, {:.1}, {:.1})",
+                    pos[0], pos[1], pos[2]
+                )),
+            }
+        }
         (None, _) => Next::Done,
     }
 }
@@ -870,6 +915,9 @@ pub const CLUTCH_FROM: f64 = 4.0;
 /// Blocks from the eye to the ground's top face a pour reaches: the player's block interaction
 /// range 4.5, less a tenth.
 pub const POUR_REACH: f64 = 4.4;
+/// The hotbar index the water bucket is kept in up high (the last: the tools and blocks the
+/// climb and dig hold are selected elsewhere).
+pub const CLUTCH_HOTBAR: u8 = 8;
 
 /// Whether the pour goes this tick (the orchestrator, after race 45885217441 lane 1's miss at 48
 /// over the ground): the position this tick's movement sends (the feet plus the velocity, the
@@ -896,13 +944,87 @@ fn dig_down(w: &World, c: Cell, tick: u64) -> Dig {
     d
 }
 
+/// The cell beside the feet's whose full floor the body's box (0.6 wide) rests on, when the
+/// feet's own cell has none.
+pub fn held_by(w: &World, pos: [f64; 3], feet: Cell) -> Option<Cell> {
+    let half = physics::HALF_WIDTH;
+    let (fx, fz) = (pos[0] - f64::from(feet.0), pos[2] - f64::from(feet.2));
+    [
+        (-1, 0),
+        (1, 0),
+        (0, -1),
+        (0, 1),
+        (-1, -1),
+        (-1, 1),
+        (1, -1),
+        (1, 1),
+    ]
+    .into_iter()
+    .filter(|(dx, dz)| {
+        let over_x = match dx {
+            -1 => fx < half,
+            1 => fx > 1.0 - half,
+            _ => true,
+        };
+        let over_z = match dz {
+            -1 => fz < half,
+            1 => fz > 1.0 - half,
+            _ => true,
+        };
+        over_x && over_z
+    })
+    .map(|(dx, dz)| (feet.0 + dx, feet.1, feet.2 + dz))
+    .find(|c| full(kind(w, (c.0, c.1 - 1, c.2))) && open(kind(w, *c)))
+}
+
+/// The next cell to dig out of a pit or a shut cell toward `target`, along its larger axis: a
+/// step up (the cell over the head, then the step's cell and the one over it) when the target
+/// is higher, else the way along (the feet's and the head's cells). Only a block with an open
+/// face beside the bot's own cell, never obsidian or bedrock. `None` when the way is open.
+pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
+    let (dx, dz) = {
+        let (ax, az) = (target.0 - feet.0, target.2 - feet.2);
+        if ax.abs() >= az.abs() {
+            (ax.signum(), 0)
+        } else {
+            (0, az.signum())
+        }
+    };
+    if (dx, dz) == (0, 0) {
+        return None;
+    }
+    let (x, y, z) = feet;
+    // A stair of up to `DIG_OUT_STEPS` steps (each within a dig's reach), or the way along.
+    let rise = (target.1 - y).clamp(0, DIG_OUT_STEPS);
+    let cells: Vec<Cell> = if rise > 0 {
+        (0..rise)
+            .flat_map(|k| {
+                [
+                    (x + k * dx, y + k + 2, z + k * dz),
+                    (x + (k + 1) * dx, y + k + 1, z + (k + 1) * dz),
+                    (x + (k + 1) * dx, y + k + 2, z + (k + 1) * dz),
+                ]
+            })
+            .collect()
+    } else {
+        vec![(x + dx, y, z + dz), (x + dx, y + 1, z + dz)]
+    };
+    cells.into_iter().find(|c| {
+        let k = kind(w, *c);
+        !open(k) && k.is_some() && !matches!(k, Some(BlockKind::Obsidian | BlockKind::Bedrock))
+    })
+}
+
+/// Steps of a stair out a dig-out looks along (each cell within a dig's reach of the feet).
+pub const DIG_OUT_STEPS: i32 = 3;
+
 fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
 }
 
 impl Plan {
     // >>> E4 (issue 20f)
-    fn spikes_note(&mut self, tick: u64, what: String, why: String) {
+    pub(crate) fn spikes_note(&mut self, tick: u64, what: String, why: String) {
         if let Some((last, at)) = &self.spikes.last_note
             && *last == what
             && tick.saturating_sub(*at) < NOTE_EVERY
@@ -911,6 +1033,24 @@ impl Plan {
         }
         self.spikes.last_note = Some((what.clone(), tick));
         self.note(tick, what, why);
+    }
+
+    /// Is the bot up high on the crystals' work in the End: on a pillar it put up, on a spike's
+    /// top, or climbing or stepping in its column?
+    pub fn spikes_up_high(&self, w: &World) -> bool {
+        if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
+            return false;
+        }
+        let Some(body) = w.body else {
+            return false;
+        };
+        let feet = path::stand_cell(w, body.pos);
+        on_pillar(w, feet, &self.spikes.pillars)
+            || on_spike(w, feet)
+            || matches!(
+                self.spikes.doing,
+                Some(Doing::Climb(_) | Doing::Step { .. } | Doing::Build(_) | Doing::Strike(_))
+            )
     }
 
     fn spikes_danger(&self) -> f32 {
@@ -997,6 +1137,24 @@ impl Plan {
             .spikes
             .box_blow_at
             .is_some_and(|t| tick.saturating_sub(t) <= BOX_BLOW_TICKS);
+        // A breath on the feet up a pillar: down out of it at once, ahead of every hold (E5's walk
+        // out of a breath stands aside up high: there is no cell to walk to).
+        if body.on_ground
+            && on_pillar(w, feet, &self.spikes.pillars)
+            && let Some(b) = crate::dragon::breath_on(&crate::dragon::breaths(w), body.pos)
+        {
+            let c = (feet.0, feet.1 - 1, feet.2);
+            self.spikes_note(
+                tick,
+                format!("spikes: dig down out of the breath at {c:?}"),
+                format!(
+                    "a breath {:.1} off, radius {:.1}; health {health:?}",
+                    crate::dragon::flat(b.pos, body.pos),
+                    b.radius
+                ),
+            );
+            return Some(Task::Dig(dig_down(w, c, tick)));
+        }
         // A charge near: a bot up its pillar's column holds still there, neither digging the last
         // cells nor climbing on.
         if charging(d.as_ref())
@@ -1013,6 +1171,39 @@ impl Plan {
                 format!(
                     "the dragon {:?} at {feet:?}; health {health:?}",
                     d.map(|d| (d.dist, d.phase))
+                ),
+            );
+            return Some(self.spikes_hold(tick));
+        }
+        // Hurt on the way down (under danger plus one blow) with the dragon near and not perched:
+        // held in the shaft, eating when food is short, until it is far or perched (the
+        // orchestrator, after race 45895161187 lane 1: struck dead at 9 going down).
+        if health.is_some_and(|h| h < danger + ONE_BLOW)
+            && body.on_ground
+            && on_pillar(w, feet, &self.spikes.pillars)
+            && matches!(n, Next::DigDown(_) | Next::Step { .. })
+            && let Some(why) = dragon_refusal(d.as_ref())
+        {
+            let food = self
+                .table
+                .as_ref()
+                .and_then(|t| crate::eat::best_food(w, &t.survival));
+            if w.player.food.is_some_and(|f| f < 20)
+                && let Some(f) = food
+            {
+                self.spikes_note(
+                    tick,
+                    "spikes: eat in the shaft".to_owned(),
+                    format!("{f:?}; health {health:?}, food {:?}; {why}", w.player.food),
+                );
+                return Some(Task::Eat(crate::eat::Eat::new(w, f, tick)));
+            }
+            self.spikes_note(
+                tick,
+                "spikes: hold in the shaft, hurt".to_owned(),
+                format!(
+                    "health {health:?} under {}; {why} at {feet:?}",
+                    danger + ONE_BLOW
                 ),
             );
             return Some(self.spikes_hold(tick));
@@ -1244,10 +1435,24 @@ impl Plan {
                 );
                 Some(Task::Dig(dig_down(w, c, tick)))
             }
+            Next::DigOut { cell, toward } => {
+                // The approaches refused for want of a way are tried again once it is dug.
+                self.spikes.refused.clear();
+                self.spikes_note(
+                    tick,
+                    format!("spikes: dig the way out at {cell:?}"),
+                    format!("from {feet:?} toward the approach's foot {toward:?}"),
+                );
+                Some(Task::Dig(dig_down(w, cell, tick)))
+            }
             Next::Step { to, sneak } => {
                 self.spikes_note(
                     tick,
-                    format!("spikes: step into the shaft at {to:?}"),
+                    if sneak {
+                        format!("spikes: step onto the floor at {to:?}")
+                    } else {
+                        format!("spikes: step into the shaft at {to:?}")
+                    },
                     format!("from {feet:?}, sneaking {sneak}"),
                 );
                 self.spikes.doing = Some(Doing::Step {
@@ -1265,7 +1470,7 @@ impl Plan {
     /// `CLUTCH_FROM` under the feet and a water bucket held, the bucket to hand, used looking
     /// straight down in the last tick the eye is in reach of the ground (`pour_now`); landed, the water taken
     /// back. Every step noted.
-    fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
             self.spikes.clutch = None;
             return None;
@@ -1287,15 +1492,34 @@ impl Plan {
                 return None;
             }
             self.spikes.clutches += 1;
+            // The clutch owns the hand (the orchestrator, after race 45899557907 lane 0: the eat
+            // row cut in the tick the fall began, and no pour went): any eating stopped, its task
+            // dropped, the bucket's slot selected below.
+            // The use key let go whatever it held (harmless when nothing is in use).
+            self.acts.push(Act::ReleaseUse);
+            if matches!(self.task, Task::Eat(_)) {
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "spikes: clutch stops the eating".to_owned(),
+                    "the hand to the water bucket".to_owned(),
+                );
+            }
             self.note(
                 tick,
                 format!("spikes: clutch begun at {:?}", path::feet_cell(body.pos)),
                 format!(
-                    "falling with {:.1} under the feet (velocity {:.2}); clutch {}; health {:?}",
+                    "falling with {:.1} under the feet (velocity {:.2}); clutch {}; health {:?}; held {:?}, the bucket in slot {:?}",
                     height.unwrap_or(0.0),
                     body.vel[1],
                     self.spikes.clutches,
-                    w.player.health
+                    w.player.health,
+                    crate::dig::held_item(w),
+                    w.inventory
+                        .slots
+                        .iter()
+                        .find(|(_, (k, _))| *k == ItemKind::WaterBucket)
+                        .map(|(s, _)| *s)
                 ),
             );
             self.spikes.clutch = Some(Clutch {
@@ -1348,6 +1572,15 @@ impl Plan {
                     && ground.is_some_and(|g| pour_now(body.pos[1], body.vel[1], g))
                     && self.acts.is_empty()
                 {
+                    self.note(
+                        tick,
+                        "spikes: clutch pour sent".to_owned(),
+                        format!(
+                            "{:.2} over the ground, falling {:.2}",
+                            height.unwrap_or(0.0),
+                            body.vel[1]
+                        ),
+                    );
                     self.acts.push(Act::UseItem);
                 }
                 self.spikes.clutch = Some(c);
@@ -1404,11 +1637,53 @@ impl Plan {
     /// `item` to hand for the clutch (an act when a swap is needed), looking down.
     fn spikes_clutch_hold(&mut self, w: &World, item: ItemKind, down: Controls) -> Controls {
         if let hold::Hold::Act(a) = hold::toward(w, item)
-            && self.acts.is_empty()
+            && self.acts.iter().all(|x| matches!(x, Act::ReleaseUse))
         {
             self.acts.push(a);
         }
         down
+    }
+
+    /// Up a pillar or a spike, the water bucket kept in the hotbar (`CLUTCH_HOTBAR`), so a fall
+    /// selects it with one packet and never waits on a window's clicks. Noted.
+    fn spikes_bucket_to_hotbar(&mut self, w: &World, tick: u64) {
+        if !self.spikes_up_high(w)
+            || !self.acts.is_empty()
+            || w.click.is_some()
+            || w.window.is_some()
+            || w.inventory.carried.is_some()
+        {
+            return;
+        }
+        let slots = &w.inventory.slots;
+        if slots
+            .iter()
+            .any(|(s, (k, _))| (36..=44).contains(s) && *k == ItemKind::WaterBucket)
+        {
+            return;
+        }
+        let Some(from) = slots
+            .iter()
+            .find(|(s, (k, _))| (9..=35).contains(*s) && *k == ItemKind::WaterBucket)
+            .map(|(s, _)| *s)
+        else {
+            return;
+        };
+        let button = if w.held == CLUTCH_HOTBAR {
+            CLUTCH_HOTBAR - 1
+        } else {
+            CLUTCH_HOTBAR
+        };
+        self.acts.push(Act::Click {
+            slot: from,
+            button: i8::try_from(button).unwrap_or(8),
+            mode: 2,
+        });
+        self.spikes_note(
+            tick,
+            "spikes: water bucket to the hotbar".to_owned(),
+            format!("from slot {from} to hotbar {button}, up high"),
+        );
     }
 
     fn spikes_hold(&mut self, tick: u64) -> Task {
@@ -1422,6 +1697,7 @@ impl Plan {
     /// One tick of the crystals' driver while no task runs (the planner's step calls it ahead of
     /// the choice). `None` when nothing runs or it just ended.
     pub fn spikes_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        self.spikes_bucket_to_hotbar(w, tick);
         // A blow taken inside a closed box: noted (the box's own test).
         if let (Some(body), Some(h)) = (w.body, w.player.health) {
             let feet = path::stand_cell(w, body.pos);
@@ -1443,10 +1719,6 @@ impl Plan {
                 self.spikes.box_blow_at = Some(tick);
             }
             self.spikes.last_health = Some(h);
-        }
-        // The clutch first, whatever runs: a fall waits for no task.
-        if let Some(c) = self.spikes_clutch(w, tick) {
-            return Some(c);
         }
         if !matches!(self.task, Task::Idle) {
             return None;
@@ -1476,6 +1748,16 @@ impl Plan {
                 let exposed =
                     body.on_ground && on_pillar(w, feet, &self.spikes.pillars) && !boxed(w, feet);
                 let near = dragon_near(w, body.pos);
+                if on_pillar(w, feet, &self.spikes.pillars)
+                    && crate::dragon::breath_on(&crate::dragon::breaths(w), body.pos).is_some()
+                {
+                    self.note(
+                        tick,
+                        format!("spikes: hold ended by a breath at {feet:?}"),
+                        "up a pillar; the way down out of it".to_owned(),
+                    );
+                    return None;
+                }
                 if exposed && threatens(near.as_ref()) && !charging(near.as_ref()) {
                     self.note(
                         tick,

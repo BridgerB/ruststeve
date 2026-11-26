@@ -822,3 +822,35 @@ fn a_scanning_turn_that_does_not_come_is_not_waited_for() {
         "no turn in 40: round to the head as it points"
     );
 }
+
+#[test]
+fn the_takeoff_count_starts_again_when_a_blow_sends_it_off() {
+    // Race 45895541443 lane 0: the blow over 50 was seen with the phase already takeoff, the count
+    // never reset, and no strike came after 100 dealt.
+    let mut w = end_at([30.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    let mut p = Plan::new(Aim::Race);
+    p.step(&w);
+    data(&mut w, DRAGON, vec![(9, MetaValue::Float(156.0))]);
+    p.step(&w);
+    assert!(
+        (p.dragon.sat_damage - 44.0).abs() < 1e-3,
+        "{}",
+        p.dragon.sat_damage
+    );
+    data(
+        &mut w,
+        DRAGON,
+        vec![(9, MetaValue::Float(150.0)), (16, MetaValue::Int(4))],
+    );
+    p.step(&w);
+    assert_eq!(
+        p.dragon.sat_damage, 0.0,
+        "the server's count went over: it starts again"
+    );
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("dragon takeoff count over"))
+    );
+}

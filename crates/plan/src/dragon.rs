@@ -681,6 +681,9 @@ pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i3
     best.map(|(_, c)| c)
 }
 
+/// Server ticks after a blow a takeoff counts as the blow's: the server resets its count then.
+pub const TAKEOFF_AFTER_BLOW: u64 = 20;
+
 /// Would the next strike make the dragon take off (`PERCH_TAKEOFF`)?
 pub fn crossing(sat_damage: f32) -> bool {
     sat_damage + STRIKE_DAMAGE + STRIKE_MARGIN > PERCH_TAKEOFF
@@ -1344,6 +1347,9 @@ pub struct DragonState {
     pub sat_damage: f32,
     #[serde(default)]
     pub seen_health: Option<f32>,
+    /// The last drop in its health while sitting, server ticks.
+    #[serde(default)]
+    pub drop_at: Option<u64>,
     #[serde(default)]
     pub low_digs: u32,
     /// The way round the head held, and how many were chosen; the stand one was walked to.
@@ -1416,19 +1422,30 @@ impl Plan {
                 self.dragon.seen = true;
                 // The takeoff count: damage taken while sitting, reset as the server does when it
                 // goes over.
+                // The blow that sends it over is seen with the phase already takeoff (race
+                // 45895541443 lane 0: the count never reset, and no strike after 100 dealt).
+                let was_sitting = self.dragon.phase.is_some_and(|p| Phase::of(p).sitting());
                 if let Some(was) = self.dragon.seen_health
                     && v.health < was
-                    && v.phase().is_some_and(Phase::sitting)
+                    && (was_sitting || v.phase().is_some_and(Phase::sitting))
                 {
                     self.dragon.sat_damage += was - v.health;
-                    if self.dragon.sat_damage > PERCH_TAKEOFF {
-                        self.note(
-                            tick,
-                            format!("dragon takeoff count over ({:.1})", self.dragon.sat_damage),
-                            format!("health {:.1}; the count starts again", v.health),
-                        );
-                        self.dragon.sat_damage = 0.0;
-                    }
+                    self.dragon.drop_at = Some(now);
+                }
+                let takeoff_now = v.phase() == Some(Phase::Takeoff)
+                    && self.dragon.phase != Some(v.phase)
+                    && self
+                        .dragon
+                        .drop_at
+                        .is_some_and(|t| now.saturating_sub(t) <= TAKEOFF_AFTER_BLOW)
+                    && self.dragon.sat_damage + STRIKE_DAMAGE + STRIKE_MARGIN > PERCH_TAKEOFF;
+                if self.dragon.sat_damage > PERCH_TAKEOFF || takeoff_now {
+                    self.note(
+                        tick,
+                        format!("dragon takeoff count over ({:.1})", self.dragon.sat_damage),
+                        format!("health {:.1}; the count starts again", v.health),
+                    );
+                    self.dragon.sat_damage = 0.0;
                 }
                 self.dragon.seen_health = Some(v.health);
                 self.dragon.perched_ticks = if over_fountain(&v) {
@@ -1874,6 +1891,13 @@ impl Plan {
         if !in_end(w) {
             return None;
         }
+        // >>> E4 (issue 20f): up a pillar or a spike there is no cell to walk out to; the
+        // crystals' way down takes the body out of a breath (race 45899557907 lane 1: the walk
+        // out of a breath on a pillar's top at y 83, "NoPath" every tick, then the fall).
+        if self.spikes_up_high(w) {
+            return None;
+        }
+        // <<< E4
         let feet = w.body?.pos;
         let clouds = breaths(w);
         let Some(on) = breath_on(&clouds, feet) else {
