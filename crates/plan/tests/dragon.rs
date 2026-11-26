@@ -119,6 +119,7 @@ fn ask() -> Ask {
         way: None,
         sat_damage: 0.0,
         phase_ticks: 0,
+        way_done: None,
     }
 }
 

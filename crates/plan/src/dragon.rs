@@ -1050,6 +1050,8 @@ pub struct Ask {
     pub sat_damage: f32,
     /// Server ticks the dragon has held its phase.
     pub phase_ticks: u64,
+    /// The stand a way round was walked to the end of (`DragonState::way_done`).
+    pub way_done: Option<[i32; 3]>,
 }
 
 /// The fight's choice for this tick, pure: the clojurecraft `toward-dragon` order, with the
@@ -1213,7 +1215,10 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         {
             return Want::Go(wp, "round the head");
         }
-        if let Some(p) = around(&v, feet, mid(hs))
+        // A way round already walked to this stand is not asked again: the last leg grazes the
+        // strip's end, and asking again sent the bot back round (E6's end_loop: every 8 ticks).
+        if ask.way_done != Some(hs)
+            && let Some(p) = around(&v, feet, mid(hs))
             && let Some(c) = ground(w, p[0].floor() as i32, p[1].floor() as i32, feet_cell[1])
             && flat(feet, mid(c)) > STAND_NEAR
         {
@@ -1341,9 +1346,11 @@ pub struct DragonState {
     pub seen_health: Option<f32>,
     #[serde(default)]
     pub low_digs: u32,
-    /// The way round the head held, and how many were chosen.
+    /// The way round the head held, and how many were chosen; the stand one was walked to.
     #[serde(default)]
     pub way: Option<[i32; 3]>,
+    #[serde(default)]
+    pub way_done: Option<[i32; 3]>,
     #[serde(default)]
     pub ways: u32,
     /// Ticks a provoked enderman's pocket was passed over for the dragon, and the last note.
@@ -1551,6 +1558,13 @@ impl Plan {
             });
         // E3's bunker (`Plan.bunker`), the wait while the dragon flies.
         let bunker = self.bunker;
+        // A way round reached: its stand is gone to straight from here.
+        if let (Some(wp), Some(b)) = (self.dragon.way, w.body)
+            && flat(b.pos, mid(wp)) <= STAND_NEAR
+        {
+            self.dragon.way = None;
+            self.dragon.way_done = self.dragon.stand;
+        }
         let ask = Ask {
             danger,
             blow: HEAD_BLOW,
@@ -1560,6 +1574,7 @@ impl Plan {
             dead: self.dragon.dead,
             food: food.is_some(),
             way: self.dragon.way,
+            way_done: self.dragon.way_done,
             sat_damage: self.dragon.sat_damage,
             phase_ticks: self
                 .dragon
@@ -1620,13 +1635,12 @@ impl Plan {
                         keep_head_stand(&v, w, self.dragon.stand, crossing(self.dragon.sat_damage));
                 }
             }
-            Want::Exit(_)
-            | Want::Go(..)
-            | Want::Strike { .. }
-            | Want::Eat
-            | Want::Dig(_)
-            | Want::Hold(_) => {
+            Want::Go(..) => {
                 self.dragon.way = None;
+            }
+            Want::Exit(_) | Want::Strike { .. } | Want::Eat | Want::Dig(_) | Want::Hold(_) => {
+                self.dragon.way = None;
+                self.dragon.way_done = None;
             }
         }
         if changed {
