@@ -626,3 +626,74 @@ fn a_hold_on_an_unguarded_pillar_ends_when_the_dragon_strafes_within_64() {
         t => panic!("{t:?} {:?}", notes(&p)),
     }
 }
+
+#[test]
+fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back() {
+    // Parity e06 (E6): a 21-block fall onto water poured while falling cost 0. Race 45871173293
+    // lane 0 fell 8 for 7.5 with a water bucket held.
+    let mut w = world(2, [8.5, 75.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    let fall = |w: &mut World, y: f64| {
+        at(w, [8.5, y, 5.5]);
+        if let Some(b) = w.body.as_mut() {
+            b.on_ground = false;
+            b.vel = [0.0, -0.8, 0.0];
+        }
+    };
+    fall(&mut w, 75.0);
+    let mut p = Plan::new(Aim::Race);
+    let c = p.spikes_step(&w, 100);
+    assert_eq!(c.and_then(|c| c.pitch), Some(90.0), "looking straight down");
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch begun")),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::Hold { slot: 1 }],
+        "the bucket to hand"
+    );
+    w.held = 1;
+    fall(&mut w, 70.0);
+    p.spikes_step(&w, 101);
+    assert!(p.take_acts().is_empty(), "too high to pour yet");
+    fall(&mut w, 66.5);
+    p.spikes_step(&w, 102);
+    assert_eq!(p.take_acts(), vec![Act::UseItem], "poured near the ground");
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    fall(&mut w, 65.5);
+    p.spikes_step(&w, 103);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch poured"))
+    );
+    set(&mut w, (8, 64, 5), BlockKind::Water);
+    at(&mut w, [8.5, 64.0, 5.5]);
+    if let Some(b) = w.body.as_mut() {
+        b.in_water = true;
+    }
+    p.take_acts();
+    p.spikes_step(&w, 104);
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::UseItem],
+        "landed: the water taken back"
+    );
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    assert!(p.spikes_step(&w, 105).is_none());
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch over")),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.spikes.clutches, 1);
+}

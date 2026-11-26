@@ -51,3 +51,7 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - `THREAT_NEAR` is now `CLIMB_FAR` (64).
   - A hold on an unguarded pillar ends the tick the dragon strafes or charges near ("spikes: hold ended by the dragon"), and the planner digs down.
   - Unit test `a_hold_on_an_unguarded_pillar_ends_when_the_dragon_strafes_within_64`.
+- **The second guard** (Bridger: a taller spike's fall would kill): the water clutch, proven by parity e06 (a 21-block fall onto water poured while falling cost 0, with none 18).
+  - In the End, falling with more than 4 under the feet and a water bucket held: the bucket to hand, looking down, used every tick from 3 over the ground until it pours.
+  - Landed, the water is taken back.
+  - Notes "spikes: clutch begun / poured / missed / over"; unit test `a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back`. Not yet counted in a race.

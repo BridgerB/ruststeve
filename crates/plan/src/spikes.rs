@@ -564,6 +564,22 @@ pub struct SpikeState {
     pub stalls: u32,
     /// The last note's what and tick, so a held wait is not written every tick.
     pub last_note: Option<(String, u64)>,
+    /// The water clutch in hand (a fall caught with the water bucket), and how many fired.
+    pub clutch: Option<Clutch>,
+    pub clutches: u32,
+}
+
+/// A fall caught with the water bucket (parity e06, E6: a 21-block fall onto water poured while
+/// falling cost 0; with none, 18).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Clutch {
+    pub since: u64,
+    /// The feet's height when the fall was caught.
+    pub from_y: f64,
+    /// The cell the water went into, once poured.
+    pub poured: Option<Cell>,
+    /// When the feet landed after the pour.
+    pub landed_at: Option<u64>,
 }
 
 impl Default for SpikeState {
@@ -583,6 +599,8 @@ impl Default for SpikeState {
             placed: 0,
             stalls: 0,
             last_note: None,
+            clutch: None,
+            clutches: 0,
         }
     }
 }
@@ -712,6 +730,25 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
         (None, _) => Next::Done,
     }
 }
+
+/// The top of the ground under the feet (the first full block down, its top face), or `None`
+/// over the void or past `GROUND_SEARCH`.
+pub fn ground_under(w: &World, pos: [f64; 3]) -> Option<f64> {
+    let (x, y, z) = path::feet_cell(pos);
+    (y - GROUND_SEARCH..=y)
+        .rev()
+        .find(|cy| full(kind(w, (x, *cy, z))))
+        .map(|cy| f64::from(cy + 1))
+}
+
+/// Feet over the ground at which a fall is caught (e06: a fall from a pillar's top; the clutch is
+/// for more than a stumble), and at or under which the bucket is used, every tick until it pours
+/// (e06's `above` 4.0 and 2.0 both poured; the use reaches 4.5 from the eye).
+pub const CLUTCH_FROM: f64 = 4.0;
+pub const CLUTCH_AT: f64 = 3.0;
+/// Ticks after landing the water is tried to be taken back, and the most a clutch lasts.
+pub const CLUTCH_TAKE_TICKS: u64 = 40;
+pub const CLUTCH_TICKS: u64 = 200;
 
 fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
@@ -979,6 +1016,156 @@ impl Plan {
         }
     }
 
+    /// The water clutch (Bridger's plan 20f, parity e06): in the End, falling with more than
+    /// `CLUTCH_FROM` under the feet and a water bucket held, the bucket to hand, used looking
+    /// straight down from `CLUTCH_AT` over the ground until it pours; landed, the water taken
+    /// back. Every step noted.
+    fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
+            self.spikes.clutch = None;
+            return None;
+        }
+        let body = w.body?;
+        let down = Controls {
+            yaw: w.player.yaw.into(),
+            pitch: Some(crate::endermen::EYES_DOWN),
+            ..Controls::default()
+        };
+        let ground = ground_under(w, body.pos);
+        let height = ground.map(|g| body.pos[1] - g);
+        let Some(mut c) = self.spikes.clutch.take() else {
+            let falling = !body.on_ground && !body.in_water && body.vel[1] < 0.0;
+            if !falling
+                || height.is_none_or(|h| h <= CLUTCH_FROM)
+                || craft::count(w, ItemKind::WaterBucket) == 0
+            {
+                return None;
+            }
+            self.spikes.clutches += 1;
+            self.note(
+                tick,
+                format!("spikes: clutch begun at {:?}", path::feet_cell(body.pos)),
+                format!(
+                    "falling with {:.1} under the feet (velocity {:.2}); clutch {}; health {:?}",
+                    height.unwrap_or(0.0),
+                    body.vel[1],
+                    self.spikes.clutches,
+                    w.player.health
+                ),
+            );
+            self.spikes.clutch = Some(Clutch {
+                since: tick,
+                from_y: body.pos[1],
+                poured: None,
+                landed_at: None,
+            });
+            return Some(self.spikes_clutch_hold(w, ItemKind::WaterBucket, down));
+        };
+        let landed = body.on_ground || body.in_water;
+        if tick.saturating_sub(c.since) > CLUTCH_TICKS {
+            self.note(
+                tick,
+                "spikes: clutch over, out of time".to_owned(),
+                format!("poured {:?}; health {:?}", c.poured, w.player.health),
+            );
+            return None;
+        }
+        match c.poured {
+            None if landed => {
+                self.note(
+                    tick,
+                    format!("spikes: clutch missed at {:?}", path::feet_cell(body.pos)),
+                    format!(
+                        "landed before the water poured, from {:.1}; health {:?}",
+                        c.from_y, w.player.health
+                    ),
+                );
+                None
+            }
+            None => {
+                let ctl = self.spikes_clutch_hold(w, ItemKind::WaterBucket, down);
+                if crate::dig::held_item(w) == Some(ItemKind::Bucket) {
+                    let cell = ground.map(|g| {
+                        let f = path::feet_cell(body.pos);
+                        (f.0, g as i32, f.2)
+                    });
+                    c.poured = cell.or(Some(path::feet_cell(body.pos)));
+                    self.note(
+                        tick,
+                        format!("spikes: clutch poured at {:?}", c.poured),
+                        format!(
+                            "{:.1} over the ground, falling {:.2}",
+                            height.unwrap_or(0.0),
+                            body.vel[1]
+                        ),
+                    );
+                } else if crate::dig::held_item(w) == Some(ItemKind::WaterBucket)
+                    && height.is_some_and(|h| h <= CLUTCH_AT + (-body.vel[1]).max(0.0))
+                    && self.acts.is_empty()
+                {
+                    self.acts.push(Act::UseItem);
+                }
+                self.spikes.clutch = Some(c);
+                Some(ctl)
+            }
+            Some(cell) => {
+                if !landed {
+                    self.spikes.clutch = Some(c);
+                    return Some(down);
+                }
+                let at = *c.landed_at.get_or_insert(tick);
+                let water = matches!(kind(w, cell), Some(BlockKind::Water));
+                if !water || crate::dig::held_item(w) == Some(ItemKind::WaterBucket) {
+                    self.note(
+                        tick,
+                        format!("spikes: clutch over at {:?}", path::feet_cell(body.pos)),
+                        format!(
+                            "fell from {:.1}; the water {}; health {:?}",
+                            c.from_y,
+                            if water { "left" } else { "taken back" },
+                            w.player.health
+                        ),
+                    );
+                    return None;
+                }
+                if tick.saturating_sub(at) > CLUTCH_TAKE_TICKS {
+                    self.note(
+                        tick,
+                        format!("spikes: clutch water left at {cell:?}"),
+                        format!("not taken back in {CLUTCH_TAKE_TICKS} ticks"),
+                    );
+                    return None;
+                }
+                let target = [
+                    f64::from(cell.0) + 0.5,
+                    f64::from(cell.1) + 0.2,
+                    f64::from(cell.2) + 0.5,
+                ];
+                let (yaw, pitch) = crate::walk::look_at(eye(&body), target);
+                let ctl = self.spikes_clutch_hold(w, ItemKind::Bucket, down);
+                if crate::dig::held_item(w) == Some(ItemKind::Bucket) && self.acts.is_empty() {
+                    self.acts.push(Act::UseItem);
+                }
+                self.spikes.clutch = Some(c);
+                Some(Controls {
+                    yaw,
+                    pitch: Some(pitch),
+                    ..ctl
+                })
+            }
+        }
+    }
+
+    /// `item` to hand for the clutch (an act when a swap is needed), looking down.
+    fn spikes_clutch_hold(&mut self, w: &World, item: ItemKind, down: Controls) -> Controls {
+        if let hold::Hold::Act(a) = hold::toward(w, item)
+            && self.acts.is_empty()
+        {
+            self.acts.push(a);
+        }
+        down
+    }
+
     fn spikes_hold(&mut self, tick: u64) -> Task {
         self.spikes.doing = Some(Doing::Hold {
             until: tick + HOLD_TICKS,
@@ -990,6 +1177,10 @@ impl Plan {
     /// One tick of the crystals' driver while no task runs (the planner's step calls it ahead of
     /// the choice). `None` when nothing runs or it just ended.
     pub fn spikes_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        // The clutch first, whatever runs: a fall waits for no task.
+        if let Some(c) = self.spikes_clutch(w, tick) {
+            return Some(c);
+        }
         if !matches!(self.task, Task::Idle) {
             return None;
         }

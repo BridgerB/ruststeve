@@ -6,7 +6,7 @@ tags: [plan, end, crystals, pillar, strike, dragon]
 aliases: [spikes, Spike, StandPlan, spikes_task, spikes_step, SpikeState, pillar and strike, end crystal, guard ring, bars_shield, rise_jump, rise_click]
 status: draft
 lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
+verifiedAgainst: ruststeve@b15c51b clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/spikes.rs#pub fn stand(spike: &Spike, axis: Axis) -> StandPlan {"
   - "ruststeve:crates/plan/src/spikes.rs#pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {"
@@ -38,6 +38,9 @@ Issue 20f (agent E4, `docs/problems/end-crystals.md`), the port of clojurecraft'
 - The dragon strafing (1) or charging (8) within `THREAT_NEAR` (64, a strafe fires its fireball from that far): up high in a whole guard ring, hold crouched; on an unguarded pillar, dig down, a hold there ended at once.
 - No strike at or under danger health. A strike attacks every `SWING_EVERY` ticks while the crystal's box (2 by 2) is within 3.0 of the eye.
 - A pillar with no rise in `PILLAR_STALL` (1,200) ticks fails, says why, and its approach is refused for `REFUSE_TICKS`.
+
+## The water clutch
+In the End, a fall with more than `CLUTCH_FROM` (4) under the feet and a water bucket held is caught (`Plan::spikes_clutch`, run from `spikes_step` ahead of any task): the bucket to hand, looking straight down, used every tick from `CLUTCH_AT` (3, plus a tick's fall) over the ground until it pours; landed, the water is taken back with the empty bucket. Parity e06 (E6): a 21-block fall onto water poured while falling cost 0, with none 18. Notes: clutch begun, poured, missed, over (the water taken back or left).
 
 ## Ledger
 Every path writes a `spikes: ...` note: pillar up from / up to / stalled / boxed / paused / down at, walk to, no way to, Guard/Ledge/Wall block at and in at, bar dug at, strike N, crystal gone N, no strike under danger health, no climb, hold in the guard ring, dig down from the dragon, wait, no crystal left. Repeats within `NOTE_EVERY` are not written twice.
