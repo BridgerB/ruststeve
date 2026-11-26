@@ -348,9 +348,9 @@ fn the_rules_default_to_the_config() {
 }
 
 #[test]
-fn lava_by_the_standing_cells_head_is_sealed_first() {
-    // Race 45737493003 lane 1: lava falling beside the standing cell's head spread into it once
-    // the approach sealed the cell under it. Here (10, 66, 9), beside the head (11, 66, 9).
+fn the_door_is_boxed_before_the_approachs_seals() {
+    // Race 45742933645 lane 1: lava falling beside the door spread into the standing cell once
+    // the approach sealed the fall's foot. Here lava at (10, 66, 9), beside the head (11, 66, 9).
     let mut w = nether([11.5, 65.0, 10.5]);
     portal_and_hill(&mut w, 79);
     for y in 65..=66 {
@@ -358,18 +358,74 @@ fn lava_by_the_standing_cells_head_is_sealed_first() {
     }
     set(&mut w, (10, 66, 9), BlockKind::Lava);
     let mut p = homeward();
+    for t in 100..300 {
+        w.ticks = t;
+        p.step(&w);
+        for a in p.take_acts() {
+            if let world::Act::UseOn { pos, face } = a {
+                let (dx, dy, dz) = match face {
+                    0 => (0, -1, 0),
+                    1 => (0, 1, 0),
+                    2 => (0, 0, -1),
+                    3 => (0, 0, 1),
+                    4 => (-1, 0, 0),
+                    _ => (1, 0, 0),
+                };
+                set(
+                    &mut w,
+                    (pos.x + dx, pos.y + dy, pos.z + dz),
+                    BlockKind::Netherrack,
+                );
+            }
+        }
+    }
+    let n = notes(&p);
+    let boxed: Vec<usize> = n
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.starts_with("portal way: door boxed at"))
+        .map(|(i, _)| i)
+        .collect();
+    assert!(
+        n.iter()
+            .any(|s| s.starts_with("portal way: door boxed at (11, 67, 9)")),
+        "{n:?}"
+    );
+    assert!(
+        n.iter()
+            .any(|s| s.starts_with("portal way: door boxed at (10, 66, 9)")),
+        "{n:?}"
+    );
+    let first_home = n.iter().position(|s| s.starts_with("home: lava sealed"));
+    assert!(
+        first_home.is_none_or(|h| boxed.iter().all(|b| *b < h)),
+        "{n:?}"
+    );
+}
+
+#[test]
+fn a_filled_door_is_dug_open_again() {
+    // The escape sealed lava in the standing cell: from the tunnel cell, the door dug open.
+    let mut w = nether([11.5, 65.0, 10.5]);
+    portal_and_hill(&mut w, 79);
+    for y in 65..=66 {
+        set(&mut w, (11, y, 10), BlockKind::Air);
+    }
+    set(&mut w, (11, 65, 9), BlockKind::Netherrack);
+    let mut p = homeward();
+    p.ender.home.way_in.door = Some(((11, 65, 9), (11, 65, 10)));
     for t in 100..104 {
         w.ticks = t;
         p.step(&w);
         p.take_acts();
     }
     let n = notes(&p);
-    let head = n
-        .iter()
-        .position(|s| s.starts_with("portal way: lava sealed by the head at (10, 66, 9)"));
-    let first_home = n.iter().position(|s| s.starts_with("home: lava sealed"));
-    assert!(head.is_some(), "{n:?}");
-    assert!(first_home.is_none_or(|h| head < Some(h)), "{n:?}");
+    assert!(
+        n.iter()
+            .any(|s| s.starts_with("portal way: the door dug open at (11, 65, 9)")),
+        "{n:?}"
+    );
+    assert!(matches!(p.task, Task::Dig(_)), "{}", p.task.name());
 }
 
 #[test]
