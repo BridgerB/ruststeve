@@ -710,23 +710,22 @@ fn a_shut_step_of_the_bunkers_stair_is_dug_out_on_the_way_up() {
     p.end.door = Some((-1, 0));
     p.end.exit_walk = true;
     p.step(&w);
-    // On the first step: the next step's cell is dug before it is stepped onto.
-    w.body = Some(physics::Body {
-        pos: [11.5, 61.0, 0.5],
-        on_ground: true,
-        ..physics::Body::default()
-    });
-    let mut acts = Vec::new();
-    for _ in 0..6 {
-        p.step(&w);
-        acts.extend(p.take_acts());
-    }
-    assert!(
-        acts.iter().any(|a| matches!(
-            a,
-            Act::Dig { pos, .. } if *pos == world::BlockPos::new(10, 62, 0)
-        )),
-        "{acts:?} {:?}",
-        notes(&p)
-    );
+    // The way up: each step's cells dug before it is stepped onto, the shut one among them.
+    let ops = p
+        .end
+        .work
+        .as_ref()
+        .map(|wk| wk.ops.clone())
+        .unwrap_or_default();
+    let dig = ops
+        .iter()
+        .position(|o| *o == plan::end::Op::Dig((10, 62, 0)))
+        .unwrap_or_else(|| panic!("no dig of the shut step: {ops:?}"));
+    let step = ops
+        .iter()
+        .position(|o| *o == plan::end::Op::Step((10, 62, 0)))
+        .unwrap_or_else(|| panic!("no step: {ops:?}"));
+    assert!(dig < step, "{ops:?}");
+    // And the room over the head before the step, from the step below.
+    assert!(ops.contains(&plan::end::Op::Dig((11, 63, 0))), "{ops:?}");
 }
