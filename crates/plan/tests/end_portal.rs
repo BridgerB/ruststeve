@@ -425,3 +425,29 @@ fn over_the_lit_portal_is_not_at_the_door() {
     assert!(end_portal::over_portal(&w, [1628.5, 19.2, -34.5]));
     assert!(!end_portal::over_portal(&w, [1624.5, 17.0, -38.5]));
 }
+
+/// A creeper near in the room: the step away opens the distance from where it is now, never
+/// toward it, never onto lava (wall 12, race 45886255606 lane 0).
+#[test]
+fn a_creeper_near_is_stepped_away_from() {
+    let w = load(&room_world(C, &[]), [1631.5, 17.0, -37.5]);
+    let body = w.body.unwrap();
+    // The creeper west of the bot along the ring's south side.
+    let foe = [1628.5, 17.0, -37.5];
+    let yaw = plan::defend::away_step(&w, &body, foe).expect("a step away");
+    let rad = yaw.to_radians();
+    let p = [body.pos[0] - rad.sin() * 1.2, body.pos[2] + rad.cos() * 1.2];
+    let before = (body.pos[0] - foe[0]).hypot(body.pos[2] - foe[2]);
+    let after = (p[0] - foe[0]).hypot(p[1] - foe[2]);
+    assert!(after > before + 0.3, "yaw {yaw}: {before} to {after}");
+    // Boxed in on three sides with the creeper on the fourth: no step.
+    let mut s = room_world(C, &[]);
+    s.fill((1630, 1633), (17, 18), (-40, -36), BlockKind::StoneBricks);
+    s.air((1630, 1631), (17, 18), (-38, -38));
+    let w = load(&s, [1631.5, 17.0, -37.5]);
+    let body = w.body.unwrap();
+    assert_eq!(
+        plan::defend::away_step(&w, &body, [1629.5, 17.0, -37.5]),
+        None
+    );
+}
