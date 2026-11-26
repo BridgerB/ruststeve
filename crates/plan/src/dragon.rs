@@ -580,6 +580,47 @@ pub const STRIKE_MARGIN: f32 = 1.0;
 pub const WING_DROP: f64 = 2.0;
 pub const WING_CLEAR: f64 = 0.2;
 
+/// Ticks of the attacking turn struck in before the bot leaves the flame's way: the turn is 40
+/// (`DragonSittingAttackingPhase`) and a walk of 5 takes about 20.
+pub const FLAME_LEAVE_TICKS: u64 = 15;
+/// The flame's cloud: radius 5 at the head (`DragonSittingFlamingPhase`); the bot keeps its
+/// reach (radius and `BREATH_MARGIN`) and a block more.
+pub const FLAME_RADIUS: f64 = 5.0;
+pub const FLAME_CLEAR: f64 = FLAME_RADIUS + BREATH_MARGIN + 1.0;
+
+/// The ground cell nearest the feet `FLAME_CLEAR` or more from the head's point on the plane,
+/// out of every breath, not before the head nor on a way past it, `ESCAPE_WAYS` directions at
+/// `FLAME_CLEAR` and a block and two more out.
+pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i32; 3]> {
+    let h = head_point(v);
+    let clouds = breaths(w);
+    let fy = feet[1].floor() as i32;
+    let mut best: Option<(f64, [i32; 3])> = None;
+    for r in [FLAME_CLEAR, FLAME_CLEAR + 1.0, FLAME_CLEAR + 2.0] {
+        for k in 0..ESCAPE_WAYS {
+            let a = f64::from(k) * std::f64::consts::TAU / f64::from(ESCAPE_WAYS);
+            let x = (h[0] + r * a.cos()).floor() as i32;
+            let z = (h[2] + r * a.sin()).floor() as i32;
+            let Some(c) = ground(w, x, z, fy) else {
+                continue;
+            };
+            let p = mid(c);
+            if flat(p, h) < FLAME_CLEAR
+                || breath_on(&clouds, p).is_some()
+                || before_head(v, p)
+                || !way_clear(v, feet, p)
+            {
+                continue;
+            }
+            let d = flat(feet, p);
+            if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
+                best = Some((d, c));
+            }
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
 /// Would the next strike make the dragon take off (`PERCH_TAKEOFF`)?
 pub fn crossing(sat_damage: f32) -> bool {
     sat_damage + STRIKE_DAMAGE + STRIKE_MARGIN > PERCH_TAKEOFF
@@ -901,6 +942,8 @@ pub struct Ask {
     pub way: Option<[i32; 3]>,
     /// The perched dragon's damage counted toward its takeoff (`DragonState::sat_damage`).
     pub sat_damage: f32,
+    /// Server ticks the dragon has held its phase.
+    pub phase_ticks: u64,
 }
 
 /// The fight's choice for this tick, pure: the clojurecraft `toward-dragon` order, with the
@@ -990,6 +1033,22 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     // Sat: the head part (the dragon's id + 1, a full blow; E6's e05) from out of its blow box.
     // The strike that makes it take off only from under the wings' sweep: one dig of end stone
     // down first where that makes it so.
+    // The flame: the attacking turn (40 ticks, `DragonSittingAttackingPhase`) ends in a cloud of
+    // radius 5 at the head (`DragonSittingFlamingPhase`), over the head stand. Strikes for its
+    // first `FLAME_LEAVE_TICKS`, then out of its reach before it comes, and there while it burns
+    // (races 45873410249 and 45876898172: 3.0 a flame, walking out of it).
+    let flame = match v.phase() {
+        Some(Phase::SittingAttacking) => ask.phase_ticks >= FLAME_LEAVE_TICKS,
+        Some(Phase::SittingFlaming) => true,
+        Some(_) | None => false,
+    };
+    if sat && flame {
+        return match flame_clear_cell(w, &v, feet) {
+            Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "out of the flame's way"),
+            Some(_) => Want::Hold("out of the flame's way"),
+            None => Want::Hold("the flame coming, no cell out of its way loaded"),
+        };
+    }
     // Every strike from under the wings' and head's sweep where one dig makes it so (race
     // 45876898172 lane 1: a head stand on the surface took 10 in the attacking turn, and the
     // natural takeoff's wings 5); the one that makes it take off from nowhere else.
@@ -1119,6 +1178,9 @@ pub struct DragonState {
     pub breath_waits: u64,
     #[serde(default)]
     pub breath_waited_at: u64,
+    /// When the phase last changed, server ticks.
+    #[serde(default)]
+    pub phase_at: Option<u64>,
     /// The perched dragon's damage toward its takeoff, as the server counts it, the dragon's health
     /// last seen, and the digs down for a low stand.
     #[serde(default)]
@@ -1221,6 +1283,7 @@ impl Plan {
                         .phase
                         .map_or_else(|| "none".to_owned(), |p| Phase::of(p).name());
                     self.dragon.phase = Some(v.phase);
+                    self.dragon.phase_at = Some(now);
                     self.note(
                         tick,
                         format!("dragon phase {from} -> {}", Phase::of(v.phase).name()),
@@ -1346,6 +1409,10 @@ impl Plan {
             food: food.is_some(),
             way: self.dragon.way,
             sat_damage: self.dragon.sat_damage,
+            phase_ticks: self
+                .dragon
+                .phase_at
+                .map_or(0, |at| w.session.server_ticks.saturating_sub(at)),
         };
         let want = decide(w, &ask);
         let Task::Dragon(f) = &mut self.task else {

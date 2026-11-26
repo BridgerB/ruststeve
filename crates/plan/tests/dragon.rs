@@ -118,6 +118,7 @@ fn ask() -> Ask {
         food: true,
         way: None,
         sat_damage: 0.0,
+        phase_ticks: 0,
     }
 }
 
@@ -693,5 +694,39 @@ fn the_strike_that_makes_it_take_off_is_struck_from_under_the_wings() {
     assert!(
         matches!(decide(&low, &a), Want::Strike { head: true, .. }),
         "down in it: the strike"
+    );
+}
+
+#[test]
+fn the_flame_is_waited_out_of_its_reach() {
+    // Races 45873410249 and 45876898172: 3.0 a flame, walking out of its cloud from the head stand.
+    let mut w = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
+    assert!(
+        matches!(decide(&w, &ask()), Want::Strike { head: true, .. }),
+        "the attacking turn's first ticks: the strike"
+    );
+    let late = Ask {
+        phase_ticks: 20,
+        ..ask()
+    };
+    let v = dragon::view(&w).unwrap().1;
+    let h = head_point(&v);
+    match decide(&w, &late) {
+        Want::Go(c, "out of the flame's way") => {
+            let d = dragon::flat(feet_of(c), h);
+            assert!(d >= dragon::FLAME_CLEAR, "{c:?} {d}");
+            assert!(!dragon::before_head(&v, feet_of(c)), "{c:?}");
+        }
+        other => panic!("out of the flame's way before it comes, not {other:?}"),
+    }
+    let mut flaming = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut flaming, [0.5, PERCH_Y, 0.5], 5, 90.0);
+    assert!(
+        matches!(
+            decide(&flaming, &ask()),
+            Want::Go(_, "out of the flame's way")
+        ),
+        "and while it burns"
     );
 }
