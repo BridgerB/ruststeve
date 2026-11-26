@@ -53,3 +53,15 @@ What the world holds (the plan maps):
 
 ## The second iteration (the coordinator, 2026-11-25)
 `[home] covered` is band75's line now (feet y 44 to 75, at most 16 of rise between points, 2 steps of 773 beside a fall to lava), each point `[x, y, z, cover]`: the plain `tunnel_toward` on every leg but the one the survey puts beside a fall to lava (step 32 at (474, 56, 20), the leg to (461, 64, 19)), which keeps cover. With no route the leg holds (a fail counted at most every 200 ticks); after 3 the point is skipped and the next tried in the same tick, never the heading's walk.
+3. **band75: no damage, no deaths, about 6 blocks west per 1,000 ticks** (race 45770564199 at 1f22a0b, 3 lanes from the frontier, read at tick 28,700 from the evidence uploads). All three lanes stayed at 19.8 health on the way, with no lava touch.
+   - Lanes 0 and 2 were past point 4 and lane 1 past point 5, at x 377 to 400 (lanes 0 and 2 were held at point 5, 19 to 24 off on the plane).
+   - From the covered way's start (ticks 7,960 to 8,100, x 511 to 513): lane 0 made 136 blocks west (6.6 per 1,000 ticks), lane 1 111 (5.4), lane 2 122 (5.9).
+   - Pickaxe uses, gross (held at the start plus every pickaxe made, less held now): about 590 in lane 0 (4.3 a block west), about 600 in lane 2 (4.9), and 430 to 560 in lane 1 (3.9 to 5.1).
+   - Points 2 to 5 on the plain tunnel went at 11 to 25 blocks per 1,000 ticks.
+   - The time went in two places:
+     - (a) The one covered leg, to (461, 64, 19): 7,700 to 9,000 ticks for about 20 blocks, with one "no route ... held".
+     - (b) Pickaxe runs. Q8's "home: pickaxes on the way" ran 4 or 5 times a lane. Each of the first three walked back to the forest's placed table at about (494, 41, -7), 35 to 50 blocks east, though a table was carried ("1 tables"). That cost 800 to 900 ticks a run and the tunnel retraced its way after ("tunnel off its route at (494, 41, -9)"). The fourth run, at x 400, placed the carried table and took 65 to 75 ticks.
+   - Next:
+     - Make the trip's pickaxe runs place the carried table where the bot stands, not walk back to a known one (Q8's `home_trip`, or base's table step).
+     - Make the covered leg plain too: the survey's one fall-to-lava step there is one cell, at (474, 56, 20).
+     - At about 6 blocks per 1,000 ticks, the 380 blocks left to the last leg's reach take about 60,000 more ticks. With the walk-backs gone, the plain legs' 11 to 25 a 1,000 would be 15,000 to 35,000.
