@@ -72,7 +72,26 @@ impl Default for HomeRules {
         Self {
             pearls_wanted: 14,
             top_up_ticks: 6000,
-            way: vec![[490, 150], [226, 194], [8, 81]],
+            way: vec![
+                [477, 152],
+                [448, 152],
+                [426, 150],
+                [417, 159],
+                [407, 173],
+                [399, 194],
+                [368, 194],
+                [339, 194],
+                [310, 194],
+                [280, 194],
+                [250, 194],
+                [220, 194],
+                [190, 195],
+                [167, 208],
+                [146, 208],
+                [130, 206],
+                [130, 167],
+                [8, 81],
+            ],
             portal: Some([22, 34, -20]),
             portal_chunks: 48,
             portal_every: 1200,
@@ -205,6 +224,15 @@ pub const COOK_FOOD_FLOOR: i32 = 6;
 /// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
 /// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
 pub const CUBE_FIGHT: f64 = 3.0;
+/// The trip's wooden pickaxes from the kit's stems: a table placed, then wooden pickaxes to the
+/// base's wood uses (150).
+pub const TRIP_WOOD_STEPS: [base::Step; 2] = [base::Step::Table, base::Step::WoodPicks];
+
+fn picking_now(p: &Plan) -> bool {
+    (p.base.steps == base::CLIMB_STEPS.to_vec() || p.base.steps == TRIP_WOOD_STEPS.to_vec())
+        && !p.base.over
+}
+
 /// Bridge blocks the trip keeps on record (the last laid), to dig back when stranded.
 pub const LAID_KEPT: usize = 64;
 
@@ -962,28 +990,40 @@ impl Plan {
                 self.ender.home.ground = Some(path::feet_cell(body.pos));
             }
         }
-        let picking = self.base.steps == base::CLIMB_STEPS.to_vec() && !self.base.over;
+        // Stone and wood both count (the coordinator, 2026-11-25): the kit's 16 stems are 64
+        // planks, about 20 wooden pickaxes of 59 uses; stone from blackstone when held.
+        let picking = (self.base.steps == base::CLIMB_STEPS.to_vec()
+            || self.base.steps == TRIP_WOOD_STEPS.to_vec())
+            && !self.base.over;
         let want = self.table.as_ref().map_or(100, |t| t.base.pickaxe_uses);
         let stone = craft::count(w, ItemKind::Blackstone)
             + craft::count(w, ItemKind::Cobblestone)
             + craft::count(w, ItemKind::CobbledDeepslate);
+        let wood = base::logs_held(w) + base::planks_held(w);
+        let uses = endermen::pickaxe_uses_left(w);
+        let steps = if stone >= 3 && craft::count(w, ItemKind::Stick) >= 2 {
+            Some(base::CLIMB_STEPS.to_vec())
+        } else if wood >= 2 {
+            Some(TRIP_WOOD_STEPS.to_vec())
+        } else {
+            None
+        };
         if !picking
-            && base::reserve_pick_uses(w) < want
-            && stone >= 3
-            && craft::count(w, ItemKind::Stick) >= 2
+            && uses < want
             && self.ender.home.trip_pick_runs < r.pick_runs
+            && let Some(steps) = steps
         {
             self.ender.home.trip_pick_runs += 1;
             self.base = base::BaseState {
-                steps: base::CLIMB_STEPS.to_vec(),
+                steps,
                 ..base::BaseState::default()
             };
             self.note(
                 tick,
                 format!("home: pickaxes on the way ({})", self.ender.home.trip_pick_runs),
                 format!(
-                    "stone pickaxe uses {} under {want}; {} blackstone, {} cobblestone, {} sticks, {} tables",
-                    base::reserve_pick_uses(w),
+                    "pickaxe uses {uses} (stone and wood) under {want}; {} logs and planks, {} blackstone, {} cobblestone, {} sticks, {} tables",
+                    wood,
                     craft::count(w, ItemKind::Blackstone),
                     craft::count(w, ItemKind::Cobblestone),
                     craft::count(w, ItemKind::Stick),
@@ -991,8 +1031,7 @@ impl Plan {
                 ),
             );
         }
-        if self.base.steps == base::CLIMB_STEPS.to_vec()
-            && !self.base.over
+        if picking_now(self)
             && let Some(t) = self.base_task(w, tick)
         {
             return Some(t);
