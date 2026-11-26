@@ -2484,9 +2484,19 @@ impl Plan {
             return None;
         };
         let body = w.body?;
-        if crate::end::covered(w) {
+        // E3's and E4's own answers first, as inside `ender_threat`: covered (the bunker, a
+        // tunnel), and up a pillar or a spike.
+        if self.end_covered(w, tick) {
             self.dragon.ender_walk = None;
-            self.ender_note(tick, id, "in cover: it cannot come in; on with the work");
+            return None;
+        }
+        if self.spikes_up_high(w) {
+            self.dragon.ender_walk = None;
+            self.spikes_note(
+                tick,
+                "spikes: up high, no enderman pocket".to_owned(),
+                format!("enderman {id} provoked; the crystals' work goes on"),
+            );
             return None;
         }
         let danger = self
@@ -2549,6 +2559,7 @@ impl Plan {
         let e = w.entities.get(&id)?;
         let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
         if crate::defend::box_distance_of(eye, e.pos, EntityKind::Enderman) > STRIKE_REACH {
+            self.ender_note(tick, id, "out of reach: on with the task");
             return None;
         }
         if let Some(wp) = crate::hunt::weapon(w) {
