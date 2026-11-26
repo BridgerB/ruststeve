@@ -346,3 +346,79 @@ fn at_the_tunnel_cell_the_approach_seals_and_goes_in() {
 fn the_rules_default_to_the_config() {
     assert_eq!(table().portal_way, portal_way::WayRules::default());
 }
+
+#[test]
+fn lava_by_the_standing_cells_head_is_sealed_first() {
+    // Race 45737493003 lane 1: lava falling beside the standing cell's head spread into it once
+    // the approach sealed the cell under it. Here (10, 66, 9), beside the head (11, 66, 9).
+    let mut w = nether([11.5, 65.0, 10.5]);
+    portal_and_hill(&mut w, 79);
+    for y in 65..=66 {
+        set(&mut w, (11, y, 10), BlockKind::Air);
+    }
+    set(&mut w, (10, 66, 9), BlockKind::Lava);
+    let mut p = homeward();
+    for t in 100..104 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let n = notes(&p);
+    let head = n
+        .iter()
+        .position(|s| s.starts_with("portal way: lava sealed by the head at (10, 66, 9)"));
+    let first_home = n.iter().position(|s| s.starts_with("home: lava sealed"));
+    assert!(head.is_some(), "{n:?}");
+    assert!(first_home.is_none_or(|h| head < Some(h)), "{n:?}");
+}
+
+#[test]
+fn under_the_danger_line_in_rock_the_leg_goes_on() {
+    let mut w = nether([11.5, 69.0, 14.5]);
+    portal_and_hill(&mut w, 79);
+    for y in 69..=70 {
+        set(&mut w, (11, y, 14), BlockKind::Air);
+    }
+    w.player.health = Some(6.0);
+    let mut p = homeward();
+    p.ender.home.portal = Some((11, 64, 8));
+    for t in 100..104 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let n = notes(&p);
+    assert!(
+        n.iter()
+            .any(|s| s.starts_with("portal way: on under the danger line, in rock")),
+        "{n:?}"
+    );
+    assert!(matches!(p.task, Task::Stairs(_)), "{}", p.task.name());
+}
+
+#[test]
+fn burning_under_the_danger_line_the_pocket_holds() {
+    let mut w = nether([11.5, 69.0, 14.5]);
+    portal_and_hill(&mut w, 79);
+    for y in 69..=70 {
+        set(&mut w, (11, y, 14), BlockKind::Air);
+    }
+    w.player.health = Some(6.0);
+    w.player.on_fire = true;
+    let mut p = homeward();
+    p.ender.home.portal = Some((11, 64, 8));
+    for t in 100..104 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let n = notes(&p);
+    assert!(
+        !n.iter().any(|s| s.starts_with("portal way: on under")),
+        "{n:?}"
+    );
+    assert!(
+        n.iter().any(|s| s.starts_with("home: hold in a pocket")),
+        "{n:?}"
+    );
+}

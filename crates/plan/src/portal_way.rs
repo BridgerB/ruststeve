@@ -91,7 +91,30 @@ pub struct WayIn {
     pub dug: u32,
     /// Blocks dug under a pocket on a ledge.
     pub ledge_dug: u32,
+    /// Lava sealed round the standing cell's head, and the last tick a hostile was within
+    /// `CARRY_CLEAR` (for the carry-on under the danger line), and the carry-ons begun.
+    pub head_seals: u32,
+    pub hostile_at: Option<u64>,
+    pub carry_ons: u32,
+    /// Pickaxe runs begun by the leg's budget.
+    pub pick_runs: u32,
 }
+
+/// Lava cells sealed round the standing cell's head at most: its four sides and the cell over
+/// it, twice (a seal washed out once by a fall from above).
+pub const HEAD_SEALS: u32 = 10;
+/// The carry-on under the danger line (the coordinator, 2026-11-25): no hostile within this, in
+/// the last `CARRY_QUIET` ticks. Endermen and zombified piglins are neutral and never provoked by
+/// the leg: they do not count.
+pub const CARRY_CLEAR: f64 = 16.0;
+pub const CARRY_QUIET: u64 = 200;
+/// Pickaxe uses a block of the leg is budgeted (the coordinator, 2026-11-25: race 45737493003
+/// lane 1 spent 267 uses on a leg of 156 blocks each axis summed, 1.7 a block; 2.5 with room).
+pub const USES_PER_BLOCK: f64 = 2.5;
+
+/// Blocks on the plane (each axis summed) a new dig-in is from the last: past a dig-in's own
+/// shaft and the tunnel stretch begun from it (`tunnel::STRETCH` 6), with room.
+const DIG_IN_APART: i32 = 8;
 
 const DIRS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
@@ -205,6 +228,9 @@ impl Plan {
         // The portal's chunk not loaded (or no face seen yet): the tunnel runs at the portal
         // itself until the front is seen.
         let target = front.map_or(portal, |f| f.tunnel);
+        if let Some(t) = self.way_picks(w, tick, span(feet, target)) {
+            return Some(t);
+        }
         if !self.ender.home.way_in.begun {
             self.ender.home.way_in.begun = true;
             self.ender.home.way_in.uses0 = Some(crate::endermen::pickaxe_uses_left(w));
@@ -309,15 +335,21 @@ impl Plan {
             .filter(|s| s.0 == feet.0 && s.2 == feet.2 && feet.1 > s.1 - r.dig_in);
         if digging.is_none() {
             let in_open = open((feet.0, feet.1 + 2, feet.2)) || open((feet.0, feet.1 + 3, feet.2));
-            if !in_open || st.dig_ins >= r.dig_ins {
+            // One dig-in a place: its own shaft reads open over the head (race 45737493003 lane
+            // 0 dug in 4 times in one column, 12 deep).
+            let fresh = st
+                .dig_from
+                .is_none_or(|s| (s.0 - feet.0).abs() + (s.2 - feet.2).abs() > DIG_IN_APART);
+            if !in_open || !fresh || st.dig_ins >= r.dig_ins {
                 return None;
             }
         }
         let floor = (feet.0, feet.1 - 1, feet.2);
         let under = (feet.0, feet.1 - 2, feet.2);
         if let Some(why) = crate::stairs::refusal(w, &[floor], under) {
-            if digging.is_some() {
-                self.ender.home.way_in.dig_from = None;
+            // A dig-in stopped short counts as done here: no new one in this column.
+            if let Some(s0) = digging {
+                self.ender.home.way_in.dig_from = Some((s0.0, feet.1 + r.dig_in, s0.2));
             }
             self.note(
                 tick,
@@ -386,5 +418,240 @@ impl Plan {
             ),
         );
         Some(Task::Dig(crate::dig::Dig::new(w, floor, tick)))
+    }
+
+    /// The leg's pickaxe budget: under `USES_PER_BLOCK` uses a block to go (each axis summed),
+    /// a run of the trip's wooden pickaxes (`home::TRIP_WOOD_STEPS`) from held stems or planks,
+    /// within the way home's `pick_runs`. `None` with enough, no wood, or a run in hand (the
+    /// trip runs it).
+    fn way_picks(&mut self, w: &World, tick: u64, to_go: i32) -> Option<Task> {
+        let uses = crate::endermen::pickaxe_uses_left(w);
+        let need = (f64::from(to_go) * USES_PER_BLOCK).ceil();
+        let runs = self.table.as_ref().map_or(8, |t| t.home.pick_runs);
+        let wood = crate::base::logs_held(w) + crate::base::planks_held(w);
+        let picking = self.base.steps == home::TRIP_WOOD_STEPS.to_vec() && !self.base.over;
+        if f64::from(uses) >= need || picking || wood < 2 || self.ender.home.trip_pick_runs >= runs
+        {
+            return None;
+        }
+        self.ender.home.trip_pick_runs += 1;
+        self.ender.home.way_in.pick_runs += 1;
+        self.base = crate::base::BaseState {
+            steps: home::TRIP_WOOD_STEPS.to_vec(),
+            ..crate::base::BaseState::default()
+        };
+        self.note(
+            tick,
+            format!(
+                "portal way: pickaxes for the leg ({})",
+                self.ender.home.way_in.pick_runs
+            ),
+            format!(
+                "pickaxe uses {uses} under {need} for {to_go} blocks to go; {wood} logs and planks"
+            ),
+        );
+        self.base_task(w, tick)
+    }
+
+    /// Lava beside or over the standing cell's head (its four sides and the cell over it), sealed
+    /// with filler from where the bot stands before the approach's own seals: race 45737493003
+    /// lane 1 sealed (21, 35, -19) beside the standing cell, and the lava falling at (21, 36, -19)
+    /// over it spread into the head cell (22, 36, -19) and set the bot alight in the tunnel cell.
+    /// `None` with no such lava in reach, no filler, or `HEAD_SEALS` placed.
+    pub(crate) fn head_seal(
+        &mut self,
+        w: &World,
+        tick: u64,
+        front: Option<&Front>,
+    ) -> Option<Task> {
+        let f = front?;
+        let st = &self.ender.home.way_in;
+        if st.head_seals >= HEAD_SEALS {
+            return None;
+        }
+        let body = w.body?;
+        let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
+        let reach = |c: Cell| {
+            (0..3)
+                .map(|i| (eye[i] - (f64::from([c.0, c.1, c.2][i]) + 0.5)).powi(2))
+                .sum::<f64>()
+                .sqrt()
+                <= home::SEAL_REACH
+        };
+        let lava = |c: Cell| {
+            w.block_at(world::BlockPos::new(c.0, c.1, c.2)) == Some(data::BlockKind::Lava)
+        };
+        let solid = |c: Cell| {
+            path::classify(w.state_at(world::BlockPos::new(c.0, c.1, c.2))) == path::Class::Solid
+        };
+        let head = (f.stand.0, f.stand.1 + 1, f.stand.2);
+        let feet = path::feet_cell(body.pos);
+        let (target, click, face) = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0)]
+            .into_iter()
+            .map(|(dx, dy, dz)| (head.0 + dx, head.1 + dy, head.2 + dz))
+            .filter(|c| lava(*c) && reach(*c) && *c != feet && *c != (feet.0, feet.1 + 1, feet.2))
+            .find_map(|c| {
+                [
+                    ((c.0, c.1 - 1, c.2), 1),
+                    ((c.0 + 1, c.1, c.2), 4),
+                    ((c.0 - 1, c.1, c.2), 5),
+                    ((c.0, c.1, c.2 + 1), 2),
+                    ((c.0, c.1, c.2 - 1), 3),
+                    ((c.0, c.1 + 1, c.2), 0),
+                ]
+                .into_iter()
+                .find(|(n, _)| solid(*n))
+                .map(|(n, face)| (c, n, face))
+            })?;
+        let item = crate::endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| crate::craft::count(w, *k) > 0)?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.way_in.head_seals += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("portal way: lava sealed by the head at {target:?}"),
+                    format!(
+                        "beside or over the standing cell's head {head:?}; {item:?} on {click:?} face {face}; seal {} of {HEAD_SEALS}",
+                        self.ender.home.way_in.head_seals
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
+    }
+
+    /// Under the danger line with nothing to heal with, on the last leg in rock (the coordinator,
+    /// 2026-11-25; race 45737493003 lane 0 held a pocket at 8.0 for 10,000 ticks): the leg goes on
+    /// when not burning, no hostile (`CARRY_CLEAR`, neutrals aside) in the last `CARRY_QUIET`
+    /// ticks, the feet under 2 of rock, and the leg's next task a stretch of tunnel, a cut or a
+    /// seal whose cells all keep 2 of rock over the head. Never a fight; else `None` and the
+    /// pocket holds.
+    pub(crate) fn danger_carry_on(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::stand_cell(w, body.pos);
+        let rock = |c: Cell| {
+            path::classify(w.state_at(world::BlockPos::new(c.0, c.1, c.2))) == path::Class::Solid
+        };
+        let covered = |c: Cell| rock((c.0, c.1 + 2, c.2)) && rock((c.0, c.1 + 3, c.2));
+        if !self.carry_quiet(w, tick) || !covered(feet) {
+            return None;
+        }
+        let portal = self.ender.home.portal?;
+        let d = {
+            let (dx, dz) = (f64::from(feet.0 - portal.0), f64::from(feet.2 - portal.2));
+            (dx * dx + dz * dz).sqrt().round() as i32
+        };
+        // The leg asked as it would be; its stairs kept only when every cell stays covered.
+        let t = self.portal_way(w, tick, portal, d)?;
+        let ok = match &t {
+            Task::Stairs(st) => st.route.iter().all(|c| covered(*c)),
+            Task::Idle => true,
+            _ => false,
+        };
+        if !ok {
+            return None;
+        }
+        self.ender.home.way_in.carry_ons += 1;
+        if self.ender.home.way_in.carry_ons % 20 == 1 {
+            self.note(
+                tick,
+                "portal way: on under the danger line, in rock".to_owned(),
+                format!(
+                    "health {:?}, nothing to heal with; no hostile within {CARRY_CLEAR} for {CARRY_QUIET} ticks, 2 of rock over the head; carry-on {}",
+                    w.player.health, self.ender.home.way_in.carry_ons
+                ),
+            );
+        }
+        Some(t)
+    }
+
+    /// Under the danger line at the portal's door (the front's tunnel cell or its standing cell),
+    /// quiet and not burning: the approach goes on (its seals and the step in), never a pocket in
+    /// the doorway. Noted with the carry-ons.
+    pub(crate) fn danger_at_door(&mut self, w: &World, tick: u64) -> bool {
+        let Some(body) = w.body else {
+            return false;
+        };
+        let Some(portal) = self.ender.home.portal else {
+            return false;
+        };
+        let feet = path::stand_cell(w, body.pos);
+        let lit: Vec<Cell> = home::portal_cells(w, home::NETHER, portal)
+            .into_iter()
+            .filter(|c| {
+                w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+                    == Some(data::BlockKind::NetherPortal)
+            })
+            .collect();
+        let at_door = home::portal_front(w, &lit, body.pos)
+            .is_some_and(|f| feet == f.stand || feet == f.tunnel);
+        if !at_door || !self.carry_quiet(w, tick) {
+            return false;
+        }
+        self.ender.home.way_in.carry_ons += 1;
+        if self.ender.home.way_in.carry_ons % 20 == 1 {
+            self.note(
+                tick,
+                "portal way: on into the portal under the danger line".to_owned(),
+                format!(
+                    "health {:?} at the door {feet:?}; carry-on {}",
+                    w.player.health, self.ender.home.way_in.carry_ons
+                ),
+            );
+        }
+        true
+    }
+
+    /// Not burning, and no hostile (neutrals aside) within `CARRY_CLEAR` in the last
+    /// `CARRY_QUIET` ticks; the last one seen is kept.
+    fn carry_quiet(&mut self, w: &World, tick: u64) -> bool {
+        let Some(body) = w.body else {
+            return false;
+        };
+        let near = w.entities.values().any(|e| {
+            !e.dead
+                && crate::defend::hostile(e.kind)
+                && !matches!(
+                    e.kind,
+                    data::EntityKind::Enderman | data::EntityKind::ZombifiedPiglin
+                )
+                && (0..3)
+                    .map(|i| (e.pos[i] - body.pos[i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+                    <= CARRY_CLEAR
+        });
+        if near {
+            self.ender.home.way_in.hostile_at = Some(tick);
+        }
+        let quiet = self
+            .ender
+            .home
+            .way_in
+            .hostile_at
+            .is_none_or(|t| tick >= t + CARRY_QUIET);
+        quiet && !w.player.on_fire
     }
 }

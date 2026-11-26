@@ -847,8 +847,18 @@ impl Plan {
                     ),
                 );
             }
-            // >>> Q6 (issue 19): never a pocket on a ledge (race 45727347488 lane 0 fell off its
-            // own, shot): a dig down one first (`crate::portal_way`).
+            // >>> Q6 (issue 19): on the last leg in rock, quiet and not burning, the leg goes on
+            // (the coordinator, 2026-11-25); never a pocket on a ledge (race 45727347488 lane 0
+            // fell off its own, shot): a dig down one first (`crate::portal_way`).
+            if let Some(t) = self.danger_carry_on(w, tick) {
+                return Some(t);
+            }
+            if self.danger_at_door(w, tick)
+                && let Some(portal) = self.ender.home.portal
+                && let Some(t) = self.home_approach(w, tick, portal)
+            {
+                return Some(t);
+            }
             if let Some(t) = self.ledge_dig(w, tick) {
                 return Some(t);
             }
@@ -1835,6 +1845,11 @@ impl Plan {
         // and the tunnel go to the cell behind its standing cell (the entry portal's north face
         // has no floor over the lava sea).
         let front = portal_front(w, &lit, body.pos);
+        // >>> Q6 (issue 19): the lava by the standing cell's head first (`crate::portal_way`).
+        if let Some(t) = self.head_seal(w, tick, front.as_ref()) {
+            return Some(t);
+        }
+        // <<< Q6
         if let Some(t) = self.home_seal(w, tick, &lit, front.as_ref()) {
             return Some(t);
         }
