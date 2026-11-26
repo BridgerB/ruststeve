@@ -633,6 +633,20 @@ pub struct World {
     /// The game said the run is won (`win_game`, after the dragon).
     #[serde(default)]
     pub won: bool,
+    // >>> E1 (issue 20b)
+    /// The server tick the dragon was first seen dead: entity event 3 on an `ender_dragon`
+    /// (LivingEntity.die at the killing blow, the 26.1.2 jar) or, in the End, the dragon's boss
+    /// bar removed (EnderDragonFight.setDragonKilled hides it after the 200-tick death). The
+    /// `win` stage asks for it before `won`.
+    #[serde(default)]
+    pub dragon_dead: Option<u64>,
+    /// Attacks the bot has sent (`Act::Attack`), and the last one's server tick and target id
+    /// (a dragon part's id is not an entity of its own): the ledger's strikes.
+    #[serde(default)]
+    pub attacks_sent: u64,
+    #[serde(default)]
+    pub last_attack: Option<(u64, i32)>,
+    // <<< E1
     /// Chat and the screen's text, newest last (`SOUNDS_KEPT`).
     #[serde(default)]
     pub chat: Vec<ChatLine>,
@@ -945,7 +959,7 @@ impl World {
         self.memory
             .forget_sign(&dim, cell, data::block_of_state(state));
         let sign = memory::is_sign(state);
-        let watched = memory::watched(state) || self.memory.on_record(&dim, cell);
+        let watched = memory::watched_in(&dim, state) || self.memory.on_record(&dim, cell);
         if !sign && !watched {
             return;
         }
@@ -1082,13 +1096,21 @@ impl World {
         self.observe_column_signs(at, &column);
         let (bx, bz) = (at.x * 16, at.z * 16);
         let mut cells = Vec::new();
+        // >>> E1 (issue 20b): the End's kinds are watched in the End only.
+        let here = self
+            .dimension
+            .as_ref()
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
+        let watched = |s: u32| memory::watched_in(&here, s);
+        // <<< E1
         for (si, section) in column.sections.iter().enumerate() {
-            if !section.blocks.may_contain(memory::watched) {
+            if !section.blocks.may_contain(watched) {
                 continue;
             }
             let by = column.min_y + 16 * si as i32;
             for i in 0..4096usize {
-                if section.blocks.get(i).is_some_and(memory::watched) {
+                if section.blocks.get(i).is_some_and(watched) {
                     let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
                     cells.push(BlockPos::new(bx + lx, by + ly, bz + lz));
                 }
@@ -1114,7 +1136,7 @@ impl World {
                 // on that axis, 0 when above.
                 let edge = |d: i32| if d < 0 { 15 } else { 0 };
                 for (si, section) in nc.sections.iter().enumerate() {
-                    if !section.blocks.may_contain(memory::watched) {
+                    if !section.blocks.may_contain(watched) {
                         continue;
                     }
                     let by = nc.min_y + 16 * si as i32;
@@ -1126,7 +1148,7 @@ impl World {
                                 (a, edge(dz))
                             };
                             let i = protocol::chunk::block_index(lx, ly, lz);
-                            if section.blocks.get(i).is_some_and(memory::watched) {
+                            if section.blocks.get(i).is_some_and(watched) {
                                 cells.push(BlockPos::new(n.x * 16 + lx, by + ly, n.z * 16 + lz));
                             }
                         }
@@ -1198,6 +1220,10 @@ impl World {
                 if let Some(e) = self.entities.get_mut(&entity) {
                     e.struck = true;
                 }
+                // >>> E1 (issue 20b)
+                self.attacks_sent += 1;
+                self.last_attack = Some((self.session.server_ticks, entity));
+                // <<< E1
                 vec![Effect::Send(C2s::Attack { entity })]
             }
             Act::Respawn => {
@@ -1622,6 +1648,11 @@ impl World {
                         self.kills += 1;
                     }
                     e.dead = true;
+                    // >>> E1 (issue 20b)
+                    if e.kind == EntityKind::EnderDragon && self.dragon_dead.is_none() {
+                        self.dragon_dead = Some(self.session.server_ticks);
+                    }
+                    // <<< E1
                 }
             }
             S2c::OpenScreen { window, menu } => {
@@ -1874,6 +1905,22 @@ impl World {
                     self.bosses.insert(*uuid, (name.clone(), *progress));
                 }
                 protocol::BossOp::Remove => {
+                    // >>> E1 (issue 20b): the dragon's bar goes when it is killed.
+                    let in_end = self
+                        .dimension
+                        .as_ref()
+                        .is_some_and(|d| d.name == "minecraft:the_end");
+                    if in_end
+                        && self.dragon_dead.is_none()
+                        && self.bosses.get(uuid).is_some_and(|b| {
+                            b.0.to_lowercase()
+                                .replace(' ', "_")
+                                .contains("ender_dragon")
+                        })
+                    {
+                        self.dragon_dead = Some(self.session.server_ticks);
+                    }
+                    // <<< E1
                     self.bosses.remove(uuid);
                 }
                 protocol::BossOp::Progress(p) => {

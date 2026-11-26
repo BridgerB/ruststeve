@@ -357,7 +357,7 @@ why = "the locator bar: other players' positions"
 
 [[skipped]]
 packet = "play/level_particles"
-why = "particles are visual; what they show (portals, drips, teleports) comes from blocks and sounds"
+why = "particles are visual; what they show (portals, drips, teleports) comes from blocks and sounds, and the dragon's breath and fireball clouds come from the area_effect_cloud entity's data (radius and particle, issue 20)"
 
 [[skipped]]
 packet = "play/light_update"

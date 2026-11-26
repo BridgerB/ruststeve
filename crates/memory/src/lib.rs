@@ -54,6 +54,17 @@ const WATCHED: [BlockKind; 19] = [
     BlockKind::InfestedDeepslate,
 ];
 
+/// The End's kinds (issue 20b), watched in the End only: end stone is the island's ground and
+/// the dragon-immune pillar block (#dragon_immune, the 26.1.2 jar); iron bars cage two spikes;
+/// bedrock is each spike's top and the exit portal's (probe 45863427332: 10 bedrock tops, 146
+/// bars on this seed). Elsewhere bedrock floors every chunk (and roofs the Nether's): watched
+/// there, every column would be "seen" and the heading's seen-columns count would mean nothing
+/// (`a_way_only_back_over_the_cut_is_refused_and_said`, CI 45868182237).
+const END_WATCHED: [BlockKind; 3] = [BlockKind::EndStone, BlockKind::IronBars, BlockKind::Bedrock];
+
+/// The End's dimension name.
+pub const THE_END: &str = "minecraft:the_end";
+
 /// The infested kinds (issue 19b): a block of one of these breaks into a silverfish.
 pub const INFESTED: [BlockKind; 7] = [
     BlockKind::InfestedStone,
@@ -79,6 +90,43 @@ pub fn watched(state: u32) -> bool {
         return false;
     };
     WATCHED.contains(&kind) || block_tag("logs").is_some_and(|logs| logs.contains(&kind))
+}
+
+/// Whether a block state is a kind memory watches in `dimension`: `watched`, and in the End
+/// its own kinds (`END_WATCHED`).
+pub fn watched_in(dimension: &str, state: u32) -> bool {
+    watched(state)
+        || (dimension == THE_END
+            && data::block_of_state(state).is_some_and(|k| END_WATCHED.contains(&k)))
+}
+
+/// Whether an `end_portal_frame` state holds an eye (issue 20b): its `eye` property, read from
+/// the generated table (the state ids count the last property fastest). Not a frame: false.
+/// Probe 45863427332: memory's states of the frontier's 12 frames match RCON's `eye=` exactly
+/// (9469, eye=true facing=north; 9473 to 9476 empty).
+pub fn frame_has_eye(state: u32) -> bool {
+    let Some(info) = data::block_of_state(state)
+        .filter(|k| *k == BlockKind::EndPortalFrame)
+        .and_then(|k| k.info())
+    else {
+        return false;
+    };
+    let Some(at) = info.properties.iter().position(|p| p.name == "eye") else {
+        return false;
+    };
+    let stride: u32 = info
+        .properties
+        .get(at + 1..)
+        .unwrap_or(&[])
+        .iter()
+        .map(|p| p.values.len() as u32)
+        .product();
+    let Some(eye) = info.properties.get(at) else {
+        return false;
+    };
+    let n = eye.values.len() as u32;
+    let value = state.saturating_sub(info.first_state) / stride.max(1) % n.max(1);
+    eye.values.get(value as usize) == Some(&"true")
 }
 
 /// Whether a neighbouring cell lets a face be seen: loaded, and not a full cube (air, water,
@@ -266,6 +314,10 @@ pub const INDEXED: &[BlockKind] = &[
     BlockKind::InfestedCrackedStoneBricks,
     BlockKind::InfestedChiseledStoneBricks,
     BlockKind::InfestedDeepslate,
+    // Issue 20b: the spikes' tops and cages, few cells each (end stone is not indexed: the
+    // island's whole surface).
+    BlockKind::IronBars,
+    BlockKind::Bedrock,
 ];
 
 fn unindexed() -> bool {
@@ -678,6 +730,36 @@ impl Memory {
 
 #[cfg(test)]
 mod tests {
+    /// Issue 20b: the frame decoder reads the frontier's states as RCON did (probe 45863427332).
+    #[test]
+    fn frame_has_eye_reads_the_eye_property() {
+        assert!(super::frame_has_eye(9469));
+        assert!(super::frame_has_eye(9472));
+        for s in 9473..=9476 {
+            assert!(!super::frame_has_eye(s));
+        }
+        let stone = BlockKind::Stone.info().map_or(0, |i| i.default_state);
+        assert!(!super::frame_has_eye(stone));
+    }
+
+    /// Issue 20b: end stone, iron bars and bedrock are watched in the End only (bedrock floors
+    /// every Overworld and Nether chunk); bars and bedrock indexed.
+    #[test]
+    fn the_end_blocks_are_watched_in_the_end_only() {
+        for k in [BlockKind::EndStone, BlockKind::IronBars, BlockKind::Bedrock] {
+            let s = k.info().map_or(0, |i| i.default_state);
+            assert!(super::watched_in(super::THE_END, s), "{k:?}");
+            assert!(!super::watched_in("minecraft:the_nether", s), "{k:?}");
+            assert!(!super::watched_in("minecraft:overworld", s), "{k:?}");
+            assert!(!super::watched(s), "{k:?}");
+        }
+        let log = BlockKind::OakLog.info().map_or(0, |i| i.default_state);
+        assert!(super::watched_in("minecraft:overworld", log));
+        assert!(super::watched_in(super::THE_END, log));
+        assert!(super::INDEXED.contains(&BlockKind::Bedrock));
+        assert!(!super::INDEXED.contains(&BlockKind::EndStone));
+    }
+
     use super::*;
 
     fn state(kind: BlockKind) -> u32 {
