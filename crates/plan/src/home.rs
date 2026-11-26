@@ -508,11 +508,42 @@ impl Plan {
         let held = craft::count(w, ItemKind::EnderPearl) + craft::count(w, ItemKind::EnderEye);
         match dimension(w) {
             Some(NETHER) if held >= wanted => {
+                // Resumed past the kit (a snapshot on the trip, race 45725323112): the pearls are
+                // eyes and the kit is held, so no top-up and no kit again (it walked 258 back to
+                // the hunt point).
+                let eyes = craft::count(w, ItemKind::EnderEye);
+                let made = eyes >= wanted;
+                let kit = made
+                    && craft::count(w, ItemKind::Stick)
+                        >= self.table.as_ref().map_or(8, |t| t.base.home_sticks)
+                    && craft::count(w, ItemKind::CraftingTable) >= 1;
                 self.ender.phase = EnderPhase::Home;
                 self.ender.home = HomeState {
                     since: Some(tick),
+                    top_up_over: made,
+                    kit_begun: kit,
+                    kit_over: kit,
                     ..HomeState::default()
                 };
+                if made {
+                    // The way points before the nearest one are behind a bot resumed mid-trip.
+                    let feet = w.body.map(|b| path::feet_cell(b.pos)).unwrap_or_default();
+                    let way = self.home_rules().way;
+                    let nearest = way
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|(_, [x, z])| flat(feet, (*x, feet.1, *z)))
+                        .map(|(i, _)| i);
+                    if let Some(k) = nearest {
+                        self.ender.home.ways_passed =
+                            way.iter().take(k).map(|[x, z]| (x >> 4, z >> 4)).collect();
+                    }
+                    self.note(
+                        tick,
+                        "home: resumed with the eyes made".to_owned(),
+                        format!("{eyes} eyes held: no top-up; the kit held: {kit}"),
+                    );
+                }
                 let s = self.home_state(w);
                 self.note(
                     tick,

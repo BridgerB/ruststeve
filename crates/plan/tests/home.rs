@@ -795,3 +795,31 @@ fn a_laid_bridge_block_is_kept_from_its_note() {
     assert_eq!(home::parse_cell("(1, 2)"), None);
     assert_eq!(home::parse_cell("(1, 2, 3, 4)"), None);
 }
+
+#[test]
+fn resumed_mid_trip_with_the_eyes_made_skips_the_top_up_and_points_behind() {
+    // Race 45725323112: a snapshot on the trip held 14 eyes and the kit, Home began afresh and
+    // walked 258 back to the hunt point.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.remove(&9);
+    w.inventory.slots.insert(9, (ItemKind::EnderEye, 14));
+    w.inventory.slots.insert(11, (ItemKind::Stick, 9));
+    w.inventory.slots.insert(12, (ItemKind::CraftingTable, 1));
+    let mut p = racer();
+    run(&mut p, &mut w, 100, 2);
+    assert_eq!(p.ender.phase, EnderPhase::Home, "{:?}", notes(&p));
+    assert!(
+        noted(&p, "home: resumed with the eyes made"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.ender.home.top_up_over && p.ender.home.kit_over);
+    // At (8, 64, 8) the nearest point is (8, 81), the last: the two before it are behind.
+    assert_eq!(
+        p.ender.home.ways_passed.len(),
+        2,
+        "{:?}",
+        p.ender.home.ways_passed
+    );
+}
