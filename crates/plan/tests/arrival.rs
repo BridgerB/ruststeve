@@ -200,3 +200,36 @@ fn gravel_over_the_head_steps_aside_to_rock() {
     let c = arrival::side_cell(&w, (8, 40, 8), &PICK);
     assert!(c != Some((7, 40, 8)) && c.is_some(), "{c:?}");
 }
+
+#[test]
+fn on_the_surface_by_day_with_food_six_the_eyes_take_over() {
+    let mut w = world([8.5, 96.0, 8.5]);
+    w.step(&Event::Packet(S2c::SetTime {
+        game_time: 1000,
+        clocks: vec![protocol::ClockUpdate {
+            clock: protocol::OVERWORLD_CLOCK,
+            total_ticks: 1000,
+            partial_tick: 0.0,
+            rate: 1.0,
+        }],
+    }));
+    w.inventory.slots.insert(36, (ItemKind::IronSword, 1));
+    w.inventory.slots.insert(37, (ItemKind::StonePickaxe, 1));
+    w.inventory.slots.insert(9, (ItemKind::EnderEye, 14));
+    w.held = 0;
+    w.stage_reached = Some(world::stage::Stage::Pearls12);
+    let mut p = Plan::with_table(Aim::Race, table());
+    for t in 100..110 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let notes: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n == "home: over on the surface, the eyes take over"),
+        "{notes:?}"
+    );
+    assert!(p.home_done());
+}

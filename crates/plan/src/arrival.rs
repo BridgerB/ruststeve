@@ -100,6 +100,11 @@ const FOOD_TURNS: [f64; 5] = [0.0, 30.0, -30.0, 60.0, -60.0];
 /// `bridge_keep` ([overland], config/goals.toml).
 const FOOD_BRIDGES: usize = 40;
 const FOOD_KEEP: i64 = 32;
+/// Food at or over which the way home hands over to the eyes on the surface by day, unfed (the
+/// coordinator, 2026-11-25: the overland walk hunts on the way, as Q4's dev runs ate on it; 6 is
+/// where sprinting stops, vanilla, and `home::COOK_FOOD_FLOOR`). Under it the walk east for
+/// animals runs first.
+pub const HAND_OVER_FOOD: i32 = 6;
 /// Cells over a cell checked for the sky: `world::stage::SKY_CHECK`, the open-sky rule's own.
 const SKY: i32 = world::stage::SKY_CHECK;
 
@@ -472,7 +477,9 @@ impl Plan {
     /// On the surface by day, hungry, no prey in view: a far walk of `FOOD_LEG` toward
     /// `FOOD_POINT` (a bearing off it when that has no leg), noted; `None` after `FOOD_LEGS`.
     pub(crate) fn arrival_food_walk(&mut self, w: &World, tick: u64) -> Option<Task> {
-        if self.ender.home.arrival.food_legs >= FOOD_LEGS {
+        if self.ender.home.arrival.food_legs >= FOOD_LEGS
+            || w.player.food.unwrap_or(0) >= HAND_OVER_FOOD
+        {
             return None;
         }
         let body = w.body?;
@@ -518,6 +525,32 @@ impl Plan {
             format!("leg {n} of {FOOD_LEGS}: no leg on any bearing from {feet:?}"),
         );
         None
+    }
+
+    /// On the surface by day (not night, dusk more than `DUSK_MARGIN` off) with food at
+    /// `HAND_OVER_FOOD` or more: the way home is over and the eyes take over at once (throw 1,
+    /// then the overland legs, which hunt on the way). Noted; `true` when it hands over.
+    pub(crate) fn arrival_hand_over(&mut self, w: &World, tick: u64) -> bool {
+        let food = w.player.food.unwrap_or(0);
+        let day = w.is_night() == Some(false)
+            && w.day_time()
+                .is_some_and(|t| world::time::ticks_to_dusk(t) >= crate::DUSK_MARGIN);
+        if self.ender.home.done || !day || food < HAND_OVER_FOOD {
+            return false;
+        }
+        self.ender.home.done = true;
+        let feet = w.body.map(|b| path::feet_cell(b.pos));
+        self.note(
+            tick,
+            "home: over on the surface, the eyes take over".to_owned(),
+            format!(
+                "at {feet:?} by day (day time {:?}), food {food} of {HAND_OVER_FOOD} or more, health {:?}; {} ticks since the arrival; the overland walk hunts on the way",
+                w.day_time(),
+                w.player.health,
+                tick.saturating_sub(self.ender.home.arrived_at.unwrap_or(tick))
+            ),
+        );
+        true
     }
 
     /// One tick of the shaft in hand, while no task runs (the planner's step calls it ahead of

@@ -1513,6 +1513,12 @@ impl Plan {
                 return self.home_climb(w, tick, &r);
             }
         }
+        // >>> Q7: on the surface by day, food 6 or more: over, the eyes take over (the done
+        // branch above: Q4's exit with eyes held).
+        if self.arrival_hand_over(w, tick) {
+            return self.home_overworld(w, tick);
+        }
+        // <<< Q7
         // The night: a hut where the bot stands, one a night, and the night waited out in it.
         let dusk = self.dusk_near(w, tick) || w.is_night() == Some(true);
         if dusk {
