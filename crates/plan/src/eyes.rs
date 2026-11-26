@@ -1683,6 +1683,11 @@ pub struct EyeState {
     /// Walks out from trees before the first throw (`open_side`).
     #[serde(default)]
     pub open_walks: u32,
+    // >>> overland and stronghold (Q4): set by `eyes_stronghold_task` once the throw spot's
+    // moves are spent; the column guard then lets the throw go. Cleared at the next throw.
+    #[serde(default)]
+    pub force_throw: bool,
+    // <<< overland and stronghold
 }
 
 /// What survives a resume: written beside the snapshot and read back (`Plan::eyes_kept`,
@@ -1833,7 +1838,22 @@ impl Plan {
             .or_else(|| self.throws.iter().rev().find_map(|l| unit(l.dir)));
         // The drop's column on the bearing: a throw with no bearing yet (the first) cannot know
         // where its eye comes down, and goes; the rest-height rule bounds what that one loses.
-        if let Some(cell) = bearing.and_then(|b| apex_blocked(w, feet, b, &rules)) {
+        // >>> overland and stronghold (Q4): `force_throw`, set once the throw spot's moves are
+        // spent (`eyes_stronghold_task`), throws through a blocked column: a lost eye costs less
+        // than a stalled run, and the canopy fetch recovers most.
+        let forced = self.eyes.force_throw;
+        // <<< overland and stronghold
+        if let Some(cell) = bearing.and_then(|b| apex_blocked(w, feet, b, &rules))
+            && forced
+        {
+            self.note(
+                tick,
+                format!("eye throw {} ({}) forced", self.eyes.thrown + 1, why.name()),
+                format!(
+                    "the column on the bearing is blocked at {cell:?}; the spot's moves are spent"
+                ),
+            );
+        } else if let Some(cell) = bearing.and_then(|b| apex_blocked(w, feet, b, &rules)) {
             if self.eyes_note_due(tick, rules.note_every) {
                 self.eyes.noted_at = Some(tick);
                 self.note(
@@ -1884,6 +1904,9 @@ impl Plan {
             )));
         }
         let t = Throw::new(w, why, bearing, &rules, tick);
+        // >>> overland and stronghold (Q4): a forced throw is a one-off.
+        self.eyes.force_throw = false;
+        // <<< overland and stronghold
         self.note(
             tick,
             format!("eye throw {} ({})", self.eyes.thrown + 1, why.name()),

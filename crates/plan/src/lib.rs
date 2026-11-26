@@ -2885,6 +2885,21 @@ impl Plan {
                             to[1]
                         ),
                     );
+                } else if tick.saturating_sub(since) > WAY_WAIT
+                    && self.overland.nudges >= WAY_NUDGES
+                    && !self.eyes.force_throw
+                {
+                    // The moves spent and the throw still waiting: it goes anyway, through the
+                    // column (`EyeState::force_throw`); a lost eye costs less than a stalled run.
+                    self.eyes.force_throw = true;
+                    self.note(
+                        tick,
+                        "overland throw forced".to_owned(),
+                        format!(
+                            "{WAY_NUDGES} spot moves spent and the throw waited {} ticks",
+                            tick.saturating_sub(since)
+                        ),
+                    );
                 }
             } else {
                 self.overland.wait_from = None;

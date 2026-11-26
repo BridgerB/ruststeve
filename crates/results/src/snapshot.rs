@@ -225,6 +225,7 @@ mod tests {
                 spots: vec![[10.5, 20.5], [180.0, 25.0]],
                 noted_at: Some(4_400),
                 open_walks: 1,
+                force_throw: false,
             },
         };
         let mut from = plan::Plan::new(plan::Aim::Hold);
