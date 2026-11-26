@@ -1570,6 +1570,11 @@ impl Plan {
                 self.retry_at = tick + crate::RETRY_TICKS * 10;
                 return Some(Task::Idle);
             }
+            // >>> Q7: by day, far legs east for animals (fresh land), before the look round.
+            if let Some(t) = self.arrival_food_walk(w, tick) {
+                return Some(t);
+            }
+            // <<< Q7
             if self.ender.home.animal_walks < r.animal_walks {
                 self.ender.home.animal_walks += 1;
                 let why = format!(

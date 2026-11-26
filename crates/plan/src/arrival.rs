@@ -80,6 +80,26 @@ pub const SIDES_MAX: u32 = 3;
 /// 45737410143: "the cursor's SoulSoil put away" 14 times a shaft, nine shafts that never rose).
 /// The planner's own cursor rule waits 100 (`lib.rs`, "cursor put down").
 pub const CURSOR_WAIT: u64 = 100;
+/// Where the walk out for animals heads: the stronghold's `locate` point (1648, -16), known
+/// geography (Bridger's ruling of 2026-11-24; docs/problems/eyes-observe.md), 1,537 east of the
+/// portal over plains (y 65 to 81 for the first 320, then a river, forest). Round the portal and
+/// the old stairs, where issue 16's bots hunted, no animal was in view in 12 looks (race
+/// 45737410143, both lanes, from (112, 65, -73)); fresh land east has them, and the eyes' way is
+/// east too.
+pub const FOOD_POINT: [f64; 2] = [1648.0, -16.0];
+/// A leg's length out for animals (the hunt sees prey within `hunt_radius` 24: a leg of 48 looks
+/// over new ground at each end), the shortest leg taken, and the step the target is sought in.
+pub const FOOD_LEG: i32 = 48;
+pub const FOOD_LEG_MIN: i32 = 24;
+pub const FOOD_STEP: i32 = 8;
+/// Legs out for animals at most: 24 of 48 is about 1,150 blocks, most of the way east.
+pub const FOOD_LEGS: u32 = 24;
+/// The bearings tried for a leg, off the one to `FOOD_POINT` (degrees).
+const FOOD_TURNS: [f64; 5] = [0.0, 30.0, -30.0, 60.0, -60.0];
+/// Bridges a leg may lay (a stream), and the blocks kept: the overland's `bridge_max` and
+/// `bridge_keep` ([overland], config/goals.toml).
+const FOOD_BRIDGES: usize = 40;
+const FOOD_KEEP: i64 = 32;
 /// Cells over a cell checked for the sky: `world::stage::SKY_CHECK`, the open-sky rule's own.
 const SKY: i32 = world::stage::SKY_CHECK;
 
@@ -100,6 +120,8 @@ pub struct Arrival {
     pub table_out: bool,
     /// Tables taken along after a run.
     pub tables_taken: u32,
+    /// Legs walked (or refused) out for animals toward `FOOD_POINT`.
+    pub food_legs: u32,
 }
 
 /// A shaft straight up.
@@ -445,6 +467,57 @@ impl Plan {
             ),
         );
         Some(Task::Dig(Dig::new(w, c, tick)))
+    }
+
+    /// On the surface by day, hungry, no prey in view: a far walk of `FOOD_LEG` toward
+    /// `FOOD_POINT` (a bearing off it when that has no leg), noted; `None` after `FOOD_LEGS`.
+    pub(crate) fn arrival_food_walk(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.ender.home.arrival.food_legs >= FOOD_LEGS {
+            return None;
+        }
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        self.ender.home.arrival.food_legs += 1;
+        let n = self.ender.home.arrival.food_legs;
+        let from = [body.pos[0], body.pos[2]];
+        let deg = crate::overland::bearing(from, FOOD_POINT);
+        for turn in FOOD_TURNS {
+            let Some(target) =
+                crate::overland::leg_target(w, feet, deg + turn, FOOD_LEG, FOOD_LEG_MIN, FOOD_STEP)
+            else {
+                continue;
+            };
+            let goal = path::Goal::Near {
+                pos: target,
+                range: 4.0,
+            };
+            let mut walk = crate::walk::Walk::far_to(target, goal, tick);
+            walk.more.keep = Some(FOOD_KEEP);
+            walk.more.water = true;
+            let ok = walk.route_now(w, tick);
+            self.expanded += walk.expanded;
+            if !ok || walk.bridges_ahead() > FOOD_BRIDGES {
+                continue;
+            }
+            self.walks += 1;
+            self.note(
+                tick,
+                format!("arrival: a walk for animals to {target:?}"),
+                format!(
+                    "leg {n} of {FOOD_LEGS}, bearing {:.0} (turned {turn:.0}) toward {FOOD_POINT:?}; food {:?}, health {:?}",
+                    deg + turn,
+                    w.player.food,
+                    w.player.health
+                ),
+            );
+            return Some(Task::Explore(walk));
+        }
+        self.note(
+            tick,
+            "arrival: no walk for animals".to_owned(),
+            format!("leg {n} of {FOOD_LEGS}: no leg on any bearing from {feet:?}"),
+        );
+        None
     }
 
     /// One tick of the shaft in hand, while no task runs (the planner's step calls it ahead of
