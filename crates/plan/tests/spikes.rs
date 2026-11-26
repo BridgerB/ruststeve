@@ -958,3 +958,39 @@ fn a_body_held_up_by_the_floor_beside_steps_onto_it_first() {
         }
     );
 }
+
+#[test]
+fn hurt_on_the_way_down_with_the_dragon_near_the_bot_holds_in_its_shaft() {
+    // Race 45895161187 lane 1: going down at 9 health, struck dead.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    gone(&mut w);
+    w.player.health = Some(9.0);
+    dragon(&mut w, [8.5, 67.0, 45.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: hold in the shaft, hurt"),
+        "{:?}",
+        notes(&p)
+    );
+    // The dragon perched: down.
+    dragon(&mut w, [0.5, 66.0, 0.5], 6);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+}

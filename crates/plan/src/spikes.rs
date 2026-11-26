@@ -132,6 +132,10 @@ pub const REFUSE_TICKS: u64 = 1200;
 /// wide within 0.2 of the centre stands on its cell alone.
 pub const STEP_NEAR: f64 = 0.2;
 pub const STEP_TICKS: u64 = 60;
+/// One blow of the dragon's (its breath's 6 through iron, race 45875049490; a wing's 5, a head's
+/// 10): on the way down under danger plus this, the bot holds in its shaft while the dragon is
+/// near.
+pub const ONE_BLOW: f32 = 6.0;
 /// Ticks after a blow inside the box in which the bot leaves it for the way down.
 pub const BOX_BLOW_TICKS: u64 = 200;
 /// Ticks a repeated note waits before it is written again.
@@ -1091,6 +1095,39 @@ impl Plan {
                 format!(
                     "the dragon {:?} at {feet:?}; health {health:?}",
                     d.map(|d| (d.dist, d.phase))
+                ),
+            );
+            return Some(self.spikes_hold(tick));
+        }
+        // Hurt on the way down (under danger plus one blow) with the dragon near and not perched:
+        // held in the shaft, eating when food is short, until it is far or perched (the
+        // orchestrator, after race 45895161187 lane 1: struck dead at 9 going down).
+        if health.is_some_and(|h| h < danger + ONE_BLOW)
+            && body.on_ground
+            && on_pillar(w, feet, &self.spikes.pillars)
+            && matches!(n, Next::DigDown(_) | Next::Step { .. })
+            && let Some(why) = dragon_refusal(d.as_ref())
+        {
+            let food = self
+                .table
+                .as_ref()
+                .and_then(|t| crate::eat::best_food(w, &t.survival));
+            if w.player.food.is_some_and(|f| f < 20)
+                && let Some(f) = food
+            {
+                self.spikes_note(
+                    tick,
+                    "spikes: eat in the shaft".to_owned(),
+                    format!("{f:?}; health {health:?}, food {:?}; {why}", w.player.food),
+                );
+                return Some(Task::Eat(crate::eat::Eat::new(w, f, tick)));
+            }
+            self.spikes_note(
+                tick,
+                "spikes: hold in the shaft, hurt".to_owned(),
+                format!(
+                    "health {health:?} under {}; {why} at {feet:?}",
+                    danger + ONE_BLOW
                 ),
             );
             return Some(self.spikes_hold(tick));

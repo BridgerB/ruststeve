@@ -158,3 +158,4 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 ### Wall 10: the cell beside a dug shaft was a diagonal one (fixed)
 - **The cause:** E5's breath walk took the body off along the spike's top, and the way back to the shaft picked the cell beside it by the signs of both axes, (-9, 97, -41) for the shaft at (-8, -40). From there the shaft was not "next to" (two off), so the walk was asked again, 900 times.
 - **The fix:** the cells beside the shaft along an axis with a floor and room, the nearest walked to, then the step in. Unit test case added.
+- **Lane 1's death** (the orchestrator's answer): on the way down under danger plus one blow (14), with the dragon within 64 and not perched, the bot holds in its shaft ("hold in the shaft, hurt"). It eats there when food is short ("eat in the shaft") and goes down once the dragon is far or perched. Unit test `hurt_on_the_way_down_with_the_dragon_near_the_bot_holds_in_its_shaft`.
