@@ -271,7 +271,7 @@ fn endermen_holds_within_32_of_one_that_ticks() {
     assert_eq!(world::stage::enderman_near(&w).map(|(id, _)| id), Some(41));
     assert_eq!(w.stage_reached, Some(Stage::Endermen));
     assert_eq!(Stage::from_name("endermen"), Some(Stage::Endermen));
-    assert_eq!(Stage::ALL.len(), 20);
+    assert_eq!(Stage::ALL.len(), 24);
 }
 
 /// An enderman near but frozen (its chunk beyond the simulation distance) does not count, and
@@ -548,3 +548,278 @@ fn stronghold_and_portal_room_read_the_frame_ring() {
     w.step(&tick());
     assert!(!Stage::PortalRoom.holds(&w));
 }
+
+// >>> E1: issue 20's stages.
+
+/// A column at chunk `(x, z)` of air with the section from y 48 to 63 all `state`.
+fn column_with(x: i32, z: i32, state: u32) -> Event {
+    use protocol::chunk::{Column, Paletted, Section};
+    let air = Section {
+        block_count: 0,
+        fluid_count: 0,
+        blocks: Paletted::Single(0),
+        biomes: Paletted::Single(0),
+    };
+    let mut sections = vec![air; 16];
+    sections[3] = Section {
+        block_count: 4096,
+        fluid_count: 0,
+        blocks: Paletted::Single(state),
+        biomes: Paletted::Single(0),
+    };
+    Event::Packet(S2c::LevelChunkWithLight {
+        x,
+        z,
+        column: std::sync::Arc::new(Column { min_y: 0, sections }),
+    })
+}
+
+fn add(id: i32, kind: data::EntityKind, x: f64, y: f64, z: f64) -> Event {
+    Event::Packet(S2c::AddEntity {
+        id,
+        uuid: [id as u8; 16],
+        kind: kind.id(),
+        x,
+        y,
+        z,
+        velocity: [0.0; 3],
+    })
+}
+
+fn state(k: data::BlockKind) -> u32 {
+    k.info().map(|i| i.default_state).unwrap()
+}
+
+/// The ladder's new rungs: `armed` between `portal_room` and `end`; `island`, `crystals` and
+/// `win` after `end`, by name both ways.
+#[test]
+fn the_end_stages_sit_in_order() {
+    assert!(Stage::PortalRoom < Stage::Armed && Stage::Armed < Stage::End);
+    assert!(Stage::End < Stage::Island && Stage::Island < Stage::Crystals);
+    assert!(Stage::Crystals < Stage::Win);
+    for (s, n) in [
+        (Stage::Armed, "armed"),
+        (Stage::Island, "island"),
+        (Stage::Crystals, "crystals"),
+        (Stage::Win, "win"),
+    ] {
+        assert_eq!(s.name(), n);
+        assert_eq!(Stage::from_name(n), Some(s));
+    }
+}
+
+/// `armed`: the whole kit in the overworld; one piece short (one pickaxe, 23 cooked, too few
+/// eyes for the empty frames, no water bucket) is not; the Nether is not.
+#[test]
+fn armed_needs_the_whole_kit_in_the_overworld() {
+    let kit = |w: &mut World| {
+        w.step(&give(0, ItemKind::IronSword, 1));
+        w.step(&give(1, ItemKind::StonePickaxe, 1));
+        w.step(&give(2, ItemKind::StonePickaxe, 1));
+        w.step(&give(3, ItemKind::CookedPorkchop, 11));
+        w.step(&give(4, ItemKind::CookedMutton, 13));
+        w.step(&give(5, ItemKind::EnderEye, 12));
+        w.step(&give(6, ItemKind::Cobblestone, 64));
+        w.step(&give(7, ItemKind::Netherrack, 64));
+        w.step(&give(8, ItemKind::WaterBucket, 1));
+    };
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    kit(&mut w);
+    second(&mut w);
+    assert!(Stage::Armed.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Armed));
+    assert_eq!(world::stage::armed_pickaxes(&w), (2, 262));
+    assert_eq!(
+        world::stage::empty_frames(&w),
+        12,
+        "no frame seen: all empty"
+    );
+    for (slot, item, n) in [
+        (2, ItemKind::Stick, 1),
+        (4, ItemKind::CookedMutton, 12),
+        (5, ItemKind::EnderEye, 11),
+        (8, ItemKind::Bucket, 1),
+        (7, ItemKind::Netherrack, 63),
+    ] {
+        let mut w = World::new();
+        w.step(&login("minecraft:overworld"));
+        w.step(&teleport());
+        kit(&mut w);
+        w.step(&give(slot, item, n));
+        w.step(&tick());
+        assert!(!Stage::Armed.holds(&w), "{item:?} x{n} in slot {slot}");
+    }
+    let mut w = World::new();
+    w.step(&login("minecraft:the_nether"));
+    w.step(&teleport());
+    kit(&mut w);
+    w.step(&tick());
+    assert!(!Stage::Armed.holds(&w));
+}
+
+/// The eyes `armed` asks for are the ring's empty frames: a frame on record with an eye is one
+/// fewer (the frontier's ring has one, probe 45863427332).
+#[test]
+fn armed_counts_the_frames_with_an_eye() {
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    w.step(&air_column(0, 0));
+    w.step(&air_column(1, 0));
+    w.step(&air_column(1, 1));
+    for e in ring(20, 30, 20) {
+        w.step(&e);
+    }
+    // One frame with an eye (9469: eye=true, facing north).
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (21, 30, 24),
+        state: 9469,
+    }));
+    w.step(&tick());
+    assert_eq!(world::stage::frames_with_eye(&w), 1);
+    assert_eq!(world::stage::empty_frames(&w), 11);
+}
+
+/// `island`: on end stone within 30 of the fountain, in the End; 31 off, on air, or in the
+/// overworld is not.
+#[test]
+fn island_is_end_stone_near_the_fountain() {
+    let end_stone = state(data::BlockKind::EndStone);
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&column_with(0, 0, end_stone));
+    w.step(&column_with(1, 0, end_stone));
+    w.step(&column_with(-1, 0, 0));
+    w.step(&teleport_to(20.5, 64.0, 0.5));
+    w.step(&tick());
+    assert!(Stage::Island.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Island));
+    w.step(&teleport_to(31.0, 64.0, 0.5));
+    w.step(&tick());
+    assert!(!Stage::Island.holds(&w), "31 off");
+    w.step(&teleport_to(-5.0, 64.0, 0.5));
+    w.step(&tick());
+    assert!(!Stage::Island.holds(&w), "over air");
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&column_with(0, 0, end_stone));
+    w.step(&teleport_to(0.5, 64.0, 0.5));
+    w.step(&tick());
+    assert!(!Stage::Island.holds(&w));
+}
+
+/// `crystals`: near the fountain with every spike's column loaded and no crystal alive. A
+/// crystal alive, a spike column not loaded, or the bot far out is not.
+#[test]
+fn crystals_needs_every_spike_seen_and_none_alive() {
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
+    for [x, z] in world::stage::SPIKES {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    w.step(&add(90, data::EntityKind::EndCrystal, 42.5, 83.0, 0.5));
+    w.step(&tick());
+    assert!(!Stage::Crystals.holds(&w), "one alive");
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![90] }));
+    w.step(&tick());
+    assert!(Stage::Crystals.holds(&w));
+    w.step(&teleport_to(70.5, 70.0, 0.5));
+    w.step(&tick());
+    assert!(!Stage::Crystals.holds(&w), "70 off the fountain");
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
+    for [x, z] in world::stage::SPIKES.iter().skip(1) {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    w.step(&tick());
+    // The ten spikes' chunks are ten different columns: one missing is a spike not seen.
+    assert!(!Stage::Crystals.holds(&w), "a spike's column not loaded");
+}
+
+/// `win`: the credits with the dragon seen dead before them (its death event, or its boss bar
+/// removed in the End). The credits alone are not.
+#[test]
+fn win_needs_the_dragon_dead_then_the_credits() {
+    let win = Event::Packet(S2c::GameEvent {
+        event: 4,
+        param: 0.0,
+    });
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
+    w.step(&win);
+    w.step(&tick());
+    assert!(w.won && !Stage::Win.holds(&w), "credits alone");
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
+    w.step(&add(80, data::EntityKind::EnderDragon, 0.5, 70.0, 0.5));
+    w.step(&Event::Packet(S2c::EntityEvent { id: 80, status: 3 }));
+    assert!(w.dragon_dead.is_some());
+    w.step(&win);
+    w.step(&tick());
+    assert_eq!(w.stage_reached, Some(Stage::Win));
+    // The boss bar removed in the End is the death too.
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&Event::Packet(S2c::BossEvent {
+        uuid: [5; 16],
+        op: protocol::BossOp::Add {
+            name: "entity.minecraft.ender_dragon".to_owned(),
+            progress: 0.0,
+        },
+    }));
+    w.step(&Event::Packet(S2c::BossEvent {
+        uuid: [5; 16],
+        op: protocol::BossOp::Remove,
+    }));
+    assert!(w.dragon_dead.is_some());
+}
+
+/// The kit and geography in `config/end.toml` are the stage's constants.
+#[test]
+fn the_stage_constants_are_config_end_toml() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/end.toml"
+    ))
+    .unwrap();
+    let t: toml::Table = toml::from_str(&text).unwrap();
+    let kit = t["kit"].as_table().unwrap();
+    assert_eq!(
+        kit["pickaxes"].as_integer(),
+        Some(world::stage::ARMED_PICKAXES as i64)
+    );
+    assert_eq!(
+        kit["pickaxe_uses"].as_integer(),
+        Some(i64::from(world::stage::ARMED_PICKAXE_USES))
+    );
+    assert_eq!(kit["cooked"].as_integer(), Some(world::stage::ARMED_COOKED));
+    assert_eq!(kit["blocks"].as_integer(), Some(world::stage::ARMED_BLOCKS));
+    assert_eq!(
+        t["island"]["near"].as_float(),
+        Some(world::stage::ISLAND_NEAR)
+    );
+    assert_eq!(
+        t["crystals"]["near"].as_float(),
+        Some(world::stage::CRYSTALS_NEAR)
+    );
+    let spikes: Vec<[i32; 2]> = t["spike"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            let c = s["centre"].as_array().unwrap();
+            [
+                c[0].as_integer().unwrap() as i32,
+                c[1].as_integer().unwrap() as i32,
+            ]
+        })
+        .collect();
+    assert_eq!(spikes, world::stage::SPIKES.to_vec());
+}
+// <<< E1

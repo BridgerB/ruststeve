@@ -11,3 +11,4 @@ data = { path = "../data" }
 protocol = { path = "../protocol" }
 serde = { version = "1", features = ["derive"] }
 world = { path = "../world" }
+memory = { path = "../memory" }
