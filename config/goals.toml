@@ -1074,8 +1074,13 @@ provides = [["item:stone_pickaxe", 3], ["item:iron_sword", 1], ["item:iron_boots
 # 43,720, "stronghold stairs down leg 1 ... from (1608, 63, -32)"; its stairs and tunnel from there
 # to the room's floor at (1624, 17, -36) are cells it dug (ticks 43,720 to 55,560).
 way_up = [1608, 63, -32]
-# Walks up begun before the dry stairs (a walk ends at its 1,200-tick timeout or a partial route).
-up_walks = 4
+# The way's points under the top, from the room up: the same ledger's leg starts (stronghold stairs
+# down legs 7 to 2 at ticks 46,180 to 44,120, and the tunnel's start at (1609, 23, -38), tick 49,480)
+# and the tunnel's end at the room's wall, (1620, 17, -36) at tick 53,460.
+way = [[1620, 17, -36], [1609, 23, -38], [1602, 27, -38], [1596, 33, -38], [1590, 39, -38], [1596, 45, -38], [1602, 51, -38], [1608, 57, -38]]
+# Walks to one way point before it is skipped (a walk ends at its timeout, a partial route, or a
+# fight with the spawner's silverfish cutting it; the frontier bot fought 10 in its first 800 ticks).
+up_walks = 3
 # Logs before the row: a table 4 planks, 4 more sticks 2, fuel for 7 raw iron (1,400 ticks, 5
 # planks) and 30 meat (6,000 ticks, 20 planks) at a plank's 300: 31 planks, 8 logs; 10 with margin.
 logs = 10
@@ -1091,7 +1096,7 @@ eat_tasks = 12
 # failed tasks.
 phase_ticks = 6000
 phase_fails = 8
-down_walks = 4
+down_walks = 8
 # The server takes a UseOn within the block interaction range, 4.5 from the eye (the plan, 20d.2).
 frame_reach = 4.5
 eye_tries = 4
