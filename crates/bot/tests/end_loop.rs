@@ -283,3 +283,60 @@ fn on_the_island_endermen_about_are_never_stared_at() {
     assert!(r.has("end: bunker dug at") >= 1, "{story}");
     assert!(r.has("end: stock run 1") >= 1, "{story}");
 }
+
+/// The dragon (20g), every crystal gone: the model's dragon (`sim::end::Dragon`, scripted) sits
+/// on the fountain's pillar facing north. The bot, on the island with the stock held, digs its
+/// bunker, hands over to the fight, strikes the perched dragon until it is dead (it flies off
+/// after each quarter of its health and sits again), walks into the exit portal, and answers the
+/// credits with a respawn; never under the danger line.
+#[test]
+fn the_perched_dragon_is_struck_dead_and_the_credits_answered() {
+    let top = 60;
+    let mut stage = island(64, top, Vec::new());
+    stage.spawn((0, top + 1, 20));
+    let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(7);
+    kit(&mut sim, 192);
+    sim.summon_dragon(top + 1, 0.0);
+    let r = drive(sim, 16000, |p| {
+        p.end.arrived = true;
+        p.end.bridged = true;
+        p.end.stock_over = true;
+    });
+    let story = r.story();
+    let d = r.run.sim.dragon.clone().unwrap();
+    let parts = |p: i32| d.hits.iter().filter(|h| h.1 == p).count();
+    let tally = format!(
+        "hits head {} neck {} body {} own {}; perches {}, blows {}, died {:?}, won {:?}, respawns {}",
+        parts(1),
+        parts(2),
+        parts(3),
+        parts(0),
+        d.perches,
+        d.blows,
+        d.died_at,
+        d.won_at,
+        d.respawns_asked
+    );
+    assert!(!r.run.died, "{tally}\n{story}");
+    assert!(r.has("dragon fight") >= 1, "{tally}\n{story}");
+    assert!(d.died_at.is_some(), "{tally}\n{story}");
+    assert!(d.perches >= 2, "{tally}\n{story}");
+    assert!(d.portal_lit && d.won_at.is_some(), "{tally}\n{story}");
+    assert!(r.run.world.won, "{tally}\n{story}");
+    assert!(r.has("credits") >= 1, "{tally}\n{story}");
+    assert!(
+        r.has("respawn after the credits (1)") >= 1,
+        "{tally}\n{story}"
+    );
+    assert!(d.respawns_asked >= 1, "{tally}\n{story}");
+    assert!(
+        r.run.min_health_in_script.unwrap_or(0.0) > 8.0,
+        "never under the danger line: {:?}\n{tally}\n{story}",
+        r.run.min_health_in_script
+    );
+    assert!(
+        r.run.sim.violations.is_empty(),
+        "{:?}",
+        r.run.sim.violations
+    );
+}

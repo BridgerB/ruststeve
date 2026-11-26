@@ -115,15 +115,15 @@ const ON_POS_BELOW: f64 = 0.2;
 /// What a magma block does to feet on it (`MagmaBlock.stepOn`'s 1.0).
 const MAGMA_DAMAGE: f32 = 1.0;
 /// Invulnerability after a hit, and the half in which only a larger hit lands.
-const INVULNERABLE_TICKS: u32 = 20;
-const INVULNERABLE_HALF: u32 = 10;
+pub(crate) const INVULNERABLE_TICKS: u32 = 20;
+pub(crate) const INVULNERABLE_HALF: u32 = 10;
 /// A dead mob is removed this long after its death event (`deathTime`).
 const DEATH_TICKS: u64 = 20;
 /// Reach for melee: the entity interaction range 3 plus the server's 1 of slack.
 pub(crate) const MELEE_REACH: f64 = 3.0 + 1.0;
 /// Exhaustion costs (`FoodConstants`).
 const EXHAUSTION_JUMP: f32 = 0.05;
-const EXHAUSTION_ATTACK: f32 = 0.1;
+pub(crate) const EXHAUSTION_ATTACK: f32 = 0.1;
 const EXHAUSTION_HURT: f32 = 0.1;
 const EXHAUSTION_MINE: f32 = 0.005;
 const EXHAUSTION_HEAL: f32 = 6.0;
@@ -1811,6 +1811,18 @@ impl Sim {
 
     /// `attack`: a placed mob in reach takes the held item's damage scaled by the swing's
     /// charge.
+    /// A swing's damage with the item held: the weapon's attack damage and speed, scaled by the
+    /// attack strength charged since the last swing (`Player.attack`'s `getAttackStrengthScale`).
+    pub(crate) fn swing_damage(&self) -> f32 {
+        let held = self.survival.held_stack().map(|(k, _)| k);
+        let weapon = held.and_then(data::generated::item_props::weapon_of);
+        let base = 1.0 + weapon.map_or(0.0, |w| w.damage);
+        let speed = 4.0 + weapon.map_or(0.0, |w| w.speed);
+        let delay = 20.0 / speed.max(0.01);
+        let scale = ((f64::from(self.survival.life.attack_ticker) + 0.5) / delay).clamp(0.0, 1.0);
+        (base * (0.2 + scale * scale * 0.8)) as f32
+    }
+
     pub(crate) fn on_attack(&mut self, entity: i32) -> Result<Vec<Wire>, EncodeError> {
         // An end crystal ends on any hit and explodes (issue 20, `crate::end`).
         if self
@@ -1822,15 +1834,14 @@ impl Sim {
         {
             return self.strike_crystal(entity);
         }
+        // The dragon and its parts (issue 20h, `crate::end`): the part struck takes the blow.
+        if self.dragon_part(entity).is_some() {
+            return self.strike_dragon(entity);
+        }
         let eye = [self.pos[0], self.pos[1] + physics::EYE_HEIGHT, self.pos[2]];
         let held = self.survival.held_stack().map(|(k, _)| k);
-        let weapon = held.and_then(data::generated::item_props::weapon_of);
-        let base = 1.0 + weapon.map_or(0.0, |w| w.damage);
-        let speed = 4.0 + weapon.map_or(0.0, |w| w.speed);
-        let delay = 20.0 / speed.max(0.01);
+        let damage = self.swing_damage();
         let life = &mut self.survival.life;
-        let scale = ((f64::from(life.attack_ticker) + 0.5) / delay).clamp(0.0, 1.0);
-        let damage = (base * (0.2 + scale * scale * 0.8)) as f32;
         let Some(m) = life.mobs.get_mut(&entity).filter(|m| m.dead_at.is_none()) else {
             return Ok(Vec::new());
         };

@@ -174,6 +174,8 @@ pub struct Sim {
     pub eyes_thrown: u64,
     pub eyes_dropped: u64,
     pub eyes_shattered: u64,
+    /// The End's dragon as the model plays it (issue 20h, `end::Dragon`), once summoned.
+    pub dragon: Option<end::Dragon>,
 }
 
 fn wire(state: State, p: &S2c) -> Result<Wire, EncodeError> {
@@ -223,6 +225,7 @@ impl Sim {
             eyes_thrown: 0,
             eyes_dropped: 0,
             eyes_shattered: 0,
+            dragon: None,
         }
     }
 
@@ -366,6 +369,7 @@ impl Sim {
                 self.on_use_item(*sequence)
             }
             (Phase::Play, C2s::Attack { entity }) => self.on_attack(*entity),
+            (Phase::Play, C2s::ClientCommand { action }) => self.on_client_command(*action),
             (
                 Phase::Play,
                 C2s::UseItemOn {
@@ -401,6 +405,7 @@ impl Sim {
         )?];
         out.extend(self.chunks_around()?);
         out.extend(self.mobs_added()?);
+        out.extend(self.dragon_joined()?);
         out.extend(self.items_added()?);
         out.push(self.teleport(self.pos)?);
         out.push(wire(
@@ -738,6 +743,7 @@ impl Sim {
         out.extend(self.tick_items()?);
         out.extend(self.tick_eyes()?);
         out.extend(self.tick_life()?);
+        out.extend(self.tick_dragon()?);
         out.extend(self.tick_furnaces()?);
         out.extend(self.tick_menu()?);
         out.extend(self.broadcast_changes()?);
