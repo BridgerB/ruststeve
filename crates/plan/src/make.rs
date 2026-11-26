@@ -233,6 +233,10 @@ pub struct Goals {
     #[serde(default)]
     pub home: crate::home::HomeRules,
     // <<< home
+    // >>> Q6 (issue 19): `[portal_way]`, the last leg's numbers.
+    #[serde(default)]
+    pub portal_way: crate::portal_way::WayRules,
+    // <<< Q6
     // >>> eyes (Q3, issue 19c): `[eyes]`, the throws' numbers.
     #[serde(default)]
     pub eyes: crate::eyes::EyeRules,
@@ -590,6 +594,9 @@ pub struct Table {
     // >>> home
     pub home: crate::home::HomeRules,
     // <<< home
+    // >>> Q6
+    pub portal_way: crate::portal_way::WayRules,
+    // <<< Q6
     // >>> eyes
     pub eyes: crate::eyes::EyeRules,
     // <<< eyes
@@ -799,6 +806,9 @@ impl Table {
             // >>> home
             home: g.home.clone(),
             // <<< home
+            // >>> Q6
+            portal_way: g.portal_way.clone(),
+            // <<< Q6
             // >>> eyes
             eyes: g.eyes.clone(),
             // <<< eyes
@@ -1225,6 +1235,7 @@ mod tests {
             overland: crate::overland::OverlandRules::default(),
             stronghold: crate::stronghold::StrongholdRules::default(),
             home: crate::home::HomeRules::default(),
+            portal_way: crate::portal_way::WayRules::default(),
             eyes: crate::eyes::EyeRules::default(),
         };
         Table::new(&g).unwrap()

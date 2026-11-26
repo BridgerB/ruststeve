@@ -188,6 +188,10 @@ pub struct HomeState {
     pub aim: Option<(i32, i32)>,
     #[serde(default)]
     pub done: bool,
+    // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
+    #[serde(default)]
+    pub way_in: crate::portal_way::WayIn,
+    // <<< Q6
 }
 
 /// Lava cells sealed beside the portal at most: two rows of five in front of it and its sides
@@ -1034,6 +1038,12 @@ impl Plan {
                 ),
             );
         }
+        // >>> Q6 (issue 19): within `[portal_way] reach` with the front seen, the last leg by rock
+        // to the front's tunnel cell (docs/problems/eyes-portal.md); at it, the approach.
+        if let Some(t) = self.portal_way(w, tick, portal, d) {
+            return Some(t);
+        }
+        // <<< Q6
         if d <= r.approach {
             return self.home_approach(w, tick, portal);
         }

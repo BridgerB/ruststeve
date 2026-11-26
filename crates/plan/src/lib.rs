@@ -45,6 +45,9 @@ pub mod path;
 pub mod pearls;
 // <<< pearls
 pub mod place;
+// >>> Q6 (issue 19): the last leg to the portal's front.
+pub mod portal_way;
+// <<< Q6
 pub mod redig;
 pub mod scoop;
 pub mod shield;

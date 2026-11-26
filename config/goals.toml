@@ -878,6 +878,24 @@ climb_pick_uses = 30
 pick_runs = 8
 # <<< home
 
+# >>> Q6 (issue 19, docs/problems/eyes-portal.md): the way home's last leg, by rock to the entry
+# portal's front (plan::portal_way).
+[portal_way]
+# Within this many blocks on the plane of the portal the tunnel to its front replaces the heading:
+# race 45727347488's bots swung 44 to 64 off it (lane 1 at y 97, 60 over it, turned by crimson
+# signs), and the portal's chunk is loaded well inside it (view distance 8 chunks, 128 blocks).
+reach = 64
+# The exact cut to the tunnel cell is searched within this (each axis summed): over the tunnel's
+# reach of 5 (plan::tunnel::REACH) round the cell, twice, with room for a stair round.
+cut_range = 12
+# Cells the cut's breadth-first search may visit: a 12-range diamond is about 7,000 cells; 6,000
+# covers what rock leaves open.
+cut_nodes = 6000
+# Cuts begun with no step nearer before the cut is given up (a step cut short by a fight or a
+# meal is one; tunnel::SHORT_STRIKES is 2).
+cut_tries = 4
+# <<< Q6
+
 # >>> eyes (Q3, issue 19c, docs/problems/eyes-throw.md): the eyes of ender, crafted in the 2x2 grid
 # where the bot stands (blaze_powder from a rod, two a rod; ender_eye from a pearl and a powder:
 # the generated recipes, no table). plan::eyes::eyes_row sets the count to what the held pearls,
