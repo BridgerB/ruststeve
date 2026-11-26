@@ -194,8 +194,9 @@ pub struct EndPortalState {
     pub wood_legs: bool,
     pub down_walks: u32,
     pub down_noted: bool,
-    /// The way point walked down to next.
+    /// The way point walked down to next, and plain walks back to the way from far off.
     pub down_at: Option<usize>,
+    pub far_walks: u32,
     /// The night a hut was begun for (the day's number).
     pub hut_night: Option<i64>,
     pub hut_digs: u32,
@@ -1479,6 +1480,32 @@ impl Plan {
             // Far from the way (a wood walk ended out on the plain): the overland's legs, not
             // counted as the point's walks (race 45880017656 lane 1: its night hut's blocks, a
             // task a call, spent every point's walks in 60 ticks).
+            // A plain walk first, found or partial: the overland's legs build a hut at night and
+            // wait it out on the surface (race 45891071513: all three lanes huted 60 off the
+            // stairs' top from tick 1,020 to the cap), and the way down is underground.
+            if flat(feet, p) > 40.0 && self.end_portal.far_walks < r.down_walks {
+                let mut walk = Walk::new(p, Goal::Near { pos: p, range: 1.5 }, Arrive::Goal, tick);
+                let routed = walk.route_now(w, tick);
+                self.end_portal.far_walks += 1;
+                if routed
+                    && matches!(
+                        walk.route,
+                        Some(path::Status::Found | path::Status::Partial)
+                    )
+                {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("end kit: walk back to point {i} at {p:?}"),
+                        format!(
+                            "from {feet:?}, a {:?} route, walk {}",
+                            walk.route, self.end_portal.far_walks
+                        ),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+            }
             if flat(feet, p) > 40.0 {
                 let q = [f64::from(p.0) + 0.5, f64::from(p.2) + 0.5];
                 if self
