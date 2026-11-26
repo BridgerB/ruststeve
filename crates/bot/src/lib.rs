@@ -342,6 +342,25 @@ pub fn goals_table(path: &str) -> Result<plan::make::Table, String> {
     plan::make::Table::new(&goals)
 }
 
+// >>> E4 (issue 20f)
+/// `config/end.toml`'s `[[spike]]` rows (E1: centre, top_y the bedrock's y, radius, caged).
+#[derive(serde::Deserialize)]
+struct EndSpikes {
+    #[serde(default)]
+    spike: Vec<plan::spikes::Spike>,
+}
+
+/// The End's spikes from `path` (`config/end.toml`), empty when it is missing or unread: the
+/// planner then reads each spike from the blocks round its crystal.
+pub fn end_spikes(path: &str) -> Vec<plan::spikes::Spike> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| toml::from_str::<EndSpikes>(&t).ok())
+        .map(|e| e.spike)
+        .unwrap_or_default()
+}
+// <<< E4
+
 /// Packets handled between two ticks at most: the queue is taken whole in all but a flood.
 pub const MAX_PACKETS_A_TURN: usize = 4096;
 
@@ -563,6 +582,11 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         p.restore_eyes(k);
     }
     // <<< eyes
+    // >>> E4 (issue 20f): the spikes' geography, E1's measured `[[spike]]` rows.
+    if let Some(p) = planner.as_mut() {
+        p.spikes.geography = end_spikes("config/end.toml");
+    }
+    // <<< E4
     let mut plan_seen: u64 = 0;
     let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut plan_notes = Notes::default();

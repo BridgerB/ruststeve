@@ -75,6 +75,11 @@ pub const SIDE_MARGIN: f64 = 1.0;
 /// A breath cloud's radius when its data has not said: the sitting dragon's flame cloud is 5
 /// (`DragonSittingFlamingPhase`), a fireball's 3 growing to 7.
 pub const BREATH_RADIUS: f64 = 5.0;
+/// A fireball's cloud: radius 3.0 at first, growing to 7.0 over 600 ticks (E1, `DragonFireball`):
+/// a cloud's radius is never taken under that, whatever its data says.
+pub const CLOUD_MIN: f64 = 3.0;
+pub const CLOUD_MAX: f64 = 7.0;
+pub const CLOUD_GROWTH: f64 = 4.0 / 600.0;
 /// Blocks beyond a cloud's radius the bot keeps (`dragon/breath-margin`).
 pub const BREATH_MARGIN: f64 = 1.5;
 /// More than that the way back to a stand keeps, so a cloud growing as the bot walks does not
@@ -122,6 +127,8 @@ pub const FIGHT_TICKS: u64 = 1200;
 /// many times.
 pub const RESPAWN_WAIT: u64 = 200;
 pub const RESPAWN_TRIES: u32 = 5;
+/// Ticks between the notes of a pocket passed over for the dragon.
+pub const FIRST_NOTE_TICKS: u64 = 200;
 /// The End's dimension name.
 pub const THE_END: &str = "minecraft:the_end";
 
@@ -400,10 +407,16 @@ pub fn breaths(w: &World) -> Vec<Breath> {
         .iter()
         .filter_map(|(id, e)| {
             let radius = match e.kind {
-                EntityKind::AreaEffectCloud => match e.metadata.get(&RADIUS_INDEX) {
-                    Some(MetaValue::Float(r)) if r.is_finite() => f64::from(*r),
-                    Some(_) | None => BREATH_RADIUS,
-                },
+                // Never under a fireball's cloud as it grows (race 45873410249 lane 0: a cloud
+                // shown with radius 0.0 on the feet was stood in for 80 ticks, 20 to dead).
+                EntityKind::AreaEffectCloud => {
+                    let age = w.session.server_ticks.saturating_sub(e.first_seen) as f64;
+                    let grown = (CLOUD_MIN + age * CLOUD_GROWTH).min(CLOUD_MAX);
+                    match e.metadata.get(&RADIUS_INDEX) {
+                        Some(MetaValue::Float(r)) if r.is_finite() => f64::from(*r).max(grown),
+                        Some(_) | None => BREATH_RADIUS.max(grown),
+                    }
+                }
                 EntityKind::DragonFireball => 3.0,
                 _ => return None,
             };
@@ -414,6 +427,68 @@ pub fn breaths(w: &World) -> Vec<Breath> {
             })
         })
         .collect()
+}
+
+/// Blocks over a cloud's floor the feet may be and still be in it: its box is 0.5 tall
+/// (`AreaEffectCloud`), and a margin of 1. And blocks under it the head may be: the bunker three
+/// down and a pillar two up are out of it, a body stood on its floor is in it.
+pub const BREATH_OVER: f64 = 1.5;
+pub const BREATH_UNDER: f64 = 1.0;
+/// Columns round the feet the cell out of a breath is looked for in.
+pub const OUT_SEARCH: i32 = 9;
+/// Blocks ahead of the feet along a walk's heading tested for a breath (`breath_ahead`).
+pub const AHEAD: f64 = 1.5;
+/// Ticks between the notes of a walk held at a breath's edge.
+pub const AHEAD_NOTE_TICKS: u64 = 100;
+
+/// The nearest breath whose reach takes in a body with its feet at `feet`: within its reach on
+/// the plane, and the body's height meeting the cloud's (`BREATH_OVER`, `BREATH_UNDER`).
+pub fn breath_on(breaths: &[Breath], feet: [f64; 3]) -> Option<Breath> {
+    breaths
+        .iter()
+        .filter(|b| {
+            flat(b.pos, feet) <= b.reach()
+                && feet[1] <= b.pos[1] + BREATH_OVER
+                && feet[1] + physics::HEIGHT + BREATH_UNDER >= b.pos[1]
+        })
+        .min_by(|a, b| flat(a.pos, feet).total_cmp(&flat(b.pos, feet)))
+        .copied()
+}
+
+/// The ground cell nearest the feet (within `OUT_SEARCH` columns) that no breath reaches
+/// (`breath_on`), not before a grounded dragon's head nor on a way past it; `None` when none
+/// is loaded.
+pub fn out_of_breath(w: &World, feet: [f64; 3]) -> Option<[i32; 3]> {
+    let clouds = breaths(w);
+    let v = view(w).map(|(_, v)| v).filter(grounded);
+    let fc = cell_of(feet);
+    let mut cells = crate::path::Cells::new(w);
+    let mut best: Option<(f64, [i32; 3])> = None;
+    for x in (fc[0] - OUT_SEARCH)..=(fc[0] + OUT_SEARCH) {
+        for z in (fc[2] - OUT_SEARCH)..=(fc[2] + OUT_SEARCH) {
+            let d0 = flat(feet, mid([x, 0, z]));
+            if d0 > f64::from(OUT_SEARCH) || best.is_some_and(|(bd, _)| d0 > bd) {
+                continue;
+            }
+            let Some(y) = ((fc[1] - 3)..=(fc[1] + 2))
+                .rev()
+                .find(|y| cells.standable((x, *y, z)))
+            else {
+                continue;
+            };
+            let c = [x, y, z];
+            let p = mid(c);
+            if breath_on(&clouds, p).is_some()
+                || v.is_some_and(|v| before_head(&v, p) || !way_clear(&v, feet, p))
+            {
+                continue;
+            }
+            if best.is_none_or(|(bd, bc)| d0 < bd || (d0 == bd && c < bc)) {
+                best = Some((d0, c));
+            }
+        }
+    }
+    best.map(|(_, c)| c)
 }
 
 /// Does a breath reach `p` on the plane (its reach and `extra`)?
@@ -490,6 +565,46 @@ fn head_stand_ok(v: &DragonView, clouds: &[Breath], c: [i32; 3], reach: f64) -> 
 /// about it), out of the blow boxes and every breath, the eye within reach of the head's box with
 /// `REACH_SLACK` to spare; the nearest the ideal point.
 pub fn head_stand(v: &DragonView, w: &World) -> Option<[i32; 3]> {
+    head_stand_for(v, w, false)
+}
+
+/// The damage a perched dragon takes before it takes off: `sittingDamageReceived` over a
+/// quarter of 200 (E1, `EnderDragon.hurt`). The count is kept across perches and only reset when
+/// it goes over (race 45876898172 lane 2: 18.4 in one perch and 32 in the next, then takeoff).
+pub const PERCH_TAKEOFF: f32 = 50.0;
+/// One head strike with the iron sword (E6's e05: 6.0), and a margin for a crit.
+pub const STRIKE_DAMAGE: f32 = 6.0;
+pub const STRIKE_MARGIN: f32 = 1.0;
+/// The wings' box at takeoff reaches this far under the dragon's feet (E1: inflate(4, 2, 4) moved
+/// −2 from the wing parts 2 over the feet), and the margin the head keeps under it.
+pub const WING_DROP: f64 = 2.0;
+pub const WING_CLEAR: f64 = 0.2;
+
+/// Would the next strike make the dragon take off (`PERCH_TAKEOFF`)?
+pub fn crossing(sat_damage: f32) -> bool {
+    sat_damage + STRIKE_DAMAGE + STRIKE_MARGIN > PERCH_TAKEOFF
+}
+
+/// Is a body with its feet at `feet_y` under the wings' sweep at takeoff, and the head's blow box
+/// (race 45876898172 lane 2: the strike that made it take off was struck from the surface, and the
+/// head and wings took 15 and threw the bot 120 blocks off the island)?
+pub fn under_wings(v: &DragonView, feet_y: f64) -> bool {
+    feet_y + physics::HEIGHT + WING_CLEAR <= v.pos[1] - WING_DROP
+}
+
+/// Can the floor under feet cell `c` be dug for a stand one lower that still strikes: end stone
+/// (the island's), the cell under it solid to stand on?
+fn lowerable(w: &World, v: &DragonView, clouds: &[Breath], c: [i32; 3]) -> bool {
+    let under = world::BlockPos::new(c[0], c[1] - 1, c[2]);
+    let floor = world::BlockPos::new(c[0], c[1] - 2, c[2]);
+    w.block_at(under) == Some(BlockKind::EndStone)
+        && w.block_at(floor).is_some_and(|k| k != BlockKind::Air)
+        && head_stand_ok(v, clouds, [c[0], c[1] - 1, c[2]], STRIKE_REACH)
+}
+
+/// `head_stand`; with `low`, only a cell under the wings' sweep or one dig of end stone from it
+/// (one block: a climb back out is a jump).
+pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> {
     let feet = w.body?.pos;
     let clouds = breaths(w);
     let [ix, iz] = beside(v, HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF, 0.0);
@@ -504,6 +619,12 @@ pub fn head_stand(v: &DragonView, w: &World) -> Option<[i32; 3]> {
             if !head_stand_ok(v, &clouds, c, STRIKE_REACH - REACH_SLACK) {
                 continue;
             }
+            if low
+                && !under_wings(v, f64::from(c[1]))
+                && !(under_wings(v, f64::from(c[1] - 1)) && lowerable(w, v, &clouds, c))
+            {
+                continue;
+            }
             let d = flat(ideal, mid(c));
             if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
                 best = Some((d, c));
@@ -514,13 +635,22 @@ pub fn head_stand(v: &DragonView, w: &World) -> Option<[i32; 3]> {
 }
 
 /// The head stand to hold: the one held while it still strikes (no slack), else `head_stand`.
-pub fn keep_head_stand(v: &DragonView, w: &World, held: Option<[i32; 3]>) -> Option<[i32; 3]> {
+pub fn keep_head_stand(
+    v: &DragonView,
+    w: &World,
+    held: Option<[i32; 3]>,
+    low: bool,
+) -> Option<[i32; 3]> {
+    let clouds = breaths(w);
     if let Some(h) = held
-        && head_stand_ok(v, &breaths(w), h, STRIKE_REACH)
+        && head_stand_ok(v, &clouds, h, STRIKE_REACH)
+        && (!low
+            || under_wings(v, f64::from(h[1]))
+            || (under_wings(v, f64::from(h[1] - 1)) && lowerable(w, v, &clouds, h)))
     {
         return Some(h);
     }
-    head_stand(v, w)
+    head_stand_for(v, w, low)
 }
 
 /// Did the dragon itself hit the bot within `HIT_HOLD_TICKS` (its blow, not its breath)?
@@ -744,6 +874,8 @@ pub enum Want {
     Strike { entity: i32, head: bool },
     /// Eat for health back in a lull.
     Eat,
+    /// Dig the block under the feet (a stand one lower, under the wings' sweep).
+    Dig([i32; 3]),
     /// Stand where the feet are, looking down, and why.
     Hold(&'static str),
 }
@@ -765,6 +897,10 @@ pub struct Ask {
     pub dead: bool,
     /// Food is held that heals.
     pub food: bool,
+    /// The way round the head held (`DragonState::way`).
+    pub way: Option<[i32; 3]>,
+    /// The perched dragon's damage counted toward its takeoff (`DragonState::sat_damage`).
+    pub sat_damage: f32,
 }
 
 /// The fight's choice for this tick, pure: the clojurecraft `toward-dragon` order, with the
@@ -852,15 +988,44 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     }
     let sat = perched(&v, ask.perched_ticks);
     // Sat: the head part (the dragon's id + 1, a full blow; E6's e05) from out of its blow box.
+    // The strike that makes it take off only from under the wings' sweep: one dig of end stone
+    // down first where that makes it so.
+    // Every strike from under the wings' and head's sweep where one dig makes it so (race
+    // 45876898172 lane 1: a head stand on the surface took 10 in the attacking turn, and the
+    // natural takeoff's wings 5); the one that makes it take off from nowhere else.
+    let must_low = crossing(ask.sat_damage);
     if sat && clear_of_blow(&v, feet) && head_reach(&v, eye) <= STRIKE_REACH {
-        return Want::Strike {
-            entity: id + 1,
-            head: true,
-        };
+        let lowerable_here = body.on_ground
+            && under_wings(&v, feet[1] - 1.0)
+            && lowerable(w, &v, &clouds, feet_cell);
+        if under_wings(&v, feet[1]) || (!must_low && !lowerable_here) {
+            return Want::Strike {
+                entity: id + 1,
+                head: true,
+            };
+        }
+        if lowerable_here {
+            return Want::Dig([feet_cell[0], feet_cell[1] - 1, feet_cell[2]]);
+        }
     }
-    if sat && let Some(hs) = keep_head_stand(&v, w, ask.stand) {
+    let hs = keep_head_stand(&v, w, ask.stand, true).or_else(|| {
+        (!must_low)
+            .then(|| keep_head_stand(&v, w, ask.stand, false))
+            .flatten()
+    });
+    if sat && let Some(hs) = hs {
         if breath_on_way(&clouds, feet, mid(hs), BREATH_HOLD) {
             return Want::Hold("a breath on the way to the head stand");
+        }
+        // The way round held is kept until it is reached or blocked (race 45873410249 lane 0:
+        // the way round and the head stand swapped every tick 9 off the fountain).
+        if let Some(wp) = ask.way
+            && flat(feet, mid(wp)) > STAND_NEAR
+            && !before_head(&v, mid(wp))
+            && !breathed(&clouds, mid(wp), 0.0)
+            && way_clear(&v, feet, mid(wp))
+        {
+            return Want::Go(wp, "round the head");
         }
         if let Some(p) = around(&v, feet, mid(hs))
             && let Some(c) = ground(w, p[0].floor() as i32, p[1].floor() as i32, feet_cell[1])
@@ -872,37 +1037,31 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
             return Want::Go(hs, "to the head stand");
         }
     }
-    // Landing, or no head stand open: the wait behind the body.
-    let stand = keep_stand(&v, w, ask.stand);
-    let Some(stand) = stand else {
-        if in_bite(&v, feet) {
-            return match step_out_cell(w, Some(&v), STEP_OUT_RADIUS) {
-                Some(c) => Want::Go(c, "out of the bite, no stand open"),
-                None => Want::Hold("in the bite, no cell out loaded"),
-            };
-        }
-        return Want::Hold("no stand open behind the dragon");
-    };
-    if flat(feet, mid(stand)) <= STAND_NEAR {
-        return Want::Hold("at the stand");
+    // Landing, not yet sat, or no head stand open: the bunker (under every sweep: race
+    // 45876898172 lane 1 took the landing wings' 5 twice on the ring 11 out), else out of its
+    // reach to the wait's ring, never into the basin (race 45873410249 lane 0: the landing
+    // dragon's head took 10 from a bot walking to a stand behind it).
+    if ask.bunker.is_some() {
+        return wait(w, ask, feet, "the dragon not yet sat, in the bunker");
     }
-    if breath_on_way(&clouds, feet, mid(stand), BREATH_HOLD) {
-        return Want::Hold("a breath on the way to the stand");
+    if from_fountain(feet) < WAIT_FROM || in_bite(&v, feet) {
+        return match step_out_cell(w, Some(&v), WAIT_RING) {
+            Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "out of the landing's reach"),
+            Some(_) | None => Want::Hold("in the landing's reach, no cell out loaded"),
+        };
     }
-    // From outside the basin, round the head first; inside it, straight and low under it.
-    if from_fountain(feet) > IN_BASIN
-        && let Some(p) = around(&v, feet, mid(stand))
-        && let Some(c) = ground(w, p[0].floor() as i32, p[1].floor() as i32, feet_cell[1])
-    {
-        return Want::Go(c, "round the head");
-    }
-    Want::Go(stand, "to the stand behind the dragon")
+    Want::Hold(if sat {
+        "no head stand open"
+    } else {
+        "the dragon not yet sat"
+    })
 }
 
 /// Blocks from the fountain the wait with no bunker goes out to, and holds at from: past the
-/// wings' reach of a dragon on the pillar (4.5 across plus 2 plus 4 inflated, 10.5).
-pub const WAIT_RING: f64 = 12.0;
-pub const WAIT_FROM: f64 = 11.0;
+/// wings' reach of a dragon on the pillar (4.5 across plus 2 plus 4 inflated, 10.5), and of the
+/// landing one coming in over the ring (race 45876898172 lane 1: hit 5 at 11 out, twice).
+pub const WAIT_RING: f64 = 16.0;
+pub const WAIT_FROM: f64 = 15.0;
 
 /// The wait while the dragon flies: the bunker when there is one, else a cell on the ring
 /// `WAIT_RING` out, out of the breath.
@@ -950,6 +1109,34 @@ pub struct DragonState {
     pub head_strikes: u32,
     /// The dragon's health at the last strike, for the blow's note.
     pub last_health: Option<f32>,
+    /// The walk out of a breath in hand, the walks begun, and the walks held at a breath's edge
+    /// with the last note.
+    #[serde(default)]
+    pub breath_walk: Option<Walk>,
+    #[serde(default)]
+    pub breath_outs: u32,
+    #[serde(default)]
+    pub breath_waits: u64,
+    #[serde(default)]
+    pub breath_waited_at: u64,
+    /// The perched dragon's damage toward its takeoff, as the server counts it, the dragon's health
+    /// last seen, and the digs down for a low stand.
+    #[serde(default)]
+    pub sat_damage: f32,
+    #[serde(default)]
+    pub seen_health: Option<f32>,
+    #[serde(default)]
+    pub low_digs: u32,
+    /// The way round the head held, and how many were chosen.
+    #[serde(default)]
+    pub way: Option<[i32; 3]>,
+    #[serde(default)]
+    pub ways: u32,
+    /// Ticks a provoked enderman's pocket was passed over for the dragon, and the last note.
+    #[serde(default)]
+    pub first_skips: u64,
+    #[serde(default)]
+    pub first_noted_at: u64,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -964,6 +1151,9 @@ pub struct Fight {
     pub last_swing: Option<u64>,
     /// The last want noted, so a note is made on a change only.
     pub said: String,
+    /// The dig down for a low stand in hand.
+    #[serde(default)]
+    pub dig: Option<crate::dig::Dig>,
 }
 
 impl Fight {
@@ -974,6 +1164,7 @@ impl Fight {
             eat: None,
             last_swing: None,
             said: String::new(),
+            dig: None,
         }
     }
 }
@@ -1002,6 +1193,23 @@ impl Plan {
             }
             if let Some((_, v)) = view(w) {
                 self.dragon.seen = true;
+                // The takeoff count: damage taken while sitting, reset as the server does when it
+                // goes over.
+                if let Some(was) = self.dragon.seen_health
+                    && v.health < was
+                    && v.phase().is_some_and(Phase::sitting)
+                {
+                    self.dragon.sat_damage += was - v.health;
+                    if self.dragon.sat_damage > PERCH_TAKEOFF {
+                        self.note(
+                            tick,
+                            format!("dragon takeoff count over ({:.1})", self.dragon.sat_damage),
+                            format!("health {:.1}; the count starts again", v.health),
+                        );
+                        self.dragon.sat_damage = 0.0;
+                    }
+                }
+                self.dragon.seen_health = Some(v.health);
                 self.dragon.perched_ticks = if over_fountain(&v) {
                     self.dragon.perched_ticks.saturating_add(1)
                 } else {
@@ -1136,6 +1344,8 @@ impl Plan {
             bunker,
             dead: self.dragon.dead,
             food: food.is_some(),
+            way: self.dragon.way,
+            sat_damage: self.dragon.sat_damage,
         };
         let want = decide(w, &ask);
         let Task::Dragon(f) = &mut self.task else {
@@ -1159,6 +1369,7 @@ impl Plan {
             Want::Go(c, why) => format!("go {c:?} {why}"),
             Want::Strike { head, .. } => format!("strike {}", if *head { "head" } else { "body" }),
             Want::Eat => "eat".to_owned(),
+            Want::Dig(c) => format!("dig down at {c:?} for a stand under the wings"),
             Want::Hold(why) => format!("hold {why}"),
         };
         let changed = f.said != key;
@@ -1177,6 +1388,27 @@ impl Plan {
         // The stand held is the stand noted.
         if let Want::Go(c, "to the stand behind the dragon" | "to the head stand") = &want {
             self.dragon.stand = Some(*c);
+        }
+        // The way round is held while it is chosen, and with it the head stand it goes to.
+        match &want {
+            Want::Go(c, "round the head") => {
+                if self.dragon.way != Some(*c) {
+                    self.dragon.way = Some(*c);
+                    self.dragon.ways += 1;
+                }
+                if let Some((_, v)) = view(w) {
+                    self.dragon.stand =
+                        keep_head_stand(&v, w, self.dragon.stand, crossing(self.dragon.sat_damage));
+                }
+            }
+            Want::Exit(_)
+            | Want::Go(..)
+            | Want::Strike { .. }
+            | Want::Eat
+            | Want::Dig(_)
+            | Want::Hold(_) => {
+                self.dragon.way = None;
+            }
         }
         if changed {
             let at = w.body.map_or([0.0; 3], |b| b.pos);
@@ -1206,7 +1438,32 @@ impl Plan {
         let Task::Dragon(f) = &mut self.task else {
             return Controls::default();
         };
+        if !matches!(want, Want::Dig(_)) {
+            f.dig = None;
+        }
         match want {
+            Want::Dig(c) => {
+                let cell: Cell = (c[0], c[1], c[2]);
+                if f.dig.as_ref().is_none_or(|d| d.target != cell) {
+                    f.dig = Some(crate::dig::Dig::new(w, cell, tick));
+                    self.dragon.low_digs += 1;
+                }
+                let Some(d) = f.dig.as_mut() else {
+                    return looking_down(w);
+                };
+                let (mut c, act, status) = d.step(w, tick);
+                self.acts.extend(act);
+                if !matches!(status, crate::dig::DigStatus::Running)
+                    || w.block_at(world::BlockPos::new(cell.0, cell.1, cell.2))
+                        == Some(BlockKind::Air)
+                {
+                    f.dig = None;
+                }
+                if c.pitch.is_none() {
+                    c.pitch = Some(90.0);
+                }
+                c
+            }
             Want::Hold(_) => {
                 if let Some(e) = &mut f.eat {
                     let (act, status) = e.step(w, tick);
@@ -1357,6 +1614,192 @@ impl Plan {
             c.pitch = Some(90.0);
         }
         c
+    }
+
+    /// Does the dragon come before a provoked enderman's pocket (`ender_threat`): in the End with a
+    /// breath's reach on the feet, or the dragon on or over its perch with the feet within its
+    /// reach of the fountain? Race 45873410249: both bots were held sealing a pocket, one in a
+    /// fireball's cloud (dead in 80 ticks), one beside the sitting dragon (its head, 10, then a
+    /// fall).
+    pub(crate) fn dragon_first(&self, w: &World) -> bool {
+        if !in_end(w) {
+            return false;
+        }
+        let Some(feet) = w.body.map(|b| b.pos) else {
+            return false;
+        };
+        breathed(&breaths(w), feet, 0.0)
+            || view(w).is_some_and(|(_, v)| grounded(&v) && from_fountain(feet) < WAIT_RING + 4.0)
+    }
+
+    /// In the End, a breath's reach on the body (`breath_on`): the walk to the nearest cell out of
+    /// every breath (`out_of_breath`), ahead of every row and task, the one rule for all the End's
+    /// work (race 45873410249 lane 0 and E4's race 45875049490 lane 0 each stood in a fireball's
+    /// cloud and died; E3's walk back to the bunker went through one). `None` with none on the
+    /// body: what was running runs on.
+    pub fn breath_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) {
+            return None;
+        }
+        let feet = w.body?.pos;
+        let clouds = breaths(w);
+        let Some(on) = breath_on(&clouds, feet) else {
+            if let Some(wk) = self.dragon.breath_walk.take() {
+                self.note(
+                    tick,
+                    "out of the breath".to_owned(),
+                    format!(
+                        "at {:?}, {} ticks after the walk to {:?} began",
+                        cell_of(feet),
+                        tick.saturating_sub(wk.started),
+                        wk.target
+                    ),
+                );
+            }
+            return None;
+        };
+        // The cell held while no breath reaches it; else the nearest one anew.
+        let held = self
+            .dragon
+            .breath_walk
+            .as_ref()
+            .map(|wk| [wk.target.0, wk.target.1, wk.target.2])
+            .filter(|c| breath_on(&clouds, mid(*c)).is_none());
+        let target = match held {
+            Some(c) => c,
+            None => {
+                let Some(c) = out_of_breath(w, feet) else {
+                    if self.dragon.breath_walk.take().is_some() || self.dragon.breath_outs == 0 {
+                        self.note(
+                            tick,
+                            "in the breath, no way out".to_owned(),
+                            format!(
+                                "a breath {:.1} off, radius {:.1}; no cell out of it loaded within {OUT_SEARCH}",
+                                flat(on.pos, feet),
+                                on.radius
+                            ),
+                        );
+                    }
+                    return None;
+                };
+                self.dragon.breath_outs += 1;
+                self.dragon.breath_walk = Some(Walk::new(
+                    (c[0], c[1], c[2]),
+                    Goal::Block {
+                        pos: (c[0], c[1], c[2]),
+                    },
+                    Arrive::Goal,
+                    tick,
+                ));
+                self.note(
+                    tick,
+                    format!("out of the breath to {c:?}"),
+                    format!(
+                        "a breath {:.1} off (radius {:.1}) at {:?}; task {}; health {:.1}; {} walks out in the run",
+                        flat(on.pos, feet),
+                        on.radius,
+                        cell_of(feet),
+                        self.task.name(),
+                        w.player.health.unwrap_or(0.0),
+                        self.dragon.breath_outs
+                    ),
+                );
+                c
+            }
+        };
+        let wk = self.dragon.breath_walk.as_mut()?;
+        let (mut c, status) = wk.step(w, tick);
+        let (acts, said) = wk.take_out();
+        self.acts.extend(acts);
+        for (what, why) in said {
+            self.note(tick, what, why);
+        }
+        if !matches!(status, TaskStatus::Running) {
+            // Arrived (the breath grew onto it) or failed: the next tick looks again.
+            self.dragon.breath_walk = None;
+            if let TaskStatus::Failed(e) = status {
+                self.note(
+                    tick,
+                    format!("walk out of the breath to {target:?} failed: {e:?}"),
+                    "the next tick looks again".to_owned(),
+                );
+            }
+        }
+        if c.pitch.is_none() {
+            c.pitch = Some(90.0);
+        }
+        Some(c)
+    }
+
+    /// In the End, a walk pressing on toward a breath's reach (the point `AHEAD` along its
+    /// heading inside one, the feet not) waits at the edge instead, noted every
+    /// `AHEAD_NOTE_TICKS`: a cloud lasts a while and the walk goes on once it is gone.
+    pub fn breath_ahead(&mut self, w: &World, c: Controls) -> Controls {
+        if !c.forward || !in_end(w) {
+            return c;
+        }
+        let Some(feet) = w.body.map(|b| b.pos) else {
+            return c;
+        };
+        let clouds = breaths(w);
+        if clouds.is_empty() || breath_on(&clouds, feet).is_some() {
+            return c;
+        }
+        let r = c.yaw.to_radians();
+        let ahead = [
+            feet[0] - r.sin() * AHEAD,
+            feet[1],
+            feet[2] + r.cos() * AHEAD,
+        ];
+        let Some(b) = breath_on(&clouds, ahead) else {
+            return c;
+        };
+        let tick = w.ticks;
+        self.dragon.breath_waits += 1;
+        if tick >= self.dragon.breath_waited_at + AHEAD_NOTE_TICKS || self.dragon.breath_waits == 1
+        {
+            self.dragon.breath_waited_at = tick;
+            self.note(
+                tick,
+                "walk waits at a breath's edge".to_owned(),
+                format!(
+                    "a breath {:.1} ahead (radius {:.1}) at {:?}; task {}; {} ticks waited in the run",
+                    flat(b.pos, ahead),
+                    b.radius,
+                    cell_of(feet),
+                    self.task.name(),
+                    self.dragon.breath_waits
+                ),
+            );
+        }
+        Controls {
+            forward: false,
+            jump: false,
+            ..c
+        }
+    }
+
+    /// `dragon_first`, noted (at most every `FIRST_NOTE_TICKS`) when a provoked enderman's pocket
+    /// is passed over for it.
+    pub fn dragon_first_step(&mut self, w: &World, tick: u64) -> bool {
+        let first = self.dragon_first(w);
+        if first && let Some(id) = crate::endermen::angry(w) {
+            self.dragon.first_skips += 1;
+            if tick >= self.dragon.first_noted_at + FIRST_NOTE_TICKS || self.dragon.first_skips == 1
+            {
+                self.dragon.first_noted_at = tick;
+                self.note(
+                    tick,
+                    format!("dragon first: no pocket for enderman {id}"),
+                    format!(
+                        "a breath's reach on the feet or the dragon on its perch within {:.0}; {} ticks passed over",
+                        WAIT_RING + 4.0,
+                        self.dragon.first_skips
+                    ),
+                );
+            }
+        }
+        first
     }
 
     /// Is a meal by the always-row to wait: the dragon on or over its perch with the feet within

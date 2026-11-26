@@ -1154,6 +1154,9 @@ impl Plan {
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
+        // >>> E5 (issue 20g): no walk steps into a breath's reach; it waits (`breath_ahead`).
+        let c = self.breath_ahead(w, c);
+        // <<< E5
         // >>> E3 (issue 20e): in the End a look no act asked for is straight down.
         let c = self.end_gaze(w, c);
         // <<< E3
@@ -1670,6 +1673,12 @@ impl Plan {
             }
             Some(_) | None => self.mark = Some((body.pos, items, self.event_count, tick)),
         }
+        // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
+        // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
+        if let Some(c) = self.breath_step(w, tick) {
+            return c;
+        }
+        // <<< E5
         // The always-rows come first, ahead of every goal and after the aim is met.
         if let Some(c) = self.always(w, &body, tick) {
             return c;
@@ -1681,7 +1690,10 @@ impl Plan {
         }
         // <<< pearls
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
-        if let Some(c) = self.ender_threat(w, tick) {
+        // >>> E5 (issue 20g): not while a breath reaches the feet or the dragon sits near.
+        let dragon_first = self.dragon_first_step(w, tick);
+        // <<< E5
+        if !dragon_first && let Some(c) = self.ender_threat(w, tick) {
             return c;
         }
         // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.

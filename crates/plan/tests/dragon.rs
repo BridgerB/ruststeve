@@ -116,6 +116,8 @@ fn ask() -> Ask {
         bunker: None,
         dead: false,
         food: true,
+        way: None,
+        sat_damage: 0.0,
     }
 }
 
@@ -276,12 +278,28 @@ fn the_wait_is_behind_the_sitting_dragons_head() {
             head: true
         }
     );
-    // Landing, not yet sat: the wait behind the body.
-    let mut w = end_at([-12.5, 64.0, 0.5]);
+    // Landing, not yet sat: out of its reach to the ring, never into the basin (race
+    // 45873410249 lane 0: the landing head took 10 from a bot walking to a stand behind it).
+    let mut w = end_at([-4.5, 64.0, 0.5]);
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 3, 90.0);
+    match decide(&w, &ask()) {
+        Want::Go(c, "out of the landing's reach") => {
+            let d = dragon::flat(feet_of(c), [0.5, 0.0, 0.5]);
+            assert!(d >= 11.0, "{c:?} {d}");
+        }
+        other => panic!("out to the ring, not {other:?}"),
+    }
+    let mut w = end_at([-16.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 3, 90.0);
+    assert_eq!(decide(&w, &ask()), Want::Hold("the dragon not yet sat"));
+    // With a bunker: the wait is there.
+    let a = Ask {
+        bunker: Some([14, FLOOR - 3, 0]),
+        ..ask()
+    };
     assert_eq!(
-        decide(&w, &ask()),
-        Want::Go([-2, FLOOR, 0], "to the stand behind the dragon")
+        decide(&w, &a),
+        Want::Go([14, FLOOR - 3, 0], "to the bunker")
     );
     // In front of it under the head: out sideways first, never along under it.
     let mut w = end_at([-1.5, 64.0, 0.5]);
@@ -497,4 +515,183 @@ fn a_crystal_shown_leaves_the_fight_to_the_crystals() {
     add(&mut w, 60, EntityKind::EndCrystal, [42.5, 90.0, 0.5]);
     let mut p = Plan::new(Aim::Race);
     assert!(p.dragon_task(&w, 0).is_none());
+}
+
+#[test]
+fn a_fireballs_cloud_is_never_taken_under_its_first_radius() {
+    // Race 45873410249 lane 0: a cloud shown with radius 0.0 on the feet was stood in for 80
+    // ticks, 20 health to none.
+    let mut w = end_at([8.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [9.5, 64.0, 0.5], 0.0);
+    let b = breaths(&w);
+    assert!((b[0].radius - 3.0).abs() < 1e-9, "{b:?}");
+    w.session.server_ticks += 300;
+    let b = breaths(&w);
+    assert!((b[0].radius - 5.0).abs() < 1e-9, "grown by its age: {b:?}");
+}
+
+#[test]
+fn the_dragon_comes_before_a_provoked_endermans_pocket() {
+    let mut w = end_at([6.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 0.0);
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.dragon_first_step(&w, 0), "the dragon sat within 16");
+    let mut far = end_at([30.5, 64.0, 0.5]);
+    with_dragon(&mut far, [0.5, PERCH_Y, 0.5], 6, 0.0);
+    assert!(!p.dragon_first_step(&far, 0), "far off: the pocket");
+    cloud(&mut far, 50, [30.5, 64.0, 1.5], 3.0);
+    assert!(p.dragon_first_step(&far, 0), "a breath on the feet");
+}
+
+#[test]
+fn a_way_round_the_head_is_kept_until_it_is_reached() {
+    // Race 45873410249 lane 0: the way round and the head stand swapped every tick.
+    let mut w = end_at([-12.5, 64.0, -1.0]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    let Want::Go(held, "round the head") = decide(&w, &ask()) else {
+        panic!("round the head");
+    };
+    let mut w = end_at([-12.5, 64.0, 2.0]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    let Want::Go(fresh, "round the head") = decide(&w, &ask()) else {
+        panic!("round the head");
+    };
+    assert_ne!(
+        fresh, held,
+        "from the other side, chosen anew, the other way round"
+    );
+    let a = Ask {
+        way: Some(held),
+        ..ask()
+    };
+    assert_eq!(
+        decide(&w, &a),
+        Want::Go(held, "round the head"),
+        "held, it is kept"
+    );
+    let mut there = end_at(feet_of(held));
+    with_dragon(&mut there, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    let a = Ask {
+        way: Some(held),
+        ..ask()
+    };
+    assert_ne!(
+        decide(&there, &a),
+        Want::Go(held, "round the head"),
+        "reached, the next leg"
+    );
+}
+
+#[test]
+fn a_breath_on_the_feet_is_walked_out_of_ahead_of_every_task() {
+    // Race 45873410249 lane 0 and E4's race 45875049490 lane 0: stood in a fireball's cloud, dead.
+    let mut w = end_at([8.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [9.5, 64.0, 0.5], 3.0);
+    let b = breaths(&w);
+    assert!(dragon::breath_on(&b, [8.5, 64.0, 0.5]).is_some());
+    let out = dragon::out_of_breath(&w, [8.5, 64.0, 0.5]).unwrap();
+    assert!(
+        dragon::flat(feet_of(out), [9.5, 64.0, 0.5]) > 4.5,
+        "out of its reach: {out:?}"
+    );
+    let mut p = Plan::new(Aim::Race);
+    let c = p.breath_step(&w, 0).expect("the walk out");
+    assert_eq!(c.pitch, Some(90.0), "looking down");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == format!("out of the breath to {out:?}")),
+        "noted"
+    );
+    // Out of it: the walk ends, noted, and what was running runs on.
+    let mut clear = end_at(feet_of(out));
+    cloud(&mut clear, 50, [9.5, 64.0, 0.5], 3.0);
+    assert!(p.breath_step(&clear, 20).is_none());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "out of the breath")
+    );
+}
+
+#[test]
+fn a_breath_over_the_bunker_or_under_a_pillar_is_not_on_the_body() {
+    let b = vec![Breath {
+        id: 50,
+        pos: [8.5, 64.0, 0.5],
+        radius: 3.0,
+    }];
+    assert!(
+        dragon::breath_on(&b, [8.5, 64.0, 0.5]).is_some(),
+        "on its floor"
+    );
+    assert!(
+        dragon::breath_on(&b, [8.5, 61.0, 0.5]).is_none(),
+        "three down in the bunker"
+    );
+    assert!(
+        dragon::breath_on(&b, [8.5, 66.0, 0.5]).is_none(),
+        "two up a pillar"
+    );
+}
+
+#[test]
+fn a_walk_waits_at_a_breaths_edge() {
+    let mut w = end_at([2.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [8.0, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    // Yaw -90 faces +x (Notchian: south 0, west +90): toward the cloud, its reach 4.5 from 8.0.
+    let toward = physics::Controls {
+        forward: true,
+        yaw: -90.0,
+        ..physics::Controls::default()
+    };
+    assert!(!p.breath_ahead(&w, toward).forward, "waits");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "walk waits at a breath's edge")
+    );
+    let away = physics::Controls {
+        yaw: 90.0,
+        ..toward
+    };
+    assert!(p.breath_ahead(&w, away).forward, "away from it: on");
+}
+
+#[test]
+fn the_strike_that_makes_it_take_off_is_struck_from_under_the_wings() {
+    // Race 45876898172 lane 2: the strike over 50 was struck from the surface; the head and wings
+    // took 15 and threw the bot 120 blocks off the island.
+    assert!(!dragon::crossing(42.0), "one more strike stays under 50");
+    assert!(dragon::crossing(44.5));
+    let mut w = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut w, [0.5, 67.0, 0.5], 6, 90.0);
+    let v = dragon::view(&w).unwrap().1;
+    assert!(!dragon::under_wings(&v, 64.0), "feet 64, the wings from 65");
+    assert!(dragon::under_wings(&v, 63.0), "a block down: under them");
+    let a = Ask {
+        sat_damage: 45.0,
+        ..ask()
+    };
+    assert_eq!(
+        decide(&w, &a),
+        Want::Dig([9, FLOOR - 1, 0]),
+        "one dig of end stone down first"
+    );
+    assert_eq!(
+        decide(&w, &ask()),
+        Want::Dig([9, FLOOR - 1, 0]),
+        "every strike from under the sweep where one dig makes it so"
+    );
+    let mut low = end_at([9.5, 63.0, 0.5]);
+    low.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (9, 63, 0),
+        state: state(BlockKind::Air),
+    }));
+    with_dragon(&mut low, [0.5, 67.0, 0.5], 6, 90.0);
+    assert!(
+        matches!(decide(&low, &a), Want::Strike { head: true, .. }),
+        "down in it: the strike"
+    );
 }

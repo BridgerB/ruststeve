@@ -22,9 +22,10 @@
 //! pillar's top is the stand; on a wider one the stand is on the spike's top, walked onto from the
 //! pillar's top.
 //!
-//! **The guard ring.** Before the bot stands still at a stand, every side of it at the feet's
-//! height that drops (open, with open air under it) gets a block, a ledge under it first when
-//! nothing holds it: a knock-back or the dragon's wings cannot push the body off.
+//! **The box.** At the stand the body is closed in end stone: the walls, every other side at the
+//! feet's and the eye's height (a ledge under a feet cell nothing holds), a block over one side
+//! and the roof. A strike needs reach, not sight (e03), so the dragon's wings and charge find
+//! nothing open to push the body out by (race 45871173293's wall 2).
 //!
 //! **Cages.** Two small spikes are caged in iron bars two out from the column, at the bedrock's
 //! height to three over it: the bars are in the wall's own cells. Parity e03 (E6, run
@@ -102,8 +103,11 @@ pub const PLACED: [BlockKind; 17] = [
 /// issue 20f).
 pub const CLIMB_FAR: f64 = 64.0;
 /// The dragon strafing or charging within this (blocks) sends the bot into its guard ring or
-/// down (issue 20f).
-pub const THREAT_NEAR: f64 = 40.0;
+/// down. Issue 20f's plan said 40; a strafing dragon fires its fireball from farther (vanilla
+/// `DragonStrafePlayerPhase` fires within 64): race 45871173293 lane 0 held on an unguarded
+/// pillar at y 69 with the dragon strafing 62 off, took a fireball's 6 at tick 1080 and fell 8
+/// for 7.5 more. So the climb's own reach, `CLIMB_FAR`.
+pub const THREAT_NEAR: f64 = CLIMB_FAR;
 /// Health over the danger line a climb needs: a blast or a blow in mid-climb is then not a
 /// death (issue 20f).
 pub const CLIMB_MARGIN: f32 = 6.0;
@@ -124,6 +128,8 @@ pub const SWING_EVERY: u64 = 10;
 pub const STRIKE_TICKS: u64 = 200;
 /// Ticks an approach that failed (a walk with no route, a stalled pillar) is refused.
 pub const REFUSE_TICKS: u64 = 1200;
+/// Ticks after a blow inside the box in which the bot leaves it for the way down.
+pub const BOX_BLOW_TICKS: u64 = 200;
 /// Ticks a repeated note waits before it is written again.
 pub const NOTE_EVERY: u64 = 200;
 /// The dragon's phase is its metadata index 16, an INT (`EnderDragon.DATA_PHASE`, after the
@@ -293,7 +299,9 @@ pub fn approach_along(w: &World, spike: &Spike, axis: Axis) -> Option<Approach> 
     let plan = stand(spike, axis);
     let top = plan.stand.1;
     let (x, z) = plan.column;
-    let base = ground(w, x, z, top + 2)?;
+    // Down from under the stand: the box's roof over the stand is no ground (CI run
+    // 45876961897: with it the approach was lost and the bot walked off to another).
+    let base = ground(w, x, z, top - 1)?;
     if base > top {
         return None;
     }
@@ -352,40 +360,74 @@ pub fn support(w: &World, (x, y, z): Cell) -> Option<(Cell, i8)> {
 /// What a block is put for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Role {
-    /// A side of the stand that drops, at the feet's height.
+    /// A side of the stand's box, at the feet's or the eye's height.
     Guard,
-    /// Under a guard's cell, so the guard has a face to go against.
+    /// Under a side's cell, so the side has a face to go against.
     Ledge,
     /// One of the two cells between the stand and the crystal.
     Wall,
+    /// Over the head, the box's top.
+    Roof,
 }
 
-/// The next block of the stand's guard ring: a side at the feet's height that is open and not
-/// over the spike's own top (obsidian) nor over a recorded pillar's top (the way back from a
-/// wide spike's stand), its ledge first when its cell under is open. A ledge alone is no guard:
-/// the block at the feet's height is what a knock-back meets. `None` with the ring whole.
-pub fn guard_gap(w: &World, stand: Cell, pillars: &[PillarRec]) -> Option<(Cell, Role)> {
+/// The next block of the stand's box (the orchestrator, after race 45871173293's wall 2: a
+/// strike needs reach, not sight, so the stand is closed): every side at the feet's and the
+/// eye's height but the wall's own cells, a ledge under a feet cell nothing holds, then the roof.
+/// End stone round the whole body leaves the dragon's wings and charge nothing to push it out
+/// with. `None` with the box whole.
+pub fn box_gap(w: &World, stand: Cell, walls: &[Cell; 2]) -> Option<(Cell, Role)> {
     let (x, y, z) = stand;
-    Axis::ALL.iter().find_map(|a| {
+    let side = |a: &Axis, dy: i32| {
         let (dx, dz) = a.step();
-        let side = (x + dx, y, z + dz);
-        let under = (x + dx, y - 1, z + dz);
-        let safe = kind(w, under) == Some(BlockKind::Obsidian)
-            || pillars.iter().any(|p| (p.x, p.z) == (side.0, side.2));
-        if !open(kind(w, side)) || safe {
+        (x + dx, y + dy, z + dz)
+    };
+    let feet = Axis::ALL.iter().find_map(|a| {
+        let c = side(a, 0);
+        if walls.contains(&c) || !open(kind(w, c)) {
             return None;
         }
-        Some(if support(w, side).is_some() {
-            (side, Role::Guard)
+        Some(if support(w, c).is_some() {
+            (c, Role::Guard)
         } else {
-            (under, Role::Ledge)
+            ((c.0, c.1 - 1, c.2), Role::Ledge)
         })
-    })
+    });
+    let eye = || {
+        Axis::ALL
+            .iter()
+            .map(|a| side(a, 1))
+            .find(|c| !walls.contains(c) && open(kind(w, *c)))
+            .map(|c| (c, Role::Guard))
+    };
+    let roof = (x, y + 2, z);
+    // The roof has no face of its own to go against (the sides at the eye's height are under its
+    // corners' neighbours, not under it): a block over one of them first (E6's sim, CI run
+    // 45880921319: "nothing holds" the roof over a cage's stand, every tick).
+    let roof_step = || {
+        if !open(kind(w, roof)) {
+            return None;
+        }
+        if support(w, roof).is_some() {
+            return Some((roof, Role::Roof));
+        }
+        Axis::ALL
+            .iter()
+            .map(|a| side(a, 2))
+            .find(|c| open(kind(w, *c)) && support(w, *c).is_some())
+            .map(|c| (c, Role::Ledge))
+    };
+    feet.or_else(eye).or_else(roof_step)
 }
 
-/// Is the guard ring round the feet whole?
-pub fn guarded(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
-    guard_gap(w, feet, pillars).is_none()
+/// Is the body boxed in where it stands: every side at the feet's and the eye's height filled,
+/// and the cell over the head?
+pub fn boxed(w: &World, feet: Cell) -> bool {
+    let (x, y, z) = feet;
+    let sides = Axis::ALL.iter().all(|a| {
+        let (dx, dz) = a.step();
+        (0..=1).all(|dy| !open(kind(w, (x + dx, y + dy, z + dz))))
+    });
+    sides && !open(kind(w, (x, y + 2, z)))
 }
 
 /// The first wall cell still open, or one holding a bar when bars are no shield (dug, then a
@@ -477,6 +519,18 @@ pub fn climb_refusal(d: Option<&DragonNear>, health: Option<f32>, danger: f32) -
     }
 }
 
+/// Why the dragon keeps the bot where it is (on the ground, or in its box), or `None`: it is
+/// more than `CLIMB_FAR` off or perched.
+pub fn dragon_refusal(d: Option<&DragonNear>) -> Option<String> {
+    match d {
+        Some(d) if d.dist <= CLIMB_FAR && !perched(d) => Some(format!(
+            "the dragon {:.0} off in phase {:?}, not perched",
+            d.dist, d.phase
+        )),
+        Some(_) | None => None,
+    }
+}
+
 /// A pillar the bot put up: its column, its base (the feet's height on the ground) and top.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PillarRec {
@@ -521,6 +575,8 @@ pub enum Next {
     Build(Cell, Role),
     /// Dig a bar out of a wall cell (bars no shield).
     Bar(Cell),
+    /// Dig a side of the box open, the way back to the pillar's top from a wide spike's stand.
+    Open(Cell),
     /// Attack this crystal.
     Strike(i32),
     /// Dig this cell, the one under the feet: the pillar back down.
@@ -561,6 +617,29 @@ pub struct SpikeState {
     pub stalls: u32,
     /// The last note's what and tick, so a held wait is not written every tick.
     pub last_note: Option<(String, u64)>,
+    /// The water clutch in hand (a fall caught with the water bucket), and how many fired.
+    pub clutch: Option<Clutch>,
+    pub clutches: u32,
+    /// Blocks put when the last climb reached its top, the stand last noted closed, and the
+    /// health last seen (a blow inside the box is noted).
+    pub top_placed: u32,
+    pub closed_at: Option<Cell>,
+    pub last_health: Option<f32>,
+    /// When a blow last landed inside the box.
+    pub box_blow_at: Option<u64>,
+}
+
+/// A fall caught with the water bucket (parity e06, E6: a 21-block fall onto water poured while
+/// falling cost 0; with none, 18).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Clutch {
+    pub since: u64,
+    /// The feet's height when the fall was caught.
+    pub from_y: f64,
+    /// The cell the water went into, once poured.
+    pub poured: Option<Cell>,
+    /// When the feet landed after the pour.
+    pub landed_at: Option<u64>,
 }
 
 impl Default for SpikeState {
@@ -580,6 +659,12 @@ impl Default for SpikeState {
             placed: 0,
             stalls: 0,
             last_note: None,
+            clutch: None,
+            clutches: 0,
+            top_placed: 0,
+            closed_at: None,
+            last_health: None,
+            box_blow_at: None,
         }
     }
 }
@@ -646,9 +731,9 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
         let p = a.plan;
         if feet == p.stand {
-            if let Some((c, role)) = guard_gap(w, feet, &st.pillars) {
-                return Next::Build(c, role);
-            }
+            // The blast's line, then the strike at once: no other block first. Race 45880674581
+            // took its blows while the rest of a box went up, and E6's sim (CI run 45880795371)
+            // stranded a wide spike's bot behind a box side over its own pillar's top.
             if let Some(c) = wall_gap(w, &p, st.bars_shield) {
                 return if kind(w, c) == Some(BlockKind::IronBars) {
                     Next::Bar(c)
@@ -688,9 +773,19 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             .min_by_key(|r| (r.x - feet.0).abs() + (r.z - feet.2).abs())
             .map_or_else(
                 || Next::Wait("stranded on a spike's top with no pillar down".to_owned()),
-                |r| Next::Walk {
-                    to: (r.x, feet.1, r.z),
-                    approach: None,
+                |r| {
+                    // The box's side toward the pillar opened first (its feet and eye cells).
+                    let (dx, dz) = ((r.x - feet.0).signum(), (r.z - feet.2).signum());
+                    let way = (0..=1)
+                        .map(|dy| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
+                        .find(|c| !open(kind(w, *c)) && kind(w, *c) != Some(BlockKind::Obsidian));
+                    match way {
+                        Some(c) => Next::Open(c),
+                        None => Next::Walk {
+                            to: (r.x, feet.1, r.z),
+                            approach: None,
+                        },
+                    }
                 },
             );
     }
@@ -708,6 +803,35 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
         )),
         (None, _) => Next::Done,
     }
+}
+
+/// The top of the ground under the feet (the first full block down, its top face), or `None`
+/// over the void or past `GROUND_SEARCH`.
+pub fn ground_under(w: &World, pos: [f64; 3]) -> Option<f64> {
+    let (x, y, z) = path::feet_cell(pos);
+    (y - GROUND_SEARCH..=y)
+        .rev()
+        .find(|cy| full(kind(w, (x, *cy, z))))
+        .map(|cy| f64::from(cy + 1))
+}
+
+/// Feet over the ground at which a fall is caught (e06: a fall from a pillar's top; the clutch is
+/// for more than a stumble), and at or under which the bucket is used, every tick until it pours
+/// (e06's `above` 4.0 and 2.0 both poured; the use reaches 4.5 from the eye).
+pub const CLUTCH_FROM: f64 = 4.0;
+pub const CLUTCH_AT: f64 = 3.0;
+/// Ticks after landing the water is tried to be taken back, and the most a clutch lasts.
+pub const CLUTCH_TAKE_TICKS: u64 = 40;
+pub const CLUTCH_TICKS: u64 = 200;
+
+/// The dig of the pillar's cell under the feet, its drop not waited for: it falls into the cell
+/// the body falls into and is picked up there. Race 45871173293 dug a block every 40 ticks with
+/// the drop's collect; lane 0 was struck off its pillar 280 ticks into a 33-block way down.
+fn dig_down(w: &World, c: Cell, tick: u64) -> Dig {
+    let mut d = Dig::new(w, c, tick);
+    d.drop = None;
+    d.others.clear();
+    d
 }
 
 fn eye(body: &physics::Body) -> [f64; 3] {
@@ -797,29 +921,31 @@ impl Plan {
         let health = w.player.health;
         let d = dragon_near(w, body.pos);
         let n = next(w, &self.spikes, tick);
-        let up = on_pillar(w, feet, &self.spikes.pillars) || on_spike(w, feet);
-        // The dragon strafing or charging near: crouched in a whole guard ring, else down.
-        let high = matches!(
-            n,
-            Next::Pillar { .. } | Next::Build(..) | Next::Bar(_) | Next::Strike(_)
-        ) || up;
-        if threatens(d.as_ref()) && high && body.on_ground {
-            let d = d.as_ref().map(|d| (d.dist, d.phase));
-            if guarded(w, feet, &self.spikes.pillars) || !on_pillar(w, feet, &self.spikes.pillars) {
-                self.spikes_note(
-                    tick,
-                    "spikes: hold in the guard ring".to_owned(),
-                    format!("the dragon (distance, phase) {d:?} at {feet:?}"),
-                );
-                return Some(self.spikes_hold(tick));
-            }
-            let c = (feet.0, feet.1 - 1, feet.2);
+        let climbing = self
+            .spikes
+            .pillars
+            .iter()
+            .any(|p| (p.x, p.z) == (feet.0, feet.2) && feet.1 > p.base);
+        // Out of the box (down, or out toward the pillar's top) only with the dragon far or
+        // perched: inside it a blow pushes nothing out; on the way down it can.
+        // A blow inside the box within `BOX_BLOW_TICKS` says the box is no shelter from this
+        // dragon: down at once (race 45880674581: the wings and head struck through an open-topped
+        // box, 5, 5 and 10).
+        let struck = self
+            .spikes
+            .box_blow_at
+            .is_some_and(|t| tick.saturating_sub(t) <= BOX_BLOW_TICKS);
+        if boxed(w, feet)
+            && !struck
+            && matches!(n, Next::DigDown(_) | Next::Open(_) | Next::Walk { .. })
+            && let Some(why) = dragon_refusal(d.as_ref())
+        {
             self.spikes_note(
                 tick,
-                format!("spikes: dig down from the dragon at {c:?}"),
-                format!("the dragon (distance, phase) {d:?}; no guard ring at {feet:?}"),
+                "spikes: hold in the box".to_owned(),
+                format!("{why}; at {feet:?}, health {health:?}"),
             );
-            return Some(Task::Dig(Dig::new(w, c, tick)));
+            return Some(self.spikes_hold(tick));
         }
         match n {
             Next::Done => {
@@ -868,13 +994,33 @@ impl Plan {
                 axis,
                 centre,
             } => {
-                if let Some(why) = climb_refusal(d.as_ref(), health, danger) {
+                // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
+                let refusal = climb_refusal(d.as_ref(), health, danger).or_else(|| {
+                    threatens(d.as_ref()).then(|| "the dragon strafes or charges near".to_owned())
+                });
+                if let Some(why) = refusal {
+                    if !climbing {
+                        self.spikes_note(
+                            tick,
+                            "spikes: no climb".to_owned(),
+                            format!("{why}; at {feet:?} under {top}"),
+                        );
+                        return Some(self.spikes_hold(tick));
+                    }
                     self.spikes_note(
                         tick,
-                        "spikes: no climb".to_owned(),
-                        format!("{why}; at {feet:?} under {top}"),
+                        "spikes: climb on through".to_owned(),
+                        format!("{why}; at {feet:?}, {} under {top}", top - feet.1),
                     );
-                    return Some(self.spikes_hold(tick));
+                }
+                if pillar_item(w).is_none() && climbing {
+                    let c = (feet.0, feet.1 - 1, feet.2);
+                    self.spikes_note(
+                        tick,
+                        format!("spikes: out of blocks, dig down at {c:?}"),
+                        format!("{} under {top}", top - feet.1),
+                    );
+                    return Some(Task::Dig(dig_down(w, c, tick)));
                 }
                 if pillar_item(w).is_none() {
                     self.spikes_note(
@@ -920,6 +1066,10 @@ impl Plan {
                         "spikes: no block for the stand".to_owned(),
                         format!("{role:?} at {cell:?}"),
                     );
+                    // No wait at an open stand: down.
+                    if on_pillar(w, feet, &self.spikes.pillars) {
+                        return Some(Task::Dig(dig_down(w, (feet.0, feet.1 - 1, feet.2), tick)));
+                    }
                     return Some(self.spikes_hold(tick));
                 }
                 self.spikes_note(
@@ -948,6 +1098,14 @@ impl Plan {
                 d.others.clear();
                 Some(Task::Dig(d))
             }
+            Next::Open(cell) => {
+                self.spikes_note(
+                    tick,
+                    format!("spikes: box opened at {cell:?}"),
+                    format!("the way back to the pillar from {feet:?}"),
+                );
+                Some(Task::Dig(dig_down(w, cell, tick)))
+            }
             Next::Strike(id) => {
                 if health.is_some_and(|h| h <= danger) {
                     self.spikes_note(
@@ -956,6 +1114,18 @@ impl Plan {
                         format!("health {health:?}, danger {danger}"),
                     );
                     return Some(self.spikes_hold(tick));
+                }
+                if self.spikes.closed_at != Some(feet) {
+                    self.spikes.closed_at = Some(feet);
+                    self.note(
+                        tick,
+                        format!("spikes: stand walled at {feet:?}"),
+                        format!(
+                            "{} blocks put at the top; health {health:?}, the dragon {:?}",
+                            self.spikes.placed.saturating_sub(self.spikes.top_placed),
+                            d.map(|d| (d.dist, d.phase))
+                        ),
+                    );
                 }
                 self.spikes.doing = Some(Doing::Strike(Strike {
                     target: id,
@@ -971,9 +1141,159 @@ impl Plan {
                     format!("spikes: dig down at {c:?}"),
                     format!("on a pillar at {feet:?}"),
                 );
-                Some(Task::Dig(Dig::new(w, c, tick)))
+                Some(Task::Dig(dig_down(w, c, tick)))
             }
         }
+    }
+
+    /// The water clutch (Bridger's plan 20f, parity e06): in the End, falling with more than
+    /// `CLUTCH_FROM` under the feet and a water bucket held, the bucket to hand, used looking
+    /// straight down from `CLUTCH_AT` over the ground until it pours; landed, the water taken
+    /// back. Every step noted.
+    fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
+            self.spikes.clutch = None;
+            return None;
+        }
+        let body = w.body?;
+        let down = Controls {
+            yaw: w.player.yaw.into(),
+            pitch: Some(crate::endermen::EYES_DOWN),
+            ..Controls::default()
+        };
+        let ground = ground_under(w, body.pos);
+        let height = ground.map(|g| body.pos[1] - g);
+        let Some(mut c) = self.spikes.clutch.take() else {
+            let falling = !body.on_ground && !body.in_water && body.vel[1] < 0.0;
+            if !falling
+                || height.is_none_or(|h| h <= CLUTCH_FROM)
+                || craft::count(w, ItemKind::WaterBucket) == 0
+            {
+                return None;
+            }
+            self.spikes.clutches += 1;
+            self.note(
+                tick,
+                format!("spikes: clutch begun at {:?}", path::feet_cell(body.pos)),
+                format!(
+                    "falling with {:.1} under the feet (velocity {:.2}); clutch {}; health {:?}",
+                    height.unwrap_or(0.0),
+                    body.vel[1],
+                    self.spikes.clutches,
+                    w.player.health
+                ),
+            );
+            self.spikes.clutch = Some(Clutch {
+                since: tick,
+                from_y: body.pos[1],
+                poured: None,
+                landed_at: None,
+            });
+            return Some(self.spikes_clutch_hold(w, ItemKind::WaterBucket, down));
+        };
+        let landed = body.on_ground || body.in_water;
+        if tick.saturating_sub(c.since) > CLUTCH_TICKS {
+            self.note(
+                tick,
+                "spikes: clutch over, out of time".to_owned(),
+                format!("poured {:?}; health {:?}", c.poured, w.player.health),
+            );
+            return None;
+        }
+        match c.poured {
+            None if landed => {
+                self.note(
+                    tick,
+                    format!("spikes: clutch missed at {:?}", path::feet_cell(body.pos)),
+                    format!(
+                        "landed before the water poured, from {:.1}; health {:?}",
+                        c.from_y, w.player.health
+                    ),
+                );
+                None
+            }
+            None => {
+                let ctl = self.spikes_clutch_hold(w, ItemKind::WaterBucket, down);
+                if crate::dig::held_item(w) == Some(ItemKind::Bucket) {
+                    let cell = ground.map(|g| {
+                        let f = path::feet_cell(body.pos);
+                        (f.0, g as i32, f.2)
+                    });
+                    c.poured = cell.or(Some(path::feet_cell(body.pos)));
+                    self.note(
+                        tick,
+                        format!("spikes: clutch poured at {:?}", c.poured),
+                        format!(
+                            "{:.1} over the ground, falling {:.2}",
+                            height.unwrap_or(0.0),
+                            body.vel[1]
+                        ),
+                    );
+                } else if crate::dig::held_item(w) == Some(ItemKind::WaterBucket)
+                    && height.is_some_and(|h| h <= CLUTCH_AT + (-body.vel[1]).max(0.0))
+                    && self.acts.is_empty()
+                {
+                    self.acts.push(Act::UseItem);
+                }
+                self.spikes.clutch = Some(c);
+                Some(ctl)
+            }
+            Some(cell) => {
+                if !landed {
+                    self.spikes.clutch = Some(c);
+                    return Some(down);
+                }
+                let at = *c.landed_at.get_or_insert(tick);
+                let water = matches!(kind(w, cell), Some(BlockKind::Water));
+                if !water || crate::dig::held_item(w) == Some(ItemKind::WaterBucket) {
+                    self.note(
+                        tick,
+                        format!("spikes: clutch over at {:?}", path::feet_cell(body.pos)),
+                        format!(
+                            "fell from {:.1}; the water {}; health {:?}",
+                            c.from_y,
+                            if water { "left" } else { "taken back" },
+                            w.player.health
+                        ),
+                    );
+                    return None;
+                }
+                if tick.saturating_sub(at) > CLUTCH_TAKE_TICKS {
+                    self.note(
+                        tick,
+                        format!("spikes: clutch water left at {cell:?}"),
+                        format!("not taken back in {CLUTCH_TAKE_TICKS} ticks"),
+                    );
+                    return None;
+                }
+                let target = [
+                    f64::from(cell.0) + 0.5,
+                    f64::from(cell.1) + 0.2,
+                    f64::from(cell.2) + 0.5,
+                ];
+                let (yaw, pitch) = crate::walk::look_at(eye(&body), target);
+                let ctl = self.spikes_clutch_hold(w, ItemKind::Bucket, down);
+                if crate::dig::held_item(w) == Some(ItemKind::Bucket) && self.acts.is_empty() {
+                    self.acts.push(Act::UseItem);
+                }
+                self.spikes.clutch = Some(c);
+                Some(Controls {
+                    yaw,
+                    pitch: Some(pitch),
+                    ..ctl
+                })
+            }
+        }
+    }
+
+    /// `item` to hand for the clutch (an act when a swap is needed), looking down.
+    fn spikes_clutch_hold(&mut self, w: &World, item: ItemKind, down: Controls) -> Controls {
+        if let hold::Hold::Act(a) = hold::toward(w, item)
+            && self.acts.is_empty()
+        {
+            self.acts.push(a);
+        }
+        down
     }
 
     fn spikes_hold(&mut self, tick: u64) -> Task {
@@ -987,6 +1307,32 @@ impl Plan {
     /// One tick of the crystals' driver while no task runs (the planner's step calls it ahead of
     /// the choice). `None` when nothing runs or it just ended.
     pub fn spikes_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        // A blow taken inside a closed box: noted (the box's own test).
+        if let (Some(body), Some(h)) = (w.body, w.player.health) {
+            let feet = path::stand_cell(w, body.pos);
+            if let Some(last) = self.spikes.last_health
+                && h + 0.01 < last
+                && boxed(w, feet)
+            {
+                self.note(
+                    tick,
+                    format!("spikes: blow in the box at {feet:?}"),
+                    format!(
+                        "health {last} to {h}; the dragon {:?}; last strike {:?}",
+                        dragon_near(w, body.pos).map(|d| (d.dist, d.phase)),
+                        self.spikes.struck
+                    ),
+                );
+            }
+            if self.spikes.last_health.is_some_and(|l| h + 0.01 < l) && boxed(w, feet) {
+                self.spikes.box_blow_at = Some(tick);
+            }
+            self.spikes.last_health = Some(h);
+        }
+        // The clutch first, whatever runs: a fall waits for no task.
+        if let Some(c) = self.spikes_clutch(w, tick) {
+            return Some(c);
+        }
         if !matches!(self.task, Task::Idle) {
             return None;
         }
@@ -1008,10 +1354,25 @@ impl Plan {
             ..Controls::default()
         };
         match doing {
-            Doing::Hold { until } => (tick < *until).then_some(Controls {
-                sneak: true,
-                ..down
-            }),
+            Doing::Hold { until } => {
+                // A hold on a pillar outside a box ends the moment the dragon strafes or charges
+                // near: the planner digs down (race 45871173293 lane 0, tick 1080).
+                let feet = path::stand_cell(w, body.pos);
+                let exposed =
+                    body.on_ground && on_pillar(w, feet, &self.spikes.pillars) && !boxed(w, feet);
+                if exposed && threatens(dragon_near(w, body.pos).as_ref()) {
+                    self.note(
+                        tick,
+                        format!("spikes: hold ended by the dragon at {feet:?}"),
+                        "unguarded on a pillar; the way down".to_owned(),
+                    );
+                    return None;
+                }
+                (tick < *until).then_some(Controls {
+                    sneak: true,
+                    ..down
+                })
+            }
             Doing::Climb(c) => self.spikes_climb(w, tick, &body, c, down),
             Doing::Build(b) => self.spikes_build(w, tick, b, down),
             Doing::Strike(s) => self.spikes_strike(w, tick, &body, s, down),
@@ -1036,6 +1397,7 @@ impl Plan {
         }
         if body.on_ground && feet.1 >= c.goal {
             self.spikes.pillars_up += 1;
+            self.spikes.top_placed = self.spikes.placed;
             self.note(
                 tick,
                 format!("spikes: pillar up to {feet:?}"),
@@ -1089,18 +1451,23 @@ impl Plan {
             );
             return None;
         }
-        // The rules before each jump.
+        // No wait on a half-built pillar (the orchestrator, after wall 2: lane 1 of race
+        // 45871173293 held at y 85 and was struck off): the rules are read at the foot, and
+        // the climb goes on to the box, noted when they would have held it.
         let d = dragon_near(w, body.pos);
         let refusal = climb_refusal(d.as_ref(), w.player.health, self.spikes_danger());
         if let Some(why) = refusal.or_else(|| {
             threatens(d.as_ref()).then(|| "the dragon strafes or charges near".to_owned())
         }) {
-            self.note(
+            self.spikes_note(
                 tick,
-                format!("spikes: climb paused at {feet:?}"),
-                format!("{why}; {} under the goal {}", c.goal - feet.1, c.goal),
+                "spikes: climb on through".to_owned(),
+                format!(
+                    "{why}; at {feet:?}, {} under the goal {}",
+                    c.goal - feet.1,
+                    c.goal
+                ),
             );
-            return None;
         }
         if !open(kind(w, (feet.0, feet.1 + 2, feet.2))) {
             self.spikes.stalls += 1;
@@ -1176,7 +1543,7 @@ impl Plan {
             return None;
         }
         let Some((n, face)) = support(w, b.cell) else {
-            self.note(
+            self.spikes_note(
                 tick,
                 format!("spikes: nothing holds {:?}", b.cell),
                 format!("{:?} with no solid neighbour", b.role),
