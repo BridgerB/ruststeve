@@ -251,3 +251,27 @@ stage = "pearls_12"
 place = { dimension = "minecraft:overworld", x = 1498.5, y = 90, z = -15.5 }
 spread = 16
 kit = [["ender_eye", 14], ["cooked_beef", 32], ["crafting_table", 1], ["stick", 8]]
+
+# DEVELOPMENT starts for issue 19's later home legs (2026-11-25; never evidence, never the
+# frontier), so they are developed while real bots cross the deltas. Race them only with the
+# frontier's snapshot. Places are the chain's own ground (development knowledge from the
+# snapshot's memory and region files, docs/problems/eyes-observe.md):
+# dev-nether-home: the endermen frontier's old pocket at (8, 85, 81) in the soul sand valley, the
+# last way point before the bot's own Nether portal at (22, 34, -20), about 100 blocks north.
+# The eyes are made, so home skips the top-up and the kit.
+[[start]]
+name = "dev-nether-home"
+stage = "pearls_12"
+place = { dimension = "minecraft:the_nether", x = 8.5, y = 85, z = 81.5 }
+spread = 6
+spread_under = 100
+kit = [["ender_eye", 14], ["netherrack", 64], ["crafting_table", 1], ["stick", 8]]
+
+# dev-overworld-arrival: the bot's overworld portal's south face at (125, -51, -107), where a
+# real bot comes out of the Nether near the lava sea, in the cave band; for the climb in rock and
+# the food on the surface. No food given: the real bot has none.
+[[start]]
+name = "dev-overworld-arrival"
+stage = "pearls_12"
+place = { dimension = "minecraft:overworld", x = 125.5, y = -52, z = -106.5 }
+kit = [["ender_eye", 14], ["crafting_table", 1], ["stick", 8]]
