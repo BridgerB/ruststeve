@@ -370,6 +370,7 @@ fn a_bot_falling_from_a_pillar_waits_and_asks_for_no_walk() {
 #[test]
 fn the_climb_jumps_and_puts_the_block_in_once_clear() {
     let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
     let mut p = Plan::new(Aim::Race);
     assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
     assert!(
@@ -418,6 +419,7 @@ fn the_climb_jumps_and_puts_the_block_in_once_clear() {
 #[test]
 fn hurt_on_the_ground_the_crystals_wait_for_the_health() {
     let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
     w.player.health = Some(12.0);
     let mut p = Plan::new(Aim::Race);
     assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
@@ -437,12 +439,14 @@ fn hurt_on_the_ground_the_crystals_wait_for_the_health() {
 fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
     // Strafing 50 off: no climb.
     let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
     dragon(&mut w, [8.5, 64.0, 55.5], 0);
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
     assert!(notes(&p).iter().any(|n| n == "spikes: no climb"));
     // Perched 50 off: the climb.
     let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
     dragon(&mut w, [8.5, 64.0, 55.5], 6);
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
@@ -453,6 +457,7 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
     );
     // Flying 100 off: the climb.
     let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
     dragon(&mut w, [8.5, 64.0, 105.5], 0);
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
@@ -532,7 +537,8 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
 
 #[test]
 fn a_pillar_that_rises_no_block_in_1200_ticks_fails_and_says_why() {
-    let w = world(2, [8.5, 64.0, 5.5]);
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
     assert!(p.spikes_step(&w, 1400).is_none());
@@ -1231,4 +1237,40 @@ fn a_pool_is_made_by_the_bunker_and_refills_the_buckets() {
         "{n:?}"
     );
     assert!(p.spikes.pool_made);
+}
+
+/// The clutch's water bucket in the hotbar's last slot: no climb begins without it.
+fn water(w: &mut World) {
+    w.inventory.slots.insert(44, (ItemKind::WaterBucket, 1));
+}
+
+#[test]
+fn no_climb_begins_without_a_water_bucket_in_the_hotbar() {
+    // Race 45908299055: both bots climbed with no water at all, and fell dead.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p).iter().any(|n| n == "spikes: no climb: no water"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
+    // One in the main slots: moved to the hotbar, and still no climb this time.
+    w.inventory.slots.insert(12, (ItemKind::WaterBucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes_task(&w, 100);
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::Click {
+            slot: 12,
+            button: 8,
+            mode: 2
+        }]
+    );
+    // In the hotbar: the climb.
+    water(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes_task(&w, 100);
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
 }

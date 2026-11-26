@@ -1383,6 +1383,30 @@ impl Plan {
                 axis,
                 centre,
             } => {
+                // No climb begins without a full water bucket in the hotbar (the clutch's), the
+                // orchestrator's invariant after race 45908299055: with none, the pool refills
+                // it (`spikes_water`, ahead of this) or the bot climbs no pillar at all.
+                if !climbing {
+                    let hotbar =
+                        w.inventory.slots.iter().any(|(sl, (k, _))| {
+                            (36..=44).contains(sl) && *k == ItemKind::WaterBucket
+                        });
+                    if !hotbar {
+                        let held = craft::count(w, ItemKind::WaterBucket) > 0;
+                        if held {
+                            self.spikes_bucket_swap(w, tick);
+                        }
+                        self.spikes_note(
+                            tick,
+                            "spikes: no climb: no water".to_owned(),
+                            format!(
+                                "no water bucket in the hotbar at {feet:?}{}",
+                                if held { "; one moved there" } else { "" }
+                            ),
+                        );
+                        return Some(self.spikes_hold(tick));
+                    }
+                }
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
                 let closing_refusal = (closing && !d.as_ref().is_some_and(perched))
                     .then(|| "the dragon closing".to_owned());
@@ -1780,8 +1804,15 @@ impl Plan {
     /// Up a pillar or a spike, the water bucket kept in the hotbar (`CLUTCH_HOTBAR`), so a fall
     /// selects it with one packet and never waits on a window's clicks. Noted.
     fn spikes_bucket_to_hotbar(&mut self, w: &World, tick: u64) {
-        if !self.spikes_up_high(w)
-            || !self.acts.is_empty()
+        if !self.spikes_up_high(w) {
+            return;
+        }
+        self.spikes_bucket_swap(w, tick);
+    }
+
+    /// A water bucket from the main slots into the hotbar (`CLUTCH_HOTBAR`) when none is there.
+    fn spikes_bucket_swap(&mut self, w: &World, tick: u64) {
+        if !self.acts.is_empty()
             || w.click.is_some()
             || w.window.is_some()
             || w.inventory.carried.is_some()
@@ -1898,7 +1929,12 @@ impl Plan {
             && let Some(b) = self.bunker
             && (b[0] - feet.0).abs().max((b[2] - feet.2).abs()) <= POOL_NEAR
         {
-            let pool = self.spikes.pool.or_else(|| pool_cells(w, feet));
+            // A pool is begun only with both its sources in hand: one bucket alone makes no
+            // infinite source, and would be lost.
+            let pool = self
+                .spikes
+                .pool
+                .or_else(|| (water >= 2).then(|| pool_cells(w, feet)).flatten());
             if let Some([c0, c1]) = pool {
                 self.spikes.pool = Some([c0, c1]);
                 self.spikes.pool_stand.get_or_insert(feet);

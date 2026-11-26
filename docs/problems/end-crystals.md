@@ -226,3 +226,8 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The fix:**
   - With both buckets poured and the pool not yet seen whole, the bot waits by it ("waiting on the pool").
   - A refill no longer waits on "made": any pool cell with water refills an empty bucket.
+- **The invariant** (the orchestrator): no climb begins without a full water bucket in the hotbar ("no climb: no water").
+  - A bucket in the main slots is moved to the hotbar first.
+  - With none, the pool refills one; with no pool, no pillar is climbed.
+  - A pool is begun only with both its buckets in hand.
+  - Unit test `no_climb_begins_without_a_water_bucket_in_the_hotbar`. E6's sim crystal runs are given a water bucket (fenced E4 in `crates/bot/tests/end_loop.rs`).

@@ -210,6 +210,10 @@ fn crystal(sp: Spike) -> Run {
     let mut stage = island(64, top, vec![sp]);
     stage.spawn((sp.centre[0] - 12, top + 1, sp.centre[1]));
     let mut sim = Sim::new(CONFIG, stage.build().unwrap()).seeded(7);
+    // >>> E4 (issue 20f): no climb begins without a water bucket in the hotbar (the clutch's);
+    // given first, it takes the hotbar's first slot.
+    sim.survival.give((ItemKind::WaterBucket, 1));
+    // <<< E4
     kit(&mut sim, 192);
     sim.summon_crystal(sp.crystal());
     drive(sim, 2500, |p| {
