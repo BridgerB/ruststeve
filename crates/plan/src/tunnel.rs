@@ -382,6 +382,13 @@ pub struct Limits {
 // (`SUSPECT_COST`): a stair down through rock (about 3 digs) is cheaper than two steps in the
 // open, so a route from the open goes under first and stays under.
 pub const COVER_COST: u32 = 8;
+/// A covered route pays `HIGH_COST` a step more than `DEEP_SLACK` over the higher of its target
+/// and `SAFE_Y`: a stair down (3 digs) then costs no more than a level step up high (2 digs and
+/// this), so the route goes deep first and crosses under the valley in thick rock (race
+/// 45742933645 lane 0 tunnelled level at y 74 to 77 under the soul sand valley's floor and took 7
+/// skeleton arrows through its open sides).
+pub const HIGH_COST: u32 = 2;
+pub const DEEP_SLACK: i32 = 4;
 // <<< Q6
 
 /// `route` within `limits`.
@@ -497,6 +504,9 @@ pub fn route_keeping(
                         || sight.at((to.0, to.1 + 3, to.2)) == OPEN)
                 {
                     cost += COVER_COST;
+                }
+                if limits.cover && to.1 > target.1.max(SAFE_Y) + DEEP_SLACK {
+                    cost += HIGH_COST;
                 }
                 // <<< Q6
                 let g2 = g + cost;
