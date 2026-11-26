@@ -44,3 +44,12 @@ The crystal plan (a pillar 3 off, a wall at 2 off, a strike by reach), the drago
 
 ## Walls
 1. **The cover at 2 off is consumed by each blast** (e03, parity 45864998071). A second crystal struck from the same stand without rebuilding the wall meets an open stand (`e03-open`: dead). For E4, rebuild or re-check the two cells before every strike, never assume them.
+2. **The last crystal leaves the bot on top of its pillar** (closed loop, `crates/bot/tests/end_loop.rs`, CI 45871565862 and probe 45873677573 on b818d90). The bot pillars, rings, walls, strikes (open spike reach 2.09, caged 1.94 through the bars, health 19.58 after the blast) and the crystal is gone. Then `end_task` hands over to the spikes only while `crystals_alive > 0`, so `spikes_task`'s dig down never runs. The bot stays 15 to 18 up, and the ledger shows "no walk to the bunker" 24 times. E3 owns the fix in `end.rs`. The two spike tests assert the dig down and fail until it lands.
+
+## Closed-loop tests (`crates/bot/tests/end_loop.rs`)
+These run the planner itself (`Aim::Race`, config/goals.toml) on the synthetic End, through `bot::lockstep`. They are development evidence only.
+- **The bridge**: platform to lip, the lip at y 52 out to x 72 as E1 measured. The bot pillars up 4, lays 27 floor blocks and 58 guards (rails at the feet's height on both sides of every cell over the void), and steps on at (72, 53, 0) in 600 ticks; the feet never go under 49. It passes (probe 45873677573).
+- **The gaze**: three endermen at eye height on the island. The bot walks to the bunker's site, digs it and tunnels, and never stares at or angers any of them. It passes (probe 45873677573).
+- **Open and caged spikes**: walk, pillar, guard ring, wall (or the bars), strike, dig down. They pass up to the strike; the dig down is wall 2.
+- The island in the tests is 20 deep: with 3 deep, the bunker's third dig opened onto the void and the bot fell. The real island is tens deep near the fountain, so this is a test layout fix, not a bot wall.
+- **The dragon**: waits for E5 (not modelled yet).
