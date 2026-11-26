@@ -49,7 +49,7 @@ pub const FORTRESS_CHUNKS: i32 = 8;
 /// Blocks round the bricks' bounds that still count as the footprint (a bridge's edge).
 pub const FORTRESS_PAD: i32 = 4;
 /// Ticks between two notes of the same standing condition (a hold, a rest).
-const NOTE_EVERY: u64 = 600;
+pub(crate) const NOTE_EVERY: u64 = 600;
 /// Ticks between two "look kept off" notes (the count is in each).
 const LOOK_NOTE_EVERY: u64 = 200;
 /// Ticks after a fruitless search for a way to a known place before the next is made.
@@ -99,6 +99,21 @@ pub enum EnderPhase {
     Travel,
     /// The feet in a warped forest: the base, the burrow and the hunt (issue 18d to 18f).
     Hunt,
+    /// Issue 19d (docs/problems/eyes-home.md): 12 pearls held under the race. The top-up, the
+    /// eyes, the kit for the overworld, the trip back to the entry portal, the climb and the food
+    /// (`crate::home`); over once fed on the overworld's surface.
+    Home,
+}
+
+impl EnderPhase {
+    /// Whether the bot is on a trip through the Nether (issue 18c's travel, issue 19d's way home):
+    /// the far route's shunned mobs, the tunnel's spare uses and the fortress turn apply.
+    pub fn travels(self) -> bool {
+        match self {
+            EnderPhase::Travel | EnderPhase::Home => true,
+            EnderPhase::Reach | EnderPhase::Hunt => false,
+        }
+    }
 }
 
 /// Blocks a forest target may lie above or below the feet before a lower or higher one is
@@ -221,6 +236,11 @@ pub struct EnderState {
     pub fortress: Option<(i32, i32, i32, i32)>,
     #[serde(default)]
     pub fortress_at: Option<u64>,
+    // >>> home (Q2, issue 19d)
+    /// The way home's state (`crate::home`).
+    #[serde(default)]
+    pub home: crate::home::HomeState,
+    // <<< home
 }
 
 /// One enderman as the planner sees it.
@@ -779,10 +799,96 @@ impl Plan {
         // >>> pearls (P3, issue 18f): in the hunt the hunt's rows answer a provoked enderman
         // (from the burrow, or a capped pocket with none built: P4's closed loop held this
         // pocket to the cap).
-        if self.pearls.started {
+        if self.pearls.started && !self.home_hunt_over() {
             return None;
         }
         // <<< pearls
+        // >>> Q8 (issue 19): on the way home a provoked enderman's hold is capped at
+        // `home::ENDER_HOLD_MAX`, then that enderman is left (Q9's race 45764756002 lane 2: the
+        // top-up ended on its clock in the tick one was provoked, and the bot held a 0-block pocket
+        // in the forest from 6,040 past 23,440 at 19.8 health, the trip never begun).
+        let home = self.ender.phase == EnderPhase::Home && self.ender.home.top_up_over;
+        if home
+            && let Some(id) = angry(w)
+            && !self.ender.home.enders_left.contains(&id)
+        {
+            let since = match self.ender.home.ender_hold {
+                Some((held, t)) if held == id => t,
+                Some(_) | None => {
+                    self.ender.home.ender_hold = Some((id, tick));
+                    tick
+                }
+            };
+            let near = w
+                .entities
+                .get(&id)
+                .zip(w.body)
+                .map_or(f64::MAX, |(e, b)| crate::home::dist(e.pos, b.pos));
+            // At the cap with it still within `ENDER_RELEASE`: never walked out of the pocket (Q9's
+            // race 45776886803 lane 0: released with it 2 off, four hits in 60 ticks, dead). On it
+            // (`ENDER_FIGHT`) over the danger line it is fought from the pocket; else the hold goes on.
+            let capped = tick.saturating_sub(since) >= crate::home::ENDER_HOLD_MAX;
+            if capped && near <= crate::home::ENDER_RELEASE {
+                let danger = self
+                    .table
+                    .as_ref()
+                    .map_or(8.0, |t| t.survival.danger_health);
+                if near <= crate::home::ENDER_FIGHT
+                    && w.player.health.is_some_and(|h| h > danger)
+                    && !matches!(self.task, crate::Task::Defend(_))
+                    && let Some(rules) = self.table.as_ref().map(|t| t.survival.clone())
+                {
+                    self.ender.home.ender_fights += 1;
+                    self.note(
+                        tick,
+                        format!("home: fight enderman {id} from the pocket"),
+                        format!(
+                            "{near:.1} off at the hold's cap; health {:?}; fight {}",
+                            w.player.health, self.ender.home.ender_fights
+                        ),
+                    );
+                    self.task = crate::Task::Defend(Box::new(crate::defend::Defend::new(
+                        w,
+                        id,
+                        EntityKind::Enderman,
+                        &rules,
+                        tick,
+                    )));
+                    return Some(Controls::default());
+                }
+                if self.ender.home.ender_near_noted != Some(id) {
+                    self.ender.home.ender_near_noted = Some(id);
+                    self.note(
+                        tick,
+                        format!("home: enderman {id} still near at the hold's cap"),
+                        format!(
+                            "{near:.1} off, within {}; the hold goes on",
+                            crate::home::ENDER_RELEASE
+                        ),
+                    );
+                }
+            }
+            if capped && near > crate::home::ENDER_RELEASE {
+                self.ender.home.enders_left.push(id);
+                self.ender.home.ender_hold = None;
+                self.ender.threat = None;
+                self.note(
+                    tick,
+                    format!("home: left the pocket from enderman {id}"),
+                    format!(
+                        "held {} ticks; health {:?}; on with the trip, never a swing; left {}",
+                        crate::home::ENDER_HOLD_MAX,
+                        w.player.health,
+                        self.ender.home.enders_left.len()
+                    ),
+                );
+                return None;
+            }
+        }
+        if home && angry(w).is_some_and(|id| self.ender.home.enders_left.contains(&id)) {
+            return None;
+        }
+        // <<< Q8
         let Some(id) = angry(w) else {
             if let Some(old) = self.ender.threat.take() {
                 self.note(
@@ -984,6 +1090,14 @@ impl Plan {
                 ),
             );
         }
+        // >>> home (Q2, issue 19d): 12 pearls held under the race and the way home begins.
+        if self.ender.phase == EnderPhase::Hunt {
+            self.home_begin(w, tick);
+        }
+        if self.ender.phase == EnderPhase::Home {
+            return self.home_task(w, tick).unwrap_or(Task::Idle);
+        }
+        // <<< home
         if self.ender.phase == EnderPhase::Hunt {
             return self.pearls_task(w, tick).unwrap_or(Task::Idle);
         }
@@ -1407,7 +1521,7 @@ impl Plan {
         let found = match tries {
             0 => {
                 let mut walk = Walk::new(c, goal, Arrive::Goal, tick);
-                walk.more.shun = self.ender.phase == EnderPhase::Travel;
+                walk.more.shun = self.ender.phase.travels();
                 walk.route_now(w, tick).then_some((walk, "a plain route"))
             }
             1 => {

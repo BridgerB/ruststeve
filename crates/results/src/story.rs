@@ -78,6 +78,21 @@ pub fn note_kinds(l: &Ledger) -> Vec<NoteKind> {
     out
 }
 
+/// A run's eyes of ender (issue 19b), from its ledger and its last senses row: what the race
+/// summary's eyes lines count.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EyeCounts {
+    /// Eyes held at the end (the last senses row).
+    pub held: i32,
+    /// `EyeThrown`, `EyeEnded` dropped and shattered, `EyePicked`.
+    pub thrown: u32,
+    pub dropped: u32,
+    pub shattered: u32,
+    pub picked: u32,
+    /// `FrameSeen`: end portal frames that came on record within 128.
+    pub frames: u32,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Story {
     /// `tick stage`.
@@ -114,6 +129,29 @@ pub struct Story {
     /// Every note that carries an escape's trail, whole: `tick what (why)`.
     #[serde(default)]
     pub trails: Vec<String>,
+    /// Issue 19b: the run's eyes, when it held or threw any or saw a frame.
+    #[serde(default)]
+    pub eyes: Option<EyeCounts>,
+}
+
+/// A run's eyes from its facts and senses rows; `None` when it never held, threw or picked an
+/// eye nor saw a frame.
+pub fn eye_counts(l: &Ledger, rows: &[Senses]) -> Option<EyeCounts> {
+    let mut c = EyeCounts {
+        held: rows.last().and_then(|r| r.eyes).unwrap_or(0),
+        ..EyeCounts::default()
+    };
+    for f in &l.facts {
+        match &f.fact {
+            Fact::EyeThrown { .. } => c.thrown += 1,
+            Fact::EyeEnded { dropped: true, .. } => c.dropped += 1,
+            Fact::EyeEnded { dropped: false, .. } => c.shattered += 1,
+            Fact::EyePicked { .. } => c.picked += 1,
+            Fact::FrameSeen { .. } => c.frames += 1,
+            _ => {}
+        }
+    }
+    (c != EyeCounts::default()).then_some(c)
 }
 
 /// The tick of a ledger's last record or fact.
@@ -227,7 +265,10 @@ fn spans(rows: &[Senses], on: impl Fn(&Senses) -> bool) -> Vec<(u64, u64)> {
 }
 
 pub fn story(l: &Ledger, rows: &[Senses]) -> Story {
-    let mut s = Story::default();
+    let mut s = Story {
+        eyes: eye_counts(l, rows),
+        ..Story::default()
+    };
     let all_rows = rows;
     // Rows before the inventory first arrives (every slot free) say nothing about tools.
     let first = rows
@@ -457,6 +498,8 @@ mod tests {
             angry_ticking: None,
             angry_frozen: None,
             sword_uses: None,
+            eyes: None,
+            frames: None,
         }
     }
 

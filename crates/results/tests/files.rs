@@ -76,6 +76,7 @@ fn batch(rows: Vec<Case>) -> Batch {
                 recording: c.recording.clone(),
                 aim: None,
                 pearls: None,
+                eyes: None,
             })
             .collect(),
     }

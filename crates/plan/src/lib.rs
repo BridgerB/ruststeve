@@ -8,6 +8,9 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// >>> Q7 (issue 19, the overworld arrival)
+pub mod arrival;
+// <<< Q7
 // >>> base (P5, issue 18d)
 pub mod base;
 // <<< base
@@ -23,25 +26,43 @@ pub mod dig;
 pub mod eat;
 pub mod endermen;
 pub mod escape;
+// >>> eyes (Q3, issue 19c)
+pub mod eyes;
+// <<< eyes
 // >>> heading (E2, issue 17d)
 pub mod heading;
+// >>> home (Q2, issue 19d)
+pub mod home;
+// <<< home
 // <<< heading
+// >>> Q11 (issue 19): the way home's fortress stretch.
+pub mod fortress_way;
+// <<< Q11
 pub mod hold;
 pub mod hunt;
 pub mod ledger;
 pub mod look;
 pub mod make;
+// >>> overland (Q4, issue 19e)
+pub mod overland;
+// <<< overland
 pub mod path;
 // >>> pearls (P3, issue 18f)
 pub mod pearls;
 // <<< pearls
 pub mod place;
+// >>> Q6 (issue 19): the last leg to the portal's front.
+pub mod portal_way;
+// <<< Q6
 pub mod redig;
 pub mod scoop;
 pub mod shield;
 pub mod smelt;
 pub mod stairs;
 pub mod station;
+// >>> stronghold (Q4, issue 19f)
+pub mod stronghold;
+// <<< stronghold
 pub mod tunnel;
 pub mod walk;
 
@@ -90,18 +111,24 @@ pub struct Enter {
     cell: Cell,
     /// The tick the feet were first in a portal block.
     inside_since: Option<u64>,
+    // >>> home (Q2, issue 19d): the dimension the walk began in; done once it differs. A task
+    // from before the field (none: tasks are not in a snapshot) reads as the overworld's.
+    #[serde(default)]
+    from: Option<String>,
+    // <<< home
 }
 
 impl Enter {
     /// Done once the world is in another dimension than the portal's; while the feet are in a
     /// portal block, stand still (a step out resets the game's count); else walk on.
     fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {
-        if w.dimension
-            .as_ref()
-            .is_some_and(|d| d.name != "minecraft:overworld")
-        {
+        // >>> home (Q2, issue 19d): done in any dimension other than the one it began in (the
+        // way home enters from the Nether).
+        let from = self.from.as_deref().unwrap_or("minecraft:overworld");
+        if w.dimension.as_ref().is_some_and(|d| d.name != from) {
             return (Controls::default(), TaskStatus::Done);
         }
+        // <<< home
         // Between dimensions the world holds no body: wait for it.
         let Some(body) = w.body else {
             return (Controls::default(), TaskStatus::Running);
@@ -157,6 +184,9 @@ const SHELTER_BLOCKS: &[data::ItemKind] = &[
 /// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
 /// `SEAL_EVERY_TICKS`).
 const SHELTER_EVERY_TICKS: u64 = 10;
+/// Ticks a stack may sit on the cursor with no window and no click before it is put down: a swap
+/// through the cursor is a few ticks (a click and its answer), five seconds is stuck.
+const CURSOR_STUCK_TICKS: u64 = 100;
 /// Shelter blocks in one run before the bot stops building: a closed box round one cell is 10
 /// (eight wall cells, one more for the roof to hang on, the roof); eight boxes.
 const SHELTER_MAX: u32 = 80;
@@ -182,6 +212,21 @@ const REPICKUP_JUMP: i32 = 4;
 /// Ticks a full pack holds tasks back while its junk is dropped: three drops at `EQUIP_TICKS`
 /// and their resyncs, with room (overworld-leg wall 10).
 const FULL_WAIT_TICKS: u64 = 200;
+// >>> overland and stronghold (Q4)
+/// A throw's walk point (`eyes_way`, read from the feet each call) that moved more than this is
+/// a new target for the overland: a quarter of the shortest leg (`[overland] leg_min` 64), so a
+/// leg is not begun again for the point's drift as the bot walks.
+const WAY_MOVED: f64 = 16.0;
+/// A throw waiting this long at its spot (`eyes_task` blocked: a canopy or a cliff on the
+/// bearing) moves the spot: half a minute.
+const WAY_WAIT: u64 = 600;
+/// The spot moved this far, east, south, west, north in turn: past a tree's crown (the canopy
+/// Q3 reads is 10 to 14 out) and within the baseline's slack.
+const WAY_NUDGE: f64 = 20.0;
+/// Twelve moves: three rings of four, each ring `WAY_NUDGE` farther out (race 45747459284 lane 0
+/// used its four of 20 under one wide canopy).
+const WAY_NUDGES: u32 = 12;
+// <<< overland and stronghold
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
 pub const TRAIL_TOWARD: f64 = 4.0;
@@ -456,6 +501,10 @@ pub enum Task {
     Eat(eat::Eat),
     /// Killing an animal for its meat (issue 12c).
     Hunt(Box<hunt::Hunt>),
+    // >>> eyes (Q3, issue 19c)
+    /// An eye of ender thrown, followed, read and picked up again (`eyes`).
+    Throw(Box<eyes::Throw>),
+    // <<< eyes
 }
 
 impl Task {
@@ -478,6 +527,9 @@ impl Task {
             Task::Defend(_) => "defend",
             Task::Eat(_) => "eat",
             Task::Hunt(_) => "hunt",
+            // >>> eyes
+            Task::Throw(_) => "throw-eye",
+            // <<< eyes
         }
     }
 
@@ -498,6 +550,9 @@ impl Task {
             | Task::Defend(_)
             | Task::Eat(_)
             | Task::Hunt(_) => None,
+            // >>> eyes
+            Task::Throw(_) => None,
+            // <<< eyes
             Task::ToLog(w) | Task::Explore(w) => Some(w),
         }
     }
@@ -672,6 +727,15 @@ pub struct Plan {
     pub cook_tasks: u32,
     #[serde(default)]
     pub cook_over: bool,
+    /// The way home's cook (issue 19d): set only around one `decide` call from Home's night in
+    /// the hut, which then takes the cook row as the clean flow's cook phase does.
+    #[serde(default)]
+    pub home_cook: bool,
+    /// A stack on the cursor since (no window, no click), and the stacks put down from it.
+    #[serde(default)]
+    pub cursor_since: Option<u64>,
+    #[serde(default)]
+    pub cursor_puts: u32,
     /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
     /// (closed, or none could be built).
     #[serde(default)]
@@ -811,6 +875,21 @@ pub struct Plan {
     #[serde(default)]
     pub base: base::BaseState,
     // <<< base
+    // >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md).
+    #[serde(default)]
+    pub overland: overland::OverlandState,
+    #[serde(default)]
+    pub stronghold: stronghold::StrongholdState,
+    // <<< overland and stronghold
+    // >>> eyes (Q3, issue 19c): the lines read, their fix, and the throws' record
+    // (docs/problems/eyes-throw.md).
+    #[serde(default)]
+    pub fix: Option<eyes::Fix>,
+    #[serde(default)]
+    pub throws: Vec<eyes::Line>,
+    #[serde(default)]
+    pub eyes: eyes::EyeState,
+    // <<< eyes
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -879,6 +958,9 @@ impl Plan {
             portal_food_noted: false,
             cook_tasks: 0,
             cook_over: false,
+            home_cook: false,
+            cursor_since: None,
+            cursor_puts: 0,
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
@@ -930,6 +1012,15 @@ impl Plan {
             // >>> base
             base: base::BaseState::default(),
             // <<< base
+            // >>> overland and stronghold (Q4)
+            overland: overland::OverlandState::default(),
+            stronghold: stronghold::StrongholdState::default(),
+            // <<< overland and stronghold
+            // >>> eyes
+            fix: None,
+            throws: Vec::new(),
+            eyes: eyes::EyeState::default(),
+            // <<< eyes
             acts: Vec::new(),
         }
     }
@@ -965,6 +1056,18 @@ impl Plan {
     }
 
     fn note(&mut self, tick: u64, what: String, why: String) {
+        // >>> home: the way home keeps the bridge blocks it lays, to dig back when stranded.
+        if self.ender.phase == endermen::EnderPhase::Home
+            && let Some(c) = what
+                .strip_prefix("bridge block laid at ")
+                .and_then(home::parse_cell)
+        {
+            self.ender.home.laid.push(c);
+            if self.ender.home.laid.len() > home::LAID_KEPT {
+                self.ender.home.laid.remove(0);
+            }
+        }
+        // <<< home
         self.events.push(PlanEvent { tick, what, why });
         self.event_count += 1;
         if self.events.len() > EVENTS_KEPT {
@@ -994,6 +1097,7 @@ impl Plan {
         // swing count before the tick: a strike the raised shield drops is given back.
         let swings_before = self.swing_count();
         let c = self.step_inner(w);
+        self.cursor_watch(w);
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
@@ -1001,6 +1105,45 @@ impl Plan {
         let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
         c
+    }
+
+    /// A stack left on the cursor with no window and no click pending for `CURSOR_STUCK_TICKS` is
+    /// put down in a free main slot (else the window is asked for again), noted: every task
+    /// begins with an empty cursor (race 45715674818 lane 0: netherrack 33 on the cursor, a
+    /// tunnel's stairs at (418, 40, 158) stood 1,200 ticks twice with no dig begun).
+    fn cursor_watch(&mut self, w: &World) {
+        let tick = w.session.server_ticks;
+        let Some((kind, n)) = w.inventory.carried else {
+            self.cursor_since = None;
+            return;
+        };
+        if w.window.is_some() || w.click.is_some() {
+            return;
+        }
+        let since = *self.cursor_since.get_or_insert(tick);
+        if tick.saturating_sub(since) < CURSOR_STUCK_TICKS || !self.acts.is_empty() {
+            return;
+        }
+        self.cursor_since = None;
+        self.cursor_puts += 1;
+        let act = match hold::put_down_slot(w) {
+            Some(slot) => world::Act::Click {
+                slot,
+                button: 0,
+                mode: 0,
+            },
+            None => world::Act::Resync,
+        };
+        self.note(
+            tick,
+            format!("cursor put down ({kind:?} {n})"),
+            format!(
+                "on the cursor {} ticks with no window and no click; {act:?}; {} in the run",
+                tick.saturating_sub(since),
+                self.cursor_puts
+            ),
+        );
+        self.acts.push(act);
     }
 
     /// A junk stack dropped and its kind back by `REPICKUP_JUMP` or more at once within
@@ -1207,6 +1350,9 @@ impl Plan {
             | Task::Scoop(_)
             | Task::Cast(_)
             | Task::Enter(_)
+            // >>> eyes
+            | Task::Throw(_)
+            // <<< eyes
             | Task::Swim(..) => false,
         };
         // A strike, a change of the held slot or a click to place a block is weighed by the
@@ -1473,6 +1619,11 @@ impl Plan {
         if let Some(c) = self.ender_threat(w, tick) {
             return c;
         }
+        // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.
+        if let Some(c) = self.arrival_step(w, tick) {
+            return c;
+        }
+        // <<< Q7
         if self.finished() {
             return Controls::default();
         }
@@ -1508,8 +1659,18 @@ impl Plan {
         let remake = matches!(self.task, Task::Cast(_))
             && !holds_pickaxe(w)
             && self.pickaxe_at_hand(w, tick);
+        // >>> Q8 (issue 19): idle at a lava edge (a rail laid, a hold), sneak: the server keeps a
+        // sneaking body on its block, a knock-back too (`walk::lava_edge`).
+        let idle_sneak = matches!(self.task, Task::Idle) && crate::home::at_lava_edge(w);
+        // <<< Q8
         let (controls, status) = match &mut self.task {
-            Task::Idle => (Controls::default(), TaskStatus::Running),
+            Task::Idle => (
+                Controls {
+                    sneak: idle_sneak,
+                    ..Controls::default()
+                },
+                TaskStatus::Running,
+            ),
             Task::ToLog(walk) | Task::Explore(walk) => {
                 let out = walk.step(w, tick);
                 // A walk's bridge move lays blocks: its acts are sent and each block laid is
@@ -1636,6 +1797,9 @@ impl Plan {
                 }
                 return c;
             }
+            // >>> eyes (Q3, issue 19c): the one call site of `eyes::Plan::throw_step`.
+            Task::Throw(_) => return self.throw_step(w, tick),
+            // <<< eyes
             // `always` runs these (and ends them).
             Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
                 return Controls::default();
@@ -1692,6 +1856,8 @@ impl Plan {
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
+                    // >>> eyes
+                    Task::Throw(_) => {} // <<< eyes
                 }
                 Controls::default()
             }
@@ -1759,6 +1925,8 @@ impl Plan {
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => {}
+                    // >>> eyes
+                    Task::Throw(_) => {} // <<< eyes
                 }
                 if give_up {
                     self.maroon = w.body.is_some_and(|b| wet(w, &b));
@@ -1827,20 +1995,208 @@ impl Plan {
         }
         // >>> pearls (P3, the orchestrator 2026-11-25): in the hunt a magma cube is never fought
         // by choice (a no-heal bot loses every trade, and they split): the hunt seals a pocket.
-        if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
+        // The way home (issue 19d) is not the hunt, though the top-up started it: on the trip a
+        // magma cube that strikes is fought (race 45698618366 lane 3 walked on through five
+        // magma cube hits, 19.8 to 1.8 health in 140 ticks, its defence ignoring every cube).
+        let home_trip =
+            self.ender.phase == endermen::EnderPhase::Home && self.ender.home.top_up_over;
+        let hunt_pocket =
+            (self.pearls.started && !home_trip) || self.ender.phase == endermen::EnderPhase::Hunt;
+        // >>> Q8: on the trip a cube the rules say not to fight is never fought, even one that
+        // struck (`defend::foe_except` lets a provoked kind through `ignored`: race 45758211666
+        // lane 1 began and dropped a cube fight every tick for 420 ticks on the west span, still,
+        // until a hit knocked it off).
+        let mut home_never_cubes = false;
+        // <<< Q8
+        if hunt_pocket {
             ignored.extend(
                 w.entities
                     .iter()
                     .filter(|(_, e)| e.kind == data::EntityKind::MagmaCube)
                     .map(|(id, _)| *id),
             );
+        } else if home_trip {
+            // On the trip a cube is fought only when it is on the bot (within
+            // `home::CUBE_FIGHT`) and the health is over the danger line: a large one splits and
+            // a no-heal bot loses a long fight; further off the legs shun it, and under the line
+            // or with two near the trip seals a pocket (`home_recover`).
+            // Two within `CUBE_NEAR`, or a cube pocket in hand: the pocket, no fight.
+            let crowd = w
+                .entities
+                .values()
+                .filter(|e| {
+                    !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_NEAR
+                })
+                .count();
+            // After a pocket given up (`home::CUBE_HOLD_MAX`) the near one is fought though
+            // two are near: the pocket waits `CUBE_RESUME_TICKS`.
+            let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t);
+            // A fight begun on one cube that split (race 45722775712 lane 2: a large one struck
+            // at (418, 40, 154) became three, the defence switched among them for 280 ticks, 16.2
+            // to dead) ends once two are near: the pocket takes over.
+            if crowd >= crate::home::CUBE_CROWD && !resting && matches!(self.task, Task::Defend(_))
+            {
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "home: the cube fight dropped for the pocket".to_owned(),
+                    format!("{crowd} magma cubes within {}", crate::home::CUBE_NEAR),
+                );
+            }
+            let over = w.player.health.is_some_and(|h| h > rules.danger_health)
+                && (crowd < crate::home::CUBE_CROWD || resting)
+                && self.ender.home.cube_pocket.is_none()
+                && self.ender.home.cube_tunnel.is_none();
+            // >>> Q8: by a lava edge a large or medium cube is never struck: a split puts two to
+            // four cubes by the edge (race 45749508716 lane 3 split one on the west span, knocked
+            // into lava 40 ticks later). The rails and the sneak hold the bot; it goes on.
+            let edge = crate::home::near_lava_edge(w);
+            let big: Vec<i32> = w
+                .entities
+                .iter()
+                .filter(|(_, e)| {
+                    edge && !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        // Any size (race 45783532164 lane 0 fought a small one on the west span and was
+                        // knocked into the sea: a knock-back lifts the body, which sneaking does not hold).
+                        && crate::home::cube_size(e) >= 1
+                        && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_FIGHT
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            if !big.is_empty()
+                && self
+                    .ender
+                    .home
+                    .big_cube_noted_at
+                    .is_none_or(|t| tick >= t + 200)
+            {
+                self.ender.home.big_cube_noted_at = Some(tick);
+                self.ender.home.big_cubes_spared += 1;
+                self.note(
+                    tick,
+                    "home: a large cube not struck by a lava edge".to_owned(),
+                    format!(
+                        "{} within {} (sizes {:?}); spared {}",
+                        big.len(),
+                        crate::home::CUBE_FIGHT,
+                        big.iter()
+                            .filter_map(|id| w.entities.get(id))
+                            .map(crate::home::cube_size)
+                            .collect::<Vec<_>>(),
+                        self.ender.home.big_cubes_spared
+                    ),
+                );
+            }
+            home_never_cubes = !over || !big.is_empty();
+            ignored.extend(big);
+            // <<< Q8
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| {
+                        e.kind == data::EntityKind::MagmaCube
+                            && (!over
+                                || crate::home::dist(e.pos, body.pos) > crate::home::CUBE_FIGHT)
+                    })
+                    .map(|(id, _)| *id),
+            );
         }
-        let never_kinds: &[data::EntityKind] =
-            if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
-                &[data::EntityKind::MagmaCube]
-            } else {
-                &[]
-            };
+        // On the way home a blaze or a ghast is never fought, at any health (a fireball costs 6 to
+        // 9 through iron and nothing heals): the trip's cover takes it (`home_recover`).
+        // A rail wanted with a knocker near (`home::rail_wanted`) cuts a walk under way: the
+        // planner lays the floor beside the feet before the next step.
+        if home_trip
+            // Q8: the Nether only: the rails and the guard are laid by the Nether's recovery, and an
+            // overworld walk cut for them was cut again every tick.
+            && w
+                .dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+            && matches!(
+                self.task,
+                // Not a tunnel's stairs (Q8: race 45779137282, the guard filled its own stair).
+                Task::Explore(_) | Task::ToLog(_)
+            )
+            && (crate::home::rail_wanted(w).is_some()
+                // >>> Q8
+                || (crate::home::guard_next(w, self.ender.home.axis, &self.ender.home.guard_refused)
+                    .is_some()
+                    && self.headed.as_ref().is_none_or(|h| h.restock.is_none())))
+                // <<< Q8
+            && craft::count(w, data::ItemKind::Netherrack)
+                + craft::count(w, data::ItemKind::Basalt)
+                + craft::count(w, data::ItemKind::Cobblestone)
+                > 0
+        {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.retry_at = tick;
+            self.note(
+                tick,
+                format!("home: {cut} cut for a rail"),
+                "a mob that knocks back near and no floor beside the feet".to_owned(),
+            );
+        }
+        // >>> Q8 (issue 19): a shooter that first sees the bot on the trip cuts a walk or a tunnel
+        // under way, so the trip's cover runs (Q10's race 45768707240 lane 1: three ghast fireballs
+        // in a level tunnel at (75, 33, 179), 15.6 to dead, no cover note). Once a sighting; in the
+        // Nether only (F3, race 45800967549: the overland legs cut 131 times in one tick by a
+        // skeleton, the sighting never recorded outside the Nether's recovery).
+        if home_trip
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+            && matches!(
+                self.task,
+                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+            )
+            && self
+                .ender
+                .home
+                .shooter_seen_at
+                .is_none_or(|t| tick >= t + crate::home::SHOOTER_CLEAR_TICKS)
+            && (crate::home::ghast_sees(w)
+                || crate::home::skeleton_sees(w)
+                || endermen::seen_by_far_shooter(w))
+        {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.retry_at = tick;
+            self.ender.home.shooter_cuts += 1;
+            self.ender.home.shooter_seen_at = Some(tick);
+            self.note(
+                tick,
+                format!("home: {cut} cut for cover"),
+                format!(
+                    "a ghast, blaze or skeleton has the bot in sight; cut {}",
+                    self.ender.home.shooter_cuts
+                ),
+            );
+        }
+        // <<< Q8
+        if home_trip {
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| {
+                        matches!(
+                            e.kind,
+                            data::EntityKind::Blaze
+                                | data::EntityKind::Ghast
+                                | data::EntityKind::Skeleton
+                        )
+                    })
+                    .map(|(id, _)| *id),
+            );
+        }
+        let never_kinds: &[data::EntityKind] = if hunt_pocket || home_never_cubes {
+            &[data::EntityKind::MagmaCube]
+        } else {
+            &[]
+        };
         // <<< pearls
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
@@ -1867,6 +2223,9 @@ impl Plan {
             | Task::Scoop(_)
             | Task::Cast(_)
             | Task::Enter(_)
+            // >>> eyes
+            | Task::Throw(_)
+            // <<< eyes
             | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
@@ -1922,6 +2281,9 @@ impl Plan {
                     | Task::Defend(_)
                     | Task::Eat(_)
                     | Task::Hunt(_) => String::new(),
+                    // >>> eyes
+                    Task::Throw(_) => String::new(),
+                    // <<< eyes
                 };
                 self.retry_at = tick;
                 self.note(
@@ -2033,7 +2395,15 @@ impl Plan {
             }
             Task::Defend(d) => {
                 let (sent, landed) = (d.swings, d.landed);
-                let (c, act, status) = d.step(w, rules, tick);
+                let (mut c, act, status) = d.step(w, rules, tick);
+                // >>> Q8 (issue 19): a fight at a lava edge sneaks: the server holds a sneaking
+                // body on its block, its own steps and a knock-back (race 45758211666 lane 2 was
+                // hit into the lava sea fighting small cubes on the island by the join).
+                if !c.jump && crate::home::at_lava_edge(w) {
+                    c.sneak = true;
+                    d.edge_sneak_ticks += 1;
+                }
+                // <<< Q8
                 said = std::mem::take(&mut d.notes);
                 self.swings_sent += u64::from(d.swings.saturating_sub(sent));
                 self.swings_landed += u64::from(d.landed.saturating_sub(landed));
@@ -2066,7 +2436,7 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck, {} steps off fire on the deck",
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck, {} steps off fire on the deck, {} ticks sneaked at a lava edge",
                             d.swings,
                             d.landed,
                             d.stance,
@@ -2084,7 +2454,8 @@ impl Plan {
                             d.passing_swings,
                             d.fire_held,
                             d.rod_steps,
-                            d.fire_steps
+                            d.fire_steps,
+                            d.edge_sneak_ticks
                         )))
                     }
                 };
@@ -2123,6 +2494,9 @@ impl Plan {
             | Task::Scoop(_)
             | Task::Cast(_)
             | Task::Enter(_)
+            // >>> eyes
+            | Task::Throw(_)
+            // <<< eyes
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
@@ -2269,11 +2643,71 @@ impl Plan {
             return;
         }
         // A nearly full inventory drops a stack of junk first, by the same quick-move clock.
-        let junk = self
+        let mut junk = self
             .table
             .as_ref()
             .map(|t| t.survival.junk.clone())
             .unwrap_or_default();
+        // >>> overland and stronghold (Q4): the Nether's leftovers go in the overworld while the
+        // stronghold is the aim (race 45695074789 lane 0's full pack took no cobblestone from nine
+        // stair legs, and lane 1's crafts failed on a full pack).
+        if self.aim == Aim::Race
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == stronghold::OVERWORLD)
+            && (craft::count(w, data::ItemKind::EnderEye) > 0 || self.stronghold.room.is_some())
+        {
+            junk.extend(self.stronghold_rules().junk_kinds());
+        }
+        // >>> Q11 (issue 19): the fortress stretch's tunnel fills the pack (race 45766983995: every
+        // wooden pickaxe craft failed on a full pack) (`crate::fortress_way`).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(self.fortress_rules().junk_kinds());
+        }
+        // <<< Q11
+        // >>> Q8 (issue 19): the same leftovers on the whole trip home in the Nether, the top-up over
+        // (the coordinator, 2026-11-26: Q11's race 45766983995 filled every pack before its
+        // tunnel), basalt kept to 64 for the guard and the bridges (the deltas' restock digs it).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.top_up_over
+            && !self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(
+                self.fortress_rules()
+                    .junk_kinds()
+                    .into_iter()
+                    .map(|(k, n)| {
+                        if k == data::ItemKind::Basalt {
+                            (k, crate::home::BASALT_KEPT)
+                        } else if k == data::ItemKind::Netherrack {
+                            (k, crate::home::NETHERRACK_KEPT)
+                        } else {
+                            (k, n)
+                        }
+                    }),
+            );
+        }
+        // <<< Q8
+        // A kind that came back after its drop is held back (`junk_watch`, `junk_now`).
+        self.junk_watch(w, tick);
+        let walking = matches!(self.task, Task::Explore(_));
+        let junk = stronghold::junk_now(&junk, &self.stronghold.junk_held, tick, walking);
+        // In a hut nothing is dropped: a drop lands inside and comes back (Q7's race
+        // 45741154601); its blocks are the hut's walls instead (`overland_hut_step`).
+        let junk = if self.overland.hut.is_some() {
+            Vec::new()
+        } else {
+            junk
+        };
+        // <<< overland and stronghold
         // A click no reply came to, with the pack full of junk: window 0 asked for again, so the
         // drop below can go (overworld-leg wall 10: a craft's take into a full pack drew no
         // reply, the click stayed pending, and no junk was dropped for 1,600 ticks until the
@@ -2321,6 +2755,9 @@ impl Plan {
             // Kept to count a pick-up of it again (wall 12).
             let stack = w.inventory.slots.get(&slot).map_or(0, |(_, n)| *n);
             self.dropped = Some((kind, -(craft::count(w, kind) - stack).max(0) - 1, tick));
+            // >>> overland and stronghold (Q4): the drop kept per kind for `junk_watch`.
+            self.junk_dropped(kind, (craft::count(w, kind) - stack).max(0), tick);
+            // <<< overland and stronghold
             // Mode 4 button 1: drop the whole stack (the client's ctrl+Q over the slot).
             self.acts.push(world::Act::Click {
                 slot,
@@ -2386,6 +2823,17 @@ impl Plan {
         {
             return Task::Idle;
         }
+        // >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home, in either dimension;
+        // `None` when not on it or once it is over.
+        if let Some(t) = self.home_race_task(w, tick) {
+            return t;
+        }
+        // <<< home
+        // >>> overland and stronghold (Q4, issue 19e/f)
+        if let Some(t) = self.eyes_stronghold_task(w, tick) {
+            return t;
+        }
+        // <<< overland and stronghold
         if w.dimension
             .as_ref()
             .is_some_and(|d| d.name == "minecraft:the_nether")
@@ -2502,12 +2950,134 @@ impl Plan {
                     walk,
                     cell: c,
                     inside_since: None,
+                    from: w.dimension.as_ref().map(|d| d.name.clone()),
                 }));
             }
             self.refuse(c, tick);
         }
         self.decide(w, origin, tick)
     }
+
+    // >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md)
+    /// In the overworld with eyes held (or a portal room known): into the room if its frames are
+    /// seen, else overland toward the fix (`OverlandState::fix`, set from the eyes' fix), else
+    /// `None` (the eyes' throws come first; the orchestrator orders the calls).
+    fn eyes_stronghold_task(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.aim != Aim::Race {
+            return None;
+        }
+        // The eyes made from the pearls and rods held, before anything else (a safety net: Q2's
+        // Home phase crafts them in the forest, so this normally finds nothing to do).
+        let overworld = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == stronghold::OVERWORLD);
+        if overworld && let Some(t) = self.eyes_craft_task(w, tick) {
+            return Some(t);
+        }
+        let eyes = craft::count(w, data::ItemKind::EnderEye) > 0;
+        if !eyes && self.stronghold.room.is_none() {
+            return None;
+        }
+        // A full pack with only held-back junk: a block of it put down, never dropped.
+        if let Some(t) = self.junk_place(w, tick) {
+            return Some(t);
+        }
+        // Fresh stone pickaxes first, between legs and stairs (not in the room: the nook's).
+        let in_room = self.stronghold.entered_noted;
+        if !in_room && let Some(t) = self.stronghold_pickaxes(w, tick) {
+            return Some(t);
+        }
+        // The eyes' fix is the overland's target from the moment it is crossed.
+        if let Some(f) = self.fix {
+            let fix = (f.point, f.err_along.max(f.err_across));
+            if self.overland.fix != Some(fix) || self.overland.way {
+                self.overland.retarget(fix, false);
+            }
+        }
+        // Into the room when its frames are seen, or the search from the fix's arrival.
+        if let Some(t) = self.stronghold_task(w, tick) {
+            return Some(t);
+        }
+        // A throw due here, or the eye of the last one followed and picked up (Q3).
+        if let Some(t) = self.eyes_task(w, tick) {
+            return Some(t);
+        }
+        // No fix yet: the walk to the spot the next throw is due at (the baseline for throw 2),
+        // measured from the spot's own point when a nudge moved the walk off it.
+        if self.fix.is_none()
+            && let Some(p) = self.eyes_way(w)
+        {
+            let base = self.overland.way_base.or(self.overland.fix.map(|(q, _)| q));
+            if !self.overland.way
+                || base.is_none_or(|q| (q[0] - p[0]).hypot(q[1] - p[1]) > WAY_MOVED)
+            {
+                self.overland.retarget((p, 0.0), true);
+                self.overland.way_base = None;
+                self.overland.nudges = 0;
+            }
+            // At the spot with the throw waiting (a canopy or a cliff on the bearing, race
+            // 45719263137 lane 1 idled 2,000 ticks): the spot moved `WAY_NUDGE` round the compass,
+            // `WAY_NUDGES` times at most.
+            if self.overland.way && self.overland.arrived {
+                let since = *self.overland.wait_from.get_or_insert(tick);
+                if tick.saturating_sub(since) > WAY_WAIT && self.overland.nudges < WAY_NUDGES {
+                    let base = self.overland.way_base.unwrap_or(p);
+                    let (dx, dz) = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)]
+                        [self.overland.nudges as usize % 4];
+                    let ring = f64::from(self.overland.nudges / 4 + 1) * WAY_NUDGE;
+                    let to = [base[0] + dx * ring, base[1] + dz * ring];
+                    let nudges = self.overland.nudges + 1;
+                    self.overland.retarget((to, 0.0), true);
+                    self.overland.way_base = Some(base);
+                    self.overland.nudges = nudges;
+                    self.note(
+                        tick,
+                        format!("overland throw spot moved ({nudges} of {WAY_NUDGES})"),
+                        format!(
+                            "the throw waited {} ticks at ({:.0}, {:.0}); to ({:.0}, {:.0})",
+                            tick.saturating_sub(since),
+                            base[0],
+                            base[1],
+                            to[0],
+                            to[1]
+                        ),
+                    );
+                } else if tick.saturating_sub(since) > WAY_WAIT
+                    && self.overland.nudges >= WAY_NUDGES
+                    && !self.eyes.force_throw
+                {
+                    // The moves spent and the throw still waiting: it goes anyway, through the
+                    // column (`EyeState::force_throw`); a lost eye costs less than a stalled run.
+                    self.eyes.force_throw = true;
+                    self.note(
+                        tick,
+                        "overland throw forced".to_owned(),
+                        format!(
+                            "{WAY_NUDGES} spot moves spent and the throw waited {} ticks",
+                            tick.saturating_sub(since)
+                        ),
+                    );
+                }
+            } else {
+                self.overland.wait_from = None;
+            }
+        }
+        if let Some(t) = self.overland_task(w, tick) {
+            return Some(t);
+        }
+        // Eyes held in the overworld and nothing to do now (a throw that waits on the night or
+        // a hostile): a look again, never on to the Nether task's portal below.
+        if w.dimension
+            .as_ref()
+            .is_some_and(|d| d.name == stronghold::OVERWORLD)
+        {
+            self.retry_at = tick + RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        None
+    }
+    // <<< overland and stronghold
 
     /// Under the engage health in the Nether: rest where no shooter in range sees the body and
     /// nothing burns; seen or burning, the nearest cell out of sight on a found route; with none,
@@ -3609,7 +4179,9 @@ impl Plan {
         // come back up, stocked, before the cast.
         let mut stock_row = false;
         let mut cook_row = false;
-        if self.aim == Aim::Race && !self.kit_row {
+        if self.home_cook {
+            cook_row = true;
+        } else if self.aim == Aim::Race && !self.kit_row {
             match self.clean_flow(w, &table.survival, tick) {
                 Flow::Task(t) => return *t,
                 Flow::Stock => stock_row = true,
@@ -5663,9 +6235,13 @@ pub fn own_heading(feet: Cell, pool: Option<Cell>, legs: u32) -> (i32, i32) {
 /// A dry staircase's turns from water, for its ending note (overworld-leg wall 7); empty for
 /// any other staircase or none.
 fn water_turns(st: &Stairs) -> String {
-    match st.water_refusals() {
+    let water = match st.water_refusals() {
         0 => String::new(),
         n => format!(" ({n} turned from water beside)"),
+    };
+    match st.cave_refusals() {
+        0 => water,
+        n => format!("{water} ({n} turned from a cave ahead)"),
     }
 }
 
@@ -5771,11 +6347,16 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
             .and_then(|t| i32::try_from(t).ok())
             .unwrap_or(0)
     };
+    // Sticks over the reserve burn too (100 ticks, whatever planks made them: a stick is not in
+    // `#non_flammable_wood`), the smelt's own last fuel (`smelt::fuels_held`).
+    let sticks_over =
+        (counts.get(&data::ItemKind::Stick).copied().unwrap_or(0) - make::STICK_RESERVE).max(0);
     let have: i32 = counts
         .iter()
         .filter(|(k, _)| planks.contains(k) || coals.contains(k))
         .map(|(k, n)| n * burns(k))
-        .sum();
+        .sum::<i32>()
+        + sticks_over * burns(&data::ItemKind::Stick);
     let row = |id: &str, need: make::Need, count: i32| make::Row {
         id: id.to_owned(),
         needs: Vec::new(),
@@ -5787,15 +6368,52 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
     };
     if have < need {
         let plank = burns(&data::ItemKind::OakPlanks).max(1);
-        let held: i32 = counts
+        // Warped and crimson wood does not burn (the way home carries its stems): with any held,
+        // the fuel row names the planks of a log that burns, so no stem is crafted for fuel.
+        let logs = data::generated::tags::item_tag("logs").unwrap_or(&[]);
+        let nether_wood = counts
             .iter()
-            .filter(|(k, _)| planks.contains(k))
-            .map(|(_, n)| *n)
-            .sum();
+            .any(|(k, n)| *n > 0 && (planks.contains(k) || logs.contains(k)) && burns(k) == 0);
+        let burning_log = counts
+            .iter()
+            .filter(|(k, n)| **n > 0 && logs.contains(k) && burns(k) > 0)
+            .filter_map(|(k, _)| {
+                k.name()?
+                    .strip_suffix("_log")
+                    .map(|b| format!("{b}_planks"))
+            })
+            .find(|p| data::ItemKind::from_name(p).is_some());
+        let stick = burns(&data::ItemKind::Stick).max(1);
+        let (need_name, held) = match burning_log {
+            Some(p) if nether_wood => {
+                let held = data::ItemKind::from_name(&p)
+                    .and_then(|k| counts.get(&k).copied())
+                    .unwrap_or(0);
+                (format!("item:{p}"), held)
+            }
+            // Only nether wood: sticks, crafted from its planks (a warped stem is 8 sticks).
+            None if nether_wood => {
+                let held = counts.get(&data::ItemKind::Stick).copied().unwrap_or(0);
+                let more = (need - have + stick - 1) / stick;
+                return Some(row(
+                    "cook-fuel",
+                    make::Need::parse("item:stick")?,
+                    held + more,
+                ));
+            }
+            _ => (
+                "tag:planks".to_owned(),
+                counts
+                    .iter()
+                    .filter(|(k, _)| planks.contains(k) && burns(k) > 0)
+                    .map(|(_, n)| *n)
+                    .sum(),
+            ),
+        };
         let more = (need - have + plank - 1) / plank;
         return Some(row(
             "cook-fuel",
-            make::Need::parse("tag:planks")?,
+            make::Need::parse(&need_name)?,
             held + more,
         ));
     }

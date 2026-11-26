@@ -5,8 +5,8 @@ type: reference
 tags: [plan, path, astar, routes, core]
 aliases: [path, pathfinder, A*, route, waypoints, Cells, classify, awkward, moves, goals, Near, Afar, budget, expansions, start_cell]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@31545c1 clojurecraft@be85a92
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@b09de3d clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/path.rs#pub fn classify(state: Option<u32>) -> Class {"
   - "ruststeve:crates/plan/src/path.rs#pub fn search(cells: &mut Cells<'_>, start: Cell, goal: &Goal, max_nodes: u32) -> Route {"
@@ -40,7 +40,7 @@ Issue 09a: clojurecraft's `path.clj` in Rust (`plan::path`), constant for consta
 
 ## Issue 16: the Nether walk (docs/problems/nether-walk.md)
 - **Soul sand is ground**: `classify` answers `Solid` for it (a box 0.875 high the physics stands on). Feet resting on it floor to the soul sand's own cell, so `plan` searches from the cell over it and the walk reads its node with `stand_cell`; `feet_cell` is unchanged for every other task (a global lift of the feet's cell broke the tunnel's stairs on soul sand and was taken out). Magma stays `Awkward`.
-- **The bridge move** (`MoveKind::Bridge`, a far search's alone (`plan_far`, `Cells::far`), Nether only, with `BRIDGE_RESERVE` of the `BRIDGE_BLOCKS` held): one cell on the level whose floor is air or lava, laid first by the walk. Its cost is a walk plus `BRIDGE_COST` 3. Its feet cell may have lava under (`clear_over`), never beside. The overworld is not bridged and water is never laid in.
+- **The bridge move** (`MoveKind::Bridge`, a far search's alone (`plan_far`, `Cells::far`), Nether only, with `BRIDGE_RESERVE` of the `BRIDGE_BLOCKS` held): one cell on the level whose floor is air or lava, laid first by the walk. Its cost is a walk plus `BRIDGE_COST` 3. Its feet cell may have lava under (`clear_over`), never beside. The overworld is not bridged and water is never laid in. Basalt and blackstone are bridge blocks too (issue 19d: the deltas' own walls, restocked by the way home).
 - **A far search keeps clear of mobs that kill on sight** (`SHUN_KINDS`: piglins, brutes, hoglins, and from issue 18c wither skeletons): no cell within `SHUN_RADIUS` 24 of one (20 through issue 17; the travel to the warped forest is at no-heal health), none within `SHUN_MAGMA` 8 of a magma cube and none within `SHUN_SKELETON` 16 of a skeleton (`path::shun_radius`); the travel's plain walks shun too (`Walk.more.shun`), except within `SHUN_FREE` 6 of the start. Two piglins killed a bot in iron in 100 ticks on its first bridged route (race 45337580375). Magma blocks are awkward, never a floor.
 - **The bridge block held** (`path::bridge_item`): the bridge block in hand, else the stack on the cursor, else the kind with the most held; `bridge_blocks` counts the cursor's stack. Chosen afresh by count alone, a stack lifted for the swap stopped counting and the swap undid itself for 3,500 ticks 35 blocks from the warped forest (race 45531577912 lane 1).
 - **`Goal::Plane`** (issue 18c): within a range on the plane at any height; a travel leg toward a far forest ends where the ground there is.
@@ -51,6 +51,7 @@ Issue 09a: clojurecraft's `path.clj` in Rust (`plan::path`), constant for consta
 ## Issue 17d: the heading's legs (docs/problems/heading.md)
 - **`Goal::Ahead { from, dir, gain }`**: `gain` or more along a compass axis from `from` (`path::along` gives a cell's projection and how far aside), no more than `gain` aside. A heading's leg ends wherever the ground lets it, not at one cell that may be rock.
 - **Blocked cells** (`Cells::blocking`): a search never enters them. The heading gives its cut cells at or behind the feet, so a leg never walks back over ground it covered (clojurecraft's causeway pacing).
+- **Bridges over water** (issue 19e, `Cells::far_over_water`, `walk::More::water`): an overland leg's far search may lay held blocks over water (a river) in the overworld, with its keep; every other search still never lays into water.
 - **A keep for bridging** (`Cells::far_keeping`): a far search bridges only with that many blocks held; the heading keeps 32, the fortress walk `BRIDGE_RESERVE` 16. `plan_over` searches cells the caller made.
 
 ## See also

@@ -42,6 +42,7 @@ fn opts() -> Result<bot::Opts, String> {
         on_stage: None,
         no_progress_ticks: None,
         snapshot_at: None,
+        eyes: None,
         progress: None,
     };
     let mut seconds = 600u64;

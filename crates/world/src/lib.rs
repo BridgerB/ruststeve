@@ -93,6 +93,11 @@ pub struct Entity {
     /// A fireball's acceleration power (`projectile_power`).
     #[serde(default)]
     pub power: Option<f64>,
+    /// Its velocity at spawn, from `add_entity` (issue 19b: a thrown eye's first motion). Kept
+    /// apart from `velocity` (the server's later `set_entity_motion`), which the fireball
+    /// readers take as "sent since".
+    #[serde(default)]
+    pub spawn_velocity: Option<[f64; 3]>,
     /// What rides it (`set_passengers`).
     #[serde(default)]
     pub passengers: Vec<i32>,
@@ -1365,6 +1370,7 @@ impl World {
                 x,
                 y,
                 z,
+                velocity: spawn,
             } => {
                 if Some(*id) != self.player.entity_id && [x, y, z].iter().all(|v| v.is_finite()) {
                     let tick = self.session.server_ticks;
@@ -1386,6 +1392,7 @@ impl World {
                             equipment: BTreeMap::new(),
                             swung_at: None,
                             power: None,
+                            spawn_velocity: spawn.iter().all(|v| v.is_finite()).then_some(*spawn),
                             passengers: Vec::new(),
                             effects: BTreeMap::new(),
                             attributes: BTreeMap::new(),
@@ -1992,6 +1999,7 @@ mod blaze_charge {
             equipment: BTreeMap::new(),
             swung_at: None,
             power: None,
+            spawn_velocity: None,
             passengers: Vec::new(),
             effects: BTreeMap::new(),
             attributes: BTreeMap::new(),
@@ -2064,6 +2072,7 @@ mod entity_tests {
             x: 0.0,
             y: 64.0,
             z: 0.0,
+            velocity: [0.0; 3],
         });
         w.fold(&S2c::SetEntityMotion {
             id: 7,
@@ -2096,6 +2105,7 @@ mod entity_tests {
             x: 0.0,
             y: 64.0,
             z: 0.0,
+            velocity: [0.0; 3],
         });
         w.fold(&S2c::SetEntityData {
             id: 7,
@@ -2137,6 +2147,7 @@ mod hearing_tests {
             x: 3.0,
             y: 64.0,
             z: 4.0,
+            velocity: [0.0; 3],
         });
         w.fold(&S2c::SoundEntity {
             sound: SoundRef::Inline("entity.enderman.stare".to_owned()),
@@ -2173,6 +2184,7 @@ mod sight_tests {
             x: pos[0],
             y: pos[1],
             z: pos[2],
+            velocity: [0.0; 3],
         });
     }
 

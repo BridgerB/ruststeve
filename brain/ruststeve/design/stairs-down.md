@@ -5,8 +5,8 @@ type: reference
 tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@3c8b108 clojurecraft@be85a92
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@b09de3d clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -76,8 +76,10 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 
 ## Issue 16: dry stairs (overworld-leg wall 7)
 - **`Stairs::dry`**: water beside a cell a stair or level step opens refuses it too ("water beside", the heading turns), as lava beside does for every staircase. Set by the lava hunt's own stairs (`Plan::own_stairs`) only: a leg at y 55 cut beside an aquifer, the water ran in and the bot was held in it 20,000 ticks (race 45343519424 lane 2). The ending note counts the turns ("cut 6 stairs (N turned from water beside)"). Test `a_dry_staircase_turns_from_water_beside` (bot).
+- **`Stairs::rock`** (issue 19d, the way home's climb): with a start cell set, once the feet are more than `ROCK_FROM` 4 from it on the plane, a cell a stair or level step would cut that is already open is a cave ("cave at", the heading turns). The home climb sets it, with `dry`, to where the climb began (the overworld portal's room is open). The ending note counts the turns ("turned from a cave ahead"). Test `the_climbs_stairs_turn_from_a_cave_ahead` (plan home).
 - **Back from a ledge** (overworld-leg wall 9): two own-stairs legs from one cell that left the feet there walk the bot back up the leg that led to it, once (`Plan::own_into`, "own stairs back to …"); the next leg from there turns from that heading (`own_back`, "own stairs turned from … to …").
 - **Laid stairs need ground**: only with ground within 6 under the step (`LAY_OVER`), never out over a drop; a block that has shown leaves the list and the next gets its own click.
 - **A staircase is bounded**: one stair's cells take at most 8 digs (`MAX_CUT_TRIES`) and the feet stay in one cell at most 1,200 ticks (`STAND_TICKS`); a travel tunnel's step whose walk fails is steered straight (the end note counts blocks laid and steps steered).
+- **Infested blocks** (issue 19f, the stronghold): a cell to open that is an infested kind (`stairs::infested`, read from chunk data as lava beside is) is refused ("infested at …"), and the travel tunnel's route reads it as a wall: a silverfish woken is a fight under no-heal health.
 - **No bricks seen, in the Nether**: `Plan::explore_tunnel`, a search tunnel on a held compass heading, 48 blocks a leg, before any explore walk.
 - **Raced again** (race 45344386490, d4422d4): 2 of 3 at `fortress`, refusals 7 a bot (22 before); the third died to a ghast on the portal ledge at tick 240, before its first stretch.

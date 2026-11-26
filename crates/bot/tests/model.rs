@@ -45,6 +45,7 @@ fn the_bot_joins_the_model_and_walks() {
         on_stage: None,
         no_progress_ticks: None,
         snapshot_at: None,
+        eyes: None,
         progress: None,
     })
     .unwrap();

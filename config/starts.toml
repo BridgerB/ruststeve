@@ -226,3 +226,65 @@ stage = "endermen"
 place = { dimension = "minecraft:the_nether", x = 490.5, y = 45, z = 5.5 }
 spread = 8
 spread_under = 80
+
+# DEVELOPMENT starts for issue 19 (2026-11-25; never issue-19 evidence, never the frontier): the
+# pearls_12 frontier bot put on the overworld surface with its eyes made and food, so the eyes,
+# the overland walk and the stronghold are developed while real bots travel home. Race them only
+# with the frontier's snapshot (`snapshot=frontier`: its world, memory and player file). The
+# places are development knowledge only (RCON `locate structure minecraft:stronghold`, probe
+# 45685968956, docs/problems/eyes-observe.md): this world's stronghold at (1648, ~, -16), 1,537
+# blocks east of the overworld portal near (113, -50, -105); never read by the bot.
+# dev-overworld-eyes: the bot's old surface stairs at (55, 70, -133), where a real bot climbing
+# from its portal comes out. Each bot to the surface within 16.
+[[start]]
+name = "dev-overworld-eyes"
+stage = "pearls_12"
+place = { dimension = "minecraft:overworld", x = 55.5, y = 70, z = -132.5 }
+spread = 16
+kit = [["ender_eye", 14], ["cooked_beef", 32], ["crafting_table", 1], ["stick", 8]]
+
+# dev-stronghold: 150 blocks west of the located stronghold, on the surface within 16, for the
+# dig into the portal room (19f).
+[[start]]
+name = "dev-stronghold"
+stage = "pearls_12"
+place = { dimension = "minecraft:overworld", x = 1498.5, y = 90, z = -15.5 }
+spread = 16
+kit = [["ender_eye", 14], ["cooked_beef", 32], ["crafting_table", 1], ["stick", 8]]
+
+# DEVELOPMENT starts for issue 19's later home legs (2026-11-25; never evidence, never the
+# frontier), so they are developed while real bots cross the deltas. Race them only with the
+# frontier's snapshot. Places are the chain's own ground (development knowledge from the
+# snapshot's memory and region files, docs/problems/eyes-observe.md):
+# dev-nether-home: the endermen frontier's old pocket at (8, 85, 81) in the soul sand valley, the
+# last way point before the bot's own Nether portal at (22, 34, -20), about 100 blocks north.
+# The eyes are made, so home skips the top-up and the kit.
+[[start]]
+name = "dev-nether-home"
+stage = "pearls_12"
+place = { dimension = "minecraft:the_nether", x = 8.5, y = 85, z = 81.5 }
+spread = 6
+spread_under = 100
+kit = [["ender_eye", 14], ["netherrack", 64], ["crafting_table", 1], ["stick", 8]]
+
+# dev-overworld-arrival: the bot's overworld portal's south face at (125, -51, -107), where a
+# real bot comes out of the Nether near the lava sea, in the cave band; for the climb in rock and
+# the food on the surface. No food given: the real bot has none.
+[[start]]
+name = "dev-overworld-arrival"
+stage = "pearls_12"
+place = { dimension = "minecraft:overworld", x = 125.5, y = -52, z = -106.5 }
+kit = [["ender_eye", 14], ["crafting_table", 1], ["stick", 8]]
+
+# dev-nether-fortress (issue 19, 2026-11-25; development only, never evidence or the frontier):
+# the frontier bot put on the trip home's route just west of the blaze spawner's detour, where
+# real bots of races B5 to B9 reached and then stalled or died (docs/problems/eyes-home.md), so
+# the stretch from the fortress to the portal is raced on its own. Race it only with
+# `snapshot=frontier`. The eyes are made, so Home skips the top-up and the kit.
+[[start]]
+name = "dev-nether-fortress"
+stage = "pearls_12"
+place = { dimension = "minecraft:the_nether", x = 100.5, y = 45, z = 205.5 }
+spread = 4
+spread_under = 70
+kit = [["ender_eye", 14], ["netherrack", 128], ["crafting_table", 1], ["stick", 8], ["warped_stem", 8]]

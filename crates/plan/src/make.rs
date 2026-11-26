@@ -223,6 +223,28 @@ pub struct Goals {
     #[serde(default)]
     pub base: crate::base::Base,
     // <<< base
+    // >>> overland and stronghold (Q4, issue 19e/f): `[overland]` and `[stronghold]`.
+    #[serde(default)]
+    pub overland: crate::overland::OverlandRules,
+    #[serde(default)]
+    pub stronghold: crate::stronghold::StrongholdRules,
+    // <<< overland and stronghold
+    // >>> home (Q2, issue 19d): `[home]`, the way home's numbers.
+    #[serde(default)]
+    pub home: crate::home::HomeRules,
+    // <<< home
+    // >>> Q6 (issue 19): `[portal_way]`, the last leg's numbers.
+    #[serde(default)]
+    pub portal_way: crate::portal_way::WayRules,
+    // <<< Q6
+    // >>> Q11 (issue 19): `[fortress_way]`, the fortress stretch's numbers.
+    #[serde(default)]
+    pub fortress_way: crate::fortress_way::FortressRules,
+    // <<< Q11
+    // >>> eyes (Q3, issue 19c): `[eyes]`, the throws' numbers.
+    #[serde(default)]
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -569,6 +591,22 @@ pub struct Table {
     // >>> base
     pub base: crate::base::Base,
     // <<< base
+    // >>> overland and stronghold (Q4)
+    pub overland: crate::overland::OverlandRules,
+    pub stronghold: crate::stronghold::StrongholdRules,
+    // <<< overland and stronghold
+    // >>> home
+    pub home: crate::home::HomeRules,
+    // <<< home
+    // >>> Q6
+    pub portal_way: crate::portal_way::WayRules,
+    // <<< Q6
+    // >>> Q11
+    pub fortress_way: crate::fortress_way::FortressRules,
+    // <<< Q11
+    // >>> eyes
+    pub eyes: crate::eyes::EyeRules,
+    // <<< eyes
 }
 
 impl Table {
@@ -768,6 +806,22 @@ impl Table {
                 valley_wait_ticks: g.survival.valley_wait_ticks,
             },
             base: g.base.clone(),
+            // >>> overland and stronghold (Q4)
+            overland: g.overland.clone(),
+            stronghold: g.stronghold.clone(),
+            // <<< overland and stronghold
+            // >>> home
+            home: g.home.clone(),
+            // <<< home
+            // >>> Q6
+            portal_way: g.portal_way.clone(),
+            // <<< Q6
+            // >>> Q11
+            fortress_way: g.fortress_way.clone(),
+            // <<< Q11
+            // >>> eyes
+            eyes: g.eyes.clone(),
+            // <<< eyes
         })
     }
 
@@ -1188,6 +1242,12 @@ mod tests {
             survival: Survival::default(),
             pearls: crate::pearls::PearlRules::default(),
             base: crate::base::Base::default(),
+            overland: crate::overland::OverlandRules::default(),
+            stronghold: crate::stronghold::StrongholdRules::default(),
+            home: crate::home::HomeRules::default(),
+            portal_way: crate::portal_way::WayRules::default(),
+            fortress_way: crate::fortress_way::FortressRules::default(),
+            eyes: crate::eyes::EyeRules::default(),
         };
         Table::new(&g).unwrap()
     }

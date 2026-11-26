@@ -41,3 +41,12 @@ z = -240
 [[landing]]
 x = 400
 z = 80
+
+# Landing 10 (issue 19, y03 and y04): over the parity seed's portal room (probe 45690314001:
+# the ring's centre cell (1628, 19, -34)), captured 7 columns each way so a bot 100 blocks west
+# still has the room's chunks (8, the view distance, is a circle: parity 45694311575's capture
+# never got its 4 corners).
+[[landing]]
+x = 1628
+z = -34
+radius = 7

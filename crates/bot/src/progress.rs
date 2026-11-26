@@ -34,6 +34,9 @@ pub enum Gain {
     /// An enderman killed by the bot or a pearl picked up (issue 18b): a hunt that kills is
     /// going on even when a pearl lost and found again is no more than the most held.
     Hunt,
+    /// Issue 19b: an eye thrown or picked up, an end portal frame seen, or a new dimension: the
+    /// search for the stronghold goes on while the eyes held stay at most what was held.
+    Eyes,
 }
 
 /// The run's progress so far.
@@ -88,6 +91,16 @@ impl Progress {
                 | observe::Fact::EndermanHit { .. }
                 | observe::Fact::PearlDropped { .. }
                 | observe::Fact::BlockTaken { .. } => {}
+                // An eye thrown or picked up, or a frame seen, is the stronghold search going on
+                // (the eyes held fall with each throw, so the item rule never counts them); a
+                // flight's end, a shatter or a silverfish is not by itself.
+                observe::Fact::EyeThrown { .. }
+                | observe::Fact::EyePicked { .. }
+                | observe::Fact::FrameSeen { .. }
+                | observe::Fact::Dimension { .. } => gain = gain.or(Some(Gain::Eyes)),
+                observe::Fact::EyeFlight { .. }
+                | observe::Fact::EyeEnded { .. }
+                | observe::Fact::SilverfishWoken { .. } => {}
                 observe::Fact::Item { item, to, .. } => {
                     let most = self.most.get(item).copied();
                     if most.is_none() && *to > 0 {
@@ -113,7 +126,6 @@ impl Progress {
                 | observe::Fact::ToolGone { .. }
                 | observe::Fact::HealthDrop { .. }
                 | observe::Fact::Cursor { .. }
-                | observe::Fact::Dimension { .. }
                 | observe::Fact::Effect { .. }
                 | observe::Fact::Sound { .. }
                 | observe::Fact::LevelEvent { .. }
@@ -313,7 +325,57 @@ mod tests {
         .unwrap();
         assert_eq!(race_items(&text).get("blaze_rod"), Some(&7));
         assert_eq!(race_items(&text).get("ender_pearl"), Some(&12));
+        assert_eq!(race_items(&text).get("ender_eye"), Some(&12));
         assert!(race_items("[race]\ncap_ticks = 1").is_empty());
+    }
+
+    /// Issue 19b: an eye thrown or picked up, a frame seen and a dimension entered are progress;
+    /// a flight's end, a shatter and a silverfish are not.
+    #[test]
+    fn an_eye_thrown_or_a_frame_seen_is_progress() {
+        let fact = |at, fact| observe::Stamped { at, fact };
+        let mut p = Progress::new(BTreeMap::new());
+        p.see(100, &[], HERE);
+        let quiet = [
+            observe::Fact::EyeEnded {
+                id: 1,
+                dropped: false,
+                at: [0.0; 3],
+            },
+            observe::Fact::EyeFlight {
+                id: 1,
+                first: [0.0; 3],
+                last: [9.0, 0.0, 0.0],
+                heading: Some(-90.0),
+                samples: 40,
+                ticks: 40,
+            },
+            observe::Fact::SilverfishWoken { id: 2, d: 3.0 },
+        ];
+        for (i, f) in quiet.into_iter().enumerate() {
+            assert_eq!(p.see(101 + i as u64, &[fact(101, f)], HERE), None);
+        }
+        for (i, f) in [
+            observe::Fact::EyeThrown {
+                id: 3,
+                from: [0.0; 3],
+                yaw: None,
+            },
+            observe::Fact::EyePicked { id: 4, amount: 1 },
+            observe::Fact::FrameSeen { cell: [1, 30, 1] },
+            observe::Fact::Dimension {
+                to: "minecraft:overworld".to_owned(),
+                from: Some("minecraft:the_nether".to_owned()),
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                p.see(110 + i as u64, &[fact(110, f)], HERE),
+                Some(Gain::Eyes)
+            );
+        }
     }
 
     /// Issue 18b: the bot's kill and a pearl picked up are progress; another's kill, anger and a

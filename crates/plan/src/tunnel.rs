@@ -93,6 +93,17 @@ const SIDES: [(i32, i32, i32); 6] = [
 ];
 const DIRS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
+/// A fortress's blocks: a wall to a tunnel on the way home (`Limits::bricks_wall`).
+pub const FORTRESS_BLOCKS: &[BlockKind] = &[
+    BlockKind::NetherBricks,
+    BlockKind::NetherBrickFence,
+    BlockKind::NetherBrickStairs,
+    BlockKind::NetherBrickSlab,
+    BlockKind::NetherBrickWall,
+    BlockKind::CrackedNetherBricks,
+    BlockKind::ChiseledNetherBricks,
+];
+
 /// The world as the tunnel may know it, read once a cell inside a box.
 struct Sight<'a> {
     w: &'a World,
@@ -100,6 +111,8 @@ struct Sight<'a> {
     dims: (i32, i32, i32),
     raw: Vec<u8>,
     seen: Vec<u8>,
+    /// Nether bricks read as a wall (`Limits::bricks_wall`).
+    bricks_wall: bool,
 }
 
 impl<'a> Sight<'a> {
@@ -117,6 +130,7 @@ impl<'a> Sight<'a> {
             dims,
             raw: vec![UNREAD; n],
             seen: vec![UNREAD; n],
+            bricks_wall: false,
         }
     }
 
@@ -151,6 +165,9 @@ impl<'a> Sight<'a> {
                 | BlockKind::CryingObsidian
                 | BlockKind::Bedrock,
             ) => WALL,
+            // Issue 19f: an infested block is never opened (a silverfish wakes).
+            Some(k) if stairs::infested(Some(k)) => WALL,
+            Some(k) if self.bricks_wall && FORTRESS_BLOCKS.contains(&k) => WALL,
             Some(k) => match path::classify(state) {
                 Class::Water => WATER,
                 Class::Lava => LAVA,
@@ -364,7 +381,40 @@ pub struct Limits {
     /// resource, so its tunnel walks what is open and cuts only what is not. A fortress's tunnel
     /// keeps to rock, out of the open where ghasts and piglins are.
     pub open_cheap: bool,
+    // >>> overland and stronghold (Q4): the highest feet y (a portal room's floor + 6). `SAFE_Y`'s
+    // cost under y 40 is the Nether's lava sea; in the overworld it took two routes to a room at
+    // y 17 up to y 40 under a river and into its water (races 45703184922, 45706776687).
+    pub max_y: Option<i32>,
+    // <<< overland and stronghold
+    // >>> Q6 (issue 19): a step with open air in the two cells over the head pays `COVER_COST`:
+    // the way home's last leg keeps 2 of rock over it from the soul sand valley's skeletons
+    // (race 45727347488 lane 0: 8 arrows on the walk, the last off a ledge).
+    pub cover: bool,
+    // <<< Q6
+    // >>> Q8 (issue 19): nether bricks are a wall: the way home never opens a fortress (race
+    // 45753006452 lane 1 tunnelled level through its bricks at (72, 61, 150) into a corridor and
+    // took two wither skeleton blows and the wither, 19.8 to 5.6, with nothing to heal).
+    pub bricks_wall: bool,
+    // <<< Q8
+    // >>> Q8 (issue 19): the route ends with the feet in a goal cell, not within reach of it (Q10's
+    // race 45774326055: six lanes 4 over the front's tunnel cell, "0 steps (ends within reach)",
+    // 10,000 ticks idle at the door).
+    pub feet_in: bool,
+    // <<< Q8
 }
+
+// >>> Q6 (issue 19): a step under open air costs as much as a step by a cell found bad
+// (`SUSPECT_COST`): a stair down through rock (about 3 digs) is cheaper than two steps in the
+// open, so a route from the open goes under first and stays under.
+pub const COVER_COST: u32 = 8;
+/// A covered route pays `HIGH_COST` a step more than `DEEP_SLACK` over the higher of its target
+/// and `SAFE_Y`: a stair down (3 digs) then costs no more than a level step up high (2 digs and
+/// this), so the route goes deep first and crosses under the valley in thick rock (race
+/// 45742933645 lane 0 tunnelled level at y 74 to 77 under the soul sand valley's floor and took 7
+/// skeleton arrows through its open sides).
+pub const HIGH_COST: u32 = 2;
+pub const DEEP_SLACK: i32 = 4;
+// <<< Q6
 
 /// `route` within `limits`.
 pub fn route_keeping(
@@ -392,7 +442,15 @@ pub fn route_keeping(
         from.1.max(near.1).max(SAFE_Y) + RISE,
         from.2.max(near.2) + MARGIN,
     );
+    // >>> overland and stronghold (Q4): the cap, never under the feet or the target.
+    let hi = match limits.max_y {
+        // `max_y` is the highest feet y: the box holds the head one over it.
+        Some(top) => (hi.0, hi.1.min(top.max(from.1).max(target.1) + 1), hi.2),
+        None => hi,
+    };
+    // <<< overland and stronghold
     let mut sight = Sight::new(w, lo, hi);
+    sight.bricks_wall = limits.bricks_wall;
     let mut suspect: BTreeSet<Cell> = BTreeSet::new();
     for b in blocked {
         for dx in -SUSPECT_NEAR..=SUSPECT_NEAR {
@@ -423,7 +481,12 @@ pub fn route_keeping(
         if !closed.insert(c) {
             continue;
         }
-        if goals.iter().any(|g| within_reach(c, *g)) {
+        let reached = if limits.feet_in {
+            goals.contains(&c)
+        } else {
+            goals.iter().any(|g| within_reach(c, *g))
+        };
+        if reached {
             end = Some(c);
             break;
         }
@@ -466,6 +529,17 @@ pub fn route_keeping(
                 if !limits.open_cheap && sight.open_sides(to) > 4 {
                     cost += OPEN_COST;
                 }
+                // >>> Q6
+                if limits.cover
+                    && (sight.at((to.0, to.1 + 2, to.2)) == OPEN
+                        || sight.at((to.0, to.1 + 3, to.2)) == OPEN)
+                {
+                    cost += COVER_COST;
+                }
+                if limits.cover && to.1 > target.1.max(SAFE_Y) + DEEP_SLACK {
+                    cost += HIGH_COST;
+                }
+                // <<< Q6
                 let g2 = g + cost;
                 if best.get(&to).is_none_or(|(old, _)| g2 < *old) {
                     best.insert(to, (g2, c));
@@ -530,6 +604,20 @@ pub struct Travel {
     /// A heading tunnel's: open cells cost a step (`Limits::open_cheap`).
     #[serde(default)]
     pub open_cheap: bool,
+    // >>> overland and stronghold (Q4): `Limits::max_y`, set by `tunnel_toward_capped` only.
+    #[serde(default)]
+    pub max_y: Option<i32>,
+    // <<< overland and stronghold
+    // >>> Q6 (issue 19): the target whose routes keep cover (`Limits::cover`), set by
+    // `tunnel_toward_covered` only; any other target's route has none.
+    #[serde(default)]
+    pub cover: Option<Cell>,
+    // >>> Q8 (issue 19): the target whose route ends with the feet in it (`Limits::feet_in`), set by
+    // the way home's last leg for the front's tunnel cell only.
+    #[serde(default)]
+    pub feet_in: Option<Cell>,
+    // <<< Q8
+    // <<< Q6
 }
 
 /// What a stretch of route does, for the note: "stairs up", "level" or "stairs down".
@@ -611,6 +699,7 @@ impl Plan {
         self.travel.paced.clear();
         self.travel.footprint = None;
         self.travel.open_cheap = false;
+        self.travel.max_y = None;
         self.tunnel(w, target, true, (what, why), tick)
     }
 
@@ -628,8 +717,47 @@ impl Plan {
         self.travel.paced = paced;
         self.travel.footprint = crate::endermen::fortress_bounds(w);
         self.travel.open_cheap = true;
+        self.travel.max_y = None;
         self.tunnel(w, target, false, (what, why), tick)
     }
+
+    // >>> overland and stronghold (Q4)
+    /// `tunnel_toward` with the route's box topped at `max_y` (a portal room's floor + 6).
+    pub fn tunnel_toward_capped(
+        &mut self,
+        w: &World,
+        target: Cell,
+        max_y: i32,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        self.travel.exploring = false;
+        self.travel.paced.clear();
+        self.travel.footprint = None;
+        self.travel.open_cheap = false;
+        self.travel.max_y = Some(max_y);
+        self.tunnel(w, target, false, (what, why), tick)
+    }
+    // <<< overland and stronghold
+
+    // >>> Q6 (issue 19)
+    /// `tunnel_toward` keeping 2 of rock over the head where it can (`Limits::cover`).
+    pub fn tunnel_toward_covered(
+        &mut self,
+        w: &World,
+        target: Cell,
+        (what, why): (&str, &str),
+        tick: u64,
+    ) -> Option<Task> {
+        self.travel.exploring = false;
+        self.travel.paced.clear();
+        self.travel.footprint = None;
+        self.travel.open_cheap = false;
+        self.travel.max_y = None;
+        self.travel.cover = Some(target);
+        self.tunnel(w, target, false, (what, why), tick)
+    }
+    // <<< Q6
 
     /// The travel tunnel to one cell (a spawner, a place): as `travel_tunnel`, but the route ends
     /// only within `REACH` of `target` itself, never at a brick near it. For any task that has a
@@ -645,6 +773,7 @@ impl Plan {
         self.travel.paced.clear();
         self.travel.footprint = None;
         self.travel.open_cheap = false;
+        self.travel.max_y = None;
         self.tunnel(w, target, false, (what, why), tick)
     }
 
@@ -770,6 +899,14 @@ impl Plan {
                 let limits = Limits {
                     footprint: self.travel.footprint,
                     open_cheap: self.travel.open_cheap,
+                    max_y: self.travel.max_y,
+                    // >>> Q6
+                    cover: self.travel.cover == Some(target),
+                    // <<< Q6
+                    // >>> Q8
+                    bricks_wall: self.ender.phase == crate::endermen::EnderPhase::Home,
+                    feet_in: self.travel.feet_in == Some(target),
+                    // <<< Q8
                 };
                 let Some(r) = route_keeping(w, feet, &goals, &blocked, lay, MAX_NODES, limits)
                 else {

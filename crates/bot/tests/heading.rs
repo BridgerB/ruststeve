@@ -264,7 +264,9 @@ fn a_way_only_back_over_the_cut_is_refused_and_said() {
         &[(ItemKind::Netherrack, 36)],
         (1, 0),
         Signs::default(),
-        3000,
+        // The causeway is one-wide over lava: walked sneaking (issue 19, eyes-home wall 21), 0.3 of
+        // a walk, so the turns run out later than 3,000 (probe 45756036598: at 2,432 unsneaked).
+        6000,
     );
     let tail = out.tail();
     assert!(out.count("refused for cut (paced)") >= 1, "{tail:#?}");
@@ -569,6 +571,8 @@ fn no_stair_down_is_cut_in_a_fortress_footprint() {
         plan::tunnel::Limits {
             footprint: Some((-40, -40, 60, 40)),
             open_cheap: false,
+            max_y: None,
+            ..plan::tunnel::Limits::default()
         },
     );
     // The footprint padded by 4: no stair down ends inside it (the route may go round it).
@@ -600,6 +604,8 @@ fn a_heading_tunnel_walks_open_ground_and_cuts_nothing_there() {
         plan::tunnel::Limits {
             footprint: None,
             open_cheap: true,
+            max_y: None,
+            ..plan::tunnel::Limits::default()
         },
     )
     .unwrap();

@@ -406,8 +406,10 @@ junk = [
   ["smooth_basalt", 0], ["raw_copper", 0], ["lapis_lazuli", 0], ["glow_ink_sac", 0],
   ["rotten_flesh", 0], ["spider_eye", 0], ["bone", 0], ["leaf_litter", 0],
   # The hunt's by-products (overworld-leg wall 10: a cook-site bot's pack held eggs, feathers,
-  # leather and three colours of wool when it filled and its crafts failed).
-  ["egg", 0], ["feather", 0], ["leather", 0], ["string", 0], ["white_wool", 0],
+  # leather and three colours of wool when it filled and its crafts failed). Leather is kept (4
+  # items, one slot): dropped, it came back 167 times to a bot standing still (race 45703184922
+  # lane 0) and still while walking (45714294764).
+  ["egg", 0], ["feather", 0], ["string", 0], ["white_wool", 0],
   ["light_gray_wool", 0], ["gray_wool", 0], ["black_wool", 0], ["brown_wool", 0],
 ]
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
@@ -721,4 +723,335 @@ down_tries = 24
 wait_ticks = 200
 pause_ticks = 6000
 pause_max = 1
+# >>> home (Q2, issue 19d): the way home's kit, made in the forest after the top-up
+# (plan::base::HOME_STEPS). 16 stems are 64 planks: a carried table 4, two spare wooden pickaxes 6
+# and their sticks, 8 sticks for stone pickaxes on the overworld climb (2 each), a placed table 4,
+# and the rest for tables and sticks on the way (the plan's 19d.1). Warped planks do not burn.
+# 48 (the coordinator, 2026-11-26): the trip costs about 3 pickaxe uses a block over about 800
+# blocks, 2,400 uses; a stem is 4 planks, about 1.3 wooden pickaxes of 59, so about 40 stems (Q10's
+# door race 45783611857: six bots at the door with no pickaxe, 277 uses short at tick 700).
+home_logs = 48
+home_sticks = 8
+# Two spare wooden pickaxes (59 uses each) for the climb from the overworld portal at about y -50
+# (the plan's 19d.6), each counted only with spare_uses' 40 uses or more left.
+home_picks = 2
+home_pick_uses = 40
+# <<< home
 # <<< base
+# >>> overland and stronghold (Q4, issue 19e/f, docs/problems/eyes-stronghold.md)
+[overland]
+# Legs of 64 to 128 blocks (the plan's 19e: four to eight chunks, so each leg loads new columns
+# ahead within the server's view distance), each ended within leg_reach of its cell on seen ground.
+leg_min = 64
+leg_max = 128
+leg_reach = 6.0
+# A leg that comes no nearer its target in 600 ticks turns the bearing 30 degrees (plan 19e.1);
+# three walks begun on one leg without arriving end it the same way.
+leg_stall_ticks = 600
+leg_tries = 3
+turn_deg = 30.0
+# The way's invariant: the fix 32 blocks nearer every 1,200 walking ticks (plan 19e.5: walking is
+# about 4 blocks a second, 80 a minute; 32 a minute leaves room for detours and bridges).
+progress_blocks = 32.0
+progress_ticks = 1200
+# Water 64 or wider on the bearing is an ocean, gone round (plan 19e.2); narrower is bridged.
+ocean_wide = 64
+# A leg's bridge keeps 32 held blocks back (the heading's KEEP, docs/problems/heading.md) and lays
+# at most 40 (rivers run 8 to 30 wide; a wider crossing is an ocean's).
+bridge_keep = 32
+bridge_max = 40
+# Within 24 of the fix with no frame seen the stronghold's search starts (Q5's probe 45685968956:
+# the eye heads exactly at the stronghold, so the fix is expected within tens of blocks).
+arrive = 24.0
+# A hut is the cook's (overworld-leg wall 11: HUT_MAX 24 blocks).
+hut_max = 24
+# Hurt under the danger line with food: in the hut until 16 health or 2,400 ticks (two meals'
+# regeneration at food 18 and over: half a heart every 80 ticks).
+heal_to = 16.0
+heal_ticks = 2400
+# Columns read on a bearing every 8 blocks for ground and water.
+scan_step = 8
+# Travel points round a known ocean (Bridger's geography ruling): none known on this world's way
+# east (the strip map is Q1's, docs/problems/eyes-observe.md).
+around = []
+# Development only: a fix (x, z) used while the eyes give none, for a dev start's race on a dev
+# branch. Never set on a merged branch (dev_fix = [x, z]).
+
+[stronghold]
+# The portal room's template (StrongholdPieces$PortalRoom, Q5's probe 45685968956): frames at y 3,
+# the floor at y 0, feet at y 1: the feet two under the frames.
+frame_over_feet = 2
+# The room's air within 7 of the ring's centre on the plane (the room is 11 by 16; the plan's
+# portal_room box).
+room_reach = 7
+# The dry stairs end 10 blocks or more out from the ring's centre (the room's half-length 8, and 2
+# of rock), then the tunnel at the floor's level breaks in through its wall.
+approach = 10
+# Frames are looked for within 8 chunk columns (the view distance) every 100 ticks.
+frame_chunks = 8
+look_every = 100
+# No frame seen at the fix: down to y 30 (Q1's jar read; the first ring's strongholds start at
+# y 10 to 40 in this world's measures), then a spiral of 12 tunnel legs from 16, 8 longer a pair.
+search_y = 30
+spiral_first = 16
+spiral_step = 8
+spiral_legs = 12
+# The nook in the room: a hut's blocks at most.
+nook_max = 24
+# Stairs legs that leave the feet where they were, before the tunnel takes the descent.
+descent_stalls = 4
+# Stone bricks broken where the tunnel ends in reach of the wall (race 45689919380 lane 0 stood at
+# the wall at (1646, 29, -8) and turned away): four opens a corridor's side, then the spiral.
+wall_breaks = 4
+# Tasks a round of stone pickaxes may begin (a table placed, two crafts, the table dug: four; twice
+# that for a failed click), then the round ends and waits the spares' retry.
+pick_tasks = 8
+# The Nether's leftovers, dropped like [survival] junk (name, count kept) in the overworld while the
+# stronghold is the aim: the frontier's pack came up full (67 netherrack, 50 soul soil, warped
+# blocks and roots) and took no cobblestone from nine stair legs (race 45695074789 lane 0). 64
+# netherrack covers the overland's bridges (bridge_keep 32 and bridge_max 40).
+junk = [
+  ["netherrack", 64], ["soul_soil", 0], ["soul_sand", 0], ["warped_roots", 0],
+  ["crimson_roots", 0], ["warped_wart_block", 0], ["nether_wart_block", 0],
+  ["warped_nylium", 0], ["crimson_nylium", 0], ["warped_fungus", 0], ["crimson_fungus", 0],
+  ["gold_nugget", 0], ["quartz", 0], ["basalt", 0], ["magma_cream", 0],
+]
+# <<< overland and stronghold
+# >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home's goal rows, run by the base
+# machinery in the forest (plan::base::HOME_STEPS). Each makes one more of its provide a run.
+[[goal]]
+id = "home-eyes"
+priority = 16
+until = "home-eyes"
+doc = "one more eye of ender: a pearl and blaze powder (from a rod) in the 2x2 grid; Q3's eyes row is used first when the table holds it"
+provides = [["item:ender_eye", 1]]
+
+[[goal]]
+id = "home-sticks"
+priority = 16
+until = "home-sticks"
+doc = "four more sticks from warped planks, for the overworld's stone pickaxes"
+provides = [["item:stick", 4]]
+
+[[goal]]
+id = "home-table"
+priority = 16
+until = "home-table"
+doc = "a crafting table to carry home (four warped planks), held, not placed"
+provides = [["item:crafting_table", 1]]
+
+[home]
+# Pearls the top-up hunts to before the trip, and its clock from Home's start (Bridger,
+# 2026-11-25: 14 pearls so the 7 rods make 14 eyes, every throw spending issue 20's margin;
+# bounded at 6,000 ticks, five game minutes, as the plan's 19d.1).
+pearls_wanted = 14
+top_up_ticks = 6000
+# Way points (x, z) before the portal, known geography from the chain's own run (Bridger's ruling of
+# 2026-11-24): the senses rows (a position every 10 s) of race 45537545167 lane 0, the frontier's
+# ancestor, which crossed the deltas eastward along z 194 at y 37 to 41 on its own bridges, then
+# north to the forest at (497, 42, 153); thinned to a point every 20 to 32 blocks and reversed, so
+# each leg is short and lies on ground or bridges that bot made (race 45727976297: legs straight at
+# (226, 194) wanted 44 to 48 new bridges at x 311). Round the blaze spawner at about (130, 61, 167)
+# by its south-west at 24 or more (blazes wake within 16; no point or leg nearer: the coordinator),
+# west along z 205 to (100, 205), then race 45350933958 lane 0's own route out of the portal ("Nether to the blaze
+# spawner": south from the portal along x 24, up to z 95 at y 64, east to the fortress bridge at x
+# 60 and along it to the spawner), reversed and thinned the same way, ending by the portal at
+# (22, 34, -20), whose approach takes over within 24.
+way = [[477, 152], [448, 152], [426, 150], [417, 159], [407, 173], [399, 194], [368, 194], [339, 194], [310, 194], [280, 194], [250, 194], [220, 194], [190, 195], [167, 208], [146, 208], [130, 206], [100, 205], [83, 188], [60, 175], [60, 140], [60, 110], [55, 100], [45, 95], [31, 95], [30, 76], [30, 62], [25, 56], [24, 41], [24, 22], [24, 1], [24, -11]]
+# The entry portal by geography, used only when memory holds no nether_portal sighting. Q1's
+# probe 45686594347 read the frontier snapshot's memory: nether_portal blocks at x 22 to 23, y 34
+# to 36, z -20, still lit, so memory is the way and this is the fallback: the lower inside cell.
+portal = [22, 34, -20]
+# The chain's own bridge east (race 45537545167 lane 0), standing, one cell wide at z 194 with no
+# gaps (Q1's probe 45734754593 of the frontier world's region files): the east span's top at y 36
+# (feet 37) from x 400 to 311, the west span's at y 40 (feet 41) from x 307 to 201 (head room
+# clear). [x_east, x_west, feet_y, z]: walked on its own blocks, no new bridging.
+bridges = [[400, 311, 37, 194], [307, 201, 41, 194]]
+# Between two spans the join is built from the world as it is (home_step): each column rises one
+# from the last feet toward the next span, blocks placed under, head room dug over.
+# The far lookup reads memory's index this many chunk columns round the feet: 48 is 768 blocks,
+# past the forest's 475 from the portal with room.
+portal_chunks = 48
+portal_every = 1200
+# Within this many blocks on the plane of the portal the approach replaces the heading: the
+# heading's own POINT_REACH (24).
+approach = 24
+note_every = 1200
+# Fed: natural healing needs food 18 (vanilla; plan::eat::HEALS_FROM). Then a rest toward 18
+# health for at most two game minutes before the eyes' phase.
+fed = 18
+heal_to = 18.0
+heal_ticks = 2400
+# Walks to look for animals on the surface before the look waits (overworld-leg wall 6: six
+# failed walks in a row end its look; twelve here, the way home has no other food).
+animal_walks = 12
+# Stone pickaxe uses under which the climb makes more from the stairs' cobblestone (a stair up
+# opens about three blocks: 30 is ten stairs' warning), at most pick_runs times (120 blocks of
+# climb at 3 a stair is about 360 uses, three stone pickaxes, with room). 24: the trip's wooden
+# pickaxes from stems gathered by hand count too (Q10's race 45768707240 lane 2 spent all 8).
+climb_pick_uses = 30
+pick_runs = 24
+# <<< home
+
+# >>> Q6 (issue 19, docs/problems/eyes-portal.md): the way home's last leg, by rock to the entry
+# portal's front (plan::portal_way).
+[portal_way]
+# Within this many blocks on the plane of the portal the tunnel in rock replaces the heading:
+# the soul sand valley south of the portal is a skeleton field (race 45727347488 lane 0: 8 arrows,
+# 19.8 to its death), and the real route's last stretch from about (30, 64, 62) crosses it (the
+# coordinator, 2026-11-25: 120); the pocket at (8, 85, 81) is 101 off.
+reach = 120
+# The exact cut to the tunnel cell is searched within this (each axis summed): over the tunnel's
+# reach of 5 (plan::tunnel::REACH) round the cell, twice, with room for a stair round.
+cut_range = 12
+# Cells the cut's breadth-first search may visit: a 12-range diamond is about 7,000 cells; 6,000
+# covers what rock leaves open.
+cut_nodes = 6000
+# Cuts begun with no step nearer before the cut is given up (a step cut short by a fight or a
+# meal is one; tunnel::SHORT_STRIKES is 2).
+cut_tries = 4
+# Standing in the open, blocks dug straight down first, out of the skeletons' line (the
+# coordinator, 2026-11-25: 3), at most dig_ins times on the leg.
+dig_in = 3
+dig_ins = 4
+# A pocket on a ledge digs down one first (lane 0 fell off its own), at most this many on the way.
+ledge_digs = 4
+# <<< Q6
+
+# >>> Q11 (issue 19, docs/problems/eyes-fortress.md): the way home's fortress stretch
+# (plan::fortress_way).
+[fortress_way]
+# Within this many blocks on the plane of the portal (and out of [portal_way] reach) the trip goes
+# by the covered tunnel in rock toward the portal, as Q6's last leg does, instead of the heading's
+# legs: race 45763915181's heading legs over the fortress and the soul sand valley wandered 3,000
+# to 4,000 ticks (lane 1 north to z 244 and up to y 101, 171 pickaxe uses spent; lane 2 "no way
+# on" on every side at (86, 78, 178)), and race 45760537530 lane 3 burned to death on blaze fire
+# at (91, 73, 169) in the open; Q6's covered tunnel ran 156 blocks with no hit (race 45742933645
+# lane 1). 250 takes in the dev start at (100, 205) (236 off) and the trip from about x 127 on
+# z 207 (the old bridges' last point (146, 208) is 259 off), 40 from the blaze spawner.
+reach = 250
+# Dropped like [survival] junk (name, count kept) once the stretch's tunnel has begun: the tunnel
+# picks up every block it cuts, and race 45766983995's lanes 0 to 2 filled the pack (448 netherrack,
+# 50 soul soil, warped blocks and roots; 0 main slots free), so every wooden pickaxe craft failed
+# StaleWindow (12 to 16 crafts a lane, the trip's 8 pickaxe runs spent) and the tunnel stood with
+# 0 to 21 pickaxe uses. 128 netherrack covers the trip's bridging and guards (HOME_FILLER_MAX
+# 128); blackstone is kept for stone pickaxes.
+junk = [
+  ["netherrack", 128], ["soul_soil", 0], ["soul_sand", 0], ["warped_roots", 0],
+  ["crimson_roots", 0], ["warped_wart_block", 0], ["nether_wart_block", 0],
+  ["warped_nylium", 0], ["crimson_nylium", 0], ["warped_fungus", 0], ["crimson_fungus", 0],
+  ["gold_nugget", 0], ["quartz", 0], ["basalt", 0], ["magma_cream", 0], ["gravel", 0],
+]
+# <<< Q11
+
+# >>> eyes (Q3, issue 19c, docs/problems/eyes-throw.md): the eyes of ender, crafted in the 2x2 grid
+# where the bot stands (blaze_powder from a rod, two a rod; ender_eye from a pearl and a powder:
+# the generated recipes, no table). plan::eyes::eyes_row sets the count to what the held pearls,
+# powder and rods make, up to [eyes] eyes_max, so the needs planner spends a rod only for powder it
+# needs: 12 pearls and 7 rods make 12 eyes and keep a rod; 14 pearls make 14 and keep none.
+[[goal]]
+id = "eyes"
+priority = 17
+until = "eyes"
+doc = "the eyes of ender the held pearls make, up to 14, powder from rods in the 2x2 grid"
+provides = [["item:ender_eye", 14]]
+
+[eyes]
+# 7 rods make 14 powder; 14 pearls with the top-up (Bridger, 2026-11-25).
+eyes_max = 14
+# Up a little (the brief, 19c.3): a use whose look hits an end portal frame throws nothing (the
+# jar, Q5's probe 45685968956); clojurecraft looked up 20.
+throw_pitch = -10.0
+# No hostile within 16 of the feet, and no throw by night (the brief, 19c.3): the bot stands still
+# for 80 ticks and walks to the drop.
+hostile_clear = 16.0
+night_throws = false
+# Ticks the look is held before the use (scoop's settle: the look reaches the server first).
+settle_ticks = 2
+# The eye spawns at the thrower's (x, y + 0.9, z) (the jar, probe 45685968956); a new eye within 3
+# of that is the throw's own (clojurecraft's seen-within).
+seen_within = 3.0
+# The eye must be seen within 60 ticks of the use (clojurecraft's answer-ms, 3 s).
+answer_ticks = 60
+# It lives 81 ticks (the jar); followed at most 120.
+flight_max = 120
+# Positions skipped before the fit (the first may predate the first move), and the least the eye
+# must fly on the plane for its line to count (clojurecraft's min-flight).
+fit_skip = 2
+min_flight = 1.0
+# The least angular spread a line is given, degrees: the heading is the exact bearing with no curve
+# (the jar), so only the positions' quantization is left; 0.2 is margin over it.
+spread_floor_deg = 0.2
+# The dropped item appears at the eye's last position with a small kick (the jar): within 3 on the
+# plane, within 20 ticks (clojurecraft's drop-grace-ms, 1 s); else it shattered.
+drop_radius = 3.0
+drop_grace = 20
+# The near rule (the jar): with the stronghold point within 12 on the plane the eye flies to it and
+# descends; a sink of 1 under where it was first seen marks it, and the point is good to about 2.
+near_radius = 12.0
+near_sink = 1.0
+near_err = 2.0
+# Pickup (the brief, 19c.3): a routed walk to a drop within 24, the drop at the feet's height or up
+# to 2 over (clojurecraft: picked only within 2 of the feet), given up after 600 ticks or 3 walks.
+pickup_radius = 24.0
+pickup_rise = 2
+pickup_ticks = 600
+pickup_walks = 3
+# A drop that comes to rest more than 2 over the feet is given up at once (Q5's parity 45688030470:
+# one of three drops rested on a canopy at feet +4; a pickup reaches about feet +2.3). At rest: its
+# height unchanged for 8 ticks (positions arrive every 4 ticks there, so two updates).
+rest_rise = 2.0
+rest_ticks = 8
+# A drop at rest 2 to 12 over the feet with filler held is fetched, not given up (the coordinator
+# from Q4's overland races: both throws a bot made rested 9 up in a canopy, a pearl each): a walk
+# to within 1.2 of its column on the plane (else a cut there: a pillar never starts further off), a
+# pillar of held filler till the feet are within 1.5 under it (the pickup reaches about +2.3),
+# leaves over the head dug through; a block every 4 ticks at most (a block update comes in one
+# or two); given up after climb_ticks, and the pillar dug back down either way.
+climb_rise_max = 12.0
+climb_beside = 1.2
+climb_within = 1.5
+# With no walk to within 1.2 (Q4's race 45732530352 lane 0: NoPath, the drop 12 off): a level cut
+# toward its column, 16 steps at most; the whole fetch given up after 600 ticks (the coordinator).
+climb_ticks = 600
+climb_every = 4
+climb_cut_max = 16
+# A cut's step (dug, a floor laid when none, then a straight step with no route: Q4's race
+# 45740169100 lane 0, the step's walk had no path) given up past 60 ticks (three seconds).
+climb_step_ticks = 60
+# Where the eye drops from (Q5's parity 45688030470, 8 real throws): 12.15 out on the bearing and
+# 8.18 over its spawn at feet + 0.9, so about 9.1 over the feet. A throw with a bearing waits for a
+# spot whose column there, from the feet's level up to that point, holds no solid block seen.
+apex_out = 12.0
+apex_up = 9.1
+# Before the first throw, which has no bearing to check (the coordinator, 2026-11-25): no log or
+# leaf seen within 6 on the plane over the feet's level (a canopy that near could catch the drop),
+# else a walk 16 to the side with the fewest, at most 4 walks before throwing anyway.
+first_clear = 6
+# The first throw's ring (Q4's race 45698008920, both lanes: throw 1's eye rested 9 up on a canopy
+# about 12 out, past first_clear): each of the 8 sides, 10 to 14 out around the drop's 12, from the
+# feet's level up 10 (the drop's 9.1 and a block over); any blocked side walks first.
+ring_from = 10
+ring_to = 14
+ring_up = 10.0
+open_walk = 16.0
+open_walks_max = 4
+# At most 4 throws (the plan, 19c.6: 0.8 eyes lost at one in five).
+max_throws = 4
+# Throw 2 once 200 out from throw 1 and 140 across its line (the coordinator from the jar's exact
+# heading: about 150 across). At a 0.2 degree spread 1,500 off, 140 across gives about 75 along.
+# The way there turns the bearing 45 degrees.
+baseline = 200.0
+baseline_across = 140.0
+baseline_turn_deg = 45.0
+# A refine only at the fix with no frame seen (the coordinator, 2026-11-25): within 64 of it, from
+# the fix itself (no side spot); a further throw only from 150 off every earlier spot.
+refine_from = 64.0
+refine_offset = 0.0
+final_within = 64.0
+respot = 150.0
+# Frames are looked for within 8 chunk columns (the view distance: the frames face the room's air).
+frame_chunks = 8
+# A due throw that waits, or a craft that cannot go on, is noted at most every 600 ticks.
+note_every = 600
+# <<< eyes

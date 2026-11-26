@@ -132,6 +132,50 @@ pub struct Death {
     pub pos: [f64; 3],
 }
 
+/// Blocks from the bot within which a new eye of ender is its own throw (issue 19b): the eye
+/// spawns at the thrower's eyes (`EnderEyeItem.use`), so 4 leaves room for a tick of flight.
+pub const EYE_THROWN_NEAR: f64 = 4.0;
+/// Eyes and eye items watched (blocks): an eye flies about 12 blocks before it ends (the jar,
+/// probe 45685968956), so 64 holds every eye the bot threw and the item it drops.
+pub const EYE_WATCH: f64 = 64.0;
+/// Server ticks an ended eye waits for its dropped item (an `ender_eye` item within
+/// `EYE_DROP_NEAR` of where it ended): the item is added in the tick the eye is removed, its
+/// stack data a tick or two later. Half a second.
+pub const EYE_DROP_TICKS: u64 = 10;
+/// Blocks from an ended eye within which an `ender_eye` item is its drop (it spawns where the
+/// eye was).
+pub const EYE_DROP_NEAR: f64 = 2.0;
+/// Blocks within which a silverfish appearing is noted as woken (issue 19b): a spawner wakes for
+/// a player within 16, and an infested block broken releases one beside the bot.
+pub const SILVERFISH_NEAR: f64 = 16.0;
+
+/// An eye of ender in flight, watched from its first tick (issue 19b).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EyeTrack {
+    /// It appeared within `EYE_THROWN_NEAR` of the bot: the bot's own throw.
+    pub own: bool,
+    pub first: [f64; 3],
+    pub last: [f64; 3],
+    pub first_at: u64,
+    /// Ticks it was seen in.
+    pub samples: u32,
+}
+
+/// An eye ended (gone from the entities), waiting `EYE_DROP_TICKS` for its dropped item.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EyeGone {
+    pub id: i32,
+    pub at: u64,
+    pub pos: [f64; 3],
+}
+
+/// The horizontal heading from `a` to `b` in the game's yaw degrees (0 south, +z; 90 west,
+/// -x), `None` for no horizontal move.
+pub fn heading(a: [f64; 3], b: [f64; 3]) -> Option<f64> {
+    let (dx, dz) = (b[0] - a[0], b[2] - a[2]);
+    (dx.hypot(dz) > 1e-6).then(|| (-dx).atan2(dz).to_degrees())
+}
+
 /// The bridge blocks the planner spends (`plan::path::BRIDGE_BLOCKS`; a test in `results`
 /// holds the two lists equal): the senses row's filler.
 pub const FILLER: &[data::ItemKind] = &[
@@ -143,6 +187,9 @@ pub const FILLER: &[data::ItemKind] = &[
     data::ItemKind::Andesite,
     data::ItemKind::Tuff,
     data::ItemKind::Dirt,
+    // The deltas' walls, bridge blocks since issue 19d (plan::path::BRIDGE_BLOCKS).
+    data::ItemKind::Basalt,
+    data::ItemKind::Blackstone,
 ];
 
 /// The filler held, every kind together.
@@ -299,6 +346,21 @@ pub struct Snapshot {
     /// Enderman deaths of the last `KILL_LOOT_TICKS` (carried by `diff`).
     #[serde(default)]
     pub deaths: Vec<Death>,
+    /// Issue 19b: eyes of ender within `EYE_WATCH`, by id (carried by `diff`).
+    #[serde(default)]
+    pub eyes: BTreeMap<i32, EyeTrack>,
+    /// Eyes ended in the last `EYE_DROP_TICKS` whose drop is not yet told (carried by `diff`).
+    #[serde(default)]
+    pub eyes_gone: Vec<EyeGone>,
+    /// Ender eye items on the ground within `EYE_WATCH`, by id.
+    #[serde(default)]
+    pub eye_items: BTreeMap<i32, [f64; 3]>,
+    /// End portal frames on record within `world::stage::FRAME_NEAR` (overworld).
+    #[serde(default)]
+    pub frames: Vec<[i32; 3]>,
+    /// Silverfish within `SILVERFISH_NEAR`, by id.
+    #[serde(default)]
+    pub silverfish: Vec<i32>,
 }
 
 /// A fact for the ledger.
@@ -357,6 +419,9 @@ pub enum Fact {
     },
     Dimension {
         to: String,
+        /// The dimension before (issue 19b; `None` at the first login and in older files).
+        #[serde(default)]
+        from: Option<String>,
     },
     Stage {
         reached: String,
@@ -471,6 +536,44 @@ pub enum Fact {
     /// bot's (issue 18e; an enderman takes a holdable block). Emitted by its owner.
     BlockTaken {
         cell: [i32; 3],
+    },
+    /// Issue 19b: an eye of ender appeared within `EYE_THROWN_NEAR` of the bot (its throw):
+    /// where, and the heading of its spawn velocity when the server sent one.
+    EyeThrown {
+        id: i32,
+        from: [f64; 3],
+        yaw: Option<f64>,
+    },
+    /// An eye's flight, told when it ends: the first and last positions seen, the heading
+    /// between them (yaw degrees) and the ticks it was seen in.
+    EyeFlight {
+        id: i32,
+        first: [f64; 3],
+        last: [f64; 3],
+        heading: Option<f64>,
+        samples: u32,
+        ticks: u64,
+    },
+    /// An eye ended: `dropped` when an `ender_eye` item appeared within `EYE_DROP_NEAR` of
+    /// where it ended within `EYE_DROP_TICKS` (else it shattered), `at` its last position.
+    EyeEnded {
+        id: i32,
+        dropped: bool,
+        at: [f64; 3],
+    },
+    /// The bot picked up an ender eye item.
+    EyePicked {
+        id: i32,
+        amount: i32,
+    },
+    /// An end portal frame came on record within `world::stage::FRAME_NEAR`.
+    FrameSeen {
+        cell: [i32; 3],
+    },
+    /// A silverfish appeared within `SILVERFISH_NEAR` (a spawner's, or out of an infested block).
+    SilverfishWoken {
+        id: i32,
+        d: f64,
     },
 }
 
@@ -623,6 +726,47 @@ pub fn snapshot(w: &World) -> Snapshot {
         soul_valleys: w.memory.soul_valleys().len(),
         pearl_items: pearls_near(w, bot),
         deaths: Vec::new(),
+        eyes: w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == EntityKind::EyeOfEnder && dist(e.pos, bot) <= EYE_WATCH)
+            .map(|(id, e)| {
+                (
+                    *id,
+                    EyeTrack {
+                        own: dist(e.pos, bot) <= EYE_THROWN_NEAR,
+                        first: e.pos,
+                        last: e.pos,
+                        first_at: at,
+                        samples: 1,
+                    },
+                )
+            })
+            .collect(),
+        eyes_gone: Vec::new(),
+        eye_items: w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == EntityKind::Item && dist(e.pos, bot) <= EYE_WATCH)
+            .filter(|(_, e)| e.item().is_some_and(|(k, _)| k == data::ItemKind::EnderEye))
+            .map(|(id, e)| (*id, e.pos))
+            .collect(),
+        frames: if w.memory.has_seen(BlockKind::EndPortalFrame) {
+            world::stage::frames_near(w)
+                .into_iter()
+                .map(|(x, y, z)| [x, y, z])
+                .collect()
+        } else {
+            Vec::new()
+        },
+        silverfish: w
+            .entities
+            .iter()
+            .filter(|(_, e)| {
+                !e.dead && e.kind == EntityKind::Silverfish && dist(e.pos, bot) <= SILVERFISH_NEAR
+            })
+            .map(|(id, _)| *id)
+            .collect(),
     }
 }
 
@@ -791,7 +935,10 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
     if next.dimension != prev.dimension
         && let Some(d) = &next.dimension
     {
-        out.push(Fact::Dimension { to: d.clone() });
+        out.push(Fact::Dimension {
+            to: d.clone(),
+            from: prev.dimension.clone(),
+        });
     }
     if next.stage != prev.stage
         && let Some(s) = &next.stage
@@ -894,6 +1041,87 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
             out.push(Fact::PearlPicked {
                 id: *id,
                 amount: p.amount,
+            });
+        }
+    }
+    // Issue 19b: eyes thrown, flown, ended and picked; frames seen; silverfish woken.
+    for (id, e) in &mut next.eyes {
+        match prev.eyes.get(id) {
+            Some(p) => {
+                e.own = p.own;
+                e.first = p.first;
+                e.first_at = p.first_at;
+                e.samples = p.samples + 1;
+            }
+            None if e.own => out.push(Fact::EyeThrown {
+                id: *id,
+                from: e.first,
+                yaw: w
+                    .entities
+                    .get(id)
+                    .and_then(|x| x.spawn_velocity)
+                    .and_then(|v| heading([0.0; 3], v)),
+            }),
+            None => {}
+        }
+    }
+    // Every ended eye waits until its drop is seen or its wait is over; each is told once.
+    next.eyes_gone.clone_from(&prev.eyes_gone);
+    for (id, e) in &prev.eyes {
+        if !next.eyes.contains_key(id) && e.own {
+            out.push(Fact::EyeFlight {
+                id: *id,
+                first: e.first,
+                last: e.last,
+                heading: heading(e.first, e.last),
+                samples: e.samples,
+                ticks: at.saturating_sub(e.first_at),
+            });
+            next.eyes_gone.push(EyeGone {
+                id: *id,
+                at,
+                pos: e.last,
+            });
+        }
+    }
+    let mut told = Vec::new();
+    for g in &next.eyes_gone {
+        let dropped = next
+            .eye_items
+            .values()
+            .any(|p| dist(*p, g.pos) <= EYE_DROP_NEAR);
+        if dropped || g.at + EYE_DROP_TICKS <= at {
+            out.push(Fact::EyeEnded {
+                id: g.id,
+                dropped,
+                at: g.pos,
+            });
+            told.push(g.id);
+        }
+    }
+    next.eyes_gone.retain(|g| !told.contains(&g.id));
+    for id in prev.eye_items.keys() {
+        if !next.eye_items.contains_key(id)
+            && let Some(p) = w.pickups.iter().find(|p| p.item_entity == *id)
+        {
+            out.push(Fact::EyePicked {
+                id: *id,
+                amount: p.amount,
+            });
+        }
+    }
+    for cell in &next.frames {
+        if !prev.frames.contains(cell) {
+            out.push(Fact::FrameSeen { cell: *cell });
+        }
+    }
+    for id in &next.silverfish {
+        if !prev.silverfish.contains(id)
+            && let Some(e) = w.entities.get(id)
+        {
+            out.push(Fact::SilverfishWoken {
+                id: *id,
+                d: dist(e.pos, bot),
             });
         }
     }
@@ -1104,6 +1332,12 @@ pub struct Senses {
     pub angry_frozen: Option<u32>,
     #[serde(default)]
     pub sword_uses: Option<i32>,
+    /// Issue 19b: eyes of ender held, and the end portal frames on record within
+    /// `world::stage::FRAME_NEAR`.
+    #[serde(default)]
+    pub eyes: Option<i32>,
+    #[serde(default)]
+    pub frames: Option<u32>,
 }
 
 /// How a fluid touches the body (the feet's cell and the one over it).
@@ -1202,6 +1436,26 @@ impl Senses {
         }
         if let Some(u) = self.sword_uses {
             s.push_str(&format!(" swords {u}"));
+        }
+        s
+    }
+
+    /// Issue 19's part of the row, each piece only when it says something (older rows print
+    /// nothing): ` overworld eyes 12 frames 9`. The dimension is said outside the Nether.
+    pub fn eyes(&self) -> String {
+        let mut s = String::new();
+        if let Some(d) = self
+            .dimension
+            .as_deref()
+            .filter(|d| *d != "minecraft:the_nether")
+        {
+            s.push_str(&format!(" {}", d.trim_start_matches("minecraft:")));
+        }
+        if let Some(e) = self.eyes.filter(|e| *e > 0) {
+            s.push_str(&format!(" eyes {e}"));
+        }
+        if let Some(f) = self.frames.filter(|f| *f > 0) {
+            s.push_str(&format!(" frames {f}"));
         }
         s
     }
@@ -1343,6 +1597,12 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
         angry_ticking: Some(angry(true)),
         angry_frozen: Some(angry(false)),
         sword_uses: Some(sword_uses(w)),
+        eyes: Some(i32::try_from(w.inventory.count(data::ItemKind::EnderEye)).unwrap_or(i32::MAX)),
+        frames: Some(if w.memory.has_seen(BlockKind::EndPortalFrame) {
+            u32::try_from(world::stage::frames_near(w).len()).unwrap_or(u32::MAX)
+        } else {
+            0
+        }),
     }
 }
 
@@ -1393,7 +1653,10 @@ impl Fact {
                 Some(i) => format!("on cursor: {i} {count}"),
                 None => "cursor empty".to_owned(),
             },
-            Fact::Dimension { to } => format!("dimension {to}"),
+            Fact::Dimension { to, from } => match from {
+                Some(f) => format!("dimension {f} -> {to}"),
+                None => format!("dimension {to}"),
+            },
             Fact::Stage { reached } => format!("stage {reached}"),
             Fact::Death => "died".to_owned(),
             Fact::Won => "won".to_owned(),
@@ -1455,6 +1718,40 @@ impl Fact {
             Fact::BlockTaken { cell: [x, y, z] } => {
                 format!("block taken at {x},{y},{z} (no dig of ours)")
             }
+            Fact::EyeThrown { id, from, yaw } => format!(
+                "eye thrown (eye#{id}) from {:.1},{:.1},{:.1}{}",
+                from[0],
+                from[1],
+                from[2],
+                yaw.map_or_else(String::new, |y| format!(", spawn heading {y:.1}"))
+            ),
+            Fact::EyeFlight {
+                id,
+                first,
+                last,
+                heading,
+                samples,
+                ticks,
+            } => format!(
+                "eye#{id} flew {:.1},{:.1},{:.1} -> {:.1},{:.1},{:.1}, heading {}, {samples} samples in {ticks} ticks",
+                first[0],
+                first[1],
+                first[2],
+                last[0],
+                last[1],
+                last[2],
+                heading.map_or_else(|| "-".to_owned(), |h| format!("{h:.1}"))
+            ),
+            Fact::EyeEnded { id, dropped, at } => format!(
+                "eye#{id} {} at {:.1},{:.1},{:.1}",
+                if *dropped { "dropped" } else { "shattered" },
+                at[0],
+                at[1],
+                at[2]
+            ),
+            Fact::EyePicked { id, amount } => format!("eye picked up (item#{id}, {amount})"),
+            Fact::FrameSeen { cell: [x, y, z] } => format!("end portal frame seen at {x},{y},{z}"),
+            Fact::SilverfishWoken { id, d } => format!("silverfish#{id} woken at {d:.1}"),
         }
     }
 }

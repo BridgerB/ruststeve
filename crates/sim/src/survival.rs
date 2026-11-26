@@ -288,7 +288,7 @@ impl Survival {
     }
 }
 
-fn slot_of(s: Option<Stack>) -> Slot {
+pub(crate) fn slot_of(s: Option<Stack>) -> Slot {
     match s {
         Some((item, count)) => Slot::item(item.id(), count),
         None => Slot::Empty,
@@ -758,6 +758,7 @@ impl Sim {
                     x: it.pos[0],
                     y: it.pos[1],
                     z: it.pos[2],
+                    velocity: [0.0; 3],
                 },
             )?);
             out.push(wire(
@@ -804,6 +805,7 @@ impl Sim {
                     x: pos[0],
                     y: pos[1],
                     z: pos[2],
+                    velocity: [0.0; 3],
                 },
             )?,
             wire(

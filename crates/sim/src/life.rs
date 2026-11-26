@@ -660,6 +660,7 @@ impl Sim {
                                 x,
                                 y,
                                 z,
+                                velocity: [0.0; 3],
                             },
                         )?);
                         spawned += 1;
@@ -815,6 +816,7 @@ impl Sim {
                             x: pos[0],
                             y: pos[1],
                             z: pos[2],
+                            velocity: [0.0; 3],
                         },
                     )?);
                 }
@@ -1484,6 +1486,7 @@ impl Sim {
                     x: m.pos[0],
                     y: m.pos[1],
                     z: m.pos[2],
+                    velocity: [0.0; 3],
                 },
             )?);
             // An enderman a test placed already angry (issue 18: a frozen angry one holding the
@@ -1762,6 +1765,12 @@ impl Sim {
         {
             self.survival.life.blocking_since = Some(self.ticks);
             self.survival.life.blocking_slot = slot;
+        }
+        // An eye of ender is thrown toward the stronghold (`EnderEyeItem.use`, issue 19).
+        if let Some(thrown) = self.use_eye() {
+            let mut out = thrown?;
+            out.push(wire(State::Play, &S2c::BlockChangedAck { sequence })?);
+            return Ok(out);
         }
         // A bucket is used along the look (`BucketItem.use`, issue 14a).
         if let Some(used) = self.use_bucket() {

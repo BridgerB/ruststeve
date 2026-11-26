@@ -86,6 +86,7 @@ fn events(fixture: Arc<Column>) -> impl Strategy<Value = Event> {
                 x,
                 y,
                 z,
+                velocity: [0.0; 3],
             })
         }),
         proptest::collection::vec(id.clone(), 0..4)

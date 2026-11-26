@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 170 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 178 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow, eyes of ender), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
-aliases: [burrow rows, e04-mouth, fill rows, trace, enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
+aliases: [eye rows, y01-throw, y02-fetch, stronghold field, eye class, burrow rows, e04-mouth, fill rows, trace, enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@31545c1
+lastUpdated: 2026-11-25
+verifiedAgainst: ruststeve@25a0729
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -91,6 +91,11 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - A row may `fill` boxes before its `set` (`fill` by RCON, each cell in the model), keep its mobs' `loot`, and lay `items` on the ground (`summon item` with no pickup delay; `Sim::place_item`). Script `burrow:<mode>` (`hold`, `strike`, `eye`, `near`) reads the world each tick (`Script::steer`): the stare until creepy, the step into B, the torso look, the strike.
 - The class's `mobs` gains `stared` (entity data 18) and `cell` (where its feet ended). A row with mobs or items writes `<id>.real.trace.txt` (folded from its recording) and `<id>.sim.trace.txt`: the bot and every enderman and item within 32 every 10 ticks, for reading what the enderman did.
 - Tolerance 168 of 170.
+
+## Eye rows (issue 19)
+- Rows `y01-throw-N` (landings 0 to 3 and 8) and `y02-fetch-N` (landings 0, 4, 5) (`docs/problems/eyes-model.md`), on the peaceful table, 40 off their landing's centre, the bot given one eye. A row's `stronghold = [x, z]` is the point RCON's `locate structure minecraft:stronghold` names from the landing (the model is told it; the real line is judged against it). `use:20:0:-20` throws looking up; `fetch:<tick>` (`Script::Fetch`) throws, then walks to the dropped eye.
+- The class gains `eye`: seen, on the line (the line from its first place to its farthest on the plane within 1 degree of the bearing to the stronghold), ended, and for a fetch row none left on the ground. Drop or shatter is the jar's 4 in 5 roll: an ender eye held is out of the inventory class, and the end is written in `<id>.<real|sim>.eye.txt` with every place, the line, its error and the flight's numbers.
+- Tolerance 176 of 178.
 
 ## See also
 - [[server-model]] - what the model models.

@@ -26,6 +26,7 @@ fn spider_beside() -> World {
         x: 3.0,
         y: 0.0,
         z: 0.5,
+        velocity: [0.0; 3],
     }));
     w
 }
@@ -55,6 +56,7 @@ fn zombie_in_reach(health: f32) -> World {
         x: 2.5,
         y: 0.0,
         z: 0.5,
+        velocity: [0.0; 3],
     }));
     w.step(&Event::Packet(S2c::SetHealth {
         health,
@@ -99,6 +101,7 @@ fn beside(kind: EntityKind, at: f64) -> World {
         x: at,
         y: 0.0,
         z: 0.5,
+        velocity: [0.0; 3],
     }));
     w
 }
@@ -141,6 +144,7 @@ fn add(w: &mut World, id: i32, kind: EntityKind, pos: [f64; 3]) {
         x: pos[0],
         y: pos[1],
         z: pos[2],
+        velocity: [0.0; 3],
     }));
 }
 

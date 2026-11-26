@@ -58,6 +58,105 @@ pub fn read_memory(path: &Path) -> Result<memory::Memory, String> {
     rmp_serde::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// A snapshot's memory as text (issue 19a.2: is the way home in memory?): per dimension, the
+/// positions on record by their latest kind and the seen columns' extent; every portal and
+/// obsidian position with its latest kind; every sighting ever of a kind in `list` (by name,
+/// such as `nether_portal`), so a portal lit then broken shows both.
+pub fn memory_report(m: &memory::Memory, list: &[String]) -> String {
+    use std::collections::BTreeMap;
+    use std::fmt::Write as _;
+    let name = |state: u32| {
+        data::block_of_state(state)
+            .and_then(|k| k.info())
+            .map_or("?", |i| i.name)
+    };
+    let mut out = String::new();
+    let mut kinds: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    let mut keep: BTreeMap<(&str, &str), Vec<memory::Cell>> = BTreeMap::new();
+    for ((dim, pos), i) in m.latest_index() {
+        let Some(s) = m.log().get(*i) else { continue };
+        let n = name(s.state);
+        *kinds.entry((dim.as_str(), n)).or_default() += 1;
+        if matches!(n, "nether_portal" | "obsidian" | "end_portal_frame") {
+            keep.entry((dim.as_str(), n)).or_default().push(*pos);
+        }
+    }
+    let _ = writeln!(
+        out,
+        "sightings {} ever, {} positions on record",
+        m.log().len(),
+        m.latest_index().len()
+    );
+    let dims: std::collections::BTreeSet<&str> = kinds.keys().map(|(d, _)| *d).collect();
+    for d in dims {
+        let cols = m.seen_columns(d);
+        let (x0, x1) = cols
+            .iter()
+            .fold((i32::MAX, i32::MIN), |(a, b), c| (a.min(c.0), b.max(c.0)));
+        let (z0, z1) = cols
+            .iter()
+            .fold((i32::MAX, i32::MIN), |(a, b), c| (a.min(c.1), b.max(c.1)));
+        let _ = writeln!(
+            out,
+            "\n[{d}] {} columns seen, chunk x {x0}..{x1}, z {z0}..{z1}",
+            cols.len()
+        );
+        for ((_, k), n) in kinds.range((d, "")..=(d, "\u{10ffff}")) {
+            let _ = writeln!(out, "  {k}: {n}");
+        }
+        for ((_, k), cells) in keep.range((d, "")..=(d, "\u{10ffff}")) {
+            let _ = writeln!(out, "  latest {k} cells ({}):", cells.len());
+            for c in cells {
+                let _ = writeln!(out, "    {} {} {}", c.0, c.1, c.2);
+            }
+        }
+    }
+    if !list.is_empty() {
+        let _ = writeln!(out, "\nevery sighting of {}:", list.join(", "));
+        for s in m.log() {
+            let n = name(s.state);
+            let short = n.trim_start_matches("minecraft:");
+            if list.iter().any(|l| l == short || l == n) {
+                let _ = writeln!(
+                    out,
+                    "  {} {} {} {} {n} state {} at tick {}",
+                    s.dimension, s.pos.0, s.pos.1, s.pos.2, s.state, s.at_tick
+                );
+            }
+        }
+    }
+    out
+}
+
+/// The plan's eyes of ender state (issue 19c: the lines thrown, the fix, the throws' tally) to
+/// `eyes.rsw` beside `memory.rsw`, in the same encoding.
+pub fn write_eyes(path: &Path, kept: &plan::eyes::Kept) -> Result<(), String> {
+    let bytes = rmp_serde::to_vec_named(kept).map_err(|e| e.to_string())?;
+    let packed = zstd::encode_all(bytes.as_slice(), 3).map_err(|e| e.to_string())?;
+    std::fs::write(path, packed).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The eyes state a snapshot kept; a snapshot from before issue 19c has no `eyes.rsw` and reads
+/// as the default (no lines, no fix). One that cannot be read is said on stderr and read as the
+/// default too: the eyes state is a help to a resume, never a reason to lose the race.
+pub fn read_eyes(path: &Path) -> Result<plan::eyes::Kept, String> {
+    if !path.exists() {
+        return Ok(plan::eyes::Kept::default());
+    }
+    let read = || -> Result<plan::eyes::Kept, String> {
+        let packed = std::fs::read(path).map_err(|e| e.to_string())?;
+        let bytes = zstd::decode_all(packed.as_slice()).map_err(|e| e.to_string())?;
+        rmp_serde::from_slice(&bytes).map_err(|e| e.to_string())
+    };
+    Ok(read().unwrap_or_else(|e| {
+        eprintln!(
+            "eyes: {} unreadable ({e}): resumed with no eyes state",
+            path.display()
+        );
+        plan::eyes::Kept::default()
+    }))
+}
+
 /// Copy a directory tree, leaving out the server's `session.lock` (held while it runs).
 pub fn copy_dir(from: &Path, to: &Path) -> Result<u64, String> {
     std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
@@ -90,6 +189,62 @@ mod tests {
             offline_uuid("Notch"),
             "b50ad385-829d-3141-a216-7e7d7539ba7f"
         );
+    }
+
+    /// Issue 19c: a plan's eyes state goes out to `eyes.rsw` and comes back into a fresh plan
+    /// whole; a snapshot without the file reads as no lines and no fix.
+    #[test]
+    fn the_eyes_round_trip_through_the_snapshot_files() {
+        use plan::eyes::{EyeState, Fix, Kept, Line};
+        let dir = std::env::temp_dir().join(format!("rs-snap-eyes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("eyes.rsw");
+        let kept = Kept {
+            fix: Some(Fix {
+                point: [1_204.5, -873.25],
+                err_along: 61.0,
+                err_across: 9.5,
+            }),
+            throws: vec![
+                Line {
+                    from: [10.5, 20.5],
+                    dir: [0.6, -0.8],
+                    spread: 0.004,
+                },
+                Line {
+                    from: [180.0, 25.0],
+                    dir: [0.0, 0.0],
+                    spread: 0.0,
+                },
+            ],
+            state: EyeState {
+                thrown: 3,
+                kept: 2,
+                lost: 0,
+                shattered: 1,
+                spots: vec![[10.5, 20.5], [180.0, 25.0]],
+                noted_at: Some(4_400),
+                open_walks: 1,
+                force_throw: false,
+            },
+        };
+        let mut from = plan::Plan::new(plan::Aim::Hold);
+        from.restore_eyes(kept.clone());
+        write_eyes(&path, &from.eyes_kept()).expect("write");
+        let mut to = plan::Plan::new(plan::Aim::Hold);
+        to.restore_eyes(read_eyes(&path).expect("read"));
+        assert_eq!(to.eyes_kept(), kept);
+        assert_eq!(
+            read_eyes(&dir.join("missing.rsw")).expect("missing"),
+            Kept::default()
+        );
+        // A corrupt file warns and reads as the default: the race goes on.
+        std::fs::write(dir.join("bad.rsw"), b"not zstd").expect("bad");
+        assert_eq!(
+            read_eyes(&dir.join("bad.rsw")).expect("corrupt"),
+            Kept::default()
+        );
+        std::fs::remove_dir_all(&dir).expect("clean");
     }
 
     #[test]

@@ -53,10 +53,54 @@ pub const MAX_CHOICES: u32 = 4;
 /// Filler kept unspent by a leg's bridges (the handoff's 32; `path::BRIDGE_RESERVE` is 16 for the
 /// fortress walk), and a restock from the wall runs to `RESTOCK_TO`, at most `RESTOCK_DIGS` digs.
 pub const KEEP: i64 = 32;
+/// The keep on the way home (issue 19d): the 32 is held for the hunt's sealed pocket, and the hunt
+/// is over. Over `path::BRIDGE_RESERVE` (16, under which a far search bridges nothing) by 8: at 16
+/// the bots of races 45715674818 and 45722775712 ran their own bridges down to 15 and were
+/// stranded on them with no way on.
+pub const HOME_KEEP: i64 = 24;
+/// A leg refused only for want of filler restocks for its bridges first when they are at most
+/// this many over the spare (race 45698618366: legs in the deltas wanted 44 to 50 with 11 to 13
+/// spare, and failed "no way on" one after another).
+pub const RESTOCK_BRIDGES: i64 = 64;
+/// The most filler the way home restocks to before a crossing: two stacks.
+pub const HOME_FILLER_MAX: i64 = 128;
+/// How far ahead a gap is measured for the way home's restock.
+pub const GAP_LOOK: i32 = 104;
+
+/// Cells along `dir` from `feet` with no floor under them at the feet's height, from the first
+/// such cell to the next floor (lava and air alike), at most `GAP_LOOK`; 0 with a floor ahead.
+pub fn gap_ahead(w: &World, feet: Cell, dir: Dir) -> i64 {
+    let mut cells = path::Cells::new(w);
+    // Some(true) a floor, Some(false) none, None not loaded (the scan stops there).
+    let floor = |cells: &mut path::Cells, i: i32| {
+        let c = (feet.0 + dir.0 * i, feet.1 - 1, feet.2 + dir.1 * i);
+        match cells.at(c) {
+            path::Class::Unknown => None,
+            k => Some(k == path::Class::Solid),
+        }
+    };
+    let Some(start) = (1..=GAP_LOOK)
+        .map_while(|i| floor(&mut cells, i).map(|f| (i, f)))
+        .find(|(_, f)| !f)
+        .map(|(i, _)| i)
+    else {
+        return 0;
+    };
+    let end = (start..=GAP_LOOK)
+        .find(|i| floor(&mut cells, *i) != Some(false))
+        .unwrap_or(GAP_LOOK + 1);
+    i64::from(end - start)
+}
 pub const RESTOCK_TO: i64 = 48;
 pub const RESTOCK_DIGS: u32 = 24;
+/// On the way home a restock runs at most this long (two game minutes; Q10's races dug 4,300
+/// to 4,700 ticks by the join).
+pub const HOME_RESTOCK_TICKS: u64 = 2400;
 /// A wall cell is dug for filler from this near the eye (`walk::REACH`).
 pub const RESTOCK_REACH: f64 = 4.0;
+/// Restock cells are looked for this far from the eye; one past `RESTOCK_REACH` is walked to
+/// first (the coordinator, 2026-11-25: filler decides the deltas).
+pub const RESTOCK_LOOK: f64 = 6.0;
 /// A leg's budget per metre of `best` gained, read only past `BUDGET_GRACE` metres of spend: a
 /// level tunnel cuts 2 a metre and a stair 3 (docs/problems/nether-tunnel.md), a straight bridge
 /// lays 1 a metre (the plan's starting numbers, to be refined from races). Blocks placed are let
@@ -185,6 +229,10 @@ pub struct Restock {
     pub uses0: i32,
     pub digs: u32,
     pub began: u64,
+    /// The filler it digs to when over `RESTOCK_TO` (a leg's bridges over the keep); 0 is
+    /// `RESTOCK_TO`.
+    #[serde(default)]
+    pub to: i64,
 }
 
 /// The heading held (plan 17d). Every field defaults: a moment written before one was added loads.
@@ -442,6 +490,35 @@ pub fn choose_dir(
     Some((*best, why))
 }
 
+/// With a point to reach (a travel point, the way home's portal), the quarter turn from `dir` is
+/// the perpendicular axis toward it, by the sign of what is left on that axis; `None` with
+/// nothing left on it (the exploring turn then). Race 45698618366: the way home's bots, the portal
+/// to the -x and -z, turned by seen columns between (-1, 0) and (0, 1) and never tried (0, -1).
+pub fn turn_toward(dir: Dir, feet: Cell, point: (i32, i32)) -> Option<Dir> {
+    let (dx, dz) = (point.0 - feet.0, point.1 - feet.2);
+    let d = if dir.0 == 0 {
+        (dx.signum(), 0)
+    } else {
+        (0, dz.signum())
+    };
+    (d != (0, 0)).then_some(d)
+}
+
+/// With a point to reach, a fresh choice: the axis toward it with the most left on it, of those
+/// not in `avoid`; then the other axis toward it; `None` when both have failed or nothing is
+/// left (the exploring choice then). Never away from the point: the exploring choice heads away
+/// from the seen columns' centroid, and on the way home those columns are the route back, so
+/// every bot of race 45698618366 was sent east, away from the portal.
+pub fn choose_toward(feet: Cell, point: (i32, i32), avoid: &[Dir]) -> Option<Dir> {
+    let (dx, dz) = (point.0 - feet.0, point.1 - feet.2);
+    let x = (dx.signum(), 0);
+    let z = (0, dz.signum());
+    let order = if dx.abs() >= dz.abs() { [x, z] } else { [z, x] };
+    order
+        .into_iter()
+        .find(|d| *d != (0, 0) && !avoid.contains(d))
+}
+
 /// The quarter turn from `dir`: toward the side with fewer seen columns ahead, a tie to the side
 /// other than `last` (alternating). Returns the new axis and its side (1 left, -1 right). Pure.
 pub fn turn_dir(dir: Dir, chunk: (i32, i32), seen: &BTreeSet<(i32, i32)>, last: i8) -> (Dir, i8) {
@@ -468,12 +545,52 @@ pub fn projection(origin: Cell, dir: Dir, c: Cell) -> i32 {
 /// `WALL_RISE` over them, never the floor), with no lava beside it (read as the staircase's
 /// refusal reads the cells a cut opens: docs/problems/nether-tunnel.md), nothing over it that
 /// falls, and at the feet's height a floor under it, so no opening over a drop is made.
-fn restock_cell(w: &World, feet: Cell, c: Cell) -> bool {
+fn restock_cell(w: &World, feet: Cell, ahead: Option<Dir>, c: Cell, sea: Option<i32>) -> bool {
+    // >>> Q8: never a floor cell within `SEA_FLOOR` over the lava near (race 45758211666 lane 2
+    // dug the island by the join down to y 32 and 33 over the sea at 31 and was hit into it).
+    if c.1 < feet.1 && sea.is_some_and(|top| c.1 <= top + SEA_FLOOR) {
+        return false;
+    }
+    // <<< Q8
+    // The floor only with a heading to keep clear of (the way home's restock).
+    if c.1 < feet.1 && ahead.is_none() {
+        return false;
+    }
     let kind = |c: Cell| w.block_at(BlockPos::new(c.0, c.1, c.2));
-    if kind(c) != Some(BlockKind::Netherrack)
-        || !crate::escape::exposed(w, c)
-        || c.1 < feet.1
+    // A floor cell is never dug with lava within 2 of it at its height or under (race 45743712658
+    // lane 0 restocked the floor of the lava sea's shore at y 31 to 32, stepped into the lava,
+    // burned from 19.8 to 0.9).
+    if c.1 < feet.1
+        && (-2..=2).any(|dx| {
+            (-2..=2).any(|dz| {
+                (-2..=0).any(|dy| kind((c.0 + dx, c.1 + dy, c.2 + dz)) == Some(BlockKind::Lava))
+            })
+        })
+    {
+        return false;
+    }
+    // Netherrack, and the deltas' basalt and blackstone (bridge blocks too, issue 19d).
+    if !matches!(
+        kind(c),
+        Some(
+            BlockKind::Netherrack
+                | BlockKind::Basalt
+                | BlockKind::Blackstone
+                | BlockKind::Stone
+                | BlockKind::Deepslate
+        )
+    ) || !crate::escape::exposed(w, c)
+        || c.1 < feet.1 - 1
         || c.1 > feet.1 + WALL_RISE
+    {
+        return false;
+    }
+    // The floor beside the feet (never under them), a full block under it: a hole one deep
+    // beside the bot, no drop (race 45707489694: on the deltas' open basalt "no wall cell to dig",
+    // filler 15). The forest-to-deltas trip restocked from the floor this way.
+    if c.1 == feet.1 - 1
+        && ((c.0, c.2) == (feet.0, feet.2)
+            || ahead.is_some_and(|d| (c.0, c.2) == (feet.0 + d.0, feet.2 + d.1)))
     {
         return false;
     }
@@ -486,18 +603,40 @@ fn restock_cell(w: &World, feet: Cell, c: Cell) -> bool {
     !lava && !falls_over && (c.1 > feet.1 || floor_under)
 }
 
+/// A floor cell is never dug this near over the top of lava within `SEA_LOOK` of the reach (2: the
+/// feet stay 3 over the lava sea, out of a knock-back's fall into it).
+pub const SEA_FLOOR: i32 = 2;
+pub const SEA_LOOK: i32 = 6;
+
+/// The highest lava cell within `r` of the feet on the plane and 8 under them to 1 over.
+fn lava_top_near(w: &World, feet: Cell, r: i32) -> Option<i32> {
+    (-8..=1).rev().map(|dy| feet.1 + dy).find(|y| {
+        (-r..=r).any(|dx| {
+            (-r..=r).any(|dz| {
+                w.block_at(BlockPos::new(feet.0 + dx, *y, feet.2 + dz)) == Some(BlockKind::Lava)
+            })
+        })
+    })
+}
+
+/// Whether a restock cell is in the floor (dug after the walls).
+fn floor_cell(feet: Cell, c: Cell) -> bool {
+    c.1 < feet.1
+}
+
 /// Wall cells dug for filler are at most this over the feet (reach from the eye bounds it too).
 pub const WALL_RISE: i32 = 3;
 
-/// Exposed netherrack within `RESTOCK_REACH` of the eye that `restock_cell` allows, nearest
-/// first.
-pub fn restock_cells(w: &World) -> Vec<Cell> {
+/// Exposed filler stone within `reach` of the eye that `restock_cell` allows (never the floor
+/// under the feet or under the next step along `ahead`), walls first, then nearest.
+pub fn restock_cells(w: &World, ahead: Option<Dir>, reach: f64) -> Vec<Cell> {
     let Some(body) = w.body else {
         return Vec::new();
     };
     let feet = path::stand_cell(w, body.pos);
     let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
-    let r = RESTOCK_REACH.ceil() as i32;
+    let r = reach.ceil() as i32;
+    let sea = lava_top_near(w, feet, r + SEA_LOOK);
     let mut out: Vec<(i64, Cell)> = (-r..=r)
         .flat_map(|dx| (-r..=r).flat_map(move |dy| (-r..=r).map(move |dz| (dx, dy, dz))))
         .map(|(dx, dy, dz)| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
@@ -505,8 +644,10 @@ pub fn restock_cells(w: &World) -> Vec<Cell> {
             let d = (f64::from(c.0) + 0.5 - eye[0]).powi(2)
                 + (f64::from(c.1) + 0.5 - eye[1]).powi(2)
                 + (f64::from(c.2) + 0.5 - eye[2]).powi(2);
-            (d.sqrt() <= RESTOCK_REACH && restock_cell(w, feet, c))
-                .then_some(((d * 100.0) as i64, c))
+            (d.sqrt() <= reach && restock_cell(w, feet, ahead, c, sea)).then_some((
+                (d * 100.0) as i64 + if floor_cell(feet, c) { 1_000_000 } else { 0 },
+                c,
+            ))
         })
         .collect();
     out.sort();
@@ -528,6 +669,8 @@ fn drops_filler(k: Option<BlockKind>) -> bool {
                 | BlockKind::Andesite
                 | BlockKind::Tuff
                 | BlockKind::Dirt
+                | BlockKind::Basalt
+                | BlockKind::Blackstone
         )
     )
 }
@@ -931,22 +1074,37 @@ impl Plan {
                 // fortress and a blaze's fireball and its fire took it from 12.5 to 5.6).
                 // Not while a travel point steers: from inside a fortress every axis has bricks
                 // ahead, and the heading would turn out in a second.
-                let bricks: u32 =
-                    if self.ender.phase == crate::endermen::EnderPhase::Travel && !h.way {
-                        (1..=SIGNS_AHEAD)
-                            .flat_map(|d| (-1..=1).map(move |s| (d, s)))
-                            .map(|(d, s)| {
-                                bricks_in_column(
-                                    w,
-                                    chunk.0 + h.dir.0 * d + h.dir.1 * s,
-                                    chunk.1 + h.dir.1 * d + h.dir.0 * s,
-                                )
-                            })
-                            .sum()
-                    } else {
-                        0
-                    };
-                if ahead >= SIGNS_TURN {
+                let bricks: u32 = if self.ender.phase.travels() && !h.way {
+                    (1..=SIGNS_AHEAD)
+                        .flat_map(|d| (-1..=1).map(move |s| (d, s)))
+                        .map(|(d, s)| {
+                            bricks_in_column(
+                                w,
+                                chunk.0 + h.dir.0 * d + h.dir.1 * s,
+                                chunk.1 + h.dir.1 * d + h.dir.0 * s,
+                            )
+                        })
+                        .sum()
+                } else {
+                    0
+                };
+                // Nor the crimson signs while a point steers on the way home (Q6's race 45727347488
+                // lane 1: every leg re-aimed and turned north again for 6,000 ticks).
+                let home_way = self.ender.phase == crate::endermen::EnderPhase::Home && h.way;
+                // >>> Q11 (issue 19): no fortress turn while the way steers home, nor in the tick
+                // between a point reached and the next aimed at (race 45760537530: all three
+                // lanes turned 48 south at tick 60) (`crate::fortress_way`).
+                let fortress_refused = crate::fortress_way::home_way_steers(self, h.way);
+                if fortress_refused
+                    && (bricks >= SIGNS_TURN || fortress_mob_ahead(w, h.dir).is_some())
+                {
+                    self.fortress_turn_refused(
+                        tick,
+                        &format!("{bricks} nether bricks ahead on ({}, {})", h.dir.0, h.dir.1),
+                    );
+                }
+                // <<< Q11
+                if ahead >= SIGNS_TURN && !home_way {
                     self.heading_turn(
                         w,
                         h,
@@ -954,10 +1112,13 @@ impl Plan {
                         tick,
                         &format!("{ahead} crimson signs seen ahead"),
                     )?;
-                } else if let Some((kind, d)) =
-                    (self.ender.phase == crate::endermen::EnderPhase::Travel && !h.way)
-                        .then(|| fortress_mob_ahead(w, h.dir))
-                        .flatten()
+                } else if let Some((kind, d)) = (self.ender.phase.travels()
+                    && !h.way
+                    // >>> Q11
+                    && !fortress_refused)
+                    // <<< Q11
+                    .then(|| fortress_mob_ahead(w, h.dir))
+                    .flatten()
                 {
                     self.heading_turn(
                         w,
@@ -966,7 +1127,9 @@ impl Plan {
                         tick,
                         &format!("a fortress seen ahead (a ticking {kind:?} {d:.0} off)"),
                     )?;
-                } else if bricks >= SIGNS_TURN {
+                // >>> Q11
+                } else if bricks >= SIGNS_TURN && !fortress_refused {
+                    // <<< Q11
                     self.heading_turn(
                         w,
                         h,
@@ -978,17 +1141,60 @@ impl Plan {
             }
         }
         // Under the keep: restock from the wall before the leg.
-        if path::bridge_blocks(w) < KEEP && h.restock.is_none() && tick >= h.restock_after {
+        if path::bridge_blocks(w) < self.heading_keep()
+            && h.restock.is_none()
+            && tick >= h.restock_after
+        {
             h.restock = Some(Restock {
                 filler0: path::bridge_blocks(w),
                 uses0: pickaxe_uses_left(w),
                 digs: 0,
                 began: tick,
+                to: 0,
             });
             if let Some(t) = self.heading_restock(w, h, tick) {
                 return Some(t);
             }
         }
+        // >>> Q8 (issue 19): on the way home, a leg refused for filler where there was no cell to
+        // dig leaves the restock owed; it runs at the next place with cells, before the leg (race
+        // 45753006452 lane 3 paced 48 blocks north and back at x 175 for 8,000 ticks: west wanted
+        // 49 bridges with 45 held, no cell at the leg's start, and the ground 48 back was never
+        // dug).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && let Some(owed) = self.ender.home.filler_owed
+        {
+            let filler = path::bridge_blocks(w);
+            if filler >= owed {
+                self.ender.home.filler_owed = None;
+            } else if h.restock.is_none()
+                && tick >= h.restock_after
+                && restock_cells(w, Some(h.dir), RESTOCK_LOOK)
+                    .into_iter()
+                    .any(|c| !self.on_known_span(c))
+            {
+                self.ender.home.owed_restocks += 1;
+                h.restock = Some(Restock {
+                    filler0: filler,
+                    uses0: pickaxe_uses_left(w),
+                    digs: 0,
+                    began: tick,
+                    to: owed,
+                });
+                self.note(
+                    tick,
+                    format!("home: the restock owed begun at {feet:?}"),
+                    format!(
+                        "filler {filler}, {owed} owed since a leg had no cell to dig; owed restock {}",
+                        self.ender.home.owed_restocks
+                    ),
+                );
+                if let Some(t) = self.heading_restock(w, h, tick) {
+                    return Some(t);
+                }
+            }
+        }
+        // <<< Q8
         // New legs, a turn between each that has no way.
         for _ in 0..ATTEMPTS_PER_LOOK {
             self.heading_leg_start(w, h, feet, tick);
@@ -1147,6 +1353,8 @@ impl Plan {
         if tick < leg.wait_until {
             return Some(Task::Idle);
         }
+        let keep = self.heading_keep();
+        let mut want_filler: Option<i64> = None;
         let mut refusals: Vec<String> = Vec::new();
         loop {
             leg.tries += 1;
@@ -1157,17 +1365,39 @@ impl Plan {
                     let far = leg.way == Way::Far;
                     let mut walk = if far {
                         let mut walk = Walk::far_to(leg.target, goal, tick);
-                        walk.more.keep = Some(KEEP);
+                        walk.more.keep = Some(keep);
                         walk
                     } else {
                         Walk::new(leg.target, goal, crate::walk::Arrive::Goal, tick)
                     };
                     walk.more.blocked = blocked.clone();
-                    walk.more.shun = self.ender.phase == crate::endermen::EnderPhase::Travel;
+                    walk.more.shun = self.ender.phase.travels();
                     let found = walk.route_now(w, tick) && walk.route == Some(path::Status::Found);
                     self.expanded += walk.expanded;
                     let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
-                    let spare = path::bridge_blocks(w) - KEEP;
+                    let spare = path::bridge_blocks(w) - keep;
+                    // On the way home the restock carries the whole gap ahead, not the leg's part
+                    // of it (race 45733362772 lane 1 began an 85-block gap with 60 and was at 15
+                    // mid-way): to the keep and the gap to the next floor, at most HOME_FILLER_MAX.
+                    let home = self.ender.phase == crate::endermen::EnderPhase::Home;
+                    if found && bridges > spare && (home || bridges <= spare + RESTOCK_BRIDGES) {
+                        // >>> Q8: the next known gap only, when one is seen (Q10's race 45765424576:
+                        // 41 to 128 on the shore west of the fortress, slow); else the route's own.
+                        let gap = if home {
+                            Some(gap_ahead(w, feet, dir))
+                                .filter(|g| *g > 0)
+                                .unwrap_or(bridges)
+                        } else {
+                            bridges
+                        };
+                        // <<< Q8
+                        let want = keep + gap;
+                        want_filler = Some(if home {
+                            want.min(HOME_FILLER_MAX)
+                        } else {
+                            want
+                        });
+                    }
                     // A route with no bridge is taken whatever is held; one that bridges keeps
                     // the keep.
                     if found && (bridges == 0 || bridges <= spare) {
@@ -1204,6 +1434,9 @@ impl Plan {
                     // In travel the hunt needs the reserve and only the forest base makes new
                     // pickaxes: bridge over the deltas (filler is plentiful), tunnel only with
                     // `TRAVEL_SPARE` over (race 45535712274 lane 0 tunnelled 84 uses in the deltas).
+                    // Not on the way home: the hunt is over and the trip makes its own
+                    // pickaxes (race 45742350492 lane 2 stood 4,600 ticks at (70, 46, 145) with
+                    // 118 uses, every tunnel refused for the hunt's 60).
                     let spare = if self.ender.phase == crate::endermen::EnderPhase::Travel {
                         TRAVEL_SPARE
                     } else {
@@ -1287,6 +1520,27 @@ impl Plan {
                             .map_or(0, |wps| wps.iter().filter(|c| blocked.contains(c)).count());
                         // Only a route the cut alone refused: over cut cells.
                         if found && back > 0 {
+                            // >>> Q8: on the way home, with a point steering, the cells behind are
+                            // the way it came: the only route is taken (Q10's race 45765424576:
+                            // all five lanes threw an 83-cell walk away at (50, 33, 206) and drifted
+                            // east restocking).
+                            if self.ender.phase == crate::endermen::EnderPhase::Home && h.way {
+                                self.ender.home.cut_routes_taken += 1;
+                                leg_now.planned = walk.waypoints.clone().unwrap_or_default();
+                                self.walks += 1;
+                                self.expanded += walk.expanded;
+                                self.note(
+                                    tick,
+                                    format!("home: heading leg {n} takes the route back over its cut"),
+                                    format!(
+                                        "the only route found, {} cells, {back} of them cut; taken {}",
+                                        leg_now.planned.len(),
+                                        self.ender.home.cut_routes_taken
+                                    ),
+                                );
+                                return Some(Task::Explore(walk));
+                            }
+                            // <<< Q8
                             self.note(
                                 tick,
                                 format!("heading leg {n} refused for cut (paced)"),
@@ -1297,6 +1551,34 @@ impl Plan {
                             );
                         }
                         self.expanded += walk.expanded;
+                    }
+                    // Refused only for filler: dig it from the walls first, the leg kept.
+                    if let Some(want) = want_filler
+                        && h.restock.is_none()
+                        && tick >= h.restock_after
+                    {
+                        leg_now.way = Way::Walk;
+                        leg_now.tries = 0;
+                        let filler = path::bridge_blocks(w);
+                        h.restock = Some(Restock {
+                            filler0: filler,
+                            uses0: pickaxe_uses_left(w),
+                            digs: 0,
+                            began: tick,
+                            to: want,
+                        });
+                        self.note(
+                            tick,
+                            format!("heading leg {n} restocks for its bridges"),
+                            format!(
+                                "filler {filler}, {want} wanted (the keep {keep} and the far \
+                                 walk's bridges); {}",
+                                refusals.join("; ")
+                            ),
+                        );
+                        if let Some(t) = self.heading_restock(w, h, tick) {
+                            return Some(t);
+                        }
                     }
                     self.note(
                         tick,
@@ -1398,16 +1680,31 @@ impl Plan {
         if h.idle_turns > IDLE_TURNS {
             h.choices += 1;
             let avoid = std::mem::take(&mut h.failed);
-            let chosen = (h.choices < MAX_CHOICES)
-                .then(|| {
-                    let soul = if self.ender.phase == crate::endermen::EnderPhase::Reach {
-                        soul_columns(w, &seen)
-                    } else {
-                        BTreeMap::new()
-                    };
-                    choose_dir(feet, &seen, &soul, &[was])
+            let toward = h.point.and_then(|p| {
+                let mut skip = avoid.clone();
+                skip.push(was);
+                choose_toward(feet, p, &skip).map(|d| {
+                    (
+                        d,
+                        format!("toward the point ({}, {}), never away from it", p.0, p.1),
+                    )
                 })
-                .flatten();
+            });
+            let chosen = (h.choices < MAX_CHOICES)
+                .then(|| toward.clone())
+                .flatten()
+                .or_else(|| {
+                    (h.choices < MAX_CHOICES)
+                        .then(|| {
+                            let soul = if self.ender.phase == crate::endermen::EnderPhase::Reach {
+                                soul_columns(w, &seen)
+                            } else {
+                                BTreeMap::new()
+                            };
+                            choose_dir(feet, &seen, &soul, &[was])
+                        })
+                        .flatten()
+                });
             let Some((dir, reason)) = chosen else {
                 h.over = true;
                 self.note(
@@ -1433,12 +1730,22 @@ impl Plan {
                 ),
             );
         } else {
-            let (dir, side) = turn_dir(was, (feet.0 >> 4, feet.2 >> 4), &seen, h.side);
+            let (dir, side) = match h.point.and_then(|p| turn_toward(was, feet, p)) {
+                Some(d) => (d, h.side),
+                None => turn_dir(was, (feet.0 >> 4, feet.2 >> 4), &seen, h.side),
+            };
             h.dir = dir;
             h.side = side;
             self.note(
                 tick,
-                format!("heading turned to ({}, {})", dir.0, dir.1),
+                format!(
+                    "heading turned to ({}, {}){}",
+                    dir.0,
+                    dir.1,
+                    h.point
+                        .map(|p| format!(" toward the point ({}, {})", p.0, p.1))
+                        .unwrap_or_default()
+                ),
                 format!(
                     "from ({}, {}) after {why}; best there {}; {} turns without {RECHOOSE_GAIN} \
                      gained",
@@ -1451,28 +1758,107 @@ impl Plan {
         Some(())
     }
 
+    /// A cell of a known bridge (`[home] bridges`), or within 1 of its line at its height: never
+    /// dug for filler (Q1's probe 45740087576: the bot's own restock dug the old bridge's step and a
+    /// 7-cell gap out of its east span).
+    pub(crate) fn on_known_span(&self, c: Cell) -> bool {
+        self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.table.as_ref().is_some_and(|t| {
+                t.home
+                    .bridges
+                    .iter()
+                    .any(|[e, wst, y, z]| crate::home::near_span([*e, *wst, *y, *z], c))
+            })
+    }
+
+    /// Filler a leg's bridges leave unspent: `HOME_KEEP` on the way home, else `KEEP`.
+    fn heading_keep(&self) -> i64 {
+        if self.ender.phase == crate::endermen::EnderPhase::Home {
+            HOME_KEEP
+        } else {
+            KEEP
+        }
+    }
+
     /// The restock in hand: the next wall cell dug, or its end noted (filler back to `RESTOCK_TO`,
     /// `RESTOCK_DIGS` dug, or no cell to dig).
-    fn heading_restock(&mut self, w: &World, h: &mut Heading, tick: u64) -> Option<Task> {
+    pub(crate) fn heading_restock(
+        &mut self,
+        w: &World,
+        h: &mut Heading,
+        tick: u64,
+    ) -> Option<Task> {
+        let keep = self.heading_keep();
         let r = h.restock.as_mut()?;
         let filler = path::bridge_blocks(w);
-        let cell = (filler < RESTOCK_TO && r.digs < RESTOCK_DIGS)
-            .then(|| restock_cells(w).into_iter().next())
+        let to = r.to.max(RESTOCK_TO);
+        let max_digs = RESTOCK_DIGS.max(u32::try_from(to - r.filler0 + 8).unwrap_or(0));
+        // The way home digs the floor too and looks within RESTOCK_LOOK (the deltas' open
+        // basalt); elsewhere the walls within reach, as before.
+        let home = self.ender.phase == crate::endermen::EnderPhase::Home;
+        let ahead = home.then_some(h.dir);
+        let look = if home { RESTOCK_LOOK } else { RESTOCK_REACH };
+        // >>> Q8: on the way home a restock runs at most `HOME_RESTOCK_TICKS`, then goes with what
+        // it has (Q10: the spans' restock dug 4,300 to 4,700 ticks by the join).
+        let timed_out = home && tick.saturating_sub(r.began) >= HOME_RESTOCK_TICKS;
+        // <<< Q8
+        let cell = (filler < to && r.digs < max_digs && !timed_out)
+            .then(|| {
+                restock_cells(w, ahead, look)
+                    .into_iter()
+                    .find(|c| !self.on_known_span(*c))
+            })
             .flatten();
+        // Past the dig's reach: a walk to beside it first.
+        if let Some(c) = cell
+            && let Some(body) = w.body
+            && {
+                let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+                ((f64::from(c.0) + 0.5 - eye[0]).powi(2)
+                    + (f64::from(c.1) + 0.5 - eye[1]).powi(2)
+                    + (f64::from(c.2) + 0.5 - eye[2]).powi(2))
+                .sqrt()
+                    > RESTOCK_REACH
+            }
+        {
+            let mut walk = Walk::to_dig(c, tick);
+            if walk.route_now(w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("restock walk to {c:?}"),
+                    format!("filler {filler} under {to}; the nearest cell is past the dig's reach"),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+        }
+        let cell = cell.and_then(|_| {
+            restock_cells(w, ahead, RESTOCK_REACH)
+                .into_iter()
+                .find(|c| !self.on_known_span(*c))
+        });
         if let Some(c) = cell {
             r.digs += 1;
             let n = r.digs;
             self.note(
                 tick,
                 format!("restock dig {c:?}"),
-                format!("filler {filler} under the keep {KEEP}; dig {n} of this restock"),
+                format!("filler {filler} under {to} (the keep {keep}); dig {n} of this restock"),
             );
             return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
         }
         let r = h.restock.take()?;
-        if filler < KEEP {
+        // Short of what it dug for (under the keep, or a leg's bridges): no other restock here for a
+        // while (race 45715674818: six legs in one tick each began one and found no cell).
+        if filler < keep || (r.to > 0 && filler < r.to) {
             h.restock_after = tick + PACE_TICKS;
         }
+        // >>> Q8: on the way home what it dug for and did not get is owed (run where cells are).
+        if home && r.to > 0 && filler < r.to {
+            self.ender.home.filler_owed = Some(r.to);
+        }
+        // <<< Q8
         self.note(
             tick,
             "restock over".to_owned(),
@@ -1482,7 +1868,7 @@ impl Plan {
                 r.digs,
                 (r.uses0 - pickaxe_uses_left(w)).max(0),
                 tick.saturating_sub(r.began),
-                if filler < KEEP {
+                if filler < keep {
                     " (no wall cell to dig: still under the keep)"
                 } else {
                     ""

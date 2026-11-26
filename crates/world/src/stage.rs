@@ -122,6 +122,97 @@ pub const PEARLS_THREE_QUARTERS: u32 = 9;
 /// Pearls of the `pearls_12` stage (issue 18's done condition; issue 19's twelve eyes).
 pub const PEARLS_FULL: u32 = 12;
 
+/// Eyes and pearls together of the `overworld` checkpoint (issue 19): the twelve the End portal
+/// may need (12 frames, every one empty 28% of the time), as eyes or pearls still to be made into
+/// eyes.
+pub const EYES_FULL: i64 = 12;
+/// Within this (horizontal) of an `end_portal_frame` seen exposed, the stronghold is found (issue
+/// 19's `stronghold` checkpoint): the race's view distance, 8 chunks (`config/race.toml`), is
+/// as far as chunk data shows a frame.
+pub const FRAME_NEAR: f64 = 128.0;
+/// Chunk columns of memory looked through for frames: `FRAME_NEAR` / 16.
+pub const FRAME_CHUNKS: i32 = 8;
+/// The portal room's box about the frame ring's centre: within this along both axes the feet are
+/// inside the room whichever way it faces. The piece is 11 by 16 with its walls (the 26.1.2 jar,
+/// probe 45685968956); the race world's room (probe 45689842509: ring x 1626 to 1630, z -36 to
+/// -32, frames at y 19, walls at z -39 and -29 and x 1623 and 1638, the door at x 1638) has an
+/// inside 4.5 from the centre on its short axis and from -4.5 to +9.5 on its long one, the door's
+/// end. The 8 first proposed reached through the west wall into a corridor at x 1621 to 1622
+/// (air at y 19 to 20), so the box is the short axis's both ways.
+pub const ROOM_HALF: f64 = 4.5;
+/// The room's frames lie at piece y 3, its floor at y 0 (feet y 1), its stair landing higher:
+/// feet y from the frame y - 2 to the frame y + 2 (the same template).
+pub const ROOM_BELOW: i32 = 2;
+pub const ROOM_ABOVE: i32 = 2;
+
+/// In the overworld.
+pub fn in_overworld(w: &World) -> bool {
+    w.dimension
+        .as_ref()
+        .is_some_and(|d| d.name == "minecraft:overworld")
+}
+
+/// The `end_portal_frame` cells on record within `FRAME_NEAR` (horizontal) of the feet, in the
+/// overworld, nearest first.
+pub fn frames_near(w: &World) -> Vec<(i32, i32, i32)> {
+    let Some(body) = w.body.filter(|_| in_overworld(w)) else {
+        return Vec::new();
+    };
+    kind_near(w, data::BlockKind::EndPortalFrame, FRAME_CHUNKS)
+        .into_iter()
+        .filter(|c| {
+            (f64::from(c.0) + 0.5 - body.pos[0]).hypot(f64::from(c.2) + 0.5 - body.pos[2])
+                <= FRAME_NEAR
+        })
+        .collect()
+}
+
+/// The frame ring nearest the feet, from the frames on record within 16 of the nearest one: the
+/// centre of their box (x, z) and their y. A ring is 12 frames on a 5 by 5 square less its
+/// corners, so the box's middle is the ring's centre once both sides are seen.
+pub fn frame_ring(w: &World) -> Option<([f64; 2], i32)> {
+    let frames = frames_near(w);
+    let first = *frames.first()?;
+    let ring: Vec<_> = frames
+        .into_iter()
+        .filter(|c| (c.0 - first.0).abs() <= 16 && (c.2 - first.2).abs() <= 16 && c.1 == first.1)
+        .collect();
+    let (x0, x1) = ring
+        .iter()
+        .fold((i32::MAX, i32::MIN), |(a, b), c| (a.min(c.0), b.max(c.0)));
+    let (z0, z1) = ring
+        .iter()
+        .fold((i32::MAX, i32::MIN), |(a, b), c| (a.min(c.2), b.max(c.2)));
+    Some((
+        [
+            (f64::from(x0) + f64::from(x1) + 1.0) / 2.0,
+            (f64::from(z0) + f64::from(z1) + 1.0) / 2.0,
+        ],
+        first.1,
+    ))
+}
+
+/// Whether the feet stand in the portal room: an air cell within `ROOM_HALF` of the ring's
+/// centre along each axis, at a y the room holds (`ROOM_BELOW`, `ROOM_ABOVE`).
+pub fn in_portal_room(w: &World) -> bool {
+    let (Some(body), Some((centre, fy))) = (w.body, frame_ring(w)) else {
+        return false;
+    };
+    let feet = crate::BlockPos::new(
+        body.pos[0].floor() as i32,
+        body.pos[1].floor() as i32,
+        body.pos[2].floor() as i32,
+    );
+    let half = ROOM_HALF;
+    (body.pos[0] - centre[0]).abs() <= half
+        && (body.pos[2] - centre[1]).abs() <= half
+        && (fy - ROOM_BELOW..=fy + ROOM_ABOVE).contains(&feet.y)
+        && matches!(
+            w.block_at(feet),
+            Some(data::BlockKind::Air | data::BlockKind::CaveAir)
+        )
+}
+
 /// In the Nether: a fortress and its blaze spawner are nowhere else. A dungeon's monster spawner
 /// at y -21 in the overworld made a stone-tool bot `spawner`, and so every stage under it
 /// (race 44804466844; blaze wall 4).
@@ -270,13 +361,22 @@ pub enum Stage {
     /// Holds the 7 rods and 12 ender pearls (issue 18: "reach 12 pearls"). The rods are part of
     /// it so the ladder stays a ladder (issue 19 needs six of them for the eyes).
     Pearls12,
+    /// In the overworld holding `EYES_FULL` eyes of ender and pearls together (issue 19's first
+    /// checkpoint, Bridger 2026-11-25): home through the bot's own portal with the eyes, so the
+    /// overland trip never replays the Nether.
+    Overworld,
+    /// In the overworld with an `end_portal_frame` on record within `FRAME_NEAR` (issue 19's
+    /// second checkpoint): the portal room is located; what is left is the dig.
+    Stronghold,
+    /// The feet in the portal room (`in_portal_room`): issue 19's done condition.
+    PortalRoom,
     /// In the End (issue 20).
     End,
 }
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 17] = [
+    pub const ALL: [Stage; 20] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -293,6 +393,9 @@ impl Stage {
         Stage::Pearls6,
         Stage::Pearls9,
         Stage::Pearls12,
+        Stage::Overworld,
+        Stage::Stronghold,
+        Stage::PortalRoom,
         Stage::End,
     ];
 
@@ -315,6 +418,9 @@ impl Stage {
             Stage::Pearls6 => "pearls_6",
             Stage::Pearls9 => "pearls_9",
             Stage::Pearls12 => "pearls_12",
+            Stage::Overworld => "overworld",
+            Stage::Stronghold => "stronghold",
+            Stage::PortalRoom => "portal_room",
             Stage::End => "end",
         }
     }
@@ -368,6 +474,14 @@ impl Stage {
             Stage::Pearls12 => {
                 has(ItemKind::BlazeRod, 7) && has(ItemKind::EnderPearl, i64::from(PEARLS_FULL))
             }
+            Stage::Overworld => {
+                dim == Some("minecraft:overworld")
+                    && w.inventory.count(ItemKind::EnderEye)
+                        + w.inventory.count(ItemKind::EnderPearl)
+                        >= EYES_FULL
+            }
+            Stage::Stronghold => !frames_near(w).is_empty(),
+            Stage::PortalRoom => in_portal_room(w),
             Stage::End => dim == Some("minecraft:the_end"),
         }
     }
@@ -386,7 +500,13 @@ impl Stage {
             .into_iter()
             .rev()
             .take_while(|s| reached.is_none_or(|r| *s > r))
-            .filter(|s| scans || !matches!(s, Stage::Fortress | Stage::Spawner))
+            .filter(|s| {
+                scans
+                    || !matches!(
+                        s,
+                        Stage::Fortress | Stage::Spawner | Stage::Stronghold | Stage::PortalRoom
+                    )
+            })
             .find(|s| s.holds(w))
     }
 }

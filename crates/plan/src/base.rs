@@ -76,6 +76,15 @@ pub struct Base {
     pub wait_ticks: u64,
     pub pause_ticks: u64,
     pub pause_max: u32,
+    // >>> home (Q2, issue 19d): the way home's kit, made in the forest after the top-up.
+    /// Logs (warped stems) held before the trip back.
+    pub home_logs: i32,
+    /// Sticks held before the trip back.
+    pub home_sticks: i32,
+    /// Wooden pickaxes with `home_pick_uses` or more uses left held before the trip back.
+    pub home_picks: i32,
+    pub home_pick_uses: i32,
+    // <<< home
 }
 
 impl Default for Base {
@@ -103,6 +112,10 @@ impl Default for Base {
             wait_ticks: 200,
             pause_ticks: 6000,
             pause_max: 1,
+            home_logs: 48,
+            home_sticks: 8,
+            home_picks: 2,
+            home_pick_uses: 40,
         }
     }
 }
@@ -121,7 +134,35 @@ pub enum Step {
     /// model's 12-pearl loop ran out near the sixth): reclaiming shells and netherrack without
     /// spending the stone reserve. After the table, by the run order of `STEPS`.
     WoodPicks,
+    // >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home's steps (`HOME_STEPS`).
+    /// Every pearl held made an eye (blaze powder from the rods), in the 2x2 grid.
+    HomeEyes,
+    /// Stems to `home_logs`.
+    HomeWood,
+    /// Wooden pickaxes to `home_picks` fresh ones.
+    HomePicks,
+    /// Sticks to `home_sticks`.
+    HomeSticks,
+    /// A crafting table held (carried, not placed).
+    HomeTable,
+    // <<< home
 }
+
+/// The way home's kit (issue 19d), in order: the eyes first (they free slots), then the wood, a
+/// table placed with sticks for the 3x3 crafts, the spare wooden pickaxes, the sticks, and a table
+/// to carry.
+pub const HOME_STEPS: [Step; 6] = [
+    Step::HomeEyes,
+    Step::HomeWood,
+    Step::Table,
+    Step::HomePicks,
+    Step::HomeSticks,
+    Step::HomeTable,
+];
+
+/// The overworld climb's pickaxes (issue 19d): a table placed with sticks, then stone pickaxes to
+/// `pickaxe_uses` from the cobblestone the stairs dig.
+pub const CLIMB_STEPS: [Step; 2] = [Step::Table, Step::Pickaxe];
 
 pub const STEPS: [Step; 8] = [
     Step::Wood,
@@ -145,6 +186,11 @@ impl Step {
             Step::Pickaxe => "pickaxe",
             Step::Shield => "shield",
             Step::WoodPicks => "wood picks",
+            Step::HomeEyes => "eyes",
+            Step::HomeWood => "home wood",
+            Step::HomePicks => "home wood picks",
+            Step::HomeSticks => "home sticks",
+            Step::HomeTable => "home table",
         }
     }
 }
@@ -186,6 +232,11 @@ pub struct BaseState {
     pub paused_until: Option<u64>,
     #[serde(default)]
     pub pauses: u32,
+    // >>> home (Q2, issue 19d)
+    /// The steps this base runs, in order: empty is the forest base's `STEPS`.
+    #[serde(default)]
+    pub steps: Vec<Step>,
+    // <<< home
 }
 
 /// What a wait comes to.
@@ -223,6 +274,14 @@ pub fn starved_by(gone: Step, w: &World, table_near: bool) -> Vec<Step> {
             Step::Pickaxe,
             Step::Shield,
         ],
+        Step::HomeWood if !wood && !table => {
+            vec![
+                Step::Table,
+                Step::HomePicks,
+                Step::HomeSticks,
+                Step::HomeTable,
+            ]
+        }
         Step::Wood
         | Step::Table
         | Step::Smelt
@@ -230,7 +289,12 @@ pub fn starved_by(gone: Step, w: &World, table_near: bool) -> Vec<Step> {
         | Step::StoneSword
         | Step::Pickaxe
         | Step::Shield
-        | Step::WoodPicks => Vec::new(),
+        | Step::WoodPicks
+        | Step::HomeEyes
+        | Step::HomeWood
+        | Step::HomePicks
+        | Step::HomeSticks
+        | Step::HomeTable => Vec::new(),
     }
 }
 
@@ -347,6 +411,32 @@ pub fn drop_slot(w: &World, base: &Base) -> Option<(i16, ItemKind)> {
                 .find(|(s, (h, _))| (9..=44).contains(*s) && *h == k)
                 .map(|(s, _)| (*s, k))
         })
+}
+
+/// On the way home with no main slot free: the main stack of the Nether's blocks whose kind is
+/// held most (netherrack, basalt, soul soil or sand, blackstone, nylium, wart blocks, roots).
+pub fn home_free_slot(w: &World) -> Option<(i16, ItemKind)> {
+    const KINDS: [ItemKind; 9] = [
+        ItemKind::Netherrack,
+        ItemKind::Basalt,
+        ItemKind::SoulSoil,
+        ItemKind::SoulSand,
+        ItemKind::Blackstone,
+        ItemKind::WarpedNylium,
+        ItemKind::WarpedWartBlock,
+        ItemKind::WarpedRoots,
+        ItemKind::CrimsonRoots,
+    ];
+    let kind = KINDS
+        .iter()
+        .copied()
+        .filter(|k| craft::count(w, *k) > 0)
+        .max_by_key(|k| craft::count(w, *k))?;
+    w.inventory
+        .slots
+        .iter()
+        .find(|(s, (h, _))| (9..=44).contains(*s) && *h == kind)
+        .map(|(s, _)| (*s, kind))
 }
 
 /// Whether an item wears when it digs (a sword loses 2 a block, a pickaxe 1): not for stems.
@@ -561,7 +651,52 @@ pub fn skip_why(step: Step, w: &World, base: &Base, table_near: bool) -> Option<
                 )
             })
         }
+        Step::HomeEyes => {
+            let pearls = craft::count(w, ItemKind::EnderPearl);
+            let powder = craft::count(w, ItemKind::BlazePowder);
+            let rods = craft::count(w, ItemKind::BlazeRod);
+            if pearls == 0 {
+                Some("no pearl held".to_owned())
+            } else if powder + rods == 0 {
+                Some(format!("{pearls} pearls and no rod or powder"))
+            } else {
+                None
+            }
+        }
+        Step::HomeWood => {
+            let logs = logs_held(w);
+            (logs >= base.home_logs).then(|| format!("{logs} logs held, of {}", base.home_logs))
+        }
+        Step::HomePicks => {
+            let n = fresh_wood_picks(w, base.home_pick_uses);
+            (n >= base.home_picks).then(|| {
+                format!(
+                    "{n} wooden pickaxes with {} uses held, of {}",
+                    base.home_pick_uses, base.home_picks
+                )
+            })
+        }
+        Step::HomeSticks => {
+            let n = craft::count(w, ItemKind::Stick);
+            (n >= base.home_sticks).then(|| format!("{n} sticks held, of {}", base.home_sticks))
+        }
+        Step::HomeTable => {
+            let n = craft::count(w, ItemKind::CraftingTable);
+            (n >= 1).then(|| format!("{n} crafting table held"))
+        }
     }
+}
+
+/// Wooden pickaxes held with `uses` or more uses left (main inventory, hotbar, off hand).
+pub fn fresh_wood_picks(w: &World, uses: i32) -> i32 {
+    let n = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(s, (k, _))| (9..=45).contains(*s) && *k == ItemKind::WoodenPickaxe)
+        .filter(|(s, _)| w.inventory.uses_left(**s).is_none_or(|u| u >= uses))
+        .count();
+    i32::try_from(n).unwrap_or(i32::MAX)
 }
 
 /// The pickaxe uses the burrows are kept from: every held pickaxe but the wooden ones, which are
@@ -612,7 +747,13 @@ pub fn step_row(step: Step, w: &World) -> Option<&'static str> {
             }
         }
         Step::Shield => Some("base-shield"),
-        Step::WoodPicks => Some("base-wood-pickaxe"),
+        Step::WoodPicks | Step::HomePicks => Some("base-wood-pickaxe"),
+        Step::HomeWood => None,
+        Step::HomeSticks => Some("home-sticks"),
+        Step::HomeTable => Some("home-table"),
+        // Q3's `eyes` row when it is in the table, else this module's `home-eyes`: the same
+        // chain (rod to powder to eye) either way, one eye a run.
+        Step::HomeEyes => Some("home-eyes"),
     }
 }
 
@@ -622,7 +763,19 @@ fn again(step: Step, w: &World, base: &Base) -> bool {
         Step::StoneSword => weapon_kills(w, base) < base.kills,
         Step::Pickaxe => reserve_pick_uses(w) < base.pickaxe_uses,
         Step::WoodPicks => wood_pick_uses(w) < base.wood_pick_uses,
-        Step::Wood | Step::Table | Step::Smelt | Step::IronSword | Step::Shield => false,
+        Step::HomePicks => fresh_wood_picks(w, base.home_pick_uses) < base.home_picks,
+        Step::HomeSticks => craft::count(w, ItemKind::Stick) < base.home_sticks,
+        Step::HomeEyes => {
+            craft::count(w, ItemKind::EnderPearl) > 0
+                && craft::count(w, ItemKind::BlazePowder) + craft::count(w, ItemKind::BlazeRod) > 0
+        }
+        Step::Wood
+        | Step::Table
+        | Step::Smelt
+        | Step::IronSword
+        | Step::Shield
+        | Step::HomeWood
+        | Step::HomeTable => false,
     }
 }
 
@@ -689,6 +842,30 @@ impl Plan {
                 w, furnace, result, count, tick,
             ))));
         }
+        // >>> Q8 (issue 19): on the way home a craft never begins with no main slot free: the
+        // biggest stack of the Nether's blocks is dropped first (Q11's race 45766983995: every
+        // wooden pickaxe craft failed StaleWindow on a full pack, all 8 trip runs spent).
+        if free_slots(w) == 0
+            && self.ender.phase == crate::endermen::EnderPhase::Home
+            && w.click.is_none()
+            && w.window.is_none()
+            && w.inventory.carried.is_none()
+            && let Some((slot, kind)) = home_free_slot(w)
+        {
+            self.acts.push(Act::Click {
+                slot,
+                button: 1,
+                mode: 4,
+            });
+            self.retry_at = tick + crate::RETRY_TICKS;
+            self.note(
+                tick,
+                format!("base: a main slot freed: drop {kind:?} from slot {slot}"),
+                "no main slot free before a craft on the way home".to_owned(),
+            );
+            return Some(Task::Idle);
+        }
+        // <<< Q8
         if w.click.is_none()
             && w.window.is_none()
             && w.inventory.carried.is_none()
@@ -722,7 +899,12 @@ impl Plan {
             let step = match self.base.step {
                 Some(s) => s,
                 None => {
-                    let Some(s) = STEPS
+                    let list: Vec<Step> = if self.base.steps.is_empty() {
+                        STEPS.to_vec()
+                    } else {
+                        self.base.steps.clone()
+                    };
+                    let Some(s) = list
                         .iter()
                         .copied()
                         .find(|s| !self.base.ended.iter().any(|(e, _)| e == s))
@@ -969,6 +1151,16 @@ impl Plan {
                 self.stem_step(w, base, tick)
             }
             Step::Smelt => self.smelt_step(w, tick),
+            Step::HomeWood => {
+                let logs = logs_held(w);
+                if logs >= base.home_logs {
+                    return Next::Done(format!("{logs} logs held"));
+                }
+                self.stem_step(w, base, tick)
+            }
+            Step::HomeEyes | Step::HomePicks | Step::HomeSticks | Step::HomeTable => {
+                self.row_step(w, table, base, step, tick)
+            }
             Step::Table
             | Step::IronSword
             | Step::StoneSword
@@ -1106,10 +1298,27 @@ impl Plan {
         let Some(id) = step_row(step, w) else {
             return Next::GaveUp("no row".to_owned());
         };
-        let Some(goal) = table.until(id) else {
+        // >>> home (Q2): Q3's `eyes` row first when it is in the table, at the count the held
+        // pearls, powder and rods make (`eyes::eyes_row`; the table's own 14 is its cap: 12
+        // pearls asked for 14 eyes and the step gave up, run 45694981697), the run making all the
+        // rest of them.
+        let eyes = if step == Step::HomeEyes {
+            crate::eyes::eyes_row(table, &crate::held(w)).map(|mut r| {
+                if let Some(p) = r.provides.first_mut()
+                    && let Some(k) = p.0.items.first().copied()
+                {
+                    p.1 = (p.1 - craft::count(w, k)).max(1);
+                }
+                r
+            })
+        } else {
+            None
+        };
+        let found = eyes.or_else(|| table.until(id).cloned());
+        // <<< home
+        let Some(mut row) = found else {
             return Next::GaveUp(format!("no goal row {id}"));
         };
-        let mut row = goal.clone();
         // The table's row is as written (four sticks and a table near); the others make one
         // more of their first provide per run, repeated while the step wants it.
         if step != Step::Table {

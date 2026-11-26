@@ -45,6 +45,7 @@ fn stand(day_time: i64, cap: u64, tag: &str) -> bot::Outcome {
         on_stage: None,
         no_progress_ticks: None,
         snapshot_at: None,
+        eyes: None,
         progress: None,
     })
     .unwrap();
