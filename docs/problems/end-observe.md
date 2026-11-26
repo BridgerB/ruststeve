@@ -16,6 +16,7 @@ Sources: probe 45863427332 (RCON on a server started from the snapshot's world, 
   - north frames: (fx, 17, -31), 1.56;
   - west frames: (1625, 17, fz), 1.56;
   - east frames: the spawner step's top (1631, 20, fz), 2.07 to 2.30, or the floor's corners (1631, 17, -36) and (1631, 17, -32), 1.85.
+- **Not measured: the way back up**, the bot's own stairs to the surface at about (1526, 68, 45). Memory keeps no air cells, so the stairs are not in `memory.rsw`'s report, and the region files cannot tell the bot's tunnel from a cave. The trip up is E2's, read from its recording.
 
 ## 20a.2: the End of this seed
 Source: probe 45863427332, the snapshot's world, with the End forceloaded over x -64..127, z -64..63 and its region files read. This is development knowledge: Bridger's ruling allows the geography, and no bot code reads RCON.

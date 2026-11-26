@@ -30,7 +30,9 @@ cooked = 24
 blocks = 128
 # Water buckets (the clutch, 20f).
 water_buckets = 1
-# Eyes: at least the ring's empty frames (probe 45863427332: 11 empty of 12, the bot holds 13).
+# Eyes: at least the ring's empty frames, the ring's frames less those on record with an eye
+# (probe 45863427332: 11 empty of 12, the bot holds 13).
+ring_frames = 12
 
 [room]
 # The frontier's portal room (probe 45863427332, RCON on the snapshot world; memory's states
@@ -74,6 +76,8 @@ lava_door = [[1635, 17, -38], [1640, 17, -28]]
 # Where the End portal lands the bot: EndPortalBlock.getPortalDestination, END_SPAWN_POINT's
 # bottom centre less one, facing west (yaw 90), on the obsidian platform made under it.
 arrival = [100.5, 49.0, 0.5]
+# Facing west (EndPortalBlock.getPortalDestination: yaw 90, pitch 0).
+arrival_yaw = 90.0
 # The platform: obsidian 5 by 5 at y 48, x 98..102, z -2..2 (probe 45863427332).
 y = 48
 x = [98, 102]
@@ -108,11 +112,19 @@ radius = 64
 centre = [0, 0]
 origin_y = 63
 pillar_top_y = 66
+# The bowl's bedrock floor (origin - 1), the portal within this of the centre at origin_y, the
+# rim's bedrock out to rim_radius (EndPodiumFeature, PODIUM_RADIUS 4; derived, not observed).
+floor_y = 62
+portal_radius = 2.5
+rim_radius = 3.5
 
 [crystals]
 # Stage `crystals`: the feet within this of the fountain (every spike then within 102, inside
 # the entity tracking distance of 112: view distance 8 less one chunk, ChunkMap.TrackedEntity).
 near = 60.0
+# The entity tracking distance that `near` keeps every spike inside (view distance 8 less one
+# chunk, ChunkMap.TrackedEntity; the race server's server.properties).
+tracking = 112.0
 
 # The ten spikes (probe 45863427332): the centre column, the bedrock top's y (the crystal stands
 # at top + 1, at the centre + 0.5, fire in its cell), the radius from EndSpikeFeature (2 + i/3
@@ -219,9 +231,15 @@ heal_search = 32.0
 head_damage = 10.0
 head_blow_no_boots = 6.8
 head_blow_iron = 6.0
+# The armour those two blows are taken through (iron helmet 2, chestplate 6, leggings 5, boots 2).
+armour_no_boots = 13
+armour_iron = 15
 # Wings: box inflated (4, 2, 4) and moved down 2; push 4 out and 0.2 up; 5.0 damage when not
 # sitting; only while the dragon's hurtTime is 0.
 wing_push = 4.0
+wing_push_up = 0.2
+wing_inflate = [4.0, 2.0, 4.0]
+wing_down = 2.0
 wing_damage = 5.0
 # Part offsets from the dragon's position and yaw t (perched, no turn): head (6.5 sin t, -1,
 # -6.5 cos t), box 1 by 1; neck at 5.5, box 3 by 3; body (0.5 sin t, 0, -0.5 cos t), 5 by 3;
@@ -229,6 +247,16 @@ wing_damage = 5.0
 head_offset = 6.5
 head_y_sitting = -1.0
 neck_offset = 5.5
+head_box = 1.0
+neck_box = 3.0
+# The blow's reach: the head's and neck's boxes inflated by this.
+blow_inflate = 1.0
+body_offset = 0.5
+wing_offset = 4.5
+wing_up = 2.0
+# The parts' entity ids: the dragon's id + 1 to + part_count (head, neck, body, tail 1 to 3,
+# wing left, wing right).
+part_count = 8
 # Phase ids (EnderDragonPhase): 0 holding, 1 strafe, 2 landing approach, 3 landing, 4 takeoff,
 # 5 sitting flaming, 6 sitting scanning, 7 sitting attacking, 8 charging, 9 dying, 10 hover.
 sitting_phases = [5, 6, 7]
@@ -246,4 +274,10 @@ breath_radius = 5.0
 breath_ticks = 200
 # #dragon_immune holds end stone, obsidian, iron bars, bedrock, crying obsidian and the frames;
 # cobblestone and netherrack are not (checkWalls breaks them with mob griefing on).
+# EnderMan.isLookingAtMe: the stare is a dot product over 1 - stare_tolerance / distance, with a
+# line of sight; a worn carved pumpkin excuses it.
+stare_tolerance = 0.025
+# Entity.updateInWaterStateAndDoFluidPushing: a tick in water resets the fall distance, so water
+# in the landing cell cancels the fall's damage (the clutch).
+water_cancels_fall = true
 dragon_immune = ["end_stone", "obsidian", "iron_bars", "bedrock", "crying_obsidian", "end_portal_frame"]
