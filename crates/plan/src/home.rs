@@ -1069,11 +1069,46 @@ impl Plan {
         let body = w.body?;
         let mut cells = path::Cells::new(w);
         let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
-        let c = r
+        let Some(c) = r
             .steps
             .iter()
             .map(|[x, y, z]| (*x, *y, *z))
-            .find(|c| !matches!(cells.at(*c), path::Class::Solid))?;
+            .find(|c| !matches!(cells.at(*c), path::Class::Solid))
+        else {
+            // Every step placed: the two cells over each step's new feet are opened (the head
+            // room over x 308 to 310 is not known), never one with lava beside it.
+            let head: Vec<Cell> = r
+                .steps
+                .iter()
+                .map(|[x, y, z]| (*x, *y, *z))
+                .filter(|c| {
+                    !r.steps
+                        .iter()
+                        .any(|[x, y, z]| (*x, *y, *z) == (c.0, c.1 + 1, c.2))
+                })
+                .flat_map(|c| [(c.0, c.1 + 1, c.2), (c.0, c.1 + 2, c.2)])
+                .collect();
+            let dig = head.into_iter().find(|h| {
+                cells.at(*h) == path::Class::Solid
+                    && ![(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 0, 1), (0, 0, -1)]
+                        .iter()
+                        .any(|(dx, dy, dz)| {
+                            cells.at((h.0 + dx, h.1 + dy, h.2 + dz)) == path::Class::Lava
+                        })
+                    && (0..3)
+                        .map(|i| (eye[i] - (f64::from([h.0, h.1, h.2][i]) + 0.5)).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= crate::heading::RESTOCK_REACH
+            })?;
+            self.ender.home.steps_placed += 1;
+            self.note(
+                tick,
+                format!("home: head room over the step at {dig:?}"),
+                "a block over a step's new feet dug before the walk up".to_owned(),
+            );
+            return Some(Task::Dig(crate::dig::Dig::new(w, dig, tick)));
+        };
         let lava_beside = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
             .iter()
             .any(|(dx, dy, dz)| cells.at((c.0 + dx, c.1 + dy, c.2 + dz)) == path::Class::Lava);

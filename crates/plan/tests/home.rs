@@ -952,3 +952,67 @@ fn a_cube_near_with_lava_beside_the_feet_lays_a_rail_first() {
     assert_eq!(p.ender.home.rails, 1);
     assert!(matches!(p.task, Task::Idle), "{}", p.task.name());
 }
+
+#[test]
+fn the_old_bridges_step_is_built_and_walked_west() {
+    // A copy of the chain's bridge step at z 194 (Q1's probe 45734754593) moved by (-300, +27,
+    // -186): tops x 11 at 63, x 10 at 62, x 9 at 65, x 8 at 64, x 7 to 1 at 67, along z 8.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (10, 63, 8), BlockKind::Air);
+    for y in 64..=65 {
+        set(&mut w, (9, y, 8), BlockKind::Basalt);
+    }
+    set(&mut w, (8, 64, 8), BlockKind::Basalt);
+    for x in 1..=7 {
+        for y in 64..=67 {
+            set(&mut w, (x, y, 8), BlockKind::Netherrack);
+        }
+    }
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 11, 64, 8], [7, 1, 68, 8]];
+    goals.home.steps = vec![[10, 63, 8], [10, 64, 8], [8, 65, 8], [8, 66, 8]];
+    goals.home.way = vec![[-200, 8]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut p = Plan::with_table(Aim::Race, t);
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    w.body = w.body.map(|b| physics::Body {
+        pos: [11.5, 64.0, 8.5],
+        ..b
+    });
+    w.player.pos = Some([11.5, 64.0, 8.5]);
+    // The world answers each placement on the clicked block's top.
+    for t in 100..260 {
+        w.ticks = t;
+        p.step(&w);
+        for a in p.take_acts() {
+            if let world::Act::UseOn { pos, face: 1 } = a {
+                set(&mut w, (pos.x, pos.y + 1, pos.z), BlockKind::Netherrack);
+            }
+        }
+    }
+    for c in ["(10, 63, 8)", "(10, 64, 8)", "(8, 65, 8)", "(8, 66, 8)"] {
+        assert!(
+            noted(&p, &format!("home: step block at {c}")),
+            "{c}: {:?}",
+            notes(&p)
+        );
+    }
+    assert!(
+        noted(&p, "home: on the old bridge to (7, 68, 8)"),
+        "the walk up onto the west span: {:?}",
+        notes(&p)
+    );
+}
