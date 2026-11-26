@@ -243,3 +243,7 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - While a waterfall is ridden (in its water, not on the ground) the crystals hold the controls ahead of every row ("riding the waterfall"; the same call site as the clutch).
   - A pillar's top holding water counts as a way back.
   - Unit test `the_waterfall_ride_is_kept_and_its_pour_is_no_bar_to_the_way_back`.
+- **No pool in race 10, read from the ledger:** lane 1's ledger has no pool note at all. The only chance was tick 680, at the bunker stair's top (11, 60, -2), and the pool was looked for only beside the feet.
+  - **The fix:** every refusal is now noted ("no pool: buckets", "no pool: no site" with each axis's first reason, "no pool: no way to its site").
+  - The site is looked for within 3 columns (`pool_site`) and walked to ("to the pool site at").
+  - Unit test `no_pool_site_says_why`.

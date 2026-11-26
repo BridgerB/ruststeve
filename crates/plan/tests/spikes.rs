@@ -1319,3 +1319,28 @@ fn the_waterfall_ride_is_kept_and_its_pour_is_no_bar_to_the_way_back() {
         }
     );
 }
+
+#[test]
+fn no_pool_site_says_why() {
+    // Race 45912100302 made no pool and wrote nothing of why.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    for x in 15..=25 {
+        for z in 15..=25 {
+            set(&mut w, (x, 63, z), BlockKind::Obsidian);
+        }
+    }
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    w.inventory.slots.insert(38, (ItemKind::WaterBucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([20, 64, 20]);
+    p.spikes_task(&w, 100);
+    let n = notes(&p);
+    assert!(n.iter().any(|n| n == "spikes: no pool: no site"), "{n:?}");
+    let why = p
+        .events
+        .iter()
+        .find(|e| e.what == "spikes: no pool: no site")
+        .map(|e| e.why.clone())
+        .unwrap_or_default();
+    assert!(why.contains("Obsidian"), "{why}");
+}
