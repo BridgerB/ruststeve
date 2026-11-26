@@ -196,6 +196,26 @@ impl Plan {
         if front.is_some_and(|f| feet == f.stand || feet == f.tunnel) {
             return None;
         }
+        // Every task begins with an empty cursor: a stack on it is put down first (`cursor_watch`
+        // waits for no acts, and a dig sends one every tick).
+        if w.inventory.carried.is_some() {
+            return None;
+        }
+        // Within the approach with a plain walk into a lit cell, the approach walks in.
+        let approach = self.table.as_ref().map_or(24, |t| t.home.approach);
+        if d <= approach
+            && lit.iter().any(|c| {
+                let mut walk = crate::walk::Walk::new(
+                    *c,
+                    path::Goal::Block { pos: *c },
+                    crate::walk::Arrive::Goal,
+                    tick,
+                );
+                walk.route_now(w, tick) && walk.route == Some(path::Status::Found)
+            })
+        {
+            return None;
+        }
         // The portal's chunk not loaded (or no face seen yet): the tunnel runs at the portal
         // itself until the front is seen.
         let target = front.map_or(portal, |f| f.tunnel);
