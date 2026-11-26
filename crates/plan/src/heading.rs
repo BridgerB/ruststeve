@@ -1333,7 +1333,10 @@ impl Plan {
                     // In travel the hunt needs the reserve and only the forest base makes new
                     // pickaxes: bridge over the deltas (filler is plentiful), tunnel only with
                     // `TRAVEL_SPARE` over (race 45535712274 lane 0 tunnelled 84 uses in the deltas).
-                    let spare = if self.ender.phase.travels() {
+                    // Not on the way home: the hunt is over and the trip makes its own
+                    // pickaxes (race 45742350492 lane 2 stood 4,600 ticks at (70, 46, 145) with
+                    // 118 uses, every tunnel refused for the hunt's 60).
+                    let spare = if self.ender.phase == crate::endermen::EnderPhase::Travel {
                         TRAVEL_SPARE
                     } else {
                         0
