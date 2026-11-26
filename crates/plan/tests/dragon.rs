@@ -974,3 +974,27 @@ fn a_stand_under_the_heads_blow_strikes_from_under_it() {
     let eye = [7.5, 62.0 + physics::EYE_HEIGHT, 0.5];
     assert!(dragon::head_reach(&v, eye) <= dragon::STRIKE_REACH);
 }
+
+#[test]
+fn sealed_in_cover_the_wait_holds_there() {
+    // Race 45901376114 lane 0: sealed in a pocket, the walk to the bunker failed 656 times.
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    for c in [
+        (12, 66, 0),
+        (13, 64, 0),
+        (11, 64, 0),
+        (12, 64, 1),
+        (12, 64, -1),
+    ] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    with_dragon(&mut w, [40.5, 90.0, 0.5], 0, 0.0);
+    let a = Ask {
+        bunker: Some([14, FLOOR - 3, 0]),
+        ..ask()
+    };
+    assert_eq!(decide(&w, &a), Want::Hold("in cover"));
+}

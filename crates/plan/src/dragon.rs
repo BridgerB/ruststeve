@@ -523,6 +523,9 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// Ticks a fight whose walk failed in cover waits before it plans again.
+pub const COVERED_RETRY_TICKS: u64 = 200;
+
 /// Ticks between the notch roof's clicks, and the clicks it may take in all.
 pub const ROOF_CLICK_TICKS: u64 = 6;
 pub const ROOF_TRIES: u32 = 8;
@@ -1333,6 +1336,12 @@ pub const WAIT_FROM: f64 = 15.0;
 /// The wait while the dragon flies: the bunker when there is one, else a cell on the ring
 /// `WAIT_RING` out, out of the breath.
 fn wait(w: &World, ask: &Ask, feet: [f64; 3], why: &'static str) -> Want {
+    // Already in a roofed 2-high cell (a pocket sealed for an enderman, a notch): the wait is
+    // there (race 45901376114 lane 0: sealed in a pocket, the walk to the bunker failed NoPath
+    // 656 times, 13,000 ticks).
+    if crate::end::covered(w) {
+        return Want::Hold("in cover");
+    }
     if let Some(b) = ask.bunker {
         return if flat(feet, mid(b)) <= STAND_NEAR && (feet[1] - f64::from(b[1])).abs() < 1.5 {
             Want::Hold(why)
@@ -1928,13 +1937,25 @@ impl Plan {
             self.note(tick, what, why);
         }
         if let Some(e) = failed {
+            // Sealed in cover, a walk out has no way: the next choice waits a while, the End's
+            // own rows (the pocket's, the bunker's) open it.
+            let covered = crate::end::covered(w);
             self.note(
                 tick,
                 format!("dragon walk to {cell:?} failed: {e:?}"),
-                "the fight plans again".to_owned(),
+                if covered {
+                    format!("in cover; the fight plans again in {COVERED_RETRY_TICKS} ticks")
+                } else {
+                    "the fight plans again".to_owned()
+                },
             );
             self.task = Task::Idle;
-            self.retry_at = tick + crate::RETRY_TICKS;
+            self.retry_at = tick
+                + if covered {
+                    COVERED_RETRY_TICKS
+                } else {
+                    crate::RETRY_TICKS
+                };
             return Controls::default();
         }
         if c.pitch.is_none() {

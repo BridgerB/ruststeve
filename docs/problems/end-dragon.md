@@ -147,5 +147,9 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - With the feet at 62 under a dragon at 67, a stand 2.0 off the head's box is 2.38 under it. The eye was 3.75 from the box, so "no head stand open" came every turn, and the dragon was at 193 by tick 4,740.
 - **Fix:** `clear_of_blow` counts a body under the blow boxes as clear of them. The boxes reach down to 2 under the dragon's feet, the same floor as the wings' sweep. Such a stand may be right under the head, 2.4 from its box.
 
+**Wall 13: sealed in a pocket, the fight walked for the bunker** (race 45901376114 lanes 0 and 1). An enderman's pocket sealed the bot in (21 blocks). The fight's wait while the dragon flew walked for the bunker: NoPath, "the fight plans again", 656 times over 13,000 ticks. The dragon stayed at 193.
+- **Fix:** in a roofed 2-high cell (`end::covered`), the wait holds there ("in cover"). A walk that fails NoPath in cover plans again only after 200 ticks.
+- Still open: a sealed pocket is not opened by the fight when the dragon sits.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
