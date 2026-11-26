@@ -1566,3 +1566,24 @@ fn four_below_a_span_one_off_its_line_the_stair_runs_along_it() {
         notes(&p)
     );
 }
+
+#[test]
+fn short_of_pickaxes_a_stem_seen_near_is_gathered_by_hand() {
+    // Q10's race 45768707240 lane 2: 17 off the portal at 15.6 health with 0 pickaxe uses, the
+    // kit's stems spent, a crimson forest round it.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.remove(&37);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (14, 64, 8), BlockKind::CrimsonStem);
+    remember(&mut w, home::NETHER, (14, 64, 8), BlockKind::CrimsonStem);
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: wood by hand at (14, 64, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.wood_walks, 1);
+}

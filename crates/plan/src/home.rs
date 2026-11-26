@@ -120,7 +120,7 @@ impl Default for HomeRules {
             heal_ticks: 2400,
             animal_walks: 12,
             climb_pick_uses: 30,
-            pick_runs: 8,
+            pick_runs: 24,
         }
     }
 }
@@ -291,6 +291,11 @@ pub struct HomeState {
     pub ender_hold: Option<(i32, u64)>,
     #[serde(default)]
     pub enders_left: Vec<i32>,
+    /// Walks for wood by hand, and whether a gather to `WOOD_GATHER` is in hand.
+    #[serde(default)]
+    pub wood_walks: u32,
+    #[serde(default)]
+    pub wood_gathering: bool,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -404,6 +409,17 @@ pub const ENDER_HOLD_MAX: u64 = 1200;
 /// Basalt kept on the trip when the pack fills (the guard's and the bridges' filler with the
 /// netherrack's 128; the deltas' restock digs it).
 pub const BASALT_KEPT: i32 = 64;
+/// Wood by hand (`Plan::home_wood`; Q10's race 45768707240 lane 2 ran out of pickaxes 17 off the
+/// portal): under this many pickaxe uses, logs or stems within `WOOD_REACH` are gathered by hand
+/// to `WOOD_GATHER`, at most `WOOD_WALKS` walks a trip; within `WOOD_LEG_FROM` of the portal the
+/// last leg's budget (`WOOD_USES_A_BLOCK`, Q6's 2.5) is wanted. A wooden pickaxe is 59 uses.
+pub const WOOD_SHORT_USES: i32 = 60;
+pub const WOOD_REACH: i32 = 24;
+pub const WOOD_GATHER: i32 = 8;
+pub const WOOD_WALKS: u32 = 48;
+pub const WOOD_LEG_FROM: i32 = 160;
+pub const WOOD_USES_A_BLOCK: f64 = 2.5;
+pub const WOOD_PICK_USES: i32 = 59;
 
 /// The next block of the guard (`Plan::home_guard`): for each side across `axis`, an open
 /// feet-level cell (no floor under it, or only a rail over a drop) is guarded. Its block is clicked onto a
@@ -2196,6 +2212,70 @@ impl Plan {
         found
     }
 
+    /// Pickaxe uses the trip wants held: `WOOD_SHORT_USES`, or within `WOOD_LEG_FROM` of the portal
+    /// the last leg's own budget (`WOOD_USES_A_BLOCK` a block to go on the plane).
+    fn wood_wanted_uses(&self, w: &World) -> i32 {
+        let Some(body) = w.body else {
+            return WOOD_SHORT_USES;
+        };
+        let feet = path::feet_cell(body.pos);
+        let leg = self
+            .ender
+            .home
+            .portal
+            .map(|p| flat(feet, p))
+            .filter(|d| *d <= WOOD_LEG_FROM)
+            .map_or(0, |d| (f64::from(d) * WOOD_USES_A_BLOCK).ceil() as i32);
+        WOOD_SHORT_USES.max(leg)
+    }
+
+    /// Wood by hand (the forest base's gather, reused): with the pickaxe uses held and the wood
+    /// held for more under what the trip wants (`wood_wanted_uses`), a log or stem seen within
+    /// `WOOD_REACH` (warped and crimson stems make planks too) is walked to and dug by hand, until
+    /// `WOOD_GATHER` logs are held or none is seen; the trip's pickaxe runs make them pickaxes.
+    /// Noted and counted (`wood_walks`), at most `WOOD_WALKS` a trip.
+    fn home_wood(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.ender.home.wood_walks >= WOOD_WALKS {
+            return None;
+        }
+        let want = self.wood_wanted_uses(w);
+        let uses = endermen::pickaxe_uses_left(w);
+        let logs = base::logs_held(w);
+        // A log is four planks, about one wooden pickaxe (`WOOD_PICK_USES`) with its sticks.
+        let promised = uses + WOOD_PICK_USES * (logs + base::planks_held(w) / 4);
+        let gathering = self.ender.home.wood_gathering && logs < WOOD_GATHER;
+        if promised >= want && !gathering {
+            self.ender.home.wood_gathering = false;
+            return None;
+        }
+        let body = w.body?;
+        let log = self.nearest_log(w, body.pos, 0.0, tick)?;
+        let feet = path::feet_cell(body.pos);
+        let d = flat(feet, log);
+        if d > WOOD_REACH {
+            self.ender.home.wood_gathering = false;
+            return None;
+        }
+        let mut walk = Walk::to_dig(log, tick);
+        if !walk.route_now(w, tick) {
+            self.expanded += walk.expanded;
+            self.refuse(log, tick);
+            return None;
+        }
+        self.ender.home.wood_gathering = true;
+        self.ender.home.wood_walks += 1;
+        self.walks += 1;
+        self.note(
+            tick,
+            format!("home: wood by hand at {log:?}"),
+            format!(
+                "pickaxe uses {uses} and {logs} logs held, {want} wanted; {d} off; walk {} of {WOOD_WALKS}",
+                self.ender.home.wood_walks
+            ),
+        );
+        Some(Task::ToLog(walk))
+    }
+
     /// The trip west: the heading's legs to the way's points and the portal, then the approach.
     fn home_trip(&mut self, w: &World, tick: u64) -> Option<Task> {
         let r = self.home_rules();
@@ -2218,6 +2298,12 @@ impl Plan {
                 self.ender.home.ground = Some(path::feet_cell(body.pos));
             }
         }
+        // >>> Q8: wood by hand when the pickaxes run short (Q10's race 45768707240 lane 2: 17 off
+        // the portal with 0 uses, the kit's stems spent, a crimson forest round it).
+        if let Some(t) = self.home_wood(w, tick) {
+            return Some(t);
+        }
+        // <<< Q8
         // Stone and wood both count (the coordinator, 2026-11-25): the kit's 16 stems are 64
         // planks, about 20 wooden pickaxes of 59 uses; stone from blackstone when held.
         let picking = (self.base.steps == base::CLIMB_STEPS.to_vec()

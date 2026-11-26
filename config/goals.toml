@@ -884,9 +884,10 @@ heal_ticks = 2400
 animal_walks = 12
 # Stone pickaxe uses under which the climb makes more from the stairs' cobblestone (a stair up
 # opens about three blocks: 30 is ten stairs' warning), at most pick_runs times (120 blocks of
-# climb at 3 a stair is about 360 uses, three stone pickaxes, with room).
+# climb at 3 a stair is about 360 uses, three stone pickaxes, with room). 24: the trip's wooden
+# pickaxes from stems gathered by hand count too (Q10's race 45768707240 lane 2 spent all 8).
 climb_pick_uses = 30
-pick_runs = 8
+pick_runs = 24
 # <<< home
 
 # >>> Q6 (issue 19, docs/problems/eyes-portal.md): the way home's last leg, by rock to the entry
