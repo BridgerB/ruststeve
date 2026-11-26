@@ -555,3 +555,24 @@ fn a_blast_takes_the_wall_and_a_crystal_left_gets_it_again() {
         Next::Build((8, 70, 6), Role::Wall)
     );
 }
+
+#[test]
+fn the_spikes_read_from_end_toml_rows() {
+    // E1's `[[spike]]` rows (config/end.toml, probe 45863427332), with its extra fields.
+    #[derive(serde::Deserialize)]
+    struct Rows {
+        spike: Vec<Spike>,
+    }
+    let text =
+        "[[spike]]\ncentre = [-34, 24]\ntop_y = 79\nradius = 2\ncaged = true\nground_y = 62\n";
+    let rows: Rows = toml::from_str(text).unwrap();
+    assert_eq!(
+        rows.spike,
+        vec![Spike {
+            centre: [-34, 24],
+            radius: 2,
+            top_y: 79,
+            caged: true,
+        }]
+    );
+}
