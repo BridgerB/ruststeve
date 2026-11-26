@@ -177,3 +177,7 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The fall at 3 health killed it 100 ticks later.
 - **Not known:** whether the bucket was in the hotbar, and whether the eat in progress held the hand.
 - **Now noted:** the clutch's begin note carries the held item and the bucket's slot, and each pour sent is noted ("clutch pour sent"). The next race reads why.
+- **Made structural** (the orchestrator; the clutch is the one rule that must be certain: every death in races 4 to 7 was a fall after a blow):
+  - Once the clutch starts it owns the hand. The use key is let go (`ReleaseUse`), any eating task is dropped ("clutch stops the eating"), the bucket's slot is selected, and the pour goes on its predicted tick.
+  - Up a pillar or a spike, the water bucket is kept in the hotbar (index 8) by a hotbar swap click ("water bucket to the hotbar"), so selecting it is one packet.
+  - Unit tests `a_clutch_that_begins_while_eating_still_pours` and `up_a_pillar_the_water_bucket_is_kept_in_the_hotbar`.

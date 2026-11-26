@@ -901,6 +901,9 @@ pub const CLUTCH_FROM: f64 = 4.0;
 /// Blocks from the eye to the ground's top face a pour reaches: the player's block interaction
 /// range 4.5, less a tenth.
 pub const POUR_REACH: f64 = 4.4;
+/// The hotbar index the water bucket is kept in up high (the last: the tools and blocks the
+/// climb and dig hold are selected elsewhere).
+pub const CLUTCH_HOTBAR: u8 = 8;
 
 /// Whether the pour goes this tick (the orchestrator, after race 45885217441 lane 1's miss at 48
 /// over the ground): the position this tick's movement sends (the feet plus the velocity, the
@@ -1424,6 +1427,19 @@ impl Plan {
                 return None;
             }
             self.spikes.clutches += 1;
+            // The clutch owns the hand (the orchestrator, after race 45899557907 lane 0: the eat
+            // row cut in the tick the fall began, and no pour went): any eating stopped, its task
+            // dropped, the bucket's slot selected below.
+            // The use key let go whatever it held (harmless when nothing is in use).
+            self.acts.push(Act::ReleaseUse);
+            if matches!(self.task, Task::Eat(_)) {
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "spikes: clutch stops the eating".to_owned(),
+                    "the hand to the water bucket".to_owned(),
+                );
+            }
             self.note(
                 tick,
                 format!("spikes: clutch begun at {:?}", path::feet_cell(body.pos)),
@@ -1556,11 +1572,53 @@ impl Plan {
     /// `item` to hand for the clutch (an act when a swap is needed), looking down.
     fn spikes_clutch_hold(&mut self, w: &World, item: ItemKind, down: Controls) -> Controls {
         if let hold::Hold::Act(a) = hold::toward(w, item)
-            && self.acts.is_empty()
+            && self.acts.iter().all(|x| matches!(x, Act::ReleaseUse))
         {
             self.acts.push(a);
         }
         down
+    }
+
+    /// Up a pillar or a spike, the water bucket kept in the hotbar (`CLUTCH_HOTBAR`), so a fall
+    /// selects it with one packet and never waits on a window's clicks. Noted.
+    fn spikes_bucket_to_hotbar(&mut self, w: &World, tick: u64) {
+        if !self.spikes_up_high(w)
+            || !self.acts.is_empty()
+            || w.click.is_some()
+            || w.window.is_some()
+            || w.inventory.carried.is_some()
+        {
+            return;
+        }
+        let slots = &w.inventory.slots;
+        if slots
+            .iter()
+            .any(|(s, (k, _))| (36..=44).contains(s) && *k == ItemKind::WaterBucket)
+        {
+            return;
+        }
+        let Some(from) = slots
+            .iter()
+            .find(|(s, (k, _))| (9..=35).contains(*s) && *k == ItemKind::WaterBucket)
+            .map(|(s, _)| *s)
+        else {
+            return;
+        };
+        let button = if w.held == CLUTCH_HOTBAR {
+            CLUTCH_HOTBAR - 1
+        } else {
+            CLUTCH_HOTBAR
+        };
+        self.acts.push(Act::Click {
+            slot: from,
+            button: i8::try_from(button).unwrap_or(8),
+            mode: 2,
+        });
+        self.spikes_note(
+            tick,
+            "spikes: water bucket to the hotbar".to_owned(),
+            format!("from slot {from} to hotbar {button}, up high"),
+        );
     }
 
     fn spikes_hold(&mut self, tick: u64) -> Task {
@@ -1574,6 +1632,7 @@ impl Plan {
     /// One tick of the crystals' driver while no task runs (the planner's step calls it ahead of
     /// the choice). `None` when nothing runs or it just ended.
     pub fn spikes_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        self.spikes_bucket_to_hotbar(w, tick);
         // A blow taken inside a closed box: noted (the box's own test).
         if let (Some(body), Some(h)) = (w.body, w.player.health) {
             let feet = path::stand_cell(w, body.pos);
