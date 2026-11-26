@@ -459,11 +459,16 @@ fn gazes(w: &World) -> BTreeMap<i32, (f64, bool)> {
 
 /// The eye's distance to an entity's box: a crystal's 2 by 2 by 2, else its position.
 fn reach_to(w: &World, e: &world::Entity) -> Option<f64> {
+    reach_at(w, e.kind, e.pos)
+}
+
+/// `reach_to` for a kind at a place (a crystal the strike already removed).
+fn reach_at(w: &World, kind: EntityKind, pos: [f64; 3]) -> Option<f64> {
     let f = feet(w)?;
     let eye = [f[0], f[1] + 1.62, f[2]];
-    if e.kind == EntityKind::EndCrystal {
-        let lo = [e.pos[0] - 1.0, e.pos[1], e.pos[2] - 1.0];
-        let hi = [e.pos[0] + 1.0, e.pos[1] + 2.0, e.pos[2] + 1.0];
+    if kind == EntityKind::EndCrystal {
+        let lo = [pos[0] - 1.0, pos[1], pos[2] - 1.0];
+        let hi = [pos[0] + 1.0, pos[1] + 2.0, pos[2] + 1.0];
         return Some(
             (0..3)
                 .map(|i| (eye[i] - eye[i].clamp(lo[i], hi[i])).powi(2))
@@ -471,7 +476,7 @@ fn reach_to(w: &World, e: &world::Entity) -> Option<f64> {
                 .sqrt(),
         );
     }
-    Some(dist(eye, e.pos))
+    Some(dist(eye, pos))
 }
 // <<< E1
 
@@ -1653,12 +1658,17 @@ fn end_facts(prev: &Snapshot, next: &mut Snapshot, w: &World, out: &mut Vec<Fact
     if next.attacks > prev.attacks
         && let Some((_, id)) = next.last_attack
     {
-        let (target, reach) = match w.entities.get(&id) {
-            Some(e) => (
+        let (target, reach) = match (w.entities.get(&id), prev.crystals.get(&id)) {
+            (Some(e), _) => (
                 e.kind.name().unwrap_or("unknown").to_owned(),
                 reach_to(w, e),
             ),
-            None => match next.dragon {
+            // A crystal the strike removed in the same tick: where it was.
+            (None, Some(pos)) => (
+                "end_crystal".to_owned(),
+                reach_at(w, EntityKind::EndCrystal, *pos),
+            ),
+            (None, None) => match next.dragon {
                 Some(d) if id > d && id <= d + DRAGON_PARTS.len() as i32 => {
                     let part = DRAGON_PARTS
                         .get(usize::try_from(id - d - 1).unwrap_or(0))
