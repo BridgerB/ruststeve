@@ -762,3 +762,45 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     );
     assert_eq!(p.spikes.clutches, 1);
 }
+
+#[test]
+fn a_breath_at_a_pillars_foot_is_walked_out_of() {
+    // Race 45875049490 lane 0: held still at (42, 59, 3) in a fireball's cloud, three blows of 6.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    w.player.health = Some(12.0);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle), "hurt: a hold");
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 50,
+        uuid: [2; 16],
+        kind: EntityKind::AreaEffectCloud.id(),
+        x: 8.5,
+        y: 64.0,
+        z: 4.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 50,
+        entries: vec![(8, MetaValue::Float(3.0))],
+    }));
+    assert!(p.spikes_step(&w, 101).is_none(), "the hold ends");
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: hold ended by a breath"))
+    );
+    match p.spikes_task(&w, 102) {
+        Some(Task::Explore(walk)) => {
+            let t = walk.target;
+            let d = ((f64::from(t.0) + 0.5 - 8.5).powi(2) + (f64::from(t.2) + 0.5 - 4.5).powi(2))
+                .sqrt();
+            assert!(d > 4.5, "out of its reach: {t:?}");
+        }
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: out of the breath to"))
+    );
+}

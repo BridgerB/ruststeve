@@ -70,3 +70,18 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - **The climb:** it begins only with the dragon far or perched, and once begun it goes on to the box, with no waits half way ("climb on through").
   - **Out of the box:** only with the dragon far or perched ("hold in the box").
   - A blow inside the box is noted ("blow in the box").
+
+## Second race: 45875049490 (dev-end-island, 2 lanes, cap 12,000, commit 7c08206, development only)
+- **The clutch fired once and worked.** Lane 1 was struck off at y 77 and fell 19.6 (health 14). It poured 1.3 over the ground, landed at 16 health with no fall damage, and took the water back. Noted "clutch begun / poured / over".
+- **No crystal broke.** Both bots died of `indirectMagic` from the dragon, a breath cloud or fireball, on the ground:
+  - Lane 0 at tick 1,080 held still at its pillar's foot (42, 59, 3), "hold in the guard ring" while the dragon strafed 23 off, and took 6 three times.
+  - Lane 1 at tick 2,780 was on E3's walk back to the bunker, an enderman provoked as well.
+- The holds on a half-built pillar and the dig from the top ("dig down from the dragon" at y 82) are the b15c51b logic, which f8cc3da replaces (climb on through, the box, hold in the box).
+
+### Wall 3: a breath cloud at the feet, held in (fixed)
+- **The cause:** no step of the crystals looked at the dragon's breath, so a hold on the ground stood in a cloud.
+- **The fix:**
+  - On the ground and outside a box, a breath whose reach (radius + 1.5, E5's `dragon::breaths`) takes in the feet gets a walk out first: 16 ways, 1.5 and 3.5 past its reach, a cell out of every breath ("spikes: out of the breath to").
+  - A hold ends when a breath comes ("hold ended by a breath").
+  - Unit test `a_breath_at_a_pillars_foot_is_walked_out_of`.
+- **Not mine:** lane 1's death on E3's bunker walk (`end: back to the bunker`, through the breath), reported to the orchestrator.
