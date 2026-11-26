@@ -1744,11 +1744,16 @@ fn end_facts(prev: &Snapshot, next: &mut Snapshot, w: &World, out: &mut Vec<Fact
             health: next.dragon_health,
         });
     }
-    let new_hits = w
-        .hits
-        .iter()
-        .filter(|h| next.hit_mark.is_some() && Some(h.at_tick) > prev.hit_mark.map(|m| m.0));
-    for h in new_hits {
+    // The new blows as `diff` counts them: after the newest seen before, and more at its stamp.
+    let fresh = match prev.hit_mark {
+        Some((t, n)) => {
+            let after = w.hits.iter().filter(|h| h.at_tick > t).count();
+            let same = w.hits.iter().filter(|h| h.at_tick == t).count();
+            after + same.saturating_sub(n)
+        }
+        None => w.hits.len(),
+    };
+    for h in w.hits.iter().rev().take(fresh) {
         if h.cause == Some(EntityKind::EnderDragon) || h.direct == Some(EntityKind::EnderDragon) {
             let lost = match (prev.health, next.health) {
                 (Some(a), Some(b)) => (a - b).max(0.0),

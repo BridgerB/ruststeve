@@ -1073,7 +1073,7 @@ fn the_dragon_and_the_credits_are_in_the_ledger() {
         id: 60,
         entries: vec![(9, MetaValue::Float(191.0))],
     }));
-    let (c, facts) = facts_between(&b, &w);
+    let (_, facts) = facts_between(&b, &w);
     assert!(
         facts.iter().any(
             |x| matches!(x, Fact::Strike { target, id: 61, .. } if target == "ender_dragon:head")
@@ -1085,6 +1085,23 @@ fn the_dragon_and_the_credits_are_in_the_ledger() {
             x,
             Fact::DragonHit { part: Some(p), health: Some(h) } if p == "head" && (*h - 191.0).abs() < 1e-6
         )),
+        "{facts:?}"
+    );
+    // The head strikes back: a blow on the bot caused by the dragon, 6 health lost.
+    health(&mut w, 20.0);
+    let c = snapshot(&w);
+    w.step(&Event::Packet(S2c::DamageEvent {
+        entity_id: 7,
+        source_type: 0,
+        cause: Some(60),
+        direct: Some(60),
+    }));
+    health(&mut w, 14.0);
+    let (c, facts) = facts_between(&c, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::DragonBlow { lost, .. } if (*lost - 6.0).abs() < 1e-6)),
         "{facts:?}"
     );
     let row = senses(&w, "t", "w", None);
