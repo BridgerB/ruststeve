@@ -2109,6 +2109,12 @@ impl Plan {
         // A rail wanted with a knocker near (`home::rail_wanted`) cuts a walk under way: the
         // planner lays the floor beside the feet before the next step.
         if home_trip
+            // Q8: the Nether only: the rails and the guard are laid by the Nether's recovery, and an
+            // overworld walk cut for them was cut again every tick.
+            && w
+                .dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
             && matches!(
                 self.task,
                 // Not a tunnel's stairs (Q8: race 45779137282, the guard filled its own stair).
@@ -2136,8 +2142,13 @@ impl Plan {
         }
         // >>> Q8 (issue 19): a shooter that first sees the bot on the trip cuts a walk or a tunnel
         // under way, so the trip's cover runs (Q10's race 45768707240 lane 1: three ghast fireballs
-        // in a level tunnel at (75, 33, 179), 15.6 to dead, no cover note). Once a sighting.
+        // in a level tunnel at (75, 33, 179), 15.6 to dead, no cover note). Once a sighting; in the
+        // Nether only (F3, race 45800967549: the overland legs cut 131 times in one tick by a
+        // skeleton, the sighting never recorded outside the Nether's recovery).
         if home_trip
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
             && matches!(
                 self.task,
                 Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
@@ -2155,6 +2166,7 @@ impl Plan {
             self.task = Task::Idle;
             self.retry_at = tick;
             self.ender.home.shooter_cuts += 1;
+            self.ender.home.shooter_seen_at = Some(tick);
             self.note(
                 tick,
                 format!("home: {cut} cut for cover"),
