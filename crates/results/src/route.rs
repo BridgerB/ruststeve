@@ -702,8 +702,9 @@ fn report(
         *by_biome.entry(g.biome(x, z).to_owned()).or_default() += 1;
         if k % 8 == 0 || k + 1 == path.len() {
             rows.push_str(&format!(
-                "  {k:>5} ({x}, {y}, {z}) {} lava{h} drops{dr} lavadrops{ld} digs{digs}\n",
-                g.biome(x, z)
+                "  {k:>5} ({x}, {y}, {z}) {} lava{h} drops{dr} lavadrops{ld} open{} digs{digs}\n",
+                g.biome(x, z),
+                u8::from(g.in_open(x, y, z))
             ));
         }
     }
@@ -777,6 +778,10 @@ fn report(
             .join(", "),
     );
     s.push_str("]\n");
+    // The same points with the feet's height, for a covered leg's target cell.
+    let mut way3: Vec<[i32; 3]> = path.iter().step_by(24).copied().collect();
+    way3.extend(path.last().copied());
+    s.push_str(&format!("way3 = {way3:?}\n"));
     s.push_str(&rows);
     s
 }
