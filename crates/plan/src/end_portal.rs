@@ -94,7 +94,7 @@ impl Default for EndKitRules {
                 [1608, 57, -38],
             ],
             up_walks: 3,
-            logs: 10,
+            logs: 14,
             log_reach: 48.0,
             log_rise: 16,
             log_walks: 24,
@@ -402,7 +402,16 @@ impl Entry {
             (self.high.0, self.high.1 + 2, self.high.2),
             (self.frame[0], self.frame[1] + 1, self.frame[2]),
             self.inside,
+            self.deeper(),
         ]
+    }
+
+    /// The cell past `inside` away from the frame: walked toward, so the body's box leaves the
+    /// frame's top (race 45877404722 lane 1 stood "in end_portal" with its box still on the
+    /// frame's edge at y 19.81, over the portal's 0.75 top, and never went through).
+    pub fn deeper(&self) -> Cell {
+        let (dx, dz) = (self.frame[0] - self.inside.0, self.frame[2] - self.inside.2);
+        (self.inside.0 - dx, self.inside.1, self.inside.2 - dz)
     }
 }
 
@@ -870,6 +879,16 @@ impl Plan {
                     self.end_kit_advance(w, tick, "no raw meat left");
                     return None;
                 }
+                // The row's table taken along first: at hand, the cook's planner presses the
+                // cobblestone into furnaces (race 45877404722 lane 0: ten, 80 cobblestone).
+                if let Some(t) = self.at_hand(w, BlockKind::CraftingTable, tick) {
+                    self.note(
+                        tick,
+                        format!("end kit: the row's table at {t:?} taken along"),
+                        "before the cook, so no stone is pressed into furnaces".to_owned(),
+                    );
+                    return Some(Task::Dig(crate::dig::Dig::new(w, t, tick)));
+                }
                 if let Some(t) = self.home_cook(w, tick, &rules, night) {
                     return Some(t);
                 }
@@ -906,6 +925,11 @@ impl Plan {
             return None;
         }
         let feet = path::feet_cell(w.body?.pos);
+        // A hut is on the surface: in the bot's own stairs a wall is no hut (race 45877404722
+        // lane 0 dug its stair's side at (1591, 39, -38)).
+        if feet.1 < self.end_rules().way_up[1] - 8 {
+            return None;
+        }
         let mut cells = path::Cells::new(w);
         let sides = [(1, 0), (-1, 0), (0, 1), (0, -1)];
         let open = |cells: &mut path::Cells, (dx, dz): (i32, i32)| {
@@ -1163,6 +1187,47 @@ impl Plan {
                     .map(|i| craft::count(w, *i))
                     .sum::<i32>()
                     .min(64);
+                // The whole batch's fuel first, planks from the logs held (race 45877404722: the
+                // smelt of 7 raw iron ran out of fuel, "failed Missing", 4 left in the furnace and
+                // no boots).
+                let need = count * i32::try_from(s.ticks).unwrap_or(200);
+                let have: i32 = crate::smelt::fuels_held(w)
+                    .iter()
+                    .map(|(k, t)| craft::count(w, *k) * i32::try_from(*t).unwrap_or(0))
+                    .sum();
+                if have < need && base::logs_held(w) > 0 {
+                    let plank = 300;
+                    let more = (need - have + plank - 1) / plank;
+                    let want = base::planks_held(w) + more;
+                    if let Some(n) = make::Need::parse("tag:planks") {
+                        let fuel_row = make::Row {
+                            id: "end-kit-fuel".to_owned(),
+                            needs: Vec::new(),
+                            provides: vec![(n, want)],
+                            holds: Vec::new(),
+                            spares: Vec::new(),
+                            wants: Vec::new(),
+                            act: None,
+                        };
+                        if let Choice::Act(a) = make::make_with_wear(
+                            &table,
+                            &counts,
+                            &near,
+                            false,
+                            &make::Wear::default(),
+                            &fuel_row,
+                        ) && let Some(make::Act::Craft(rec)) = a.act
+                            && make::fits_grid(rec)
+                        {
+                            self.note(
+                                tick,
+                                format!("end kit: craft {} for the smelt's fuel", rec.id),
+                                format!("{count} to smelt want {need} ticks, {have} held"),
+                            );
+                            return Some(Task::Craft(crate::craft::Craft::new(rec, tick)));
+                        }
+                    }
+                }
                 let sm = crate::smelt::Smelt::new(w, f, s, count, tick)?;
                 self.note(
                     tick,
@@ -1575,6 +1640,7 @@ impl Plan {
             path::MoveKind::JumpUp,
             path::MoveKind::JumpUp,
             path::MoveKind::JumpUp,
+            path::MoveKind::Walk,
             path::MoveKind::Walk,
         ];
         walk.route = Some(path::Status::Found);

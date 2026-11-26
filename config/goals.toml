@@ -1082,8 +1082,10 @@ way = [[1620, 17, -36], [1609, 23, -38], [1602, 27, -38], [1596, 33, -38], [1590
 # fight with the spawner's silverfish cutting it; the frontier bot fought 10 in its first 800 ticks).
 up_walks = 3
 # Logs before the row: a table 4 planks, 4 more sticks 2, fuel for 7 raw iron (1,400 ticks, 5
-# planks) and 30 meat (6,000 ticks, 20 planks) at a plank's 300: 31 planks, 8 logs; 10 with margin.
-logs = 10
+# planks) and 30 meat (6,000 ticks, 20 planks) at a plank's 300: 31 planks, 8 logs; the way home's
+# cook counts shields' planks too (1,800 ticks), and race 45877404722 had 7,600 ticks of fuel
+# after the row from 10 logs and walked for more: 14.
+logs = 14
 # Trees walked to within 48 flat (the forest base's stem_radius), 24 walks at most; 8 walks to look.
 log_reach = 48.0
 # Logs on record more than 16 over or under the feet are not trees to walk to (race 45875661476:
