@@ -19,8 +19,9 @@ The resume stands at about (311, 36, 194) on the old bridge's east span. A lane 
 | 45765427829 | 1543fcb | stuck snapshot 45742350492 lane 0 (74, 33, 201), hp 15.6, food 9 | 6000 | 20000 | 3 | cancelled at ~tick 10,000 for 694f582: x 58 to 75, no progress |
 | 45768703328 | 694f582 | stuck 45742350492 lane 1 (49, 33, 206) | 6000 | 20000 | 5 | lane 1 ghast fireball at 7,520; at 16,800 the rest at (103, 38, 163), (88, 54, 201), (167, 75, 206), (56, 59, 122); lane 2 a spawner snapshot |
 | 45768707240 | 694f582 | stuck 45742350492 lane 0 (74, 33, 201) | 6000 | 20000 | 3 | **lane 2 to (22, 52, -8), 17 from the portal on the plane**, cap, no pickaxe from 18,180 (the last leg, a 71-step tunnel down from y 59, spent 156 uses; wood gone; 464 netherrack held); lane 1 ghast fireball at 7,520; lane 0 cap, "no far walk" at (64, 63, 210) |
-| 45771610530 | 5ea5a66 | at-6000 of 45768707240 lane 2 | 5000 | 16000 | 6 | running |
+| 45771610530 | 5ea5a66 | at-6000 of 45768707240 lane 2 | 5000 | 16000 | 6 | **5 of 6 to 14 to 32 from the portal**, all cap with 0 pickaxe uses (154 spent on the last leg; no pickaxe from tick 8,540; hand digs of netherrack 340 to 360 ticks, "Uncollected"); lane 2 cap at (33, 86, 109), hp 9.7. at-5000 snapshots: 5 lanes at (44, 71, 106 to 111) |
 | 45771663969 | 5ea5a66 | frontier (pearls_12, the forest) | 12000 | 24000 | 2 | running |
+| 45774326055 | 5ea5a66 | at-5000 of 45771610530 lane 0 (44, 71, 106) | 7600 | 36000 | 6 | running |
 
 ## Resume points (real snapshots past the join, from earlier races' case files)
 | snapshot | where | health | note |
@@ -30,3 +31,4 @@ The resume stands at about (311, 36, 194) on the old bridge's east span. A lane 
 | race-45746355032/snapshot-stuck-rs-l01-b00-…-lane-1 | (163, 40, 216) | 7.6 | at the danger line: not used |
 | race-45753006452/snapshot-stuck-rs-l01-b00-…-lane-1 | (78, 61, 159) on the fortress | 5.6 | at the danger line: not used |
 | race-45768707240/snapshot-at-6000-…-lane-2 | about (70, 50, 110 to 150), tick 6,000 of the lane that reached 17 from the portal | 15.6 | the portal stretch's resume |
+| race-45771610530/snapshot-at-5000-…-lane-0 | (44, 71, 106), ~125 from the portal | 15.6 | the portal stretch, the furthest resume |
