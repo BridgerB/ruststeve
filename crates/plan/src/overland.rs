@@ -365,7 +365,10 @@ impl Plan {
         if let Some(t) = self.overland_hut(w, &rules, feet, fix, tick) {
             return Some(t);
         }
-        if d <= rules.arrive && self.overland.way {
+        // A throw's walk point is reached at a leg's own reach, not the fix's `arrive` (24): a
+        // spot moved 20 off counted as reached on the spot, and the throw waited on the same
+        // canopy through four moves (race 45729721263 lane 0).
+        if self.overland.way && d <= rules.leg_reach {
             if !self.overland.arrived {
                 self.overland.arrived = true;
                 self.note(
@@ -379,7 +382,7 @@ impl Plan {
             }
             return None;
         }
-        if d <= rules.arrive {
+        if !self.overland.way && d <= rules.arrive {
             if !self.overland.arrived {
                 self.overland.arrived = true;
                 self.stronghold.at_fix = Some([fix[0].floor() as i32, fix[1].floor() as i32]);
@@ -515,12 +518,13 @@ impl Plan {
             );
         }
         let target = leg_target(w, feet, deg, len, rules.leg_min, rules.scan_step).or_else(|| {
-            // Nothing seen that far: the nearest seen ground on the bearing.
+            // Nothing seen that far: the nearest seen ground on the bearing, never past the aim (a
+            // throw's spot moved 20 off is not overshot by a 32-block leg).
             leg_target(
                 w,
                 feet,
                 deg,
-                rules.leg_min / 2,
+                (rules.leg_min / 2).min(len.max(rules.scan_step)),
                 rules.scan_step,
                 rules.scan_step / 2,
             )

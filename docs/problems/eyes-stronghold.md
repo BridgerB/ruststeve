@@ -106,3 +106,8 @@ A development race on 5c62f28 (`dev-overworld-eyes`, from the frontier), 2 lanes
 - **What worked**: lane 1's throw spot moved after 620 ticks of waiting ("overland throw spot moved (1 of 4)"); throw 2 went and the fix came (err 70). Both lanes walked east and huted at dusk.
 - **Cause**: the hut's exit digs one cell on the fix's axis at the feet and the head. Lane 1's hut took 22 blocks (the body moved while it was built), so those cells were air inside it and the wall stood beyond. From dawn (tick 17,660) every far walk died in 4 expansions: 302 failed in a row, turning the bearing each time, to the cap. Lane 0 was the same at (55, 80, -36), 2 expansions.
 - **Fix**: a far walk that dies within `ENCLOSED_EXPANSIONS` (8) is boxed in. A wall cell is dug toward the leg's target, else on any side, head before feet, never infested or the furnace ("overland dig out").
+
+### Wall 8: the moved spot counted as reached (race 45729721263, 2026-11-25)
+A development race on bbfe300 (`dev-overworld-eyes`, from the frontier), 2 lanes x 1 bot, cap 48,000. Development knowledge, never evidence.
+- **Cause**: a throw's walk point was reached at `[overland] arrive` (24), the fix's radius. The spot moved 20 ("overland throw spot moved", 4 of 4 in lane 0) counted as reached where the bot stood, and the throw waited on the same canopy at (216, 75, 29) from tick 2,320 through the night, idle 14,600 ticks. Both lanes did the same.
+- **Fix**: a walk point is reached at a leg's own reach (`leg_reach`, 6), and never hands over to the search. A leg with nothing seen at its length looks no farther than its aim (a 20-block move is not overshot by a 32-block leg).

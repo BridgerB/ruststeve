@@ -736,3 +736,20 @@ fn a_boxed_bot_digs_out() {
         "{n:#?}"
     );
 }
+
+/// A throw's walk point 20 off is walked to, not reached where the bot stands (`arrive`, 24, is
+/// the fix's): race 45729721263 lane 0's spot moved four times and the bot never left it.
+#[test]
+fn a_walk_point_is_reached_at_a_legs_reach() {
+    let (w, mut p) = flat(None);
+    p.overland.retarget(([20.5, 0.5], 0.0), true);
+    let t = p.overland_task(&w, 0);
+    let n = notes(&p);
+    assert!(matches!(t, Some(Task::Explore(_))), "{t:?} {n:#?}");
+    assert!(
+        !n.iter()
+            .any(|n| n.starts_with("overland at the throw's spot")),
+        "{n:#?}"
+    );
+    assert_eq!(p.stronghold.at_fix, None);
+}
