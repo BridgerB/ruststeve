@@ -40,6 +40,9 @@ Every look still leaves through `keep_look` ([[way-home]]'s endermen rules). In 
 ## The void
 `void_column`: a cell and everything under it to the dimension's floor loaded and clear. `void_edge` is the walk's edge in the End ([[walk-and-watchdog]]); `home::rail_wanted` and the idle sneak count it too.
 
+## Covered
+In the End a roofed 2-high cell with 2-high roofed sides (`covered`: the bunker, its tunnels) needs no pocket from an angry enderman: `Plan::ender_threat` returns at once there (`end_covered`, noted every 600 ticks), and the stock goes on (race 45869900923: endermen hurt near the dragon turned angry and held both bots in pockets in their own tunnels).
+
 ## Gotchas
 - Cobblestone and netherrack are not dragon-immune (E1): the dragon breaks bridge blocks it touches. End stone, obsidian, iron bars and bedrock are.
 - The caged spike at (42, 0) sits on the bridge's line 30 into the island: the site walk paths round it.

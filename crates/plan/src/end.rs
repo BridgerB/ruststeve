@@ -213,6 +213,28 @@ pub fn void_column(w: &World, c: Cell) -> bool {
     c.1 >= min_y && (min_y..=c.1).all(|y| cells.at((c.0, y, c.2)) == path::Class::Clear)
 }
 
+/// The feet in a roofed cell two high, and every open side of it two high and roofed too: an
+/// enderman (2.9 tall) can stand in none of them, so none reaches the bot (the bunker and its
+/// tunnels).
+pub fn covered(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let f = path::stand_cell(w, body.pos);
+    let two_high =
+        |c: Cell| open(w, c) && open(w, (c.0, c.1 + 1, c.2)) && solid(w, (c.0, c.1 + 2, c.2));
+    two_high(f)
+        && SIDES.iter().all(|(dx, dz)| {
+            let n = (f.0 + dx, f.1, f.2 + dz);
+            let h = (n.0, n.1 + 1, n.2);
+            // A side shut at the feet or the head; or open two high under a roof.
+            !(open(w, n) && open(w, h)) || solid(w, (n.0, n.1 + 2, n.2))
+        })
+}
+
+/// Covered notes are written at most this often (a second's worth of angry endermen at once).
+pub const COVERED_NOTE_EVERY: u64 = 600;
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -367,6 +389,14 @@ pub struct EndState {
     pub handoffs: u32,
     #[serde(default)]
     pub hold_noted: bool,
+    /// Ticks the bunker or a tunnel stood for a pocket from an angry enderman, and the last note.
+    #[serde(default)]
+    pub covered_ticks: u64,
+    #[serde(default)]
+    pub covered_noted: Option<u64>,
+    /// Up a pillar handed to the crystals' task for the way down, noted.
+    #[serde(default)]
+    pub down_noted: bool,
 }
 
 /// Where a work stands after a tick.
@@ -509,6 +539,28 @@ impl Plan {
         let (_, roof, door_cells) = bunker_cells(b, door);
         let inside = feet == b;
         let sealed = !open(w, roof) && !open(w, door_cells[0]);
+        // Up a pillar or a spike, or a pillar of E4's still standing: the crystals' task brings
+        // the bot down first, crystals left or not (E6's closed loop: the last crystal gone, the
+        // bot stayed 18 up and asked for walks to the bunker 24 times).
+        let up = crate::spikes::on_pillar(w, feet, &self.spikes.pillars)
+            || crate::spikes::on_spike(w, feet)
+            || !self.spikes.pillars.is_empty();
+        if up && let Some(t) = self.end_spikes(w, tick) {
+            if !self.end.down_noted {
+                self.end.down_noted = true;
+                self.note(
+                    tick,
+                    format!("end: up a pillar at {feet:?}, the crystals' task first"),
+                    format!(
+                        "{} crystals alive, {} pillars standing",
+                        crystals_alive(w),
+                        self.spikes.pillars.len()
+                    ),
+                );
+            }
+            return Some(t);
+        }
+        self.end.down_noted = false;
         // 3. Retreat, eat and heal.
         let health = w.player.health.unwrap_or(20.0);
         let food = w.player.food.unwrap_or(20);
@@ -1332,6 +1384,31 @@ impl Plan {
                 .to_degrees(),
             ..down(w)
         })
+    }
+
+    /// In the End, covered (`covered`) with an angry enderman near: no pocket is sealed, the work
+    /// goes on; noted every `COVERED_NOTE_EVERY` ticks with the count.
+    pub(crate) fn end_covered(&mut self, w: &World, tick: u64) -> bool {
+        if !in_end(w) || crate::endermen::angry(w).is_none() || !covered(w) {
+            return false;
+        }
+        self.end.covered_ticks += 1;
+        if self
+            .end
+            .covered_noted
+            .is_none_or(|t| tick >= t + COVERED_NOTE_EVERY)
+        {
+            self.end.covered_noted = Some(tick);
+            self.note(
+                tick,
+                "end: covered from an angry enderman, no pocket".to_owned(),
+                format!(
+                    "a roofed 2-high cell with 2-high sides; {} ticks covered in the run",
+                    self.end.covered_ticks
+                ),
+            );
+        }
+        true
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes
