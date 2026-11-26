@@ -147,6 +147,8 @@ pub struct StrongholdState {
     /// the kinds held back after one came back (until the tick).
     pub junk_drops: Vec<(data::ItemKind, u64, i32)>,
     pub junk_held: Vec<(data::ItemKind, u64)>,
+    /// Held-back blocks placed since the last release (`JUNK_PLACE_MAX` at most).
+    pub junk_places: u32,
     /// Stone bricks broken in reach of the tunnel's end.
     pub wall_breaks: u32,
     /// Stone pickaxes being made (`stronghold_pickaxes`), tasks begun for them in this round,
@@ -1313,19 +1315,24 @@ impl Plan {
                     None
                 }
             })?;
-        if smallest(k) > JUNK_PLACE_MAX {
+        // A small stack placed and dug back again by the way on (race 45732530352 lane 1: 6,000
+        // ticks 4 off its standing cell): `JUNK_PLACE_MAX` placings in a hold, then released too.
+        if smallest(k) > JUNK_PLACE_MAX || self.stronghold.junk_places >= JUNK_PLACE_MAX as u32 {
             self.stronghold.junk_held.retain(|(h, _)| *h != k);
             self.note(
                 tick,
                 format!("junk released: {k:?}"),
                 format!(
-                    "no main slot free and its smallest stack is {}: dropped whole, not placed one \
-                     by one",
-                    smallest(k)
+                    "no main slot free, its smallest stack {} and {} placed in this hold: \
+                     dropped whole",
+                    smallest(k),
+                    self.stronghold.junk_places
                 ),
             );
+            self.stronghold.junk_places = 0;
             return None;
         }
+        self.stronghold.junk_places += 1;
         let p = crate::place::Place::new(b, tick)?;
         self.note(
             tick,
