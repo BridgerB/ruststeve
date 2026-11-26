@@ -44,8 +44,10 @@ pub struct EndKitRules {
     pub up_walks: u32,
     /// Logs (and planks / 4) held before the row.
     pub logs: i32,
-    /// Trees walked to within this flat distance of the feet.
+    /// Trees walked to within this flat distance of the feet, and logs counted only within
+    /// `log_rise` of the feet's height.
     pub log_reach: f64,
+    pub log_rise: i32,
     /// Walks to logs, and walks to look for trees, at most.
     pub log_walks: u32,
     pub look_walks: u32,
@@ -94,6 +96,7 @@ impl Default for EndKitRules {
             up_walks: 3,
             logs: 10,
             log_reach: 48.0,
+            log_rise: 16,
             log_walks: 24,
             look_walks: 24,
             wood_points: vec![
@@ -945,6 +948,37 @@ impl Plan {
         None
     }
 
+    /// The nearest log on record within `log_rise` of the feet's height (memory's sightings, an
+    /// exposed face; race 45875661476: memory held logs at y -33 to -44 under the plain, and every
+    /// leg went toward them), not refused, no other player at it.
+    fn end_log(&self, w: &World, r: &EndKitRules, tick: u64) -> Option<Cell> {
+        let body = w.body?;
+        let dim = w.dimension.as_ref()?.name.clone();
+        let logs = data::generated::tags::block_tag("logs")?;
+        let feet = path::feet_cell(body.pos);
+        let (cx, cz) = (feet.0 >> 4, feet.2 >> 4);
+        let mut best: Option<(f64, Cell)> = None;
+        for dx in -crate::SEARCH_COLUMNS..=crate::SEARCH_COLUMNS {
+            for dz in -crate::SEARCH_COLUMNS..=crate::SEARCH_COLUMNS {
+                for s in w.memory.in_column(&dim, cx + dx, cz + dz) {
+                    let is_log = data::block_of_state(s.state).is_some_and(|k| logs.contains(&k));
+                    if !is_log
+                        || (s.pos.1 - feet.1).abs() > r.log_rise
+                        || self.refused_now(s.pos, tick)
+                        || crate::crowded(w, s.pos)
+                    {
+                        continue;
+                    }
+                    let d = flat(feet, s.pos);
+                    if best.is_none_or(|(bd, bc)| d < bd || (d == bd && s.pos < bc)) {
+                        best = Some((d, s.pos));
+                    }
+                }
+            }
+        }
+        best.map(|(_, c)| c)
+    }
+
     /// Wood by hand: the nearest log seen within `log_reach` with a found walk to it, dug by hand;
     /// with none, a walk to look for trees.
     fn end_kit_wood(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
@@ -957,7 +991,7 @@ impl Plan {
         let feet = path::feet_cell(body.pos);
         if self.end_portal.log_walks < r.log_walks {
             for _ in 0..crate::CANDIDATES_PER_TICK {
-                let Some(log) = self.nearest_log(w, body.pos, 0.0, tick) else {
+                let Some(log) = self.end_log(w, r, tick) else {
                     break;
                 };
                 let d = flat(feet, log);
@@ -991,7 +1025,7 @@ impl Plan {
         // 45873894148: plains and a river round the stairs' top, no log within 48, and eight
         // explore walks NoPath at once).
         let goal = self
-            .nearest_log(w, body.pos, 0.0, tick)
+            .end_log(w, r, tick)
             .map(|c| {
                 (
                     [f64::from(c.0) + 0.5, f64::from(c.2) + 0.5],

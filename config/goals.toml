@@ -1086,6 +1086,9 @@ up_walks = 3
 logs = 10
 # Trees walked to within 48 flat (the forest base's stem_radius), 24 walks at most; 8 walks to look.
 log_reach = 48.0
+# Logs on record more than 16 over or under the feet are not trees to walk to (race 45875661476:
+# memory held logs at y -33 to -44 under the plain by the stairs' top).
+log_rise = 16
 log_walks = 24
 # Legs retargeted at most 24 times. With no log on record, the overland's legs (seen ground,
 # rivers bridged) go to these points (x, z) in turn, reached within 12: first west along the
