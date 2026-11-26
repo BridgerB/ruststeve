@@ -80,8 +80,5 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 
 ### Wall 3: a breath cloud at the feet, held in (fixed)
 - **The cause:** no step of the crystals looked at the dragon's breath, so a hold on the ground stood in a cloud.
-- **The fix:**
-  - On the ground and outside a box, a breath whose reach (radius + 1.5, E5's `dragon::breaths`) takes in the feet gets a walk out first: 16 ways, 1.5 and 3.5 past its reach, a cell out of every breath ("spikes: out of the breath to").
-  - A hold ends when a breath comes ("hold ended by a breath").
-  - Unit test `a_breath_at_a_pillars_foot_is_walked_out_of`.
+- **The fix:** 8311848 walked out of a breath at the feet. E5's global rule (`dragon::Plan::breath_step`, bb3b247), run ahead of every task in the End, now does the same for every agent, so the local version is gone. Nothing box- or pillar-specific was needed.
 - **Not mine:** lane 1's death on E3's bunker walk (`end: back to the bunker`, through the breath), reported to the orchestrator.
