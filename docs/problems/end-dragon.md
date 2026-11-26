@@ -55,5 +55,20 @@ Development start, never evidence. The setup's kill worked: lane 1 saw 3 crystal
 - **`Plan::breath_step`** (before the always-rows): a breath whose reach takes in the body sends the bot on a walk to the nearest ground cell out of every breath. It looks within 9 columns, never before a grounded dragon's head. The cell is held while it stays clear. A breath's reach means radius plus 1.5 on the plane, with the body's height meeting the cloud's 0.5-tall box with a margin of 1 (`breath_on`). So the bunker three down and a pillar two up are out of it. Notes: "out of the breath to …", "out of the breath", "in the breath, no way out".
 - **`Plan::breath_ahead`** (on every tick's controls): a walk whose point 1.5 ahead lies in a breath's reach, with the feet not in one, stops at the edge and waits. Note: "walk waits at a breath's edge", every 100 ticks at most, with its count.
 
+### Race 45876898172 (issue-20-end with 24b0a6f, dev-end-no-crystals, 3 lanes, cap 12,000): 0/3 win
+Development start. Lane 1 ran to the cap; lanes 0 and 2 died. 26 head strikes in all. The dragon went to 145 (lane 0), 180 (lane 1) and 150 (lane 2). "dragon first: no pocket" fired 44 times, and no bot died in a pocket.
+
+**Lane 0's death** was a breath during E3's "open the bunker". The global breath rule (bb3b247, wall 4) is the answer; this race predates it.
+
+**Wall 5: the strike that makes it take off throws the bot off the island** (lane 2, tick 3,560). The dragon's takeoff count (`sittingDamageReceived`) is kept across perches and reset only when it goes over 50: 18.4 in perch 1, then 32 in perch 2. So 1 strike in about 9 starts a takeoff. That strike was made from the head stand on the surface. The dragon flew forward over the bot: head 10, wings 5, and a throw of 120 blocks off the island, dead by the fall.
+- **Fix:** `DragonState::sat_damage` counts the takeoff count as the server does ("dragon takeoff count over" when it resets).
+- A strike that would take it over 50 (`crossing`) is made only from under the wings' sweep and the head's: the body's top 0.2 under the dragon's feet less 2 (`under_wings`). Where one dig of end stone under the feet makes that so (`lowerable`: a 1-deep notch, climbed out by a jump), the bot digs first (`Want::Dig`). Where nothing does, it does not strike.
+
+**Wall 6: the sweep hits the bot on the surface outside the crossing strike** (lane 1).
+- A head stand 8.7 along took 10 in the attacking turn (tick 6,600).
+- The natural takeoff's wings took 5 on the way to the head stand (2,440).
+- The landing's wings took 5 on the ring 11 out, twice (4,080 and 10,900).
+- **Fix:** every strike prefers a low stand (one dig where that makes it so). While the dragon lands or is not yet sat, the bot waits in E3's bunker (three down, under every sweep). With no bunker, the ring is 16 out, not 12.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

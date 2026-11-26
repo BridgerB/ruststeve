@@ -565,6 +565,46 @@ fn head_stand_ok(v: &DragonView, clouds: &[Breath], c: [i32; 3], reach: f64) -> 
 /// about it), out of the blow boxes and every breath, the eye within reach of the head's box with
 /// `REACH_SLACK` to spare; the nearest the ideal point.
 pub fn head_stand(v: &DragonView, w: &World) -> Option<[i32; 3]> {
+    head_stand_for(v, w, false)
+}
+
+/// The damage a perched dragon takes before it takes off: `sittingDamageReceived` over a
+/// quarter of 200 (E1, `EnderDragon.hurt`). The count is kept across perches and only reset when
+/// it goes over (race 45876898172 lane 2: 18.4 in one perch and 32 in the next, then takeoff).
+pub const PERCH_TAKEOFF: f32 = 50.0;
+/// One head strike with the iron sword (E6's e05: 6.0), and a margin for a crit.
+pub const STRIKE_DAMAGE: f32 = 6.0;
+pub const STRIKE_MARGIN: f32 = 1.0;
+/// The wings' box at takeoff reaches this far under the dragon's feet (E1: inflate(4, 2, 4) moved
+/// −2 from the wing parts 2 over the feet), and the margin the head keeps under it.
+pub const WING_DROP: f64 = 2.0;
+pub const WING_CLEAR: f64 = 0.2;
+
+/// Would the next strike make the dragon take off (`PERCH_TAKEOFF`)?
+pub fn crossing(sat_damage: f32) -> bool {
+    sat_damage + STRIKE_DAMAGE + STRIKE_MARGIN > PERCH_TAKEOFF
+}
+
+/// Is a body with its feet at `feet_y` under the wings' sweep at takeoff, and the head's blow box
+/// (race 45876898172 lane 2: the strike that made it take off was struck from the surface, and the
+/// head and wings took 15 and threw the bot 120 blocks off the island)?
+pub fn under_wings(v: &DragonView, feet_y: f64) -> bool {
+    feet_y + physics::HEIGHT + WING_CLEAR <= v.pos[1] - WING_DROP
+}
+
+/// Can the floor under feet cell `c` be dug for a stand one lower that still strikes: end stone
+/// (the island's), the cell under it solid to stand on?
+fn lowerable(w: &World, v: &DragonView, clouds: &[Breath], c: [i32; 3]) -> bool {
+    let under = world::BlockPos::new(c[0], c[1] - 1, c[2]);
+    let floor = world::BlockPos::new(c[0], c[1] - 2, c[2]);
+    w.block_at(under) == Some(BlockKind::EndStone)
+        && w.block_at(floor).is_some_and(|k| k != BlockKind::Air)
+        && head_stand_ok(v, clouds, [c[0], c[1] - 1, c[2]], STRIKE_REACH)
+}
+
+/// `head_stand`; with `low`, only a cell under the wings' sweep or one dig of end stone from it
+/// (one block: a climb back out is a jump).
+pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> {
     let feet = w.body?.pos;
     let clouds = breaths(w);
     let [ix, iz] = beside(v, HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF, 0.0);
@@ -579,6 +619,12 @@ pub fn head_stand(v: &DragonView, w: &World) -> Option<[i32; 3]> {
             if !head_stand_ok(v, &clouds, c, STRIKE_REACH - REACH_SLACK) {
                 continue;
             }
+            if low
+                && !under_wings(v, f64::from(c[1]))
+                && !(under_wings(v, f64::from(c[1] - 1)) && lowerable(w, v, &clouds, c))
+            {
+                continue;
+            }
             let d = flat(ideal, mid(c));
             if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
                 best = Some((d, c));
@@ -589,13 +635,22 @@ pub fn head_stand(v: &DragonView, w: &World) -> Option<[i32; 3]> {
 }
 
 /// The head stand to hold: the one held while it still strikes (no slack), else `head_stand`.
-pub fn keep_head_stand(v: &DragonView, w: &World, held: Option<[i32; 3]>) -> Option<[i32; 3]> {
+pub fn keep_head_stand(
+    v: &DragonView,
+    w: &World,
+    held: Option<[i32; 3]>,
+    low: bool,
+) -> Option<[i32; 3]> {
+    let clouds = breaths(w);
     if let Some(h) = held
-        && head_stand_ok(v, &breaths(w), h, STRIKE_REACH)
+        && head_stand_ok(v, &clouds, h, STRIKE_REACH)
+        && (!low
+            || under_wings(v, f64::from(h[1]))
+            || (under_wings(v, f64::from(h[1] - 1)) && lowerable(w, v, &clouds, h)))
     {
         return Some(h);
     }
-    head_stand(v, w)
+    head_stand_for(v, w, low)
 }
 
 /// Did the dragon itself hit the bot within `HIT_HOLD_TICKS` (its blow, not its breath)?
@@ -819,6 +874,8 @@ pub enum Want {
     Strike { entity: i32, head: bool },
     /// Eat for health back in a lull.
     Eat,
+    /// Dig the block under the feet (a stand one lower, under the wings' sweep).
+    Dig([i32; 3]),
     /// Stand where the feet are, looking down, and why.
     Hold(&'static str),
 }
@@ -842,6 +899,8 @@ pub struct Ask {
     pub food: bool,
     /// The way round the head held (`DragonState::way`).
     pub way: Option<[i32; 3]>,
+    /// The perched dragon's damage counted toward its takeoff (`DragonState::sat_damage`).
+    pub sat_damage: f32,
 }
 
 /// The fight's choice for this tick, pure: the clojurecraft `toward-dragon` order, with the
@@ -929,13 +988,32 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     }
     let sat = perched(&v, ask.perched_ticks);
     // Sat: the head part (the dragon's id + 1, a full blow; E6's e05) from out of its blow box.
+    // The strike that makes it take off only from under the wings' sweep: one dig of end stone
+    // down first where that makes it so.
+    // Every strike from under the wings' and head's sweep where one dig makes it so (race
+    // 45876898172 lane 1: a head stand on the surface took 10 in the attacking turn, and the
+    // natural takeoff's wings 5); the one that makes it take off from nowhere else.
+    let must_low = crossing(ask.sat_damage);
     if sat && clear_of_blow(&v, feet) && head_reach(&v, eye) <= STRIKE_REACH {
-        return Want::Strike {
-            entity: id + 1,
-            head: true,
-        };
+        let lowerable_here = body.on_ground
+            && under_wings(&v, feet[1] - 1.0)
+            && lowerable(w, &v, &clouds, feet_cell);
+        if under_wings(&v, feet[1]) || (!must_low && !lowerable_here) {
+            return Want::Strike {
+                entity: id + 1,
+                head: true,
+            };
+        }
+        if lowerable_here {
+            return Want::Dig([feet_cell[0], feet_cell[1] - 1, feet_cell[2]]);
+        }
     }
-    if sat && let Some(hs) = keep_head_stand(&v, w, ask.stand) {
+    let hs = keep_head_stand(&v, w, ask.stand, true).or_else(|| {
+        (!must_low)
+            .then(|| keep_head_stand(&v, w, ask.stand, false))
+            .flatten()
+    });
+    if sat && let Some(hs) = hs {
         if breath_on_way(&clouds, feet, mid(hs), BREATH_HOLD) {
             return Want::Hold("a breath on the way to the head stand");
         }
@@ -959,9 +1037,13 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
             return Want::Go(hs, "to the head stand");
         }
     }
-    // Landing, not yet sat, or no head stand open: out of its reach to the wait's ring, never
-    // into the basin (race 45873410249 lane 0: the landing dragon's head took 10 from a bot
-    // walking to a stand behind it, 4.4 along and 2.9 across).
+    // Landing, not yet sat, or no head stand open: the bunker (under every sweep: race
+    // 45876898172 lane 1 took the landing wings' 5 twice on the ring 11 out), else out of its
+    // reach to the wait's ring, never into the basin (race 45873410249 lane 0: the landing
+    // dragon's head took 10 from a bot walking to a stand behind it).
+    if ask.bunker.is_some() {
+        return wait(w, ask, feet, "the dragon not yet sat, in the bunker");
+    }
     if from_fountain(feet) < WAIT_FROM || in_bite(&v, feet) {
         return match step_out_cell(w, Some(&v), WAIT_RING) {
             Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "out of the landing's reach"),
@@ -976,9 +1058,10 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
 }
 
 /// Blocks from the fountain the wait with no bunker goes out to, and holds at from: past the
-/// wings' reach of a dragon on the pillar (4.5 across plus 2 plus 4 inflated, 10.5).
-pub const WAIT_RING: f64 = 12.0;
-pub const WAIT_FROM: f64 = 11.0;
+/// wings' reach of a dragon on the pillar (4.5 across plus 2 plus 4 inflated, 10.5), and of the
+/// landing one coming in over the ring (race 45876898172 lane 1: hit 5 at 11 out, twice).
+pub const WAIT_RING: f64 = 16.0;
+pub const WAIT_FROM: f64 = 15.0;
 
 /// The wait while the dragon flies: the bunker when there is one, else a cell on the ring
 /// `WAIT_RING` out, out of the breath.
@@ -1036,6 +1119,14 @@ pub struct DragonState {
     pub breath_waits: u64,
     #[serde(default)]
     pub breath_waited_at: u64,
+    /// The perched dragon's damage toward its takeoff, as the server counts it, the dragon's health
+    /// last seen, and the digs down for a low stand.
+    #[serde(default)]
+    pub sat_damage: f32,
+    #[serde(default)]
+    pub seen_health: Option<f32>,
+    #[serde(default)]
+    pub low_digs: u32,
     /// The way round the head held, and how many were chosen.
     #[serde(default)]
     pub way: Option<[i32; 3]>,
@@ -1060,6 +1151,9 @@ pub struct Fight {
     pub last_swing: Option<u64>,
     /// The last want noted, so a note is made on a change only.
     pub said: String,
+    /// The dig down for a low stand in hand.
+    #[serde(default)]
+    pub dig: Option<crate::dig::Dig>,
 }
 
 impl Fight {
@@ -1070,6 +1164,7 @@ impl Fight {
             eat: None,
             last_swing: None,
             said: String::new(),
+            dig: None,
         }
     }
 }
@@ -1098,6 +1193,23 @@ impl Plan {
             }
             if let Some((_, v)) = view(w) {
                 self.dragon.seen = true;
+                // The takeoff count: damage taken while sitting, reset as the server does when it
+                // goes over.
+                if let Some(was) = self.dragon.seen_health
+                    && v.health < was
+                    && v.phase().is_some_and(Phase::sitting)
+                {
+                    self.dragon.sat_damage += was - v.health;
+                    if self.dragon.sat_damage > PERCH_TAKEOFF {
+                        self.note(
+                            tick,
+                            format!("dragon takeoff count over ({:.1})", self.dragon.sat_damage),
+                            format!("health {:.1}; the count starts again", v.health),
+                        );
+                        self.dragon.sat_damage = 0.0;
+                    }
+                }
+                self.dragon.seen_health = Some(v.health);
                 self.dragon.perched_ticks = if over_fountain(&v) {
                     self.dragon.perched_ticks.saturating_add(1)
                 } else {
@@ -1233,6 +1345,7 @@ impl Plan {
             dead: self.dragon.dead,
             food: food.is_some(),
             way: self.dragon.way,
+            sat_damage: self.dragon.sat_damage,
         };
         let want = decide(w, &ask);
         let Task::Dragon(f) = &mut self.task else {
@@ -1256,6 +1369,7 @@ impl Plan {
             Want::Go(c, why) => format!("go {c:?} {why}"),
             Want::Strike { head, .. } => format!("strike {}", if *head { "head" } else { "body" }),
             Want::Eat => "eat".to_owned(),
+            Want::Dig(c) => format!("dig down at {c:?} for a stand under the wings"),
             Want::Hold(why) => format!("hold {why}"),
         };
         let changed = f.said != key;
@@ -1283,10 +1397,16 @@ impl Plan {
                     self.dragon.ways += 1;
                 }
                 if let Some((_, v)) = view(w) {
-                    self.dragon.stand = keep_head_stand(&v, w, self.dragon.stand);
+                    self.dragon.stand =
+                        keep_head_stand(&v, w, self.dragon.stand, crossing(self.dragon.sat_damage));
                 }
             }
-            Want::Exit(_) | Want::Go(..) | Want::Strike { .. } | Want::Eat | Want::Hold(_) => {
+            Want::Exit(_)
+            | Want::Go(..)
+            | Want::Strike { .. }
+            | Want::Eat
+            | Want::Dig(_)
+            | Want::Hold(_) => {
                 self.dragon.way = None;
             }
         }
@@ -1318,7 +1438,32 @@ impl Plan {
         let Task::Dragon(f) = &mut self.task else {
             return Controls::default();
         };
+        if !matches!(want, Want::Dig(_)) {
+            f.dig = None;
+        }
         match want {
+            Want::Dig(c) => {
+                let cell: Cell = (c[0], c[1], c[2]);
+                if f.dig.as_ref().is_none_or(|d| d.target != cell) {
+                    f.dig = Some(crate::dig::Dig::new(w, cell, tick));
+                    self.dragon.low_digs += 1;
+                }
+                let Some(d) = f.dig.as_mut() else {
+                    return looking_down(w);
+                };
+                let (mut c, act, status) = d.step(w, tick);
+                self.acts.extend(act);
+                if !matches!(status, crate::dig::DigStatus::Running)
+                    || w.block_at(world::BlockPos::new(cell.0, cell.1, cell.2))
+                        == Some(BlockKind::Air)
+                {
+                    f.dig = None;
+                }
+                if c.pitch.is_none() {
+                    c.pitch = Some(90.0);
+                }
+                c
+            }
             Want::Hold(_) => {
                 if let Some(e) = &mut f.eat {
                     let (act, status) = e.step(w, tick);
