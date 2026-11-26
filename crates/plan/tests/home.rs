@@ -1879,3 +1879,34 @@ fn on_the_surface_with_no_pickaxe_wood_comes_first() {
         notes(&p)
     );
 }
+
+#[test]
+fn out_of_the_portal_over_a_drop_the_landing_is_the_target() {
+    // F2 (race 45796865676): the room south of the frontier's portal floors one under the
+    // portal's own floor; the walk to the cell beside was refused 162 times.
+    let mut w = world(
+        home::OVERWORLD,
+        0,
+        column(BlockKind::Stone, 6),
+        [8.5, 40.0, 8.5],
+    );
+    kit(&mut w);
+    for y in 40..=42 {
+        for x in 8..=9 {
+            set(&mut w, (x, y, 8), BlockKind::NetherPortal);
+        }
+    }
+    for x in 7..=10 {
+        for y in 39..=42 {
+            set(&mut w, (x, y, 9), BlockKind::Air);
+        }
+    }
+    w.stage_reached = Some(world::stage::Stage::Pearls12);
+    let mut p = racer();
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: out of the portal to (8, 39, 9)"),
+        "{:?}",
+        notes(&p)
+    );
+}

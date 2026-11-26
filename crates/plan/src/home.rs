@@ -3071,6 +3071,15 @@ impl Plan {
                     && cells.at((c.0, c.1 + 1, c.2)) == path::Class::Clear
                     && cells.at((c.0, c.1 - 1, c.2)) != path::Class::Lava)
                     .then_some(c)
+            })
+            // Over a drop (F2, race 45796865676: the room south of the portal floors at y -54,
+            // so (125, -52, -107) stands on nothing and the walk to it was refused 162 times):
+            // the landing under it, down to `stairs::MAX_DROP`, is the target.
+            .map(|c| {
+                (0..crate::stairs::MAX_DROP)
+                    .map(|d| (c.0, c.1 - d, c.2))
+                    .find(|l| cells.at((l.0, l.1 - 1, l.2)) == path::Class::Solid)
+                    .unwrap_or(c)
             })?;
         let mut walk = Walk::new(
             out,
