@@ -803,6 +803,92 @@ impl Plan {
             return None;
         }
         // <<< pearls
+        // >>> Q8 (issue 19): on the way home a provoked enderman's hold is capped at
+        // `home::ENDER_HOLD_MAX`, then that enderman is left (Q9's race 45764756002 lane 2: the
+        // top-up ended on its clock in the tick one was provoked, and the bot held a 0-block pocket
+        // in the forest from 6,040 past 23,440 at 19.8 health, the trip never begun).
+        let home = self.ender.phase == EnderPhase::Home && self.ender.home.top_up_over;
+        if home
+            && let Some(id) = angry(w)
+            && !self.ender.home.enders_left.contains(&id)
+        {
+            let since = match self.ender.home.ender_hold {
+                Some((held, t)) if held == id => t,
+                Some(_) | None => {
+                    self.ender.home.ender_hold = Some((id, tick));
+                    tick
+                }
+            };
+            let near = w
+                .entities
+                .get(&id)
+                .zip(w.body)
+                .map_or(f64::MAX, |(e, b)| crate::home::dist(e.pos, b.pos));
+            // At the cap with it still within `ENDER_RELEASE`: never walked out of the pocket (Q9's
+            // race 45776886803 lane 0: released with it 2 off, four hits in 60 ticks, dead). On it
+            // (`ENDER_FIGHT`) over the danger line it is fought from the pocket; else the hold goes on.
+            let capped = tick.saturating_sub(since) >= crate::home::ENDER_HOLD_MAX;
+            if capped && near <= crate::home::ENDER_RELEASE {
+                let danger = self
+                    .table
+                    .as_ref()
+                    .map_or(8.0, |t| t.survival.danger_health);
+                if near <= crate::home::ENDER_FIGHT
+                    && w.player.health.is_some_and(|h| h > danger)
+                    && !matches!(self.task, crate::Task::Defend(_))
+                    && let Some(rules) = self.table.as_ref().map(|t| t.survival.clone())
+                {
+                    self.ender.home.ender_fights += 1;
+                    self.note(
+                        tick,
+                        format!("home: fight enderman {id} from the pocket"),
+                        format!(
+                            "{near:.1} off at the hold's cap; health {:?}; fight {}",
+                            w.player.health, self.ender.home.ender_fights
+                        ),
+                    );
+                    self.task = crate::Task::Defend(Box::new(crate::defend::Defend::new(
+                        w,
+                        id,
+                        EntityKind::Enderman,
+                        &rules,
+                        tick,
+                    )));
+                    return Some(Controls::default());
+                }
+                if self.ender.home.ender_near_noted != Some(id) {
+                    self.ender.home.ender_near_noted = Some(id);
+                    self.note(
+                        tick,
+                        format!("home: enderman {id} still near at the hold's cap"),
+                        format!(
+                            "{near:.1} off, within {}; the hold goes on",
+                            crate::home::ENDER_RELEASE
+                        ),
+                    );
+                }
+            }
+            if capped && near > crate::home::ENDER_RELEASE {
+                self.ender.home.enders_left.push(id);
+                self.ender.home.ender_hold = None;
+                self.ender.threat = None;
+                self.note(
+                    tick,
+                    format!("home: left the pocket from enderman {id}"),
+                    format!(
+                        "held {} ticks; health {:?}; on with the trip, never a swing; left {}",
+                        crate::home::ENDER_HOLD_MAX,
+                        w.player.health,
+                        self.ender.home.enders_left.len()
+                    ),
+                );
+                return None;
+            }
+        }
+        if home && angry(w).is_some_and(|id| self.ender.home.enders_left.contains(&id)) {
+            return None;
+        }
+        // <<< Q8
         let Some(id) = angry(w) else {
             if let Some(old) = self.ender.threat.take() {
                 self.note(

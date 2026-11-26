@@ -264,7 +264,9 @@ fn a_way_only_back_over_the_cut_is_refused_and_said() {
         &[(ItemKind::Netherrack, 36)],
         (1, 0),
         Signs::default(),
-        3000,
+        // The causeway is one-wide over lava: walked sneaking (issue 19, eyes-home wall 21), 0.3 of
+        // a walk, so the turns run out later than 3,000 (probe 45756036598: at 2,432 unsneaked).
+        6000,
     );
     let tail = out.tail();
     assert!(out.count("refused for cut (paced)") >= 1, "{tail:#?}");

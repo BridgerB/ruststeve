@@ -93,6 +93,17 @@ const SIDES: [(i32, i32, i32); 6] = [
 ];
 const DIRS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
+/// A fortress's blocks: a wall to a tunnel on the way home (`Limits::bricks_wall`).
+pub const FORTRESS_BLOCKS: &[BlockKind] = &[
+    BlockKind::NetherBricks,
+    BlockKind::NetherBrickFence,
+    BlockKind::NetherBrickStairs,
+    BlockKind::NetherBrickSlab,
+    BlockKind::NetherBrickWall,
+    BlockKind::CrackedNetherBricks,
+    BlockKind::ChiseledNetherBricks,
+];
+
 /// The world as the tunnel may know it, read once a cell inside a box.
 struct Sight<'a> {
     w: &'a World,
@@ -100,6 +111,8 @@ struct Sight<'a> {
     dims: (i32, i32, i32),
     raw: Vec<u8>,
     seen: Vec<u8>,
+    /// Nether bricks read as a wall (`Limits::bricks_wall`).
+    bricks_wall: bool,
 }
 
 impl<'a> Sight<'a> {
@@ -117,6 +130,7 @@ impl<'a> Sight<'a> {
             dims,
             raw: vec![UNREAD; n],
             seen: vec![UNREAD; n],
+            bricks_wall: false,
         }
     }
 
@@ -153,6 +167,7 @@ impl<'a> Sight<'a> {
             ) => WALL,
             // Issue 19f: an infested block is never opened (a silverfish wakes).
             Some(k) if stairs::infested(Some(k)) => WALL,
+            Some(k) if self.bricks_wall && FORTRESS_BLOCKS.contains(&k) => WALL,
             Some(k) => match path::classify(state) {
                 Class::Water => WATER,
                 Class::Lava => LAVA,
@@ -376,6 +391,16 @@ pub struct Limits {
     // (race 45727347488 lane 0: 8 arrows on the walk, the last off a ledge).
     pub cover: bool,
     // <<< Q6
+    // >>> Q8 (issue 19): nether bricks are a wall: the way home never opens a fortress (race
+    // 45753006452 lane 1 tunnelled level through its bricks at (72, 61, 150) into a corridor and
+    // took two wither skeleton blows and the wither, 19.8 to 5.6, with nothing to heal).
+    pub bricks_wall: bool,
+    // <<< Q8
+    // >>> Q8 (issue 19): the route ends with the feet in a goal cell, not within reach of it (Q10's
+    // race 45774326055: six lanes 4 over the front's tunnel cell, "0 steps (ends within reach)",
+    // 10,000 ticks idle at the door).
+    pub feet_in: bool,
+    // <<< Q8
 }
 
 // >>> Q6 (issue 19): a step under open air costs as much as a step by a cell found bad
@@ -425,6 +450,7 @@ pub fn route_keeping(
     };
     // <<< overland and stronghold
     let mut sight = Sight::new(w, lo, hi);
+    sight.bricks_wall = limits.bricks_wall;
     let mut suspect: BTreeSet<Cell> = BTreeSet::new();
     for b in blocked {
         for dx in -SUSPECT_NEAR..=SUSPECT_NEAR {
@@ -455,7 +481,12 @@ pub fn route_keeping(
         if !closed.insert(c) {
             continue;
         }
-        if goals.iter().any(|g| within_reach(c, *g)) {
+        let reached = if limits.feet_in {
+            goals.contains(&c)
+        } else {
+            goals.iter().any(|g| within_reach(c, *g))
+        };
+        if reached {
             end = Some(c);
             break;
         }
@@ -581,6 +612,11 @@ pub struct Travel {
     // `tunnel_toward_covered` only; any other target's route has none.
     #[serde(default)]
     pub cover: Option<Cell>,
+    // >>> Q8 (issue 19): the target whose route ends with the feet in it (`Limits::feet_in`), set by
+    // the way home's last leg for the front's tunnel cell only.
+    #[serde(default)]
+    pub feet_in: Option<Cell>,
+    // <<< Q8
     // <<< Q6
 }
 
@@ -867,6 +903,10 @@ impl Plan {
                     // >>> Q6
                     cover: self.travel.cover == Some(target),
                     // <<< Q6
+                    // >>> Q8
+                    bricks_wall: self.ender.phase == crate::endermen::EnderPhase::Home,
+                    feet_in: self.travel.feet_in == Some(target),
+                    // <<< Q8
                 };
                 let Some(r) = route_keeping(w, feet, &goals, &blocked, lay, MAX_NODES, limits)
                 else {

@@ -347,6 +347,10 @@ impl Plan {
             );
         }
         // 2. The tunnel: through rock, under cover, to within reach of the tunnel cell.
+        // >>> Q8 (issue 19): to the front's tunnel cell the route ends with the feet in it (Q10's
+        // race 45774326055: "0 steps (ends within reach)" 4 over it, 10,000 ticks idle).
+        self.travel.feet_in = front.map(|f| f.tunnel);
+        // <<< Q8
         let t = self.tunnel_toward_covered(
             w,
             target,
@@ -394,6 +398,16 @@ impl Plan {
         }
         let floor = (feet.0, feet.1 - 1, feet.2);
         let under = (feet.0, feet.1 - 2, feet.2);
+        // >>> Q8: never a dig at an open cell (Q10's race 45777976793: "Gone" 336 times).
+        if open(floor) {
+            self.note(
+                tick,
+                format!("portal way: no dig in at {floor:?}"),
+                "the cell is open already; the tunnel from where it stands".to_owned(),
+            );
+            return None;
+        }
+        // <<< Q8
         if let Some(why) = crate::stairs::refusal(w, &[floor], under) {
             // A dig-in stopped short counts as done here: no new one in this column.
             if let Some(s0) = digging {
@@ -735,7 +749,7 @@ impl Plan {
 
     /// Not burning, and no hostile (neutrals aside) within `CARRY_CLEAR` in the last
     /// `CARRY_QUIET` ticks; the last one seen is kept.
-    fn carry_quiet(&mut self, w: &World, tick: u64) -> bool {
+    pub(crate) fn carry_quiet(&mut self, w: &World, tick: u64) -> bool {
         let Some(body) = w.body else {
             return false;
         };

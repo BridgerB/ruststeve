@@ -124,6 +124,9 @@ pub struct Defend {
     /// Steps taken on the deck away from fire beside the feet (wall 18).
     #[serde(default)]
     pub fire_steps: u32,
+    /// Ticks the fight held sneak at a lava edge (the planner sets it: issue 19, eyes-home wall 27).
+    #[serde(default)]
+    pub edge_sneak_ticks: u32,
     /// Steps held because fire lay ahead (wall 11).
     #[serde(default)]
     pub fire_held: u32,
@@ -720,6 +723,7 @@ impl Defend {
             passing_swings: 0,
             rod_steps: 0,
             fire_steps: 0,
+            edge_sneak_ticks: 0,
             fire_held: 0,
             given_up: false,
             crit_wait: 0,

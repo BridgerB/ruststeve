@@ -35,6 +35,9 @@ pub mod heading;
 pub mod home;
 // <<< home
 // <<< heading
+// >>> Q11 (issue 19): the way home's fortress stretch.
+pub mod fortress_way;
+// <<< Q11
 pub mod hold;
 pub mod hunt;
 pub mod ledger;
@@ -1656,8 +1659,18 @@ impl Plan {
         let remake = matches!(self.task, Task::Cast(_))
             && !holds_pickaxe(w)
             && self.pickaxe_at_hand(w, tick);
+        // >>> Q8 (issue 19): idle at a lava edge (a rail laid, a hold), sneak: the server keeps a
+        // sneaking body on its block, a knock-back too (`walk::lava_edge`).
+        let idle_sneak = matches!(self.task, Task::Idle) && crate::home::at_lava_edge(w);
+        // <<< Q8
         let (controls, status) = match &mut self.task {
-            Task::Idle => (Controls::default(), TaskStatus::Running),
+            Task::Idle => (
+                Controls {
+                    sneak: idle_sneak,
+                    ..Controls::default()
+                },
+                TaskStatus::Running,
+            ),
             Task::ToLog(walk) | Task::Explore(walk) => {
                 let out = walk.step(w, tick);
                 // A walk's bridge move lays blocks: its acts are sent and each block laid is
@@ -1989,6 +2002,12 @@ impl Plan {
             self.ender.phase == endermen::EnderPhase::Home && self.ender.home.top_up_over;
         let hunt_pocket =
             (self.pearls.started && !home_trip) || self.ender.phase == endermen::EnderPhase::Hunt;
+        // >>> Q8: on the trip a cube the rules say not to fight is never fought, even one that
+        // struck (`defend::foe_except` lets a provoked kind through `ignored`: race 45758211666
+        // lane 1 began and dropped a cube fight every tick for 420 ticks on the west span, still,
+        // until a hit knocked it off).
+        let mut home_never_cubes = false;
+        // <<< Q8
         if hunt_pocket {
             ignored.extend(
                 w.entities
@@ -2030,6 +2049,50 @@ impl Plan {
                 && (crowd < crate::home::CUBE_CROWD || resting)
                 && self.ender.home.cube_pocket.is_none()
                 && self.ender.home.cube_tunnel.is_none();
+            // >>> Q8: by a lava edge a large or medium cube is never struck: a split puts two to
+            // four cubes by the edge (race 45749508716 lane 3 split one on the west span, knocked
+            // into lava 40 ticks later). The rails and the sneak hold the bot; it goes on.
+            let edge = crate::home::near_lava_edge(w);
+            let big: Vec<i32> = w
+                .entities
+                .iter()
+                .filter(|(_, e)| {
+                    edge && !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        // Any size (race 45783532164 lane 0 fought a small one on the west span and was
+                        // knocked into the sea: a knock-back lifts the body, which sneaking does not hold).
+                        && crate::home::cube_size(e) >= 1
+                        && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_FIGHT
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            if !big.is_empty()
+                && self
+                    .ender
+                    .home
+                    .big_cube_noted_at
+                    .is_none_or(|t| tick >= t + 200)
+            {
+                self.ender.home.big_cube_noted_at = Some(tick);
+                self.ender.home.big_cubes_spared += 1;
+                self.note(
+                    tick,
+                    "home: a large cube not struck by a lava edge".to_owned(),
+                    format!(
+                        "{} within {} (sizes {:?}); spared {}",
+                        big.len(),
+                        crate::home::CUBE_FIGHT,
+                        big.iter()
+                            .filter_map(|id| w.entities.get(id))
+                            .map(crate::home::cube_size)
+                            .collect::<Vec<_>>(),
+                        self.ender.home.big_cubes_spared
+                    ),
+                );
+            }
+            home_never_cubes = !over || !big.is_empty();
+            ignored.extend(big);
+            // <<< Q8
             ignored.extend(
                 w.entities
                     .iter()
@@ -2046,11 +2109,23 @@ impl Plan {
         // A rail wanted with a knocker near (`home::rail_wanted`) cuts a walk under way: the
         // planner lays the floor beside the feet before the next step.
         if home_trip
+            // Q8: the Nether only: the rails and the guard are laid by the Nether's recovery, and an
+            // overworld walk cut for them was cut again every tick.
+            && w
+                .dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
             && matches!(
                 self.task,
-                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+                // Not a tunnel's stairs (Q8: race 45779137282, the guard filled its own stair).
+                Task::Explore(_) | Task::ToLog(_)
             )
-            && crate::home::rail_wanted(w).is_some()
+            && (crate::home::rail_wanted(w).is_some()
+                // >>> Q8
+                || (crate::home::guard_next(w, self.ender.home.axis, &self.ender.home.guard_refused)
+                    .is_some()
+                    && self.headed.as_ref().is_none_or(|h| h.restock.is_none())))
+                // <<< Q8
             && craft::count(w, data::ItemKind::Netherrack)
                 + craft::count(w, data::ItemKind::Basalt)
                 + craft::count(w, data::ItemKind::Cobblestone)
@@ -2065,6 +2140,43 @@ impl Plan {
                 "a mob that knocks back near and no floor beside the feet".to_owned(),
             );
         }
+        // >>> Q8 (issue 19): a shooter that first sees the bot on the trip cuts a walk or a tunnel
+        // under way, so the trip's cover runs (Q10's race 45768707240 lane 1: three ghast fireballs
+        // in a level tunnel at (75, 33, 179), 15.6 to dead, no cover note). Once a sighting; in the
+        // Nether only (F3, race 45800967549: the overland legs cut 131 times in one tick by a
+        // skeleton, the sighting never recorded outside the Nether's recovery).
+        if home_trip
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+            && matches!(
+                self.task,
+                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+            )
+            && self
+                .ender
+                .home
+                .shooter_seen_at
+                .is_none_or(|t| tick >= t + crate::home::SHOOTER_CLEAR_TICKS)
+            && (crate::home::ghast_sees(w)
+                || crate::home::skeleton_sees(w)
+                || endermen::seen_by_far_shooter(w))
+        {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.retry_at = tick;
+            self.ender.home.shooter_cuts += 1;
+            self.ender.home.shooter_seen_at = Some(tick);
+            self.note(
+                tick,
+                format!("home: {cut} cut for cover"),
+                format!(
+                    "a ghast, blaze or skeleton has the bot in sight; cut {}",
+                    self.ender.home.shooter_cuts
+                ),
+            );
+        }
+        // <<< Q8
         if home_trip {
             ignored.extend(
                 w.entities
@@ -2080,7 +2192,7 @@ impl Plan {
                     .map(|(id, _)| *id),
             );
         }
-        let never_kinds: &[data::EntityKind] = if hunt_pocket {
+        let never_kinds: &[data::EntityKind] = if hunt_pocket || home_never_cubes {
             &[data::EntityKind::MagmaCube]
         } else {
             &[]
@@ -2283,7 +2395,15 @@ impl Plan {
             }
             Task::Defend(d) => {
                 let (sent, landed) = (d.swings, d.landed);
-                let (c, act, status) = d.step(w, rules, tick);
+                let (mut c, act, status) = d.step(w, rules, tick);
+                // >>> Q8 (issue 19): a fight at a lava edge sneaks: the server holds a sneaking
+                // body on its block, its own steps and a knock-back (race 45758211666 lane 2 was
+                // hit into the lava sea fighting small cubes on the island by the join).
+                if !c.jump && crate::home::at_lava_edge(w) {
+                    c.sneak = true;
+                    d.edge_sneak_ticks += 1;
+                }
+                // <<< Q8
                 said = std::mem::take(&mut d.notes);
                 self.swings_sent += u64::from(d.swings.saturating_sub(sent));
                 self.swings_landed += u64::from(d.landed.saturating_sub(landed));
@@ -2316,7 +2436,7 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck, {} steps off fire on the deck",
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck, {} steps off fire on the deck, {} ticks sneaked at a lava edge",
                             d.swings,
                             d.landed,
                             d.stance,
@@ -2334,7 +2454,8 @@ impl Plan {
                             d.passing_swings,
                             d.fire_held,
                             d.rod_steps,
-                            d.fire_steps
+                            d.fire_steps,
+                            d.edge_sneak_ticks
                         )))
                     }
                 };
@@ -2538,6 +2659,43 @@ impl Plan {
         {
             junk.extend(self.stronghold_rules().junk_kinds());
         }
+        // >>> Q11 (issue 19): the fortress stretch's tunnel fills the pack (race 45766983995: every
+        // wooden pickaxe craft failed on a full pack) (`crate::fortress_way`).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(self.fortress_rules().junk_kinds());
+        }
+        // <<< Q11
+        // >>> Q8 (issue 19): the same leftovers on the whole trip home in the Nether, the top-up over
+        // (the coordinator, 2026-11-26: Q11's race 45766983995 filled every pack before its
+        // tunnel), basalt kept to 64 for the guard and the bridges (the deltas' restock digs it).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.top_up_over
+            && !self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(
+                self.fortress_rules()
+                    .junk_kinds()
+                    .into_iter()
+                    .map(|(k, n)| {
+                        if k == data::ItemKind::Basalt {
+                            (k, crate::home::BASALT_KEPT)
+                        } else if k == data::ItemKind::Netherrack {
+                            (k, crate::home::NETHERRACK_KEPT)
+                        } else {
+                            (k, n)
+                        }
+                    }),
+            );
+        }
+        // <<< Q8
         // A kind that came back after its drop is held back (`junk_watch`, `junk_now`).
         self.junk_watch(w, tick);
         let walking = matches!(self.task, Task::Explore(_));

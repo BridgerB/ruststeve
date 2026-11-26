@@ -59,11 +59,48 @@ pub const SHAFT_BLOCKS: [ItemKind; 17] = [
 ];
 
 /// Ticks with no rise before a shaft is given up: a dig of deepslate with a wooden pickaxe is
-/// 45 ticks (hardness 3, speed 2), a step about 70 with the jump; 600 is eight steps' worth.
-pub const SHAFT_STALL: u64 = 600;
+/// 45 ticks (hardness 3, speed 2), a step about 70 with the jump; 900 is over a hand dig of
+/// deepslate (`MAX_BREAK_HAND` 600) and a jump.
+pub const SHAFT_STALL: u64 = 900;
 /// The longest break the shaft waits for (ticks, with the best tool held): deepslate with a
 /// wooden pickaxe is 45, ores a stone pickaxe cannot take (diamond, gold) 300 by hand.
 pub const MAX_BREAK: u64 = 100;
+// >>> Q8 (issue 19): with no pickaxe held the shaft digs by hand: stone 150 ticks, deepslate 300,
+// no drop, but the shaft only needs the cells open (the frontier bot of race 45783611857 came
+// through with no pickaxe; all six of its lanes stood in the portal).
+pub const MAX_BREAK_HAND: u64 = 600;
+
+/// Blocks to pillar on are held (netherrack, cobblestone and the like: `SHAFT_BLOCKS`' filler).
+pub fn pillar_blocks(items: &[ItemKind]) -> bool {
+    items.iter().any(|k| {
+        matches!(
+            k,
+            ItemKind::Netherrack
+                | ItemKind::Cobblestone
+                | ItemKind::CobbledDeepslate
+                | ItemKind::Blackstone
+                | ItemKind::Basalt
+        )
+    })
+}
+
+/// The longest break the shaft waits for with `items` held: `MAX_BREAK`, or by hand
+/// `MAX_BREAK_HAND` when no pickaxe is held.
+pub fn max_break(items: &[ItemKind]) -> u64 {
+    let pickaxe = items.iter().any(|k| {
+        matches!(
+            k,
+            ItemKind::WoodenPickaxe
+                | ItemKind::StonePickaxe
+                | ItemKind::IronPickaxe
+                | ItemKind::GoldenPickaxe
+                | ItemKind::DiamondPickaxe
+                | ItemKind::NetheritePickaxe
+        )
+    });
+    if pickaxe { MAX_BREAK } else { MAX_BREAK_HAND }
+}
+// <<< Q8
 /// Blocks a table may be from the eye for the climb's pickaxe run: a click's reach (4.5) and a
 /// little.
 pub const TABLE_REACH: f64 = 5.0;
@@ -270,6 +307,12 @@ pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> 
         if opened == Some(over) || sky_over(w, over) {
             return Step::Rise;
         }
+        // >>> Q8: a room over the head with a ceiling within 8 is pillared through on held blocks
+        // (the frontier: the overworld portal's south room is open from y -53 to -49).
+        if pillar_blocks(items) && (3..=8).any(|d| full(kind(w, (x, y + d, z)))) {
+            return Step::Rise;
+        }
+        // <<< Q8
         return Step::Refused(format!("cave over the head at {over:?}"));
     }
     let Some(block) = k else {
@@ -292,14 +335,17 @@ pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> 
     {
         return Step::Refused(format!("{f} beside {over:?} at {c:?}"));
     }
+    // >>> Q8: past a cave beside the shaft (not in its own column) with blocks held (the frontier
+    // bot's first shaft was refused for a cave beside, the stairs then dug obsidian).
     if !sky_over(w, above)
+        && !pillar_blocks(items)
         && let Some(c) = near.iter().find(|c| open(kind(w, **c)))
     {
         return Step::Refused(format!("cave beside {over:?} at {c:?}"));
     }
     let tool = data::dig::best_tool(block, items.iter().copied());
     match data::dig::break_ticks(block, tool, false, true) {
-        Some(t) if t <= MAX_BREAK => Step::Dig(over),
+        Some(t) if t <= max_break(items) => Step::Dig(over),
         Some(t) => Step::Refused(format!("{block:?} at {over:?} takes {t} ticks")),
         None => Step::Refused(format!("{block:?} at {over:?} does not break")),
     }
@@ -325,7 +371,7 @@ pub fn side_cell(w: &World, feet: Cell, items: &[ItemKind]) -> Option<Cell> {
                     false,
                     true,
                 )
-                .is_some_and(|t| t <= MAX_BREAK)
+                .is_some_and(|t| t <= max_break(items))
         });
         let round_ok = SIDES.iter().all(|(ex, ez)| {
             let n = (cell.0 + ex, cell.1, cell.2 + ez);
@@ -472,9 +518,16 @@ impl Plan {
             return None;
         }
         self.ender.home.arrival.table_out = false;
+        // >>> Q8: never the floor under the body (F3, race 45800967549: the table placed under the
+        // shaft's cell and dug back left the shaft over a hole; the centring, sneaking, could not
+        // step over it, no rise for 900 ticks in four lanes).
+        let feet = crate::path::stand_cell(w, body.pos);
+        let under_body =
+            |c: Cell| c.1 == feet.1 - 1 && (c.0 - feet.0).abs() <= 1 && (c.2 - feet.2).abs() <= 1;
+        // <<< Q8
         let c = self
             .near_block(w, BlockKind::CraftingTable, tick)
-            .filter(|c| d(*c) <= TABLE_REACH)?;
+            .filter(|c| d(*c) <= TABLE_REACH && !under_body(*c))?;
         self.ender.home.arrival.tables_taken += 1;
         self.note(
             tick,
