@@ -21,6 +21,7 @@
 //!    `tunnel_toward`. With no route the leg holds; a fail is counted at most each `FAIL_EVERY`,
 //!    and after `FAILS` the point is skipped and the next tried in the same tick (never the
 //!    heading's walk: wall 1's fallback walked down to the sea).
+//!    The first leg waits while an angry enderman is within `ANGRY_NEAR` (wall 5).
 //! 4. **Pickaxes**: under `PICK_USES` uses left, a run of the trip's wooden pickaxes
 //!    (`home::TRIP_WOOD_STEPS`) from held stems or planks, within the way home's `pick_runs`, at
 //!    most `PICK_RUNS` here and `PICK_EVERY` apart.
@@ -51,6 +52,9 @@ pub struct CoveredState {
     pub skipped: u32,
     pub pick_runs: u32,
     pub pick_at: Option<u64>,
+    /// Ticks the first leg was held for an angry enderman, and the last note's tick.
+    pub angry_holds: u32,
+    pub angry_noted_at: Option<u64>,
     /// The pickaxe uses held when the covered way began, for the notes.
     pub uses0: Option<i32>,
 }
@@ -66,6 +70,8 @@ pub const FAILS: u32 = 3;
 /// target it gave up on for a while (race 45764756002 lane 0: "refused a while" three times in 20
 /// ticks skipped point 1).
 pub const FAIL_EVERY: u64 = 200;
+/// The first leg waits while an angry enderman is within this (the coordinator, 2026-11-26).
+pub const ANGRY_NEAR: f64 = 16.0;
 /// Pickaxe uses under which a wooden run is made: a 24-block leg cut through rock at Q6's measured
 /// 1.7 a block (race 45742933645 lane 1) is about 41; 100 is two legs and a margin.
 pub const PICK_USES: i32 = 100;
@@ -204,6 +210,26 @@ impl Plan {
         points.get(self.ender.home.covered.passed)?;
         if w.inventory.carried.is_some() {
             return None;
+        }
+        // The first leg waits while an angry enderman is near (race 45776886803 lane 0: the trip
+        // and the first leg began beside one 2 off, four hits in 60 ticks, dead).
+        if self.ender.home.covered.tunnels == 0
+            && let Some(e) = crate::pearls::angry_endermen(w)
+                .into_iter()
+                .find(|s| s.dist <= ANGRY_NEAR)
+        {
+            let st = &mut self.ender.home.covered;
+            st.angry_holds += 1;
+            if st.angry_noted_at.is_none_or(|t| tick >= t + FAIL_EVERY) {
+                st.angry_noted_at = Some(tick);
+                let n = st.angry_holds;
+                self.note(
+                    tick,
+                    format!("covered way: first leg held, enderman {} angry", e.id),
+                    format!("{:.1} off, within {ANGRY_NEAR}; hold tick {n}", e.dist),
+                );
+            }
+            return Some(Task::Idle);
         }
         // 4. Pickaxes before the leg.
         if let Some(t) = self.covered_picks(w, tick) {

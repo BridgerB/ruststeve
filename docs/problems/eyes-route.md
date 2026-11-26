@@ -71,3 +71,4 @@ What the world holds (the plan maps):
    - Point 8 (355, 67, 77) had no route 3 times, 200 ticks apart, and was skipped; the next leg began in the same tick.
    - From x 348 the leg was cut for a rail about every 60 ticks ("home: stairs cut for a rail": 20 cuts in 1,800 ticks). At tick 21,620 the inventory had no main slot free: "craft crafting_table failed: StaleWindow" 4 times, then the table was given up. Both lanes ended stuck at (342, 86, 83), 171 blocks from the start (8.4 per 1,000 ticks).
    - Lane 0 died at tick 7,560 by an angry enderman 2 off. The kit was paused for it, and the trip and the first leg began in the same tick (7,440): four hits in 60 ticks. That is the hold's cap letting the trip begin beside the enderman (Q8's).
+   Fix (the coordinator, 2026-11-26), in covered_way.rs: the first leg holds while an angry enderman is within 16 ("covered way: first leg held, enderman … angry"). Q8 fixes the hold's cap itself.
