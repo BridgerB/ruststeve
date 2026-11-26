@@ -1265,7 +1265,7 @@ impl Plan {
     /// `CLUTCH_FROM` under the feet and a water bucket held, the bucket to hand, used looking
     /// straight down in the last tick the eye is in reach of the ground (`pour_now`); landed, the water taken
     /// back. Every step noted.
-    fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
             self.spikes.clutch = None;
             return None;
@@ -1443,10 +1443,6 @@ impl Plan {
                 self.spikes.box_blow_at = Some(tick);
             }
             self.spikes.last_health = Some(h);
-        }
-        // The clutch first, whatever runs: a fall waits for no task.
-        if let Some(c) = self.spikes_clutch(w, tick) {
-            return Some(c);
         }
         if !matches!(self.task, Task::Idle) {
             return None;

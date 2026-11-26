@@ -1673,6 +1673,13 @@ impl Plan {
             }
             Some(_) | None => self.mark = Some((body.pos, items, self.event_count, tick)),
         }
+        // >>> E4 (issue 20f): the water clutch ahead of everything: a fall waits for no row (race
+        // 45890149072 lane 0: struck off its pillar while an enderman's pocket held the planner,
+        // the clutch never ran, a fall of 22).
+        if let Some(c) = self.spikes_clutch(w, tick) {
+            return c;
+        }
+        // <<< E4
         // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
         // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
         if let Some(c) = self.breath_step(w, tick) {

@@ -727,7 +727,7 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     };
     fall(&mut w, 75.0);
     let mut p = Plan::new(Aim::Race);
-    let c = p.spikes_step(&w, 100);
+    let c = p.spikes_clutch(&w, 100);
     assert_eq!(c.and_then(|c| c.pitch), Some(90.0), "looking straight down");
     assert!(
         notes(&p)
@@ -743,20 +743,20 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     );
     w.held = 1;
     fall(&mut w, 70.0);
-    p.spikes_step(&w, 101);
+    p.spikes_clutch(&w, 101);
     assert!(p.take_acts().is_empty(), "too high to pour yet");
     fall(&mut w, 66.5);
-    p.spikes_step(&w, 102);
+    p.spikes_clutch(&w, 102);
     assert!(
         p.take_acts().is_empty(),
         "in reach, but the next tick is too: the later one"
     );
     fall(&mut w, 65.0);
-    p.spikes_step(&w, 103);
+    p.spikes_clutch(&w, 103);
     assert_eq!(p.take_acts(), vec![Act::UseItem], "the last tick in reach");
     w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
     fall(&mut w, 64.5);
-    p.spikes_step(&w, 104);
+    p.spikes_clutch(&w, 104);
     assert!(
         notes(&p)
             .iter()
@@ -768,14 +768,14 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
         b.in_water = true;
     }
     p.take_acts();
-    p.spikes_step(&w, 104);
+    p.spikes_clutch(&w, 104);
     assert_eq!(
         p.take_acts(),
         vec![Act::UseItem],
         "landed: the water taken back"
     );
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
-    assert!(p.spikes_step(&w, 105).is_none());
+    assert!(p.spikes_clutch(&w, 105).is_none());
     assert!(
         notes(&p)
             .iter()
