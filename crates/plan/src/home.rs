@@ -3009,6 +3009,16 @@ impl Plan {
                     && cells.at(*c) == path::Class::Clear
                     && cells.at((c.0, c.1 + 1, c.2)) == path::Class::Clear
                     && cells.at((c.0, c.1 - 1, c.2)) == path::Class::Solid
+            })
+            // Else the south face (Q1's region read: the overworld portal's way out, z -107), open
+            // at the feet and the head and no lava under it.
+            .or_else(|| {
+                let c = (feet.0, feet.1, feet.2 + 1);
+                (!portal(c)
+                    && cells.at(c) == path::Class::Clear
+                    && cells.at((c.0, c.1 + 1, c.2)) == path::Class::Clear
+                    && cells.at((c.0, c.1 - 1, c.2)) != path::Class::Lava)
+                    .then_some(c)
             })?;
         let mut walk = Walk::new(
             out,
@@ -3019,9 +3029,22 @@ impl Plan {
             Arrive::Goal,
             tick,
         );
-        if !walk.route_now(w, tick) {
+        if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
             self.expanded += walk.expanded;
-            return None;
+            // A plain step forward: the route is the one cell (F1, race 45791152151: six bots in
+            // the portal, the step-out found no route from a portal block).
+            walk = Walk::new(
+                out,
+                Goal::Near {
+                    pos: out,
+                    range: 0.5,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            walk.waypoints = Some(vec![out]);
+            walk.more.kinds = vec![path::MoveKind::Walk];
+            walk.route = Some(path::Status::Found);
         }
         self.walks += 1;
         self.ender.home.portal_exits += 1;
