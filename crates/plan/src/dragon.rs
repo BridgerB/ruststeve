@@ -516,6 +516,37 @@ pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> 
     best.map(|(_, c)| c)
 }
 
+/// Blocks from the bot a charging dragon counts within, and the cosine its facing must be within
+/// of the line to the bot (the charge flies at the player: `DragonChargePlayerPhase`).
+pub const CHARGE_RANGE: f64 = 40.0;
+pub const CHARGE_CONE: f64 = 0.8;
+/// Blocks on the plane a bunker is gone into from at a charge.
+pub const CHARGE_BUNKER_REACH: f64 = 12.0;
+
+/// The distance of the dragon when it is charging (phase 8) within `CHARGE_RANGE` of `feet` with
+/// its facing on the line to them (its yaw unsaid: taken as on it), else `None`.
+pub fn charging_at(w: &World, feet: [f64; 3]) -> Option<f64> {
+    let (_, e) = dragon(w)?;
+    let (_, v) = view(w)?;
+    if v.phase() != Some(Phase::ChargingPlayer) {
+        return None;
+    }
+    let d = ((v.pos[0] - feet[0]).powi(2)
+        + (v.pos[1] - feet[1]).powi(2)
+        + (v.pos[2] - feet[2]).powi(2))
+    .sqrt();
+    if d > CHARGE_RANGE {
+        return None;
+    }
+    let flat_d = flat(v.pos, feet);
+    if e.yaw.is_none() || flat_d < 1e-6 {
+        return Some(d);
+    }
+    let [fx, fz] = facing(v.yaw);
+    let cos = (fx * (feet[0] - v.pos[0]) + fz * (feet[2] - v.pos[2])) / flat_d;
+    (cos >= CHARGE_CONE).then_some(d)
+}
+
 /// Does a breath reach `p` on the plane (its reach and `extra`)?
 pub fn breathed(breaths: &[Breath], p: [f64; 3], extra: f64) -> bool {
     breaths.iter().any(|b| flat(b.pos, p) <= b.reach() + extra)
@@ -1199,6 +1230,13 @@ pub struct DragonState {
     pub breath_walk: Option<Walk>,
     #[serde(default)]
     pub breath_outs: u32,
+    /// A charge in force, the charges in the run, and the walk to the bunker at one.
+    #[serde(default)]
+    pub charging: bool,
+    #[serde(default)]
+    pub charges: u32,
+    #[serde(default)]
+    pub charge_walk: Option<Walk>,
     /// Cells reached with the feet still in a breath, refused until out; the last cell noted.
     #[serde(default)]
     pub breath_refused: Vec<[i32; 3]>,
@@ -1835,6 +1873,105 @@ impl Plan {
                     format!("walk out of the breath to {target:?} failed: {e:?}"),
                     "the next tick looks again".to_owned(),
                 );
+            }
+        }
+        if c.pitch.is_none() {
+            c.pitch = Some(90.0);
+        }
+        Some(c)
+    }
+
+    /// In the End, the dragon charging the bot (`charging_at`) with the feet under the open sky:
+    /// into the bunker when it is within `CHARGE_BUNKER_REACH`, else crouched still where the feet
+    /// are, no dig and no walk begun in the open (E4's race 4: a charge hit a bot digging down two
+    /// over the ground for 10 and 5 and threw it 48 high). A breath on the feet is left to
+    /// `breath_step`. Noted "charge: hold …" once a charge.
+    pub fn charge_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) {
+            self.dragon.charge_walk = None;
+            return None;
+        }
+        let body = w.body?;
+        let Some(d) = charging_at(w, body.pos) else {
+            if self.dragon.charging {
+                self.dragon.charging = false;
+                self.dragon.charge_walk = None;
+                self.note(
+                    tick,
+                    "charge: over".to_owned(),
+                    format!("at {:?}", cell_of(body.pos)),
+                );
+            }
+            return None;
+        };
+        if !world::stage::open_sky(w) || breath_on(&breaths(w), body.pos).is_some() {
+            return None;
+        }
+        let bunker = self.bunker.filter(|b| {
+            flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
+                && (body.pos[1] - f64::from(b[1])).abs() <= 5.0
+        });
+        if !self.dragon.charging {
+            self.dragon.charging = true;
+            self.dragon.charges += 1;
+            self.note(
+                tick,
+                match bunker {
+                    Some(b) => format!("charge: hold in the bunker at {b:?}"),
+                    None => "charge: hold crouched where the feet are".to_owned(),
+                },
+                format!(
+                    "the dragon charging {d:.0} off; task {}; health {:.1}; {} charges in the run",
+                    self.task.name(),
+                    w.player.health.unwrap_or(0.0),
+                    self.dragon.charges
+                ),
+            );
+        }
+        let crouch = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
+        let Some(b) = bunker else {
+            return Some(crouch);
+        };
+        let cell: Cell = (b[0], b[1], b[2]);
+        if self
+            .dragon
+            .charge_walk
+            .as_ref()
+            .is_none_or(|wk| wk.target != cell)
+        {
+            self.dragon.charge_walk = Some(Walk::new(
+                cell,
+                Goal::Block { pos: cell },
+                Arrive::Goal,
+                tick,
+            ));
+        }
+        let wk = self.dragon.charge_walk.as_mut()?;
+        let (mut c, status) = wk.step(w, tick);
+        let (acts, said) = wk.take_out();
+        self.acts.extend(acts);
+        for (what, why) in said {
+            self.note(tick, what, why);
+        }
+        match status {
+            TaskStatus::Running => {}
+            TaskStatus::Done => {
+                self.dragon.charge_walk = None;
+                return Some(crouch);
+            }
+            TaskStatus::Failed(e) => {
+                self.dragon.charge_walk = None;
+                self.note(
+                    tick,
+                    format!("charge: walk to the bunker failed: {e:?}"),
+                    "crouched where the feet are".to_owned(),
+                );
+                return Some(crouch);
             }
         }
         if c.pitch.is_none() {

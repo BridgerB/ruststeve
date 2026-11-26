@@ -749,3 +749,43 @@ fn a_cell_out_of_the_breath_is_never_the_feets_own_and_well_clear() {
         "a block past the reach: {c:?}"
     );
 }
+
+#[test]
+fn a_charge_is_waited_out_crouched_or_in_the_bunker() {
+    // E4's race 4: a charge hit a bot digging down two over the ground for 10 and 5 and threw it
+    // 48 high.
+    let feet = [12.5, 64.0, 0.5];
+    // Yaw 90 faces +x: from x -17.5 the dragon's facing is on the line to the bot, 30 off.
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-17.5, 64.0, 0.5], 8, 90.0);
+    assert!(dragon::charging_at(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    let c = p.charge_step(&w, 0).expect("held");
+    assert!(c.sneak && !c.forward, "crouched still");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "charge: hold crouched where the feet are")
+    );
+    let mut away = end_at(feet);
+    with_dragon(&mut away, [-17.5, 64.0, 0.5], 8, 270.0);
+    assert!(dragon::charging_at(&away, feet).is_none(), "facing away");
+    let mut far = end_at(feet);
+    with_dragon(&mut far, [-40.5, 64.0, 0.5], 8, 90.0);
+    assert!(dragon::charging_at(&far, feet).is_none(), "53 off");
+    let mut holding = end_at(feet);
+    with_dragon(&mut holding, [-17.5, 64.0, 0.5], 0, 90.0);
+    assert!(
+        dragon::charging_at(&holding, feet).is_none(),
+        "not charging"
+    );
+    // With the bunker in reach: into it.
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([16, FLOOR, 0]);
+    assert!(q.charge_step(&w, 0).is_some());
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == format!("charge: hold in the bunker at {:?}", [16, FLOOR, 0]))
+    );
+}

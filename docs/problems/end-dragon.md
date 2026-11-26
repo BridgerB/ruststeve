@@ -98,5 +98,12 @@ Most perches gave 0 to 2 strikes. That is the wall, not the cap. In the perches 
   - **Fix:** `GROUND_UP` 3 → 6.
 - Each flame cycle cost about 3.0 to a bot walking out of the flame. The flame fix (da32c2b) leaves before the flame comes.
 
+**Wall 8: a charge in the open** (E4's race 4). While the bot dug down two over the ground near (12, 63, 42), a charge (phase 8) hit it for 10 and then 5 and threw it 48 high.
+- **Fix:** `Plan::charge_step` runs beside `breath_step`, ahead of every task. When the dragon is charging within 40 with its facing on the line to the bot (`charging_at`) and the feet are under the open sky:
+  - with the bunker within 12 on the plane, the bot walks into it;
+  - otherwise it crouches still where it is, and no dig or walk begins in the open.
+- A breath on the feet still goes to `breath_step`.
+- Notes: "charge: hold in the bunker at …", "charge: hold crouched where the feet are", "charge: over".
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
