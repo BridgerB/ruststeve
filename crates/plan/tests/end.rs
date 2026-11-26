@@ -740,3 +740,35 @@ fn a_shut_step_of_the_bunkers_stair_is_dug_out_on_the_way_up() {
     // And the room over the head before the step, from the step below.
     assert!(ops.contains(&plan::end::Op::Dig((11, 63, 0))), "{ops:?}");
 }
+
+#[test]
+fn the_bunker_is_not_left_while_a_fireball_or_cloud_lies_by_its_stair() {
+    // Race 45910659261 lane 1: a fireball on the stair, its cloud killed the bot in 4 s.
+    let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+    for c in [(12, 60, 0), (12, 61, 0)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    // The stair's top is (9, 64, 0) (door west): a cloud 4 off it.
+    with_entity(&mut w, 13, EntityKind::AreaEffectCloud, [6.5, 64.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.step(&w);
+    assert!(
+        noted(
+            &p,
+            "end: the bunker stays shut for a AreaEffectCloud near its stair"
+        ),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: open the bunker"), "{:?}", notes(&p));
+    // The cloud gone: opened.
+    w.entities.remove(&13);
+    p.retry_at = 0;
+    p.step(&w);
+    assert!(noted(&p, "end: open the bunker"), "{:?}", notes(&p));
+}

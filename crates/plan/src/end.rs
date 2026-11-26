@@ -300,6 +300,25 @@ fn found(walk: &mut Walk, w: &World, tick: u64) -> bool {
     walk.route_now(w, tick) && walk.route == Some(path::Status::Found)
 }
 
+/// The bunker is left only with no dragon fireball and no area cloud this near its stair's top.
+pub const STAIR_CLEAR: f64 = 8.0;
+
+/// A dragon fireball or an area cloud within `range` of `c`: its kind and place.
+pub fn fire_near(w: &World, c: Cell, range: f64) -> Option<(EntityKind, [f64; 3])> {
+    let at = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+    w.entities
+        .values()
+        .filter(|e| {
+            !e.dead
+                && matches!(
+                    e.kind,
+                    EntityKind::DragonFireball | EntityKind::AreaEffectCloud
+                )
+        })
+        .find(|e| dist(e.pos, at) <= range)
+        .map(|e| (e.kind, e.pos))
+}
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -529,6 +548,11 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// A wait for a fireball or cloud by the stair in hand, and waits begun.
+    #[serde(default)]
+    pub fire_waiting: bool,
+    #[serde(default)]
+    pub fire_waits: u32,
     /// The stair's steps walked: stairs up on if no sky is over the top.
     #[serde(default)]
     pub exit_up: bool,
@@ -785,6 +809,14 @@ impl Plan {
         }
         // The bunker opened to hand over: up its stair before any hand-off is asked (the
         // crystals' task, once asked, holds the bot in its own wait).
+        if self.end.exit_walk && self.fire_at_stair(w, door_cells[6], tick) {
+            // Open and waiting: shut again until the stair's top is clear (the open re-digs it).
+            if inside && open(w, roof) {
+                self.end.exit_walk = false;
+                self.begin_seal(w, b, door, tick);
+            }
+            return None;
+        }
         if self.end.exit_walk {
             self.end.exit_walk = false;
             // Up the stair a step at a time, steered (race 45898928805 lane 0: from (14, 59, 0),
@@ -845,6 +877,9 @@ impl Plan {
                 return Some(Task::Stairs(Box::new(st)));
             }
             if inside && shut {
+                if self.fire_at_stair(w, door_cells[6], tick) {
+                    return None;
+                }
                 // Out of the bunker first, the task chosen again once the door is open.
                 self.note(
                     tick,
@@ -1862,6 +1897,30 @@ impl Plan {
                 ),
             );
         }
+        true
+    }
+
+    /// A dragon fireball or an area cloud within `STAIR_CLEAR` of the bunker's stair's top: the
+    /// bunker is not left (race 45910659261 lane 1: a fireball on the stair, its cloud reached
+    /// the bot under the end stone at 6 a second, 20 to dead in 4 s). Noted once a wait.
+    fn fire_at_stair(&mut self, w: &World, top: Cell, tick: u64) -> bool {
+        let Some((kind, at)) = fire_near(w, top, STAIR_CLEAR) else {
+            self.end.fire_waiting = false;
+            return false;
+        };
+        if !self.end.fire_waiting {
+            self.end.fire_waiting = true;
+            self.end.fire_waits += 1;
+            self.note(
+                tick,
+                format!("end: the bunker stays shut for a {kind:?} near its stair at {top:?}"),
+                format!(
+                    "at {:.0}, {:.0}, {:.0}; wait {}",
+                    at[0], at[1], at[2], self.end.fire_waits
+                ),
+            );
+        }
+        self.retry_at = tick + crate::RETRY_TICKS * 2;
         true
     }
 
