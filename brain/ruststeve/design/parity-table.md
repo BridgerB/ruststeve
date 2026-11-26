@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 178 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow, eyes of ender), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 178 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow, eyes of ender, the End's rows), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
-aliases: [eye rows, y01-throw, y02-fetch, stronghold field, eye class, burrow rows, e04-mouth, fill rows, trace, enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
+aliases: [end rows, e03-strike, crystal script, lift, summon_nbt, report rows, eye rows, y01-throw, y02-fetch, stronghold field, eye class, burrow rows, e04-mouth, fill rows, trace, enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@25a0729
+lastUpdated: 2026-11-26
+verifiedAgainst: ruststeve@34ec399
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -96,6 +96,12 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - Rows `y01-throw-N` (landings 0 to 3 and 8) and `y02-fetch-N` (landings 0, 4, 5) (`docs/problems/eyes-model.md`), on the peaceful table, 40 off their landing's centre, the bot given one eye. A row's `stronghold = [x, z]` is the point RCON's `locate structure minecraft:stronghold` names from the landing (the model is told it; the real line is judged against it). `use:20:0:-20` throws looking up; `fetch:<tick>` (`Script::Fetch`) throws, then walks to the dropped eye.
 - The class gains `eye`: seen, on the line (the line from its first place to its farthest on the plane within 1 degree of the bearing to the stronghold), ended, and for a fetch row none left on the ground. Drop or shatter is the jar's 4 in 5 roll: an ender eye held is out of the inventory class, and the end is written in `<id>.<real|sim>.eye.txt` with every place, the line, its error and the flight's numbers.
 - Tolerance 176 of 178.
+
+## End rows (issue 20)
+- Rows `e01-frame` to `e06-drop` (`docs/problems/end-model.md`), development setups laid by RCON in the overworld (never evidence), 40 off their landing's centre, at Normal, in full iron with boots. They measure the End's dangerous geometry before any race: an eye into a frame and the portal lit, the portal's arrival, a crystal struck by reach through a wall or its cage, the enderman's stare cone, the perched dragon's head and its blow, the water clutch.
+- New row fields: `lift` (the start stands that many over the surface; the real side stands it on the ground first, lays the row, then lifts it), `summon_nbt` (more NBT for the real `summon`s: a dragon's phase and yaw), `report` (writes `<id>.<real|sim>.end.txt`: health at each change, hits, blasts, crystals, dragons and endermen with their health, the dimension, the watched cells' full block states). `set` and `fill` take a block with properties as a command does (`iron_bars[north=true,south=true]`).
+- Scripts `crystal:<every>` (strike the nearest crystal by reach), `dragon:<every>:<part>` (strike the dragon's part id + part: the server judges the part's box) and `clutch:<yaw>:<walk>:<above>` (off a pillar, pour the water bucket falling).
+- `moments --only <prefixes>` and parity.yml's `only` and `tolerance` inputs run a few rows in minutes instead of the table's hour.
 
 ## See also
 - [[server-model]] - what the model models.
