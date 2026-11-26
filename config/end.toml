@@ -1,0 +1,249 @@
+# The End and the dragon (issue 20, #25): the kit, the geography of this seed's End, and the
+# jar's numbers. Every number names its source.
+#
+# Sources:
+# - probe 45863427332 (2026-11-26): a server started on a runner from the frontier snapshot's world
+#   (race-45800967549 lane 4, seed `typecraft`), RCON `execute if block` on the room's frames, the
+#   End forceloaded over x -64..127, z -64..63 and its region files read (`results region-find`,
+#   `region-strip`); crystals' `Pos` by RCON. Development knowledge (Bridger's ruling: the End's
+#   layout is fixed by the seed; RCON is never read by bot code).
+# - probe 45863431767 (2026-11-26): `javap -c -p -constants` of the 26.1.2 server jar and its
+#   data tags.
+# The world crate mirrors [kit], [island], [crystals] and the spikes' centres as constants in
+# crates/world/src/stage.rs; crates/world/tests/stages.rs holds the two equal.
+
+[kit]
+# Stage `armed` (crates/world/src/stage.rs `armed_kit`), in the overworld:
+# an iron sword (the plan's 20c: 2 of the 7 raw iron).
+iron_sword = 1
+# Stone or better pickaxes, at least: two, so one breaking is not the end of the mine.
+pickaxes = 2
+# Uses left over them: the end-stone mine (20e, about 160 blocks at 1 use each, plus the bunker)
+# about 200 and the pillars' dig back down the rest (plan "about 260"); two fresh stone pickaxes
+# are 262 (131 each, the generated tool table).
+pickaxe_uses = 260
+# Cooked food items: no food in the End (plan 20c, 30 raw meat cooked; 24 leaves margin for a
+# lost few).
+cooked = 24
+# Building blocks (cobblestone, deepslate, netherrack, the bridge's filler, end stone): the
+# 25-cell bridge with its rails (about 75) and a spare (plan: 128).
+blocks = 128
+# Water buckets (the clutch, 20f).
+water_buckets = 1
+# Eyes: at least the ring's empty frames (probe 45863427332: 11 empty of 12, the bot holds 13).
+
+[room]
+# The frontier's portal room (probe 45863427332, RCON on the snapshot world; memory's states
+# agree: 9469 eye, 9473..9476 empty).
+ring_centre = [1628, 19, -34]
+frame_y = 19
+# The one frame that holds an eye: (1627, 19, -32), facing north.
+frames_with_eye = [[1627, 19, -32]]
+# The 11 empty frames, each with its facing (the side its top is filled from does not matter;
+# the facing points into the ring).
+empty_frames = [
+  [1627, 19, -36], [1628, 19, -36], [1629, 19, -36],   # facing south
+  [1628, 19, -32], [1629, 19, -32],                    # facing north
+  [1626, 19, -35], [1626, 19, -34], [1626, 19, -33],   # facing east
+  [1630, 19, -35], [1630, 19, -34], [1630, 19, -33],   # facing west
+]
+# The lava pool under the ring: (1628, 17, -34) is lava, y 18 over it air (RCON); the template's
+# pool is x 1627..1629, z -35..-33 at y 17 (probe 45689842509, eyes-observe.md).
+lava_pool = [[1627, 17, -35], [1629, 17, -33]]
+# The silverfish spawner (RCON `data get block`: silverfish, delay 200..800, player range 16).
+spawner = [1632, 19, -34]
+# Where to stand to fill each empty frame (probe 45864386183, the snapshot's region files): an
+# air cell for the feet and head over a solid floor, outside the ring's 5 by 5, no lava within 1
+# of the feet, the eye (feet + 1.62) within 4.5 of the frame's top face (y 19 + 13/16). The
+# nearest of each, in the order of `empty_frames` (215 standable cells in the room's box; every
+# empty frame has 25 to 38 within 4.5):
+# south frames from the floor north of them at y 17 (1.56 off); north frames from z -31
+# (1.56); west frames from x 1625 (1.56); east frames from the spawner step's top at x 1631,
+# y 20 (2.07), or the floor's corners (1631, 17, -36) and (1631, 17, -32) (1.85).
+stands = [
+  [1627, 17, -37], [1628, 17, -37], [1629, 17, -37],
+  [1628, 17, -31], [1629, 17, -31],
+  [1625, 17, -35], [1625, 17, -34], [1625, 17, -33],
+  [1631, 17, -36], [1631, 20, -34], [1631, 17, -32],
+]
+# Lava at the floor's level besides the pool (the same files): (1635..1637, 17, -38),
+# (1635..1640, 17, -30), (1638..1639, 17, -29), (1638, 17, -28): the door's end, x >= 1635.
+lava_door = [[1635, 17, -38], [1640, 17, -28]]
+
+[platform]
+# Where the End portal lands the bot: EndPortalBlock.getPortalDestination, END_SPAWN_POINT's
+# bottom centre less one, facing west (yaw 90), on the obsidian platform made under it.
+arrival = [100.5, 49.0, 0.5]
+# The platform: obsidian 5 by 5 at y 48, x 98..102, z -2..2 (probe 45863427332).
+y = 48
+x = [98, 102]
+z = [-2, 2]
+
+[bridge]
+# The island's edge along -x from the platform (probe 45863427332, end stone columns):
+# at z -1..3 the end stone ends at x 72 (z -2: 66, z -3: 64). x 68..72 is a lip one block
+# thick at y 52; x 65 holds end stone y 50..54, x 63..64 from y 48; solid island by x 62
+# (top 56).
+island_edge_x = 72
+lip_y = 52
+# The void between: x 73..97, 25 cells at z 0.
+gap = 25
+# The lip's top is 4 over the platform's (48): a bridge at the platform's level meets the lip's
+# underside at x 65 (end stone at y 50, the head's height) and the island's side at x 63..64.
+rise = 4
+
+[island]
+# Stage `island`: the feet on end stone within this of the fountain (plan 20b).
+near = 30.0
+# End stone tops within 30 of (0, 0): 57 to 64, median 63 (2,821 columns, probe 45863427332).
+# The island's radius on the axes: 64 (-x, +z, -z), 72 (+x).
+radius = 64
+
+[fountain]
+# Not generated before a player is in the End (no dragon fight yet, probe 45863427332). From the
+# jar's EndPodiumFeature (PODIUM_RADIUS 4, PODIUM_PILLAR_HEIGHT 4) placed at the heightmap of
+# (0, 0): the end stone top there is 62, so the origin is y 63. Derived, not observed: the bowl's
+# bedrock floor y 62, the portal at y 63 within 2.5 of the centre, the rim's bedrock at y 63 out
+# to 3.5, the pillar's bedrock y 63..66 at (0, 0).
+centre = [0, 0]
+origin_y = 63
+pillar_top_y = 66
+
+[crystals]
+# Stage `crystals`: the feet within this of the fountain (every spike then within 102, inside
+# the entity tracking distance of 112: view distance 8 less one chunk, ChunkMap.TrackedEntity).
+near = 60.0
+
+# The ten spikes (probe 45863427332): the centre column, the bedrock top's y (the crystal stands
+# at top + 1, at the centre + 0.5, fire in its cell), the radius from EndSpikeFeature (2 + i/3
+# for the spike of height 76 + 3i; the obsidian cells' farthest is radius + about 0.2), whether
+# caged (iron bars over centre -2..+2 on x and z, y top..top + 3: 73 bars; i = 1 and 2), and the
+# ground: the median end stone top of the columns 1 to 3 outside the spike.
+[[spike]]
+centre = [12, 39]
+top_y = 76
+radius = 2
+caged = false
+ground_y = 61
+
+[[spike]]
+centre = [-34, 24]
+top_y = 79
+radius = 2
+caged = true
+ground_y = 62
+
+[[spike]]
+centre = [42, 0]
+top_y = 82
+radius = 2
+caged = true
+ground_y = 58
+
+[[spike]]
+centre = [-34, -25]
+top_y = 85
+radius = 3
+caged = false
+ground_y = 62
+
+[[spike]]
+centre = [-42, -1]
+top_y = 88
+radius = 3
+caged = false
+ground_y = 62
+
+[[spike]]
+centre = [33, -25]
+top_y = 91
+radius = 3
+caged = false
+ground_y = 57
+
+[[spike]]
+centre = [33, 24]
+top_y = 94
+radius = 4
+caged = false
+ground_y = 59
+
+[[spike]]
+centre = [-13, -40]
+top_y = 97
+radius = 4
+caged = false
+ground_y = 61
+
+[[spike]]
+centre = [-13, 39]
+top_y = 100
+radius = 4
+caged = false
+ground_y = 62
+
+[[spike]]
+centre = [12, -40]
+top_y = 103
+radius = 5
+caged = false
+ground_y = 57
+
+[jar]
+# The 26.1.2 jar (probe 45863431767).
+# EndCrystal.hurtServer: any damage not from the dragon removes it, then an explosion of this
+# power at its position, unless the damage was itself an explosion (a chained crystal does not
+# explode).
+crystal_power = 6.0
+# ServerGamePacketListenerImpl.handleAttack: isWithinAttackRange(main hand, the target's box,
+# buffer 3.0); no line-of-sight test. The client's own reach is 3.0.
+attack_buffer = 3.0
+reach = 3.0
+# ExplosionDamageCalculator: (impact^2 + impact) / 2 * 7 * (2 * power) + 1, impact = (1 - feet
+# distance / (2 * power)) * seen; seen is the share of rays from a grid over the body's box that
+# ClipContext.COLLIDER leaves open (full blocks shut a ray; iron bars' thin shape lets some by).
+# Fully seen at 3 off: about 56.
+explosion_full_at_3 = 56.1
+# EnderDragon.hurt(part): the head takes the damage, any other part damage / 4 + min(damage, 1);
+# under 0.01 is nothing; only a player's damage or #is_explosion hurts it.
+head_factor = 1.0
+# A perch ends when the damage taken while sitting passes this share of max health (200): 50.
+sitting_damage_share = 0.25
+max_health = 200.0
+# checkCrystals: +1 health every 10 ticks from the nearest crystal; it looks within 32.
+heal_per_10_ticks = 1.0
+heal_search = 32.0
+# Head and neck: 10.0 (mobAttack) to everything in their boxes inflated by 1.0. Through iron
+# armour (CombatRules, toughness 0: armour - damage / 2, at least 20% of armour, of 25): 6.8
+# with no boots (armour 13, clojurecraft's number), 6.0 with iron boots (armour 15).
+head_damage = 10.0
+head_blow_no_boots = 6.8
+head_blow_iron = 6.0
+# Wings: box inflated (4, 2, 4) and moved down 2; push 4 out and 0.2 up; 5.0 damage when not
+# sitting; only while the dragon's hurtTime is 0.
+wing_push = 4.0
+wing_damage = 5.0
+# Part offsets from the dragon's position and yaw t (perched, no turn): head (6.5 sin t, -1,
+# -6.5 cos t), box 1 by 1; neck at 5.5, box 3 by 3; body (0.5 sin t, 0, -0.5 cos t), 5 by 3;
+# wings 4.5 across, +2, 4 by 2; tails 2 by 2.
+head_offset = 6.5
+head_y_sitting = -1.0
+neck_offset = 5.5
+# Phase ids (EnderDragonPhase): 0 holding, 1 strafe, 2 landing approach, 3 landing, 4 takeoff,
+# 5 sitting flaming, 6 sitting scanning, 7 sitting attacking, 8 charging, 9 dying, 10 hover.
+sitting_phases = [5, 6, 7]
+dying_phase = 9
+# Landing: nextInt(crystals + 3) == 0 when a holding path is done; strafe nextInt(crystals + 2).
+# The death: 200 ticks of tickDeath, then setDragonKilled (the boss bar hidden) and the removal;
+# the killing blow goes through LivingEntity.die (entity event 3).
+death_ticks = 200
+# DragonFireball's cloud: radius 3.0 growing to 7.0 over 600 ticks, instant damage.
+fireball_radius = 3.0
+fireball_radius_end = 7.0
+fireball_ticks = 600
+# The sitting-flaming breath's cloud: radius 5.0 for 200 ticks.
+breath_radius = 5.0
+breath_ticks = 200
+# #dragon_immune holds end stone, obsidian, iron bars, bedrock, crying obsidian and the frames;
+# cobblestone and netherrack are not (checkWalls breaks them with mob griefing on).
+dragon_immune = ["end_stone", "obsidian", "iron_bars", "bedrock", "crying_obsidian", "end_portal_frame"]

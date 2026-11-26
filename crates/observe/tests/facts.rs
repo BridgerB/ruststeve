@@ -947,3 +947,331 @@ fn a_frame_seen_is_in_the_ledger_once() {
     assert!(!facts.iter().any(|x| matches!(x, Fact::FrameSeen { .. })));
     assert_eq!(senses(&w, "t", "w", None).frames, Some(1));
 }
+
+// >>> E1: issue 20b, the End's facts.
+
+fn end_bot() -> World {
+    let mut w = World::new();
+    w.step(&Event::Packet(S2c::Login {
+        entity_id: 7,
+        view_distance: 8,
+        simulation_distance: 3,
+        dimension_type: 0,
+        dimension: "minecraft:the_end".to_owned(),
+        game_type: 0,
+    }));
+    w.step(&Event::Packet(S2c::PlayerPosition {
+        teleport_id: 1,
+        x: 40.5,
+        y: 80.0,
+        z: 0.5,
+        yaw: 0.0,
+        pitch: 0.0,
+        flags: 0,
+    }));
+    w
+}
+
+/// A crystal seen, struck (the bot's attack on it), gone as `struck`; a second removed far off is
+/// `far`. The strike names its target and the eye's reach to the crystal's box.
+#[test]
+fn a_crystal_seen_struck_and_gone_is_in_the_ledger() {
+    let mut w = end_bot();
+    let a = snapshot(&w);
+    add(
+        &mut w,
+        30,
+        EntityKind::EndCrystal,
+        [42.5, 83.0, 0.5],
+        [0.0; 3],
+    );
+    add(
+        &mut w,
+        31,
+        EntityKind::EndCrystal,
+        [-41.5, 89.0, -0.5],
+        [0.0; 3],
+    );
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::CrystalSeen { id: 30, .. })),
+        "{facts:?}"
+    );
+    w.step(&Event::Act(world::Act::Attack { entity: 30 }));
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![30, 31] }));
+    let (_, facts) = facts_between(&b, &w);
+    let reach = facts.iter().find_map(|x| match x {
+        Fact::Strike {
+            target,
+            id: 30,
+            reach,
+        } if target == "end_crystal" => *reach,
+        _ => None,
+    });
+    // The eye (40.5, 81.62, 0.5) to the box x 41.5..43.5, y 83..85: 1.0 across, 1.38 up.
+    assert!(
+        reach.is_some_and(|r| (r - 1.0f64.hypot(1.38)).abs() < 1e-6),
+        "{facts:?}"
+    );
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::CrystalGone { id: 30, how, .. } if how == "struck")),
+        "{facts:?}"
+    );
+    assert!(
+        facts.iter().any(
+            |x| matches!(x, Fact::CrystalGone { id: 31, how, .. } if how == "gone" || how == "far")
+        ),
+        "{facts:?}"
+    );
+}
+
+/// The dragon's phase, a blow landed on it (struck at its head part's id), the dragon dead, and
+/// the credits are each a fact; the senses row carries its health and phase in the End.
+#[test]
+fn the_dragon_and_the_credits_are_in_the_ledger() {
+    let mut w = end_bot();
+    add(
+        &mut w,
+        60,
+        EntityKind::EnderDragon,
+        [0.5, 70.0, 0.5],
+        [0.0; 3],
+    );
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 60,
+        entries: vec![(16, MetaValue::Int(0)), (9, MetaValue::Float(200.0))],
+    }));
+    let a = snapshot(&w);
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 60,
+        entries: vec![(16, MetaValue::Int(6))],
+    }));
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        facts.iter().any(|x| matches!(
+            x,
+            Fact::DragonPhase {
+                from: Some(0),
+                to: 6
+            }
+        )),
+        "{facts:?}"
+    );
+    // Struck at the head (id 61), and the server says the dragon took the bot's blow.
+    w.step(&Event::Act(world::Act::Attack { entity: 61 }));
+    w.step(&Event::Packet(S2c::DamageEvent {
+        entity_id: 60,
+        source_type: 0,
+        cause: Some(7),
+        direct: Some(7),
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 60,
+        entries: vec![(9, MetaValue::Float(191.0))],
+    }));
+    let (c, facts) = facts_between(&b, &w);
+    assert!(
+        facts.iter().any(
+            |x| matches!(x, Fact::Strike { target, id: 61, .. } if target == "ender_dragon:head")
+        ),
+        "{facts:?}"
+    );
+    assert!(
+        facts.iter().any(|x| matches!(
+            x,
+            Fact::DragonHit { part: Some(p), health: Some(h) } if p == "head" && (*h - 191.0).abs() < 1e-6
+        )),
+        "{facts:?}"
+    );
+    let row = senses(&w, "t", "w", None);
+    assert_eq!(row.dragon_phase, Some(6));
+    assert!(row.end().contains("dragon 191.0 p6"), "{}", row.end());
+    w.step(&Event::Packet(S2c::EntityEvent { id: 60, status: 3 }));
+    w.step(&Event::Packet(S2c::GameEvent {
+        event: 4,
+        param: 0.0,
+    }));
+    let (_, facts) = facts_between(&c, &w);
+    assert!(
+        facts.iter().any(|x| matches!(x, Fact::DragonDead)),
+        "{facts:?}"
+    );
+    assert!(
+        facts.iter().any(|x| matches!(
+            x,
+            Fact::Credits {
+                dragon_dead: Some(_)
+            }
+        )),
+        "{facts:?}"
+    );
+}
+
+/// A climb on a pillar in the End: told up once its top holds `PILLAR_SETTLE` ticks, and down
+/// when back near the ground; the senses row says the feet over the ground.
+#[test]
+fn a_pillar_up_and_down_is_in_the_ledger() {
+    use protocol::chunk::{Column, Paletted, Section};
+    let mut w = end_bot();
+    let air = Section {
+        block_count: 0,
+        fluid_count: 0,
+        blocks: Paletted::Single(0),
+        biomes: Paletted::Single(0),
+    };
+    let stone = Section {
+        block_count: 4096,
+        fluid_count: 0,
+        blocks: Paletted::Single(BlockKind::EndStone.info().unwrap().default_state),
+        biomes: Paletted::Single(0),
+    };
+    // Ground: end stone y 0 to 63 (the top at 63, the feet's ground level 64).
+    let mut sections = vec![stone; 4];
+    sections.extend(vec![air; 12]);
+    for (x, z) in [(2, 0), (2, -1), (3, 0), (3, -1)] {
+        w.step(&Event::Packet(S2c::LevelChunkWithLight {
+            x,
+            z,
+            column: std::sync::Arc::new(Column {
+                min_y: 0,
+                sections: sections.clone(),
+            }),
+        }));
+    }
+    let at = |w: &mut World, y: f64| {
+        w.step(&Event::Packet(S2c::PlayerPosition {
+            teleport_id: 2,
+            x: 40.5,
+            y,
+            z: 0.5,
+            yaw: 0.0,
+            pitch: 0.0,
+            flags: 0,
+        }));
+    };
+    at(&mut w, 84.0);
+    let mut a = snapshot(&w);
+    assert_eq!(a.over, Some(20));
+    a.climb = None;
+    let (mut b, facts) = facts_between(&a, &w);
+    assert!(!facts.iter().any(|x| matches!(x, Fact::PillarUp { .. })));
+    // The top holds: told once.
+    b.at += observe::PILLAR_SETTLE;
+    let mut c = snapshot(&w);
+    c.at = b.at;
+    let facts: Vec<Fact> = diff(&b, &mut c, &w).into_iter().map(|s| s.fact).collect();
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::PillarUp { height: 20, .. })),
+        "{facts:?}"
+    );
+    assert!(senses(&w, "t", "w", None).end().contains("over 20"));
+    at(&mut w, 64.0);
+    let mut d = snapshot(&w);
+    d.at = c.at + 1;
+    let facts: Vec<Fact> = diff(&c, &mut d, &w).into_iter().map(|s| s.fact).collect();
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::PillarDown { height: 20 })),
+        "{facts:?}"
+    );
+}
+
+/// A look near an enderman's eyes is a near miss; one inside the stare's cone says so.
+#[test]
+fn a_look_near_an_endermans_eyes_is_in_the_ledger() {
+    let mut w = end_bot();
+    // An enderman 20 south (+z) whose eyes (2.55 over its feet) are 1.5 over the bot's (1.62).
+    add(
+        &mut w,
+        70,
+        EntityKind::Enderman,
+        [40.5, 80.57, 20.5],
+        [0.0; 3],
+    );
+    let mut a = snapshot(&w);
+    a.gazes.clear();
+    // Looking south and level: 4.3 degrees off its eyes, inside 4 tolerances (5.7 degrees at
+    // 20) and outside one (2.9).
+    w.sent_look = Some((0.0, 0.0));
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        facts.iter().any(|x| matches!(
+            x,
+            Fact::GazeNearMiss {
+                id: 70,
+                stare: false,
+                ..
+            }
+        )),
+        "{facts:?}"
+    );
+    // Straight at the eyes: a stare.
+    let pitch = -(1.5f64 / 20.0).atan().to_degrees() as f32;
+    w.sent_look = Some((0.0, pitch));
+    let (_, facts) = facts_between(&b, &w);
+    assert!(
+        facts.iter().any(|x| matches!(
+            x,
+            Fact::GazeNearMiss {
+                id: 70,
+                stare: true,
+                ..
+            }
+        )),
+        "{facts:?}"
+    );
+}
+
+/// An eye placed in a frame on record, and the End entered, are facts.
+#[test]
+fn an_eye_placed_and_the_end_entered_are_in_the_ledger() {
+    use protocol::chunk::{Column, Paletted, Section};
+    let mut w = overworld_bot();
+    let air = Section {
+        block_count: 0,
+        fluid_count: 0,
+        blocks: Paletted::Single(0),
+        biomes: Paletted::Single(0),
+    };
+    w.step(&Event::Packet(S2c::LevelChunkWithLight {
+        x: 0,
+        z: 0,
+        column: std::sync::Arc::new(Column {
+            min_y: 0,
+            sections: vec![air; 16],
+        }),
+    }));
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (5, 30, 5),
+        state: 9473,
+    }));
+    let a = snapshot(&w);
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (5, 30, 5),
+        state: 9469,
+    }));
+    let (mut b, facts) = facts_between(&a, &w);
+    assert!(
+        facts
+            .iter()
+            .any(|x| matches!(x, Fact::EyePlaced { cell: [5, 30, 5] })),
+        "{facts:?}"
+    );
+    let w = end_bot();
+    b.dimension = Some("minecraft:overworld".to_owned());
+    let (_, facts) = facts_between(&b, &w);
+    assert!(
+        facts.iter().any(
+            |x| matches!(x, Fact::PortalEntered { from: Some(f), .. } if f == "minecraft:overworld")
+        ),
+        "{facts:?}"
+    );
+}
+// <<< E1

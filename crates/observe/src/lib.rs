@@ -273,6 +273,208 @@ fn projectile(kind: EntityKind) -> bool {
     )
 }
 
+// >>> E1 (issue 20b): the End.
+
+/// The dragon's phase (EnderDragon.DATA_PHASE, an INT after Mob's 15): ids from EnderDragonPhase
+/// in the 26.1.2 jar (probe 45863431767): 0 holding, 1 strafe, 2 landing approach, 3 landing,
+/// 4 takeoff, 5 to 7 sitting, 8 charging, 9 dying, 10 hover.
+pub const DRAGON_PHASE: u8 = 16;
+/// LivingEntity's health (a FLOAT).
+pub const HEALTH: u8 = 9;
+/// AreaEffectCloud's radius (a FLOAT after Entity's 0 to 7).
+pub const CLOUD_RADIUS: u8 = 8;
+/// The dragon's max health (EnderDragon attributes, 200).
+pub const DRAGON_MAX: f32 = 200.0;
+/// The dragon's parts after its own id, in `getSubEntities` order (EnderDragon.setId gives
+/// part i the id + i + 1): what a strike on a part's id names.
+pub const DRAGON_PARTS: [&str; 8] = [
+    "head", "neck", "body", "tail", "tail", "tail", "wing", "wing",
+];
+/// A breath or fireball cloud within this of the feet (beyond its radius) is told.
+pub const BREATH_WATCH: f64 = 16.0;
+/// Feet over the ground (the lowest top of the columns two out) from which a climb is a pillar.
+pub const PILLAR_MIN: i32 = 3;
+/// Ticks a pillar's top holds before `PillarUp` is told (the climb stopped).
+pub const PILLAR_SETTLE: u64 = 40;
+/// How far down the ground is looked for (deeper is the void).
+pub const GROUND_SCAN: i32 = 64;
+/// A strike is the reason a crystal went if the bot's attack on it was this recent (ticks).
+pub const STRIKE_TICKS: u64 = 20;
+/// A blast within this of a crystal's place, within `STRIKE_TICKS`, is what took it.
+pub const BLAST_NEAR: f64 = 2.0;
+/// A crystal removed farther than this went out of view, not out of the world (the tracking
+/// distance, 112).
+pub const CRYSTAL_VIEW: f64 = 100.0;
+/// The stare's tolerance (EnderMan.isBeingStaredBy: 0.025, scaled by distance) and the near
+/// miss's: a look within this many tolerances of an enderman's eyes is told.
+pub const STARE_TOLERANCE: f64 = 0.025;
+pub const NEAR_MISS: f64 = 4.0;
+/// Endermen looked at within this (EnderMan's look-for-player range, 64).
+pub const GAZE_RANGE: f64 = 64.0;
+/// An enderman's eye over its feet (EntityType.ENDERMAN eye height 2.55).
+pub const ENDERMAN_EYE_Y: f64 = 2.55;
+
+/// A climb in the End: the most the feet have been over the ground, when, where, and whether
+/// `PillarUp` was told.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Climb {
+    pub top: i32,
+    pub top_at: u64,
+    pub cell: [i32; 3],
+    pub told: bool,
+}
+
+/// A breath or fireball cloud watched, and the nearest the feet came to its edge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Cloud {
+    pub radius: f32,
+    pub closest: f64,
+}
+
+fn meta_int(e: &world::Entity, i: u8) -> Option<i32> {
+    match e.metadata.get(&i) {
+        Some(MetaValue::Int(v)) => Some(*v),
+        Some(_) | None => None,
+    }
+}
+
+fn meta_float(e: &world::Entity, i: u8) -> Option<f32> {
+    match e.metadata.get(&i) {
+        Some(MetaValue::Float(v)) => Some(*v),
+        Some(_) | None => None,
+    }
+}
+
+/// The dragon the world holds alive, with its id.
+pub fn dragon(w: &World) -> Option<(i32, &world::Entity)> {
+    w.entities
+        .iter()
+        .filter(|(_, e)| e.kind == EntityKind::EnderDragon)
+        .min_by_key(|(id, e)| (e.dead, **id))
+        .map(|(id, e)| (*id, e))
+}
+
+/// The dragon's health: its own entity data, else its boss bar's share of 200.
+pub fn dragon_health(w: &World) -> Option<f32> {
+    dragon(w)
+        .and_then(|(_, e)| meta_float(e, HEALTH))
+        .or_else(|| {
+            w.bosses
+                .values()
+                .find(|(n, _)| n.to_lowercase().replace(' ', "_").contains("ender_dragon"))
+                .map(|(_, p)| p * DRAGON_MAX)
+        })
+}
+
+/// The dragon's phase id, when its entity data has come.
+pub fn dragon_phase(w: &World) -> Option<i32> {
+    dragon(w).and_then(|(_, e)| meta_int(e, DRAGON_PHASE))
+}
+
+/// The feet over the ground: the lowest top among the eight columns two out from the feet's
+/// (axes and diagonals), each looked down for `GROUND_SCAN`; `None` when every one is void or
+/// unloaded (on the bridge, over the void).
+pub fn over_ground(w: &World) -> Option<i32> {
+    let b = feet(w)?;
+    let (x, y, z) = (
+        b[0].floor() as i32,
+        b[1].floor() as i32,
+        b[2].floor() as i32,
+    );
+    [
+        (2, 0),
+        (-2, 0),
+        (0, 2),
+        (0, -2),
+        (2, 2),
+        (2, -2),
+        (-2, 2),
+        (-2, -2),
+    ]
+    .iter()
+    .filter_map(|(dx, dz)| {
+        (1..=GROUND_SCAN).find_map(|k| match w.block_at(BlockPos::new(x + dx, y - k, z + dz)) {
+            Some(BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir) => None,
+            Some(_) => Some(k - 1),
+            None => None,
+        })
+    })
+    .min()
+}
+
+/// End crystals in the world, by id, with their place.
+fn crystals(w: &World) -> BTreeMap<i32, [f64; 3]> {
+    w.entities
+        .iter()
+        .filter(|(_, e)| !e.dead && e.kind == EntityKind::EndCrystal)
+        .map(|(id, e)| (*id, e.pos))
+        .collect()
+}
+
+/// The frames on record within `world::stage::FRAME_NEAR` that hold an eye.
+fn frames_with_eye(w: &World) -> Vec<[i32; 3]> {
+    let Some(dim) = w.dimension.as_ref() else {
+        return Vec::new();
+    };
+    if !w.memory.has_seen(BlockKind::EndPortalFrame) {
+        return Vec::new();
+    }
+    world::stage::frames_near(w)
+        .into_iter()
+        .filter(|c| {
+            w.memory
+                .latest(&dim.name, *c)
+                .is_some_and(|s| memory::frame_has_eye(s.state))
+        })
+        .map(|(x, y, z)| [x, y, z])
+        .collect()
+}
+
+/// Endermen whose eyes the look sent last comes within `NEAR_MISS` tolerances of (a stare is
+/// within one; line of sight is not tested here), by id, with the range and whether it is inside
+/// the stare's own cone.
+fn gazes(w: &World) -> BTreeMap<i32, (f64, bool)> {
+    let (Some(f), Some((yaw, pitch))) = (feet(w), w.sent_look) else {
+        return BTreeMap::new();
+    };
+    let eye = [f[0], f[1] + 1.62, f[2]];
+    let (yr, pr) = (f64::from(yaw).to_radians(), f64::from(pitch).to_radians());
+    let v = [-yr.sin() * pr.cos(), -pr.sin(), yr.cos() * pr.cos()];
+    w.entities
+        .iter()
+        .filter(|(_, e)| !e.dead && e.kind == EntityKind::Enderman)
+        .filter_map(|(id, e)| {
+            let t = [e.pos[0], e.pos[1] + ENDERMAN_EYE_Y, e.pos[2]];
+            let d = [t[0] - eye[0], t[1] - eye[1], t[2] - eye[2]];
+            let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if len > GAZE_RANGE || len <= f64::EPSILON {
+                return None;
+            }
+            let dot = (v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / len;
+            (dot > 1.0 - NEAR_MISS * STARE_TOLERANCE / len)
+                .then_some((*id, (len, dot > 1.0 - STARE_TOLERANCE / len)))
+        })
+        .collect()
+}
+
+/// The eye's distance to an entity's box: a crystal's 2 by 2 by 2, else its position.
+fn reach_to(w: &World, e: &world::Entity) -> Option<f64> {
+    let f = feet(w)?;
+    let eye = [f[0], f[1] + 1.62, f[2]];
+    if e.kind == EntityKind::EndCrystal {
+        let lo = [e.pos[0] - 1.0, e.pos[1], e.pos[2] - 1.0];
+        let hi = [e.pos[0] + 1.0, e.pos[1] + 2.0, e.pos[2] + 1.0];
+        return Some(
+            (0..3)
+                .map(|i| (eye[i] - eye[i].clamp(lo[i], hi[i])).powi(2))
+                .sum::<f64>()
+                .sqrt(),
+        );
+    }
+    Some(dist(eye, e.pos))
+}
+// <<< E1
+
 /// The parts of the world the ledger compares from tick to tick: cheap to take every tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -361,6 +563,42 @@ pub struct Snapshot {
     /// Silverfish within `SILVERFISH_NEAR`, by id.
     #[serde(default)]
     pub silverfish: Vec<i32>,
+    // >>> E1 (issue 20b)
+    /// Frames on record within `FRAME_NEAR` holding an eye.
+    #[serde(default)]
+    pub frames_eye: Vec<[i32; 3]>,
+    /// End crystals alive, by id, and where.
+    #[serde(default)]
+    pub crystals: BTreeMap<i32, [f64; 3]>,
+    /// `World::attacks_sent` and `World::last_attack`.
+    #[serde(default)]
+    pub attacks: u64,
+    #[serde(default)]
+    pub last_attack: Option<(u64, i32)>,
+    /// The feet over the ground in the End (`over_ground`), and the climb (carried by `diff`).
+    #[serde(default)]
+    pub over: Option<i32>,
+    #[serde(default)]
+    pub climb: Option<Climb>,
+    /// The dragon: its id, phase and health, and the blows the bot landed on it.
+    #[serde(default)]
+    pub dragon: Option<i32>,
+    #[serde(default)]
+    pub dragon_phase: Option<i32>,
+    #[serde(default)]
+    pub dragon_health: Option<f32>,
+    #[serde(default)]
+    pub dragon_landed: usize,
+    /// `World::dragon_dead`.
+    #[serde(default)]
+    pub dragon_dead: Option<u64>,
+    /// Breath and fireball clouds within `BREATH_WATCH`, by id (carried by `diff`).
+    #[serde(default)]
+    pub clouds: BTreeMap<i32, Cloud>,
+    /// Endermen the look comes near (`gazes`), by id: range and inside the stare's cone.
+    #[serde(default)]
+    pub gazes: BTreeMap<i32, (f64, bool)>,
+    // <<< E1
 }
 
 /// A fact for the ledger.
@@ -575,6 +813,81 @@ pub enum Fact {
         id: i32,
         d: f64,
     },
+    // >>> E1 (issue 20b)
+    /// An end portal frame on record came to hold an eye.
+    EyePlaced {
+        cell: [i32; 3],
+    },
+    /// The End entered, from `from`, the feet at `at`.
+    PortalEntered {
+        from: Option<String>,
+        at: [f64; 3],
+    },
+    /// An end crystal came into the world: where, and how far from the feet.
+    CrystalSeen {
+        id: i32,
+        pos: [f64; 3],
+        d: f64,
+    },
+    /// An end crystal left the world: `struck` (the bot's attack on it within `STRIKE_TICKS`),
+    /// `blast` (an explosion beside it), `far` (out of view), else `gone`.
+    CrystalGone {
+        id: i32,
+        pos: [f64; 3],
+        how: String,
+    },
+    /// A climb's top held `PILLAR_SETTLE` ticks: the feet `height` over the ground at `cell`.
+    PillarUp {
+        height: i32,
+        cell: [i32; 3],
+    },
+    /// Back near the ground after a pillar of `height`.
+    PillarDown {
+        height: i32,
+    },
+    /// An attack sent: its target (an entity kind, or `ender_dragon:<part>`), the id, and the
+    /// eye's distance to it (a crystal's box; else its position).
+    Strike {
+        target: String,
+        id: i32,
+        reach: Option<f64>,
+    },
+    /// The dragon's phase changed (ids at `DRAGON_PHASE`).
+    DragonPhase {
+        from: Option<i32>,
+        to: i32,
+    },
+    /// A blow of the bot's landed on the dragon: the part last struck and its health after.
+    DragonHit {
+        part: Option<String>,
+        health: Option<f32>,
+    },
+    /// The dragon hurt the bot: the health lost.
+    DragonBlow {
+        lost: f32,
+        damage_type: String,
+    },
+    /// A breath or fireball cloud came within `BREATH_WATCH` of the feet: its radius, and the
+    /// feet's distance to its edge then (negative: inside).
+    Breath {
+        id: i32,
+        radius: f32,
+        dist: f64,
+    },
+    /// The look came within `NEAR_MISS` stare tolerances of an enderman's eyes; `stare` when
+    /// inside the stare's own cone (line of sight not tested).
+    GazeNearMiss {
+        id: i32,
+        d: f64,
+        stare: bool,
+    },
+    /// The dragon was seen dead (`World::dragon_dead`).
+    DragonDead,
+    /// The credits (`win_game`), with the tick the dragon was seen dead, if it was.
+    Credits {
+        dragon_dead: Option<u64>,
+    },
+    // <<< E1
 }
 
 /// A fact and the server tick it was seen.
@@ -767,6 +1080,40 @@ pub fn snapshot(w: &World) -> Snapshot {
             })
             .map(|(id, _)| *id)
             .collect(),
+        // >>> E1 (issue 20b)
+        frames_eye: frames_with_eye(w),
+        crystals: crystals(w),
+        attacks: w.attacks_sent,
+        last_attack: w.last_attack,
+        over: if world::stage::in_end(w) {
+            over_ground(w)
+        } else {
+            None
+        },
+        climb: None,
+        dragon: dragon(w).map(|(id, _)| id),
+        dragon_phase: dragon_phase(w),
+        dragon_health: dragon_health(w),
+        dragon_landed: dragon(w).map_or(0, |(_, e)| e.hurts.iter().filter(|h| h.by_bot).count()),
+        dragon_dead: w.dragon_dead,
+        clouds: w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == EntityKind::AreaEffectCloud)
+            .filter_map(|(id, e)| {
+                let r = meta_float(e, CLOUD_RADIUS).unwrap_or(0.0);
+                let d = (e.pos[0] - bot[0]).hypot(e.pos[2] - bot[2]) - f64::from(r);
+                (d <= BREATH_WATCH).then_some((
+                    *id,
+                    Cloud {
+                        radius: r,
+                        closest: d,
+                    },
+                ))
+            })
+            .collect(),
+        gazes: gazes(w),
+        // <<< E1
     }
 }
 
@@ -1243,8 +1590,203 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
             });
         }
     }
+    end_facts(prev, next, w, &mut out);
     out.into_iter().map(|fact| Stamped { at, fact }).collect()
 }
+
+// >>> E1 (issue 20b)
+/// The End's facts between two snapshots (`diff`'s tail).
+fn end_facts(prev: &Snapshot, next: &mut Snapshot, w: &World, out: &mut Vec<Fact>) {
+    let at = next.at;
+    let bot = feet(w).unwrap_or([0.0; 3]);
+    for cell in &next.frames_eye {
+        if !prev.frames_eye.contains(cell) {
+            out.push(Fact::EyePlaced { cell: *cell });
+        }
+    }
+    let end = Some("minecraft:the_end");
+    if next.dimension.as_deref() == end
+        && prev.dimension.is_some()
+        && prev.dimension.as_deref() != end
+    {
+        out.push(Fact::PortalEntered {
+            from: prev.dimension.clone(),
+            at: bot,
+        });
+    }
+    for (id, pos) in &next.crystals {
+        if !prev.crystals.contains_key(id) {
+            out.push(Fact::CrystalSeen {
+                id: *id,
+                pos: *pos,
+                d: dist(*pos, bot),
+            });
+        }
+    }
+    for (id, pos) in &prev.crystals {
+        if next.crystals.contains_key(id) {
+            continue;
+        }
+        let struck = next
+            .last_attack
+            .is_some_and(|(t, x)| x == *id && t + STRIKE_TICKS >= at);
+        let blast = w
+            .explosions
+            .iter()
+            .any(|b| b.at_tick + STRIKE_TICKS >= at && dist(b.center, *pos) <= BLAST_NEAR);
+        let how = if struck {
+            "struck"
+        } else if blast {
+            "blast"
+        } else if dist(*pos, bot) > CRYSTAL_VIEW {
+            "far"
+        } else {
+            "gone"
+        };
+        out.push(Fact::CrystalGone {
+            id: *id,
+            pos: *pos,
+            how: how.to_owned(),
+        });
+    }
+    // Strikes: every attack sent since the last snapshot, told by its last target.
+    if next.attacks > prev.attacks
+        && let Some((_, id)) = next.last_attack
+    {
+        let (target, reach) = match w.entities.get(&id) {
+            Some(e) => (
+                e.kind.name().unwrap_or("unknown").to_owned(),
+                reach_to(w, e),
+            ),
+            None => match next.dragon {
+                Some(d) if id > d && id <= d + DRAGON_PARTS.len() as i32 => {
+                    let part = DRAGON_PARTS
+                        .get(usize::try_from(id - d - 1).unwrap_or(0))
+                        .copied()
+                        .unwrap_or("part");
+                    (
+                        format!("ender_dragon:{part}"),
+                        w.entities.get(&d).and_then(|e| reach_to(w, e)),
+                    )
+                }
+                Some(_) | None => ("unknown".to_owned(), None),
+            },
+        };
+        out.push(Fact::Strike { target, id, reach });
+    }
+    // Pillars: a climb over `PILLAR_MIN` told once its top holds, and its end near the ground.
+    next.climb = prev.climb;
+    match next.over {
+        Some(h) if h >= PILLAR_MIN => {
+            let c = next.climb.get_or_insert(Climb {
+                top: h,
+                top_at: at,
+                cell: world_cell(bot),
+                told: false,
+            });
+            if h > c.top {
+                *c = Climb {
+                    top: h,
+                    top_at: at,
+                    cell: world_cell(bot),
+                    told: false,
+                };
+            }
+            if !c.told && at >= c.top_at + PILLAR_SETTLE {
+                c.told = true;
+                out.push(Fact::PillarUp {
+                    height: c.top,
+                    cell: c.cell,
+                });
+            }
+        }
+        Some(h) if h < PILLAR_MIN - 1 => {
+            if let Some(c) = next.climb.take()
+                && c.told
+            {
+                out.push(Fact::PillarDown { height: c.top });
+            }
+        }
+        // Between, or over the void: the climb stands as it was.
+        Some(_) | None => {}
+    }
+    if let Some(to) = next.dragon_phase
+        && next.dragon_phase != prev.dragon_phase
+    {
+        out.push(Fact::DragonPhase {
+            from: prev.dragon_phase,
+            to,
+        });
+    }
+    if next.dragon == prev.dragon && next.dragon_landed > prev.dragon_landed {
+        let part = next.last_attack.and_then(|(_, id)| {
+            let d = next.dragon?;
+            if id == d {
+                return Some("body".to_owned());
+            }
+            (id > d && id <= d + DRAGON_PARTS.len() as i32)
+                .then(|| DRAGON_PARTS.get(usize::try_from(id - d - 1).unwrap_or(0)))
+                .flatten()
+                .map(|p| (*p).to_owned())
+        });
+        out.push(Fact::DragonHit {
+            part,
+            health: next.dragon_health,
+        });
+    }
+    let new_hits = w
+        .hits
+        .iter()
+        .filter(|h| next.hit_mark.is_some() && Some(h.at_tick) > prev.hit_mark.map(|m| m.0));
+    for h in new_hits {
+        if h.cause == Some(EntityKind::EnderDragon) || h.direct == Some(EntityKind::EnderDragon) {
+            let lost = match (prev.health, next.health) {
+                (Some(a), Some(b)) => (a - b).max(0.0),
+                _ => 0.0,
+            };
+            out.push(Fact::DragonBlow {
+                lost,
+                damage_type: h.damage_type.clone(),
+            });
+        }
+    }
+    for (id, c) in &mut next.clouds {
+        match prev.clouds.get(id) {
+            None => out.push(Fact::Breath {
+                id: *id,
+                radius: c.radius,
+                dist: c.closest,
+            }),
+            Some(p) => c.closest = c.closest.min(p.closest),
+        }
+    }
+    for (id, n) in &next.gazes {
+        if !prev.gazes.get(id).is_some_and(|p| p.1 || !n.1) {
+            out.push(Fact::GazeNearMiss {
+                id: *id,
+                d: n.0,
+                stare: n.1,
+            });
+        }
+    }
+    if next.dragon_dead.is_some() && prev.dragon_dead.is_none() {
+        out.push(Fact::DragonDead);
+    }
+    if next.won && !prev.won {
+        out.push(Fact::Credits {
+            dragon_dead: next.dragon_dead,
+        });
+    }
+}
+
+fn world_cell(p: [f64; 3]) -> [i32; 3] {
+    [
+        p[0].floor() as i32,
+        p[1].floor() as i32,
+        p[2].floor() as i32,
+    ]
+}
+// <<< E1
 
 /// A mob in a senses row.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1338,6 +1880,22 @@ pub struct Senses {
     pub eyes: Option<i32>,
     #[serde(default)]
     pub frames: Option<u32>,
+    // >>> E1 (issue 20b): in the End only.
+    /// The dragon's health and phase, the crystals alive, the feet's distance to the fountain,
+    /// the feet over the ground (`over_ground`; `None` over the void) and endermen within 16.
+    #[serde(default)]
+    pub dragon_health: Option<f32>,
+    #[serde(default)]
+    pub dragon_phase: Option<i32>,
+    #[serde(default)]
+    pub crystals: Option<u32>,
+    #[serde(default)]
+    pub fountain: Option<f64>,
+    #[serde(default)]
+    pub over: Option<i32>,
+    #[serde(default)]
+    pub endermen_16: Option<u32>,
+    // <<< E1
 }
 
 /// How a fluid touches the body (the feet's cell and the one over it).
@@ -1460,6 +2018,36 @@ impl Senses {
         s
     }
 
+    // >>> E1 (issue 20b)
+    /// Issue 20's part of the row, in the End only (older rows print nothing):
+    /// ` dragon 180.0 p0 crystals 7 fountain 34.2 over 12 endermen16 1` (`over void` with no
+    /// ground below).
+    pub fn end(&self) -> String {
+        let Some(f) = self.fountain else {
+            return String::new();
+        };
+        let mut s = String::new();
+        if let Some(h) = self.dragon_health {
+            s.push_str(&format!(" dragon {h:.1}"));
+            if let Some(p) = self.dragon_phase {
+                s.push_str(&format!(" p{p}"));
+            }
+        }
+        if let Some(c) = self.crystals {
+            s.push_str(&format!(" crystals {c}"));
+        }
+        s.push_str(&format!(" fountain {f:.1}"));
+        match self.over {
+            Some(o) => s.push_str(&format!(" over {o}")),
+            None => s.push_str(" over void"),
+        }
+        if let Some(n) = self.endermen_16.filter(|n| *n > 0) {
+            s.push_str(&format!(" endermen16 {n}"));
+        }
+        s
+    }
+    // <<< E1
+
     /// The feet's cell: as recorded, else the position floored (rows from before the cell was
     /// kept).
     pub fn feet(&self) -> Option<[i32; 3]> {
@@ -1501,6 +2089,7 @@ impl Senses {
 
 /// The senses row for `w`, with the task and its reason as the planner holds them.
 pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses {
+    let in_end = world::stage::in_end(w);
     let bot = feet(w);
     let here = bot.unwrap_or([0.0; 3]);
     let cell = bot.map(feet_cell);
@@ -1603,6 +2192,20 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
         } else {
             0
         }),
+        // >>> E1 (issue 20b)
+        dragon_health: in_end.then(|| dragon_health(w)).flatten(),
+        dragon_phase: in_end.then(|| dragon_phase(w)).flatten(),
+        crystals: in_end
+            .then(|| u32::try_from(world::stage::crystals_alive(w)).unwrap_or(u32::MAX)),
+        fountain: in_end.then(|| world::stage::from_fountain(w)).flatten(),
+        over: in_end.then(|| over_ground(w)).flatten(),
+        endermen_16: in_end.then(|| {
+            w.entities
+                .values()
+                .filter(|e| !e.dead && e.kind == EntityKind::Enderman && dist(e.pos, here) <= 16.0)
+                .count() as u32
+        }),
+        // <<< E1
     }
 }
 
@@ -1752,6 +2355,65 @@ impl Fact {
             Fact::EyePicked { id, amount } => format!("eye picked up (item#{id}, {amount})"),
             Fact::FrameSeen { cell: [x, y, z] } => format!("end portal frame seen at {x},{y},{z}"),
             Fact::SilverfishWoken { id, d } => format!("silverfish#{id} woken at {d:.1}"),
+            // >>> E1 (issue 20b)
+            Fact::EyePlaced { cell } => {
+                format!("eye placed in frame {},{},{}", cell[0], cell[1], cell[2])
+            }
+            Fact::PortalEntered { from, at } => format!(
+                "end entered from {} at {:.1},{:.1},{:.1}",
+                from.as_deref()
+                    .unwrap_or("?")
+                    .trim_start_matches("minecraft:"),
+                at[0],
+                at[1],
+                at[2]
+            ),
+            Fact::CrystalSeen { id, pos, d } => format!(
+                "crystal#{id} seen at {:.1},{:.1},{:.1} ({d:.1} off)",
+                pos[0], pos[1], pos[2]
+            ),
+            Fact::CrystalGone { id, pos, how } => format!(
+                "crystal#{id} gone ({how}) at {:.1},{:.1},{:.1}",
+                pos[0], pos[1], pos[2]
+            ),
+            Fact::PillarUp { height, cell } => format!(
+                "pillar up {height} over the ground at {},{},{}",
+                cell[0], cell[1], cell[2]
+            ),
+            Fact::PillarDown { height } => format!("pillar down from {height}"),
+            Fact::Strike { target, id, reach } => match reach {
+                Some(r) => format!("strike {target}#{id} at reach {r:.2}"),
+                None => format!("strike {target}#{id}"),
+            },
+            Fact::DragonPhase { from, to } => match from {
+                Some(f) => format!("dragon phase {f} -> {to}"),
+                None => format!("dragon phase {to}"),
+            },
+            Fact::DragonHit { part, health } => format!(
+                "dragon hit on the {} (health {})",
+                part.as_deref().unwrap_or("?"),
+                health.map_or_else(|| "?".to_owned(), |h| format!("{h:.1}"))
+            ),
+            Fact::DragonBlow { lost, damage_type } => {
+                format!("dragon blow: {lost:.1} health lost ({damage_type})")
+            }
+            Fact::Breath { id, radius, dist } => {
+                format!("breath cloud#{id} radius {radius:.1}, {dist:.1} from its edge")
+            }
+            Fact::GazeNearMiss { id, d, stare } => format!(
+                "gaze {} enderman#{id} at {d:.1}",
+                if *stare {
+                    "in the stare cone of"
+                } else {
+                    "near"
+                }
+            ),
+            Fact::DragonDead => "dragon dead".to_owned(),
+            Fact::Credits { dragon_dead } => match dragon_dead {
+                Some(t) => format!("credits (the dragon seen dead at {t})"),
+                None => "credits (the dragon not seen dead)".to_owned(),
+            },
+            // <<< E1
         }
     }
 }
