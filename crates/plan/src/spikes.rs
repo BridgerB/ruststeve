@@ -296,7 +296,9 @@ pub fn approach_along(w: &World, spike: &Spike, axis: Axis) -> Option<Approach> 
     let plan = stand(spike, axis);
     let top = plan.stand.1;
     let (x, z) = plan.column;
-    let base = ground(w, x, z, top + 2)?;
+    // Down from under the stand: the box's roof over the stand is no ground (CI run
+    // 45876961897: with it the approach was lost and the bot walked off to another).
+    let base = ground(w, x, z, top - 1)?;
     if base > top {
         return None;
     }
