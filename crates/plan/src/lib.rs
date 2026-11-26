@@ -35,6 +35,9 @@ pub mod heading;
 pub mod home;
 // <<< home
 // <<< heading
+// >>> Q11 (issue 19): the way home's fortress stretch.
+pub mod fortress_way;
+// <<< Q11
 pub mod hold;
 pub mod hunt;
 pub mod ledger;

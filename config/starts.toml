@@ -275,3 +275,16 @@ name = "dev-overworld-arrival"
 stage = "pearls_12"
 place = { dimension = "minecraft:overworld", x = 125.5, y = -52, z = -106.5 }
 kit = [["ender_eye", 14], ["crafting_table", 1], ["stick", 8]]
+
+# dev-nether-fortress (issue 19, 2026-11-25; development only, never evidence or the frontier):
+# the frontier bot put on the trip home's route just west of the blaze spawner's detour, where
+# real bots of races B5 to B9 reached and then stalled or died (docs/problems/eyes-home.md), so
+# the stretch from the fortress to the portal is raced on its own. Race it only with
+# `snapshot=frontier`. The eyes are made, so Home skips the top-up and the kit.
+[[start]]
+name = "dev-nether-fortress"
+stage = "pearls_12"
+place = { dimension = "minecraft:the_nether", x = 100.5, y = 45, z = 205.5 }
+spread = 4
+spread_under = 70
+kit = [["ender_eye", 14], ["netherrack", 128], ["crafting_table", 1], ["stick", 8], ["warped_stem", 8]]

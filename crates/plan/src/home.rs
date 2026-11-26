@@ -279,6 +279,10 @@ pub struct HomeState {
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
     // <<< Q6
+    // >>> Q11 (issue 19): the fortress stretch's state (`crate::fortress_way`).
+    #[serde(default)]
+    pub fortress: crate::fortress_way::FortressState,
+    // <<< Q11
     // >>> Q7: the overworld arrival's state (the shaft, the climb's table).
     #[serde(default)]
     pub arrival: crate::arrival::Arrival,
@@ -409,6 +413,14 @@ pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, 
             return None;
         }
         let rail = (t.0, t.1 - 1, t.2);
+        // >>> Q11: never a block in the body's own box (race 45760537530: the server refused the
+        // same guard 300 times while blazes burned the bot); the rail under it still, if missing.
+        if crate::fortress_way::body_in_cell(w, t) {
+            return (cells.at(rail) != path::Class::Solid
+                && !crate::fortress_way::body_in_cell(w, rail))
+            .then_some((rail, under, face_to((sx, sz))));
+        }
+        // <<< Q11
         // A guard block beside it along the axis: clicked on the face toward it.
         for (dx, dz) in [(ax, az), (-ax, -az)] {
             let n = (t.0 + dx, t.1, t.2 + dz);
@@ -2066,6 +2078,11 @@ impl Plan {
                 ),
             );
         }
+        // >>> Q11 (issue 19): the fortress stretch's rules (docs/problems/eyes-fortress.md).
+        if let Some(t) = self.fortress_way(w, tick) {
+            return Some(t);
+        }
+        // <<< Q11
         // >>> Q6 (issue 19): within `[portal_way] reach` and out of the approach's, the last leg
         // in rock to the front's tunnel cell (docs/problems/eyes-portal.md).
         if d > r.approach
