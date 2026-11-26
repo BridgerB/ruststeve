@@ -244,6 +244,22 @@ pub struct HomeState {
     pub aim: Option<(i32, i32)>,
     #[serde(default)]
     pub done: bool,
+    /// Large and medium cubes left unstruck by a lava edge (counted), and the last note.
+    #[serde(default)]
+    pub big_cubes_spared: u32,
+    #[serde(default)]
+    pub big_cube_noted_at: Option<u64>,
+    /// The old bridges' spans whose west end was reached with no span beyond: walked out, never
+    /// walked back to (race 45753006452 lane 0 paced 4 blocks between the west span's end and a
+    /// restock walk east for 2,500 ticks).
+    #[serde(default)]
+    pub spans_out: Vec<usize>,
+    /// Filler a restock dug for and did not get (no cell where the leg began): run at the next
+    /// place with cells to dig (`heading_with`), and the owed restocks begun.
+    #[serde(default)]
+    pub filler_owed: Option<i64>,
+    #[serde(default)]
+    pub owed_restocks: u32,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -295,10 +311,11 @@ pub fn rail_wanted(w: &World) -> Option<(Cell, i8, bool, bool)> {
     if cells.at(under) != path::Class::Solid {
         return None;
     }
-    // Only while filler is over the keep (race 45749508716 lane 0 laid 72 rails and was left
-    // with none), and only on a side that drops to lava within RAIL_DROP: a fall onto ground
-    // is a block or two, not a death.
-    if path::bridge_blocks(w) <= crate::heading::HOME_KEEP {
+    // Only on a side that drops to lava within RAIL_DROP (a fall onto ground is a block or two,
+    // not a death), and down to RAIL_FLOOR of filler, under the trip's keep: life over the
+    // trip (the coordinator, 2026-11-26; race 45749508716 lane 3 held 10 under the keep of 24,
+    // laid none, and was knocked off the west span into lava by a split cube).
+    if path::bridge_blocks(w) <= RAIL_FLOOR {
         return None;
     }
     [((1, 0), 5i8), ((-1, 0), 4), ((0, 1), 3), ((0, -1), 2)]
@@ -324,6 +341,37 @@ pub const KNOCKERS: &[data::EntityKind] = &[
 pub const KNOCK_RANGE: f64 = 16.0;
 /// A rail is laid only on a side that drops to lava within this.
 pub const RAIL_DROP: i32 = 8;
+/// Rails are laid while more filler than this is held (the coordinator, 2026-11-26: down to 4).
+pub const RAIL_FLOOR: i64 = 4;
+
+/// A magma cube's size: its own metadata index 16 (`Slime.ID_SIZE`, an int: 1 small, 2 medium,
+/// 4 large), sent only when not the default 1.
+pub fn cube_size(e: &world::Entity) -> i32 {
+    match e.metadata.get(&16) {
+        Some(protocol::metadata::MetaValue::Int(s)) => *s,
+        Some(_) | None => 1,
+    }
+}
+
+/// A lava edge at the feet or at a cell beside them on the same level: a span, its join, a
+/// bridge over the sea, or a rail laid beside one (a cube's knock-back lands there).
+pub fn near_lava_edge(w: &World) -> bool {
+    w.body.is_some_and(|b| {
+        let feet = path::stand_cell(w, b.pos);
+        let mut cells = path::Cells::new(w);
+        [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|(dx, dz)| crate::walk::lava_edge(&mut cells, (feet.0 + dx, feet.1, feet.2 + dz)))
+    })
+}
+
+/// The feet stand at a lava edge (`walk::lava_edge`): a span, its join, a bridge over the sea.
+pub fn at_lava_edge(w: &World) -> bool {
+    w.body.is_some_and(|b| {
+        let mut cells = path::Cells::new(w);
+        crate::walk::lava_edge(&mut cells, path::stand_cell(w, b.pos))
+    })
+}
 
 /// A skeleton within this has the trip take cover as from a blaze (its bow's 15 and margin).
 pub const SKELETON_COVER: f64 = 24.0;
@@ -1059,18 +1107,29 @@ impl Plan {
     fn home_bridge(&mut self, w: &World, tick: u64, r: &HomeRules) -> Option<Task> {
         let body = w.body?;
         let feet = path::feet_cell(body.pos);
+        let out = self.ender.home.spans_out.clone();
         let on = r.bridges.iter().position(|[e, wst, y, z]| {
             (feet.2 - z).abs() <= 1 && feet.0 <= *e + 1 && feet.0 >= *wst && (feet.1 - y).abs() <= 1
         });
+        // A span walked out is the heading's from then on.
+        if on.is_some_and(|i| out.contains(&i)) {
+            return None;
+        }
         // Beside a span but not on it (race 45733362772's bots stood on their own bridge at y 36
         // a few blocks south of it): onto it first, at the feet's x.
         let Some(on) = on else {
-            let [e, wst, y, z] = *r.bridges.iter().find(|[e, wst, y, z]| {
-                (feet.2 - z).abs() <= BRIDGE_NEAR
-                    && feet.0 <= *e + 1
-                    && feet.0 >= *wst
-                    && (feet.1 - y).abs() <= BRIDGE_BELOW
-            })?;
+            let [e, wst, y, z] = *r
+                .bridges
+                .iter()
+                .enumerate()
+                .find(|(i, [e, wst, y, z])| {
+                    !out.contains(i)
+                        && (feet.2 - z).abs() <= BRIDGE_NEAR
+                        && feet.0 <= *e + 1
+                        && feet.0 >= *wst
+                        && (feet.1 - y).abs() <= BRIDGE_BELOW
+                })?
+                .1;
             let target = (feet.0.clamp(wst, e), y, z);
             let mut walk = Walk::new(
                 target,
@@ -1129,6 +1188,14 @@ impl Plan {
             }
             (e2, y2, z2)
         } else if feet.0 <= west + 1 {
+            self.ender.home.spans_out.push(on);
+            self.note(
+                tick,
+                format!("home: the old bridges walked out at {feet:?}"),
+                format!(
+                    "span {on}'s west end ({west}, {y}, {z}), no span beyond: the heading's from here"
+                ),
+            );
             return None;
         } else {
             ((feet.0 - BRIDGE_LEG).max(west), y, z)

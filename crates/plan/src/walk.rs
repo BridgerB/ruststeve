@@ -190,7 +190,37 @@ pub struct More {
     #[serde(default)]
     pub water: bool,
     // <<< overland
+    /// Ticks this walk held sneak at a lava edge (`lava_edge`), and whether it said so.
+    #[serde(default)]
+    pub sneak_ticks: u64,
+    #[serde(default)]
+    pub sneak_said: bool,
 }
+
+/// A side of `feet` drops to lava: the cell beside its floor is lava, or open with lava within
+/// `LAVA_DROP` under it. Walking or bridging there, the walk sneaks: the server keeps a sneaking
+/// player from moving off an edge (`physics::back_off_from_edge`), its own step or a knock-back
+/// (race 45742350492 lane 3 stepped off its own bridge over the lava sea at (144, 33, 188) and
+/// burned to death: in the Nether nothing puts the fire out, so a touch of lava is a death).
+pub fn lava_edge(cells: &mut path::Cells, feet: Cell) -> bool {
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dz)| {
+        let c = (feet.0 + dx, feet.1 - 1, feet.2 + dz);
+        match cells.at(c) {
+            path::Class::Lava => true,
+            path::Class::Clear => {
+                (1..=LAVA_DROP).any(|d| cells.at((c.0, c.1 - d, c.2)) == path::Class::Lava)
+            }
+            path::Class::Solid
+            | path::Class::Water
+            | path::Class::Awkward
+            | path::Class::Unknown => false,
+        }
+    })
+}
+
+/// A side open this far down to lava is a lava edge (the rails' `home::RAIL_DROP`: a fall onto
+/// ground is a block or two, not a death).
+pub const LAVA_DROP: i32 = 8;
 
 fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
@@ -321,7 +351,9 @@ impl Walk {
     }
 
     fn deadline(&self) -> u64 {
-        WALK_TIMEOUT_TICKS
+        // Sneaking goes at 0.3 of a walk (`physics::SNEAKING_SPEED`): its ticks are added back.
+        self.more.sneak_ticks
+            + WALK_TIMEOUT_TICKS
             + WAYPOINT_TICKS * self.waypoints.as_ref().map_or(0, |w| w.len() as u64)
             + BRIDGE_TICKS
                 * self
@@ -522,7 +554,7 @@ impl Walk {
         if self.more.kinds.get(self.at) == Some(&MoveKind::Bridge)
             && let Some(out) = self.bridge(w, body, next, tick)
         {
-            return out;
+            return self.edge_sneak(w, body, next, out);
         }
         // Feet resting in soul sand's own cell (y + 0.875): read from the block, never from the
         // fraction of y, which a body mid-jump or a hair under a whole block also shows.
@@ -531,7 +563,38 @@ impl Walk {
             pos[1].floor() as i32,
             pos[2].floor() as i32,
         )) == Some(data::BlockKind::SoulSand);
-        (follow(body, next, soul), TaskStatus::Running)
+        let out = (follow(body, next, soul), TaskStatus::Running);
+        self.edge_sneak(w, body, next, out)
+    }
+
+    /// Sneak held at a lava edge (`lava_edge` at the feet or at the next waypoint), walking or
+    /// bridging; never on a step down, which a sneaking body is held back from. Counted, and said
+    /// once a walk.
+    fn edge_sneak(
+        &mut self,
+        w: &World,
+        body: physics::Body,
+        next: Cell,
+        (mut c, status): (Controls, TaskStatus),
+    ) -> (Controls, TaskStatus) {
+        let feet = path::stand_cell(w, body.pos);
+        if next.1 < feet.1 {
+            return (c, status);
+        }
+        let mut cells = path::Cells::new(w);
+        if !lava_edge(&mut cells, feet) && !lava_edge(&mut cells, next) {
+            return (c, status);
+        }
+        c.sneak = true;
+        self.more.sneak_ticks += 1;
+        if !self.more.sneak_said {
+            self.more.sneak_said = true;
+            self.more.said.push((
+                format!("walk: sneak at a lava edge from {feet:?}"),
+                format!("toward {next:?}; a side drops to lava within {LAVA_DROP}"),
+            ));
+        }
+        (c, status)
     }
 
     /// The bridge move's executor: with no floor under `next`, stand on the block before it and

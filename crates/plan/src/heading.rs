@@ -1111,6 +1111,44 @@ impl Plan {
                 return Some(t);
             }
         }
+        // >>> Q8 (issue 19): on the way home, a leg refused for filler where there was no cell to
+        // dig leaves the restock owed; it runs at the next place with cells, before the leg (race
+        // 45753006452 lane 3 paced 48 blocks north and back at x 175 for 8,000 ticks: west wanted
+        // 49 bridges with 45 held, no cell at the leg's start, and the ground 48 back was never
+        // dug).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && let Some(owed) = self.ender.home.filler_owed
+        {
+            let filler = path::bridge_blocks(w);
+            if filler >= owed {
+                self.ender.home.filler_owed = None;
+            } else if h.restock.is_none()
+                && restock_cells(w, Some(h.dir), RESTOCK_LOOK)
+                    .into_iter()
+                    .any(|c| !self.on_known_span(c))
+            {
+                self.ender.home.owed_restocks += 1;
+                h.restock = Some(Restock {
+                    filler0: filler,
+                    uses0: pickaxe_uses_left(w),
+                    digs: 0,
+                    began: tick,
+                    to: owed,
+                });
+                self.note(
+                    tick,
+                    format!("home: the restock owed begun at {feet:?}"),
+                    format!(
+                        "filler {filler}, {owed} owed since a leg had no cell to dig; owed restock {}",
+                        self.ender.home.owed_restocks
+                    ),
+                );
+                if let Some(t) = self.heading_restock(w, h, tick) {
+                    return Some(t);
+                }
+            }
+        }
+        // <<< Q8
         // New legs, a turn between each that has no way.
         for _ in 0..ATTEMPTS_PER_LOOK {
             self.heading_leg_start(w, h, feet, tick);
@@ -1735,6 +1773,11 @@ impl Plan {
         if filler < keep || (r.to > 0 && filler < r.to) {
             h.restock_after = tick + PACE_TICKS;
         }
+        // >>> Q8: on the way home what it dug for and did not get is owed (run where cells are).
+        if home && r.to > 0 && filler < r.to {
+            self.ender.home.filler_owed = Some(r.to);
+        }
+        // <<< Q8
         self.note(
             tick,
             "restock over".to_owned(),

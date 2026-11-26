@@ -1080,3 +1080,114 @@ fn the_join_west_of_a_span_is_never_a_restock_cell() {
     assert!(home::near_span(span, (310, 34, 194)));
     assert!(home::near_span(span, (308, 39, 194)));
 }
+
+/// A Home trip plan, the top-up and kit behind it, from `t` (the default table, or `t`).
+fn tripper(t: Option<Arc<make::Table>>) -> Plan {
+    let mut p = Plan::with_table(Aim::Race, t.unwrap_or_else(table));
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    p
+}
+
+/// A cube of `size` 2 blocks east of the feet at (8, 64, 8), lava beside the feet (a span's
+/// sides), no filler to rail with; how long the plan defends in 20 ticks.
+fn defends_a_cube_on_an_edge(size: i32) -> (u32, Plan) {
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 3));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (8, 63, 7), BlockKind::Lava);
+    set(&mut w, (8, 63, 9), BlockKind::Lava);
+    add_cube(&mut w, 50, [10.0, 64.0, 8.5]);
+    if size > 1 {
+        w.step(&Event::Packet(S2c::SetEntityData {
+            id: 50,
+            entries: vec![(16, protocol::metadata::MetaValue::Int(size))],
+        }));
+    }
+    assert_eq!(home::cube_size(&w.entities[&50]), size);
+    assert!(home::at_lava_edge(&w));
+    let mut p = tripper(None);
+    let mut defending = 0;
+    for t in 100..120 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+        if matches!(p.task, Task::Defend(_)) {
+            defending += 1;
+        }
+    }
+    (defending, p)
+}
+
+#[test]
+fn a_large_cube_by_a_lava_edge_is_never_struck() {
+    // Race 45749508716 lane 3 struck a large one on the west span at x 253; it split into four
+    // and knocked the bot into the lava 40 ticks later.
+    let (defending, p) = defends_a_cube_on_an_edge(4);
+    assert_eq!(defending, 0, "{:?}", notes(&p));
+    assert!(
+        noted(&p, "home: a large cube not struck by a lava edge"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.big_cubes_spared, 1);
+    // A medium one too; a small one (no split) is fought as before.
+    assert_eq!(defends_a_cube_on_an_edge(2).0, 0);
+    assert!(
+        defends_a_cube_on_an_edge(1).0 > 0,
+        "a small cube on the bot is fought"
+    );
+}
+
+#[test]
+fn rails_are_laid_under_the_keep_down_to_four() {
+    // Race 45749508716 lane 3 held 10 filler, under the keep of 24, and laid no rail.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 10));
+    set(&mut w, (9, 63, 8), BlockKind::Lava);
+    add_cube(&mut w, 50, [8.5, 64.0, 13.5]);
+    assert!(home::rail_wanted(&w).is_some(), "10 held: a rail");
+    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 4));
+    assert!(home::rail_wanted(&w).is_none(), "4 held: none");
+}
+
+#[test]
+fn a_span_walked_out_is_never_walked_back_to() {
+    // Race 45753006452 lane 0 paced between the west span's end (201, 41, 194) and a restock walk
+    // 4 east for 2,500 ticks: the span's walk sent it back to the end each time.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 8, 64, 8]];
+    goals.home.way = vec![[-200, 8]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(Some(t));
+    run(&mut p, &mut w, 100, 2);
+    assert!(
+        noted(&p, "home: the old bridges walked out at (8, 64, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.spans_out, vec![0]);
+    // Back on the span 4 east: no walk along it to its end again.
+    w.body = w.body.map(|b| physics::Body {
+        pos: [12.5, 64.0, 8.5],
+        ..b
+    });
+    w.player.pos = Some([12.5, 64.0, 8.5]);
+    p.task = Task::Idle;
+    run(&mut p, &mut w, 102, 2);
+    assert!(!noted(&p, "home: on the old bridge to"), "{:?}", notes(&p));
+}

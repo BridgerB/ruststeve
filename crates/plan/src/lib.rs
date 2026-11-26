@@ -1654,8 +1654,18 @@ impl Plan {
         let remake = matches!(self.task, Task::Cast(_))
             && !holds_pickaxe(w)
             && self.pickaxe_at_hand(w, tick);
+        // >>> Q8 (issue 19): idle at a lava edge (a rail laid, a hold), sneak: the server keeps a
+        // sneaking body on its block, a knock-back too (`walk::lava_edge`).
+        let idle_sneak = matches!(self.task, Task::Idle) && crate::home::at_lava_edge(w);
+        // <<< Q8
         let (controls, status) = match &mut self.task {
-            Task::Idle => (Controls::default(), TaskStatus::Running),
+            Task::Idle => (
+                Controls {
+                    sneak: idle_sneak,
+                    ..Controls::default()
+                },
+                TaskStatus::Running,
+            ),
             Task::ToLog(walk) | Task::Explore(walk) => {
                 let out = walk.step(w, tick);
                 // A walk's bridge move lays blocks: its acts are sent and each block laid is
@@ -2028,6 +2038,47 @@ impl Plan {
                 && (crowd < crate::home::CUBE_CROWD || resting)
                 && self.ender.home.cube_pocket.is_none()
                 && self.ender.home.cube_tunnel.is_none();
+            // >>> Q8: by a lava edge a large or medium cube is never struck: a split puts two to
+            // four cubes by the edge (race 45749508716 lane 3 split one on the west span, knocked
+            // into lava 40 ticks later). The rails and the sneak hold the bot; it goes on.
+            let edge = crate::home::near_lava_edge(w);
+            let big: Vec<i32> = w
+                .entities
+                .iter()
+                .filter(|(_, e)| {
+                    edge && !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        && crate::home::cube_size(e) > 1
+                        && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_FIGHT
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            if !big.is_empty()
+                && self
+                    .ender
+                    .home
+                    .big_cube_noted_at
+                    .is_none_or(|t| tick >= t + 200)
+            {
+                self.ender.home.big_cube_noted_at = Some(tick);
+                self.ender.home.big_cubes_spared += 1;
+                self.note(
+                    tick,
+                    "home: a large cube not struck by a lava edge".to_owned(),
+                    format!(
+                        "{} within {} (sizes {:?}); spared {}",
+                        big.len(),
+                        crate::home::CUBE_FIGHT,
+                        big.iter()
+                            .filter_map(|id| w.entities.get(id))
+                            .map(crate::home::cube_size)
+                            .collect::<Vec<_>>(),
+                        self.ender.home.big_cubes_spared
+                    ),
+                );
+            }
+            ignored.extend(big);
+            // <<< Q8
             ignored.extend(
                 w.entities
                     .iter()
