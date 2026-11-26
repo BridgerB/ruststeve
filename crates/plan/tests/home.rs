@@ -1287,7 +1287,11 @@ fn the_guard_lays_a_rail_then_a_block_at_the_feet_on_each_lava_side() {
     // No axis, or no filler: none (Bridger: down to 0).
     assert_eq!(home::guard_wanted(&w, None), None);
     w.inventory.slots.insert(38, (ItemKind::Cobblestone, 1));
-    assert!(home::guard_wanted(&w, axis).is_some(), "one held: laid");
+    assert_eq!(
+        home::guard_wanted(&w, axis),
+        None,
+        "one held, no knocker near: the keep is kept for the rails"
+    );
     w.inventory.slots.remove(&38);
     assert_eq!(home::guard_wanted(&w, axis), None);
 }

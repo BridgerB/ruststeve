@@ -2059,7 +2059,9 @@ impl Plan {
                 .filter(|(_, e)| {
                     edge && !e.dead
                         && e.kind == data::EntityKind::MagmaCube
-                        && crate::home::cube_size(e) > 1
+                        // Any size (race 45783532164 lane 0 fought a small one on the west span and was
+                        // knocked into the sea: a knock-back lifts the body, which sneaking does not hold).
+                        && crate::home::cube_size(e) >= 1
                         && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_FIGHT
                 })
                 .map(|(id, _)| *id)

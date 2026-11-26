@@ -390,6 +390,15 @@ pub const KNOCKERS: &[data::EntityKind] = &[
     data::EntityKind::ZombifiedPiglin,
 ];
 pub const KNOCK_RANGE: f64 = 16.0;
+
+/// A `KNOCKERS` mob within `KNOCK_RANGE`, seen or not.
+pub fn knocker_near(w: &World) -> bool {
+    w.body.is_some_and(|b| {
+        w.entities
+            .values()
+            .any(|e| !e.dead && KNOCKERS.contains(&e.kind) && dist(e.pos, b.pos) <= KNOCK_RANGE)
+    })
+}
 /// A rail is laid only on a side that drops to lava within this.
 pub const RAIL_DROP: i32 = 8;
 /// Rails are laid while more filler than this is held (Bridger, 2026-11-26: "do the rails
@@ -438,6 +447,8 @@ pub const WOOD_WALKS: u32 = 48;
 pub const WOOD_LEG_FROM: i32 = 160;
 pub const WOOD_USES_A_BLOCK: f64 = 2.5;
 pub const WOOD_PICK_USES: i32 = 59;
+/// A stem with no walk to it is tunnelled to with at least this many pickaxe uses left.
+pub const WOOD_TUNNEL_USES: i32 = 10;
 
 /// The next block of the guard (`Plan::home_guard`): for each side across `axis`, an open
 /// feet-level cell (no floor under it, or only a rail over a drop) is guarded. Its block is clicked onto a
@@ -457,7 +468,15 @@ pub fn guard_next(
 ) -> Option<(Cell, Cell, i8)> {
     let (ax, az) = axis?;
     let body = w.body?;
-    if path::bridge_blocks(w) <= 0 {
+    // Down to `HOME_KEEP` with no knocker near, kept for the rails that a knocker calls for (race
+    // 45783532164 lane 0 guarded 41 cells of the west span to filler 0, then a cube came and no
+    // rail could be laid); down to 0 with one near.
+    let floor = if rail_wanted(w).is_some() || knocker_near(w) {
+        0
+    } else {
+        crate::heading::HOME_KEEP
+    };
+    if path::bridge_blocks(w) <= floor {
         return None;
     }
     let feet = path::stand_cell(w, body.pos);
@@ -2289,6 +2308,23 @@ impl Plan {
         // undoing its stairs).
         if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
             self.expanded += walk.expanded;
+            // With pickaxe uses left, a tunnel or stairs to it (Q10's race 45783611857: the stems
+            // by the portal seen, every walk-only route failed).
+            if uses >= WOOD_TUNNEL_USES
+                && let Some(t) = self.tunnel_toward(w, log, ("a stem", "wood by hand"), tick)
+            {
+                self.ender.home.wood_gathering = true;
+                self.ender.home.wood_walks += 1;
+                self.note(
+                    tick,
+                    format!("home: wood by tunnel to {log:?}"),
+                    format!(
+                        "no walk; pickaxe uses {uses}, {logs} logs held, {want} wanted; {d} off; walk {} of {WOOD_WALKS}",
+                        self.ender.home.wood_walks
+                    ),
+                );
+                return Some(t);
+            }
             self.refuse(log, tick);
             return None;
         }
@@ -2354,7 +2390,7 @@ impl Plan {
         };
         if !picking
             && uses < want
-            && self.ender.home.trip_pick_runs < r.pick_runs
+            && (self.ender.home.trip_pick_runs < r.pick_runs || wood >= 2)
             && let Some(steps) = steps
         {
             self.ender.home.trip_pick_runs += 1;
