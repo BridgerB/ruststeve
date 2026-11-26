@@ -352,19 +352,30 @@ pub fn way_clear(v: &DragonView, a: [f64; 3], b: [f64; 3]) -> bool {
 
 /// The point on the plane a walk from `pos` to `b` goes by first while the straight way passes
 /// before the head, or `None`: with the feet less than `SIDE_CLEAR` beside its facing, out to
-/// `SIDE_OUT` on their side short of its reach; else beside it behind the stands' line
-/// (clojurecraft `around`).
+/// `SIDE_OUT` on their side short of its reach; else along beside it to `b`'s place along it
+/// (behind the stands' line for a stand behind, past the head for the head stand; clojurecraft
+/// `around`).
 pub fn around(v: &DragonView, pos: [f64; 3], b: [f64; 3]) -> Option<[f64; 2]> {
-    if !bite_on_way(v, pos, b) {
-        return None;
+    if !way_clear(v, pos, b) {
+        let (along, across) = ahead(v, pos);
+        let side = if across < 0.0 { -SIDE_OUT } else { SIDE_OUT };
+        let to = ahead(v, b).0;
+        let to = if to < 0.0 {
+            to.min(-(BEHIND_BY + SIDE_MARGIN))
+        } else {
+            to.max(BITE_OUT + SIDE_MARGIN)
+        };
+        return Some(if across.abs() < SIDE_CLEAR {
+            beside(
+                v,
+                along.clamp(-(BEHIND_BY + SIDE_MARGIN), BITE_OUT + SIDE_MARGIN),
+                side,
+            )
+        } else {
+            beside(v, to, side)
+        });
     }
-    let (along, across) = ahead(v, pos);
-    let side = if across < 0.0 { -SIDE_OUT } else { SIDE_OUT };
-    Some(if across.abs() < SIDE_CLEAR {
-        beside(v, along.min(BITE_OUT + SIDE_MARGIN), side)
-    } else {
-        beside(v, -(BEHIND_BY + SIDE_MARGIN), side)
-    })
+    None
 }
 
 /// A breath cloud or fireball: where, and its radius.
@@ -437,13 +448,79 @@ pub fn segment_distance(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
 /// The health over which the bot stands in the perched dragon's reach, and whether the head may
 /// be struck there: two blows and the danger line when that is under full health (three blows
 /// in 0.6 s killed one at 18.5), else one blow and the line, struck only from behind the body.
-pub fn perch_line(danger: f32, blow: f32) -> (f32, bool) {
+pub fn perch_line(danger: f32, blow: f32) -> f32 {
     let two = danger + 2.0 * blow;
     if two < FULL_HEALTH {
-        (two, true)
+        two
     } else {
-        (danger + blow, false)
+        danger + blow
     }
+}
+
+/// Blocks the head stand's feet are from the head part's box along the facing: E6's parity e05
+/// (run 45866776019) struck from 2.0 off the box, full 6.0 strikes, never hurt (outside the box
+/// grown by 1).
+pub const HEAD_STAND_OFF: f64 = 2.0;
+/// The head's blow box (its 1 by 1 grown by 1) and the neck's (3 by 3 grown by 1), half widths.
+pub const HEAD_BLOW_HALF: f64 = 1.5;
+pub const NECK_BLOW_HALF: f64 = 2.5;
+/// Reach the head stand keeps short of `STRIKE_REACH`, so a dragon shifting a little leaves it
+/// in reach.
+pub const REACH_SLACK: f64 = 0.25;
+
+/// Are feet at `p` (on the plane, with the player's half width) out of the head's and the neck's
+/// blow boxes? Heights are not counted: under them in the basin is counted as in them.
+pub fn clear_of_blow(v: &DragonView, p: [f64; 3]) -> bool {
+    let (along, across) = ahead(v, p);
+    let hw = physics::HALF_WIDTH;
+    let out =
+        |centre: f64, half: f64| (along - centre).abs() - hw >= half || across.abs() - hw >= half;
+    out(HEAD_OUT, HEAD_BLOW_HALF) && out(NECK_OUT, NECK_BLOW_HALF)
+}
+
+/// May feet at cell `c` strike the head from there: out of the blow boxes, out of every breath's
+/// reach, the eye within `reach` of the head's box.
+fn head_stand_ok(v: &DragonView, clouds: &[Breath], c: [i32; 3], reach: f64) -> bool {
+    let p = mid(c);
+    let eye = [p[0], p[1] + physics::EYE_HEIGHT, p[2]];
+    clear_of_blow(v, p) && !breathed(clouds, p, 0.0) && head_reach(v, eye) <= reach
+}
+
+/// The head stand: a ground cell `HEAD_STAND_OFF` beyond the head's box along the facing (or
+/// about it), out of the blow boxes and every breath, the eye within reach of the head's box with
+/// `REACH_SLACK` to spare; the nearest the ideal point.
+pub fn head_stand(v: &DragonView, w: &World) -> Option<[i32; 3]> {
+    let feet = w.body?.pos;
+    let clouds = breaths(w);
+    let [ix, iz] = beside(v, HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF, 0.0);
+    let ideal = [ix, 0.0, iz];
+    let (cx, cz) = (ix.floor() as i32, iz.floor() as i32);
+    let mut best: Option<(f64, [i32; 3])> = None;
+    for x in (cx - 2)..=(cx + 2) {
+        for z in (cz - 2)..=(cz + 2) {
+            let Some(c) = ground(w, x, z, feet[1].floor() as i32) else {
+                continue;
+            };
+            if !head_stand_ok(v, &clouds, c, STRIKE_REACH - REACH_SLACK) {
+                continue;
+            }
+            let d = flat(ideal, mid(c));
+            if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
+                best = Some((d, c));
+            }
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
+/// The head stand to hold: the one held while it still strikes (no slack), else `head_stand`.
+pub fn keep_head_stand(v: &DragonView, w: &World, held: Option<[i32; 3]>) -> Option<[i32; 3]> {
+    if let Some(h) = held
+        && head_stand_ok(v, &breaths(w), h, STRIKE_REACH)
+    {
+        return Some(h);
+    }
+    head_stand(v, w)
 }
 
 /// Did the dragon itself hit the bot within `HIT_HOLD_TICKS` (its blow, not its breath)?
@@ -717,7 +794,7 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     }
     let v = view(w).map(|(_, v)| v);
     let id = view(w).map(|(id, _)| id);
-    let (line, head_ok) = perch_line(ask.danger, ask.blow);
+    let line = perch_line(ask.danger, ask.blow);
     let ground_dragon = v.filter(grounded);
     // A breath near: hold on the stand in the basin out of the cloud itself while the dragon
     // sits (a walk up the rim goes into the neck), else out by the nearest cell.
@@ -760,9 +837,10 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         return wait(w, ask, feet, "the dragon flies");
     }
     // Grounded from here: on the perch or landing on it.
+    // Under the line: out past the head stand's reach and the wings', to the wait's ring.
     if health <= line {
-        if from_fountain(feet) < STEP_OUT_RADIUS || in_bite(&v, feet) {
-            return match step_out_cell(w, Some(&v), STEP_OUT_RADIUS) {
+        if from_fountain(feet) < WAIT_FROM || in_bite(&v, feet) {
+            return match step_out_cell(w, Some(&v), WAIT_RING) {
                 Some(c) => Want::Go(c, "under the perch line"),
                 None => Want::Hold("under the perch line, no cell out loaded"),
             };
@@ -772,20 +850,30 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     if !yaw_seen(w) {
         return Want::Hold("the dragon's yaw not yet told");
     }
-    let stand = keep_stand(&v, w, ask.stand);
     let sat = perched(&v, ask.perched_ticks);
-    if sat && head_ok && head_reach(&v, eye) <= STRIKE_REACH {
+    // Sat: the head part (the dragon's id + 1, a full blow; E6's e05) from out of its blow box.
+    if sat && clear_of_blow(&v, feet) && head_reach(&v, eye) <= STRIKE_REACH {
         return Want::Strike {
             entity: id + 1,
             head: true,
         };
     }
-    if sat && behind(&v, feet, BEHIND_BY - STAND_SLACK) && body_reach(&v, eye) <= STRIKE_REACH {
-        return Want::Strike {
-            entity: id,
-            head: false,
-        };
+    if sat && let Some(hs) = keep_head_stand(&v, w, ask.stand) {
+        if breath_on_way(&clouds, feet, mid(hs), BREATH_HOLD) {
+            return Want::Hold("a breath on the way to the head stand");
+        }
+        if let Some(p) = around(&v, feet, mid(hs))
+            && let Some(c) = ground(w, p[0].floor() as i32, p[1].floor() as i32, feet_cell[1])
+            && flat(feet, mid(c)) > STAND_NEAR
+        {
+            return Want::Go(c, "round the head");
+        }
+        if flat(feet, mid(hs)) > STAND_NEAR {
+            return Want::Go(hs, "to the head stand");
+        }
     }
+    // Landing, or no head stand open: the wait behind the body.
+    let stand = keep_stand(&v, w, ask.stand);
     let Some(stand) = stand else {
         if in_bite(&v, feet) {
             return match step_out_cell(w, Some(&v), STEP_OUT_RADIUS) {
@@ -1088,7 +1176,7 @@ impl Plan {
         }
         let v = view(w).map(|(_, v)| v);
         // The stand held is the stand noted.
-        if let Want::Go(c, "to the stand behind the dragon") = &want {
+        if let Want::Go(c, "to the stand behind the dragon" | "to the head stand") = &want {
             self.dragon.stand = Some(*c);
         }
         if changed {

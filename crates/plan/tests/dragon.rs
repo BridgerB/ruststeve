@@ -9,7 +9,7 @@ use std::sync::Arc;
 use data::{BlockKind, EntityKind};
 use plan::dragon::{
     self, Ask, Breath, DragonView, Want, ahead, beside, breath_on_way, breaths, decide, facing,
-    head_point, keep_stand, perch_line, perched, stand_behind,
+    head_point, head_stand, keep_stand, perch_line, perched, stand_behind,
 };
 use plan::{Aim, Plan};
 use protocol::S2c;
@@ -253,14 +253,10 @@ fn the_wait_is_behind_the_sitting_dragons_head() {
     let v = dragon::view(&w).unwrap().1;
     assert_eq!(stand_behind(&v, &w), Some([-2, FLOOR, 0]), "behind it");
     assert_eq!(
-        decide(&w, &ask()),
-        Want::Go([-2, FLOOR, 0], "to the stand behind the dragon")
+        head_stand(&v, &w),
+        Some([9, FLOOR, 0]),
+        "2.0 beyond the head's box"
     );
-    // Facing the bot: round its head first, never under it.
-    let mut w = end_at([-12.5, 64.0, 0.5]);
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 270.0);
-    let v = dragon::view(&w).unwrap().1;
-    assert_eq!(stand_behind(&v, &w), Some([2, FLOOR, 0]));
     match decide(&w, &ask()) {
         Want::Go(c, "round the head") => {
             assert!(
@@ -268,26 +264,36 @@ fn the_wait_is_behind_the_sitting_dragons_head() {
                 "the way round is out of the head's way: {c:?}"
             );
         }
-        other => panic!("round the head first, not {other:?}"),
+        other => panic!("round the head to the head stand, not {other:?}"),
     }
-    // There: the strike on the body, from behind.
-    let mut w = end_at(feet_of([2, FLOOR, 0]));
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 270.0);
+    // There: the head part, the dragon's id + 1 (E6's e05: a full 6.0, never hurt).
+    let mut w = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
     assert_eq!(
         decide(&w, &ask()),
         Want::Strike {
-            entity: DRAGON,
-            head: false
+            entity: DRAGON + 1,
+            head: true
         }
     );
-    // In front of it: never a strike, out of the bite.
-    let mut w = end_at([-1.5, 64.0, 0.5]);
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 270.0);
+    // Landing, not yet sat: the wait behind the body.
+    let mut w = end_at([-12.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 3, 90.0);
     assert_eq!(
         decide(&w, &ask()),
-        Want::Go([2, FLOOR, 0], "to the stand behind the dragon"),
-        "inside the basin, straight and low to the stand behind"
+        Want::Go([-2, FLOOR, 0], "to the stand behind the dragon")
     );
+    // In front of it under the head: out sideways first, never along under it.
+    let mut w = end_at([-1.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 270.0);
+    let v = dragon::view(&w).unwrap().1;
+    match decide(&w, &ask()) {
+        Want::Go(c, "round the head") => {
+            let (_, across) = dragon::ahead(&v, feet_of(c));
+            assert!(across.abs() >= 4.0, "{c:?}");
+        }
+        other => panic!("out sideways, not {other:?}"),
+    }
 }
 
 #[test]
@@ -317,28 +323,28 @@ fn the_stand_held_stays_the_stand_while_the_dragon_turns_marginally() {
 fn the_bot_stands_in_the_dragons_reach_only_above_two_hits_and_the_margin() {
     assert_eq!(
         perch_line(8.0, 6.0),
-        (14.0, false),
-        "two blows through iron with boots is 20: one blow and the line, behind only"
+        14.0,
+        "two blows through iron with boots is 20: one blow and the line"
     );
-    assert_eq!(
-        perch_line(8.0, 4.0),
-        (16.0, true),
-        "softer blows: two and the head"
-    );
-    let mut w = end_at(feet_of([2, FLOOR, 0]));
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 270.0);
+    assert_eq!(perch_line(8.0, 4.0), 16.0, "softer blows: two and the line");
+    let mut w = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
     w.player.health = Some(13.0);
     match decide(&w, &ask()) {
         Want::Go(c, "under the perch line") => {
             let d = dragon::flat(feet_of(c), [0.5, 0.0, 0.5]);
-            assert!(d >= 7.0, "out of reach: {c:?} {d}");
+            assert!(d >= 11.0, "out of reach: {c:?} {d}");
         }
         other => panic!("under the line no strike: {other:?}"),
     }
     w.player.health = Some(14.5);
-    assert!(
-        matches!(decide(&w, &ask()), Want::Strike { head: false, .. }),
-        "over it, the strike from behind"
+    assert_eq!(
+        decide(&w, &ask()),
+        Want::Strike {
+            entity: DRAGON + 1,
+            head: true
+        },
+        "over it, the head from the head stand"
     );
 }
 
