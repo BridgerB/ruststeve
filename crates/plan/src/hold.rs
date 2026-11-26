@@ -34,7 +34,7 @@ pub enum Hold {
 }
 
 /// An empty slot for a stack on the cursor: the main inventory first, then the hotbar.
-fn put_down_slot(w: &World) -> Option<i16> {
+pub(crate) fn put_down_slot(w: &World) -> Option<i16> {
     (9i16..=44).find(|s| !w.inventory.slots.contains_key(s))
 }
 

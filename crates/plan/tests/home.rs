@@ -625,3 +625,208 @@ fn warped_wood_burns_as_sticks_and_the_cook_asks_for_them() {
     let row = plan::cook_goal(&c, &t.survival).unwrap_or_else(|| panic!("a cook row"));
     assert_eq!(row.id, "cook", "{row:?}");
 }
+
+#[test]
+fn a_heading_with_a_point_turns_and_chooses_toward_it() {
+    use plan::heading::{choose_toward, turn_toward};
+    // Race 45698618366 lane 3: at (450, 40, 51), the portal at (22, -20): -x and -z.
+    let feet = (450, 40, 51);
+    let p = (22, -20);
+    assert_eq!(turn_toward((-1, 0), feet, p), Some((0, -1)));
+    assert_eq!(turn_toward((0, 1), feet, p), Some((-1, 0)));
+    // The fresh choice: the longer axis toward it first, never away (east was chosen).
+    assert_eq!(choose_toward(feet, p, &[]), Some((-1, 0)));
+    assert_eq!(choose_toward(feet, p, &[(-1, 0)]), Some((0, -1)));
+    assert_eq!(choose_toward(feet, p, &[(-1, 0), (0, -1)]), None);
+    // Nothing left on the turned-to axis: the exploring turn decides.
+    assert_eq!(turn_toward((-1, 0), (450, 40, -20), p), None);
+}
+
+fn add_cube(w: &mut World, id: i32, at: [f64; 3]) {
+    w.step(&Event::Packet(S2c::AddEntity {
+        id,
+        uuid: [0; 16],
+        kind: data::EntityKind::MagmaCube.id(),
+        x: at[0],
+        y: at[1],
+        z: at[2],
+        velocity: [0.0; 3],
+    }));
+}
+
+#[test]
+fn two_magma_cubes_near_on_the_trip_seal_a_pocket_and_clear_it() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    add_cube(&mut w, 50, [11.5, 64.0, 8.5]);
+    add_cube(&mut w, 51, [8.5, 64.0, 12.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 5);
+    assert!(
+        noted(&p, "home: pocket from magma cubes"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.cube_pockets, 1);
+    // Both gone: held CUBE_CLEAR_TICKS, then on.
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![50, 51] }));
+    run(&mut p, &mut w, 105, 230);
+    assert!(noted(&p, "home: out of the cube pocket"), "{:?}", notes(&p));
+    assert_eq!(p.ender.home.cube_pockets, 1);
+}
+
+#[test]
+fn a_basalt_floor_with_no_wall_restocks_beside_the_feet() {
+    // The feet at (8, 64, 8) on a delta floor of basalt, no wall in reach.
+    let mut w = nether();
+    for x in 5..=11 {
+        for z in 5..=11 {
+            set(&mut w, (x, 63, z), BlockKind::Basalt);
+        }
+    }
+    let cells = plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK);
+    assert!(!cells.is_empty(), "a floor cell to dig");
+    assert!(cells.iter().all(|c| c.1 == 63), "{cells:?}");
+    // Never under the feet, nor under the next step east.
+    assert!(!cells.contains(&(8, 63, 8)), "{cells:?}");
+    assert!(!cells.contains(&(9, 63, 8)), "{cells:?}");
+    // Lava beside a cell refuses it.
+    set(&mut w, (7, 62, 8), BlockKind::Lava);
+    let cells = plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK);
+    assert!(!cells.contains(&(7, 63, 8)), "{cells:?}");
+}
+
+#[test]
+fn cubes_that_stay_end_the_pocket_after_its_hold() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    add_cube(&mut w, 50, [11.5, 64.0, 8.5]);
+    add_cube(&mut w, 51, [8.5, 64.0, 12.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, home::CUBE_HOLD_MAX + 20);
+    assert!(
+        noted(&p, "home: out of the cube pocket, the cubes stay"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(
+        p.ender.home.cube_pockets, 1,
+        "no second pocket while it rests"
+    );
+    assert_eq!(p.ender.home.cube_breakouts, 1);
+}
+
+#[test]
+fn the_cube_tunnel_runs_toward_the_point_away_from_the_cubes() {
+    let feet = (404, 38, 171);
+    // Cubes outside the east wall, the next point west: west.
+    let east = [[407.5, 38.0, 171.5], [408.0, 38.0, 170.0]];
+    assert_eq!(home::cube_tunnel_dir(feet, (226, 194), &east), (-1, 0));
+    // Cubes west, the point west: the other axis toward the point (south, +z).
+    let west = [[401.0, 38.0, 171.5]];
+    assert_eq!(home::cube_tunnel_dir(feet, (226, 194), &west), (0, 1));
+    // The pocket's breakout takes the tunnel and notes it.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    add_cube(&mut w, 50, [11.5, 64.0, 8.5]);
+    add_cube(&mut w, 51, [12.5, 64.0, 9.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, home::CUBE_HOLD_MAX + 20);
+    assert!(
+        noted(&p, "home: left the cube pocket by tunnel"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.cube_tunnels, 1);
+}
+
+#[test]
+fn a_stack_left_on_the_cursor_is_put_down() {
+    // Race 45715674818 lane 0: netherrack 33 on the cursor, stairs stood 1,200 ticks.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.carried = Some((ItemKind::Netherrack, 33));
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    let mut put = false;
+    for t in 100..260 {
+        w.ticks = t;
+        w.session.server_ticks = t;
+        p.step(&w);
+        put |= p.take_acts().iter().any(|a| {
+            matches!(
+                a,
+                world::Act::Click {
+                    button: 0,
+                    mode: 0,
+                    ..
+                }
+            )
+        });
+    }
+    assert!(
+        noted(&p, "cursor put down (Netherrack 33)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(put, "a click puts it in a free slot");
+    assert_eq!(p.cursor_puts, 1);
+}
+
+#[test]
+fn a_laid_bridge_block_is_kept_from_its_note() {
+    assert_eq!(home::parse_cell("(293, 37, 188)"), Some((293, 37, 188)));
+    assert_eq!(home::parse_cell("(-3, 37, -188)"), Some((-3, 37, -188)));
+    assert_eq!(home::parse_cell("(1, 2)"), None);
+    assert_eq!(home::parse_cell("(1, 2, 3, 4)"), None);
+}
+
+#[test]
+fn resumed_mid_trip_with_the_eyes_made_skips_the_top_up_and_points_behind() {
+    // Race 45725323112: a snapshot on the trip held 14 eyes and the kit, Home began afresh and
+    // walked 258 back to the hunt point.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.remove(&9);
+    w.inventory.slots.insert(9, (ItemKind::EnderEye, 14));
+    w.inventory.slots.insert(11, (ItemKind::Stick, 9));
+    w.inventory.slots.insert(12, (ItemKind::CraftingTable, 1));
+    let mut p = racer();
+    run(&mut p, &mut w, 100, 2);
+    assert_eq!(p.ender.phase, EnderPhase::Home, "{:?}", notes(&p));
+    assert!(
+        noted(&p, "home: resumed with the eyes made"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.ender.home.top_up_over && p.ender.home.kit_over);
+    // At (8, 64, 8) the nearest point is (8, 81), the last: the two before it are behind.
+    assert_eq!(
+        p.ender.home.ways_passed.len(),
+        2,
+        "{:?}",
+        p.ender.home.ways_passed
+    );
+}
