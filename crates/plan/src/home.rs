@@ -69,6 +69,10 @@ pub struct HomeRules {
     /// from the cobblestone it dug, at most `pick_runs` times.
     pub climb_pick_uses: i32,
     pub pick_runs: u32,
+    // >>> Q9 (issue 19): the covered way's feet cells (`crate::covered_way`).
+    #[serde(default)]
+    pub covered: Vec<[i32; 3]>,
+    // <<< Q9
 }
 
 impl Default for HomeRules {
@@ -77,38 +81,42 @@ impl Default for HomeRules {
             pearls_wanted: 14,
             top_up_ticks: 6000,
             bridges: vec![[400, 311, 37, 194], [307, 201, 41, 194]],
+            // Q9 (issue 19): the covered route's points on the plane, then the tail by the portal
+            // (config/goals.toml [home] way).
             way: vec![
-                [477, 152],
-                [448, 152],
-                [426, 150],
-                [417, 159],
-                [407, 173],
-                [399, 194],
-                [368, 194],
-                [339, 194],
-                [310, 194],
-                [280, 194],
-                [250, 194],
-                [220, 194],
-                [190, 195],
-                [167, 208],
-                [146, 208],
-                [130, 206],
-                [100, 205],
-                [83, 188],
-                [60, 175],
-                [60, 140],
-                [60, 110],
-                [55, 100],
-                [45, 95],
-                [31, 95],
-                [30, 76],
-                [30, 62],
-                [25, 56],
-                [24, 41],
-                [24, 22],
-                [24, 1],
-                [24, -11],
+                [481, 21],
+                [466, 28],
+                [457, 39],
+                [443, 49],
+                [425, 53],
+                [409, 59],
+                [392, 62],
+                [375, 69],
+                [360, 70],
+                [338, 70],
+                [319, 75],
+                [296, 74],
+                [286, 60],
+                [285, 39],
+                [261, 39],
+                [240, 40],
+                [222, 42],
+                [205, 45],
+                [190, 42],
+                [170, 42],
+                [148, 40],
+                [139, 55],
+                [124, 64],
+                [116, 80],
+                [104, 74],
+                [82, 74],
+                [58, 74],
+                [41, 67],
+                [32, 52],
+                [24, 54],
+                [24, 36],
+                [24, 12],
+                [24, -12],
             ],
             portal: Some([22, 34, -20]),
             portal_chunks: 48,
@@ -121,6 +129,9 @@ impl Default for HomeRules {
             animal_walks: 12,
             climb_pick_uses: 30,
             pick_runs: 8,
+            // >>> Q9
+            covered: crate::covered_way::default_covered(),
+            // <<< Q9
         }
     }
 }
@@ -288,6 +299,10 @@ pub struct HomeState {
     #[serde(default)]
     pub fortress: crate::fortress_way::FortressState,
     // <<< Q11
+    // >>> Q9 (issue 19): the covered way's state (`crate::covered_way`).
+    #[serde(default)]
+    pub covered: crate::covered_way::CoveredState,
+    // <<< Q9
     // >>> Q7: the overworld arrival's state (the shaft, the climb's table).
     #[serde(default)]
     pub arrival: crate::arrival::Arrival,
@@ -2128,6 +2143,12 @@ impl Plan {
             return Some(t);
         }
         // <<< Q11
+        // >>> Q9 (issue 19): the covered way's legs while its points remain, out of the last
+        // leg's reach (docs/problems/eyes-route.md).
+        if let Some(t) = self.covered_way(w, tick, portal, d) {
+            return Some(t);
+        }
+        // <<< Q9
         // >>> Q6 (issue 19): within `[portal_way] reach` and out of the approach's, the last leg
         // in rock to the front's tunnel cell (docs/problems/eyes-portal.md).
         if d > r.approach

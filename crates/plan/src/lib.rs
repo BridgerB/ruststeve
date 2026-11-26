@@ -20,6 +20,9 @@ pub mod burrow;
 // <<< pearls
 pub mod cast;
 pub mod cover;
+// >>> Q9 (issue 19): the way home under cover.
+pub mod covered_way;
+// <<< Q9
 pub mod craft;
 pub mod defend;
 pub mod dig;
