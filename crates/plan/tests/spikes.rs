@@ -268,6 +268,12 @@ fn the_planner_walks_pillars_walls_strikes_and_digs_down() {
     }
     assert_eq!(
         spikes::next(&w, &st, 0),
+        Next::Build((9, 72, 5), Role::Ledge),
+        "a block over a side first: nothing else holds the roof"
+    );
+    set(&mut w, (9, 72, 5), BlockKind::EndStone);
+    assert_eq!(
+        spikes::next(&w, &st, 0),
         Next::Build((8, 72, 5), Role::Roof),
         "the roof"
     );

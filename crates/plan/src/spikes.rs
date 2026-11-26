@@ -22,9 +22,10 @@
 //! pillar's top is the stand; on a wider one the stand is on the spike's top, walked onto from the
 //! pillar's top.
 //!
-//! **The guard ring.** Before the bot stands still at a stand, every side of it at the feet's
-//! height that drops (open, with open air under it) gets a block, a ledge under it first when
-//! nothing holds it: a knock-back or the dragon's wings cannot push the body off.
+//! **The box.** At the stand the body is closed in end stone: the walls, every other side at the
+//! feet's and the eye's height (a ledge under a feet cell nothing holds), a block over one side
+//! and the roof. A strike needs reach, not sight (e03), so the dragon's wings and charge find
+//! nothing open to push the body out by (race 45871173293's wall 2).
 //!
 //! **Cages.** Two small spikes are caged in iron bars two out from the column, at the bedrock's
 //! height to three over it: the bars are in the wall's own cells. Parity e03 (E6, run
@@ -397,8 +398,23 @@ pub fn box_gap(w: &World, stand: Cell, walls: &[Cell; 2]) -> Option<(Cell, Role)
             .map(|c| (c, Role::Guard))
     };
     let roof = (x, y + 2, z);
-    feet.or_else(eye)
-        .or_else(|| open(kind(w, roof)).then_some((roof, Role::Roof)))
+    // The roof has no face of its own to go against (the sides at the eye's height are under its
+    // corners' neighbours, not under it): a block over one of them first (E6's sim, CI run
+    // 45880921319: "nothing holds" the roof over a cage's stand, every tick).
+    let roof_step = || {
+        if !open(kind(w, roof)) {
+            return None;
+        }
+        if support(w, roof).is_some() {
+            return Some((roof, Role::Roof));
+        }
+        Axis::ALL
+            .iter()
+            .map(|a| side(a, 2))
+            .find(|c| open(kind(w, *c)) && support(w, *c).is_some())
+            .map(|c| (c, Role::Ledge))
+    };
+    feet.or_else(eye).or_else(roof_step)
 }
 
 /// Is the body boxed in where it stands: every side at the feet's and the eye's height filled,
@@ -1512,7 +1528,7 @@ impl Plan {
             return None;
         }
         let Some((n, face)) = support(w, b.cell) else {
-            self.note(
+            self.spikes_note(
                 tick,
                 format!("spikes: nothing holds {:?}", b.cell),
                 format!("{:?} with no solid neighbour", b.role),
