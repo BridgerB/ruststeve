@@ -1079,6 +1079,24 @@ impl Plan {
             .spikes
             .box_blow_at
             .is_some_and(|t| tick.saturating_sub(t) <= BOX_BLOW_TICKS);
+        // A breath on the feet up a pillar: down out of it at once, ahead of every hold (E5's walk
+        // out of a breath stands aside up high: there is no cell to walk to).
+        if body.on_ground
+            && on_pillar(w, feet, &self.spikes.pillars)
+            && let Some(b) = crate::dragon::breath_on(&crate::dragon::breaths(w), body.pos)
+        {
+            let c = (feet.0, feet.1 - 1, feet.2);
+            self.spikes_note(
+                tick,
+                format!("spikes: dig down out of the breath at {c:?}"),
+                format!(
+                    "a breath {:.1} off, radius {:.1}; health {health:?}",
+                    crate::dragon::flat(b.pos, body.pos),
+                    b.radius
+                ),
+            );
+            return Some(Task::Dig(dig_down(w, c, tick)));
+        }
         // A charge near: a bot up its pillar's column holds still there, neither digging the last
         // cells nor climbing on.
         if charging(d.as_ref())
@@ -1410,11 +1428,17 @@ impl Plan {
                 tick,
                 format!("spikes: clutch begun at {:?}", path::feet_cell(body.pos)),
                 format!(
-                    "falling with {:.1} under the feet (velocity {:.2}); clutch {}; health {:?}",
+                    "falling with {:.1} under the feet (velocity {:.2}); clutch {}; health {:?}; held {:?}, the bucket in slot {:?}",
                     height.unwrap_or(0.0),
                     body.vel[1],
                     self.spikes.clutches,
-                    w.player.health
+                    w.player.health,
+                    crate::dig::held_item(w),
+                    w.inventory
+                        .slots
+                        .iter()
+                        .find(|(_, (k, _))| *k == ItemKind::WaterBucket)
+                        .map(|(s, _)| *s)
                 ),
             );
             self.spikes.clutch = Some(Clutch {
@@ -1467,6 +1491,15 @@ impl Plan {
                     && ground.is_some_and(|g| pour_now(body.pos[1], body.vel[1], g))
                     && self.acts.is_empty()
                 {
+                    self.note(
+                        tick,
+                        "spikes: clutch pour sent".to_owned(),
+                        format!(
+                            "{:.2} over the ground, falling {:.2}",
+                            height.unwrap_or(0.0),
+                            body.vel[1]
+                        ),
+                    );
                     self.acts.push(Act::UseItem);
                 }
                 self.spikes.clutch = Some(c);
@@ -1591,6 +1624,16 @@ impl Plan {
                 let exposed =
                     body.on_ground && on_pillar(w, feet, &self.spikes.pillars) && !boxed(w, feet);
                 let near = dragon_near(w, body.pos);
+                if on_pillar(w, feet, &self.spikes.pillars)
+                    && crate::dragon::breath_on(&crate::dragon::breaths(w), body.pos).is_some()
+                {
+                    self.note(
+                        tick,
+                        format!("spikes: hold ended by a breath at {feet:?}"),
+                        "up a pillar; the way down out of it".to_owned(),
+                    );
+                    return None;
+                }
                 if exposed && threatens(near.as_ref()) && !charging(near.as_ref()) {
                     self.note(
                         tick,

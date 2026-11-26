@@ -994,3 +994,43 @@ fn hurt_on_the_way_down_with_the_dragon_near_the_bot_holds_in_its_shaft() {
         t => panic!("{t:?} {:?}", notes(&p)),
     }
 }
+
+#[test]
+fn a_breath_on_a_pillar_top_is_dug_down_out_of() {
+    // Race 45899557907 lane 1: a breath on its pillar's top at y 83; the walk out of it found no
+    // way ("NoPath" every tick), and the bot fell.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 50,
+        uuid: [2; 16],
+        kind: EntityKind::AreaEffectCloud.id(),
+        x: 8.5,
+        y: 67.0,
+        z: 5.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 50,
+        entries: vec![(8, MetaValue::Float(3.0))],
+    }));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert!(p.breath_step(&w, 100).is_none(), "no walk out up high");
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: dig down out of the breath"))
+    );
+}

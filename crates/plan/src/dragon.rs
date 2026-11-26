@@ -1874,6 +1874,13 @@ impl Plan {
         if !in_end(w) {
             return None;
         }
+        // >>> E4 (issue 20f): up a pillar or a spike there is no cell to walk out to; the
+        // crystals' way down takes the body out of a breath (race 45899557907 lane 1: the walk
+        // out of a breath on a pillar's top at y 83, "NoPath" every tick, then the fall).
+        if self.spikes_up_high(w) {
+            return None;
+        }
+        // <<< E4
         let feet = w.body?.pos;
         let clouds = breaths(w);
         let Some(on) = breath_on(&clouds, feet) else {
