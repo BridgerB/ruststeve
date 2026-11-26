@@ -678,15 +678,19 @@ impl Plan {
                 }
                 self.expanded += to_end.expanded;
             }
-            // Right under it: pillared up on held blocks to its height (Q7's shaft, stopped there).
+            // No walk up: a shaft straight up from here (Q7's, one dig a block by hand and a block
+            // under the feet) to the sky. The bot's own stairs were cut going down and no walk
+            // climbs them (race 45870075221: every point past the tunnel "route Some(None)";
+            // stairs up by hand took 2,900 ticks for 5).
             if p.1 > feet.1 + 1
-                && flat(feet, p) <= 1.0
-                && let Some(t) = self.arrival_rise_to(w, tick, p.1)
+                // No height stop: out under the sky (`arrival::Step::Out`); a stop at the stairs'
+                // top would end it in rock under a hill.
+                && let Some(t) = self.arrival_rise_to(w, tick, i32::MAX)
             {
                 self.note(
                     tick,
-                    format!("end kit: pillar up to point {i} at {p:?}"),
-                    format!("from {feet:?}, no walk (route {found:?})"),
+                    format!("end kit: shaft up from {feet:?} toward point {i} at {p:?}"),
+                    format!("no walk (route {found:?}); out under the sky"),
                 );
                 return Some(t);
             }

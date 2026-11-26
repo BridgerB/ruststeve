@@ -961,7 +961,12 @@ impl Plan {
                     && craft::count(w, ItemKind::Cobblestone)
                         + craft::count(w, ItemKind::CobbledDeepslate)
                         >= 3
-                    && self.ender.home.pick_runs < r.pick_runs;
+                    && self.ender.home.pick_runs < r.pick_runs
+                    // >>> E2: a shaft with a stop (the End kit's) digs by hand: no table or wood
+                    // under the room makes a pickaxe (race 45870075221: "the pickaxes first"
+                    // ended both pillars at once).
+                    && s.stop_at.is_none();
+                // <<< E2
                 if low {
                     self.shaft_end(tick, s, feet, "the pickaxes first", false);
                     return None;
