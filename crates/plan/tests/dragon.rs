@@ -909,3 +909,47 @@ fn scanning_the_bot_never_goes_far_enough_to_draw_a_charge() {
     flying.player.health = Some(12.0);
     assert_eq!(decide(&flying, &ask()), Want::Hold("under the perch line"));
 }
+
+#[test]
+fn the_notch_is_roofed_a_side_block_first() {
+    // A fireball's cloud on an open notch is on the body.
+    let mut down = end_at([12.5, 62.0, 0.5]);
+    for y in [62, 63] {
+        down.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    with_dragon(&mut down, [-17.5, 64.0, 0.5], 8, 90.0);
+    down.inventory
+        .slots
+        .insert(36, (data::ItemKind::EndStone, 64));
+    down.held = 0;
+    let mut p = Plan::new(Aim::Race);
+    p.dragon.notch_from = Some([12, 64, 0]);
+    assert!(p.charge_step(&down, 0).is_some());
+    let acts = p.take_acts();
+    assert!(
+        acts.contains(&Act::UseOn {
+            pos: world::BlockPos::new(13, 63, 0),
+            face: 1
+        }),
+        "the side block on the wall's top first, the roof's cell having no face: {acts:?}"
+    );
+    assert_eq!(p.dragon.notch_side, Some([13, 64, 0]));
+    // The side laid: the roof against it.
+    down.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (13, 64, 0),
+        state: state(BlockKind::EndStone),
+    }));
+    assert!(p.charge_step(&down, 10).is_some());
+    assert!(p.take_acts().contains(&Act::UseOn {
+        pos: world::BlockPos::new(13, 64, 0),
+        face: 4
+    }));
+    // The step out is never under the side block.
+    assert_ne!(
+        dragon::notch_step_except(&down, [12, 64, 0], Some([13, 64, 0])),
+        Some([13, 63, 0])
+    );
+}

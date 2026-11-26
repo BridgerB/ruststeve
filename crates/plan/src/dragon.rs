@@ -523,6 +523,10 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// Ticks between the notch roof's clicks, and the clicks it may take in all.
+pub const ROOF_CLICK_TICKS: u64 = 6;
+pub const ROOF_TRIES: u32 = 8;
+
 /// May the block under feet cell `c` be dug for a notch: end stone, with a solid block under it to
 /// land on (never a hole to the void at the island's edge)?
 pub fn notch_diggable(w: &World, c: [i32; 3]) -> bool {
@@ -535,10 +539,18 @@ pub fn notch_diggable(w: &World, c: [i32; 3]) -> bool {
 /// the surface, end stone with air over it, whose digging leaves a stair (the notch's floor, a
 /// step a block up, the surface). `None` when no side has one.
 pub fn notch_step(w: &World, from: [i32; 3]) -> Option<[i32; 3]> {
+    notch_step_except(w, from, None)
+}
+
+/// `notch_step`, never under the roof's side block `side` (a block over the step's head).
+pub fn notch_step_except(w: &World, from: [i32; 3], side: Option<[i32; 3]>) -> Option<[i32; 3]> {
     [(1, 0), (-1, 0), (0, 1), (0, -1)]
         .iter()
         .find_map(|(dx, dz)| {
             let s = [from[0] + dx, from[1] - 1, from[2] + dz];
+            if side.is_some_and(|b| b[0] == s[0] && b[2] == s[2]) {
+                return None;
+            }
             let k = |y: i32| w.block_at(world::BlockPos::new(s[0], y, s[2]));
             (k(s[1]) == Some(BlockKind::EndStone)
                 && k(s[1] + 1) == Some(BlockKind::Air)
@@ -1379,6 +1391,15 @@ pub struct DragonState {
     pub charge_dig: Option<crate::dig::Dig>,
     #[serde(default)]
     pub notch_step: Option<[i32; 3]>,
+    /// The notch's roof once laid, its side block, and the clicks for them.
+    #[serde(default)]
+    pub notch_roof: Option<[i32; 3]>,
+    #[serde(default)]
+    pub notch_side: Option<[i32; 3]>,
+    #[serde(default)]
+    pub roof_tries: u32,
+    #[serde(default)]
+    pub roof_click_at: u64,
     /// Cells reached with the feet still in a breath, refused until out; the last cell noted.
     #[serde(default)]
     pub breath_refused: Vec<[i32; 3]>,
@@ -2064,12 +2085,13 @@ impl Plan {
                 self.dragon.charge_dig = None;
                 // Down a notch two deep: a step one up beside it is dug before the bot goes on,
                 // the way out a jump at a time.
+                let side = self.dragon.notch_side.take();
                 self.dragon.notch_step = self
                     .dragon
                     .notch_from
                     .take()
                     .filter(|f| cell_of(body.pos)[1] <= f[1] - 2)
-                    .and_then(|f| notch_step(w, f));
+                    .and_then(|f| notch_step_except(w, f, side));
                 self.note(
                     tick,
                     "charge: over".to_owned(),
@@ -2080,6 +2102,14 @@ impl Plan {
                     ),
                 );
             }
+            // The roof dug back first: the jump out needs the head clear.
+            if let Some(r) = self.dragon.notch_roof
+                && w.block_at(world::BlockPos::new(r[0], r[1], r[2]))
+                    .is_some_and(|k| k != BlockKind::Air)
+            {
+                return self.charge_dig_step(w, tick, r);
+            }
+            self.dragon.notch_roof = None;
             // The step out of the notch, dug from inside it.
             if let Some(s) = self.dragon.notch_step {
                 if w.block_at(world::BlockPos::new(s[0], s[1], s[2])) == Some(BlockKind::Air) {
@@ -2106,6 +2136,7 @@ impl Plan {
         if !self.dragon.charging {
             self.dragon.charging = true;
             self.dragon.charges += 1;
+            self.dragon.roof_tries = 0;
             self.note(
                 tick,
                 match bunker {
@@ -2144,6 +2175,14 @@ impl Plan {
                     );
                 }
                 return self.charge_dig_step(w, tick, [fc[0], fc[1] - 1, fc[2]]);
+            }
+            // Down in it: roofed over the head, a block on a side first for the roof to go
+            // against (a fireball's cloud on an open notch is on the body).
+            if fc[1] <= from[1] - 2 {
+                let roof = [fc[0], from[1], fc[2]];
+                if let Some(c) = self.notch_roof_step(w, tick, roof, crouch) {
+                    return Some(c);
+                }
             }
             return Some(crouch);
         };
@@ -2188,6 +2227,71 @@ impl Plan {
             c.pitch = Some(90.0);
         }
         Some(c)
+    }
+
+    /// The notch's roof over the head at `roof`: a block on a side of it first when nothing holds
+    /// it (the side's own block on the wall's top), then the roof against it. `None` once roofed,
+    /// or with no block held or nothing to click; a click every `ROOF_CLICK_TICKS`, at most
+    /// `ROOF_TRIES` a cell.
+    fn notch_roof_step(
+        &mut self,
+        w: &World,
+        tick: u64,
+        roof: [i32; 3],
+        crouch: Controls,
+    ) -> Option<Controls> {
+        let air = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
+        };
+        if !air(roof) {
+            if self.dragon.notch_roof != Some(roof) {
+                self.dragon.notch_roof = Some(roof);
+                self.note(
+                    tick,
+                    format!("charge: the notch roofed at {roof:?}"),
+                    format!("{} clicks", self.dragon.roof_tries),
+                );
+            }
+            return None;
+        }
+        let item = crate::spikes::pillar_item(w)?;
+        let (x, y, z) = (roof[0], roof[1], roof[2]);
+        let target = if crate::spikes::support(w, (x, y, z)).is_some() {
+            roof
+        } else {
+            let side = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(|(dx, dz)| [x + dx, y, z + dz])
+                .find(|c| air(*c) && crate::spikes::support(w, (c[0], c[1], c[2])).is_some())?;
+            self.dragon.notch_side = Some(side);
+            side
+        };
+        if self.dragon.roof_tries >= ROOF_TRIES {
+            return None;
+        }
+        let (n, face) = crate::spikes::support(w, (target[0], target[1], target[2]))?;
+        match hold::toward(w, item) {
+            Hold::Held => {
+                if self.acts.is_empty()
+                    && w.click.is_none()
+                    && tick >= self.dragon.roof_click_at + ROOF_CLICK_TICKS
+                {
+                    self.dragon.roof_tries += 1;
+                    self.dragon.roof_click_at = tick;
+                    self.acts.push(Act::UseOn {
+                        pos: world::BlockPos::new(n.0, n.1, n.2),
+                        face,
+                    });
+                }
+            }
+            Hold::Act(a) => {
+                if self.acts.is_empty() {
+                    self.acts.push(a);
+                }
+            }
+            Hold::Wait | Hold::Missing => {}
+        }
+        Some(crouch)
     }
 
     /// One tick of a dig for the notch (or its step out), crouched, looking down.

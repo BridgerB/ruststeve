@@ -137,7 +137,7 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - **Wall 11, fixed in the next push:**
   - **Scanning, never far enough to draw a charge.** While the dragon scans, every way out is held within `SCAN_KEEP` (12) of the fountain: the blow's step out, the perch line's ring, and "into the scan's reach" from a hold. The dragon charges a bot it cannot find within 20 for 100 ticks.
   - **At a charge with no bunker within 12, a notch two deep.** The bot digs the end stone under its feet twice at once, crouched, and drops in. Never where the block under that is air (the void at the edge). Once the charge is over it digs a step out beside it, one under the surface, and climbs out a jump at a time. Notes: "charge: dig a notch at …", "charge: the step out dug at …".
-  - It is not roofed: a 1-wide notch has no face to lay a roof on without a second block.
+  - Roofed: a block on a side first (on the wall's top), then the roof against it, so a fireball's cloud lies on the roof. The roof is dug back before the step out (the jump needs the head clear), and the step is never under the side block. Note: "charge: the notch roofed at …".
 - **Wall 11 as first found:** a bot far from the perch during scanning draws a charge, and crouching does not answer one. To try next:
   - keep near the scanning stand (9 from the body) during scanning, which draws the attacking turn instead;
   - at a charge with no bunker near, a dug notch two deep, under the head's and wings' boxes.
