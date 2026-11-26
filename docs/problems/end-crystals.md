@@ -204,3 +204,12 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - A clutch also begins over no known ground at a real fall's speed (over 0.5 a tick): a fling over the void may come over ground.
   - Unit test `a_body_flung_sideways_pours_on_the_column_it_will_land_on`.
 - **Open:** a body that strikes the island's side, not its top, has no top face to pour on. The structural answer is fewer blows up high; the clutch cannot save that one.
+
+### The waterfall descent (the orchestrator's design, after races 4 to 8: every death a blow up high and a fall; the dig down was the most time up there)
+- **The way down:** at a pillar's top with the crystal gone, holding two water buckets (one kept for the clutch) and 48 or more end stone, the bot pours water on the pillar's top where it stands ("waterfall poured at").
+  - It steps off a side that drops ("waterfall down from") and rides the falling water to the ground; water resets the fall's distance (E1, e06).
+  - Landed at the pillar's base it notes "waterfall down to"; the pillar is left standing. Under 48 end stone the pillar is dug back for its blocks, as before.
+- **The pool:** within 8 of E3's bunker, on the ground, two end stone cells side by side under the feet's level, walled round, are dug ("water pool dug at"). Both buckets go in ("water pool poured at"), making an infinite source ("water pool at"). An empty bucket is refilled there ("refilled at"), walked to from within 64 ("to the pool at").
+- **The climb rule:** to begin a climb the dragon must also not be closing (nearer by a block than its reading within 60 ticks), unless perched ("the dragon closing").
+- **Unit tests:** `the_waterfall_is_poured_on_the_pillars_top_and_ridden_down`, `a_pool_is_made_by_the_bunker_and_refills_the_buckets`.
+- **Not yet counted in a race.**

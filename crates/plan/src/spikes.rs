@@ -138,6 +138,18 @@ pub const STEP_TICKS: u64 = 60;
 pub const ONE_BLOW: f32 = 6.0;
 /// Ticks after a blow inside the box in which the bot leaves it for the way down.
 pub const BOX_BLOW_TICKS: u64 = 200;
+/// Ticks between two uses of a bucket that has not yet done its work, and the most it is tried.
+pub const BUCKET_EVERY: u64 = 10;
+pub const BUCKET_TICKS: u64 = 100;
+/// End stone held at or over which the way down is the waterfall, the pillar left standing
+/// (under it the pillar is dug back for its blocks).
+pub const WATERFALL_KEEP: i32 = 48;
+/// Blocks from the bunker within which the pool is made, and from the pool a refill walks.
+pub const POOL_NEAR: i32 = 8;
+pub const POOL_FAR: i32 = 64;
+/// Ticks a dragon reading counts toward "closing", and the blocks closer it must have come.
+pub const CLOSING_TICKS: u64 = 60;
+pub const CLOSING_BY: f64 = 1.0;
 /// Ticks a repeated note waits before it is written again.
 pub const NOTE_EVERY: u64 = 200;
 /// The dragon's phase is its metadata index 16, an INT (`EnderDragon.DATA_PHASE`, after the
@@ -649,6 +661,17 @@ pub struct SpikeState {
     pub last_health: Option<f32>,
     /// When a blow last landed inside the box.
     pub box_blow_at: Option<u64>,
+    /// The water pool by the bunker (two sources, an infinite one), the cell it is filled from,
+    /// and the counts of waterfalls ridden down and buckets refilled.
+    pub pool: Option<[Cell; 2]>,
+    pub pool_stand: Option<Cell>,
+    pub pool_made: bool,
+    pub waterfalls: u32,
+    pub refills: u32,
+    /// The dragon's distance when last read, and when: is it closing?
+    pub dragon_seen: Option<(u64, f64)>,
+    /// The pillar column a waterfall is being ridden down beside.
+    pub riding: Option<(i32, i32)>,
 }
 
 /// A fall caught with the water bucket (parity e06, E6: a 21-block fall onto water poured while
@@ -687,6 +710,13 @@ impl Default for SpikeState {
             closed_at: None,
             last_health: None,
             box_blow_at: None,
+            pool: None,
+            pool_stand: None,
+            pool_made: false,
+            waterfalls: 0,
+            refills: 0,
+            dragon_seen: None,
+            riding: None,
         }
     }
 }
@@ -706,6 +736,16 @@ pub enum Doing {
         to: Cell,
         sneak: bool,
         until: u64,
+    },
+    /// A bucket used at a point (a pour, a fill) until `want` is held `count` times.
+    Bucket {
+        look: [f64; 3],
+        item: ItemKind,
+        want: ItemKind,
+        count: i32,
+        until: u64,
+        last: Option<u64>,
+        why: String,
     },
 }
 
@@ -1028,6 +1068,31 @@ pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
 /// Steps of a stair out a dig-out looks along (each cell within a dig's reach of the feet).
 pub const DIG_OUT_STEPS: i32 = 3;
 
+/// Two cells of end stone ground beside each other next to the feet, one under the feet's level,
+/// walled below and round by full blocks: the pool's cells (a source poured in each makes an
+/// infinite one that spills nowhere).
+pub fn pool_cells(w: &World, feet: Cell) -> Option<[Cell; 2]> {
+    let (x, y, z) = feet;
+    Axis::ALL.iter().find_map(|a| {
+        let (dx, dz) = a.step();
+        let c0 = (x + dx, y - 1, z + dz);
+        let c1 = (x + 2 * dx, y - 1, z + 2 * dz);
+        let ground = |c: Cell| {
+            kind(w, c) == Some(BlockKind::EndStone)
+                && full(kind(w, (c.0, c.1 - 1, c.2)))
+                && open(kind(w, (c.0, c.1 + 1, c.2)))
+        };
+        let walled = |c: Cell| {
+            Axis::ALL.iter().all(|b| {
+                let (bx, bz) = b.step();
+                let n = (c.0 + bx, c.1, c.2 + bz);
+                n == c0 || n == c1 || full(kind(w, n))
+            })
+        };
+        (ground(c0) && ground(c1) && walled(c0) && walled(c1)).then_some([c0, c1])
+    })
+}
+
 fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
 }
@@ -1138,6 +1203,47 @@ impl Plan {
             .pillars
             .iter()
             .any(|p| (p.x, p.z) == (feet.0, feet.2) && feet.1 > p.base);
+        // The dragon closing: nearer by `CLOSING_BY` than at the last reading within
+        // `CLOSING_TICKS` (the orchestrator's climb rule: far and moving away, or perched).
+        let closing = match (d, self.spikes.dragon_seen) {
+            (Some(now), Some((at, then))) => {
+                tick.saturating_sub(at) <= CLOSING_TICKS && now.dist < then - CLOSING_BY
+            }
+            (Some(_) | None, _) => false,
+        };
+        if let Some(now) = d
+            && self
+                .spikes
+                .dragon_seen
+                .is_none_or(|(at, _)| tick.saturating_sub(at) >= CLOSING_TICKS / 3)
+        {
+            self.spikes.dragon_seen = Some((tick, now.dist));
+        }
+        // A waterfall ridden down: landed by its pillar at its base, the pillar left standing.
+        if body.on_ground
+            && !on_pillar(w, feet, &self.spikes.pillars)
+            && let Some(col) = self.spikes.riding
+            && let Some(i) = self
+                .spikes
+                .pillars
+                .iter()
+                .position(|p| (p.x, p.z) == col && feet.1 <= p.base + 1)
+        {
+            self.spikes.riding = None;
+            let p = self.spikes.pillars.remove(i);
+            self.spikes.pillars_down += 1;
+            self.note(
+                tick,
+                format!("spikes: waterfall down to {feet:?}"),
+                format!(
+                    "from the pillar in ({}, {}), base {}; {} waterfalls; health {health:?}",
+                    p.x, p.z, p.base, self.spikes.waterfalls
+                ),
+            );
+        }
+        if let Some(t) = self.spikes_water(w, tick, &body, feet, &n) {
+            return Some(t);
+        }
         // Out of the box (down, or out toward the pillar's top) only with the dragon far or
         // perched: inside it a blow pushes nothing out; on the way down it can.
         // A blow inside the box within `BOX_BLOW_TICKS` says the box is no shelter from this
@@ -1278,9 +1384,14 @@ impl Plan {
                 centre,
             } => {
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
-                let refusal = climb_refusal(d.as_ref(), health, danger).or_else(|| {
-                    threatens(d.as_ref()).then(|| "the dragon strafes or charges near".to_owned())
-                });
+                let closing_refusal = (closing && !d.as_ref().is_some_and(perched))
+                    .then(|| "the dragon closing".to_owned());
+                let refusal = climb_refusal(d.as_ref(), health, danger)
+                    .or(closing_refusal)
+                    .or_else(|| {
+                        threatens(d.as_ref())
+                            .then(|| "the dragon strafes or charges near".to_owned())
+                    });
                 if let Some(why) = refusal {
                     if !climbing {
                         self.spikes_note(
@@ -1708,6 +1819,187 @@ impl Plan {
         );
     }
 
+    /// The water's steps (the orchestrator's waterfall descent): the pool by the bunker made and
+    /// the buckets refilled from it on the ground; at a pillar's top with the crystal gone, the
+    /// pour on the top and the step off into the falling water, the pillar left standing. One
+    /// water bucket is always kept for the clutch: the waterfall pours a second.
+    fn spikes_water(
+        &mut self,
+        w: &World,
+        tick: u64,
+        body: &physics::Body,
+        feet: Cell,
+        n: &Next,
+    ) -> Option<Task> {
+        let water = craft::count(w, ItemKind::WaterBucket);
+        let empty = craft::count(w, ItemKind::Bucket);
+        // The waterfall: at a recorded pillar's top, the way down asked, two buckets held and
+        // end stone to spare for the pillars to come.
+        if let Next::DigDown(_) = n
+            && body.on_ground
+            && let Some(rec) = self
+                .spikes
+                .pillars
+                .iter()
+                .find(|r| (r.x, r.z) == (feet.0, feet.2) && feet.1 > r.base + 4)
+                .copied()
+            && craft::count(w, PILLAR_ITEM) >= WATERFALL_KEEP
+        {
+            let here = kind(w, feet);
+            if here == Some(BlockKind::Water) {
+                // Off the top into the falling water, on a side with a drop.
+                let side = Axis::ALL.iter().map(|a| a.step()).find(|(dx, dz)| {
+                    let c = (feet.0 + dx, feet.1, feet.2 + dz);
+                    !full(kind(w, c)) && !full(kind(w, (c.0, c.1 - 1, c.2)))
+                });
+                if let Some((dx, dz)) = side {
+                    self.spikes.riding = Some((rec.x, rec.z));
+                    self.spikes.waterfalls += 1;
+                    self.note(
+                        tick,
+                        format!("spikes: waterfall down from {feet:?}"),
+                        format!(
+                            "off its side ({dx}, {dz}); {} waterfalls; health {:?}",
+                            self.spikes.waterfalls, w.player.health
+                        ),
+                    );
+                    self.spikes.doing = Some(Doing::Step {
+                        to: (feet.0 + dx, feet.1, feet.2 + dz),
+                        sneak: false,
+                        until: tick + STEP_TICKS,
+                    });
+                    self.retry_at = tick + 1;
+                    return Some(Task::Idle);
+                }
+            } else if water >= 2 && open(here) {
+                self.spikes_note(
+                    tick,
+                    format!("spikes: waterfall poured at {feet:?}"),
+                    format!("{water} water buckets held, one kept for the clutch"),
+                );
+                self.spikes.doing = Some(Doing::Bucket {
+                    look: [body.pos[0], f64::from(feet.1), body.pos[2]],
+                    item: ItemKind::WaterBucket,
+                    want: ItemKind::Bucket,
+                    count: empty + 1,
+                    until: tick + BUCKET_TICKS,
+                    last: None,
+                    why: "the waterfall's pour".to_owned(),
+                });
+                self.retry_at = tick + 1;
+                return Some(Task::Idle);
+            }
+        }
+        if !body.on_ground || self.spikes_up_high(w) {
+            return None;
+        }
+        // The pool by the bunker: two cells dug one deep and both buckets poured in.
+        if !self.spikes.pool_made
+            && let Some(b) = self.bunker
+            && (b[0] - feet.0).abs().max((b[2] - feet.2).abs()) <= POOL_NEAR
+        {
+            let pool = self.spikes.pool.or_else(|| pool_cells(w, feet));
+            if let Some([c0, c1]) = pool {
+                self.spikes.pool = Some([c0, c1]);
+                self.spikes.pool_stand.get_or_insert(feet);
+                for c in [c0, c1] {
+                    if full(kind(w, c)) {
+                        self.spikes_note(
+                            tick,
+                            format!("spikes: water pool dug at {c:?}"),
+                            format!("by the bunker at {b:?}"),
+                        );
+                        return Some(Task::Dig(dig_down(w, c, tick)));
+                    }
+                }
+                for c in [c0, c1] {
+                    if open(kind(w, c)) && water > 0 {
+                        self.spikes_note(
+                            tick,
+                            format!("spikes: water pool poured at {c:?}"),
+                            format!("{water} water buckets held"),
+                        );
+                        self.spikes.doing = Some(Doing::Bucket {
+                            look: [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5],
+                            item: ItemKind::WaterBucket,
+                            want: ItemKind::Bucket,
+                            count: empty + 1,
+                            until: tick + BUCKET_TICKS,
+                            last: None,
+                            why: "the pool's pour".to_owned(),
+                        });
+                        self.retry_at = tick + 1;
+                        return Some(Task::Idle);
+                    }
+                }
+                if [c0, c1]
+                    .iter()
+                    .all(|c| kind(w, *c) == Some(BlockKind::Water))
+                {
+                    self.spikes.pool_made = true;
+                    self.note(
+                        tick,
+                        format!("spikes: water pool at {c0:?} and {c1:?}"),
+                        "an infinite source by the bunker".to_owned(),
+                    );
+                }
+            }
+        }
+        // A refill: an empty bucket held and the pool made.
+        if self.spikes.pool_made
+            && empty > 0
+            && let Some([c0, _]) = self.spikes.pool
+            && kind(w, c0) == Some(BlockKind::Water)
+        {
+            let target = [
+                f64::from(c0.0) + 0.5,
+                f64::from(c0.1) + 0.5,
+                f64::from(c0.2) + 0.5,
+            ];
+            let reach = (0..3)
+                .map(|i| (target[i] - eye(body)[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if reach <= 4.0 {
+                self.spikes.refills += 1;
+                self.note(
+                    tick,
+                    format!("spikes: refilled at {c0:?}"),
+                    format!(
+                        "{empty} empty, {water} full; refill {}",
+                        self.spikes.refills
+                    ),
+                );
+                self.spikes.doing = Some(Doing::Bucket {
+                    look: target,
+                    item: ItemKind::Bucket,
+                    want: ItemKind::WaterBucket,
+                    count: water + 1,
+                    until: tick + BUCKET_TICKS,
+                    last: None,
+                    why: "the refill".to_owned(),
+                });
+                self.retry_at = tick + 1;
+                return Some(Task::Idle);
+            }
+            if let Some(stand) = self.spikes.pool_stand
+                && (stand.0 - feet.0).abs().max((stand.2 - feet.2).abs()) <= POOL_FAR
+            {
+                let mut walk = Walk::new(stand, Goal::Block { pos: stand }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.spikes_note(
+                        tick,
+                        format!("spikes: to the pool at {stand:?}"),
+                        format!("{empty} empty buckets"),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+            }
+        }
+        None
+    }
+
     fn spikes_hold(&mut self, tick: u64) -> Task {
         self.spikes.doing = Some(Doing::Hold {
             until: tick + HOLD_TICKS,
@@ -1794,6 +2086,56 @@ impl Plan {
                 })
             }
             Doing::Climb(c) => self.spikes_climb(w, tick, &body, c, down),
+            Doing::Bucket {
+                look,
+                item,
+                want,
+                count,
+                until,
+                last,
+                why,
+            } => {
+                if craft::count(w, *want) >= *count {
+                    self.note(
+                        tick,
+                        format!("spikes: {why} done"),
+                        format!("{want:?} held {}", craft::count(w, *want)),
+                    );
+                    return None;
+                }
+                if tick >= *until {
+                    self.note(
+                        tick,
+                        format!("spikes: {why} gave up"),
+                        format!("{want:?} held {}, wanted {count}", craft::count(w, *want)),
+                    );
+                    return None;
+                }
+                let (yaw, pitch) = crate::walk::look_at(eye(&body), *look);
+                match hold::toward(w, *item) {
+                    hold::Hold::Held => {
+                        if self.acts.is_empty()
+                            && last.is_none_or(|l| tick.saturating_sub(l) >= BUCKET_EVERY)
+                        {
+                            *last = Some(tick);
+                            self.acts.push(Act::UseItem);
+                        }
+                    }
+                    hold::Hold::Act(a) => {
+                        if self.acts.is_empty() {
+                            self.acts.push(a);
+                        }
+                    }
+                    hold::Hold::Wait => {}
+                    hold::Hold::Missing => return None,
+                }
+                Some(Controls {
+                    sneak: true,
+                    yaw,
+                    pitch: Some(pitch),
+                    ..down
+                })
+            }
             Doing::Step { to, sneak, until } => {
                 let (dx, dz) = (
                     f64::from(to.0) + 0.5 - body.pos[0],
