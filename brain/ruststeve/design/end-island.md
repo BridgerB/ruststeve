@@ -32,7 +32,7 @@ Issue 20e (agent E3, `docs/problems/end-island.md`). `Plan::end_step` runs ahead
 5. **The bunker**: three cells dug down under the feet, each from the cell's centre, the top one laid back as the roof from a side block; the door (a two-step stair out) on another side. "end: bunker dug at". Sealed (roof and door laid back) on every return; opened (roof and stair dug) to leave.
 6. **Retreat, eat, heal**: under `RETREAT_HEALTH` 14 back to the bunker until `HEALED` 18; food under `FED` 18 with food held is eaten there.
 7. **The stock**: level tunnels (`Stairs::level`, `rock` from the feet) in a square spiral from the bunker (`stock_dir`), until `STOCK_WANTED` 160 end stone or `STOCK_RUNS` 24.
-8. **The hand-offs**: while a crystal is alive E4's spikes task, then E5's dragon task (stubs until they land); out by the bunker's stair first. With none ready the bot holds sealed in the bunker.
+8. **The hand-offs**: while a crystal is alive E4's spikes task, then E5's `Plan::dragon_task` (`end_dragon`; the fight waits in `Plan.bunker` while the dragon flies); out by the bunker's stair first. With none ready the bot holds sealed in the bunker.
 
 ## Gaze
 Every look still leaves through `keep_look` ([[way-home]]'s endermen rules). In the End a look no act asked for is straight down (`end_gaze`, ahead of `keep_look` in `Plan::step`); `end_look` sends a wanted look only when it stares at no enderman within 64 from the standing or the crouching eye.
