@@ -998,3 +998,38 @@ fn sealed_in_cover_the_wait_holds_there() {
     };
     assert_eq!(decide(&w, &a), Want::Hold("in cover"));
 }
+
+#[test]
+fn walled_in_a_breath_the_wall_toward_the_cell_out_is_dug() {
+    // Race 45901376114 lane 2: sealed in a pocket, 140 walks out of a flame failed NoPath, dead.
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    for c in [
+        (13, 64, 0),
+        (13, 65, 0),
+        (11, 64, 0),
+        (11, 65, 0),
+        (12, 64, 1),
+        (12, 65, 1),
+        (12, 64, -1),
+        (12, 65, -1),
+        (12, 66, 0),
+    ] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    assert_eq!(
+        dragon::wall_toward(&w, [12.5, 64.0, 0.5], [20, 64, 0]),
+        Some([13, 64, 0]),
+        "the wall at the feet toward the cell"
+    );
+    cloud(&mut w, 50, [12.5, 64.0, 0.5], 5.0);
+    let mut p = Plan::new(Aim::Race);
+    let mut dug = false;
+    for t in 0..200 {
+        let _ = p.breath_step(&w, t);
+        dug |= p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. }));
+    }
+    assert!(dug, "{:?}", p.events_since(0));
+}

@@ -151,5 +151,11 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - **Fix:** in a roofed 2-high cell (`end::covered`), the wait holds there ("in cover"). A walk that fails NoPath in cover plans again only after 200 ticks.
 - Still open: a sealed pocket is not opened by the fight when the dragon sits.
 
+**Race 45901376114 in full** (622f39a, dev, 3 lanes, cap 24,000): no win.
+- **Lowest dragon health:** 157 (lane 2), 175 (lane 1), 193 (lane 0).
+- **Strikes:** 8, 5 and 2. In lanes 0 and 1 every later perch was lost to wall 13 (2,091 "dragon walk to … failed" in all).
+- **Lane 2's death, wall 14: walled in a breath.** An enderman's pocket sealed it in, and a flame's cloud then burned through the walls. 140 walks out failed NoPath, 20 health to dead.
+  - **Fix:** a walk out of a breath that fails NoPath digs the wall toward the cell, at the feet's height and then the head's (`wall_toward`; never bedrock or obsidian). It then walks.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

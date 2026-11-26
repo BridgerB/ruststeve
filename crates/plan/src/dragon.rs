@@ -530,6 +530,29 @@ pub const COVERED_RETRY_TICKS: u64 = 200;
 pub const ROOF_CLICK_TICKS: u64 = 6;
 pub const ROOF_TRIES: u32 = 8;
 
+/// The block of the wall at the feet's or the head's height in the cell beside the feet toward
+/// `target` (along the plane's longer way to it), or `None` when both are open: what a walled-in
+/// bot digs to get out. Never bedrock or obsidian.
+pub fn wall_toward(w: &World, feet: [f64; 3], target: [i32; 3]) -> Option<[i32; 3]> {
+    let f = cell_of(feet);
+    let (dx, dz) = (target[0] - f[0], target[2] - f[2]);
+    let step = if dx.abs() >= dz.abs() {
+        (dx.signum(), 0)
+    } else {
+        (0, dz.signum())
+    };
+    if step == (0, 0) {
+        return None;
+    }
+    [0, 1].iter().find_map(|dy| {
+        let c = [f[0] + step.0, f[1] + dy, f[2] + step.1];
+        match w.block_at(world::BlockPos::new(c[0], c[1], c[2])) {
+            Some(BlockKind::Air | BlockKind::Bedrock | BlockKind::Obsidian) | None => None,
+            Some(_) => Some(c),
+        }
+    })
+}
+
 /// May the block under feet cell `c` be dug for a notch: end stone, with a solid block under it to
 /// land on (never a hole to the void at the island's edge)?
 pub fn notch_diggable(w: &World, c: [i32; 3]) -> bool {
@@ -1415,6 +1438,9 @@ pub struct DragonState {
     pub roof_tries: u32,
     #[serde(default)]
     pub roof_click_at: u64,
+    /// The wall cell dug to get out of a pocket in a breath.
+    #[serde(default)]
+    pub breath_wall: Option<[i32; 3]>,
     /// Cells reached with the feet still in a breath, refused until out; the last cell noted.
     #[serde(default)]
     pub breath_refused: Vec<[i32; 3]>,
@@ -2001,6 +2027,7 @@ impl Plan {
         let Some(on) = breath_on(&clouds, feet) else {
             self.dragon.breath_refused.clear();
             self.dragon.breath_noted = None;
+            self.dragon.breath_wall = None;
             if let Some(wk) = self.dragon.breath_walk.take() {
                 self.note(
                     tick,
@@ -2073,6 +2100,22 @@ impl Plan {
 
     /// One tick of the walk out of a breath to `target`.
     fn breath_walk_step(&mut self, w: &World, tick: u64, target: [i32; 3]) -> Option<Controls> {
+        // Walled in (a pocket sealed for an enderman, race 45901376114 lane 2: 140 walks out
+        // failed NoPath while a flame burned it from 20 to dead): the wall toward the cell is dug.
+        if let Some(cell) = self.dragon.breath_wall {
+            let air = |c: [i32; 3]| {
+                w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
+            };
+            if !air(cell) {
+                return self.charge_dig_step(w, tick, cell);
+            }
+            self.dragon.breath_wall = None;
+            let next = wall_toward(w, w.body.map_or([0.0; 3], |b| b.pos), target);
+            if let Some(n) = next {
+                self.dragon.breath_wall = Some(n);
+                return self.charge_dig_step(w, tick, n);
+            }
+        }
         let wk = self.dragon.breath_walk.as_mut()?;
         let (mut c, status) = wk.step(w, tick);
         let (acts, said) = wk.take_out();
@@ -2088,10 +2131,16 @@ impl Plan {
                 self.dragon.breath_refused.push(target);
             }
             if let TaskStatus::Failed(e) = status {
+                let feet = w.body.map_or([0.0; 3], |b| b.pos);
+                let wall = wall_toward(w, feet, target);
+                self.dragon.breath_wall = wall;
                 self.note(
                     tick,
                     format!("walk out of the breath to {target:?} failed: {e:?}"),
-                    "the next tick looks again".to_owned(),
+                    match wall {
+                        Some(c) => format!("walled in: dig {c:?} toward it"),
+                        None => "the next tick looks again".to_owned(),
+                    },
                 );
             }
         }
