@@ -25,7 +25,7 @@ pub type Cell = (i32, i32, i32);
 /// bricks). A position on record is then followed through every change. Water and lava are not
 /// cells here: clojurecraft found one fact per fluid cell froze a forest run (600,000 water
 /// cells); fluids become per-chunk pools later.
-const WATCHED: [BlockKind; 22] = [
+const WATCHED: [BlockKind; 19] = [
     BlockKind::CraftingTable,
     BlockKind::Furnace,
     BlockKind::NetherBricks,
@@ -52,13 +52,18 @@ const WATCHED: [BlockKind; 22] = [
     BlockKind::InfestedCrackedStoneBricks,
     BlockKind::InfestedChiseledStoneBricks,
     BlockKind::InfestedDeepslate,
-    // The End (issue 20b): end stone is the island's ground and the dragon-immune pillar block
-    // (#dragon_immune, the 26.1.2 jar); iron bars cage two spikes; bedrock is each spike's top
-    // and the exit portal's. Probe 45863427332: 10 bedrock tops, 146 bars on this seed.
-    BlockKind::EndStone,
-    BlockKind::IronBars,
-    BlockKind::Bedrock,
 ];
+
+/// The End's kinds (issue 20b), watched in the End only: end stone is the island's ground and
+/// the dragon-immune pillar block (#dragon_immune, the 26.1.2 jar); iron bars cage two spikes;
+/// bedrock is each spike's top and the exit portal's (probe 45863427332: 10 bedrock tops, 146
+/// bars on this seed). Elsewhere bedrock floors every chunk (and roofs the Nether's): watched
+/// there, every column would be "seen" and the heading's seen-columns count would mean nothing
+/// (`a_way_only_back_over_the_cut_is_refused_and_said`, CI 45868182237).
+const END_WATCHED: [BlockKind; 3] = [BlockKind::EndStone, BlockKind::IronBars, BlockKind::Bedrock];
+
+/// The End's dimension name.
+pub const THE_END: &str = "minecraft:the_end";
 
 /// The infested kinds (issue 19b): a block of one of these breaks into a silverfish.
 pub const INFESTED: [BlockKind; 7] = [
@@ -85,6 +90,14 @@ pub fn watched(state: u32) -> bool {
         return false;
     };
     WATCHED.contains(&kind) || block_tag("logs").is_some_and(|logs| logs.contains(&kind))
+}
+
+/// Whether a block state is a kind memory watches in `dimension`: `watched`, and in the End
+/// its own kinds (`END_WATCHED`).
+pub fn watched_in(dimension: &str, state: u32) -> bool {
+    watched(state)
+        || (dimension == THE_END
+            && data::block_of_state(state).is_some_and(|k| END_WATCHED.contains(&k)))
 }
 
 /// Whether an `end_portal_frame` state holds an eye (issue 20b): its `eye` property, read from
@@ -729,13 +742,20 @@ mod tests {
         assert!(!super::frame_has_eye(stone));
     }
 
-    /// Issue 20b: end stone, iron bars and bedrock are watched; bars and bedrock indexed.
+    /// Issue 20b: end stone, iron bars and bedrock are watched in the End only (bedrock floors
+    /// every Overworld and Nether chunk); bars and bedrock indexed.
     #[test]
-    fn the_end_blocks_are_watched() {
+    fn the_end_blocks_are_watched_in_the_end_only() {
         for k in [BlockKind::EndStone, BlockKind::IronBars, BlockKind::Bedrock] {
             let s = k.info().map_or(0, |i| i.default_state);
-            assert!(super::watched(s), "{k:?}");
+            assert!(super::watched_in(super::THE_END, s), "{k:?}");
+            assert!(!super::watched_in("minecraft:the_nether", s), "{k:?}");
+            assert!(!super::watched_in("minecraft:overworld", s), "{k:?}");
+            assert!(!super::watched(s), "{k:?}");
         }
+        let log = BlockKind::OakLog.info().map_or(0, |i| i.default_state);
+        assert!(super::watched_in("minecraft:overworld", log));
+        assert!(super::watched_in(super::THE_END, log));
         assert!(super::INDEXED.contains(&BlockKind::Bedrock));
         assert!(!super::INDEXED.contains(&BlockKind::EndStone));
     }

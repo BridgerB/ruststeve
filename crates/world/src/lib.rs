@@ -959,7 +959,7 @@ impl World {
         self.memory
             .forget_sign(&dim, cell, data::block_of_state(state));
         let sign = memory::is_sign(state);
-        let watched = memory::watched(state) || self.memory.on_record(&dim, cell);
+        let watched = memory::watched_in(&dim, state) || self.memory.on_record(&dim, cell);
         if !sign && !watched {
             return;
         }
@@ -1096,13 +1096,21 @@ impl World {
         self.observe_column_signs(at, &column);
         let (bx, bz) = (at.x * 16, at.z * 16);
         let mut cells = Vec::new();
+        // >>> E1 (issue 20b): the End's kinds are watched in the End only.
+        let here = self
+            .dimension
+            .as_ref()
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
+        let watched = |s: u32| memory::watched_in(&here, s);
+        // <<< E1
         for (si, section) in column.sections.iter().enumerate() {
-            if !section.blocks.may_contain(memory::watched) {
+            if !section.blocks.may_contain(watched) {
                 continue;
             }
             let by = column.min_y + 16 * si as i32;
             for i in 0..4096usize {
-                if section.blocks.get(i).is_some_and(memory::watched) {
+                if section.blocks.get(i).is_some_and(watched) {
                     let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
                     cells.push(BlockPos::new(bx + lx, by + ly, bz + lz));
                 }
@@ -1128,7 +1136,7 @@ impl World {
                 // on that axis, 0 when above.
                 let edge = |d: i32| if d < 0 { 15 } else { 0 };
                 for (si, section) in nc.sections.iter().enumerate() {
-                    if !section.blocks.may_contain(memory::watched) {
+                    if !section.blocks.may_contain(watched) {
                         continue;
                     }
                     let by = nc.min_y + 16 * si as i32;
@@ -1140,7 +1148,7 @@ impl World {
                                 (a, edge(dz))
                             };
                             let i = protocol::chunk::block_index(lx, ly, lz);
-                            if section.blocks.get(i).is_some_and(memory::watched) {
+                            if section.blocks.get(i).is_some_and(watched) {
                                 cells.push(BlockPos::new(n.x * 16 + lx, by + ly, n.z * 16 + lz));
                             }
                         }
