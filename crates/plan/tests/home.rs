@@ -1392,7 +1392,9 @@ fn no_guard_while_a_restock_is_in_hand() {
         ..plan::heading::Restock::default()
     });
     p.headed = Some(h);
-    run(&mut p, &mut w, 100, 3);
+    // The trip already begun (its start drops the heading), one tick with the restock in hand.
+    p.ender.home.trip_begun = true;
+    run(&mut p, &mut w, 100, 1);
     assert_eq!(p.ender.home.guards, 0, "{:?}", notes(&p));
 }
 
