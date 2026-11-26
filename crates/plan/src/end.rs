@@ -98,6 +98,9 @@ pub const CLIFF_RUNS: u32 = 8;
 pub const OUT_RUNS: u32 = 8;
 /// Rounds of site walks begun again from out of the island's reach.
 pub const SITE_ROUNDS: u32 = 3;
+/// Ticks from the first End tick when every look is straight down (five seconds: the arrival's
+/// chunks and their endermen arrive in the first two).
+pub const ARRIVAL_DOWN: u64 = 100;
 /// Walks to the bunker's site at most.
 pub const SITE_WALKS: u32 = 10;
 /// Retreat to the bunker under this health (the danger line 8 plus 6, the plan's climb line).
@@ -521,6 +524,12 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// The first tick seen in the End.
+    #[serde(default)]
+    pub end_since: Option<u64>,
+    /// The bunker opened to leave: the walk up its stair is due.
+    #[serde(default)]
+    pub exit_walk: bool,
     /// Rounds of site walks begun again.
     #[serde(default)]
     pub site_rounds: u32,
@@ -820,6 +829,36 @@ impl Plan {
                     tick,
                 ));
                 return None;
+            }
+            // Up the stair onto the ground first (race 45890445738: both bots stood half on the
+            // stair's first step, the feet cell over the bunker's air, and every route from there
+            // was refused for 14,000 ticks).
+            if self.end.exit_walk {
+                self.end.exit_walk = false;
+                let out = (b.0 + 4 * door.0, b.1 + 4, b.2 + 4 * door.1);
+                let mut walk = Walk::new(
+                    out,
+                    Goal::Near {
+                        pos: out,
+                        range: 1.5,
+                    },
+                    Arrive::Goal,
+                    tick,
+                );
+                if found(&mut walk, w, tick) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("end: up the bunker's stair to {out:?}"),
+                        "onto the ground before the hand-off".to_owned(),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.note(
+                    tick,
+                    format!("end: no walk up the bunker's stair to {out:?}"),
+                    format!("from {feet:?}; the hand-off from here"),
+                );
             }
             self.end.handoffs += 1;
             self.end.hold_noted = false;
@@ -1365,11 +1404,14 @@ impl Plan {
                 format!("end: pillar up to the bridge's height at {feet:?}"),
                 format!("{} ops; floor {BRIDGE_FLOOR}", work.done),
             ),
-            WorkKind::Open => self.note(
-                tick,
-                "end: bunker opened".to_owned(),
-                format!("the roof and the stair out dug; {} ops", work.done),
-            ),
+            WorkKind::Open => {
+                self.end.exit_walk = true;
+                self.note(
+                    tick,
+                    "end: bunker opened".to_owned(),
+                    format!("the roof and the stair out dug; {} ops", work.done),
+                );
+            }
         }
     }
 
@@ -1767,11 +1809,27 @@ impl Plan {
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes
     /// through `keep_look` after this.
-    pub(crate) fn end_gaze(&self, w: &World, c: Controls) -> Controls {
-        if !in_end(w) || c.pitch.is_some() {
+    pub(crate) fn end_gaze(&mut self, w: &World, c: Controls) -> Controls {
+        if !in_end(w) {
             return c;
         }
-        let (_, pitch) = end_look(w, None);
+        // The first ticks in the End, while the endermen round the platform are still being sent:
+        // straight down whatever was asked (a look judged safe against endermen not yet heard of
+        // is no look to trust).
+        let since = *self.end.end_since.get_or_insert(w.ticks);
+        if w.ticks.saturating_sub(since) < ARRIVAL_DOWN || w.body.is_none() {
+            return Controls {
+                pitch: Some(crate::endermen::EYES_DOWN),
+                ..c
+            };
+        }
+        // From the first End tick, the arrival's too: no look is left to the pitch the portal
+        // brought (E5's race 45886819862 lane 1: "near miss: enderman 114 stared at … pitch 0" at
+        // tick 60, killed by it at 140 to 180). A look an act asked for is sent only when it
+        // stares at no enderman.
+        #[allow(clippy::cast_possible_truncation)]
+        let want = c.pitch.map(|p| (c.yaw as f32, p));
+        let (_, pitch) = end_look(w, want);
         Controls {
             pitch: Some(pitch),
             ..c

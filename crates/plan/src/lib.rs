@@ -192,6 +192,12 @@ const SHELTER_BLOCKS: &[data::ItemKind] = &[
     data::ItemKind::CobbledDeepslate,
     data::ItemKind::NetherBricks,
     data::ItemKind::Netherrack,
+    // >>> E3 (issue 20e): in the End the pack may hold only end stone (E5's race 45886819862
+    // lane 1: "no block held for a pocket" with 192 end stone, killed by an enderman). Last, so
+    // the pillars' end stone goes only when nothing else is held.
+    data::ItemKind::EndStone,
+    data::ItemKind::Obsidian,
+    // <<< E3
 ];
 /// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
 /// `SEAL_EVERY_TICKS`).
@@ -1682,6 +1688,13 @@ impl Plan {
             }
             Some(_) | None => self.mark = Some((body.pos, items, self.event_count, tick)),
         }
+        // >>> E4 (issue 20f): the water clutch ahead of everything: a fall waits for no row (race
+        // 45890149072 lane 0: struck off its pillar while an enderman's pocket held the planner,
+        // the clutch never ran, a fall of 22).
+        if let Some(c) = self.spikes_clutch(w, tick) {
+            return c;
+        }
+        // <<< E4
         // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
         // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
         if let Some(c) = self.charge_step(w, tick) {

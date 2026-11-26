@@ -131,3 +131,19 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - At terminal speed (3.9 a tick) a fall's phase can skip the band; the unit test's 48-block fall at terminal speed does not.
   - Unit test `a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach`, plus every start from rest from 5 to 60 over the ground.
 - **A charge** (phase 8) within 40, with the bot on its pillar digging down, climbing or stepping: it holds still in the column ("hold in the shaft from the charge"). The climb's driver stops for it too ("climb held from the charge").
+
+## Fifth race: 45890149072 (dev-end-island, 2 lanes, df44b87, development only)
+- **3 crystals in 2 runs (1 and 2).** The clutch fired once and poured. The other new notes fired too: "hold in the shaft from the charge", "climb held from the charge", "centre over the pillar".
+- **Lane 1 died at tick 8,940 in E5's breath walk.** "out of the breath to [8, 58, -35]" names the feet's own cell 480 times while the cloud grew (radius 4.9 to 5.4); `indirectMagic`. That is E5's, reported.
+
+### Wall 8: the clutch never ran while another row held the planner (fixed)
+- **What happened** (lane 0, ticks 1,240 to 1,580): provoked endermen put the planner "into a sealed pocket" (`ender_threat`, ahead of `spikes_step`) on the pillar at y 80. The charging dragon struck it (5) and knocked it off. It fell 22 with the water bucket held and no clutch ("death.fell.assist").
+- **The fix:** `Plan::spikes_clutch` has its own call site in `step_inner`, ahead of every row (E5's breath step included), fenced E4.
+- **And its cause:** up a pillar or a spike, `ender_threat` is held off by a fenced E4 guard (`Plan::spikes_up_high`, noted "spikes: up high, no enderman pocket"). No enderman reaches a one-wide column's top, and the crystals' work goes on: the strike, or the way down. Unit test `up_a_pillar_a_provoked_enderman_gets_no_pocket`.
+
+### Wall 9: a walk from a cell with no floor (E3's race 45890445738; fixed on my side)
+- **What happened:** after E3's bunker opened, the body stood at x 14.2, half on the stair's step and over the bunker's air. Every spikes walk from the feet's cell (14, 59, 0) was refused ("no way to", every approach) from tick 10,000 to the cap.
+- **The fix:**
+  - E3 walks up the bunker's stair before the hand-off.
+  - On my side, a body held up by the floor beside the feet's cell first steps onto that cell ("step onto the floor at").
+  - Unit test `a_body_held_up_by_the_floor_beside_steps_onto_it_first`.

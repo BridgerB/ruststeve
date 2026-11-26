@@ -727,7 +727,7 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     };
     fall(&mut w, 75.0);
     let mut p = Plan::new(Aim::Race);
-    let c = p.spikes_step(&w, 100);
+    let c = p.spikes_clutch(&w, 100);
     assert_eq!(c.and_then(|c| c.pitch), Some(90.0), "looking straight down");
     assert!(
         notes(&p)
@@ -743,20 +743,20 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     );
     w.held = 1;
     fall(&mut w, 70.0);
-    p.spikes_step(&w, 101);
+    p.spikes_clutch(&w, 101);
     assert!(p.take_acts().is_empty(), "too high to pour yet");
     fall(&mut w, 66.5);
-    p.spikes_step(&w, 102);
+    p.spikes_clutch(&w, 102);
     assert!(
         p.take_acts().is_empty(),
         "in reach, but the next tick is too: the later one"
     );
     fall(&mut w, 65.0);
-    p.spikes_step(&w, 103);
+    p.spikes_clutch(&w, 103);
     assert_eq!(p.take_acts(), vec![Act::UseItem], "the last tick in reach");
     w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
     fall(&mut w, 64.5);
-    p.spikes_step(&w, 104);
+    p.spikes_clutch(&w, 104);
     assert!(
         notes(&p)
             .iter()
@@ -768,14 +768,14 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
         b.in_water = true;
     }
     p.take_acts();
-    p.spikes_step(&w, 104);
+    p.spikes_clutch(&w, 104);
     assert_eq!(
         p.take_acts(),
         vec![Act::UseItem],
         "landed: the water taken back"
     );
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
-    assert!(p.spikes_step(&w, 105).is_none());
+    assert!(p.spikes_clutch(&w, 105).is_none());
     assert!(
         notes(&p)
             .iter()
@@ -882,4 +882,69 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
         }
         assert_eq!(n, 1, "a fall from {h}");
     }
+}
+
+#[test]
+fn up_a_pillar_a_provoked_enderman_gets_no_pocket() {
+    // Race 45890149072 lane 0: a sealed pocket on the pillar at y 80 held the bot still for the
+    // charging dragon. No enderman reaches a one-wide column's top: the crystals' work goes on.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 60,
+        uuid: [3; 16],
+        kind: EntityKind::Enderman.id(),
+        x: 14.5,
+        y: 64.0,
+        z: 0.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 60,
+        entries: vec![(17, MetaValue::Bool(true))],
+    }));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert!(p.spikes_up_high(&w));
+    for t in 100..110 {
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let n = notes(&p);
+    assert!(
+        n.iter().any(|n| n == "spikes: up high, no enderman pocket"),
+        "{n:?}"
+    );
+    assert!(
+        !n.iter().any(|n| n.starts_with("provoked enderman")),
+        "{n:?}"
+    );
+    // On the ground the enderman rule answers as before.
+    let mut ground = w.clone();
+    at(&mut ground, [12.5, 64.0, 12.5]);
+    let fresh = Plan::new(Aim::Race);
+    assert!(!fresh.spikes_up_high(&ground));
+}
+
+#[test]
+fn a_body_held_up_by_the_floor_beside_steps_onto_it_first() {
+    // E3's race 45890445738: x 14.2 half on a stair's step over the bunker's air; every walk from
+    // the feet's cell (no floor) was refused for 14,000 ticks.
+    let mut w = world(2, [8.2, 64.0, 0.5]);
+    set(&mut w, (8, 63, 0), BlockKind::Air);
+    assert_eq!(
+        spikes::next(&w, &SpikeState::default(), 0),
+        Next::Step {
+            to: (7, 64, 0),
+            sneak: true
+        }
+    );
 }
