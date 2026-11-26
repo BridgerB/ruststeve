@@ -523,6 +523,30 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// May the block under feet cell `c` be dug for a notch: end stone, with a solid block under it to
+/// land on (never a hole to the void at the island's edge)?
+pub fn notch_diggable(w: &World, c: [i32; 3]) -> bool {
+    let under = w.block_at(world::BlockPos::new(c[0], c[1] - 1, c[2]));
+    let floor = w.block_at(world::BlockPos::new(c[0], c[1] - 2, c[2]));
+    under == Some(BlockKind::EndStone) && floor.is_some_and(|k| k != BlockKind::Air)
+}
+
+/// The step out of a notch two deep dug from surface feet cell `from`: a cell beside it one under
+/// the surface, end stone with air over it, whose digging leaves a stair (the notch's floor, a
+/// step a block up, the surface). `None` when no side has one.
+pub fn notch_step(w: &World, from: [i32; 3]) -> Option<[i32; 3]> {
+    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .iter()
+        .find_map(|(dx, dz)| {
+            let s = [from[0] + dx, from[1] - 1, from[2] + dz];
+            let k = |y: i32| w.block_at(world::BlockPos::new(s[0], y, s[2]));
+            (k(s[1]) == Some(BlockKind::EndStone)
+                && k(s[1] + 1) == Some(BlockKind::Air)
+                && k(s[1] - 1).is_some_and(|b| b != BlockKind::Air))
+            .then_some(s)
+        })
+}
+
 /// The distance of the dragon when it is charging (phase 8) within `CHARGE_RANGE` of `feet` with
 /// its facing on the line to them (its yaw unsaid: taken as on it), else `None`.
 pub fn charging_at(w: &World, feet: [f64; 3]) -> Option<f64> {
@@ -737,6 +761,10 @@ pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> 
     }
     best.map(|(_, c)| c)
 }
+
+/// Blocks from the fountain every way out keeps to while the dragon scans: inside the 20 it looks
+/// for a player in before it charges one, past the head's sweep (8) and the turn's stand (9).
+pub const SCAN_KEEP: f64 = 12.0;
 
 /// Ticks of the scanning phase the bot waits for the head to turn onto it at `scan_stand`
 /// (the turn takes about 20, `DragonSittingScanningPhase`).
@@ -1102,8 +1130,13 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         }
     }
     // The dragon's own blow: out of its reach for the hold.
+    // Scanning, the dragon charges a bot it cannot reach (`DragonSittingScanningPhase`: none
+    // within 20 for 100 ticks): every way out stays within `SCAN_KEEP` of the fountain then (race
+    // 45895541443 lane 2: out of reach after a blow 19 off, a charge, 10 and two fly-bys, dead).
+    let scanning_near = ground_dragon.is_some_and(|d| d.phase() == Some(Phase::SittingScanning));
+    let keep = |r: f64| if scanning_near { r.min(SCAN_KEEP) } else { r };
     if struck_by_dragon(w) {
-        let r = STEP_OUT_RADIUS.max(from_fountain(feet) + 4.0);
+        let r = keep(STEP_OUT_RADIUS.max(from_fountain(feet) + 4.0));
         return match step_out_cell(w, ground_dragon.as_ref(), r) {
             Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "out of reach after a blow"),
             Some(_) | None => Want::Hold("after a blow"),
@@ -1129,9 +1162,12 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     // Grounded from here: on the perch or landing on it.
     // Under the line: out past the head stand's reach and the wings', to the wait's ring.
     if health <= line {
-        if from_fountain(feet) < WAIT_FROM || in_bite(&v, feet) {
-            return match step_out_cell(w, Some(&v), WAIT_RING) {
-                Some(c) => Want::Go(c, "under the perch line"),
+        let ring = keep(WAIT_RING);
+        let out_of_scan = scanning_near && from_fountain(feet) > SCAN_KEEP + 1.0;
+        if from_fountain(feet) < ring - 1.0 || in_bite(&v, feet) || out_of_scan {
+            return match step_out_cell(w, Some(&v), ring) {
+                Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "under the perch line"),
+                Some(_) => Want::Hold("under the perch line"),
                 None => Want::Hold("under the perch line, no cell out loaded"),
             };
         }
@@ -1246,6 +1282,12 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
                 Some(_) | None => Want::Hold("in the bite, no cell out loaded"),
             };
         }
+        if scanning_near && from_fountain(feet) > SCAN_KEEP + 1.0 {
+            return match step_out_cell(w, Some(&v), SCAN_KEEP) {
+                Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "into the scan's reach"),
+                Some(_) | None => Want::Hold("no head stand open"),
+            };
+        }
         return Want::Hold("no head stand open");
     }
     if ask.bunker.is_some() {
@@ -1329,6 +1371,14 @@ pub struct DragonState {
     pub charges: u32,
     #[serde(default)]
     pub charge_walk: Option<Walk>,
+    /// The notch at a charge: the surface cell it was begun from, the dig in hand, and the step
+    /// out to dig once the charge is over.
+    #[serde(default)]
+    pub notch_from: Option<[i32; 3]>,
+    #[serde(default)]
+    pub charge_dig: Option<crate::dig::Dig>,
+    #[serde(default)]
+    pub notch_step: Option<[i32; 3]>,
     /// Cells reached with the feet still in a breath, refused until out; the last cell noted.
     #[serde(default)]
     pub breath_refused: Vec<[i32; 3]>,
@@ -2011,11 +2061,38 @@ impl Plan {
             if self.dragon.charging {
                 self.dragon.charging = false;
                 self.dragon.charge_walk = None;
+                self.dragon.charge_dig = None;
+                // Down a notch two deep: a step one up beside it is dug before the bot goes on,
+                // the way out a jump at a time.
+                self.dragon.notch_step = self
+                    .dragon
+                    .notch_from
+                    .take()
+                    .filter(|f| cell_of(body.pos)[1] <= f[1] - 2)
+                    .and_then(|f| notch_step(w, f));
                 self.note(
                     tick,
                     "charge: over".to_owned(),
-                    format!("at {:?}", cell_of(body.pos)),
+                    format!(
+                        "at {:?}; the step out {:?}",
+                        cell_of(body.pos),
+                        self.dragon.notch_step
+                    ),
                 );
+            }
+            // The step out of the notch, dug from inside it.
+            if let Some(s) = self.dragon.notch_step {
+                if w.block_at(world::BlockPos::new(s[0], s[1], s[2])) == Some(BlockKind::Air) {
+                    self.dragon.notch_step = None;
+                    self.dragon.charge_dig = None;
+                    self.note(
+                        tick,
+                        format!("charge: the step out dug at {s:?}"),
+                        "on with the task".to_owned(),
+                    );
+                    return None;
+                }
+                return self.charge_dig_step(w, tick, s);
             }
             return None;
         };
@@ -2050,6 +2127,24 @@ impl Plan {
             ..Controls::default()
         };
         let Some(b) = bunker else {
+            // No bunker near: a notch two deep where the feet are, dug at once and dropped into,
+            // under the charge's head and wings (E4's race 4; race 45895541443 lane 2 crouched on
+            // the surface and took 10, then 5 and 5).
+            let fc = cell_of(body.pos);
+            let from = *self.dragon.notch_from.get_or_insert(fc);
+            if fc[1] > from[1] - 2 && body.on_ground && notch_diggable(w, fc) {
+                if self.dragon.charge_dig.is_none() {
+                    self.note(
+                        tick,
+                        format!("charge: dig a notch at {:?}", [fc[0], fc[1] - 1, fc[2]]),
+                        format!(
+                            "{} of 2 down; no bunker within {CHARGE_BUNKER_REACH:.0}",
+                            from[1] - fc[1] + 1
+                        ),
+                    );
+                }
+                return self.charge_dig_step(w, tick, [fc[0], fc[1] - 1, fc[2]]);
+            }
             return Some(crouch);
         };
         let cell: Cell = (b[0], b[1], b[2]);
@@ -2093,6 +2188,41 @@ impl Plan {
             c.pitch = Some(90.0);
         }
         Some(c)
+    }
+
+    /// One tick of a dig for the notch (or its step out), crouched, looking down.
+    fn charge_dig_step(&mut self, w: &World, tick: u64, c: [i32; 3]) -> Option<Controls> {
+        let cell: Cell = (c[0], c[1], c[2]);
+        if self
+            .dragon
+            .charge_dig
+            .as_ref()
+            .is_none_or(|d| d.target != cell)
+        {
+            self.dragon.charge_dig = Some(crate::dig::Dig::new(w, cell, tick));
+        }
+        let d = self.dragon.charge_dig.as_mut()?;
+        let (mut ctl, act, status) = d.step(w, tick);
+        self.acts.extend(act);
+        if !matches!(status, crate::dig::DigStatus::Running)
+            || w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
+        {
+            if let crate::dig::DigStatus::Failed(e) = status {
+                self.note(
+                    tick,
+                    format!("charge: dig at {c:?} failed: {e:?}"),
+                    "crouched where the feet are".to_owned(),
+                );
+                self.dragon.notch_step = None;
+            }
+            self.dragon.charge_dig = None;
+        }
+        ctl.sneak = true;
+        ctl.forward = false;
+        if ctl.pitch.is_none() {
+            ctl.pitch = Some(90.0);
+        }
+        Some(ctl)
     }
 
     /// In the End, a walk pressing on toward a breath's reach (the point `AHEAD` along its

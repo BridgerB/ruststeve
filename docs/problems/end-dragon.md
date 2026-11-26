@@ -134,7 +134,11 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
   - Lane 2 brought the dragon to 96 with 19 strikes ("dragon takeoff count over" fired once, at 16,520), then died. Retreating "out of reach after a blow" to 19 from the fountain during a scanning turn, it drew a charge (sitting-scanning → charging at 22,480).
   - Lane 2's `charge_step` crouched it still (no bunker within 12). The charge still struck for 10, and two fly-by blows of 5 followed while it held an enderman pocket. Crouching in the open does not stop a charge aimed at the bot.
   - Lane 1 died in a fall during E4's clutch.
-- **Wall 11 (open):** a bot far from the perch during scanning draws a charge, and crouching does not answer one. To try next:
+- **Wall 11, fixed in the next push:**
+  - **Scanning, never far enough to draw a charge.** While the dragon scans, every way out is held within `SCAN_KEEP` (12) of the fountain: the blow's step out, the perch line's ring, and "into the scan's reach" from a hold. The dragon charges a bot it cannot find within 20 for 100 ticks.
+  - **At a charge with no bunker within 12, a notch two deep.** The bot digs the end stone under its feet twice at once, crouched, and drops in. Never where the block under that is air (the void at the edge). Once the charge is over it digs a step out beside it, one under the surface, and climbs out a jump at a time. Notes: "charge: dig a notch at …", "charge: the step out dug at …".
+  - It is not roofed: a 1-wide notch has no face to lay a roof on without a second block.
+- **Wall 11 as first found:** a bot far from the perch during scanning draws a charge, and crouching does not answer one. To try next:
   - keep near the scanning stand (9 from the body) during scanning, which draws the attacking turn instead;
   - at a charge with no bunker near, a dug notch two deep, under the head's and wings' boxes.
 

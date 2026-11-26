@@ -854,3 +854,58 @@ fn the_takeoff_count_starts_again_when_a_blow_sends_it_off() {
             .any(|e| e.what.starts_with("dragon takeoff count over"))
     );
 }
+
+#[test]
+fn a_charge_with_no_bunker_near_is_met_in_a_notch_two_deep() {
+    // Race 45895541443 lane 2: crouched on the surface, the charge took 10 and two fly-bys 5.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-17.5, 64.0, 0.5], 8, 90.0);
+    assert!(dragon::notch_diggable(&w, [12, 64, 0]));
+    let mut p = Plan::new(Aim::Race);
+    let c = p.charge_step(&w, 0).expect("held");
+    assert!(c.sneak && !c.forward);
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "charge: dig a notch at [12, 63, 0]"),
+        "the block under the feet first"
+    );
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "dug at once"
+    );
+    // Two down, the step out is beside it one under the surface, with air over it.
+    let mut down = end_at([12.5, 62.0, 0.5]);
+    for y in [62, 63] {
+        down.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    assert_eq!(dragon::notch_step(&down, [12, 64, 0]), Some([13, 63, 0]));
+    assert!(
+        !dragon::notch_diggable(&end_at([12.5, 1.0, 0.5]), [12, 1, 0]),
+        "never a notch into the void"
+    );
+}
+
+#[test]
+fn scanning_the_bot_never_goes_far_enough_to_draw_a_charge() {
+    // Race 45895541443 lane 2: out of reach 19 off during a scanning turn drew a charge.
+    let mut w = end_at([17.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    w.player.health = Some(12.0);
+    match decide(&w, &ask()) {
+        Want::Go(c, "under the perch line") => {
+            let d = dragon::flat(feet_of(c), [0.5, 0.0, 0.5]);
+            assert!(d <= dragon::SCAN_KEEP + 1.0, "{c:?} {d}");
+        }
+        other => panic!("in to the scan's reach, not {other:?}"),
+    }
+    // Not scanning: the ring out at 16.
+    let mut flying = end_at([17.5, 64.0, 0.5]);
+    with_dragon(&mut flying, [0.5, PERCH_Y, 0.5], 5, 90.0);
+    flying.player.health = Some(12.0);
+    assert_eq!(decide(&flying, &ask()), Want::Hold("under the perch line"));
+}
