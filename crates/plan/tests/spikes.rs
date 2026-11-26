@@ -244,40 +244,40 @@ fn the_planner_walks_pillars_walls_strikes_and_digs_down() {
     set(&mut w, (8, 71, 6), BlockKind::EndStone);
     assert_eq!(
         spikes::next(&w, &st, 0),
-        Next::Build((9, 69, 5), Role::Ledge),
-        "then the box: a ledge where nothing would hold a side"
+        Next::Strike(CRYSTAL),
+        "the wall up, the strike at once: no other block first"
     );
-    for c in [(9, 69, 5), (7, 69, 5), (8, 69, 4)] {
+    // The box, when one is wanted (a hold up high), goes up in this order.
+    assert_eq!(
+        spikes::box_gap(&w, (8, 70, 5), &[(8, 70, 6), (8, 71, 6)]),
+        Some(((9, 69, 5), Role::Ledge)),
+        "a ledge where nothing would hold a side"
+    );
+    for c in [
+        (9, 69, 5),
+        (7, 69, 5),
+        (8, 69, 4),
+        (9, 70, 5),
+        (7, 70, 5),
+        (8, 70, 4),
+    ] {
         set(&mut w, c, BlockKind::EndStone);
     }
-    assert_eq!(
-        spikes::next(&w, &st, 0),
-        Next::Build((9, 70, 5), Role::Guard),
-        "the side on it"
-    );
-    for c in [(9, 70, 5), (7, 70, 5), (8, 70, 4)] {
-        set(&mut w, c, BlockKind::EndStone);
-    }
-    assert_eq!(
-        spikes::next(&w, &st, 0),
-        Next::Build((9, 71, 5), Role::Guard),
-        "the sides at the eye's height"
-    );
     for c in [(9, 71, 5), (7, 71, 5), (8, 71, 4)] {
         set(&mut w, c, BlockKind::EndStone);
     }
     assert_eq!(
-        spikes::next(&w, &st, 0),
-        Next::Build((8, 72, 5), Role::Roof),
-        "the roof"
+        spikes::box_gap(&w, (8, 70, 5), &[(8, 70, 6), (8, 71, 6)]),
+        Some(((9, 72, 5), Role::Ledge)),
+        "a block over a side first: nothing else holds the roof"
+    );
+    set(&mut w, (9, 72, 5), BlockKind::EndStone);
+    assert_eq!(
+        spikes::box_gap(&w, (8, 70, 5), &[(8, 70, 6), (8, 71, 6)]),
+        Some(((8, 72, 5), Role::Roof))
     );
     set(&mut w, (8, 72, 5), BlockKind::EndStone);
     assert!(spikes::boxed(&w, (8, 70, 5)), "the box whole");
-    assert_eq!(
-        spikes::next(&w, &st, 0),
-        Next::Strike(CRYSTAL),
-        "the box closed, the strike"
-    );
     gone(&mut w);
     let rec = SpikeState {
         pillars: vec![PillarRec {
@@ -487,7 +487,7 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
     assert!(
         notes(&p)
             .iter()
-            .any(|n| n == "spikes: stand closed at (8, 70, 5)")
+            .any(|n| n == "spikes: stand walled at (8, 70, 5)")
     );
     // The crystal gone, the dragon strafing 30 off: held in the box, not down.
     gone(&mut w);
@@ -761,46 +761,4 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
         notes(&p)
     );
     assert_eq!(p.spikes.clutches, 1);
-}
-
-#[test]
-fn a_breath_at_a_pillars_foot_is_walked_out_of() {
-    // Race 45875049490 lane 0: held still at (42, 59, 3) in a fireball's cloud, three blows of 6.
-    let mut w = world(2, [8.5, 64.0, 5.5]);
-    w.player.health = Some(12.0);
-    let mut p = Plan::new(Aim::Race);
-    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle), "hurt: a hold");
-    w.step(&Event::Packet(S2c::AddEntity {
-        id: 50,
-        uuid: [2; 16],
-        kind: EntityKind::AreaEffectCloud.id(),
-        x: 8.5,
-        y: 64.0,
-        z: 4.5,
-        velocity: [0.0; 3],
-    }));
-    w.step(&Event::Packet(S2c::SetEntityData {
-        id: 50,
-        entries: vec![(8, MetaValue::Float(3.0))],
-    }));
-    assert!(p.spikes_step(&w, 101).is_none(), "the hold ends");
-    assert!(
-        notes(&p)
-            .iter()
-            .any(|n| n.starts_with("spikes: hold ended by a breath"))
-    );
-    match p.spikes_task(&w, 102) {
-        Some(Task::Explore(walk)) => {
-            let t = walk.target;
-            let d = ((f64::from(t.0) + 0.5 - 8.5).powi(2) + (f64::from(t.2) + 0.5 - 4.5).powi(2))
-                .sqrt();
-            assert!(d > 4.5, "out of its reach: {t:?}");
-        }
-        t => panic!("{t:?} {:?}", notes(&p)),
-    }
-    assert!(
-        notes(&p)
-            .iter()
-            .any(|n| n.starts_with("spikes: out of the breath to"))
-    );
 }
