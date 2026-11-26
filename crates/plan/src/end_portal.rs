@@ -62,6 +62,8 @@ pub struct EndKitRules {
     pub eat_tasks: u32,
     /// A phase ends done or given up within this many ticks and failed tasks.
     pub phase_ticks: u64,
+    /// The cook's own clock.
+    pub cook_ticks: u64,
     pub phase_fails: u32,
     /// Walks down to the room begun before the stronghold's own way takes over.
     pub down_walks: u32,
@@ -111,6 +113,7 @@ impl Default for EndKitRules {
             fed: 20,
             eat_tasks: 12,
             phase_ticks: 6000,
+            cook_ticks: 9600,
             phase_fails: 16,
             down_walks: 8,
             frame_reach: 4.5,
@@ -616,13 +619,16 @@ impl Plan {
                 self.end_portal.failures_seen = failures;
             }
             let spent = tick.saturating_sub(self.end_portal.since);
+            // The cook's clock is its own: a furnace cooks a piece in 200 ticks, 30 pieces 6,000
+            // (race 45880017656 lane 1 gave the cook up at 6,182 ticks with its last batch done).
+            let clock = if phase == KitPhase::Cook {
+                r.cook_ticks
+            } else {
+                r.phase_ticks
+            };
             if phase != KitPhase::Up && phase != KitPhase::Down {
-                if spent > r.phase_ticks {
-                    self.end_kit_advance(
-                        w,
-                        tick,
-                        &format!("gave up: {spent} ticks of {}", r.phase_ticks),
-                    );
+                if spent > clock {
+                    self.end_kit_advance(w, tick, &format!("gave up: {spent} ticks of {clock}"));
                     continue;
                 }
                 if self.end_portal.fails >= r.phase_fails {
@@ -1401,8 +1407,9 @@ impl Plan {
                 self.end_portal.down_at = Some(i - 1);
                 continue;
             }
-            self.end_portal.down_walks += 1;
-            // Far from the way (a wood walk ended out on the plain): the overland's legs.
+            // Far from the way (a wood walk ended out on the plain): the overland's legs, not
+            // counted as the point's walks (race 45880017656 lane 1: its night hut's blocks, a
+            // task a call, spent every point's walks in 60 ticks).
             if flat(feet, p) > 40.0 {
                 let q = [f64::from(p.0) + 0.5, f64::from(p.2) + 0.5];
                 if self
@@ -1424,6 +1431,7 @@ impl Plan {
                     return Some(t);
                 }
             }
+            self.end_portal.down_walks += 1;
             let mut walk = Walk::new(p, Goal::Near { pos: p, range: 1.5 }, Arrive::Goal, tick);
             let routed = walk.route_now(w, tick);
             let found = walk.route;

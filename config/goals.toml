@@ -1107,6 +1107,8 @@ eat_tasks = 12
 # Each phase ends within 6,000 ticks (the plan's armed budget is 6,000 to 12,000 for all) or 16
 # failed tasks (race 45873894148: eight NoPath walks for trees ended the wood in 860 ticks).
 phase_ticks = 6000
+# The cook: 30 pieces at 200 ticks in one furnace are 6,000, its fuel and placing besides; 9,600.
+cook_ticks = 9600
 phase_fails = 16
 down_walks = 8
 # The server takes a UseOn within the block interaction range, 4.5 from the eye (the plan, 20d.2).
