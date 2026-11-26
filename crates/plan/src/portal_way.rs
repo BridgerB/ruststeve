@@ -96,13 +96,31 @@ pub struct WayIn {
     pub head_seals: u32,
     pub hostile_at: Option<u64>,
     pub carry_ons: u32,
-    /// Pickaxe runs begun by the leg's budget.
+    /// Pickaxe runs begun by the leg's budget, and when the last began.
     pub pick_runs: u32,
+    pub pick_at: Option<u64>,
+    /// The door last seen (the front's standing cell and tunnel cell), and the times it was
+    /// dug open again (filled by an escape's seal).
+    pub door: Option<(Cell, Cell)>,
+    pub door_digs: u32,
+    /// The door's box cells clicked, and how often (one still open after `BOX_CLICKS` is left).
+    pub box_clicks: Vec<(Cell, u32)>,
 }
 
-/// Lava cells sealed round the standing cell's head at most: its four sides and the cell over
-/// it, twice (a seal washed out once by a fall from above).
-pub const HEAD_SEALS: u32 = 10;
+/// Clicks on one box cell before it is left (`endermen::POCKET_CLICKS`'s rule: a cell clicked
+/// and still open is not clicked for ever).
+pub const BOX_CLICKS: u32 = 2;
+
+/// Runs of the leg's own pickaxe budget at most, and the ticks between two (race 45742933645:
+/// eight runs in 600 ticks at the pocket, each "table gave up", no room to place it).
+pub const PICK_RUNS: u32 = 2;
+pub const PICK_EVERY: u64 = 1200;
+/// Times the door is dug open again at most.
+pub const DOOR_DIGS: u32 = 3;
+
+/// The door's box filled at most: its five cells, twice (a seal washed out by a fall from above),
+/// with room.
+pub const HEAD_SEALS: u32 = 12;
 /// The carry-on under the danger line (the coordinator, 2026-11-25): no hostile within this, in
 /// the last `CARRY_QUIET` ticks. Endermen and zombified piglins are neutral and never provoked by
 /// the leg: they do not count.
@@ -219,6 +237,36 @@ impl Plan {
         let front: Option<Front> = home::portal_front(w, &lit, body.pos);
         if front.is_some_and(|f| feet == f.stand || feet == f.tunnel) {
             return None;
+        }
+        if let Some(f) = front {
+            self.ender.home.way_in.door = Some((f.stand, f.tunnel));
+        }
+        // No front, but the door was seen and its standing cell is filled now (race 45742933645
+        // lane 1: the lava escape sealed lava in the standing cell itself, and the front was gone
+        // for 4,500 ticks): dug open again from the tunnel cell.
+        if front.is_none()
+            && let Some((stand, tunnel)) = self.ender.home.way_in.door
+        {
+            let filled =
+                path::classify(w.state_at(world::BlockPos::new(stand.0, stand.1, stand.2)))
+                    == path::Class::Solid;
+            if filled && feet == tunnel && self.ender.home.way_in.door_digs < DOOR_DIGS {
+                self.ender.home.way_in.door_digs += 1;
+                self.note(
+                    tick,
+                    format!("portal way: the door dug open at {stand:?}"),
+                    format!(
+                        "the standing cell filled; from the tunnel cell {tunnel:?}; dig {} of {DOOR_DIGS}",
+                        self.ender.home.way_in.door_digs
+                    ),
+                );
+                return Some(Task::Dig(crate::dig::Dig::new(w, stand, tick)));
+            }
+            // Beside the portal with no face: no tunnel at the portal itself (it spun 4,200
+            // routes in place).
+            if span(feet, portal) <= 6 {
+                return None;
+            }
         }
         // Every task begins with an empty cursor: a stack on it is put down first (`cursor_watch`
         // waits for no acts, and a dig sends one every tick).
@@ -430,10 +478,17 @@ impl Plan {
         let runs = self.table.as_ref().map_or(8, |t| t.home.pick_runs);
         let wood = crate::base::logs_held(w) + crate::base::planks_held(w);
         let picking = self.base.steps == home::TRIP_WOOD_STEPS.to_vec() && !self.base.over;
-        if f64::from(uses) >= need || picking || wood < 2 || self.ender.home.trip_pick_runs >= runs
+        let st = &self.ender.home.way_in;
+        if f64::from(uses) >= need
+            || picking
+            || wood < 2
+            || self.ender.home.trip_pick_runs >= runs
+            || st.pick_runs >= PICK_RUNS
+            || st.pick_at.is_some_and(|t| tick < t + PICK_EVERY)
         {
             return None;
         }
+        self.ender.home.way_in.pick_at = Some(tick);
         self.ender.home.trip_pick_runs += 1;
         self.ender.home.way_in.pick_runs += 1;
         self.base = crate::base::BaseState {
@@ -484,12 +539,54 @@ impl Plan {
         let solid = |c: Cell| {
             path::classify(w.state_at(world::BlockPos::new(c.0, c.1, c.2))) == path::Class::Solid
         };
+        let open = |c: Cell| {
+            matches!(
+                w.block_at(world::BlockPos::new(c.0, c.1, c.2)),
+                Some(data::BlockKind::Air | data::BlockKind::CaveAir)
+            )
+        };
         let head = (f.stand.0, f.stand.1 + 1, f.stand.2);
         let feet = path::feet_cell(body.pos);
-        let (target, click, face) = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0)]
+        // The door's box: the cells beside the standing cell and its head along the portal's
+        // plane, and the cell over the head, lava or open, filled in that order (the top first):
+        // race 45742933645 lane 1 sealed the foot of the fall at (24, 35, -19), and the fall
+        // spread at (24, 36, -19) through (23, 36, -19) into the standing cell itself.
+        let side = (f.normal.1, f.normal.0);
+        let boxed = [
+            (head.0, head.1 + 1, head.2),
+            (head.0 + side.0, head.1, head.2 + side.1),
+            (head.0 - side.0, head.1, head.2 - side.1),
+            (f.stand.0 + side.0, f.stand.1, f.stand.2 + side.1),
+            (f.stand.0 - side.0, f.stand.1, f.stand.2 - side.1),
+        ];
+        // Only by lava at the head's height or over it, beside or in the box (a fall that can
+        // spread into the door); lava at the feet's height is the approach's own seals'.
+        let high_lava = boxed.iter().any(|c| {
+            [
+                (0, 0, 0),
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+                (0, 1, 0),
+            ]
+            .iter()
+            .map(|(dx, dy, dz)| (c.0 + dx, c.1 + dy, c.2 + dz))
+            .any(|n| n.1 >= head.1 && lava(n))
+        });
+        if !high_lava {
+            return None;
+        }
+        let clicks = &self.ender.home.way_in.box_clicks;
+        let (target, click, face) = boxed
             .into_iter()
-            .map(|(dx, dy, dz)| (head.0 + dx, head.1 + dy, head.2 + dz))
-            .filter(|c| lava(*c) && reach(*c) && *c != feet && *c != (feet.0, feet.1 + 1, feet.2))
+            .filter(|c| {
+                !clicks.iter().any(|(b, n)| b == c && *n >= BOX_CLICKS)
+                    && (lava(*c) || open(*c))
+                    && reach(*c)
+                    && *c != feet
+                    && *c != (feet.0, feet.1 + 1, feet.2)
+            })
             .find_map(|c| {
                 [
                     ((c.0, c.1 - 1, c.2), 1),
@@ -518,15 +615,27 @@ impl Plan {
             crate::hold::Hold::Held => {
                 self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
                 self.ender.home.way_in.head_seals += 1;
+                match self
+                    .ender
+                    .home
+                    .way_in
+                    .box_clicks
+                    .iter_mut()
+                    .find(|(b, _)| *b == target)
+                {
+                    Some(e) => e.1 += 1,
+                    None => self.ender.home.way_in.box_clicks.push((target, 1)),
+                }
                 self.acts.push(world::Act::UseOn {
                     pos: world::BlockPos::new(click.0, click.1, click.2),
                     face,
                 });
                 self.note(
                     tick,
-                    format!("portal way: lava sealed by the head at {target:?}"),
+                    format!("portal way: door boxed at {target:?}"),
                     format!(
-                        "beside or over the standing cell's head {head:?}; {item:?} on {click:?} face {face}; seal {} of {HEAD_SEALS}",
+                        "the box round the standing cell {:?} and its head; {item:?} on {click:?} face {face}; block {} of {HEAD_SEALS}",
+                        f.stand,
                         self.ender.home.way_in.head_seals
                     ),
                 );

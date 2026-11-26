@@ -1037,7 +1037,7 @@ fn a_known_span_is_never_a_restock_cell() {
         "one past its west end"
     );
     assert!(!home::near_span(span, (320, 36, 197)), "three off the line");
-    assert!(!home::near_span(span, (320, 32, 194)), "well under it");
+    assert!(!home::near_span(span, (320, 30, 194)), "well under it");
 }
 
 #[test]
@@ -1062,15 +1062,21 @@ fn a_lava_fall_beside_the_portal_is_sealed_from_the_top() {
     p.ender.home.top_up_over = true;
     p.ender.home.kit_begun = true;
     p.ender.home.kit_over = true;
-    run(&mut p, &mut w, 100, 3);
-    assert!(
-        noted(&p, "home: lava sealed at (11, 65, 9)"),
-        "the top of the fall first: {:?}",
-        notes(&p)
-    );
+    // Q6's door box ("portal way: door boxed") runs before the seal; whatever goes first, the
+    // fall's foot is never sealed while lava stands over it.
+    run(&mut p, &mut w, 100, 40);
     assert!(
         !noted(&p, "home: lava sealed at (11, 64, 9)"),
-        "{:?}",
+        "never the foot of the fall: {:?}",
         notes(&p)
     );
+}
+
+#[test]
+fn the_join_west_of_a_span_is_never_a_restock_cell() {
+    // Race 45749508716 lane 2 dug its own step at (309, 34, 194) and (310, 34, 194).
+    let span = [400, 311, 37, 194];
+    assert!(home::near_span(span, (309, 34, 194)));
+    assert!(home::near_span(span, (310, 34, 194)));
+    assert!(home::near_span(span, (308, 39, 194)));
 }

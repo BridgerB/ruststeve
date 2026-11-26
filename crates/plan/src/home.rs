@@ -295,10 +295,19 @@ pub fn rail_wanted(w: &World) -> Option<(Cell, i8, bool, bool)> {
     if cells.at(under) != path::Class::Solid {
         return None;
     }
+    // Only while filler is over the keep (race 45749508716 lane 0 laid 72 rails and was left
+    // with none), and only on a side that drops to lava within RAIL_DROP: a fall onto ground
+    // is a block or two, not a death.
+    if path::bridge_blocks(w) <= crate::heading::HOME_KEEP {
+        return None;
+    }
     [((1, 0), 5i8), ((-1, 0), 4), ((0, 1), 3), ((0, -1), 2)]
         .into_iter()
         .map(|((dx, dz), f)| ((feet.0 + dx, feet.1 - 1, feet.2 + dz), f))
-        .find(|(c, _)| matches!(cells.at(*c), path::Class::Lava | path::Class::Clear))
+        .find(|(c, _)| {
+            matches!(cells.at(*c), path::Class::Lava | path::Class::Clear)
+                && (0..=RAIL_DROP).any(|d| cells.at((c.0, c.1 - d, c.2)) == path::Class::Lava)
+        })
         .map(|(c, f)| (c, f, cube, knocker))
 }
 
@@ -313,6 +322,8 @@ pub const KNOCKERS: &[data::EntityKind] = &[
     data::EntityKind::ZombifiedPiglin,
 ];
 pub const KNOCK_RANGE: f64 = 16.0;
+/// A rail is laid only on a side that drops to lava within this.
+pub const RAIL_DROP: i32 = 8;
 
 /// A skeleton within this has the trip take cover as from a blaze (its bow's 15 and margin).
 pub const SKELETON_COVER: f64 = 24.0;
@@ -384,8 +395,13 @@ fn picking_now(p: &Plan) -> bool {
 /// Whether `c` is a cell of the span `[x_east, x_west, feet_y, z]` or within 1 of its line at
 /// its height (its floor and the feet cells over it, one each side).
 pub fn near_span([e, wst, y, z]: [i32; 4], c: Cell) -> bool {
-    (c.2 - z).abs() <= 1 && c.0 <= e + 1 && c.0 >= wst - 1 && c.1 >= y - 2 && c.1 <= y + 1
+    // West of the span by up to JOIN_REACH (the join to the next span is built there) and down to
+    // 4 under its feet (race 45749508716 lane 2 dug its own step at (309, 34..35, 194)).
+    (c.2 - z).abs() <= 1 && c.0 <= e + 1 && c.0 >= wst - JOIN_REACH && c.1 >= y - 5 && c.1 <= y + 4
 }
+
+/// West of a span, the join to the next is built this far out: never a restock cell.
+pub const JOIN_REACH: i32 = 6;
 
 /// A walk on an old bridge goes this far at a time.
 pub const BRIDGE_LEG: i32 = 24;
