@@ -59,15 +59,30 @@ pub const SHAFT_BLOCKS: [ItemKind; 17] = [
 ];
 
 /// Ticks with no rise before a shaft is given up: a dig of deepslate with a wooden pickaxe is
-/// 45 ticks (hardness 3, speed 2), a step about 70 with the jump; 600 is eight steps' worth.
-pub const SHAFT_STALL: u64 = 600;
+/// 45 ticks (hardness 3, speed 2), a step about 70 with the jump; 900 is over a hand dig of
+/// deepslate (`MAX_BREAK_HAND` 600) and a jump.
+pub const SHAFT_STALL: u64 = 900;
 /// The longest break the shaft waits for (ticks, with the best tool held): deepslate with a
 /// wooden pickaxe is 45, ores a stone pickaxe cannot take (diamond, gold) 300 by hand.
 pub const MAX_BREAK: u64 = 100;
 // >>> Q8 (issue 19): with no pickaxe held the shaft digs by hand: stone 150 ticks, deepslate 300,
 // no drop, but the shaft only needs the cells open (the frontier bot of race 45783611857 came
 // through with no pickaxe; all six of its lanes stood in the portal).
-pub const MAX_BREAK_HAND: u64 = 320;
+pub const MAX_BREAK_HAND: u64 = 600;
+
+/// Blocks to pillar on are held (netherrack, cobblestone and the like: `SHAFT_BLOCKS`' filler).
+pub fn pillar_blocks(items: &[ItemKind]) -> bool {
+    items.iter().any(|k| {
+        matches!(
+            k,
+            ItemKind::Netherrack
+                | ItemKind::Cobblestone
+                | ItemKind::CobbledDeepslate
+                | ItemKind::Blackstone
+                | ItemKind::Basalt
+        )
+    })
+}
 
 /// The longest break the shaft waits for with `items` held: `MAX_BREAK`, or by hand
 /// `MAX_BREAK_HAND` when no pickaxe is held.
@@ -292,6 +307,12 @@ pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> 
         if opened == Some(over) || sky_over(w, over) {
             return Step::Rise;
         }
+        // >>> Q8: a room over the head with a ceiling within 8 is pillared through on held blocks
+        // (the frontier: the overworld portal's south room is open from y -53 to -49).
+        if pillar_blocks(items) && (3..=8).any(|d| full(kind(w, (x, y + d, z)))) {
+            return Step::Rise;
+        }
+        // <<< Q8
         return Step::Refused(format!("cave over the head at {over:?}"));
     }
     let Some(block) = k else {
@@ -314,7 +335,10 @@ pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> 
     {
         return Step::Refused(format!("{f} beside {over:?} at {c:?}"));
     }
+    // >>> Q8: past a cave beside the shaft (not in its own column) with blocks held (the frontier
+    // bot's first shaft was refused for a cave beside, the stairs then dug obsidian).
     if !sky_over(w, above)
+        && !pillar_blocks(items)
         && let Some(c) = near.iter().find(|c| open(kind(w, **c)))
     {
         return Step::Refused(format!("cave beside {over:?} at {c:?}"));

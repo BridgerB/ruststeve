@@ -1819,3 +1819,39 @@ fn with_no_pickaxe_the_shaft_digs_stone_and_deepslate_by_hand() {
     assert!(by_hand(BlockKind::Stone).is_some_and(|t| t <= MAX_BREAK_HAND));
     assert!(by_hand(BlockKind::Deepslate).is_some_and(|t| t <= MAX_BREAK_HAND));
 }
+
+#[test]
+fn the_shaft_pillars_through_a_room_and_passes_a_cave_beside_with_blocks_held() {
+    use plan::arrival::{Step, step};
+    // A room over the head: open to y 44, stone at 45.
+    let mut w = world(
+        home::OVERWORLD,
+        0,
+        column(BlockKind::Stone, 6),
+        [8.5, 40.0, 8.5],
+    );
+    for y in 40..=44 {
+        set(&mut w, (8, y, 8), BlockKind::Air);
+    }
+    assert_eq!(
+        step(&w, (8, 40, 8), None, &[ItemKind::Netherrack]),
+        Step::Rise
+    );
+    assert!(matches!(step(&w, (8, 40, 8), None, &[]), Step::Refused(_)));
+    // A cave beside the cell over the head, not in the shaft's own column.
+    let mut w = world(
+        home::OVERWORLD,
+        0,
+        column(BlockKind::Stone, 6),
+        [8.5, 40.0, 8.5],
+    );
+    for y in 40..=41 {
+        set(&mut w, (8, y, 8), BlockKind::Air);
+    }
+    set(&mut w, (9, 42, 8), BlockKind::Air);
+    assert_eq!(
+        step(&w, (8, 40, 8), None, &[ItemKind::Netherrack]),
+        Step::Dig((8, 42, 8))
+    );
+    assert!(matches!(step(&w, (8, 40, 8), None, &[]), Step::Refused(_)));
+}
