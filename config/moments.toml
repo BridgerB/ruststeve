@@ -1798,7 +1798,9 @@ fill = [["stone", -1, -1, 0, 1, 2, 1], ["air", 0, 0, 0, 0, 1, 0]]
 # hits, blasts, crystals, dragons and endermen with their health, the watched cells' full states.
 # - e01-frame: a ring of 12 frames facing out (a player-placed frame faces the player:
 #   `EndPortalFrameBlock.getStateForPlacement`), 11 with an eye; the bot, holding one eye, uses it
-#   on the 12th's top: the frame gains it and the 3x3 inside lights (end_portal).
+#   on the 12th's top: the frame gains it and the 3x3 inside lights (end_portal). Parity
+#   45864998071: the frame took the eye, the ring did not light. e01-frame-in: the same ring
+#   with every frame facing in.
 # - e02-enter: three end_portal cells laid east of the feet; the bot walks in: the_end, where?
 # - e03-strike: a crystal on bedrock on an obsidian column (a spike's top, `SpikeFeature`), the
 #   bot on an end stone pillar 3 off with end stone at 2 off at the feet and the eye: it strikes
@@ -1811,7 +1813,8 @@ fill = [["stone", -1, -1, 0, 1, 2, 1], ["air", 0, 0, 0, 0, 1, 0]]
 # - e03-open: the same crystal, no wall: what the blast does to an open stand (the control).
 # - e04-gaze-N: e00-stare's pen (an enderman 12 east): the look 3 and 6 degrees aside of its
 #   eye (`EnderMan.isLookingAtMe`'s cone at 12 is about 3.7), and straight down.
-# - e05-head, e05-neck: a dragon (no AI, sitting: DragonPhase 6, yaw 0) whose head by the
+# - e05-head, e05-neck: a dragon (with its AI: a dragon with none never moves its parts,
+#   parity 45864998071; sitting scanning: DragonPhase 6, yaw 0) whose head by the
 #   jar's `EnderDragon.aiStep` part offsets lies 6.5 along (sin yaw, -cos yaw) and 1 down from
 #   its feet: here 2.0 from the eye, out of its blow's box (the head's box grown by 1). The bot
 #   strikes part 1 (the head) or 2 (the neck); the dragon's health says which landed and how
@@ -1832,6 +1835,19 @@ give = ["ender_eye 1"]
 report = true
 fill = [["air", -1, 0, -3, 6, 3, 3], ["stone", -1, -2, -3, 6, -1, 3], ["air", 2, -1, -1, 4, -1, 1]]
 set = [["end_portal_frame[eye=true,facing=west]", 1, -1, -1], ["end_portal_frame[eye=true,facing=east]", 5, -1, -1], ["end_portal_frame[eye=false,facing=west]", 1, -1, 0], ["end_portal_frame[eye=true,facing=east]", 5, -1, 0], ["end_portal_frame[eye=true,facing=west]", 1, -1, 1], ["end_portal_frame[eye=true,facing=east]", 5, -1, 1], ["end_portal_frame[eye=true,facing=north]", 2, -1, -2], ["end_portal_frame[eye=true,facing=south]", 2, -1, 2], ["end_portal_frame[eye=true,facing=north]", 3, -1, -2], ["end_portal_frame[eye=true,facing=south]", 3, -1, 2], ["end_portal_frame[eye=true,facing=north]", 4, -1, -2], ["end_portal_frame[eye=true,facing=south]", 4, -1, 2]]
+watch = [[1, -1, 0], [3, -1, 0], [2, -1, -1], [4, -1, 1]]
+
+[[moment]]
+id = "e01-frame-in"
+landing = 0
+dx = 40
+dz = -52
+script = "light:20:1:-1:0:1"
+ticks = 60
+give = ["ender_eye 1"]
+report = true
+fill = [["air", -1, 0, -3, 6, 3, 3], ["stone", -1, -2, -3, 6, -1, 3], ["air", 2, -1, -1, 4, -1, 1]]
+set = [["end_portal_frame[eye=true,facing=east]", 1, -1, -1], ["end_portal_frame[eye=true,facing=west]", 5, -1, -1], ["end_portal_frame[eye=false,facing=east]", 1, -1, 0], ["end_portal_frame[eye=true,facing=west]", 5, -1, 0], ["end_portal_frame[eye=true,facing=east]", 1, -1, 1], ["end_portal_frame[eye=true,facing=west]", 5, -1, 1], ["end_portal_frame[eye=true,facing=south]", 2, -1, -2], ["end_portal_frame[eye=true,facing=north]", 2, -1, 2], ["end_portal_frame[eye=true,facing=south]", 3, -1, -2], ["end_portal_frame[eye=true,facing=north]", 3, -1, 2], ["end_portal_frame[eye=true,facing=south]", 4, -1, -2], ["end_portal_frame[eye=true,facing=north]", 4, -1, 2]]
 watch = [[1, -1, 0], [3, -1, 0], [2, -1, -1], [4, -1, 1]]
 
 [[moment]]
@@ -1962,7 +1978,7 @@ armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
 report = true
 fill = [["air", -7, -3, -3, 8, 8, 16], ["end_stone", -1, -1, -1, 1, -1, 12]]
 summon = [["ender_dragon", 0, 2, 9]]
-summon_nbt = "DragonPhase:6,Rotation:[0f,0f]"
+summon_nbt = "NoAI:0b,DragonPhase:6,Rotation:[0f,0f]"
 watch = [[0, -1, 0]]
 
 [[moment]]
@@ -1979,7 +1995,7 @@ armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
 report = true
 fill = [["air", -7, -3, -3, 8, 8, 16], ["end_stone", -1, -1, -1, 1, -1, 12]]
 summon = [["ender_dragon", 0, 2, 9]]
-summon_nbt = "DragonPhase:6,Rotation:[0f,0f]"
+summon_nbt = "NoAI:0b,DragonPhase:6,Rotation:[0f,0f]"
 watch = [[0, -1, 0]]
 
 [[moment]]
@@ -1996,7 +2012,7 @@ armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
 report = true
 fill = [["air", -7, -3, -3, 8, 8, 16], ["end_stone", -1, -1, -1, 1, -1, 12], ["end_stone", 0, 0, 2, 0, 1, 2]]
 summon = [["ender_dragon", 0, 2, 9]]
-summon_nbt = "DragonPhase:6,Rotation:[0f,0f]"
+summon_nbt = "NoAI:0b,DragonPhase:6,Rotation:[0f,0f]"
 watch = [[0, -1, 0]]
 
 [[moment]]
@@ -2031,9 +2047,9 @@ watch = [[2, -21, 0], [3, -21, 0]]
 
 [[moment]]
 id = "e06-drop"
-landing = 3
+landing = 1
 dx = -40
-dz = 40
+dz = 56
 lift = 21
 script = "clutch:270:5:4.0"
 ticks = 70

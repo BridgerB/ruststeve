@@ -983,8 +983,11 @@ fn real_waves(
                         .summon_nbt
                         .as_deref()
                         .map_or_else(String::new, |n| format!(",{n}"));
+                    // A row's own NoAI wins (issue 20: a dragon with no AI never moves its
+                    // parts, parity 45864998071).
+                    let ai = if more.contains("NoAI") { "" } else { "NoAI:1b," };
                     format!(
-                        "summon minecraft:{e} {} {} {} {{NoAI:1b,DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b,Silent:1b{more}}}",
+                        "summon minecraft:{e} {} {} {} {{{ai}DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b,Silent:1b{more}}}",
                         f64::from(x + dx) + 0.5,
                         y + dy,
                         f64::from(z + dz) + 0.5

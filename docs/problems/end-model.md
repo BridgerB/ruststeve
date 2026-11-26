@@ -21,5 +21,19 @@ The crystal plan (a pillar 3 off, a wall at 2 off, a strike by reach), the drago
 - Scripts `crystal:<every>`, `dragon:<every>:<part>` (the dragon's parts are entity ids after its own: 1 head, 2 neck, 3 body; the client is never told where they are, so the server's verdict on a strike is the probe of where a part is), `clutch:<yaw>:<walk>:<above>`.
 - parity.yml `only` and `tolerance` inputs run the e rows alone.
 
+## The real rows (parity 45864998071, 6dac60c), read from each row's `real.end.trace.txt`
+- **e03, the strike works by reach through cover, and the cover is spent.** In `e03-strike` (end stone at 2 off at the feet and the eye) the crystal was struck through the wall and removed, and the bot lost **0.42** (20 to 19.58). That is `ServerExplosion`'s floor: a fully hidden player within 12 still takes 1.0 before armour, 0.42 through 15 points. **Both wall blocks were air after the blast**: the damage is dealt before the blast breaks blocks, so the wall shields exactly one blast.
+- **e03-bars**: the cage's own bars at 2 off, left in place. The strike went through, and the loss was the same 0.42 (exposure 0: a bar on the cage's x edge is joined north and south, a full-width pane facing the stand). The two bars at the feet and the eye were air after; the one at the bedrock's level stayed. **e03-cage-wall** (those two swapped for end stone): the same 0.42, both blocks air after. So for a cage no bar needs breaking.
+- **e03-open** (no wall): dead through full iron with boots.
+- **e04**: an enderman 12 east, the look 3 degrees aside of its eye: creepy (angered) at t 49. 6 degrees aside: calm. Straight down: calm. The cone at 12 lies between 3 and 6 degrees (the jar's 0.025 / d: 3.7).
+- **e06**: a 21 fall off an end stone pillar, the water bucket poured falling (tried each tick from 4.0, or 2.0, over the ground): the water went in and there was no damage in either row. The model matched the 2.0 row; in the 4.0 row the model never poured (its bucket's reach from a falling body differs: open). `e06-drop` landed in the ocean (landing 3 is sea) and is moved to dry ground.
+- **e02**: walking into a lit end portal arrived at **(100.500, 49.000, 0.500)** in `minecraft:the_end` (t 70). The script kept walking east and fell into the void, as a blind bot would.
+- **e01**: the use of an eye on the empty frame's top set `eye=true`. The ring with every frame facing out did not light; `e01-frame-in` tries them facing in.
+- **e05**: a dragon with no AI never moves its parts. No strike on part 1 or 2 landed (health 200 throughout), and walking into where the head should be drew no blow. The rows now summon it with its AI in phase 6 (sitting scanning).
+
+## The model (20h)
+- `crates/sim/src/end.rs`: the synthetic End (`EndStage`, `Layout::small()`) and the crystal's blast, with exposure as `getSeenPercent` counts it (iron bars by their post and arms). The model's floor matched the real 0.42 to the hundredth.
+- **Not modelled:** the blocks a blast breaks (the real wall at 2 off is spent, above); the dragon; the portal's travel; the frame fill.
+
 ## Walls
-(none yet)
+1. **The cover at 2 off is consumed by each blast** (e03, parity 45864998071). A second crystal struck from the same stand without rebuilding the wall meets an open stand (`e03-open`: dead). For E4, rebuild or re-check the two cells before every strike, never assume them.
