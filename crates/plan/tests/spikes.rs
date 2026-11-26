@@ -576,3 +576,27 @@ fn the_spikes_read_from_end_toml_rows() {
         }]
     );
 }
+
+#[test]
+fn config_end_toml_holds_the_ten_spikes() {
+    // E1's measured rows (config/end.toml, probe 45863427332), as the shell loads them.
+    #[derive(serde::Deserialize)]
+    struct Rows {
+        spike: Vec<Spike>,
+    }
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/end.toml"
+    ))
+    .unwrap();
+    let rows: Rows = toml::from_str(&text).unwrap();
+    assert_eq!(rows.spike.len(), 10);
+    assert_eq!(rows.spike.iter().filter(|s| s.caged).count(), 2);
+    let first = Spike {
+        centre: [12, 39],
+        radius: 2,
+        top_y: 76,
+        caged: false,
+    };
+    assert_eq!(rows.spike.first(), Some(&first));
+}

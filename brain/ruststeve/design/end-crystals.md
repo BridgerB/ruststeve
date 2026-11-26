@@ -24,7 +24,7 @@ related:
 Issue 20f (agent E4, `docs/problems/end-crystals.md`), the port of clojurecraft's `dragon.clj` crystal half. A hit of any kind blows a crystal up, power 6: about 56 damage at 3 off with the body fully seen (E1, jar 26.1.2), so every strike is from behind a wall.
 
 ## The geometry
-`Spike { centre, radius, top_y, caged }`: `top_y` is the bedrock's y (obsidian below it, the crystal at `top_y + 1`). It comes from `config/end.toml` (`SpikeState::geography`, set by the shell) or, when none matches, from the blocks seen round the crystal (`spike_for`: its bedrock, its top layer followed out along +x, bars two out).
+`Spike { centre, radius, top_y, caged }`: `top_y` is the bedrock's y (obsidian below it, the crystal at `top_y + 1`). It comes from `config/end.toml`'s ten `[[spike]]` rows (E1), loaded into `SpikeState::geography` by the shell (`bot::end_spikes`) or, when none matches, from the blocks seen round the crystal (`spike_for`: its bedrock, its top layer followed out along +x, bars two out).
 
 `stand(spike, axis)`, pure: the pillar's column is the first column out from the top layer (cells with dx² + dz² <= r² + 1), `STAND_OFF` (3) at the nearest; the stand is 3 out at the bedrock's height; the walls are the cells 2 out at the feet's and the eye's height. A radius-2 spike's stand is its pillar's top; a wider one's is on the spike's top, walked onto from the pillar. `approach_along` adds the pillar's foot (the column's ground, seen) and refuses a column with something in the way; `best_approach` takes the foot nearest the feet.
 
