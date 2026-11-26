@@ -322,7 +322,7 @@ name = "dev-end-island"
 stage = "end"
 place = { dimension = "minecraft:the_end", x = 20.5, y = 80, z = 0.5 }
 spread = 4
-kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["end_stone", 192], ["water_bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
+kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["end_stone", 192], ["water_bucket", 2], ["bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
 
 # dev-end-no-crystals: dev-end-island with every crystal killed, for the dragon (20g). The
 # crystals' chunks load as the bot arrives, so the kill is forced over them first; E5 checks in
@@ -332,7 +332,7 @@ name = "dev-end-no-crystals"
 stage = "end"
 place = { dimension = "minecraft:the_end", x = 20.5, y = 80, z = 0.5 }
 spread = 4
-kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["end_stone", 192], ["water_bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
+kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["end_stone", 192], ["water_bucket", 2], ["bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
 setup = [
   "execute in minecraft:the_end run forceload add -64 -64 64 64",
   "execute in minecraft:the_end run kill @e[type=minecraft:end_crystal]",

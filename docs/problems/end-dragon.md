@@ -124,5 +124,19 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - **Lane 2:** 7 strikes; the dragon reached 168. It died by a fall after a walk failed NoPath.
 - **Lane 1:** killed by an enderman early ("near miss: enderman … stared at"), outside the fight.
 
+### Race 45895541443 (9657b79, dev-end-no-crystals, 3 lanes, cap 24,000), lane 0 read from its evidence
+- **Perches and strikes.** 10 perches, with 7, 3, 0, 1, 7, 2, 0, 0, 0, 0 strikes. The dragon went 200 → 94 by tick 11,360, then took no more damage for 11,000 ticks. Hits taken were 1, 0, 1, 0, 0, 0, 0, 0, 1, 0: the fight itself is safe now.
+- **Wall 10: the takeoff count never started again.** The blow that sent the count over 50 was seen with the phase already takeoff, so it was never counted while sitting. "dragon takeoff count over" never fired. The count sat over 44, every strike was the crossing one, and each wanted a low stand ("hold no head stand open"; one dig begun at tick 19,900 was cut by the flame's leave).
+- **Fix:** a drop counts if the phase noted before it was sitting. A takeoff within 20 ticks of a drop, with the count within a strike of 50, starts the count again, as the server does.
+
+- **The rest of race 45895541443.** No win.
+  - Lane 0 reached the cap with the dragon at 94: 20 strikes, then none for 11,000 ticks (wall 10).
+  - Lane 2 brought the dragon to 96 with 19 strikes ("dragon takeoff count over" fired once, at 16,520), then died. Retreating "out of reach after a blow" to 19 from the fountain during a scanning turn, it drew a charge (sitting-scanning → charging at 22,480).
+  - Lane 2's `charge_step` crouched it still (no bunker within 12). The charge still struck for 10, and two fly-by blows of 5 followed while it held an enderman pocket. Crouching in the open does not stop a charge aimed at the bot.
+  - Lane 1 died in a fall during E4's clutch.
+- **Wall 11 (open):** a bot far from the perch during scanning draws a charge, and crouching does not answer one. To try next:
+  - keep near the scanning stand (9 from the body) during scanning, which draws the attacking turn instead;
+  - at a charge with no bunker near, a dug notch two deep, under the head's and wings' boxes.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
