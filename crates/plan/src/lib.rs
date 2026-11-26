@@ -45,6 +45,9 @@ pub mod path;
 pub mod pearls;
 // <<< pearls
 pub mod place;
+// >>> Q6 (issue 19): the last leg to the portal's front.
+pub mod portal_way;
+// <<< Q6
 pub mod redig;
 pub mod scoop;
 pub mod shield;
@@ -175,6 +178,9 @@ const SHELTER_BLOCKS: &[data::ItemKind] = &[
 /// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
 /// `SEAL_EVERY_TICKS`).
 const SHELTER_EVERY_TICKS: u64 = 10;
+/// Ticks a stack may sit on the cursor with no window and no click before it is put down: a swap
+/// through the cursor is a few ticks (a click and its answer), five seconds is stuck.
+const CURSOR_STUCK_TICKS: u64 = 100;
 /// Shelter blocks in one run before the bot stops building: a closed box round one cell is 10
 /// (eight wall cells, one more for the roof to hang on, the roof); eight boxes.
 const SHELTER_MAX: u32 = 80;
@@ -717,6 +723,11 @@ pub struct Plan {
     /// the hut, which then takes the cook row as the clean flow's cook phase does.
     #[serde(default)]
     pub home_cook: bool,
+    /// A stack on the cursor since (no window, no click), and the stacks put down from it.
+    #[serde(default)]
+    pub cursor_since: Option<u64>,
+    #[serde(default)]
+    pub cursor_puts: u32,
     /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
     /// (closed, or none could be built).
     #[serde(default)]
@@ -940,6 +951,8 @@ impl Plan {
             cook_tasks: 0,
             cook_over: false,
             home_cook: false,
+            cursor_since: None,
+            cursor_puts: 0,
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
@@ -1035,6 +1048,18 @@ impl Plan {
     }
 
     fn note(&mut self, tick: u64, what: String, why: String) {
+        // >>> home: the way home keeps the bridge blocks it lays, to dig back when stranded.
+        if self.ender.phase == endermen::EnderPhase::Home
+            && let Some(c) = what
+                .strip_prefix("bridge block laid at ")
+                .and_then(home::parse_cell)
+        {
+            self.ender.home.laid.push(c);
+            if self.ender.home.laid.len() > home::LAID_KEPT {
+                self.ender.home.laid.remove(0);
+            }
+        }
+        // <<< home
         self.events.push(PlanEvent { tick, what, why });
         self.event_count += 1;
         if self.events.len() > EVENTS_KEPT {
@@ -1064,6 +1089,7 @@ impl Plan {
         // swing count before the tick: a strike the raised shield drops is given back.
         let swings_before = self.swing_count();
         let c = self.step_inner(w);
+        self.cursor_watch(w);
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
@@ -1071,6 +1097,45 @@ impl Plan {
         let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
         c
+    }
+
+    /// A stack left on the cursor with no window and no click pending for `CURSOR_STUCK_TICKS` is
+    /// put down in a free main slot (else the window is asked for again), noted: every task
+    /// begins with an empty cursor (race 45715674818 lane 0: netherrack 33 on the cursor, a
+    /// tunnel's stairs at (418, 40, 158) stood 1,200 ticks twice with no dig begun).
+    fn cursor_watch(&mut self, w: &World) {
+        let tick = w.session.server_ticks;
+        let Some((kind, n)) = w.inventory.carried else {
+            self.cursor_since = None;
+            return;
+        };
+        if w.window.is_some() || w.click.is_some() {
+            return;
+        }
+        let since = *self.cursor_since.get_or_insert(tick);
+        if tick.saturating_sub(since) < CURSOR_STUCK_TICKS || !self.acts.is_empty() {
+            return;
+        }
+        self.cursor_since = None;
+        self.cursor_puts += 1;
+        let act = match hold::put_down_slot(w) {
+            Some(slot) => world::Act::Click {
+                slot,
+                button: 0,
+                mode: 0,
+            },
+            None => world::Act::Resync,
+        };
+        self.note(
+            tick,
+            format!("cursor put down ({kind:?} {n})"),
+            format!(
+                "on the cursor {} ticks with no window and no click; {act:?}; {} in the run",
+                tick.saturating_sub(since),
+                self.cursor_puts
+            ),
+        );
+        self.acts.push(act);
     }
 
     /// A junk stack dropped and its kind back by `REPICKUP_JUMP` or more at once within
@@ -1907,20 +1972,109 @@ impl Plan {
         }
         // >>> pearls (P3, the orchestrator 2026-11-25): in the hunt a magma cube is never fought
         // by choice (a no-heal bot loses every trade, and they split): the hunt seals a pocket.
-        if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
+        // The way home (issue 19d) is not the hunt, though the top-up started it: on the trip a
+        // magma cube that strikes is fought (race 45698618366 lane 3 walked on through five
+        // magma cube hits, 19.8 to 1.8 health in 140 ticks, its defence ignoring every cube).
+        let home_trip =
+            self.ender.phase == endermen::EnderPhase::Home && self.ender.home.top_up_over;
+        let hunt_pocket =
+            (self.pearls.started && !home_trip) || self.ender.phase == endermen::EnderPhase::Hunt;
+        if hunt_pocket {
             ignored.extend(
                 w.entities
                     .iter()
                     .filter(|(_, e)| e.kind == data::EntityKind::MagmaCube)
                     .map(|(id, _)| *id),
             );
+        } else if home_trip {
+            // On the trip a cube is fought only when it is on the bot (within
+            // `home::CUBE_FIGHT`) and the health is over the danger line: a large one splits and
+            // a no-heal bot loses a long fight; further off the legs shun it, and under the line
+            // or with two near the trip seals a pocket (`home_recover`).
+            // Two within `CUBE_NEAR`, or a cube pocket in hand: the pocket, no fight.
+            let crowd = w
+                .entities
+                .values()
+                .filter(|e| {
+                    !e.dead
+                        && e.kind == data::EntityKind::MagmaCube
+                        && crate::home::dist(e.pos, body.pos) <= crate::home::CUBE_NEAR
+                })
+                .count();
+            // After a pocket given up (`home::CUBE_HOLD_MAX`) the near one is fought though
+            // two are near: the pocket waits `CUBE_RESUME_TICKS`.
+            let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t);
+            // A fight begun on one cube that split (race 45722775712 lane 2: a large one struck
+            // at (418, 40, 154) became three, the defence switched among them for 280 ticks, 16.2
+            // to dead) ends once two are near: the pocket takes over.
+            if crowd >= crate::home::CUBE_CROWD && !resting && matches!(self.task, Task::Defend(_))
+            {
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "home: the cube fight dropped for the pocket".to_owned(),
+                    format!("{crowd} magma cubes within {}", crate::home::CUBE_NEAR),
+                );
+            }
+            let over = w.player.health.is_some_and(|h| h > rules.danger_health)
+                && (crowd < crate::home::CUBE_CROWD || resting)
+                && self.ender.home.cube_pocket.is_none()
+                && self.ender.home.cube_tunnel.is_none();
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| {
+                        e.kind == data::EntityKind::MagmaCube
+                            && (!over
+                                || crate::home::dist(e.pos, body.pos) > crate::home::CUBE_FIGHT)
+                    })
+                    .map(|(id, _)| *id),
+            );
         }
-        let never_kinds: &[data::EntityKind] =
-            if self.pearls.started || self.ender.phase == endermen::EnderPhase::Hunt {
-                &[data::EntityKind::MagmaCube]
-            } else {
-                &[]
-            };
+        // On the way home a blaze or a ghast is never fought, at any health (a fireball costs 6 to
+        // 9 through iron and nothing heals): the trip's cover takes it (`home_recover`).
+        // A rail wanted with a knocker near (`home::rail_wanted`) cuts a walk under way: the
+        // planner lays the floor beside the feet before the next step.
+        if home_trip
+            && matches!(
+                self.task,
+                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+            )
+            && crate::home::rail_wanted(w).is_some()
+            && craft::count(w, data::ItemKind::Netherrack)
+                + craft::count(w, data::ItemKind::Basalt)
+                + craft::count(w, data::ItemKind::Cobblestone)
+                > 0
+        {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.retry_at = tick;
+            self.note(
+                tick,
+                format!("home: {cut} cut for a rail"),
+                "a mob that knocks back near and no floor beside the feet".to_owned(),
+            );
+        }
+        if home_trip {
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| {
+                        matches!(
+                            e.kind,
+                            data::EntityKind::Blaze
+                                | data::EntityKind::Ghast
+                                | data::EntityKind::Skeleton
+                        )
+                    })
+                    .map(|(id, _)| *id),
+            );
+        }
+        let never_kinds: &[data::EntityKind] = if hunt_pocket {
+            &[data::EntityKind::MagmaCube]
+        } else {
+            &[]
+        };
         // <<< pearls
         // A swim off an island is in water on purpose: only another trap (lava, fire, a wall)
         // cuts it, and a foe or hunger waits for the far shore (wall 24).
