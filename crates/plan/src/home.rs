@@ -280,6 +280,9 @@ pub struct HomeState {
     pub guard_try: Option<(Cell, u32)>,
     #[serde(default)]
     pub guard_refused: Vec<Cell>,
+    /// Blocks laid or dug to step up onto a span from below.
+    #[serde(default)]
+    pub step_ups: u32,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -385,6 +388,8 @@ pub const GUARD_EXTRA: i64 = 128;
 pub const GUARD_TRIES: u32 = 6;
 /// Guard cells given up, kept (the last).
 pub const GUARD_REFUSED_KEPT: usize = 32;
+/// Blocks laid or dug to step up onto a span from below, a trip.
+pub const STEP_UPS: u32 = 16;
 
 /// The next block of the guard (`Plan::home_guard`): for each side across `axis`, an open
 /// feet-level cell (no floor under it, or only a rail over a drop) is guarded. Its block is clicked onto a
@@ -1412,6 +1417,16 @@ impl Plan {
             );
             if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
                 self.expanded += walk.expanded;
+                // >>> Q8: up to 2 below and the walk finds no way: a step block laid toward the span
+                // at the feet's level, on a full floor, then the walk again (Q10's races 45764230971
+                // and 45764234506: 8 of 8 lanes at y 34 under the span top at 36, "tunnel route …
+                // 0 steps, ends within reach", every tick).
+                if (1..=2).contains(&(target.1 - feet.1))
+                    && let Some(t) = self.home_step_up(w, tick, feet, target)
+                {
+                    return Some(t);
+                }
+                // <<< Q8
                 // From below (race 45738826162: its own bridge 5 under the west span): the travel
                 // tunnel's stairs up, laying blocks where there is no floor.
                 if target.1 > feet.1 + 1
@@ -1564,6 +1579,99 @@ impl Plan {
             format!("from {feet:?}; walk {} on it", self.ender.home.bridge_walks),
         );
         Some(Task::Explore(walk))
+    }
+
+    /// Up to 2 below a span with no walk onto it: a stair of laid blocks toward it, one at the
+    /// feet's level, the next one higher, each on a full floor with two open cells over it; a
+    /// solid cell over a step (no lava beside) dug first. At most `STEP_UPS` blocks a trip. `None`
+    /// with nothing to lay or dig (the walk and the tunnel are tried as before).
+    fn home_step_up(&mut self, w: &World, tick: u64, feet: Cell, target: Cell) -> Option<Task> {
+        if self.ender.home.step_ups >= STEP_UPS {
+            return None;
+        }
+        let (dx, dz) = if target.2 != feet.2 {
+            (0, (target.2 - feet.2).signum())
+        } else if target.0 != feet.0 {
+            ((target.0 - feet.0).signum(), 0)
+        } else {
+            return None;
+        };
+        let mut cells = path::Cells::new(w);
+        let lava_by = |cells: &mut path::Cells, c: Cell| {
+            [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 0, 1), (0, 0, -1)]
+                .iter()
+                .any(|(x, y, z)| cells.at((c.0 + x, c.1 + y, c.2 + z)) == path::Class::Lava)
+        };
+        for i in 1..=(target.1 - feet.1) {
+            let c = (feet.0 + dx * i, feet.1 + i - 1, feet.2 + dz * i);
+            let under = (c.0, c.1 - 1, c.2);
+            match cells.at(c) {
+                path::Class::Solid => {
+                    // The step is there: its head room.
+                    if let Some(h) = [(c.0, c.1 + 1, c.2), (c.0, c.1 + 2, c.2)]
+                        .into_iter()
+                        .find(|h| cells.at(*h) == path::Class::Solid)
+                    {
+                        if lava_by(&mut cells, h) {
+                            return None;
+                        }
+                        self.ender.home.step_ups += 1;
+                        self.note(
+                            tick,
+                            format!("home: head room dug over the step up at {h:?}"),
+                            format!("from {feet:?} toward {target:?}"),
+                        );
+                        return Some(Task::Dig(crate::dig::Dig::new(w, h, tick)));
+                    }
+                }
+                path::Class::Clear if cells.at(under) == path::Class::Solid => {
+                    let item = endermen::FILLER
+                        .iter()
+                        .copied()
+                        .find(|k| craft::count(w, *k) > 0)?;
+                    if w.window.is_some()
+                        || w.click.is_some()
+                        || !self.acts.is_empty()
+                        || tick < self.shelter_at
+                    {
+                        return Some(Task::Idle);
+                    }
+                    return match crate::hold::toward(w, item) {
+                        crate::hold::Hold::Held => {
+                            self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                            self.ender.home.step_ups += 1;
+                            self.acts.push(world::Act::UseOn {
+                                pos: world::BlockPos::new(under.0, under.1, under.2),
+                                face: 1,
+                            });
+                            self.note(
+                                tick,
+                                format!("home: step up toward the old bridge at {c:?}"),
+                                format!(
+                                    "from {feet:?}, {} below {target:?}; {item:?} on {under:?}; {} laid",
+                                    target.1 - feet.1,
+                                    self.ender.home.step_ups
+                                ),
+                            );
+                            self.retry_at = tick + 1;
+                            Some(Task::Idle)
+                        }
+                        crate::hold::Hold::Act(a) => {
+                            self.acts.push(a);
+                            Some(Task::Idle)
+                        }
+                        crate::hold::Hold::Wait => Some(Task::Idle),
+                        crate::hold::Hold::Missing => None,
+                    };
+                }
+                path::Class::Clear
+                | path::Class::Water
+                | path::Class::Lava
+                | path::Class::Awkward
+                | path::Class::Unknown => return None,
+            }
+        }
+        None
     }
 
     /// One block laid at `at`, clicked on `click`'s face `face` with held filler; noted. `None`

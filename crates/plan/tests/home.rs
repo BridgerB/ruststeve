@@ -1395,3 +1395,36 @@ fn no_guard_while_a_restock_is_in_hand() {
     run(&mut p, &mut w, 100, 3);
     assert_eq!(p.ender.home.guards, 0, "{:?}", notes(&p));
 }
+
+#[test]
+fn two_below_a_span_a_step_is_laid_up_onto_it() {
+    // Q10's races 45764230971 and 45764234506: 8 of 8 lanes at y 34 under the span top at 36,
+    // "tunnel route ... 0 steps, ends within reach", every tick.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 1, 66, 10]];
+    goals.home.way = vec![[-200, 10]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    // The span: a one-wide line of blocks at y 64 and 65 along z 10, its top at 66.
+    for x in 1..=15 {
+        for y in 64..=65 {
+            set(&mut w, (x, y, 10), BlockKind::Netherrack);
+        }
+    }
+    let mut p = tripper(Some(t));
+    run(&mut p, &mut w, 100, 5);
+    assert!(
+        noted(&p, "home: step up toward the old bridge at (8, 64, 9)"),
+        "{:?}",
+        notes(&p)
+    );
+}

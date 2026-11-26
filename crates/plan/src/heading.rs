@@ -93,6 +93,9 @@ pub fn gap_ahead(w: &World, feet: Cell, dir: Dir) -> i64 {
 }
 pub const RESTOCK_TO: i64 = 48;
 pub const RESTOCK_DIGS: u32 = 24;
+/// On the way home a restock runs at most this long (two game minutes; Q10's races dug 4,300
+/// to 4,700 ticks by the join).
+pub const HOME_RESTOCK_TICKS: u64 = 2400;
 /// A wall cell is dug for filler from this near the eye (`walk::REACH`).
 pub const RESTOCK_REACH: f64 = 4.0;
 /// Restock cells are looked for this far from the eye; one past `RESTOCK_REACH` is walked to
@@ -1165,6 +1168,7 @@ impl Plan {
             if filler >= owed {
                 self.ender.home.filler_owed = None;
             } else if h.restock.is_none()
+                && tick >= h.restock_after
                 && restock_cells(w, Some(h.dir), RESTOCK_LOOK)
                     .into_iter()
                     .any(|c| !self.on_known_span(c))
@@ -1768,7 +1772,11 @@ impl Plan {
         let home = self.ender.phase == crate::endermen::EnderPhase::Home;
         let ahead = home.then_some(h.dir);
         let look = if home { RESTOCK_LOOK } else { RESTOCK_REACH };
-        let cell = (filler < to && r.digs < max_digs)
+        // >>> Q8: on the way home a restock runs at most `HOME_RESTOCK_TICKS`, then goes with what
+        // it has (Q10: the spans' restock dug 4,300 to 4,700 ticks by the join).
+        let timed_out = home && tick.saturating_sub(r.began) >= HOME_RESTOCK_TICKS;
+        // <<< Q8
+        let cell = (filler < to && r.digs < max_digs && !timed_out)
             .then(|| {
                 restock_cells(w, ahead, look)
                     .into_iter()
