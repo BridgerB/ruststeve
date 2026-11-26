@@ -335,16 +335,19 @@ pub const HEAD_CLEAR: f64 = 2.5;
 pub const NECK_CLEAR: f64 = 3.0;
 
 /// Is the straight way from `a` to `b` clear of the head: never before it from outside; from
-/// feet already before it (no way out of there passes no sample before it), a way that keeps
-/// `HEAD_CLEAR` from the head and `NECK_CLEAR` from the neck.
+/// feet already before it (no way out of there passes no sample before it), a way that comes no
+/// nearer the head than `HEAD_CLEAR` nor the neck than `NECK_CLEAR`, or than the feet already
+/// are when they are nearer: a way out that moves away.
 pub fn way_clear(v: &DragonView, a: [f64; 3], b: [f64; 3]) -> bool {
     if !before_head(v, a) {
         return !bite_on_way(v, a, b);
     }
-    let [hx, hz] = beside(v, HEAD_OUT, 0.0);
-    let [nx, nz] = beside(v, NECK_OUT, 0.0);
-    segment_distance([hx, 0.0, hz], a, b) >= HEAD_CLEAR
-        && segment_distance([nx, 0.0, nz], a, b) >= NECK_CLEAR
+    let keeps = |out: f64, clear: f64| {
+        let [px, pz] = beside(v, out, 0.0);
+        let p = [px, 0.0, pz];
+        segment_distance(p, a, b) >= clear.min(flat(p, a)) - 1e-9
+    };
+    keeps(HEAD_OUT, HEAD_CLEAR) && keeps(NECK_OUT, NECK_CLEAR)
 }
 
 /// The point on the plane a walk from `pos` to `b` goes by first while the straight way passes

@@ -373,7 +373,7 @@ fn escape_never_paths_through_the_sitting_dragons_head_or_bite_area() {
             assert!(!dragon::before_head(&v, p), "{c:?}");
             assert!(dragon::way_clear(&v, [4.5, 64.0, 0.5], p), "{c:?}");
             assert!(
-                dragon::segment_distance([7.0, 0.0, 0.5], [4.5, 64.0, 0.5], p) >= 2.5,
+                dragon::segment_distance([7.0, 0.0, 0.5], [4.5, 64.0, 0.5], p) >= 2.5 - 1e-9,
                 "never through the head: {c:?}"
             );
             assert!(dragon::flat(p, [5.5, 64.0, 0.5]) > 4.5, "{c:?}");
