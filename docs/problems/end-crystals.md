@@ -159,3 +159,35 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The cause:** E5's breath walk took the body off along the spike's top, and the way back to the shaft picked the cell beside it by the signs of both axes, (-9, 97, -41) for the shaft at (-8, -40). From there the shaft was not "next to" (two off), so the walk was asked again, 900 times.
 - **The fix:** the cells beside the shaft along an axis with a floor and room, the nearest walked to, then the step in. Unit test case added.
 - **Lane 1's death** (the orchestrator's answer): on the way down under danger plus one blow (14), with the dragon within 64 and not perched, the bot holds in its shaft ("hold in the shaft, hurt"). It eats there when food is short ("eat in the shaft") and goes down once the dragon is far or perched. Unit test `hurt_on_the_way_down_with_the_dragon_near_the_bot_holds_in_its_shaft`.
+
+## Seventh race: 45899557907 (dev-end-island, 2 lanes, 1fafc15 with issue-20-end c1135d7, development only)
+- **6 crystals struck (3 and 3).** Both bots died of falls after the dragon: lane 0 at tick 6,780, lane 1 at 4,860.
+- **New notes:** "hold in the shaft, hurt" once; the clutch began 4 times and poured 3.
+
+### Wall 11: E5's walk out of a breath on a pillar's top (fixed)
+- **What happened** (lane 1, ticks 4,800 to 4,860): a breath landed on its pillar's top at (-30, 83, -25). E5's `breath_step`, ahead of every task, looked for a cell out of it ("NoPath" every tick) while the breath took 6, and the bot fell.
+- **The fix:**
+  - A fenced E4 guard in `breath_step`: up a pillar or a spike it stands aside.
+  - The crystals dig down out of the breath at once ("dig down out of the breath"), ahead of every hold, and a hold ends when a breath comes.
+  - Unit test `a_breath_on_a_pillar_top_is_dug_down_out_of`.
+
+### Wall 12: a clutch with no pour (open)
+- **What happened** (lane 0, tick 6,680): digging down at y 88, health 18, the dragon struck twice (10 and 5, to 3), and the eat row cut the dig in that same tick.
+  - The clutch began 31.6 over the ground, but no pour was noted.
+  - The fall at 3 health killed it 100 ticks later.
+- **Not known:** whether the bucket was in the hotbar, and whether the eat in progress held the hand.
+- **Now noted:** the clutch's begin note carries the held item and the bucket's slot, and each pour sent is noted ("clutch pour sent"). The next race reads why.
+- **Made structural** (the orchestrator; the clutch is the one rule that must be certain: every death in races 4 to 7 was a fall after a blow):
+  - Once the clutch starts it owns the hand. The use key is let go (`ReleaseUse`), any eating task is dropped ("clutch stops the eating"), the bucket's slot is selected, and the pour goes on its predicted tick.
+  - Up a pillar or a spike, the water bucket is kept in the hotbar (index 8) by a hotbar swap click ("water bucket to the hotbar"), so selecting it is one packet.
+  - Unit tests `a_clutch_that_begins_while_eating_still_pours` and `up_a_pillar_the_water_bucket_is_kept_in_the_hotbar`.
+
+### Wall 13: shut in at the bunker's stair, every approach refused (the frontier race 45898928805 lane 1; fixed)
+- **What happened:** at tick 9,940 a provoked enderman's pocket put blocks on E3's bunker stair: (12, 60, 0), the next step, and (13, 61, 0), over the first. After the bunker opened, the bot stood at (13, 59, 0).
+  - E3's walk up the stair failed.
+  - Every spikes walk to (42, 0)'s four pillar feet was refused ("no way to ... refused"), then "no approach" from 10,260 to 22,000+.
+- **The fix:**
+  - With every approach refused but one there in the geometry, the bot digs its way out toward the nearest foot along its larger axis ("dig the way out at").
+  - A stair of up to three steps when the foot is higher: the cell over the head, the step's cell and the one over it. Otherwise the way along. Never obsidian or bedrock.
+  - The refusals are cleared after each dig so the walks are tried again.
+  - Unit test `shut_in_a_pit_with_every_approach_refused_the_bot_digs_its_way_out`, from a pit three deep.
