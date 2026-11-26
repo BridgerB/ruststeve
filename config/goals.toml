@@ -932,6 +932,18 @@ pickup_walks = 3
 # height unchanged for 8 ticks (positions arrive every 4 ticks there, so two updates).
 rest_rise = 2.0
 rest_ticks = 8
+# A drop at rest 2 to 12 over the feet with filler held is fetched, not given up (the coordinator
+# from Q4's overland races: both throws a bot made rested 9 up in a canopy, a pearl each): a walk
+# to within 1.2 of its column on the plane (else from within 4, as near as the ground lets it), a
+# pillar of held filler till the feet are within 1.5 under it (the pickup reaches about +2.3),
+# leaves over the head dug through; a block every 4 ticks at most (a block update comes in one
+# or two); given up after 400 ticks, and the pillar dug back down either way.
+climb_rise_max = 12.0
+climb_near = 4.0
+climb_beside = 1.2
+climb_within = 1.5
+climb_ticks = 400
+climb_every = 4
 # Where the eye drops from (Q5's parity 45688030470, 8 real throws): 12.15 out on the bearing and
 # 8.18 over its spawn at feet + 0.9, so about 9.1 over the feet. A throw with a bearing waits for a
 # spot whose column there, from the feet's level up to that point, holds no solid block seen.
