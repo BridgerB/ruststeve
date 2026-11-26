@@ -347,6 +347,10 @@ impl Plan {
             );
         }
         // 2. The tunnel: through rock, under cover, to within reach of the tunnel cell.
+        // >>> Q8 (issue 19): to the front's tunnel cell the route ends with the feet in it (Q10's
+        // race 45774326055: "0 steps (ends within reach)" 4 over it, 10,000 ticks idle).
+        self.travel.feet_in = front.map(|f| f.tunnel);
+        // <<< Q8
         let t = self.tunnel_toward_covered(
             w,
             target,

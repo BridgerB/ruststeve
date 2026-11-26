@@ -1645,3 +1645,70 @@ fn the_trips_pickaxe_run_refuses_a_far_table() {
         notes(&p)
     );
 }
+
+#[test]
+fn arrived_in_the_portals_own_cell_the_bot_steps_out_south_first() {
+    // Q11's race 45771600648: three bots stood in the portal at (125, -52, -108), "no stairs up
+    // from here", the shaft never begun.
+    let mut w = world(
+        home::OVERWORLD,
+        0,
+        column(BlockKind::Stone, 6),
+        [8.5, 40.0, 8.5],
+    );
+    kit(&mut w);
+    // A portal along x: x 8 to 9, y 40 to 42, z 8, its frame round it; a room cut south of it.
+    for y in 40..=42 {
+        for x in 8..=9 {
+            set(&mut w, (x, y, 8), BlockKind::NetherPortal);
+        }
+    }
+    for x in 7..=10 {
+        for y in 40..=41 {
+            set(&mut w, (x, y, 9), BlockKind::Air);
+        }
+    }
+    w.stage_reached = Some(world::stage::Stage::Pearls12);
+    let mut p = racer();
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: out of the portal to (8, 40, 9)"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_tunnel_to_a_standing_cell_ends_with_the_feet_in_it() {
+    // Q10's race 45774326055: six lanes at (22, 39, -16), 4 over the front's tunnel cell
+    // (22, 35, -18): "0 steps (ends within reach)", 10,000 ticks idle at the door.
+    let mut w = nether();
+    set(&mut w, (8, 52, 8), BlockKind::Air);
+    set(&mut w, (8, 53, 8), BlockKind::Air);
+    let w = w;
+    let none = std::collections::BTreeSet::new();
+    let route = |feet_in| {
+        plan::tunnel::route_keeping(
+            &w,
+            (8, 52, 8),
+            &[(8, 48, 10)],
+            &none,
+            false,
+            plan::tunnel::MAX_NODES,
+            plan::tunnel::Limits {
+                feet_in,
+                ..plan::tunnel::Limits::default()
+            },
+        )
+    };
+    let near = route(false).unwrap_or_else(|| panic!("no route"));
+    assert!(
+        near.cells.len() <= 1,
+        "within reach already: {:?}",
+        near.cells
+    );
+    let r = route(true).unwrap_or_else(|| panic!("no route"));
+    assert!(r.found, "{:?}", r.cells);
+    assert!(r.cells.len() > 1, "{:?}", r.cells);
+    assert_eq!(r.cells.last(), Some(&(8, 48, 10)), "{:?}", r.cells);
+}
