@@ -1,0 +1,38 @@
+# Issue 20f: the crystals by pillar and strike (agent E4)
+
+**Status: built and unit-tested on hand-built worlds (2026-11-26); not yet raced.** Code: `crates/plan/src/spikes.rs`; tests: `crates/plan/tests/spikes.rs`; brain: `brain/ruststeve/design/end-crystals.md`. Index: [`end.md`](end.md).
+
+## Needs
+From the island (stage `island`), every end crystal destroyed with the bot alive and on the ground: stage `crystals`. Nothing alive heals the dragon then (it heals 2 a second from the nearest crystal within 32, E1).
+
+## Done (world terms)
+A case file with stage `crystals`: the ledger shows a `spikes: crystal gone N` for each crystal, `spikes: pillar up to` and `spikes: pillar down at` in pairs, and no death.
+
+## The design (Bridger's choice, clojurecraft's `dragon.clj`)
+- **The stand:** 3 cells out from the crystal's column along an axis, feet level with the bedrock. The crystal's box (2 by 2) is then 2.0 from the eye, inside the 3.0 reach.
+- **The wall:** end stone in the two cells 2 out, at the feet's and the eye's height. e03: the strike from 3 off through it lost 0.42 (exposure 0). The explosion sits at the crystal's feet (bedrock + 1). Every ray to the 1.8-high body crosses the wall's plane under bedrock + 2 and within the stand's own column, so the wall shuts them all. That matters because, fully seen at 3 off, the blast takes about 56 (E1's formula).
+- **The attack:** 26.1 judges it by `isWithinAttackRange` alone, with no line-of-sight check (E1, jar), so the strike past the wall is legal.
+- **The pillar:** end stone only, the only placeable `dragon_immune` block the bot carries (E1: END_STONE, OBSIDIAN, IRON_BARS, BEDROCK). It goes in the first column out from the spike's top layer, 3 out at the nearest, and is recorded with its base so the way down digs exactly it.
+- **The guard ring:** at the stand, every open side at the feet's height not over the spike's obsidian or a recorded pillar gets a block, with a ledge under it first (a ledge alone is no guard; CI run 45865201752 caught the first version taking a ledge for one).
+- **Cages:** the bars (x and z c±2, y top to top+3) sit in the wall's own cells. Parity e03 (E6, run 45864998071, Normal, full iron with boots) struck through the intact bars and lost 0.42, the blast's least: a bar on the ring's edge is a full-width pane facing the stand. So the bars are the wall and the strike goes through them (`SpikeState::bars_shield`, true). The fallback, with it false, digs each wall cell's bar (no drop fetched) and puts end stone in.
+- **One blast, one wall (e03):** the blast leaves both wall cells air, end stone or bars. The wall is read from the world before every strike, so a crystal still standing is walled again first. With no wall, e03's bot died through full iron.
+- **Down:** the cell under the feet dug, one at a time, with no jump. The drops come back as end stone.
+
+## Rules
+- A climb (checked before each jump) needs the dragon more than 64 off or perched (phases 5 to 7), and health over danger + 6.
+- If the dragon strafes (1) or charges (8) within 40: inside a whole guard ring, hold crouched. On an unguarded pillar, dig down.
+- Never a strike at or under danger health.
+- A pillar that rises no block in 1,200 ticks fails, the note says why, and that approach is refused for 1,200 ticks.
+
+## What it needs from others
+- **E3:** `end_task` calls `Plan::spikes_task` while a crystal is alive. The driver `Plan::spikes_step` is already called from `step_inner` (fenced E4). End stone in stock: the plan's 260-odd blocks of pillar per run, recovered on the way down.
+- **E1 or the shell:** `config/end.toml`'s `[[spikes]]` rows (`centre = [x, z]`, `radius`, `top_y` = the bedrock's y, `caged`), loaded into `plan.spikes.geography`. Without them, the spike is read from the blocks seen round the crystal (its bedrock, its top layer, bars 2 out).
+
+## Risks, unverified
+- Dragon knock-back at the stand with a whole guard ring: not measured.
+- Each crystal's dig down loses nothing, but a pillar the dragon cannot break still stands if the bot dies on it. The record is then lost to a respawn: the stump is end stone on end stone and is no longer known as a pillar.
+- The walk from a wide spike's pillar top onto the spike (1 to 2 cells at height 76 to 103) relies on the pathfinder. Untested real.
+- Endermen: every look goes through `Plan::step`'s `keep_look`; the strike looks at the crystal, everything else looks down.
+
+## Walls
+(none raced yet)

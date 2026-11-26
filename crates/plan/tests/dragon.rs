@@ -454,12 +454,12 @@ fn the_dragon_is_dead_by_the_servers_word_and_the_credits_are_answered() {
     let mut w = end_at([12.5, 64.0, 0.5]);
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 0.0);
     let mut p = Plan::new(Aim::Race);
-    p.step(&w);
-    assert!(!p.dragon.dead);
     assert!(
-        p.events_since(0).iter().any(|e| e.what == "dragon fight"),
+        matches!(p.dragon_task(&w, 0), Some(plan::Task::Dragon(_))),
         "no crystal shown: the fight"
     );
+    p.step(&w);
+    assert!(!p.dragon.dead);
     w.step(&Event::Packet(S2c::EntityEvent {
         id: DRAGON,
         status: 2,

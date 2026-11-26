@@ -1087,7 +1087,7 @@ impl Plan {
     }
 
     /// The fight with the dragon, in the End with no crystal shown and the credits not yet come,
-    /// or `None` (E3's `end_task` calls it once the crystals are gone).
+    /// or `None` (E3's `end_task` calls it once the crystals are gone, `end::end_dragon`).
     pub fn dragon_task(&mut self, w: &World, tick: u64) -> Option<Task> {
         if !in_end(w) || w.won || w.body.is_none() {
             return None;
@@ -1126,9 +1126,8 @@ impl Plan {
                     .find(|(k, _)| data::generated::item_props::food_of(*k).is_some())
                     .map(|(k, _)| k)
             });
-        // >>> E5 merge: E3's `Plan.bunker` goes here once end.rs lands.
-        let bunker: Option<[i32; 3]> = None;
-        // <<< E5 merge
+        // E3's bunker (`Plan.bunker`), the wait while the dragon flies.
+        let bunker = self.bunker;
         let ask = Ask {
             danger,
             blow: HEAD_BLOW,

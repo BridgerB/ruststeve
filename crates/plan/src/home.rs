@@ -380,7 +380,10 @@ pub fn rail_wanted(w: &World) -> Option<(Cell, i8, bool, bool)> {
         .map(|((dx, dz), f)| ((feet.0 + dx, feet.1 - 1, feet.2 + dz), f))
         .find(|(c, _)| {
             matches!(cells.at(*c), path::Class::Lava | path::Class::Clear)
-                && (0..=RAIL_DROP).any(|d| cells.at((c.0, c.1 - d, c.2)) == path::Class::Lava)
+                && ((0..=RAIL_DROP).any(|d| cells.at((c.0, c.1 - d, c.2)) == path::Class::Lava)
+                    // >>> E3 (issue 20e): in the End a drop to the void wants the rail too.
+                    || (crate::end::in_end(w) && crate::end::void_column(w, *c)))
+            // <<< E3
         })
         .map(|(c, f)| (c, f, cube, knocker))
 }
@@ -553,7 +556,11 @@ pub fn near_lava_edge(w: &World) -> bool {
 pub fn at_lava_edge(w: &World) -> bool {
     w.body.is_some_and(|b| {
         let mut cells = path::Cells::new(w);
-        crate::walk::lava_edge(&mut cells, path::stand_cell(w, b.pos))
+        let feet = path::stand_cell(w, b.pos);
+        crate::walk::lava_edge(&mut cells, feet)
+            // >>> E3 (issue 20e): idle at a void edge in the End, sneak as at lava.
+            || (crate::end::in_end(w) && crate::end::void_edge(w, feet))
+        // <<< E3
     })
 }
 
@@ -3306,8 +3313,8 @@ impl Plan {
     /// raw meat held and the fuel to cook all of it (overworld planks, logs as their four planks,
     /// coal; warped wood is no fuel), table and furnace placed where the bot stands and the meat
     /// smelted, cooked meat 8 food a piece against raw's 3. `None` with nothing to cook, the fuel
-    /// short (noted), or the night's cook over.
-    fn home_cook(
+    /// short (noted), or the night's cook over. (E2, issue 20c: the End kit's cook too.)
+    pub(crate) fn home_cook(
         &mut self,
         w: &World,
         tick: u64,

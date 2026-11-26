@@ -52,10 +52,13 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[overland-and-stronghold]] - the overworld walk to the eyes' fix and the dig into the portal room (issue 19e/f).
+- [[end-portal]] - from the portal room to the End: the kit made on the surface, the frames filled, the step in (issue 20c/d).
 - [[eyes-of-ender]] - the eyes made in the 2x2 grid, thrown and read into lines, crossed into a fix (issue 19c).
 - [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.
 - [[way-home]] - from 12 pearls in the forest back through the entry portal to the overworld surface, fed (issue 19d).
+- [[end-island]] - the End from the arrival platform: a pillar to the bridge's height, the bridge west over the void with rails, the bunker in the end stone, the stock (issue 20e).
 - [[overworld-arrival]] - the climb from the overworld portal by the lava sea: a sealed shaft straight up in rock, the pickaxe run's table at hand (issue 19).
+- [[end-crystals]] - the End's crystals by pillar and strike: an end stone pillar, a guard ring, the stand behind two blocks, the way back down (issue 20f).
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
 - [[parity-table]] - captured worlds, 160 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.
