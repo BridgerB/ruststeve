@@ -794,6 +794,14 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             sneak: false,
         };
     }
+    // Held up by the floor beside the feet's cell (a body over an edge: E3's race 45890445738,
+    // x 14.2 half on a stair's step over the bunker's air, every walk refused from there for
+    // 14,000 ticks): onto the cell whose floor holds it first.
+    if !full(kind(w, (feet.0, feet.1 - 1, feet.2)))
+        && let Some(c) = held_by(w, body.pos, feet)
+    {
+        return Next::Step { to: c, sneak: true };
+    }
     if on_spike(w, feet) {
         // Back to a pillar's top at the feet's height, or into its shaft once dug: the way down.
         return st
@@ -896,13 +904,46 @@ fn dig_down(w: &World, c: Cell, tick: u64) -> Dig {
     d
 }
 
+/// The cell beside the feet's whose full floor the body's box (0.6 wide) rests on, when the
+/// feet's own cell has none.
+pub fn held_by(w: &World, pos: [f64; 3], feet: Cell) -> Option<Cell> {
+    let half = physics::HALF_WIDTH;
+    let (fx, fz) = (pos[0] - f64::from(feet.0), pos[2] - f64::from(feet.2));
+    [
+        (-1, 0),
+        (1, 0),
+        (0, -1),
+        (0, 1),
+        (-1, -1),
+        (-1, 1),
+        (1, -1),
+        (1, 1),
+    ]
+    .into_iter()
+    .filter(|(dx, dz)| {
+        let over_x = match dx {
+            -1 => fx < half,
+            1 => fx > 1.0 - half,
+            _ => true,
+        };
+        let over_z = match dz {
+            -1 => fz < half,
+            1 => fz > 1.0 - half,
+            _ => true,
+        };
+        over_x && over_z
+    })
+    .map(|(dx, dz)| (feet.0 + dx, feet.1, feet.2 + dz))
+    .find(|c| full(kind(w, (c.0, c.1 - 1, c.2))) && open(kind(w, *c)))
+}
+
 fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
 }
 
 impl Plan {
     // >>> E4 (issue 20f)
-    fn spikes_note(&mut self, tick: u64, what: String, why: String) {
+    pub(crate) fn spikes_note(&mut self, tick: u64, what: String, why: String) {
         if let Some((last, at)) = &self.spikes.last_note
             && *last == what
             && tick.saturating_sub(*at) < NOTE_EVERY
@@ -911,6 +952,24 @@ impl Plan {
         }
         self.spikes.last_note = Some((what.clone(), tick));
         self.note(tick, what, why);
+    }
+
+    /// Is the bot up high on the crystals' work in the End: on a pillar it put up, on a spike's
+    /// top, or climbing or stepping in its column?
+    pub fn spikes_up_high(&self, w: &World) -> bool {
+        if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
+            return false;
+        }
+        let Some(body) = w.body else {
+            return false;
+        };
+        let feet = path::stand_cell(w, body.pos);
+        on_pillar(w, feet, &self.spikes.pillars)
+            || on_spike(w, feet)
+            || matches!(
+                self.spikes.doing,
+                Some(Doing::Climb(_) | Doing::Step { .. } | Doing::Build(_) | Doing::Strike(_))
+            )
     }
 
     fn spikes_danger(&self) -> f32 {
@@ -1247,7 +1306,11 @@ impl Plan {
             Next::Step { to, sneak } => {
                 self.spikes_note(
                     tick,
-                    format!("spikes: step into the shaft at {to:?}"),
+                    if sneak {
+                        format!("spikes: step onto the floor at {to:?}")
+                    } else {
+                        format!("spikes: step into the shaft at {to:?}")
+                    },
                     format!("from {feet:?}, sneaking {sneak}"),
                 );
                 self.spikes.doing = Some(Doing::Step {
@@ -1265,7 +1328,7 @@ impl Plan {
     /// `CLUTCH_FROM` under the feet and a water bucket held, the bucket to hand, used looking
     /// straight down in the last tick the eye is in reach of the ground (`pour_now`); landed, the water taken
     /// back. Every step noted.
-    fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn spikes_clutch(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if w.dimension.as_ref().map(|d| d.name.as_str()) != Some("minecraft:the_end") {
             self.spikes.clutch = None;
             return None;
@@ -1443,10 +1506,6 @@ impl Plan {
                 self.spikes.box_blow_at = Some(tick);
             }
             self.spikes.last_health = Some(h);
-        }
-        // The clutch first, whatever runs: a fall waits for no task.
-        if let Some(c) = self.spikes_clutch(w, tick) {
-            return Some(c);
         }
         if !matches!(self.task, Task::Idle) {
             return None;
