@@ -84,5 +84,19 @@ Development start. Lanes 0 and 1 ran to the cap; lane 2 died. 25 head strikes in
   - A cell reached with the feet still in a breath is refused until out.
   - "out of the breath to" is noted only when the cell changes.
 
+**Throughput in race 45882663266.** A perch runs from landing to sitting until takeoff, about 1,100 ticks, which is four flame cycles. Counted from the ledgers:
+
+| lane | perches | strikes per perch | hits taken per perch |
+|---|---|---|---|
+| 0 | 6 | 7, 0, 0, 2, 2, 0 (the cap) | 4, 0, 7, 6, 0, 0 |
+| 1 | 5 | 4, 0, 0, 2, 2 | 8, 9, 0, 6, 4 |
+| 2 | 1 (died in it) | 6 | 6 |
+
+Most perches gave 0 to 2 strikes. That is the wall, not the cap. In the perches with no strike:
+- **Breath churn** (wall 7). "out of the breath to" was noted 124 to 631 times a perch, and every other task waited. Lane 1's perches 2 and 3 went that way, as did lane 0's perch 3.
+- **No head stand found from the bunker** (lane 0, perch 2, 3,740 to 4,800). The fight began in the bunker three down, and `ground` looked only 3 over the feet, so the surface 4 up was never a stand. The bot held "in the bunker" through the whole perch.
+  - **Fix:** `GROUND_UP` 3 → 6.
+- Each flame cycle cost about 3.0 to a bot walking out of the flame. The flame fix (da32c2b) leaves before the flame comes.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

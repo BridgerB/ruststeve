@@ -117,8 +117,10 @@ pub const RIM: f64 = 3.6;
 pub const STAND_NEAR: f64 = 1.0;
 /// Blocks round the feet no hostile may be for a lull (`dragon/calm-radius`).
 pub const CALM_RADIUS: f64 = 8.0;
-/// Heights over and under the feet a stand's ground is looked for in.
-pub const GROUND_UP: i32 = 3;
+/// Heights over and under the feet a stand's ground is looked for in: from the bunker three down
+/// the surface is four up, and the stairs' top a block more (race 45882663266 lane 0: in the
+/// bunker no head stand was found for a whole perch, 1,060 ticks with no strike).
+pub const GROUND_UP: i32 = 6;
 pub const GROUND_DOWN: i32 = 8;
 /// A fight hands back to the planner this often, so the End's order is asked again
 /// (`dragon/perch-hold-ms`, 60 s).
