@@ -661,6 +661,46 @@ impl Plan {
                 return Some(Task::Explore(walk));
             }
             self.expanded += walk.expanded;
+            // The route's end under the point (race 45865135195's replan: from the room the
+            // way's reach ends in the corridor at (1609, 19, -38), 4 under the stair it dropped
+            // from): walked to, then stairs up toward the point from there.
+            let end = walk.waypoints.as_ref().and_then(|v| v.last().copied());
+            if let Some(e) = end.filter(|e| near(feet, *e) > 1.5) {
+                let mut to_end = Walk::new(e, Goal::Block { pos: e }, Arrive::Goal, tick);
+                if to_end.route_now(w, tick) && to_end.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("end kit: to the way's reach at {e:?} under point {i}"),
+                        format!("from {feet:?}, route to {p:?} {found:?}"),
+                    );
+                    return Some(Task::Explore(to_end));
+                }
+                self.expanded += to_end.expanded;
+            }
+            // Right under it: pillared up on held blocks to its height (Q7's shaft, stopped there).
+            if p.1 > feet.1 + 1
+                && flat(feet, p) <= 1.0
+                && let Some(t) = self.arrival_rise_to(w, tick, p.1)
+            {
+                self.note(
+                    tick,
+                    format!("end kit: pillar up to point {i} at {p:?}"),
+                    format!("from {feet:?}, no walk (route {found:?})"),
+                );
+                return Some(t);
+            }
+            if p.1 > feet.1 + 1 {
+                let why = format!("point {i}, no walk from {feet:?} (route {found:?})");
+                if let Some(t) = self.dig_toward(w, p, true, ("the way's point", &why), tick) {
+                    self.note(
+                        tick,
+                        format!("end kit: stairs up toward point {i} at {p:?}"),
+                        why,
+                    );
+                    return Some(t);
+                }
+            }
             self.note(
                 tick,
                 format!("end kit: no walk to point {i} at {p:?}"),
