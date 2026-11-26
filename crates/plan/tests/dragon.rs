@@ -118,6 +118,8 @@ fn ask() -> Ask {
         food: true,
         way: None,
         sat_damage: 0.0,
+        phase_ticks: 0,
+        way_done: None,
     }
 }
 
@@ -259,6 +261,14 @@ fn the_wait_is_behind_the_sitting_dragons_head() {
         Some([9, FLOOR, 0]),
         "2.0 beyond the head's box"
     );
+    assert_eq!(
+        decide(&w, &ask()),
+        Want::Go([-9, FLOOR, 0], "to the head stand"),
+        "scanning, it turns its head onto the bot: the stand on the bot's side"
+    );
+    // Attacking, its yaw held: round its head to the stand it points at.
+    let mut w = end_at([-12.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
     match decide(&w, &ask()) {
         Want::Go(c, "round the head") => {
             assert!(
@@ -547,12 +557,12 @@ fn the_dragon_comes_before_a_provoked_endermans_pocket() {
 fn a_way_round_the_head_is_kept_until_it_is_reached() {
     // Race 45873410249 lane 0: the way round and the head stand swapped every tick.
     let mut w = end_at([-12.5, 64.0, -1.0]);
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
     let Want::Go(held, "round the head") = decide(&w, &ask()) else {
         panic!("round the head");
     };
     let mut w = end_at([-12.5, 64.0, 2.0]);
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
     let Want::Go(fresh, "round the head") = decide(&w, &ask()) else {
         panic!("round the head");
     };
@@ -570,7 +580,7 @@ fn a_way_round_the_head_is_kept_until_it_is_reached() {
         "held, it is kept"
     );
     let mut there = end_at(feet_of(held));
-    with_dragon(&mut there, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    with_dragon(&mut there, [0.5, PERCH_Y, 0.5], 7, 90.0);
     let a = Ask {
         way: Some(held),
         ..ask()
@@ -693,5 +703,122 @@ fn the_strike_that_makes_it_take_off_is_struck_from_under_the_wings() {
     assert!(
         matches!(decide(&low, &a), Want::Strike { head: true, .. }),
         "down in it: the strike"
+    );
+}
+
+#[test]
+fn the_flame_is_waited_out_of_its_reach() {
+    // Races 45873410249 and 45876898172: 3.0 a flame, walking out of its cloud from the head stand.
+    let mut w = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
+    assert!(
+        matches!(decide(&w, &ask()), Want::Strike { head: true, .. }),
+        "the attacking turn's first ticks: the strike"
+    );
+    let late = Ask {
+        phase_ticks: 30,
+        ..ask()
+    };
+    let v = dragon::view(&w).unwrap().1;
+    let h = head_point(&v);
+    match decide(&w, &late) {
+        Want::Go(c, "out of the flame's way") => {
+            let d = dragon::flat(feet_of(c), h);
+            assert!(d >= dragon::FLAME_CLEAR, "{c:?} {d}");
+            assert!(
+                dragon::flat(feet_of(c), v.pos) >= dragon::BITE_OUT + 1.0,
+                "out of the turning head's sweep: {c:?}"
+            );
+            assert!(!dragon::before_head(&v, feet_of(c)), "{c:?}");
+        }
+        other => panic!("out of the flame's way before it comes, not {other:?}"),
+    }
+    let mut flaming = end_at(feet_of([9, FLOOR, 0]));
+    with_dragon(&mut flaming, [0.5, PERCH_Y, 0.5], 5, 90.0);
+    assert!(
+        matches!(
+            decide(&flaming, &ask()),
+            Want::Go(_, "out of the flame's way")
+        ),
+        "and while it burns"
+    );
+}
+
+#[test]
+fn a_cell_out_of_the_breath_is_never_the_feets_own_and_well_clear() {
+    // Race 45882663266: lane 0 held 370 ticks at 6.4 off a reach of 6.5, the walk to its own cell
+    // done each tick; lane 2 walked 211 times to the cell under it on the bunker's stair.
+    let mut w = end_at([13.9, 64.0, 0.5]);
+    cloud(&mut w, 50, [9.5, 64.0, 0.5], 3.0);
+    let b = breaths(&w);
+    assert!(
+        dragon::breath_on(&b, [13.9, 64.0, 0.5]).is_some(),
+        "4.4 off a reach of 4.5"
+    );
+    let c = dragon::out_of_breath(&w, [13.9, 64.0, 0.5]).unwrap();
+    assert_ne!([c[0], c[2]], [13, 0], "not its own column");
+    assert!(
+        dragon::flat(feet_of(c), [9.5, 64.0, 0.5]) > 5.5,
+        "a block past the reach: {c:?}"
+    );
+}
+
+#[test]
+fn a_charge_is_waited_out_crouched_or_in_the_bunker() {
+    // E4's race 4: a charge hit a bot digging down two over the ground for 10 and 5 and threw it
+    // 48 high.
+    let feet = [12.5, 64.0, 0.5];
+    // Yaw 90 faces +x: from x -17.5 the dragon's facing is on the line to the bot, 30 off.
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-17.5, 64.0, 0.5], 8, 90.0);
+    assert!(dragon::charging_at(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    let c = p.charge_step(&w, 0).expect("held");
+    assert!(c.sneak && !c.forward, "crouched still");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "charge: hold crouched where the feet are")
+    );
+    let mut away = end_at(feet);
+    with_dragon(&mut away, [-17.5, 64.0, 0.5], 8, 270.0);
+    assert!(dragon::charging_at(&away, feet).is_none(), "facing away");
+    let mut far = end_at(feet);
+    with_dragon(&mut far, [-40.5, 64.0, 0.5], 8, 90.0);
+    assert!(dragon::charging_at(&far, feet).is_none(), "53 off");
+    let mut holding = end_at(feet);
+    with_dragon(&mut holding, [-17.5, 64.0, 0.5], 0, 90.0);
+    assert!(
+        dragon::charging_at(&holding, feet).is_none(),
+        "not charging"
+    );
+    // With the bunker in reach: into it.
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([16, FLOOR, 0]);
+    assert!(q.charge_step(&w, 0).is_some());
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == format!("charge: hold in the bunker at {:?}", [16, FLOOR, 0]))
+    );
+}
+
+#[test]
+fn a_scanning_turn_that_does_not_come_is_not_waited_for() {
+    // E6's end_loop: a dragon that never turned held the bot 15,000 ticks behind it.
+    let mut w = end_at([-12.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    assert_eq!(
+        decide(&w, &ask()),
+        Want::Go([-9, FLOOR, 0], "to the head stand"),
+        "the turn's first ticks: where the head will come"
+    );
+    let long = Ask {
+        phase_ticks: 60,
+        ..ask()
+    };
+    assert!(
+        matches!(decide(&w, &long), Want::Go(_, "round the head")),
+        "no turn in 40: round to the head as it points"
     );
 }
