@@ -139,24 +139,24 @@ fn the_config_holds_the_default_covered_points() {
 
 #[test]
 fn resumed_by_a_point_the_covered_way_tunnels_to_the_next() {
-    // 7 on the plane from (294, 54, 70), the nearest point: the 13 before it passed.
+    // 7 on the plane from (294, 54, 70), the nearest point: the 12 before it passed.
     let mut w = nether([300.5, 54.0, 66.5]);
     let mut p = homeward();
     run(&mut p, &mut w);
     let n = notes(&p);
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: begun at point 13 of 25")),
+            .any(|s| s.starts_with("covered way: begun at point 12 of 25")),
         "{n:?}"
     );
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: tunnel to point 13 at (294, 54, 70)")),
+            .any(|s| s.starts_with("covered way: tunnel to point 12 at (294, 54, 70)")),
         "{n:?}"
     );
     assert!(!n.iter().any(|s| s.starts_with("heading leg")), "{n:?}");
     assert!(matches!(p.task, Task::Stairs(_)), "{}", p.task.name());
-    assert_eq!(p.ender.home.covered.passed, 13);
+    assert_eq!(p.ender.home.covered.passed, 12);
     // The first point's column is passed for the heading's fallback too.
     assert!(p.ender.home.ways_passed.contains(&(479 >> 4, 19 >> 4)));
 }
@@ -169,12 +169,12 @@ fn at_a_point_it_is_passed_and_the_next_aimed_at() {
     let n = notes(&p);
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: point 13 of 25 passed at [294, 54, 70, 0]")),
+            .any(|s| s.starts_with("covered way: point 12 of 25 passed at [294, 54, 70, 0]")),
         "{n:?}"
     );
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: tunnel to point 14 at (275, 52, 75)")),
+            .any(|s| s.starts_with("covered way: tunnel to point 13 at (275, 52, 75)")),
         "{n:?}"
     );
 }
