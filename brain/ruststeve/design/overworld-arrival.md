@@ -5,8 +5,8 @@ type: reference
 tags: [plan, home, overworld, climb, shaft, stairs]
 aliases: [arrival, shaft, Arrival, Shaft, arrival_step, arrival_climb, arrival_table, arrival_hand_over, arrival_food_walk, side_cell, SHAFT_BLOCKS, TABLE_REACH, HAND_OVER_FOOD, FOOD_POINT, the shaft, pillar up, step aside]
 status: draft
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@4dc778b
+lastUpdated: 2026-11-26
+verifiedAgainst: ruststeve@34ec399
 sourceRefs:
   - "ruststeve:crates/plan/src/arrival.rs#pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> Step {"
   - "ruststeve:crates/plan/src/arrival.rs#pub(crate) fn arrival_step(&mut self, w: &World, tick: u64) -> Option<Controls> {"
@@ -16,6 +16,7 @@ related:
   - "[[way-home]]"
   - "[[stairs-down]]"
   - "[[digging]]"
+  - "[[end-crystals]]"
 ---
 
 # The overworld arrival
@@ -32,7 +33,7 @@ The way home's stairs in rock climb a block for three digs (race 45727358847: ab
 
 `Plan::arrival_climb`, called from the way home's climb (`home_climb`), begins a shaft where `step` allows one ("arrival: shaft up from"); refused, it notes "arrival: no shaft from" and the stairs take a leg (they turn from caves), and the next climb tries again from where the leg ended. `Plan::arrival_step` drives the shaft a tick at a time ahead of the task choice while no task runs; it ends "arrival: shaft over at" with its reason, rise, digs and blocks placed. A shaft ends for the climb's pickaxe run when the way home's own rule would make pickaxes.
 
-Before each jump the feet go to the cell's centre (`CENTRE` 0.12, sneaking): off it, the body touches the next column and the jump stops on the rock over it. A dig whose drop a full pack cannot take still counts once its cell is open. The junk blocks of the trip (soul soil, nylium, wart blocks, tuff, granite) go under the feet first, so the climb empties the pack. A stack left on the cursor `CURSOR_WAIT` (100) ticks goes to a free slot or swaps out a junk block (never sooner: a hold's swap carries its item on the cursor between clicks).
+Before each jump the feet go to the cell's centre (`CENTRE` 0.12, sneaking): off it, the body touches the next column and the jump stops on the rock over it. The rise's two halves are `rise_jump` (centre, the block to hand, the jump) and `rise_click` (the block in at the top of the jump), shared with the End's spike pillars ([[end-crystals]], issue 20f) and unchanged in behaviour. A dig whose drop a full pack cannot take still counts once its cell is open. The junk blocks of the trip (soul soil, nylium, wart blocks, tuff, granite) go under the feet first, so the climb empties the pack. A stack left on the cursor `CURSOR_WAIT` (100) ticks goes to a free slot or swaps out a junk block (never sooner: a hold's swap carries its item on the cursor between clicks).
 
 A refused shaft first steps aside (`side_cell`): a level tunnel of up to `SIDE_REACH` 3 cells, nearest first, every cell on a full floor, rock or open, neither a falling block nor under one, no fluid in, beside or over it, no open cell beside it but the one behind, quick to break, and a shaft allowed from its end; at most `SIDES_MAX` 3 with no rise between ("arrival: shaft steps aside to").
 
