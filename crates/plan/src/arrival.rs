@@ -33,19 +33,29 @@ use crate::dig::{Dig, DigStatus};
 use crate::path::{self, Cell};
 use crate::{Plan, Task, craft, hold};
 
-/// Blocks the shaft puts under the feet, the first held: what the climb digs (cobbled deepslate
-/// under y 0, cobblestone over it, tuff) and the trip's filler (netherrack, blackstone, basalt).
-pub const SHAFT_BLOCKS: [ItemKind; 10] = [
+/// Blocks the shaft puts under the feet, the first held. The junk first: a full pack's junk
+/// thrown down in a shaft or a stair lands at the feet and comes back 40 ticks later, and the
+/// climb's pickaxe run dropped granite and tuff 59 times in 2,300 ticks and never crafted (race
+/// 45731721046 lane 0, from tick 13,880); put under the feet it is gone for good. Then what the
+/// climb digs (cobbled deepslate under y 0, cobblestone over it) and the trip's filler.
+pub const SHAFT_BLOCKS: [ItemKind; 17] = [
+    ItemKind::SoulSoil,
+    ItemKind::SoulSand,
+    ItemKind::WarpedNylium,
+    ItemKind::CrimsonNylium,
+    ItemKind::WarpedWartBlock,
+    ItemKind::SmoothBasalt,
+    ItemKind::Granite,
+    ItemKind::Tuff,
+    ItemKind::Diorite,
+    ItemKind::Andesite,
+    ItemKind::Calcite,
+    ItemKind::Dirt,
     ItemKind::CobbledDeepslate,
     ItemKind::Cobblestone,
     ItemKind::Netherrack,
-    ItemKind::Tuff,
     ItemKind::Blackstone,
     ItemKind::Basalt,
-    ItemKind::Andesite,
-    ItemKind::Diorite,
-    ItemKind::Granite,
-    ItemKind::Dirt,
 ];
 
 /// Ticks with no rise before a shaft is given up: a dig of deepslate with a wooden pickaxe is
@@ -57,6 +67,11 @@ pub const MAX_BREAK: u64 = 100;
 /// Blocks a table may be from the eye for the climb's pickaxe run: a click's reach (4.5) and a
 /// little.
 pub const TABLE_REACH: f64 = 5.0;
+/// How far the feet may be off the cell's centre on either axis before a jump: a body 0.6 wide
+/// at x 124.7 touches the next column, and its jump is stopped by the rock over it (race
+/// 45731721046 lane 0: six shafts of seven dug one cell and never rose, the body at 124.7 or
+/// -109.5 + 0.2; the one centred at 113.5 rose 8 in 631 ticks).
+pub const CENTRE: f64 = 0.12;
 /// Cells over a cell checked for the sky: `world::stage::SKY_CHECK`, the open-sky rule's own.
 const SKY: i32 = world::stage::SKY_CHECK;
 
@@ -414,6 +429,13 @@ impl Plan {
                     s.dig = None;
                     s.dug += 1;
                 }
+                // The cell open: the dig did its work, whatever became of the drop (a full pack:
+                // "failed Uncollected" ended three shafts in race 45731721046).
+                DigStatus::Failed(_) if open(kind(w, d.target)) => {
+                    s.opened = Some(d.target);
+                    s.dig = None;
+                    s.dug += 1;
+                }
                 DigStatus::Failed(f) => {
                     let why = format!("the dig of {:?} failed {f:?}", d.target);
                     self.shaft_end(tick, s, feet, &why, true);
@@ -431,7 +453,14 @@ impl Plan {
             s.clicked = false;
         }
         if tick.saturating_sub(s.rose_at) > SHAFT_STALL {
-            let why = format!("no rise for {SHAFT_STALL} ticks");
+            let why = format!(
+                "no rise for {SHAFT_STALL} ticks (body at {:.2}, {:.2}, {:.2}, on the ground {}, over the head {:?})",
+                body.pos[0],
+                body.pos[1],
+                body.pos[2],
+                body.on_ground,
+                kind(w, (feet.0, feet.1 + 2, feet.2))
+            );
             self.shaft_end(tick, s, feet, &why, true);
             return None;
         }
@@ -503,6 +532,17 @@ impl Plan {
                     self.shaft_end(tick, s, feet, "no block held to put under the feet", true);
                     return None;
                 };
+                // To the cell's centre first, slowly (sneaking keeps the feet off any edge).
+                let centre = [f64::from(feet.0) + 0.5, f64::from(feet.2) + 0.5];
+                let (dx, dz) = (centre[0] - body.pos[0], centre[1] - body.pos[2]);
+                if dx.abs() > CENTRE || dz.abs() > CENTRE {
+                    return Some(Controls {
+                        forward: true,
+                        sneak: true,
+                        yaw: (-dx).atan2(dz).to_degrees(),
+                        ..down
+                    });
+                }
                 match hold::toward(w, item) {
                     hold::Hold::Held => {
                         s.jump_from = Some(feet);
