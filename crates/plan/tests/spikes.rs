@@ -841,6 +841,16 @@ fn the_way_down_centres_first_and_steps_into_a_dug_shaft() {
             approach: None
         }
     );
+    // Off the axis (race 45895161187 lane 0 walked to a diagonal "beside" 900 times): the cell
+    // beside it along an axis.
+    at(&mut w, [9.5, 70.0, 5.5]);
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Walk {
+            to: (8, 70, 4),
+            approach: None
+        }
+    );
 }
 
 #[test]
@@ -947,4 +957,40 @@ fn a_body_held_up_by_the_floor_beside_steps_onto_it_first() {
             sneak: true
         }
     );
+}
+
+#[test]
+fn hurt_on_the_way_down_with_the_dragon_near_the_bot_holds_in_its_shaft() {
+    // Race 45895161187 lane 1: going down at 9 health, struck dead.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    gone(&mut w);
+    w.player.health = Some(9.0);
+    dragon(&mut w, [8.5, 67.0, 45.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: hold in the shaft, hurt"),
+        "{:?}",
+        notes(&p)
+    );
+    // The dragon perched: down.
+    dragon(&mut w, [0.5, 66.0, 0.5], 6);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
 }

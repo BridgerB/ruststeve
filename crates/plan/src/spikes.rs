@@ -132,6 +132,10 @@ pub const REFUSE_TICKS: u64 = 1200;
 /// wide within 0.2 of the centre stands on its cell alone.
 pub const STEP_NEAR: f64 = 0.2;
 pub const STEP_TICKS: u64 = 60;
+/// One blow of the dragon's (its breath's 6 through iron, race 45875049490; a wing's 5, a head's
+/// 10): on the way down under danger plus this, the bot holds in its shaft while the dragon is
+/// near.
+pub const ONE_BLOW: f32 = 6.0;
 /// Ticks after a blow inside the box in which the bot leaves it for the way down.
 pub const BOX_BLOW_TICKS: u64 = 200;
 /// Ticks a repeated note waits before it is written again.
@@ -824,19 +828,38 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
                         .map(|dy| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
                         .find(|c| !open(kind(w, *c)) && kind(w, *c) != Some(BlockKind::Obsidian));
                     let top = (r.x, feet.1, r.z);
-                    let next_to = (r.x - feet.0).abs() + (r.z - feet.2).abs() <= 1;
                     let shaft = !full(kind(w, (r.x, feet.1 - 1, r.z)));
+                    // The cells beside the shaft along an axis a body can stand in (race
+                    // 45895161187 lane 0: a diagonal "beside" was walked to 900 times).
+                    let beside: Vec<Cell> = Axis::ALL
+                        .iter()
+                        .map(|a| {
+                            let (ax, az) = a.step();
+                            (r.x + ax, feet.1, r.z + az)
+                        })
+                        .filter(|c| {
+                            full(kind(w, (c.0, c.1 - 1, c.2)))
+                                && open(kind(w, *c))
+                                && open(kind(w, (c.0, c.1 + 1, c.2)))
+                        })
+                        .collect();
                     match way {
                         Some(c) => Next::Open(c),
                         // A dug shaft: walk to beside it on the spike, then step in.
-                        None if shaft && next_to => Next::Step {
+                        None if shaft && beside.contains(&feet) => Next::Step {
                             to: top,
                             sneak: false,
                         },
-                        None if shaft => Next::Walk {
-                            to: (r.x - dx, feet.1, r.z - dz),
-                            approach: None,
-                        },
+                        None if shaft => beside
+                            .iter()
+                            .min_by_key(|c| (c.0 - feet.0).abs() + (c.2 - feet.2).abs())
+                            .map_or_else(
+                                || Next::Wait("no cell beside the pillar's shaft".to_owned()),
+                                |c| Next::Walk {
+                                    to: *c,
+                                    approach: None,
+                                },
+                            ),
                         None => Next::Walk {
                             to: top,
                             approach: None,
@@ -1072,6 +1095,39 @@ impl Plan {
                 format!(
                     "the dragon {:?} at {feet:?}; health {health:?}",
                     d.map(|d| (d.dist, d.phase))
+                ),
+            );
+            return Some(self.spikes_hold(tick));
+        }
+        // Hurt on the way down (under danger plus one blow) with the dragon near and not perched:
+        // held in the shaft, eating when food is short, until it is far or perched (the
+        // orchestrator, after race 45895161187 lane 1: struck dead at 9 going down).
+        if health.is_some_and(|h| h < danger + ONE_BLOW)
+            && body.on_ground
+            && on_pillar(w, feet, &self.spikes.pillars)
+            && matches!(n, Next::DigDown(_) | Next::Step { .. })
+            && let Some(why) = dragon_refusal(d.as_ref())
+        {
+            let food = self
+                .table
+                .as_ref()
+                .and_then(|t| crate::eat::best_food(w, &t.survival));
+            if w.player.food.is_some_and(|f| f < 20)
+                && let Some(f) = food
+            {
+                self.spikes_note(
+                    tick,
+                    "spikes: eat in the shaft".to_owned(),
+                    format!("{f:?}; health {health:?}, food {:?}; {why}", w.player.food),
+                );
+                return Some(Task::Eat(crate::eat::Eat::new(w, f, tick)));
+            }
+            self.spikes_note(
+                tick,
+                "spikes: hold in the shaft, hurt".to_owned(),
+                format!(
+                    "health {health:?} under {}; {why} at {feet:?}",
+                    danger + ONE_BLOW
                 ),
             );
             return Some(self.spikes_hold(tick));
