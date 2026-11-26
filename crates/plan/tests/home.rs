@@ -849,3 +849,32 @@ fn no_way_point_or_leg_comes_within_24_of_the_blaze_spawner() {
         assert!(d >= 24.0, "{:?} to {:?} comes {d:.1} near", leg[0], leg[1]);
     }
 }
+
+#[test]
+fn a_blaze_in_sight_on_the_trip_is_never_struck() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 60,
+        uuid: [0; 16],
+        kind: data::EntityKind::Blaze.id(),
+        x: 14.5,
+        y: 66.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 40);
+    let n = notes(&p);
+    assert!(
+        !n.iter().any(|s| s.starts_with("defend Blaze")),
+        "never a fight with a blaze in Home: {n:?}"
+    );
+    assert!(!matches!(p.task, Task::Defend(_)), "{}", p.task.name());
+}

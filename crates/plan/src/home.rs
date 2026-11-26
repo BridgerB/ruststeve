@@ -210,6 +210,9 @@ pub struct HomeState {
     pub cube_resume_at: Option<u64>,
     #[serde(default)]
     pub cube_breakouts: u32,
+    /// The last tick a blaze or ghast had the bot in sight on the trip.
+    #[serde(default)]
+    pub shooter_seen_at: Option<u64>,
     /// The tunnel out of a cube pocket in hand (its start and end), and the tunnels dug.
     #[serde(default)]
     pub cube_tunnel: Option<(Cell, Cell)>,
@@ -237,6 +240,8 @@ pub const COOK_FOOD_FLOOR: i32 = 6;
 /// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
 /// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
 pub const CUBE_FIGHT: f64 = 3.0;
+/// A blaze or ghast out of sight this long ends the trip's cover (ten seconds).
+pub const SHOOTER_CLEAR_TICKS: u64 = 200;
 /// The trip's wooden pickaxes from the kit's stems: a table placed, then wooden pickaxes to the
 /// base's wood uses (150).
 pub const TRIP_WOOD_STEPS: [base::Step; 2] = [base::Step::Table, base::Step::WoodPicks];
@@ -771,7 +776,22 @@ impl Plan {
             self.retry_at = tick + 1;
             return Some(Task::Idle);
         }
-        if health < rules.travel_health && endermen::seen_by_far_shooter(w) {
+        // A blaze or ghast in sight on the trip: cover at any health, held until it has been out
+        // of sight SHOOTER_CLEAR_TICKS; never a fight (the defence ignores them in Home).
+        let seen = endermen::seen_by_far_shooter(w);
+        if seen && self.ender.home.top_up_over {
+            self.ender.home.shooter_seen_at = Some(tick);
+        }
+        let held = self
+            .ender
+            .home
+            .shooter_seen_at
+            .is_some_and(|t| tick < t + SHOOTER_CLEAR_TICKS);
+        if held && !seen {
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        if seen && (health < rules.travel_health || self.ender.home.top_up_over) {
             let t = self.take_cover(w, tick)?;
             if self
                 .ender

@@ -1987,6 +1987,18 @@ impl Plan {
                     .map(|(id, _)| *id),
             );
         }
+        // On the way home a blaze or a ghast is never fought, at any health (a fireball costs 6 to
+        // 9 through iron and nothing heals): the trip's cover takes it (`home_recover`).
+        if home_trip {
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| {
+                        matches!(e.kind, data::EntityKind::Blaze | data::EntityKind::Ghast)
+                    })
+                    .map(|(id, _)| *id),
+            );
+        }
         let never_kinds: &[data::EntityKind] = if hunt_pocket {
             &[data::EntityKind::MagmaCube]
         } else {
