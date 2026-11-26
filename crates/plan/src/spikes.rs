@@ -912,6 +912,9 @@ pub fn ground_under(w: &World, pos: [f64; 3]) -> Option<f64> {
 /// for more than a stumble), and at or under which the bucket is used, every tick until it pours
 /// (e06's `above` 4.0 and 2.0 both poured; the use reaches 4.5 from the eye).
 pub const CLUTCH_FROM: f64 = 4.0;
+/// Over no known ground, the fall speed (blocks a tick) at which a clutch begins anyway: a real
+/// fall, not a step's or a jump's dip.
+pub const CLUTCH_VOID_FALL: f64 = 0.5;
 /// Blocks from the eye to the ground's top face a pour reaches: the player's block interaction
 /// range 4.5, less a tenth.
 pub const POUR_REACH: f64 = 4.4;
@@ -925,10 +928,17 @@ pub const CLUTCH_HOTBAR: u8 = 8;
 /// face and the feet still over it, and the next tick's does not. That is the last tick in reach,
 /// predicted, not waited for: at about 3.9 a tick the reach is crossed in one or two ticks.
 pub fn pour_now(feet_y: f64, vy: f64, ground: f64) -> bool {
+    pour_now_at(feet_y, vy, Some(ground), Some(ground))
+}
+
+/// `pour_now` with the ground under each predicted position: `g1` under the position this
+/// tick sends, `g2` under the next. A body flung sideways (race 45903987747: both bots knocked
+/// off near the island's edge) lands on another column than the one it fell from.
+pub fn pour_now_at(feet_y: f64, vy: f64, g1: Option<f64>, g2: Option<f64>) -> bool {
     let p1 = feet_y + vy;
     let p2 = p1 + (vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
-    let in_reach = |p: f64| p > ground && p + physics::EYE_HEIGHT - ground <= POUR_REACH;
-    in_reach(p1) && !in_reach(p2)
+    let in_reach = |p: f64, g: f64| p > g && p + physics::EYE_HEIGHT - g <= POUR_REACH;
+    g1.is_some_and(|g| in_reach(p1, g)) && !g2.is_some_and(|g| in_reach(p2, g))
 }
 /// Ticks after landing the water is tried to be taken back, and the most a clutch lasts.
 pub const CLUTCH_TAKE_TICKS: u64 = 40;
@@ -1485,8 +1495,10 @@ impl Plan {
         let height = ground.map(|g| body.pos[1] - g);
         let Some(mut c) = self.spikes.clutch.take() else {
             let falling = !body.on_ground && !body.in_water && body.vel[1] < 0.0;
+            // Over the void the clutch begins too: a body flung sideways may come over ground.
             if !falling
-                || height.is_none_or(|h| h <= CLUTCH_FROM)
+                || height.is_some_and(|h| h <= CLUTCH_FROM)
+                || (height.is_none() && body.vel[1] > -CLUTCH_VOID_FALL)
                 || craft::count(w, ItemKind::WaterBucket) == 0
             {
                 return None;
@@ -1569,7 +1581,17 @@ impl Plan {
                         ),
                     );
                 } else if crate::dig::held_item(w) == Some(ItemKind::WaterBucket)
-                    && ground.is_some_and(|g| pour_now(body.pos[1], body.vel[1], g))
+                    && {
+                        // The ground under where the body will be this tick and the next.
+                        let v = body.vel;
+                        let p1 = [body.pos[0] + v[0], body.pos[1] + v[1], body.pos[2] + v[2]];
+                        let p2 = [
+                            p1[0] + v[0] * physics::AIR_INERTIA,
+                            p1[1],
+                            p1[2] + v[2] * physics::AIR_INERTIA,
+                        ];
+                        pour_now_at(body.pos[1], v[1], ground_under(w, p1), ground_under(w, p2))
+                    }
                     && self.acts.is_empty()
                 {
                     self.note(

@@ -1107,3 +1107,16 @@ fn up_a_pillar_the_water_bucket_is_kept_in_the_hotbar() {
     p.spikes_step(&w, 100);
     assert!(p.take_acts().is_empty());
 }
+
+#[test]
+fn a_body_flung_sideways_pours_on_the_column_it_will_land_on() {
+    // Race 45903987747: both bots knocked off sideways near the island's edge, the column under
+    // the fall's start not the one landed on.
+    let g = 54.0;
+    // Over the void now, the next tick over ground in reach, the one after past it: pour.
+    assert!(spikes::pour_now_at(g + 3.0, -1.5, Some(g), None));
+    // In reach this tick under one column and the next tick too under another: wait.
+    assert!(!spikes::pour_now_at(g + 3.0, -0.5, Some(g), Some(g)));
+    // No ground under this tick's position: no pour.
+    assert!(!spikes::pour_now_at(g + 3.0, -1.5, None, Some(g)));
+}

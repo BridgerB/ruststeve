@@ -191,3 +191,16 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - A stair of up to three steps when the foot is higher: the cell over the head, the step's cell and the one over it. Otherwise the way along. Never obsidian or bedrock.
   - The refusals are cleared after each dig so the walks are tried again.
   - Unit test `shut_in_a_pit_with_every_approach_refused_the_bot_digs_its_way_out`, from a pit three deep.
+
+## Eighth race: 45903987747 (dev-end-island, 2 lanes, 6b08484, development only)
+- **4 crystals struck (3 and 1).**
+- **The clutch:** begun 5 times, a pour sent 3 times, poured 3 of 3 sent; "clutch stops the eating" never needed. The bucket was in hotbar slot 44 every time (the hotbar rule).
+- **Both deaths were falls after double blows** (20 to 6, and 10 then 5). Each bot was flung sideways off near the island's edge: the cases end at (65.5, 37.7, -20.3) and (30.5, 34.5, -99.5), "over air", far below the island's top.
+
+### Wall 14: a sideways fling lands on another column than the fall began over (fixed in part)
+- **The cause:** the pour was judged against the ground under the current position. A body flung sideways at speed lands on another column (here the island's sloped underside past its rim), and no tick qualified.
+- **The fix:**
+  - The pour is judged against the ground under the predicted positions (this tick's sent position, then the next, with the horizontal velocity and air drag 0.91, `pour_now_at`).
+  - A clutch also begins over no known ground at a real fall's speed (over 0.5 a tick): a fling over the void may come over ground.
+  - Unit test `a_body_flung_sideways_pours_on_the_column_it_will_land_on`.
+- **Open:** a body that strikes the island's side, not its top, has no top face to pour on. The structural answer is fewer blows up high; the clutch cannot save that one.
