@@ -841,20 +841,29 @@ provides = [["item:crafting_table", 1]]
 # bounded at 6,000 ticks, five game minutes, as the plan's 19d.1).
 pearls_wanted = 14
 top_up_ticks = 6000
-# Way points (x, z) before the portal, known geography (Bridger's ruling of 2026-11-24): the chain's
-# own route east, reversed, which memory saw, so the far walks meet the old bridges and tunnels.
-# Straight at the portal, race 45698618366's bots stalled at x 448 to 465 in the deltas (no walk,
-# no tunnel route, bridges past the spare). The route east (docs/problems/pearls-travel.md, the
-# forest snapshot of race 45537545167 lane 0, an ancestor of the frontier): from the endermen
-# pocket at (8, 81) east along the deltas, "heading crosses basalt deltas" at (226, 41, 194), into
-# the forest at (464, 68, 160) and (497, 42, 153); the hunt then moved north to z 13 to 38. So
-# back: south to the forest's old cell, west along z 150 to 200 to x 226, then the pocket, then
-# the portal at (22, 34, -20).
-way = [[490, 150], [226, 194], [8, 81]]
+# Way points (x, z) before the portal, known geography from the chain's own run (Bridger's ruling of
+# 2026-11-24): the senses rows (a position every 10 s) of race 45537545167 lane 0, the frontier's
+# ancestor, which crossed the deltas eastward along z 194 at y 37 to 41 on its own bridges, then
+# north to the forest at (497, 42, 153); thinned to a point every 20 to 32 blocks and reversed, so
+# each leg is short and lies on ground or bridges that bot made (race 45727976297: legs straight at
+# (226, 194) wanted 44 to 48 new bridges at x 311). Round the blaze spawner at about (130, 61, 167)
+# by its south-west at 24 or more (blazes wake within 16; no point or leg nearer: the coordinator),
+# west along z 205 to (100, 205), then race 45350933958 lane 0's own route out of the portal ("Nether to the blaze
+# spawner": south from the portal along x 24, up to z 95 at y 64, east to the fortress bridge at x
+# 60 and along it to the spawner), reversed and thinned the same way, ending by the portal at
+# (22, 34, -20), whose approach takes over within 24.
+way = [[477, 152], [448, 152], [426, 150], [417, 159], [407, 173], [399, 194], [368, 194], [339, 194], [310, 194], [280, 194], [250, 194], [220, 194], [190, 195], [167, 208], [146, 208], [130, 206], [100, 205], [83, 188], [60, 175], [60, 140], [60, 110], [55, 100], [45, 95], [31, 95], [30, 76], [30, 62], [25, 56], [24, 41], [24, 22], [24, 1], [24, -11]]
 # The entry portal by geography, used only when memory holds no nether_portal sighting. Q1's
 # probe 45686594347 read the frontier snapshot's memory: nether_portal blocks at x 22 to 23, y 34
 # to 36, z -20, still lit, so memory is the way and this is the fallback: the lower inside cell.
 portal = [22, 34, -20]
+# The chain's own bridge east (race 45537545167 lane 0), standing, one cell wide at z 194 with no
+# gaps (Q1's probe 45734754593 of the frontier world's region files): the east span's top at y 36
+# (feet 37) from x 400 to 311, the west span's at y 40 (feet 41) from x 307 to 201 (head room
+# clear). [x_east, x_west, feet_y, z]: walked on its own blocks, no new bridging.
+bridges = [[400, 311, 37, 194], [307, 201, 41, 194]]
+# Between two spans the join is built from the world as it is (home_step): each column rises one
+# from the last feet toward the next span, blocks placed under, head room dug over.
 # The far lookup reads memory's index this many chunk columns round the feet: 48 is 768 blocks,
 # past the forest's 475 from the portal with room.
 portal_chunks = 48

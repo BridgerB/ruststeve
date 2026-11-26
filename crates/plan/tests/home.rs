@@ -822,11 +822,220 @@ fn resumed_mid_trip_with_the_eyes_made_skips_the_top_up_and_points_behind() {
         notes(&p)
     );
     assert!(p.ender.home.top_up_over && p.ender.home.kit_over);
-    // At (8, 64, 8) the nearest point is (8, 81), the last: the two before it are behind.
-    assert_eq!(
-        p.ender.home.ways_passed.len(),
-        2,
-        "{:?}",
-        p.ender.home.ways_passed
+    // At (8, 64, 8) the nearest points are the last by the portal: every one before them is behind.
+    let way = home::HomeRules::default().way;
+    let passed = &p.ender.home.ways_passed;
+    assert!(passed.len() + 2 >= way.len(), "{passed:?}");
+    assert!(
+        passed.contains(&(way[0][0] >> 4, way[0][1] >> 4)),
+        "{passed:?}"
     );
+}
+
+#[test]
+fn no_way_point_or_leg_comes_within_24_of_the_blaze_spawner() {
+    // The spawner by the fortress, about (130, 61, 167) (race 45350933958 lane 0's senses).
+    let s = (130.0_f64, 167.0_f64);
+    let way = home::HomeRules::default().way;
+    let near = |a: [i32; 2], b: [i32; 2]| {
+        // The least distance on the plane from the spawner to the leg from a to b.
+        let (ax, az) = (f64::from(a[0]), f64::from(a[1]));
+        let (dx, dz) = (f64::from(b[0]) - ax, f64::from(b[1]) - az);
+        let len = dx * dx + dz * dz;
+        let t = if len == 0.0 {
+            0.0
+        } else {
+            (((s.0 - ax) * dx + (s.1 - az) * dz) / len).clamp(0.0, 1.0)
+        };
+        ((ax + t * dx - s.0).powi(2) + (az + t * dz - s.1).powi(2)).sqrt()
+    };
+    for p in &way {
+        assert!(near(*p, *p) >= 24.0, "{p:?} is {:.1} off", near(*p, *p));
+    }
+    for leg in way.windows(2) {
+        let d = near(leg[0], leg[1]);
+        assert!(d >= 24.0, "{:?} to {:?} comes {d:.1} near", leg[0], leg[1]);
+    }
+}
+
+#[test]
+fn a_blaze_in_sight_on_the_trip_is_never_struck() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 60,
+        uuid: [0; 16],
+        kind: data::EntityKind::Blaze.id(),
+        x: 14.5,
+        y: 66.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 40);
+    let n = notes(&p);
+    assert!(
+        !n.iter().any(|s| s.starts_with("defend Blaze")),
+        "never a fight with a blaze in Home: {n:?}"
+    );
+    assert!(!matches!(p.task, Task::Defend(_)), "{}", p.task.name());
+}
+
+#[test]
+fn a_skeleton_in_sight_on_the_trip_is_a_shooter() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 61,
+        uuid: [0; 16],
+        kind: data::EntityKind::Skeleton.id(),
+        x: 16.5,
+        y: 64.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    assert!(home::skeleton_sees(&w));
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 40);
+    assert!(p.ender.home.shooter_seen_at.is_some());
+    assert!(
+        !notes(&p).iter().any(|s| s.starts_with("defend Skeleton")),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_ledge_is_air_beside_and_under() {
+    let mut w = nether();
+    assert!(!home::on_ledge(&w), "the flat floor is no ledge");
+    set(&mut w, (9, 63, 8), BlockKind::Air);
+    assert!(home::on_ledge(&w), "air beside the feet and under it");
+}
+
+#[test]
+fn the_gap_ahead_is_measured_to_the_next_floor() {
+    let mut w = nether();
+    assert_eq!(plan::heading::gap_ahead(&w, (8, 64, 8), (1, 0)), 0);
+    for x in 10..=21 {
+        set(&mut w, (x, 63, 8), BlockKind::Air);
+    }
+    assert_eq!(plan::heading::gap_ahead(&w, (8, 64, 8), (1, 0)), 12);
+}
+
+#[test]
+fn a_cube_near_with_lava_beside_the_feet_lays_a_rail_first() {
+    // Race 45733362772 lane 0: knocked into lava by a magma cube 560 ticks after the resume.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (9, 63, 8), BlockKind::Lava);
+    add_cube(&mut w, 50, [8.5, 64.0, 13.5]);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: rail beside the feet at (9, 63, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.rails, 1);
+    assert!(matches!(p.task, Task::Idle), "{}", p.task.name());
+}
+
+#[test]
+fn the_old_bridges_step_is_built_and_walked_west() {
+    // A copy of the chain's bridge step at z 194 (Q1's probe 45734754593) moved by (-300, +27,
+    // -186): tops x 11 at 63, x 10 at 62, x 9 at 65, x 8 at 64, x 7 to 1 at 67, along z 8.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    set(&mut w, (10, 63, 8), BlockKind::Air);
+    for y in 64..=65 {
+        set(&mut w, (9, y, 8), BlockKind::Basalt);
+    }
+    set(&mut w, (8, 64, 8), BlockKind::Basalt);
+    for x in 1..=7 {
+        for y in 64..=67 {
+            set(&mut w, (x, y, 8), BlockKind::Netherrack);
+        }
+    }
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 11, 64, 8], [7, 1, 68, 8]];
+    goals.home.way = vec![[-200, 8]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut p = Plan::with_table(Aim::Race, t);
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    w.body = w.body.map(|b| physics::Body {
+        pos: [11.5, 64.0, 8.5],
+        ..b
+    });
+    w.player.pos = Some([11.5, 64.0, 8.5]);
+    // The world answers each placement on the clicked block's top.
+    for t in 100..260 {
+        w.ticks = t;
+        p.step(&w);
+        for a in p.take_acts() {
+            if let world::Act::UseOn { pos, face: 1 } = a {
+                set(&mut w, (pos.x, pos.y + 1, pos.z), BlockKind::Netherrack);
+            }
+        }
+    }
+    for c in ["(10, 63, 8)", "(10, 64, 8)", "(8, 65, 8)", "(8, 66, 8)"] {
+        assert!(
+            noted(&p, &format!("home: step block at {c}")),
+            "{c}: {:?}",
+            notes(&p)
+        );
+    }
+    assert!(
+        noted(&p, "home: on the old bridge to (7, 68, 8)"),
+        "the walk up onto the west span: {:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_known_span_is_never_a_restock_cell() {
+    // Q1's probe 45740087576: the bot's own restock dug the old bridge's step and 7 cells of it.
+    let span = [400, 311, 37, 194];
+    assert!(home::near_span(span, (320, 36, 194)), "the span's floor");
+    assert!(
+        home::near_span(span, (315, 37, 195)),
+        "beside its line at its height"
+    );
+    assert!(
+        home::near_span(span, (310, 36, 194)),
+        "one past its west end"
+    );
+    assert!(!home::near_span(span, (320, 36, 197)), "three off the line");
+    assert!(!home::near_span(span, (320, 32, 194)), "well under it");
 }

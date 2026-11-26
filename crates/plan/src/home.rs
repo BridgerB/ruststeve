@@ -46,6 +46,10 @@ pub struct HomeRules {
     pub way: Vec<[i32; 2]>,
     /// The entry portal's cell by known geography, used only when memory holds no portal.
     pub portal: Option<[i32; 3]>,
+    /// Known bridges the chain built, each `[x_east, x_west, feet_y, z]`: one cell wide along z,
+    /// walked west from `x_east` to `x_west` at `feet_y` with no new bridging.
+    #[serde(default)]
+    pub bridges: Vec<[i32; 4]>,
     /// Chunk columns round the feet the far portal lookup reads memory's index in.
     pub portal_chunks: i32,
     /// Ticks between two far lookups.
@@ -72,7 +76,40 @@ impl Default for HomeRules {
         Self {
             pearls_wanted: 14,
             top_up_ticks: 6000,
-            way: vec![[490, 150], [226, 194], [8, 81]],
+            bridges: vec![[400, 311, 37, 194], [307, 201, 41, 194]],
+            way: vec![
+                [477, 152],
+                [448, 152],
+                [426, 150],
+                [417, 159],
+                [407, 173],
+                [399, 194],
+                [368, 194],
+                [339, 194],
+                [310, 194],
+                [280, 194],
+                [250, 194],
+                [220, 194],
+                [190, 195],
+                [167, 208],
+                [146, 208],
+                [130, 206],
+                [100, 205],
+                [83, 188],
+                [60, 175],
+                [60, 140],
+                [60, 110],
+                [55, 100],
+                [45, 95],
+                [31, 95],
+                [30, 76],
+                [30, 62],
+                [25, 56],
+                [24, 41],
+                [24, 22],
+                [24, 1],
+                [24, -11],
+            ],
             portal: Some([22, 34, -20]),
             portal_chunks: 48,
             portal_every: 1200,
@@ -178,6 +215,25 @@ pub struct HomeState {
     pub cube_resume_at: Option<u64>,
     #[serde(default)]
     pub cube_breakouts: u32,
+    /// Walks on the old bridges, step blocks placed, and the last note of a bridge that failed.
+    #[serde(default)]
+    pub bridge_walks: u32,
+    #[serde(default)]
+    pub steps_placed: u32,
+    /// Blocks laid into gaps of an old bridge.
+    #[serde(default)]
+    pub gaps_laid: u32,
+    #[serde(default)]
+    pub bridge_noted_at: Option<u64>,
+    /// Floor blocks laid beside the feet with a cube near.
+    #[serde(default)]
+    pub rails: u32,
+    /// The last tick a blaze or ghast had the bot in sight on the trip.
+    #[serde(default)]
+    pub shooter_seen_at: Option<u64>,
+    /// Pockets not sealed for a ledge.
+    #[serde(default)]
+    pub ledge_skips: u32,
     /// The tunnel out of a cube pocket in hand (its start and end), and the tunnels dug.
     #[serde(default)]
     pub cube_tunnel: Option<(Cell, Cell)>,
@@ -209,6 +265,67 @@ pub const COOK_FOOD_FLOOR: i32 = 6;
 /// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
 /// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
 pub const CUBE_FIGHT: f64 = 3.0;
+/// A skeleton within this has the trip take cover as from a blaze (its bow's 15 and margin).
+pub const SKELETON_COVER: f64 = 24.0;
+
+/// A skeleton within `SKELETON_COVER` with the bot in sight (Q6's race 45727347488: eight
+/// arrows, 19.8 to 8.6, in the soul sand valley south of the portal).
+pub fn skeleton_sees(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let eyes: Vec<[f64; 3]> = w
+        .entities
+        .values()
+        .filter(|e| !e.dead && e.kind == data::EntityKind::Skeleton)
+        .filter(|e| dist(e.pos, body.pos) <= SKELETON_COVER)
+        .map(|e| [e.pos[0], e.pos[1] + 1.74, e.pos[2]])
+        .collect();
+    !eyes.is_empty() && crate::cover::seen_body(w, &eyes, body.pos)
+}
+
+/// Air under the feet, or under a cell beside them: a ledge, where no pocket is sealed.
+pub fn on_ledge(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let (x, y, z) = path::feet_cell(body.pos);
+    let air = |c: Cell| {
+        matches!(
+            w.block_at(world::BlockPos::new(c.0, c.1, c.2)),
+            Some(BlockKind::Air | BlockKind::CaveAir)
+        )
+    };
+    air((x, y - 1, z))
+        || [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|(dx, dz)| air((x + dx, y, z + dz)) && air((x + dx, y - 1, z + dz)))
+}
+
+/// A blaze or ghast out of sight this long ends the trip's cover (ten seconds).
+pub const SHOOTER_CLEAR_TICKS: u64 = 200;
+/// The trip's wooden pickaxes from the kit's stems: a table placed, then wooden pickaxes to the
+/// base's wood uses (150).
+pub const TRIP_WOOD_STEPS: [base::Step; 2] = [base::Step::Table, base::Step::WoodPicks];
+
+fn picking_now(p: &Plan) -> bool {
+    (p.base.steps == base::CLIMB_STEPS.to_vec() || p.base.steps == TRIP_WOOD_STEPS.to_vec())
+        && !p.base.over
+}
+
+/// Whether `c` is a cell of the span `[x_east, x_west, feet_y, z]` or within 1 of its line at
+/// its height (its floor and the feet cells over it, one each side).
+pub fn near_span([e, wst, y, z]: [i32; 4], c: Cell) -> bool {
+    (c.2 - z).abs() <= 1 && c.0 <= e + 1 && c.0 >= wst - 1 && c.1 >= y - 2 && c.1 <= y + 1
+}
+
+/// A walk on an old bridge goes this far at a time.
+pub const BRIDGE_LEG: i32 = 24;
+/// A known bridge this far below (race 45738826162: 5 under the west span) is joined from below.
+pub const BRIDGE_BELOW: i32 = 6;
+/// A known bridge this near on the plane (across it) is walked onto first.
+pub const BRIDGE_NEAR: i32 = 8;
+
 /// Bridge blocks the trip keeps on record (the last laid), to dig back when stranded.
 pub const LAID_KEPT: usize = 64;
 
@@ -736,11 +853,42 @@ impl Plan {
                 return Some(t);
             }
             // <<< Q6
+            if on_ledge(w) {
+                // Never a pocket on a ledge (Q6's race 45727347488: knocked off one while sealing).
+                self.ender.home.ledge_skips += 1;
+                if self.ender.home.ledge_skips % 20 == 1 {
+                    self.note(
+                        tick,
+                        "home: no pocket on a ledge".to_owned(),
+                        format!(
+                            "air beside or under the feet; skip {}",
+                            self.ender.home.ledge_skips
+                        ),
+                    );
+                }
+                return None;
+            }
             self.pocket_step(w, tick);
             self.retry_at = tick + 1;
             return Some(Task::Idle);
         }
-        if health < rules.travel_health && endermen::seen_by_far_shooter(w) {
+        // A blaze or ghast in sight on the trip: cover at any health, held until it has been out
+        // of sight SHOOTER_CLEAR_TICKS; never a fight (the defence ignores them in Home).
+        let seen =
+            endermen::seen_by_far_shooter(w) || (self.ender.home.top_up_over && skeleton_sees(w));
+        if seen && self.ender.home.top_up_over {
+            self.ender.home.shooter_seen_at = Some(tick);
+        }
+        let held = self
+            .ender
+            .home
+            .shooter_seen_at
+            .is_some_and(|t| tick < t + SHOOTER_CLEAR_TICKS);
+        if held && !seen {
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        if seen && (health < rules.travel_health || self.ender.home.top_up_over) {
             let t = self.take_cover(w, tick)?;
             if self
                 .ender
@@ -760,6 +908,442 @@ impl Plan {
             return Some(t);
         }
         None
+    }
+
+    /// A cube within `CUBE_CLEAR` and an edge beside the feet (no floor beside them: lava or air
+    /// under the next cell): the floor beside the feet is laid first, a block clicked onto the side
+    /// of the one stood on, so a cube's knock-back lands on a block (race 45733362772 lane 0: a
+    /// magma cube knocked it into lava 560 ticks after the resume). Noted and counted; `None`
+    /// with no cube near, no edge beside, or no filler held.
+    fn home_rail(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        let cube = w.entities.values().any(|e| {
+            !e.dead && e.kind == data::EntityKind::MagmaCube && dist(e.pos, body.pos) <= CUBE_CLEAR
+        });
+        if !cube {
+            return None;
+        }
+        let feet = path::feet_cell(body.pos);
+        let under = (feet.0, feet.1 - 1, feet.2);
+        let mut cells = path::Cells::new(w);
+        if cells.at(under) != path::Class::Solid {
+            return None;
+        }
+        let (target, face) = [((1, 0), 5i8), ((-1, 0), 4), ((0, 1), 3), ((0, -1), 2)]
+            .into_iter()
+            .map(|((dx, dz), f)| ((feet.0 + dx, feet.1 - 1, feet.2 + dz), f))
+            .find(|(c, _)| matches!(cells.at(*c), path::Class::Lava | path::Class::Clear))?;
+        let item = endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.rails += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(under.0, under.1, under.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("home: rail beside the feet at {target:?}"),
+                    format!(
+                        "a magma cube within {CUBE_CLEAR} and no floor beside {feet:?}; {item:?} on {under:?} face {face}; rail {}",
+                        self.ender.home.rails
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
+    }
+
+    /// On a known bridge (`[home] bridges`): the walk west along it, 24 at a time on its own
+    /// blocks, no new bridging; at the east span's west end the step blocks are placed first
+    /// (`[home] steps`), then the walk up onto the west span. `None` off every bridge.
+    fn home_bridge(&mut self, w: &World, tick: u64, r: &HomeRules) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let on = r.bridges.iter().position(|[e, wst, y, z]| {
+            (feet.2 - z).abs() <= 1 && feet.0 <= *e + 1 && feet.0 >= *wst && (feet.1 - y).abs() <= 1
+        });
+        // Beside a span but not on it (race 45733362772's bots stood on their own bridge at y 36
+        // a few blocks south of it): onto it first, at the feet's x.
+        let Some(on) = on else {
+            let [e, wst, y, z] = *r.bridges.iter().find(|[e, wst, y, z]| {
+                (feet.2 - z).abs() <= BRIDGE_NEAR
+                    && feet.0 <= *e + 1
+                    && feet.0 >= *wst
+                    && (feet.1 - y).abs() <= BRIDGE_BELOW
+            })?;
+            let target = (feet.0.clamp(wst, e), y, z);
+            let mut walk = Walk::new(
+                target,
+                Goal::Near {
+                    pos: target,
+                    range: 0.8,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
+                self.expanded += walk.expanded;
+                // From below (race 45738826162: its own bridge 5 under the west span): the travel
+                // tunnel's stairs up, laying blocks where there is no floor.
+                if target.1 > feet.1 + 1
+                    && let Some(t) =
+                        self.tunnel_toward(w, target, ("the old bridge", "joined from below"), tick)
+                {
+                    self.note(
+                        tick,
+                        format!("home: up onto the old bridge at {target:?}"),
+                        format!("from {feet:?}, {} below it", target.1 - feet.1),
+                    );
+                    return Some(t);
+                }
+                return None;
+            }
+            self.walks += 1;
+            self.ender.home.bridge_walks += 1;
+            self.note(
+                tick,
+                format!("home: onto the old bridge at {target:?}"),
+                format!("from {feet:?}; walk {}", self.ender.home.bridge_walks),
+            );
+            return Some(Task::Explore(walk));
+        };
+        let [_, west, y, z] = r.bridges[on];
+        // The way points along the bridges at or east of the feet are passed: the heading takes
+        // over past the west end and must not aim back along them.
+        for [px, pz] in &r.way {
+            let near_line = r.bridges.iter().any(|[e, wst, _, bz]| {
+                (pz - bz).abs() <= BRIDGE_NEAR && *px <= *e + 1 && *px >= *wst - BRIDGE_NEAR
+            });
+            let col = (px >> 4, pz >> 4);
+            if near_line && *px >= feet.0 && !self.ender.home.ways_passed.contains(&col) {
+                self.ender.home.ways_passed.push(col);
+            }
+        }
+        let next = r.bridges.get(on + 1).copied();
+        // At the span's west end with a span beyond: the step blocks, then the walk up.
+        let target = if feet.0 <= west + 1
+            && let Some([e2, _, y2, z2]) = next
+        {
+            if let Some(t) = self.home_step(w, tick, r) {
+                return Some(t);
+            }
+            (e2, y2, z2)
+        } else if feet.0 <= west + 1 {
+            return None;
+        } else {
+            ((feet.0 - BRIDGE_LEG).max(west), y, z)
+        };
+        // A cell gone from the span between the feet and the target (the bot's own restock dug a
+        // 7-cell gap in it: Q1's probe 45740087576): the floor laid there from the cell before it,
+        // kept to the span's line and height.
+        if target.1 == y
+            && let Some(gx) = (target.0..feet.0).rev().find(|x| {
+                let mut cells = path::Cells::new(w);
+                cells.at((*x, y - 1, z)) != path::Class::Solid
+            })
+        {
+            let edge = (gx + 1, y, z);
+            if feet != edge {
+                let mut walk = Walk::new(
+                    edge,
+                    Goal::Near {
+                        pos: edge,
+                        range: 0.5,
+                    },
+                    Arrive::Goal,
+                    tick,
+                );
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("home: to the gap in the old bridge at {edge:?}"),
+                        format!("the floor at ({gx}, {}, {z}) is gone", y - 1),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+            } else if let Some(t) = self.home_lay(w, tick, (gx, y - 1, z), (gx + 1, y - 1, z), 4) {
+                return Some(t);
+            }
+        }
+        let mut walk = Walk::new(
+            target,
+            Goal::Near {
+                pos: target,
+                range: 0.8,
+            },
+            Arrive::Goal,
+            tick,
+        );
+        if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
+            self.expanded += walk.expanded;
+            if self
+                .ender
+                .home
+                .bridge_noted_at
+                .is_none_or(|t| tick >= t + 600)
+            {
+                self.ender.home.bridge_noted_at = Some(tick);
+                self.note(
+                    tick,
+                    format!("home: no walk on the old bridge to {target:?}"),
+                    format!("from {feet:?}; the heading goes on"),
+                );
+            }
+            return None;
+        }
+        self.walks += 1;
+        self.ender.home.bridge_walks += 1;
+        self.note(
+            tick,
+            format!("home: on the old bridge to {target:?}"),
+            format!("from {feet:?}; walk {} on it", self.ender.home.bridge_walks),
+        );
+        Some(Task::Explore(walk))
+    }
+
+    /// One block laid at `at`, clicked on `click`'s face `face` with held filler; noted. `None`
+    /// with no filler held.
+    fn home_lay(&mut self, w: &World, tick: u64, at: Cell, click: Cell, face: i8) -> Option<Task> {
+        let item = endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.gaps_laid += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                self.note(
+                    tick,
+                    format!("home: the old bridge's gap laid at {at:?}"),
+                    format!(
+                        "{item:?} on {click:?} face {face}; {} laid",
+                        self.ender.home.gaps_laid
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
+    }
+
+    /// The join from the span the bot is on to the next one west, built from the world as it is
+    /// (the snapshot's world is not the frontier's: race 45738826162): from the bot at the span's
+    /// west end, each column between rises by one from the last feet toward the next span's feet;
+    /// a column lower than that gets blocks placed from its top up (bottom first), any solid cell
+    /// in the two over the new feet is dug (none with lava beside). The bot stands at the span's
+    /// west end first, so nothing is placed in its own body. `None` once the join is whole.
+    fn home_step(&mut self, w: &World, tick: u64, r: &HomeRules) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let on = r.bridges.iter().position(|[e, wst, y, z]| {
+            (feet.2 - z).abs() <= 1 && feet.0 <= *e + 1 && feet.0 >= *wst && (feet.1 - y).abs() <= 1
+        })?;
+        let [_, west, y, z] = r.bridges[on];
+        let [e2, _, y2, _] = *r.bridges.get(on + 1)?;
+        let stand = (west, y, z);
+        let mut cells = path::Cells::new(w);
+        let solid = |cells: &mut path::Cells, c: Cell| cells.at(c) == path::Class::Solid;
+        let lava_by = |cells: &mut path::Cells, c: Cell| {
+            [
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 1, 0),
+                (0, -1, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+            ]
+            .iter()
+            .any(|(dx, dy, dz)| cells.at((c.0 + dx, c.1 + dy, c.2 + dz)) == path::Class::Lava)
+        };
+        // What the join wants, column by column going west: a place, a dig or nothing.
+        let mut want: Option<(Cell, bool)> = None;
+        let mut last = y;
+        for x in (e2 + 1..west).rev() {
+            let f = (last + 1).min(y2.max(last));
+            last = f;
+            let top = f - 1;
+            // The column's own top at or under the new floor: the cells from it up are placed.
+            let base = (top - 6..=top)
+                .rev()
+                .find(|yy| solid(&mut cells, (x, *yy, z)));
+            let from = base.map_or(top - 6, |b| b + 1);
+            if let Some(c) = (from..=top)
+                .map(|yy| (x, yy, z))
+                .find(|c| !solid(&mut cells, *c))
+            {
+                want = Some((c, true));
+                break;
+            }
+            if let Some(c) = [(x, f, z), (x, f + 1, z)]
+                .into_iter()
+                .find(|c| solid(&mut cells, *c))
+            {
+                want = Some((c, false));
+                break;
+            }
+        }
+        let (c, place) = want?;
+        // The span's own last cell gone (dug by a restock): laid from the cell east of it.
+        if !solid(&mut cells, (stand.0, stand.1 - 1, stand.2)) && feet == (west + 1, y, z) {
+            return self.home_lay(
+                w,
+                tick,
+                (stand.0, stand.1 - 1, stand.2),
+                (west + 1, y - 1, z),
+                4,
+            );
+        }
+        if feet != stand {
+            let mut walk = Walk::new(
+                stand,
+                Goal::Near {
+                    pos: stand,
+                    range: 0.5,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("home: to the bridge's end at {stand:?} for the step"),
+                    format!("from {feet:?}; {c:?} wanted"),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            return None;
+        }
+        let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
+        let reach = (0..3)
+            .map(|i| (eye[i] - (f64::from([c.0, c.1, c.2][i]) + 0.5)).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let under = (c.0, c.1 - 1, c.2);
+        let blocked = lava_by(&mut cells, c)
+            || reach > crate::heading::RESTOCK_REACH
+            || (place && !solid(&mut cells, under));
+        if blocked {
+            // A climb with nothing to build on (the step dug away, open air to the lava sea):
+            // the travel tunnel's stairs up to the next span, laying blocks as they go.
+            if let Some(t) = self.tunnel_toward(
+                w,
+                (e2, y2, z),
+                ("the next span", "the join cannot be built"),
+                tick,
+            ) {
+                self.note(
+                    tick,
+                    format!("home: stairs up to the next span at {:?}", (e2, y2, z)),
+                    format!("the step at {c:?} cannot be built from {feet:?}"),
+                );
+                return Some(t);
+            }
+            if self
+                .ender
+                .home
+                .bridge_noted_at
+                .is_none_or(|t| tick >= t + 600)
+            {
+                self.ender.home.bridge_noted_at = Some(tick);
+                self.note(
+                    tick,
+                    format!("home: the step at {c:?} cannot be made"),
+                    format!(
+                        "{}, under {:?}, {reach:.1} off, lava beside {}",
+                        if place { "a place" } else { "a dig" },
+                        cells.at(under),
+                        lava_by(&mut cells, c)
+                    ),
+                );
+            }
+            return None;
+        }
+        if !place {
+            self.ender.home.steps_placed += 1;
+            self.note(
+                tick,
+                format!("home: head room over the step at {c:?}"),
+                "a block over a step's new feet dug before the walk up".to_owned(),
+            );
+            return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
+        }
+        let item = endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.steps_placed += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(under.0, under.1, under.2),
+                    face: 1,
+                });
+                self.note(
+                    tick,
+                    format!("home: step block at {c:?}"),
+                    format!(
+                        "joining the old bridges from {stand:?}; {item:?} on {under:?}; {} made",
+                        self.ender.home.steps_placed
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
     }
 
     /// The tunnel out of a cube pocket in hand: on through rock toward its end until
@@ -810,6 +1394,9 @@ impl Plan {
         }
         let body = w.body?;
         if let Some(t) = self.home_cube_tunnel(w, tick) {
+            return Some(t);
+        }
+        if let Some(t) = self.home_rail(w, tick) {
             return Some(t);
         }
         let cubes: Vec<f64> = w
@@ -908,6 +1495,21 @@ impl Plan {
                 return None;
             }
         }
+        if on_ledge(w) {
+            // Never a pocket on a ledge (Q6's race 45727347488: knocked off one while sealing).
+            self.ender.home.ledge_skips += 1;
+            if self.ender.home.ledge_skips % 20 == 1 {
+                self.note(
+                    tick,
+                    "home: no pocket on a ledge".to_owned(),
+                    format!(
+                        "air beside or under the feet; skip {}",
+                        self.ender.home.ledge_skips
+                    ),
+                );
+            }
+            return None;
+        }
         self.pocket_step(w, tick);
         self.retry_at = tick + 1;
         Some(Task::Idle)
@@ -972,28 +1574,40 @@ impl Plan {
                 self.ender.home.ground = Some(path::feet_cell(body.pos));
             }
         }
-        let picking = self.base.steps == base::CLIMB_STEPS.to_vec() && !self.base.over;
+        // Stone and wood both count (the coordinator, 2026-11-25): the kit's 16 stems are 64
+        // planks, about 20 wooden pickaxes of 59 uses; stone from blackstone when held.
+        let picking = (self.base.steps == base::CLIMB_STEPS.to_vec()
+            || self.base.steps == TRIP_WOOD_STEPS.to_vec())
+            && !self.base.over;
         let want = self.table.as_ref().map_or(100, |t| t.base.pickaxe_uses);
         let stone = craft::count(w, ItemKind::Blackstone)
             + craft::count(w, ItemKind::Cobblestone)
             + craft::count(w, ItemKind::CobbledDeepslate);
+        let wood = base::logs_held(w) + base::planks_held(w);
+        let uses = endermen::pickaxe_uses_left(w);
+        let steps = if stone >= 3 && craft::count(w, ItemKind::Stick) >= 2 {
+            Some(base::CLIMB_STEPS.to_vec())
+        } else if wood >= 2 {
+            Some(TRIP_WOOD_STEPS.to_vec())
+        } else {
+            None
+        };
         if !picking
-            && base::reserve_pick_uses(w) < want
-            && stone >= 3
-            && craft::count(w, ItemKind::Stick) >= 2
+            && uses < want
             && self.ender.home.trip_pick_runs < r.pick_runs
+            && let Some(steps) = steps
         {
             self.ender.home.trip_pick_runs += 1;
             self.base = base::BaseState {
-                steps: base::CLIMB_STEPS.to_vec(),
+                steps,
                 ..base::BaseState::default()
             };
             self.note(
                 tick,
                 format!("home: pickaxes on the way ({})", self.ender.home.trip_pick_runs),
                 format!(
-                    "stone pickaxe uses {} under {want}; {} blackstone, {} cobblestone, {} sticks, {} tables",
-                    base::reserve_pick_uses(w),
+                    "pickaxe uses {uses} (stone and wood) under {want}; {} logs and planks, {} blackstone, {} cobblestone, {} sticks, {} tables",
+                    wood,
                     craft::count(w, ItemKind::Blackstone),
                     craft::count(w, ItemKind::Cobblestone),
                     craft::count(w, ItemKind::Stick),
@@ -1001,8 +1615,7 @@ impl Plan {
                 ),
             );
         }
-        if self.base.steps == base::CLIMB_STEPS.to_vec()
-            && !self.base.over
+        if picking_now(self)
             && let Some(t) = self.base_task(w, tick)
         {
             return Some(t);
@@ -1052,6 +1665,9 @@ impl Plan {
             return Some(t);
         }
         // <<< Q6
+        if let Some(t) = self.home_bridge(w, tick, &r) {
+            return Some(t);
+        }
         if d <= r.approach {
             return self.home_approach(w, tick, portal);
         }

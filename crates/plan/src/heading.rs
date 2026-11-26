@@ -62,6 +62,35 @@ pub const HOME_KEEP: i64 = 24;
 /// this many over the spare (race 45698618366: legs in the deltas wanted 44 to 50 with 11 to 13
 /// spare, and failed "no way on" one after another).
 pub const RESTOCK_BRIDGES: i64 = 64;
+/// The most filler the way home restocks to before a crossing: two stacks.
+pub const HOME_FILLER_MAX: i64 = 128;
+/// How far ahead a gap is measured for the way home's restock.
+pub const GAP_LOOK: i32 = 104;
+
+/// Cells along `dir` from `feet` with no floor under them at the feet's height, from the first
+/// such cell to the next floor (lava and air alike), at most `GAP_LOOK`; 0 with a floor ahead.
+pub fn gap_ahead(w: &World, feet: Cell, dir: Dir) -> i64 {
+    let mut cells = path::Cells::new(w);
+    // Some(true) a floor, Some(false) none, None not loaded (the scan stops there).
+    let floor = |cells: &mut path::Cells, i: i32| {
+        let c = (feet.0 + dir.0 * i, feet.1 - 1, feet.2 + dir.1 * i);
+        match cells.at(c) {
+            path::Class::Unknown => None,
+            k => Some(k == path::Class::Solid),
+        }
+    };
+    let Some(start) = (1..=GAP_LOOK)
+        .map_while(|i| floor(&mut cells, i).map(|f| (i, f)))
+        .find(|(_, f)| !f)
+        .map(|(i, _)| i)
+    else {
+        return 0;
+    };
+    let end = (start..=GAP_LOOK)
+        .find(|i| floor(&mut cells, *i) != Some(false))
+        .unwrap_or(GAP_LOOK + 1);
+    i64::from(end - start)
+}
 pub const RESTOCK_TO: i64 = 48;
 pub const RESTOCK_DIGS: u32 = 24;
 /// A wall cell is dug for filler from this near the eye (`walk::REACH`).
@@ -1021,7 +1050,10 @@ impl Plan {
                 } else {
                     0
                 };
-                if ahead >= SIGNS_TURN {
+                // Nor the crimson signs while a point steers on the way home (Q6's race 45727347488
+                // lane 1: every leg re-aimed and turned north again for 6,000 ticks).
+                let home_way = self.ender.phase == crate::endermen::EnderPhase::Home && h.way;
+                if ahead >= SIGNS_TURN && !home_way {
                     self.heading_turn(
                         w,
                         h,
@@ -1248,8 +1280,22 @@ impl Plan {
                     self.expanded += walk.expanded;
                     let bridges = i64::try_from(walk.bridges_ahead()).unwrap_or(i64::MAX);
                     let spare = path::bridge_blocks(w) - keep;
-                    if found && bridges > spare && bridges <= spare + RESTOCK_BRIDGES {
-                        want_filler = Some(keep + bridges);
+                    // On the way home the restock carries the whole gap ahead, not the leg's part
+                    // of it (race 45733362772 lane 1 began an 85-block gap with 60 and was at 15
+                    // mid-way): to the keep and the gap to the next floor, at most HOME_FILLER_MAX.
+                    let home = self.ender.phase == crate::endermen::EnderPhase::Home;
+                    if found && bridges > spare && (home || bridges <= spare + RESTOCK_BRIDGES) {
+                        let gap = if home {
+                            gap_ahead(w, feet, dir).max(bridges)
+                        } else {
+                            bridges
+                        };
+                        let want = keep + gap;
+                        want_filler = Some(if home {
+                            want.min(HOME_FILLER_MAX)
+                        } else {
+                            want
+                        });
                     }
                     // A route with no bridge is taken whatever is held; one that bridges keeps
                     // the keep.
@@ -1587,6 +1633,19 @@ impl Plan {
         Some(())
     }
 
+    /// A cell of a known bridge (`[home] bridges`), or within 1 of its line at its height: never
+    /// dug for filler (Q1's probe 45740087576: the bot's own restock dug the old bridge's step and a
+    /// 7-cell gap out of its east span).
+    pub(crate) fn on_known_span(&self, c: Cell) -> bool {
+        self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.table.as_ref().is_some_and(|t| {
+                t.home
+                    .bridges
+                    .iter()
+                    .any(|[e, wst, y, z]| crate::home::near_span([*e, *wst, *y, *z], c))
+            })
+    }
+
     /// Filler a leg's bridges leave unspent: `HOME_KEEP` on the way home, else `KEEP`.
     fn heading_keep(&self) -> i64 {
         if self.ender.phase == crate::endermen::EnderPhase::Home {
@@ -1610,7 +1669,11 @@ impl Plan {
         let ahead = home.then_some(h.dir);
         let look = if home { RESTOCK_LOOK } else { RESTOCK_REACH };
         let cell = (filler < to && r.digs < max_digs)
-            .then(|| restock_cells(w, ahead, look).into_iter().next())
+            .then(|| {
+                restock_cells(w, ahead, look)
+                    .into_iter()
+                    .find(|c| !self.on_known_span(*c))
+            })
             .flatten();
         // Past the dig's reach: a walk to beside it first.
         if let Some(c) = cell
@@ -1636,7 +1699,11 @@ impl Plan {
             }
             self.expanded += walk.expanded;
         }
-        let cell = cell.and_then(|_| restock_cells(w, ahead, RESTOCK_REACH).into_iter().next());
+        let cell = cell.and_then(|_| {
+            restock_cells(w, ahead, RESTOCK_REACH)
+                .into_iter()
+                .find(|c| !self.on_known_span(*c))
+        });
         if let Some(c) = cell {
             r.digs += 1;
             let n = r.digs;

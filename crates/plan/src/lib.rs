@@ -1997,6 +1997,18 @@ impl Plan {
             // After a pocket given up (`home::CUBE_HOLD_MAX`) the near one is fought though
             // two are near: the pocket waits `CUBE_RESUME_TICKS`.
             let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t);
+            // A fight begun on one cube that split (race 45722775712 lane 2: a large one struck
+            // at (418, 40, 154) became three, the defence switched among them for 280 ticks, 16.2
+            // to dead) ends once two are near: the pocket takes over.
+            if crowd >= crate::home::CUBE_CROWD && !resting && matches!(self.task, Task::Defend(_))
+            {
+                self.task = Task::Idle;
+                self.note(
+                    tick,
+                    "home: the cube fight dropped for the pocket".to_owned(),
+                    format!("{crowd} magma cubes within {}", crate::home::CUBE_NEAR),
+                );
+            }
             let over = w.player.health.is_some_and(|h| h > rules.danger_health)
                 && (crowd < crate::home::CUBE_CROWD || resting)
                 && self.ender.home.cube_pocket.is_none()
@@ -2008,6 +2020,23 @@ impl Plan {
                         e.kind == data::EntityKind::MagmaCube
                             && (!over
                                 || crate::home::dist(e.pos, body.pos) > crate::home::CUBE_FIGHT)
+                    })
+                    .map(|(id, _)| *id),
+            );
+        }
+        // On the way home a blaze or a ghast is never fought, at any health (a fireball costs 6 to
+        // 9 through iron and nothing heals): the trip's cover takes it (`home_recover`).
+        if home_trip {
+            ignored.extend(
+                w.entities
+                    .iter()
+                    .filter(|(_, e)| {
+                        matches!(
+                            e.kind,
+                            data::EntityKind::Blaze
+                                | data::EntityKind::Ghast
+                                | data::EntityKind::Skeleton
+                        )
                     })
                     .map(|(id, _)| *id),
             );
