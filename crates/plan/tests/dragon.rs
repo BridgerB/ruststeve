@@ -260,6 +260,14 @@ fn the_wait_is_behind_the_sitting_dragons_head() {
         Some([9, FLOOR, 0]),
         "2.0 beyond the head's box"
     );
+    assert_eq!(
+        decide(&w, &ask()),
+        Want::Go([-9, FLOOR, 0], "to the head stand"),
+        "scanning, it turns its head onto the bot: the stand on the bot's side"
+    );
+    // Attacking, its yaw held: round its head to the stand it points at.
+    let mut w = end_at([-12.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
     match decide(&w, &ask()) {
         Want::Go(c, "round the head") => {
             assert!(
@@ -548,12 +556,12 @@ fn the_dragon_comes_before_a_provoked_endermans_pocket() {
 fn a_way_round_the_head_is_kept_until_it_is_reached() {
     // Race 45873410249 lane 0: the way round and the head stand swapped every tick.
     let mut w = end_at([-12.5, 64.0, -1.0]);
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
     let Want::Go(held, "round the head") = decide(&w, &ask()) else {
         panic!("round the head");
     };
     let mut w = end_at([-12.5, 64.0, 2.0]);
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 90.0);
     let Want::Go(fresh, "round the head") = decide(&w, &ask()) else {
         panic!("round the head");
     };
@@ -571,7 +579,7 @@ fn a_way_round_the_head_is_kept_until_it_is_reached() {
         "held, it is kept"
     );
     let mut there = end_at(feet_of(held));
-    with_dragon(&mut there, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    with_dragon(&mut there, [0.5, PERCH_Y, 0.5], 7, 90.0);
     let a = Ask {
         way: Some(held),
         ..ask()
@@ -707,7 +715,7 @@ fn the_flame_is_waited_out_of_its_reach() {
         "the attacking turn's first ticks: the strike"
     );
     let late = Ask {
-        phase_ticks: 20,
+        phase_ticks: 30,
         ..ask()
     };
     let v = dragon::view(&w).unwrap().1;

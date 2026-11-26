@@ -105,5 +105,18 @@ Most perches gave 0 to 2 strikes. That is the wall, not the cap. In the perches 
 - A breath on the feet still goes to `breath_step`.
 - Notes: "charge: hold in the bunker at …", "charge: hold crouched where the feet are", "charge: over".
 
+### Race 45886819862 (e5d912a, 3 lanes, cap 24,000), read mid-run (lane 2's evidence at tick 11,980)
+Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs scanning (about 20 to 40 ticks, until its head faces the bot), then attacking (40), then flaming (200).
+
+**Wall 9: the strike window was lost.**
+- The bot chased the head stand as the scanning turn swept the head round. With no stand open it went for the bunker in the middle of the perch ("go … to the bunker" while sitting-scanning).
+- It reached the stand as attacking began, then left at 15 ticks for the flame's way before its first strike, every turn.
+- No damage was taken (0 hits in perch 1), but there were no strikes either.
+- **Fix:**
+  - Scanning, the stand is where the head will come: 9.0 out from the body on the line to the bot (`scan_stand`). The turn brings the head there.
+  - Attacking, with its yaw held, the head stand as it points.
+  - The flame leave moves from 15 to 25 ticks into the attacking turn.
+  - Sat with no stand open, the bot holds near and out of the bite, never the bunker; the bunker is for landing and before the dragon has sat.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

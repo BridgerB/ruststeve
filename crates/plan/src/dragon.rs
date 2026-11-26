@@ -637,8 +637,9 @@ pub const WING_DROP: f64 = 2.0;
 pub const WING_CLEAR: f64 = 0.2;
 
 /// Ticks of the attacking turn struck in before the bot leaves the flame's way: the turn is 40
-/// (`DragonSittingAttackingPhase`) and a walk of 5 takes about 20.
-pub const FLAME_LEAVE_TICKS: u64 = 15;
+/// (`DragonSittingAttackingPhase`); a walk of 4 out of the cloud's reach takes about 18, and race
+/// 45886819862 lane 2 left at 15, before its first strike, every turn.
+pub const FLAME_LEAVE_TICKS: u64 = 25;
 /// The flame's cloud: radius 5 at the head (`DragonSittingFlamingPhase`); the bot keeps its
 /// reach (radius and `BREATH_MARGIN`) and a block more.
 pub const FLAME_RADIUS: f64 = 5.0;
@@ -723,6 +724,48 @@ pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> 
                 continue;
             }
             let d = flat(ideal, mid(c));
+            if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
+                best = Some((d, c));
+            }
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
+/// The scanning turn's stand: the scanning dragon turns its head onto the bot
+/// (`DragonSittingScanningPhase`, about 20 ticks), so the stand is where the head will be struck
+/// from once it has: `HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF` out from the body on the line to the
+/// feet, a ground cell out of the blow boxes as the head points now and of every breath, under the
+/// wings' sweep with `low` as `head_stand_for`; the nearest that point (race 45886819862 lane 2:
+/// chasing the turning head's stand, 1 strike in 4 perches).
+pub fn scan_stand(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> {
+    let feet = w.body?.pos;
+    let clouds = breaths(w);
+    let (dx, dz) = (feet[0] - v.pos[0], feet[2] - v.pos[2]);
+    let n = (dx * dx + dz * dz).sqrt();
+    if n < 1e-6 {
+        return None;
+    }
+    let out = HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF;
+    let ideal = [v.pos[0] + dx / n * out, 0.0, v.pos[2] + dz / n * out];
+    let (cx, cz) = (ideal[0].floor() as i32, ideal[2].floor() as i32);
+    let mut best: Option<(f64, [i32; 3])> = None;
+    for x in (cx - 1)..=(cx + 1) {
+        for z in (cz - 1)..=(cz + 1) {
+            let Some(c) = ground(w, x, z, feet[1].floor() as i32) else {
+                continue;
+            };
+            let p = mid(c);
+            if !clear_of_blow(v, p) || breathed(&clouds, p, 0.0) {
+                continue;
+            }
+            if low
+                && !under_wings(v, f64::from(c[1]))
+                && !(under_wings(v, f64::from(c[1] - 1)) && lowerable(w, v, &clouds, c))
+            {
+                continue;
+            }
+            let d = flat(ideal, p);
             if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
                 best = Some((d, c));
             }
@@ -1123,7 +1166,24 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
             return Want::Dig([feet_cell[0], feet_cell[1] - 1, feet_cell[2]]);
         }
     }
-    let hs = keep_head_stand(&v, w, ask.stand, true).or_else(|| {
+    // Scanning, the head turns onto the bot: wait where it will come (`scan_stand`), the stand
+    // held while it is still on the line within a block; else the head stand as it points.
+    let scanning = v.phase() == Some(Phase::SittingScanning);
+    let scan = |low: bool| {
+        let fresh = scan_stand(&v, w, low)?;
+        Some(
+            ask.stand
+                .filter(|h| flat(mid(*h), mid(fresh)) <= 1.5 && clear_of_blow(&v, mid(*h)))
+                .unwrap_or(fresh),
+        )
+    };
+    let hs = if scanning {
+        scan(true).or_else(|| (!must_low).then(|| scan(false)).flatten())
+    } else {
+        None
+    }
+    .or_else(|| keep_head_stand(&v, w, ask.stand, true))
+    .or_else(|| {
         (!must_low)
             .then(|| keep_head_stand(&v, w, ask.stand, false))
             .flatten()
@@ -1156,6 +1216,19 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     // 45876898172 lane 1 took the landing wings' 5 twice on the ring 11 out), else out of its
     // reach to the wait's ring, never into the basin (race 45873410249 lane 0: the landing
     // dragon's head took 10 from a bot walking to a stand behind it).
+    // Sat with no stand open: held near, out of the bite (the bunker is a walk away, and the
+    // next turn opens a stand: race 45886819862 lane 2 went for the bunker mid-perch).
+    if sat {
+        if in_bite(&v, feet) || before_head(&v, feet) {
+            return match step_out_cell(w, Some(&v), STEP_OUT_RADIUS + 4.0) {
+                Some(c) if flat(feet, mid(c)) > STAND_NEAR => {
+                    Want::Go(c, "out of the bite, no stand open")
+                }
+                Some(_) | None => Want::Hold("in the bite, no cell out loaded"),
+            };
+        }
+        return Want::Hold("no head stand open");
+    }
     if ask.bunker.is_some() {
         return wait(w, ask, feet, "the dragon not yet sat, in the bunker");
     }
