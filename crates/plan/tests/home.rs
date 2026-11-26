@@ -1527,9 +1527,12 @@ fn on_the_join_between_spans_the_next_span_is_the_target() {
     w.player.pos = Some([9.5, 64.0, 12.5]);
     let mut p = tripper(Some(t));
     run(&mut p, &mut w, 100, 3);
+    // The next span, 4 up and 4 north: a stair toward it, its first step at the feet's level.
+    let why: Vec<String> = p.events.iter().map(|e| e.why.clone()).collect();
     assert!(
-        notes(&p).iter().any(|n| n.contains("(7, 68, 8)")),
-        "{:?}",
+        noted(&p, "home: step up toward the old bridge at (9, 64, 11)")
+            && why.iter().any(|y| y.contains("(7, 68, 8)")),
+        "{:?} {why:?}",
         notes(&p)
     );
 }
