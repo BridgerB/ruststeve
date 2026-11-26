@@ -1375,3 +1375,94 @@ fn a_guard_the_server_never_answers_is_given_up() {
         p.ender.home.guards
     );
 }
+
+#[test]
+fn no_guard_while_a_restock_is_in_hand() {
+    // Race 45764179359: the guard filled the cells the restock dug, filler flat for 4,000 ticks.
+    let mut w = span_over_lava();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(None);
+    p.ender.home.axis = Some((-1, 0));
+    p.ender.home.last_feet = Some((8, 64, 8));
+    let mut h = plan::heading::Heading::new((-1, 0), (8, 64, 8), 0, "test".to_owned());
+    h.restock = Some(plan::heading::Restock {
+        to: 152,
+        ..plan::heading::Restock::default()
+    });
+    p.headed = Some(h);
+    // The trip already begun (its start drops the heading), one tick with the restock in hand.
+    p.ender.home.trip_begun = true;
+    run(&mut p, &mut w, 100, 1);
+    assert_eq!(p.ender.home.guards, 0, "{:?}", notes(&p));
+}
+
+#[test]
+fn two_below_a_span_a_step_is_laid_up_onto_it() {
+    // Q10's races 45764230971 and 45764234506: 8 of 8 lanes at y 34 under the span top at 36,
+    // "tunnel route ... 0 steps, ends within reach", every tick.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let mut goals: make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    goals.home.bridges = vec![[15, 1, 66, 10]];
+    goals.home.way = vec![[-200, 10]];
+    let t = Arc::new(make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    // The span: a one-wide line of blocks at y 64 and 65 along z 10, its top at 66.
+    for x in 1..=15 {
+        for y in 64..=65 {
+            set(&mut w, (x, y, 10), BlockKind::Netherrack);
+        }
+    }
+    let mut p = tripper(Some(t));
+    run(&mut p, &mut w, 100, 5);
+    assert!(
+        noted(&p, "home: step up toward the old bridge at (8, 64, 9)"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_provoked_enderman_on_the_way_home_is_held_from_at_most_a_minute() {
+    // Q9's race 45764756002 lane 2: provoked in the tick the top-up ended on its clock, then a
+    // 0-block pocket in the forest from 6,040 past 23,440 at 19.8 health, the trip never begun.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 70,
+        uuid: [0; 16],
+        kind: data::EntityKind::Enderman.id(),
+        x: 11.5,
+        y: 64.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 70,
+        entries: vec![(
+            plan::endermen::CREEPY_INDEX,
+            protocol::metadata::MetaValue::Bool(true),
+        )],
+    }));
+    assert_eq!(plan::endermen::angry(&w), Some(70));
+    let mut p = tripper(None);
+    run(&mut p, &mut w, 100, home::ENDER_HOLD_MAX + 40);
+    assert!(
+        noted(&p, "home: left the pocket from enderman 70"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.enders_left, vec![70]);
+    // Then the trip: no new hold from it.
+    assert!(noted(&p, "home: the trip begun"), "{:?}", notes(&p));
+}

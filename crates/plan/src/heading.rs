@@ -93,6 +93,9 @@ pub fn gap_ahead(w: &World, feet: Cell, dir: Dir) -> i64 {
 }
 pub const RESTOCK_TO: i64 = 48;
 pub const RESTOCK_DIGS: u32 = 24;
+/// On the way home a restock runs at most this long (two game minutes; Q10's races dug 4,300
+/// to 4,700 ticks by the join).
+pub const HOME_RESTOCK_TICKS: u64 = 2400;
 /// A wall cell is dug for filler from this near the eye (`walk::REACH`).
 pub const RESTOCK_REACH: f64 = 4.0;
 /// Restock cells are looked for this far from the eye; one past `RESTOCK_REACH` is walked to
@@ -1165,6 +1168,7 @@ impl Plan {
             if filler >= owed {
                 self.ender.home.filler_owed = None;
             } else if h.restock.is_none()
+                && tick >= h.restock_after
                 && restock_cells(w, Some(h.dir), RESTOCK_LOOK)
                     .into_iter()
                     .any(|c| !self.on_known_span(c))
@@ -1377,11 +1381,16 @@ impl Plan {
                     // mid-way): to the keep and the gap to the next floor, at most HOME_FILLER_MAX.
                     let home = self.ender.phase == crate::endermen::EnderPhase::Home;
                     if found && bridges > spare && (home || bridges <= spare + RESTOCK_BRIDGES) {
+                        // >>> Q8: the next known gap only, when one is seen (Q10's race 45765424576:
+                        // 41 to 128 on the shore west of the fortress, slow); else the route's own.
                         let gap = if home {
-                            gap_ahead(w, feet, dir).max(bridges)
+                            Some(gap_ahead(w, feet, dir))
+                                .filter(|g| *g > 0)
+                                .unwrap_or(bridges)
                         } else {
                             bridges
                         };
+                        // <<< Q8
                         let want = keep + gap;
                         want_filler = Some(if home {
                             want.min(HOME_FILLER_MAX)
@@ -1511,6 +1520,27 @@ impl Plan {
                             .map_or(0, |wps| wps.iter().filter(|c| blocked.contains(c)).count());
                         // Only a route the cut alone refused: over cut cells.
                         if found && back > 0 {
+                            // >>> Q8: on the way home, with a point steering, the cells behind are
+                            // the way it came: the only route is taken (Q10's race 45765424576:
+                            // all five lanes threw an 83-cell walk away at (50, 33, 206) and drifted
+                            // east restocking).
+                            if self.ender.phase == crate::endermen::EnderPhase::Home && h.way {
+                                self.ender.home.cut_routes_taken += 1;
+                                leg_now.planned = walk.waypoints.clone().unwrap_or_default();
+                                self.walks += 1;
+                                self.expanded += walk.expanded;
+                                self.note(
+                                    tick,
+                                    format!("home: heading leg {n} takes the route back over its cut"),
+                                    format!(
+                                        "the only route found, {} cells, {back} of them cut; taken {}",
+                                        leg_now.planned.len(),
+                                        self.ender.home.cut_routes_taken
+                                    ),
+                                );
+                                return Some(Task::Explore(walk));
+                            }
+                            // <<< Q8
                             self.note(
                                 tick,
                                 format!("heading leg {n} refused for cut (paced)"),
@@ -1768,7 +1798,11 @@ impl Plan {
         let home = self.ender.phase == crate::endermen::EnderPhase::Home;
         let ahead = home.then_some(h.dir);
         let look = if home { RESTOCK_LOOK } else { RESTOCK_REACH };
-        let cell = (filler < to && r.digs < max_digs)
+        // >>> Q8: on the way home a restock runs at most `HOME_RESTOCK_TICKS`, then goes with what
+        // it has (Q10: the spans' restock dug 4,300 to 4,700 ticks by the join).
+        let timed_out = home && tick.saturating_sub(r.began) >= HOME_RESTOCK_TICKS;
+        // <<< Q8
+        let cell = (filler < to && r.digs < max_digs && !timed_out)
             .then(|| {
                 restock_cells(w, ahead, look)
                     .into_iter()

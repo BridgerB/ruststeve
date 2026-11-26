@@ -803,6 +803,43 @@ impl Plan {
             return None;
         }
         // <<< pearls
+        // >>> Q8 (issue 19): on the way home a provoked enderman's hold is capped at
+        // `home::ENDER_HOLD_MAX`, then that enderman is left (Q9's race 45764756002 lane 2: the
+        // top-up ended on its clock in the tick one was provoked, and the bot held a 0-block pocket
+        // in the forest from 6,040 past 23,440 at 19.8 health, the trip never begun).
+        let home = self.ender.phase == EnderPhase::Home && self.ender.home.top_up_over;
+        if home
+            && let Some(id) = angry(w)
+            && !self.ender.home.enders_left.contains(&id)
+        {
+            let since = match self.ender.home.ender_hold {
+                Some((held, t)) if held == id => t,
+                Some(_) | None => {
+                    self.ender.home.ender_hold = Some((id, tick));
+                    tick
+                }
+            };
+            if tick.saturating_sub(since) >= crate::home::ENDER_HOLD_MAX {
+                self.ender.home.enders_left.push(id);
+                self.ender.home.ender_hold = None;
+                self.ender.threat = None;
+                self.note(
+                    tick,
+                    format!("home: left the pocket from enderman {id}"),
+                    format!(
+                        "held {} ticks; health {:?}; on with the trip, never a swing; left {}",
+                        crate::home::ENDER_HOLD_MAX,
+                        w.player.health,
+                        self.ender.home.enders_left.len()
+                    ),
+                );
+                return None;
+            }
+        }
+        if home && angry(w).is_some_and(|id| self.ender.home.enders_left.contains(&id)) {
+            return None;
+        }
+        // <<< Q8
         let Some(id) = angry(w) else {
             if let Some(old) = self.ender.threat.take() {
                 self.note(
