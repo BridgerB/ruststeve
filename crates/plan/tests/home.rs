@@ -917,3 +917,13 @@ fn a_ledge_is_air_beside_and_under() {
     set(&mut w, (9, 63, 8), BlockKind::Air);
     assert!(home::on_ledge(&w), "air beside the feet and under it");
 }
+
+#[test]
+fn the_gap_ahead_is_measured_to_the_next_floor() {
+    let mut w = nether();
+    assert_eq!(plan::heading::gap_ahead(&w, (8, 64, 8), (1, 0)), 0);
+    for x in 10..=21 {
+        set(&mut w, (x, 63, 8), BlockKind::Air);
+    }
+    assert_eq!(plan::heading::gap_ahead(&w, (8, 64, 8), (1, 0)), 12);
+}
