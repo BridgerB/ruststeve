@@ -94,6 +94,8 @@ pub const CENTRE: f64 = 0.15;
 pub const WORK_STALL: u64 = 900;
 /// Stair runs (`Stairs::up`, six stairs each) up through a cliff of end stone at most.
 pub const CLIFF_RUNS: u32 = 8;
+/// Stair runs up out of the stock tunnels at most, when no walk leads back to the bunker.
+pub const OUT_RUNS: u32 = 8;
 /// Walks to the bunker's site at most.
 pub const SITE_WALKS: u32 = 10;
 /// Retreat to the bunker under this health (the danger line 8 plus 6, the plan's climb line).
@@ -439,6 +441,9 @@ pub struct EndState {
     pub covered_ticks: u64,
     #[serde(default)]
     pub covered_noted: Option<u64>,
+    /// Stair runs up out of the tunnels begun.
+    #[serde(default)]
+    pub out_runs: u32,
     /// Walks to the bunker held back for a cloud on the way.
     #[serde(default)]
     pub cloud_waits: u32,
@@ -714,7 +719,25 @@ impl Plan {
             // roof and stair dug; the task is chosen again once the sky is over the head.
             let shut = !open(w, roof) || !open(w, door_cells[0]);
             if !world::stage::open_sky(w) && !inside && !open(w, door_cells[0]) {
-                return self.walk_home(w, b, tick, "to leave by the bunker's stair");
+                let mut probe = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
+                if probe.route_now(w, tick) || self.end.out_runs >= OUT_RUNS {
+                    return self.walk_home(w, b, tick, "to leave by the bunker's stair");
+                }
+                // No way back through the tunnels (race 45878860222 lane 0: 23 walks refused from
+                // 52 deep after the stock): stairs up from where the bot stands to the sky.
+                self.end.out_runs += 1;
+                let dir = stock_dir(door, self.end.out_runs);
+                self.note(
+                    tick,
+                    format!("end: stairs up out of the tunnels from {feet:?} toward {dir:?}"),
+                    format!(
+                        "no walk back to the bunker {b:?}; run {} of {OUT_RUNS}",
+                        self.end.out_runs
+                    ),
+                );
+                let mut st = Stairs::up(dir, tick);
+                st.dry = true;
+                return Some(Task::Stairs(Box::new(st)));
             }
             if inside && shut {
                 // Out of the bunker first, the task chosen again once the door is open.

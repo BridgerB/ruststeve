@@ -423,3 +423,25 @@ fn hurt_the_walk_to_the_bunker_waits_while_a_cloud_lies_on_the_way() {
     p.step(&w);
     assert!(noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
 }
+
+#[test]
+fn deep_in_the_tunnels_with_no_way_back_the_bot_cuts_stairs_up_to_hand_over() {
+    // The stock over at y 52, the bunker at (12, 59, 0) out of reach (its cells shut).
+    let mut w = world(4, 0..=7, [30.5, 52.0, 0.5]);
+    for c in [(30, 52, 0), (30, 53, 0), (29, 52, 0), (29, 53, 0)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 59, 0]);
+    p.end.door = Some((1, 0));
+    p.step(&w);
+    assert!(
+        noted(&p, "end: stairs up out of the tunnels from (30, 52, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.task.name(), "stairs", "{:?}", notes(&p));
+}
