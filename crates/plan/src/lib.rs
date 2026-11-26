@@ -1994,7 +1994,12 @@ impl Plan {
                 w.entities
                     .iter()
                     .filter(|(_, e)| {
-                        matches!(e.kind, data::EntityKind::Blaze | data::EntityKind::Ghast)
+                        matches!(
+                            e.kind,
+                            data::EntityKind::Blaze
+                                | data::EntityKind::Ghast
+                                | data::EntityKind::Skeleton
+                        )
                     })
                     .map(|(id, _)| *id),
             );

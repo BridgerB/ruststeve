@@ -879,3 +879,41 @@ fn a_blaze_in_sight_on_the_trip_is_never_struck() {
     );
     assert!(!matches!(p.task, Task::Defend(_)), "{}", p.task.name());
 }
+
+#[test]
+fn a_skeleton_in_sight_on_the_trip_is_a_shooter() {
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 61,
+        uuid: [0; 16],
+        kind: data::EntityKind::Skeleton.id(),
+        x: 16.5,
+        y: 64.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    assert!(home::skeleton_sees(&w));
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 40);
+    assert!(p.ender.home.shooter_seen_at.is_some());
+    assert!(
+        !notes(&p).iter().any(|s| s.starts_with("defend Skeleton")),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_ledge_is_air_beside_and_under() {
+    let mut w = nether();
+    assert!(!home::on_ledge(&w), "the flat floor is no ledge");
+    set(&mut w, (9, 63, 8), BlockKind::Air);
+    assert!(home::on_ledge(&w), "air beside the feet and under it");
+}

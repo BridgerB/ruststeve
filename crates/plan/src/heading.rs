@@ -1021,7 +1021,10 @@ impl Plan {
                 } else {
                     0
                 };
-                if ahead >= SIGNS_TURN {
+                // Nor the crimson signs while a point steers on the way home (Q6's race 45727347488
+                // lane 1: every leg re-aimed and turned north again for 6,000 ticks).
+                let home_way = self.ender.phase == crate::endermen::EnderPhase::Home && h.way;
+                if ahead >= SIGNS_TURN && !home_way {
                     self.heading_turn(
                         w,
                         h,

@@ -213,6 +213,9 @@ pub struct HomeState {
     /// The last tick a blaze or ghast had the bot in sight on the trip.
     #[serde(default)]
     pub shooter_seen_at: Option<u64>,
+    /// Pockets not sealed for a ledge.
+    #[serde(default)]
+    pub ledge_skips: u32,
     /// The tunnel out of a cube pocket in hand (its start and end), and the tunnels dug.
     #[serde(default)]
     pub cube_tunnel: Option<(Cell, Cell)>,
@@ -240,6 +243,43 @@ pub const COOK_FOOD_FLOOR: i32 = 6;
 /// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
 /// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
 pub const CUBE_FIGHT: f64 = 3.0;
+/// A skeleton within this has the trip take cover as from a blaze (its bow's 15 and margin).
+pub const SKELETON_COVER: f64 = 24.0;
+
+/// A skeleton within `SKELETON_COVER` with the bot in sight (Q6's race 45727347488: eight
+/// arrows, 19.8 to 8.6, in the soul sand valley south of the portal).
+pub fn skeleton_sees(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let eyes: Vec<[f64; 3]> = w
+        .entities
+        .values()
+        .filter(|e| !e.dead && e.kind == data::EntityKind::Skeleton)
+        .filter(|e| dist(e.pos, body.pos) <= SKELETON_COVER)
+        .map(|e| [e.pos[0], e.pos[1] + 1.74, e.pos[2]])
+        .collect();
+    !eyes.is_empty() && crate::cover::seen_body(w, &eyes, body.pos)
+}
+
+/// Air under the feet, or under a cell beside them: a ledge, where no pocket is sealed.
+pub fn on_ledge(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    let (x, y, z) = path::feet_cell(body.pos);
+    let air = |c: Cell| {
+        matches!(
+            w.block_at(world::BlockPos::new(c.0, c.1, c.2)),
+            Some(BlockKind::Air | BlockKind::CaveAir)
+        )
+    };
+    air((x, y - 1, z))
+        || [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|(dx, dz)| air((x + dx, y, z + dz)) && air((x + dx, y - 1, z + dz)))
+}
+
 /// A blaze or ghast out of sight this long ends the trip's cover (ten seconds).
 pub const SHOOTER_CLEAR_TICKS: u64 = 200;
 /// The trip's wooden pickaxes from the kit's stems: a table placed, then wooden pickaxes to the
@@ -772,13 +812,29 @@ impl Plan {
                     ),
                 );
             }
+            if on_ledge(w) {
+                // Never a pocket on a ledge (Q6's race 45727347488: knocked off one while sealing).
+                self.ender.home.ledge_skips += 1;
+                if self.ender.home.ledge_skips % 20 == 1 {
+                    self.note(
+                        tick,
+                        "home: no pocket on a ledge".to_owned(),
+                        format!(
+                            "air beside or under the feet; skip {}",
+                            self.ender.home.ledge_skips
+                        ),
+                    );
+                }
+                return None;
+            }
             self.pocket_step(w, tick);
             self.retry_at = tick + 1;
             return Some(Task::Idle);
         }
         // A blaze or ghast in sight on the trip: cover at any health, held until it has been out
         // of sight SHOOTER_CLEAR_TICKS; never a fight (the defence ignores them in Home).
-        let seen = endermen::seen_by_far_shooter(w);
+        let seen =
+            endermen::seen_by_far_shooter(w) || (self.ender.home.top_up_over && skeleton_sees(w));
         if seen && self.ender.home.top_up_over {
             self.ender.home.shooter_seen_at = Some(tick);
         }
@@ -958,6 +1014,21 @@ impl Plan {
                 );
                 return None;
             }
+        }
+        if on_ledge(w) {
+            // Never a pocket on a ledge (Q6's race 45727347488: knocked off one while sealing).
+            self.ender.home.ledge_skips += 1;
+            if self.ender.home.ledge_skips % 20 == 1 {
+                self.note(
+                    tick,
+                    "home: no pocket on a ledge".to_owned(),
+                    format!(
+                        "air beside or under the feet; skip {}",
+                        self.ender.home.ledge_skips
+                    ),
+                );
+            }
+            return None;
         }
         self.pocket_step(w, tick);
         self.retry_at = tick + 1;
