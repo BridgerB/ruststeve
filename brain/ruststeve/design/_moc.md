@@ -52,6 +52,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[overland-and-stronghold]] - the overworld walk to the eyes' fix and the dig into the portal room (issue 19e/f).
+- [[end-portal]] - from the portal room to the End: the kit made on the surface, the frames filled, the step in (issue 20c/d).
 - [[eyes-of-ender]] - the eyes made in the 2x2 grid, thrown and read into lines, crossed into a fix (issue 19c).
 - [[pearl-hunt]] - ender pearls from a burrow an enderman cannot reach into: provoke, strike, collect, move on.
 - [[way-home]] - from 12 pearls in the forest back through the entry portal to the overworld surface, fed (issue 19d).

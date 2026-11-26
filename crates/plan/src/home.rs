@@ -3306,8 +3306,8 @@ impl Plan {
     /// raw meat held and the fuel to cook all of it (overworld planks, logs as their four planks,
     /// coal; warped wood is no fuel), table and furnace placed where the bot stands and the meat
     /// smelted, cooked meat 8 food a piece against raw's 3. `None` with nothing to cook, the fuel
-    /// short (noted), or the night's cook over.
-    fn home_cook(
+    /// short (noted), or the night's cook over. (E2, issue 20c: the End kit's cook too.)
+    pub(crate) fn home_cook(
         &mut self,
         w: &World,
         tick: u64,
