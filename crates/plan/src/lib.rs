@@ -1999,6 +1999,12 @@ impl Plan {
             self.ender.phase == endermen::EnderPhase::Home && self.ender.home.top_up_over;
         let hunt_pocket =
             (self.pearls.started && !home_trip) || self.ender.phase == endermen::EnderPhase::Hunt;
+        // >>> Q8: on the trip a cube the rules say not to fight is never fought, even one that
+        // struck (`defend::foe_except` lets a provoked kind through `ignored`: race 45758211666
+        // lane 1 began and dropped a cube fight every tick for 420 ticks on the west span, still,
+        // until a hit knocked it off).
+        let mut home_never_cubes = false;
+        // <<< Q8
         if hunt_pocket {
             ignored.extend(
                 w.entities
@@ -2079,6 +2085,7 @@ impl Plan {
                     ),
                 );
             }
+            home_never_cubes = !over || !big.is_empty();
             ignored.extend(big);
             // <<< Q8
             ignored.extend(
@@ -2101,7 +2108,10 @@ impl Plan {
                 self.task,
                 Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
             )
-            && crate::home::rail_wanted(w).is_some()
+            && (crate::home::rail_wanted(w).is_some()
+                // >>> Q8
+                || crate::home::guard_wanted(w, self.ender.home.axis).is_some())
+                // <<< Q8
             && craft::count(w, data::ItemKind::Netherrack)
                 + craft::count(w, data::ItemKind::Basalt)
                 + craft::count(w, data::ItemKind::Cobblestone)
@@ -2131,7 +2141,7 @@ impl Plan {
                     .map(|(id, _)| *id),
             );
         }
-        let never_kinds: &[data::EntityKind] = if hunt_pocket {
+        let never_kinds: &[data::EntityKind] = if hunt_pocket || home_never_cubes {
             &[data::EntityKind::MagmaCube]
         } else {
             &[]
@@ -2334,7 +2344,15 @@ impl Plan {
             }
             Task::Defend(d) => {
                 let (sent, landed) = (d.swings, d.landed);
-                let (c, act, status) = d.step(w, rules, tick);
+                let (mut c, act, status) = d.step(w, rules, tick);
+                // >>> Q8 (issue 19): a fight at a lava edge sneaks: the server holds a sneaking
+                // body on its block, its own steps and a knock-back (race 45758211666 lane 2 was
+                // hit into the lava sea fighting small cubes on the island by the join).
+                if !c.jump && crate::home::at_lava_edge(w) {
+                    c.sneak = true;
+                    d.edge_sneak_ticks += 1;
+                }
+                // <<< Q8
                 said = std::mem::take(&mut d.notes);
                 self.swings_sent += u64::from(d.swings.saturating_sub(sent));
                 self.swings_landed += u64::from(d.landed.saturating_sub(landed));
@@ -2367,7 +2385,7 @@ impl Plan {
                             ));
                         }
                         Some(Ok(format!(
-                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck, {} steps off fire on the deck",
+                            "defended: {} swings, {} landed, {:?}, {} steps held back; {:?} health {:?} to {:?}, foe up to {:.1} over the eye, charging {} ticks, kept off {} ticks, sweeps held {} ticks, dodged {} fireballs ({} with a velocity), {} swings falling, {} in passing, {} steps held from fire, {} steps to rods on the deck, {} steps off fire on the deck, {} ticks sneaked at a lava edge",
                             d.swings,
                             d.landed,
                             d.stance,
@@ -2385,7 +2403,8 @@ impl Plan {
                             d.passing_swings,
                             d.fire_held,
                             d.rod_steps,
-                            d.fire_steps
+                            d.fire_steps,
+                            d.edge_sneak_ticks
                         )))
                     }
                 };

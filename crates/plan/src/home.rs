@@ -260,6 +260,18 @@ pub struct HomeState {
     pub filler_owed: Option<i64>,
     #[serde(default)]
     pub owed_restocks: u32,
+    /// The trip's axis and the last feet it was read from (`home_axis`), and guard blocks laid.
+    #[serde(default)]
+    pub axis: Option<(i32, i32)>,
+    #[serde(default)]
+    pub last_feet: Option<Cell>,
+    #[serde(default)]
+    pub guards: u32,
+    /// The spans' guard restock done, and whether it has begun.
+    #[serde(default)]
+    pub guard_restock_done: bool,
+    #[serde(default)]
+    pub span_restocked: bool,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -351,6 +363,60 @@ pub fn cube_size(e: &world::Entity) -> i32 {
         Some(protocol::metadata::MetaValue::Int(s)) => *s,
         Some(_) | None => 1,
     }
+}
+
+/// A side whose drop leads to lava this far under the feet's level is guarded (the coordinator:
+/// within 10; the west span is 9 over the sea).
+pub const GUARD_DROP: i32 = 10;
+/// The span's guard restock digs at most this over the keep (the coordinator: 2 stacks).
+pub const GUARD_EXTRA: i64 = 128;
+
+/// The next block of the guard (`Plan::home_guard`): for each side across `axis`, a feet-level
+/// cell open with lava within `GUARD_DROP` under it is guarded. Its block is clicked onto a
+/// guard block beside it along the axis, else onto the floor-level block under it (the rail),
+/// else that rail is laid first, clicked onto the side of the block stood on. `(cell to fill,
+/// block clicked, face)`; `None` with nothing to guard, no axis, no solid block stood on, or
+/// filler at `RAIL_FLOOR` or under.
+pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, i8)> {
+    let (ax, az) = axis?;
+    let body = w.body?;
+    if path::bridge_blocks(w) <= RAIL_FLOOR {
+        return None;
+    }
+    let feet = path::stand_cell(w, body.pos);
+    let under = (feet.0, feet.1 - 1, feet.2);
+    let mut cells = path::Cells::new(w);
+    if cells.at(under) != path::Class::Solid {
+        return None;
+    }
+    let face_to = |(dx, dz): (i32, i32)| -> i8 {
+        match (dx, dz) {
+            (1, _) => 5,
+            (-1, _) => 4,
+            (_, 1) => 3,
+            _ => 2,
+        }
+    };
+    [(az, ax), (-az, -ax)].into_iter().find_map(|(sx, sz)| {
+        let t = (feet.0 + sx, feet.1, feet.2 + sz);
+        if cells.at(t) != path::Class::Clear
+            || !(1..=GUARD_DROP + 1).any(|d| cells.at((t.0, t.1 - d, t.2)) == path::Class::Lava)
+        {
+            return None;
+        }
+        let rail = (t.0, t.1 - 1, t.2);
+        // A guard block beside it along the axis: clicked on the face toward it.
+        for (dx, dz) in [(ax, az), (-ax, -az)] {
+            let n = (t.0 + dx, t.1, t.2 + dz);
+            if cells.at(n) == path::Class::Solid {
+                return Some((t, n, face_to((-dx, -dz))));
+            }
+        }
+        if cells.at(rail) == path::Class::Solid {
+            return Some((t, rail, 1));
+        }
+        Some((rail, under, face_to((sx, sz))))
+    })
 }
 
 /// A lava edge at the feet or at a cell beside them on the same level: a span, its join, a
@@ -1052,6 +1118,79 @@ impl Plan {
         None
     }
 
+    /// The trip's axis of travel (`HomeState::axis`): a known span's (west), else the last step
+    /// of the feet along x or z. Read every tick on the trip.
+    fn home_axis(&mut self, w: &World) -> Option<(i32, i32)> {
+        let body = w.body?;
+        let feet = path::stand_cell(w, body.pos);
+        let r = self.home_rules();
+        if r.bridges
+            .iter()
+            .any(|[e, wst, y, z]| near_span([*e, *wst, *y, *z], feet))
+        {
+            self.ender.home.axis = Some((-1, 0));
+        } else if let Some(last) = self.ender.home.last_feet
+            && last != feet
+            && last.1 == feet.1
+        {
+            let (dx, dz) = (feet.0 - last.0, feet.2 - last.2);
+            if dx.abs() + dz.abs() == 1 {
+                self.ender.home.axis = Some((dx, dz));
+            }
+        }
+        self.ender.home.last_feet = Some(feet);
+        self.ender.home.axis
+    }
+
+    /// The guard (the coordinator, 2026-11-26; race 45758211666: lane 1 knocked off the west
+    /// span 9 over the sea by a cube that spawned beside it): a block at the feet's level on each
+    /// side across the trip's axis whose drop leads to lava, laid before the next step, mob or no
+    /// mob. Noted and counted; `None` with nothing to guard or no filler over `RAIL_FLOOR`.
+    fn home_guard(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let axis = self.home_axis(w);
+        let (at, click, face) = guard_wanted(w, axis)?;
+        let item = endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.guards += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(click.0, click.1, click.2),
+                    face,
+                });
+                if self.ender.home.guards % 10 == 1 {
+                    self.note(
+                        tick,
+                        format!("home: guard laid at {at:?}"),
+                        format!(
+                            "a side across the axis {axis:?} drops to lava within {GUARD_DROP}; {item:?} on {click:?} face {face}; guard {}, filler {}",
+                            self.ender.home.guards,
+                            path::bridge_blocks(w)
+                        ),
+                    );
+                }
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
+    }
+
     /// A cube within `CUBE_CLEAR` and an edge beside the feet (no floor beside them: lava or air
     /// under the next cell): the floor beside the feet is laid first, a block clicked onto the side
     /// of the one stood on, so a cube's knock-back lands on a block (race 45733362772 lane 0: a
@@ -1108,6 +1247,59 @@ impl Plan {
         let body = w.body?;
         let feet = path::feet_cell(body.pos);
         let out = self.ender.home.spans_out.clone();
+        // >>> Q8: the guard's filler before the spans are walked, once, by the first span met: 2
+        // a cell for what is left of them west of the feet, over the keep, at most `GUARD_EXTRA`
+        // over it, dug where the bot stands (never a span, its join or the sea's floor:
+        // `heading::restock_cells`).
+        let near_any = r.bridges.iter().enumerate().any(|(i, [e, wst, y, z])| {
+            !out.contains(&i)
+                && (feet.2 - z).abs() <= BRIDGE_NEAR
+                && feet.0 <= *e + 1
+                && feet.0 >= *wst
+                && (feet.1 - y).abs() <= BRIDGE_BELOW
+        });
+        if near_any && !self.ender.home.guard_restock_done {
+            let left: i32 = r
+                .bridges
+                .iter()
+                .map(|[e, wst, _, _]| ((*e).min(feet.0) - wst + 1).max(0))
+                .sum();
+            let need = (crate::heading::HOME_KEEP + 2 * i64::from(left))
+                .min(crate::heading::HOME_KEEP + GUARD_EXTRA);
+            let filler = path::bridge_blocks(w);
+            let mut h = self.headed.take().unwrap_or_else(|| {
+                crate::heading::Heading::new(
+                    (-1, 0),
+                    feet,
+                    tick,
+                    "the spans' guard restock".to_owned(),
+                )
+            });
+            if h.restock.is_none() && filler < need && !self.ender.home.span_restocked {
+                self.ender.home.span_restocked = true;
+                h.restock = Some(crate::heading::Restock {
+                    filler0: filler,
+                    uses0: endermen::pickaxe_uses_left(w),
+                    digs: 0,
+                    began: tick,
+                    to: need,
+                });
+                self.note(
+                    tick,
+                    format!("home: restock for the spans' guard at {feet:?}"),
+                    format!(
+                        "{left} span cells west of the feet: filler {filler}, {need} wanted (2 a cell over the keep)"
+                    ),
+                );
+            }
+            let t = self.heading_restock(w, &mut h, tick);
+            self.headed = Some(h);
+            if let Some(t) = t {
+                return Some(t);
+            }
+            self.ender.home.guard_restock_done = true;
+        }
+        // <<< Q8
         let on = r.bridges.iter().position(|[e, wst, y, z]| {
             (feet.2 - z).abs() <= 1 && feet.0 <= *e + 1 && feet.0 >= *wst && (feet.1 - y).abs() <= 1
         });
@@ -1570,6 +1762,11 @@ impl Plan {
         if let Some(t) = self.home_cube_tunnel(w, tick) {
             return Some(t);
         }
+        // >>> Q8: the guard first, mob or none.
+        if let Some(t) = self.home_guard(w, tick) {
+            return Some(t);
+        }
+        // <<< Q8
         if let Some(t) = self.home_rail(w, tick) {
             return Some(t);
         }

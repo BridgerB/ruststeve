@@ -1236,3 +1236,90 @@ fn on_the_way_home_a_tunnel_never_cuts_nether_bricks() {
         round.cells
     );
 }
+
+/// The feet at (8, 64, 8) on a one-wide line along x: the cells beside it at z 7 and 9 open down
+/// to lava at y 61 (3 under the feet's level), for x 0 to 16.
+fn span_over_lava() -> World {
+    let mut w = nether();
+    for x in 0..=16 {
+        for z in [7, 9] {
+            set(&mut w, (x, 63, z), BlockKind::Air);
+            set(&mut w, (x, 62, z), BlockKind::Air);
+            set(&mut w, (x, 61, z), BlockKind::Lava);
+        }
+    }
+    w
+}
+
+#[test]
+fn the_guard_lays_a_rail_then_a_block_at_the_feet_on_each_lava_side() {
+    // Race 45758211666 lane 1: a cube spawned beside it on the west span, 9 over the sea, and a
+    // hit put it in the lava. The guard is laid mob or no mob.
+    let mut w = span_over_lava();
+    kit(&mut w);
+    let axis = Some((-1, 0));
+    assert_eq!(
+        home::guard_wanted(&w, axis),
+        Some(((8, 63, 7), (8, 63, 8), 2)),
+        "the rail first, on the side of the block stood on"
+    );
+    set(&mut w, (8, 63, 7), BlockKind::Cobblestone);
+    assert_eq!(
+        home::guard_wanted(&w, axis),
+        Some(((8, 64, 7), (8, 63, 7), 1)),
+        "then the guard on top of it"
+    );
+    set(&mut w, (8, 64, 7), BlockKind::Cobblestone);
+    assert_eq!(
+        home::guard_wanted(&w, axis).map(|g| g.0),
+        Some((8, 63, 9)),
+        "then the other side"
+    );
+    // The next cell west: clicked onto the guard laid beside it, no rail.
+    set(&mut w, (8, 64, 7), BlockKind::Air);
+    set(&mut w, (9, 64, 7), BlockKind::Cobblestone);
+    assert_eq!(
+        home::guard_wanted(&w, axis),
+        Some(((8, 64, 7), (9, 64, 7), 4))
+    );
+    // No axis, or filler at 4: none.
+    assert_eq!(home::guard_wanted(&w, None), None);
+    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 4));
+    assert_eq!(home::guard_wanted(&w, axis), None);
+}
+
+#[test]
+fn on_the_trip_the_guard_is_laid_with_no_mob_near() {
+    let mut w = span_over_lava();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(None);
+    p.ender.home.axis = Some((-1, 0));
+    p.ender.home.last_feet = Some((8, 64, 8));
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: guard laid at (8, 63, 7)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.guards, 1);
+}
+
+#[test]
+fn the_restock_never_digs_the_floor_near_over_the_lava_sea() {
+    // Race 45758211666 lane 2 dug the island by the join down to y 32 and 33 over the sea at 31.
+    let mut w = nether();
+    for x in 5..=11 {
+        for z in 5..=11 {
+            set(&mut w, (x, 63, z), BlockKind::Basalt);
+        }
+    }
+    assert!(
+        !plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK).is_empty()
+    );
+    // The sea's top 2 under the floor, 6 off on the plane.
+    set(&mut w, (14, 61, 8), BlockKind::Lava);
+    let cells = plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK);
+    assert!(cells.iter().all(|c| c.1 >= 64), "{cells:?}");
+}

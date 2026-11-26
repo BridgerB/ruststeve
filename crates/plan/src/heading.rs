@@ -542,7 +542,13 @@ pub fn projection(origin: Cell, dir: Dir, c: Cell) -> i32 {
 /// `WALL_RISE` over them, never the floor), with no lava beside it (read as the staircase's
 /// refusal reads the cells a cut opens: docs/problems/nether-tunnel.md), nothing over it that
 /// falls, and at the feet's height a floor under it, so no opening over a drop is made.
-fn restock_cell(w: &World, feet: Cell, ahead: Option<Dir>, c: Cell) -> bool {
+fn restock_cell(w: &World, feet: Cell, ahead: Option<Dir>, c: Cell, sea: Option<i32>) -> bool {
+    // >>> Q8: never a floor cell within `SEA_FLOOR` over the lava near (race 45758211666 lane 2
+    // dug the island by the join down to y 32 and 33 over the sea at 31 and was hit into it).
+    if c.1 < feet.1 && sea.is_some_and(|top| c.1 <= top + SEA_FLOOR) {
+        return false;
+    }
+    // <<< Q8
     // The floor only with a heading to keep clear of (the way home's restock).
     if c.1 < feet.1 && ahead.is_none() {
         return false;
@@ -594,6 +600,22 @@ fn restock_cell(w: &World, feet: Cell, ahead: Option<Dir>, c: Cell) -> bool {
     !lava && !falls_over && (c.1 > feet.1 || floor_under)
 }
 
+/// A floor cell is never dug this near over the top of lava within `SEA_LOOK` of the reach (2: the
+/// feet stay 3 over the lava sea, out of a knock-back's fall into it).
+pub const SEA_FLOOR: i32 = 2;
+pub const SEA_LOOK: i32 = 6;
+
+/// The highest lava cell within `r` of the feet on the plane and 8 under them to 1 over.
+fn lava_top_near(w: &World, feet: Cell, r: i32) -> Option<i32> {
+    (-8..=1).rev().map(|dy| feet.1 + dy).find(|y| {
+        (-r..=r).any(|dx| {
+            (-r..=r).any(|dz| {
+                w.block_at(BlockPos::new(feet.0 + dx, *y, feet.2 + dz)) == Some(BlockKind::Lava)
+            })
+        })
+    })
+}
+
 /// Whether a restock cell is in the floor (dug after the walls).
 fn floor_cell(feet: Cell, c: Cell) -> bool {
     c.1 < feet.1
@@ -611,6 +633,7 @@ pub fn restock_cells(w: &World, ahead: Option<Dir>, reach: f64) -> Vec<Cell> {
     let feet = path::stand_cell(w, body.pos);
     let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
     let r = reach.ceil() as i32;
+    let sea = lava_top_near(w, feet, r + SEA_LOOK);
     let mut out: Vec<(i64, Cell)> = (-r..=r)
         .flat_map(|dx| (-r..=r).flat_map(move |dy| (-r..=r).map(move |dz| (dx, dy, dz))))
         .map(|(dx, dy, dz)| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
@@ -618,7 +641,7 @@ pub fn restock_cells(w: &World, ahead: Option<Dir>, reach: f64) -> Vec<Cell> {
             let d = (f64::from(c.0) + 0.5 - eye[0]).powi(2)
                 + (f64::from(c.1) + 0.5 - eye[1]).powi(2)
                 + (f64::from(c.2) + 0.5 - eye[2]).powi(2);
-            (d.sqrt() <= reach && restock_cell(w, feet, ahead, c)).then_some((
+            (d.sqrt() <= reach && restock_cell(w, feet, ahead, c, sea)).then_some((
                 (d * 100.0) as i64 + if floor_cell(feet, c) { 1_000_000 } else { 0 },
                 c,
             ))
@@ -1710,7 +1733,12 @@ impl Plan {
 
     /// The restock in hand: the next wall cell dug, or its end noted (filler back to `RESTOCK_TO`,
     /// `RESTOCK_DIGS` dug, or no cell to dig).
-    fn heading_restock(&mut self, w: &World, h: &mut Heading, tick: u64) -> Option<Task> {
+    pub(crate) fn heading_restock(
+        &mut self,
+        w: &World,
+        h: &mut Heading,
+        tick: u64,
+    ) -> Option<Task> {
         let keep = self.heading_keep();
         let r = h.restock.as_mut()?;
         let filler = path::bridge_blocks(w);
