@@ -787,3 +787,11 @@ fn a_stack_left_on_the_cursor_is_put_down() {
     assert!(put, "a click puts it in a free slot");
     assert_eq!(p.cursor_puts, 1);
 }
+
+#[test]
+fn a_laid_bridge_block_is_kept_from_its_note() {
+    assert_eq!(home::parse_cell("(293, 37, 188)"), Some((293, 37, 188)));
+    assert_eq!(home::parse_cell("(-3, 37, -188)"), Some((-3, 37, -188)));
+    assert_eq!(home::parse_cell("(1, 2)"), None);
+    assert_eq!(home::parse_cell("(1, 2, 3, 4)"), None);
+}

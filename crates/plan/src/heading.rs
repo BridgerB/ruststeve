@@ -54,8 +54,10 @@ pub const MAX_CHOICES: u32 = 4;
 /// fortress walk), and a restock from the wall runs to `RESTOCK_TO`, at most `RESTOCK_DIGS` digs.
 pub const KEEP: i64 = 32;
 /// The keep on the way home (issue 19d): the 32 is held for the hunt's sealed pocket, and the hunt
-/// is over; 16 is `path::BRIDGE_RESERVE`, the fortress walk's.
-pub const HOME_KEEP: i64 = 16;
+/// is over. Over `path::BRIDGE_RESERVE` (16, under which a far search bridges nothing) by 8: at 16
+/// the bots of races 45715674818 and 45722775712 ran their own bridges down to 15 and were
+/// stranded on them with no way on.
+pub const HOME_KEEP: i64 = 24;
 /// A leg refused only for want of filler restocks for its bridges first when they are at most
 /// this many over the spare (race 45698618366: legs in the deltas wanted 44 to 50 with 11 to 13
 /// spare, and failed "no way on" one after another).

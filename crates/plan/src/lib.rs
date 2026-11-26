@@ -1016,6 +1016,18 @@ impl Plan {
     }
 
     fn note(&mut self, tick: u64, what: String, why: String) {
+        // >>> home: the way home keeps the bridge blocks it lays, to dig back when stranded.
+        if self.ender.phase == endermen::EnderPhase::Home
+            && let Some(c) = what
+                .strip_prefix("bridge block laid at ")
+                .and_then(home::parse_cell)
+        {
+            self.ender.home.laid.push(c);
+            if self.ender.home.laid.len() > home::LAID_KEPT {
+                self.ender.home.laid.remove(0);
+            }
+        }
+        // <<< home
         self.events.push(PlanEvent { tick, what, why });
         self.event_count += 1;
         if self.events.len() > EVENTS_KEPT {

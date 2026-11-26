@@ -154,6 +154,11 @@ pub struct HomeState {
     pub ground_at: Option<u64>,
     #[serde(default)]
     pub ground_walks: u32,
+    /// The bridge blocks laid on the trip (the last `LAID_KEPT`), and those dug back.
+    #[serde(default)]
+    pub laid: Vec<Cell>,
+    #[serde(default)]
+    pub unbridged: u32,
     /// Runs of stone pickaxes made on the trip (from blackstone).
     #[serde(default)]
     pub trip_pick_runs: u32,
@@ -200,6 +205,21 @@ pub const COOK_FOOD_FLOOR: i32 = 6;
 /// `CUBE_NEAR` (or any within `CUBE_CLEAR` under the line) seals a pocket, held until none is
 /// within `CUBE_CLEAR` for `CUBE_CLEAR_TICKS`. The legs shun them at `path::SHUN_MAGMA` 8.
 pub const CUBE_FIGHT: f64 = 3.0;
+/// Bridge blocks the trip keeps on record (the last laid), to dig back when stranded.
+pub const LAID_KEPT: usize = 64;
+
+/// A cell as `{:?}` prints it, "(x, y, z)".
+pub fn parse_cell(s: &str) -> Option<Cell> {
+    let mut it = s
+        .trim()
+        .strip_prefix('(')?
+        .strip_suffix(')')?
+        .split(',')
+        .map(|p| p.trim().parse::<i32>());
+    let c = (it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
+    it.next().is_none().then_some(c)
+}
+
 /// How often the trip notes the last ground with filler to dig (a second).
 pub const GROUND_EVERY: u64 = 20;
 pub const CUBE_NEAR: f64 = 6.0;
@@ -1070,6 +1090,39 @@ impl Plan {
                 return Some(Task::Explore(back));
             }
             self.expanded += back.expanded;
+        }
+        // No ground known (or no way to it) and under what a far search needs to bridge: the
+        // bridge's own last blocks behind the bot are dug back, never the one under the feet, for
+        // a short retreat to land (the coordinator, 2026-11-25).
+        if path::bridge_blocks(w) < path::BRIDGE_RESERVE
+            && let Some(body) = w.body
+        {
+            let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
+            let under = (feet.0, feet.1 - 1, feet.2);
+            let mut cells = path::Cells::new(w);
+            let pick = self.ender.home.laid.iter().rev().copied().find(|c| {
+                *c != under
+                    && cells.at(*c) == path::Class::Solid
+                    && (0..3)
+                        .map(|i| (eye[i] - (f64::from([c.0, c.1, c.2][i]) + 0.5)).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= crate::heading::RESTOCK_REACH
+            });
+            if let Some(c) = pick {
+                self.ender.home.laid.retain(|l| *l != c);
+                self.ender.home.unbridged += 1;
+                self.note(
+                    tick,
+                    format!("home: dig back own bridge block at {c:?}"),
+                    format!(
+                        "stranded at {feet:?} with filler {}; dig {} of the run",
+                        path::bridge_blocks(w),
+                        self.ender.home.unbridged
+                    ),
+                );
+                return Some(Task::Dig(crate::dig::Dig::new(w, c, tick)));
+            }
         }
         self.retry_at = tick + crate::RETRY_TICKS * 10;
         self.note(
