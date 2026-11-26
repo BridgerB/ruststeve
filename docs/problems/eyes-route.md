@@ -66,3 +66,8 @@ What the world holds (the plan maps):
      - Make the covered leg plain too: the survey's one fall-to-lava step there is one cell, at (474, 56, 20).
      - At about 6 blocks per 1,000 ticks, the 380 blocks left to the last leg's reach take about 60,000 more ticks. With the walk-backs gone, the plain legs' 11 to 25 a 1,000 would be 15,000 to 35,000.
 4. **The covered leg made plain** (the coordinator, 2026-11-26): every point's `cover` is 0. The survey's one fall to lava on that leg is the single cell beside (474, 56, 20), which the trip's guard (eyes-home wall 28) covers.
+5. **Plain legs: about 10 blocks west per 1,000 ticks** (race 45776886803 at 79817f5, 3 lanes from the frontier; it ended on the 70-minute wall clock at ticks 24,600 to 27,600).
+   - Lanes 1 and 2 stayed at 19.8 health. From x 513 to point 7 (376, 75, 76) they made 137 blocks in about 12,900 ticks (10.6 per 1,000 ticks), at about 3.3 pickaxe uses a block gross. With the carried table placed, pickaxe runs took 14 to 369 ticks.
+   - Point 8 (355, 67, 77) had no route 3 times, 200 ticks apart, and was skipped; the next leg began in the same tick.
+   - From x 348 the leg was cut for a rail about every 60 ticks ("home: stairs cut for a rail": 20 cuts in 1,800 ticks). At tick 21,620 the inventory had no main slot free: "craft crafting_table failed: StaleWindow" 4 times, then the table was given up. Both lanes ended stuck at (342, 86, 83), 171 blocks from the start (8.4 per 1,000 ticks).
+   - Lane 0 died at tick 7,560 by an angry enderman 2 off. The kit was paused for it, and the trip and the first leg began in the same tick (7,440): four hits in 60 ticks. That is the hold's cap letting the trip begin beside the enderman (Q8's).
