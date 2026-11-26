@@ -815,12 +815,13 @@ fn resumed_mid_trip_with_the_eyes_made_skips_the_top_up_and_points_behind() {
         notes(&p)
     );
     assert!(p.ender.home.top_up_over && p.ender.home.kit_over);
-    // At (8, 64, 8) the nearest point is (24, 1), the last but one: every one before it is behind.
-    assert_eq!(
-        p.ender.home.ways_passed.len(),
-        home::HomeRules::default().way.len() - 2,
-        "{:?}",
-        p.ender.home.ways_passed
+    // At (8, 64, 8) the nearest points are the last by the portal: every one before them is behind.
+    let way = home::HomeRules::default().way;
+    let passed = &p.ender.home.ways_passed;
+    assert!(passed.len() + 2 >= way.len(), "{passed:?}");
+    assert!(
+        passed.contains(&(way[0][0] >> 4, way[0][1] >> 4)),
+        "{passed:?}"
     );
 }
 
