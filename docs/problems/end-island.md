@@ -29,5 +29,9 @@ From the `end` frontier (or `dev-end-arrival` for development only), the ledger 
 - A walk on the island is not cut when the dragon charges; only the bridge waits.
 - The hand-offs are stubs until E4's `spikes_task` and E5's `dragon_task` land.
 
+## Evidence so far
+- E6's parity e04 (gaze, an enderman 12 east): a look 3 degrees aside of its eye angered it, 6 degrees aside left it calm, straight down (pitch 90) left it calm: the cone at 12 is about 3.7 degrees, as the jar says; looking down by default holds.
+- E6's e02: the arrival is (100.500, 49.000, 0.500).
+
 ## Walls
 (None yet.)
