@@ -393,6 +393,9 @@ pub enum Op {
     /// A block laid into `cell` (over the head) on whichever side block is there when it is
     /// laid; skipped when the cell is not open. Counted in `EndState::roofs`.
     Roof(Cell),
+    /// The feet onto `cell` (a stair's step, one up and over), steered with a jump; done once the
+    /// feet are there or higher.
+    Step(Cell),
     /// One block up: a jump from the cell's centre and a block put into the cell the feet left
     /// at the jump's top (arrival's shaft, the pearls hunt's pillar).
     Rise,
@@ -412,6 +415,8 @@ pub enum WorkKind {
     Build,
     /// A pillar up on the platform to the bridge's height.
     Pillar,
+    /// Up the opened bunker's stair onto the ground.
+    Exit,
     /// The roof and the door laid back from inside.
     Seal,
     /// The roof and the door's stair dug, to leave.
@@ -524,6 +529,9 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// The stair's steps walked: stairs up on if no sky is over the top.
+    #[serde(default)]
+    pub exit_up: bool,
     /// The first tick seen in the End.
     #[serde(default)]
     pub end_since: Option<u64>,
@@ -775,6 +783,36 @@ impl Plan {
         if !self.end.stock_over {
             return self.stock_step(w, b, door, feet, inside, sealed, tick);
         }
+        // The bunker opened to hand over: up its stair before any hand-off is asked (the
+        // crystals' task, once asked, holds the bot in its own wait).
+        if self.end.exit_walk {
+            self.end.exit_walk = false;
+            // Up the stair a step at a time, steered (race 45898928805 lane 0: from (14, 59, 0),
+            // half on the first step after the open's digs walked to their drops, no route
+            // was found up the stair to the ground, and the hand-off sat 14,000 ticks).
+            let steps = [door_cells[0], door_cells[3], door_cells[5]];
+            self.note(
+                tick,
+                format!("end: up the bunker's stair by {steps:?}"),
+                format!("from {feet:?}; onto the ground before the hand-off"),
+            );
+            self.end.exit_up = true;
+            // Each step's cells dug again first if shut (the bot's own blocks: a pocket laid in
+            // the stair), then the step.
+            let ops = steps
+                .into_iter()
+                .flat_map(|c| {
+                    [
+                        Op::Dig((c.0 - door.0, c.1 + 1, c.2 - door.1)),
+                        Op::Dig((c.0, c.1 + 1, c.2)),
+                        Op::Dig(c),
+                        Op::Step(c),
+                    ]
+                })
+                .collect();
+            self.end.work = Some(Work::new(WorkKind::Exit, ops, tick));
+            return None;
+        }
         // 5. The hand-offs: the crystals while one is alive, then the dragon.
         let next = if crystals_alive(w) > 0 {
             self.end_spikes(w, tick)
@@ -833,33 +871,22 @@ impl Plan {
             // Up the stair onto the ground first (race 45890445738: both bots stood half on the
             // stair's first step, the feet cell over the bunker's air, and every route from there
             // was refused for 14,000 ticks).
-            if self.end.exit_walk {
-                self.end.exit_walk = false;
-                let out = (b.0 + 4 * door.0, b.1 + 4, b.2 + 4 * door.1);
-                let mut walk = Walk::new(
-                    out,
-                    Goal::Near {
-                        pos: out,
-                        range: 1.5,
-                    },
-                    Arrive::Goal,
-                    tick,
-                );
-                if found(&mut walk, w, tick) {
-                    self.walks += 1;
-                    self.note(
-                        tick,
-                        format!("end: up the bunker's stair to {out:?}"),
-                        "onto the ground before the hand-off".to_owned(),
-                    );
-                    return Some(Task::Explore(walk));
-                }
+            // At the stair's top with no sky over it (the ground higher there): stairs up on.
+            if self.end.exit_up && !world::stage::open_sky(w) && self.end.out_runs < OUT_RUNS {
+                self.end.out_runs += 1;
                 self.note(
                     tick,
-                    format!("end: no walk up the bunker's stair to {out:?}"),
-                    format!("from {feet:?}; the hand-off from here"),
+                    format!("end: stairs up from the bunker's stair at {feet:?}"),
+                    format!(
+                        "no sky over the head; run {} of {OUT_RUNS}",
+                        self.end.out_runs
+                    ),
                 );
+                let mut st = Stairs::up(door, tick);
+                st.dry = true;
+                return Some(Task::Stairs(Box::new(st)));
             }
+            self.end.exit_up = false;
             self.end.handoffs += 1;
             self.end.hold_noted = false;
             return Some(t);
@@ -1399,6 +1426,11 @@ impl Plan {
                     ),
                 );
             }
+            WorkKind::Exit => self.note(
+                tick,
+                format!("end: up the bunker's stair at {feet:?}"),
+                format!("{} steps", work.done),
+            ),
             WorkKind::Pillar => self.note(
                 tick,
                 format!("end: pillar up to the bridge's height at {feet:?}"),
@@ -1452,8 +1484,12 @@ impl Plan {
                 }
             }
             Op::Dig(c) => {
+                // Open already: skipped in the same tick (a stair's cells are dug only when shut).
                 if work.dig.is_none() && open(w, c) {
-                    return next(work);
+                    work.ops.remove(0);
+                    work.op_at = tick;
+                    work.done += 1;
+                    return self.work_tick(w, tick, work);
                 }
                 let d = work.dig.get_or_insert_with(|| Dig::new(w, c, tick));
                 let (ctl, act, status) = d.step(w, tick);
@@ -1474,6 +1510,21 @@ impl Plan {
                         kind(w, c)
                     )),
                 }
+            }
+            Op::Step(c) => {
+                if feet == c || (feet.1 > c.1 && body.on_ground) {
+                    return next(work);
+                }
+                let (dx, dz) = (
+                    f64::from(c.0) + 0.5 - body.pos[0],
+                    f64::from(c.2) + 0.5 - body.pos[2],
+                );
+                WorkStep::Running(Controls {
+                    forward: true,
+                    jump: body.on_ground && c.1 > feet.1,
+                    yaw: (-dx).atan2(dz).to_degrees(),
+                    ..down(w)
+                })
             }
             Op::Rise => {
                 if let Some(j) = work.jump_from {
@@ -1785,7 +1836,14 @@ impl Plan {
     /// In the End, covered (`covered`) with an angry enderman near: no pocket is sealed, the work
     /// goes on; noted every `COVERED_NOTE_EVERY` ticks with the count.
     pub(crate) fn end_covered(&mut self, w: &World, tick: u64) -> bool {
-        if !in_end(w) || crate::endermen::angry(w).is_none() || !covered(w) {
+        if !in_end(w) || crate::endermen::angry(w).is_none() {
+            return false;
+        }
+        // In or on the bunker, its stair too: it is the shelter, and a pocket sealed there shuts
+        // its own door (race 45898928805 lanes 0 and 1: pocket blocks at (12, 60, 0) and
+        // (13, 61, 0), the stair's steps, laid while the bunker opened; every way out refused).
+        let at_bunker = self.at_bunker(w);
+        if !at_bunker && !covered(w) {
             return false;
         }
         self.end.covered_ticks += 1;
@@ -1805,6 +1863,19 @@ impl Plan {
             );
         }
         true
+    }
+
+    /// The feet in the bunker's column (its cell to its roof) or on its stair.
+    pub fn at_bunker(&self, w: &World) -> bool {
+        let (Some([x, y, z]), Some(door), Some(body)) = (self.bunker, self.end.door, w.body) else {
+            return false;
+        };
+        let b = (x, y, z);
+        let f = path::stand_cell(w, body.pos);
+        let (_, _, door_cells) = bunker_cells(b, door);
+        (f.0 == b.0 && f.2 == b.2 && (b.1..=b.1 + 3).contains(&f.1))
+            || door_cells.contains(&f)
+            || door_cells.contains(&(f.0, f.1 - 1, f.2))
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes
