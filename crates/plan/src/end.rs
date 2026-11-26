@@ -393,6 +393,9 @@ pub enum Op {
     /// A block laid into `cell` (over the head) on whichever side block is there when it is
     /// laid; skipped when the cell is not open. Counted in `EndState::roofs`.
     Roof(Cell),
+    /// The feet onto `cell` (a stair's step, one up and over), steered with a jump; done once the
+    /// feet are there or higher.
+    Step(Cell),
     /// One block up: a jump from the cell's centre and a block put into the cell the feet left
     /// at the jump's top (arrival's shaft, the pearls hunt's pillar).
     Rise,
@@ -412,6 +415,8 @@ pub enum WorkKind {
     Build,
     /// A pillar up on the platform to the bridge's height.
     Pillar,
+    /// Up the opened bunker's stair onto the ground.
+    Exit,
     /// The roof and the door laid back from inside.
     Seal,
     /// The roof and the door's stair dug, to leave.
@@ -524,6 +529,9 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// The stair's steps walked: stairs up on if no sky is over the top.
+    #[serde(default)]
+    pub exit_up: bool,
     /// The first tick seen in the End.
     #[serde(default)]
     pub end_since: Option<u64>,
@@ -835,31 +843,39 @@ impl Plan {
             // was refused for 14,000 ticks).
             if self.end.exit_walk {
                 self.end.exit_walk = false;
-                let out = (b.0 + 4 * door.0, b.1 + 4, b.2 + 4 * door.1);
-                let mut walk = Walk::new(
-                    out,
-                    Goal::Near {
-                        pos: out,
-                        range: 1.5,
-                    },
-                    Arrive::Goal,
-                    tick,
-                );
-                if found(&mut walk, w, tick) {
-                    self.walks += 1;
-                    self.note(
-                        tick,
-                        format!("end: up the bunker's stair to {out:?}"),
-                        "onto the ground before the hand-off".to_owned(),
-                    );
-                    return Some(Task::Explore(walk));
-                }
+                // Up the stair a step at a time, steered (race 45898928805 lane 0: from (14, 59, 0),
+                // half on the first step after the open's digs walked to their drops, no route
+                // was found up the stair to the ground, and the hand-off sat 14,000 ticks).
+                let steps = [door_cells[0], door_cells[3], door_cells[5]];
                 self.note(
                     tick,
-                    format!("end: no walk up the bunker's stair to {out:?}"),
-                    format!("from {feet:?}; the hand-off from here"),
+                    format!("end: up the bunker's stair by {steps:?}"),
+                    format!("from {feet:?}; onto the ground before the hand-off"),
                 );
+                self.end.exit_up = true;
+                self.end.work = Some(Work::new(
+                    WorkKind::Exit,
+                    steps.into_iter().map(Op::Step).collect(),
+                    tick,
+                ));
+                return None;
             }
+            // At the stair's top with no sky over it (the ground higher there): stairs up on.
+            if self.end.exit_up && !world::stage::open_sky(w) && self.end.out_runs < OUT_RUNS {
+                self.end.out_runs += 1;
+                self.note(
+                    tick,
+                    format!("end: stairs up from the bunker's stair at {feet:?}"),
+                    format!(
+                        "no sky over the head; run {} of {OUT_RUNS}",
+                        self.end.out_runs
+                    ),
+                );
+                let mut st = Stairs::up(door, tick);
+                st.dry = true;
+                return Some(Task::Stairs(Box::new(st)));
+            }
+            self.end.exit_up = false;
             self.end.handoffs += 1;
             self.end.hold_noted = false;
             return Some(t);
@@ -1399,6 +1415,11 @@ impl Plan {
                     ),
                 );
             }
+            WorkKind::Exit => self.note(
+                tick,
+                format!("end: up the bunker's stair at {feet:?}"),
+                format!("{} steps", work.done),
+            ),
             WorkKind::Pillar => self.note(
                 tick,
                 format!("end: pillar up to the bridge's height at {feet:?}"),
@@ -1474,6 +1495,21 @@ impl Plan {
                         kind(w, c)
                     )),
                 }
+            }
+            Op::Step(c) => {
+                if feet == c || (feet.1 > c.1 && body.on_ground) {
+                    return next(work);
+                }
+                let (dx, dz) = (
+                    f64::from(c.0) + 0.5 - body.pos[0],
+                    f64::from(c.2) + 0.5 - body.pos[2],
+                );
+                WorkStep::Running(Controls {
+                    forward: true,
+                    jump: body.on_ground && c.1 > feet.1,
+                    yaw: (-dx).atan2(dz).to_degrees(),
+                    ..down(w)
+                })
             }
             Op::Rise => {
                 if let Some(j) = work.jump_from {

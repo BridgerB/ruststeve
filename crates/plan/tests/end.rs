@@ -597,11 +597,26 @@ fn the_bunker_opened_the_bot_walks_up_its_stair_onto_the_ground() {
     p.end.exit_walk = true;
     p.step(&w);
     assert!(
-        noted(&p, "end: up the bunker's stair to (8, 64, 0)"),
+        noted(
+            &p,
+            "end: up the bunker's stair by [(11, 61, 0), (10, 62, 0), (9, 63, 0)]"
+        ),
         "{:?}",
         notes(&p)
     );
-    assert_eq!(p.task.name(), "explore");
+    // Steered at the first step with a jump.
+    let c = p.step(&w);
+    assert!(c.forward && c.jump, "{c:?}");
+    // On it (race 45898928805 lane 0 stood here, half over the bunker, with no route found): on
+    // to the next step.
+    w.body = Some(physics::Body {
+        pos: [11.5, 61.0, 0.5],
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    p.step(&w);
+    let c = p.step(&w);
+    assert!(c.forward && c.jump, "{c:?}");
 }
 
 #[test]
