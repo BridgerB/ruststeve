@@ -118,5 +118,11 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
   - The flame leave moves from 15 to 25 ticks into the attacking turn.
   - Sat with no stand open, the bot holds near and out of the bite, never the bunker; the bunker is for landing and before the dragon has sat.
 
+### Race 45886819862 (e5d912a, 3 lanes, cap 24,000): 0/3, all three dead
+- **Lane 0:** the flame-clear cell was taken 3.6 from the fountain, beside the body and under the neck. The next scanning turn swept the head onto it: 10, a throw, death by the fall.
+  - **Fix:** a flame-clear cell is also at least `BITE_OUT` + 1 (9) from the body.
+- **Lane 2:** 7 strikes; the dragon reached 168. It died by a fall after a walk failed NoPath.
+- **Lane 1:** killed by an enderman early ("near miss: enderman … stared at"), outside the fight.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

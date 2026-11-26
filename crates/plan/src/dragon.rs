@@ -662,7 +662,10 @@ pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i3
                 continue;
             };
             let p = mid(c);
+            // Never within the turning head's sweep of the body either (race 45886819862 lane 0:
+            // held out of the flame 3.6 from the fountain, the scanning turn's head took 10).
             if flat(p, h) < FLAME_CLEAR
+                || flat(p, v.pos) < BITE_OUT + 1.0
                 || breath_on(&clouds, p).is_some()
                 || before_head(v, p)
                 || !way_clear(v, feet, p)

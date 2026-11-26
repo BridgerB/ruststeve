@@ -724,6 +724,10 @@ fn the_flame_is_waited_out_of_its_reach() {
         Want::Go(c, "out of the flame's way") => {
             let d = dragon::flat(feet_of(c), h);
             assert!(d >= dragon::FLAME_CLEAR, "{c:?} {d}");
+            assert!(
+                dragon::flat(feet_of(c), v.pos) >= dragon::BITE_OUT + 1.0,
+                "out of the turning head's sweep: {c:?}"
+            );
             assert!(!dragon::before_head(&v, feet_of(c)), "{c:?}");
         }
         other => panic!("out of the flame's way before it comes, not {other:?}"),
