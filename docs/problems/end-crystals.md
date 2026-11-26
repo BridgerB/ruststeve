@@ -1,6 +1,6 @@
 # Issue 20f: the crystals by pillar and strike (agent E4)
 
-**Status: built and unit-tested on hand-built worlds (2026-11-26); not yet raced.** Code: `crates/plan/src/spikes.rs`; tests: `crates/plan/tests/spikes.rs`; brain: `brain/ruststeve/design/end-crystals.md`. Index: [`end.md`](end.md).
+**Status: racing from dev-end-island (2026-11-26).** Code: `crates/plan/src/spikes.rs`; tests: `crates/plan/tests/spikes.rs`; brain: `brain/ruststeve/design/end-crystals.md`. Index: [`end.md`](end.md).
 
 ## Needs
 From the island (stage `island`), every end crystal destroyed with the bot alive and on the ground: stage `crystals`. Nothing alive heals the dragon then (it heals 2 a second from the nearest crystal within 32, E1).
@@ -20,7 +20,7 @@ A case file with stage `crystals`: the ledger shows a `spikes: crystal gone N` f
 
 ## Rules
 - A climb (checked before each jump) needs the dragon more than 64 off or perched (phases 5 to 7), and health over danger + 6.
-- If the dragon strafes (1) or charges (8) within 40: inside a whole guard ring, hold crouched. On an unguarded pillar, dig down.
+- If the dragon strafes (1) or charges (8) within 64 (40 until wall 1): inside a whole guard ring, hold crouched. On an unguarded pillar, dig down.
 - Never a strike at or under danger health.
 - A pillar that rises no block in 1,200 ticks fails, the note says why, and that approach is refused for 1,200 ticks.
 
@@ -34,5 +34,20 @@ A case file with stage `crystals`: the ledger shows a `spikes: crystal gone N` f
 - The walk from a wide spike's pillar top onto the spike (1 to 2 cells at height 76 to 103) relies on the pathfinder. Untested real.
 - Endermen: every look goes through `Plan::step`'s `keep_look`; the strike looks at the crystal, everything else looks down.
 
+## First race: 45871173293 (dev-end-island, 2 lanes, cap 12,000, commit 415d61c, development only)
+Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
+- **Both bots broke 2 crystals each:** the caged (42, 0) and (12, 39).
+  - Caged: struck through the intact bars, as e03 says.
+  - Each strike lost 1.0 (`player_explosion`); the guard ring and wall took 6 to 8 blocks.
+  - Pillars rose 34 blocks in 150 ticks and 15 in 155.
+  - The dig down was a block every 40 ticks, back to the pillar's base, noted.
+- **Notes counted** (lane 0): `pillar up to` 2, `pillar down at` 1 (the second still digging), `strike` 2, `crystal gone` 2, about 18 `dig down from the dragon` while it strafed.
+
 ## Walls
-(none raced yet)
+### Wall 1: held on an unguarded pillar while the dragon strafed from 62 (fixed)
+- **What happened** (race 45871173293 lane 0, ticks 1,020 to 1,120): the climb paused at (42, 69, -3) with the dragon 62 off in phase 1 (strafe). The bot held there, then a fireball took 6 (`indirect_magic`) and it fell 8 blocks for 7.5 more (health 8.3). The bunker healed it, and it came back.
+- **The cause:** strafing within 40 was the only "threat". A strafing dragon fires from up to 64 (`DragonStrafePlayerPhase`), and a hold was never re-checked.
+- **The fix:**
+  - `THREAT_NEAR` is now `CLIMB_FAR` (64).
+  - A hold on an unguarded pillar ends the tick the dragon strafes or charges near ("spikes: hold ended by the dragon"), and the planner digs down.
+  - Unit test `a_hold_on_an_unguarded_pillar_ends_when_the_dragon_strafes_within_64`.

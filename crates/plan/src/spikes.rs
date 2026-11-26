@@ -102,8 +102,11 @@ pub const PLACED: [BlockKind; 17] = [
 /// issue 20f).
 pub const CLIMB_FAR: f64 = 64.0;
 /// The dragon strafing or charging within this (blocks) sends the bot into its guard ring or
-/// down (issue 20f).
-pub const THREAT_NEAR: f64 = 40.0;
+/// down. Issue 20f's plan said 40; a strafing dragon fires its fireball from farther (vanilla
+/// `DragonStrafePlayerPhase` fires within 64): race 45871173293 lane 0 held on an unguarded
+/// pillar at y 69 with the dragon strafing 62 off, took a fireball's 6 at tick 1080 and fell 8
+/// for 7.5 more. So the climb's own reach, `CLIMB_FAR`.
+pub const THREAT_NEAR: f64 = CLIMB_FAR;
 /// Health over the danger line a climb needs: a blast or a blow in mid-climb is then not a
 /// death (issue 20f).
 pub const CLIMB_MARGIN: f32 = 6.0;
@@ -1008,10 +1011,26 @@ impl Plan {
             ..Controls::default()
         };
         match doing {
-            Doing::Hold { until } => (tick < *until).then_some(Controls {
-                sneak: true,
-                ..down
-            }),
+            Doing::Hold { until } => {
+                // A hold on an unguarded pillar ends the moment the dragon strafes or charges
+                // near: the planner digs down (race 45871173293 lane 0, tick 1080).
+                let feet = path::stand_cell(w, body.pos);
+                let exposed = body.on_ground
+                    && on_pillar(w, feet, &self.spikes.pillars)
+                    && !guarded(w, feet, &self.spikes.pillars);
+                if exposed && threatens(dragon_near(w, body.pos).as_ref()) {
+                    self.note(
+                        tick,
+                        format!("spikes: hold ended by the dragon at {feet:?}"),
+                        "unguarded on a pillar; the way down".to_owned(),
+                    );
+                    return None;
+                }
+                (tick < *until).then_some(Controls {
+                    sneak: true,
+                    ..down
+                })
+            }
             Doing::Climb(c) => self.spikes_climb(w, tick, &body, c, down),
             Doing::Build(b) => self.spikes_build(w, tick, b, down),
             Doing::Strike(s) => self.spikes_strike(w, tick, &body, s, down),

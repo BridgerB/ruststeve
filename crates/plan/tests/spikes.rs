@@ -600,3 +600,29 @@ fn config_end_toml_holds_the_ten_spikes() {
     };
     assert_eq!(rows.spike.first(), Some(&first));
 }
+
+#[test]
+fn a_hold_on_an_unguarded_pillar_ends_when_the_dragon_strafes_within_64() {
+    // Race 45871173293 lane 0: held at y 69 with the dragon strafing 62 off, a fireball's 6 and a
+    // fall of 8 for 7.5.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::Cobblestone);
+    w.player.health = Some(12.0);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle), "hurt: a hold");
+    assert!(p.spikes_step(&w, 101).is_some());
+    dragon(&mut w, [8.5, 67.0, 65.5], 1);
+    assert!(
+        p.spikes_step(&w, 102).is_none(),
+        "the dragon strafes 60 off"
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: hold ended by the dragon"))
+    );
+    match p.spikes_task(&w, 103) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+}

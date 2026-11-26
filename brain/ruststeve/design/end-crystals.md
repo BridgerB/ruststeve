@@ -35,7 +35,7 @@ Issue 20f (agent E4, `docs/problems/end-crystals.md`), the port of clojurecraft'
 
 ## The rules
 - A climb (each jump) only with the dragon more than `CLIMB_FAR` (64) off or perched (phases 5 to 7) and health over danger + `CLIMB_MARGIN` (6).
-- The dragon strafing (1) or charging (8) within `THREAT_NEAR` (40): up high in a whole guard ring, hold crouched; on an unguarded pillar, dig down.
+- The dragon strafing (1) or charging (8) within `THREAT_NEAR` (64, a strafe fires its fireball from that far): up high in a whole guard ring, hold crouched; on an unguarded pillar, dig down, a hold there ended at once.
 - No strike at or under danger health. A strike attacks every `SWING_EVERY` ticks while the crystal's box (2 by 2) is within 3.0 of the eye.
 - A pillar with no rise in `PILLAR_STALL` (1,200) ticks fails, says why, and its approach is refused for `REFUSE_TICKS`.
 
