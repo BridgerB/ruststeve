@@ -211,7 +211,9 @@ const WAY_WAIT: u64 = 600;
 /// The spot moved this far, east, south, west, north in turn: past a tree's crown (the canopy
 /// Q3 reads is 10 to 14 out) and within the baseline's slack.
 const WAY_NUDGE: f64 = 20.0;
-const WAY_NUDGES: u32 = 4;
+/// Twelve moves: three rings of four, each ring `WAY_NUDGE` farther out (race 45747459284 lane 0
+/// used its four of 20 under one wide canopy).
+const WAY_NUDGES: u32 = 12;
 // <<< overland and stronghold
 /// A trail mark counts as toward the spawner when it is at least this much nearer to it than the
 /// feet are (two trail steps: a mark beside the bot is no way on).
@@ -2703,7 +2705,8 @@ impl Plan {
                     let base = self.overland.way_base.unwrap_or(p);
                     let (dx, dz) = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)]
                         [self.overland.nudges as usize % 4];
-                    let to = [base[0] + dx * WAY_NUDGE, base[1] + dz * WAY_NUDGE];
+                    let ring = f64::from(self.overland.nudges / 4 + 1) * WAY_NUDGE;
+                    let to = [base[0] + dx * ring, base[1] + dz * ring];
                     let nudges = self.overland.nudges + 1;
                     self.overland.retarget((to, 0.0), true);
                     self.overland.way_base = Some(base);
