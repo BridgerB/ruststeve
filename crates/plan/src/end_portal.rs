@@ -31,6 +31,10 @@ use crate::{Plan, Task, base, craft, eat};
 /// The overworld's dimension name.
 pub const OVERWORLD: &str = "minecraft:overworld";
 
+/// A standing cell for an eye is chosen this far inside the reach: the body stands up to a
+/// third of a block off its cell's centre.
+pub const STAND_MARGIN: f64 = 0.4;
+
 /// `[end_kit]` in `config/goals.toml` (moves to E1's `config/end.toml`); each number's source is
 /// there. The defaults are the config's values.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1949,11 +1953,15 @@ impl Plan {
         }
         // A walk to the nearest standing cell of the first frame that has one.
         for f in &todo {
-            for stand in eye_stands(w, room, *f, feet, r.frame_reach)
+            // Stands judged from the cell's centre a margin inside the reach, and never the feet's
+            // own cell (race 45886255606 lane 1: (1629, 17, -37) was in reach of (1626, 19, -34)
+            // from its centre, not from the body off it, and the walk there was begun 3,267 times
+            // standing on it).
+            for stand in eye_stands(w, room, *f, feet, r.frame_reach - STAND_MARGIN)
                 .into_iter()
                 .take(crate::CANDIDATES_PER_TICK + 2)
             {
-                if self.refused_now(stand, tick) {
+                if self.refused_now(stand, tick) || stand == feet {
                     continue;
                 }
                 let mut walk = Walk::new(stand, Goal::Block { pos: stand }, Arrive::Goal, tick);
