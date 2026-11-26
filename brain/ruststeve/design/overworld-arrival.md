@@ -3,10 +3,10 @@ title: The overworld arrival
 description: How the bot climbs from its own overworld portal by the lava sea (feet y -53) to the open sky on the way home (plan::arrival, issue 19) - a one-wide shaft straight up in rock, a dig and a jump a block, sealed below by its own blocks; refused at caves, fluids and falling blocks, where the way home's stairs take a leg; the climb's pickaxes made at a table where the bot stands.
 type: reference
 tags: [plan, home, overworld, climb, shaft, stairs]
-aliases: [arrival, shaft, Arrival, Shaft, arrival_step, arrival_climb, arrival_table, SHAFT_BLOCKS, TABLE_REACH, the shaft, pillar up]
+aliases: [arrival, shaft, Arrival, Shaft, arrival_step, arrival_climb, arrival_table, arrival_hand_over, arrival_food_walk, side_cell, SHAFT_BLOCKS, TABLE_REACH, HAND_OVER_FOOD, FOOD_POINT, the shaft, pillar up, step aside]
 status: draft
 lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@4fe8848
+verifiedAgainst: ruststeve@4dc778b
 sourceRefs:
   - "ruststeve:crates/plan/src/arrival.rs#pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> Step {"
   - "ruststeve:crates/plan/src/arrival.rs#pub(crate) fn arrival_step(&mut self, w: &World, tick: u64) -> Option<Controls> {"
@@ -32,8 +32,15 @@ The way home's stairs in rock climb a block for three digs (race 45727358847: ab
 
 `Plan::arrival_climb`, called from the way home's climb (`home_climb`), begins a shaft where `step` allows one ("arrival: shaft up from"); refused, it notes "arrival: no shaft from" and the stairs take a leg (they turn from caves), and the next climb tries again from where the leg ended. `Plan::arrival_step` drives the shaft a tick at a time ahead of the task choice while no task runs; it ends "arrival: shaft over at" with its reason, rise, digs and blocks placed. A shaft ends for the climb's pickaxe run when the way home's own rule would make pickaxes.
 
+Before each jump the feet go to the cell's centre (`CENTRE` 0.12, sneaking): off it, the body touches the next column and the jump stops on the rock over it. A dig whose drop a full pack cannot take still counts once its cell is open. The junk blocks of the trip (soul soil, nylium, wart blocks, tuff, granite) go under the feet first, so the climb empties the pack. A stack left on the cursor `CURSOR_WAIT` (100) ticks goes to a free slot or swaps out a junk block (never sooner: a hold's swap carries its item on the cursor between clicks).
+
+A refused shaft first steps aside (`side_cell`): a level tunnel of up to `SIDE_REACH` 3 cells, nearest first, every cell on a full floor, rock or open, neither a falling block nor under one, no fluid in, beside or over it, no open cell beside it but the one behind, quick to break, and a shaft allowed from its end; at most `SIDES_MAX` 3 with no rise between ("arrival: shaft steps aside to").
+
 ## The climb's table
 `base::CLIMB_STEPS` took any table within `TABLE_SEARCH` (64): from y -21 the bot walked back down to the portal room's table at y -53. `Plan::arrival_table` refuses tables farther than `TABLE_REACH` from the eye for the run, so the base places the carried one; when the run is over that table is dug and taken along ("arrival: the table at … taken along").
 
+## The hand-over and the food
+On the surface by day (dusk more than `DUSK_MARGIN` off) with food `HAND_OVER_FOOD` (6) or more, `Plan::arrival_hand_over` ends Home at once ("home: over on the surface, the eyes take over"; the coordinator: the overland walk hunts on the way), after digging the block over the head (the night hut's roof) so the first throw has the open sky. Under food 6, hungry by day with no prey in view, `Plan::arrival_food_walk` walks far legs of `FOOD_LEG` (48) toward `FOOD_POINT`, the stronghold's `locate` point (1648, -16), known geography: the ground round the portal was hunted bare by issue 16's bots.
+
 ## Tests
-`crates/plan/tests/arrival.rs`: the dig over the head in rock; the refusals (a cave beside, lava over, water beside, gravel over, a cave over the head not opened by the shaft); the rise into a cell it opened; out under the sky with a side to walk off by; the climb from under rock begins a shaft and digs.
+`crates/plan/tests/arrival.rs`: the dig over the head in rock; the refusals (a cave beside, lava over, water beside, gravel over, a cave over the head not opened by the shaft); the rise into a cell it opened; out under the sky with a side to walk off by; the climb from under rock begins a shaft and digs; gravel over the head steps aside to rock; on the surface by day with food 6 the eyes take over.
