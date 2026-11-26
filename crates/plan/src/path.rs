@@ -407,6 +407,10 @@ pub const BRIDGE_BLOCKS: &[data::ItemKind] = &[
     data::ItemKind::Andesite,
     data::ItemKind::Tuff,
     data::ItemKind::Dirt,
+    // The basalt deltas' own walls (issue 19d, race 45698618366: the way home restocks there):
+    // full blocks a pickaxe drops as themselves.
+    data::ItemKind::Basalt,
+    data::ItemKind::Blackstone,
 ];
 /// Blocks held before a search may bridge: fewer is not a crossing.
 pub const BRIDGE_RESERVE: i64 = 16;
