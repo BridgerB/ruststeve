@@ -2280,7 +2280,8 @@ impl Plan {
             Hold::Held => {
                 if self.acts.is_empty()
                     && w.click.is_none()
-                    && tick >= self.dragon.roof_click_at + ROOF_CLICK_TICKS
+                    && (self.dragon.roof_tries == 0
+                        || tick >= self.dragon.roof_click_at + ROOF_CLICK_TICKS)
                 {
                     self.dragon.roof_tries += 1;
                     self.dragon.roof_click_at = tick;
