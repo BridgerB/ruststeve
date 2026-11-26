@@ -248,6 +248,10 @@ pub struct HomeState {
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
     // <<< Q6
+    // >>> Q7: the overworld arrival's state (the shaft, the climb's table).
+    #[serde(default)]
+    pub arrival: crate::arrival::Arrival,
+    // <<< Q7
 }
 
 /// Lava cells sealed beside the portal at most: two rows of five in front of it and its sides
@@ -2255,6 +2259,14 @@ impl Plan {
                 return self.home_climb(w, tick, &r);
             }
         }
+        // >>> Q7: on the surface by day, food 6 or more: over, the eyes take over (the done
+        // branch above: Q4's exit with eyes held).
+        match self.arrival_hand_over(w, tick) {
+            Some(Some(t)) => return Some(t),
+            Some(None) => return self.home_overworld(w, tick),
+            None => {}
+        }
+        // <<< Q7
         // The night: a hut where the bot stands, one a night, and the night waited out in it.
         let dusk = self.dusk_near(w, tick) || w.is_night() == Some(true);
         if dusk {
@@ -2312,6 +2324,11 @@ impl Plan {
                 self.retry_at = tick + crate::RETRY_TICKS * 10;
                 return Some(Task::Idle);
             }
+            // >>> Q7: by day, far legs east for animals (fresh land), before the look round.
+            if let Some(t) = self.arrival_food_walk(w, tick) {
+                return Some(t);
+            }
+            // <<< Q7
             if self.ender.home.animal_walks < r.animal_walks {
                 self.ender.home.animal_walks += 1;
                 let why = format!(
@@ -2507,12 +2524,24 @@ impl Plan {
                 ),
             );
         }
+        // >>> Q7: the run's table where the bot stands (a far one refused), taken along after; then
+        // a shaft straight up where one is safe (crates/plan/src/arrival.rs).
+        let running = self.base.steps == base::CLIMB_STEPS.to_vec() && !self.base.over;
+        if let Some(t) = self.arrival_table(w, tick, running) {
+            return Some(t);
+        }
+        // <<< Q7
         if self.base.steps == base::CLIMB_STEPS.to_vec()
             && !self.base.over
             && let Some(t) = self.base_task(w, tick)
         {
             return Some(t);
         }
+        // >>> Q7
+        if let Some(t) = self.arrival_climb(w, tick) {
+            return Some(t);
+        }
+        // <<< Q7
         if let Some(mut t) = self.stairs_to_surface(w, tick) {
             // Dry and in rock: a stair breaking into a cave or beside water turns its heading
             // (the cave band, y -57 to 33 round the overworld portal: Q1's probe 45688112814).

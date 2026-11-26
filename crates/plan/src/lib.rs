@@ -8,6 +8,9 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// >>> Q7 (issue 19, the overworld arrival)
+pub mod arrival;
+// <<< Q7
 // >>> base (P5, issue 18d)
 pub mod base;
 // <<< base
@@ -1611,6 +1614,11 @@ impl Plan {
         if let Some(c) = self.ender_threat(w, tick) {
             return c;
         }
+        // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.
+        if let Some(c) = self.arrival_step(w, tick) {
+            return c;
+        }
+        // <<< Q7
         if self.finished() {
             return Controls::default();
         }
