@@ -188,6 +188,10 @@ pub struct HomeState {
     pub aim: Option<(i32, i32)>,
     #[serde(default)]
     pub done: bool,
+    // >>> Q7: the overworld arrival's state (the shaft, the climb's table).
+    #[serde(default)]
+    pub arrival: crate::arrival::Arrival,
+    // <<< Q7
 }
 
 /// Lava cells sealed beside the portal at most: two rows of five in front of it and its sides
@@ -1761,12 +1765,24 @@ impl Plan {
                 ),
             );
         }
+        // >>> Q7: the run's table where the bot stands (a far one refused), taken along after; then
+        // a shaft straight up where one is safe (crates/plan/src/arrival.rs).
+        let running = self.base.steps == base::CLIMB_STEPS.to_vec() && !self.base.over;
+        if let Some(t) = self.arrival_table(w, tick, running) {
+            return Some(t);
+        }
+        // <<< Q7
         if self.base.steps == base::CLIMB_STEPS.to_vec()
             && !self.base.over
             && let Some(t) = self.base_task(w, tick)
         {
             return Some(t);
         }
+        // >>> Q7
+        if let Some(t) = self.arrival_climb(w, tick) {
+            return Some(t);
+        }
+        // <<< Q7
         if let Some(mut t) = self.stairs_to_surface(w, tick) {
             // Dry and in rock: a stair breaking into a cave or beside water turns its heading
             // (the cave band, y -57 to 33 round the overworld portal: Q1's probe 45688112814).

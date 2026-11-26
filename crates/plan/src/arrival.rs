@@ -1,0 +1,527 @@
+//! Issue 19, the overworld arrival (agent Q7, docs/problems/eyes-arrival.md): from the bot's own
+//! overworld portal by the lava sea (feet y -53) up to the open sky, through the cave band that
+//! killed 7 of 16 bots in issue 16 (docs/problems/overworld-leg.md wall 1).
+//!
+//! **The shaft.** The way home's stairs in rock (`Stairs::rock`) climb a block of height for
+//! three digs and about 120 ticks in deepslate (race 45727358847: 33 blocks in 12,000 ticks, both
+//! lanes). A one-wide shaft straight up climbs a block for one dig and a jump: the block over the
+//! head is dug, the bot jumps and puts a block into the cell its feet left at the top of the jump
+//! (the pearls hunt's pillar out of a hole, `pearls::out_of_hole`). The shaft is sealed below by
+//! its own blocks and walled on every side by rock, so no mob reaches the bot in it; each dig
+//! gives the block the next step places.
+//!
+//! A cell over the head is dug only when it is safe to open (the stairs' own rule, reading the
+//! cells beside a cell about to be opened, the no-X-ray exception the stairs and the tunnel use):
+//! no fluid in it or beside it, nothing that falls over it (gravel, sand, a dripstone), no open
+//! cell beside it or over it (a cave) unless the sky is over it (the surface), and no block a
+//! held tool takes longer than `MAX_BREAK` to break. Refused, the shaft ends and the way home's
+//! stairs take one leg from there (they turn from caves); the next climb tries a shaft again from
+//! the cell the leg ended in. The shaft is over once the open sky is over the head and a side is
+//! walkable out of it.
+//!
+//! **The table.** The climb's pickaxe run (`base::CLIMB_STEPS`) took any table within
+//! `TABLE_SEARCH` (64): from y -21 the bot walked back down its own stairs to the portal room's
+//! table at y -53 and climbed again (race 45727358847, ticks 4,620 to 6,440 and 10,480). A table
+//! farther than `TABLE_REACH` is refused for the run, so the base places the carried one where
+//! the bot stands, and it is dug and taken along once the run is over.
+
+use data::{BlockKind, ItemKind};
+use physics::Controls;
+use world::{BlockPos, World};
+
+use crate::dig::{Dig, DigStatus};
+use crate::path::{self, Cell};
+use crate::{Plan, Task, craft, hold};
+
+/// Blocks the shaft puts under the feet, the first held: what the climb digs (cobbled deepslate
+/// under y 0, cobblestone over it, tuff) and the trip's filler (netherrack, blackstone, basalt).
+pub const SHAFT_BLOCKS: [ItemKind; 10] = [
+    ItemKind::CobbledDeepslate,
+    ItemKind::Cobblestone,
+    ItemKind::Netherrack,
+    ItemKind::Tuff,
+    ItemKind::Blackstone,
+    ItemKind::Basalt,
+    ItemKind::Andesite,
+    ItemKind::Diorite,
+    ItemKind::Granite,
+    ItemKind::Dirt,
+];
+
+/// Ticks with no rise before a shaft is given up: a dig of deepslate with a wooden pickaxe is
+/// 45 ticks (hardness 3, speed 2), a step about 70 with the jump; 600 is eight steps' worth.
+pub const SHAFT_STALL: u64 = 600;
+/// The longest break the shaft waits for (ticks, with the best tool held): deepslate with a
+/// wooden pickaxe is 45, ores a stone pickaxe cannot take (diamond, gold) 300 by hand.
+pub const MAX_BREAK: u64 = 100;
+/// Blocks a table may be from the eye for the climb's pickaxe run: a click's reach (4.5) and a
+/// little.
+pub const TABLE_REACH: f64 = 5.0;
+/// Cells over a cell checked for the sky: `world::stage::SKY_CHECK`, the open-sky rule's own.
+const SKY: i32 = world::stage::SKY_CHECK;
+
+/// The arrival's state, one field of the way home's (`HomeState::arrival`).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Arrival {
+    /// The shaft in hand, driven a tick at a time while no task runs (`Plan::arrival_step`).
+    pub shaft: Option<Shaft>,
+    /// The feet's cell where the last shaft was refused or ended short: the stairs take a leg
+    /// from it before another shaft.
+    pub refused_at: Option<Cell>,
+    /// Shafts begun, blocks risen in them, refusals.
+    pub shafts: u32,
+    pub risen: i32,
+    pub refusals: u32,
+    /// A far table was refused for the pickaxe run: the one the base places is taken along.
+    pub table_out: bool,
+    /// Tables taken along after a run.
+    pub tables_taken: u32,
+}
+
+/// A shaft straight up.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Shaft {
+    /// The feet's cell it began from, the highest feet y, when it began and last rose.
+    pub from: Cell,
+    pub top: i32,
+    pub since: u64,
+    pub rose_at: u64,
+    /// The dig in hand of the cell over the head, and the cell this shaft opened last.
+    pub dig: Option<Dig>,
+    #[serde(default)]
+    pub opened: Option<Cell>,
+    /// The feet's cell a jump left, and whether its block was clicked in.
+    #[serde(default)]
+    pub jump_from: Option<Cell>,
+    #[serde(default)]
+    pub clicked: bool,
+    #[serde(default)]
+    pub dug: u32,
+    #[serde(default)]
+    pub placed: u32,
+}
+
+/// The shaft's next step from the feet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// Dig this cell (the one over the head).
+    Dig(Cell),
+    /// The cell over the head is open: jump and put a block under the feet.
+    Rise,
+    /// Out: the sky over the head and a side walkable.
+    Out,
+    /// Not safe to go on: why.
+    Refused(String),
+}
+
+fn kind(w: &World, (x, y, z): Cell) -> Option<BlockKind> {
+    w.block_at(BlockPos::new(x, y, z))
+}
+
+fn open(k: Option<BlockKind>) -> bool {
+    matches!(
+        k,
+        Some(BlockKind::Air | BlockKind::CaveAir | BlockKind::VoidAir)
+    )
+}
+
+fn full(k: Option<BlockKind>) -> bool {
+    k.and_then(data::generated::shapes::collision) == Some(data::types::Collision::Full)
+}
+
+fn fluid(k: Option<BlockKind>) -> Option<&'static str> {
+    match k {
+        Some(
+            BlockKind::Water
+            | BlockKind::BubbleColumn
+            | BlockKind::Kelp
+            | BlockKind::KelpPlant
+            | BlockKind::Seagrass
+            | BlockKind::TallSeagrass,
+        ) => Some("water"),
+        Some(BlockKind::Lava) => Some("lava"),
+        Some(_) | None => None,
+    }
+}
+
+/// A block that falls when what holds it is dug (or hangs and falls: a dripstone).
+fn falls(k: Option<BlockKind>) -> bool {
+    matches!(
+        k,
+        Some(
+            BlockKind::Sand
+                | BlockKind::RedSand
+                | BlockKind::Gravel
+                | BlockKind::SuspiciousSand
+                | BlockKind::SuspiciousGravel
+                | BlockKind::PointedDripstone
+        )
+    )
+}
+
+/// The sky over `c`: `c` and the `SKY` cells over it open (leaves and logs count, as in
+/// `world::stage::open_sky`), or over the top of the loaded column.
+pub fn sky_over(w: &World, c: Cell) -> bool {
+    let tree = |k: BlockKind| {
+        ["leaves", "logs"]
+            .iter()
+            .filter_map(|t| data::generated::tags::block_tag(t))
+            .any(|ks| ks.contains(&k))
+    };
+    (c.1..c.1 + SKY).all(|y| match kind(w, (c.0, y, c.2)) {
+        Some(BlockKind::Air | BlockKind::CaveAir) => true,
+        Some(k) => tree(k),
+        None => y > 319,
+    })
+}
+
+const SIDES: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+
+/// A side the bot walks out of the shaft by: a floor beside the feet with room over it, or a
+/// block beside the feet with room over it to jump onto.
+fn walk_out(w: &World, (x, y, z): Cell) -> bool {
+    SIDES.iter().any(|(dx, dz)| {
+        let at = |dy: i32| kind(w, (x + dx, y + dy, z + dz));
+        (open(at(0)) && open(at(1)) && full(at(-1))) || (full(at(0)) && open(at(1)) && open(at(2)))
+    })
+}
+
+/// The shaft's next step from `feet`, with `opened` the cell this shaft dug last and `items` what
+/// is held (for the break time). Pure: a hand-built world gives its answer.
+pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> Step {
+    let (x, y, z) = feet;
+    let over = (x, y + 2, z);
+    let above = (x, y + 3, z);
+    if open(kind(w, over)) && sky_over(w, over) && walk_out(w, feet) {
+        return Step::Out;
+    }
+    let k = kind(w, over);
+    if open(k) {
+        if opened == Some(over) || sky_over(w, over) {
+            return Step::Rise;
+        }
+        return Step::Refused(format!("cave over the head at {over:?}"));
+    }
+    let Some(block) = k else {
+        return Step::Refused(format!("{over:?} not loaded"));
+    };
+    if let Some(f) = fluid(k) {
+        return Step::Refused(format!("{f} at {over:?}"));
+    }
+    if falls(k) || falls(kind(w, above)) {
+        return Step::Refused(format!("a falling block at {over:?} or over it"));
+    }
+    let round = SIDES
+        .iter()
+        .map(|(dx, dz)| (x + dx, y + 2, z + dz))
+        .chain(std::iter::once(above));
+    let near: Vec<Cell> = round.collect();
+    if let Some((c, f)) = near
+        .iter()
+        .find_map(|c| fluid(kind(w, *c)).map(|f| (*c, f)))
+    {
+        return Step::Refused(format!("{f} beside {over:?} at {c:?}"));
+    }
+    if !sky_over(w, above)
+        && let Some(c) = near.iter().find(|c| open(kind(w, **c)))
+    {
+        return Step::Refused(format!("cave beside {over:?} at {c:?}"));
+    }
+    let tool = data::dig::best_tool(block, items.iter().copied());
+    match data::dig::break_ticks(block, tool, false, true) {
+        Some(t) if t <= MAX_BREAK => Step::Dig(over),
+        Some(t) => Step::Refused(format!("{block:?} at {over:?} takes {t} ticks")),
+        None => Step::Refused(format!("{block:?} at {over:?} does not break")),
+    }
+}
+
+fn items(w: &World) -> Vec<ItemKind> {
+    w.inventory
+        .slots
+        .values()
+        .chain(w.inventory.carried.iter())
+        .map(|(k, _)| *k)
+        .collect()
+}
+
+impl Plan {
+    // >>> Q7: the climb's own entry, called from the way home's climb (`home_climb`).
+    /// A shaft up from the feet when one is safe here (noted), else `None` and the stairs take a
+    /// leg (refused here, noted once). `Some(Task::Idle)` while a shaft runs: `arrival_step`
+    /// drives it.
+    pub(crate) fn arrival_climb(&mut self, w: &World, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        if self.ender.home.arrival.shaft.is_some() {
+            self.retry_at = tick + 1;
+            return Some(Task::Idle);
+        }
+        if self.ender.home.arrival.refused_at == Some(feet) || !body.on_ground {
+            return None;
+        }
+        if SHAFT_BLOCKS.iter().all(|k| craft::count(w, *k) == 0) {
+            return None;
+        }
+        match step(w, feet, None, &items(w)) {
+            Step::Refused(why) => {
+                self.ender.home.arrival.refused_at = Some(feet);
+                self.ender.home.arrival.refusals += 1;
+                self.note(
+                    tick,
+                    format!("arrival: no shaft from {feet:?}"),
+                    format!("{why}; the stairs take a leg"),
+                );
+                None
+            }
+            Step::Out => None,
+            Step::Dig(_) | Step::Rise => {
+                self.ender.home.arrival.shafts += 1;
+                self.ender.home.arrival.shaft = Some(Shaft {
+                    from: feet,
+                    top: feet.1,
+                    since: tick,
+                    rose_at: tick,
+                    dig: None,
+                    opened: None,
+                    jump_from: None,
+                    clicked: false,
+                    dug: 0,
+                    placed: 0,
+                });
+                self.note(
+                    tick,
+                    format!("arrival: shaft up from {feet:?}"),
+                    format!(
+                        "shaft {}; {} risen in shafts so far; health {:?}, food {:?}",
+                        self.ender.home.arrival.shafts,
+                        self.ender.home.arrival.risen,
+                        w.player.health,
+                        w.player.food
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+        }
+    }
+
+    /// The climb's pickaxe run: tables past `TABLE_REACH` are refused for it (noted), so the
+    /// base places the carried table where the bot stands; once the run is over, that table is
+    /// dug and taken along. `Some` with the dig.
+    pub(crate) fn arrival_table(&mut self, w: &World, tick: u64, running: bool) -> Option<Task> {
+        let body = w.body?;
+        let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+        let d = |c: Cell| {
+            let p = [
+                f64::from(c.0) + 0.5,
+                f64::from(c.1) + 0.5,
+                f64::from(c.2) + 0.5,
+            ];
+            (0..3).map(|i| (eye[i] - p[i]).powi(2)).sum::<f64>().sqrt()
+        };
+        if running {
+            for _ in 0..4 {
+                let Some(c) = self.near_block(w, BlockKind::CraftingTable, tick) else {
+                    break;
+                };
+                if d(c) <= TABLE_REACH {
+                    break;
+                }
+                self.refuse(c, tick);
+                self.ender.home.arrival.table_out = true;
+                self.note(
+                    tick,
+                    format!("arrival: the table at {c:?} is far"),
+                    format!(
+                        "{:.0} from the eye, over {TABLE_REACH}: the pickaxes are made here ({} tables held)",
+                        d(c),
+                        craft::count(w, ItemKind::CraftingTable)
+                    ),
+                );
+            }
+            return None;
+        }
+        if !self.ender.home.arrival.table_out || craft::count(w, ItemKind::CraftingTable) > 0 {
+            self.ender.home.arrival.table_out = false;
+            return None;
+        }
+        self.ender.home.arrival.table_out = false;
+        let c = self
+            .near_block(w, BlockKind::CraftingTable, tick)
+            .filter(|c| d(*c) <= TABLE_REACH)?;
+        self.ender.home.arrival.tables_taken += 1;
+        self.note(
+            tick,
+            format!("arrival: the table at {c:?} taken along"),
+            format!(
+                "the climb's pickaxes made; {} taken",
+                self.ender.home.arrival.tables_taken
+            ),
+        );
+        Some(Task::Dig(Dig::new(w, c, tick)))
+    }
+
+    /// One tick of the shaft in hand, while no task runs (the planner's step calls it ahead of
+    /// the choice). `None` when no shaft runs or it just ended (noted).
+    pub(crate) fn arrival_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !matches!(self.task, Task::Idle) {
+            return None;
+        }
+        let mut s = self.ender.home.arrival.shaft.take()?;
+        let c = self.shaft_tick(w, tick, &mut s);
+        if c.is_some() {
+            self.ender.home.arrival.shaft = Some(s);
+        } else {
+            self.retry_at = tick;
+        }
+        c
+    }
+
+    fn shaft_end(&mut self, tick: u64, s: &Shaft, feet: Cell, why: &str, short: bool) {
+        if short {
+            self.ender.home.arrival.refused_at = Some(feet);
+            self.ender.home.arrival.refusals += 1;
+        }
+        let risen = s.top - s.from.1;
+        self.note(
+            tick,
+            format!("arrival: shaft over at {feet:?}"),
+            format!(
+                "{why}; risen {risen} in {} ticks ({} dug, {} placed); {} risen in {} shafts",
+                tick.saturating_sub(s.since),
+                s.dug,
+                s.placed,
+                self.ender.home.arrival.risen,
+                self.ender.home.arrival.shafts
+            ),
+        );
+    }
+
+    fn shaft_tick(&mut self, w: &World, tick: u64, s: &mut Shaft) -> Option<Controls> {
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        if w.dimension.as_ref().map(|d| d.name.as_str()) != Some(crate::home::OVERWORLD) {
+            return None;
+        }
+        if let Some(d) = s.dig.as_mut() {
+            let (c, act, status) = d.step(w, tick);
+            self.acts.extend(act);
+            match status {
+                DigStatus::Running => return Some(c),
+                DigStatus::Done => {
+                    s.opened = Some(d.target);
+                    s.dig = None;
+                    s.dug += 1;
+                }
+                DigStatus::Failed(f) => {
+                    let why = format!("the dig of {:?} failed {f:?}", d.target);
+                    self.shaft_end(tick, s, feet, &why, true);
+                    return None;
+                }
+            }
+        }
+        if body.on_ground && feet.1 > s.top {
+            self.ender.home.arrival.risen += feet.1 - s.top;
+            s.top = feet.1;
+            s.rose_at = tick;
+            if s.jump_from.take().is_some() && s.clicked {
+                s.placed += 1;
+            }
+            s.clicked = false;
+        }
+        if tick.saturating_sub(s.rose_at) > SHAFT_STALL {
+            let why = format!("no rise for {SHAFT_STALL} ticks");
+            self.shaft_end(tick, s, feet, &why, true);
+            return None;
+        }
+        let down = Controls {
+            yaw: w.player.yaw.into(),
+            pitch: Some(crate::endermen::EYES_DOWN),
+            ..Controls::default()
+        };
+        // In the air on a jump: at its top, the block into the cell the feet left.
+        if let Some(j) = s.jump_from
+            && !body.on_ground
+        {
+            if !s.clicked
+                && body.pos[1] >= f64::from(j.1) + 1.0
+                && open(kind(w, j))
+                && self.acts.is_empty()
+                && w.click.is_none()
+            {
+                s.clicked = true;
+                self.acts.push(world::Act::UseOn {
+                    pos: BlockPos::new(j.0, j.1 - 1, j.2),
+                    face: 1,
+                });
+            }
+            return Some(down);
+        }
+        if !body.on_ground {
+            return Some(down);
+        }
+        // Back on the ground where the jump began: the block did not go in; jump again.
+        s.jump_from = None;
+        s.clicked = false;
+        match step(w, feet, s.opened, &items(w)) {
+            Step::Out => {
+                self.shaft_end(tick, s, feet, "out: the sky over the head", false);
+                None
+            }
+            Step::Refused(why) => {
+                self.shaft_end(tick, s, feet, &why, true);
+                None
+            }
+            Step::Dig(c) => {
+                // The climb's pickaxes first, when the way home's run would make them.
+                let r = self
+                    .table
+                    .as_ref()
+                    .map_or_else(crate::home::HomeRules::default, |t| t.home.clone());
+                let low = crate::base::reserve_pick_uses(w) < r.climb_pick_uses
+                    && craft::count(w, ItemKind::Cobblestone)
+                        + craft::count(w, ItemKind::CobbledDeepslate)
+                        >= 3
+                    && self.ender.home.pick_runs < r.pick_runs;
+                if low {
+                    self.shaft_end(tick, s, feet, "the pickaxes first", false);
+                    return None;
+                }
+                let mut d = Dig::new(w, c, tick);
+                let (ctl, act, _) = d.step(w, tick);
+                self.acts.extend(act);
+                s.dig = Some(d);
+                Some(ctl)
+            }
+            Step::Rise => {
+                let Some(item) = SHAFT_BLOCKS
+                    .iter()
+                    .copied()
+                    .find(|k| craft::count(w, *k) > 0)
+                else {
+                    self.shaft_end(tick, s, feet, "no block held to put under the feet", true);
+                    return None;
+                };
+                match hold::toward(w, item) {
+                    hold::Hold::Held => {
+                        s.jump_from = Some(feet);
+                        Some(Controls { jump: true, ..down })
+                    }
+                    hold::Hold::Act(a) => {
+                        if self.acts.is_empty() {
+                            self.acts.push(a);
+                        }
+                        Some(down)
+                    }
+                    hold::Hold::Wait => Some(down),
+                    hold::Hold::Missing => {
+                        self.shaft_end(tick, s, feet, "the block went missing", true);
+                        None
+                    }
+                }
+            }
+        }
+    }
+    // <<< Q7
+}
