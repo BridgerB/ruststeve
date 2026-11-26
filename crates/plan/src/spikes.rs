@@ -750,6 +750,16 @@ pub const CLUTCH_AT: f64 = 3.0;
 pub const CLUTCH_TAKE_TICKS: u64 = 40;
 pub const CLUTCH_TICKS: u64 = 200;
 
+/// The dig of the pillar's cell under the feet, its drop not waited for: it falls into the cell
+/// the body falls into and is picked up there. Race 45871173293 dug a block every 40 ticks with
+/// the drop's collect; lane 0 was struck off its pillar 280 ticks into a 33-block way down.
+fn dig_down(w: &World, c: Cell, tick: u64) -> Dig {
+    let mut d = Dig::new(w, c, tick);
+    d.drop = None;
+    d.others.clear();
+    d
+}
+
 fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
 }
@@ -859,7 +869,7 @@ impl Plan {
                 format!("spikes: dig down from the dragon at {c:?}"),
                 format!("the dragon (distance, phase) {d:?}; no guard ring at {feet:?}"),
             );
-            return Some(Task::Dig(Dig::new(w, c, tick)));
+            return Some(Task::Dig(dig_down(w, c, tick)));
         }
         match n {
             Next::Done => {
@@ -1011,7 +1021,7 @@ impl Plan {
                     format!("spikes: dig down at {c:?}"),
                     format!("on a pillar at {feet:?}"),
                 );
-                Some(Task::Dig(Dig::new(w, c, tick)))
+                Some(Task::Dig(dig_down(w, c, tick)))
             }
         }
     }

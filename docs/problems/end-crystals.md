@@ -55,3 +55,13 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - In the End, falling with more than 4 under the feet and a water bucket held: the bucket to hand, looking down, used every tick from 3 over the ground until it pours.
   - Landed, the water is taken back.
   - Notes "spikes: clutch begun / poured / missed / over"; unit test `a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back`. Not yet counted in a race.
+
+### Wall 2: struck off a tall pillar by the circling dragon, and the fall killed (both bots of race 45871173293)
+- **Lane 0:** crystal 3 broke at (33, 24), from the stand on the spike's top at y 94. 280 ticks into the dig down, at y 93, the dragon hit twice (`mob_attack`, 20 to 12.8), and the bot died of the fall (`death.fell.assist ender_dragon`, tick 6,000).
+- **Lane 1:** it held at (28, 85, 24), 9 under the goal, with the dragon 61 to 63 off in phase 0 or 1 (`no climb`). One blow took 10 and another 5, then it fell to its death (tick 6,260).
+- **Totals:** 5 crystals in 2 runs (3 and 2). Every strike cost 1.0. No death was a blast.
+- **The cause:** the dragon's holding pattern flies past the spikes' tops (its path nodes sit over them), so a bot high on a pillar is in its way whatever the phase. The blows themselves were survivable (10 and 5 from 20). The falls of 25 to 33 were not.
+- **The fixes:**
+  - The water clutch (7c08206) catches the fall.
+  - The way down no longer waits to collect each block's drop (the next commit): the drop falls into the cell the body falls into, so the bot spends less time up high.
+  - Both are to be counted in race 2.
