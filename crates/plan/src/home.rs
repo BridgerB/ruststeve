@@ -1515,8 +1515,10 @@ impl Plan {
         }
         // >>> Q7: on the surface by day, food 6 or more: over, the eyes take over (the done
         // branch above: Q4's exit with eyes held).
-        if self.arrival_hand_over(w, tick) {
-            return self.home_overworld(w, tick);
+        match self.arrival_hand_over(w, tick) {
+            Some(Some(t)) => return Some(t),
+            Some(None) => return self.home_overworld(w, tick),
+            None => {}
         }
         // <<< Q7
         // The night: a hut where the bot stands, one a night, and the night waited out in it.

@@ -75,6 +75,10 @@ pub const CENTRE: f64 = 0.12;
 /// Steps aside a shaft takes with no rise between before it ends: a refused cell over the head
 /// (gravel, a cave beside) is often one column wide; three tries the other sides of the feet.
 pub const SIDES_MAX: u32 = 3;
+/// Cells along a level tunnel a step aside may go: gravel lies in layers wider than a block (race
+/// 45741154601: no cell beside the shaft at (124, -20, -110) was free of it, the stairs given the
+/// leg cut under it, 3 health "in_wall" in both lanes).
+pub const SIDE_REACH: i32 = 3;
 /// Ticks a stack stays on the cursor before the shaft puts it away: a swap to the hotbar holds
 /// the item on the cursor between its clicks, and throwing it then undid every swap (race
 /// 45737410143: "the cursor's SoulSoil put away" 14 times a shaft, nine shafts that never rose).
@@ -105,6 +109,8 @@ const FOOD_KEEP: i64 = 32;
 /// where sprinting stops, vanilla, and `home::COOK_FOOD_FLOOR`). Under it the walk east for
 /// animals runs first.
 pub const HAND_OVER_FOOD: i32 = 6;
+/// Digs of the block over the head (the hut's roof) before the hand-over at most.
+pub const ROOF_DIGS: u32 = 2;
 /// Cells over a cell checked for the sky: `world::stage::SKY_CHECK`, the open-sky rule's own.
 const SKY: i32 = world::stage::SKY_CHECK;
 
@@ -127,6 +133,8 @@ pub struct Arrival {
     pub tables_taken: u32,
     /// Legs walked (or refused) out for animals toward `FOOD_POINT`.
     pub food_legs: u32,
+    /// Digs of the block over the head before the hand-over.
+    pub roof_digs: u32,
 }
 
 /// A shaft straight up.
@@ -304,38 +312,43 @@ pub fn step(w: &World, feet: Cell, opened: Option<Cell>, items: &[ItemKind]) -> 
 /// that is not the feet's own column, each quick to break, and a shaft allowed from it.
 pub fn side_cell(w: &World, feet: Cell, items: &[ItemKind]) -> Option<Cell> {
     let (x, y, z) = feet;
-    SIDES.iter().find_map(|(dx, dz)| {
-        let c = (x + dx, y, z + dz);
-        let head = (c.0, y + 1, c.2);
-        if !full(kind(w, (c.0, y - 1, c.2))) || falls(kind(w, (c.0, y + 2, c.2))) {
-            return None;
+    let fine = |cell: Cell, back: (i32, i32)| {
+        let k = kind(w, cell);
+        if falls(k) || fluid(k).is_some() {
+            return false;
         }
-        let fine = |cell: Cell| {
-            let k = kind(w, cell);
-            if falls(k) || fluid(k).is_some() {
-                return false;
-            }
-            let quick = k.is_some_and(|b| {
-                open(k)
-                    || data::dig::break_ticks(
-                        b,
-                        data::dig::best_tool(b, items.iter().copied()),
-                        false,
-                        true,
-                    )
-                    .is_some_and(|t| t <= MAX_BREAK)
+        let quick = k.is_some_and(|b| {
+            open(k)
+                || data::dig::break_ticks(
+                    b,
+                    data::dig::best_tool(b, items.iter().copied()),
+                    false,
+                    true,
+                )
+                .is_some_and(|t| t <= MAX_BREAK)
+        });
+        let round_ok = SIDES.iter().all(|(ex, ez)| {
+            let n = (cell.0 + ex, cell.1, cell.2 + ez);
+            let nk = kind(w, n);
+            fluid(nk).is_none() && ((n.0, n.2) == back || !open(nk))
+        });
+        quick && round_ok
+    };
+    // Nearest first: a cell beside the feet on every side, then two along, then three.
+    (1..=SIDE_REACH).find_map(|reach| {
+        SIDES.iter().find_map(|(dx, dz)| {
+            let along = (1..=reach).all(|i| {
+                let c = (x + dx * i, y, z + dz * i);
+                let back = (x + dx * (i - 1), z + dz * (i - 1));
+                full(kind(w, (c.0, y - 1, c.2)))
+                    && !falls(kind(w, (c.0, y + 2, c.2)))
+                    && fluid(kind(w, (c.0, y + 2, c.2))).is_none()
+                    && fine(c, back)
+                    && fine((c.0, y + 1, c.2), back)
             });
-            let round_ok = SIDES.iter().all(|(ex, ez)| {
-                let n = (cell.0 + ex, cell.1, cell.2 + ez);
-                let nk = kind(w, n);
-                fluid(nk).is_none() && ((n.0, n.2) == (x, z) || !open(nk))
-            });
-            quick && round_ok
-        };
-        if !fine(c) || !fine(head) {
-            return None;
-        }
-        matches!(step(w, c, None, items), Step::Dig(_)).then_some(c)
+            let c = (x + dx * reach, y, z + dz * reach);
+            (along && matches!(step(w, c, None, items), Step::Dig(_))).then_some(c)
+        })
     })
 }
 
@@ -530,16 +543,38 @@ impl Plan {
     /// On the surface by day (not night, dusk more than `DUSK_MARGIN` off) with food at
     /// `HAND_OVER_FOOD` or more: the way home is over and the eyes take over at once (throw 1,
     /// then the overland legs, which hunt on the way). Noted; `true` when it hands over.
-    pub(crate) fn arrival_hand_over(&mut self, w: &World, tick: u64) -> bool {
+    pub(crate) fn arrival_hand_over(&mut self, w: &World, tick: u64) -> Option<Option<Task>> {
         let food = w.player.food.unwrap_or(0);
         let day = w.is_night() == Some(false)
             && w.day_time()
                 .is_some_and(|t| world::time::ticks_to_dusk(t) >= crate::DUSK_MARGIN);
         if self.ender.home.done || !day || food < HAND_OVER_FOOD {
-            return false;
+            return None;
+        }
+        let feet = w.body.map(|b| path::feet_cell(b.pos));
+        // The night's hut roofs the head: the first throw wants the open sky (race 45741154601:
+        // "eye throw 1 (first) waits (no open sky over the feet)" 11 times to the cap, in the
+        // hut, both lanes). The block over the head is dug first, twice at most.
+        if let Some(f) = feet
+            && !world::stage::open_sky(w)
+            && self.ender.home.arrival.roof_digs < ROOF_DIGS
+        {
+            let roof = (f.0, f.1 + 2, f.2);
+            if !open(kind(w, roof)) {
+                self.ender.home.arrival.roof_digs += 1;
+                self.note(
+                    tick,
+                    format!("arrival: the roof over the head opened at {roof:?}"),
+                    format!(
+                        "{:?} over the head: the first throw wants the open sky; dig {} of {ROOF_DIGS}",
+                        kind(w, roof),
+                        self.ender.home.arrival.roof_digs
+                    ),
+                );
+                return Some(Some(Task::Dig(Dig::new(w, roof, tick))));
+            }
         }
         self.ender.home.done = true;
-        let feet = w.body.map(|b| path::feet_cell(b.pos));
         self.note(
             tick,
             "home: over on the surface, the eyes take over".to_owned(),
@@ -550,7 +585,7 @@ impl Plan {
                 tick.saturating_sub(self.ender.home.arrived_at.unwrap_or(tick))
             ),
         );
-        true
+        Some(None)
     }
 
     /// One tick of the shaft in hand, while no task runs (the planner's step calls it ahead of
@@ -725,16 +760,23 @@ impl Plan {
         // Back on the ground where the jump began: the block did not go in; jump again.
         s.jump_from = None;
         s.clicked = false;
-        // A step aside in hand: its head cell dug, then its feet cell, then walked into.
+        // A step aside in hand, a cell at a time along its line: the next cell's head dug, then
+        // its feet, then walked into.
         if let Some(c) = s.side {
+            let on_line = feet.1 == c.1 && (feet.0 == c.0 || feet.2 == c.2);
             if feet == c {
                 s.side = None;
-            } else if (feet.0 - c.0).abs() + (feet.2 - c.2).abs() != 1 || feet.1 != c.1 {
+            } else if !on_line {
                 let why = format!("off the step aside to {c:?}");
                 self.shaft_end(tick, s, feet, &why, true);
                 return None;
             } else {
-                for cell in [(c.0, c.1 + 1, c.2), c] {
+                let next = (
+                    feet.0 + (c.0 - feet.0).signum(),
+                    feet.1,
+                    feet.2 + (c.2 - feet.2).signum(),
+                );
+                for cell in [(next.0, next.1 + 1, next.2), next] {
                     if !open(kind(w, cell)) {
                         let mut d = Dig::new(w, cell, tick);
                         let (ctl, act, _) = d.step(w, tick);
@@ -744,8 +786,8 @@ impl Plan {
                     }
                 }
                 let (dx, dz) = (
-                    f64::from(c.0) + 0.5 - body.pos[0],
-                    f64::from(c.2) + 0.5 - body.pos[2],
+                    f64::from(next.0) + 0.5 - body.pos[0],
+                    f64::from(next.2) + 0.5 - body.pos[2],
                 );
                 return Some(Controls {
                     forward: true,
