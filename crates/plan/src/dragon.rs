@@ -732,6 +732,10 @@ pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> 
     best.map(|(_, c)| c)
 }
 
+/// Ticks of the scanning phase the bot waits for the head to turn onto it at `scan_stand`
+/// (the turn takes about 20, `DragonSittingScanningPhase`).
+pub const SCAN_WAIT_TICKS: u64 = 40;
+
 /// The scanning turn's stand: the scanning dragon turns its head onto the bot
 /// (`DragonSittingScanningPhase`, about 20 ticks), so the stand is where the head will be struck
 /// from once it has: `HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF` out from the body on the line to the
@@ -1168,7 +1172,9 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
     }
     // Scanning, the head turns onto the bot: wait where it will come (`scan_stand`), the stand
     // held while it is still on the line within a block; else the head stand as it points.
-    let scanning = v.phase() == Some(Phase::SittingScanning);
+    // A turn that has not come in `SCAN_WAIT_TICKS` is not waited for: the head stand as it points
+    // (E6's end_loop dragon never turns, and held the bot 15,000 ticks behind it).
+    let scanning = v.phase() == Some(Phase::SittingScanning) && ask.phase_ticks < SCAN_WAIT_TICKS;
     let scan = |low: bool| {
         let fresh = scan_stand(&v, w, low)?;
         Some(

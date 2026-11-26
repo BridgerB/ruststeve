@@ -797,3 +797,23 @@ fn a_charge_is_waited_out_crouched_or_in_the_bunker() {
             .any(|e| e.what == format!("charge: hold in the bunker at {:?}", [16, FLOOR, 0]))
     );
 }
+
+#[test]
+fn a_scanning_turn_that_does_not_come_is_not_waited_for() {
+    // E6's end_loop: a dragon that never turned held the bot 15,000 ticks behind it.
+    let mut w = end_at([-12.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    assert_eq!(
+        decide(&w, &ask()),
+        Want::Go([-9, FLOOR, 0], "to the head stand"),
+        "the turn's first ticks: where the head will come"
+    );
+    let long = Ask {
+        phase_ticks: 60,
+        ..ask()
+    };
+    assert!(
+        matches!(decide(&w, &long), Want::Go(_, "round the head")),
+        "no turn in 40: round to the head as it points"
+    );
+}
