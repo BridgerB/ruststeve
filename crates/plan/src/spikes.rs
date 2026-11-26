@@ -595,6 +595,8 @@ pub enum Next {
     Bar(Cell),
     /// Dig a side of the box open, the way back to the pillar's top from a wide spike's stand.
     Open(Cell),
+    /// Dig this cell, shutting the bot in, toward an approach's foot.
+    DigOut { cell: Cell, toward: Cell },
     /// Move to this cell's centre (sneaking, or not: into a pillar's dug shaft).
     Step { to: Cell, sneak: bool },
     /// Attack this crystal.
@@ -876,10 +878,22 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             to: a.foot,
             approach: Some((spike.centre[0], spike.centre[1], a.plan.axis)),
         },
-        (Some((_, pos)), None) => Next::Wait(format!(
-            "no approach to the crystal at ({:.1}, {:.1}, {:.1})",
-            pos[0], pos[1], pos[2]
-        )),
+        (Some((_, pos)), None) => {
+            // Every approach refused for want of a way: the cells shutting the bot in dug toward
+            // the nearest approach (the frontier race 45898928805 lane 1: an enderman's pocket put
+            // blocks on the bunker's stair, (12, 60, 0) and (13, 61, 0), and every walk from
+            // (13, 59, 0) was refused for 12,000 ticks).
+            let out = spike_for(w, &st.geography, pos)
+                .and_then(|sp| best_approach(w, &sp, body.pos, &[], tick))
+                .and_then(|a| dig_out(w, feet, a.foot).map(|c| (c, a.foot)));
+            match out {
+                Some((cell, toward)) => Next::DigOut { cell, toward },
+                None => Next::Wait(format!(
+                    "no approach to the crystal at ({:.1}, {:.1}, {:.1})",
+                    pos[0], pos[1], pos[2]
+                )),
+            }
+        }
         (None, _) => Next::Done,
     }
 }
@@ -962,6 +976,47 @@ pub fn held_by(w: &World, pos: [f64; 3], feet: Cell) -> Option<Cell> {
     .map(|(dx, dz)| (feet.0 + dx, feet.1, feet.2 + dz))
     .find(|c| full(kind(w, (c.0, c.1 - 1, c.2))) && open(kind(w, *c)))
 }
+
+/// The next cell to dig out of a pit or a shut cell toward `target`, along its larger axis: a
+/// step up (the cell over the head, then the step's cell and the one over it) when the target
+/// is higher, else the way along (the feet's and the head's cells). Only a block with an open
+/// face beside the bot's own cell, never obsidian or bedrock. `None` when the way is open.
+pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
+    let (dx, dz) = {
+        let (ax, az) = (target.0 - feet.0, target.2 - feet.2);
+        if ax.abs() >= az.abs() {
+            (ax.signum(), 0)
+        } else {
+            (0, az.signum())
+        }
+    };
+    if (dx, dz) == (0, 0) {
+        return None;
+    }
+    let (x, y, z) = feet;
+    // A stair of up to `DIG_OUT_STEPS` steps (each within a dig's reach), or the way along.
+    let rise = (target.1 - y).clamp(0, DIG_OUT_STEPS);
+    let cells: Vec<Cell> = if rise > 0 {
+        (0..rise)
+            .flat_map(|k| {
+                [
+                    (x + k * dx, y + k + 2, z + k * dz),
+                    (x + (k + 1) * dx, y + k + 1, z + (k + 1) * dz),
+                    (x + (k + 1) * dx, y + k + 2, z + (k + 1) * dz),
+                ]
+            })
+            .collect()
+    } else {
+        vec![(x + dx, y, z + dz), (x + dx, y + 1, z + dz)]
+    };
+    cells.into_iter().find(|c| {
+        let k = kind(w, *c);
+        !open(k) && k.is_some() && !matches!(k, Some(BlockKind::Obsidian | BlockKind::Bedrock))
+    })
+}
+
+/// Steps of a stair out a dig-out looks along (each cell within a dig's reach of the feet).
+pub const DIG_OUT_STEPS: i32 = 3;
 
 fn eye(body: &physics::Body) -> [f64; 3] {
     [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]]
@@ -1379,6 +1434,16 @@ impl Plan {
                     format!("on a pillar at {feet:?}"),
                 );
                 Some(Task::Dig(dig_down(w, c, tick)))
+            }
+            Next::DigOut { cell, toward } => {
+                // The approaches refused for want of a way are tried again once it is dug.
+                self.spikes.refused.clear();
+                self.spikes_note(
+                    tick,
+                    format!("spikes: dig the way out at {cell:?}"),
+                    format!("from {feet:?} toward the approach's foot {toward:?}"),
+                );
+                Some(Task::Dig(dig_down(w, cell, tick)))
             }
             Next::Step { to, sneak } => {
                 self.spikes_note(

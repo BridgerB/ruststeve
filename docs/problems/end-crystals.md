@@ -181,3 +181,13 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Once the clutch starts it owns the hand. The use key is let go (`ReleaseUse`), any eating task is dropped ("clutch stops the eating"), the bucket's slot is selected, and the pour goes on its predicted tick.
   - Up a pillar or a spike, the water bucket is kept in the hotbar (index 8) by a hotbar swap click ("water bucket to the hotbar"), so selecting it is one packet.
   - Unit tests `a_clutch_that_begins_while_eating_still_pours` and `up_a_pillar_the_water_bucket_is_kept_in_the_hotbar`.
+
+### Wall 13: shut in at the bunker's stair, every approach refused (the frontier race 45898928805 lane 1; fixed)
+- **What happened:** at tick 9,940 a provoked enderman's pocket put blocks on E3's bunker stair: (12, 60, 0), the next step, and (13, 61, 0), over the first. After the bunker opened, the bot stood at (13, 59, 0).
+  - E3's walk up the stair failed.
+  - Every spikes walk to (42, 0)'s four pillar feet was refused ("no way to ... refused"), then "no approach" from 10,260 to 22,000+.
+- **The fix:**
+  - With every approach refused but one there in the geometry, the bot digs its way out toward the nearest foot along its larger axis ("dig the way out at").
+  - A stair of up to three steps when the foot is higher: the cell over the head, the step's cell and the one over it. Otherwise the way along. Never obsidian or bedrock.
+  - The refusals are cleared after each dig so the walks are tried again.
+  - Unit test `shut_in_a_pit_with_every_approach_refused_the_bot_digs_its_way_out`, from a pit three deep.
