@@ -405,7 +405,8 @@ fn the_door_is_boxed_before_the_approachs_seals() {
 
 #[test]
 fn a_filled_door_is_dug_open_again() {
-    // The escape sealed lava in the standing cell: from the tunnel cell, the door dug open.
+    // The escape sealed lava in the standing cell: from the tunnel cell, after the approach's
+    // seals, the door dug open.
     let mut w = nether([11.5, 65.0, 10.5]);
     portal_and_hill(&mut w, 79);
     for y in 65..=66 {
@@ -414,10 +415,31 @@ fn a_filled_door_is_dug_open_again() {
     set(&mut w, (11, 65, 9), BlockKind::Netherrack);
     let mut p = homeward();
     p.ender.home.way_in.door = Some(((11, 65, 9), (11, 65, 10)));
-    for t in 100..104 {
+    let mut dug = false;
+    for t in 100..400 {
         w.ticks = t;
         p.step(&w);
-        p.take_acts();
+        for a in p.take_acts() {
+            if let world::Act::UseOn { pos, face } = a {
+                let (dx, dy, dz) = match face {
+                    0 => (0, -1, 0),
+                    1 => (0, 1, 0),
+                    2 => (0, 0, -1),
+                    3 => (0, 0, 1),
+                    4 => (-1, 0, 0),
+                    _ => (1, 0, 0),
+                };
+                set(
+                    &mut w,
+                    (pos.x + dx, pos.y + dy, pos.z + dz),
+                    BlockKind::Netherrack,
+                );
+            }
+        }
+        dug |= matches!(p.task, Task::Dig(_));
+        if dug {
+            break;
+        }
     }
     let n = notes(&p);
     assert!(
@@ -425,7 +447,7 @@ fn a_filled_door_is_dug_open_again() {
             .any(|s| s.starts_with("portal way: the door dug open at (11, 65, 9)")),
         "{n:?}"
     );
-    assert!(matches!(p.task, Task::Dig(_)), "{}", p.task.name());
+    assert!(dug, "{}", p.task.name());
 }
 
 #[test]

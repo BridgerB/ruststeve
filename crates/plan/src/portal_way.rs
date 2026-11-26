@@ -103,7 +103,13 @@ pub struct WayIn {
     /// dug open again (filled by an escape's seal).
     pub door: Option<(Cell, Cell)>,
     pub door_digs: u32,
+    /// The door's box cells clicked, and how often (one still open after `BOX_CLICKS` is left).
+    pub box_clicks: Vec<(Cell, u32)>,
 }
+
+/// Clicks on one box cell before it is left (`endermen::POCKET_CLICKS`'s rule: a cell clicked
+/// and still open is not clicked for ever).
+pub const BOX_CLICKS: u32 = 2;
 
 /// Runs of the leg's own pickaxe budget at most, and the ticks between two (race 45742933645:
 /// eight runs in 600 ticks at the pocket, each "table gave up", no room to place it).
@@ -553,10 +559,30 @@ impl Plan {
             (f.stand.0 + side.0, f.stand.1, f.stand.2 + side.1),
             (f.stand.0 - side.0, f.stand.1, f.stand.2 - side.1),
         ];
+        // Only by lava at the head's height or over it, beside or in the box (a fall that can
+        // spread into the door); lava at the feet's height is the approach's own seals'.
+        let high_lava = boxed.iter().any(|c| {
+            [
+                (0, 0, 0),
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+                (0, 1, 0),
+            ]
+            .iter()
+            .map(|(dx, dy, dz)| (c.0 + dx, c.1 + dy, c.2 + dz))
+            .any(|n| n.1 >= head.1 && lava(n))
+        });
+        if !high_lava {
+            return None;
+        }
+        let clicks = &self.ender.home.way_in.box_clicks;
         let (target, click, face) = boxed
             .into_iter()
             .filter(|c| {
-                (lava(*c) || open(*c))
+                !clicks.iter().any(|(b, n)| b == c && *n >= BOX_CLICKS)
+                    && (lava(*c) || open(*c))
                     && reach(*c)
                     && *c != feet
                     && *c != (feet.0, feet.1 + 1, feet.2)
@@ -589,6 +615,17 @@ impl Plan {
             crate::hold::Hold::Held => {
                 self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
                 self.ender.home.way_in.head_seals += 1;
+                match self
+                    .ender
+                    .home
+                    .way_in
+                    .box_clicks
+                    .iter_mut()
+                    .find(|(b, _)| *b == target)
+                {
+                    Some(e) => e.1 += 1,
+                    None => self.ender.home.way_in.box_clicks.push((target, 1)),
+                }
                 self.acts.push(world::Act::UseOn {
                     pos: world::BlockPos::new(click.0, click.1, click.2),
                     face,
