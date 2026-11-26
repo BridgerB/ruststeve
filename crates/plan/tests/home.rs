@@ -1191,3 +1191,48 @@ fn a_span_walked_out_is_never_walked_back_to() {
     run(&mut p, &mut w, 102, 2);
     assert!(!noted(&p, "home: on the old bridge to"), "{:?}", notes(&p));
 }
+
+#[test]
+fn on_the_way_home_a_tunnel_never_cuts_nether_bricks() {
+    // Race 45753006452 lane 1 tunnelled through a fortress's bricks into a corridor at (72, 61,
+    // 150): two wither skeleton blows and the wither, 19.8 to 5.6.
+    let mut w = nether();
+    for x in 2..=14 {
+        for y in 50..=70 {
+            set(&mut w, (x, y, 14), BlockKind::NetherBricks);
+        }
+    }
+    let none = std::collections::BTreeSet::new();
+    let route = |bricks_wall| {
+        plan::tunnel::route_keeping(
+            &w,
+            (8, 52, 8),
+            &[(8, 52, 20)],
+            &none,
+            false,
+            plan::tunnel::MAX_NODES,
+            plan::tunnel::Limits {
+                bricks_wall,
+                ..plan::tunnel::Limits::default()
+            },
+        )
+    };
+    let brick =
+        |c: &(i32, i32, i32)| (2..=14).contains(&c.0) && (50..=70).contains(&c.1) && c.2 == 14;
+    let through = route(false).unwrap_or_else(|| panic!("no route"));
+    assert!(through.found);
+    assert!(
+        through.cells.iter().any(brick),
+        "straight through: {:?}",
+        through.cells
+    );
+    let round = route(true).unwrap_or_else(|| panic!("no route"));
+    assert!(round.found, "round the wall: {:?}", round.cells);
+    assert!(!round.cells.iter().any(brick), "{:?}", round.cells);
+    // The head cell over each feet cell too: never a brick.
+    assert!(
+        !round.cells.iter().any(|c| brick(&(c.0, c.1 + 1, c.2))),
+        "{:?}",
+        round.cells
+    );
+}
