@@ -855,10 +855,11 @@ top_up_ticks = 6000
 way = [[479, 19], [461, 19], [442, 22], [426, 30], [405, 33], [400, 52], [397, 73], [376, 76], [355, 77], [338, 74], [320, 70], [309, 61], [294, 70], [275, 75], [260, 84], [236, 84], [212, 84], [188, 84], [170, 80], [157, 91], [143, 99], [130, 108], [114, 100], [98, 92], [83, 83], [64, 78], [44, 76], [30, 66], [23, 55], [24, 34], [24, 10], [24, -14]]
 # >>> Q9: the way's feet cells and a cover flag (plan::covered_way), the route's `way3` from the
 # same probe: each leg a tunnel to the next, out of the last leg's reach of 120 (nearer points are
-# Q6's portal_way's). Cover 1 (`tunnel_toward_covered`) only on the leg the survey puts beside a
-# fall to lava (step 32 at (474, 56, 20)); the others by the plain `tunnel_toward` (race
-# 45764756002: covered legs to cliff tops cost about 60 blocks in 16,400 ticks).
-covered = [[479, 48, 19, 0], [461, 64, 19, 1], [442, 72, 22, 0], [426, 72, 30, 0], [405, 75, 33, 0], [400, 75, 52, 0], [397, 75, 73, 0], [376, 75, 76, 0], [355, 67, 77, 0], [338, 49, 74, 0], [320, 44, 70, 0], [309, 53, 61, 0], [294, 54, 70, 0], [275, 52, 75, 0], [260, 58, 84, 0], [236, 60, 84, 0], [212, 53, 84, 0], [188, 51, 84, 0], [170, 58, 80, 0], [157, 64, 91, 0], [143, 69, 99, 0], [130, 63, 108, 0], [114, 62, 100, 0], [98, 64, 92, 0], [83, 73, 83, 0]]
+# Q6's portal_way's). Every leg by the plain `tunnel_toward` (cover 0): race 45770564199's one covered
+# leg, to (461, 64, 19), took 7,700 to 9,000 ticks for about 20 blocks, the plain ones 11 to 25 a
+# 1,000 ticks; the survey's one fall to lava on it is the single cell beside (474, 56, 20), which
+# the trip's guard (eyes-home wall 28) covers. Cover 1 stays for a leg that needs it.
+covered = [[479, 48, 19, 0], [461, 64, 19, 0], [442, 72, 22, 0], [426, 72, 30, 0], [405, 75, 33, 0], [400, 75, 52, 0], [397, 75, 73, 0], [376, 75, 76, 0], [355, 67, 77, 0], [338, 49, 74, 0], [320, 44, 70, 0], [309, 53, 61, 0], [294, 54, 70, 0], [275, 52, 75, 0], [260, 58, 84, 0], [236, 60, 84, 0], [212, 53, 84, 0], [188, 51, 84, 0], [170, 58, 80, 0], [157, 64, 91, 0], [143, 69, 99, 0], [130, 63, 108, 0], [114, 62, 100, 0], [98, 64, 92, 0], [83, 73, 83, 0]]
 # <<< Q9
 # The entry portal by geography, used only when memory holds no nether_portal sighting. Q1's
 # probe 45686594347 read the frontier snapshot's memory: nether_portal blocks at x 22 to 23, y 34

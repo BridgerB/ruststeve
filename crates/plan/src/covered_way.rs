@@ -83,12 +83,13 @@ pub const NOTE_TUNNELS: u32 = 10;
 /// The default `[home] covered` (the config's; a test holds them equal): `results region-route`
 /// candidate `band75`'s feet cells every 24 steps (probe 45762715583, its `way3`) on the frontier
 /// world (race 45621953332 lane 7's snapshot), the first (the forest's start) and those within
-/// `[portal_way] reach` 120 of the portal left out. `cover` 1 on the one leg the survey puts beside a
-/// fall to lava (step 32 at (474, 56, 20), between points 0 and 1).
+/// `[portal_way] reach` 120 of the portal left out. `cover` 0 on every leg: the one leg the survey
+/// puts beside a fall to lava (step 32 at (474, 56, 20), between points 0 and 1) was covered in race
+/// 45770564199 and took 7,700 to 9,000 ticks for about 20 blocks; the guard covers its one cell.
 pub fn default_covered() -> Vec<[i32; 4]> {
     vec![
         [479, 48, 19, 0],
-        [461, 64, 19, 1],
+        [461, 64, 19, 0],
         [442, 72, 22, 0],
         [426, 72, 30, 0],
         [405, 75, 33, 0],

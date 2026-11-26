@@ -65,3 +65,4 @@ What the world holds (the plan maps):
      - Make the trip's pickaxe runs place the carried table where the bot stands, not walk back to a known one (Q8's `home_trip`, or base's table step).
      - Make the covered leg plain too: the survey's one fall-to-lava step there is one cell, at (474, 56, 20).
      - At about 6 blocks per 1,000 ticks, the 380 blocks left to the last leg's reach take about 60,000 more ticks. With the walk-backs gone, the plain legs' 11 to 25 a 1,000 would be 15,000 to 35,000.
+4. **The covered leg made plain** (the coordinator, 2026-11-26): every point's `cover` is 0. The survey's one fall to lava on that leg is the single cell beside (474, 56, 20), which the trip's guard (eyes-home wall 28) covers.
