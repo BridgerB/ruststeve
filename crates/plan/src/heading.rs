@@ -71,15 +71,23 @@ pub const GAP_LOOK: i32 = 104;
 /// such cell to the next floor (lava and air alike), at most `GAP_LOOK`; 0 with a floor ahead.
 pub fn gap_ahead(w: &World, feet: Cell, dir: Dir) -> i64 {
     let mut cells = path::Cells::new(w);
+    // Some(true) a floor, Some(false) none, None not loaded (the scan stops there).
     let floor = |cells: &mut path::Cells, i: i32| {
         let c = (feet.0 + dir.0 * i, feet.1 - 1, feet.2 + dir.1 * i);
-        cells.at(c) == path::Class::Solid
+        match cells.at(c) {
+            path::Class::Unknown => None,
+            k => Some(k == path::Class::Solid),
+        }
     };
-    let Some(start) = (1..=GAP_LOOK).find(|i| !floor(&mut cells, *i)) else {
+    let Some(start) = (1..=GAP_LOOK)
+        .map_while(|i| floor(&mut cells, i).map(|f| (i, f)))
+        .find(|(_, f)| !f)
+        .map(|(i, _)| i)
+    else {
         return 0;
     };
     let end = (start..=GAP_LOOK)
-        .find(|i| floor(&mut cells, *i))
+        .find(|i| floor(&mut cells, *i) != Some(false))
         .unwrap_or(GAP_LOOK + 1);
     i64::from(end - start)
 }
