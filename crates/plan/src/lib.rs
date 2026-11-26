@@ -25,6 +25,9 @@ pub mod defend;
 pub mod dig;
 pub mod eat;
 pub mod endermen;
+// >>> E2 (issue 20c/20d): the End kit and the portal.
+pub mod end_portal;
+// <<< E2
 pub mod escape;
 // >>> eyes (Q3, issue 19c)
 pub mod eyes;
@@ -890,6 +893,10 @@ pub struct Plan {
     #[serde(default)]
     pub eyes: eyes::EyeState,
     // <<< eyes
+    // >>> E2 (issue 20c/20d, docs/problems/end-portal.md): the End kit and the portal.
+    #[serde(default)]
+    pub end_portal: end_portal::EndPortalState,
+    // <<< E2
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1021,6 +1028,9 @@ impl Plan {
             throws: Vec::new(),
             eyes: eyes::EyeState::default(),
             // <<< eyes
+            // >>> E2
+            end_portal: end_portal::EndPortalState::default(),
+            // <<< E2
             acts: Vec::new(),
         }
     }
@@ -2823,6 +2833,12 @@ impl Plan {
         {
             return Task::Idle;
         }
+        // >>> E2 (issue 20c/20d, docs/problems/end-portal.md): from the portal room, the End's kit,
+        // the frames and the step in; `None` before the room or outside the overworld.
+        if let Some(t) = self.end_portal_task(w, tick) {
+            return t;
+        }
+        // <<< E2
         // >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home, in either dimension;
         // `None` when not on it or once it is over.
         if let Some(t) = self.home_race_task(w, tick) {
