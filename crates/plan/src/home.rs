@@ -2248,7 +2248,7 @@ impl Plan {
             );
         }
         // >>> Q11 (issue 19): the fortress stretch's rules (docs/problems/eyes-fortress.md).
-        if let Some(t) = self.fortress_way(w, tick) {
+        if let Some(t) = self.fortress_way(w, tick, portal, d) {
             return Some(t);
         }
         // <<< Q11

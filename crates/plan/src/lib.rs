@@ -2613,6 +2613,17 @@ impl Plan {
         {
             junk.extend(self.stronghold_rules().junk_kinds());
         }
+        // >>> Q11 (issue 19): the fortress stretch's tunnel fills the pack (race 45766983995: every
+        // wooden pickaxe craft failed on a full pack) (`crate::fortress_way`).
+        if self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.ender.home.fortress.begun
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER)
+        {
+            junk.extend(self.fortress_rules().junk_kinds());
+        }
+        // <<< Q11
         // A kind that came back after its drop is held back (`junk_watch`, `junk_now`).
         self.junk_watch(w, tick);
         let walking = matches!(self.task, Task::Explore(_));
