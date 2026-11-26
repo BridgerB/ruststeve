@@ -288,3 +288,52 @@ place = { dimension = "minecraft:the_nether", x = 100.5, y = 45, z = 205.5 }
 spread = 4
 spread_under = 70
 kit = [["ender_eye", 14], ["netherrack", 128], ["crafting_table", 1], ["stick", 8], ["warped_stem", 8]]
+
+# DEVELOPMENT starts for issue 20 (2026-11-26; never evidence, never the frontier). The kit is
+# the `armed` kit the real bot makes in 20c (iron sword and boots from its 7 iron, stone
+# pickaxes, its meat cooked) plus what the End work needs, so the End is developed while real
+# bots arm. Worn armour is not given by `give`: the bot equips what it holds.
+#
+# dev-portal-room-armed: on the stronghold portal room's floor (the frontier bot's own cell,
+# (1624.4, 17, -35.7), docs/problems/end.md), armed, for the frames and the entry (20d).
+[[start]]
+name = "dev-portal-room-armed"
+stage = "portal_room"
+place = { dimension = "minecraft:overworld", x = 1624.5, y = 17, z = -35.5 }
+kit = [["ender_eye", 13], ["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["cobblestone", 128], ["water_bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
+
+# dev-end-arrival: the End's arrival cell (100.5, 49, 0.5) (ServerLevel's END_SPAWN_POINT). A
+# /tp does not build the obsidian platform a portal does, so setup builds it as the game would
+# (5x5 obsidian at y 48, air above).
+[[start]]
+name = "dev-end-arrival"
+stage = "end"
+place = { dimension = "minecraft:the_end", x = 100.5, y = 49, z = 0.5 }
+kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["cobblestone", 128], ["water_bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
+setup = [
+  "execute in minecraft:the_end run fill 98 48 -2 102 48 2 minecraft:obsidian",
+  "execute in minecraft:the_end run fill 98 49 -2 102 51 2 minecraft:air",
+]
+
+# dev-end-island: on the main island's surface about 20 east of the fountain, with an end stone
+# stock as 20e makes, for the crystals (20f).
+[[start]]
+name = "dev-end-island"
+stage = "end"
+place = { dimension = "minecraft:the_end", x = 20.5, y = 80, z = 0.5 }
+spread = 4
+kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["end_stone", 192], ["water_bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
+
+# dev-end-no-crystals: dev-end-island with every crystal killed, for the dragon (20g). The
+# crystals' chunks load as the bot arrives, so the kill is forced over them first; E5 checks in
+# its first race that none is left (the ledger's CrystalSeen count) and says if the kill missed.
+[[start]]
+name = "dev-end-no-crystals"
+stage = "end"
+place = { dimension = "minecraft:the_end", x = 20.5, y = 80, z = 0.5 }
+spread = 4
+kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["end_stone", 192], ["water_bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
+setup = [
+  "execute in minecraft:the_end run forceload add -64 -64 64 64",
+  "execute in minecraft:the_end run kill @e[type=minecraft:end_crystal]",
+]

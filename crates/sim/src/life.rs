@@ -120,7 +120,7 @@ const INVULNERABLE_HALF: u32 = 10;
 /// A dead mob is removed this long after its death event (`deathTime`).
 const DEATH_TICKS: u64 = 20;
 /// Reach for melee: the entity interaction range 3 plus the server's 1 of slack.
-const MELEE_REACH: f64 = 3.0 + 1.0;
+pub(crate) const MELEE_REACH: f64 = 3.0 + 1.0;
 /// Exhaustion costs (`FoodConstants`).
 const EXHAUSTION_JUMP: f32 = 0.05;
 const EXHAUSTION_ATTACK: f32 = 0.1;
@@ -413,6 +413,10 @@ pub struct Life {
     /// Armour points worn (iron helmet, chestplate and leggings: 2 + 6 + 5). The model wears
     /// nothing: a test sets it.
     pub armor: f32,
+    /// End crystals the player struck (issue 20, `crate::end`), and each crystal blast that
+    /// reached it: the tick, its exposure and the damage before armour.
+    pub crystals_struck: u64,
+    pub blasts: Vec<(u64, f64, f32)>,
     /// Ticks of the wither effect left.
     pub wither_ticks: u32,
     /// Small fireballs in flight.
@@ -496,6 +500,8 @@ impl Default for Life {
             fire_resistance: false,
             sneaking: false,
             armor: 0.0,
+            crystals_struck: 0,
+            blasts: Vec::new(),
             wither_ticks: 0,
             fireballs: Vec::new(),
             fires: Vec::new(),
@@ -681,7 +687,7 @@ impl Sim {
     }
 
     /// A mob's hit after armour (`CombatRules.getDamageAfterArmorAbsorb`, toughness 0).
-    fn after_armor(&self, damage: f32) -> f32 {
+    pub(crate) fn after_armor(&self, damage: f32) -> f32 {
         let armor = self.survival.life.armor;
         let cut = ARMOR_CAP.min((armor / 5.0).max(armor - 4.0 * damage / 8.0)) / 25.0;
         damage * (1.0 - cut.max(0.0))
@@ -1806,6 +1812,16 @@ impl Sim {
     /// `attack`: a placed mob in reach takes the held item's damage scaled by the swing's
     /// charge.
     pub(crate) fn on_attack(&mut self, entity: i32) -> Result<Vec<Wire>, EncodeError> {
+        // An end crystal ends on any hit and explodes (issue 20, `crate::end`).
+        if self
+            .survival
+            .life
+            .mobs
+            .get(&entity)
+            .is_some_and(|m| m.kind == EntityKind::EndCrystal)
+        {
+            return self.strike_crystal(entity);
+        }
         let eye = [self.pos[0], self.pos[1] + physics::EYE_HEIGHT, self.pos[2]];
         let held = self.survival.held_stack().map(|(k, _)| k);
         let weapon = held.and_then(data::generated::item_props::weapon_of);
