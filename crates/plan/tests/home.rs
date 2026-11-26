@@ -1764,3 +1764,49 @@ fn an_angry_enderman_still_on_the_bot_at_the_cap_is_never_walked_away_from() {
         notes(&p)
     );
 }
+
+#[test]
+fn under_the_danger_line_in_rock_and_quiet_the_trip_goes_on_by_covered_tunnel() {
+    // B14 (race 45783532164) lane 3 held a danger pocket at 5.6 from tick 9,240 to the cap.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 40, 8), BlockKind::NetherPortal);
+    for y in 40..=41 {
+        set(&mut w, (8, y, 8), BlockKind::Air);
+    }
+    w.body = w.body.map(|b| physics::Body {
+        pos: [8.5, 40.0, 8.5],
+        ..b
+    });
+    w.player.pos = Some([8.5, 40.0, 8.5]);
+    w.player.health = Some(5.0);
+    w.player.food = Some(8);
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    p.ender.home.aim = Some((-200, 8));
+    run(&mut p, &mut w, 100, 1);
+    assert!(
+        noted(&p, "home: on under the danger line by covered tunnel"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.danger_tunnels, 1);
+    // A ghast in sight: the pocket.
+    let mut w2 = nether();
+    kit(&mut w2);
+    w2.player.health = Some(5.0);
+    w2.step(&Event::Packet(S2c::AddEntity {
+        id: 81,
+        uuid: [0; 16],
+        kind: data::EntityKind::Ghast.id(),
+        x: 8.5,
+        y: 72.0,
+        z: 40.5,
+        velocity: [0.0; 3],
+    }));
+    let mut p2 = tripper(None);
+    p2.ender.home.trip_begun = true;
+    p2.ender.home.aim = Some((-200, 8));
+    run(&mut p2, &mut w2, 100, 1);
+    assert_eq!(p2.ender.home.danger_tunnels, 0);
+}

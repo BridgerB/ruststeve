@@ -294,6 +294,9 @@ pub struct HomeState {
     /// Endermen fought from the pocket at the cap, and the last one noted still near.
     #[serde(default)]
     pub ender_fights: u32,
+    /// Covered tunnels begun under the danger line on the trip.
+    #[serde(default)]
+    pub danger_tunnels: u32,
     #[serde(default)]
     pub ender_near_noted: Option<i32>,
     /// Walks for wood by hand, and whether a gather to `WOOD_GATHER` is in hand.
@@ -430,6 +433,8 @@ pub const ENDER_HOLD_MAX: u64 = 1200;
 /// pocket over the danger line (Q9's race 45776886803: released at 2 off, dead in 60 ticks).
 pub const ENDER_RELEASE: f64 = 16.0;
 pub const ENDER_FIGHT: f64 = 3.0;
+/// Under the danger line a covered tunnel goes this far toward the point aimed at, a leg at a time.
+pub const DANGER_LEG: i32 = 24;
 /// Basalt kept on the trip when the pack fills (the guard's and the bridges' filler with the
 /// netherrack's 128; the deltas' restock digs it).
 pub const BASALT_KEPT: i32 = 64;
@@ -1172,6 +1177,12 @@ impl Plan {
                 return Some(t);
             }
             // <<< Q6
+            // >>> Q8: the same carry-on on the whole trip (the coordinator, 2026-11-26: B14 lane 3 held
+            // a danger pocket at 5.6 from tick 9,240 to the cap; the overworld has food).
+            if let Some(t) = self.home_danger_tunnel(w, tick) {
+                return Some(t);
+            }
+            // <<< Q8
             if on_ledge(w) {
                 // Never a pocket on a ledge (Q6's race 45727347488: knocked off one while sealing).
                 self.ender.home.ledge_skips += 1;
@@ -1349,6 +1360,66 @@ impl Plan {
             crate::hold::Hold::Wait => Some(Task::Idle),
             crate::hold::Hold::Missing => None,
         }
+    }
+
+    /// Under the danger line on the trip with nothing to heal with: quiet (`carry_quiet`: not
+    /// burning, no hostile within 16 for 200 ticks), no shooter in sight, 2 of rock over the head,
+    /// a covered tunnel (`tunnel_toward_covered`) up to `DANGER_LEG` toward the point aimed at,
+    /// every cell of its route covered; never a walk in the open, never a bridge. Noted and counted
+    /// (`danger_tunnels`); `None` otherwise (the pocket holds).
+    fn home_danger_tunnel(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if !self.ender.home.top_up_over
+            || dimension(w) != Some(NETHER)
+            || skeleton_sees(w)
+            || ghast_sees(w)
+            || endermen::seen_by_far_shooter(w)
+            || !self.carry_quiet(w, tick)
+        {
+            return None;
+        }
+        let body = w.body?;
+        let feet = path::stand_cell(w, body.pos);
+        let rock = |c: Cell| {
+            path::classify(w.state_at(world::BlockPos::new(c.0, c.1, c.2))) == path::Class::Solid
+        };
+        let covered = |c: Cell| rock((c.0, c.1 + 2, c.2)) && rock((c.0, c.1 + 3, c.2));
+        if !covered(feet) {
+            return None;
+        }
+        let (ax, az) = self.ender.home.aim?;
+        let (dx, dz) = (ax - feet.0, az - feet.2);
+        let len = f64::from(dx * dx + dz * dz).sqrt().max(1.0);
+        let step = (f64::from(DANGER_LEG) / len).min(1.0);
+        let target = (
+            feet.0 + (f64::from(dx) * step).round() as i32,
+            feet.1,
+            feet.2 + (f64::from(dz) * step).round() as i32,
+        );
+        let t = self.tunnel_toward_covered(
+            w,
+            target,
+            ("the danger tunnel", "on under the danger line"),
+            tick,
+        )?;
+        let ok = match &t {
+            Task::Stairs(st) => st.route.iter().all(|c| covered(*c)),
+            _ => false,
+        };
+        if !ok {
+            return None;
+        }
+        self.ender.home.danger_tunnels += 1;
+        if self.ender.home.danger_tunnels % 10 == 1 {
+            self.note(
+                tick,
+                "home: on under the danger line by covered tunnel".to_owned(),
+                format!(
+                    "health {:?}, nothing to heal with; quiet, no shooter in sight, 2 of rock over the head; toward {target:?}; tunnel {}",
+                    w.player.health, self.ender.home.danger_tunnels
+                ),
+            );
+        }
+        Some(t)
     }
 
     /// A cube within `CUBE_CLEAR` and an edge beside the feet (no floor beside them: lava or air
