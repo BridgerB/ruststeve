@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "pearls_12"
-tag = "race-45621953332"
-asset = "snapshot-pearls_12-45621953332-race-45621953332-lane-7.tar.zst"
-commit = "a41455347b94d792f5338f5fa938953e16c3cfba"
-how = "rs-l07-b00 of race 45621953332, a sideways move (issue 19, 2026-11-25) from lane 1 of the same race at the same stage: both resumed from the real pearls_9 snapshot of race 45615781100 lane 6 (itself from the real pearls_6 snapshot of race 45588764709 lane 0, the real stuck snapshot of race 45578610032 lane 6 and the real forest snapshot of race 45537545167 lane 0). Lane 7 picked up its twelfth pearl at server tick 21,620 at (496.5, 44.0, 17.9) and holds 19.8 health against lane 1's 10.0, food 11, the iron sword at 47 uses, 295 pickaxe uses and 67 netherrack (probe 45686594347, docs/problems/eyes-observe.md). Its memory holds the Nether portal at (22, 34, -20) and the overworld portal at (125, -51, -108). Real (no development mark, no kind)."
+stage = "overworld"
+tag = "race-45783611857"
+asset = "snapshot-overworld-45783611857-race-45783611857-lane-0.tar.zst"
+commit = "088c7076342b38c6a2db1fba3d82f0161d21cda2"
+how = "rs-l00-b00 of race 45783611857 (issue 19, 2026-11-26), resumed from the real at-5000 snapshot of race 45771610530 lane 0, itself from the real at-6000 snapshot of race 45768707240 lane 2, the real stuck snapshot of race 45742350492 lane 0, the real at-16000 snapshot of race 45722775712 lane 1 and the real pearls_12 snapshot of race 45621953332 lane 7 (the previous frontier): every link a real bot on the trip home. It went through its own Nether portal at (22, 34, -20) by the south face and stood in the overworld at (125.5, -52, -107.5) at server tick 14,800, holding 14 eyes of ender, the shield, iron armour and sword, a crafting table and 7 sticks, health 15.6, food 7, no pickaxe. All 6 lanes of that race passed; lane 0 is the checkpoint. Real (no development mark, no kind)."
