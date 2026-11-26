@@ -933,3 +933,18 @@ fn up_a_pillar_a_provoked_enderman_gets_no_pocket() {
     let fresh = Plan::new(Aim::Race);
     assert!(!fresh.spikes_up_high(&ground));
 }
+
+#[test]
+fn a_body_held_up_by_the_floor_beside_steps_onto_it_first() {
+    // E3's race 45890445738: x 14.2 half on a stair's step over the bunker's air; every walk from
+    // the feet's cell (no floor) was refused for 14,000 ticks.
+    let mut w = world(2, [8.2, 64.0, 0.5]);
+    set(&mut w, (8, 63, 0), BlockKind::Air);
+    assert_eq!(
+        spikes::next(&w, &SpikeState::default(), 0),
+        Next::Step {
+            to: (7, 64, 0),
+            sneak: true
+        }
+    );
+}
