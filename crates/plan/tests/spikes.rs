@@ -738,8 +738,8 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     );
     assert_eq!(
         p.take_acts(),
-        vec![Act::Hold { slot: 1 }],
-        "the bucket to hand"
+        vec![Act::ReleaseUse, Act::Hold { slot: 1 }],
+        "the use key let go, the bucket to hand"
     );
     w.held = 1;
     fall(&mut w, 70.0);
@@ -993,4 +993,117 @@ fn hurt_on_the_way_down_with_the_dragon_near_the_bot_holds_in_its_shaft() {
         Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
         t => panic!("{t:?} {:?}", notes(&p)),
     }
+}
+
+#[test]
+fn a_breath_on_a_pillar_top_is_dug_down_out_of() {
+    // Race 45899557907 lane 1: a breath on its pillar's top at y 83; the walk out of it found no
+    // way ("NoPath" every tick), and the bot fell.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 50,
+        uuid: [2; 16],
+        kind: EntityKind::AreaEffectCloud.id(),
+        x: 8.5,
+        y: 67.0,
+        z: 5.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 50,
+        entries: vec![(8, MetaValue::Float(3.0))],
+    }));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert!(p.breath_step(&w, 100).is_none(), "no walk out up high");
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: dig down out of the breath"))
+    );
+}
+
+#[test]
+fn a_clutch_that_begins_while_eating_still_pours() {
+    // Race 45899557907 lane 0: the eat row cut in the tick the fall began; no pour went.
+    let mut w = world(2, [8.5, 75.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    w.inventory.slots.insert(36, (ItemKind::CookedBeef, 8));
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    let fall = |w: &mut World, y: f64| {
+        at(w, [8.5, y, 5.5]);
+        if let Some(b) = w.body.as_mut() {
+            b.on_ground = false;
+            b.vel = [0.0, -0.8, 0.0];
+        }
+    };
+    fall(&mut w, 75.0);
+    let mut p = Plan::new(Aim::Race);
+    p.task = Task::Eat(plan::eat::Eat::new(&w, ItemKind::CookedBeef, 99));
+    assert!(p.spikes_clutch(&w, 100).is_some());
+    assert_eq!(p.task, Task::Idle, "the eating dropped");
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::ReleaseUse, Act::Hold { slot: 1 }],
+        "the use key let go, the bucket's slot selected"
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: clutch stops the eating")
+    );
+    w.held = 1;
+    fall(&mut w, 65.0);
+    p.spikes_clutch(&w, 101);
+    assert_eq!(p.take_acts(), vec![Act::UseItem], "the pour on its tick");
+}
+
+#[test]
+fn up_a_pillar_the_water_bucket_is_kept_in_the_hotbar() {
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    w.inventory.slots.insert(12, (ItemKind::WaterBucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    p.spikes_step(&w, 100);
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::Click {
+            slot: 12,
+            button: 8,
+            mode: 2
+        }]
+    );
+    // In the hotbar already: nothing.
+    w.inventory.slots.remove(&12);
+    w.inventory.slots.insert(44, (ItemKind::WaterBucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    p.spikes_step(&w, 100);
+    assert!(p.take_acts().is_empty());
 }
