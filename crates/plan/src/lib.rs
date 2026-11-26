@@ -1717,8 +1717,23 @@ impl Plan {
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
         // >>> E5 (issue 20g): not while a breath reaches the feet or the dragon sits near.
         let dragon_first = self.dragon_first_step(w, tick);
+        // In the End no pocket is ever sealed (they held bots in the dragon's reach and a breath
+        // came through the walls): `dragon::Plan::end_enderman_step` answers instead.
+        let in_the_end = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == dragon::THE_END);
+        if in_the_end
+            && !dragon_first
+            && let Some(c) = self.end_enderman_step(w, tick)
+        {
+            return c;
+        }
         // <<< E5
-        if !dragon_first && let Some(c) = self.ender_threat(w, tick) {
+        if !dragon_first
+            && !in_the_end
+            && let Some(c) = self.ender_threat(w, tick)
+        {
             return c;
         }
         // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.

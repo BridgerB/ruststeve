@@ -854,3 +854,244 @@ fn the_takeoff_count_starts_again_when_a_blow_sends_it_off() {
             .any(|e| e.what.starts_with("dragon takeoff count over"))
     );
 }
+
+#[test]
+fn a_charge_with_no_bunker_near_is_met_in_a_notch_two_deep() {
+    // Race 45895541443 lane 2: crouched on the surface, the charge took 10 and two fly-bys 5.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-17.5, 64.0, 0.5], 8, 90.0);
+    assert!(dragon::notch_diggable(&w, [12, 64, 0]));
+    let mut p = Plan::new(Aim::Race);
+    let c = p.charge_step(&w, 0).expect("held");
+    assert!(c.sneak && !c.forward);
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "charge: dig a notch at [12, 63, 0]"),
+        "the block under the feet first"
+    );
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "dug at once"
+    );
+    // Two down, the step out is beside it one under the surface, with air over it.
+    let mut down = end_at([12.5, 62.0, 0.5]);
+    for y in [62, 63] {
+        down.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    assert_eq!(dragon::notch_step(&down, [12, 64, 0]), Some([13, 63, 0]));
+    assert!(
+        !dragon::notch_diggable(&end_at([12.5, 1.0, 0.5]), [12, 1, 0]),
+        "never a notch into the void"
+    );
+}
+
+#[test]
+fn scanning_the_bot_never_goes_far_enough_to_draw_a_charge() {
+    // Race 45895541443 lane 2: out of reach 19 off during a scanning turn drew a charge.
+    let mut w = end_at([17.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    w.player.health = Some(12.0);
+    match decide(&w, &ask()) {
+        Want::Go(c, "under the perch line") => {
+            let d = dragon::flat(feet_of(c), [0.5, 0.0, 0.5]);
+            assert!(d <= dragon::SCAN_KEEP + 1.0, "{c:?} {d}");
+        }
+        other => panic!("in to the scan's reach, not {other:?}"),
+    }
+    // Not scanning: the ring out at 16.
+    let mut flying = end_at([17.5, 64.0, 0.5]);
+    with_dragon(&mut flying, [0.5, PERCH_Y, 0.5], 5, 90.0);
+    flying.player.health = Some(12.0);
+    assert_eq!(decide(&flying, &ask()), Want::Hold("under the perch line"));
+}
+
+#[test]
+fn the_notch_is_roofed_a_side_block_first() {
+    // A fireball's cloud on an open notch is on the body.
+    let mut down = end_at([12.5, 62.0, 0.5]);
+    for y in [62, 63] {
+        down.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    with_dragon(&mut down, [-17.5, 64.0, 0.5], 8, 90.0);
+    down.inventory
+        .slots
+        .insert(36, (data::ItemKind::EndStone, 64));
+    down.held = 0;
+    let mut p = Plan::new(Aim::Race);
+    p.dragon.notch_from = Some([12, 64, 0]);
+    assert!(p.charge_step(&down, 0).is_some());
+    let acts = p.take_acts();
+    assert!(
+        acts.contains(&Act::UseOn {
+            pos: world::BlockPos::new(13, 63, 0),
+            face: 1
+        }),
+        "the side block on the wall's top first, the roof's cell having no face: {acts:?}"
+    );
+    assert_eq!(p.dragon.notch_side, Some([13, 64, 0]));
+    // The side laid: the roof against it.
+    down.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (13, 64, 0),
+        state: state(BlockKind::EndStone),
+    }));
+    assert!(p.charge_step(&down, 10).is_some());
+    assert!(p.take_acts().contains(&Act::UseOn {
+        pos: world::BlockPos::new(13, 64, 0),
+        face: 4
+    }));
+    // The step out is never under the side block.
+    assert_ne!(
+        dragon::notch_step_except(&down, [12, 64, 0], Some([13, 64, 0])),
+        Some([13, 63, 0])
+    );
+}
+
+#[test]
+fn a_stand_under_the_heads_blow_strikes_from_under_it() {
+    // Race 45901376114 lane 0: feet at 62 under a dragon at 67; 2.0 off the box was out of reach.
+    let v = DragonView {
+        pos: [0.5, 67.0, 0.5],
+        yaw: 90.0,
+        phase: 6,
+        health: 200.0,
+    };
+    assert!(
+        dragon::clear_of_blow(&v, [7.5, 62.0, 0.5]),
+        "under the blow box"
+    );
+    assert!(
+        !dragon::clear_of_blow(&v, [7.5, 64.0, 0.5]),
+        "in it on the surface"
+    );
+    let eye = [7.5, 62.0 + physics::EYE_HEIGHT, 0.5];
+    assert!(dragon::head_reach(&v, eye) <= dragon::STRIKE_REACH);
+}
+
+#[test]
+fn sealed_in_cover_the_wait_holds_there() {
+    // Race 45901376114 lane 0: sealed in a pocket, the walk to the bunker failed 656 times.
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    for c in [
+        (12, 66, 0),
+        (13, 64, 0),
+        (11, 64, 0),
+        (12, 64, 1),
+        (12, 64, -1),
+    ] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    with_dragon(&mut w, [40.5, 90.0, 0.5], 0, 0.0);
+    let a = Ask {
+        bunker: Some([14, FLOOR - 3, 0]),
+        ..ask()
+    };
+    assert_eq!(decide(&w, &a), Want::Hold("in cover"));
+}
+
+#[test]
+fn walled_in_a_breath_the_wall_toward_the_cell_out_is_dug() {
+    // Race 45901376114 lane 2: sealed in a pocket, 140 walks out of a flame failed NoPath, dead.
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    for c in [
+        (13, 64, 0),
+        (13, 65, 0),
+        (11, 64, 0),
+        (11, 65, 0),
+        (12, 64, 1),
+        (12, 65, 1),
+        (12, 64, -1),
+        (12, 65, -1),
+        (12, 66, 0),
+    ] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    assert_eq!(
+        dragon::wall_toward(&w, [12.5, 64.0, 0.5], [20, 64, 0]),
+        Some([13, 64, 0]),
+        "the wall at the feet toward the cell"
+    );
+    cloud(&mut w, 50, [12.5, 64.0, 0.5], 5.0);
+    let mut p = Plan::new(Aim::Race);
+    let mut dug = false;
+    for t in 0..200 {
+        let _ = p.breath_step(&w, t);
+        dug |= p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. }));
+    }
+    assert!(dug, "{:?}", p.events_since(0));
+}
+
+#[test]
+fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
+    // Pockets held bots in the dragon's reach, shut the bunker's stair, and a breath came through
+    // their walls (races 45895541443, 45901376114).
+    let feet = [12.5, 64.0, 0.5];
+    let angry = |w: &mut World| {
+        add(w, 70, EntityKind::Enderman, [14.0, 64.0, 0.5]);
+        data(w, 70, vec![(17, MetaValue::Bool(true))]);
+    };
+    let mut w = end_at(feet);
+    angry(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.end_enderman_step(&w, 0).is_some());
+    assert!(
+        p.take_acts()
+            .iter()
+            .any(|a| matches!(a, Act::Attack { entity: 70 })),
+        "over the danger line, in reach: struck"
+    );
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: no pocket for enderman 70 (struck over the danger line)")
+    );
+    // The bunker within reach: into it.
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([20, FLOOR, 0]);
+    assert!(q.end_enderman_step(&w, 0).is_some());
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: no pocket for enderman 70 (to the bunker)")
+    );
+    // In a roofed 2-high cell: the work goes on.
+    let mut c = end_at(feet);
+    for b in [
+        (12, 66, 0),
+        (13, 64, 0),
+        (11, 64, 0),
+        (12, 64, 1),
+        (12, 64, -1),
+    ] {
+        c.step(&Event::Packet(S2c::BlockUpdate {
+            pos: b,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    angry(&mut c);
+    let mut r = Plan::new(Aim::Race);
+    assert!(r.end_enderman_step(&c, 0).is_none(), "in cover");
+    // And Plan::step never seals one in the End.
+    let mut s = Plan::new(Aim::Race);
+    s.step(&w);
+    assert!(
+        !s.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("pocket block") || e.what.contains("into a sealed pocket")),
+        "{:?}",
+        s.events_since(0)
+    );
+}

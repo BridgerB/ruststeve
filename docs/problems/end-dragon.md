@@ -134,9 +134,37 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
   - Lane 2 brought the dragon to 96 with 19 strikes ("dragon takeoff count over" fired once, at 16,520), then died. Retreating "out of reach after a blow" to 19 from the fountain during a scanning turn, it drew a charge (sitting-scanning → charging at 22,480).
   - Lane 2's `charge_step` crouched it still (no bunker within 12). The charge still struck for 10, and two fly-by blows of 5 followed while it held an enderman pocket. Crouching in the open does not stop a charge aimed at the bot.
   - Lane 1 died in a fall during E4's clutch.
-- **Wall 11 (open):** a bot far from the perch during scanning draws a charge, and crouching does not answer one. To try next:
+- **Wall 11, fixed in the next push:**
+  - **Scanning, never far enough to draw a charge.** While the dragon scans, every way out is held within `SCAN_KEEP` (12) of the fountain: the blow's step out, the perch line's ring, and "into the scan's reach" from a hold. The dragon charges a bot it cannot find within 20 for 100 ticks.
+  - **At a charge with no bunker within 12, a notch two deep.** The bot digs the end stone under its feet twice at once, crouched, and drops in. Never where the block under that is air (the void at the edge). Once the charge is over it digs a step out beside it, one under the surface, and climbs out a jump at a time. Notes: "charge: dig a notch at …", "charge: the step out dug at …".
+  - Roofed: a block on a side first (on the wall's top), then the roof against it, so a fireball's cloud lies on the roof. The roof is dug back before the step out (the jump needs the head clear), and the step is never under the side block. Note: "charge: the notch roofed at …".
+- **Wall 11 as first found:** a bot far from the perch during scanning draws a charge, and crouching does not answer one. To try next:
   - keep near the scanning stand (9 from the body) during scanning, which draws the attacking turn instead;
   - at a charge with no bunker near, a dug notch two deep, under the head's and wings' boxes.
+
+### Race 45901376114 (622f39a, dev, 3 lanes, cap 24,000), read mid-run (lane 0's evidence at tick 4,740)
+**Wall 12: a low stand was out of reach.**
+- With the feet at 62 under a dragon at 67, a stand 2.0 off the head's box is 2.38 under it. The eye was 3.75 from the box, so "no head stand open" came every turn, and the dragon was at 193 by tick 4,740.
+- **Fix:** `clear_of_blow` counts a body under the blow boxes as clear of them. The boxes reach down to 2 under the dragon's feet, the same floor as the wings' sweep. Such a stand may be right under the head, 2.4 from its box.
+
+**Wall 13: sealed in a pocket, the fight walked for the bunker** (race 45901376114 lanes 0 and 1). An enderman's pocket sealed the bot in (21 blocks). The fight's wait while the dragon flew walked for the bunker: NoPath, "the fight plans again", 656 times over 13,000 ticks. The dragon stayed at 193.
+- **Fix:** in a roofed 2-high cell (`end::covered`), the wait holds there ("in cover"). A walk that fails NoPath in cover plans again only after 200 ticks.
+- Still open: a sealed pocket is not opened by the fight when the dragon sits.
+
+**Race 45901376114 in full** (622f39a, dev, 3 lanes, cap 24,000): no win.
+- **Lowest dragon health:** 157 (lane 2), 175 (lane 1), 193 (lane 0).
+- **Strikes:** 8, 5 and 2. In lanes 0 and 1 every later perch was lost to wall 13 (2,091 "dragon walk to … failed" in all).
+- **Lane 2's death, wall 14: walled in a breath.** An enderman's pocket sealed it in, and a flame's cloud then burned through the walls. 140 walks out failed NoPath, 20 health to dead.
+  - **Fix:** a walk out of a breath that fails NoPath digs the wall toward the cell, at the feet's height and then the head's (`wall_toward`; never bedrock or obsidian). It then walks.
+
+**Wall 15: no pocket in the End, ever** (the top killer across the End's races). Pockets held bots in the dragon's reach, shut E3's bunker stair, stranded the fight, and let a breath through their walls.
+- **Fix:** in the End, `ender_threat` is never called (the lib.rs call site, fenced E5); `Plan::end_enderman_step` answers an angry enderman instead:
+  - in a roofed 2-high cell (`end::covered`), the work goes on, since it cannot come in;
+  - on open ground, into the bunker within 24;
+  - otherwise, struck when in reach while health is over the danger line (40 health, the iron sword's 6);
+  - under the line, the bunker however far, else the task goes on.
+- Note: "end: no pocket for enderman N (…)".
+- E3's covered guard and E4's up-high guard inside `ender_threat` stay as they are.
 
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

@@ -597,11 +597,31 @@ fn the_bunker_opened_the_bot_walks_up_its_stair_onto_the_ground() {
     p.end.exit_walk = true;
     p.step(&w);
     assert!(
-        noted(&p, "end: up the bunker's stair to (8, 64, 0)"),
+        noted(
+            &p,
+            "end: up the bunker's stair by [(11, 61, 0), (10, 62, 0), (9, 63, 0)]"
+        ),
         "{:?}",
         notes(&p)
     );
-    assert_eq!(p.task.name(), "explore");
+    // Steered at the first step with a jump.
+    let c = p.step(&w);
+    assert!(
+        c.forward && c.jump,
+        "{c:?} {:?} {:?}",
+        notes(&p),
+        p.end.work
+    );
+    // On it (race 45898928805 lane 0 stood here, half over the bunker, with no route found): on
+    // to the next step.
+    w.body = Some(physics::Body {
+        pos: [11.5, 61.0, 0.5],
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    p.step(&w);
+    let c = p.step(&w);
+    assert!(c.forward && c.jump, "{c:?}");
 }
 
 #[test]
@@ -620,7 +640,8 @@ fn from_the_first_end_tick_every_look_is_straight_down() {
 
 #[test]
 fn a_pocket_is_built_from_end_stone_when_that_is_all_that_is_held() {
-    // E5's race 45886819862 lane 1: "no block held for a pocket" with 192 end stone.
+    // E5's race 45886819862 lane 1: "no block held for a pocket" with 192 end stone. Since E5's
+    // wall 15 no pocket is sealed in the End at all (`dragon::Plan::end_enderman_step`).
     let mut w = world(4, 0..=7, [12.5, 64.0, 0.5]);
     w.inventory.slots.clear();
     w.inventory.slots.insert(36, (ItemKind::EndStone, 64));
@@ -634,6 +655,88 @@ fn a_pocket_is_built_from_end_stone_when_that_is_all_that_is_held() {
     for _ in 0..3 {
         p.step(&w);
     }
-    assert!(noted(&p, "pocket block 1"), "{:?}", notes(&p));
+    assert!(!noted(&p, "pocket block 1"), "{:?}", notes(&p));
     assert!(!noted(&p, "no block held"), "{:?}", notes(&p));
+    assert!(
+        noted(&p, "end: no pocket for enderman 9"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn on_the_bunkers_stair_an_angry_enderman_seals_no_pocket() {
+    // Race 45898928805: a pocket laid in the stair shut the bunker's own door.
+    let mut w = world(4, 0..=7, [11.5, 61.0, 0.5]);
+    for c in [
+        (12, 60, 0),
+        (12, 61, 0),
+        (12, 62, 0),
+        (11, 61, 0),
+        (11, 62, 0),
+        (11, 63, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 9, EntityKind::Enderman, [16.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&9) {
+        e.metadata.insert(17, MetaValue::Bool(true));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    assert!(p.at_bunker(&w));
+    p.step(&w);
+    assert!(!noted(&p, "provoked enderman"), "{:?}", notes(&p));
+    assert!(
+        noted(&p, "end: covered from an angry enderman"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_shut_step_of_the_bunkers_stair_is_dug_out_on_the_way_up() {
+    // The bunker opened, its stair's second step (10, 62, 0) shut by a block laid there.
+    let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+    for c in [
+        (12, 60, 0),
+        (12, 61, 0),
+        (12, 62, 0),
+        (11, 61, 0),
+        (11, 62, 0),
+        (11, 63, 0),
+        (10, 63, 0),
+        (9, 63, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    w.held = 2;
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.end.exit_walk = true;
+    p.step(&w);
+    // The way up: each step's cells dug before it is stepped onto, the shut one among them.
+    let ops = p
+        .end
+        .work
+        .as_ref()
+        .map(|wk| wk.ops.clone())
+        .unwrap_or_default();
+    let dig = ops
+        .iter()
+        .position(|o| *o == plan::end::Op::Dig((10, 62, 0)))
+        .unwrap_or_else(|| panic!("no dig of the shut step: {ops:?}"));
+    let step = ops
+        .iter()
+        .position(|o| *o == plan::end::Op::Step((10, 62, 0)))
+        .unwrap_or_else(|| panic!("no step: {ops:?}"));
+    assert!(dig < step, "{ops:?}");
+    // And the room over the head before the step, from the step below.
+    assert!(ops.contains(&plan::end::Op::Dig((11, 63, 0))), "{ops:?}");
 }
