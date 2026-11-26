@@ -35,6 +35,9 @@ pub mod heading;
 pub mod home;
 // <<< home
 // <<< heading
+// >>> Q11 (issue 19): the way home's fortress stretch.
+pub mod fortress_way;
+// <<< Q11
 pub mod hold;
 pub mod hunt;
 pub mod ledger;
@@ -2110,7 +2113,8 @@ impl Plan {
             )
             && (crate::home::rail_wanted(w).is_some()
                 // >>> Q8
-                || crate::home::guard_wanted(w, self.ender.home.axis).is_some())
+                || crate::home::guard_next(w, self.ender.home.axis, &self.ender.home.guard_refused)
+                    .is_some())
                 // <<< Q8
             && craft::count(w, data::ItemKind::Netherrack)
                 + craft::count(w, data::ItemKind::Basalt)

@@ -1088,6 +1088,19 @@ impl Plan {
                 // Nor the crimson signs while a point steers on the way home (Q6's race 45727347488
                 // lane 1: every leg re-aimed and turned north again for 6,000 ticks).
                 let home_way = self.ender.phase == crate::endermen::EnderPhase::Home && h.way;
+                // >>> Q11 (issue 19): no fortress turn while the way steers home, nor in the tick
+                // between a point reached and the next aimed at (race 45760537530: all three
+                // lanes turned 48 south at tick 60) (`crate::fortress_way`).
+                let fortress_refused = crate::fortress_way::home_way_steers(self, h.way);
+                if fortress_refused
+                    && (bricks >= SIGNS_TURN || fortress_mob_ahead(w, h.dir).is_some())
+                {
+                    self.fortress_turn_refused(
+                        tick,
+                        &format!("{bricks} nether bricks ahead on ({}, {})", h.dir.0, h.dir.1),
+                    );
+                }
+                // <<< Q11
                 if ahead >= SIGNS_TURN && !home_way {
                     self.heading_turn(
                         w,
@@ -1096,7 +1109,11 @@ impl Plan {
                         tick,
                         &format!("{ahead} crimson signs seen ahead"),
                     )?;
-                } else if let Some((kind, d)) = (self.ender.phase.travels() && !h.way)
+                } else if let Some((kind, d)) = (self.ender.phase.travels()
+                    && !h.way
+                    // >>> Q11
+                    && !fortress_refused)
+                    // <<< Q11
                     .then(|| fortress_mob_ahead(w, h.dir))
                     .flatten()
                 {
@@ -1107,7 +1124,9 @@ impl Plan {
                         tick,
                         &format!("a fortress seen ahead (a ticking {kind:?} {d:.0} off)"),
                     )?;
-                } else if bricks >= SIGNS_TURN {
+                // >>> Q11
+                } else if bricks >= SIGNS_TURN && !fortress_refused {
+                    // <<< Q11
                     self.heading_turn(
                         w,
                         h,

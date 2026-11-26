@@ -1327,3 +1327,51 @@ fn the_restock_never_digs_the_floor_near_over_the_lava_sea() {
     let cells = plan::heading::restock_cells(&w, Some((1, 0)), plan::heading::RESTOCK_LOOK);
     assert!(cells.iter().all(|c| c.1 >= 64), "{cells:?}");
 }
+
+#[test]
+fn by_a_lava_edge_over_the_danger_line_no_cube_pocket_is_sealed() {
+    // Race 45758211666 lanes 3 and 4 sat 4,000 to 16,000 ticks in pockets on the join's island.
+    let mut w = span_over_lava();
+    kit(&mut w);
+    w.inventory.slots.remove(&38);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    add_cube(&mut w, 50, [11.5, 64.0, 8.5]);
+    add_cube(&mut w, 51, [5.5, 64.0, 8.5]);
+    let mut p = tripper(None);
+    run(&mut p, &mut w, 100, 5);
+    assert!(
+        noted(
+            &p,
+            "home: no cube pocket by a lava edge, on behind the guard"
+        ),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.ender.home.cube_pocket.is_none());
+    assert_eq!(p.ender.home.cube_pockets, 0);
+}
+
+#[test]
+fn a_guard_the_server_never_answers_is_given_up() {
+    // Race 45760537530: one guard clicked 221 to 411 times, filler unchanged, under blazes.
+    let mut w = span_over_lava();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    let mut p = tripper(None);
+    p.ender.home.axis = Some((-1, 0));
+    p.ender.home.last_feet = Some((8, 64, 8));
+    // The world never answers: every click is refused.
+    run(&mut p, &mut w, 100, 200);
+    assert!(
+        noted(&p, "home: guard given up at (8, 63, 7)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.ender.home.guard_refused.contains(&(8, 63, 7)));
+    assert!(
+        p.ender.home.guards <= 2 * (home::GUARD_TRIES + 1),
+        "{} clicks",
+        p.ender.home.guards
+    );
+}

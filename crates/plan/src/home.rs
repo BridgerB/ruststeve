@@ -272,10 +272,22 @@ pub struct HomeState {
     pub guard_restock_done: bool,
     #[serde(default)]
     pub span_restocked: bool,
+    /// Cube pockets not made, or left, by a lava edge over the danger line.
+    #[serde(default)]
+    pub edge_pocket_skips: u32,
+    /// The guard cell clicked last and its clicks, and the guard cells given up.
+    #[serde(default)]
+    pub guard_try: Option<(Cell, u32)>,
+    #[serde(default)]
+    pub guard_refused: Vec<Cell>,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
     // <<< Q6
+    // >>> Q11 (issue 19): the fortress stretch's state (`crate::fortress_way`).
+    #[serde(default)]
+    pub fortress: crate::fortress_way::FortressState,
+    // <<< Q11
     // >>> Q7: the overworld arrival's state (the shaft, the climb's table).
     #[serde(default)]
     pub arrival: crate::arrival::Arrival,
@@ -368,6 +380,11 @@ pub fn cube_size(e: &world::Entity) -> i32 {
 
 /// The span's guard restock digs at most this over the keep (the coordinator: 2 stacks).
 pub const GUARD_EXTRA: i64 = 128;
+/// Clicks for one guard block before it is given up (`MAX_PLACE_TRIES` of the walk's bridge is 8;
+/// a guard clicked every `SHELTER_EVERY_TICKS` 10 is answered within a tick or two).
+pub const GUARD_TRIES: u32 = 6;
+/// Guard cells given up, kept (the last).
+pub const GUARD_REFUSED_KEPT: usize = 32;
 
 /// The next block of the guard (`Plan::home_guard`): for each side across `axis`, an open
 /// feet-level cell (no floor under it, or only a rail over a drop) is guarded. Its block is clicked onto a
@@ -376,6 +393,15 @@ pub const GUARD_EXTRA: i64 = 128;
 /// block clicked, face)`; `None` with nothing to guard, no axis, no solid block stood on, or
 /// no filler (Bridger: down to 0).
 pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, i8)> {
+    guard_next(w, axis, &[])
+}
+
+/// `guard_wanted`, skipping the cells in `refused` (guards given up after `GUARD_TRIES` clicks).
+pub fn guard_next(
+    w: &World,
+    axis: Option<(i32, i32)>,
+    refused: &[Cell],
+) -> Option<(Cell, Cell, i8)> {
     let (ax, az) = axis?;
     let body = w.body?;
     if path::bridge_blocks(w) <= 0 {
@@ -395,7 +421,7 @@ pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, 
             _ => 2,
         }
     };
-    [(az, ax), (-az, -ax)].into_iter().find_map(|(sx, sz)| {
+    let mut side = |(sx, sz): (i32, i32)| -> Option<(Cell, Cell, i8)> {
         let t = (feet.0 + sx, feet.1, feet.2 + sz);
         // Open: nothing at the feet's level and no floor under it, or only a floor-level rail
         // over a drop (Bridger, 2026-11-26: "do the rails always": any open side, not only
@@ -406,6 +432,14 @@ pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, 
             return None;
         }
         let rail = (t.0, t.1 - 1, t.2);
+        // >>> Q11: never a block in the body's own box (race 45760537530: the server refused the
+        // same guard 300 times while blazes burned the bot); the rail under it still, if missing.
+        if crate::fortress_way::body_in_cell(w, t) {
+            return (cells.at(rail) != path::Class::Solid
+                && !crate::fortress_way::body_in_cell(w, rail))
+            .then_some((rail, under, face_to((sx, sz))));
+        }
+        // <<< Q11
         // A guard block beside it along the axis: clicked on the face toward it.
         for (dx, dz) in [(ax, az), (-ax, -az)] {
             let n = (t.0 + dx, t.1, t.2 + dz);
@@ -417,7 +451,10 @@ pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, 
             return Some((t, rail, 1));
         }
         Some((rail, under, face_to((sx, sz))))
-    })
+    };
+    [(az, ax), (-az, -ax)]
+        .into_iter()
+        .find_map(|s| side(s).filter(|g| !refused.contains(&g.0)))
 }
 
 /// A lava edge at the feet or at a cell beside them on the same level: a span, its join, a
@@ -1161,7 +1198,29 @@ impl Plan {
     /// before the next step, mob or no mob. Noted and counted; `None` with nothing to guard or no filler.
     fn home_guard(&mut self, w: &World, tick: u64) -> Option<Task> {
         let axis = self.home_axis(w);
-        let (at, click, face) = guard_wanted(w, axis)?;
+        let (at, click, face) = guard_next(w, axis, &self.ender.home.guard_refused)?;
+        // The progress invariant: a guard clicked `GUARD_TRIES` times and still open is given up
+        // (race 45760537530: one guard clicked 221 to 411 times, filler unchanged, blazes near).
+        let tries = match self.ender.home.guard_try {
+            Some((c, n)) if c == at => n,
+            Some(_) | None => 0,
+        };
+        if tries >= GUARD_TRIES {
+            self.ender.home.guard_try = None;
+            self.ender.home.guard_refused.push(at);
+            if self.ender.home.guard_refused.len() > GUARD_REFUSED_KEPT {
+                self.ender.home.guard_refused.remove(0);
+            }
+            self.note(
+                tick,
+                format!("home: guard given up at {at:?}"),
+                format!(
+                    "{tries} clicks on {click:?} face {face}, still open; given up {}",
+                    self.ender.home.guard_refused.len()
+                ),
+            );
+            return None;
+        }
         let item = endermen::FILLER
             .iter()
             .copied()
@@ -1177,6 +1236,7 @@ impl Plan {
             crate::hold::Hold::Held => {
                 self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
                 self.ender.home.guards += 1;
+                self.ender.home.guard_try = Some((at, tries + 1));
                 self.acts.push(world::Act::UseOn {
                     pos: world::BlockPos::new(click.0, click.1, click.2),
                     face,
@@ -1796,6 +1856,28 @@ impl Plan {
         // 8,000 ticks with cubes at 4 to 7).
         let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t) && health > danger;
         let press = !resting && (near >= CUBE_CROWD || (within_clear && health <= danger));
+        // >>> Q8: over the danger line by a lava edge no cube pocket: the guard and the sneak hold
+        // the bot and it walks on (race 45758211666 lanes 3 and 4 sat 4,000 to 16,000 ticks in
+        // pockets on the join's island over the sea; the breakout's tunnel found no rock there).
+        if health > danger && near_lava_edge(w) {
+            if press || self.ender.home.cube_pocket.is_some() {
+                self.ender.home.cube_pocket = None;
+                self.ender.home.cube_clear_since = None;
+                self.ender.home.edge_pocket_skips += 1;
+                if self.ender.home.edge_pocket_skips % 20 == 1 {
+                    self.note(
+                        tick,
+                        "home: no cube pocket by a lava edge, on behind the guard".to_owned(),
+                        format!(
+                            "{near} within {CUBE_NEAR}; health {health} over {danger}; skip {}",
+                            self.ender.home.edge_pocket_skips
+                        ),
+                    );
+                }
+            }
+            return None;
+        }
+        // <<< Q8
         let held = self.ender.home.cube_pocket.is_some();
         if press && !held {
             self.ender.home.cube_pocket = Some(tick);
@@ -2041,6 +2123,11 @@ impl Plan {
                 ),
             );
         }
+        // >>> Q11 (issue 19): the fortress stretch's rules (docs/problems/eyes-fortress.md).
+        if let Some(t) = self.fortress_way(w, tick) {
+            return Some(t);
+        }
+        // <<< Q11
         // >>> Q6 (issue 19): within `[portal_way] reach` and out of the approach's, the last leg
         // in rock to the front's tunnel cell (docs/problems/eyes-portal.md).
         if d > r.approach
