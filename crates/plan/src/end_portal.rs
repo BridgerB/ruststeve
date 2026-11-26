@@ -49,6 +49,10 @@ pub struct EndKitRules {
     /// Walks to logs, and walks to look for trees, at most.
     pub log_walks: u32,
     pub look_walks: u32,
+    /// With no log seen, the points (x, z) the overland's legs go to, in order, and how near is
+    /// reached.
+    pub wood_points: Vec<[i32; 2]>,
+    pub point_reach: f64,
     /// Stone (or better) pickaxes held after the row.
     pub stone_pickaxes: i32,
     /// Food eaten up to.
@@ -91,12 +95,20 @@ impl Default for EndKitRules {
             logs: 10,
             log_reach: 48.0,
             log_walks: 24,
-            look_walks: 8,
+            look_walks: 24,
+            wood_points: vec![
+                [1530, -45],
+                [1610, -130],
+                [1610, 60],
+                [1700, -35],
+                [1420, -70],
+            ],
+            point_reach: 12.0,
             stone_pickaxes: 3,
             fed: 20,
             eat_tasks: 12,
             phase_ticks: 6000,
-            phase_fails: 8,
+            phase_fails: 16,
             down_walks: 8,
             frame_reach: 4.5,
             eye_tries: 4,
@@ -165,8 +177,14 @@ pub struct EndPortalState {
     pub log_walks: u32,
     pub look_walks: u32,
     pub eat_tasks: u32,
+    /// The wood point walked to next, and whether the overland's legs run for the wood now.
+    pub wood_point: usize,
+    #[serde(skip)]
+    pub wood_legs: bool,
     pub down_walks: u32,
     pub down_noted: bool,
+    /// The way point walked down to next.
+    pub down_at: Option<usize>,
     /// The night a hut was begun for (the day's number).
     pub hut_night: Option<i64>,
     pub hut_digs: u32,
@@ -968,14 +986,70 @@ impl Plan {
                 self.refuse(log, tick);
             }
         }
-        if self.end_portal.look_walks < r.look_walks {
-            self.end_portal.look_walks += 1;
-            let n = self.end_portal.look_walks;
-            let why = format!("end kit: look for trees ({n} of {})", r.look_walks);
-            if let Some(t) = self.explore_walk(w, tick, &why) {
-                self.note(tick, why, format!("{} logs held", base::logs_held(w)));
+        // No log in walking reach: the overland's legs (seen ground, rivers bridged, a hut at
+        // night) toward the nearest log on record, else the next of `wood_points` (race
+        // 45873894148: plains and a river round the stairs' top, no log within 48, and eight
+        // explore walks NoPath at once).
+        let goal = self
+            .nearest_log(w, body.pos, 0.0, tick)
+            .map(|c| {
+                (
+                    [f64::from(c.0) + 0.5, f64::from(c.2) + 0.5],
+                    format!("the log at {c:?}"),
+                )
+            })
+            .or_else(|| {
+                r.wood_points.get(self.end_portal.wood_point).map(|p| {
+                    (
+                        [f64::from(p[0]), f64::from(p[1])],
+                        format!("wood point {}", self.end_portal.wood_point),
+                    )
+                })
+            });
+        if let Some((p, what)) = goal
+            && self.end_portal.look_walks < r.look_walks
+        {
+            let here = [body.pos[0], body.pos[2]];
+            let d = (p[0] - here[0]).hypot(p[1] - here[1]);
+            if what.starts_with("wood point") && (d <= r.point_reach || self.overland.arrived) {
+                self.end_portal.wood_point += 1;
+                self.overland.arrived = false;
+                self.note(
+                    tick,
+                    format!("end kit: {what} reached, no log seen"),
+                    format!("{d:.0} off; on to the next"),
+                );
+                self.retry_at = tick + crate::RETRY_TICKS;
+                return Some(Task::Idle);
+            }
+            if self
+                .overland
+                .fix
+                .is_none_or(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) > 4.0)
+            {
+                self.overland.retarget((p, 0.0), true);
+                self.end_portal.look_walks += 1;
+                self.note(
+                    tick,
+                    format!("end kit: legs toward {what}"),
+                    format!(
+                        "({:.0}, {:.0}), {d:.0} off; look {} of {}; {} logs held",
+                        p[0],
+                        p[1],
+                        self.end_portal.look_walks,
+                        r.look_walks,
+                        base::logs_held(w)
+                    ),
+                );
+            }
+            self.end_portal.wood_legs = true;
+            let t = self.overland_task(w, tick);
+            self.end_portal.wood_legs = false;
+            if let Some(t) = t {
                 return Some(t);
             }
+            self.overland.arrived = true;
+            return Some(Task::Idle);
         }
         let wood = base::logs_held(w) + base::planks_held(w) / 4;
         self.end_kit_advance(
@@ -1102,9 +1176,8 @@ impl Plan {
         if let Some(t) = self.end_hut_exit(w, target, tick) {
             return Some(t);
         }
-        if let Some(target) = target
-            && self.end_portal.down_walks < r.down_walks
-        {
+        // A found walk straight to the room, else its own way down a point at a time.
+        if let Some(target) = target {
             let mut walk = Walk::new(
                 target,
                 Goal::Near {
@@ -1114,29 +1187,20 @@ impl Plan {
                 Arrive::Goal,
                 tick,
             );
-            let routed = walk.route_now(w, tick);
-            let found = walk.route;
-            if routed && matches!(found, Some(path::Status::Found | path::Status::Partial)) {
-                self.end_portal.down_walks += 1;
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
                 self.walks += 1;
                 let n = walk.waypoints.as_ref().map_or(0, Vec::len);
                 self.note(
                     tick,
-                    format!("end kit: down its own stairs to {target:?}"),
-                    format!(
-                        "walk {} of {}, {n} cells on a {found:?} route",
-                        self.end_portal.down_walks, r.down_walks
-                    ),
+                    format!("end kit: down to the room at {target:?}"),
+                    format!("from {feet:?}, {n} cells on a found route"),
                 );
                 return Some(Task::Explore(walk));
             }
             self.expanded += walk.expanded;
-            self.end_portal.down_walks = r.down_walks;
-            self.note(
-                tick,
-                format!("end kit: no walk down to {target:?}"),
-                format!("route {found:?}; the stronghold's way in"),
-            );
+        }
+        if let Some(t) = self.end_way_down(w, r, feet, tick) {
+            return Some(t);
         }
         if !self.end_portal.down_noted {
             self.end_portal.down_noted = true;
@@ -1152,6 +1216,123 @@ impl Plan {
         // The stronghold's own approach (its stairs, its tunnel) knows the room; its inside
         // steps (the spawner, a nook) are this module's once in.
         Some(self.stronghold_task(w, tick).unwrap_or(Task::Idle))
+    }
+
+    /// Down the bot's own way, a point at a time from the nearest, top to bottom: far from the
+    /// top, the overland's legs to it; a walk to each point (found or partial); a point right
+    /// under the feet with no walk (the pillar the way up left in the corridor) dug down to, the
+    /// cell under the feet at a time. `None` once the way is spent.
+    fn end_way_down(&mut self, w: &World, r: &EndKitRules, feet: Cell, tick: u64) -> Option<Task> {
+        let way: Vec<Cell> = r
+            .way
+            .iter()
+            .chain(std::iter::once(&r.way_up))
+            .map(|p| (p[0], p[1], p[2]))
+            .collect();
+        let near = |a: Cell, b: Cell| path::octile(a, b) + f64::from((a.1 - b.1).abs());
+        if self.end_portal.down_at.is_none() {
+            let i = way
+                .iter()
+                .enumerate()
+                .min_by(|a, b| near(feet, *a.1).total_cmp(&near(feet, *b.1)))
+                .map_or(0, |(i, _)| i);
+            self.end_portal.down_at = Some(i);
+            self.end_portal.down_walks = 0;
+            self.note(
+                tick,
+                format!("end kit: down its own way from point {i}"),
+                format!("feet {feet:?}, the nearest point {:?}", way.get(i)),
+            );
+        }
+        while let Some(i) = self.end_portal.down_at {
+            let p = *way.get(i)?;
+            if near(feet, p) <= 2.0 {
+                self.end_portal.down_walks = 0;
+                self.note(
+                    tick,
+                    format!("end kit: down at point {i} {p:?}"),
+                    format!("feet {feet:?}"),
+                );
+                if i == 0 {
+                    self.end_portal.down_at = None;
+                    return None;
+                }
+                self.end_portal.down_at = Some(i - 1);
+                continue;
+            }
+            if self.end_portal.down_walks >= r.down_walks {
+                self.end_portal.down_walks = 0;
+                self.note(
+                    tick,
+                    format!("end kit: down point {i} at {p:?} skipped"),
+                    format!("from {feet:?}"),
+                );
+                if i == 0 {
+                    self.end_portal.down_at = None;
+                    return None;
+                }
+                self.end_portal.down_at = Some(i - 1);
+                continue;
+            }
+            self.end_portal.down_walks += 1;
+            // Far from the way (a wood walk ended out on the plain): the overland's legs.
+            if flat(feet, p) > 40.0 {
+                let q = [f64::from(p.0) + 0.5, f64::from(p.2) + 0.5];
+                if self
+                    .overland
+                    .fix
+                    .is_none_or(|(o, _)| (o[0] - q[0]).hypot(o[1] - q[1]) > 4.0)
+                {
+                    self.overland.retarget((q, 0.0), true);
+                    self.note(
+                        tick,
+                        format!("end kit: legs back to point {i} at {p:?}"),
+                        format!("from {feet:?}"),
+                    );
+                }
+                self.end_portal.wood_legs = true;
+                let t = self.overland_task(w, tick);
+                self.end_portal.wood_legs = false;
+                if let Some(t) = t {
+                    return Some(t);
+                }
+            }
+            let mut walk = Walk::new(p, Goal::Near { pos: p, range: 1.5 }, Arrive::Goal, tick);
+            let routed = walk.route_now(w, tick);
+            let found = walk.route;
+            if routed && matches!(found, Some(path::Status::Found | path::Status::Partial)) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("end kit: down its own way to point {i} at {p:?}"),
+                    format!(
+                        "from {feet:?}, a {found:?} route, walk {}",
+                        self.end_portal.down_walks
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            let under = (feet.0, feet.1 - 1, feet.2);
+            let mut cells = path::Cells::new(w);
+            let safe = cells.at((under.0, under.1 - 1, under.2)) != path::Class::Lava
+                && cells.at(under) == path::Class::Solid;
+            if p.1 < feet.1 && flat(feet, p) <= 1.0 && safe {
+                self.note(
+                    tick,
+                    format!("end kit: dig down to point {i}, {under:?}"),
+                    format!("from {feet:?}, no walk (route {found:?})"),
+                );
+                return Some(Task::Dig(crate::dig::Dig::new(w, under, tick)));
+            }
+            self.note(
+                tick,
+                format!("end kit: no walk down to point {i} at {p:?}"),
+                format!("from {feet:?}, route {found:?}"),
+            );
+            return Some(Task::Idle);
+        }
+        None
     }
 
     /// 20d: in the room with the kit, the spawner broken, then an eye into each empty frame, then

@@ -1087,15 +1087,22 @@ logs = 10
 # Trees walked to within 48 flat (the forest base's stem_radius), 24 walks at most; 8 walks to look.
 log_reach = 48.0
 log_walks = 24
-look_walks = 8
+# Legs retargeted at most 24 times. With no log on record, the overland's legs (seen ground,
+# rivers bridged) go to these points (x, z) in turn, reached within 12: first west along the
+# bot's own way in (race 45800967549 lane 4 walked from (1491, 70, -50) to (1613, 64, -32) over
+# plains), then 100 north, south and east of the stairs' top, then further west; race
+# 45873894148 saw no log within 48 of the top (plains and a river).
+look_walks = 24
+wood_points = [[1530, -45], [1610, -130], [1610, 60], [1700, -35], [1420, -70]]
+point_reach = 12.0
 stone_pickaxes = 3
 # Eaten to 20 before the End: no food grows there (the plan, risk 8).
 fed = 20
 eat_tasks = 12
-# Each phase ends within 6,000 ticks (the plan's armed budget is 6,000 to 12,000 for all) or 8
-# failed tasks.
+# Each phase ends within 6,000 ticks (the plan's armed budget is 6,000 to 12,000 for all) or 16
+# failed tasks (race 45873894148: eight NoPath walks for trees ended the wood in 860 ticks).
 phase_ticks = 6000
-phase_fails = 8
+phase_fails = 16
 down_walks = 8
 # The server takes a UseOn within the block interaction range, 4.5 from the eye (the plan, 20d.2).
 frame_reach = 4.5
