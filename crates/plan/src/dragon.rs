@@ -75,6 +75,11 @@ pub const SIDE_MARGIN: f64 = 1.0;
 /// A breath cloud's radius when its data has not said: the sitting dragon's flame cloud is 5
 /// (`DragonSittingFlamingPhase`), a fireball's 3 growing to 7.
 pub const BREATH_RADIUS: f64 = 5.0;
+/// A fireball's cloud: radius 3.0 at first, growing to 7.0 over 600 ticks (E1, `DragonFireball`):
+/// a cloud's radius is never taken under that, whatever its data says.
+pub const CLOUD_MIN: f64 = 3.0;
+pub const CLOUD_MAX: f64 = 7.0;
+pub const CLOUD_GROWTH: f64 = 4.0 / 600.0;
 /// Blocks beyond a cloud's radius the bot keeps (`dragon/breath-margin`).
 pub const BREATH_MARGIN: f64 = 1.5;
 /// More than that the way back to a stand keeps, so a cloud growing as the bot walks does not
@@ -122,6 +127,8 @@ pub const FIGHT_TICKS: u64 = 1200;
 /// many times.
 pub const RESPAWN_WAIT: u64 = 200;
 pub const RESPAWN_TRIES: u32 = 5;
+/// Ticks between the notes of a pocket passed over for the dragon.
+pub const FIRST_NOTE_TICKS: u64 = 200;
 /// The End's dimension name.
 pub const THE_END: &str = "minecraft:the_end";
 
@@ -400,10 +407,16 @@ pub fn breaths(w: &World) -> Vec<Breath> {
         .iter()
         .filter_map(|(id, e)| {
             let radius = match e.kind {
-                EntityKind::AreaEffectCloud => match e.metadata.get(&RADIUS_INDEX) {
-                    Some(MetaValue::Float(r)) if r.is_finite() => f64::from(*r),
-                    Some(_) | None => BREATH_RADIUS,
-                },
+                // Never under a fireball's cloud as it grows (race 45873410249 lane 0: a cloud
+                // shown with radius 0.0 on the feet was stood in for 80 ticks, 20 to dead).
+                EntityKind::AreaEffectCloud => {
+                    let age = w.session.server_ticks.saturating_sub(e.first_seen) as f64;
+                    let grown = (CLOUD_MIN + age * CLOUD_GROWTH).min(CLOUD_MAX);
+                    match e.metadata.get(&RADIUS_INDEX) {
+                        Some(MetaValue::Float(r)) if r.is_finite() => f64::from(*r).max(grown),
+                        Some(_) | None => BREATH_RADIUS.max(grown),
+                    }
+                }
                 EntityKind::DragonFireball => 3.0,
                 _ => return None,
             };
@@ -872,31 +885,20 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
             return Want::Go(hs, "to the head stand");
         }
     }
-    // Landing, or no head stand open: the wait behind the body.
-    let stand = keep_stand(&v, w, ask.stand);
-    let Some(stand) = stand else {
-        if in_bite(&v, feet) {
-            return match step_out_cell(w, Some(&v), STEP_OUT_RADIUS) {
-                Some(c) => Want::Go(c, "out of the bite, no stand open"),
-                None => Want::Hold("in the bite, no cell out loaded"),
-            };
-        }
-        return Want::Hold("no stand open behind the dragon");
-    };
-    if flat(feet, mid(stand)) <= STAND_NEAR {
-        return Want::Hold("at the stand");
+    // Landing, not yet sat, or no head stand open: out of its reach to the wait's ring, never
+    // into the basin (race 45873410249 lane 0: the landing dragon's head took 10 from a bot
+    // walking to a stand behind it, 4.4 along and 2.9 across).
+    if from_fountain(feet) < WAIT_FROM || in_bite(&v, feet) {
+        return match step_out_cell(w, Some(&v), WAIT_RING) {
+            Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "out of the landing's reach"),
+            Some(_) | None => Want::Hold("in the landing's reach, no cell out loaded"),
+        };
     }
-    if breath_on_way(&clouds, feet, mid(stand), BREATH_HOLD) {
-        return Want::Hold("a breath on the way to the stand");
-    }
-    // From outside the basin, round the head first; inside it, straight and low under it.
-    if from_fountain(feet) > IN_BASIN
-        && let Some(p) = around(&v, feet, mid(stand))
-        && let Some(c) = ground(w, p[0].floor() as i32, p[1].floor() as i32, feet_cell[1])
-    {
-        return Want::Go(c, "round the head");
-    }
-    Want::Go(stand, "to the stand behind the dragon")
+    Want::Hold(if sat {
+        "no head stand open"
+    } else {
+        "the dragon not yet sat"
+    })
 }
 
 /// Blocks from the fountain the wait with no bunker goes out to, and holds at from: past the
@@ -950,6 +952,11 @@ pub struct DragonState {
     pub head_strikes: u32,
     /// The dragon's health at the last strike, for the blow's note.
     pub last_health: Option<f32>,
+    /// Ticks a provoked enderman's pocket was passed over for the dragon, and the last note.
+    #[serde(default)]
+    pub first_skips: u64,
+    #[serde(default)]
+    pub first_noted_at: u64,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -1357,6 +1364,45 @@ impl Plan {
             c.pitch = Some(90.0);
         }
         c
+    }
+
+    /// Does the dragon come before a provoked enderman's pocket (`ender_threat`): in the End with a
+    /// breath's reach on the feet, or the dragon on or over its perch with the feet within its
+    /// reach of the fountain? Race 45873410249: both bots were held sealing a pocket, one in a
+    /// fireball's cloud (dead in 80 ticks), one beside the sitting dragon (its head, 10, then a
+    /// fall).
+    pub(crate) fn dragon_first(&self, w: &World) -> bool {
+        if !in_end(w) {
+            return false;
+        }
+        let Some(feet) = w.body.map(|b| b.pos) else {
+            return false;
+        };
+        breathed(&breaths(w), feet, 0.0)
+            || view(w).is_some_and(|(_, v)| grounded(&v) && from_fountain(feet) < WAIT_RING + 4.0)
+    }
+
+    /// `dragon_first`, noted (at most every `FIRST_NOTE_TICKS`) when a provoked enderman's pocket
+    /// is passed over for it.
+    pub fn dragon_first_step(&mut self, w: &World, tick: u64) -> bool {
+        let first = self.dragon_first(w);
+        if first && let Some(id) = crate::endermen::angry(w) {
+            self.dragon.first_skips += 1;
+            if tick >= self.dragon.first_noted_at + FIRST_NOTE_TICKS || self.dragon.first_skips == 1
+            {
+                self.dragon.first_noted_at = tick;
+                self.note(
+                    tick,
+                    format!("dragon first: no pocket for enderman {id}"),
+                    format!(
+                        "a breath's reach on the feet or the dragon on its perch within {:.0}; {} ticks passed over",
+                        WAIT_RING + 4.0,
+                        self.dragon.first_skips
+                    ),
+                );
+            }
+        }
+        first
     }
 
     /// Is a meal by the always-row to wait: the dragon on or over its perch with the feet within

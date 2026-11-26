@@ -1681,7 +1681,10 @@ impl Plan {
         }
         // <<< pearls
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
-        if let Some(c) = self.ender_threat(w, tick) {
+        // >>> E5 (issue 20g): not while a breath reaches the feet or the dragon sits near.
+        let dragon_first = self.dragon_first_step(w, tick);
+        // <<< E5
+        if !dragon_first && let Some(c) = self.ender_threat(w, tick) {
             return c;
         }
         // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.

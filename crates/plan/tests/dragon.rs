@@ -276,13 +276,20 @@ fn the_wait_is_behind_the_sitting_dragons_head() {
             head: true
         }
     );
-    // Landing, not yet sat: the wait behind the body.
+    // Landing, not yet sat: out of its reach to the ring, never into the basin (race
+    // 45873410249 lane 0: the landing head took 10 from a bot walking to a stand behind it).
+    let mut w = end_at([-4.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 3, 90.0);
+    match decide(&w, &ask()) {
+        Want::Go(c, "out of the landing's reach") => {
+            let d = dragon::flat(feet_of(c), [0.5, 0.0, 0.5]);
+            assert!(d >= 11.0, "{c:?} {d}");
+        }
+        other => panic!("out to the ring, not {other:?}"),
+    }
     let mut w = end_at([-12.5, 64.0, 0.5]);
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 3, 90.0);
-    assert_eq!(
-        decide(&w, &ask()),
-        Want::Go([-2, FLOOR, 0], "to the stand behind the dragon")
-    );
+    assert_eq!(decide(&w, &ask()), Want::Hold("the dragon not yet sat"));
     // In front of it under the head: out sideways first, never along under it.
     let mut w = end_at([-1.5, 64.0, 0.5]);
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 7, 270.0);
@@ -497,4 +504,30 @@ fn a_crystal_shown_leaves_the_fight_to_the_crystals() {
     add(&mut w, 60, EntityKind::EndCrystal, [42.5, 90.0, 0.5]);
     let mut p = Plan::new(Aim::Race);
     assert!(p.dragon_task(&w, 0).is_none());
+}
+
+#[test]
+fn a_fireballs_cloud_is_never_taken_under_its_first_radius() {
+    // Race 45873410249 lane 0: a cloud shown with radius 0.0 on the feet was stood in for 80
+    // ticks, 20 health to none.
+    let mut w = end_at([8.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [9.5, 64.0, 0.5], 0.0);
+    let b = breaths(&w);
+    assert!((b[0].radius - 3.0).abs() < 1e-9, "{b:?}");
+    w.session.server_ticks += 300;
+    let b = breaths(&w);
+    assert!((b[0].radius - 5.0).abs() < 1e-9, "grown by its age: {b:?}");
+}
+
+#[test]
+fn the_dragon_comes_before_a_provoked_endermans_pocket() {
+    let mut w = end_at([6.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 0.0);
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.dragon_first_step(&w, 0), "the dragon sat within 16");
+    let mut far = end_at([30.5, 64.0, 0.5]);
+    with_dragon(&mut far, [0.5, PERCH_Y, 0.5], 6, 0.0);
+    assert!(!p.dragon_first_step(&far, 0), "far off: the pocket");
+    cloud(&mut far, 50, [30.5, 64.0, 1.5], 3.0);
+    assert!(p.dragon_first_step(&far, 0), "a breath on the feet");
 }
