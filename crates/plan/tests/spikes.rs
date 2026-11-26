@@ -461,10 +461,10 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
             .iter()
             .any(|n| n.starts_with("spikes: pillar up from"))
     );
-    // Charging 30 off with the bot half way up a pillar: no wait there, on up to the box.
+    // Strafing 30 off with the bot half way up a pillar: no wait there, on up to the stand.
     let mut w = world(2, [8.5, 67.0, 5.5]);
     pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
-    dragon(&mut w, [8.5, 67.0, 35.5], 8);
+    dragon(&mut w, [8.5, 67.0, 35.5], 1);
     let mut p = Plan::new(Aim::Race);
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -478,6 +478,22 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
         notes(&p)
     );
     assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
+    // Charging 30 off: held still in the column.
+    dragon(&mut w, [8.5, 67.0, 35.5], 8);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: hold in the shaft from the charge"),
+        "{:?}",
+        notes(&p)
+    );
     // Charging 30 off with the bot boxed in at its stand: the strike, the stand noted closed.
     let mut w = walled();
     dragon(&mut w, [8.5, 70.0, 35.5], 8);
@@ -491,6 +507,7 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
     );
     // The crystal gone, the dragon strafing 30 off: held in the box, not down.
     gone(&mut w);
+    dragon(&mut w, [8.5, 70.0, 35.5], 1);
     let mut p = Plan::new(Aim::Race);
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -730,10 +747,16 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     assert!(p.take_acts().is_empty(), "too high to pour yet");
     fall(&mut w, 66.5);
     p.spikes_step(&w, 102);
-    assert_eq!(p.take_acts(), vec![Act::UseItem], "poured near the ground");
-    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
-    fall(&mut w, 65.5);
+    assert!(
+        p.take_acts().is_empty(),
+        "in reach, but the next tick is too: the later one"
+    );
+    fall(&mut w, 65.0);
     p.spikes_step(&w, 103);
+    assert_eq!(p.take_acts(), vec![Act::UseItem], "the last tick in reach");
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    fall(&mut w, 64.5);
+    p.spikes_step(&w, 104);
     assert!(
         notes(&p)
             .iter()
@@ -761,4 +784,102 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
         notes(&p)
     );
     assert_eq!(p.spikes.clutches, 1);
+}
+
+#[test]
+fn the_way_down_centres_first_and_steps_into_a_dug_shaft() {
+    // Race 45885217441 lane 0: the dig under a wide spike's pillar top left the body on the
+    // spike's edge beside the shaft, "no approach" and then "stranded" to the cap.
+    let mut w = world(4, [8.5, 70.0, 3.85]);
+    pillar(&mut w, (8, 3), 64, 69, BlockKind::EndStone);
+    gone(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 3,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: centre over the pillar")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(
+        p.spikes.doing,
+        Some(spikes::Doing::Step { sneak: true, .. })
+    ));
+    // The shaft dug with the body held up beside it: into it.
+    set(&mut w, (8, 69, 3), BlockKind::Air);
+    let rec = SpikeState {
+        pillars: p.spikes.pillars.clone(),
+        ..SpikeState::default()
+    };
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Step {
+            to: (8, 70, 3),
+            sneak: false
+        }
+    );
+    // On the spike's top beside it: a step in; farther off, the walk to beside it.
+    at(&mut w, [8.5, 70.0, 4.5]);
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Step {
+            to: (8, 70, 3),
+            sneak: false
+        }
+    );
+    at(&mut w, [8.5, 70.0, 7.5]);
+    assert_eq!(
+        spikes::next(&w, &rec, 0),
+        Next::Walk {
+            to: (8, 70, 4),
+            approach: None
+        }
+    );
+}
+
+#[test]
+fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
+    // Race 45885217441 lane 1: flung 48 over the ground, the bucket held, never poured. The pour
+    // is predicted from the velocity (gravity 0.08, drag 0.98), never waited for.
+    let ground = 54.0;
+    let (mut y, mut v) = (ground + 48.0, -3.9);
+    let mut pours = Vec::new();
+    while y > ground {
+        if spikes::pour_now(y, v, ground) {
+            pours.push((y, v));
+        }
+        y += v;
+        v = (v - 0.08) * 0.98;
+    }
+    // At terminal speed a tick falls 3.9, more than the 2.78 the reach spans over the ground
+    // (4.4 less the eye's 1.62), so a fall's phase can skip it: this one's does not.
+    assert_eq!(pours.len(), 1, "{pours:?}");
+    let (py, pv) = pours[0];
+    let sent = py + pv;
+    assert!(sent > ground, "the feet still over the ground: {sent}");
+    assert!(
+        sent + 1.62 - ground <= spikes::POUR_REACH,
+        "the eye in reach: {}",
+        sent + 1.62 - ground
+    );
+    // Every start from rest 5 to 60 over the ground: under 2.78 a tick (about 100 blocks of
+    // fall), a tick always lands in reach, and exactly one pour goes.
+    for h in 5..=60 {
+        let (mut y, mut v) = (ground + f64::from(h), 0.0);
+        let mut n = 0;
+        while y > ground {
+            if spikes::pour_now(y, v, ground) {
+                n += 1;
+            }
+            y += v;
+            v = (v - 0.08) * 0.98;
+        }
+        assert_eq!(n, 1, "a fall from {h}");
+    }
 }
