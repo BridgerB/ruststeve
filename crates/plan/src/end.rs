@@ -12,7 +12,7 @@
 //!   `DRAGON_CLEAR` off or perched; otherwise the bot waits crouched in the cell's middle. A cliff
 //!   of end stone ahead is climbed by stairs cut up into it (`Stairs::up`): inside the island the
 //!   bot is under dragon-immune end stone.
-//! - **The bunker**: a 1x2 cell dug three down into the end stone about `BUNKER_FROM_FOUNTAIN` from
+//! - **The bunker**: a 1x2 cell dug four down into the end stone about `BUNKER_FROM_FOUNTAIN` from
 //!   the fountain, its top cell laid back as a roof; its door (a stair out) is dug only to leave
 //!   and filled again on the way in. Eat to `FED` and heal to `HEALED` there; every retreat goes
 //!   there.
@@ -235,6 +235,39 @@ pub fn covered(w: &World) -> bool {
 /// Covered notes are written at most this often (a second's worth of angry endermen at once).
 pub const COVERED_NOTE_EVERY: u64 = 600;
 
+/// An area cloud's radius: `AreaEffectCloud.DATA_RADIUS`, a float at metadata index 8 (after
+/// Entity's 0 to 7); 3 (its default) when not sent.
+pub const CLOUD_RADIUS_INDEX: u8 = 8;
+/// A route keeps this far outside a cloud's radius (the plan's 20g breath margin).
+pub const CLOUD_MARGIN: f64 = 1.5;
+
+/// The first cell of `cells` inside an area cloud (the dragon's breath, a fireball's splash),
+/// with the cloud's centre: within its radius and `CLOUD_MARGIN` on the plane and 3 of its height.
+pub fn cloud_on(w: &World, cells: &[Cell]) -> Option<(Cell, [f64; 3])> {
+    let clouds: Vec<([f64; 3], f64)> = w
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::AreaEffectCloud && !e.dead)
+        .map(|e| {
+            let r = match e.metadata.get(&CLOUD_RADIUS_INDEX) {
+                Some(MetaValue::Float(r)) => f64::from(*r),
+                Some(_) | None => 3.0,
+            };
+            (e.pos, r)
+        })
+        .collect();
+    cells.iter().find_map(|c| {
+        let at = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+        clouds
+            .iter()
+            .find(|(p, r)| {
+                ((at[0] - p[0]).powi(2) + (at[2] - p[2]).powi(2)).sqrt() <= r + CLOUD_MARGIN
+                    && (at[1] - p[1]).abs() <= 3.0
+            })
+            .map(|(p, _)| (*c, *p))
+    })
+}
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -255,12 +288,19 @@ pub fn surface_y(w: &World, x: i32, z: i32, top: i32) -> Option<i32> {
 
 /// The bunker's cells: its feet cell, the roof over its head and the door's cells (the stair out
 /// along `door`: its first step's feet and head, the second step's feet).
-pub fn bunker_cells(b: Cell, (dx, dz): (i32, i32)) -> (Cell, Cell, [Cell; 3]) {
+pub fn bunker_cells(b: Cell, (dx, dz): (i32, i32)) -> (Cell, Cell, [Cell; 7]) {
     let roof = (b.0, b.1 + 2, b.2);
+    // Three steps up to the surface (the bunker is four down: two of end stone over its head),
+    // each step's feet and head cut and the room over the head before it.
+    let at = |i: i32, y: i32| (b.0 + i * dx, b.1 + y, b.2 + i * dz);
     let door = [
-        (b.0 + dx, b.1 + 1, b.2 + dz),
-        (b.0 + dx, b.1 + 2, b.2 + dz),
-        (b.0 + 2 * dx, b.1 + 2, b.2 + 2 * dz),
+        at(1, 1),
+        at(1, 2),
+        at(1, 3),
+        at(2, 2),
+        at(2, 3),
+        at(3, 3),
+        at(3, 4),
     ];
     (b, roof, door)
 }
@@ -295,7 +335,7 @@ pub enum Op {
 /// What a work is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WorkKind {
-    /// The bunker dug three down and roofed.
+    /// The bunker dug four down and roofed two deep.
     Build,
     /// A pillar up on the platform to the bridge's height.
     Pillar,
@@ -394,6 +434,9 @@ pub struct EndState {
     pub covered_ticks: u64,
     #[serde(default)]
     pub covered_noted: Option<u64>,
+    /// Walks to the bunker held back for a cloud on the way.
+    #[serde(default)]
+    pub cloud_waits: u32,
     /// Up a pillar handed to the crystals' task for the way down, noted.
     #[serde(default)]
     pub down_noted: bool,
@@ -652,10 +695,11 @@ impl Plan {
         if let Some(t) = next {
             // Out from under the end stone first: from the tunnel back to the bunker, then its
             // roof and stair dug; the task is chosen again once the sky is over the head.
-            if !world::stage::open_sky(w) && !inside {
+            let shut = !open(w, roof) || !open(w, door_cells[0]);
+            if !world::stage::open_sky(w) && !inside && !open(w, door_cells[0]) {
                 return self.walk_home(w, b, tick, "to leave by the bunker's stair");
             }
-            if !world::stage::open_sky(w) {
+            if inside && shut {
                 // Out of the bunker first, the task chosen again once the door is open.
                 self.note(
                     tick,
@@ -671,12 +715,10 @@ impl Plan {
                 );
                 self.end.work = Some(Work::new(
                     WorkKind::Open,
-                    vec![
-                        Op::Dig(roof),
-                        Op::Dig(door_cells[0]),
-                        Op::Dig(door_cells[1]),
-                        Op::Dig(door_cells[2]),
-                    ],
+                    std::iter::once(roof)
+                        .chain(door_cells)
+                        .map(Op::Dig)
+                        .collect(),
                     tick,
                 ));
                 return None;
@@ -814,7 +856,10 @@ impl Plan {
         Some(Task::Explore(walk))
     }
 
-    /// Dig three down where the feet stand and lay the top cell back as the roof.
+    /// Dig four down where the feet stand and lay the top two cells back as the roof: two of end
+    /// stone over the head and over every stock tunnel, so a dip of one in the ground opens none
+    /// to the sky (race 45872058898: both bots killed in their tunnels by a dragon fireball's
+    /// cloud, the tunnels one under the surface).
     fn begin_build(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
         let s = feet.1 - 1;
         let top = (feet.0, s, feet.2);
@@ -836,21 +881,32 @@ impl Plan {
             .find(|s| *s != roof_side)
             .unwrap_or((1, 0));
         self.end.door = Some(door);
-        let cells = [top, (feet.0, s - 1, feet.2), (feet.0, s - 2, feet.2)];
+        let cells = [
+            top,
+            (feet.0, s - 1, feet.2),
+            (feet.0, s - 2, feet.2),
+            (feet.0, s - 3, feet.2),
+        ];
         let mut ops = Vec::new();
         for c in cells {
             ops.extend([Op::Centre, Op::Dig(c), Op::Settle]);
         }
+        // The top first (on its side block), then the one under it on the side block under that.
         ops.push(Op::Place {
             cell: top,
             against,
+            face,
+        });
+        ops.push(Op::Place {
+            cell: (top.0, s - 1, top.2),
+            against: (against.0, s - 1, against.2),
             face,
         });
         self.note(
             tick,
             format!("end: dig the bunker at {feet:?}"),
             format!(
-                "{:.0} from the fountain; three down, the roof laid back on {against:?}; door {door:?}",
+                "{:.0} from the fountain; four down, the roof's two cells laid back on {against:?} and under it; door {door:?}",
                 w.body.map_or(-1.0, |b| flat_to_fountain(b.pos))
             ),
         );
@@ -906,6 +962,22 @@ impl Plan {
                 format!("{why}; walk {} of {HOME_WALKS}", self.end.home_walks),
             );
             self.retry_at = tick + crate::RETRY_TICKS;
+            return None;
+        }
+        // Never through a cloud (E4's race 45875049490 lane 1 died walking this route through the
+        // dragon's breath): wait where the bot is until it is gone.
+        if let Some((c, at)) = cloud_on(w, walk.waypoints.as_deref().unwrap_or_default()) {
+            self.end.home_walks -= 1;
+            self.end.cloud_waits += 1;
+            self.note(
+                tick,
+                format!("end: the way to the bunker waits for a cloud at {c:?}"),
+                format!(
+                    "{why}; the cloud at {:.0}, {:.0}, {:.0}; wait {}",
+                    at[0], at[1], at[2], self.end.cloud_waits
+                ),
+            );
+            self.retry_at = tick + crate::RETRY_TICKS * 2;
             return None;
         }
         self.walks += 1;
