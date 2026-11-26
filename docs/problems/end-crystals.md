@@ -213,3 +213,16 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The climb rule:** to begin a climb the dragon must also not be closing (nearer by a block than its reading within 60 ticks), unless perched ("the dragon closing").
 - **Unit tests:** `the_waterfall_is_poured_on_the_pillars_top_and_ridden_down`, `a_pool_is_made_by_the_bunker_and_refills_the_buckets`.
 - **Not yet counted in a race.**
+
+## Ninth race: 45908299055 (dev-end-island with two water buckets and a bucket, 1a70f53, development only)
+- **1 crystal each, and both bots fell dead early** (blows while digging down).
+- **No waterfall and no clutch: neither bot held any water.**
+
+### Wall 15: the pool took both buckets and the bot walked off (fixed)
+- **What happened** (lane 0, tick 800):
+  - Both buckets went into the pool at (10, 60, -7) and (11, 60, -7) ("the pool's pour done" twice).
+  - The next tick, before the second cell's update was seen, the pool was not yet "made", and the refill waited on "made". The bot walked to (42, 0) with three empty buckets.
+  - It dug down from (29, 91, -25) and was struck off with no water.
+- **The fix:**
+  - With both buckets poured and the pool not yet seen whole, the bot waits by it ("waiting on the pool").
+  - A refill no longer waits on "made": any pool cell with water refills an empty bucket.

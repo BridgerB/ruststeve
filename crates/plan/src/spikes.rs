@@ -1942,14 +1942,27 @@ impl Plan {
                         format!("spikes: water pool at {c0:?} and {c1:?}"),
                         "an infinite source by the bunker".to_owned(),
                     );
+                } else if water == 0 {
+                    // Both buckets poured, the pool's update not yet seen: wait by it, never
+                    // leave with no water (race 45908299055: both bots walked off with none,
+                    // no clutch and no waterfall, and fell dead).
+                    self.spikes_note(
+                        tick,
+                        "spikes: waiting on the pool".to_owned(),
+                        format!("{c0:?} {:?}, {c1:?} {:?}", kind(w, c0), kind(w, c1)),
+                    );
+                    return Some(self.spikes_hold(tick));
                 }
             }
         }
-        // A refill: an empty bucket held and the pool made.
-        if self.spikes.pool_made
-            && empty > 0
-            && let Some([c0, _]) = self.spikes.pool
-            && kind(w, c0) == Some(BlockKind::Water)
+        // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
+        // pool with an empty hand).
+        if empty > 0
+            && let Some(cells) = self.spikes.pool
+            && let Some(c0) = cells
+                .iter()
+                .copied()
+                .find(|c| kind(w, *c) == Some(BlockKind::Water))
         {
             let target = [
                 f64::from(c0.0) + 0.5,
