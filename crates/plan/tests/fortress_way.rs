@@ -225,3 +225,10 @@ fn past_the_stretch_the_heading_runs() {
     }
     assert!(!p.ender.home.fortress.begun);
 }
+
+#[test]
+fn the_stretch_junk_names_are_all_items() {
+    let r = fortress_way::FortressRules::default();
+    assert_eq!(r.junk_kinds().len(), r.junk.len());
+    assert!(r.junk_kinds().contains(&(ItemKind::Netherrack, 128)));
+}

@@ -22,6 +22,10 @@
 //!    chunk is unloaded, so the leg runs on unbroken. Race 45763915181's heading legs over the
 //!    fortress and the valley wandered for 4,000 ticks; race 45760537530 lane 3 burned to death in
 //!    the open. With no tunnel route the heading's legs run as before.
+//! 4. **The pack kept open** (`FortressRules::junk`, read by `Plan::equip`'s junk drop): once
+//!    the tunnel has begun, the blocks it picks up go over their keep (race 45766983995: 448
+//!    netherrack and 50 soul soil filled the pack; every wooden pickaxe craft failed StaleWindow
+//!    and the tunnel stood with no pickaxe).
 
 use world::World;
 
@@ -35,11 +39,44 @@ pub struct FortressRules {
     /// Blocks on the plane from the portal inside which (and out of `[portal_way] reach`) the
     /// trip goes by the covered tunnel.
     pub reach: i32,
+    /// Dropped like `[survival] junk` (name, count kept) once the stretch's tunnel has begun.
+    pub junk: Vec<(String, i32)>,
+}
+
+impl FortressRules {
+    /// `junk` with its names read as item kinds (an unknown name is skipped).
+    pub fn junk_kinds(&self) -> Vec<(data::ItemKind, i32)> {
+        self.junk
+            .iter()
+            .filter_map(|(n, keep)| data::ItemKind::from_name(n).map(|k| (k, *keep)))
+            .collect()
+    }
 }
 
 impl Default for FortressRules {
     fn default() -> Self {
-        Self { reach: 250 }
+        let junk: &[(&str, i32)] = &[
+            ("netherrack", 128),
+            ("soul_soil", 0),
+            ("soul_sand", 0),
+            ("warped_roots", 0),
+            ("crimson_roots", 0),
+            ("warped_wart_block", 0),
+            ("nether_wart_block", 0),
+            ("warped_nylium", 0),
+            ("crimson_nylium", 0),
+            ("warped_fungus", 0),
+            ("crimson_fungus", 0),
+            ("gold_nugget", 0),
+            ("quartz", 0),
+            ("basalt", 0),
+            ("magma_cream", 0),
+            ("gravel", 0),
+        ];
+        Self {
+            reach: 250,
+            junk: junk.iter().map(|(n, k)| ((*n).to_owned(), *k)).collect(),
+        }
     }
 }
 
@@ -103,7 +140,7 @@ pub fn home_way_steers(p: &Plan, heading_way: bool) -> bool {
 }
 
 impl Plan {
-    fn fortress_rules(&self) -> FortressRules {
+    pub(crate) fn fortress_rules(&self) -> FortressRules {
         self.table
             .as_ref()
             .map_or_else(FortressRules::default, |t| t.fortress_way.clone())
