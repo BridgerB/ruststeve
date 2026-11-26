@@ -1135,12 +1135,10 @@ fn a_large_cube_by_a_lava_edge_is_never_struck() {
         notes(&p)
     );
     assert_eq!(p.ender.home.big_cubes_spared, 1);
-    // A medium one too; a small one (no split) is fought as before.
+    // A medium one too, and a small one (race 45783532164 lane 0: knocked into the sea fighting
+    // one by the edge).
     assert_eq!(defends_a_cube_on_an_edge(2).0, 0);
-    assert!(
-        defends_a_cube_on_an_edge(1).0 > 0,
-        "a small cube on the bot is fought"
-    );
+    assert_eq!(defends_a_cube_on_an_edge(1).0, 0);
 }
 
 #[test]
