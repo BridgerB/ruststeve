@@ -276,7 +276,9 @@ fn end_stone_under_the_sky_is_the_island_and_the_bot_walks_to_the_bunker_site() 
 
 #[test]
 fn at_the_site_the_bunker_is_dug_three_down_and_roofed() {
-    let w = world(4, 0..=7, [12.5, 64.0, 0.5]);
+    let mut w = world(4, 0..=7, [12.5, 64.0, 0.5]);
+    // The pickaxe in hand (a hand-built world does not answer the hold's swap).
+    w.held = 2;
     let mut p = racer();
     p.end.bridged = true;
     let mut acts = Vec::new();

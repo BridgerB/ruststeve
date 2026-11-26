@@ -931,8 +931,9 @@ impl Plan {
             }
             return Some(hold);
         }
+        // Waiting: the planner's own idle wait, and the steps after this one (E4's driver) run.
         if tick < self.retry_at {
-            return Some(hold);
+            return None;
         }
         if let Some(t) = self.end_task(w, tick) {
             self.begin(t);
