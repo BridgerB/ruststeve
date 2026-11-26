@@ -1248,7 +1248,16 @@ impl Plan {
         if self.headed.as_ref().is_some_and(|h| h.restock.is_some()) {
             return None;
         }
-        let (at, click, face) = guard_next(w, axis, &self.ender.home.guard_refused)?;
+        // Never a cell of the tunnel's own route, nor the floor of one (race 45779137282: the guard
+        // filled (22, 43, -11), a stair of its own last leg).
+        let mut skip = self.ender.home.guard_refused.clone();
+        skip.extend(
+            self.travel
+                .route
+                .iter()
+                .flat_map(|c| [*c, (c.0, c.1 - 1, c.2)]),
+        );
+        let (at, click, face) = guard_next(w, axis, &skip)?;
         // The progress invariant: a guard clicked `GUARD_TRIES` times and still open is given up
         // (race 45760537530: one guard clicked 221 to 411 times, filler unchanged, blazes near).
         let tries = match self.ender.home.guard_try {
@@ -2266,7 +2275,10 @@ impl Plan {
             return None;
         }
         let mut walk = Walk::to_dig(log, tick);
-        if !walk.route_now(w, tick) {
+        // A found route only: a partial one walks the bot back up its own stairs toward a stem it
+        // cannot reach (race 45779137282: twelve walks NoPath from the last leg's tunnel, each
+        // undoing its stairs).
+        if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
             self.expanded += walk.expanded;
             self.refuse(log, tick);
             return None;
