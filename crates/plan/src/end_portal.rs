@@ -38,7 +38,9 @@ pub const OVERWORLD: &str = "minecraft:overworld";
 pub struct EndKitRules {
     /// The top of the bot's own stairs down to the room (the frontier's ledger).
     pub way_up: [i32; 3],
-    /// Walks up the stairs begun before the dry stairs take over.
+    /// The way's points under it, from the room up (its legs' ends).
+    pub way: Vec<[i32; 3]>,
+    /// Walks to one way point before it is skipped.
     pub up_walks: u32,
     /// Logs (and planks / 4) held before the row.
     pub logs: i32,
@@ -75,7 +77,17 @@ impl Default for EndKitRules {
     fn default() -> Self {
         Self {
             way_up: [1608, 63, -32],
-            up_walks: 4,
+            way: vec![
+                [1620, 17, -36],
+                [1609, 23, -38],
+                [1602, 27, -38],
+                [1596, 33, -38],
+                [1590, 39, -38],
+                [1596, 45, -38],
+                [1602, 51, -38],
+                [1608, 57, -38],
+            ],
+            up_walks: 3,
             logs: 10,
             log_reach: 48.0,
             log_walks: 24,
@@ -85,7 +97,7 @@ impl Default for EndKitRules {
             eat_tasks: 12,
             phase_ticks: 6000,
             phase_fails: 8,
-            down_walks: 4,
+            down_walks: 8,
             frame_reach: 4.5,
             eye_tries: 4,
             eye_every: 20,
@@ -148,6 +160,8 @@ pub struct EndPortalState {
     pub failures_seen: u64,
     pub up_walks: u32,
     pub climb_noted: bool,
+    /// The way point walked to next.
+    pub way_at: Option<usize>,
     pub log_walks: u32,
     pub look_walks: u32,
     pub eat_tasks: u32,
@@ -582,40 +596,121 @@ impl Plan {
             self.end_kit_advance(w, tick, &format!("on the surface at {feet:?}"));
             return None;
         }
-        let up = (r.way_up[0], r.way_up[1], r.way_up[2]);
-        if self.end_portal.up_walks < r.up_walks {
-            let mut walk = Walk::new(
-                up,
-                Goal::Near {
-                    pos: up,
-                    range: 1.5,
-                },
-                Arrive::Goal,
+        // The way: the legs' ends from the room up, then the stairs' top; walked a leg at a time
+        // from the point after the nearest one (a single route of 100 cells through the stairs
+        // and the tunnel ran out of the search's budget).
+        let way: Vec<Cell> = r
+            .way
+            .iter()
+            .chain(std::iter::once(&r.way_up))
+            .map(|p| (p[0], p[1], p[2]))
+            .collect();
+        let feet = path::stand_cell(w, w.body?.pos);
+        let near = |a: Cell, b: Cell| path::octile(a, b) + f64::from((a.1 - b.1).abs());
+        if self.end_portal.way_at.is_none() {
+            let i = way
+                .iter()
+                .enumerate()
+                .min_by(|a, b| near(feet, *a.1).total_cmp(&near(feet, *b.1)))
+                .map_or(0, |(i, _)| i);
+            self.end_portal.way_at = Some(i);
+            self.note(
                 tick,
+                format!("end kit: up its own way from point {i} of {}", way.len()),
+                format!("feet {feet:?}, the nearest point {:?}", way.get(i)),
             );
+        }
+        while let Some(i) = self.end_portal.way_at
+            && let Some(p) = way.get(i).copied()
+        {
+            if near(feet, p) <= 2.0 {
+                self.end_portal.way_at = Some(i + 1);
+                self.end_portal.up_walks = 0;
+                self.note(
+                    tick,
+                    format!("end kit: way point {i} reached at {p:?}"),
+                    format!("feet {feet:?}"),
+                );
+                continue;
+            }
+            if self.end_portal.up_walks >= r.up_walks {
+                self.end_portal.way_at = Some(i + 1);
+                self.end_portal.up_walks = 0;
+                self.note(
+                    tick,
+                    format!("end kit: way point {i} at {p:?} skipped"),
+                    format!("{} walks to it from {feet:?}", r.up_walks),
+                );
+                continue;
+            }
+            let mut walk = Walk::new(p, Goal::Near { pos: p, range: 1.5 }, Arrive::Goal, tick);
             let routed = walk.route_now(w, tick);
             let found = walk.route;
+            self.end_portal.up_walks += 1;
             if routed && matches!(found, Some(path::Status::Found | path::Status::Partial)) {
-                self.end_portal.up_walks += 1;
                 self.walks += 1;
                 let n = walk.waypoints.as_ref().map_or(0, Vec::len);
                 self.note(
                     tick,
-                    format!("end kit: up its own stairs to {up:?}"),
+                    format!("end kit: up its own way to point {i} at {p:?}"),
                     format!(
-                        "walk {} of {}, {n} cells on a {found:?} route",
+                        "from {feet:?}, walk {} of {}, {n} cells on a {found:?} route",
                         self.end_portal.up_walks, r.up_walks
                     ),
                 );
                 return Some(Task::Explore(walk));
             }
             self.expanded += walk.expanded;
-            self.end_portal.up_walks = r.up_walks;
+            // The route's end under the point (race 45865135195's replan: from the room the
+            // way's reach ends in the corridor at (1609, 19, -38), 4 under the stair it dropped
+            // from): walked to, then stairs up toward the point from there.
+            let end = walk.waypoints.as_ref().and_then(|v| v.last().copied());
+            if let Some(e) = end.filter(|e| near(feet, *e) > 1.5) {
+                let mut to_end = Walk::new(e, Goal::Block { pos: e }, Arrive::Goal, tick);
+                if to_end.route_now(w, tick) && to_end.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("end kit: to the way's reach at {e:?} under point {i}"),
+                        format!("from {feet:?}, route to {p:?} {found:?}"),
+                    );
+                    return Some(Task::Explore(to_end));
+                }
+                self.expanded += to_end.expanded;
+            }
+            // No walk up: a shaft straight up from here (Q7's, one dig a block by hand and a block
+            // under the feet) to the sky. The bot's own stairs were cut going down and no walk
+            // climbs them (race 45870075221: every point past the tunnel "route Some(None)";
+            // stairs up by hand took 2,900 ticks for 5).
+            if p.1 > feet.1 + 1
+                // No height stop: out under the sky (`arrival::Step::Out`); a stop at the stairs'
+                // top would end it in rock under a hill.
+                && let Some(t) = self.arrival_rise_to(w, tick, i32::MAX)
+            {
+                self.note(
+                    tick,
+                    format!("end kit: shaft up from {feet:?} toward point {i} at {p:?}"),
+                    format!("no walk (route {found:?}); out under the sky"),
+                );
+                return Some(t);
+            }
+            if p.1 > feet.1 + 1 {
+                let why = format!("point {i}, no walk from {feet:?} (route {found:?})");
+                if let Some(t) = self.dig_toward(w, p, true, ("the way's point", &why), tick) {
+                    self.note(
+                        tick,
+                        format!("end kit: stairs up toward point {i} at {p:?}"),
+                        why,
+                    );
+                    return Some(t);
+                }
+            }
             self.note(
                 tick,
-                format!("end kit: no walk up its own stairs to {up:?}"),
-                format!("route {found:?}; the dry stairs up"),
+                format!("end kit: no walk to point {i} at {p:?}"),
+                format!("from {feet:?}, route {found:?}"),
             );
+            return Some(Task::Idle);
         }
         if !self.end_portal.climb_noted {
             self.end_portal.climb_noted = true;
