@@ -204,7 +204,22 @@ fn key_of(f: &Fact) -> Key {
         | Fact::EyeEnded { .. }
         | Fact::EyePicked { .. }
         | Fact::FrameSeen { .. }
-        | Fact::SilverfishWoken { .. } => Key::Other(f.line()),
+        | Fact::SilverfishWoken { .. }
+        // Issue 20b.
+        | Fact::EyePlaced { .. }
+        | Fact::PortalEntered { .. }
+        | Fact::CrystalSeen { .. }
+        | Fact::CrystalGone { .. }
+        | Fact::PillarUp { .. }
+        | Fact::PillarDown { .. }
+        | Fact::Strike { .. }
+        | Fact::DragonPhase { .. }
+        | Fact::DragonHit { .. }
+        | Fact::DragonBlow { .. }
+        | Fact::Breath { .. }
+        | Fact::GazeNearMiss { .. }
+        | Fact::DragonDead
+        | Fact::Credits { .. } => Key::Other(f.line()),
     }
 }
 

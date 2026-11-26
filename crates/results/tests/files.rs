@@ -77,6 +77,7 @@ fn batch(rows: Vec<Case>) -> Batch {
                 aim: None,
                 pearls: None,
                 eyes: None,
+                end: None,
             })
             .collect(),
     }

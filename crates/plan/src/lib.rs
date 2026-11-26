@@ -23,6 +23,9 @@ pub mod cover;
 pub mod craft;
 pub mod defend;
 pub mod dig;
+// >>> E5 (issue 20g, the dragon and the win)
+pub mod dragon;
+// <<< E5
 pub mod eat;
 // >>> E3 (issue 20e, the End's arrival and island)
 pub mod end;
@@ -514,6 +517,10 @@ pub enum Task {
     /// An eye of ender thrown, followed, read and picked up again (`eyes`).
     Throw(Box<eyes::Throw>),
     // <<< eyes
+    // >>> E5 (issue 20g)
+    /// The fight with the dragon and the way into the exit portal (`dragon`).
+    Dragon(Box<dragon::Fight>),
+    // <<< E5
 }
 
 impl Task {
@@ -539,6 +546,9 @@ impl Task {
             // >>> eyes
             Task::Throw(_) => "throw-eye",
             // <<< eyes
+            // >>> E5
+            Task::Dragon(_) => "dragon",
+            // <<< E5
         }
     }
 
@@ -562,6 +572,9 @@ impl Task {
             // >>> eyes
             Task::Throw(_) => None,
             // <<< eyes
+            // >>> E5
+            Task::Dragon(_) => None,
+            // <<< E5
             Task::ToLog(w) | Task::Explore(w) => Some(w),
         }
     }
@@ -899,6 +912,10 @@ pub struct Plan {
     #[serde(default)]
     pub eyes: eyes::EyeState,
     // <<< eyes
+    // >>> E5 (issue 20g): the dragon's record, its death and the credits (docs/problems/end-dragon.md).
+    #[serde(default)]
+    pub dragon: dragon::DragonState,
+    // <<< E5
     // >>> E2 (issue 20c/20d, docs/problems/end-portal.md): the End kit and the portal.
     #[serde(default)]
     pub end_portal: end_portal::EndPortalState,
@@ -1044,6 +1061,9 @@ impl Plan {
             throws: Vec::new(),
             eyes: eyes::EyeState::default(),
             // <<< eyes
+            // >>> E5
+            dragon: dragon::DragonState::default(),
+            // <<< E5
             // >>> E2
             end_portal: end_portal::EndPortalState::default(),
             // <<< E2
@@ -1134,6 +1154,9 @@ impl Plan {
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
+        // >>> E5 (issue 20g): no walk steps into a breath's reach; it waits (`breath_ahead`).
+        let c = self.breath_ahead(w, c);
+        // <<< E5
         // >>> E3 (issue 20e): in the End a look no act asked for is straight down.
         let c = self.end_gaze(w, c);
         // <<< E3
@@ -1389,6 +1412,9 @@ impl Plan {
             // >>> eyes
             | Task::Throw(_)
             // <<< eyes
+            // >>> E5
+            | Task::Dragon(_)
+            // <<< E5
             | Task::Swim(..) => false,
         };
         // A strike, a change of the held slot or a click to place a block is weighed by the
@@ -1587,6 +1613,12 @@ impl Plan {
 
     fn step_inner(&mut self, w: &World) -> Controls {
         let tick = w.ticks;
+        // >>> E5 (issue 20g): the dragon's record every tick, and the credits answered with the
+        // respawn (`dragon::Plan::dragon_watch`), ahead of everything: the body is gone then.
+        if let Some(c) = self.dragon_watch(w, tick) {
+            return c;
+        }
+        // <<< E5
         let Some(body) = w.body else {
             return Controls::default();
         };
@@ -1641,6 +1673,12 @@ impl Plan {
             }
             Some(_) | None => self.mark = Some((body.pos, items, self.event_count, tick)),
         }
+        // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
+        // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
+        if let Some(c) = self.breath_step(w, tick) {
+            return c;
+        }
+        // <<< E5
         // The always-rows come first, ahead of every goal and after the aim is met.
         if let Some(c) = self.always(w, &body, tick) {
             return c;
@@ -1652,7 +1690,10 @@ impl Plan {
         }
         // <<< pearls
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
-        if let Some(c) = self.ender_threat(w, tick) {
+        // >>> E5 (issue 20g): not while a breath reaches the feet or the dragon sits near.
+        let dragon_first = self.dragon_first_step(w, tick);
+        // <<< E5
+        if !dragon_first && let Some(c) = self.ender_threat(w, tick) {
             return c;
         }
         // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.
@@ -1846,6 +1887,9 @@ impl Plan {
             // >>> eyes (Q3, issue 19c): the one call site of `eyes::Plan::throw_step`.
             Task::Throw(_) => return self.throw_step(w, tick),
             // <<< eyes
+            // >>> E5 (issue 20g): the one call site of `dragon::Plan::dragon_step`.
+            Task::Dragon(_) => return self.dragon_step(w, tick),
+            // <<< E5
             // `always` runs these (and ends them).
             Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
                 return Controls::default();
@@ -1904,6 +1948,8 @@ impl Plan {
                     | Task::Hunt(_) => {}
                     // >>> eyes
                     Task::Throw(_) => {} // <<< eyes
+                    // >>> E5
+                    Task::Dragon(_) => {} // <<< E5
                 }
                 Controls::default()
             }
@@ -1973,6 +2019,8 @@ impl Plan {
                     | Task::Hunt(_) => {}
                     // >>> eyes
                     Task::Throw(_) => {} // <<< eyes
+                    // >>> E5
+                    Task::Dragon(_) => {} // <<< E5
                 }
                 if give_up {
                     self.maroon = w.body.is_some_and(|b| wet(w, &b));
@@ -2272,6 +2320,9 @@ impl Plan {
             // >>> eyes
             | Task::Throw(_)
             // <<< eyes
+            // >>> E5
+            | Task::Dragon(_)
+            // <<< E5
             | Task::Swim(..) => None,
         };
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
@@ -2287,6 +2338,9 @@ impl Plan {
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
                 make::Always::Eat => {
                     running != Some(make::Always::Hunt)
+                        // >>> E5: never a meal in the perched dragon's reach.
+                        && !self.dragon_holds_meal(w)
+                        // <<< E5
                         && tick >= self.always_retry_at
                         && (eat::hungry(w, rules) || eat::eat_to_heal(w, rules))
                         && eat::best_food(w, rules).is_some()
@@ -2330,6 +2384,9 @@ impl Plan {
                     // >>> eyes
                     Task::Throw(_) => String::new(),
                     // <<< eyes
+                    // >>> E5
+                    Task::Dragon(_) => String::new(),
+                    // <<< E5
                 };
                 self.retry_at = tick;
                 self.note(
@@ -2543,6 +2600,9 @@ impl Plan {
             // >>> eyes
             | Task::Throw(_)
             // <<< eyes
+            // >>> E5
+            | Task::Dragon(_)
+            // <<< E5
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);

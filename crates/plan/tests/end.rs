@@ -328,3 +328,98 @@ fn the_stock_spirals_out_from_the_door() {
         vec![(0, 1), (-1, 0), (0, -1), (0, -1), (1, 0), (1, 0)]
     );
 }
+
+#[test]
+fn in_a_roofed_tunnel_an_angry_enderman_seals_no_pocket() {
+    // The bunker at (12, 61, 0) and a tunnel cell beside it, under the end stone's top at 63.
+    let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+    for c in [(12, 61, 0), (12, 62, 0), (12, 61, 1), (12, 62, 1)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 9, EntityKind::Enderman, [16.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&9) {
+        e.metadata.insert(17, MetaValue::Bool(true));
+    }
+    assert!(end::covered(&w));
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.step(&w);
+    assert!(
+        noted(&p, "end: covered from an angry enderman"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "provoked enderman"), "{:?}", notes(&p));
+    // On the open surface it is the issue 19 pocket as before.
+    let mut w = world(4, 0..=7, [12.5, 64.0, 0.5]);
+    with_entity(&mut w, 9, EntityKind::Enderman, [16.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&9) {
+        e.metadata.insert(17, MetaValue::Bool(true));
+    }
+    assert!(!end::covered(&w));
+}
+
+#[test]
+fn up_a_pillar_with_no_crystal_left_the_crystals_task_brings_the_bot_down() {
+    // E6's closed loop: the last crystal gone, the bot stayed 18 up on its pillar.
+    let mut w = world(4, 0..=7, [20.5, 74.0, 0.5]);
+    for y in 64..=73 {
+        set(&mut w, (20, y, 0), BlockKind::EndStone);
+    }
+    for c in [(12, 61, 0), (12, 62, 0)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.spikes.pillars.push(plan::spikes::PillarRec {
+        x: 20,
+        z: 0,
+        base: 63,
+    });
+    for _ in 0..3 {
+        p.step(&w);
+    }
+    assert!(
+        noted(&p, "end: up a pillar at (20, 74, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: no walk to the bunker"), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
+}
+
+#[test]
+fn hurt_the_walk_to_the_bunker_waits_while_a_cloud_lies_on_the_way() {
+    // The bunker at (12, 61, 0), its shaft open to the surface; the bot 18 east at 10 health.
+    let mut w = world(4, 0..=7, [30.5, 64.0, 0.5]);
+    for y in 61..=63 {
+        set(&mut w, (12, y, 0), BlockKind::Air);
+    }
+    w.player.health = Some(10.0);
+    with_entity(&mut w, 11, EntityKind::AreaEffectCloud, [21.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&11) {
+        e.metadata.insert(8, MetaValue::Float(3.0));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.step(&w);
+    assert!(noted(&p, "end: retreat to the bunker"), "{:?}", notes(&p));
+    assert!(
+        noted(&p, "end: the way to the bunker waits for a cloud"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.task.name(), "idle");
+    // The cloud gone, the walk begins.
+    w.entities.remove(&11);
+    p.retry_at = 0;
+    p.step(&w);
+    assert!(noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
+}

@@ -803,6 +803,13 @@ impl Plan {
             return None;
         }
         // <<< pearls
+        // >>> E3 (issue 20e): in the End a roofed 2-high cell no enderman can enter (the bunker,
+        // its tunnels) is the pocket already: the work goes on (race 45869900923: both bots held
+        // pockets in their stock tunnels from tick 3,480 to the cap at 20 health).
+        if self.end_covered(w, tick) {
+            return None;
+        }
+        // <<< E3
         // >>> Q8 (issue 19): on the way home a provoked enderman's hold is capped at
         // `home::ENDER_HOLD_MAX`, then that enderman is left (Q9's race 45764756002 lane 2: the
         // top-up ended on its clock in the tick one was provoked, and the bot held a 0-block pocket

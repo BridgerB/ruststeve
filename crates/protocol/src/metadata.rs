@@ -51,6 +51,11 @@ pub enum MetaValue {
     Quaternion([f32; 4]),
     /// The serializer the read stopped at: nothing after it in this packet was read.
     Unread(String),
+    /// A particle (`PARTICLE`, issue 20b): its type's name and its options' numbers. Read for
+    /// the kinds an area effect cloud carries (the dragon's breath and fireball clouds,
+    /// `dragon_breath` with its power; a plain cloud's `entity_effect` with its colour); any
+    /// other kind stops the read as `Unread`.
+    Particle(String, Vec<f32>),
 }
 
 fn serializer_name(id: i32) -> Option<&'static str> {
@@ -146,6 +151,29 @@ pub fn read_metadata(r: &mut Reader<'_>) -> Result<Vec<(u8, MetaValue)>, ParseEr
             }),
             Some("VECTOR3") => MetaValue::Vector3(floats(r)?),
             Some("QUATERNION") => MetaValue::Quaternion(floats(r)?),
+            // >>> E1 (issue 20b): an area effect cloud's particle, so the cloud's entries read
+            // whole (its radius comes before it, its other fields after).
+            Some("PARTICLE") => {
+                let kind = r.varint()?;
+                let name = usize::try_from(kind)
+                    .ok()
+                    .and_then(|i| data::generated::registries::PARTICLE_TYPE.get(i));
+                match name {
+                    // PowerParticleOption: the power, a float.
+                    Some(&"dragon_breath") => {
+                        MetaValue::Particle("dragon_breath".to_owned(), vec![r.f32()?])
+                    }
+                    // ColorParticleOption: the colour, an int (ARGB).
+                    Some(&"entity_effect") => {
+                        MetaValue::Particle("entity_effect".to_owned(), vec![r.i32()? as f32])
+                    }
+                    Some(_) | None => {
+                        out.push((index, MetaValue::Unread("PARTICLE".to_owned())));
+                        return Ok(out);
+                    }
+                }
+            }
+            // <<< E1
             Some("ITEM_STACK") => {
                 let slot = read_slot(r)?;
                 out.push((index, MetaValue::Item(slot)));
@@ -302,6 +330,21 @@ pub fn write_metadata(
                 w.varint(serializer_id("QUATERNION"));
                 v.iter().for_each(|f| w.f32(*f));
             }
+            // >>> E1 (issue 20b)
+            MetaValue::Particle(name, values) => {
+                w.varint(serializer_id("PARTICLE"));
+                let kind = data::generated::registries::PARTICLE_TYPE
+                    .iter()
+                    .position(|p| p == name)
+                    .and_then(|i| i32::try_from(i).ok())
+                    .unwrap_or(0);
+                w.varint(kind);
+                match name.as_str() {
+                    "entity_effect" => values.iter().for_each(|v| w.i32(*v as i32)),
+                    _ => values.iter().for_each(|v| w.f32(*v)),
+                }
+            }
+            // <<< E1
             MetaValue::Unread(_) => {}
         }
     }
@@ -336,6 +379,41 @@ mod tests {
         assert_eq!(
             got,
             vec![(0, MetaValue::Byte(1)), (9, MetaValue::Float(14.5))]
+        );
+    }
+
+    /// Issue 20b: a breath cloud's particle reads whole and the read goes on past it.
+    #[test]
+    fn reads_a_breath_clouds_particle_and_goes_on() {
+        let kind = |n: &str| {
+            data::generated::registries::PARTICLE_TYPE
+                .iter()
+                .position(|p| *p == n)
+                .unwrap() as i32
+        };
+        let mut w = Writer::new();
+        w.u8(8);
+        w.varint(id("FLOAT"));
+        w.f32(5.0);
+        w.u8(10);
+        w.varint(id("PARTICLE"));
+        w.varint(kind("dragon_breath"));
+        w.f32(1.0);
+        w.u8(9);
+        w.varint(id("BOOLEAN"));
+        w.u8(0);
+        w.u8(0xff);
+        let got = read_metadata(&mut Reader::new(&w.buf)).unwrap();
+        assert_eq!(
+            got,
+            vec![
+                (8, MetaValue::Float(5.0)),
+                (
+                    10,
+                    MetaValue::Particle("dragon_breath".to_owned(), vec![1.0])
+                ),
+                (9, MetaValue::Bool(false)),
+            ]
         );
     }
 

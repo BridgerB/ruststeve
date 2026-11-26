@@ -308,6 +308,173 @@ pub fn open_sky(w: &World) -> bool {
     })
 }
 
+// >>> E1: issue 20's stages (the numbers are `config/end.toml`'s; a test in
+// crates/world/tests/stages.rs holds the two equal).
+
+/// `armed`: pickaxes (stone or better) held, at least (`[kit] pickaxes`).
+pub const ARMED_PICKAXES: usize = 2;
+/// `armed`: uses left over those pickaxes (`[kit] pickaxe_uses`: two fresh stone ones, 262).
+pub const ARMED_PICKAXE_USES: i32 = 260;
+/// `armed`: cooked food items (`[kit] cooked`).
+pub const ARMED_COOKED: i64 = 24;
+/// `armed`: building blocks (`[kit] blocks`).
+pub const ARMED_BLOCKS: i64 = 128;
+/// Frames in a ring: the empty ones are these less those on record with an eye.
+pub const RING_FRAMES: i64 = 12;
+/// The fountain's column centre (the podium at 0, 0: EndPodiumFeature, the 26.1.2 jar).
+pub const FOUNTAIN: [f64; 2] = [0.5, 0.5];
+/// `island`: the feet on end stone within this (horizontal) of the fountain (`[island] near`).
+pub const ISLAND_NEAR: f64 = 30.0;
+/// `crystals`: the feet within this of the fountain, so every spike (42 off on a ring, probe
+/// 45863427332) is within 102, inside the entity tracking distance (view distance 8 less one
+/// chunk, 112): every crystal still alive has been sent (`[crystals] near`).
+pub const CRYSTALS_NEAR: f64 = 60.0;
+/// The ten spikes' centre columns, this seed (probe 45863427332; `[[spike]]` in
+/// config/end.toml). Geography, Bridger's ruling: the End's layout is fixed by the seed.
+pub const SPIKES: [[i32; 2]; 10] = [
+    [12, 39],
+    [-34, 24],
+    [42, 0],
+    [-34, -25],
+    [-42, -1],
+    [33, -25],
+    [33, 24],
+    [-13, -40],
+    [-13, 39],
+    [12, -40],
+];
+
+/// The pickaxes (stone or better) held `armed` counts.
+const ARMED_PICKAXE_KINDS: [ItemKind; 4] = [
+    ItemKind::StonePickaxe,
+    ItemKind::IronPickaxe,
+    ItemKind::DiamondPickaxe,
+    ItemKind::NetheritePickaxe,
+];
+/// The cooked food `armed` counts.
+pub const COOKED: [ItemKind; 9] = [
+    ItemKind::CookedBeef,
+    ItemKind::CookedPorkchop,
+    ItemKind::CookedMutton,
+    ItemKind::CookedChicken,
+    ItemKind::CookedRabbit,
+    ItemKind::CookedCod,
+    ItemKind::CookedSalmon,
+    ItemKind::Bread,
+    ItemKind::BakedPotato,
+];
+/// The blocks `armed` counts: the bridge blocks (`observe::FILLER`) and end stone.
+pub const ARMED_BLOCK_KINDS: [ItemKind; 11] = [
+    ItemKind::Cobblestone,
+    ItemKind::CobbledDeepslate,
+    ItemKind::Netherrack,
+    ItemKind::Granite,
+    ItemKind::Diorite,
+    ItemKind::Andesite,
+    ItemKind::Tuff,
+    ItemKind::Dirt,
+    ItemKind::Basalt,
+    ItemKind::Blackstone,
+    ItemKind::EndStone,
+];
+
+/// In the End.
+pub fn in_end(w: &World) -> bool {
+    w.dimension
+        .as_ref()
+        .is_some_and(|d| d.name == "minecraft:the_end")
+}
+
+/// The frames on record within `FRAME_NEAR` that hold an eye (`memory::frame_has_eye`).
+pub fn frames_with_eye(w: &World) -> i64 {
+    let Some(dim) = w.dimension.as_ref() else {
+        return 0;
+    };
+    frames_near(w)
+        .into_iter()
+        .filter(|c| {
+            w.memory
+                .latest(&dim.name, *c)
+                .is_some_and(|s| memory::frame_has_eye(s.state))
+        })
+        .count() as i64
+}
+
+/// The ring's empty frames: `RING_FRAMES` less those on record with an eye (a frame never seen
+/// counts as empty).
+pub fn empty_frames(w: &World) -> i64 {
+    (RING_FRAMES - frames_with_eye(w)).max(0)
+}
+
+/// Uses left over the pickaxes `armed` counts, and how many.
+pub fn armed_pickaxes(w: &World) -> (usize, i32) {
+    let picks: Vec<i32> = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(_, (k, _))| ARMED_PICKAXE_KINDS.contains(k))
+        .filter_map(|(slot, _)| w.inventory.uses_left(*slot))
+        .collect();
+    (picks.len(), picks.iter().sum())
+}
+
+/// The kit of `armed`: an iron sword, `ARMED_PICKAXES` pickaxes with `ARMED_PICKAXE_USES`,
+/// `ARMED_COOKED` cooked food, eyes for every empty frame, `ARMED_BLOCKS` blocks, a water bucket.
+pub fn armed_kit(w: &World) -> bool {
+    let count = |ks: &[ItemKind]| ks.iter().map(|k| w.inventory.count(*k)).sum::<i64>();
+    let (picks, uses) = armed_pickaxes(w);
+    w.inventory.count(ItemKind::IronSword) >= 1
+        && picks >= ARMED_PICKAXES
+        && uses >= ARMED_PICKAXE_USES
+        && count(&COOKED) >= ARMED_COOKED
+        && w.inventory.count(ItemKind::EnderEye) >= empty_frames(w)
+        && count(&ARMED_BLOCK_KINDS) >= ARMED_BLOCKS
+        && w.inventory.count(ItemKind::WaterBucket) >= 1
+}
+
+/// The feet's horizontal distance to the fountain.
+pub fn from_fountain(w: &World) -> Option<f64> {
+    w.body
+        .map(|b| (b.pos[0] - FOUNTAIN[0]).hypot(b.pos[2] - FOUNTAIN[1]))
+}
+
+/// The feet on end stone within `ISLAND_NEAR` of the fountain, in the End.
+pub fn on_island(w: &World) -> bool {
+    let Some(body) = w.body.filter(|_| in_end(w)) else {
+        return false;
+    };
+    let under = crate::BlockPos::new(
+        body.pos[0].floor() as i32,
+        (body.pos[1] - 0.01).floor() as i32,
+        body.pos[2].floor() as i32,
+    );
+    from_fountain(w).is_some_and(|d| d <= ISLAND_NEAR)
+        && w.block_at(under) == Some(data::BlockKind::EndStone)
+}
+
+/// End crystals the world holds alive.
+pub fn crystals_alive(w: &World) -> usize {
+    w.entities
+        .values()
+        .filter(|e| !e.dead && e.kind == data::EntityKind::EndCrystal)
+        .count()
+}
+
+/// Every spike's column loaded (so its crystal, if alive, was sent), the feet within
+/// `CRYSTALS_NEAR` of the fountain, and no crystal alive, in the End.
+pub fn crystals_gone(w: &World) -> bool {
+    in_end(w)
+        && from_fountain(w).is_some_and(|d| d <= CRYSTALS_NEAR)
+        && SPIKES.iter().all(|[x, z]| {
+            w.columns.contains_key(&crate::ChunkPos {
+                x: x.div_euclid(16),
+                z: z.div_euclid(16),
+            })
+        })
+        && crystals_alive(w) == 0
+}
+// <<< E1
+
 /// A stage, lowest first. `Ord` is the ladder.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
@@ -370,13 +537,23 @@ pub enum Stage {
     Stronghold,
     /// The feet in the portal room (`in_portal_room`): issue 19's done condition.
     PortalRoom,
+    /// In the overworld with the End's kit (`armed_kit`; issue 20's first checkpoint, Bridger
+    /// 2026-11-26): the overworld prep is never replayed.
+    Armed,
     /// In the End (issue 20).
     End,
+    /// The feet on the main island's end stone within `ISLAND_NEAR` of the fountain (issue 20).
+    Island,
+    /// In the End near the fountain, every spike's column loaded and no crystal alive (issue 20).
+    Crystals,
+    /// The credits (`win_game`) with the dragon seen dead before them (issue 20's done
+    /// condition).
+    Win,
 }
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 20] = [
+    pub const ALL: [Stage; 24] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -396,7 +573,11 @@ impl Stage {
         Stage::Overworld,
         Stage::Stronghold,
         Stage::PortalRoom,
+        Stage::Armed,
         Stage::End,
+        Stage::Island,
+        Stage::Crystals,
+        Stage::Win,
     ];
 
     /// The name results files and the insight store use.
@@ -421,7 +602,11 @@ impl Stage {
             Stage::Overworld => "overworld",
             Stage::Stronghold => "stronghold",
             Stage::PortalRoom => "portal_room",
+            Stage::Armed => "armed",
             Stage::End => "end",
+            Stage::Island => "island",
+            Stage::Crystals => "crystals",
+            Stage::Win => "win",
         }
     }
 
@@ -482,7 +667,11 @@ impl Stage {
             }
             Stage::Stronghold => !frames_near(w).is_empty(),
             Stage::PortalRoom => in_portal_room(w),
+            Stage::Armed => dim == Some("minecraft:overworld") && armed_kit(w),
             Stage::End => dim == Some("minecraft:the_end"),
+            Stage::Island => on_island(w),
+            Stage::Crystals => crystals_gone(w),
+            Stage::Win => w.won && w.dragon_dead.is_some(),
         }
     }
 
@@ -504,7 +693,11 @@ impl Stage {
                 scans
                     || !matches!(
                         s,
-                        Stage::Fortress | Stage::Spawner | Stage::Stronghold | Stage::PortalRoom
+                        Stage::Fortress
+                            | Stage::Spawner
+                            | Stage::Stronghold
+                            | Stage::PortalRoom
+                            | Stage::Armed
                     )
             })
             .find(|s| s.holds(w))
