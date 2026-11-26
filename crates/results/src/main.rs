@@ -10,6 +10,7 @@
 //! cargo run -p results -- memory <memory.rsw> [kind]...    # a snapshot memory by dimension and kind (19a)
 //! cargo run -p results -- region-find <region dir> <block|*>... [--box x0,y0,z0,x1,y1,z1]  # a block's cells (19a)
 //! cargo run -p results -- region-strip <region dir> x0,z0 x1,z1 step   # column tops and biomes (19a)
+//! cargo run -p results -- region-route <region dir> --from x,y,z --to x,y,z --box ... --cand ...   # route survey (19, Q9)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -177,6 +178,51 @@ fn run(args: &[String]) -> Result<(), String> {
                     None => println!("{:>5} {x} {z} not generated", (f64::from(k) * step) as i32),
                 }
             }
+            Ok(())
+        }
+        Some("region-route") => {
+            // region-route <dir> --from x,y,z --to x,y,z --box x0,y0,z0,x1,y1,z1 [--avoid x,z,r]...
+            //   [--map] --cand 'name;miny;maxy;dig,bridge,lava,drop,low;radius;x,z x,z ...'...
+            let dir = args.get(1).ok_or("region-route needs a region directory")?;
+            let nums = |flag: &str| -> Result<Vec<Vec<i32>>, String> {
+                args.windows(2)
+                    .filter(|w| w[0] == flag)
+                    .map(|w| {
+                        w[1].split(',')
+                            .map(|p| p.trim().parse().map_err(|e| format!("{flag} {}: {e}", w[1])))
+                            .collect()
+                    })
+                    .collect()
+            };
+            let three = |flag: &str| -> Result<[i32; 3], String> {
+                match nums(flag)?.first().map(Vec::as_slice) {
+                    Some(&[a, b, c]) => Ok([a, b, c]),
+                    _ => Err(format!("{flag} needs x,y,z")),
+                }
+            };
+            let (from, to) = (three("--from")?, three("--to")?);
+            let (lo, hi) = match nums("--box")?.first().map(Vec::as_slice) {
+                Some(&[a, b, c, d, e, f]) => ([a, b, c], [d, e, f]),
+                _ => return Err("--box needs x0,y0,z0,x1,y1,z1".to_owned()),
+            };
+            let avoid: Vec<([i32; 2], f64)> = nums("--avoid")?
+                .iter()
+                .filter_map(|v| match v[..] {
+                    [x, z, r] => Some(([x, z], f64::from(r))),
+                    _ => None,
+                })
+                .collect();
+            let cands = args
+                .windows(2)
+                .filter(|w| w[0] == "--cand")
+                .map(|w| results::route::parse_cand(&w[1]))
+                .collect::<Result<Vec<_>, String>>()?;
+            let g = results::route::Grid::load(Path::new(dir), lo, hi)?;
+            let map = args.iter().any(|a| a == "--map");
+            print!(
+                "{}",
+                results::route::survey(&g, from, to, &avoid, &cands, map)
+            );
             Ok(())
         }
         Some("endermen") => {

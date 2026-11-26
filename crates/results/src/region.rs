@@ -282,6 +282,31 @@ pub fn top(chunks: &[Chunk], x: i32, z: i32) -> Option<(String, i32, String)> {
     })
 }
 
+impl Chunk {
+    /// Every cell of the chunk as `(cell, block, biome)`, lowest section first (issue 19, Q9's
+    /// route survey: `crate::route` reads a region a file at a time into its own grid).
+    pub fn cells(&self) -> impl Iterator<Item = ([i32; 3], &str, &str)> + '_ {
+        self.sections.iter().flat_map(move |s| {
+            s.blocks.iter().enumerate().map(move |(i, b)| {
+                let (lx, ly, lz) = (i % 16, i / 256, (i / 16) % 16);
+                let biome = s
+                    .biomes
+                    .get((ly / 4) * 16 + (lz / 4) * 4 + lx / 4)
+                    .map_or("", String::as_str);
+                (
+                    [
+                        self.cx * 16 + lx as i32,
+                        s.y * 16 + ly as i32,
+                        self.cz * 16 + lz as i32,
+                    ],
+                    b.as_str(),
+                    biome,
+                )
+            })
+        })
+    }
+}
+
 /// Every chunk in a region directory.
 pub fn all_chunks(dir: &Path) -> Result<Vec<Chunk>, String> {
     let mut out = Vec::new();
