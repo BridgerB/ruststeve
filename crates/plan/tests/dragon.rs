@@ -953,3 +953,24 @@ fn the_notch_is_roofed_a_side_block_first() {
         Some([13, 63, 0])
     );
 }
+
+#[test]
+fn a_stand_under_the_heads_blow_strikes_from_under_it() {
+    // Race 45901376114 lane 0: feet at 62 under a dragon at 67; 2.0 off the box was out of reach.
+    let v = DragonView {
+        pos: [0.5, 67.0, 0.5],
+        yaw: 90.0,
+        phase: 6,
+        health: 200.0,
+    };
+    assert!(
+        dragon::clear_of_blow(&v, [7.5, 62.0, 0.5]),
+        "under the blow box"
+    );
+    assert!(
+        !dragon::clear_of_blow(&v, [7.5, 64.0, 0.5]),
+        "in it on the surface"
+    );
+    let eye = [7.5, 62.0 + physics::EYE_HEIGHT, 0.5];
+    assert!(dragon::head_reach(&v, eye) <= dragon::STRIKE_REACH);
+}

@@ -142,5 +142,10 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
   - keep near the scanning stand (9 from the body) during scanning, which draws the attacking turn instead;
   - at a charge with no bunker near, a dug notch two deep, under the head's and wings' boxes.
 
+### Race 45901376114 (622f39a, dev, 3 lanes, cap 24,000), read mid-run (lane 0's evidence at tick 4,740)
+**Wall 12: a low stand was out of reach.**
+- With the feet at 62 under a dragon at 67, a stand 2.0 off the head's box is 2.38 under it. The eye was 3.75 from the box, so "no head stand open" came every turn, and the dragon was at 193 by tick 4,740.
+- **Fix:** `clear_of_blow` counts a body under the blow boxes as clear of them. The boxes reach down to 2 under the dragon's feet, the same floor as the wings' sweep. Such a stand may be right under the head, 2.4 from its box.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

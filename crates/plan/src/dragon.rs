@@ -635,9 +635,15 @@ pub const NECK_BLOW_HALF: f64 = 2.5;
 /// in reach.
 pub const REACH_SLACK: f64 = 0.25;
 
-/// Are feet at `p` (on the plane, with the player's half width) out of the head's and the neck's
-/// blow boxes? Heights are not counted: under them in the basin is counted as in them.
+/// Are feet at `p` out of the head's and the neck's blow boxes: under them (`under_wings`), or on
+/// the plane with the player's half width?
 pub fn clear_of_blow(v: &DragonView, p: [f64; 3]) -> bool {
+    // Under them: the head's and neck's boxes grown by 1 reach down to 2 under the dragon's feet
+    // (E1), the wings' sweep's floor (race 45901376114 lane 0: feet at 62 under a dragon at 67,
+    // the stand 2.0 off the box out of reach, "no head stand open" every turn).
+    if under_wings(v, p[1]) {
+        return true;
+    }
     let (along, across) = ahead(v, p);
     let hw = physics::HALF_WIDTH;
     let out =
