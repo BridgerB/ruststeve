@@ -98,6 +98,9 @@ pub const CLIFF_RUNS: u32 = 8;
 pub const OUT_RUNS: u32 = 8;
 /// Rounds of site walks begun again from out of the island's reach.
 pub const SITE_ROUNDS: u32 = 3;
+/// Ticks from the first End tick when every look is straight down (five seconds: the arrival's
+/// chunks and their endermen arrive in the first two).
+pub const ARRIVAL_DOWN: u64 = 100;
 /// Walks to the bunker's site at most.
 pub const SITE_WALKS: u32 = 10;
 /// Retreat to the bunker under this health (the danger line 8 plus 6, the plan's climb line).
@@ -521,6 +524,9 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// The first tick seen in the End.
+    #[serde(default)]
+    pub end_since: Option<u64>,
     /// The bunker opened to leave: the walk up its stair is due.
     #[serde(default)]
     pub exit_walk: bool,
@@ -1803,11 +1809,27 @@ impl Plan {
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes
     /// through `keep_look` after this.
-    pub(crate) fn end_gaze(&self, w: &World, c: Controls) -> Controls {
-        if !in_end(w) || c.pitch.is_some() {
+    pub(crate) fn end_gaze(&mut self, w: &World, c: Controls) -> Controls {
+        if !in_end(w) {
             return c;
         }
-        let (_, pitch) = end_look(w, None);
+        // The first ticks in the End, while the endermen round the platform are still being sent:
+        // straight down whatever was asked (a look judged safe against endermen not yet heard of
+        // is no look to trust).
+        let since = *self.end.end_since.get_or_insert(w.ticks);
+        if w.ticks.saturating_sub(since) < ARRIVAL_DOWN || w.body.is_none() {
+            return Controls {
+                pitch: Some(crate::endermen::EYES_DOWN),
+                ..c
+            };
+        }
+        // From the first End tick, the arrival's too: no look is left to the pitch the portal
+        // brought (E5's race 45886819862 lane 1: "near miss: enderman 114 stared at … pitch 0" at
+        // tick 60, killed by it at 140 to 180). A look an act asked for is sent only when it
+        // stares at no enderman.
+        #[allow(clippy::cast_possible_truncation)]
+        let want = c.pitch.map(|p| (c.yaw as f32, p));
+        let (_, pitch) = end_look(w, want);
         Controls {
             pitch: Some(pitch),
             ..c
