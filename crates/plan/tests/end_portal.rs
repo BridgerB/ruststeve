@@ -333,3 +333,53 @@ fn the_climb_route_reverses_a_downward_leg() {
         (a.0 - b.0).abs() + (a.2 - b.2).abs() == 1 && (0..=1).contains(&(b.1 - a.1))
     }));
 }
+
+/// On a frame's top beside the lit portal: no way in is chosen, the push goes straight in.
+#[test]
+fn on_a_frame_beside_the_lit_portal_the_bot_pushes_in() {
+    let eyed: Vec<Cell> = (-1..=1)
+        .flat_map(|k| {
+            [
+                (C.0 + k, C.1, C.2 - 2),
+                (C.0 + k, C.1, C.2 + 2),
+                (C.0 - 2, C.1, C.2 + k),
+                (C.0 + 2, C.1, C.2 + k),
+            ]
+        })
+        .collect();
+    let mut s = room_world(C, &eyed);
+    s.fill(
+        (C.0 - 1, C.0 + 1),
+        (C.1, C.1),
+        (C.2 - 1, C.2 + 1),
+        BlockKind::EndPortal,
+    );
+    // On the south middle frame (1628, 19, -36), its box half over the portal cell's edge.
+    let mut w = load(&s, [1628.5, 19.8125, -35.9]);
+    give(&mut w, 0, ItemKind::Cobblestone, 64);
+    w.stage_reached = Some(world::stage::Stage::PortalRoom);
+    let room = the_room(&w);
+    assert!(end_portal::on_frame_by_portal(
+        &w,
+        &room,
+        [1628.5, 19.8125, -35.9]
+    ));
+    assert!(!end_portal::on_frame_by_portal(
+        &w,
+        &room,
+        [1628.5, 17.0, -37.5]
+    ));
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.end_portal.begun = true;
+    p.end_portal.phase = KitPhase::Over;
+    p.end_portal.spawner_done = true;
+    let t = p.end_portal_task(&w, 1);
+    assert!(matches!(t, Some(Task::Enter(_))), "{t:?}");
+    let what: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert!(
+        what.iter()
+            .any(|n| n.starts_with("end portal: into the portal by push")),
+        "{what:#?}"
+    );
+    assert!(p.end_portal.entry.is_none(), "no way in chosen");
+}

@@ -209,6 +209,8 @@ pub struct EndPortalState {
     pub entry_clicks: u32,
     pub entry_clicked_at: u64,
     pub entries: u32,
+    /// Pushes from a frame's top into the portal.
+    pub pushes: u32,
     /// Frames whose way in was given up.
     pub entry_refused: Vec<[i32; 3]>,
 }
@@ -519,6 +521,29 @@ pub fn climb_route(from: Cell, to: Cell) -> Vec<Cell> {
         v.push(c);
     }
     v
+}
+
+/// The body stands on a frame's top (feet 0.6 to 1.0 over the frames' y) with a lit portal
+/// block at the frames' height within one cell of the feet: the last step is a push in.
+pub fn on_frame_by_portal(w: &World, room: &Room, pos: [f64; 3]) -> bool {
+    let fy = room.centre[1];
+    let up = pos[1] - f64::from(fy);
+    if !(0.6..=1.0).contains(&up) {
+        return false;
+    }
+    let (x, z) = (pos[0].floor() as i32, pos[2].floor() as i32);
+    let under = |c: (i32, i32)| w.block_at(BlockPos::new(c.0, fy, c.1));
+    let on_frame = (-1..=1).any(|dx| {
+        (-1..=1).any(|dz| {
+            let (cx, cz) = (x + dx, z + dz);
+            under((cx, cz)) == Some(BlockKind::EndPortalFrame)
+                && (pos[0] - f64::from(cx) - 0.5).abs() < 0.5 + physics::HALF_WIDTH
+                && (pos[2] - f64::from(cz) - 0.5).abs() < 0.5 + physics::HALF_WIDTH
+        })
+    });
+    let portal =
+        (-1..=1).any(|dx| (-1..=1).any(|dz| under((x + dx, z + dz)) == Some(BlockKind::EndPortal)));
+    on_frame && portal
 }
 
 fn overworld(w: &World) -> bool {
@@ -1539,6 +1564,37 @@ impl Plan {
         feet: Cell,
         tick: u64,
     ) -> Option<Task> {
+        // On a frame's top beside the lit portal: plain forward toward the ring's centre, no
+        // path and no goal to meet on the way (the coordinator, after two bots stood at the edge
+        // with their boxes on the frame: races 45877404722 and 45884543903).
+        if let Some(body) = w.body
+            && on_frame_by_portal(w, room, body.pos)
+            && self.end_portal.pushes < 4 * r.entries
+        {
+            self.end_portal.pushes += 1;
+            let c = (room.centre[0], room.centre[1], room.centre[2]);
+            let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+            walk.waypoints = Some(Vec::new());
+            walk.route = Some(path::Status::Found);
+            self.walks += 1;
+            self.note(
+                tick,
+                format!(
+                    "end portal: into the portal by push ({})",
+                    self.end_portal.pushes
+                ),
+                format!(
+                    "from ({:.2}, {:.2}, {:.2}) on a frame's top, forward toward {c:?}",
+                    body.pos[0], body.pos[1], body.pos[2]
+                ),
+            );
+            return Some(Task::Enter(Box::new(crate::Enter {
+                walk,
+                cell: c,
+                inside_since: None,
+                from: Some(OVERWORLD.to_owned()),
+            })));
+        }
         let e = match self.end_portal.entry.clone() {
             Some(e) => e,
             None => {
