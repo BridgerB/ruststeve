@@ -1,6 +1,6 @@
 //! Issue 19, the way home under cover (agent Q9, docs/problems/eyes-route.md), on a hand-built
 //! Nether: solid netherrack to y 111 round the covered route's points by the soul sand valley
-//! ((139, 80, 55), (124, 82, 64), (116, 84, 80)), the entry portal remembered at its real cells
+//! ((143, 69, 99), (130, 63, 108), (114, 62, 100)), the entry portal remembered at its real cells
 //! (x 22 to 23, y 34 to 36, z -20): the trip begins the covered way at the nearest point, marks
 //! the earlier ones passed, and tunnels to the next.
 
@@ -138,42 +138,42 @@ fn the_config_holds_the_default_covered_points() {
 
 #[test]
 fn resumed_by_a_point_the_covered_way_tunnels_to_the_next() {
-    // 7 on the plane from (124, 82, 64), the nearest point: the 22 before it passed.
-    let mut w = nether([130.5, 82.0, 60.5]);
+    // 7 on the plane from (130, 63, 108), the nearest point: the 21 before it passed.
+    let mut w = nether([136.5, 63.0, 104.5]);
     let mut p = homeward();
     run(&mut p, &mut w);
     let n = notes(&p);
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: begun at point 22 of 25")),
+            .any(|s| s.starts_with("covered way: begun at point 21 of 25")),
         "{n:?}"
     );
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: tunnel to point 22 at (124, 82, 64)")),
+            .any(|s| s.starts_with("covered way: tunnel to point 21 at (130, 63, 108)")),
         "{n:?}"
     );
     assert!(!n.iter().any(|s| s.starts_with("heading leg")), "{n:?}");
     assert!(matches!(p.task, Task::Stairs(_)), "{}", p.task.name());
-    assert_eq!(p.ender.home.covered.passed, 22);
+    assert_eq!(p.ender.home.covered.passed, 21);
     // The first point's column is passed for the heading's fallback too.
-    assert!(p.ender.home.ways_passed.contains(&(481 >> 4, 21 >> 4)));
+    assert!(p.ender.home.ways_passed.contains(&(479 >> 4, 19 >> 4)));
 }
 
 #[test]
 fn at_a_point_it_is_passed_and_the_next_aimed_at() {
-    let mut w = nether([124.5, 82.0, 64.5]);
+    let mut w = nether([130.5, 63.0, 108.5]);
     let mut p = homeward();
     run(&mut p, &mut w);
     let n = notes(&p);
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: point 22 of 25 passed at [124, 82, 64]")),
+            .any(|s| s.starts_with("covered way: point 21 of 25 passed at [130, 63, 108, 0]")),
         "{n:?}"
     );
     assert!(
         n.iter()
-            .any(|s| s.starts_with("covered way: tunnel to point 23 at (116, 84, 80)")),
+            .any(|s| s.starts_with("covered way: tunnel to point 22 at (114, 62, 100)")),
         "{n:?}"
     );
 }
@@ -182,7 +182,7 @@ fn at_a_point_it_is_passed_and_the_next_aimed_at() {
 fn another_portal_is_not_this_route() {
     // The portal elsewhere (a test world's, or another world's): the covered way stands down.
     // The way's `[home] portal` moved off the remembered one.
-    let mut w = nether([130.5, 82.0, 60.5]);
+    let mut w = nether([136.5, 63.0, 104.5]);
     let mut t = (*table()).clone();
     t.home.portal = Some([300, 34, 300]);
     let mut p = homeward();
