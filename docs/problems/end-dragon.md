@@ -157,5 +157,14 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - **Lane 2's death, wall 14: walled in a breath.** An enderman's pocket sealed it in, and a flame's cloud then burned through the walls. 140 walks out failed NoPath, 20 health to dead.
   - **Fix:** a walk out of a breath that fails NoPath digs the wall toward the cell, at the feet's height and then the head's (`wall_toward`; never bedrock or obsidian). It then walks.
 
+**Wall 15: no pocket in the End, ever** (the top killer across the End's races). Pockets held bots in the dragon's reach, shut E3's bunker stair, stranded the fight, and let a breath through their walls.
+- **Fix:** in the End, `ender_threat` is never called (the lib.rs call site, fenced E5); `Plan::end_enderman_step` answers an angry enderman instead:
+  - in a roofed 2-high cell (`end::covered`), the work goes on, since it cannot come in;
+  - on open ground, into the bunker within 24;
+  - otherwise, struck when in reach while health is over the danger line (40 health, the iron sword's 6);
+  - under the line, the bunker however far, else the task goes on.
+- Note: "end: no pocket for enderman N (…)".
+- E3's covered guard and E4's up-high guard inside `ender_threat` stay as they are.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

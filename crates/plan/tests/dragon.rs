@@ -1033,3 +1033,65 @@ fn walled_in_a_breath_the_wall_toward_the_cell_out_is_dug() {
     }
     assert!(dug, "{:?}", p.events_since(0));
 }
+
+#[test]
+fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
+    // Pockets held bots in the dragon's reach, shut the bunker's stair, and a breath came through
+    // their walls (races 45895541443, 45901376114).
+    let feet = [12.5, 64.0, 0.5];
+    let angry = |w: &mut World| {
+        add(w, 70, EntityKind::Enderman, [14.0, 64.0, 0.5]);
+        data(w, 70, vec![(17, MetaValue::Bool(true))]);
+    };
+    let mut w = end_at(feet);
+    angry(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.end_enderman_step(&w, 0).is_some());
+    assert!(
+        p.take_acts()
+            .iter()
+            .any(|a| matches!(a, Act::Attack { entity: 70 })),
+        "over the danger line, in reach: struck"
+    );
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: no pocket for enderman 70 (struck over the danger line)")
+    );
+    // The bunker within reach: into it.
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([20, FLOOR, 0]);
+    assert!(q.end_enderman_step(&w, 0).is_some());
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: no pocket for enderman 70 (to the bunker)")
+    );
+    // In a roofed 2-high cell: the work goes on.
+    let mut c = end_at(feet);
+    for b in [
+        (12, 66, 0),
+        (13, 64, 0),
+        (11, 64, 0),
+        (12, 64, 1),
+        (12, 64, -1),
+    ] {
+        c.step(&Event::Packet(S2c::BlockUpdate {
+            pos: b,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    angry(&mut c);
+    let mut r = Plan::new(Aim::Race);
+    assert!(r.end_enderman_step(&c, 0).is_none(), "in cover");
+    // And Plan::step never seals one in the End.
+    let mut s = Plan::new(Aim::Race);
+    s.step(&w);
+    assert!(
+        !s.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("pocket block") || e.what.contains("into a sealed pocket")),
+        "{:?}",
+        s.events_since(0)
+    );
+}

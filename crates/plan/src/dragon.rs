@@ -523,6 +523,9 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// Blocks on the plane a bunker is gone into from at an angry enderman.
+pub const ENDER_BUNKER_REACH: f64 = 24.0;
+
 /// Ticks a fight whose walk failed in cover waits before it plans again.
 pub const COVERED_RETRY_TICKS: u64 = 200;
 
@@ -1438,6 +1441,15 @@ pub struct DragonState {
     pub roof_tries: u32,
     #[serde(default)]
     pub roof_click_at: u64,
+    /// The walk to the bunker from an angry enderman, the last strike at one, and the last note.
+    #[serde(default)]
+    pub ender_walk: Option<Walk>,
+    #[serde(default)]
+    pub ender_swing_at: Option<u64>,
+    #[serde(default)]
+    pub ender_noted: Option<String>,
+    #[serde(default)]
+    pub ender_noted_at: u64,
     /// The wall cell dug to get out of a pocket in a breath.
     #[serde(default)]
     pub breath_wall: Option<[i32; 3]>,
@@ -2459,6 +2471,123 @@ impl Plan {
             jump: false,
             ..c
         }
+    }
+
+    /// In the End, an angry enderman answered with no pocket ever sealed: in a roofed 2-high cell
+    /// (the bunker, a notch, a tunnel) the work goes on, it cannot come in; on open ground into
+    /// the bunker within `ENDER_BUNKER_REACH`; else struck when in reach while health is over the
+    /// danger line, the task going on between. Under the line, the bunker however far, else the
+    /// task goes on. Noted "end: no pocket for enderman N (…)" at most every `FIRST_NOTE_TICKS`.
+    pub fn end_enderman_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        let Some(id) = crate::endermen::angry(w) else {
+            self.dragon.ender_walk = None;
+            return None;
+        };
+        let body = w.body?;
+        if crate::end::covered(w) {
+            self.dragon.ender_walk = None;
+            self.ender_note(tick, id, "in cover: it cannot come in; on with the work");
+            return None;
+        }
+        let danger = self
+            .table
+            .as_ref()
+            .map_or(8.0, |t| t.survival.danger_health);
+        let health = w.player.health.unwrap_or(FULL_HEALTH);
+        let above = health > danger;
+        let bunker = self
+            .bunker
+            .filter(|b| !above || flat(body.pos, mid(*b)) <= ENDER_BUNKER_REACH);
+        if let Some(b) = bunker {
+            self.ender_note(tick, id, "to the bunker");
+            let cell: Cell = (b[0], b[1], b[2]);
+            if self
+                .dragon
+                .ender_walk
+                .as_ref()
+                .is_none_or(|wk| wk.target != cell)
+            {
+                self.dragon.ender_walk = Some(Walk::new(
+                    cell,
+                    Goal::Block { pos: cell },
+                    Arrive::Goal,
+                    tick,
+                ));
+            }
+            let wk = self.dragon.ender_walk.as_mut()?;
+            let (mut c, status) = wk.step(w, tick);
+            let (acts, said) = wk.take_out();
+            self.acts.extend(acts);
+            for (what, why) in said {
+                self.note(tick, what, why);
+            }
+            if !matches!(status, TaskStatus::Running) {
+                self.dragon.ender_walk = None;
+                if let TaskStatus::Failed(e) = status {
+                    self.note(
+                        tick,
+                        format!("end: the walk from enderman {id} to the bunker failed: {e:?}"),
+                        "on with the task".to_owned(),
+                    );
+                    return None;
+                }
+            }
+            if c.pitch.is_none() {
+                c.pitch = Some(90.0);
+            }
+            return Some(c);
+        }
+        if !above {
+            self.ender_note(
+                tick,
+                id,
+                "under the danger line, no bunker: on with the task",
+            );
+            return None;
+        }
+        // Over the line: struck when in reach (40 health, the iron sword's 6).
+        let e = w.entities.get(&id)?;
+        let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+        if crate::defend::box_distance_of(eye, e.pos, EntityKind::Enderman) > STRIKE_REACH {
+            return None;
+        }
+        if let Some(wp) = crate::hunt::weapon(w) {
+            match hold::toward(w, wp) {
+                Hold::Held | Hold::Missing => {}
+                Hold::Act(a) => {
+                    self.acts.push(a);
+                    return Some(looking_down(w));
+                }
+                Hold::Wait => return Some(looking_down(w)),
+            }
+        }
+        let ready = (crate::hunt::swing_ticks(w) * crate::dig::slowdown(w)).ceil() as u64 + 1;
+        if self
+            .dragon
+            .ender_swing_at
+            .is_none_or(|t| tick.saturating_sub(t) >= ready)
+        {
+            self.dragon.ender_swing_at = Some(tick);
+            self.acts.push(Act::Attack { entity: id });
+            self.acts.push(Act::Swing);
+            self.ender_note(tick, id, "struck over the danger line");
+        }
+        Some(looking_down(w))
+    }
+
+    fn ender_note(&mut self, tick: u64, id: i32, how: &str) {
+        if self.dragon.ender_noted.as_deref() == Some(how)
+            && tick < self.dragon.ender_noted_at + FIRST_NOTE_TICKS
+        {
+            return;
+        }
+        self.dragon.ender_noted = Some(how.to_owned());
+        self.dragon.ender_noted_at = tick;
+        self.note(
+            tick,
+            format!("end: no pocket for enderman {id} ({how})"),
+            format!("the bunker {:?}", self.bunker),
+        );
     }
 
     /// `dragon_first`, noted (at most every `FIRST_NOTE_TICKS`) when a provoked enderman's pocket
