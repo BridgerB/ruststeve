@@ -75,6 +75,11 @@ pub const CENTRE: f64 = 0.12;
 /// Steps aside a shaft takes with no rise between before it ends: a refused cell over the head
 /// (gravel, a cave beside) is often one column wide; three tries the other sides of the feet.
 pub const SIDES_MAX: u32 = 3;
+/// Ticks a stack stays on the cursor before the shaft puts it away: a swap to the hotbar holds
+/// the item on the cursor between its clicks, and throwing it then undid every swap (race
+/// 45737410143: "the cursor's SoulSoil put away" 14 times a shaft, nine shafts that never rose).
+/// The planner's own cursor rule waits 100 (`lib.rs`, "cursor put down").
+pub const CURSOR_WAIT: u64 = 100;
 /// Cells over a cell checked for the sky: `world::stage::SKY_CHECK`, the open-sky rule's own.
 const SKY: i32 = world::stage::SKY_CHECK;
 
@@ -126,6 +131,9 @@ pub struct Shaft {
     pub sides: u32,
     #[serde(default)]
     pub sides_all: u32,
+    /// Since when a stack has been on the cursor.
+    #[serde(default)]
+    pub cursor_at: Option<u64>,
 }
 
 /// The shaft's next step from the feet.
@@ -364,6 +372,7 @@ impl Plan {
                     side: None,
                     sides: 0,
                     sides_all: 0,
+                    cursor_at: None,
                 });
                 self.note(
                     tick,
@@ -501,13 +510,22 @@ impl Plan {
             pitch: Some(crate::endermen::EYES_DOWN),
             ..Controls::default()
         };
-        // A stack on the cursor: into a free slot, else swapped into a junk block's slot and the
-        // junk thrown (it is put under the feet when it comes back).
+        // A stack left on the cursor `CURSOR_WAIT` ticks: into a free slot, else swapped into a
+        // junk block's slot and the junk thrown (it is put under the feet when it comes back).
+        let since = match w.inventory.carried {
+            Some(_) => *s.cursor_at.get_or_insert(tick),
+            None => {
+                s.cursor_at = None;
+                tick
+            }
+        };
         if let Some((k, _)) = w.inventory.carried
+            && tick.saturating_sub(since) >= CURSOR_WAIT
             && w.window.is_none()
             && w.click.is_none()
         {
             if self.acts.is_empty() {
+                s.cursor_at = Some(tick);
                 let junk = |j: ItemKind| SHAFT_BLOCKS[..12].contains(&j);
                 let act = if junk(k) {
                     Some(world::Act::Click {
