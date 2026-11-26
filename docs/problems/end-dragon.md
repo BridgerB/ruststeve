@@ -55,5 +55,74 @@ Development start, never evidence. The setup's kill worked: lane 1 saw 3 crystal
 - **`Plan::breath_step`** (before the always-rows): a breath whose reach takes in the body sends the bot on a walk to the nearest ground cell out of every breath. It looks within 9 columns, never before a grounded dragon's head. The cell is held while it stays clear. A breath's reach means radius plus 1.5 on the plane, with the body's height meeting the cloud's 0.5-tall box with a margin of 1 (`breath_on`). So the bunker three down and a pillar two up are out of it. Notes: "out of the breath to …", "out of the breath", "in the breath, no way out".
 - **`Plan::breath_ahead`** (on every tick's controls): a walk whose point 1.5 ahead lies in a breath's reach, with the feet not in one, stops at the edge and waits. Note: "walk waits at a breath's edge", every 100 ticks at most, with its count.
 
+### Race 45876898172 (issue-20-end with 24b0a6f, dev-end-no-crystals, 3 lanes, cap 12,000): 0/3 win
+Development start. Lane 1 ran to the cap; lanes 0 and 2 died. 26 head strikes in all. The dragon went to 145 (lane 0), 180 (lane 1) and 150 (lane 2). "dragon first: no pocket" fired 44 times, and no bot died in a pocket.
+
+**Lane 0's death** was a breath during E3's "open the bunker". The global breath rule (bb3b247, wall 4) is the answer; this race predates it.
+
+**Wall 5: the strike that makes it take off throws the bot off the island** (lane 2, tick 3,560). The dragon's takeoff count (`sittingDamageReceived`) is kept across perches and reset only when it goes over 50: 18.4 in perch 1, then 32 in perch 2. So 1 strike in about 9 starts a takeoff. That strike was made from the head stand on the surface. The dragon flew forward over the bot: head 10, wings 5, and a throw of 120 blocks off the island, dead by the fall.
+- **Fix:** `DragonState::sat_damage` counts the takeoff count as the server does ("dragon takeoff count over" when it resets).
+- A strike that would take it over 50 (`crossing`) is made only from under the wings' sweep and the head's: the body's top 0.2 under the dragon's feet less 2 (`under_wings`). Where one dig of end stone under the feet makes that so (`lowerable`: a 1-deep notch, climbed out by a jump), the bot digs first (`Want::Dig`). Where nothing does, it does not strike.
+
+**Wall 6: the sweep hits the bot on the surface outside the crossing strike** (lane 1).
+- A head stand 8.7 along took 10 in the attacking turn (tick 6,600).
+- The natural takeoff's wings took 5 on the way to the head stand (2,440).
+- The landing's wings took 5 on the ring 11 out, twice (4,080 and 10,900).
+- **Fix:** every strike prefers a low stand (one dig where that makes it so). While the dragon lands or is not yet sat, the bot waits in E3's bunker (three down, under every sweep). With no bunker, the ring is 16 out, not 12.
+
+**The flame's 3.0, answered before it comes.** The attacking turn lasts 40 ticks (`DragonSittingAttackingPhase`) and ends in the flame's cloud, radius 5 at the head (`DragonSittingFlamingPhase`). That cloud lies over the head stand, 2.5 from the head. Now the bot strikes in the turn's first 15 ticks (`FLAME_LEAVE_TICKS`), then walks to the nearest cell 7.5 or more from the head's point (`flame_clear_cell`), not before the head, and holds there while the dragon is flaming. A walk of 5 takes about 20 ticks, so it is out before the cloud forms. Note: "dragon: go … out of the flame's way". Not yet raced.
+
+### Race 45882663266 (issue-20-end e14dd1e, dev-end-no-crystals, 3 lanes, cap 12,000): 0/3 win
+Development start. Lanes 0 and 1 ran to the cap; lane 2 died. 25 head strikes in all. The dragon went to 148 (lane 0), 171 (lane 1) and 169 (lane 2). "dragon takeoff count over" never fired: no lane dealt 50 in total. "dig down" never fired either. No bot died in a pocket ("dragon first" fired 53 times).
+
+**Wall 7: the walk out of the breath chose a cell the feet were already in** ("out of the breath to" 3,181 times).
+- Lane 2 was on the bunker's stair at y 60.25. The cell under it (y 59) read clear, because its body top is 1.2 under the cloud. That cell was walked to 211 times while the bot took 3.0 a second, 20 to dead.
+- Lane 0 stood 6.4 off a reach of 6.5. The cell's middle was just out, so the walk was done each tick, and the bot held at the edge for 370 ticks with every other task stopped.
+- **Fix:**
+  - A cell out (`clear_of_breath`) keeps a block more than the trigger, on the plane and in height (`OUT_SLACK`).
+  - The feet's own column is never the target.
+  - A cell reached with the feet still in a breath is refused until out.
+  - "out of the breath to" is noted only when the cell changes.
+
+**Throughput in race 45882663266.** A perch runs from landing to sitting until takeoff, about 1,100 ticks, which is four flame cycles. Counted from the ledgers:
+
+| lane | perches | strikes per perch | hits taken per perch |
+|---|---|---|---|
+| 0 | 6 | 7, 0, 0, 2, 2, 0 (the cap) | 4, 0, 7, 6, 0, 0 |
+| 1 | 5 | 4, 0, 0, 2, 2 | 8, 9, 0, 6, 4 |
+| 2 | 1 (died in it) | 6 | 6 |
+
+Most perches gave 0 to 2 strikes. That is the wall, not the cap. In the perches with no strike:
+- **Breath churn** (wall 7). "out of the breath to" was noted 124 to 631 times a perch, and every other task waited. Lane 1's perches 2 and 3 went that way, as did lane 0's perch 3.
+- **No head stand found from the bunker** (lane 0, perch 2, 3,740 to 4,800). The fight began in the bunker three down, and `ground` looked only 3 over the feet, so the surface 4 up was never a stand. The bot held "in the bunker" through the whole perch.
+  - **Fix:** `GROUND_UP` 3 → 6.
+- Each flame cycle cost about 3.0 to a bot walking out of the flame. The flame fix (da32c2b) leaves before the flame comes.
+
+**Wall 8: a charge in the open** (E4's race 4). While the bot dug down two over the ground near (12, 63, 42), a charge (phase 8) hit it for 10 and then 5 and threw it 48 high.
+- **Fix:** `Plan::charge_step` runs beside `breath_step`, ahead of every task. When the dragon is charging within 40 with its facing on the line to the bot (`charging_at`) and the feet are under the open sky:
+  - with the bunker within 12 on the plane, the bot walks into it;
+  - otherwise it crouches still where it is, and no dig or walk begins in the open.
+- A breath on the feet still goes to `breath_step`.
+- Notes: "charge: hold in the bunker at …", "charge: hold crouched where the feet are", "charge: over".
+
+### Race 45886819862 (e5d912a, 3 lanes, cap 24,000), read mid-run (lane 2's evidence at tick 11,980)
+Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs scanning (about 20 to 40 ticks, until its head faces the bot), then attacking (40), then flaming (200).
+
+**Wall 9: the strike window was lost.**
+- The bot chased the head stand as the scanning turn swept the head round. With no stand open it went for the bunker in the middle of the perch ("go … to the bunker" while sitting-scanning).
+- It reached the stand as attacking began, then left at 15 ticks for the flame's way before its first strike, every turn.
+- No damage was taken (0 hits in perch 1), but there were no strikes either.
+- **Fix:**
+  - Scanning, the stand is where the head will come: 9.0 out from the body on the line to the bot (`scan_stand`). The turn brings the head there.
+  - Attacking, with its yaw held, the head stand as it points.
+  - The flame leave moves from 15 to 25 ticks into the attacking turn.
+  - Sat with no stand open, the bot holds near and out of the bite, never the bunker; the bunker is for landing and before the dragon has sat.
+
+### Race 45886819862 (e5d912a, 3 lanes, cap 24,000): 0/3, all three dead
+- **Lane 0:** the flame-clear cell was taken 3.6 from the fountain, beside the body and under the neck. The next scanning turn swept the head onto it: 10, a throw, death by the fall.
+  - **Fix:** a flame-clear cell is also at least `BITE_OUT` + 1 (9) from the body.
+- **Lane 2:** 7 strikes; the dragon reached 168. It died by a fall after a walk failed NoPath.
+- **Lane 1:** killed by an enderman early ("near miss: enderman … stared at"), outside the fight.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

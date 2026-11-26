@@ -255,7 +255,8 @@ fn the_ways_in_are_laid_outside_the_frames() {
             (1628, 18, -38),
             (1628, 19, -37),
             (1628, 20, -36),
-            (1628, 19, -35)
+            (1628, 19, -35),
+            (1628, 19, -34)
         ]
     );
 }
@@ -303,4 +304,150 @@ fn a_lit_portal_is_stepped_into_by_laid_steps() {
     } else {
         assert!(matches!(t, Some(Task::Explore(_))), "{t:?} {what:#?}");
     }
+}
+
+/// The climb back up a downward leg: level first, then a step up a block (the bot's leg 7 ran
+/// down from (1602, 27, -38) 4 stairs east, then 3 level steps to (1609, 23, -38)).
+#[test]
+fn the_climb_route_reverses_a_downward_leg() {
+    let r = end_portal::climb_route((1609, 23, -38), (1602, 27, -38));
+    assert_eq!(
+        r,
+        vec![
+            (1609, 23, -38),
+            (1608, 23, -38),
+            (1607, 23, -38),
+            (1606, 23, -38),
+            (1605, 24, -38),
+            (1604, 25, -38),
+            (1603, 26, -38),
+            (1602, 27, -38)
+        ]
+    );
+    // Off the line by one: across first.
+    let r = end_portal::climb_route((1600, 24, -37), (1596, 27, -38));
+    assert_eq!(r[1], (1600, 24, -38));
+    assert_eq!(*r.last().unwrap(), (1596, 27, -38));
+    assert!(r.windows(2).all(|p| {
+        let (a, b) = (p[0], p[1]);
+        (a.0 - b.0).abs() + (a.2 - b.2).abs() == 1 && (0..=1).contains(&(b.1 - a.1))
+    }));
+}
+
+/// On a frame's top beside the lit portal: no way in is chosen, the push goes straight in.
+#[test]
+fn on_a_frame_beside_the_lit_portal_the_bot_pushes_in() {
+    let eyed: Vec<Cell> = (-1..=1)
+        .flat_map(|k| {
+            [
+                (C.0 + k, C.1, C.2 - 2),
+                (C.0 + k, C.1, C.2 + 2),
+                (C.0 - 2, C.1, C.2 + k),
+                (C.0 + 2, C.1, C.2 + k),
+            ]
+        })
+        .collect();
+    let mut s = room_world(C, &eyed);
+    s.fill(
+        (C.0 - 1, C.0 + 1),
+        (C.1, C.1),
+        (C.2 - 1, C.2 + 1),
+        BlockKind::EndPortal,
+    );
+    // On the south middle frame (1628, 19, -36), its box half over the portal cell's edge.
+    let mut w = load(&s, [1628.5, 19.8125, -35.9]);
+    give(&mut w, 0, ItemKind::Cobblestone, 64);
+    w.stage_reached = Some(world::stage::Stage::PortalRoom);
+    let room = the_room(&w);
+    assert!(end_portal::on_frame_by_portal(
+        &w,
+        &room,
+        [1628.5, 19.8125, -35.9]
+    ));
+    assert!(!end_portal::on_frame_by_portal(
+        &w,
+        &room,
+        [1628.5, 17.0, -37.5]
+    ));
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.end_portal.begun = true;
+    p.end_portal.phase = KitPhase::Over;
+    p.end_portal.spawner_done = true;
+    let t = p.end_portal_task(&w, 1);
+    assert!(matches!(t, Some(Task::Enter(_))), "{t:?}");
+    let what: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert!(
+        what.iter()
+            .any(|n| n.starts_with("end portal: into the portal by push")),
+        "{what:#?}"
+    );
+    assert!(p.end_portal.entry.is_none(), "no way in chosen");
+}
+
+/// A dimension change ends the task in hand (an escape from the overworld walked a bot off the
+/// End's platform, race 45887747475 lane 1), noted once.
+#[test]
+fn a_dimension_change_ends_the_task_in_hand() {
+    let mut w = load(&room_world(C, &[]), [1624.5, 17.0, -37.5]);
+    let mut p = Plan::with_table(Aim::Hold, table());
+    let _ = p.step(&w);
+    let c = (1624, 17, -30);
+    p.task = Task::Explore(plan::walk::Walk::new(
+        c,
+        plan::path::Goal::Block { pos: c },
+        plan::walk::Arrive::Goal,
+        1,
+    ));
+    w.dimension = Some(world::Dimension {
+        name: "minecraft:the_end".to_owned(),
+        ..w.dimension.clone().unwrap()
+    });
+    let _ = p.step(&w);
+    let what: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert!(
+        what.iter().any(|n| n == "dimension changed (task ended)"),
+        "{what:#?}"
+    );
+    assert!(!matches!(p.task, Task::Explore(_)), "{:?}", p.task.name());
+}
+
+/// Lava two under the lit portal's cells is no trap at the door.
+#[test]
+fn over_the_lit_portal_is_not_at_the_door() {
+    let mut s = room_world(C, &[]);
+    s.fill(
+        (C.0 - 1, C.0 + 1),
+        (C.1, C.1),
+        (C.2 - 1, C.2 + 1),
+        BlockKind::EndPortal,
+    );
+    let w = load(&s, [1628.5, 19.2, -34.5]);
+    assert!(end_portal::over_portal(&w, [1628.5, 19.2, -34.5]));
+    assert!(!end_portal::over_portal(&w, [1624.5, 17.0, -38.5]));
+}
+
+/// A creeper near in the room: the step away opens the distance from where it is now, never
+/// toward it, never onto lava (wall 12, race 45886255606 lane 0).
+#[test]
+fn a_creeper_near_is_stepped_away_from() {
+    let w = load(&room_world(C, &[]), [1631.5, 17.0, -37.5]);
+    let body = w.body.unwrap();
+    // The creeper west of the bot along the ring's south side.
+    let foe = [1628.5, 17.0, -37.5];
+    let yaw = plan::defend::away_step(&w, &body, foe).expect("a step away");
+    let rad = yaw.to_radians();
+    let p = [body.pos[0] - rad.sin() * 1.2, body.pos[2] + rad.cos() * 1.2];
+    let before = (body.pos[0] - foe[0]).hypot(body.pos[2] - foe[2]);
+    let after = (p[0] - foe[0]).hypot(p[1] - foe[2]);
+    assert!(after > before + 0.3, "yaw {yaw}: {before} to {after}");
+    // Boxed in on three sides with the creeper on the fourth: no step.
+    let mut s = room_world(C, &[]);
+    s.fill((1630, 1633), (17, 18), (-40, -36), BlockKind::StoneBricks);
+    s.air((1630, 1631), (17, 18), (-38, -38));
+    let w = load(&s, [1631.5, 17.0, -37.5]);
+    let body = w.body.unwrap();
+    assert_eq!(
+        plan::defend::away_step(&w, &body, [1629.5, 17.0, -37.5]),
+        None
+    );
 }

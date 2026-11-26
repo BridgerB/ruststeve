@@ -66,6 +66,11 @@ pub const SITE_TURNS: [f64; 5] = [0.0, 30.0, -30.0, 60.0, -60.0];
 /// End stone held before the stock is over (the plan, 20e: about 160 for the pillars and walls
 /// of 20f; spikes' tops at 76 to 103 over ground at 60 to 65).
 pub const STOCK_WANTED: i32 = 160;
+/// The stock's level tunnels run this far under the bunker's feet (stairs down first): the
+/// ground's top within 30 of the fountain runs 57 to 64 (E1), and a tunnel one or two under it
+/// came out under the sky where the ground dipped and a dragon fireball's cloud killed the bot in
+/// it (races 45872058898 and 45876313549).
+pub const STOCK_DEPTH: i32 = 6;
 /// Stock tunnels (`Stairs::level`, six cells and twelve blocks a run) at most.
 pub const STOCK_RUNS: u32 = 24;
 /// The bridge is cut only while the dragon is farther than this, or perched (the plan, 20e).
@@ -89,6 +94,10 @@ pub const CENTRE: f64 = 0.15;
 pub const WORK_STALL: u64 = 900;
 /// Stair runs (`Stairs::up`, six stairs each) up through a cliff of end stone at most.
 pub const CLIFF_RUNS: u32 = 8;
+/// Stair runs up out of the stock tunnels at most, when no walk leads back to the bunker.
+pub const OUT_RUNS: u32 = 8;
+/// Rounds of site walks begun again from out of the island's reach.
+pub const SITE_ROUNDS: u32 = 3;
 /// Walks to the bunker's site at most.
 pub const SITE_WALKS: u32 = 10;
 /// Retreat to the bunker under this health (the danger line 8 plus 6, the plan's climb line).
@@ -177,6 +186,19 @@ pub fn dragon(w: &World) -> Option<([f64; 3], Option<i32>)> {
         .next()
 }
 
+/// The bunker's shaft is begun only with the dragon farther than this, or perched.
+pub const DRAGON_DIG_CLEAR: f64 = 64.0;
+
+/// No dragon sent, or farther than `range`, or perched.
+pub fn dragon_away(w: &World, range: f64) -> bool {
+    let Some(body) = w.body else {
+        return true;
+    };
+    dragon(w).is_none_or(|(pos, phase)| {
+        dist(pos, body.pos) > range || phase.is_some_and(|p| PERCHED_PHASES.contains(&p))
+    })
+}
+
 /// The bridge may be cut: no dragon sent, or farther than `DRAGON_CLEAR`, or perched.
 pub fn dragon_calm(w: &World) -> bool {
     let Some(body) = w.body else {
@@ -213,22 +235,23 @@ pub fn void_column(w: &World, c: Cell) -> bool {
     c.1 >= min_y && (min_y..=c.1).all(|y| cells.at((c.0, y, c.2)) == path::Class::Clear)
 }
 
-/// The feet in a roofed cell two high, and every open side of it two high and roofed too: an
-/// enderman (2.9 tall) can stand in none of them, so none reaches the bot (the bunker and its
-/// tunnels).
+/// Under the end stone: a full block over the feet column and over every open side column
+/// within the sky check (the bunker, its tunnels and the stairs down). There no pocket is sealed
+/// from an angry enderman: the 3-high stair cells kept failing the 2-high test, and the pockets
+/// sealed in them shut the way home (race 45884609352: 499 "provoked enderman", both stocks
+/// ended "no way back to the bunker").
 pub fn covered(w: &World) -> bool {
     let Some(body) = w.body else {
         return false;
     };
     let f = path::stand_cell(w, body.pos);
-    let two_high =
-        |c: Cell| open(w, c) && open(w, (c.0, c.1 + 1, c.2)) && solid(w, (c.0, c.1 + 2, c.2));
-    two_high(f)
+    let roofed =
+        |c: Cell| (c.1 + 2..c.1 + 2 + world::stage::SKY_CHECK).any(|y| solid(w, (c.0, y, c.2)));
+    open(w, f)
+        && roofed(f)
         && SIDES.iter().all(|(dx, dz)| {
             let n = (f.0 + dx, f.1, f.2 + dz);
-            let h = (n.0, n.1 + 1, n.2);
-            // A side shut at the feet or the head; or open two high under a roof.
-            !(open(w, n) && open(w, h)) || solid(w, (n.0, n.1 + 2, n.2))
+            !(open(w, n) && open(w, (n.0, n.1 + 1, n.2))) || roofed(n)
         })
 }
 
@@ -266,6 +289,12 @@ pub fn cloud_on(w: &World, cells: &[Cell]) -> Option<(Cell, [f64; 3])> {
             })
             .map(|(p, _)| (*c, *p))
     })
+}
+
+/// A walk with a whole route to its goal: a partial one (which `route_now` takes for a goal walk)
+/// is no way home through tunnels, it wanders toward a shut cell.
+fn found(walk: &mut Walk, w: &World, tick: u64) -> bool {
+    walk.route_now(w, tick) && walk.route == Some(path::Status::Found)
 }
 
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
@@ -315,6 +344,37 @@ pub fn support(w: &World, c: Cell, not: Option<(i32, i32)>) -> Option<(Cell, i8)
         .find(|(n, _)| solid(w, *n))
 }
 
+/// The bunker's shaft from `feet` (on the ground), `against` the ground block beside its top
+/// cell: never open to the sky (race 45878860222 lane 1: a fireball into the open shaft). A post
+/// of two blocks on `against` first, then four times: a dig under the feet, the fall, and the
+/// cell over the new head laid at once (on the post above the ground, on the shaft's side below).
+pub fn shaft_ops(feet: Cell, against: Cell) -> Vec<Op> {
+    let s = feet.1 - 1;
+    let post = [(against.0, s + 1, against.2), (against.0, s + 2, against.2)];
+    let mut ops = vec![
+        Op::Centre,
+        Op::Place {
+            cell: post[0],
+            against,
+            face: 1,
+        },
+        Op::Place {
+            cell: post[1],
+            against: post[0],
+            face: 1,
+        },
+    ];
+    for d in 0..4 {
+        ops.extend([
+            Op::Centre,
+            Op::Dig((feet.0, s - d, feet.2)),
+            Op::Settle,
+            Op::Roof((feet.0, s - d + 2, feet.2)),
+        ]);
+    }
+    ops
+}
+
 /// One op of a work, in order.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Op {
@@ -327,9 +387,19 @@ pub enum Op {
     /// A block laid into `cell`, clicked on `against`'s `face`; skipped when the cell is not
     /// open.
     Place { cell: Cell, against: Cell, face: i8 },
+    /// A block laid into `cell` (over the head) on whichever side block is there when it is
+    /// laid; skipped when the cell is not open. Counted in `EndState::roofs`.
+    Roof(Cell),
     /// One block up: a jump from the cell's centre and a block put into the cell the feet left
     /// at the jump's top (arrival's shaft, the pearls hunt's pillar).
     Rise,
+}
+
+/// A stock run out: the stairs down, or a level arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StockRun {
+    Down,
+    Arm(u8),
 }
 
 /// What a work is for.
@@ -434,6 +504,35 @@ pub struct EndState {
     pub covered_ticks: u64,
     #[serde(default)]
     pub covered_noted: Option<u64>,
+    /// Stair runs up out of the tunnels begun.
+    #[serde(default)]
+    pub out_runs: u32,
+    /// The stock's runs: the one out (none between runs), the stairs' foot, the arms (heading,
+    /// tip), the arm walked to, whether the bot is on its way back, and runs ended at home.
+    #[serde(default)]
+    pub stock_out: Option<StockRun>,
+    #[serde(default)]
+    pub stock_foot: Option<Cell>,
+    #[serde(default)]
+    pub arms: Vec<((i32, i32), Option<Cell>)>,
+    #[serde(default)]
+    pub going: Option<u8>,
+    #[serde(default)]
+    pub returning: bool,
+    #[serde(default)]
+    pub stock_back: u32,
+    /// Rounds of site walks begun again.
+    #[serde(default)]
+    pub site_rounds: u32,
+    /// Bunker shafts begun, cells over the head laid in them, dragon waits before one.
+    #[serde(default)]
+    pub shafts: u32,
+    #[serde(default)]
+    pub roofs: u32,
+    #[serde(default)]
+    pub dig_waits: u32,
+    #[serde(default)]
+    pub dig_waiting: bool,
     /// Walks to the bunker held back for a cloud on the way.
     #[serde(default)]
     pub cloud_waits: u32,
@@ -665,26 +764,7 @@ impl Plan {
             );
         }
         if !self.end.stock_over {
-            if world::stage::open_sky(w) {
-                return self.walk_home(w, b, tick, "to tunnel for end stone");
-            }
-            if inside && !sealed {
-                self.begin_seal(w, b, door, tick);
-                return None;
-            }
-            let dir = stock_dir(door, self.end.stock_runs);
-            self.end.stock_runs += 1;
-            self.note(
-                tick,
-                format!("end: stock run {} toward {dir:?}", self.end.stock_runs),
-                format!(
-                    "{stone} end stone held, {STOCK_WANTED} wanted; a level tunnel under the roof"
-                ),
-            );
-            let mut st = Stairs::level(dir, tick);
-            // An open cell past the start is a hole to the sky or the void: refused, turned.
-            st.rock = Some(feet);
-            return Some(Task::Stairs(Box::new(st)));
+            return self.stock_step(w, b, door, feet, inside, sealed, tick);
         }
         // 5. The hand-offs: the crystals while one is alive, then the dragon.
         let next = if crystals_alive(w) > 0 {
@@ -697,7 +777,25 @@ impl Plan {
             // roof and stair dug; the task is chosen again once the sky is over the head.
             let shut = !open(w, roof) || !open(w, door_cells[0]);
             if !world::stage::open_sky(w) && !inside && !open(w, door_cells[0]) {
-                return self.walk_home(w, b, tick, "to leave by the bunker's stair");
+                let mut probe = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
+                if found(&mut probe, w, tick) || self.end.out_runs >= OUT_RUNS {
+                    return self.walk_home(w, b, tick, "to leave by the bunker's stair");
+                }
+                // No way back through the tunnels (race 45878860222 lane 0: 23 walks refused from
+                // 52 deep after the stock): stairs up from where the bot stands to the sky.
+                self.end.out_runs += 1;
+                let dir = stock_dir(door, self.end.out_runs);
+                self.note(
+                    tick,
+                    format!("end: stairs up out of the tunnels from {feet:?} toward {dir:?}"),
+                    format!(
+                        "no walk back to the bunker {b:?}; run {} of {OUT_RUNS}",
+                        self.end.out_runs
+                    ),
+                );
+                let mut st = Stairs::up(dir, tick);
+                st.dry = true;
+                return Some(Task::Stairs(Box::new(st)));
             }
             if inside && shut {
                 // Out of the bunker first, the task chosen again once the door is open.
@@ -747,6 +845,164 @@ impl Plan {
             );
         }
         None
+    }
+
+    /// The stock, a run at a time, every run begun and ended at the bunker: the stairs down
+    /// `STOCK_DEPTH` under it first (their foot kept), then level arms from that foot, each run
+    /// walked out to its arm's tip, cut, and walked back. A run with no walk back ends the stock
+    /// (the invariant: the tunnels always lead home).
+    #[allow(clippy::too_many_arguments)]
+    fn stock_step(
+        &mut self,
+        w: &World,
+        b: Cell,
+        door: (i32, i32),
+        feet: Cell,
+        inside: bool,
+        sealed: bool,
+        tick: u64,
+    ) -> Option<Task> {
+        let stone = craft::count(w, ItemKind::EndStone);
+        // A run just ended: its end kept, then home.
+        if let Some(run) = self.end.stock_out.take() {
+            match run {
+                StockRun::Down => self.end.stock_foot = Some(feet),
+                StockRun::Arm(i) => {
+                    if let Some(a) = self.end.arms.get_mut(usize::from(i)) {
+                        a.1 = Some(feet);
+                    }
+                }
+            }
+            self.end.returning = true;
+            self.note(
+                tick,
+                format!("end: stock run {} over at {feet:?}", self.end.stock_runs),
+                format!("{stone} end stone held; back to the bunker {b:?}"),
+            );
+        }
+        if let Some(i) = self.end.going.take() {
+            let tip = self.arm_start(i);
+            if feet == tip {
+                return Some(self.begin_arm(i, feet, stone, tick));
+            }
+            self.note(
+                tick,
+                format!("end: stock walk to {tip:?} ended at {feet:?}"),
+                "back to the bunker first".to_owned(),
+            );
+            self.end.returning = true;
+        }
+        if !inside {
+            let mut walk = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
+            if found(&mut walk, w, tick) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("end: stock back to the bunker {b:?}"),
+                    format!("from {feet:?}; {stone} end stone held"),
+                );
+                return Some(Task::Explore(walk));
+            }
+            if world::stage::open_sky(w) {
+                return self.walk_home(w, b, tick, "to tunnel for end stone");
+            }
+            // The invariant broken: the stock is over where it stands.
+            self.end.stock_over = true;
+            self.note(
+                tick,
+                format!("end: no way back to the bunker from the stock at {feet:?}"),
+                format!(
+                    "{stone} end stone held after {} runs; the stock ends",
+                    self.end.stock_runs
+                ),
+            );
+            return None;
+        }
+        if self.end.returning {
+            self.end.returning = false;
+            self.end.stock_back += 1;
+            self.note(
+                tick,
+                format!(
+                    "end: back at the bunker after stock run {}",
+                    self.end.stock_runs
+                ),
+                format!(
+                    "{} runs back home; {stone} end stone held",
+                    self.end.stock_back
+                ),
+            );
+        }
+        if !sealed {
+            self.begin_seal(w, b, door, tick);
+            return None;
+        }
+        let d0 = stock_dir(door, 0);
+        if self.end.stock_foot.is_none() {
+            self.end.stock_runs += 1;
+            self.end.stock_out = Some(StockRun::Down);
+            self.note(
+                tick,
+                format!("end: stock run {} toward {d0:?}", self.end.stock_runs),
+                format!("{stone} end stone held, {STOCK_WANTED} wanted; stairs down {STOCK_DEPTH} under the bunker"),
+            );
+            let mut st = Stairs::new(d0, tick);
+            st.dry = true;
+            st.rock = Some(feet);
+            return Some(Task::Stairs(Box::new(st)));
+        }
+        // The arms from the foot: on along the stairs' heading and to both sides, never back
+        // under the stairs.
+        if self.end.arms.is_empty() {
+            let side = (-d0.1, d0.0);
+            self.end.arms = vec![(d0, None), (side, None), ((-side.0, -side.1), None)];
+        }
+        let n = u8::try_from(self.end.arms.len()).unwrap_or(1).max(1);
+        let i = u8::try_from(self.end.stock_runs % u32::from(n)).unwrap_or(0);
+        let start = self.arm_start(i);
+        let mut walk = Walk::new(start, Goal::Block { pos: start }, Arrive::Goal, tick);
+        if !found(&mut walk, w, tick) {
+            self.end.stock_over = true;
+            self.note(
+                tick,
+                format!("end: no walk to the stock arm's tip {start:?}"),
+                format!("{stone} end stone held; the stock ends"),
+            );
+            return None;
+        }
+        self.end.going = Some(i);
+        self.walks += 1;
+        self.note(
+            tick,
+            format!("end: stock walk to {start:?}"),
+            format!("arm {i}, run {} next", self.end.stock_runs + 1),
+        );
+        Some(Task::Explore(walk))
+    }
+
+    /// Where arm `i`'s next run begins: its tip, or the stairs' foot.
+    fn arm_start(&self, i: u8) -> Cell {
+        self.end
+            .arms
+            .get(usize::from(i))
+            .and_then(|a| a.1)
+            .or(self.end.stock_foot)
+            .unwrap_or_default()
+    }
+
+    fn begin_arm(&mut self, i: u8, feet: Cell, stone: i32, tick: u64) -> Task {
+        let dir = self.end.arms.get(usize::from(i)).map_or((1, 0), |a| a.0);
+        self.end.stock_runs += 1;
+        self.end.stock_out = Some(StockRun::Arm(i));
+        self.note(
+            tick,
+            format!("end: stock run {} toward {dir:?}", self.end.stock_runs),
+            format!("{stone} end stone held, {STOCK_WANTED} wanted; arm {i}, a level tunnel deep under the ground"),
+        );
+        let mut st = Stairs::level(dir, tick);
+        st.dry = true;
+        st.rock = Some(feet);
+        Task::Stairs(Box::new(st))
     }
 
     /// The crystals' hand-off: E4's `Plan::spikes_task` (issue 20f), the pillar and strike.
@@ -804,12 +1060,34 @@ impl Plan {
         let body = w.body?;
         let d = flat_to_fountain(body.pos);
         let floor = kind(w, (feet.0, feet.1 - 1, feet.2));
-        let here = floor == Some(BlockKind::EndStone)
+        // On end stone, or on a block the bot laid over it (a pocket's, a guard's: race 45888713362
+        // lane 0 stood on cobblestone 25 from the fountain through ten site walks).
+        let ground = floor == Some(BlockKind::EndStone)
+            || floor.is_some_and(|k| crate::spikes::PLACED.contains(&k));
+        let here = ground
             && body.on_ground
             && d >= BUNKER_MIN
             && (d <= BUNKER_FROM_FOUNTAIN + SITE_RANGE + 1.0
                 || (self.end.site_walks >= SITE_WALKS && d <= ISLAND_REACH));
         if here {
+            // Begun only with the dragon far or perched, as the bridge (the coordinator, wall 4).
+            if !dragon_away(w, DRAGON_DIG_CLEAR) {
+                if !self.end.dig_waiting {
+                    self.end.dig_waiting = true;
+                    self.end.dig_waits += 1;
+                    self.note(
+                        tick,
+                        format!("end: the bunker waits for the dragon at {feet:?}"),
+                        format!(
+                            "the dragon within {DRAGON_DIG_CLEAR} and flying; wait {}",
+                            self.end.dig_waits
+                        ),
+                    );
+                }
+                self.retry_at = tick + crate::RETRY_TICKS;
+                return None;
+            }
+            self.end.dig_waiting = false;
             return self.begin_build(w, feet, tick);
         }
         if self.end.site_walks >= SITE_WALKS {
@@ -819,6 +1097,11 @@ impl Plan {
                 format!("{SITE_WALKS} walks; {d:.0} from the fountain, floor {floor:?}"),
             );
             self.retry_at = tick + crate::RETRY_TICKS * 10;
+            // Out of reach of the fountain: the walks again, a round at a time.
+            if d > ISLAND_REACH && self.end.site_rounds < SITE_ROUNDS {
+                self.end.site_rounds += 1;
+                self.end.site_walks = 0;
+            }
             return None;
         }
         let turn = SITE_TURNS[(self.end.site_walks as usize) % SITE_TURNS.len()];
@@ -863,7 +1146,7 @@ impl Plan {
     fn begin_build(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
         let s = feet.1 - 1;
         let top = (feet.0, s, feet.2);
-        let Some((against, face)) = support(w, top, None) else {
+        let Some((against, _)) = support(w, top, None) else {
             self.note(
                 tick,
                 format!("end: no bunker at {feet:?}"),
@@ -881,33 +1164,16 @@ impl Plan {
             .find(|s| *s != roof_side)
             .unwrap_or((1, 0));
         self.end.door = Some(door);
-        let cells = [
-            top,
-            (feet.0, s - 1, feet.2),
-            (feet.0, s - 2, feet.2),
-            (feet.0, s - 3, feet.2),
-        ];
-        let mut ops = Vec::new();
-        for c in cells {
-            ops.extend([Op::Centre, Op::Dig(c), Op::Settle]);
-        }
-        // The top first (on its side block), then the one under it on the side block under that.
-        ops.push(Op::Place {
-            cell: top,
-            against,
-            face,
-        });
-        ops.push(Op::Place {
-            cell: (top.0, s - 1, top.2),
-            against: (against.0, s - 1, against.2),
-            face,
-        });
+        let ops = shaft_ops(feet, against);
+        let post = (against.0, s + 1, against.2);
+        self.end.shafts += 1;
         self.note(
             tick,
             format!("end: dig the bunker at {feet:?}"),
             format!(
-                "{:.0} from the fountain; four down, the roof's two cells laid back on {against:?} and under it; door {door:?}",
-                w.body.map_or(-1.0, |b| flat_to_fountain(b.pos))
+                "{:.0} from the fountain; four down, the cell over the head laid after every dig (a post at {:?}); door {door:?}",
+                w.body.map_or(-1.0, |b| flat_to_fountain(b.pos)),
+                post
             ),
         );
         self.end.work = Some(Work::new(WorkKind::Build, ops, tick));
@@ -955,7 +1221,7 @@ impl Plan {
         }
         self.end.home_walks += 1;
         let mut walk = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
-        if !walk.route_now(w, tick) {
+        if !found(&mut walk, w, tick) {
             self.note(
                 tick,
                 format!("end: no walk to the bunker {b:?}"),
@@ -1218,6 +1484,22 @@ impl Plan {
                     }
                     hold::Hold::Wait => WorkStep::Running(down(w)),
                     hold::Hold::Missing => WorkStep::Failed(format!("{item:?} went missing")),
+                }
+            }
+            Op::Roof(cell) => {
+                if !open(w, cell) {
+                    self.end.roofs += 1;
+                    return next(work);
+                }
+                let Some((against, face)) = support(w, cell, None) else {
+                    return WorkStep::Failed(format!("no side block to roof {cell:?} from"));
+                };
+                match self.lay_block(w, tick, against, face, &mut work.clicks, &mut work.click_at) {
+                    Ok(()) => WorkStep::Running(Controls {
+                        sneak: true,
+                        ..down(w)
+                    }),
+                    Err(why) => WorkStep::Failed(format!("{cell:?}: {why}")),
                 }
             }
             Op::Place {

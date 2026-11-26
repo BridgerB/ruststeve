@@ -275,10 +275,10 @@ fn end_stone_under_the_sky_is_the_island_and_the_bot_walks_to_the_bunker_site() 
 }
 
 #[test]
-fn at_the_site_the_bunker_is_dug_three_down_and_roofed() {
+fn at_the_site_the_bunker_begins_with_its_post() {
     let mut w = world(4, 0..=7, [12.5, 64.0, 0.5]);
-    // The pickaxe in hand (a hand-built world does not answer the hold's swap).
-    w.held = 2;
+    // The block in hand (a hand-built world does not answer the hold's swap): the post first.
+    w.held = 0;
     let mut p = racer();
     p.end.bridged = true;
     let mut acts = Vec::new();
@@ -291,15 +291,124 @@ fn at_the_site_the_bunker_is_dug_three_down_and_roofed() {
         "{:?}",
         notes(&p)
     );
+    // The post first: a block on the ground beside the shaft's top cell.
     assert!(
-        acts.iter().any(|a| matches!(
-            a,
-            Act::Dig {
-                pos,
-                ..
-            } if *pos == world::BlockPos::new(12, 63, 0)
-        )),
+        acts.contains(&Act::UseOn {
+            pos: world::BlockPos::new(13, 63, 0),
+            face: 1
+        }),
         "{acts:?}"
+    );
+}
+
+#[test]
+fn the_bunker_shaft_is_roofed_after_every_dig() {
+    use plan::end::{Op, shaft_ops};
+    let ops = shaft_ops((12, 64, 0), (13, 63, 0));
+    // The post of two on the ground block beside the top cell.
+    assert!(ops.contains(&Op::Place {
+        cell: (13, 64, 0),
+        against: (13, 63, 0),
+        face: 1
+    }));
+    assert!(ops.contains(&Op::Place {
+        cell: (13, 65, 0),
+        against: (13, 64, 0),
+        face: 1
+    }));
+    // Every dig under the feet is followed by the fall and the cell over the new head.
+    let digs: Vec<usize> = ops
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| matches!(o, Op::Dig(_)))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(digs.len(), 4);
+    for i in digs {
+        let Some(Op::Dig(c)) = ops.get(i) else {
+            panic!("dig");
+        };
+        assert_eq!(ops.get(i + 1), Some(&Op::Settle));
+        // The feet fall into c: the head is c + 1, the cell over it c + 2.
+        assert_eq!(ops.get(i + 2), Some(&Op::Roof((c.0, c.1 + 2, c.2))));
+    }
+    // The bunker's feet four down at (12, 60, 0), the roof's top cells laid.
+    assert!(ops.contains(&Op::Dig((12, 60, 0))));
+    assert!(ops.contains(&Op::Roof((12, 62, 0))));
+}
+
+#[test]
+fn a_flying_dragon_near_holds_the_bunker_shaft() {
+    let mut w = world(4, 0..=7, [12.5, 64.0, 0.5]);
+    with_entity(&mut w, 7, EntityKind::EnderDragon, [30.0, 80.0, 0.0]);
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.metadata.insert(16, MetaValue::Int(1));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.step(&w);
+    assert!(
+        noted(&p, "end: the bunker waits for the dragon"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: dig the bunker"), "{:?}", notes(&p));
+}
+
+#[test]
+fn every_stock_run_begins_and_ends_at_the_bunker() {
+    // The bunker at (12, 61, 0), sealed; the stock begins with the stairs down.
+    let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+    set(&mut w, (12, 61, 0), BlockKind::Air);
+    set(&mut w, (12, 62, 0), BlockKind::Air);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.step(&w);
+    assert!(noted(&p, "end: stock run 1 toward"), "{:?}", notes(&p));
+    assert_eq!(p.end.stock_out, Some(plan::end::StockRun::Down));
+    // The run over at its foot (12, 60, 1) (the stairs run along z, off the door), the way back
+    // open: walked home.
+    p.task = plan::Task::Idle;
+    for c in [(12, 60, 1), (12, 61, 1), (12, 62, 1)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    w.body = Some(physics::Body {
+        pos: [12.5, 60.0, 1.5],
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    p.step(&w);
+    assert!(
+        noted(&p, "end: stock run 1 over at (12, 60, 1)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        noted(&p, "end: stock back to the bunker"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.end.stock_foot, Some((12, 60, 1)));
+    // Home again: counted, and the next run is walked out to from the bunker.
+    p.task = plan::Task::Idle;
+    w.body = Some(physics::Body {
+        pos: [12.5, 61.0, 0.5],
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    p.step(&w);
+    assert!(
+        noted(&p, "end: back at the bunker after stock run 1"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.end.stock_back, 1);
+    assert!(
+        noted(&p, "end: stock walk to (12, 60, 1)"),
+        "{:?}",
+        notes(&p)
     );
 }
 
@@ -422,4 +531,42 @@ fn hurt_the_walk_to_the_bunker_waits_while_a_cloud_lies_on_the_way() {
     p.retry_at = 0;
     p.step(&w);
     assert!(noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
+}
+
+#[test]
+fn deep_in_the_tunnels_with_no_way_back_the_bot_cuts_stairs_up_to_hand_over() {
+    // The stock over at y 52, the bunker at (12, 59, 0) out of reach (its cells shut).
+    let mut w = world(4, 0..=7, [30.5, 52.0, 0.5]);
+    for c in [(30, 52, 0), (30, 53, 0), (29, 52, 0), (29, 53, 0)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 59, 0]);
+    p.end.door = Some((1, 0));
+    p.step(&w);
+    assert!(
+        noted(&p, "end: stairs up out of the tunnels from (30, 52, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.task.name(), "stairs", "{:?}", notes(&p));
+}
+
+#[test]
+fn on_a_laid_block_within_reach_of_the_fountain_the_bunker_is_dug_there() {
+    // Race 45888713362 lane 0: 25 from the fountain on a cobblestone block, ten site walks done.
+    let mut w = world(4, 0..=7, [23.5, 64.0, -7.5]);
+    set(&mut w, (23, 63, -8), BlockKind::Cobblestone);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.site_walks = plan::end::SITE_WALKS;
+    p.step(&w);
+    assert!(
+        noted(&p, "end: dig the bunker at (23, 64, -8)"),
+        "{:?}",
+        notes(&p)
+    );
 }

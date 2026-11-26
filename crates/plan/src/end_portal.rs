@@ -31,6 +31,10 @@ use crate::{Plan, Task, base, craft, eat};
 /// The overworld's dimension name.
 pub const OVERWORLD: &str = "minecraft:overworld";
 
+/// A standing cell for an eye is chosen this far inside the reach: the body stands up to a
+/// third of a block off its cell's centre.
+pub const STAND_MARGIN: f64 = 0.4;
+
 /// `[end_kit]` in `config/goals.toml` (moves to E1's `config/end.toml`); each number's source is
 /// there. The defaults are the config's values.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -44,11 +48,17 @@ pub struct EndKitRules {
     pub up_walks: u32,
     /// Logs (and planks / 4) held before the row.
     pub logs: i32,
-    /// Trees walked to within this flat distance of the feet.
+    /// Trees walked to within this flat distance of the feet, and logs counted only within
+    /// `log_rise` of the feet's height.
     pub log_reach: f64,
+    pub log_rise: i32,
     /// Walks to logs, and walks to look for trees, at most.
     pub log_walks: u32,
     pub look_walks: u32,
+    /// With no log seen, the points (x, z) the overland's legs go to, in order, and how near is
+    /// reached.
+    pub wood_points: Vec<[i32; 2]>,
+    pub point_reach: f64,
     /// Stone (or better) pickaxes held after the row.
     pub stone_pickaxes: i32,
     /// Food eaten up to.
@@ -56,6 +66,8 @@ pub struct EndKitRules {
     pub eat_tasks: u32,
     /// A phase ends done or given up within this many ticks and failed tasks.
     pub phase_ticks: u64,
+    /// The cook's own clock.
+    pub cook_ticks: u64,
     pub phase_fails: u32,
     /// Walks down to the room begun before the stronghold's own way takes over.
     pub down_walks: u32,
@@ -88,15 +100,25 @@ impl Default for EndKitRules {
                 [1608, 57, -38],
             ],
             up_walks: 3,
-            logs: 10,
+            logs: 14,
             log_reach: 48.0,
+            log_rise: 16,
             log_walks: 24,
-            look_walks: 8,
+            look_walks: 24,
+            wood_points: vec![
+                [1530, -45],
+                [1610, -130],
+                [1610, 60],
+                [1700, -35],
+                [1420, -70],
+            ],
+            point_reach: 12.0,
             stone_pickaxes: 3,
             fed: 20,
             eat_tasks: 12,
             phase_ticks: 6000,
-            phase_fails: 8,
+            cook_ticks: 9600,
+            phase_fails: 16,
             down_walks: 8,
             frame_reach: 4.5,
             eye_tries: 4,
@@ -160,13 +182,21 @@ pub struct EndPortalState {
     pub failures_seen: u64,
     pub up_walks: u32,
     pub climb_noted: bool,
-    /// The way point walked to next.
+    /// The way point walked to next, and whether a surface phase is climbing back up.
     pub way_at: Option<usize>,
+    pub reclimb: bool,
     pub log_walks: u32,
     pub look_walks: u32,
     pub eat_tasks: u32,
+    /// The wood point walked to next, and whether the overland's legs run for the wood now.
+    pub wood_point: usize,
+    #[serde(skip)]
+    pub wood_legs: bool,
     pub down_walks: u32,
     pub down_noted: bool,
+    /// The way point walked down to next, and plain walks back to the way from far off.
+    pub down_at: Option<usize>,
+    pub far_walks: u32,
     /// The night a hut was begun for (the day's number).
     pub hut_night: Option<i64>,
     pub hut_digs: u32,
@@ -184,6 +214,8 @@ pub struct EndPortalState {
     pub entry_clicks: u32,
     pub entry_clicked_at: u64,
     pub entries: u32,
+    /// Pushes from a frame's top into the portal.
+    pub pushes: u32,
     /// Frames whose way in was given up.
     pub entry_refused: Vec<[i32; 3]>,
 }
@@ -381,7 +413,16 @@ impl Entry {
             (self.high.0, self.high.1 + 2, self.high.2),
             (self.frame[0], self.frame[1] + 1, self.frame[2]),
             self.inside,
+            self.deeper(),
         ]
+    }
+
+    /// The cell past `inside` away from the frame: walked toward, so the body's box leaves the
+    /// frame's top (race 45877404722 lane 1 stood "in end_portal" with its box still on the
+    /// frame's edge at y 19.81, over the portal's 0.75 top, and never went through).
+    pub fn deeper(&self) -> Cell {
+        let (dx, dz) = (self.frame[0] - self.inside.0, self.frame[2] - self.inside.2);
+        (self.inside.0 - dx, self.inside.1, self.inside.2 - dz)
     }
 }
 
@@ -456,6 +497,76 @@ pub fn entries(w: &World, room: &Room) -> Vec<Entry> {
     v
 }
 
+/// The cells of a climb from `from` to `to` the way the bot's own stairs ran down it, reversed:
+/// first across the minor axis, then level along the major axis for the run the rise does not
+/// take, then a step up a cell for each block of rise (a downward leg cut its stairs first and its
+/// level steps after). Each step is one cell on an axis, level or one up (`tunnel::opened`).
+pub fn climb_route(from: Cell, to: Cell) -> Vec<Cell> {
+    let (dx, dz) = (to.0 - from.0, to.2 - from.2);
+    let x_major = dx.abs() >= dz.abs();
+    let (major, minor) = if x_major { (dx, dz) } else { (dz, dx) };
+    let rise = (to.1 - from.1).max(0);
+    let mut c = from;
+    let mut v = vec![c];
+    let step = |c: Cell, along_x: bool, s: i32, up: i32| {
+        if along_x {
+            (c.0 + s, c.1 + up, c.2)
+        } else {
+            (c.0, c.1 + up, c.2 + s)
+        }
+    };
+    for _ in 0..minor.abs() {
+        c = step(c, !x_major, minor.signum(), 0);
+        v.push(c);
+    }
+    let run = major.abs();
+    for k in 0..run {
+        let up = i32::from(k >= run - rise.min(run));
+        c = step(c, x_major, major.signum(), up);
+        v.push(c);
+    }
+    v
+}
+
+/// The body stands on a frame's top (feet 0.6 to 1.0 over the frames' y) with a lit portal
+/// block at the frames' height within one cell of the feet: the last step is a push in.
+pub fn on_frame_by_portal(w: &World, room: &Room, pos: [f64; 3]) -> bool {
+    let fy = room.centre[1];
+    let up = pos[1] - f64::from(fy);
+    if !(0.6..=1.0).contains(&up) {
+        return false;
+    }
+    let (x, z) = (pos[0].floor() as i32, pos[2].floor() as i32);
+    let under = |c: (i32, i32)| w.block_at(BlockPos::new(c.0, fy, c.1));
+    let on_frame = (-1..=1).any(|dx| {
+        (-1..=1).any(|dz| {
+            let (cx, cz) = (x + dx, z + dz);
+            under((cx, cz)) == Some(BlockKind::EndPortalFrame)
+                && (pos[0] - f64::from(cx) - 0.5).abs() < 0.5 + physics::HALF_WIDTH
+                && (pos[2] - f64::from(cz) - 0.5).abs() < 0.5 + physics::HALF_WIDTH
+        })
+    });
+    let portal =
+        (-1..=1).any(|dx| (-1..=1).any(|dz| under((x + dx, z + dz)) == Some(BlockKind::EndPortal)));
+    on_frame && portal
+}
+
+/// The body over the lit end portal: an end portal block within one cell across of the feet and
+/// up to three under them or one over. The pool under the portal's cells is lava two under the
+/// body, never "at the door" (race 45887747475 lane 1: an escape began a tick before the body
+/// went through).
+pub fn over_portal(w: &World, pos: [f64; 3]) -> bool {
+    let f = path::feet_cell(pos);
+    (-1..=1).any(|dx| {
+        (-1..=1).any(|dz| {
+            (-3..=1).any(|dy| {
+                w.block_at(BlockPos::new(f.0 + dx, f.1 + dy, f.2 + dz))
+                    == Some(BlockKind::EndPortal)
+            })
+        })
+    })
+}
+
 fn overworld(w: &World) -> bool {
     w.dimension.as_ref().is_some_and(|d| d.name == OVERWORLD)
 }
@@ -465,6 +576,30 @@ fn flat(a: Cell, b: Cell) -> f64 {
 }
 
 impl Plan {
+    /// A dimension change: the task in hand ended and the traps' belief cleared, noted
+    /// "dimension changed (task ended)". The first tick only records the dimension.
+    pub(crate) fn end_dimension_watch(&mut self, w: &World, tick: u64) {
+        let Some(now) = w.dimension.as_ref().map(|d| d.name.clone()) else {
+            return;
+        };
+        let before = self.last_dimension.replace(now.clone());
+        let Some(before) = before.filter(|b| *b != now) else {
+            return;
+        };
+        let task = self.task.name();
+        // An Enter ends itself in the new dimension (its own done check, and its after-step).
+        if !matches!(self.task, Task::Enter(_)) {
+            self.task = Task::Idle;
+        }
+        self.traps = crate::escape::Traps::default();
+        self.retry_at = tick;
+        self.note(
+            tick,
+            "dimension changed (task ended)".to_owned(),
+            format!("{before} -> {now}; the task in hand was {task}"),
+        );
+    }
+
     fn end_rules(&self) -> EndKitRules {
         self.table
             .as_ref()
@@ -554,13 +689,16 @@ impl Plan {
                 self.end_portal.failures_seen = failures;
             }
             let spent = tick.saturating_sub(self.end_portal.since);
+            // The cook's clock is its own: a furnace cooks a piece in 200 ticks, 30 pieces 6,000
+            // (race 45880017656 lane 1 gave the cook up at 6,182 ticks with its last batch done).
+            let clock = if phase == KitPhase::Cook {
+                r.cook_ticks
+            } else {
+                r.phase_ticks
+            };
             if phase != KitPhase::Up && phase != KitPhase::Down {
-                if spent > r.phase_ticks {
-                    self.end_kit_advance(
-                        w,
-                        tick,
-                        &format!("gave up: {spent} ticks of {}", r.phase_ticks),
-                    );
+                if spent > clock {
+                    self.end_kit_advance(w, tick, &format!("gave up: {spent} ticks of {clock}"));
                     continue;
                 }
                 if self.end_portal.fails >= r.phase_fails {
@@ -596,6 +734,12 @@ impl Plan {
             self.end_kit_advance(w, tick, &format!("on the surface at {feet:?}"));
             return None;
         }
+        self.end_kit_climb(w, r, tick)
+    }
+
+    /// The climb up the bot's own way from where the feet are (the up phase's, and the surface
+    /// phases' when a fight's retreat took the bot back down its stairs).
+    fn end_kit_climb(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
         // The way: the legs' ends from the room up, then the stairs' top; walked a leg at a time
         // from the point after the nearest one (a single route of 100 cells through the stairs
         // and the tunnel ran out of the search's budget).
@@ -623,7 +767,7 @@ impl Plan {
         while let Some(i) = self.end_portal.way_at
             && let Some(p) = way.get(i).copied()
         {
-            if near(feet, p) <= 2.0 {
+            if near(feet, p) <= 3.0 {
                 self.end_portal.way_at = Some(i + 1);
                 self.end_portal.up_walks = 0;
                 self.note(
@@ -665,7 +809,11 @@ impl Plan {
             // way's reach ends in the corridor at (1609, 19, -38), 4 under the stair it dropped
             // from): walked to, then stairs up toward the point from there.
             let end = walk.waypoints.as_ref().and_then(|v| v.last().copied());
-            if let Some(e) = end.filter(|e| near(feet, *e) > 1.5) {
+            // Only a reach nearer the point than the feet (from a way point the reach can be back
+            // down in the corridor).
+            if let Some(e) =
+                end.filter(|e| near(feet, *e) > 1.5 && near(*e, p) + 2.0 < near(feet, p))
+            {
                 let mut to_end = Walk::new(e, Goal::Block { pos: e }, Arrive::Goal, tick);
                 if to_end.route_now(w, tick) && to_end.route == Some(path::Status::Found) {
                     self.walks += 1;
@@ -677,6 +825,36 @@ impl Plan {
                     return Some(Task::Explore(to_end));
                 }
                 self.expanded += to_end.expanded;
+            }
+            // Right under it: pillared up to its height on held blocks (Q7's shaft, stopped there;
+            // race 45865135195: the corridor 4 under the bot's own tunnel start).
+            if p.1 > feet.1 + 1
+                && flat(feet, p) <= 1.0
+                && let Some(t) = self.arrival_rise_to(w, tick, p.1)
+            {
+                self.note(
+                    tick,
+                    format!("end kit: pillar up to point {i} at {p:?}"),
+                    format!("from {feet:?}, no walk (route {found:?})"),
+                );
+                return Some(t);
+            }
+            // From a way point up to the next: the bot's own leg back up, cell by cell
+            // (`climb_route`), only the head room its downward cut left out dug (race 45871438675:
+            // the shaft straight up met an aquifer at y 30 beside the old stairs, which are dry).
+            if i > 0 && p.1 > feet.1 && way.get(i - 1).is_some_and(|q| near(feet, *q) <= 3.0) {
+                let route = climb_route(feet, p);
+                self.note(
+                    tick,
+                    format!("end kit: up the old leg to point {i} at {p:?}"),
+                    format!(
+                        "from {feet:?}, {} steps, no walk (route {found:?})",
+                        route.len()
+                    ),
+                );
+                return Some(Task::Stairs(Box::new(crate::stairs::Stairs::along(
+                    route, tick,
+                ))));
             }
             // No walk up: a shaft straight up from here (Q7's, one dig a block by hand and a block
             // under the feet) to the sky. The bot's own stairs were cut going down and no walk
@@ -732,6 +910,27 @@ impl Plan {
         tick: u64,
     ) -> Option<Task> {
         let rules = self.table.as_ref().map(|t| t.survival.clone())?;
+        // Back down its own stairs (race 45880017656 lane 0: a creeper's retreat took the bot
+        // from the trees to (1597, 47, -38), and the wood's legs then tunnelled by hand): up again
+        // first, by the same way.
+        let feet = path::feet_cell(w.body?.pos);
+        if feet.1 < r.way_up[1] - 4 && !world::stage::open_sky(w) {
+            if !self.end_portal.reclimb {
+                self.end_portal.reclimb = true;
+                self.end_portal.way_at = None;
+                self.end_portal.up_walks = 0;
+                self.note(
+                    tick,
+                    format!(
+                        "end kit: under the surface at {feet:?} in the {} phase",
+                        phase.name()
+                    ),
+                    "up its own way again first".to_owned(),
+                );
+            }
+            return self.end_kit_climb(w, r, tick);
+        }
+        self.end_portal.reclimb = false;
         let night = self.dusk_near(w, tick) || w.is_night() == Some(true);
         if night {
             let day = w.day_time().unwrap_or(0) / 24_000;
@@ -784,6 +983,16 @@ impl Plan {
                     self.end_kit_advance(w, tick, "no raw meat left");
                     return None;
                 }
+                // The row's table taken along first: at hand, the cook's planner presses the
+                // cobblestone into furnaces (race 45877404722 lane 0: ten, 80 cobblestone).
+                if let Some(t) = self.at_hand(w, BlockKind::CraftingTable, tick) {
+                    self.note(
+                        tick,
+                        format!("end kit: the row's table at {t:?} taken along"),
+                        "before the cook, so no stone is pressed into furnaces".to_owned(),
+                    );
+                    return Some(Task::Dig(crate::dig::Dig::new(w, t, tick)));
+                }
                 if let Some(t) = self.home_cook(w, tick, &rules, night) {
                     return Some(t);
                 }
@@ -820,6 +1029,11 @@ impl Plan {
             return None;
         }
         let feet = path::feet_cell(w.body?.pos);
+        // A hut is on the surface: in the bot's own stairs a wall is no hut (race 45877404722
+        // lane 0 dug its stair's side at (1591, 39, -38)).
+        if feet.1 < self.end_rules().way_up[1] - 8 {
+            return None;
+        }
         let mut cells = path::Cells::new(w);
         let sides = [(1, 0), (-1, 0), (0, 1), (0, -1)];
         let open = |cells: &mut path::Cells, (dx, dz): (i32, i32)| {
@@ -862,6 +1076,37 @@ impl Plan {
         None
     }
 
+    /// The nearest log on record within `log_rise` of the feet's height (memory's sightings, an
+    /// exposed face; race 45875661476: memory held logs at y -33 to -44 under the plain, and every
+    /// leg went toward them), not refused, no other player at it.
+    fn end_log(&self, w: &World, r: &EndKitRules, tick: u64) -> Option<Cell> {
+        let body = w.body?;
+        let dim = w.dimension.as_ref()?.name.clone();
+        let logs = data::generated::tags::block_tag("logs")?;
+        let feet = path::feet_cell(body.pos);
+        let (cx, cz) = (feet.0 >> 4, feet.2 >> 4);
+        let mut best: Option<(f64, Cell)> = None;
+        for dx in -crate::SEARCH_COLUMNS..=crate::SEARCH_COLUMNS {
+            for dz in -crate::SEARCH_COLUMNS..=crate::SEARCH_COLUMNS {
+                for s in w.memory.in_column(&dim, cx + dx, cz + dz) {
+                    let is_log = data::block_of_state(s.state).is_some_and(|k| logs.contains(&k));
+                    if !is_log
+                        || (s.pos.1 - feet.1).abs() > r.log_rise
+                        || self.refused_now(s.pos, tick)
+                        || crate::crowded(w, s.pos)
+                    {
+                        continue;
+                    }
+                    let d = flat(feet, s.pos);
+                    if best.is_none_or(|(bd, bc)| d < bd || (d == bd && s.pos < bc)) {
+                        best = Some((d, s.pos));
+                    }
+                }
+            }
+        }
+        best.map(|(_, c)| c)
+    }
+
     /// Wood by hand: the nearest log seen within `log_reach` with a found walk to it, dug by hand;
     /// with none, a walk to look for trees.
     fn end_kit_wood(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
@@ -874,7 +1119,7 @@ impl Plan {
         let feet = path::feet_cell(body.pos);
         if self.end_portal.log_walks < r.log_walks {
             for _ in 0..crate::CANDIDATES_PER_TICK {
-                let Some(log) = self.nearest_log(w, body.pos, 0.0, tick) else {
+                let Some(log) = self.end_log(w, r, tick) else {
                     break;
                 };
                 let d = flat(feet, log);
@@ -903,14 +1148,70 @@ impl Plan {
                 self.refuse(log, tick);
             }
         }
-        if self.end_portal.look_walks < r.look_walks {
-            self.end_portal.look_walks += 1;
-            let n = self.end_portal.look_walks;
-            let why = format!("end kit: look for trees ({n} of {})", r.look_walks);
-            if let Some(t) = self.explore_walk(w, tick, &why) {
-                self.note(tick, why, format!("{} logs held", base::logs_held(w)));
+        // No log in walking reach: the overland's legs (seen ground, rivers bridged, a hut at
+        // night) toward the nearest log on record, else the next of `wood_points` (race
+        // 45873894148: plains and a river round the stairs' top, no log within 48, and eight
+        // explore walks NoPath at once).
+        let goal = self
+            .end_log(w, r, tick)
+            .map(|c| {
+                (
+                    [f64::from(c.0) + 0.5, f64::from(c.2) + 0.5],
+                    format!("the log at {c:?}"),
+                )
+            })
+            .or_else(|| {
+                r.wood_points.get(self.end_portal.wood_point).map(|p| {
+                    (
+                        [f64::from(p[0]), f64::from(p[1])],
+                        format!("wood point {}", self.end_portal.wood_point),
+                    )
+                })
+            });
+        if let Some((p, what)) = goal
+            && self.end_portal.look_walks < r.look_walks
+        {
+            let here = [body.pos[0], body.pos[2]];
+            let d = (p[0] - here[0]).hypot(p[1] - here[1]);
+            if what.starts_with("wood point") && (d <= r.point_reach || self.overland.arrived) {
+                self.end_portal.wood_point += 1;
+                self.overland.arrived = false;
+                self.note(
+                    tick,
+                    format!("end kit: {what} reached, no log seen"),
+                    format!("{d:.0} off; on to the next"),
+                );
+                self.retry_at = tick + crate::RETRY_TICKS;
+                return Some(Task::Idle);
+            }
+            if self
+                .overland
+                .fix
+                .is_none_or(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) > 4.0)
+            {
+                self.overland.retarget((p, 0.0), true);
+                self.end_portal.look_walks += 1;
+                self.note(
+                    tick,
+                    format!("end kit: legs toward {what}"),
+                    format!(
+                        "({:.0}, {:.0}), {d:.0} off; look {} of {}; {} logs held",
+                        p[0],
+                        p[1],
+                        self.end_portal.look_walks,
+                        r.look_walks,
+                        base::logs_held(w)
+                    ),
+                );
+            }
+            self.end_portal.wood_legs = true;
+            let t = self.overland_task(w, tick);
+            self.end_portal.wood_legs = false;
+            if let Some(t) = t {
                 return Some(t);
             }
+            self.overland.arrived = true;
+            return Some(Task::Idle);
         }
         let wood = base::logs_held(w) + base::planks_held(w) / 4;
         self.end_kit_advance(
@@ -990,6 +1291,47 @@ impl Plan {
                     .map(|i| craft::count(w, *i))
                     .sum::<i32>()
                     .min(64);
+                // The whole batch's fuel first, planks from the logs held (race 45877404722: the
+                // smelt of 7 raw iron ran out of fuel, "failed Missing", 4 left in the furnace and
+                // no boots).
+                let need = count * i32::try_from(s.ticks).unwrap_or(200);
+                let have: i32 = crate::smelt::fuels_held(w)
+                    .iter()
+                    .map(|(k, t)| craft::count(w, *k) * i32::try_from(*t).unwrap_or(0))
+                    .sum();
+                if have < need && base::logs_held(w) > 0 {
+                    let plank = 300;
+                    let more = (need - have + plank - 1) / plank;
+                    let want = base::planks_held(w) + more;
+                    if let Some(n) = make::Need::parse("tag:planks") {
+                        let fuel_row = make::Row {
+                            id: "end-kit-fuel".to_owned(),
+                            needs: Vec::new(),
+                            provides: vec![(n, want)],
+                            holds: Vec::new(),
+                            spares: Vec::new(),
+                            wants: Vec::new(),
+                            act: None,
+                        };
+                        if let Choice::Act(a) = make::make_with_wear(
+                            &table,
+                            &counts,
+                            &near,
+                            false,
+                            &make::Wear::default(),
+                            &fuel_row,
+                        ) && let Some(make::Act::Craft(rec)) = a.act
+                            && make::fits_grid(rec)
+                        {
+                            self.note(
+                                tick,
+                                format!("end kit: craft {} for the smelt's fuel", rec.id),
+                                format!("{count} to smelt want {need} ticks, {have} held"),
+                            );
+                            return Some(Task::Craft(crate::craft::Craft::new(rec, tick)));
+                        }
+                    }
+                }
                 let sm = crate::smelt::Smelt::new(w, f, s, count, tick)?;
                 self.note(
                     tick,
@@ -1037,9 +1379,8 @@ impl Plan {
         if let Some(t) = self.end_hut_exit(w, target, tick) {
             return Some(t);
         }
-        if let Some(target) = target
-            && self.end_portal.down_walks < r.down_walks
-        {
+        // A found walk straight to the room, else its own way down a point at a time.
+        if let Some(target) = target {
             let mut walk = Walk::new(
                 target,
                 Goal::Near {
@@ -1049,29 +1390,20 @@ impl Plan {
                 Arrive::Goal,
                 tick,
             );
-            let routed = walk.route_now(w, tick);
-            let found = walk.route;
-            if routed && matches!(found, Some(path::Status::Found | path::Status::Partial)) {
-                self.end_portal.down_walks += 1;
+            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
                 self.walks += 1;
                 let n = walk.waypoints.as_ref().map_or(0, Vec::len);
                 self.note(
                     tick,
-                    format!("end kit: down its own stairs to {target:?}"),
-                    format!(
-                        "walk {} of {}, {n} cells on a {found:?} route",
-                        self.end_portal.down_walks, r.down_walks
-                    ),
+                    format!("end kit: down to the room at {target:?}"),
+                    format!("from {feet:?}, {n} cells on a found route"),
                 );
                 return Some(Task::Explore(walk));
             }
             self.expanded += walk.expanded;
-            self.end_portal.down_walks = r.down_walks;
-            self.note(
-                tick,
-                format!("end kit: no walk down to {target:?}"),
-                format!("route {found:?}; the stronghold's way in"),
-            );
+        }
+        if let Some(t) = self.end_way_down(w, r, feet, tick) {
+            return Some(t);
         }
         if !self.end_portal.down_noted {
             self.end_portal.down_noted = true;
@@ -1087,6 +1419,151 @@ impl Plan {
         // The stronghold's own approach (its stairs, its tunnel) knows the room; its inside
         // steps (the spawner, a nook) are this module's once in.
         Some(self.stronghold_task(w, tick).unwrap_or(Task::Idle))
+    }
+
+    /// Down the bot's own way, a point at a time from the nearest, top to bottom: far from the
+    /// top, the overland's legs to it; a walk to each point (found or partial); a point right
+    /// under the feet with no walk (the pillar the way up left in the corridor) dug down to, the
+    /// cell under the feet at a time. `None` once the way is spent.
+    fn end_way_down(&mut self, w: &World, r: &EndKitRules, feet: Cell, tick: u64) -> Option<Task> {
+        let way: Vec<Cell> = r
+            .way
+            .iter()
+            .chain(std::iter::once(&r.way_up))
+            .map(|p| (p[0], p[1], p[2]))
+            .collect();
+        let near = |a: Cell, b: Cell| path::octile(a, b) + f64::from((a.1 - b.1).abs());
+        if self.end_portal.down_at.is_none() {
+            let i = way
+                .iter()
+                .enumerate()
+                .min_by(|a, b| near(feet, *a.1).total_cmp(&near(feet, *b.1)))
+                .map_or(0, |(i, _)| i);
+            self.end_portal.down_at = Some(i);
+            self.end_portal.down_walks = 0;
+            self.note(
+                tick,
+                format!("end kit: down its own way from point {i}"),
+                format!("feet {feet:?}, the nearest point {:?}", way.get(i)),
+            );
+        }
+        while let Some(i) = self.end_portal.down_at {
+            let p = *way.get(i)?;
+            if near(feet, p) <= 2.0 {
+                self.end_portal.down_walks = 0;
+                self.note(
+                    tick,
+                    format!("end kit: down at point {i} {p:?}"),
+                    format!("feet {feet:?}"),
+                );
+                if i == 0 {
+                    self.end_portal.down_at = None;
+                    return None;
+                }
+                self.end_portal.down_at = Some(i - 1);
+                continue;
+            }
+            if self.end_portal.down_walks >= r.down_walks {
+                self.end_portal.down_walks = 0;
+                self.note(
+                    tick,
+                    format!("end kit: down point {i} at {p:?} skipped"),
+                    format!("from {feet:?}"),
+                );
+                if i == 0 {
+                    self.end_portal.down_at = None;
+                    return None;
+                }
+                self.end_portal.down_at = Some(i - 1);
+                continue;
+            }
+            // Far from the way (a wood walk ended out on the plain): the overland's legs, not
+            // counted as the point's walks (race 45880017656 lane 1: its night hut's blocks, a
+            // task a call, spent every point's walks in 60 ticks).
+            // A plain walk first, found or partial: the overland's legs build a hut at night and
+            // wait it out on the surface (race 45891071513: all three lanes huted 60 off the
+            // stairs' top from tick 1,020 to the cap), and the way down is underground.
+            if flat(feet, p) > 40.0 && self.end_portal.far_walks < r.down_walks {
+                let mut walk = Walk::new(p, Goal::Near { pos: p, range: 1.5 }, Arrive::Goal, tick);
+                let routed = walk.route_now(w, tick);
+                self.end_portal.far_walks += 1;
+                if routed
+                    && matches!(
+                        walk.route,
+                        Some(path::Status::Found | path::Status::Partial)
+                    )
+                {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("end kit: walk back to point {i} at {p:?}"),
+                        format!(
+                            "from {feet:?}, a {:?} route, walk {}",
+                            walk.route, self.end_portal.far_walks
+                        ),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+            }
+            if flat(feet, p) > 40.0 {
+                let q = [f64::from(p.0) + 0.5, f64::from(p.2) + 0.5];
+                if self
+                    .overland
+                    .fix
+                    .is_none_or(|(o, _)| (o[0] - q[0]).hypot(o[1] - q[1]) > 4.0)
+                {
+                    self.overland.retarget((q, 0.0), true);
+                    self.note(
+                        tick,
+                        format!("end kit: legs back to point {i} at {p:?}"),
+                        format!("from {feet:?}"),
+                    );
+                }
+                self.end_portal.wood_legs = true;
+                let t = self.overland_task(w, tick);
+                self.end_portal.wood_legs = false;
+                if let Some(t) = t {
+                    return Some(t);
+                }
+            }
+            self.end_portal.down_walks += 1;
+            let mut walk = Walk::new(p, Goal::Near { pos: p, range: 1.5 }, Arrive::Goal, tick);
+            let routed = walk.route_now(w, tick);
+            let found = walk.route;
+            if routed && matches!(found, Some(path::Status::Found | path::Status::Partial)) {
+                self.walks += 1;
+                self.note(
+                    tick,
+                    format!("end kit: down its own way to point {i} at {p:?}"),
+                    format!(
+                        "from {feet:?}, a {found:?} route, walk {}",
+                        self.end_portal.down_walks
+                    ),
+                );
+                return Some(Task::Explore(walk));
+            }
+            self.expanded += walk.expanded;
+            let under = (feet.0, feet.1 - 1, feet.2);
+            let mut cells = path::Cells::new(w);
+            let safe = cells.at((under.0, under.1 - 1, under.2)) != path::Class::Lava
+                && cells.at(under) == path::Class::Solid;
+            if p.1 < feet.1 && flat(feet, p) <= 1.0 && safe {
+                self.note(
+                    tick,
+                    format!("end kit: dig down to point {i}, {under:?}"),
+                    format!("from {feet:?}, no walk (route {found:?})"),
+                );
+                return Some(Task::Dig(crate::dig::Dig::new(w, under, tick)));
+            }
+            self.note(
+                tick,
+                format!("end kit: no walk down to point {i} at {p:?}"),
+                format!("from {feet:?}, route {found:?}"),
+            );
+            return Some(Task::Idle);
+        }
+        None
     }
 
     /// 20d: in the room with the kit, the spawner broken, then an eye into each empty frame, then
@@ -1158,6 +1635,37 @@ impl Plan {
         feet: Cell,
         tick: u64,
     ) -> Option<Task> {
+        // On a frame's top beside the lit portal: plain forward toward the ring's centre, no
+        // path and no goal to meet on the way (the coordinator, after two bots stood at the edge
+        // with their boxes on the frame: races 45877404722 and 45884543903).
+        if let Some(body) = w.body
+            && on_frame_by_portal(w, room, body.pos)
+            && self.end_portal.pushes < 4 * r.entries
+        {
+            self.end_portal.pushes += 1;
+            let c = (room.centre[0], room.centre[1], room.centre[2]);
+            let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+            walk.waypoints = Some(Vec::new());
+            walk.route = Some(path::Status::Found);
+            self.walks += 1;
+            self.note(
+                tick,
+                format!(
+                    "end portal: into the portal by push ({})",
+                    self.end_portal.pushes
+                ),
+                format!(
+                    "from ({:.2}, {:.2}, {:.2}) on a frame's top, forward toward {c:?}",
+                    body.pos[0], body.pos[1], body.pos[2]
+                ),
+            );
+            return Some(Task::Enter(Box::new(crate::Enter {
+                walk,
+                cell: c,
+                inside_since: None,
+                from: Some(OVERWORLD.to_owned()),
+            })));
+        }
         let e = match self.end_portal.entry.clone() {
             Some(e) => e,
             None => {
@@ -1289,14 +1797,26 @@ impl Plan {
             return give_up(self, format!("{} steps in", r.entries), tick);
         }
         self.end_portal.entries += 1;
-        let mut walk = Walk::new(e.inside, Goal::Block { pos: e.inside }, Arrive::Goal, tick);
-        walk.waypoints = Some(e.way());
-        walk.more.kinds = vec![
-            path::MoveKind::JumpUp,
-            path::MoveKind::JumpUp,
-            path::MoveKind::JumpUp,
-            path::MoveKind::Walk,
-        ];
+        // The goal is the cell past the portal cell (race 45884543903 lane 0: a goal of the portal
+        // cell itself was met by the stand cell with the body at z -32.0 still on the frame's
+        // top, the walk done and the step in "TargetLost", three times). Already up at the
+        // frame's height, only the last step.
+        let deeper = e.deeper();
+        let mut walk = Walk::new(deeper, Goal::Block { pos: deeper }, Arrive::Goal, tick);
+        let up_already = feet.1 >= e.frame[1] && flat(feet, e.inside) <= 1.5;
+        if up_already {
+            walk.waypoints = Some(vec![e.inside, deeper]);
+            walk.more.kinds = vec![path::MoveKind::Walk, path::MoveKind::Walk];
+        } else {
+            walk.waypoints = Some(e.way());
+            walk.more.kinds = vec![
+                path::MoveKind::JumpUp,
+                path::MoveKind::JumpUp,
+                path::MoveKind::JumpUp,
+                path::MoveKind::Walk,
+                path::MoveKind::Walk,
+            ];
+        }
         walk.route = Some(path::Status::Found);
         self.walks += 1;
         self.note(
@@ -1309,7 +1829,7 @@ impl Plan {
         );
         Some(Task::Enter(Box::new(crate::Enter {
             walk,
-            cell: e.inside,
+            cell: deeper,
             inside_since: None,
             from: Some(OVERWORLD.to_owned()),
         })))
@@ -1500,11 +2020,15 @@ impl Plan {
         }
         // A walk to the nearest standing cell of the first frame that has one.
         for f in &todo {
-            for stand in eye_stands(w, room, *f, feet, r.frame_reach)
+            // Stands judged from the cell's centre a margin inside the reach, and never the feet's
+            // own cell (race 45886255606 lane 1: (1629, 17, -37) was in reach of (1626, 19, -34)
+            // from its centre, not from the body off it, and the walk there was begun 3,267 times
+            // standing on it).
+            for stand in eye_stands(w, room, *f, feet, r.frame_reach - STAND_MARGIN)
                 .into_iter()
                 .take(crate::CANDIDATES_PER_TICK + 2)
             {
-                if self.refused_now(stand, tick) {
+                if self.refused_now(stand, tick) || stand == feet {
                     continue;
                 }
                 let mut walk = Walk::new(stand, Goal::Block { pos: stand }, Arrive::Goal, tick);
