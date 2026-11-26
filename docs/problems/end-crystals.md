@@ -80,8 +80,29 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 
 ### Wall 3: a breath cloud at the feet, held in (fixed)
 - **The cause:** no step of the crystals looked at the dragon's breath, so a hold on the ground stood in a cloud.
-- **The fix:**
-  - On the ground and outside a box, a breath whose reach (radius + 1.5, E5's `dragon::breaths`) takes in the feet gets a walk out first: 16 ways, 1.5 and 3.5 past its reach, a cell out of every breath ("spikes: out of the breath to").
-  - A hold ends when a breath comes ("hold ended by a breath").
-  - Unit test `a_breath_at_a_pillars_foot_is_walked_out_of`.
+- **The fix:** 8311848 walked out of a breath at the feet. E5's global rule (`dragon::Plan::breath_step`, bb3b247), run ahead of every task in the End, now does the same for every agent, so the local version is gone. Nothing box- or pillar-specific was needed.
 - **Not mine:** lane 1's death on E3's bunker walk (`end: back to the bunker`, through the breath), reported to the orchestrator.
+
+## Third race: 45880674581 (dev-end-island, 2 lanes, be02c32, development only)
+- **No crystal broke; both bots died at their first stand** (the caged (42, 0), y 82).
+- Each built the walls (the bars), the three other sides at the feet's and eye's height, and the ledges: 9 blocks. Then "nothing holds" the roof, 617 times. The roof has no face of its own to go against.
+- **While there, the dragon struck through the open-topped box:**
+  - Lane 1: wings 5 and 5, then the head 10.
+  - Lane 0: two wing hits, then two breaths of 6.
+- The box held both bodies on the pillar: no fall.
+- **Fixed in 6805ab7:** a block over one side goes first, then the roof. E6's sim (`end_loop`) failed the same way and is the check.
+
+### Wall 4: blows land inside the box
+- **What we know:** the dragon's wings and head hurt through the walls (the jar's part boxes; no line-of-sight test), so the box keeps the body on the pillar but not out of harm.
+- **The open question:** whether a roofed box keeps the breath off. A cloud's box is about 0.5 high, so one on the roof should miss a body 1.8 high under it, but that is not yet measured.
+- **The rule now:**
+  - "hold in the box" while the dragon is near and not perched;
+  - a blow inside the box ("blow in the box") within 200 ticks ends that hold, and the bot goes down at once, the clutch under it.
+- **Race 4 counts both.**
+
+### Wall 5: the box stranded a wide spike's bot (E6's sim, CI runs 45880795371 and 45881998970; fixed)
+- **What happened:**
+  - It pillared to (38, 76, 0), walked onto the spike to its stand at (39, 76, 0) and walled (40, 76..77, 0).
+  - It then put a box side at (38, 76, 0), the cell over its own pillar's top.
+  - From then on its way back read "stranded on a spike's top", with no strike to the cap.
+- **The fix:** at the stand, the blast's two blocks and then the strike at once: no other block first. A box's blows were not kept out anyway (wall 4), and each block was more time up high. The box (`box_gap`) is kept as a function only, for a later hold up high. The note is "stand walled at".

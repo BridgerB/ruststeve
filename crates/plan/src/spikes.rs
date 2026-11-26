@@ -22,9 +22,10 @@
 //! pillar's top is the stand; on a wider one the stand is on the spike's top, walked onto from the
 //! pillar's top.
 //!
-//! **The guard ring.** Before the bot stands still at a stand, every side of it at the feet's
-//! height that drops (open, with open air under it) gets a block, a ledge under it first when
-//! nothing holds it: a knock-back or the dragon's wings cannot push the body off.
+//! **The box.** At the stand the body is closed in end stone: the walls, every other side at the
+//! feet's and the eye's height (a ledge under a feet cell nothing holds), a block over one side
+//! and the roof. A strike needs reach, not sight (e03), so the dragon's wings and charge find
+//! nothing open to push the body out by (race 45871173293's wall 2).
 //!
 //! **Cages.** Two small spikes are caged in iron bars two out from the column, at the bedrock's
 //! height to three over it: the bars are in the wall's own cells. Parity e03 (E6, run
@@ -127,6 +128,8 @@ pub const SWING_EVERY: u64 = 10;
 pub const STRIKE_TICKS: u64 = 200;
 /// Ticks an approach that failed (a walk with no route, a stalled pillar) is refused.
 pub const REFUSE_TICKS: u64 = 1200;
+/// Ticks after a blow inside the box in which the bot leaves it for the way down.
+pub const BOX_BLOW_TICKS: u64 = 200;
 /// Ticks a repeated note waits before it is written again.
 pub const NOTE_EVERY: u64 = 200;
 /// The dragon's phase is its metadata index 16, an INT (`EnderDragon.DATA_PHASE`, after the
@@ -397,8 +400,23 @@ pub fn box_gap(w: &World, stand: Cell, walls: &[Cell; 2]) -> Option<(Cell, Role)
             .map(|c| (c, Role::Guard))
     };
     let roof = (x, y + 2, z);
-    feet.or_else(eye)
-        .or_else(|| open(kind(w, roof)).then_some((roof, Role::Roof)))
+    // The roof has no face of its own to go against (the sides at the eye's height are under its
+    // corners' neighbours, not under it): a block over one of them first (E6's sim, CI run
+    // 45880921319: "nothing holds" the roof over a cage's stand, every tick).
+    let roof_step = || {
+        if !open(kind(w, roof)) {
+            return None;
+        }
+        if support(w, roof).is_some() {
+            return Some((roof, Role::Roof));
+        }
+        Axis::ALL
+            .iter()
+            .map(|a| side(a, 2))
+            .find(|c| open(kind(w, *c)) && support(w, *c).is_some())
+            .map(|c| (c, Role::Ledge))
+    };
+    feet.or_else(eye).or_else(roof_step)
 }
 
 /// Is the body boxed in where it stands: every side at the feet's and the eye's height filled,
@@ -513,49 +531,6 @@ pub fn dragon_refusal(d: Option<&DragonNear>) -> Option<String> {
     }
 }
 
-/// Blocks up or down from the feet a breath counts in (a cloud lies on the ground; a pillar's
-/// climb leaves it under the feet).
-pub const BREATH_RISE: f64 = 4.0;
-
-/// The breath cloud or fireball (`dragon::breaths`) whose reach takes in the feet on the plane,
-/// within `BREATH_RISE` of their height, the nearest.
-pub fn breath_here(w: &World, pos: [f64; 3]) -> Option<crate::dragon::Breath> {
-    crate::dragon::breaths(w)
-        .into_iter()
-        .filter(|b| {
-            (b.pos[1] - pos[1]).abs() <= BREATH_RISE && crate::dragon::flat(b.pos, pos) <= b.reach()
-        })
-        .min_by(|a, b| crate::dragon::flat(a.pos, pos).total_cmp(&crate::dragon::flat(b.pos, pos)))
-}
-
-/// Ground cells out of every breath's reach round the one at the feet (16 ways, 1.5 and 3.5
-/// past its reach), within 3 of the feet's height, the nearest the feet first.
-pub fn out_of_breath(w: &World, pos: [f64; 3], b: &crate::dragon::Breath) -> Vec<Cell> {
-    let all = crate::dragon::breaths(w);
-    let feet = path::feet_cell(pos);
-    let mut cells: Vec<Cell> = [1.5, 3.5]
-        .iter()
-        .flat_map(|extra| {
-            (0..16).map(move |k| {
-                let a = f64::from(k) * std::f64::consts::TAU / 16.0;
-                let r = b.reach() + extra;
-                (b.pos[0] + r * a.cos(), b.pos[2] + r * a.sin())
-            })
-        })
-        .filter_map(|(x, z)| {
-            let (cx, cz) = (x.floor() as i32, z.floor() as i32);
-            let g = ground(w, cx, cz, feet.1 + 3)?;
-            let c = (cx, g, cz);
-            let mid = [f64::from(cx) + 0.5, f64::from(g), f64::from(cz) + 0.5];
-            ((g - feet.1).abs() <= 3 && !crate::dragon::breathed(&all, mid, 1.0)).then_some(c)
-        })
-        .collect();
-    let d = |c: &Cell| crate::dragon::flat(pos, [f64::from(c.0) + 0.5, 0.0, f64::from(c.2) + 0.5]);
-    cells.sort_by(|a, b| d(a).total_cmp(&d(b)));
-    cells.dedup();
-    cells
-}
-
 /// A pillar the bot put up: its column, its base (the feet's height on the ground) and top.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PillarRec {
@@ -650,6 +625,8 @@ pub struct SpikeState {
     pub top_placed: u32,
     pub closed_at: Option<Cell>,
     pub last_health: Option<f32>,
+    /// When a blow last landed inside the box.
+    pub box_blow_at: Option<u64>,
 }
 
 /// A fall caught with the water bucket (parity e06, E6: a 21-block fall onto water poured while
@@ -687,6 +664,7 @@ impl Default for SpikeState {
             top_placed: 0,
             closed_at: None,
             last_health: None,
+            box_blow_at: None,
         }
     }
 }
@@ -753,16 +731,15 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
         let p = a.plan;
         if feet == p.stand {
-            // The blast's line first, then the rest of the box.
+            // The blast's line, then the strike at once: no other block first. Race 45880674581
+            // took its blows while the rest of a box went up, and E6's sim (CI run 45880795371)
+            // stranded a wide spike's bot behind a box side over its own pillar's top.
             if let Some(c) = wall_gap(w, &p, st.bars_shield) {
                 return if kind(w, c) == Some(BlockKind::IronBars) {
                     Next::Bar(c)
                 } else {
                     Next::Build(c, Role::Wall)
                 };
-            }
-            if let Some((c, role)) = box_gap(w, feet, &p.walls) {
-                return Next::Build(c, role);
             }
             return Next::Strike(id);
         }
@@ -951,7 +928,15 @@ impl Plan {
             .any(|p| (p.x, p.z) == (feet.0, feet.2) && feet.1 > p.base);
         // Out of the box (down, or out toward the pillar's top) only with the dragon far or
         // perched: inside it a blow pushes nothing out; on the way down it can.
+        // A blow inside the box within `BOX_BLOW_TICKS` says the box is no shelter from this
+        // dragon: down at once (race 45880674581: the wings and head struck through an open-topped
+        // box, 5, 5 and 10).
+        let struck = self
+            .spikes
+            .box_blow_at
+            .is_some_and(|t| tick.saturating_sub(t) <= BOX_BLOW_TICKS);
         if boxed(w, feet)
+            && !struck
             && matches!(n, Next::DigDown(_) | Next::Open(_) | Next::Walk { .. })
             && let Some(why) = dragon_refusal(d.as_ref())
         {
@@ -961,38 +946,6 @@ impl Plan {
                 format!("{why}; at {feet:?}, health {health:?}"),
             );
             return Some(self.spikes_hold(tick));
-        }
-        // A breath on the ground at the feet: out of it first (race 45875049490 lane 0 held still in
-        // a fireball's cloud at a pillar's foot, three blows of 6 and dead).
-        let low = body.on_ground
-            && !boxed(w, feet)
-            && !on_pillar(w, feet, &self.spikes.pillars)
-            && !on_spike(w, feet);
-        if low && let Some(b) = breath_here(w, body.pos) {
-            for c in out_of_breath(w, body.pos, &b).into_iter().take(4) {
-                let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
-                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
-                    self.spikes_note(
-                        tick,
-                        format!("spikes: out of the breath to {c:?}"),
-                        format!(
-                            "a breath {:.1} off (radius {:.1}) at {feet:?}; health {health:?}",
-                            crate::dragon::flat(b.pos, body.pos),
-                            b.radius
-                        ),
-                    );
-                    return Some(Task::Explore(walk));
-                }
-                self.expanded += walk.expanded;
-            }
-            self.spikes_note(
-                tick,
-                "spikes: in the breath, no way out".to_owned(),
-                format!(
-                    "a breath {:.1} off at {feet:?}",
-                    crate::dragon::flat(b.pos, body.pos)
-                ),
-            );
         }
         match n {
             Next::Done => {
@@ -1166,7 +1119,7 @@ impl Plan {
                     self.spikes.closed_at = Some(feet);
                     self.note(
                         tick,
-                        format!("spikes: stand closed at {feet:?}"),
+                        format!("spikes: stand walled at {feet:?}"),
                         format!(
                             "{} blocks put at the top; health {health:?}, the dragon {:?}",
                             self.spikes.placed.saturating_sub(self.spikes.top_placed),
@@ -1371,6 +1324,9 @@ impl Plan {
                     ),
                 );
             }
+            if self.spikes.last_health.is_some_and(|l| h + 0.01 < l) && boxed(w, feet) {
+                self.spikes.box_blow_at = Some(tick);
+            }
             self.spikes.last_health = Some(h);
         }
         // The clutch first, whatever runs: a fall waits for no task.
@@ -1404,18 +1360,6 @@ impl Plan {
                 let feet = path::stand_cell(w, body.pos);
                 let exposed =
                     body.on_ground && on_pillar(w, feet, &self.spikes.pillars) && !boxed(w, feet);
-                let low = body.on_ground
-                    && !boxed(w, feet)
-                    && !on_pillar(w, feet, &self.spikes.pillars)
-                    && !on_spike(w, feet);
-                if low && breath_here(w, body.pos).is_some() {
-                    self.note(
-                        tick,
-                        format!("spikes: hold ended by a breath at {feet:?}"),
-                        "the way out of it".to_owned(),
-                    );
-                    return None;
-                }
                 if exposed && threatens(dragon_near(w, body.pos).as_ref()) {
                     self.note(
                         tick,
@@ -1599,7 +1543,7 @@ impl Plan {
             return None;
         }
         let Some((n, face)) = support(w, b.cell) else {
-            self.note(
+            self.spikes_note(
                 tick,
                 format!("spikes: nothing holds {:?}", b.cell),
                 format!("{:?} with no solid neighbour", b.role),
