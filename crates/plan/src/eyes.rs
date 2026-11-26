@@ -53,6 +53,12 @@ pub struct EyeRules {
     pub rest_ticks: u64,
     pub apex_out: f64,
     pub apex_up: f64,
+    pub climb_rise_max: f64,
+    pub climb_near: f64,
+    pub climb_beside: f64,
+    pub climb_within: f64,
+    pub climb_ticks: u64,
+    pub climb_every: u64,
     pub first_clear: i32,
     pub ring_from: i32,
     pub ring_to: i32,
@@ -98,6 +104,12 @@ impl Default for EyeRules {
             rest_ticks: 8,
             apex_out: 12.0,
             apex_up: 9.1,
+            climb_rise_max: 12.0,
+            climb_near: 4.0,
+            climb_beside: 1.2,
+            climb_within: 1.5,
+            climb_ticks: 400,
+            climb_every: 4,
             first_clear: 6,
             ring_from: 10,
             ring_to: 14,
@@ -692,6 +704,8 @@ pub enum Phase {
         #[serde(default)]
         rest: Option<(f64, u64)>,
     },
+    /// A drop at rest out of reach, fetched with a pillar.
+    Climb(Box<Climb>),
 }
 
 /// Whether a drop at `y` has come to rest more than `rest_rise` over the feet, out of reach.
@@ -783,6 +797,324 @@ fn dropped_eye(e: &world::Entity) -> bool {
 
 fn flat(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
+}
+
+/// Where a climb to a high drop stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ClimbStage {
+    /// Walking on the ground to the drop's column (or beside it).
+    Approach,
+    /// The pillar going up: jump, and a block into the cell the feet left.
+    Up,
+    /// At the drop's height: waiting for the pickup.
+    Wait,
+    /// The pillar's own blocks dug back, top first.
+    Down,
+}
+
+/// A dropped eye at rest out of reach on a canopy or a ledge (Q4's overland races: both throws
+/// a bot made rested 9 up), fetched with a pillar of held filler and the pillar dug back down.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Climb {
+    pub item: i32,
+    pub since: u64,
+    pub stage: ClimbStage,
+    /// The cells the pillar laid, lowest first.
+    pub placed: Vec<path::Cell>,
+    /// The feet cell the jump left from.
+    pub base: Option<path::Cell>,
+    pub clicked_at: Option<u64>,
+    pub walk: Option<Walk>,
+    pub dig: Option<crate::dig::Dig>,
+    pub picked: bool,
+    pub down_since: Option<u64>,
+}
+
+/// What a climb's tick gives the throw.
+pub struct ClimbOut {
+    pub controls: Controls,
+    pub acts: Vec<Act>,
+    pub said: Vec<(String, String)>,
+    /// `Some(picked)` once the climb is over.
+    pub over: Option<bool>,
+}
+
+fn filler(w: &World) -> Option<ItemKind> {
+    crate::pearls::BURROW_BLOCKS
+        .iter()
+        .copied()
+        .find(|k| craft::count(w, *k) > 0)
+}
+
+fn open_cell(w: &World, (x, y, z): path::Cell) -> bool {
+    w.state_at(world::BlockPos::new(x, y, z)).is_some() && w.solid(x, y, z).is_none()
+}
+
+impl Climb {
+    pub fn new(item: i32, tick: u64) -> Self {
+        Self {
+            item,
+            since: tick,
+            stage: ClimbStage::Approach,
+            placed: Vec::new(),
+            base: None,
+            clicked_at: None,
+            walk: None,
+            dig: None,
+            picked: false,
+            down_since: None,
+        }
+    }
+
+    fn down(&mut self, tick: u64) {
+        self.stage = ClimbStage::Down;
+        self.down_since = Some(tick);
+        self.walk = None;
+        self.dig = None;
+    }
+
+    /// One tick. `eyes_before` tells a pickup the packets missed (the eye back in hand).
+    pub fn step(&mut self, w: &World, rules: &EyeRules, eyes_before: i32, tick: u64) -> ClimbOut {
+        let mut out = ClimbOut {
+            controls: Controls {
+                yaw: w.controls.yaw,
+                ..Controls::default()
+            },
+            acts: Vec::new(),
+            said: Vec::new(),
+            over: None,
+        };
+        let Some(body) = w.body else {
+            out.over = Some(self.picked);
+            return out;
+        };
+        let feet = path::feet_cell(body.pos);
+        let lying = w.entities.get(&self.item).map(|e| e.pos);
+        if !self.picked && self.stage != ClimbStage::Down {
+            let picked = w.pickups.iter().any(|p| p.item_entity == self.item)
+                || (lying.is_none() && craft::count(w, ItemKind::EnderEye) >= eyes_before);
+            if picked {
+                self.picked = true;
+                out.said.push((
+                    "eye fetched from a canopy".to_owned(),
+                    format!(
+                        "picked up {} ticks into the climb, {} blocks up; eyes held {}",
+                        tick.saturating_sub(self.since),
+                        self.placed.len(),
+                        craft::count(w, ItemKind::EnderEye)
+                    ),
+                ));
+                self.down(tick);
+            } else if lying.is_none() {
+                out.said.push((
+                    "eye fetch given up".to_owned(),
+                    "the drop is gone and no eye came back".to_owned(),
+                ));
+                self.down(tick);
+            } else if tick.saturating_sub(self.since) > rules.climb_ticks {
+                out.said.push((
+                    "eye fetch given up".to_owned(),
+                    format!(
+                        "not picked up in {} ticks, {} blocks up",
+                        rules.climb_ticks,
+                        self.placed.len()
+                    ),
+                ));
+                self.down(tick);
+            }
+        }
+        match self.stage {
+            ClimbStage::Approach => {
+                let Some(p) = lying else {
+                    self.down(tick);
+                    return out;
+                };
+                let off = flat(p, body.pos);
+                if off <= rules.climb_beside {
+                    self.stage = ClimbStage::Up;
+                    out.said.push((
+                        "eye fetch: pillar up".to_owned(),
+                        format!(
+                            "from {feet:?}, the drop {:.1} over the feet and {off:.1} off",
+                            p[1] - body.pos[1]
+                        ),
+                    ));
+                    return out;
+                }
+                let target = path::feet_cell([p[0], body.pos[1], p[2]]);
+                let walk = self.walk.get_or_insert_with(|| {
+                    Walk::new(
+                        target,
+                        Goal::Near {
+                            pos: target,
+                            range: 1.0,
+                        },
+                        Arrive::Goal,
+                        tick,
+                    )
+                });
+                let (c, status) = walk.step(w, tick);
+                let (acts, said) = walk.take_out();
+                out.acts.extend(acts);
+                out.said.extend(said);
+                out.controls = c;
+                match status {
+                    TaskStatus::Running => {}
+                    TaskStatus::Done | TaskStatus::Failed(_) => {
+                        self.walk = None;
+                        if off <= rules.climb_near {
+                            // As near as the ground lets it: the pillar from here.
+                            self.stage = ClimbStage::Up;
+                            out.said.push((
+                                "eye fetch: pillar up".to_owned(),
+                                format!(
+                                    "from {feet:?} ({status:?} walking nearer), the drop {:.1} over the feet and {off:.1} off",
+                                    p[1] - body.pos[1]
+                                ),
+                            ));
+                        } else {
+                            out.said.push((
+                                "eye fetch given up".to_owned(),
+                                format!(
+                                    "no way within {} of the drop ({status:?})",
+                                    rules.climb_near
+                                ),
+                            ));
+                            self.down(tick);
+                        }
+                    }
+                }
+            }
+            ClimbStage::Up => {
+                let Some(p) = lying else {
+                    self.down(tick);
+                    return out;
+                };
+                if body.on_ground {
+                    // A click that laid nothing: the jump came down where it left.
+                    if let Some(b) = self.base
+                        && feet.1 == b.1
+                        && self.placed.last() == Some(&b)
+                        && open_cell(w, b)
+                    {
+                        self.placed.pop();
+                    }
+                    self.base = Some(feet);
+                    if body.pos[1] >= p[1] - rules.climb_within {
+                        self.stage = ClimbStage::Wait;
+                        return out;
+                    }
+                }
+                let head = (feet.0, feet.1 + 2, feet.2);
+                if body.on_ground
+                    && !open_cell(w, head)
+                    && w.state_at(world::BlockPos::new(head.0, head.1, head.2))
+                        .is_some()
+                {
+                    // Leaves (or the ledge) over the head: dug through, the drop's own perch too.
+                    let dig = self
+                        .dig
+                        .get_or_insert_with(|| crate::dig::Dig::new(w, head, tick));
+                    let (c, act, _) = dig.step(w, tick);
+                    out.controls = c;
+                    out.acts.extend(act);
+                    return out;
+                }
+                self.dig = None;
+                let Some(block) = filler(w) else {
+                    out.said.push((
+                        "eye fetch given up".to_owned(),
+                        format!("no filler held, {} blocks up", self.placed.len()),
+                    ));
+                    self.down(tick);
+                    return out;
+                };
+                if let Hold::Act(a) = hold::toward(w, block) {
+                    out.acts.push(a);
+                    return out;
+                }
+                out.controls = Controls {
+                    jump: body.on_ground,
+                    pitch: Some(crate::endermen::EYES_DOWN),
+                    yaw: w.controls.yaw,
+                    ..Controls::default()
+                };
+                if let Some(b) = self.base
+                    && !body.on_ground
+                    && body.pos[1] >= f64::from(b.1) + 1.0
+                    && open_cell(w, b)
+                    && w.click.is_none()
+                    && self
+                        .clicked_at
+                        .is_none_or(|t| tick.saturating_sub(t) >= rules.climb_every)
+                {
+                    out.acts.push(Act::UseOn {
+                        pos: world::BlockPos::new(b.0, b.1 - 1, b.2),
+                        face: 1,
+                    });
+                    self.clicked_at = Some(tick);
+                    if self.placed.last() != Some(&b) {
+                        self.placed.push(b);
+                    }
+                }
+            }
+            ClimbStage::Wait => {
+                // Still on the top, looking at the drop: the pickup comes on its own.
+                out.controls.pitch = Some(0.0);
+                if lying.is_some_and(|p| body.pos[1] < p[1] - rules.climb_within - 0.5) {
+                    self.stage = ClimbStage::Up;
+                }
+            }
+            ClimbStage::Down => {
+                let over_time = self
+                    .down_since
+                    .is_some_and(|t| tick.saturating_sub(t) > rules.climb_ticks);
+                // The top block laid, when it is still there; one already gone is passed.
+                while let Some(&top) = self.placed.last() {
+                    if open_cell(w, top) {
+                        self.placed.pop();
+                        self.dig = None;
+                    } else {
+                        break;
+                    }
+                }
+                let Some(&top) = self.placed.last() else {
+                    out.said.push((
+                        "eye fetch: back down".to_owned(),
+                        format!("at {feet:?}, the pillar dug"),
+                    ));
+                    out.over = Some(self.picked);
+                    return out;
+                };
+                if over_time {
+                    out.said.push((
+                        "eye fetch: back down given up".to_owned(),
+                        format!(
+                            "{} blocks left at {top:?} after {} ticks",
+                            self.placed.len(),
+                            rules.climb_ticks
+                        ),
+                    ));
+                    out.over = Some(self.picked);
+                    return out;
+                }
+                if !body.on_ground {
+                    return out;
+                }
+                let dig = self
+                    .dig
+                    .get_or_insert_with(|| crate::dig::Dig::new(w, top, tick));
+                let (c, act, _) = dig.step(w, tick);
+                out.controls = Controls {
+                    forward: false,
+                    jump: false,
+                    ..c
+                };
+                out.acts.extend(act);
+            }
+        }
+        out
+    }
 }
 
 /// A walk to a dropped item's cell: where it lies within the pickup box.
@@ -1014,16 +1346,40 @@ impl Throw {
                     ));
                     self.end = Some(End::Kept);
                     out.status = ThrowStatus::Done;
-                } else if let (true, Some(p)) = (high, lying) {
+                } else if let (true, Some(p)) = (high, lying)
+                    && p[1] - feet[1] <= rules.climb_rise_max
+                    && filler(w).is_some()
+                {
+                    // Out of reach on a canopy or a ledge, filler held: a pillar up to it.
                     out.said.push((
-                        "eye pickup given up: rests high".to_owned(),
+                        "eye at rest high: fetch it".to_owned(),
                         format!(
-                            "at rest at ({:.1}, {:.1}, {:.1}), {:.1} over the feet (over {}): a canopy or a ledge",
+                            "at rest at ({:.1}, {:.1}, {:.1}), {:.1} over the feet and {:.1} off; a pillar of {:?}",
                             p[0],
                             p[1],
                             p[2],
                             p[1] - feet[1],
-                            rules.rest_rise
+                            flat(p, feet),
+                            filler(w)
+                        ),
+                    ));
+                    let id = *item;
+                    self.phase = Phase::Climb(Box::new(Climb::new(id, tick)));
+                } else if let (true, Some(p)) = (high, lying) {
+                    out.said.push((
+                        "eye pickup given up: rests high".to_owned(),
+                        format!(
+                            "at rest at ({:.1}, {:.1}, {:.1}), {:.1} over the feet (over {}): {}",
+                            p[0],
+                            p[1],
+                            p[2],
+                            p[1] - feet[1],
+                            rules.rest_rise,
+                            if filler(w).is_none() {
+                                "no filler held to pillar up".to_owned()
+                            } else {
+                                format!("over the {} a pillar climbs", rules.climb_rise_max)
+                            }
                         ),
                     ));
                     self.end = Some(End::Lost);
@@ -1047,7 +1403,11 @@ impl Throw {
                     out.controls = c;
                     match status {
                         TaskStatus::Running => {}
-                        TaskStatus::Done | TaskStatus::Failed(_) if *walks < rules.pickup_walks => {
+                        // A drop over the reach is not given up by walks: its rest decides (a pillar).
+                        TaskStatus::Done | TaskStatus::Failed(_)
+                            if *walks < rules.pickup_walks
+                                || lying.is_some_and(|p| p[1] - feet[1] > rules.rest_rise) =>
+                        {
                             // At the cell and not picked up (it rolled), or no way yet: walk again
                             // to where it lies now.
                             *walks += 1;
@@ -1064,6 +1424,16 @@ impl Throw {
                             out.status = ThrowStatus::Done;
                         }
                     }
+                }
+            }
+            Phase::Climb(c) => {
+                let step = c.step(w, rules, self.eyes_before, tick);
+                out.controls = step.controls;
+                out.acts.extend(step.acts);
+                out.said.extend(step.said);
+                if let Some(picked) = step.over {
+                    self.end = Some(if picked { End::Kept } else { End::Lost });
+                    out.status = ThrowStatus::Done;
                 }
             }
         }
@@ -1302,6 +1672,32 @@ impl Plan {
                     || "none".to_owned(),
                     |f| format!("({:.0}, {:.0})", f.point[0], f.point[1])
                 )
+            ),
+        );
+        Some(Task::Throw(Box::new(t)))
+    }
+
+    /// A dropped eye lying at `item` fetched as a throw's pickup is (no throw made): the walk to
+    /// it, or the pillar when it rests high. For a drop seen after a cut throw, and for tests.
+    pub fn fetch_eye_task(&mut self, w: &World, item: i32, tick: u64) -> Option<Task> {
+        let pos = w.entities.get(&item).filter(|e| dropped_eye(e))?.pos;
+        let rules = self.eye_rules();
+        let mut t = Throw::new(w, Why::First, None, &rules, tick);
+        t.read = true;
+        t.eyes_before = craft::count(w, ItemKind::EnderEye) + 1;
+        t.phase = Phase::Pickup {
+            item,
+            since: tick,
+            walks: 1,
+            walk: Box::new(pickup_walk(pos, rules.pickup_rise, tick)),
+            rest: None,
+        };
+        self.note(
+            tick,
+            "eye fetch".to_owned(),
+            format!(
+                "a dropped eye ({item}) at ({:.1}, {:.1}, {:.1})",
+                pos[0], pos[1], pos[2]
             ),
         );
         Some(Task::Throw(Box::new(t)))
