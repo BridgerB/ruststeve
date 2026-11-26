@@ -116,6 +116,7 @@ fn ask() -> Ask {
         bunker: None,
         dead: false,
         food: true,
+        way: None,
     }
 }
 
@@ -530,4 +531,43 @@ fn the_dragon_comes_before_a_provoked_endermans_pocket() {
     assert!(!p.dragon_first_step(&far, 0), "far off: the pocket");
     cloud(&mut far, 50, [30.5, 64.0, 1.5], 3.0);
     assert!(p.dragon_first_step(&far, 0), "a breath on the feet");
+}
+
+#[test]
+fn a_way_round_the_head_is_kept_until_it_is_reached() {
+    // Race 45873410249 lane 0: the way round and the head stand swapped every tick.
+    let mut w = end_at([-12.5, 64.0, -1.0]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    let Want::Go(held, "round the head") = decide(&w, &ask()) else {
+        panic!("round the head");
+    };
+    let mut w = end_at([-12.5, 64.0, 2.0]);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    let Want::Go(fresh, "round the head") = decide(&w, &ask()) else {
+        panic!("round the head");
+    };
+    assert_ne!(
+        fresh, held,
+        "from the other side, chosen anew, the other way round"
+    );
+    let a = Ask {
+        way: Some(held),
+        ..ask()
+    };
+    assert_eq!(
+        decide(&w, &a),
+        Want::Go(held, "round the head"),
+        "held, it is kept"
+    );
+    let mut there = end_at(feet_of(held));
+    with_dragon(&mut there, [0.5, PERCH_Y, 0.5], 6, 90.0);
+    let a = Ask {
+        way: Some(held),
+        ..ask()
+    };
+    assert_ne!(
+        decide(&there, &a),
+        Want::Go(held, "round the head"),
+        "reached, the next leg"
+    );
 }

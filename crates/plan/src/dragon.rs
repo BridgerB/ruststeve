@@ -778,6 +778,8 @@ pub struct Ask {
     pub dead: bool,
     /// Food is held that heals.
     pub food: bool,
+    /// The way round the head held (`DragonState::way`).
+    pub way: Option<[i32; 3]>,
 }
 
 /// The fight's choice for this tick, pure: the clojurecraft `toward-dragon` order, with the
@@ -875,6 +877,16 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         if breath_on_way(&clouds, feet, mid(hs), BREATH_HOLD) {
             return Want::Hold("a breath on the way to the head stand");
         }
+        // The way round held is kept until it is reached or blocked (race 45873410249 lane 0:
+        // the way round and the head stand swapped every tick 9 off the fountain).
+        if let Some(wp) = ask.way
+            && flat(feet, mid(wp)) > STAND_NEAR
+            && !before_head(&v, mid(wp))
+            && !breathed(&clouds, mid(wp), 0.0)
+            && way_clear(&v, feet, mid(wp))
+        {
+            return Want::Go(wp, "round the head");
+        }
         if let Some(p) = around(&v, feet, mid(hs))
             && let Some(c) = ground(w, p[0].floor() as i32, p[1].floor() as i32, feet_cell[1])
             && flat(feet, mid(c)) > STAND_NEAR
@@ -952,6 +964,11 @@ pub struct DragonState {
     pub head_strikes: u32,
     /// The dragon's health at the last strike, for the blow's note.
     pub last_health: Option<f32>,
+    /// The way round the head held, and how many were chosen.
+    #[serde(default)]
+    pub way: Option<[i32; 3]>,
+    #[serde(default)]
+    pub ways: u32,
     /// Ticks a provoked enderman's pocket was passed over for the dragon, and the last note.
     #[serde(default)]
     pub first_skips: u64,
@@ -1143,6 +1160,7 @@ impl Plan {
             bunker,
             dead: self.dragon.dead,
             food: food.is_some(),
+            way: self.dragon.way,
         };
         let want = decide(w, &ask);
         let Task::Dragon(f) = &mut self.task else {
@@ -1184,6 +1202,21 @@ impl Plan {
         // The stand held is the stand noted.
         if let Want::Go(c, "to the stand behind the dragon" | "to the head stand") = &want {
             self.dragon.stand = Some(*c);
+        }
+        // The way round is held while it is chosen, and with it the head stand it goes to.
+        match &want {
+            Want::Go(c, "round the head") => {
+                if self.dragon.way != Some(*c) {
+                    self.dragon.way = Some(*c);
+                    self.dragon.ways += 1;
+                }
+                if let Some((_, v)) = view(w) {
+                    self.dragon.stand = keep_head_stand(&v, w, self.dragon.stand);
+                }
+            }
+            Want::Exit(_) | Want::Go(..) | Want::Strike { .. } | Want::Eat | Want::Hold(_) => {
+                self.dragon.way = None;
+            }
         }
         if changed {
             let at = w.body.map_or([0.0; 3], |b| b.pos);
