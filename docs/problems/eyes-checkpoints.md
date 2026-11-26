@@ -21,7 +21,7 @@ The resume stands at about (311, 36, 194) on the old bridge's east span. A lane 
 | 45768707240 | 694f582 | stuck 45742350492 lane 0 (74, 33, 201) | 6000 | 20000 | 3 | **lane 2 to (22, 52, -8), 17 from the portal on the plane**, cap, no pickaxe from 18,180 (the last leg, a 71-step tunnel down from y 59, spent 156 uses; wood gone; 464 netherrack held); lane 1 ghast fireball at 7,520; lane 0 cap, "no far walk" at (64, 63, 210) |
 | 45771610530 | 5ea5a66 | at-6000 of 45768707240 lane 2 | 5000 | 16000 | 6 | **5 of 6 to 14 to 32 from the portal**, all cap with 0 pickaxe uses (154 spent on the last leg; no pickaxe from tick 8,540; hand digs of netherrack 340 to 360 ticks, "Uncollected"); lane 2 cap at (33, 86, 109), hp 9.7. at-5000 snapshots: 5 lanes at (44, 71, 106 to 111) |
 | 45771663969 | 5ea5a66 | frontier (pearls_12, the forest) | 12000 | 24000 | 2 | running |
-| 45774326055 | 5ea5a66 | at-5000 of 45771610530 lane 0 (44, 71, 106) | 7600 | 36000 | 6 | running |
+| 45774326055 | 5ea5a66 | at-5000 of 45771610530 lane 0 (44, 71, 106) | 7600 | 36000 | 6 | all 6 by hand to (22, 39, -16), 4 from the portal, then idle: the tunnel to the standing cell (22, 35, -18) "0 steps (ends within reach at (22, 39, -16))", "approach found no way" x101; no pickaxe from ~10,500 (175 uses on the last leg) |
 
 ## Resume points (real snapshots past the join, from earlier races' case files)
 | snapshot | where | health | note |
