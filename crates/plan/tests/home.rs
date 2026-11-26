@@ -1430,3 +1430,39 @@ fn two_below_a_span_a_step_is_laid_up_onto_it() {
         notes(&p)
     );
 }
+
+#[test]
+fn a_provoked_enderman_on_the_way_home_is_held_from_at_most_a_minute() {
+    // Q9's race 45764756002 lane 2: provoked in the tick the top-up ended on its clock, then a
+    // 0-block pocket in the forest from 6,040 past 23,440 at 19.8 health, the trip never begun.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 70,
+        uuid: [0; 16],
+        kind: data::EntityKind::Enderman.id(),
+        x: 11.5,
+        y: 64.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 70,
+        entries: vec![(
+            plan::endermen::CREEPY_INDEX,
+            protocol::metadata::MetaValue::Bool(true),
+        )],
+    }));
+    assert_eq!(plan::endermen::angry(&w), Some(70));
+    let mut p = tripper(None);
+    run(&mut p, &mut w, 100, home::ENDER_HOLD_MAX + 40);
+    assert!(
+        noted(&p, "home: left the pocket from enderman 70"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.enders_left, vec![70]);
+    // Then the trip: no new hold from it.
+    assert!(noted(&p, "home: the trip begun"), "{:?}", notes(&p));
+}

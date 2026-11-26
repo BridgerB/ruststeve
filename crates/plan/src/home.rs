@@ -286,6 +286,11 @@ pub struct HomeState {
     /// Routes back over the heading's own cut taken, the only way toward the point.
     #[serde(default)]
     pub cut_routes_taken: u32,
+    /// The provoked enderman held from and since when, and those left after `ENDER_HOLD_MAX`.
+    #[serde(default)]
+    pub ender_hold: Option<(i32, u64)>,
+    #[serde(default)]
+    pub enders_left: Vec<i32>,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -393,6 +398,9 @@ pub const GUARD_TRIES: u32 = 6;
 pub const GUARD_REFUSED_KEPT: usize = 32;
 /// Blocks laid or dug to step up onto a span from below, a trip.
 pub const STEP_UPS: u32 = 16;
+/// On the way home a pocket from one provoked enderman is held at most this long (a minute, as
+/// the cube pocket's `CUBE_HOLD_MAX`), then it is left.
+pub const ENDER_HOLD_MAX: u64 = 1200;
 
 /// The next block of the guard (`Plan::home_guard`): for each side across `axis`, an open
 /// feet-level cell (no floor under it, or only a rail over a drop) is guarded. Its block is clicked onto a
