@@ -550,6 +550,22 @@ pub fn on_frame_by_portal(w: &World, room: &Room, pos: [f64; 3]) -> bool {
     on_frame && portal
 }
 
+/// The body over the lit end portal: an end portal block within one cell across of the feet and
+/// up to three under them or one over. The pool under the portal's cells is lava two under the
+/// body, never "at the door" (race 45887747475 lane 1: an escape began a tick before the body
+/// went through).
+pub fn over_portal(w: &World, pos: [f64; 3]) -> bool {
+    let f = path::feet_cell(pos);
+    (-1..=1).any(|dx| {
+        (-1..=1).any(|dz| {
+            (-3..=1).any(|dy| {
+                w.block_at(BlockPos::new(f.0 + dx, f.1 + dy, f.2 + dz))
+                    == Some(BlockKind::EndPortal)
+            })
+        })
+    })
+}
+
 fn overworld(w: &World) -> bool {
     w.dimension.as_ref().is_some_and(|d| d.name == OVERWORLD)
 }
@@ -559,6 +575,30 @@ fn flat(a: Cell, b: Cell) -> f64 {
 }
 
 impl Plan {
+    /// A dimension change: the task in hand ended and the traps' belief cleared, noted
+    /// "dimension changed (task ended)". The first tick only records the dimension.
+    pub(crate) fn end_dimension_watch(&mut self, w: &World, tick: u64) {
+        let Some(now) = w.dimension.as_ref().map(|d| d.name.clone()) else {
+            return;
+        };
+        let before = self.last_dimension.replace(now.clone());
+        let Some(before) = before.filter(|b| *b != now) else {
+            return;
+        };
+        let task = self.task.name();
+        // An Enter ends itself in the new dimension (its own done check, and its after-step).
+        if !matches!(self.task, Task::Enter(_)) {
+            self.task = Task::Idle;
+        }
+        self.traps = crate::escape::Traps::default();
+        self.retry_at = tick;
+        self.note(
+            tick,
+            "dimension changed (task ended)".to_owned(),
+            format!("{before} -> {now}; the task in hand was {task}"),
+        );
+    }
+
     fn end_rules(&self) -> EndKitRules {
         self.table
             .as_ref()

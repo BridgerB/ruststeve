@@ -383,3 +383,45 @@ fn on_a_frame_beside_the_lit_portal_the_bot_pushes_in() {
     );
     assert!(p.end_portal.entry.is_none(), "no way in chosen");
 }
+
+/// A dimension change ends the task in hand (an escape from the overworld walked a bot off the
+/// End's platform, race 45887747475 lane 1), noted once.
+#[test]
+fn a_dimension_change_ends_the_task_in_hand() {
+    let mut w = load(&room_world(C, &[]), [1624.5, 17.0, -37.5]);
+    let mut p = Plan::with_table(Aim::Hold, table());
+    let _ = p.step(&w);
+    let c = (1624, 17, -30);
+    p.task = Task::Explore(plan::walk::Walk::new(
+        c,
+        plan::path::Goal::Block { pos: c },
+        plan::walk::Arrive::Goal,
+        1,
+    ));
+    w.dimension = Some(world::Dimension {
+        name: "minecraft:the_end".to_owned(),
+        ..w.dimension.clone().unwrap()
+    });
+    let _ = p.step(&w);
+    let what: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert!(
+        what.iter().any(|n| n == "dimension changed (task ended)"),
+        "{what:#?}"
+    );
+    assert!(!matches!(p.task, Task::Explore(_)), "{:?}", p.task.name());
+}
+
+/// Lava two under the lit portal's cells is no trap at the door.
+#[test]
+fn over_the_lit_portal_is_not_at_the_door() {
+    let mut s = room_world(C, &[]);
+    s.fill(
+        (C.0 - 1, C.0 + 1),
+        (C.1, C.1),
+        (C.2 - 1, C.2 + 1),
+        BlockKind::EndPortal,
+    );
+    let w = load(&s, [1628.5, 19.2, -34.5]);
+    assert!(end_portal::over_portal(&w, [1628.5, 19.2, -34.5]));
+    assert!(!end_portal::over_portal(&w, [1624.5, 17.0, -38.5]));
+}
