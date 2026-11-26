@@ -79,6 +79,10 @@ pub struct Grid {
     /// cell: 2 each way on the plane, from 4 under the feet to the head.
     exposed: Vec<u8>,
     hazard: Vec<u16>,
+    /// An open cell whose fall ends in lava (a body knocked into it burns).
+    to_lava: Vec<u8>,
+    /// Every fortress block and spawner.
+    fort_cells: Vec<[i32; 3]>,
 }
 
 /// The height a column's biome is read at: the band the routes run in.
@@ -138,9 +142,23 @@ impl Grid {
             fort_cols: BTreeSet::new(),
             exposed: Vec::new(),
             hazard: Vec::new(),
+            to_lava: Vec::new(),
+            fort_cells: Vec::new(),
         };
         let mut names: BTreeMap<String, u16> = BTreeMap::new();
         for r in crate::region::regions(dir) {
+            // `r.<rx>.<rz>.mca` covers 512 by 512 columns: a file off the box is not read.
+            let name = r.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let rxz: Vec<i32> = name.split('.').filter_map(|p| p.parse().ok()).collect();
+            if let [rx, rz] = rxz[..]
+                && (rx * 512 + 511 < lo[0]
+                    || rx * 512 > hi[0]
+                    || rz * 512 + 511 < lo[2]
+                    || rz * 512 > hi[2])
+            {
+                continue;
+            }
+            eprintln!("reading {name}");
             for c in crate::region::read_region(&r)? {
                 if c.cx * 16 + 15 < lo[0]
                     || c.cx * 16 > hi[0]
@@ -157,6 +175,7 @@ impl Grid {
                     g.cells[i] = k;
                     if k == FORT {
                         g.fort_cols.insert((p[0], p[2]));
+                        g.fort_cells.push(p);
                     }
                     if p[1] == BIOME_Y {
                         let next = names.len() as u16;
@@ -193,7 +212,38 @@ impl Grid {
             })
             .collect();
         g.hazard = g.window_sum();
+        // Bottom up: an open cell falls to lava when the cell under it is lava or falls to it.
+        let layer = (dims[0] * dims[2]) as usize;
+        let mut to_lava = vec![0u8; n];
+        for i in 0..n {
+            if !open(g.cells[i]) || i < layer {
+                continue;
+            }
+            let below = i - layer;
+            to_lava[i] =
+                u8::from(g.cells[below] == LAVA || (open(g.cells[below]) && to_lava[below] == 1));
+        }
+        g.to_lava = to_lava;
         Ok(g)
+    }
+
+    fn falls_to_lava(&self, x: i32, y: i32, z: i32) -> bool {
+        self.idx(x, y, z).is_some_and(|i| self.to_lava[i] == 1)
+    }
+
+    /// The sides of the feet a body pushed off would fall into lava from.
+    fn lava_drops(&self, x: i32, y: i32, z: i32) -> u32 {
+        [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .filter(|(a, b)| {
+                open(self.at(x + a, y + 1, z + b)) && self.falls_to_lava(x + a, y, z + b)
+            })
+            .count() as u32
+    }
+
+    /// The feet under the open sky: the four cells over the head open.
+    fn in_open(&self, x: i32, y: i32, z: i32) -> bool {
+        (y + 2..y + 6).all(|q| open(self.at(x, q, z)))
     }
 
     /// The count of exposed lava in the window round each feet cell, by three separable sums.
@@ -248,14 +298,48 @@ impl Grid {
     }
 }
 
-/// A candidate route's weights, tenths of a plain step each.
-#[derive(Clone, Copy, Debug)]
+/// A candidate route's weights, tenths of a plain step each (`fort` is a clearance in blocks:
+/// columns nearer a fortress column on the plane are refused).
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Weights {
+    /// A cell cut.
     pub dig: u32,
+    /// A block placed under the feet.
     pub bridge: u32,
+    /// Each open lava cell within 2 of the feet.
     pub lava: u32,
+    /// Each side with a drop of 2 or more (not to lava).
     pub drop: u32,
+    /// Each side whose fall ends in lava.
+    pub lavadrop: u32,
+    /// A step under y 40.
     pub low: u32,
+    /// A step under the open sky.
+    pub open: u32,
+    pub fort: u32,
+}
+
+/// `dig=24,bridge=60,...`: any of the fields, the others 0.
+fn parse_weights(s: &str) -> Result<Weights, String> {
+    let mut w = Weights::default();
+    for kv in s.split(',').filter(|t| !t.trim().is_empty()) {
+        let (k, v) = kv
+            .split_once('=')
+            .ok_or(format!("{kv}: a weight is key=value"))?;
+        let v: u32 = v.trim().parse().map_err(|e| format!("{kv}: {e}"))?;
+        match k.trim() {
+            "dig" => w.dig = v,
+            "bridge" => w.bridge = v,
+            "lava" => w.lava = v,
+            "drop" => w.drop = v,
+            "lavadrop" => w.lavadrop = v,
+            "low" => w.low = v,
+            "open" => w.open = v,
+            "fort" => w.fort = v,
+            other => return Err(format!("{other}: no such weight")),
+        }
+    }
+    Ok(w)
 }
 
 /// One candidate: a name, the feet's height band, its weights, and a corridor (a polyline and a
@@ -269,7 +353,7 @@ pub struct Cand {
     pub line: Vec<[i32; 2]>,
 }
 
-/// `name;miny;maxy;dig,bridge,lava,drop,low;radius;x,z x,z ...` (the last two may be empty).
+/// `name;miny;maxy;dig=..,bridge=..;radius;x,z x,z ...` (the last two may be empty).
 pub fn parse_cand(s: &str) -> Result<Cand, String> {
     let parts: Vec<&str> = s.split(';').collect();
     let num =
@@ -279,13 +363,7 @@ pub fn parse_cand(s: &str) -> Result<Cand, String> {
             "{s}: a candidate is name;miny;maxy;weights[;radius;line]"
         ));
     };
-    let w: Vec<u32> = ws
-        .split(',')
-        .map(|t| t.trim().parse().map_err(|e| format!("{s}: {e}")))
-        .collect::<Result<_, String>>()?;
-    let [dig, bridge, lava, drop, low] = w[..] else {
-        return Err(format!("{s}: weights are dig,bridge,lava,drop,low"));
-    };
+    let w = parse_weights(ws)?;
     let radius = match rest.first() {
         Some(r) if !r.trim().is_empty() => r.trim().parse().map_err(|e| format!("{s}: {e}"))?,
         _ => 0.0,
@@ -304,13 +382,7 @@ pub fn parse_cand(s: &str) -> Result<Cand, String> {
         name: (*name).to_owned(),
         min_y: num(miny)?,
         max_y: num(maxy)?,
-        w: Weights {
-            dig,
-            bridge,
-            lava,
-            drop,
-            low,
-        },
+        w,
         radius,
         line,
     })
@@ -368,6 +440,7 @@ pub fn survey(
     ));
     let mut routes = Vec::new();
     for c in cands {
+        eprintln!("candidate {}", c.name);
         let (text, path) = one(g, from, to, avoid, c);
         out.push_str(&text);
         routes.push((&c.name, path, &c.line));
@@ -392,7 +465,7 @@ fn one(
 ) -> (String, Vec<[i32; 3]>) {
     let [nx, _, nz] = g.dims;
     // The columns a candidate may stand in.
-    let allowed: Vec<bool> = (0..nz)
+    let mut allowed: Vec<bool> = (0..nz)
         .flat_map(|dz| (0..nx).map(move |dx| (dx, dz)))
         .map(|(dx, dz)| {
             let p = [f64::from(dx + g.lo[0]) + 0.5, f64::from(dz + g.lo[2]) + 0.5];
@@ -402,6 +475,30 @@ fn one(
             !off && (c.line.is_empty() || line_dist(p, &c.line) <= c.radius)
         })
         .collect();
+    // A fortress's clearance: every column within `fort` of a fortress column refused, but the
+    // start's and the goal's own (a portal or a forest by a fortress stays reachable).
+    let r = i32::try_from(c.w.fort).unwrap_or(0);
+    if r > 0 {
+        let keep = |x: i32, z: i32| {
+            [from, to]
+                .iter()
+                .any(|p| f64::from(x - p[0]).hypot(f64::from(z - p[2])) <= 4.0)
+        };
+        for &(fx, fz) in &g.fort_cols {
+            for dz in -r..=r {
+                for dx in -r..=r {
+                    if dx * dx + dz * dz > r * r {
+                        continue;
+                    }
+                    let (x, z) = (fx + dx, fz + dz);
+                    let (ix, iz) = (x - g.lo[0], z - g.lo[2]);
+                    if ix >= 0 && iz >= 0 && ix < nx && iz < nz && !keep(x, z) {
+                        allowed[(iz * nx + ix) as usize] = false;
+                    }
+                }
+            }
+        }
+    }
     let col_ok = |x: i32, z: i32| {
         let (dx, dz) = (x - g.lo[0], z - g.lo[2]);
         dx >= 0 && dz >= 0 && dx < nx && dz < nz && allowed[(dz * nx + dx) as usize]
@@ -494,11 +591,18 @@ fn one(
                 let Some(ti) = g.idx(tx, ty, tz) else {
                     continue;
                 };
+                let lava_drops = g.lava_drops(tx, ty, tz);
                 let cost = 10
                     + c.w.dig * digs
                     + c.w.bridge * bridge
                     + c.w.lava * u32::from(g.hazard[ti])
-                    + c.w.drop * g.drops(tx, ty, tz)
+                    + c.w.drop * g.drops(tx, ty, tz).saturating_sub(lava_drops)
+                    + c.w.lavadrop * lava_drops
+                    + if c.w.open > 0 && g.in_open(tx, ty, tz) {
+                        c.w.open
+                    } else {
+                        0
+                    }
                     + if floor == HOT { 20 } else { 0 }
                     + if ty < 40 { c.w.low } else { 0 };
                 let nd = d + cost;
@@ -543,6 +647,8 @@ fn report(
     let mut lava_steps = 0;
     let mut drop_steps = 0;
     let mut low_steps = 0;
+    let mut lavadrop_steps = 0;
+    let mut open_steps = 0;
     let mut lava_cells: BTreeSet<usize> = BTreeSet::new();
     let mut by_biome: BTreeMap<String, u32> = BTreeMap::new();
     let mut rows = String::new();
@@ -583,13 +689,20 @@ fn report(
         if dr > 0 {
             drop_steps += 1;
         }
+        let ld = g.lava_drops(x, y, z);
+        if ld > 0 {
+            lavadrop_steps += 1;
+        }
+        if g.in_open(x, y, z) {
+            open_steps += 1;
+        }
         if y < 40 {
             low_steps += 1;
         }
         *by_biome.entry(g.biome(x, z).to_owned()).or_default() += 1;
         if k % 8 == 0 || k + 1 == path.len() {
             rows.push_str(&format!(
-                "  {k:>5} ({x}, {y}, {z}) {} lava{h} drops{dr} digs{digs}\n",
+                "  {k:>5} ({x}, {y}, {z}) {} lava{h} drops{dr} lavadrops{ld} digs{digs}\n",
                 g.biome(x, z)
             ));
         }
@@ -602,6 +715,19 @@ fn report(
         .map(|p| {
             fort.iter()
                 .map(|f| f64::from(f.0 - p[0]).hypot(f64::from(f.1 - p[2])))
+                .fold(f64::INFINITY, f64::min)
+        })
+        .fold(f64::INFINITY, f64::min);
+    let near_fort_3d = path
+        .iter()
+        .step_by(2)
+        .map(|p| {
+            g.fort_cells
+                .iter()
+                .map(|f| {
+                    let d = [f[0] - p[0], f[1] - p[1], f[2] - p[2]].map(f64::from);
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                })
                 .fold(f64::INFINITY, f64::min)
         })
         .fold(f64::INFINITY, f64::min);
@@ -635,7 +761,7 @@ fn report(
         c.line.len()
     );
     s.push_str(&format!(
-        "steps {} cost {cost} expanded {expanded}; feet y {} to {}; blocks cut {digs} (about {:.0} pickaxe uses at 2.4 a block); bridges {bridges} ({bridges_lava} over lava); open lava cells within 2: {} ({lava_steps} steps beside them); steps with an open drop beside: {drop_steps}; steps under y 40: {low_steps}; nearest fortress column {near_fort:.0}; nearest avoided point {near_avoid:.0}\n",
+        "steps {} cost {cost} expanded {expanded}; feet y {} to {}; blocks cut {digs} (about {:.0} pickaxe uses at 2.4 a block); bridges {bridges} ({bridges_lava} over lava); open lava cells within 2: {} ({lava_steps} steps beside them); steps with an open drop beside: {drop_steps}; steps with a fall to lava beside: {lavadrop_steps}; steps under the open sky: {open_steps}; steps under y 40: {low_steps}; nearest fortress column {near_fort:.0}, block {near_fort_3d:.0}; nearest avoided point {near_avoid:.0}\n",
         path.len(),
         ys.iter().min().copied().unwrap_or(0),
         ys.iter().max().copied().unwrap_or(0),
@@ -655,7 +781,7 @@ fn report(
     s
 }
 
-/// A plan map, a character every 4 by 4 columns: F a fortress, ~ open lava at y 30 to 45, the
+/// A plan map, a character every 4 by 4 columns: F a fortress, ~ open air from y 70 down to lava, the
 /// biome's letter (b deltas, s soul sand valley, w warped, c crimson, . wastes), * the route, o
 /// the corridor's points, S start, P goal, X an avoided point.
 fn draw(
@@ -678,7 +804,8 @@ fn draw(
             let mut made = false;
             for (x, z) in cols {
                 fort |= g.fort_cols.contains(&(x, z));
-                sea |= (30..=45).any(|y| g.at(x, y, z) == LAVA && open(g.at(x, y + 1, z)));
+                // Lava is what a body falls to from y 70: the open lava sea under the sky.
+                sea |= open(g.at(x, 70, z)) && g.falls_to_lava(x, 70, z);
                 made |= g.at(x, BIOME_Y, z) != WALL || !g.biome(x, z).is_empty();
             }
             let biome = g.biome(x0 + 2, z0 + 2);
@@ -736,11 +863,15 @@ mod tests {
 
     #[test]
     fn a_candidate_reads_its_weights_and_corridor() {
-        let c = parse_cand("deltas;32;80;24,40,30,20,30;6;477,152 399,194").unwrap();
-        assert_eq!((c.min_y, c.max_y, c.w.lava, c.radius), (32, 80, 30, 6.0));
+        let c = parse_cand("deltas;32;80;dig=24,lava=30,fort=16;6;477,152 399,194").unwrap();
+        assert_eq!(
+            (c.min_y, c.max_y, c.w.lava, c.w.fort, c.w.open),
+            (32, 80, 30, 16, 0)
+        );
+        assert_eq!(c.radius, 6.0);
         assert_eq!(c.line, vec![[477, 152], [399, 194]]);
-        assert!(parse_cand("open;32;80;1,1,1,1,1").unwrap().line.is_empty());
-        assert!(parse_cand("bad;32;80;1,1").is_err());
+        assert!(parse_cand("open;32;80;dig=1").unwrap().line.is_empty());
+        assert!(parse_cand("bad;32;80;dug=1").is_err());
     }
 
     #[test]
