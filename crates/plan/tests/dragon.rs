@@ -571,3 +571,80 @@ fn a_way_round_the_head_is_kept_until_it_is_reached() {
         "reached, the next leg"
     );
 }
+
+#[test]
+fn a_breath_on_the_feet_is_walked_out_of_ahead_of_every_task() {
+    // Race 45873410249 lane 0 and E4's race 45875049490 lane 0: stood in a fireball's cloud, dead.
+    let mut w = end_at([8.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [9.5, 64.0, 0.5], 3.0);
+    let b = breaths(&w);
+    assert!(dragon::breath_on(&b, [8.5, 64.0, 0.5]).is_some());
+    let out = dragon::out_of_breath(&w, [8.5, 64.0, 0.5]).unwrap();
+    assert!(
+        dragon::flat(feet_of(out), [9.5, 64.0, 0.5]) > 4.5,
+        "out of its reach: {out:?}"
+    );
+    let mut p = Plan::new(Aim::Race);
+    let c = p.breath_step(&w, 0).expect("the walk out");
+    assert_eq!(c.pitch, Some(90.0), "looking down");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == format!("out of the breath to {out:?}")),
+        "noted"
+    );
+    // Out of it: the walk ends, noted, and what was running runs on.
+    let mut clear = end_at(feet_of(out));
+    cloud(&mut clear, 50, [9.5, 64.0, 0.5], 3.0);
+    assert!(p.breath_step(&clear, 20).is_none());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "out of the breath")
+    );
+}
+
+#[test]
+fn a_breath_over_the_bunker_or_under_a_pillar_is_not_on_the_body() {
+    let b = vec![Breath {
+        id: 50,
+        pos: [8.5, 64.0, 0.5],
+        radius: 3.0,
+    }];
+    assert!(
+        dragon::breath_on(&b, [8.5, 64.0, 0.5]).is_some(),
+        "on its floor"
+    );
+    assert!(
+        dragon::breath_on(&b, [8.5, 61.0, 0.5]).is_none(),
+        "three down in the bunker"
+    );
+    assert!(
+        dragon::breath_on(&b, [8.5, 66.0, 0.5]).is_none(),
+        "two up a pillar"
+    );
+}
+
+#[test]
+fn a_walk_waits_at_a_breaths_edge() {
+    let mut w = end_at([2.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [8.0, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    // Yaw -90 faces +x (Notchian: south 0, west +90): toward the cloud, its reach 4.5 from 8.0.
+    let toward = physics::Controls {
+        forward: true,
+        yaw: -90.0,
+        ..physics::Controls::default()
+    };
+    assert!(!p.breath_ahead(&w, toward).forward, "waits");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "walk waits at a breath's edge")
+    );
+    let away = physics::Controls {
+        yaw: 90.0,
+        ..toward
+    };
+    assert!(p.breath_ahead(&w, away).forward, "away from it: on");
+}

@@ -49,6 +49,11 @@ Development start, never evidence. The setup's kill worked: lane 1 saw 3 crystal
 **Wall 3: the stand behind the body is in the landing dragon's reach** (lane 0, tick 1,620). Walking in the basin to a stand behind, at 4.4 along and 2.9 across, the bot took 10 (mob_attack) as the dragon went from landing to sitting.
 - **Fix:** landing, not yet sat, or with no head stand open, the bot goes out to the ring 12 off ("out of the landing's reach") and never enters the basin. When the dragon sits, the bot goes round to the head stand from outside.
 
+**The flip-flop, fixed (a70a168).** At about 9 from the fountain the head stand and the way round the head swapped every tick (`go [10, 62, 0] round the head` / `go [8, 62, 4] to the head stand`). The way round chosen is now held (`DragonState::way`) until it is reached, or until the head, a breath or a way past the head blocks it.
+
+**Wall 4: breath killed bots outside the fight too** (E4's race 2, 45875049490: one bot waited in a fireball cloud at a pillar's foot; one walked E3's route back to the bunker through breath). Breath is one rule now, owned here, ahead of every row and task in the End:
+- **`Plan::breath_step`** (before the always-rows): a breath whose reach takes in the body sends the bot on a walk to the nearest ground cell out of every breath. It looks within 9 columns, never before a grounded dragon's head. The cell is held while it stays clear. A breath's reach means radius plus 1.5 on the plane, with the body's height meeting the cloud's 0.5-tall box with a margin of 1 (`breath_on`). So the bunker three down and a pillar two up are out of it. Notes: "out of the breath to …", "out of the breath", "in the breath, no way out".
+- **`Plan::breath_ahead`** (on every tick's controls): a walk whose point 1.5 ahead lies in a breath's reach, with the feet not in one, stops at the edge and waits. Note: "walk waits at a breath's edge", every 100 ticks at most, with its count.
+
 **Not yet answered.**
-- At about 9 from the fountain the head stand and the way round the head alternated each tick (`go [10, 62, 0] round the head` / `go [8, 62, 4] to the head stand`). It still struck, but wastes ticks.
 - The flame cloud costs about 3.0 each flaming phase.

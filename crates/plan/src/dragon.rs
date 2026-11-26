@@ -429,6 +429,68 @@ pub fn breaths(w: &World) -> Vec<Breath> {
         .collect()
 }
 
+/// Blocks over a cloud's floor the feet may be and still be in it: its box is 0.5 tall
+/// (`AreaEffectCloud`), and a margin of 1. And blocks under it the head may be: the bunker three
+/// down and a pillar two up are out of it, a body stood on its floor is in it.
+pub const BREATH_OVER: f64 = 1.5;
+pub const BREATH_UNDER: f64 = 1.0;
+/// Columns round the feet the cell out of a breath is looked for in.
+pub const OUT_SEARCH: i32 = 9;
+/// Blocks ahead of the feet along a walk's heading tested for a breath (`breath_ahead`).
+pub const AHEAD: f64 = 1.5;
+/// Ticks between the notes of a walk held at a breath's edge.
+pub const AHEAD_NOTE_TICKS: u64 = 100;
+
+/// The nearest breath whose reach takes in a body with its feet at `feet`: within its reach on
+/// the plane, and the body's height meeting the cloud's (`BREATH_OVER`, `BREATH_UNDER`).
+pub fn breath_on(breaths: &[Breath], feet: [f64; 3]) -> Option<Breath> {
+    breaths
+        .iter()
+        .filter(|b| {
+            flat(b.pos, feet) <= b.reach()
+                && feet[1] <= b.pos[1] + BREATH_OVER
+                && feet[1] + physics::HEIGHT + BREATH_UNDER >= b.pos[1]
+        })
+        .min_by(|a, b| flat(a.pos, feet).total_cmp(&flat(b.pos, feet)))
+        .copied()
+}
+
+/// The ground cell nearest the feet (within `OUT_SEARCH` columns) that no breath reaches
+/// (`breath_on`), not before a grounded dragon's head nor on a way past it; `None` when none
+/// is loaded.
+pub fn out_of_breath(w: &World, feet: [f64; 3]) -> Option<[i32; 3]> {
+    let clouds = breaths(w);
+    let v = view(w).map(|(_, v)| v).filter(grounded);
+    let fc = cell_of(feet);
+    let mut cells = crate::path::Cells::new(w);
+    let mut best: Option<(f64, [i32; 3])> = None;
+    for x in (fc[0] - OUT_SEARCH)..=(fc[0] + OUT_SEARCH) {
+        for z in (fc[2] - OUT_SEARCH)..=(fc[2] + OUT_SEARCH) {
+            let d0 = flat(feet, mid([x, 0, z]));
+            if d0 > f64::from(OUT_SEARCH) || best.is_some_and(|(bd, _)| d0 > bd) {
+                continue;
+            }
+            let Some(y) = ((fc[1] - 3)..=(fc[1] + 2))
+                .rev()
+                .find(|y| cells.standable((x, *y, z)))
+            else {
+                continue;
+            };
+            let c = [x, y, z];
+            let p = mid(c);
+            if breath_on(&clouds, p).is_some()
+                || v.is_some_and(|v| before_head(&v, p) || !way_clear(&v, feet, p))
+            {
+                continue;
+            }
+            if best.is_none_or(|(bd, bc)| d0 < bd || (d0 == bd && c < bc)) {
+                best = Some((d0, c));
+            }
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
 /// Does a breath reach `p` on the plane (its reach and `extra`)?
 pub fn breathed(breaths: &[Breath], p: [f64; 3], extra: f64) -> bool {
     breaths.iter().any(|b| flat(b.pos, p) <= b.reach() + extra)
@@ -964,6 +1026,16 @@ pub struct DragonState {
     pub head_strikes: u32,
     /// The dragon's health at the last strike, for the blow's note.
     pub last_health: Option<f32>,
+    /// The walk out of a breath in hand, the walks begun, and the walks held at a breath's edge
+    /// with the last note.
+    #[serde(default)]
+    pub breath_walk: Option<Walk>,
+    #[serde(default)]
+    pub breath_outs: u32,
+    #[serde(default)]
+    pub breath_waits: u64,
+    #[serde(default)]
+    pub breath_waited_at: u64,
     /// The way round the head held, and how many were chosen.
     #[serde(default)]
     pub way: Option<[i32; 3]>,
@@ -1413,6 +1485,153 @@ impl Plan {
         };
         breathed(&breaths(w), feet, 0.0)
             || view(w).is_some_and(|(_, v)| grounded(&v) && from_fountain(feet) < WAIT_RING + 4.0)
+    }
+
+    /// In the End, a breath's reach on the body (`breath_on`): the walk to the nearest cell out of
+    /// every breath (`out_of_breath`), ahead of every row and task, the one rule for all the End's
+    /// work (race 45873410249 lane 0 and E4's race 45875049490 lane 0 each stood in a fireball's
+    /// cloud and died; E3's walk back to the bunker went through one). `None` with none on the
+    /// body: what was running runs on.
+    pub fn breath_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) {
+            return None;
+        }
+        let feet = w.body?.pos;
+        let clouds = breaths(w);
+        let Some(on) = breath_on(&clouds, feet) else {
+            if let Some(wk) = self.dragon.breath_walk.take() {
+                self.note(
+                    tick,
+                    "out of the breath".to_owned(),
+                    format!(
+                        "at {:?}, {} ticks after the walk to {:?} began",
+                        cell_of(feet),
+                        tick.saturating_sub(wk.started),
+                        wk.target
+                    ),
+                );
+            }
+            return None;
+        };
+        // The cell held while no breath reaches it; else the nearest one anew.
+        let held = self
+            .dragon
+            .breath_walk
+            .as_ref()
+            .map(|wk| [wk.target.0, wk.target.1, wk.target.2])
+            .filter(|c| breath_on(&clouds, mid(*c)).is_none());
+        let target = match held {
+            Some(c) => c,
+            None => {
+                let Some(c) = out_of_breath(w, feet) else {
+                    if self.dragon.breath_walk.take().is_some() || self.dragon.breath_outs == 0 {
+                        self.note(
+                            tick,
+                            "in the breath, no way out".to_owned(),
+                            format!(
+                                "a breath {:.1} off, radius {:.1}; no cell out of it loaded within {OUT_SEARCH}",
+                                flat(on.pos, feet),
+                                on.radius
+                            ),
+                        );
+                    }
+                    return None;
+                };
+                self.dragon.breath_outs += 1;
+                self.dragon.breath_walk = Some(Walk::new(
+                    (c[0], c[1], c[2]),
+                    Goal::Block {
+                        pos: (c[0], c[1], c[2]),
+                    },
+                    Arrive::Goal,
+                    tick,
+                ));
+                self.note(
+                    tick,
+                    format!("out of the breath to {c:?}"),
+                    format!(
+                        "a breath {:.1} off (radius {:.1}) at {:?}; task {}; health {:.1}; {} walks out in the run",
+                        flat(on.pos, feet),
+                        on.radius,
+                        cell_of(feet),
+                        self.task.name(),
+                        w.player.health.unwrap_or(0.0),
+                        self.dragon.breath_outs
+                    ),
+                );
+                c
+            }
+        };
+        let wk = self.dragon.breath_walk.as_mut()?;
+        let (mut c, status) = wk.step(w, tick);
+        let (acts, said) = wk.take_out();
+        self.acts.extend(acts);
+        for (what, why) in said {
+            self.note(tick, what, why);
+        }
+        if !matches!(status, TaskStatus::Running) {
+            // Arrived (the breath grew onto it) or failed: the next tick looks again.
+            self.dragon.breath_walk = None;
+            if let TaskStatus::Failed(e) = status {
+                self.note(
+                    tick,
+                    format!("walk out of the breath to {target:?} failed: {e:?}"),
+                    "the next tick looks again".to_owned(),
+                );
+            }
+        }
+        if c.pitch.is_none() {
+            c.pitch = Some(90.0);
+        }
+        Some(c)
+    }
+
+    /// In the End, a walk pressing on toward a breath's reach (the point `AHEAD` along its
+    /// heading inside one, the feet not) waits at the edge instead, noted every
+    /// `AHEAD_NOTE_TICKS`: a cloud lasts a while and the walk goes on once it is gone.
+    pub fn breath_ahead(&mut self, w: &World, c: Controls) -> Controls {
+        if !c.forward || !in_end(w) {
+            return c;
+        }
+        let Some(feet) = w.body.map(|b| b.pos) else {
+            return c;
+        };
+        let clouds = breaths(w);
+        if clouds.is_empty() || breath_on(&clouds, feet).is_some() {
+            return c;
+        }
+        let r = c.yaw.to_radians();
+        let ahead = [
+            feet[0] - r.sin() * AHEAD,
+            feet[1],
+            feet[2] + r.cos() * AHEAD,
+        ];
+        let Some(b) = breath_on(&clouds, ahead) else {
+            return c;
+        };
+        let tick = w.ticks;
+        self.dragon.breath_waits += 1;
+        if tick >= self.dragon.breath_waited_at + AHEAD_NOTE_TICKS || self.dragon.breath_waits == 1
+        {
+            self.dragon.breath_waited_at = tick;
+            self.note(
+                tick,
+                "walk waits at a breath's edge".to_owned(),
+                format!(
+                    "a breath {:.1} ahead (radius {:.1}) at {:?}; task {}; {} ticks waited in the run",
+                    flat(b.pos, ahead),
+                    b.radius,
+                    cell_of(feet),
+                    self.task.name(),
+                    self.dragon.breath_waits
+                ),
+            );
+        }
+        Controls {
+            forward: false,
+            jump: false,
+            ..c
+        }
     }
 
     /// `dragon_first`, noted (at most every `FIRST_NOTE_TICKS`) when a provoked enderman's pocket
