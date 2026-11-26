@@ -24,6 +24,9 @@ pub mod craft;
 pub mod defend;
 pub mod dig;
 pub mod eat;
+// >>> E3 (issue 20e, the End's arrival and island)
+pub mod end;
+// <<< E3
 pub mod endermen;
 pub mod escape;
 // >>> eyes (Q3, issue 19c)
@@ -890,6 +893,12 @@ pub struct Plan {
     #[serde(default)]
     pub eyes: eyes::EyeState,
     // <<< eyes
+    // >>> E3 (issue 20e, docs/problems/end-island.md): the bunker's feet cell and the End's state.
+    #[serde(default)]
+    pub bunker: Option<[i32; 3]>,
+    #[serde(default)]
+    pub end: end::EndState,
+    // <<< E3
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1021,6 +1030,10 @@ impl Plan {
             throws: Vec::new(),
             eyes: eyes::EyeState::default(),
             // <<< eyes
+            // >>> E3
+            bunker: None,
+            end: end::EndState::default(),
+            // <<< E3
             acts: Vec::new(),
         }
     }
@@ -1101,6 +1114,9 @@ impl Plan {
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
+        // >>> E3 (issue 20e): in the End a look no act asked for is straight down.
+        let c = self.end_gaze(w, c);
+        // <<< E3
         // Never stare (issue 17e): every look the planner sends leaves here, kept off endermen.
         let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
@@ -1624,6 +1640,11 @@ impl Plan {
             return c;
         }
         // <<< Q7
+        // >>> E3 (issue 20e): the End's bridge, bunker and stock, and its choice of task.
+        if let Some(c) = self.end_step(w, tick) {
+            return c;
+        }
+        // <<< E3
         if self.finished() {
             return Controls::default();
         }
