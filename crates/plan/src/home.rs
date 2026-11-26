@@ -1044,9 +1044,11 @@ impl Plan {
                 ),
             );
         }
-        // >>> Q6 (issue 19): within `[portal_way] reach` with the front seen, the last leg by rock
-        // to the front's tunnel cell (docs/problems/eyes-portal.md); at it, the approach.
-        if let Some(t) = self.portal_way(w, tick, portal, d) {
+        // >>> Q6 (issue 19): within `[portal_way] reach` and out of the approach's, the last leg
+        // in rock to the front's tunnel cell (docs/problems/eyes-portal.md).
+        if d > r.approach
+            && let Some(t) = self.portal_way(w, tick, portal, d)
+        {
             return Some(t);
         }
         // <<< Q6
@@ -1253,6 +1255,12 @@ impl Plan {
             }
             self.expanded += walk.expanded;
         }
+        // >>> Q6 (issue 19): no seal due and no plain walk in: the last leg in rock to the front's
+        // tunnel cell, then exactly to it (`crate::portal_way`), before the far walk and the tunnel.
+        if let Some(t) = self.portal_way(w, tick, portal, flat(feet, portal)) {
+            return Some(t);
+        }
+        // <<< Q6
         self.ender.home.approach_tries += 1;
         let n = self.ender.home.approach_tries;
         // No face with a floor seen: a far walk to beside the portal, bridging the lava in front

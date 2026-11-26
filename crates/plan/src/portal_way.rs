@@ -167,7 +167,8 @@ impl Plan {
 
     /// The last leg (module doc): `Some` a dig, a tunnel or a cut toward the portal's front while
     /// within `reach` of `portal` (`d` on the plane), the feet not yet at the tunnel cell or the
-    /// standing cell; `None` hands back to the trip and the approach.
+    /// standing cell; `None` hands back to the trip and the approach. Called by the trip out of
+    /// the approach's range, and inside it by the approach after its seals and its plain walk in.
     pub(crate) fn portal_way(
         &mut self,
         w: &World,
@@ -201,21 +202,6 @@ impl Plan {
         if w.inventory.carried.is_some() {
             return None;
         }
-        // Within the approach with a plain walk into a lit cell, the approach walks in.
-        let approach = self.table.as_ref().map_or(24, |t| t.home.approach);
-        if d <= approach
-            && lit.iter().any(|c| {
-                let mut walk = crate::walk::Walk::new(
-                    *c,
-                    path::Goal::Block { pos: *c },
-                    crate::walk::Arrive::Goal,
-                    tick,
-                );
-                walk.route_now(w, tick) && walk.route == Some(path::Status::Found)
-            })
-        {
-            return None;
-        }
         // The portal's chunk not loaded (or no face seen yet): the tunnel runs at the portal
         // itself until the front is seen.
         let target = front.map_or(portal, |f| f.tunnel);
@@ -230,11 +216,14 @@ impl Plan {
                 ),
             );
         }
-        // 1. Dug in: out of the open where the bot stands.
-        if let Some(t) = self.way_dig_in(w, tick, feet, &r) {
+        let gap = span(feet, target);
+        // 1. Dug in: out of the open where the bot stands, short of the cut's range (by the
+        // ledge the cut goes to the cell itself).
+        if gap > r.cut_range
+            && let Some(t) = self.way_dig_in(w, tick, feet, &r)
+        {
             return Some(t);
         }
-        let gap = span(feet, target);
         // 3. The cut, near: an exact route to the tunnel cell, while it keeps coming nearer.
         if let Some(f) = front
             && gap <= r.cut_range
