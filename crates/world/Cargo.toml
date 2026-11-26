@@ -15,3 +15,4 @@ protocol = { path = "../protocol" }
 
 [dev-dependencies]
 proptest = "1"
+toml = "1"

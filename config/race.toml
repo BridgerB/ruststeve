@@ -36,7 +36,9 @@ no_progress_ticks = 24000
 # pearls (#23), and a pearl more than ever held, up to 12, is a hunt going on.
 # Issue 19: 12 eyes of ender (#24): an eye crafted more than ever held, up to 12, is the eyes
 # being made (14 with the pearl top-up; 12 is what the `overworld` stage asks).
-items = [["blaze_rod", 7], ["ender_pearl", 12], ["ender_eye", 12]]
+# Issue 20: end stone mined, up to 160 (config/end.toml, the plan's 20e stock), is the stock
+# being laid in.
+items = [["blaze_rod", 7], ["ender_pearl", 12], ["ender_eye", 12], ["end_stone", 160]]
 
 [budget]
 # The brain's CPU per bot per tick (issue 09; brain/ruststeve/design/progress-invariants.md):

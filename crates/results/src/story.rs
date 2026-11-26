@@ -5,6 +5,8 @@
 //! counted by kind (so a fix's firings are read here, with no grep), each escape's trail whole,
 //! then the last two minutes as the ledger tells them.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::Ledger;
@@ -93,6 +95,95 @@ pub struct EyeCounts {
     pub frames: u32,
 }
 
+// >>> E1 (issue 20b)
+/// A run's End (issue 20b), from its ledger and senses rows: what the race summary's End lines
+/// count.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EndCounts {
+    /// Eyes placed in frames, and the End entered.
+    pub eyes_placed: u32,
+    pub entered: bool,
+    /// Crystals seen, and gone by how (`struck`, `blast`, `far`, `gone`).
+    pub crystals_seen: u32,
+    pub crystals_gone: BTreeMap<String, u32>,
+    /// Crystals alive at the end (the last row in the End).
+    pub crystals_left: Option<u32>,
+    /// Pillars up and down, and the highest.
+    pub pillars_up: u32,
+    pub pillars_down: u32,
+    pub pillar_top: i32,
+    /// Strikes sent, blows landed on the dragon, blows the dragon landed (and the health they
+    /// took), breath clouds near, gaze near misses (and stares among them).
+    pub strikes: u32,
+    pub dragon_hits: u32,
+    pub dragon_blows: u32,
+    pub blow_health: f32,
+    pub breath: u32,
+    pub near_misses: u32,
+    pub stares: u32,
+    /// The dragon dead, and the credits.
+    pub dragon_dead: bool,
+    pub credits: bool,
+    /// The dragon's health over the run: `(tick, health)` from the senses rows each
+    /// `DRAGON_TRAIL_TICKS`, and the last.
+    pub dragon_health: Vec<(u64, f32)>,
+}
+
+/// Ticks between two points of a run's dragon health trail (a minute).
+pub const DRAGON_TRAIL_TICKS: u64 = 1200;
+
+/// A run's End from its facts and senses rows; `None` when it never placed an eye, entered the
+/// End or saw a crystal.
+pub fn end_counts(l: &Ledger, rows: &[Senses]) -> Option<EndCounts> {
+    let mut c = EndCounts::default();
+    for f in &l.facts {
+        match &f.fact {
+            Fact::EyePlaced { .. } => c.eyes_placed += 1,
+            Fact::PortalEntered { .. } => c.entered = true,
+            Fact::CrystalSeen { .. } => c.crystals_seen += 1,
+            Fact::CrystalGone { how, .. } => *c.crystals_gone.entry(how.clone()).or_default() += 1,
+            Fact::PillarUp { height, .. } => {
+                c.pillars_up += 1;
+                c.pillar_top = c.pillar_top.max(*height);
+            }
+            Fact::PillarDown { .. } => c.pillars_down += 1,
+            Fact::Strike { .. } => c.strikes += 1,
+            Fact::DragonHit { .. } => c.dragon_hits += 1,
+            Fact::DragonBlow { lost, .. } => {
+                c.dragon_blows += 1;
+                c.blow_health += lost;
+            }
+            Fact::Breath { .. } => c.breath += 1,
+            Fact::GazeNearMiss { stare, .. } => {
+                c.near_misses += 1;
+                c.stares += u32::from(*stare);
+            }
+            Fact::DragonDead => c.dragon_dead = true,
+            Fact::Credits { .. } => c.credits = true,
+            _ => {}
+        }
+    }
+    let mut next = 0;
+    for r in rows.iter().filter(|r| r.fountain.is_some()) {
+        if let Some(h) = r.dragon_health
+            && r.at >= next
+        {
+            c.dragon_health.push((r.at, h));
+            next = r.at + DRAGON_TRAIL_TICKS;
+        }
+    }
+    if let Some(last) = rows.iter().rev().find(|r| r.fountain.is_some()) {
+        c.crystals_left = last.crystals;
+        if let Some(h) = last.dragon_health
+            && c.dragon_health.last().map(|x| x.0) != Some(last.at)
+        {
+            c.dragon_health.push((last.at, h));
+        }
+    }
+    (c != EndCounts::default()).then_some(c)
+}
+// <<< E1
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Story {
     /// `tick stage`.
@@ -132,6 +223,9 @@ pub struct Story {
     /// Issue 19b: the run's eyes, when it held or threw any or saw a frame.
     #[serde(default)]
     pub eyes: Option<EyeCounts>,
+    /// Issue 20b: the run's End, when it placed an eye, entered the End or saw a crystal.
+    #[serde(default)]
+    pub end: Option<EndCounts>,
 }
 
 /// A run's eyes from its facts and senses rows; `None` when it never held, threw or picked an
@@ -267,6 +361,7 @@ fn spans(rows: &[Senses], on: impl Fn(&Senses) -> bool) -> Vec<(u64, u64)> {
 pub fn story(l: &Ledger, rows: &[Senses]) -> Story {
     let mut s = Story {
         eyes: eye_counts(l, rows),
+        end: end_counts(l, rows),
         ..Story::default()
     };
     let all_rows = rows;
@@ -500,6 +595,12 @@ mod tests {
             sword_uses: None,
             eyes: None,
             frames: None,
+            dragon_health: None,
+            dragon_phase: None,
+            crystals: None,
+            fountain: None,
+            over: None,
+            endermen_16: None,
         }
     }
 
