@@ -606,7 +606,12 @@ fn the_bunker_opened_the_bot_walks_up_its_stair_onto_the_ground() {
     );
     // Steered at the first step with a jump.
     let c = p.step(&w);
-    assert!(c.forward && c.jump, "{c:?}");
+    assert!(
+        c.forward && c.jump,
+        "{c:?} {:?} {:?}",
+        notes(&p),
+        p.end.work
+    );
     // On it (race 45898928805 lane 0 stood here, half over the bunker, with no route found): on
     // to the next step.
     w.body = Some(physics::Body {
