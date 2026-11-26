@@ -233,22 +233,23 @@ pub fn void_column(w: &World, c: Cell) -> bool {
     c.1 >= min_y && (min_y..=c.1).all(|y| cells.at((c.0, y, c.2)) == path::Class::Clear)
 }
 
-/// The feet in a roofed cell two high, and every open side of it two high and roofed too: an
-/// enderman (2.9 tall) can stand in none of them, so none reaches the bot (the bunker and its
-/// tunnels).
+/// Under the end stone: a full block over the feet column and over every open side column
+/// within the sky check (the bunker, its tunnels and the stairs down). There no pocket is sealed
+/// from an angry enderman: the 3-high stair cells kept failing the 2-high test, and the pockets
+/// sealed in them shut the way home (race 45884609352: 499 "provoked enderman", both stocks
+/// ended "no way back to the bunker").
 pub fn covered(w: &World) -> bool {
     let Some(body) = w.body else {
         return false;
     };
     let f = path::stand_cell(w, body.pos);
-    let two_high =
-        |c: Cell| open(w, c) && open(w, (c.0, c.1 + 1, c.2)) && solid(w, (c.0, c.1 + 2, c.2));
-    two_high(f)
+    let roofed =
+        |c: Cell| (c.1 + 2..c.1 + 2 + world::stage::SKY_CHECK).any(|y| solid(w, (c.0, y, c.2)));
+    open(w, f)
+        && roofed(f)
         && SIDES.iter().all(|(dx, dz)| {
             let n = (f.0 + dx, f.1, f.2 + dz);
-            let h = (n.0, n.1 + 1, n.2);
-            // A side shut at the feet or the head; or open two high under a roof.
-            !(open(w, n) && open(w, h)) || solid(w, (n.0, n.1 + 2, n.2))
+            !(open(w, n) && open(w, (n.0, n.1 + 1, n.2))) || roofed(n)
         })
 }
 
@@ -286,6 +287,12 @@ pub fn cloud_on(w: &World, cells: &[Cell]) -> Option<(Cell, [f64; 3])> {
             })
             .map(|(p, _)| (*c, *p))
     })
+}
+
+/// A walk with a whole route to its goal: a partial one (which `route_now` takes for a goal walk)
+/// is no way home through tunnels, it wanders toward a shut cell.
+fn found(walk: &mut Walk, w: &World, tick: u64) -> bool {
+    walk.route_now(w, tick) && walk.route == Some(path::Status::Found)
 }
 
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
@@ -766,7 +773,7 @@ impl Plan {
             let shut = !open(w, roof) || !open(w, door_cells[0]);
             if !world::stage::open_sky(w) && !inside && !open(w, door_cells[0]) {
                 let mut probe = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
-                if probe.route_now(w, tick) || self.end.out_runs >= OUT_RUNS {
+                if found(&mut probe, w, tick) || self.end.out_runs >= OUT_RUNS {
                     return self.walk_home(w, b, tick, "to leave by the bunker's stair");
                 }
                 // No way back through the tunnels (race 45878860222 lane 0: 23 walks refused from
@@ -882,7 +889,7 @@ impl Plan {
         }
         if !inside {
             let mut walk = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
-            if walk.route_now(w, tick) {
+            if found(&mut walk, w, tick) {
                 self.walks += 1;
                 self.note(
                     tick,
@@ -949,7 +956,7 @@ impl Plan {
         let i = u8::try_from(self.end.stock_runs % u32::from(n)).unwrap_or(0);
         let start = self.arm_start(i);
         let mut walk = Walk::new(start, Goal::Block { pos: start }, Arrive::Goal, tick);
-        if !walk.route_now(w, tick) {
+        if !found(&mut walk, w, tick) {
             self.end.stock_over = true;
             self.note(
                 tick,
@@ -1200,7 +1207,7 @@ impl Plan {
         }
         self.end.home_walks += 1;
         let mut walk = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
-        if !walk.route_now(w, tick) {
+        if !found(&mut walk, w, tick) {
             self.note(
                 tick,
                 format!("end: no walk to the bunker {b:?}"),
