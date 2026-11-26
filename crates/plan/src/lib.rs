@@ -2131,6 +2131,37 @@ impl Plan {
                 "a mob that knocks back near and no floor beside the feet".to_owned(),
             );
         }
+        // >>> Q8 (issue 19): a shooter that first sees the bot on the trip cuts a walk or a tunnel
+        // under way, so the trip's cover runs (Q10's race 45768707240 lane 1: three ghast fireballs
+        // in a level tunnel at (75, 33, 179), 15.6 to dead, no cover note). Once a sighting.
+        if home_trip
+            && matches!(
+                self.task,
+                Task::Explore(_) | Task::ToLog(_) | Task::Stairs(_)
+            )
+            && self
+                .ender
+                .home
+                .shooter_seen_at
+                .is_none_or(|t| tick >= t + crate::home::SHOOTER_CLEAR_TICKS)
+            && (crate::home::ghast_sees(w)
+                || crate::home::skeleton_sees(w)
+                || endermen::seen_by_far_shooter(w))
+        {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.retry_at = tick;
+            self.ender.home.shooter_cuts += 1;
+            self.note(
+                tick,
+                format!("home: {cut} cut for cover"),
+                format!(
+                    "a ghast, blaze or skeleton has the bot in sight; cut {}",
+                    self.ender.home.shooter_cuts
+                ),
+            );
+        }
+        // <<< Q8
         if home_trip {
             ignored.extend(
                 w.entities

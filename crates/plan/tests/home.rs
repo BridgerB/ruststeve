@@ -1587,3 +1587,35 @@ fn short_of_pickaxes_a_stem_seen_near_is_gathered_by_hand() {
     );
     assert_eq!(p.ender.home.wood_walks, 1);
 }
+
+#[test]
+fn a_ghast_that_sees_the_bot_cuts_the_walk_for_cover() {
+    // Q10's race 45768707240 lane 1: three ghast fireballs in a level tunnel, no cover note.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 80,
+        uuid: [0; 16],
+        kind: data::EntityKind::Ghast.id(),
+        x: 8.5,
+        y: 72.0,
+        z: 40.5,
+        velocity: [0.0; 3],
+    }));
+    assert!(home::ghast_sees(&w));
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    p.task = Task::Explore(plan::walk::Walk::new(
+        (-20, 64, 8),
+        plan::path::Goal::Near {
+            pos: (-20, 64, 8),
+            range: 1.0,
+        },
+        plan::walk::Arrive::Goal,
+        100,
+    ));
+    run(&mut p, &mut w, 100, 1);
+    assert!(noted(&p, "home: explore cut for cover"), "{:?}", notes(&p));
+    assert_eq!(p.ender.home.shooter_cuts, 1);
+}

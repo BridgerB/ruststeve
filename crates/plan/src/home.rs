@@ -296,6 +296,9 @@ pub struct HomeState {
     pub wood_walks: u32,
     #[serde(default)]
     pub wood_gathering: bool,
+    /// Walks and tunnels cut for cover when a shooter first saw the bot.
+    #[serde(default)]
+    pub shooter_cuts: u32,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
