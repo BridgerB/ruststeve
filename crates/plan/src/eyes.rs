@@ -996,7 +996,8 @@ impl Climb {
                     return out;
                 };
                 let off = flat(p, body.pos);
-                if off <= rules.climb_beside {
+                let column = (p[0].floor() as i32, p[2].floor() as i32);
+                if (feet.0, feet.2) == column {
                     self.stage = ClimbStage::Up;
                     out.said.push((
                         "eye fetch: pillar up".to_owned(),
@@ -1047,7 +1048,10 @@ impl Climb {
                     self.down(tick);
                     return out;
                 };
-                if flat(p, body.pos) <= rules.climb_beside {
+                // On to the drop's own column (race CI 45741807583: a pillar beside it, 1.18 off on
+                // the diagonal, rose 6 and never took the eye): its perch is dug from under and the
+                // eye falls onto the head.
+                if (feet.0, feet.2) == (p[0].floor() as i32, p[2].floor() as i32) {
                     self.stage = ClimbStage::Up;
                     self.walk = None;
                     self.dig = None;

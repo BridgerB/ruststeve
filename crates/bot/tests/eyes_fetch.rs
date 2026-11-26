@@ -177,7 +177,7 @@ fn an_eye_behind_a_wall_with_no_way_round_is_fetched_through_a_cut() {
 }
 
 /// Race 45740169100 lane 0: the cut's first step had no path (no floor under it). The wall test's
-/// world with the ground under the first step gone: the cut lays a floor and steps on.
+/// world with the ground just past the wall gone: the cut lays a floor there and steps on.
 #[test]
 fn a_cut_step_onto_a_missing_floor_lays_one() {
     let f = fetch(6.5, 5..=7, |m| {
@@ -186,7 +186,10 @@ fn a_cut_step_onto_a_missing_floor_lays_one() {
                 m.set_block(2, y, z, state(BlockKind::Stone)).unwrap();
             }
         }
-        m.set_block(1, 64, 0, state(BlockKind::Air)).unwrap();
+        // The ground just past the wall gone (a pit 1 deep), where only the cut goes.
+        for z in -80..=80 {
+            m.set_block(3, 64, z, state(BlockKind::Air)).unwrap();
+        }
     });
     assert!(f.has("eye fetch: cut toward the drop"), "{}", f.story());
     assert!(
