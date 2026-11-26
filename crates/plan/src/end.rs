@@ -235,6 +235,39 @@ pub fn covered(w: &World) -> bool {
 /// Covered notes are written at most this often (a second's worth of angry endermen at once).
 pub const COVERED_NOTE_EVERY: u64 = 600;
 
+/// An area cloud's radius: `AreaEffectCloud.DATA_RADIUS`, a float at metadata index 8 (after
+/// Entity's 0 to 7); 3 (its default) when not sent.
+pub const CLOUD_RADIUS_INDEX: u8 = 8;
+/// A route keeps this far outside a cloud's radius (the plan's 20g breath margin).
+pub const CLOUD_MARGIN: f64 = 1.5;
+
+/// The first cell of `cells` inside an area cloud (the dragon's breath, a fireball's splash),
+/// with the cloud's centre: within its radius and `CLOUD_MARGIN` on the plane and 3 of its height.
+pub fn cloud_on(w: &World, cells: &[Cell]) -> Option<(Cell, [f64; 3])> {
+    let clouds: Vec<([f64; 3], f64)> = w
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::AreaEffectCloud && !e.dead)
+        .map(|e| {
+            let r = match e.metadata.get(&CLOUD_RADIUS_INDEX) {
+                Some(MetaValue::Float(r)) => f64::from(*r),
+                Some(_) | None => 3.0,
+            };
+            (e.pos, r)
+        })
+        .collect();
+    cells.iter().find_map(|c| {
+        let at = [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5];
+        clouds
+            .iter()
+            .find(|(p, r)| {
+                ((at[0] - p[0]).powi(2) + (at[2] - p[2]).powi(2)).sqrt() <= r + CLOUD_MARGIN
+                    && (at[1] - p[1]).abs() <= 3.0
+            })
+            .map(|(p, _)| (*c, *p))
+    })
+}
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -401,6 +434,9 @@ pub struct EndState {
     pub covered_ticks: u64,
     #[serde(default)]
     pub covered_noted: Option<u64>,
+    /// Walks to the bunker held back for a cloud on the way.
+    #[serde(default)]
+    pub cloud_waits: u32,
     /// Up a pillar handed to the crystals' task for the way down, noted.
     #[serde(default)]
     pub down_noted: bool,
@@ -926,6 +962,22 @@ impl Plan {
                 format!("{why}; walk {} of {HOME_WALKS}", self.end.home_walks),
             );
             self.retry_at = tick + crate::RETRY_TICKS;
+            return None;
+        }
+        // Never through a cloud (E4's race 45875049490 lane 1 died walking this route through the
+        // dragon's breath): wait where the bot is until it is gone.
+        if let Some((c, at)) = cloud_on(w, walk.waypoints.as_deref().unwrap_or_default()) {
+            self.end.home_walks -= 1;
+            self.end.cloud_waits += 1;
+            self.note(
+                tick,
+                format!("end: the way to the bunker waits for a cloud at {c:?}"),
+                format!(
+                    "{why}; the cloud at {:.0}, {:.0}, {:.0}; wait {}",
+                    at[0], at[1], at[2], self.end.cloud_waits
+                ),
+            );
+            self.retry_at = tick + crate::RETRY_TICKS * 2;
             return None;
         }
         self.walks += 1;
