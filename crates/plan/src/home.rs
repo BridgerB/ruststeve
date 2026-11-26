@@ -291,6 +291,11 @@ pub struct HomeState {
     pub ender_hold: Option<(i32, u64)>,
     #[serde(default)]
     pub enders_left: Vec<i32>,
+    /// Endermen fought from the pocket at the cap, and the last one noted still near.
+    #[serde(default)]
+    pub ender_fights: u32,
+    #[serde(default)]
+    pub ender_near_noted: Option<i32>,
     /// Walks for wood by hand, and whether a gather to `WOOD_GATHER` is in hand.
     #[serde(default)]
     pub wood_walks: u32,
@@ -412,6 +417,10 @@ pub const STEP_UPS: u32 = 48;
 /// On the way home a pocket from one provoked enderman is held at most this long (a minute, as
 /// the cube pocket's `CUBE_HOLD_MAX`), then it is left.
 pub const ENDER_HOLD_MAX: u64 = 1200;
+/// At the cap an enderman this near is not left: the hold goes on; this near, it is fought from the
+/// pocket over the danger line (Q9's race 45776886803: released at 2 off, dead in 60 ticks).
+pub const ENDER_RELEASE: f64 = 16.0;
+pub const ENDER_FIGHT: f64 = 3.0;
 /// Basalt kept on the trip when the pack fills (the guard's and the bridges' filler with the
 /// netherrack's 128; the deltas' restock digs it).
 pub const BASALT_KEPT: i32 = 64;

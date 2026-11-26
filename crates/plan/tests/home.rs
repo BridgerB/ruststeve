@@ -1442,7 +1442,7 @@ fn a_provoked_enderman_on_the_way_home_is_held_from_at_most_a_minute() {
         id: 70,
         uuid: [0; 16],
         kind: data::EntityKind::Enderman.id(),
-        x: 11.5,
+        x: 28.5,
         y: 64.0,
         z: 8.5,
         velocity: [0.0; 3],
@@ -1725,4 +1725,38 @@ fn feet_at_a_soul_sand_top_over_a_dug_cell_stand_in_the_cell_over_it() {
     // Off soul sand's top nothing changes.
     assert_eq!(plan::path::stand_cell(&w, [22.5, 69.9, 57.5]), (22, 69, 57));
     assert_eq!(plan::path::stand_cell(&w, [22.5, 70.0, 57.5]), (22, 70, 57));
+}
+
+#[test]
+fn an_angry_enderman_still_on_the_bot_at_the_cap_is_never_walked_away_from() {
+    // Q9's race 45776886803 lane 0: released at the cap with the enderman 2 off; four hits in 60
+    // ticks, dead.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 71,
+        uuid: [0; 16],
+        kind: data::EntityKind::Enderman.id(),
+        x: 10.5,
+        y: 64.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 71,
+        entries: vec![(
+            plan::endermen::CREEPY_INDEX,
+            protocol::metadata::MetaValue::Bool(true),
+        )],
+    }));
+    let mut p = tripper(None);
+    run(&mut p, &mut w, 100, home::ENDER_HOLD_MAX + 40);
+    assert!(!noted(&p, "home: the trip begun"), "{:?}", notes(&p));
+    assert!(p.ender.home.enders_left.is_empty());
+    assert!(
+        noted(&p, "home: fight enderman 71 from the pocket"),
+        "{:?}",
+        notes(&p)
+    );
 }
