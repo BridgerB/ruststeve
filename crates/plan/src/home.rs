@@ -272,6 +272,9 @@ pub struct HomeState {
     pub guard_restock_done: bool,
     #[serde(default)]
     pub span_restocked: bool,
+    /// Cube pockets not made, or left, by a lava edge over the danger line.
+    #[serde(default)]
+    pub edge_pocket_skips: u32,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -1796,6 +1799,28 @@ impl Plan {
         // 8,000 ticks with cubes at 4 to 7).
         let resting = self.ender.home.cube_resume_at.is_some_and(|t| tick < t) && health > danger;
         let press = !resting && (near >= CUBE_CROWD || (within_clear && health <= danger));
+        // >>> Q8: over the danger line by a lava edge no cube pocket: the guard and the sneak hold
+        // the bot and it walks on (race 45758211666 lanes 3 and 4 sat 4,000 to 16,000 ticks in
+        // pockets on the join's island over the sea; the breakout's tunnel found no rock there).
+        if health > danger && near_lava_edge(w) {
+            if press || self.ender.home.cube_pocket.is_some() {
+                self.ender.home.cube_pocket = None;
+                self.ender.home.cube_clear_since = None;
+                self.ender.home.edge_pocket_skips += 1;
+                if self.ender.home.edge_pocket_skips % 20 == 1 {
+                    self.note(
+                        tick,
+                        "home: no cube pocket by a lava edge, on behind the guard".to_owned(),
+                        format!(
+                            "{near} within {CUBE_NEAR}; health {health} over {danger}; skip {}",
+                            self.ender.home.edge_pocket_skips
+                        ),
+                    );
+                }
+            }
+            return None;
+        }
+        // <<< Q8
         let held = self.ender.home.cube_pocket.is_some();
         if press && !held {
             self.ender.home.cube_pocket = Some(tick);
