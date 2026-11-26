@@ -1684,6 +1684,9 @@ impl Plan {
         }
         // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
         // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
+        if let Some(c) = self.charge_step(w, tick) {
+            return c;
+        }
         if let Some(c) = self.breath_step(w, tick) {
             return c;
         }
