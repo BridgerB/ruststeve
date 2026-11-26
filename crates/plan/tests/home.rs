@@ -823,3 +823,29 @@ fn resumed_mid_trip_with_the_eyes_made_skips_the_top_up_and_points_behind() {
         p.ender.home.ways_passed
     );
 }
+
+#[test]
+fn no_way_point_or_leg_comes_within_24_of_the_blaze_spawner() {
+    // The spawner by the fortress, about (130, 61, 167) (race 45350933958 lane 0's senses).
+    let s = (130.0_f64, 167.0_f64);
+    let way = home::HomeRules::default().way;
+    let near = |a: [i32; 2], b: [i32; 2]| {
+        // The least distance on the plane from the spawner to the leg from a to b.
+        let (ax, az) = (f64::from(a[0]), f64::from(a[1]));
+        let (dx, dz) = (f64::from(b[0]) - ax, f64::from(b[1]) - az);
+        let len = dx * dx + dz * dz;
+        let t = if len == 0.0 {
+            0.0
+        } else {
+            (((s.0 - ax) * dx + (s.1 - az) * dz) / len).clamp(0.0, 1.0)
+        };
+        ((ax + t * dx - s.0).powi(2) + (az + t * dz - s.1).powi(2)).sqrt()
+    };
+    for p in &way {
+        assert!(near(*p, *p) >= 24.0, "{p:?} is {:.1} off", near(*p, *p));
+    }
+    for leg in way.windows(2) {
+        let d = near(leg[0], leg[1]);
+        assert!(d >= 24.0, "{:?} to {:?} comes {d:.1} near", leg[0], leg[1]);
+    }
+}
