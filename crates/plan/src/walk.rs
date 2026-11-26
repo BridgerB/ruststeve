@@ -582,13 +582,26 @@ impl Walk {
             return (c, status);
         }
         let mut cells = path::Cells::new(w);
-        if !lava_edge(&mut cells, feet) && !lava_edge(&mut cells, next) {
+        // >>> E3 (issue 20e): in the End a side that drops to the void is an edge as lava is.
+        let void = crate::end::in_end(w)
+            && (crate::end::void_edge(w, feet) || crate::end::void_edge(w, next));
+        // <<< E3
+        if !void && !lava_edge(&mut cells, feet) && !lava_edge(&mut cells, next) {
             return (c, status);
         }
         c.sneak = true;
         self.more.sneak_ticks += 1;
         if !self.more.sneak_said {
             self.more.sneak_said = true;
+            // >>> E3
+            if void {
+                self.more.said.push((
+                    format!("walk: sneak at a void edge from {feet:?}"),
+                    format!("toward {next:?}; a side drops to the void"),
+                ));
+                return (c, status);
+            }
+            // <<< E3
             self.more.said.push((
                 format!("walk: sneak at a lava edge from {feet:?}"),
                 format!("toward {next:?}; a side drops to lava within {LAVA_DROP}"),
