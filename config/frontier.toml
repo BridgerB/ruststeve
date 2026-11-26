@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "end"
-tag = "race-45887747475"
-asset = "snapshot-end-45887747475-race-45887747475-lane-1.tar.zst"
-commit = "808d77b346ab098d79be218b3f8cb973781d2f2d"
-how = "rs-l01-b00 of race 45887747475 (issue 20, 2026-11-26), resumed from the real armed frontier (race 45882199358 lane 0, on the surface over the stronghold with its kit): down its own way to the portal room, the silverfish spawner broken, 11 eyes into the 11 empty frames, the portal lit and stepped into, arriving in the End at (100.5, 49, 0.5) at server tick 2,600. Holds full iron armour, an iron sword, a shield, 3 stone pickaxes, 23 cooked food, 2 water buckets, 2 eyes. Real (no development mark, no kind)."
+stage = "island"
+tag = "race-45888713362"
+asset = "snapshot-island-45888713362-race-45888713362-lane-0.tar.zst"
+commit = "ad49b79068f3dcbbe28a0c15a0bd5e929cef177a"
+how = "rs-l00-b00 of race 45888713362 (issue 20, 2026-11-26), resumed from the real end frontier (race 45887747475 lane 1, on the End's arrival platform): pillared up 4, bridged west over the void with rails on both sides, onto the main island, at (30.2, 60.0, 0.5) at server tick 1,000. Holds full iron armour, an iron sword, a shield, 3 stone pickaxes, 23 cooked food, 2 water buckets, 28 cobblestone. All 3 lanes of the race reached it. Real (no development mark, no kind)."

@@ -919,6 +919,9 @@ pub struct Plan {
     // >>> E2 (issue 20c/20d, docs/problems/end-portal.md): the End kit and the portal.
     #[serde(default)]
     pub end_portal: end_portal::EndPortalState,
+    /// The dimension the last tick was in (`end_dimension_watch`).
+    #[serde(default)]
+    pub last_dimension: Option<String>,
     // <<< E2
     // >>> E4 (issue 20f): the crystals' state (docs/problems/end-crystals.md).
     #[serde(default)]
@@ -1066,6 +1069,7 @@ impl Plan {
             // <<< E5
             // >>> E2
             end_portal: end_portal::EndPortalState::default(),
+            last_dimension: None,
             // <<< E2
             // >>> E4
             spikes: spikes::SpikeState::default(),
@@ -1618,6 +1622,11 @@ impl Plan {
         if let Some(c) = self.dragon_watch(w, tick) {
             return c;
         }
+        // >>> E2 (issue 20d, docs/problems/end-portal.md wall 11): a dimension change ends the task
+        // in hand and the traps' belief from the old dimension (race 45887747475 lane 1: an
+        // overworld lava escape carried into the End walked the bot off the platform).
+        self.end_dimension_watch(w, tick);
+        // <<< E2
         // <<< E5
         let Some(body) = w.body else {
             return Controls::default();
@@ -2072,7 +2081,10 @@ impl Plan {
             );
         }
         // A cast and a scoop stand beside lava on purpose; anything else answers lava at the door.
-        let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_));
+        let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_))
+            // >>> E2 (wall 11): lava under the lit end portal's cells is not at the door.
+            && !end_portal::over_portal(w, body.pos);
+        // <<< E2
         let trap = self.traps.tick(w, body, door);
         let rules = &table.survival;
         let mut ignored: Vec<i32> = self

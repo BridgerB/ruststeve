@@ -6,7 +6,7 @@ tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
 lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
+verifiedAgainst: ruststeve@2b6b7f1 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -49,7 +49,7 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **`flee_clear`** (20): a retreat from a `never_fight` kind holds until past it (a creeper follows from 16; retreats that stopped at 12 walked back to its ore, wall 29), and the planner keeps off its ground 600 ticks.
 - **Unreachable ranged foes**: one that a fight landed nothing on is left alone 600 ticks unless it comes within `defend_radius` (one bot fought one skeleton 51 times with no swing, wall 30).
 - **Ranged** kinds (`ranged`: skeleton, stray, bogged) are answered within `ranged_radius` (16), not only `defend_radius` (wall 16).
-- **`never_fight`** kinds (creeper) are answered first and from `flee_radius` (8), backed away from until past it and the margin: from 4 the fuse was already lit (wall 21).
+- **`never_fight`** kinds (creeper) are answered first and from `flee_radius` (8), backed away from until past it and the margin: from 4 the fuse was already lit (wall 21). Within `NEVER_CLOSE` (6) the retreat steps by `away_step` each tick (issue 20, end-portal wall 12): of sixteen steps 1.2 ahead onto an open, safe floor, the one that most opens the distance from where the mob is now; a route away from where it was led a bot back past a creeper in the portal room.
 
 ## Issue 15: neutral mobs
 - `neutral` kinds in the survival rules (`zombified_piglin`, `enderman`) are fought only once one of their kind has hit the bot within `PROVOKED_TICKS` 400 (`defend::provoked`, from the world's hit record): defending against a zombified piglin angered its group (9 of 112 deaths in the first nether race, 1 of 224 after). Piglins stay foes: with no gold worn they attack (32 of 224 deaths before the tunnels). Issue 17: an enderman is never a foe, provoked or not (`defend::NEVER_FOE`, in `foe` and `pressing`): 40 health and 7 a hit beat the bot in the open, and a provoked one is answered by a sealed pocket (`Plan::ender_threat`, [[planner]]).
