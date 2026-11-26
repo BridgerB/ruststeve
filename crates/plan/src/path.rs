@@ -941,8 +941,19 @@ pub fn feet_cell([x, y, z]: [f64; 3]) -> Cell {
 /// the node a route gives them is the cell over it). `feet_cell` itself is not changed: every
 /// other task reads it as it always has (docs/problems/nether-walk.md, fix 5).
 pub fn stand_cell(w: &World, pos: [f64; 3]) -> Cell {
-    over_soul_sand(w, feet_cell(pos))
+    // Feet at a soul sand top (y + 0.875) stand in the cell over it whatever is in the centre's
+    // column: a body over the edge of a dug cell rests on the soul sand beside (Q10's race
+    // 45777976793: feet 69.875 at (22, 69, 57), the cell under the centre dug, the dig-in aimed
+    // at (22, 68, 57), already air, "Gone" 336 times).
+    let c = feet_cell(pos);
+    if (pos[1] - pos[1].floor() - SOUL_SAND_TOP).abs() < 0.01 {
+        return (c.0, c.1 + 1, c.2);
+    }
+    over_soul_sand(w, c)
 }
+
+/// Soul sand's top over its cell's floor line (`walk::SOUL_SAND_TOP`).
+const SOUL_SAND_TOP: f64 = 0.875;
 
 /// `c`, or the cell over it when `c` is soul sand.
 fn over_soul_sand(w: &World, c: Cell) -> Cell {

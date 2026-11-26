@@ -309,6 +309,9 @@ pub struct HomeState {
     /// Walks and tunnels cut for cover when a shooter first saw the bot.
     #[serde(default)]
     pub shooter_cuts: u32,
+    /// Walks out of the portal's own cell on arrival.
+    #[serde(default)]
+    pub portal_exits: u32,
     // >>> Q6 (issue 19): the last leg's state (`crate::portal_way`).
     #[serde(default)]
     pub way_in: crate::portal_way::WayIn,
@@ -426,6 +429,9 @@ pub const ENDER_HOLD_MAX: u64 = 1200;
 /// Basalt kept on the trip when the pack fills (the guard's and the bridges' filler with the
 /// netherrack's 128; the deltas' restock digs it).
 pub const BASALT_KEPT: i32 = 64;
+/// Netherrack kept on the trip (three stacks: the spans' guard restock wants up to 152; Q10's race
+/// 45777976793 dropped 36 at 128 and walked back over them four times).
+pub const NETHERRACK_KEPT: i32 = 192;
 /// Wood by hand (`Plan::home_wood`; Q10's race 45768707240 lane 2 ran out of pickaxes 17 off the
 /// portal): under this many pickaxe uses, logs or stems within `WOOD_REACH` are gathered by hand
 /// to `WOOD_GATHER`, at most `WOOD_WALKS` walks a trip; within `WOOD_LEG_FROM` of the portal the
@@ -1256,7 +1262,16 @@ impl Plan {
         if self.headed.as_ref().is_some_and(|h| h.restock.is_some()) {
             return None;
         }
-        let (at, click, face) = guard_next(w, axis, &self.ender.home.guard_refused)?;
+        // Never a cell of the tunnel's own route, nor the floor of one (race 45779137282: the guard
+        // filled (22, 43, -11), a stair of its own last leg).
+        let mut skip = self.ender.home.guard_refused.clone();
+        skip.extend(
+            self.travel
+                .route
+                .iter()
+                .flat_map(|c| [*c, (c.0, c.1 - 1, c.2)]),
+        );
+        let (at, click, face) = guard_next(w, axis, &skip)?;
         // The progress invariant: a guard clicked `GUARD_TRIES` times and still open is given up
         // (race 45760537530: one guard clicked 221 to 411 times, filler unchanged, blazes near).
         let tries = match self.ender.home.guard_try {
@@ -2274,7 +2289,10 @@ impl Plan {
             return None;
         }
         let mut walk = Walk::to_dig(log, tick);
-        if !walk.route_now(w, tick) {
+        // A found route only: a partial one walks the bot back up its own stairs toward a stem it
+        // cannot reach (race 45779137282: twelve walks NoPath from the last leg's tunnel, each
+        // undoing its stairs).
+        if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
             self.expanded += walk.expanded;
             self.refuse(log, tick);
             return None;
@@ -2879,6 +2897,49 @@ impl Plan {
         }
     }
 
+    /// Out of the portal's own cell: the first cell beside the feet (south, north, east, west)
+    /// that is open with its head cell, on a full floor, and not a portal block, walked to. Noted
+    /// and counted; `None` with none.
+    fn home_out_of_portal(&mut self, w: &World, tick: u64, feet: Cell) -> Option<Task> {
+        let mut cells = path::Cells::new(w);
+        let portal = |c: Cell| {
+            w.block_at(world::BlockPos::new(c.0, c.1, c.2)) == Some(BlockKind::NetherPortal)
+        };
+        let out = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+            .into_iter()
+            .map(|(dx, dz)| (feet.0 + dx, feet.1, feet.2 + dz))
+            .find(|c| {
+                !portal(*c)
+                    && cells.at(*c) == path::Class::Clear
+                    && cells.at((c.0, c.1 + 1, c.2)) == path::Class::Clear
+                    && cells.at((c.0, c.1 - 1, c.2)) == path::Class::Solid
+            })?;
+        let mut walk = Walk::new(
+            out,
+            Goal::Near {
+                pos: out,
+                range: 0.5,
+            },
+            Arrive::Goal,
+            tick,
+        );
+        if !walk.route_now(w, tick) {
+            self.expanded += walk.expanded;
+            return None;
+        }
+        self.walks += 1;
+        self.ender.home.portal_exits += 1;
+        self.note(
+            tick,
+            format!("home: out of the portal to {out:?}"),
+            format!(
+                "from {feet:?}, a portal block; exit {}",
+                self.ender.home.portal_exits
+            ),
+        );
+        Some(Task::Explore(walk))
+    }
+
     /// The overworld: the climb by stairs in rock, then food, the night's hut, a rest; then over.
     fn home_overworld(&mut self, w: &World, tick: u64) -> Option<Task> {
         let r = self.home_rules();
@@ -2916,6 +2977,17 @@ impl Plan {
                 ),
             );
         }
+        // >>> Q8 (issue 19): standing in the portal's own cell, out of it first, by its south face
+        // first (Q11's race 45771600648: three bots stood in the portal at (125, -52, -108), "no
+        // stairs up from here", every heading refused, the shaft never begun).
+        if self.ender.home.surface_at.is_none()
+            && w.block_at(world::BlockPos::new(feet.0, feet.1, feet.2))
+                == Some(BlockKind::NetherPortal)
+            && let Some(t) = self.home_out_of_portal(w, tick, feet)
+        {
+            return Some(t);
+        }
+        // <<< Q8
         let rules = self.table.as_ref().map(|t| t.survival.clone())?;
         if self.ender.home.surface_at.is_none() {
             if world::stage::open_sky(w) {
