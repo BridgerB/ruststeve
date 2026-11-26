@@ -27,7 +27,9 @@ The resume stands at about (311, 36, 194) on the old bridge's east span. A lane 
 | 45791091467 | 52bc390 | the frontier: overworld (125, -52, -108), race 45783611857 lane 0 | 12000 | 36000 | 6 | cancelled at ~13,000: 6 of 6 in the portal cell; "arrival: no shaft … (cave beside (125, -50, -108) at (125, -50, -107))", every stair "DigFailed … a dig for the stair to (125, -51, -107) failed Refused" with 0 pickaxe uses; "no stairs up from here" x58 |
 | 45796947442 | 9594322 | the frontier: overworld (125, -52, -108) | 12000 | 36000 | 6 | cancelled: Q8's F2 on the same commit held all 6 in the portal ("exit 162": the step-out over the room's air) |
 | 45800988631 | 1e39129 | the frontier: overworld (125, -52, -108) | 12000 | 36000 | 6 | 4 of 6 on the surface by 12,000 (at-12000 snapshots, lanes 1 to 4: (204, 71, -8) food 15; (152, 69, -25) food 5; (241, 83, -41) food 7; (113, 70, -42) food 5); lanes 0, 5 at (128, -49, -109) at 4,800; cancelled at ~14,000 for the next race (runner budget) |
-| 45803039473 | 1e39129 | at-12000 of 45800988631 lane 1 (204, 71, -8), on grass, food 15 | 25000 | 60000 | 6 | running |
+| 45803039473 | 1e39129 | at-12000 of 45800988631 lane 1 (204, 71, -8), on grass, food 15 | 25000 | 60000 | 6 | **3 of 6 reached `stronghold`** (lanes 0, 1, 3); lane 0 at 28,820 at (1568, 55, -7) in stairs to the floor (1624, 17, -30); cancelled at ~29,000 for the stronghold-frontier races |
+| 45807236937 | 1e39129 | stronghold (the frontier), 45800967549 lane 3 | - | 30000 | 3 | running |
+| 45807242060 | 1e39129 | stronghold, 45803039473 lane 0 | - | 30000 | 3 | running |
 
 ## Resume points (real snapshots past the join, from earlier races' case files)
 | snapshot | where | health | note |
