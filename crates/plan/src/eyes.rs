@@ -1015,9 +1015,13 @@ impl Climb {
                     let dig = self
                         .dig
                         .get_or_insert_with(|| crate::dig::Dig::new(w, head, tick));
-                    let (c, act, _) = dig.step(w, tick);
+                    let (c, act, status) = dig.step(w, tick);
                     out.controls = c;
                     out.acts.extend(act);
+                    if !matches!(status, crate::dig::DigStatus::Running) {
+                        // Ended with the block still there: a fresh dig next tick.
+                        self.dig = None;
+                    }
                     return out;
                 }
                 self.dig = None;
@@ -1098,13 +1102,18 @@ impl Climb {
                     out.over = Some(self.picked);
                     return out;
                 }
-                if !body.on_ground {
+                // Landed on the next block down before it is dug (the fall takes a few ticks).
+                if !body.on_ground || feet.1 != top.1 + 1 {
                     return out;
                 }
                 let dig = self
                     .dig
                     .get_or_insert_with(|| crate::dig::Dig::new(w, top, tick));
-                let (c, act, _) = dig.step(w, tick);
+                let (c, act, status) = dig.step(w, tick);
+                if !matches!(status, crate::dig::DigStatus::Running) {
+                    // Ended with the block still there: a fresh dig next tick.
+                    self.dig = None;
+                }
                 out.controls = Controls {
                     forward: false,
                     jump: false,

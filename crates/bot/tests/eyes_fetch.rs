@@ -53,6 +53,9 @@ fn an_eye_resting_on_leaves_9_up_is_fetched_with_a_pillar_and_the_pillar_dug_bac
     }
     let mut sim = Sim::new(CONFIG, m).seeded(19);
     sim.survival.give((ItemKind::Cobblestone, 32));
+    // The overland bot holds pickaxes: cobblestone by hand is about 200 ticks a block (CI run
+    // 45727672998 ran the way down out of its 400 ticks without one).
+    sim.survival.give((ItemKind::StonePickaxe, 1));
     // The eye falls onto the leaves and rests at y 74: 9 over the feet, 3 east.
     sim.place_item((ItemKind::EnderEye, 1), [3.5, 74.5, 0.5]);
     let mut plan = Plan::new(Aim::Hold);
