@@ -778,6 +778,14 @@ way = [[477, 152], [448, 152], [426, 150], [417, 159], [407, 173], [399, 194], [
 # probe 45686594347 read the frontier snapshot's memory: nether_portal blocks at x 22 to 23, y 34
 # to 36, z -20, still lit, so memory is the way and this is the fallback: the lower inside cell.
 portal = [22, 34, -20]
+# The chain's own bridge east (race 45537545167 lane 0), standing, one cell wide at z 194 with no
+# gaps (Q1's probe 45734754593 of the frontier world's region files): the east span's top at y 36
+# (feet 37) from x 400 to 311, the west span's at y 40 (feet 41) from x 307 to 201 (head room
+# clear). [x_east, x_west, feet_y, z]: walked on its own blocks, no new bridging.
+bridges = [[400, 311, 37, 194], [307, 201, 41, 194]]
+# The step between them is a climb of 3 twice (x 310 top 35, 309 top 38, 308 top 37, 307 top 40):
+# blocks placed in order raise x 310 to feet 38 and x 308 to feet 40, so no rise is over 1.
+steps = [[310, 36, 194], [310, 37, 194], [308, 38, 194], [308, 39, 194]]
 # The far lookup reads memory's index this many chunk columns round the feet: 48 is 768 blocks,
 # past the forest's 475 from the portal with room.
 portal_chunks = 48

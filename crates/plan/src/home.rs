@@ -46,6 +46,13 @@ pub struct HomeRules {
     pub way: Vec<[i32; 2]>,
     /// The entry portal's cell by known geography, used only when memory holds no portal.
     pub portal: Option<[i32; 3]>,
+    /// Known bridges the chain built, each `[x_east, x_west, feet_y, z]`: one cell wide along z,
+    /// walked west from `x_east` to `x_west` at `feet_y` with no new bridging.
+    #[serde(default)]
+    pub bridges: Vec<[i32; 4]>,
+    /// Blocks placed (in order) to join two bridges where the step between them is too high.
+    #[serde(default)]
+    pub steps: Vec<[i32; 3]>,
     /// Chunk columns round the feet the far portal lookup reads memory's index in.
     pub portal_chunks: i32,
     /// Ticks between two far lookups.
@@ -72,6 +79,13 @@ impl Default for HomeRules {
         Self {
             pearls_wanted: 14,
             top_up_ticks: 6000,
+            bridges: vec![[400, 311, 37, 194], [307, 201, 41, 194]],
+            steps: vec![
+                [310, 36, 194],
+                [310, 37, 194],
+                [308, 38, 194],
+                [308, 39, 194],
+            ],
             way: vec![
                 [477, 152],
                 [448, 152],
@@ -210,6 +224,13 @@ pub struct HomeState {
     pub cube_resume_at: Option<u64>,
     #[serde(default)]
     pub cube_breakouts: u32,
+    /// Walks on the old bridges, step blocks placed, and the last note of a bridge that failed.
+    #[serde(default)]
+    pub bridge_walks: u32,
+    #[serde(default)]
+    pub steps_placed: u32,
+    #[serde(default)]
+    pub bridge_noted_at: Option<u64>,
     /// Floor blocks laid beside the feet with a cube near.
     #[serde(default)]
     pub rails: u32,
@@ -293,6 +314,11 @@ fn picking_now(p: &Plan) -> bool {
     (p.base.steps == base::CLIMB_STEPS.to_vec() || p.base.steps == TRIP_WOOD_STEPS.to_vec())
         && !p.base.over
 }
+
+/// A walk on an old bridge goes this far at a time.
+pub const BRIDGE_LEG: i32 = 24;
+/// A known bridge this near on the plane (across it) is walked onto first.
+pub const BRIDGE_NEAR: i32 = 8;
 
 /// Bridge blocks the trip keeps on record (the last laid), to dig back when stranded.
 pub const LAID_KEPT: usize = 64;
@@ -934,6 +960,191 @@ impl Plan {
         }
     }
 
+    /// On a known bridge (`[home] bridges`): the walk west along it, 24 at a time on its own
+    /// blocks, no new bridging; at the east span's west end the step blocks are placed first
+    /// (`[home] steps`), then the walk up onto the west span. `None` off every bridge.
+    fn home_bridge(&mut self, w: &World, tick: u64, r: &HomeRules) -> Option<Task> {
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let on = r.bridges.iter().position(|[e, wst, y, z]| {
+            (feet.2 - z).abs() <= 1 && feet.0 <= *e + 1 && feet.0 >= *wst && (feet.1 - y).abs() <= 1
+        });
+        // Beside a span but not on it (race 45733362772's bots stood on their own bridge at y 36
+        // a few blocks south of it): onto it first, at the feet's x.
+        let Some(on) = on else {
+            let [e, wst, y, z] = *r.bridges.iter().find(|[e, wst, y, z]| {
+                (feet.2 - z).abs() <= BRIDGE_NEAR
+                    && feet.0 <= *e + 1
+                    && feet.0 >= *wst
+                    && (feet.1 - y).abs() <= 4
+            })?;
+            let target = (feet.0.clamp(wst, e), y, z);
+            let mut walk = Walk::new(
+                target,
+                Goal::Near {
+                    pos: target,
+                    range: 0.8,
+                },
+                Arrive::Goal,
+                tick,
+            );
+            if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
+                self.expanded += walk.expanded;
+                return None;
+            }
+            self.walks += 1;
+            self.ender.home.bridge_walks += 1;
+            self.note(
+                tick,
+                format!("home: onto the old bridge at {target:?}"),
+                format!("from {feet:?}; walk {}", self.ender.home.bridge_walks),
+            );
+            return Some(Task::Explore(walk));
+        };
+        let [_, west, y, z] = r.bridges[on];
+        // The way points along the bridges at or east of the feet are passed: the heading takes
+        // over past the west end and must not aim back along them.
+        for [px, pz] in &r.way {
+            let near_line = r.bridges.iter().any(|[e, wst, _, bz]| {
+                (pz - bz).abs() <= BRIDGE_NEAR && *px <= *e + 1 && *px >= *wst - BRIDGE_NEAR
+            });
+            let col = (px >> 4, pz >> 4);
+            if near_line && *px >= feet.0 && !self.ender.home.ways_passed.contains(&col) {
+                self.ender.home.ways_passed.push(col);
+            }
+        }
+        let next = r.bridges.get(on + 1).copied();
+        // At the span's west end with a span beyond: the step blocks, then the walk up.
+        let target = if feet.0 <= west + 1
+            && let Some([e2, _, y2, z2]) = next
+        {
+            if let Some(t) = self.home_step(w, tick, r) {
+                return Some(t);
+            }
+            (e2, y2, z2)
+        } else if feet.0 <= west + 1 {
+            return None;
+        } else {
+            ((feet.0 - BRIDGE_LEG).max(west), y, z)
+        };
+        let mut walk = Walk::new(
+            target,
+            Goal::Near {
+                pos: target,
+                range: 0.8,
+            },
+            Arrive::Goal,
+            tick,
+        );
+        if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
+            self.expanded += walk.expanded;
+            if self
+                .ender
+                .home
+                .bridge_noted_at
+                .is_none_or(|t| tick >= t + 600)
+            {
+                self.ender.home.bridge_noted_at = Some(tick);
+                self.note(
+                    tick,
+                    format!("home: no walk on the old bridge to {target:?}"),
+                    format!("from {feet:?}; the heading goes on"),
+                );
+            }
+            return None;
+        }
+        self.walks += 1;
+        self.ender.home.bridge_walks += 1;
+        self.note(
+            tick,
+            format!("home: on the old bridge to {target:?}"),
+            format!("from {feet:?}; walk {} on it", self.ender.home.bridge_walks),
+        );
+        Some(Task::Explore(walk))
+    }
+
+    /// The next step block not yet in place, placed from where the bot stands on the top of the
+    /// block under it (`None` when all are placed, or none is in reach or clickable).
+    fn home_step(&mut self, w: &World, tick: u64, r: &HomeRules) -> Option<Task> {
+        let body = w.body?;
+        let mut cells = path::Cells::new(w);
+        let eye = [body.pos[0], body.pos[1] + 1.62, body.pos[2]];
+        let c = r
+            .steps
+            .iter()
+            .map(|[x, y, z]| (*x, *y, *z))
+            .find(|c| !matches!(cells.at(*c), path::Class::Solid))?;
+        let lava_beside = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
+            .iter()
+            .any(|(dx, dy, dz)| cells.at((c.0 + dx, c.1 + dy, c.2 + dz)) == path::Class::Lava);
+        let under = (c.0, c.1 - 1, c.2);
+        let reach = (0..3)
+            .map(|i| (eye[i] - (f64::from([c.0, c.1, c.2][i]) + 0.5)).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if cells.at(c) != path::Class::Clear
+            || lava_beside
+            || cells.at(under) != path::Class::Solid
+            || reach > crate::heading::RESTOCK_REACH
+        {
+            if self
+                .ender
+                .home
+                .bridge_noted_at
+                .is_none_or(|t| tick >= t + 600)
+            {
+                self.ender.home.bridge_noted_at = Some(tick);
+                self.note(
+                    tick,
+                    format!("home: the step block at {c:?} cannot be placed"),
+                    format!(
+                        "{:?}, lava beside {lava_beside}, under {:?}, {reach:.1} off",
+                        cells.at(c),
+                        cells.at(under)
+                    ),
+                );
+            }
+            return None;
+        }
+        let item = endermen::FILLER
+            .iter()
+            .copied()
+            .find(|k| craft::count(w, *k) > 0)?;
+        if w.window.is_some()
+            || w.click.is_some()
+            || !self.acts.is_empty()
+            || tick < self.shelter_at
+        {
+            return Some(Task::Idle);
+        }
+        match crate::hold::toward(w, item) {
+            crate::hold::Hold::Held => {
+                self.shelter_at = tick + crate::SHELTER_EVERY_TICKS;
+                self.ender.home.steps_placed += 1;
+                self.acts.push(world::Act::UseOn {
+                    pos: world::BlockPos::new(under.0, under.1, under.2),
+                    face: 1,
+                });
+                self.note(
+                    tick,
+                    format!("home: step block at {c:?}"),
+                    format!(
+                        "joining the old bridges; {item:?} on {under:?}; {} placed",
+                        self.ender.home.steps_placed
+                    ),
+                );
+                self.retry_at = tick + 1;
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Act(a) => {
+                self.acts.push(a);
+                Some(Task::Idle)
+            }
+            crate::hold::Hold::Wait => Some(Task::Idle),
+            crate::hold::Hold::Missing => None,
+        }
+    }
+
     /// The tunnel out of a cube pocket in hand: on through rock toward its end until
     /// `CUBE_TUNNEL_OUT` along with no cube within `CUBE_CLEAR`; `None` with none in hand, or it
     /// ended (noted). With no tunnel route the near cube is fought (the defence's rest window).
@@ -1244,6 +1455,9 @@ impl Plan {
                     w.feet_biome()
                 ),
             );
+        }
+        if let Some(t) = self.home_bridge(w, tick, &r) {
+            return Some(t);
         }
         if d <= r.approach {
             return self.home_approach(w, tick, portal);
