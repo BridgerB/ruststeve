@@ -2018,6 +2018,20 @@ impl Plan {
             .iter()
             .copied()
             .find(|k| craft::count(w, *k) > 0)?;
+        // A lava fall is sealed from the top down: a cell with lava over it is replaced by the
+        // highest lava cell of its column (Q6's race 45742933645: the fall's foot sealed at
+        // (24, 35, -19), the fall spread a level up and into the standing cell, 19.8 to 0.9);
+        // a column whose top is out of reach is not touched.
+        let lava: Vec<Cell> = lava
+            .into_iter()
+            .filter_map(|c| {
+                let mut top = c;
+                while cells.at((top.0, top.1 + 1, top.2)) == path::Class::Lava {
+                    top = (top.0, top.1 + 1, top.2);
+                }
+                reach(top).then_some(top)
+            })
+            .collect();
         let (target, click, face) = lava
             .into_iter()
             .filter(|c| reach(*c) && *c != feet)

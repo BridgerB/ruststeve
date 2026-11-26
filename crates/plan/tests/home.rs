@@ -1039,3 +1039,38 @@ fn a_known_span_is_never_a_restock_cell() {
     assert!(!home::near_span(span, (320, 36, 197)), "three off the line");
     assert!(!home::near_span(span, (320, 32, 194)), "well under it");
 }
+
+#[test]
+fn a_lava_fall_beside_the_portal_is_sealed_from_the_top() {
+    // Q6's race 45742933645: the foot of a fall sealed, the fall spread over it into the
+    // standing cell.
+    let mut w = nether();
+    kit(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::Netherrack, 64));
+    for y in 64..=65 {
+        set(&mut w, (11, y, 8), BlockKind::NetherPortal);
+        remember(&mut w, home::NETHER, (11, y, 8), BlockKind::NetherPortal);
+    }
+    set(&mut w, (11, 63, 8), BlockKind::Obsidian);
+    // A fall beside the portal's foot: lava at (11, 64, 9) with lava over it at (11, 65, 9).
+    set(&mut w, (11, 64, 9), BlockKind::Lava);
+    set(&mut w, (11, 65, 9), BlockKind::Lava);
+    set(&mut w, (11, 66, 9), BlockKind::Netherrack);
+    let mut p = racer();
+    p.ender.phase = EnderPhase::Home;
+    p.ender.home.since = Some(0);
+    p.ender.home.top_up_over = true;
+    p.ender.home.kit_begun = true;
+    p.ender.home.kit_over = true;
+    run(&mut p, &mut w, 100, 3);
+    assert!(
+        noted(&p, "home: lava sealed at (11, 65, 9)"),
+        "the top of the fall first: {:?}",
+        notes(&p)
+    );
+    assert!(
+        !noted(&p, "home: lava sealed at (11, 64, 9)"),
+        "{:?}",
+        notes(&p)
+    );
+}
