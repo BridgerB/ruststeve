@@ -1093,11 +1093,11 @@ fn tripper(t: Option<Arc<make::Table>>) -> Plan {
 }
 
 /// A cube of `size` 2 blocks east of the feet at (8, 64, 8), lava beside the feet (a span's
-/// sides), no filler to rail with; how long the plan defends in 20 ticks.
+/// sides), no filler to rail or guard with; how long the plan defends in 20 ticks.
 fn defends_a_cube_on_an_edge(size: i32) -> (u32, Plan) {
     let mut w = nether();
     kit(&mut w);
-    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 3));
+    w.inventory.slots.remove(&38);
     remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
     set(&mut w, (8, 63, 7), BlockKind::Lava);
     set(&mut w, (8, 63, 9), BlockKind::Lava);
@@ -1144,7 +1144,7 @@ fn a_large_cube_by_a_lava_edge_is_never_struck() {
 }
 
 #[test]
-fn rails_are_laid_under_the_keep_down_to_four() {
+fn rails_are_laid_under_the_keep_down_to_none() {
     // Race 45749508716 lane 3 held 10 filler, under the keep of 24, and laid no rail.
     let mut w = nether();
     kit(&mut w);
@@ -1152,8 +1152,10 @@ fn rails_are_laid_under_the_keep_down_to_four() {
     set(&mut w, (9, 63, 8), BlockKind::Lava);
     add_cube(&mut w, 50, [8.5, 64.0, 13.5]);
     assert!(home::rail_wanted(&w).is_some(), "10 held: a rail");
-    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 4));
-    assert!(home::rail_wanted(&w).is_none(), "4 held: none");
+    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 1));
+    assert!(home::rail_wanted(&w).is_some(), "1 held: a rail");
+    w.inventory.slots.remove(&38);
+    assert!(home::rail_wanted(&w).is_none(), "none held: none");
 }
 
 #[test]
@@ -1282,9 +1284,11 @@ fn the_guard_lays_a_rail_then_a_block_at_the_feet_on_each_lava_side() {
         home::guard_wanted(&w, axis),
         Some(((8, 64, 7), (9, 64, 7), 4))
     );
-    // No axis, or filler at 4: none.
+    // No axis, or no filler: none (Bridger: down to 0).
     assert_eq!(home::guard_wanted(&w, None), None);
-    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 4));
+    w.inventory.slots.insert(38, (ItemKind::Cobblestone, 1));
+    assert!(home::guard_wanted(&w, axis).is_some(), "one held: laid");
+    w.inventory.slots.remove(&38);
     assert_eq!(home::guard_wanted(&w, axis), None);
 }
 

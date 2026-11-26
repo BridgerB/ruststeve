@@ -353,8 +353,9 @@ pub const KNOCKERS: &[data::EntityKind] = &[
 pub const KNOCK_RANGE: f64 = 16.0;
 /// A rail is laid only on a side that drops to lava within this.
 pub const RAIL_DROP: i32 = 8;
-/// Rails are laid while more filler than this is held (the coordinator, 2026-11-26: down to 4).
-pub const RAIL_FLOOR: i64 = 4;
+/// Rails are laid while more filler than this is held (Bridger, 2026-11-26: "do the rails
+/// always": down to 0).
+pub const RAIL_FLOOR: i64 = 0;
 
 /// A magma cube's size: its own metadata index 16 (`Slime.ID_SIZE`, an int: 1 small, 2 medium,
 /// 4 large), sent only when not the default 1.
@@ -365,22 +366,19 @@ pub fn cube_size(e: &world::Entity) -> i32 {
     }
 }
 
-/// A side whose drop leads to lava this far under the feet's level is guarded (the coordinator:
-/// within 10; the west span is 9 over the sea).
-pub const GUARD_DROP: i32 = 10;
 /// The span's guard restock digs at most this over the keep (the coordinator: 2 stacks).
 pub const GUARD_EXTRA: i64 = 128;
 
-/// The next block of the guard (`Plan::home_guard`): for each side across `axis`, a feet-level
-/// cell open with lava within `GUARD_DROP` under it is guarded. Its block is clicked onto a
+/// The next block of the guard (`Plan::home_guard`): for each side across `axis`, an open
+/// feet-level cell (no floor under it, or only a rail over a drop) is guarded. Its block is clicked onto a
 /// guard block beside it along the axis, else onto the floor-level block under it (the rail),
 /// else that rail is laid first, clicked onto the side of the block stood on. `(cell to fill,
 /// block clicked, face)`; `None` with nothing to guard, no axis, no solid block stood on, or
-/// filler at `RAIL_FLOOR` or under.
+/// no filler (Bridger: down to 0).
 pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, i8)> {
     let (ax, az) = axis?;
     let body = w.body?;
-    if path::bridge_blocks(w) <= RAIL_FLOOR {
+    if path::bridge_blocks(w) <= 0 {
         return None;
     }
     let feet = path::stand_cell(w, body.pos);
@@ -399,8 +397,11 @@ pub fn guard_wanted(w: &World, axis: Option<(i32, i32)>) -> Option<(Cell, Cell, 
     };
     [(az, ax), (-az, -ax)].into_iter().find_map(|(sx, sz)| {
         let t = (feet.0 + sx, feet.1, feet.2 + sz);
+        // Open: nothing at the feet's level and no floor under it, or only a floor-level rail
+        // over a drop (Bridger, 2026-11-26: "do the rails always": any open side, not only
+        // lava under it).
         if cells.at(t) != path::Class::Clear
-            || !(1..=GUARD_DROP + 1).any(|d| cells.at((t.0, t.1 - d, t.2)) == path::Class::Lava)
+            || (1..=2).all(|d| cells.at((t.0, t.1 - d, t.2)) == path::Class::Solid)
         {
             return None;
         }
@@ -1138,14 +1139,26 @@ impl Plan {
                 self.ender.home.axis = Some((dx, dz));
             }
         }
+        // No step yet: the axis toward the point aimed at.
+        if self.ender.home.axis.is_none()
+            && let Some((px, pz)) = self.ender.home.aim
+        {
+            let (dx, dz) = (px - feet.0, pz - feet.2);
+            self.ender.home.axis = Some(if dx.abs() >= dz.abs() {
+                (dx.signum(), 0)
+            } else {
+                (0, dz.signum())
+            })
+            .filter(|a| *a != (0, 0));
+        }
         self.ender.home.last_feet = Some(feet);
         self.ender.home.axis
     }
 
     /// The guard (the coordinator, 2026-11-26; race 45758211666: lane 1 knocked off the west
     /// span 9 over the sea by a cube that spawned beside it): a block at the feet's level on each
-    /// side across the trip's axis whose drop leads to lava, laid before the next step, mob or no
-    /// mob. Noted and counted; `None` with nothing to guard or no filler over `RAIL_FLOOR`.
+    /// side across the trip's axis that is open (Bridger, 2026-11-26: "do the rails always"), laid
+    /// before the next step, mob or no mob. Noted and counted; `None` with nothing to guard or no filler.
     fn home_guard(&mut self, w: &World, tick: u64) -> Option<Task> {
         let axis = self.home_axis(w);
         let (at, click, face) = guard_wanted(w, axis)?;
@@ -1173,7 +1186,7 @@ impl Plan {
                         tick,
                         format!("home: guard laid at {at:?}"),
                         format!(
-                            "a side across the axis {axis:?} drops to lava within {GUARD_DROP}; {item:?} on {click:?} face {face}; guard {}, filler {}",
+                            "a side across the axis {axis:?} is open; {item:?} on {click:?} face {face}; guard {}, filler {}",
                             self.ender.home.guards,
                             path::bridge_blocks(w)
                         ),
