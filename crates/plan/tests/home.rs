@@ -1015,3 +1015,20 @@ fn the_old_bridges_step_is_built_and_walked_west() {
         notes(&p)
     );
 }
+
+#[test]
+fn a_known_span_is_never_a_restock_cell() {
+    // Q1's probe 45740087576: the bot's own restock dug the old bridge's step and 7 cells of it.
+    let span = [400, 311, 37, 194];
+    assert!(home::near_span(span, (320, 36, 194)), "the span's floor");
+    assert!(
+        home::near_span(span, (315, 37, 195)),
+        "beside its line at its height"
+    );
+    assert!(
+        home::near_span(span, (310, 36, 194)),
+        "one past its west end"
+    );
+    assert!(!home::near_span(span, (320, 36, 197)), "three off the line");
+    assert!(!home::near_span(span, (320, 32, 194)), "well under it");
+}

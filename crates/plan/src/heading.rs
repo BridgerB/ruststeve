@@ -1633,6 +1633,19 @@ impl Plan {
         Some(())
     }
 
+    /// A cell of a known bridge (`[home] bridges`), or within 1 of its line at its height: never
+    /// dug for filler (Q1's probe 45740087576: the bot's own restock dug the old bridge's step and a
+    /// 7-cell gap out of its east span).
+    pub(crate) fn on_known_span(&self, c: Cell) -> bool {
+        self.ender.phase == crate::endermen::EnderPhase::Home
+            && self.table.as_ref().is_some_and(|t| {
+                t.home
+                    .bridges
+                    .iter()
+                    .any(|[e, wst, y, z]| crate::home::near_span([*e, *wst, *y, *z], c))
+            })
+    }
+
     /// Filler a leg's bridges leave unspent: `HOME_KEEP` on the way home, else `KEEP`.
     fn heading_keep(&self) -> i64 {
         if self.ender.phase == crate::endermen::EnderPhase::Home {
@@ -1656,7 +1669,11 @@ impl Plan {
         let ahead = home.then_some(h.dir);
         let look = if home { RESTOCK_LOOK } else { RESTOCK_REACH };
         let cell = (filler < to && r.digs < max_digs)
-            .then(|| restock_cells(w, ahead, look).into_iter().next())
+            .then(|| {
+                restock_cells(w, ahead, look)
+                    .into_iter()
+                    .find(|c| !self.on_known_span(*c))
+            })
             .flatten();
         // Past the dig's reach: a walk to beside it first.
         if let Some(c) = cell
@@ -1682,7 +1699,11 @@ impl Plan {
             }
             self.expanded += walk.expanded;
         }
-        let cell = cell.and_then(|_| restock_cells(w, ahead, RESTOCK_REACH).into_iter().next());
+        let cell = cell.and_then(|_| {
+            restock_cells(w, ahead, RESTOCK_REACH)
+                .into_iter()
+                .find(|c| !self.on_known_span(*c))
+        });
         if let Some(c) = cell {
             r.digs += 1;
             let n = r.digs;
