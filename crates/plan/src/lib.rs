@@ -192,6 +192,12 @@ const SHELTER_BLOCKS: &[data::ItemKind] = &[
     data::ItemKind::CobbledDeepslate,
     data::ItemKind::NetherBricks,
     data::ItemKind::Netherrack,
+    // >>> E3 (issue 20e): in the End the pack may hold only end stone (E5's race 45886819862
+    // lane 1: "no block held for a pocket" with 192 end stone, killed by an enderman). Last, so
+    // the pillars' end stone goes only when nothing else is held.
+    data::ItemKind::EndStone,
+    data::ItemKind::Obsidian,
+    // <<< E3
 ];
 /// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
 /// `SEAL_EVERY_TICKS`).

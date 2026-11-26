@@ -570,3 +570,70 @@ fn on_a_laid_block_within_reach_of_the_fountain_the_bunker_is_dug_there() {
         notes(&p)
     );
 }
+
+#[test]
+fn the_bunker_opened_the_bot_walks_up_its_stair_onto_the_ground() {
+    // Race 45890445738: both bots stood half on the stair's first step for 14,000 ticks.
+    let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+    for c in [
+        (12, 60, 0),
+        (12, 61, 0),
+        (12, 62, 0),
+        (11, 61, 0),
+        (11, 62, 0),
+        (11, 63, 0),
+        (10, 62, 0),
+        (10, 63, 0),
+        (9, 63, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.end.exit_walk = true;
+    p.step(&w);
+    assert!(
+        noted(&p, "end: up the bunker's stair to (8, 64, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.task.name(), "explore");
+}
+
+#[test]
+fn from_the_first_end_tick_every_look_is_straight_down() {
+    // E5's race 45886819862 lane 1: the arrival's pitch 0 stared at an enderman at tick 60.
+    let mut w = platform([100.5, 49.0, 0.5]);
+    w.player.pitch = 0.0;
+    with_entity(&mut w, 41, EntityKind::Enderman, [90.5, 49.0, 0.5]);
+    let mut p = racer();
+    // No body yet (the arrival's teleport not answered): down.
+    let body = w.body.take();
+    assert_eq!(p.step(&w).pitch, Some(90.0));
+    w.body = body;
+    assert_eq!(p.step(&w).pitch, Some(90.0));
+}
+
+#[test]
+fn a_pocket_is_built_from_end_stone_when_that_is_all_that_is_held() {
+    // E5's race 45886819862 lane 1: "no block held for a pocket" with 192 end stone.
+    let mut w = world(4, 0..=7, [12.5, 64.0, 0.5]);
+    w.inventory.slots.clear();
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 64));
+    w.held = 0;
+    with_entity(&mut w, 9, EntityKind::Enderman, [16.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&9) {
+        e.metadata.insert(17, MetaValue::Bool(true));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    for _ in 0..3 {
+        p.step(&w);
+    }
+    assert!(noted(&p, "pocket block 1"), "{:?}", notes(&p));
+    assert!(!noted(&p, "no block held"), "{:?}", notes(&p));
+}
