@@ -1135,12 +1135,10 @@ fn a_large_cube_by_a_lava_edge_is_never_struck() {
         notes(&p)
     );
     assert_eq!(p.ender.home.big_cubes_spared, 1);
-    // A medium one too; a small one (no split) is fought as before.
+    // A medium one too, and a small one (race 45783532164 lane 0: knocked into the sea fighting
+    // one by the edge).
     assert_eq!(defends_a_cube_on_an_edge(2).0, 0);
-    assert!(
-        defends_a_cube_on_an_edge(1).0 > 0,
-        "a small cube on the bot is fought"
-    );
+    assert_eq!(defends_a_cube_on_an_edge(1).0, 0);
 }
 
 #[test]
@@ -1287,7 +1285,11 @@ fn the_guard_lays_a_rail_then_a_block_at_the_feet_on_each_lava_side() {
     // No axis, or no filler: none (Bridger: down to 0).
     assert_eq!(home::guard_wanted(&w, None), None);
     w.inventory.slots.insert(38, (ItemKind::Cobblestone, 1));
-    assert!(home::guard_wanted(&w, axis).is_some(), "one held: laid");
+    assert_eq!(
+        home::guard_wanted(&w, axis),
+        None,
+        "one held, no knocker near: the keep is kept for the rails"
+    );
     w.inventory.slots.remove(&38);
     assert_eq!(home::guard_wanted(&w, axis), None);
 }
@@ -1442,7 +1444,7 @@ fn a_provoked_enderman_on_the_way_home_is_held_from_at_most_a_minute() {
         id: 70,
         uuid: [0; 16],
         kind: data::EntityKind::Enderman.id(),
-        x: 11.5,
+        x: 28.5,
         y: 64.0,
         z: 8.5,
         velocity: [0.0; 3],
@@ -1725,4 +1727,95 @@ fn feet_at_a_soul_sand_top_over_a_dug_cell_stand_in_the_cell_over_it() {
     // Off soul sand's top nothing changes.
     assert_eq!(plan::path::stand_cell(&w, [22.5, 69.9, 57.5]), (22, 69, 57));
     assert_eq!(plan::path::stand_cell(&w, [22.5, 70.0, 57.5]), (22, 70, 57));
+}
+
+#[test]
+fn an_angry_enderman_still_on_the_bot_at_the_cap_is_never_walked_away_from() {
+    // Q9's race 45776886803 lane 0: released at the cap with the enderman 2 off; four hits in 60
+    // ticks, dead.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 50, 8), BlockKind::NetherPortal);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 71,
+        uuid: [0; 16],
+        kind: data::EntityKind::Enderman.id(),
+        x: 10.5,
+        y: 64.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    w.step(&Event::Packet(S2c::SetEntityData {
+        id: 71,
+        entries: vec![(
+            plan::endermen::CREEPY_INDEX,
+            protocol::metadata::MetaValue::Bool(true),
+        )],
+    }));
+    let mut p = tripper(None);
+    run(&mut p, &mut w, 100, home::ENDER_HOLD_MAX + 40);
+    assert!(!noted(&p, "home: the trip begun"), "{:?}", notes(&p));
+    assert!(p.ender.home.enders_left.is_empty());
+    assert!(
+        noted(&p, "home: fight enderman 71 from the pocket"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn under_the_danger_line_in_rock_and_quiet_the_trip_goes_on_by_covered_tunnel() {
+    // B14 (race 45783532164) lane 3 held a danger pocket at 5.6 from tick 9,240 to the cap.
+    let mut w = nether();
+    kit(&mut w);
+    remember(&mut w, home::NETHER, (-300, 40, 8), BlockKind::NetherPortal);
+    for y in 40..=41 {
+        set(&mut w, (8, y, 8), BlockKind::Air);
+    }
+    w.body = w.body.map(|b| physics::Body {
+        pos: [8.5, 40.0, 8.5],
+        ..b
+    });
+    w.player.pos = Some([8.5, 40.0, 8.5]);
+    w.player.health = Some(5.0);
+    w.player.food = Some(8);
+    let mut p = tripper(None);
+    p.ender.home.trip_begun = true;
+    p.ender.home.aim = Some((-200, 8));
+    run(&mut p, &mut w, 100, 1);
+    assert!(
+        noted(&p, "home: on under the danger line by covered tunnel"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.ender.home.danger_tunnels, 1);
+    // A ghast in sight: the pocket.
+    let mut w2 = nether();
+    kit(&mut w2);
+    w2.player.health = Some(5.0);
+    w2.step(&Event::Packet(S2c::AddEntity {
+        id: 81,
+        uuid: [0; 16],
+        kind: data::EntityKind::Ghast.id(),
+        x: 8.5,
+        y: 72.0,
+        z: 40.5,
+        velocity: [0.0; 3],
+    }));
+    let mut p2 = tripper(None);
+    p2.ender.home.trip_begun = true;
+    p2.ender.home.aim = Some((-200, 8));
+    run(&mut p2, &mut w2, 100, 1);
+    assert_eq!(p2.ender.home.danger_tunnels, 0);
+}
+
+#[test]
+fn with_no_pickaxe_the_shaft_digs_stone_and_deepslate_by_hand() {
+    // The frontier bot (race 45783611857 lane 0) stands in the overworld portal with no pickaxe.
+    use plan::arrival::{MAX_BREAK, MAX_BREAK_HAND, max_break};
+    assert_eq!(max_break(&[ItemKind::Netherrack]), MAX_BREAK_HAND);
+    assert_eq!(max_break(&[ItemKind::StonePickaxe]), MAX_BREAK);
+    let by_hand = |b: BlockKind| data::dig::break_ticks(b, None, false, true);
+    assert!(by_hand(BlockKind::Stone).is_some_and(|t| t <= MAX_BREAK_HAND));
+    assert!(by_hand(BlockKind::Deepslate).is_some_and(|t| t <= MAX_BREAK_HAND));
 }

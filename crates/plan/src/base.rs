@@ -112,7 +112,7 @@ impl Default for Base {
             wait_ticks: 200,
             pause_ticks: 6000,
             pause_max: 1,
-            home_logs: 16,
+            home_logs: 48,
             home_sticks: 8,
             home_picks: 2,
             home_pick_uses: 40,

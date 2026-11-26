@@ -727,7 +727,10 @@ pause_max = 1
 # (plan::base::HOME_STEPS). 16 stems are 64 planks: a carried table 4, two spare wooden pickaxes 6
 # and their sticks, 8 sticks for stone pickaxes on the overworld climb (2 each), a placed table 4,
 # and the rest for tables and sticks on the way (the plan's 19d.1). Warped planks do not burn.
-home_logs = 16
+# 48 (the coordinator, 2026-11-26): the trip costs about 3 pickaxe uses a block over about 800
+# blocks, 2,400 uses; a stem is 4 planks, about 1.3 wooden pickaxes of 59, so about 40 stems (Q10's
+# door race 45783611857: six bots at the door with no pickaxe, 277 uses short at tick 700).
+home_logs = 48
 home_sticks = 8
 # Two spare wooden pickaxes (59 uses each) for the climb from the overworld portal at about y -50
 # (the plan's 19d.6), each counted only with spare_uses' 40 uses or more left.

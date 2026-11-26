@@ -749,7 +749,7 @@ impl Plan {
 
     /// Not burning, and no hostile (neutrals aside) within `CARRY_CLEAR` in the last
     /// `CARRY_QUIET` ticks; the last one seen is kept.
-    fn carry_quiet(&mut self, w: &World, tick: u64) -> bool {
+    pub(crate) fn carry_quiet(&mut self, w: &World, tick: u64) -> bool {
         let Some(body) = w.body else {
             return false;
         };
