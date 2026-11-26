@@ -715,3 +715,24 @@ fn inside_is_the_stage_box() {
     assert!(!stronghold::inside(&r, (cx - 5, r.floor_y + 1, cz + 4), 7));
     assert!(!stronghold::inside(&r, (cx, r.floor_y, cz + 5), 7));
 }
+
+/// Boxed in where it stands (a hut built wider than its exit): the far walk dies at once and a
+/// wall is dug toward the leg, never a turn (race 45725479883: both lanes boxed from dawn).
+#[test]
+fn a_boxed_bot_digs_out() {
+    let mut s = Stage::over((-16, 200), (-32, 32), 63, 127);
+    s.fill((-3, 3), (64, 67), (-3, 3), BlockKind::Netherrack);
+    s.fill((0, 0), (64, 65), (0, 0), BlockKind::Air);
+    let mut w = load(&s, [0.5, 64.0, 0.5]);
+    give(&mut w, 0, ItemKind::Cobblestone, 64);
+    noon(&mut w, 6000);
+    let mut p = Plan::with_table(Aim::Race, table());
+    p.overland.fix = Some(([600.5, 0.5], 20.0));
+    let t = p.overland_task(&w, 0);
+    let n = notes(&p);
+    assert!(matches!(t, Some(Task::Dig(_))), "{t:?} {n:#?}");
+    assert!(
+        n.iter().any(|n| n.starts_with("overland dig out")),
+        "{n:#?}"
+    );
+}

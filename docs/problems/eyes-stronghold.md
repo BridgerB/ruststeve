@@ -100,3 +100,9 @@ A development race on d52804d (`dev-overworld-eyes`, the bot at the surface by t
 - **Cause 1, lane 1**: at throw 2's spot (tick 2,660), Q3's guard read a canopy 12 out on the bearing, and the throw waited for good. Nothing moved the bot; it idled 21,000 ticks, its stuck snapshot published. Fix (b3293bc): after 600 ticks waiting at the spot, it moves 20 blocks round the compass, 4 times at most ("overland throw spot moved").
 - **Cause 2, lane 0**: from tick 35,500 to the cap, `junk_place` put cobblestone down 270 times, one item a task against stacks of 64 that never freed a slot. Each placed block was dug back by the last steps. Fix: a held-back block is placed only from a stack of 8 or under (`JUNK_PLACE_MAX`); a bigger stack is released from the hold and dropped whole ("junk released").
 - **Leather** is off `[survival] junk` (d52804d): kept, 4 items in one slot.
+
+### Wall 7: boxed in by its own hut (race 45725479883, 2026-11-25)
+A development race on 5c62f28 (`dev-overworld-eyes`, from the frontier), 2 lanes x 1 bot, cap 48,000. Development knowledge, never evidence.
+- **What worked**: lane 1's throw spot moved after 620 ticks of waiting ("overland throw spot moved (1 of 4)"); throw 2 went and the fix came (err 70). Both lanes walked east and huted at dusk.
+- **Cause**: the hut's exit digs one cell on the fix's axis at the feet and the head. Lane 1's hut took 22 blocks (the body moved while it was built), so those cells were air inside it and the wall stood beyond. From dawn (tick 17,660) every far walk died in 4 expansions: 302 failed in a row, turning the bearing each time, to the cap. Lane 0 was the same at (55, 80, -36), 2 expansions.
+- **Fix**: a far walk that dies within `ENCLOSED_EXPANSIONS` (8) is boxed in. A wall cell is dug toward the leg's target, else on any side, head before feet, never infested or the furnace ("overland dig out").
