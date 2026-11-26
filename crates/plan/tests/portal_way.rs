@@ -85,7 +85,7 @@ fn set(w: &mut World, c: (i32, i32, i32), k: BlockKind) {
 /// The entry portal, shifted, with its south hill: netherrack x 4 to 19, y 64 to `top`, z 10 to
 /// 24 (the row behind the standing cell solid, as z -18 is at the real portal), the standing cell
 /// on cobblestone with lava beside it at (10, 65, 9) and under its neighbour at (12, 64, 9), the
-/// lava sea to the north at y 63.
+/// lava sea to the north at y 62 under open air.
 fn portal_and_hill(w: &mut World, top: i32) {
     for x in 4..=19 {
         for y in 64..=top {
@@ -120,9 +120,12 @@ fn portal_and_hill(w: &mut World, top: i32) {
     for c in [(10, 65, 9), (12, 64, 9), (13, 64, 9), (13, 65, 9)] {
         set(w, c, BlockKind::Lava);
     }
+    // The lava sea a block down, no floor under the north face (as at the real portal: air
+    // under (22, 34, -21), probe 45740955296), so no seal ever makes one.
     for x in 4..=19 {
         for z in 0..=7 {
-            set(w, (x, 63, z), BlockKind::Lava);
+            set(w, (x, 63, z), BlockKind::Air);
+            set(w, (x, 62, z), BlockKind::Lava);
         }
     }
 }
