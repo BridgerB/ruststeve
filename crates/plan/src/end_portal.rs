@@ -1670,15 +1670,26 @@ impl Plan {
             return give_up(self, format!("{} steps in", r.entries), tick);
         }
         self.end_portal.entries += 1;
-        let mut walk = Walk::new(e.inside, Goal::Block { pos: e.inside }, Arrive::Goal, tick);
-        walk.waypoints = Some(e.way());
-        walk.more.kinds = vec![
-            path::MoveKind::JumpUp,
-            path::MoveKind::JumpUp,
-            path::MoveKind::JumpUp,
-            path::MoveKind::Walk,
-            path::MoveKind::Walk,
-        ];
+        // The goal is the cell past the portal cell (race 45884543903 lane 0: a goal of the portal
+        // cell itself was met by the stand cell with the body at z -32.0 still on the frame's
+        // top, the walk done and the step in "TargetLost", three times). Already up at the
+        // frame's height, only the last step.
+        let deeper = e.deeper();
+        let mut walk = Walk::new(deeper, Goal::Block { pos: deeper }, Arrive::Goal, tick);
+        let up_already = feet.1 >= e.frame[1] && flat(feet, e.inside) <= 1.5;
+        if up_already {
+            walk.waypoints = Some(vec![e.inside, deeper]);
+            walk.more.kinds = vec![path::MoveKind::Walk, path::MoveKind::Walk];
+        } else {
+            walk.waypoints = Some(e.way());
+            walk.more.kinds = vec![
+                path::MoveKind::JumpUp,
+                path::MoveKind::JumpUp,
+                path::MoveKind::JumpUp,
+                path::MoveKind::Walk,
+                path::MoveKind::Walk,
+            ];
+        }
         walk.route = Some(path::Status::Found);
         self.walks += 1;
         self.note(
@@ -1691,7 +1702,7 @@ impl Plan {
         );
         Some(Task::Enter(Box::new(crate::Enter {
             walk,
-            cell: e.inside,
+            cell: deeper,
             inside_since: None,
             from: Some(OVERWORLD.to_owned()),
         })))
