@@ -1200,11 +1200,13 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         }
         // The way round held is kept until it is reached or blocked (race 45873410249 lane 0:
         // the way round and the head stand swapped every tick 9 off the fountain).
+        // Not dropped for the way from the feet to it: that judgement flips as the feet near the
+        // head's strip (E6's end_loop: the way round and the stand swapped every 8 ticks, 15,000
+        // ticks).
         if let Some(wp) = ask.way
             && flat(feet, mid(wp)) > STAND_NEAR
             && !before_head(&v, mid(wp))
             && !breathed(&clouds, mid(wp), 0.0)
-            && way_clear(&v, feet, mid(wp))
         {
             return Want::Go(wp, "round the head");
         }
