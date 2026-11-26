@@ -413,6 +413,9 @@ fn a_filled_door_is_dug_open_again() {
         set(&mut w, (11, y, 10), BlockKind::Air);
     }
     set(&mut w, (11, 65, 9), BlockKind::Netherrack);
+    // Its neighbour filled too: once the approach seals the lava under it, it would be a second
+    // standing cell (the real door has lava falling there).
+    set(&mut w, (12, 65, 9), BlockKind::Netherrack);
     let mut p = homeward();
     p.ender.home.way_in.door = Some(((11, 65, 9), (11, 65, 10)));
     let mut dug = false;
