@@ -54,7 +54,7 @@ pub struct EyeRules {
     pub apex_out: f64,
     pub apex_up: f64,
     pub climb_rise_max: f64,
-    pub climb_near: f64,
+    pub climb_step_ticks: u64,
     pub climb_beside: f64,
     pub climb_within: f64,
     pub climb_ticks: u64,
@@ -106,7 +106,7 @@ impl Default for EyeRules {
             apex_out: 12.0,
             apex_up: 9.1,
             climb_rise_max: 12.0,
-            climb_near: 4.0,
+            climb_step_ticks: 60,
             climb_beside: 1.2,
             climb_within: 1.5,
             climb_ticks: 600,
@@ -837,6 +837,11 @@ pub struct Climb {
     pub cuts: u32,
     #[serde(default)]
     pub step: Option<path::Cell>,
+    /// When the step began, and the floors laid under steps.
+    #[serde(default)]
+    pub step_since: Option<u64>,
+    #[serde(default)]
+    pub floors: u32,
 }
 
 /// What a climb's tick gives the throw.
@@ -868,6 +873,22 @@ fn cut_step(feet: path::Cell, p: [f64; 3]) -> path::Cell {
         (feet.0 + dx.signum(), feet.1, feet.2)
     } else {
         (feet.0, feet.1, feet.2 + dz.signum())
+    }
+}
+
+/// A cut's step is done this near its cell's middle, on the plane.
+const CUT_STEP_DONE: f64 = 0.3;
+/// Looking well down to lay a floor against the side of the block under the feet.
+const CUT_FLOOR_PITCH: f32 = 75.0;
+
+/// The face of the block under `feet` that looks toward `next` (0 down, 1 up, 2 north, 3 south,
+/// 4 west, 5 east): a block placed on it fills the cell under `next`.
+fn side_face(feet: path::Cell, next: path::Cell) -> i8 {
+    match (next.0 - feet.0, next.2 - feet.2) {
+        (1, _) => 5,
+        (-1, _) => 4,
+        (_, 1) => 3,
+        _ => 2,
     }
 }
 
@@ -906,6 +927,8 @@ impl Climb {
             down_since: None,
             cuts: 0,
             step: None,
+            step_since: None,
+            floors: 0,
         }
     }
 
@@ -973,12 +996,13 @@ impl Climb {
                     return out;
                 };
                 let off = flat(p, body.pos);
-                if off <= rules.climb_beside {
+                let column = (p[0].floor() as i32, p[2].floor() as i32);
+                if (feet.0, feet.2) == column {
                     self.stage = ClimbStage::Up;
                     out.said.push((
                         "eye fetch: pillar up".to_owned(),
                         format!(
-                            "from {feet:?}, the drop {:.1} over the feet and {off:.1} off",
+                            "from {feet:?}, the drop {:.1} over the feet; {off:.2} off",
                             p[1] - body.pos[1]
                         ),
                     ));
@@ -1004,29 +1028,18 @@ impl Climb {
                 match status {
                     TaskStatus::Running => {}
                     TaskStatus::Done | TaskStatus::Failed(_) => {
+                        // Not beside the column (Q4's race 45732530352 lane 0: NoPath, 12 off;
+                        // 45740169100 lane 0: a pillar begun 3.2 off never reached the pickup): a
+                        // cut the rest of the way. A pillar is never begun further off.
                         self.walk = None;
-                        if off <= rules.climb_near {
-                            // As near as the ground lets it: the pillar from here.
-                            self.stage = ClimbStage::Up;
-                            out.said.push((
-                                "eye fetch: pillar up".to_owned(),
-                                format!(
-                                    "from {feet:?} ({status:?} walking nearer), the drop {:.1} over the feet and {off:.1} off",
-                                    p[1] - body.pos[1]
-                                ),
-                            ));
-                        } else {
-                            // No walk near enough (Q4's race 45732530352 lane 0: NoPath, 12 off):
-                            // a cut toward the drop's column.
-                            self.stage = ClimbStage::Cut;
-                            out.said.push((
-                                "eye fetch: cut toward the drop".to_owned(),
-                                format!(
-                                    "no way within {} of the drop ({status:?}), {off:.1} off: a level cut from {feet:?}, {} blocks at most",
-                                    rules.climb_near, rules.climb_cut_max
-                                ),
-                            ));
-                        }
+                        self.stage = ClimbStage::Cut;
+                        out.said.push((
+                            "eye fetch: cut toward the drop".to_owned(),
+                            format!(
+                                "the walk ended {off:.1} off ({status:?}), over the {} a pillar starts from: a level cut from {feet:?}, {} blocks at most",
+                                rules.climb_beside, rules.climb_cut_max
+                            ),
+                        ));
                     }
                 }
             }
@@ -1035,16 +1048,21 @@ impl Climb {
                     self.down(tick);
                     return out;
                 };
-                if flat(p, body.pos) <= rules.climb_beside {
+                // On to the drop's own column (race CI 45741807583: a pillar beside it, 1.18 off on
+                // the diagonal, rose 6 and never took the eye): its perch is dug from under and the
+                // eye falls onto the head.
+                if (feet.0, feet.2) == (p[0].floor() as i32, p[2].floor() as i32) {
                     self.stage = ClimbStage::Up;
                     self.walk = None;
                     self.dig = None;
                     out.said.push((
                         "eye fetch: pillar up".to_owned(),
                         format!(
-                            "from {feet:?} after a cut of {}, the drop {:.1} over the feet",
+                            "from {feet:?} after a cut of {} ({} floors laid), the drop {:.1} over the feet; {:.2} off",
                             self.cuts,
-                            p[1] - body.pos[1]
+                            self.floors,
+                            p[1] - body.pos[1],
+                            flat(p, body.pos)
                         ),
                     ));
                     return out;
@@ -1099,35 +1117,92 @@ impl Climb {
                     return out;
                 }
                 self.dig = None;
-                if feet == next {
+                let centre = [f64::from(next.0) + 0.5, f64::from(next.2) + 0.5];
+                let to = [centre[0] - body.pos[0], centre[1] - body.pos[2]];
+                if feet == next && norm(to) <= CUT_STEP_DONE {
                     self.cuts += 1;
                     self.step = None;
-                    self.walk = None;
+                    self.step_since = None;
                     return out;
                 }
-                let walk = self.walk.get_or_insert_with(|| {
-                    Walk::new(next, Goal::Block { pos: next }, Arrive::Goal, tick)
-                });
-                let (c, status) = walk.step(w, tick);
-                let (acts, said) = walk.take_out();
-                out.acts.extend(acts);
-                out.said.extend(said);
-                out.controls = c;
-                if let TaskStatus::Failed(f) = status {
+                let since = *self.step_since.get_or_insert(tick);
+                if tick.saturating_sub(since) > rules.climb_step_ticks {
                     out.said.push((
                         "eye fetch given up".to_owned(),
-                        format!("the step of the cut into {next:?} failed ({f:?})"),
+                        format!(
+                            "the step of the cut into {next:?} took over {} ticks",
+                            rules.climb_step_ticks
+                        ),
                     ));
                     self.down(tick);
-                } else if status == TaskStatus::Done {
-                    self.walk = None;
+                    return out;
                 }
+                // No floor under the step (45740169100 lane 0: the step's walk had no path): one
+                // laid from held filler against the side of the floor under the feet.
+                let floor = (next.0, next.1 - 1, next.2);
+                let yaw = yaw_of(to);
+                if feet != next && open_cell(w, floor) {
+                    let Some(block) = filler(w) else {
+                        out.said.push((
+                            "eye fetch given up".to_owned(),
+                            format!("no floor under the cut's step {next:?} and no filler held"),
+                        ));
+                        self.down(tick);
+                        return out;
+                    };
+                    if let Hold::Act(a) = hold::toward(w, block) {
+                        out.acts.push(a);
+                        return out;
+                    }
+                    out.controls = Controls {
+                        yaw,
+                        sneak: true,
+                        pitch: Some(CUT_FLOOR_PITCH),
+                        ..Controls::default()
+                    };
+                    if body.on_ground
+                        && w.click.is_none()
+                        && self
+                            .clicked_at
+                            .is_none_or(|t| tick.saturating_sub(t) >= rules.climb_every)
+                    {
+                        out.acts.push(Act::UseOn {
+                            pos: world::BlockPos::new(feet.0, feet.1 - 1, feet.2),
+                            face: side_face(feet, next),
+                        });
+                        self.clicked_at = Some(tick);
+                        self.floors += 1;
+                    }
+                    return out;
+                }
+                // A direct step into the cell, no route: the cut is the way.
+                out.controls = Controls {
+                    forward: true,
+                    yaw,
+                    ..Controls::default()
+                };
             }
             ClimbStage::Up => {
                 let Some(p) = lying else {
                     self.down(tick);
                     return out;
                 };
+                if self.placed.is_empty()
+                    && body.on_ground
+                    && flat(p, body.pos) > rules.climb_beside
+                {
+                    // Never a pillar further off than the pickup reaches: a cut nearer first.
+                    self.stage = ClimbStage::Cut;
+                    out.said.push((
+                        "eye fetch: cut toward the drop".to_owned(),
+                        format!(
+                            "{:.1} off, over the {} a pillar starts from: a level cut from {feet:?}",
+                            flat(p, body.pos),
+                            rules.climb_beside
+                        ),
+                    ));
+                    return out;
+                }
                 if body.on_ground {
                     // A click that laid nothing: the jump came down where it left.
                     if let Some(b) = self.base
@@ -1203,7 +1278,12 @@ impl Climb {
             ClimbStage::Wait => {
                 // Still on the top, looking at the drop: the pickup comes on its own.
                 out.controls.pitch = Some(0.0);
-                if lying.is_some_and(|p| body.pos[1] < p[1] - rules.climb_within - 0.5) {
+                if lying.is_some_and(|p| {
+                    body.pos[1] < p[1] - rules.climb_within - 0.5
+                        || (self.placed.is_empty() && flat(p, body.pos) > rules.climb_beside)
+                }) {
+                    // Below it again, or (on the ground) not beside it: back to the climb, whose
+                    // first check sends a far one to the cut.
                     self.stage = ClimbStage::Up;
                 }
             }
