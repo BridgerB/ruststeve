@@ -5,8 +5,8 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@31545c1 clojurecraft@be85a92
+lastUpdated: 2026-11-26
+verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"
@@ -84,4 +84,4 @@ Issue 12d. A bot idle at night was killed by a zombie 0.4 blocks off: the `defen
 - **Measured** (development start, races 45343415088 and 45345386828): 0.4 fireball hits a thousand ticks behind the shield against 3.1 after it broke; with the timed raise 5 rods in 12,000 bot-ticks, both bots alive.
 - **Seven rods, fire, touch and safe ground** (blaze-fight walls 17 to 20): with 7 rods held blazes are no foe and the bot walks to `LEAVE_RANGE` 50 from the spawner before the aim is met; a deck cell with fire in or beside it is no post (`defend::fire_near`); a blaze in touch keeps the tick from the shield (`defend::blaze_in_touch`); the Nether shield is made only where `cover::unsafe_to_work` is `None`.
 - **The shield and the fight** (shield wall 4): `Shield::step` takes a `Duty`. It yields to the strike (lowered at once, "shield yields to the strike") while `shield::striking` names a blaze in touch or, in a fight, the foe or a mob of its kind within 4 of the eye when that kind is melee; a shield up already stays up for a fireball landing in front within 6 ticks. A strike the raised shield drops is given back to the defend (`shield::SwingCount`: its count and cooldown). A click to place a block waits while a threat is due ("placing held for the shield") and is made with the shield down otherwise. Model, 32 seeds: shield loop 29 to 30 alive with 7 rods, wither-skeleton loop 23 to 26 (probe 45364552425).
-- **Issue 18**: the hunt strikes endermen from its burrow ([[pearl-hunt]]); its reach is measured to the enderman's 2.9-high box (`defend::box_distance_of`), not the blaze's 1.8. `NEVER_FOE` stays: the defend row never takes one.
+- **Issue 18**: the hunt strikes endermen from its burrow ([[pearl-hunt]]); its reach is measured to the enderman's 2.9-high box (`defend::box_distance_of`), not the blaze's 1.8. `NEVER_FOE` stays: the defend row never takes one. **Issue 20g**: the ender dragon joins `NEVER_FOE`; it is the dragon fight's own (`plan::dragon`, [[planner]]), struck only from behind its body.

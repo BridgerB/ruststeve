@@ -5,8 +5,8 @@ type: reference
 tags: [world, entities, metadata, inventory, slots]
 aliases: [kills, struck, air, on fire, uses_finished, Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@e96708e clojurecraft@be85a92
+lastUpdated: 2026-11-26
+verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -59,6 +59,7 @@ related:
 - **Entities** keep their `uuid`, the `velocity` the server last set (a fireball's heading), the newest 4 entity-event `statuses`, and the newest 4 damage events on them (`hurts`: type, and whether the bot dealt it). A real server sends no hurt animation for a mob, so a damage event naming the bot is how a swing is known to land.
 - **Entity data cut short** ends the packet's entries with `MetaValue::Unread(serializer)`; the world counts it in `metadata_unread` and keeps the value the entry would have replaced.
 - **What a mob shows**: `head_yaw` (`rotate_head`; `Entity::faces(target, degrees)` asks whether the head points at a position, yaw 0 toward +z, 90 toward -x), `equipment` by slot (`set_equipment`: 0 main hand, 1 off hand, 2-5 feet to head), `swung_at` (`animate` 0, the main-hand swing's tick), `power` (`projectile_power`, a fireball's), `passengers`, and `effects` and `attributes` by name (an attribute is its base plus the add-value modifiers). `Entity::blaze_charged` reads a blaze's metadata index 16, bit 0.
+- **A body's yaw** (issue 20g): `Entity::yaw` is set by `move_entity_rot`, `move_entity_pos_rot` (`S2c::MoveEntity::yaw`, a 1/256-turn byte) and `teleport_entity` (relative under flag bit 3); `None` until one comes (`add_entity` and `entity_position_sync` are not read for it yet). The perched dragon's facing comes from it (`plan::dragon`).
 - **The bot's own**: `Player.effects` (amplifier and the server tick it ends; a duration of -1 never ends), `attributes`, `in_combat`, `experience`; `World::hurt_from` is its last hurt flash (tick and the yaw the blow came from).
 
 ## See also

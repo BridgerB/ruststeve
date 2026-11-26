@@ -137,10 +137,13 @@ pub enum S2c {
         dx: f64,
         dy: f64,
         dz: f64,
+        /// The body's yaw in degrees, from `move_entity_pos_rot` (issue 20g: the dragon's facing).
+        yaw: Option<f32>,
     },
-    /// A turn in place.
+    /// A turn in place: the body's yaw in degrees (issue 20g).
     MoveEntityRot {
         id: i32,
+        yaw: f32,
     },
     /// The server's absolute position for an entity.
     EntityPositionSync {
@@ -156,6 +159,8 @@ pub enum S2c {
         y: f64,
         z: f64,
         flags: u32,
+        /// The body's yaw in degrees, relative when flag bit 3 is set (issue 20g).
+        yaw: f32,
     },
     /// Changed metadata, skimmed.
     SetEntityData {
@@ -677,14 +682,29 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 }
                 S2c::RemoveEntities { ids }
             }
-            Some(PlayIn::MoveEntityPos | PlayIn::MoveEntityPosRot) => {
-                // Deltas in 1/4096 of a block (ClientboundMoveEntityPacket).
+            Some(kind @ (PlayIn::MoveEntityPos | PlayIn::MoveEntityPosRot)) => {
+                // Deltas in 1/4096 of a block (ClientboundMoveEntityPacket), then for
+                // `pos_rot` the yaw and pitch as 1/256 turns.
                 let id = r.varint()?;
                 let mut delta = || -> Result<f64, ParseError> { Ok(f64::from(r.i16()?) / 4096.0) };
                 let (dx, dy, dz) = (delta()?, delta()?, delta()?);
-                S2c::MoveEntity { id, dx, dy, dz }
+                let yaw = if matches!(kind, PlayIn::MoveEntityPosRot) {
+                    Some(angle(r.u8()?))
+                } else {
+                    None
+                };
+                S2c::MoveEntity {
+                    id,
+                    dx,
+                    dy,
+                    dz,
+                    yaw,
+                }
             }
-            Some(PlayIn::MoveEntityRot) => S2c::MoveEntityRot { id: r.varint()? },
+            Some(PlayIn::MoveEntityRot) => S2c::MoveEntityRot {
+                id: r.varint()?,
+                yaw: angle(r.u8()?),
+            },
             Some(PlayIn::EntityPositionSync) => S2c::EntityPositionSync {
                 id: r.varint()?,
                 x: finite(r.f64()?)?,
@@ -695,13 +715,14 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                 let id = r.varint()?;
                 let (x, y, z) = (finite(r.f64()?)?, finite(r.f64()?)?, finite(r.f64()?)?);
                 let _velocity = (r.f64()?, r.f64()?, r.f64()?);
-                let _look = (r.f32()?, r.f32()?);
+                let (yaw, _pitch) = (r.f32()?, r.f32()?);
                 S2c::TeleportEntity {
                     id,
                     x,
                     y,
                     z,
                     flags: r.u32()?,
+                    yaw,
                 }
             }
             Some(PlayIn::SetEntityData) => S2c::SetEntityData {

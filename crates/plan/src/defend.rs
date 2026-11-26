@@ -408,7 +408,13 @@ pub fn hostile(kind: EntityKind) -> bool {
 /// Kinds never taken as a foe, provoked or not (issue 17: never a swing at an enderman; one that
 /// is provoked is answered by the pocket, `Plan::ender_threat`: 40 health and 7 a hit, in the
 /// open the bot loses).
-pub const NEVER_FOE: &[EntityKind] = &[EntityKind::Enderman];
+pub const NEVER_FOE: &[EntityKind] = &[
+    EntityKind::Enderman,
+    // >>> E5 (issue 20g): the dragon is the fight's own (`dragon`), struck from behind its body
+    // only; the defend's chase took clojurecraft's bot off its stand into the head.
+    EntityKind::EnderDragon,
+    // <<< E5
+];
 
 fn middle(p: [f64; 3]) -> [f64; 3] {
     [p[0], p[1] + 0.9, p[2]]
