@@ -1431,3 +1431,27 @@ fn the_pool_is_never_sited_by_the_bunker_or_its_stair() {
     assert!(sq.iter().all(|c| keep(*c) >= spikes::POOL_KEEP), "{sq:?}");
     assert!(stand.1 <= 64, "not uphill of the bunker: {stand:?}");
 }
+
+#[test]
+fn the_pool_is_worked_from_its_stand_or_given_up() {
+    // Race 45934621769 lane 0: back in its bunker 6 off, the dig of a pool cell was refused 25
+    // times to the cap.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    w.inventory.slots.insert(38, (ItemKind::WaterBucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([14, 64, 20]);
+    assert!(matches!(p.spikes_task(&w, 100), Some(Task::Dig(_))));
+    // Shut in a pit 3 off its stand: no way back to it, the pool given up.
+    for y in 61..=63 {
+        set(&mut w, (17, y, 20), BlockKind::Air);
+    }
+    at(&mut w, [17.5, 61.0, 20.5]);
+    p.spikes_task(&w, 200);
+    assert!(
+        notes(&p).iter().any(|n| n == "spikes: no pool: given up"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.spikes.pool_off);
+}

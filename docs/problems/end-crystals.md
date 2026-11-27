@@ -333,3 +333,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The pool's stand and its four cells keep 5 columns from the bunker's column (its stair runs four out), and the stand is never higher than the ground over the bunker, so water cannot run down to it.
   - The site search widens to 8 columns to fit.
   - Unit test `the_pool_is_never_sited_by_the_bunker_or_its_stair`.
+
+## Seventeenth race: 45934621769 (dev-end-island, 69eabcf, development only)
+- **0 crystals in either lane.**
+  - Lane 0 dug one pool cell, then went back into its bunker 6 off (E3's retreat). From there it tried to dig the next pool cell, refused 25 times, every 380 ticks, to the cap.
+  - Lane 1 died of breath going "into the bunker" (E5's).
+
+### Wall 22: the pool worked from out of reach (fixed)
+- **The fix:**
+  - The pool's digs and pours are made from its stand only. Away from it, the bot walks back ("to the pool site at").
+  - With no way back, or after 8 digs for its four cells, the pool is given up ("no pool: given up"), and the crystals go on with the buckets in hand.
+  - Unit test `the_pool_is_worked_from_its_stand_or_given_up`.
