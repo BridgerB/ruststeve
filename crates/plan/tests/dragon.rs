@@ -1888,3 +1888,34 @@ fn the_strafing_dragon_facing_the_bot_is_dodged_before_its_fireball() {
     with_dragon(&mut away, [-30.5, 80.0, 0.5], 1, 270.0);
     assert!(dragon::fire_imminent(&away, feet).is_none());
 }
+
+#[test]
+fn from_the_bunkers_stair_the_dodge_finds_the_ground_three_up() {
+    // Frontier race 45964846590: "no dodge cell from [13, 59, 0]", the stair 3 under the ground.
+    let feet = [12.5, 61.0, 0.5];
+    let mut w = fireball_world(
+        feet,
+        [-30.5, 80.0, 0.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    // A pit three down at (12, 61, 0) and a stair up it along +x to the ground at y 64.
+    for c in [
+        (12, 61, 0),
+        (12, 62, 0),
+        (12, 63, 0),
+        (13, 62, 0),
+        (13, 63, 0),
+        (14, 63, 0),
+    ] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::Air),
+        }));
+    }
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    let to = p.dragon.dodge_to.expect("a dodge cell on the ground");
+    assert_eq!(to[1], FLOOR, "{to:?}");
+}

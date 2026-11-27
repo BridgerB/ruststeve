@@ -315,3 +315,7 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
 - Lane 5: a dodge uphill (+2) from the start of a charge's notch did not get more than 4 off in 40 ticks.
 - **Wall 34: the fireball seen too late to walk clear.** Lanes 1 and 2 first saw their fireballs 5 and 6 ticks before they hit; no walk covers 4 blocks in that time. The strafe fires within 10 degrees of the dragon's facing after 5 ticks in sight (`DragonStrafePlayerPhase`), aimed where the bot stands then.
   - **Fix:** the strafing dragon facing the bot within about 20 degrees (`IMMINENT_COS` 0.94, `fire_imminent`) starts the dodge before the fireball is seen ("fireball: dodge to … (its fire due, the strafing dragon facing the bot; …)"). The fireball, when it comes, takes over that dodge rather than choosing again.
+
+### Frontier race 45964846590 (25c4f49, 8 lanes), read mid-run (lanes 2, 4, 5, 7 at tick 4,820)
+- **Wall 35:** "fireball: no dodge cell from [13, 59, 0]", once each in three lanes: on the bunker's stair, 3 under the ground, where dodge cells were looked for only 2 up or down. **Fix:** heights up to 4 up and 3 down (`DODGE_YS`); the route check still decides.
+- The idle backstop fired twice ("end: idle 600 ticks at [14, 57, 0] … rows held charge_step, breath_step") and handed back.

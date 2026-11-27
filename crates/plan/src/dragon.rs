@@ -652,6 +652,9 @@ pub const DODGE_AIM: f64 = 6.0;
 /// twice the farthest cell is no dodge: the fireball flies about 20 to 40 ticks).
 pub const DODGE_NODES: u32 = 800;
 pub const DODGE_STEPS: usize = 16;
+/// Heights off the feet a dodge cell is looked for at, nearest first: up to 4 (from the bunker's
+/// stair, 3 under the ground: frontier race 45964846590, "no dodge cell from [13, 59, 0]").
+pub const DODGE_YS: [i32; 8] = [0, 1, -1, 2, -2, 3, 4, -3];
 /// Blocks a tick a fireball flies, for the note's ticks to its hit (dev race 45940964839: about
 /// 40 ticks over 30 to 40 blocks).
 pub const FIREBALL_SPEED: f64 = 1.0;
@@ -808,7 +811,7 @@ pub fn dodge_cell(
                 (cx + d[0] * k).floor() as i32,
                 (cz + d[1] * k).floor() as i32,
             );
-            [0, 1, -1, 2, -2].iter().find_map(|dy| {
+            DODGE_YS.iter().find_map(|dy| {
                 let c = [x, from[1] + dy, z];
                 let air = |p: [i32; 3]| {
                     w.block_at(world::BlockPos::new(p[0], p[1], p[2])) == Some(BlockKind::Air)
