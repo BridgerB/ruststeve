@@ -1455,3 +1455,25 @@ fn the_pool_is_worked_from_its_stand_or_given_up() {
     );
     assert!(p.spikes.pool_off);
 }
+
+#[test]
+fn landing_water_left_by_a_refused_approach_is_taken_back() {
+    // Race 45937952400 lane 0: poured at one pillar's foot, that approach refused, another
+    // climbed and dug down, the bucket lost.
+    let mut w = world(2, [10.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    set(&mut w, (9, 64, 5), BlockKind::Water);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.landings.push(((8, 5), (9, 64, 5)));
+    p.spikes.refused.push((8, 8, Axis::North, u64::MAX));
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: landing water taken back at (9, 64, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.spikes.landings.is_empty());
+}

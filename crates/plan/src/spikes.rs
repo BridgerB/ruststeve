@@ -2232,6 +2232,77 @@ impl Plan {
         if !body.on_ground || self.spikes_up_high(w) {
             return None;
         }
+        // Landing water poured for a pillar not climbed while the way now goes elsewhere: taken
+        // back first (race 45937952400 lane 0: poured at (38, 59, 0), the West approach then
+        // refused from the bunker, the South pillar climbed and dug down, the bucket lost).
+        let toward = match n {
+            Next::Pillar { column, .. } => Some(*column),
+            Next::Walk {
+                to,
+                approach: Some(_),
+            } => Some((to.0, to.2)),
+            _ => None,
+        };
+        if let Some(col) = toward
+            && let Some(i) = self.spikes.landings.iter().position(|(c, _)| {
+                *c != col && !self.spikes.pillars.iter().any(|r| (r.x, r.z) == *c)
+            })
+        {
+            let (c, l) = self.spikes.landings[i];
+            let target = [
+                f64::from(l.0) + 0.5,
+                f64::from(l.1) + 0.5,
+                f64::from(l.2) + 0.5,
+            ];
+            let reach = (0..3)
+                .map(|k| (target[k] - eye(body)[k]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if kind(w, l) != Some(BlockKind::Water) || empty == 0 {
+                self.spikes.landings.remove(i);
+                self.note(
+                    tick,
+                    format!("spikes: landing water forgotten at {l:?}"),
+                    format!("{:?} there, {empty} empty buckets", kind(w, l)),
+                );
+            } else if reach <= POUR_REACH {
+                self.spikes.landings.remove(i);
+                self.note(
+                    tick,
+                    format!("spikes: landing water taken back at {l:?}"),
+                    format!("unused: the way goes to {col:?}, not {c:?}"),
+                );
+                self.spikes.doing = Some(Doing::Bucket {
+                    look: target,
+                    item: ItemKind::Bucket,
+                    want: ItemKind::WaterBucket,
+                    count: water + 1,
+                    until: tick + BUCKET_TICKS,
+                    last: None,
+                    why: "the unused landing water's take-back".to_owned(),
+                });
+                self.retry_at = tick + 1;
+                return Some(Task::Idle);
+            } else {
+                let foot = (c.0, l.1, c.1);
+                let mut walk = Walk::new(foot, Goal::Block { pos: foot }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.spikes_note(
+                        tick,
+                        format!("spikes: back for the landing water at {l:?}"),
+                        format!("unused: the way goes to {col:?}"),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+                self.spikes.landings.remove(i);
+                self.note(
+                    tick,
+                    format!("spikes: landing water left at {l:?}"),
+                    format!("no way back to it from {feet:?}"),
+                );
+            }
+        }
         // The pool by the bunker: two cells dug one deep and both buckets poured in.
         if !self.spikes.pool_made
             && !self.spikes.pool_off
