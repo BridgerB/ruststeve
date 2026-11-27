@@ -698,6 +698,10 @@ pub struct Clutch {
     pub poured: Option<Cell>,
     /// When the feet landed after the pour.
     pub landed_at: Option<u64>,
+    /// When the pour was sent: one only, until the bucket shows it (a second use of the emptied
+    /// bucket would take the water back up).
+    #[serde(default)]
+    pub sent_at: Option<u64>,
 }
 
 impl Default for SpikeState {
@@ -1001,14 +1005,35 @@ pub fn pour_now(feet_y: f64, vy: f64, ground: f64) -> bool {
 /// `pour_now` with the ground under each predicted position: `g1` under the position this
 /// tick sends, `g2` under the next. A body flung sideways (race 45903987747: both bots knocked
 /// off near the island's edge) lands on another column than the one it fell from.
+///
+/// One tick early (the orchestrator, after races 45920382795 and 45924374354: a pour sent in
+/// the last tick in reach did not save the bot twice; the server places the water when it
+/// handles the packet, which may be after the feet arrive): the pour goes in the tick whose sent
+/// position is in reach while the one two ticks on is not, so the last tick in reach and the one
+/// before it both qualify, and the clutch sends at the first (`Clutch::sent_at` keeps it to one).
 pub fn pour_now_at(feet_y: f64, vy: f64, g1: Option<f64>, g2: Option<f64>) -> bool {
     let p1 = feet_y + vy;
-    let p2 = p1 + (vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
+    let v2 = (vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
+    let p2 = p1 + v2;
+    let p3 = p2 + (v2 - physics::GRAVITY) * physics::VERTICAL_DRAG;
     let in_reach = |p: f64, g: f64| p > g && p + physics::EYE_HEIGHT - g <= POUR_REACH;
-    g1.is_some_and(|g| in_reach(p1, g)) && !g2.is_some_and(|g| in_reach(p2, g))
+    g1.is_some_and(|g| in_reach(p1, g)) && !g2.is_some_and(|g| in_reach(p3, g))
+}
+
+/// Ticks until feet at `feet_y` falling at `vy` reach `ground` (for the ledger).
+pub fn ticks_to_land(feet_y: f64, vy: f64, ground: f64) -> u32 {
+    let (mut y, mut v, mut n) = (feet_y, vy, 0);
+    while y > ground && n < 200 {
+        y += v;
+        v = (v - physics::GRAVITY) * physics::VERTICAL_DRAG;
+        n += 1;
+    }
+    n
 }
 /// Ticks after landing the water is tried to be taken back, and the most a clutch lasts.
 pub const CLUTCH_TAKE_TICKS: u64 = 40;
+/// Ticks after a pour before another is sent (the bucket's change seen by then).
+pub const POUR_RESEND: u64 = 6;
 pub const CLUTCH_TICKS: u64 = 200;
 
 /// The dig of the pillar's cell under the feet, its drop not waited for: it falls into the cell
@@ -1928,6 +1953,7 @@ impl Plan {
                 from_y: body.pos[1],
                 poured: None,
                 landed_at: None,
+                sent_at: None,
             });
             return Some(self.spikes_clutch_hold(w, ItemKind::WaterBucket, down));
         };
@@ -1970,6 +1996,8 @@ impl Plan {
                         ),
                     );
                 } else if crate::dig::held_item(w) == Some(ItemKind::WaterBucket)
+                    && c.sent_at
+                        .is_none_or(|t| tick.saturating_sub(t) >= POUR_RESEND)
                     && {
                         // The ground under where the body will be this tick and the next.
                         let v = body.vel;
@@ -1983,15 +2011,17 @@ impl Plan {
                     }
                     && self.acts.is_empty()
                 {
+                    let land = ground.map(|g| ticks_to_land(body.pos[1], body.vel[1], g));
                     self.note(
                         tick,
                         "spikes: clutch pour sent".to_owned(),
                         format!(
-                            "{:.2} over the ground, falling {:.2}",
+                            "{:.2} over the ground, falling {:.2}; sent at tick {tick}, landing predicted in {land:?} ticks",
                             height.unwrap_or(0.0),
                             body.vel[1]
                         ),
                     );
+                    c.sent_at = Some(tick);
                     self.acts.push(Act::UseItem);
                 }
                 self.spikes.clutch = Some(c);
@@ -2268,15 +2298,20 @@ impl Plan {
         }
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).
+        // Each try takes the next cell of the square in turn (race 45924374354 lane 0: the
+        // second refill aimed at the cell the first had just emptied, and gave up).
         if empty > 0
             && let Some(pour) = self.spikes.pool
-            && let Some(c0) = self
-                .spikes
-                .pool_square
-                .unwrap_or([pour[0], pour[1], pour[0], pour[1]])
-                .iter()
-                .copied()
-                .find(|c| kind(w, *c) == Some(BlockKind::Water))
+            && let Some(c0) = {
+                let square = self
+                    .spikes
+                    .pool_square
+                    .unwrap_or([pour[0], pour[1], pour[0], pour[1]]);
+                let turn = usize::try_from(self.spikes.refills).unwrap_or(0);
+                (0..4)
+                    .map(|i| square[(turn + i) % 4])
+                    .find(|c| kind(w, *c) == Some(BlockKind::Water))
+            }
         {
             let target = [
                 f64::from(c0.0) + 0.5,
@@ -2287,7 +2322,7 @@ impl Plan {
                 .map(|i| (target[i] - eye(body)[i]).powi(2))
                 .sum::<f64>()
                 .sqrt();
-            if reach <= 4.0 {
+            if reach <= POUR_REACH {
                 self.spikes.refills += 1;
                 self.note(
                     tick,
@@ -2431,10 +2466,21 @@ impl Plan {
                     return None;
                 }
                 if tick >= *until {
+                    let slots: Vec<i16> = w
+                        .inventory
+                        .slots
+                        .iter()
+                        .filter(|(_, (k, _))| k == item)
+                        .map(|(sl, _)| *sl)
+                        .collect();
                     self.note(
                         tick,
                         format!("spikes: {why} gave up"),
-                        format!("{want:?} held {}, wanted {count}", craft::count(w, *want)),
+                        format!(
+                            "{want:?} held {}, wanted {count}; held {:?}, {item:?} in slots {slots:?}; aimed at {look:?}",
+                            craft::count(w, *want),
+                            crate::dig::held_item(w)
+                        ),
                     );
                     return None;
                 }

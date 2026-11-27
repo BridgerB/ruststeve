@@ -284,3 +284,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - With its steps open the bot walks up to the top step, and the dig-out goes on from there.
   - The progress invariant: a dig-out no nearer its target in 600 ticks fails ("dig-out: no progress at …", with the next cell and the distance) and hands back for 1,200 ticks.
   - Unit test `a_dig_out_climbs_to_the_ground_and_fails_when_it_gets_no_nearer`.
+
+## Thirteenth race: 45924374354 (dev-end-island, ed132b8, development only)
+- **Lane 0:** 3 crystals.
+  - The 2 by 2 pool was made ("water pool at (9, 61, 1) and (8, 61, 2)"). One refill came back, and the second "gave up" again, aimed at the cell the first had just emptied.
+  - With one bucket, "no landing water" (noted 7 times with its reason) and the dig down.
+  - The clutch saved one fall (21.8). The bot died on a second fall, its pour sent.
+- **Lane 1:** died in E5's breath walk ("a notch down where the feet are").
+- **The refill:** each try now takes the next cell of the square in turn, within the pour's reach (4.4). A give-up notes the held item, the buckets' slots and the point aimed at.
+- **The pour a tick earlier** (the orchestrator: two sent pours did not save a bot, and the server places the water when it handles the packet, perhaps after the feet arrive):
+  - The pour goes in the tick whose sent position is in reach while the one two ticks on is not, so it is one tick before the last in reach when two qualify. Only one is sent (`Clutch::sent_at`): a second use would take the water back up.
+  - "clutch pour sent" now carries the tick and the predicted ticks to landing.
