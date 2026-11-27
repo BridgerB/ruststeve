@@ -1265,11 +1265,22 @@ fn no_climb_begins_without_a_water_bucket_in_the_hotbar() {
             mode: 2
         }]
     );
-    // In the hotbar: the climb.
+    // One bucket, in the hotbar: the climb, with no landing water (the way down is the dig).
+    w.inventory.slots.remove(&12);
     water(&mut w);
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
     assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
+    assert!(
+        p.spikes.landings.is_empty(),
+        "no landing water from the clutch's one bucket"
+    );
+    // Two, one in the hotbar: the landing water first, the clutch's still in hand.
+    w.inventory.slots.insert(12, (ItemKind::WaterBucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes_task(&w, 100);
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Bucket { .. })));
+    assert_eq!(p.spikes.landings.len(), 1);
 }
 
 #[test]
