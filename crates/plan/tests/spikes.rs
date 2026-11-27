@@ -2511,7 +2511,7 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
     dragon(&mut w, [8.5, 67.0, 40.5], 0);
     let mut p = Plan::new(Aim::Race);
     tall(&mut p);
-    p.spikes.dragon_seen = Some((95, 70.0));
+    p.end.dragon_dists = vec![(80, 70.0)];
     p.spikes.pillars.push(PillarRec {
         x: 8,
         z: 5,
@@ -2550,7 +2550,7 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
     w.inventory.slots.remove(&44);
     let mut p = Plan::new(Aim::Race);
     tall(&mut p);
-    p.spikes.dragon_seen = Some((95, 70.0));
+    p.end.dragon_dists = vec![(80, 70.0)];
     p.spikes.pillars.push(PillarRec {
         x: 8,
         z: 5,
@@ -2744,13 +2744,12 @@ fn caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off() {
 fn a_climb_goes_on_through_the_holding_pattern_40_off_or_more() {
     // The orchestrator's rule after race 46071506005: start holding, 40 off or more, not closing;
     // go on while holding 40 off or more; stop on any other phase or nearer.
-    // Half way up, holding 50 off and closing: on.
+    // Half way up, holding 50 off and not closing: on.
     let mut w = world(2, [8.5, 65.0, 5.5]);
     pillar(&mut w, (8, 5), 64, 64, BlockKind::EndStone);
     water(&mut w);
     dragon(&mut w, [8.5, 65.0, 55.5], 0);
     let mut p = Plan::new(Aim::Race);
-    p.spikes.dragon_seen = Some((95, 70.0));
     p.spikes.landings.push(((8, 5), (9, 64, 5)));
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -2769,7 +2768,7 @@ fn a_climb_goes_on_through_the_holding_pattern_40_off_or_more() {
     water(&mut w);
     dragon(&mut w, [8.5, 64.0, 55.5], 0);
     let mut p = Plan::new(Aim::Race);
-    p.spikes.dragon_seen = Some((95, 70.0));
+    p.end.dragon_dists = vec![(80, 70.0)];
     p.spikes_task(&w, 100);
     assert!(
         notes(&p).iter().any(|n| n == "spikes: no climb"),

@@ -2035,14 +2035,6 @@ impl Plan {
             .pillars
             .iter()
             .any(|p| (p.x, p.z) == (feet.0, feet.2) && feet.1 > p.base);
-        // The dragon closing: nearer by `CLOSING_BY` than at the last reading within
-        // `CLOSING_TICKS` (the orchestrator's climb rule: far and moving away, or perched).
-        let closing = match (d, self.spikes.dragon_seen) {
-            (Some(now), Some((at, then))) => {
-                tick.saturating_sub(at) <= CLOSING_TICKS && now.dist < then - CLOSING_BY
-            }
-            (Some(_) | None, _) => false,
-        };
         if let Some(now) = d
             && self
                 .spikes
@@ -2627,13 +2619,12 @@ impl Plan {
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
                 let fireball_refusal = fireball_near(w, body.pos)
                     .map(|fb| format!("a fireball in flight {fb:.0} off"));
-                // Closing bars a climb's start, not its going on (the holding dragon's flight is
-                // climbed through while it keeps `CLIMB_NEAR` off).
-                let closing_refusal = (closing && !climbing && !d.as_ref().is_some_and(perched))
-                    .then(|| "the dragon closing".to_owned());
-                let refusal = climb_refusal(d.as_ref(), health, danger)
+                // The dragon by E3's one calm rule (`Plan::calm`: none, or holding 40 off or more
+                // and not closing over 20 ticks), for the start and the going on alike.
+                let calm_refusal = self.spikes_calm_refusal(w, tick, d.as_ref());
+                let refusal = climb_refusal(None, health, danger)
+                    .or(calm_refusal)
                     .or(fireball_refusal)
-                    .or(closing_refusal)
                     .or_else(|| {
                         threatens(d.as_ref())
                             .then(|| "the dragon strafes or charges near".to_owned())
@@ -3877,6 +3868,21 @@ impl Plan {
         Some(Task::Idle)
     }
 
+    /// Why the dragon bars a climb now by E3's calm rule (`Plan::calm`), or `None` when calm.
+    fn spikes_calm_refusal(
+        &mut self,
+        w: &World,
+        tick: u64,
+        d: Option<&DragonNear>,
+    ) -> Option<String> {
+        (!self.calm(w, tick)).then(|| {
+            format!(
+                "the dragon not calm: {:?} (holding {CLIMB_NEAR:.0} off or more, not closing)",
+                d.map(|d| (d.dist, d.phase))
+            )
+        })
+    }
+
     fn spikes_hold(&mut self, tick: u64) -> Task {
         self.spikes.doing = Some(Doing::Hold {
             until: tick + HOLD_TICKS,
@@ -4211,7 +4217,8 @@ impl Plan {
             );
             return None;
         }
-        let refusal = climb_refusal(d.as_ref(), w.player.health, self.spikes_danger());
+        let refusal = climb_refusal(None, w.player.health, self.spikes_danger())
+            .or_else(|| self.spikes_calm_refusal(w, tick, d.as_ref()));
         if let Some(why) = refusal.or_else(|| {
             threatens(d.as_ref()).then(|| "the dragon strafes or charges near".to_owned())
         }) {

@@ -641,3 +641,8 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Climb stops on 4 of 5, 5 of 5, 4 of 4 and 5 of 6 climbs, 0 strikes.
   - One stopped 1 under the top: "climb stopped at (34, 70, -29) (the dragon 46 off in phase Some(0) …; 1 under the goal 71)".
 - **The fix:** within `STAND_NEAR` (5) of the stand the climb finishes in any phase but a landing, sitting or charge within `KNOCK_NEAR` (`FINISH_DENIED`, `climb_on_near_stand`). The perch-descent rule and the climb's own perch stop honour it too. The knock rule (a landing, take-off or charge within 30) still holds first. Unit tests `the_one_exception_near_the_stand_finishes_but_for_a_perch_or_charge_near` and `a_climb_one_under_its_stand_finishes`; the stop tests use a tall spike (`tall`) to stay more than 5 under.
+
+### The climb's gates on E3's one calm rule
+- A climb's start and its going on both read E3's `Plan::calm` (end.rs: no dragon sent, or holding (phase 0) `CALM_FROM` 40 off or more and not closing over `CALM_TICKS` 20), so the stock, the crystals and the rest share one rule ("the dragon not calm").
+- Kept as the crystals' own: the stops for a landing, sitting, strafe or charge (`DESCEND_PHASES`, `threatens`), the knock rule within 30, fireballs, health, and the `STAND_NEAR` finish (wall 47).
+- The crystals' own closing reading is gone; `dragon_seen` is still kept for its notes.
