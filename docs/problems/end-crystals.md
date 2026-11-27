@@ -493,3 +493,18 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 ### Wall 33: a water bucket in hand read as the clutch's water taken back (lane 4; fixed)
 - **What happened:** at 16,700, "clutch over at (-32, 63, -21) (fell from 84.9; the water left)". With two water buckets held, the take-back ended as soon as a water bucket was in hand, so the source stayed on the ground (E5's hazard: no walk starts in water).
 - **The fix:** the take-back is over only when no source is left in its cell. With a water bucket in hand, the empty bucket is brought to hand and used. Unit test `a_water_bucket_in_hand_is_no_sign_the_clutchs_water_is_back`.
+
+## Frontier race 45988967677 (631d584, 8 lanes): 23 crystals gone, none past the stage; no pillar deaths
+- Lane 6 took 7 crystals (3 left), lane 5 took 6, and lanes 1 and 4 took 5 each.
+- Five lanes reached the cap (36,000) alive; the cap is now the wall.
+
+### Wall 34: a dig-out stair with a step's floor missing, walked at for 2,700 ticks (lane 1; fixed)
+- **What happened:**
+  - `why` at 14,170 (probe 45994581693): the feet at (61, 54, 1) in E3's surface-mining pit. The stair toward (45, 58, 0) ran along -x, and its first step (60, 55, 1) had no floor: (60, 54, 1) was air, dug by the mining.
+  - `dig_out_plan` judged the stair open (its cells open) and walked to its top (58, 57, 1). The walk failed NoPath every 200 ticks from 14,160 to the cap.
+  - With no approach to refuse, nothing stopped the retries.
+- **The fix:**
+  - A step with no floor gets one: end stone put there (`stair_floor_gap`, `Next::Build(_, Role::Stair)`), then the walk.
+  - The progress invariant: after `STAIR_WALK_TRIES` (3) failed walks in a row to the same target with no approach, the way out turns to the other axis ("the way out turned at"), a new way rather than the same walk retried. It turns straight again once a walk to a foot is found.
+  - Unit tests `a_dig_out_stair_with_a_step_floor_missing_gets_the_floor_put` and `the_way_out_turned_runs_along_the_other_axis`.
+- **Lane 5's stall at (43, 53, -21)** was in E3's surface-mining trench (a 1-wide cut, "DropUnreachable"). My dig-out there made no progress toward a far foot and handed back under its own invariant, as designed.
