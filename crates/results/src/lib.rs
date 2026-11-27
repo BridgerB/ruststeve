@@ -1190,6 +1190,7 @@ mod text_tests {
             fountain: None,
             over: None,
             endermen_16: None,
+            crystals_left: None,
         }
     }
 
