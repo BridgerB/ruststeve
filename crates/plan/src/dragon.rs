@@ -599,6 +599,23 @@ pub fn notch_step_except(w: &World, from: [i32; 3], side: Option<[i32; 3]>) -> O
         })
 }
 
+/// The distance of the dragon when it is strafing (phase 1) within `STRAFE_RANGE` of `feet`:
+/// `DragonStrafePlayerPhase` fires its fireball at a player in sight within 64.
+pub fn strafing_at(w: &World, feet: [f64; 3]) -> Option<f64> {
+    let (_, v) = view(w)?;
+    if v.phase() != Some(Phase::Strafe) {
+        return None;
+    }
+    let d = ((v.pos[0] - feet[0]).powi(2)
+        + (v.pos[1] - feet[1]).powi(2)
+        + (v.pos[2] - feet[2]).powi(2))
+    .sqrt();
+    (d <= STRAFE_RANGE).then_some(d)
+}
+
+/// Blocks the strafing dragon fires within (`DragonStrafePlayerPhase`; E4's `THREAT_NEAR`).
+pub const STRAFE_RANGE: f64 = 64.0;
+
 /// The distance of the dragon when it is charging (phase 8) within `CHARGE_RANGE` of `feet` with
 /// its facing on the line to them (its yaw unsaid: taken as on it), else `None`.
 pub fn charging_at(w: &World, feet: [f64; 3]) -> Option<f64> {
@@ -2377,8 +2394,22 @@ impl Plan {
             return None;
         }
         let body = w.body?;
-        let Some(d) = charging_at(w, body.pos) else {
+        // A charge, or a strafe: a fireball comes only in the strafe, at a player in sight, so
+        // the shelter is taken before it (frontier race 45924970608: two bots died of breath on
+        // open ground, the cloud already on them before the notch was dug).
+        let charge = charging_at(w, body.pos);
+        let strafe = charge.is_none().then(|| strafing_at(w, body.pos)).flatten();
+        let Some(d) = charge.or(strafe) else {
             if self.dragon.charging {
+                // Stayed in until no cloud lies within reach.
+                if breathed(&breaths(w), body.pos, 0.0) {
+                    return Some(Controls {
+                        sneak: true,
+                        yaw: f64::from(w.player.yaw),
+                        pitch: Some(90.0),
+                        ..Controls::default()
+                    });
+                }
                 self.dragon.charging = false;
                 self.dragon.charge_walk = None;
                 self.dragon.charge_dig = None;
@@ -2394,6 +2425,10 @@ impl Plan {
         if !world::stage::open_sky(w) || breath_on(&breaths(w), body.pos).is_some() {
             return None;
         }
+        // Up a pillar or a spike the crystals' own holds answer (E4's guard ring, the way down).
+        if self.spikes_up_high(w) {
+            return None;
+        }
         let bunker = self.bunker.filter(|b| {
             flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
                 && (body.pos[1] - f64::from(b[1])).abs() <= 5.0
@@ -2404,9 +2439,13 @@ impl Plan {
             self.dragon.roof_tries = 0;
             self.note(
                 tick,
-                match bunker {
-                    Some(b) => format!("charge: hold in the bunker at {b:?}"),
-                    None => "charge: hold crouched where the feet are".to_owned(),
+                match (bunker, strafe.is_some()) {
+                    (Some(b), true) => {
+                        format!("strafe: shelter before the fireball (the bunker at {b:?})")
+                    }
+                    (None, true) => "strafe: shelter before the fireball (a notch)".to_owned(),
+                    (Some(b), false) => format!("charge: hold in the bunker at {b:?}"),
+                    (None, false) => "charge: hold crouched where the feet are".to_owned(),
                 },
                 format!(
                     "the dragon charging {d:.0} off; task {}; health {:.1}; {} charges in the run",

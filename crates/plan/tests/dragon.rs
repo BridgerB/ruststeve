@@ -1260,3 +1260,42 @@ fn near_the_head_stand_but_out_of_reach_the_bot_steps_onto_its_middle() {
         Want::Strike { head: true, .. }
     ));
 }
+
+#[test]
+fn a_strafe_is_sheltered_from_before_the_fireball() {
+    // Frontier race 45924970608: two bots died of breath on open ground, the notch begun after the
+    // cloud was on them.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    assert!(dragon::strafing_at(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: shelter before the fireball (a notch)")
+    );
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "dug now"
+    );
+    // With the bunker within 12: into it.
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([16, FLOOR - 4, 0]);
+    assert!(q.charge_step(&w, 0).is_some());
+    assert!(q.events_since(0).iter().any(|e| {
+        e.what
+            .starts_with("strafe: shelter before the fireball (the bunker at")
+    }));
+    // The strafe over with a cloud still within reach: stayed in.
+    let mut after = end_at(feet);
+    with_dragon(&mut after, [-30.5, 80.0, 0.5], 0, 90.0);
+    cloud(&mut after, 50, [13.5, 64.0, 0.5], 3.0);
+    let c = p.charge_step(&after, 20).expect("stays sheltered");
+    assert!(c.sneak && !c.forward);
+    // Far off: no shelter.
+    let mut far = end_at(feet);
+    with_dragon(&mut far, [-80.5, 80.0, 0.5], 1, 90.0);
+    assert!(dragon::strafing_at(&far, feet).is_none());
+}
