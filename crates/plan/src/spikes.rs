@@ -2347,6 +2347,29 @@ impl Plan {
                 Some(Task::Idle)
             }
             Next::DigDown(c) => {
+                // Never the dig on in the open column through a charge: the water drop ran first
+                // (`spikes_water`, the landing water or the clutch); with neither, held crouched
+                // until the charge passes (E9's read of race 46038776204 lane 3: ten digs from 91,
+                // on through a charge that began at 7,800, struck at y 83 and flung over the void).
+                if !boxed(w, feet)
+                    && self
+                        .spikes
+                        .pillars
+                        .iter()
+                        .any(|r| (r.x, r.z) == (feet.0, feet.2) && feet.1 > r.base + 1)
+                    && let Some(dd) =
+                        d.filter(|dd| dd.phase == Some(CHARGE_PHASE) && dd.dist <= THREAT_NEAR)
+                {
+                    self.spikes_note(
+                        tick,
+                        "spikes: hold, not the dig, from the charge".to_owned(),
+                        format!(
+                            "the dragon {:.0} off charging; up the open pillar at {feet:?}",
+                            dd.dist
+                        ),
+                    );
+                    return Some(self.spikes_hold(tick));
+                }
                 // Centred over the column first: a body over its edge stays on the cell beside
                 // when the block goes (race 45885217441 lane 0).
                 let off = (f64::from(feet.0) + 0.5 - body.pos[0])
