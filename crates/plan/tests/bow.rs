@@ -102,6 +102,14 @@ fn notes(p: &Plan) -> Vec<String> {
     p.events.iter().map(|e| e.what.clone()).collect()
 }
 
+/// Every note with its why, for a failing assertion's message.
+fn told(p: &Plan) -> Vec<String> {
+    p.events
+        .iter()
+        .map(|e| format!("{}: {}", e.what, e.why))
+        .collect()
+}
+
 fn open(_: (i32, i32, i32)) -> bool {
     false
 }
@@ -190,11 +198,11 @@ fn a_crystal_is_shot_from_the_ground_drawn_full_and_released_on_the_aim() {
     let mut w = world(FEET);
     let mut p = Plan::new(Aim::Race);
     let t = p.bow_task(&w, 100);
-    assert!(matches!(t, Some(Task::Idle)), "{t:?}");
+    assert!(matches!(t, Some(Task::Idle)), "{t:?} {:?}", told(&p));
     assert!(
         notes(&p).iter().any(|n| n == "bow: aim at crystal 7"),
         "{:?}",
-        notes(&p)
+        told(&p)
     );
     let aim = p.bow.doing.as_ref().map(|s| s.aim).expect("a shot");
     // The bow is in hand: still, then the use.
@@ -314,7 +322,7 @@ fn with_no_shot_from_here_the_bot_walks_to_a_stand() {
             .iter()
             .any(|n| n.starts_with("bow: to the stand at") || n == "bow: no stand for crystal 7"),
         "{:?}",
-        notes(&p)
+        told(&p)
     );
     assert!(p.bow.doing.is_none());
 }
