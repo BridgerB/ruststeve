@@ -483,3 +483,13 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - From the foot, E3's 24 walks to the bunker all failed ("no more walks to the bunker"). The bot sat with no progress for 6,920 ticks by 16,840.
 - **The fix:** no walk to a pillar's foot on the ground without the end stone for its pillar plus `PILLAR_SPARE`. It notes "no walk to the foot: too few blocks" and hands back. The walk on a pillar's top to the stand is never refused. Unit test `no_walk_to_a_pillars_foot_without_its_blocks`.
 - **E3's side:** the restock waits for a lull (4,600 was about 2,800 ticks after the first hand-back), and from the foot it found no walk to the bunker.
+
+## Frontier race 45978279345 (b1acf60, 8 lanes), read while it runs
+- **Lane 4:**
+  - The wall 31 edge pour fired at 15,860 ("on the column (-21, -33), beside the feet's (an edge)"): poured late, taken back.
+  - Pillar (-34, -25) to 85 in 223 ticks, then a strike, and crystal 64 was gone at 16,680. Then a drop with the clutch from 85, landing at health 20.
+  - No bucket on the cursor in this race so far.
+
+### Wall 33: a water bucket in hand read as the clutch's water taken back (lane 4; fixed)
+- **What happened:** at 16,700, "clutch over at (-32, 63, -21) (fell from 84.9; the water left)". With two water buckets held, the take-back ended as soon as a water bucket was in hand, so the source stayed on the ground (E5's hazard: no walk starts in water).
+- **The fix:** the take-back is over only when no source is left in its cell. With a water bucket in hand, the empty bucket is brought to hand and used. Unit test `a_water_bucket_in_hand_is_no_sign_the_clutchs_water_is_back`.

@@ -2494,32 +2494,31 @@ impl Plan {
                 let at = *c.landed_at.get_or_insert(tick);
                 // Every landing takes its water back, wherever it went: not in the cell it was
                 // poured over, the source round the feet (E5, frontier race 45954274931).
-                let cell =
-                    if source(w, cell) || crate::dig::held_item(w) == Some(ItemKind::WaterBucket) {
-                        cell
-                    } else if let Some(near) = clutch_water(w, path::feet_cell(body.pos)) {
-                        if c.poured != Some(near) {
-                            self.note(
-                                tick,
-                                format!("spikes: clutch water found at {near:?}"),
-                                format!("poured over {cell:?}; to be taken back"),
-                            );
-                        }
-                        c.poured = Some(near);
-                        near
-                    } else {
-                        cell
-                    };
-                let water = matches!(kind(w, cell), Some(BlockKind::Water));
-                if !water || crate::dig::held_item(w) == Some(ItemKind::WaterBucket) {
+                let cell = if source(w, cell) {
+                    cell
+                } else if let Some(near) = clutch_water(w, path::feet_cell(body.pos)) {
+                    if c.poured != Some(near) {
+                        self.note(
+                            tick,
+                            format!("spikes: clutch water found at {near:?}"),
+                            format!("poured over {cell:?}; to be taken back"),
+                        );
+                    }
+                    c.poured = Some(near);
+                    near
+                } else {
+                    cell
+                };
+                // Over once no source is left there, never because a water bucket is in hand
+                // (frontier race 45978279345 lane 4: two water buckets held, the other one in
+                // hand read as the water taken back, "the water left" on the ground).
+                if !source(w, cell) {
                     self.note(
                         tick,
                         format!("spikes: clutch over at {:?}", path::feet_cell(body.pos)),
                         format!(
-                            "fell from {:.1}; the water {}; health {:?}",
-                            c.from_y,
-                            if water { "left" } else { "taken back" },
-                            w.player.health
+                            "fell from {:.1}; the water taken back; health {:?}",
+                            c.from_y, w.player.health
                         ),
                     );
                     return None;
