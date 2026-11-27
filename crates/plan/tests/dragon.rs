@@ -656,7 +656,7 @@ fn a_walk_is_held_clear_of_a_clouds_end_reach_and_backs_off_inside_it() {
         ..physics::Controls::default()
     };
     // Outside the end reach (7 + 1.5 + 1 from 8.0) with the way ahead in it: held there.
-    let mut far = end_at([-2.5, 64.0, 0.5]);
+    let mut far = end_at([-1.8, 64.0, 0.5]);
     cloud(&mut far, 50, [8.0, 64.0, 0.5], 3.0);
     let mut p = Plan::new(Aim::Race);
     assert!(!p.breath_ahead(&far, toward).forward, "held");
