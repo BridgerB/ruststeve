@@ -646,29 +646,43 @@ fn a_breath_over_the_bunker_or_under_a_pillar_is_not_on_the_body() {
 }
 
 #[test]
-fn a_walk_waits_at_a_breaths_edge() {
-    let mut w = end_at([2.5, 64.0, 0.5]);
-    cloud(&mut w, 50, [8.0, 64.0, 0.5], 3.0);
-    let mut p = Plan::new(Aim::Race);
-    // Yaw -90 faces +x (Notchian: south 0, west +90): toward the cloud, its reach 4.5 from 8.0.
+fn a_walk_is_held_clear_of_a_clouds_end_reach_and_backs_off_inside_it() {
+    // Wall 47, frontier race 46063334187 lanes 1, 2 and 8: walks waited at a breath's edge that
+    // grew over them (5.0 to 7.0).
     let toward = physics::Controls {
         forward: true,
+        // Yaw -90 faces +x (Notchian: south 0, west +90): toward the cloud.
         yaw: -90.0,
         ..physics::Controls::default()
     };
-    assert!(!p.breath_ahead(&w, toward).forward, "waits");
+    // Outside the end reach (7 + 1.5 + 1 from 8.0) with the way ahead in it: held there.
+    let mut far = end_at([-2.5, 64.0, 0.5]);
+    cloud(&mut far, 50, [8.0, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    assert!(!p.breath_ahead(&far, toward).forward, "held");
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "walk waits at a breath's edge")
+            .any(|e| e.what == "walk held clear of a breath's end reach")
     );
+    // Inside its end reach (not yet its edge): backed off, away from it (-x, yaw 90).
+    let mut near = end_at([2.5, 64.0, 0.5]);
+    cloud(&mut near, 50, [8.0, 64.0, 0.5], 3.0);
+    let mut q = Plan::new(Aim::Race);
+    let c = q.breath_ahead(&near, toward);
+    assert!(c.forward && (c.yaw - 90.0).abs() < 1.0, "{c:?}");
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "walk backs off a breath's growth")
+    );
+    // Walking away from it, clear: on.
     let away = physics::Controls {
         yaw: 90.0,
         ..toward
     };
-    assert!(p.breath_ahead(&w, away).forward, "away from it: on");
+    assert!(p.breath_ahead(&far, away).forward, "away from it: on");
 }
-
 #[test]
 fn the_strike_that_makes_it_take_off_is_struck_from_under_the_wings() {
     // Race 45876898172 lane 2: the strike over 50 was struck from the surface; the head and wings
@@ -1799,7 +1813,7 @@ fn a_fireball_is_dodged_ahead_of_the_walk_out_of_a_cloud_on_the_feet() {
     assert!(p.charge_step(&w, 0).is_some());
     assert_eq!(
         dodged_to(&p).as_deref(),
-        Some("fireball: dodge to [12, 64, 6]")
+        Some("fireball: dodge to [12, 64, 10]")
     );
 }
 
