@@ -665,6 +665,32 @@ pub const SKY_CLEAR: i32 = 6;
 /// so across, the portal round it).
 pub const FOUNTAIN_CLEAR: f64 = 5.0;
 
+/// The key of a dodge begun before its fireball is seen (`fire_imminent`).
+pub const IMMINENT: i32 = i32::MIN;
+/// The cosine of the angle off the strafing dragon's facing at which its fire is taken as due:
+/// it fires within 10 degrees after 5 ticks in sight (`DragonStrafePlayerPhase`), 20 gives the
+/// turn's last ticks to the walk.
+pub const IMMINENT_COS: f64 = 0.94;
+
+/// The strafing dragon within `STRAFE_RANGE` facing the bot at `feet` within `IMMINENT_COS`: its
+/// flight's way on the plane (from it to the bot) and the blocks on the plane, else `None`.
+/// Its fireball comes in a few ticks, aimed where the bot stands then (frontier race 45959448248
+/// lanes 1 and 2: fireballs seen 5 and 6 ticks before they hit).
+pub fn fire_imminent(w: &World, feet: [f64; 3]) -> Option<([f64; 2], f64)> {
+    let (_, v) = view(w)?;
+    if v.phase() != Some(Phase::Strafe) || dist3(v.pos, feet) > STRAFE_RANGE {
+        return None;
+    }
+    let to = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
+    let d = to[0].hypot(to[1]);
+    if d < 1e-6 {
+        return None;
+    }
+    let dir = [to[0] / d, to[1] / d];
+    let [fx, fz] = facing(v.yaw);
+    (fx * dir[0] + fz * dir[1] >= IMMINENT_COS).then_some((dir, d))
+}
+
 /// Is the feet cell `c` water (the planner has no start there)?
 pub fn in_water(w: &World, c: [i32; 3]) -> bool {
     w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Water)
@@ -2768,7 +2794,10 @@ impl Plan {
         // the bot stood (wall 28: its cloud is put on a body within 4 of its hit, walls or not).
         // Ahead of the walk out of a cloud on the feet: the dodge cell is clear of every cloud,
         // and the walk out went the other way (dev race 45947481217 lane 2, wall 32).
-        if charge.is_none() && fireball.is_some() && world::stage::open_sky(w) {
+        if charge.is_none()
+            && (fireball.is_some() || fire_imminent(w, body.pos).is_some())
+            && world::stage::open_sky(w)
+        {
             if let Some(c) = self.fireball_dodge_step(w, tick) {
                 return Some(c);
             }
@@ -3074,31 +3103,56 @@ impl Plan {
     pub fn fireball_dodge_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
         let body = w.body?;
         let feet = body.pos;
-        let Some((id, fb)) = w
+        let fireball = w
             .entities
             .iter()
             .filter(|(_, e)| e.kind == EntityKind::DragonFireball)
             .map(|(id, e)| (*id, e))
             .filter(|(_, e)| dist3(e.pos, feet) <= FIREBALL_RANGE)
-            .min_by(|a, b| dist3(a.1.pos, feet).total_cmp(&dist3(b.1.pos, feet)))
-        else {
-            self.dragon.dodge_id = None;
-            self.dragon.dodge_walk = None;
-            return None;
+            .min_by(|a, b| dist3(a.1.pos, feet).total_cmp(&dist3(b.1.pos, feet)));
+        let (id, dir, along, miss) = match fireball {
+            Some((id, fb)) => {
+                // Its flight: the server's velocity, else straight at the bot (the strafe aims
+                // there).
+                let flight = fb
+                    .velocity
+                    .filter(|v| v[0].hypot(v[2]) > 1e-6)
+                    .map_or([feet[0] - fb.pos[0], feet[2] - fb.pos[2]], |v| [v[0], v[2]]);
+                let len = flight[0].hypot(flight[1]);
+                if len < 1e-6 {
+                    return None;
+                }
+                let dir = [flight[0] / len, flight[1] / len];
+                let to_bot = [feet[0] - fb.pos[0], feet[2] - fb.pos[2]];
+                // A dodge begun for the fire to come is this fireball's: kept, not chosen again.
+                if self.dragon.dodge_id == Some(IMMINENT) {
+                    self.dragon.dodge_id = Some(id);
+                }
+                (
+                    id,
+                    dir,
+                    to_bot[0] * dir[0] + to_bot[1] * dir[1],
+                    (to_bot[0] * dir[1] - to_bot[1] * dir[0]).abs(),
+                )
+            }
+            // No fireball yet, the strafing dragon facing the bot: its fire is due (wall 34).
+            None => match fire_imminent(w, feet) {
+                Some((dir, d)) => {
+                    // At the leg's end with the fire still due: a dodge again from here.
+                    if self.dragon.dodge_id == Some(IMMINENT)
+                        && self.dragon.dodge_to.is_some_and(|c| cell_of(feet) == c)
+                    {
+                        self.dragon.dodge_id = None;
+                    }
+                    (IMMINENT, dir, d, 0.0)
+                }
+                None => {
+                    self.dragon.dodge_id = None;
+                    self.dragon.dodge_walk = None;
+                    return None;
+                }
+            },
         };
-        // Its flight: the server's velocity, else straight at the bot (the strafe aims there).
-        let flight = fb
-            .velocity
-            .filter(|v| v[0].hypot(v[2]) > 1e-6)
-            .map_or([feet[0] - fb.pos[0], feet[2] - fb.pos[2]], |v| [v[0], v[2]]);
-        let len = flight[0].hypot(flight[1]);
-        if len < 1e-6 {
-            return None;
-        }
-        let dir = [flight[0] / len, flight[1] / len];
-        let to_bot = [feet[0] - fb.pos[0], feet[2] - fb.pos[2]];
-        let along = to_bot[0] * dir[0] + to_bot[1] * dir[1];
-        let miss = (to_bot[0] * dir[1] - to_bot[1] * dir[0]).abs();
         if self.dragon.dodge_id != Some(id) {
             if along <= 0.0 || miss > DODGE_AIM {
                 return None;
@@ -3128,8 +3182,16 @@ impl Plan {
                         tick,
                         format!("fireball: dodge to {c:?}"),
                         format!(
-                            "flight {:.2},{:.2}; ticks {eta:.0}; from {from:?}, {:.1} off its line; {} dodges",
-                            dir[0], dir[1], miss, self.dragon.dodges
+                            "{}flight {:.2},{:.2}; ticks {eta:.0}; from {from:?}, {:.1} off its line; {} dodges",
+                            if id == IMMINENT {
+                                "its fire due, the strafing dragon facing the bot; "
+                            } else {
+                                ""
+                            },
+                            dir[0],
+                            dir[1],
+                            miss,
+                            self.dragon.dodges
                         ),
                     );
                 }

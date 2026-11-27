@@ -1398,7 +1398,8 @@ fn a_strafe_is_met_standing_in_sight() {
     // fireball's hit is none (wall 28), so no notch is dug for it.
     let feet = [12.5, 64.0, 0.5];
     let mut w = end_at(feet);
-    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    // Facing across the bot (yaw 0, toward -z): its fire is not due.
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 0.0);
     assert!(dragon::strafing_at(&w, feet).is_some());
     let mut p = Plan::new(Aim::Race);
     p.bunker = Some([60, FLOOR - 4, 60]);
@@ -1687,7 +1688,7 @@ fn unseen_in_a_strafe_the_bot_rises_into_the_dragons_sight() {
                 state: state(BlockKind::EndStone),
             }));
         }
-        with_dragon(&mut w, [-30.5, 66.0, 0.5], 1, 90.0);
+        with_dragon(&mut w, [-30.5, 66.0, 0.5], 1, 0.0);
         w.inventory.slots.insert(36, (data::ItemKind::EndStone, 64));
         w.held = 0;
         w
@@ -1845,4 +1846,45 @@ fn in_water_the_dodge_is_pressed_straight_on() {
     assert!(dodged_to(&p).is_some(), "{:?}", p.events_since(0));
     assert!(p.dragon.dodge_straight && p.dragon.dodge_walk.is_none());
     assert!(c.forward, "pressed on: {c:?}");
+}
+
+#[test]
+fn the_strafing_dragon_facing_the_bot_is_dodged_before_its_fireball() {
+    // Frontier race 45959448248 lanes 1 and 2: fireballs first seen 5 and 6 ticks before they
+    // hit; the strafe fires within 10 degrees of its facing (DragonStrafePlayerPhase).
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    // At -30.5 facing +x (yaw 90): the bot dead ahead.
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    assert!(dragon::fire_imminent(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert_eq!(
+        dodged_to(&p).as_deref(),
+        Some("fireball: dodge to [12, 64, 6]")
+    );
+    assert_eq!(p.dragon.dodge_id, Some(dragon::IMMINENT));
+    let e = p
+        .events_since(0)
+        .iter()
+        .find(|e| e.what.starts_with("fireball: dodge to"))
+        .unwrap();
+    assert!(e.why.starts_with("its fire due"), "{}", e.why);
+    // Its fireball comes: the same dodge, kept, not chosen again from wherever the bot is now.
+    add(&mut w, 51, EntityKind::DragonFireball, [-10.5, 74.0, 0.5]);
+    assert!(p.charge_step(&w, 5).is_some());
+    assert_eq!(p.dragon.dodge_id, Some(51));
+    assert_eq!(p.dragon.dodge_to, Some([12, 64, 6]));
+    assert_eq!(
+        p.events_since(0)
+            .iter()
+            .filter(|e| e.what.starts_with("fireball: dodge to"))
+            .count(),
+        1
+    );
+    // Facing away: not due.
+    let mut away = end_at(feet);
+    with_dragon(&mut away, [-30.5, 80.0, 0.5], 1, 270.0);
+    assert!(dragon::fire_imminent(&away, feet).is_none());
 }
