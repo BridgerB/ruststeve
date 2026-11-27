@@ -2844,3 +2844,69 @@ fn a_climb_one_under_its_stand_finishes() {
     );
     assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
 }
+
+#[test]
+fn an_empty_bucket_walks_10_to_left_water_spread_round_and_refills() {
+    // Race 46079924222 lanes 5 and 2: "the water against endermen lost at [-13, 60, -47] (…; left
+    // for the refill)", then "no climb: no water" to 9,640: the goal beside it was flowing water,
+    // the walk failed, and the record was dropped at once.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    set(&mut w, (30, 64, 20), BlockKind::Water);
+    for c in [(31, 64, 20), (29, 64, 20), (30, 64, 21), (30, 64, 19)] {
+        set(&mut w, c, BlockKind::Water);
+    }
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.left_water.push((30, 64, 20));
+    match p.spikes_task(&w, 100) {
+        Some(Task::Explore(walk)) => {
+            let to = walk.target;
+            assert!(
+                (to.0 - 30).abs() <= spikes::LEFT_WATER_STAND,
+                "a stand by the water: {to:?}"
+            );
+            assert_ne!(
+                kind_at(&w, to),
+                Some(BlockKind::Water),
+                "a dry stand, not the flowing water"
+            );
+        }
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: to the water left at (30, 64, 20)"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_failed_walk_to_left_water_keeps_its_record() {
+    let mut w = world(2, [13.5, 61.0, 0.5]);
+    set(&mut w, (13, 61, 0), BlockKind::Air);
+    set(&mut w, (13, 62, 0), BlockKind::Air);
+    set(&mut w, (25, 64, 0), BlockKind::Water);
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.left_water.push((25, 64, 0));
+    p.spikes_task(&w, 100);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: no way yet to the water left at (25, 64, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(
+        p.spikes.left_water,
+        vec![(25, 64, 0)],
+        "kept for a later try"
+    );
+}
+
+fn kind_at(w: &World, c: (i32, i32, i32)) -> Option<BlockKind> {
+    w.state_at(world::BlockPos::new(c.0, c.1, c.2))
+        .and_then(data::block_of_state)
+}
