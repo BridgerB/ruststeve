@@ -1124,3 +1124,62 @@ fn the_crystals_handing_back_for_blocks_starts_the_stock_again_in_a_lull() {
         assert!(noted(&p, "end: stock run 1"), "{:?}", notes(&p));
     }
 }
+
+#[test]
+fn short_of_end_stone_the_bot_mines_the_islands_surface_where_it_stands() {
+    // Frontier race 45969992660 lane 1: handed back for 6 of 27 at 1,820, then 2,800 ticks for a
+    // lull and 3,020 idle at the spike's foot. Flat end stone to y 63, the bot at (20, 64, 0).
+    let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    w.inventory.slots.insert(40, (ItemKind::EndStone, 6));
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    dragon_at(&mut w, [40.0, 75.0, 0.0], 1);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((1, 0));
+    p.end.handed_back = true;
+    let t = p.end_task(&w, 0);
+    assert_eq!(
+        t.as_ref().map(plan::Task::name),
+        Some("dig"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
+    // The cell dug: beside the feet, one under an open cell, never under the feet.
+    let c = plan::end::surface_cell(&w, (20, 64, 0)).unwrap_or_else(|| panic!("no cell"));
+    assert_ne!(c, (20, 63, 0));
+    assert_eq!(c.1, 63);
+    // Within 3 of a void edge: none. A void column at (24, *, 0): every cell under y 64 gone.
+    let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    for y in 0..=63 {
+        for x in 21..=24 {
+            for z in -4..=4 {
+                set(&mut w, (x, y, z), BlockKind::Air);
+            }
+        }
+        for x in 16..=20 {
+            for z in [-4, 4] {
+                set(&mut w, (x, y, z), BlockKind::Air);
+            }
+        }
+    }
+    assert_eq!(plan::end::surface_cell(&w, (20, 64, 0)), None);
+}
+
+#[test]
+fn home_again_the_walks_back_count_again() {
+    // The same lane spent its 24 walks to a bunker with no way in, then stood idle.
+    let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+    set(&mut w, (12, 61, 0), BlockKind::Air);
+    set(&mut w, (12, 62, 0), BlockKind::Air);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.end.home_walks = plan::end::HOME_WALKS;
+    let _ = p.end_task(&w, 0);
+    assert_eq!(p.end.home_walks, 0);
+}
