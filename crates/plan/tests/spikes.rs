@@ -1696,3 +1696,18 @@ fn the_landing_water_is_poured_from_a_bucket_other_than_the_clutchs() {
         "the other hotbar bucket"
     );
 }
+
+#[test]
+fn a_placed_block_in_a_tunnel_is_no_pillar() {
+    // Frontier race 45954274931 lane 0: E3's stair tunnel put cobbled deepslate under the feet;
+    // read as a pillar, the bot dug its own floor down into a pit.
+    let mut w = world(2, [20.5, 62.0, 20.5]);
+    set(&mut w, (20, 62, 20), BlockKind::Air);
+    set(&mut w, (20, 63, 20), BlockKind::Air);
+    set(&mut w, (20, 61, 20), BlockKind::CobbledDeepslate);
+    assert!(!spikes::on_pillar(&w, (20, 62, 20), &[]));
+    // Standing free on the floor: a pillar even with no record.
+    let mut w = world(2, [20.5, 66.0, 20.5]);
+    pillar(&mut w, (20, 20), 64, 65, BlockKind::Cobblestone);
+    assert!(spikes::on_pillar(&w, (20, 66, 20), &[]));
+}

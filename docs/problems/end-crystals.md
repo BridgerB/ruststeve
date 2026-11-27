@@ -397,3 +397,12 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - `next` takes the crystals nearest first and works the first with an approach not refused (`crystals_by_distance`).
   - A bot shut in a pocket (`shut_in`: fewer than `POCKET_CELLS` 48 standable cells reachable by steps) digs out at once. The note "dig the way out" says "shut in a pocket" or "every approach refused".
   - Unit tests: `with_every_approach_of_one_spike_refused_the_next_spike_is_tried`, `shut_in_a_pocket_the_bot_digs_out_at_once`, and `no_pool_site_says_why` (extended).
+
+## The frontier race on 21efdaf: 45954274931 (6 lanes from the snapshot, read while it runs)
+
+### Wall 27: E3's stair floor read as a pillar, and the bot dug itself into a pit (lane 0; fixed)
+- **What happened:**
+  - At 2,740 E3's stock stairs failed "Boxed" at (12, 61, -5), standing on a block the tunnel had put (cobbled deepslate, one of `PLACED`).
+  - `on_pillar` reads any `PLACED` block under the feet as a pillar, record or not. So "end: up a pillar at (12, 61, -5), the crystals' task first (0 pillars standing)" fired, and the dig down took (12, 60, -5) and (12, 59, -5).
+  - From the pit, "no walk to the bunker" failed 24 times, and the bot stood held there with no progress for 1,960 ticks by tick 4,840.
+- **The fix:** with no record, a placed block is a pillar only when it stands free, with three of its four sides open. Unit test `a_placed_block_in_a_tunnel_is_no_pillar`.

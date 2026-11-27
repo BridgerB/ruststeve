@@ -698,7 +698,20 @@ pub fn on_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
     let recorded = pillars
         .iter()
         .any(|p| p.x == feet.0 && p.z == feet.2 && feet.1 > p.base);
-    let placed = under.is_some_and(|k| PLACED.contains(&k));
+    // Unrecorded, a placed block is a pillar only standing free, three sides of it open (frontier
+    // race 45954274931 lane 0: E3's stair tunnel put cobbled deepslate under the feet, read as a
+    // pillar, and the bot dug its own floor down into a pit it could not walk out of).
+    let free = || {
+        Axis::ALL
+            .iter()
+            .filter(|a| {
+                let (dx, dz) = a.step();
+                !full(kind(w, (feet.0 + dx, feet.1 - 1, feet.2 + dz)))
+            })
+            .count()
+            >= 3
+    };
+    let placed = under.is_some_and(|k| PLACED.contains(&k)) && free();
     full(under) && (recorded || placed)
 }
 
