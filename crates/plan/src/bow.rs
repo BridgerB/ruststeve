@@ -262,8 +262,9 @@ pub fn aim(feet: P, crystal: P, blocked: &mut impl FnMut(Cell) -> bool) -> Resul
                 range,
             });
         }
-        // Past the crystal and under it: it went wide.
-        if b[1] < crystal[1] - 4.0 {
+        // Past the crystal across: it went wide (never by height alone: a shot from the
+        // ground starts under the crystal).
+        if (b[0] - from[0]).hypot(b[2] - from[2]) > flat + 2.0 * (CRYSTAL_HALF + MARGIN) {
             break;
         }
     }

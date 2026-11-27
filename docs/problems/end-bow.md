@@ -28,6 +28,12 @@ Every real player breaks the End's open crystals with a bow from the ground and 
 Not in the portal room: on the surface at (1612.2, 69.0, -96.4), 60 off its stairs' top, at dusk (server tick 13,820; end-portal.md wall 13). Its `snap.toml`: iron helmet, chestplate, leggings and boots, an iron sword, 2 stone swords, a shield, 3 stone pickaxes, 24 cooked food, 13 eyes, a crafting table, 1 oak log, 8 planks, **15 gravel**, **1 iron ingot** (no raw iron: no shears without more iron), 2 water buckets, a bucket, flint and steel, 90 cobblestone, 64 cobbled deepslate, 148 netherrack.
 So the bow wants: 3 string, feathers and flint (one each per 4 arrows), and sticks (3 for the bow, one per 4 arrows, 2 for the spare pickaxe): about 4 more logs.
 
+## What is built (branch `issue-20-bow`)
+- **The kit** (`KitPhase::Bow`, after the eat, before the way down; `[end_kit] bow = true`): by day the `bow-kit` row built from what is held (`end_portal::bow_row`: the bow once 3 string are held, arrows for the feathers held with flint redug from the gravel, a 4th stone pickaxe, 16 sticks), then the nearest chicken (feathers) or spider (string) seen within 48 hunted, else the overland's legs to the look points. Its own clock 24,000 ticks (the snapshot is at dusk: the night's hut is in it). Cobwebs are not used yet (memory does not watch them).
+- **The stage** `bow_armed`: `armed` with a bow and 16 arrows in the overworld, between `armed` and `end` (Ord is the ladder).
+- **The shot** (`plan::bow`): see the brain note `end-bow`. Asked first at E3's two crystal hand-offs (`end_spikes`, and `open_task` before the end stone stock); `bow_step` ahead of `spikes_step`.
+- **Not built**: the carved pumpkin (the snapshot holds 1 iron ingot, shears want 2).
+
 ## Parity e07 (run 46041683496, 3ea46ea, real server, Normal, full iron)
 - **e07-bow-24: an arrow from the ground destroyed the crystal 25 off.** The bot on a stone floor at (1688.5, 65, 26.5), the crystal on bedrock 24 east and 7 up (1712.5, 72, 26.5). Aimed by `plan::bow::aim`, `use_item` at script tick 20 (t 74), released 24 ticks later; the crystal was removed at t 114 and its blast went off there. Health stayed 20.0: the blast does nothing at 25.
 - e07-bow-40 is not evidence yet: its arena was 12 from the 24 row's, so its bot aimed at that crystal (nearer, 27.5 off) and was itself hit by an arrow (3.1, cause the player, direct an arrow) at its t 92. The rows now stand 120 apart.
