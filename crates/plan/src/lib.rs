@@ -2375,6 +2375,10 @@ impl Plan {
             // <<< E5
             | Task::Swim(..) => None,
         };
+        // >>> E5 (walls 39, 44): a meal in hand is cut when the dragon comes in the End, and any
+        // meal past its cap (dev race 46048455555 lane 1: an eat held 2,360 ticks).
+        let running = self.meal_cut(w, tick, running);
+        // <<< E5
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
         let mut chosen: Option<(String, make::Always)> = None;
         for (id, row) in &table.always {
@@ -2384,9 +2388,6 @@ impl Plan {
                     running == Some(make::Always::Defend)
                         || defend::foe_except(w, rules, &ignored, never_kinds).is_some()
                 }
-                // >>> E5 (wall 39): a meal in hand in the End is cut when the dragon comes.
-                make::Always::Eat if running == Some(*row) => !self.dragon_holds_meal(w),
-                // <<< E5
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
                 make::Always::Eat => {

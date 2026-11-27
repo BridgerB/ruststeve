@@ -402,3 +402,6 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - Lane 1 struck both far crystals and had the dragon at 61.
   - **Wall 43:** lane 1's "charge: no dodge from" walked it from 64 down to 62 into E3's surface pits, by the short-drop rule.
   - **Fix:** the drop only off a raised spot (two or more sides open under the feet's level); the rise and the wall dig only in a pit (walled on three or more sides at the feet); never a rise on open ground.
+- **Wall 44: a meal held for 2,360 ticks** (dev race 46048455555 lane 1, c09bf25). "spikes: eat in the shaft" began at 3,560 on an open pillar at y 81 and ran until the strike at 5,920.
+  - The eat task is stepped only by its always-row. Wall 39's gate held the row off while the dragon was not holding far, so the task froze, neither stepped nor ended.
+  - **Fix (`Plan::meal_cut`, in lib's always rows, fenced E5):** a meal in hand is cut, its use let go and noted ("eat cut: …"), when the dragon comes near or a cloud does, or after `MEAL_CAP_TICKS` (100; a meal is 32 and the answer's wait 60).

@@ -2323,3 +2323,38 @@ fn while_the_dragon_scans_the_bot_paces_wider_than_its_wings_sweep() {
     r.bunker = Some([60, FLOOR - 4, 60]);
     assert_eq!(r.charge_step(&none, 0), None);
 }
+
+#[test]
+fn a_meal_is_cut_when_the_dragon_comes_and_capped_at_100_ticks() {
+    // Dev race 46048455555 lane 1: an eat begun on a pillar ran 2,360 ticks through two perches.
+    let feet = [12.5, 64.0, 0.5];
+    let eating = |w: &World, at: u64| {
+        let mut p = Plan::new(Aim::Race);
+        p.task = plan::Task::Eat(plan::eat::Eat::new(w, data::ItemKind::CookedBeef, at));
+        p
+    };
+    let eat = Some(plan::make::Always::Eat);
+    // The dragon strafing: cut at once.
+    let mut near = end_at(feet);
+    with_dragon(&mut near, [0.5, 80.0, 20.5], 1, 0.0);
+    let mut p = eating(&near, 0);
+    assert_eq!(p.meal_cut(&near, 5, eat), None);
+    assert!(matches!(p.task, plan::Task::Idle));
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "eat cut: the dragon near or a cloud")
+    );
+    // Holding far off: kept to the cap, then cut.
+    let mut far = end_at(feet);
+    with_dragon(&mut far, [0.5, 90.0, 60.5], 0, 0.0);
+    let mut q = eating(&far, 0);
+    assert_eq!(q.meal_cut(&far, 50, eat), eat);
+    assert!(matches!(q.task, plan::Task::Eat(_)));
+    assert_eq!(q.meal_cut(&far, dragon::MEAL_CAP_TICKS + 1, eat), None);
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "eat cut: over the meal's cap")
+    );
+}

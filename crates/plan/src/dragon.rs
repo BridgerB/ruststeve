@@ -704,6 +704,8 @@ pub const CRYSTALS_FIGHT_MAX: usize = 2;
 pub const HEAL_NOTE_TICKS: u64 = 200;
 /// Blocks on the plane the holding dragon keeps from a bot that eats (wall 39).
 pub const MEAL_CLEAR: f64 = 40.0;
+/// Ticks a meal runs at most (a meal is 32 and the answer's 60 more: `eat::ANSWER_TICKS`).
+pub const MEAL_CAP_TICKS: u64 = 100;
 /// Ticks between the checks of a dodge cell from where the bot stands as the dragon comes down.
 pub const READY_CHECK_TICKS: u64 = 20;
 /// Blocks from the fountain within which a bot not fighting paces while the dragon scans (the
@@ -4547,6 +4549,44 @@ impl Plan {
         }
         let from = *self.dragon.ready_rise_from.get_or_insert(fc[1]);
         (fc[1] < from + DODGE_RISES).then(|| self.rise_step(w, tick, body))
+    }
+
+    /// A meal in hand (`running` the eat row) cut, its use let go and noted, when the dragon comes
+    /// near or a cloud does (`dragon_holds_meal`) or it has run `MEAL_CAP_TICKS`: the eat task is
+    /// stepped only by its row, and a row held off froze it (wall 44: dev race 46048455555 lane 1,
+    /// "spikes: eat in the shaft" held 2,360 ticks through two perches). `running` as it stands,
+    /// `None` once cut.
+    pub fn meal_cut(
+        &mut self,
+        w: &World,
+        tick: u64,
+        running: Option<crate::make::Always>,
+    ) -> Option<crate::make::Always> {
+        if running != Some(crate::make::Always::Eat) {
+            return running;
+        }
+        let Task::Eat(e) = &self.task else {
+            return running;
+        };
+        let age = tick.saturating_sub(e.started);
+        let why = if self.dragon_holds_meal(w) {
+            "the dragon near or a cloud"
+        } else if age > MEAL_CAP_TICKS {
+            "over the meal's cap"
+        } else {
+            return running;
+        };
+        let (used, item) = (e.used_at.is_some(), e.item);
+        self.task = Task::Idle;
+        if used {
+            self.acts.push(Act::ReleaseUse);
+        }
+        self.note(
+            tick,
+            format!("eat cut: {why}"),
+            format!("{item:?} after {age} ticks"),
+        );
+        None
     }
 
     /// The fight on a perch with crystals standing: begun when the dragon sits or lands with
