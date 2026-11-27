@@ -2597,7 +2597,8 @@ watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
 #   jar's flight: speed 3.0, drag 0.99, gravity 0.05, the low arc through the box's middle); the
 #   use at tick 20 and the release 24 later (`bow:20`): is the crystal removed, and what does its
 #   blast do at that range? e07-bow-24: 24 east and 7 up (25 off); e07-bow-40: 40 east and 21 up
-#   (45 off).
+#   (45 off). The two arenas 120 apart (parity 46041683496 ran them 12 apart: the 40 row
+#   aimed at the 24 row's crystal, nearer, and was hit by an arrow).
 
 [[moment]]
 id = "e07-bow-24"
@@ -2619,7 +2620,7 @@ watch = [[24, 6, 0], [24, 5, 0]]
 id = "e07-bow-40"
 landing = 10
 dx = 60
-dz = 72
+dz = -60
 script = "bow:20"
 ticks = 100
 difficulty = "normal"

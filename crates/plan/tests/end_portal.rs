@@ -451,3 +451,52 @@ fn a_creeper_near_is_stepped_away_from() {
         None
     );
 }
+
+// >>> E8 (issue 20, the bow line)
+/// The bow kit's row from the armed snapshot's pack (race 45882199358 lane 0: 1 log, 8 planks,
+/// 15 gravel, 3 stone pickaxes, 90 cobblestone, a table) with 3 string and 2 feathers got: a
+/// step the planner can make; with the kit held, met; with no string or feathers only the
+/// pickaxe and the sticks are asked for.
+#[test]
+fn the_bow_row_is_makeable_from_the_armed_pack() {
+    let t = table();
+    let r = t.end_kit.clone();
+    assert!(r.bow, "the bow line runs the bow phase");
+    let near = |b: BlockKind| b == BlockKind::CraftingTable;
+    let pack: plan::make::Counts = [
+        (ItemKind::OakLog, 1),
+        (ItemKind::OakPlanks, 8),
+        (ItemKind::Gravel, 15),
+        (ItemKind::StonePickaxe, 3),
+        (ItemKind::Cobblestone, 90),
+        (ItemKind::CraftingTable, 1),
+        (ItemKind::String, 3),
+        (ItemKind::Feather, 2),
+    ]
+    .into_iter()
+    .collect();
+    let row = end_portal::bow_row(&r, false, 0, 3, 2);
+    assert_eq!(row.provides.len(), 4, "bow, arrows, pickaxe, sticks");
+    let c = plan::make::make_with_wear(&t, &pack, &near, true, &plan::make::Wear::default(), &row);
+    assert!(matches!(c, plan::make::Choice::Act(_)), "{c:?}");
+    let bare = end_portal::bow_row(&r, false, 0, 0, 0);
+    assert_eq!(
+        bare.provides.len(),
+        2,
+        "no string, no feathers: pickaxe and sticks"
+    );
+    let held: plan::make::Counts = [
+        (ItemKind::Bow, 1),
+        (ItemKind::Arrow, 32),
+        (ItemKind::StonePickaxe, 4),
+        (ItemKind::Stick, 16),
+    ]
+    .into_iter()
+    .collect();
+    let done = end_portal::bow_row(&r, true, 32, 0, 0);
+    assert_eq!(
+        plan::make::make_with_wear(&t, &held, &near, true, &plan::make::Wear::default(), &done),
+        plan::make::Choice::Done
+    );
+}
+// <<< E8

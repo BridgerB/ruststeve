@@ -264,6 +264,43 @@ pub enum RowStep {
     Over(String),
 }
 
+/// The bow kit's row for what is held now: the bow with 3 string held, as many arrows as the
+/// feathers held make (one feather, flint and stick each 4, up to `arrows`), the stone pickaxes,
+/// the sticks. Pure.
+pub fn bow_row(
+    r: &EndKitRules,
+    have_bow: bool,
+    arrows: i32,
+    string: i32,
+    feathers: i32,
+) -> make::Row {
+    let sets_short = ((r.arrows - arrows).max(0) + 3) / 4;
+    let arrow_target = arrows + 4 * feathers.min(sets_short);
+    let mut provides: Vec<(make::Need, i32)> = Vec::new();
+    let mut push = |name: &str, k: i32| {
+        if let Some(need) = make::Need::parse(name) {
+            provides.push((need, k));
+        }
+    };
+    if !have_bow && string >= 3 {
+        push("item:bow", 1);
+    }
+    if arrow_target > arrows {
+        push("item:arrow", arrow_target);
+    }
+    push("item:stone_pickaxe", r.bow_pickaxes);
+    push("item:stick", r.bow_sticks);
+    make::Row {
+        id: BOW_ROW.to_owned(),
+        needs: Vec::new(),
+        provides,
+        holds: Vec::new(),
+        spares: Vec::new(),
+        wants: Vec::new(),
+        act: None,
+    }
+}
+
 /// The bow kit in one line, for the notes.
 pub fn bow_line(w: &World) -> String {
     format!(
@@ -1122,30 +1159,7 @@ impl Plan {
         let sets_short = ((r.arrows - arrows).max(0) + 3) / 4;
         let feathers = n(ItemKind::Feather);
         let string = n(ItemKind::String);
-        let arrow_target = arrows + 4 * feathers.min(sets_short);
-        let mut provides: Vec<(make::Need, i32)> = Vec::new();
-        let mut push = |name: &str, k: i32| {
-            if let Some(need) = make::Need::parse(name) {
-                provides.push((need, k));
-            }
-        };
-        if !have_bow && string >= 3 {
-            push("item:bow", 1);
-        }
-        if arrow_target > arrows {
-            push("item:arrow", arrow_target);
-        }
-        push("item:stone_pickaxe", r.bow_pickaxes);
-        push("item:stick", r.bow_sticks);
-        let row = make::Row {
-            id: BOW_ROW.to_owned(),
-            needs: Vec::new(),
-            provides,
-            holds: Vec::new(),
-            spares: Vec::new(),
-            wants: Vec::new(),
-            act: None,
-        };
+        let row = bow_row(r, have_bow, arrows, string, feathers);
         match self.kit_row_step(w, r, &row, tick) {
             RowStep::Task(Some(t)) => return Some(t),
             RowStep::Task(None) => {
