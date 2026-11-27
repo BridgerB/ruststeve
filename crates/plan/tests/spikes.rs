@@ -2655,3 +2655,71 @@ fn stubs_of_its_own_on_all_four_axes_are_climbed_back_onto() {
         spikes::stand(&sp, axis).stand.1 - 64 + spikes::PILLAR_SPARE
     );
 }
+
+/// A spike's cage as vanilla's guarded spike puts it (config/end.toml: iron bars over centre -2..+2
+/// on x and z, y top..top + 3; 73 bars): the ring where |dx| or |dz| is 2 from top to top + 2, and
+/// the 5 by 5 roof at top + 3.
+fn cage(w: &mut World, (cx, cz): (i32, i32), top: i32) {
+    for dx in -2..=2_i32 {
+        for dz in -2..=2_i32 {
+            for y in top..=top + 3 {
+                if y == top + 3 || dx.abs() == 2 || dz.abs() == 2 {
+                    set(w, (cx + dx, y, cz + dz), BlockKind::IronBars);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off() {
+    // Race 46070173620: the crystals_5 stand on the caged [-34, 24] was inside its bars; "no edge
+    // over ground" 12 to 53 times, a dig-out at its own bar, 6 of 8 dead.
+    let mut w = world(2, [9.5, 70.0, 9.5]);
+    water(&mut w);
+    cage(&mut w, (8, 8), 70);
+    // Never a dig-out from the spike's top.
+    assert!(
+        !matches!(
+            spikes::next(&w, &SpikeState::default(), 0),
+            Next::DigOut { .. }
+        ),
+        "{:?}",
+        spikes::next(&w, &SpikeState::default(), 0)
+    );
+    // The bar beside the feet, the feet's height first.
+    let mut p = Plan::new(Aim::Race);
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (9, 70, 10)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: out of the cage at (9, 70, 10)"),
+        "{:?}",
+        notes(&p)
+    );
+    // Then the head's.
+    set(&mut w, (9, 70, 10), BlockKind::Air);
+    assert_eq!(spikes::cage_bar(&w, (9, 70, 9)), Some((9, 71, 10)));
+    // Both out: to the gap at the top's edge, over ground, and off.
+    set(&mut w, (9, 71, 10), BlockKind::Air);
+    assert_eq!(
+        spikes::spike_edge(&w, (9, 70, 9)),
+        Some(((9, 70, 10), (9, 70, 11)))
+    );
+    let mut p = Plan::new(Aim::Race);
+    assert!(
+        matches!(p.spikes_task(&w, 100), Some(Task::Explore(_))),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: to the spike's edge at (9, 70, 10)"),
+        "{:?}",
+        notes(&p)
+    );
+}

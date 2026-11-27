@@ -608,3 +608,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - A stubbed approach is resumed: the walk goes to a side foot beside the stub (`stub_side`: a column with its ground at the stub's base and open to over its top, a side pillar of its own begun there first). The bot pillars up there to the stub's top and steps onto it ("on the stub at"). The climb goes on in the stub's column, its record from the stub's base again; the side pillar is left a stub.
   - Its blocks are counted for the whole pillar from the stub's base (`pillar_wants`), and `blocks_wanted` and both gates read the same count.
   - Unit test `stubs_of_its_own_on_all_four_axes_are_climbed_back_onto`: all four axes stubbed, a walk to a side foot (never a refusal), the side pillar, the step onto the stub, and the climb on from there.
+
+### Wall 45: stranded inside a spike's cage (race 46070173620, from the crystals_5 stand on [-34, 24]; fixed)
+- **What happened:**
+  - 6 of 8 dead and 0 struck. "off the spike" fired 0 times.
+  - Every lane noted "stranded on the spike's top (… at (-33, 79, 25); no edge over ground)" 12 to 53 times until a cloud came. The first act was "dig the way out at (-34, 79, 26) … shut in a pocket".
+  - [-34, 24] is caged (config/end.toml, top 79): iron bars on the ring where |dx| or |dz| is 2 from the top to top + 2, and a 5 by 5 roof at top + 3, 73 bars. A radius-2 spike's whole top layer lies under the ring, so from inside no side was passable. `spike_edge` found no edge, and the dig-out struck a bar of its own cage.
+  - The ground under the edges was known: the world holds every block of the chunks the server sent, and `spike_edge` reads them, not sight. So E9's cause (a) was not it.
+- **The fix:**
+  - Never a dig-out from a spike's top, its cage's bars or its bedrock (`on_spike_top`). It is "stranded" instead, and the stranded rule runs.
+  - Caged with no edge: the bar beside the feet is broken, the feet's height and then the head's, on the side facing the island's centre best ("out of the cage at"; `cage_bar`). Then the walk to the gap at the top's edge and the step off onto the clutch (wall 42).
+  - Unit test `caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off`, with the vanilla cage round the test spike.

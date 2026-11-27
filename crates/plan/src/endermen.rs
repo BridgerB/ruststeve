@@ -71,6 +71,10 @@ pub const CREEPY_INDEX: u8 = 17;
 /// Its stared-at flag (`DATA_STARED_AT`, index 18): set at once by a held stare, before any
 /// anger (probe 45472254333). Seen true, it is a near miss of the look filter, counted.
 pub const STARED_INDEX: u8 = 18;
+// >>> E7 (issue 20)
+/// An enderman's full health (`EnderMan.createAttributes`: max health 40).
+pub const ENDERMAN_HEALTH: f32 = 40.0;
+// <<< E7
 /// What counts as filler for the provisions note: the blocks a bridge, a seal or a pocket uses.
 pub const FILLER: &[ItemKind] = &[
     ItemKind::Netherrack,
@@ -228,6 +232,11 @@ pub struct EnderState {
     /// Clutch pours sent as asked though their look came near an enderman (`look::keep_off_act`).
     #[serde(default)]
     pub pours_unbent: u64,
+    /// Endermen seen angry (creepy) before any stared-at flag, and the flags told as anger's.
+    #[serde(default)]
+    pub angry_first: Vec<i32>,
+    #[serde(default)]
+    pub anger_flags: u64,
     // <<< E7
     /// Endermen seen with the stared-at flag set: near misses, each noted once.
     #[serde(default)]
@@ -822,9 +831,49 @@ impl Plan {
             })
             .map(|(id, _)| *id)
             .collect();
+        // >>> E7 (issue 20, docs/problems/end-gaze.md): the jar's look-for-player goal takes a
+        // player it is already angry at as if stared at (`isAngerInducing` is
+        // `isBeingStaredBy || isAngryAt`, probe 45472254333), so the flag also rises on an
+        // enderman angry from a blow or from before (race 46071506005 lane 5: enderman 93 angry
+        // since tick 40, at 17 of 40 health, flagged at 400 in the fight). Such a flag is told
+        // apart, not counted as a near miss: it was angry before (creepy seen without the flag)
+        // or hurt (under its full health).
+        for (id, e) in w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == EntityKind::Enderman)
+        {
+            let creepy = matches!(e.metadata.get(&CREEPY_INDEX), Some(MetaValue::Bool(true)));
+            let flag = matches!(e.metadata.get(&STARED_INDEX), Some(MetaValue::Bool(true)));
+            if creepy && !flag && !self.ender.angry_first.contains(id) {
+                self.ender.angry_first.push(*id);
+            }
+        }
+        let (anger, stared): (Vec<i32>, Vec<i32>) = stared.into_iter().partition(|id| {
+            self.ender.angry_first.contains(id)
+                || w.entities
+                    .get(id)
+                    .and_then(world::Entity::health)
+                    .is_some_and(|h| h < ENDERMAN_HEALTH)
+        });
+        for id in anger {
+            self.ender.near_misses.push(id);
+            self.ender.anger_flags += 1;
+            self.note(
+                w.ticks,
+                format!("stared-at flag of angry enderman {id}"),
+                format!(
+                    "set by its anger, not a look (angry before, or hurt); {} in the run; pitch {:.0}",
+                    self.ender.anger_flags, w.player.pitch
+                ),
+            );
+        }
+        // <<< E7
         for id in stared {
             self.ender.near_misses.push(id);
-            let n = self.ender.near_misses.len();
+            let n = u64::try_from(self.ender.near_misses.len())
+                .unwrap_or(u64::MAX)
+                .saturating_sub(self.ender.anger_flags);
             self.note(
                 w.ticks,
                 format!("near miss: enderman {id} stared at"),
