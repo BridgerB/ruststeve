@@ -440,7 +440,7 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
     // Strafing 50 off: no climb.
     let mut w = world(2, [8.5, 64.0, 5.5]);
     water(&mut w);
-    dragon(&mut w, [8.5, 64.0, 55.5], 0);
+    dragon(&mut w, [8.5, 64.0, 55.5], 1);
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
     assert!(notes(&p).iter().any(|n| n == "spikes: no climb"));
@@ -2206,11 +2206,14 @@ fn no_drop_climb_or_stand_while_the_dragon_would_knock_the_bot_off() {
 fn a_climb_begins_only_with_the_dragon_holding_over_64_off() {
     // E9's read of race 46038776204 lanes 1, 3 and 4: struck by the charge 80 to 160 ticks after
     // "sitting-scanning -> charging"; lane 1 began with the dragon sitting at the fountain.
+    // Part 2, the orchestrator after race 46071506005: holding, 40 off or more, not closing.
     for (phase, z, climbs) in [
         (0, 75.5, true),
+        (0, 55.5, true),
+        (0, 45.5, true),
+        (0, 40.5, false),
         (6, 105.5, false),
         (1, 105.5, false),
-        (0, 55.5, false),
     ] {
         let mut w = world(2, [8.5, 64.0, 5.5]);
         water(&mut w);
@@ -2497,14 +2500,14 @@ fn the_clutchs_water_is_found_a_little_further_out() {
 fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
     // E5's read of race 46063334187 lane 5: "climb on through (the dragon 63 off in phase 0)",
     // struck off 3 under its stand at (42, 91, 19), a fatal fall.
-    // Up, holding 50 off and closing (70 off 5 ticks ago): the climb stops and the bot comes
+    // Up, holding 35 off and closing (70 off 5 ticks ago): the climb stops and the bot comes
     // down by the clutch (the test spike's stand is 3 over, so only the closing denies the
     // near-stand exception here; `the_one_exception_near_the_stand_holding_and_not_closing`
     // covers the rest).
     let mut w = world(2, [8.5, 67.0, 5.5]);
     pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
     water(&mut w);
-    dragon(&mut w, [8.5, 67.0, 55.5], 0);
+    dragon(&mut w, [8.5, 67.0, 40.5], 0);
     let mut p = Plan::new(Aim::Race);
     p.spikes.dragon_seen = Some((95, 70.0));
     p.spikes.pillars.push(PillarRec {
@@ -2540,7 +2543,7 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
         notes(&p)
     );
     // No water bucket: held, not on.
-    dragon(&mut w, [8.5, 67.0, 55.5], 0);
+    dragon(&mut w, [8.5, 67.0, 40.5], 0);
     w.inventory.slots.remove(&44);
     let mut p = Plan::new(Aim::Race);
     p.spikes.dragon_seen = Some((95, 70.0));
@@ -2722,4 +2725,74 @@ fn caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off() {
         "{:?}",
         notes(&p)
     );
+}
+
+#[test]
+fn a_climb_goes_on_through_the_holding_pattern_40_off_or_more() {
+    // The orchestrator's rule after race 46071506005: start holding, 40 off or more, not closing;
+    // go on while holding 40 off or more; stop on any other phase or nearer.
+    // Half way up, holding 50 off and closing: on.
+    let mut w = world(2, [8.5, 65.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 64, BlockKind::EndStone);
+    water(&mut w);
+    dragon(&mut w, [8.5, 65.0, 55.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.dragon_seen = Some((95, 70.0));
+    p.spikes.landings.push(((8, 5), (9, 64, 5)));
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))),
+        "{:?} {:?}",
+        p.spikes.doing,
+        notes(&p)
+    );
+    // At the foot, the same dragon closing: no start.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    dragon(&mut w, [8.5, 64.0, 55.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.dragon_seen = Some((95, 70.0));
+    p.spikes_task(&w, 100);
+    assert!(
+        notes(&p).iter().any(|n| n == "spikes: no climb"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn a_stopped_climb_resumes_on_its_own_stub() {
+    // Race 46071506005 lane 0: four columns begun at [33, -25], each stopped low; the next climb
+    // took the nearest axis, not its stub.
+    let mut w = world(2, [16.5, 64.0, 16.5]);
+    water(&mut w);
+    let sp = spikes::spike_for(&w, &[], CRYSTAL_AT).expect("the spike");
+    // A stub on the axis farthest from the bot.
+    let far = Axis::ALL
+        .into_iter()
+        .max_by_key(|a| {
+            let c = spikes::stand(&sp, *a).column;
+            (c.0 - 16).abs() + (c.1 - 16).abs()
+        })
+        .expect("an axis");
+    let col = spikes::stand(&sp, far).column;
+    pillar(&mut w, col, 64, 67, BlockKind::Cobblestone);
+    let mut st = SpikeState::default();
+    st.stubs.push(PillarRec {
+        x: col.0,
+        z: col.1,
+        base: 64,
+    });
+    match spikes::next(&w, &st, 0) {
+        Next::Walk {
+            approach: Some((8, 8, a)),
+            ..
+        } => assert_eq!(a, far, "the stub's axis, not the nearest"),
+        n => panic!("{n:?}"),
+    }
 }

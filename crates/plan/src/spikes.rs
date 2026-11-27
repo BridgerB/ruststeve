@@ -41,7 +41,7 @@
 //! **Down** is the pillar dug back from on top of it, one cell under the feet at a time
 //! (`portal_way.rs`'s one-cell dig). No jump.
 //!
-//! **Rules.** Climb only while the dragon is more than `CLIMB_FAR` off or perched (phases 5 to 7),
+//! **Rules.** Climb only while the dragon holds (phase 0) `CLIMB_NEAR` off or more, not closing at the start,
 //! with health over danger plus `CLIMB_MARGIN`. A fireball near or a strafe within
 //! `THREAT_NEAR` takes a bot up a pillar down at once, box or not: into the landing water, else
 //! off the side onto the clutch, else the dig. A charge within `THREAT_NEAR` holds it crouched
@@ -155,9 +155,17 @@ pub const WATERFALL_KEEP: i32 = 48;
 /// Blocks from the bunker within which the pool is made, and from the pool a refill walks.
 pub const POOL_NEAR: i32 = 8;
 pub const POOL_FAR: i32 = 64;
-/// Ticks a dragon reading counts toward "closing", and the blocks closer it must have come.
-pub const CLOSING_TICKS: u64 = 60;
+/// Ticks a dragon reading counts toward "closing", and the blocks closer it must have come: its
+/// distance falling against a reading taken every `CLOSING_TICKS` / 2 (20) ticks (the
+/// orchestrator's climb rule, after race 46071506005).
+pub const CLOSING_TICKS: u64 = 40;
 pub const CLOSING_BY: f64 = 1.0;
+/// Blocks a holding dragon (phase 0) may come within and a climb still begin and go on: the
+/// holding pattern's flight is what a climb is made through; the knock-offs came from charges,
+/// perches and take-offs (the orchestrator, after race 46071506005: with "over 64" a 30-block
+/// climb, about 360 ticks, almost never saw the dragon far enough for long enough, and 4 climbs
+/// in a lane stopped low, 0 strikes in 5 lanes).
+pub const CLIMB_NEAR: f64 = 40.0;
 /// Ticks a repeated note waits before it is written again.
 pub const NOTE_EVERY: u64 = 200;
 /// The dragon's phase is its metadata index 16, an INT (`EnderDragon.DATA_PHASE`, after the
@@ -803,8 +811,9 @@ pub fn threatens(d: Option<&DragonNear>) -> bool {
     d.is_some_and(|d| d.dist <= THREAT_NEAR && matches!(d.phase, Some(STRAFE_PHASE | CHARGE_PHASE)))
 }
 
-/// Why a climb may not go on now, or `None` when it may: the dragon more than `CLIMB_FAR` off or
-/// perched, and health over danger plus `CLIMB_MARGIN`.
+/// Why a climb may not begin or go on now, or `None` when it may: the dragon holding (phase 0)
+/// `CLIMB_NEAR` off or more, and health over danger plus `CLIMB_MARGIN` (closing bars only the
+/// start, in `spikes_task`).
 pub fn climb_refusal(d: Option<&DragonNear>, health: Option<f32>, danger: f32) -> Option<String> {
     if let Some(h) = health
         && h <= danger + CLIMB_MARGIN
@@ -813,13 +822,13 @@ pub fn climb_refusal(d: Option<&DragonNear>, health: Option<f32>, danger: f32) -
             "health {h} not over danger {danger} + {CLIMB_MARGIN}"
         ));
     }
-    // Only with the dragon holding (phase 0) over `CLIMB_FAR` off: a perched dragon scans and
+    // Only with the dragon holding (phase 0), `CLIMB_NEAR` off or more: a perched dragon scans and
     // then charges whoever it sees (E9's read of race 46038776204 lanes 1, 3 and 4: the charge
     // came 80 to 160 ticks after "sitting-scanning -> charging"; lane 1 began its climb with the
     // dragon sitting at the fountain and was struck 11 up).
     match d {
-        Some(d) if d.dist <= CLIMB_FAR || d.phase != Some(HOLDING_PHASE) => Some(format!(
-            "the dragon {:.0} off in phase {:?}, not holding over {CLIMB_FAR:.0} off",
+        Some(d) if d.dist < CLIMB_NEAR || d.phase != Some(HOLDING_PHASE) => Some(format!(
+            "the dragon {:.0} off in phase {:?}, not holding {CLIMB_NEAR:.0} off or more",
             d.dist, d.phase
         )),
         Some(_) | None => None,
@@ -951,7 +960,19 @@ pub fn chosen_approach(w: &World, st: &SpikeState, pos: [f64; 3], tick: u64) -> 
                 .filter_map(|a| approach_along(w, &spike, *a))
                 .find(|a| a.plan.column == *col)
         });
+        // Then a stub of its own: a stopped climb resumes there, not on a new column (race
+        // 46071506005 lane 0: four columns begun at [33, -25], each stopped low).
+        let stubbed = || {
+            st.stubs.iter().find_map(|r| {
+                Axis::ALL
+                    .iter()
+                    .filter(|a| !refused(a))
+                    .filter_map(|a| approach_along(w, &spike, *a))
+                    .find(|a| a.plan.column == (r.x, r.z))
+            })
+        };
         landed
+            .or_else(stubbed)
             .or_else(|| best_approach(w, &spike, pos, &st.refused, tick))
             .map(|a| (spike, a))
     };
@@ -2019,7 +2040,7 @@ impl Plan {
             && self
                 .spikes
                 .dragon_seen
-                .is_none_or(|(at, _)| tick.saturating_sub(at) >= CLOSING_TICKS / 3)
+                .is_none_or(|(at, _)| tick.saturating_sub(at) >= CLOSING_TICKS / 2)
         {
             self.spikes.dragon_seen = Some((tick, now.dist));
         }
@@ -2598,7 +2619,9 @@ impl Plan {
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
                 let fireball_refusal = fireball_near(w, body.pos)
                     .map(|fb| format!("a fireball in flight {fb:.0} off"));
-                let closing_refusal = (closing && !d.as_ref().is_some_and(perched))
+                // Closing bars a climb's start, not its going on (the holding dragon's flight is
+                // climbed through while it keeps `CLIMB_NEAR` off).
+                let closing_refusal = (closing && !climbing && !d.as_ref().is_some_and(perched))
                     .then(|| "the dragon closing".to_owned());
                 let refusal = climb_refusal(d.as_ref(), health, danger)
                     .or(fireball_refusal)
