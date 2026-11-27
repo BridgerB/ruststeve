@@ -1139,6 +1139,7 @@ fn short_of_end_stone_the_bot_mines_the_islands_surface_where_it_stands() {
     // Frontier race 45969992660 lane 1: handed back for 6 of 27 at 1,820, then 2,800 ticks for a
     // lull and 3,020 idle at the spike's foot. Flat end stone to y 63, the bot at (20, 64, 0).
     let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    surface_kit(&mut w);
     w.inventory.slots.insert(40, (ItemKind::EndStone, 6));
     with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
     dragon_at(&mut w, [40.0, 75.0, 0.0], 1);
@@ -1301,6 +1302,7 @@ fn from_arrival_to_the_crystals_no_bunker_or_tunnel_only_surface_mining() {
     // The coordinator's decision after frontier race 45978279345: before the crystals are done
     // the bot stays on the surface in the open and mines its end stone there.
     let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    surface_kit(&mut w);
     w.stage_reached = Some(world::stage::Stage::Island);
     with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
     let mut p = racer();
@@ -1360,6 +1362,7 @@ fn the_first_surface_stock_stops_at_enough_for_the_tallest_pillar() {
     // The coordinator: exposure on the ground before the first climb is what kills; 64 is the
     // tallest pillar and its walls, the restock on a hand-back covers the rest.
     let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    surface_kit(&mut w);
     w.stage_reached = Some(world::stage::Stage::Island);
     with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
     w.inventory
@@ -1389,6 +1392,7 @@ fn the_first_surface_stock_stops_at_enough_for_the_tallest_pillar() {
 fn surface_mining_notes_every_dig_and_keeps_its_pit_one_deep() {
     // Race 45988967677: 117 surface digs began with no reason; lanes 1 and 5 stalled in pits.
     let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    surface_kit(&mut w);
     w.stage_reached = Some(world::stage::Stage::Island);
     with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
     let mut p = racer();
@@ -1420,4 +1424,63 @@ fn surface_mining_notes_every_dig_and_keeps_its_pit_one_deep() {
     }
     // Its walls at 63 gone, the floor at 62 beside is never dug below the level.
     assert_eq!(plan::end::surface_cell_at(&w2, (20, 63, 0), false), None);
+}
+
+/// No cobblestone (it counts as a pillar block now), the stone pickaxe in hand.
+fn surface_kit(w: &mut World) {
+    w.inventory.slots.remove(&36);
+    w.inventory.slots.remove(&37);
+    w.held = 2;
+}
+
+#[test]
+fn the_pickaxe_budget_keeps_a_reserve_and_wears_the_most_worn_first() {
+    // Race 45994686575 lane 5: three stone pickaxes worn out by 49,600, "no pickaxe" 15,240 ticks.
+    let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    // A second pickaxe in slot 3 (hotbar 3), more worn than the one in hand.
+    w.inventory.slots.insert(39, (ItemKind::StonePickaxe, 1));
+    w.inventory.wear.insert(
+        39,
+        protocol::slot::Wear {
+            damage: Some(100),
+            max_damage: Some(131),
+        },
+    );
+    assert_eq!(plan::end::most_worn_pick(&w), Some(3));
+    let mut p = racer();
+    p.end.bridged = true;
+    let _ = p.end_task(&w, 0);
+    assert!(
+        p.take_acts().contains(&Act::Hold { slot: 3 }),
+        "{:?}",
+        notes(&p)
+    );
+    // Both near the reserve: no surface dig, and the reserve says so.
+    w.inventory.wear.insert(
+        38,
+        protocol::slot::Wear {
+            damage: Some(120),
+            max_damage: Some(131),
+        },
+    );
+    w.inventory.wear.insert(
+        39,
+        protocol::slot::Wear {
+            damage: Some(110),
+            max_damage: Some(131),
+        },
+    );
+    w.held = 3;
+    let mut p = racer();
+    p.end.bridged = true;
+    let _ = p.end_task(&w, 0);
+    assert!(
+        noted(&p, "end: surface dig held for the pickaxe reserve"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
 }

@@ -372,6 +372,37 @@ pub fn strafing(w: &World) -> bool {
 
 /// The stairs down's foot is kept only this far or more under the bunker's feet.
 pub const STOCK_FOOT_DEPTH: i32 = 3;
+/// Pickaxe uses kept for dig-outs: no surface dig into them (the End has no wood and the bot no
+/// sticks: a broken pickaxe is final).
+pub const PICK_RESERVE: i32 = 40;
+
+/// Blocks a pillar is built of: end stone, and the cobblestone and cobbled deepslate carried (E4).
+pub fn pillar_blocks(w: &World) -> i32 {
+    [
+        ItemKind::EndStone,
+        ItemKind::Cobblestone,
+        ItemKind::CobbledDeepslate,
+    ]
+    .iter()
+    .map(|k| craft::count(w, *k))
+    .sum()
+}
+
+/// The hotbar slot (0 to 8) of the most worn pickaxe there, used first so another stays fresh.
+pub fn most_worn_pick(w: &World) -> Option<u8> {
+    let picks = data::generated::tags::item_tag("pickaxes").unwrap_or(&[]);
+    (36i16..=44)
+        .filter(|s| {
+            w.inventory
+                .slots
+                .get(s)
+                .is_some_and(|(k, _)| picks.contains(k))
+        })
+        .filter_map(|s| w.inventory.uses_left(s).map(|u| (u, s)))
+        .min()
+        .and_then(|(_, s)| u8::try_from(s - 36).ok())
+}
+
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
 /// Walks for surface end stone a hand-back at most, and the length of one.
@@ -658,6 +689,11 @@ pub struct EndState {
     /// they are below it.
     #[serde(default)]
     pub surface_y: Option<i32>,
+    /// Surface digs' pickaxe uses, and the reserve's hold noted.
+    #[serde(default)]
+    pub surface_uses: u32,
+    #[serde(default)]
+    pub reserve_noted: bool,
     /// The surface stock before the crystals is over (the target held, or none in reach).
     #[serde(default)]
     pub open_stock_over: bool,
@@ -1425,19 +1461,43 @@ impl Plan {
     /// edge. With none, a short walk toward the fountain over the island's top.
     fn surface_mine(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
         let stone = craft::count(w, ItemKind::EndStone);
+        // The pickaxe budget: no surface dig into the reserve kept for dig-outs.
+        let uses = crate::endermen::pickaxe_uses_left(w);
+        if uses <= PICK_RESERVE {
+            if !self.end.reserve_noted {
+                self.end.reserve_noted = true;
+                self.note(
+                    tick,
+                    "end: surface dig held for the pickaxe reserve".to_owned(),
+                    format!("{uses} pickaxe uses left, {PICK_RESERVE} kept for dig-outs; {stone} end stone held"),
+                );
+            }
+            return None;
+        }
+        self.end.reserve_noted = false;
+        // The most worn pickaxe in the hotbar in hand first, so another stays fresh.
+        if let Some(slot) = most_worn_pick(w)
+            && w.held != slot
+        {
+            if self.acts.is_empty() && w.click.is_none() && w.window.is_none() {
+                self.acts.push(world::Act::Hold { slot });
+            }
+            return Some(Task::Idle);
+        }
         let level = *self.end.surface_y.get_or_insert(feet.1);
         if let Some(c) =
             surface_cell_at(w, feet, feet.1 >= level).filter(|c| !self.refused_now(*c, tick))
         {
             self.end.surface_walks = 0;
             self.end.surface_digs += 1;
+            self.end.surface_uses += 1;
             // Every dig its reason (race 45988967677: 117 of its digs began with none, the
             // coverage row's "tasks with a reason" 620/1500).
             self.note(
                 tick,
                 format!("end: surface end stone at {c:?}"),
                 format!(
-                    "{stone} held, {STOCK_ENOUGH} wanted for the crystals; dig {} in the open",
+                    "{stone} held, {STOCK_ENOUGH} wanted for the crystals; dig {} in the open; {uses} pickaxe uses left",
                     self.end.surface_digs
                 ),
             );
@@ -1519,10 +1579,14 @@ impl Plan {
             return None;
         }
         self.end.out_runs = 0;
-        let stone = craft::count(w, ItemKind::EndStone);
-        // Enough for the tallest pillar and its walls, no more: the time on the ground before the
-        // first climb is what kills (the coordinator); a hand-back for blocks mines again.
-        let want = STOCK_ENOUGH;
+        let stone = pillar_blocks(w);
+        // What the next pillar needs, no more (race 45994686575 lane 5: three stone pickaxes worn
+        // out by 49,600, 44 held against the last pillar's 49, the End has no wood): at most the
+        // tallest pillar and its walls; a hand-back for blocks mines again.
+        let want = self
+            .next_pillar_need(w)
+            .unwrap_or(STOCK_ENOUGH)
+            .min(STOCK_ENOUGH);
         if stone < want && self.end.surface_walks <= SURFACE_WALKS && !self.end.open_stock_over {
             if let Some(t) = self.surface_mine(w, feet, tick) {
                 return Some(t);
@@ -1541,7 +1605,7 @@ impl Plan {
         }
         let next = if crystals_alive(w) > 0 {
             let t = self.end_spikes(w, tick);
-            if t.is_none() && stone < STOCK_ENOUGH {
+            if t.is_none() && stone < want {
                 // Handed back (for blocks): mine again.
                 self.end.handed_back = true;
                 self.end.open_stock_over = false;
@@ -1555,6 +1619,19 @@ impl Plan {
             self.end.handoffs += 1;
         }
         next
+    }
+
+    /// The next pillar's blocks: from the nearest crystal's spike, its top over the ground beside it
+    /// and E4's spare (`spikes::PILLAR_SPARE`); `None` with no crystal or spike known.
+    pub fn next_pillar_need(&self, w: &World) -> Option<i32> {
+        let body = w.body?;
+        let (_, pos) = crate::spikes::nearest_crystal(w, body.pos)?;
+        let spike = crate::spikes::spike_for(w, &self.spikes.geography, pos)?;
+        let (x, z) = (spike.centre[0] + spike.radius + 3, spike.centre[1]);
+        #[allow(clippy::cast_possible_truncation)]
+        let ground =
+            crate::spikes::ground(w, x, z, spike.top_y).unwrap_or(body.pos[1].floor() as i32);
+        Some(spike.top_y + 1 - ground + crate::spikes::PILLAR_SPARE)
     }
 
     /// The crystals' hand-off: E4's `Plan::spikes_task` (issue 20f), the pillar and strike.
