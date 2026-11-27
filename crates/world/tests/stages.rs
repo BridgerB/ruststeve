@@ -713,94 +713,175 @@ fn island_is_end_stone_near_the_fountain() {
     assert!(!Stage::Island.holds(&w));
 }
 
-/// `crystals`: near the fountain with every spike's column loaded and no crystal alive. A
-/// crystal alive, a spike column not loaded, or the bot far out is not.
-#[test]
-fn crystals_needs_every_spike_seen_and_none_alive() {
-    let mut w = World::new();
-    w.step(&login("minecraft:the_end"));
-    w.step(&teleport_to(0.5, 70.0, 0.5));
-    for [x, z] in world::stage::SPIKES {
-        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
-    }
-    w.step(&add(90, data::EntityKind::EndCrystal, 42.5, 83.0, 0.5));
-    w.step(&tick());
-    assert!(!Stage::Crystals.holds(&w), "one alive");
-    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![90] }));
-    w.step(&tick());
-    assert!(Stage::Crystals.holds(&w));
-    w.step(&teleport_to(70.5, 70.0, 0.5));
-    w.step(&tick());
-    assert!(!Stage::Crystals.holds(&w), "70 off the fountain");
-    let mut w = World::new();
-    w.step(&login("minecraft:the_end"));
-    w.step(&teleport_to(0.5, 70.0, 0.5));
-    for [x, z] in world::stage::SPIKES.iter().skip(1) {
-        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
-    }
-    w.step(&tick());
-    // The ten spikes' chunks are ten different columns: one missing is a spike not seen.
-    assert!(!Stage::Crystals.holds(&w), "a spike's column not loaded");
+/// A crystal on spike `i` (`SPIKES`), as the server adds it: on the centre + 0.5.
+fn crystal(id: i32, i: usize) -> Event {
+    let [x, z] = world::stage::SPIKES[i];
+    add(
+        id,
+        data::EntityKind::EndCrystal,
+        f64::from(x) + 0.5,
+        80.0,
+        f64::from(z) + 0.5,
+    )
 }
 
-/// `crystals_5` and `crystals_1`: counted the way `crystals` is (near the fountain, every
-/// spike's column loaded, the crystals the server sent): 6 alive is neither, 5 is `crystals_5`,
-/// 1 is `crystals_1`, 0 is all three and `crystals` is reached. A spike's column not loaded, or
-/// the bot far out, is none of them however few were sent.
-#[test]
-fn crystals_5_and_1_count_the_crystals_left() {
+/// Spike `i`'s crystal destroyed as a real server tells it: removed, then its blast at its
+/// spot (`EndCrystal.hurtServer`), or the blast first when `blast_first`.
+fn destroy(w: &mut World, id: i32, i: usize, blast_first: bool) {
+    let [x, z] = world::stage::SPIKES[i];
+    let blast = Event::Packet(S2c::Explode {
+        center: [f64::from(x) + 0.5, 80.0, f64::from(z) + 0.5],
+        knockback: None,
+    });
+    let remove = Event::Packet(S2c::RemoveEntities { ids: vec![id] });
+    if blast_first {
+        w.step(&blast);
+        w.step(&remove);
+    } else {
+        w.step(&remove);
+        w.step(&blast);
+    }
+    w.step(&tick());
+}
+
+fn in_the_end() -> World {
     let mut w = World::new();
     w.step(&login("minecraft:the_end"));
     w.step(&teleport_to(0.5, 70.0, 0.5));
     for [x, z] in world::stage::SPIKES {
         w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
     }
-    for (i, [x, z]) in world::stage::SPIKES.iter().take(6).enumerate() {
-        let id = 90 + i as i32;
-        w.step(&add(
-            id,
-            data::EntityKind::EndCrystal,
-            f64::from(*x) + 0.5,
-            83.0,
-            f64::from(*z) + 0.5,
-        ));
+    for i in 0..10 {
+        w.step(&crystal(100 + i as i32, i));
     }
     w.step(&tick());
-    assert_eq!(world::stage::crystals_left(&w), Some(6));
-    assert_eq!(w.stage_reached, Some(Stage::End), "6 left");
-    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![90] }));
-    w.step(&tick());
-    assert!(Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
-    assert_eq!(w.stage_reached, Some(Stage::Crystals5));
+    w
+}
+
+/// `crystals`: every spike's crystal seen destroyed (its removal with its blast at its spot),
+/// in the End. Every crystal untracked (the bot far off) is none gone; a blast off the spot is
+/// not its own; the last one's blast before its removal counts.
+#[test]
+fn crystals_needs_every_crystal_destroyed() {
+    let mut w = in_the_end();
+    assert_eq!(world::stage::crystals_left(&w), Some(10));
     w.step(&Event::Packet(S2c::RemoveEntities {
-        ids: vec![91, 92, 93],
+        ids: (100..110).collect(),
     }));
     w.step(&tick());
-    assert_eq!(world::stage::crystals_left(&w), Some(2));
-    assert_eq!(w.stage_reached, Some(Stage::Crystals5), "2 left");
-    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![94] }));
+    assert_eq!(
+        world::stage::crystals_left(&w),
+        Some(10),
+        "untracked, not gone"
+    );
+    assert!(!Stage::Crystals.holds(&w) && !Stage::Crystals5.holds(&w));
+    for i in 0..10 {
+        w.step(&crystal(200 + i as i32, i));
+    }
+    // A blast 5 off spike 0's crystal as it is removed: not its own.
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![200] }));
+    w.step(&Event::Packet(S2c::Explode {
+        center: [17.5, 80.0, 39.5],
+        knockback: None,
+    }));
     w.step(&tick());
-    assert!(Stage::Crystals1.holds(&w) && !Stage::Crystals.holds(&w));
-    assert_eq!(w.stage_reached, Some(Stage::Crystals1));
-    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![95] }));
-    w.step(&tick());
-    assert!(Stage::Crystals5.holds(&w) && Stage::Crystals1.holds(&w));
+    assert_eq!(
+        world::stage::crystals_left(&w),
+        Some(10),
+        "a blast off the spot"
+    );
+    w.step(&crystal(300, 0));
+    for i in 0..9 {
+        destroy(&mut w, if i == 0 { 300 } else { 200 + i as i32 }, i, false);
+    }
+    assert_eq!(world::stage::crystals_left(&w), Some(1));
+    assert!(!Stage::Crystals.holds(&w));
+    destroy(&mut w, 209, 9, true);
+    assert_eq!(world::stage::crystals_left(&w), Some(0));
+    assert!(Stage::Crystals.holds(&w));
     assert_eq!(w.stage_reached, Some(Stage::Crystals));
-    w.step(&teleport_to(70.5, 70.0, 0.5));
+    // Outside the End: no count.
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
     w.step(&tick());
-    assert_eq!(world::stage::crystals_left(&w), None, "70 off the fountain");
-    assert!(!Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
-    // One spike's column never loaded: its crystal may be alive and unsent, so no count.
+    assert_eq!(world::stage::crystals_left(&w), None);
+}
+
+/// `crystals_5` and `crystals_1`: 6 left is neither, 5 is `crystals_5`, 1 is `crystals_1`.
+/// A resume's re-send (seen, untracked, seen again: race 46044026128, every lane "at 5 left" on
+/// tick 40) moves nothing. The count is memory's, so a resume from a snapshot keeps it.
+#[test]
+fn crystals_5_and_1_count_the_destroyed() {
+    let mut w = in_the_end();
+    w.step(&Event::Packet(S2c::RemoveEntities {
+        ids: vec![101, 102, 103, 104, 105, 106],
+    }));
+    w.step(&tick());
+    for i in 1..7 {
+        w.step(&crystal(110 + i as i32, i));
+    }
+    w.step(&tick());
+    assert_eq!(world::stage::crystals_left(&w), Some(10));
+    assert_eq!(w.stage_reached, Some(Stage::End), "the re-send");
+    for i in 0..4 {
+        destroy(&mut w, if i == 0 { 100 } else { 110 + i as i32 }, i, false);
+    }
+    assert_eq!(world::stage::crystals_left(&w), Some(6));
+    assert_eq!(w.stage_reached, Some(Stage::End), "6 left");
+    destroy(&mut w, 114, 4, false);
+    assert!(Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Crystals5));
+    // A resume: a new world with the snapshot's memory, the crystals sent again.
+    let mut r = World::new();
+    r.memory = w.memory.clone();
+    r.step(&login("minecraft:the_end"));
+    r.step(&teleport_to(0.5, 70.0, 0.5));
+    r.step(&tick());
+    assert_eq!(world::stage::crystals_left(&r), Some(5));
+    assert_eq!(r.stage_reached, Some(Stage::Crystals5));
+    for i in 5..9 {
+        r.step(&crystal(400 + i as i32, i));
+        destroy(&mut r, 400 + i as i32, i, false);
+    }
+    assert!(Stage::Crystals1.holds(&r) && !Stage::Crystals.holds(&r));
+    assert_eq!(r.stage_reached, Some(Stage::Crystals1));
+}
+
+/// A spike seen with no crystal on it for `CRYSTAL_ABSENT_TICKS` running (near the fountain,
+/// its column loaded) is one gone the bot did not see go (a development start's RCON kill). A
+/// crystal on a spike, or the bot far off, keeps it standing.
+#[test]
+fn a_spike_long_seen_bare_is_a_crystal_gone() {
     let mut w = World::new();
     w.step(&login("minecraft:the_end"));
     w.step(&teleport_to(0.5, 70.0, 0.5));
-    for [x, z] in world::stage::SPIKES.iter().skip(1) {
+    for [x, z] in world::stage::SPIKES {
         w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
     }
+    w.step(&crystal(100, 3));
+    for _ in 0..world::CRYSTAL_ABSENT_TICKS {
+        w.step(&tick());
+    }
+    assert_eq!(world::stage::crystals_left(&w), Some(10), "not yet");
     w.step(&tick());
-    assert_eq!(world::stage::crystals_left(&w), None);
-    assert!(!Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
-    assert_eq!(w.stage_reached, Some(Stage::End));
+    assert_eq!(world::stage::crystals_left(&w), Some(1), "spike 3's stands");
+    assert_eq!(w.stage_reached, Some(Stage::Crystals1));
+    // Far off, the bare spikes are not counted.
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(70.5, 70.0, 0.5));
+    for [x, z] in world::stage::SPIKES {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    for _ in 0..world::CRYSTAL_ABSENT_TICKS + 10 {
+        w.step(&tick());
+    }
+    assert_eq!(
+        world::stage::crystals_left(&w),
+        Some(10),
+        "70 off the fountain"
+    );
 }
 
 /// `win`: the credits with the dragon seen dead before them (its death event, or its boss bar

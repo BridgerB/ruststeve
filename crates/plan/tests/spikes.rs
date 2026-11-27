@@ -2357,3 +2357,38 @@ fn an_empty_bucket_refills_from_the_water_left_behind() {
         notes(&p)
     );
 }
+
+#[test]
+fn the_crystals_that_heal_the_perch_are_taken_first() {
+    // E5's jar read: the perched dragon heals from the nearest crystal within 40 on x and z of the
+    // perch; dev race 46048455555 lane 1 took the caged (42, 0) first and left (12, 39), which
+    // healed the dragon back to 200.
+    assert!(spikes::heals_the_perch([12.5, 77.0, 39.5]));
+    assert!(spikes::heals_the_perch([-33.5, 80.0, 24.5]));
+    assert!(!spikes::heals_the_perch([42.5, 104.0, 0.5]));
+    assert!(!spikes::heals_the_perch([-41.5, 90.0, -0.5]));
+    let mut w = world(2, [40.5, 64.0, 0.5]);
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![CRYSTAL] }));
+    for (id, pos) in [
+        (81, [42.5, 104.0, 0.5]),
+        (82, [12.5, 77.0, 39.5]),
+        (83, [33.5, 92.0, -24.5]),
+    ] {
+        w.step(&Event::Packet(S2c::AddEntity {
+            id,
+            uuid: [id as u8; 16],
+            kind: EntityKind::EndCrystal.id(),
+            x: pos[0],
+            y: pos[1],
+            z: pos[2],
+            velocity: [0.0; 3],
+        }));
+    }
+    let order: Vec<i32> = spikes::crystals_in_order(&w, [40.5, 64.0, 0.5])
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    // (33, -25) and (12, 39) heal the perch: first, nearest first; the caged (42, 0) last though
+    // nearest.
+    assert_eq!(order, vec![83, 82, 81]);
+}

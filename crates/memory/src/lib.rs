@@ -296,6 +296,11 @@ pub struct Memory {
     /// Nether columns with `SOUL_SIGNS` soul sand or soul soil seen, in the order each became known.
     #[serde(default)]
     soul_valleys: Vec<(i32, i32)>,
+    /// The End's spikes (centre columns, `world::stage::SPIKES`) whose crystal was seen
+    /// destroyed: its explosion seen at its spot as it went (issue 20 part 2). Kept here so a
+    /// snapshot's resume knows them; an untracked crystal is never one.
+    #[serde(default)]
+    crystals_destroyed: BTreeSet<(i32, i32)>,
 }
 
 /// Kinds kept in `Memory::by_kind`.
@@ -631,6 +636,16 @@ impl Memory {
             .filter_map(|k| self.signs.get(&(dimension.to_owned(), cx, cz, *k)))
             .map(BTreeSet::len)
             .sum()
+    }
+
+    /// Record a spike's crystal destroyed; whether it was new.
+    pub fn record_crystal_destroyed(&mut self, spike: (i32, i32)) -> bool {
+        self.crystals_destroyed.insert(spike)
+    }
+
+    /// The spikes whose crystal was seen destroyed.
+    pub fn crystals_destroyed(&self) -> &BTreeSet<(i32, i32)> {
+        &self.crystals_destroyed
     }
 
     /// Record a biome sign. Only a `Seen` (an exposed face) can be one: no X-ray. Returns

@@ -609,6 +609,26 @@ pub fn crystals_by_distance(w: &World, pos: [f64; 3]) -> Vec<(i32, [f64; 3])> {
     all
 }
 
+/// Can a crystal at `pos` heal the perched dragon: within its box grown by the heal's range on x
+/// and z from the perch point (E5's jar read, `EnderDragon.checkCrystals`, javap probe
+/// 46039100437: `dragon::HEAL_RANGE` 32 plus `dragon::HEAL_BOX_HALF` 8, 40 a side; 8 of the 10
+/// spikes are in it, only (42, 0) and (-42, -1) are not).
+pub fn heals_the_perch(pos: [f64; 3]) -> bool {
+    let reach = crate::dragon::HEAL_RANGE + crate::dragon::HEAL_BOX_HALF;
+    let [px, _, pz] = crate::dragon::PERCH_POINT;
+    (pos[0] - px).abs() <= reach && (pos[2] - pz).abs() <= reach
+}
+
+/// The crystals in the order they are worked: those that heal the perch first, nearest first
+/// among them, then the rest nearest first (E5 fights the perch once none standing heals it:
+/// dev race 46048455555 lane 1 took the caged (42, 0) first and left (12, 39), which healed the
+/// dragon back to 200).
+pub fn crystals_in_order(w: &World, pos: [f64; 3]) -> Vec<(i32, [f64; 3])> {
+    let mut all = crystals_by_distance(w, pos);
+    all.sort_by_key(|(_, p)| !heals_the_perch(*p));
+    all
+}
+
 /// Cells a walk from the feet may reach before the feet are judged free; fewer, and the bot
 /// is shut in a pocket (a sealed bunker, a notch) and digs out at once.
 pub const POCKET_CELLS: usize = 48;
@@ -1067,7 +1087,7 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     // The crystals nearest first; the first with an approach not refused is the one worked
     // (race 45949063425 lane 1: four approaches of one spike refused in turn, and back to it,
     // none of the nine others tried).
-    let order = crystals_by_distance(w, body.pos);
+    let order = crystals_in_order(w, body.pos);
     let approach_to = |pos: [f64; 3]| {
         let spike = spike_for(w, &st.geography, pos)?;
         // A column whose landing water is poured goes first (race 45927433568 lane 0: poured at
