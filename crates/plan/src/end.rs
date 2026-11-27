@@ -370,6 +370,36 @@ pub fn strafing(w: &World) -> bool {
     dragon(w).is_some_and(|(_, phase)| phase == Some(STRAFE_PHASE))
 }
 
+/// The stairs down's foot is kept only this far or more under the bunker's feet.
+pub const STOCK_FOOT_DEPTH: i32 = 3;
+/// A surface dig keeps this far from any void edge (a fall there is a death).
+pub const VOID_KEEP: i32 = 3;
+/// Walks for surface end stone a hand-back at most, and the length of one.
+pub const SURFACE_WALKS: u32 = 12;
+pub const SURFACE_STEP: f64 = 4.0;
+
+/// The surface end stone to dig from `feet`: an end stone cell beside the feet at their height,
+/// or one under an open cell beside them (its top face exposed), never the cell under the feet,
+/// and with no void column within `VOID_KEEP` of it.
+pub fn surface_cell(w: &World, feet: Cell) -> Option<Cell> {
+    let near_void = |c: Cell| {
+        (-VOID_KEEP..=VOID_KEEP)
+            .any(|dx| (-VOID_KEEP..=VOID_KEEP).any(|dz| void_column(w, (c.0 + dx, c.1, c.2 + dz))))
+    };
+    SIDES
+        .iter()
+        .flat_map(|(dx, dz)| {
+            let beside = (feet.0 + dx, feet.1, feet.2 + dz);
+            let under = (beside.0, beside.1 - 1, beside.2);
+            [
+                (kind(w, beside) == Some(BlockKind::EndStone)).then_some(beside),
+                (open(w, beside) && kind(w, under) == Some(BlockKind::EndStone)).then_some(under),
+            ]
+        })
+        .flatten()
+        .find(|c| *c != (feet.0, feet.1 - 1, feet.2) && !near_void(*c))
+}
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -609,6 +639,11 @@ pub struct EndState {
     pub handed_back: bool,
     #[serde(default)]
     pub restocks: u32,
+    /// Surface end stone digs begun and walks for it in this hand-back.
+    #[serde(default)]
+    pub surface_digs: u32,
+    #[serde(default)]
+    pub surface_walks: u32,
     /// The first stock run's wait for a lull, noted.
     #[serde(default)]
     pub lull_wait_noted: bool,
@@ -814,6 +849,34 @@ impl Plan {
             self.end.work = Some(Work::new(WorkKind::Pillar, ops, tick));
             return None;
         }
+        // The bunker open (its roof and first step dug) with a cell of its stair shut, the bot in
+        // it or on its stair: the stair dug again (race 45969992660 lane 2: the step (12, 60, 0)
+        // shut with the shaft open, no way out on foot). The open skips cells already dug.
+        let stair_shut =
+            open(w, roof) && open(w, door_cells[0]) && door_cells[..6].iter().any(|c| !open(w, *c));
+        if stair_shut
+            && (inside || self.at_bunker(w))
+            && !self
+                .end
+                .work
+                .as_ref()
+                .is_some_and(|wk| wk.kind == WorkKind::Open)
+        {
+            self.note(
+                tick,
+                "end: the bunker's stair dug again".to_owned(),
+                format!("a cell of the stair shut, the roof and door open; from {feet:?}"),
+            );
+            self.end.work = Some(Work::new(
+                WorkKind::Open,
+                std::iter::once(roof)
+                    .chain(door_cells)
+                    .map(Op::Dig)
+                    .collect(),
+                tick,
+            ));
+            return None;
+        }
         // Up a pillar or a spike, or a pillar of E4's still standing: the crystals' task brings
         // the bot down first, crystals left or not (E6's closed loop: the last crystal gone, the
         // bot stayed 18 up and asked for walks to the bunker 24 times).
@@ -840,6 +903,23 @@ impl Plan {
             return Some(t);
         }
         self.end.down_noted = false;
+        // Home: the walks back count again (frontier race 45969992660 lane 1 spent its 24 walks to
+        // a bunker with no way in by tick 2,300 and then stood idle at a spike's foot).
+        if inside {
+            self.end.home_walks = 0;
+            self.end.hold_noted = false;
+        }
+        // Short of end stone for the crystals: mined from the island's surface where the bot
+        // stands, in the dragon's sight (the same lane: the crystals handed back for 6 of 27 at
+        // 1,820, the tunnel restock waited for a lull to 4,600, then stood 3,020 ticks idle). E5's
+        // dodge and pace run ahead of this.
+        if self.end.handed_back
+            && crystals_alive(w) > 0
+            && craft::count(w, ItemKind::EndStone) < STOCK_ENOUGH
+            && world::stage::open_sky(w)
+        {
+            return self.surface_mine(w, feet, tick);
+        }
         // 3. Retreat, eat and heal.
         let health = w.player.health.unwrap_or(20.0);
         let food = w.player.food.unwrap_or(20);
@@ -1150,7 +1230,7 @@ impl Plan {
         // A run just ended: its end kept, then home.
         if let Some(run) = self.end.stock_out.take() {
             match run {
-                StockRun::Down => self.end.stock_foot = Some(feet),
+                StockRun::Down => self.keep_foot(feet, tick),
                 StockRun::Arm(i) => {
                     if let Some(a) = self.end.arms.get_mut(usize::from(i)) {
                         a.1 = Some(feet);
@@ -1237,8 +1317,10 @@ impl Plan {
         // The arms from the foot: on along the stairs' heading and to both sides, never back
         // under the stairs.
         if self.end.arms.is_empty() {
-            let side = (-d0.1, d0.0);
-            self.end.arms = vec![(d0, None), (side, None), ((-side.0, -side.1), None)];
+            // On along the stairs and away from the door; never toward the door's stair (race
+            // 45969992660 lane 2: an arm run toward it from a foot left at the bunker).
+            let away = (-door.0, -door.1);
+            self.end.arms = vec![(d0, None), (away, None)];
         }
         let n = u8::try_from(self.end.arms.len()).unwrap_or(1).max(1);
         let i = u8::try_from(self.end.stock_runs % u32::from(n)).unwrap_or(0);
@@ -1261,6 +1343,24 @@ impl Plan {
             format!("arm {i}, run {} next", self.end.stock_runs + 1),
         );
         Some(Task::Explore(walk))
+    }
+
+    /// The stairs down's end kept as the foot only when it is `STOCK_FOOT_DEPTH` or more under the
+    /// bunker's feet; a run cut short (a strafe at its first cell, race 45969992660 lane 2: the
+    /// foot left at the bunker, the arms run along its stair) is begun again.
+    fn keep_foot(&mut self, feet: Cell, tick: u64) {
+        let deep = self
+            .bunker
+            .is_some_and(|[_, y, _]| feet.1 <= y - STOCK_FOOT_DEPTH);
+        if deep {
+            self.end.stock_foot = Some(feet);
+        } else {
+            self.note(
+                tick,
+                format!("end: the stairs down cut short at {feet:?}"),
+                format!("under {STOCK_FOOT_DEPTH} below the bunker: begun again"),
+            );
+        }
     }
 
     /// Where arm `i`'s next run begins: its tip, or the stairs' foot.
@@ -1286,6 +1386,70 @@ impl Plan {
         st.dry = true;
         st.rock = Some(feet);
         Task::Stairs(Box::new(st))
+    }
+
+    /// One block of the island's surface end stone, exposed beside the feet at their height or one
+    /// under an open cell beside them; never under the feet, never within `VOID_KEEP` of a void
+    /// edge. With none, a short walk toward the fountain over the island's top.
+    fn surface_mine(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
+        let stone = craft::count(w, ItemKind::EndStone);
+        if let Some(c) = surface_cell(w, feet).filter(|c| !self.refused_now(*c, tick)) {
+            self.end.surface_digs += 1;
+            if self.end.surface_digs % 8 == 1 {
+                self.note(
+                    tick,
+                    format!("end: surface end stone at {c:?}"),
+                    format!(
+                        "{stone} held, {STOCK_ENOUGH} wanted for the crystals; dig {} in the open",
+                        self.end.surface_digs
+                    ),
+                );
+            }
+            return Some(Task::Dig(Dig::new(w, c, tick)));
+        }
+        // None in reach: a few cells on toward the fountain, the island's middle.
+        self.end.surface_walks += 1;
+        if self.end.surface_walks > SURFACE_WALKS {
+            self.end.handed_back = false;
+            self.note(
+                tick,
+                "end: no surface end stone in reach".to_owned(),
+                format!("{SURFACE_WALKS} walks; {stone} held; back to the hand-off"),
+            );
+            return None;
+        }
+        let body = w.body?;
+        let d = flat_to_fountain(body.pos).max(1.0);
+        let step = SURFACE_STEP.min(d - BUNKER_MIN).max(1.0);
+        #[allow(clippy::cast_possible_truncation)]
+        let target = (
+            (body.pos[0] - (body.pos[0] - FOUNTAIN[0]) / d * step).floor() as i32,
+            feet.1,
+            (body.pos[2] - (body.pos[2] - FOUNTAIN[1]) / d * step).floor() as i32,
+        );
+        let mut walk = Walk::new(
+            target,
+            Goal::Near {
+                pos: target,
+                range: 1.5,
+            },
+            Arrive::Goal,
+            tick,
+        );
+        if !walk.route_now(w, tick) {
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return None;
+        }
+        self.walks += 1;
+        self.note(
+            tick,
+            format!("end: walk for surface end stone to {target:?}"),
+            format!(
+                "none in reach of {feet:?}; walk {} of {SURFACE_WALKS}",
+                self.end.surface_walks
+            ),
+        );
+        Some(Task::Explore(walk))
     }
 
     /// The crystals' hand-off: E4's `Plan::spikes_task` (issue 20f), the pillar and strike.
@@ -1569,7 +1733,7 @@ impl Plan {
             if let (Some(run), Some(body)) = (self.end.stock_out.take(), w.body) {
                 let feet = path::stand_cell(w, body.pos);
                 match run {
-                    StockRun::Down => self.end.stock_foot = Some(feet),
+                    StockRun::Down => self.keep_foot(feet, tick),
                     StockRun::Arm(i) => {
                         if let Some(a) = self.end.arms.get_mut(usize::from(i)) {
                             a.1 = Some(feet);
