@@ -233,7 +233,7 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
 - **Firings:** "strafe: shelter before the fireball" fired 4 times in lane 0 and 11 in lane 1. Both died of breath all the same.
 - **Lane 0:** the strafe began 69 off and ended 56 off. The fireball flew 40 ticks with the phase already holding, so the shelter never fired for it.
   - **Fix:** a dragon fireball in flight within 64 counts as the strafe (`fireball_at`).
-- **Lane 1:** sheltered in the bunker at [14, 58, 0], and the fireball came into the bunker (the cloud at 0.0 off, the bot at 14.7, 58.2, 0.7). The bunker was open: E3's stair and door. **Open:** the bunker must be shut while a strafe or a fireball is on (E3's seal).
+- **Lane 1:** sheltered in the bunker at [14, 58, 0], and the fireball came into the bunker (the cloud at 0.0 off, the bot at 14.7, 58.2, 0.7). The bunker was open: E3's stair and door. **Fix (E5):** the strafe shelter and every breath answer skip a bunker that is not shut (roof and the door's first cell solid: `Plan::bunker_shut`, E3's own test), and dig the roofed notch instead. E3 seals the bunker on a strafe.
 
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

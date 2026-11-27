@@ -2305,9 +2305,11 @@ impl Plan {
         // (E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
         // NoPath, then dead). In it with the breath still on: a notch from there.
         // Only a bunker clear of every breath (on the plane and in height); else a notch here.
+        // And only a bunker shut, roof and door: an open one lets the fireball in (frontier race
+        // 45931225605 lane 1: sheltered in it, the cloud on the bot inside it).
         if let Some(b) = self.bunker
             && flat(feet, mid(b)) <= BUNKER_NEAR
-            && (cell_of(feet) == b || clear_of_breath(&clouds, mid(b)))
+            && (cell_of(feet) == b || (clear_of_breath(&clouds, mid(b)) && self.bunker_shut(w)))
         {
             if cell_of(feet) == b {
                 self.dragon.breath_notch = true;
@@ -2516,8 +2518,10 @@ impl Plan {
         {
             return None;
         }
+        // For a strafe only a bunker shut (roof and door): an open one lets the fireball in.
+        let shut = strafe.is_none() || self.bunker_shut(w);
         let bunker = self.bunker.filter(|b| {
-            flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
+            shut && flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
                 && (body.pos[1] - f64::from(b[1])).abs() <= 5.0
         });
         if !self.dragon.charging {
@@ -2802,6 +2806,20 @@ impl Plan {
             Hold::Wait | Hold::Missing => {}
         }
         Some(crouch)
+    }
+
+    /// Is the bunker shut: its roof and the first cell of its door solid (E3's own test of it,
+    /// `end::bunker_cells`)? False with no bunker or no door known.
+    pub fn bunker_shut(&self, w: &World) -> bool {
+        let (Some(b), Some(door)) = (self.bunker, self.end.door) else {
+            return false;
+        };
+        let (_, roof, cells) = crate::end::bunker_cells((b[0], b[1], b[2]), door);
+        let solid = |c: Cell| {
+            w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+                .is_some_and(|k| !matches!(k, BlockKind::Air | BlockKind::Water))
+        };
+        solid(roof) && solid(cells[0])
     }
 
     /// One tick of a dig for the notch (or its step out), crouched, looking down.

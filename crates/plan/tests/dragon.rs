@@ -1103,6 +1103,7 @@ fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
     let mut p = Plan::new(Aim::Race);
     // A bunker 4 down: clear of the cloud on the surface.
     p.bunker = Some([15, FLOOR - 4, 0]);
+    p.end.door = Some((1, 0));
     assert!(p.breath_step(&w, 0).is_some());
     assert!(
         p.events_since(0)
@@ -1285,6 +1286,7 @@ fn a_strafe_is_sheltered_from_before_the_fireball() {
     // With the bunker within 12: into it.
     let mut q = Plan::new(Aim::Race);
     q.bunker = Some([16, FLOOR - 4, 0]);
+    q.end.door = Some((1, 0));
     assert!(q.charge_step(&w, 0).is_some());
     assert!(q.events_since(0).iter().any(|e| {
         e.what
@@ -1341,5 +1343,55 @@ fn a_fireball_in_flight_is_sheltered_from_after_its_strafe() {
         p.events_since(0)
             .iter()
             .any(|e| e.what == "strafe: shelter before the fireball (a notch)")
+    );
+}
+
+#[test]
+fn an_open_bunker_is_no_shelter_from_a_strafe_or_a_breath() {
+    // Frontier race 45931225605 lane 1: sheltered in the open bunker, the fireball came in.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    // The bunker 4 down at (16, 60, 0), its roof (16, 62, 0) dug open.
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (16, 62, 0),
+        state: state(BlockKind::Air),
+    }));
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([16, FLOOR - 4, 0]);
+    p.end.door = Some((1, 0));
+    assert!(!p.bunker_shut(&w));
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: shelter before the fireball (a notch)"),
+        "{:?}",
+        p.events_since(0)
+    );
+    // Shut: into it.
+    let mut shut = end_at(feet);
+    with_dragon(&mut shut, [-30.5, 80.0, 0.5], 1, 90.0);
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([16, FLOOR - 4, 0]);
+    q.end.door = Some((1, 0));
+    assert!(q.bunker_shut(&shut));
+    // And a breath on the feet by the open bunker: a notch, not the bunker.
+    let mut b = end_at(feet);
+    b.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (16, 62, 0),
+        state: state(BlockKind::Air),
+    }));
+    cloud(&mut b, 50, [12.5, 64.0, 0.5], 3.0);
+    let mut r = Plan::new(Aim::Race);
+    r.bunker = Some([16, FLOOR - 4, 0]);
+    r.end.door = Some((1, 0));
+    let _ = r.breath_step(&b, 0);
+    assert!(
+        !r.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("breath: into the bunker")),
+        "{:?}",
+        r.events_since(0)
     );
 }
