@@ -406,3 +406,18 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - `on_pillar` reads any `PLACED` block under the feet as a pillar, record or not. So "end: up a pillar at (12, 61, -5), the crystals' task first (0 pillars standing)" fired, and the dig down took (12, 60, -5) and (12, 59, -5).
   - From the pit, "no walk to the bunker" failed 24 times, and the bot stood held there with no progress for 1,960 ticks by tick 4,840.
 - **The fix:** with no record, a placed block is a pillar only when it stands free, with three of its four sides open. Unit test `a_placed_block_in_a_tunnel_is_no_pillar`.
+
+### Lane 1: the first crystal struck on the frontier, then a clutch judged missed (wall 28; fixed)
+- **Climbs:**
+  - At 11,160 the landing water was poured from the first block up (the wall 25 fix fired: "climb paused for the landing water").
+  - At 11,540 a climb was knocked off at y 71, and the clutch caught it (health 19.5).
+  - At 11,760 the (33, -25) pillar went to 91 in 334 ticks. The bot walled, struck, and crystal 38 was gone at 12,100.
+  - Then a strafe 36 off took the bot off the side onto the clutch ("drop with the clutch from").
+- **Wall 28:**
+  - The clutch's pour was sent at 12,090, and the bot landed from 90.9 at health 20, standing in the water. The clutch had not yet seen its bucket emptied, so it judged "clutch missed" and never took the water back. The water bucket count went 1 to 0.
+  - From inside the water every walk was refused: all 40 approaches of the 10 spikes in turn, 40 ticks each, from 12,260 to 13,860.
+  - Then "no climb: no water" ran from 14,680 to the last progress (16,860) with no trip to the pool, and nothing said why.
+- **The fix:**
+  - Landed with the pour sent and water in the feet's cell or the one under, the clutch counts as poured ("clutch poured late at") and the water is taken back.
+  - The refill trip now notes each way it fails: "no refill: no source seen", "no refill: no way to the pool", and "no refill: the pool too far".
+  - Unit test `a_clutch_landed_in_its_own_water_takes_it_back`.

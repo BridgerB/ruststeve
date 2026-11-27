@@ -1711,3 +1711,43 @@ fn a_placed_block_in_a_tunnel_is_no_pillar() {
     pillar(&mut w, (20, 20), 64, 65, BlockKind::Cobblestone);
     assert!(spikes::on_pillar(&w, (20, 66, 20), &[]));
 }
+
+#[test]
+fn a_clutch_landed_in_its_own_water_takes_it_back() {
+    // Frontier race 45954274931 lane 1: "missed" from 90.9 at health 20, standing in the water it
+    // had poured, which was never taken back: the bucket lost, every walk from the cell refused.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    set(&mut w, (20, 64, 20), BlockKind::Water);
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    w.held = 1;
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.clutch = Some(spikes::Clutch {
+        since: 90,
+        from_y: 90.9,
+        poured: None,
+        landed_at: None,
+        sent_at: Some(95),
+    });
+    assert!(p.spikes_clutch(&w, 100).is_some());
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: clutch poured late at (20, 64, 20)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        !notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch missed"))
+    );
+    // The next tick: the take-back.
+    p.spikes_clutch(&w, 101);
+    assert!(
+        p.take_acts().contains(&Act::UseItem),
+        "the water taken back"
+    );
+}

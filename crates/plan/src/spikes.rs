@@ -2263,6 +2263,31 @@ impl Plan {
             );
             return None;
         }
+        // Landed with the pour sent and water at the feet: it poured, the hand's bucket not yet
+        // seen emptied (frontier race 45954274931 lane 1: "missed" from 90.9 at health 20, in the
+        // water, which was never taken back; the bucket lost and every walk from the water cell
+        // refused for 1,600 ticks).
+        let late = (c.poured.is_none() && landed && c.sent_at.is_some())
+            .then(|| {
+                let f = path::feet_cell(body.pos);
+                [f, (f.0, f.1 - 1, f.2)]
+                    .into_iter()
+                    .find(|x| kind(w, *x) == Some(BlockKind::Water))
+            })
+            .flatten();
+        if let Some(cell) = late {
+            c.poured = Some(cell);
+            self.note(
+                tick,
+                format!("spikes: clutch poured late at {cell:?}"),
+                format!(
+                    "landed in it from {:.1}; health {:?}; to be taken back",
+                    c.from_y, w.player.health
+                ),
+            );
+            self.spikes.clutch = Some(c);
+            return Some(down);
+        }
         match c.poured {
             None if landed => {
                 self.note(
@@ -2797,7 +2822,33 @@ impl Plan {
                     return Some(Task::Explore(walk));
                 }
                 self.expanded += walk.expanded;
+                self.spikes_note(
+                    tick,
+                    "spikes: no refill: no way to the pool".to_owned(),
+                    format!("{stand:?} from {feet:?}; {empty} empty, {water} full"),
+                );
+            } else {
+                self.spikes_note(
+                    tick,
+                    "spikes: no refill: the pool too far".to_owned(),
+                    format!(
+                        "its stand {:?} over {POOL_FAR} from {feet:?}",
+                        self.spikes.pool_stand
+                    ),
+                );
             }
+        } else if empty > 0 && water == 0 && self.spikes.pool.is_some() {
+            // Frontier race 45954274931 lane 1: no water, the climbs refused 2,000 ticks, and
+            // nothing said why no refill was gone for.
+            self.spikes_note(
+                tick,
+                "spikes: no refill: no source seen".to_owned(),
+                format!(
+                    "the pool {:?}: {:?}; from {feet:?}",
+                    self.spikes.pool_square,
+                    self.spikes.pool_square.map(|sq| sq.map(|c| kind(w, c)))
+                ),
+            );
         }
         None
     }
