@@ -508,3 +508,37 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The progress invariant: after `STAIR_WALK_TRIES` (3) failed walks in a row to the same target with no approach, the way out turns to the other axis ("the way out turned at"), a new way rather than the same walk retried. It turns straight again once a walk to a foot is found.
   - Unit tests `a_dig_out_stair_with_a_step_floor_missing_gets_the_floor_put` and `the_way_out_turned_runs_along_the_other_axis`.
 - **Lane 5's stall at (43, 53, -21)** was in E3's surface-mining trench (a 1-wide cut, "DropUnreachable"). My dig-out there made no progress toward a far foot and handed back under its own invariant, as designed.
+
+# Part 2 (from 117843e)
+
+### Wall 35: only end stone built a pillar (race 45994686575 lane 5; fixed)
+- **What happened:** "no walk to the foot: too few blocks (44 end stone held, 49 wanted for the pillar at (6, 58, -40))" from tick 46,060 to the cap. The bot carried 28 cobblestone and 64 cobbled deepslate the whole time.
+- **The fix:**
+  - Any carried full block builds a pillar (`PILLAR_BLOCKS`: cobbled deepslate, cobblestone, netherrack, blackstone, andesite, diorite, granite, tuff, end stone), and all of them count in the "blocks wanted" checks (`pillar_blocks`).
+  - The body takes the others first. The top `PILLAR_TOP` (2) blocks take end stone (`pillar_block_for`), and so do the stand's walls, falling back to any other when none is left. A stair floor takes any.
+  - The risk accepted: only end stone is dragon-immune, so a dragon flying through a pillar's body may smash it. The bot comes down by water, not by the pillar.
+  - Unit test `any_carried_full_block_builds_a_pillar_with_end_stone_at_its_top`.
+
+### Wall 36: the way down was the dig (race 45994686575 lane 3; fixed)
+- **What happened:**
+  - Landing water needed 48 end stone to spare, so with fewer, none was poured, and the pillar was dug back for its blocks: lane 3 dug from 91 to 65 between 29,780 and 31,600.
+  - That wears the pickaxe (E3's budget), and it left the bot on the pillar when the dragon perched and charged.
+- **The fix:**
+  - The landing water no longer needs end stone to spare.
+  - With no landing water but the clutch's bucket in the hotbar, the bot steps off a side that falls clear onto the clutch ("clutch down from"), the pillar left standing. Its record is let go on landing, by the waterfall's landing rule.
+  - The dig is kept only with no water bucket.
+  - Unit test `with_no_landing_water_the_way_down_is_the_clutch_not_the_dig`.
+  - E6's `end_loop` descent assertions now accept the water descents (fenced E4).
+
+### Wall 37: knocked off by the charge (race 45994686575 lanes 3 and 4; fixed for the pillar)
+- **Lane 3 (mine):**
+  - At 31,440 the dragon perched at the fountain (sitting-scanning, about 40 off) while the bot dug down its pillar at (37, 68, -25).
+  - At 31,540 it charged. "hold ended by the dragon … unguarded on a pillar; the way down" kept the dig going.
+  - At 31,600 a mob_attack hit it at y 65, and it was flung over the void to (112, 22, 45): `death.fell.assist`.
+- **Lane 4 (E5's):** on the ground at (6, 60, 45) after E5's charge dodge at 52,520, hit twice and flung to (-98, 98, 72).
+- **The fix (`knock_risk`, `KNOCK_NEAR` 30):** with the dragon landing (3), taking off (4) or charging (8) within 30:
+  - up a pillar, the bot holds crouched ("hold from the knock-off"): no drop, no climb, no stand;
+  - a climb stops ("climb held from the knock-off");
+  - no waterfall or clutch descent is begun ("no drop: the knock-off").
+  - Wall 36's water descent takes the bot off the pillar long before a perch: lane 3's descent would have begun at 29,780.
+  - Unit test `no_drop_climb_or_stand_while_the_dragon_would_knock_the_bot_off`.

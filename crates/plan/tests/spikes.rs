@@ -485,8 +485,24 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
         "{:?}",
         notes(&p)
     );
-    // Charging 30 off: held still in the column.
+    // Charging 30 off: held still in the column, from the knock-off (part 2, KNOCK_NEAR).
     dragon(&mut w, [8.5, 67.0, 35.5], 8);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: hold from the knock-off"),
+        "{:?}",
+        notes(&p)
+    );
+    // Charging 36 off (within CHARGE_NEAR, past KNOCK_NEAR): held in the shaft.
+    dragon(&mut w, [8.5, 67.0, 41.5], 8);
     let mut p = Plan::new(Aim::Race);
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -2053,4 +2069,135 @@ fn the_way_out_turned_runs_along_the_other_axis() {
     let (turned, _) = spikes::dig_out_plan_turned(&w, (13, 57, 0), (8, 64, 5), true).expect("plan");
     assert_eq!(straight, Some((12, 58, 0)), "along x toward the foot");
     assert_eq!(turned, Some((13, 58, 1)), "along z instead");
+}
+
+#[test]
+fn any_carried_full_block_builds_a_pillar_with_end_stone_at_its_top() {
+    // Part 2, race 45994686575 lane 5: "too few blocks" with 44 end stone, 28 cobblestone and 64
+    // cobbled deepslate held, from tick 46,060 to the cap.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.remove(&36);
+    w.inventory.slots.insert(36, (ItemKind::Cobblestone, 20));
+    w.inventory.slots.insert(10, (ItemKind::EndStone, 3));
+    assert_eq!(spikes::pillar_blocks(&w), 23);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: pillar up from")),
+        "{:?}",
+        notes(&p)
+    );
+    // The body in cobblestone, the top two in end stone.
+    assert_eq!(
+        spikes::pillar_block_for(&w, 64, 70),
+        Some(ItemKind::Cobblestone)
+    );
+    assert_eq!(
+        spikes::pillar_block_for(&w, 68, 70),
+        Some(ItemKind::EndStone)
+    );
+    w.inventory.slots.remove(&10);
+    assert_eq!(
+        spikes::pillar_block_for(&w, 69, 70),
+        Some(ItemKind::Cobblestone),
+        "no end stone left: any"
+    );
+}
+
+#[test]
+fn with_no_landing_water_the_way_down_is_the_clutch_not_the_dig() {
+    // Part 2: the dig back wore out the pickaxe, and race 45994686575 lane 3 dug from 91 to 65
+    // in 1,800 ticks and was caught on its pillar by the charge.
+    let mut w = world(2, [8.5, 70.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 69, BlockKind::EndStone);
+    water(&mut w);
+    gone(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: clutch down from (8, 70, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(
+        p.spikes.doing,
+        Some(spikes::Doing::Step { sneak: false, .. })
+    ));
+    assert_eq!(
+        p.spikes.riding,
+        Some((8, 5)),
+        "the pillar's record let go on landing"
+    );
+    // No water bucket at all: the dig, the only way left.
+    w.inventory.slots.remove(&44);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert!(matches!(p.spikes_task(&w, 100), Some(Task::Dig(_))));
+}
+
+#[test]
+fn no_drop_climb_or_stand_while_the_dragon_would_knock_the_bot_off() {
+    // Part 2, race 45994686575 lanes 3 and 4: struck off by the charge, flung over the void.
+    for phase in [3, 4, 8] {
+        let mut w = world(2, [8.5, 70.0, 5.5]);
+        pillar(&mut w, (8, 5), 64, 69, BlockKind::EndStone);
+        water(&mut w);
+        gone(&mut w);
+        dragon(&mut w, [8.5, 70.0, 30.5], phase);
+        let mut p = Plan::new(Aim::Race);
+        p.spikes.pillars.push(PillarRec {
+            x: 8,
+            z: 5,
+            base: 64,
+        });
+        assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle), "phase {phase}");
+        assert!(
+            notes(&p)
+                .iter()
+                .any(|n| n == "spikes: hold from the knock-off"),
+            "phase {phase}: {:?}",
+            notes(&p)
+        );
+        assert!(
+            !notes(&p)
+                .iter()
+                .any(|n| n.starts_with("spikes: clutch down from")),
+            "no drop in phase {phase}"
+        );
+    }
+    // Over 30 off: the drop.
+    let mut w = world(2, [8.5, 70.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 69, BlockKind::EndStone);
+    water(&mut w);
+    gone(&mut w);
+    dragon(&mut w, [8.5, 70.0, 45.5], 3);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    p.spikes_task(&w, 100);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch down from")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(spikes::knock_risk(None).is_none());
 }
