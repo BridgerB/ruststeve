@@ -376,12 +376,15 @@ pub const STOCK_FOOT_DEPTH: i32 = 3;
 /// sticks: a broken pickaxe is final).
 pub const PICK_RESERVE: i32 = 40;
 
-/// Blocks a pillar is built of: end stone, and the cobblestone and cobbled deepslate carried (E4).
+/// Blocks a pillar is built of: end stone, and the cobblestone, cobbled deepslate and netherrack
+/// carried (E4 builds from any; the frontier bot carries about 92: the first pillar may need no
+/// mining at all).
 pub fn pillar_blocks(w: &World) -> i32 {
     [
         ItemKind::EndStone,
         ItemKind::Cobblestone,
         ItemKind::CobbledDeepslate,
+        ItemKind::Netherrack,
     ]
     .iter()
     .map(|k| craft::count(w, *k))
@@ -401,6 +404,15 @@ pub fn most_worn_pick(w: &World) -> Option<u8> {
         .filter_map(|s| w.inventory.uses_left(s).map(|u| (u, s)))
         .min()
         .and_then(|(_, s)| u8::try_from(s - 36).ok())
+}
+
+/// Surface mining only this far or more from the fountain (the perch's reach: race 46038776204
+/// lane 4 mined at 24 while the dragon landed and sat).
+pub const MINE_FROM_FOUNTAIN: f64 = 40.0;
+
+/// The dragon landing (2, 3), on its perch (5 to 7) or charging (8).
+pub fn dragon_down_or_charging(w: &World) -> bool {
+    dragon(w).is_some_and(|(_, phase)| phase.is_some_and(|p| matches!(p, 2 | 3 | 5 | 6 | 7 | 8)))
 }
 
 /// A surface dig keeps this far from any void edge (a fall there is a death).
@@ -424,18 +436,31 @@ pub fn surface_cell_at(w: &World, feet: Cell, under_ok: bool) -> Option<Cell> {
         (-VOID_KEEP..=VOID_KEEP)
             .any(|dx| (-VOID_KEEP..=VOID_KEEP).any(|dz| void_column(w, (c.0 + dx, c.1, c.2 + dz))))
     };
-    SIDES
-        .iter()
-        .flat_map(|(dx, dz)| {
-            let beside = (feet.0 + dx, feet.1, feet.2 + dz);
-            let under = (beside.0, beside.1 - 1, beside.2);
-            [
-                (kind(w, beside) == Some(BlockKind::EndStone)).then_some(beside),
-                (under_ok && open(w, beside) && kind(w, under) == Some(BlockKind::EndStone))
-                    .then_some(under),
-            ]
-        })
-        .flatten()
+    // A block beside the feet at their height whose drop lands where it lies, on a full block,
+    // within the pickup's reach, first (race 46038776204 lane 8: 77 surface digs for 51 end stone,
+    // 6 "Uncollected", about 160 ticks a block). A block one under an open cell beside the feet
+    // drops into a hole the collect walks into: only with `under_ok` (a trench's start, its walls
+    // then cut from inside at the feet's height), and on flat ground: the cells beside open two
+    // high (the same race, lanes 4 and 8: caught in their own pits, no dodge cell).
+    let beside = SIDES.iter().filter_map(|(dx, dz)| {
+        let c = (feet.0 + dx, feet.1, feet.2 + dz);
+        (kind(w, c) == Some(BlockKind::EndStone) && solid(w, (c.0, c.1 - 1, c.2))).then_some(c)
+    });
+    let flat = SIDES.iter().all(|(dx, dz)| {
+        let b = (feet.0 + dx, feet.1, feet.2 + dz);
+        open(w, b) && open(w, (b.0, b.1 + 1, b.2))
+    });
+    let under = SIDES.iter().filter_map(|(dx, dz)| {
+        let b = (feet.0 + dx, feet.1, feet.2 + dz);
+        let c = (b.0, b.1 - 1, b.2);
+        (under_ok
+            && flat
+            && kind(w, c) == Some(BlockKind::EndStone)
+            && solid(w, (c.0, c.1 - 1, c.2)))
+        .then_some(c)
+    });
+    beside
+        .chain(under)
         .find(|c| *c != (feet.0, feet.1 - 1, feet.2) && !near_void(*c))
 }
 
@@ -689,6 +714,9 @@ pub struct EndState {
     /// they are below it.
     #[serde(default)]
     pub surface_y: Option<i32>,
+    /// The hold for the dragon noted.
+    #[serde(default)]
+    pub dragon_held_noted: bool,
     /// Surface digs' pickaxe uses, and the reserve's hold noted.
     #[serde(default)]
     pub surface_uses: u32,
@@ -1475,6 +1503,32 @@ impl Plan {
             return None;
         }
         self.end.reserve_noted = false;
+        // The dragon landing, on its perch or charging: no mining; up onto the flat if in a pit.
+        if dragon_down_or_charging(w) {
+            let level = self.end.surface_y.unwrap_or(feet.1);
+            if feet.1 < level
+                && let Some(t) = self.step_up(w, feet, level, tick)
+            {
+                return Some(t);
+            }
+            if !self.end.dragon_held_noted {
+                self.end.dragon_held_noted = true;
+                self.note(
+                    tick,
+                    "end: surface mining held for the dragon".to_owned(),
+                    format!("landing, on its perch or charging; at {feet:?}"),
+                );
+            }
+            return None;
+        }
+        self.end.dragon_held_noted = false;
+        // Only at `MINE_FROM_FOUNTAIN` or more from the fountain (lane 4 mined at 24, under the
+        // perch): out there first.
+        if let Some(body) = w.body
+            && flat_to_fountain(body.pos) < MINE_FROM_FOUNTAIN
+        {
+            return self.walk_out_to_mine(w, feet, tick);
+        }
         // The most worn pickaxe in the hotbar in hand first, so another stays fresh.
         if let Some(slot) = most_worn_pick(w)
             && w.held != slot
@@ -1619,6 +1673,54 @@ impl Plan {
             self.end.handoffs += 1;
         }
         next
+    }
+
+    /// Up out of a mining pit onto the flat at `level`: a walk to a standable cell there beside.
+    fn step_up(&mut self, w: &World, feet: Cell, level: i32, tick: u64) -> Option<Task> {
+        let mut cells = path::Cells::new(w);
+        let to = SIDES
+            .iter()
+            .map(|(dx, dz)| (feet.0 + dx, level, feet.2 + dz))
+            .find(|c| cells.standable(*c))?;
+        let mut walk = Walk::new(to, Goal::Block { pos: to }, Arrive::Goal, tick);
+        if !found(&mut walk, w, tick) {
+            return None;
+        }
+        self.walks += 1;
+        self.note(
+            tick,
+            format!("end: up out of the mining pit to {to:?}"),
+            "the dragon landing, on its perch or charging".to_owned(),
+        );
+        Some(Task::Explore(walk))
+    }
+
+    /// Out to `MINE_FROM_FOUNTAIN` from the fountain (and `SURFACE_STEP` past it), the bot's
+    /// bearing, to mine there.
+    fn walk_out_to_mine(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
+        let body = w.body?;
+        self.end.surface_walks += 1;
+        let d = flat_to_fountain(body.pos).max(1.0);
+        let r = MINE_FROM_FOUNTAIN + SURFACE_STEP;
+        #[allow(clippy::cast_possible_truncation)]
+        let (x, z) = (
+            (FOUNTAIN[0] + (body.pos[0] - FOUNTAIN[0]) / d * r).floor() as i32,
+            (FOUNTAIN[1] + (body.pos[2] - FOUNTAIN[1]) / d * r).floor() as i32,
+        );
+        let y = surface_y(w, x, z, 120).map_or(feet.1, |y| y + 1);
+        let mut walk = Walk::far((x, y, z), SITE_RANGE, tick);
+        if !walk.route_now(w, tick) {
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return None;
+        }
+        self.walks += 1;
+        self.end.surface_y = None;
+        self.note(
+            tick,
+            format!("end: out to mine at {:?}", (x, y, z)),
+            format!("{MINE_FROM_FOUNTAIN} or more from the fountain; {d:.0} now"),
+        );
+        Some(Task::Explore(walk))
     }
 
     /// The next pillar's blocks: from the nearest crystal's spike, its top over the ground beside it
