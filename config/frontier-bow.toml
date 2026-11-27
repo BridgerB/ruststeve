@@ -1,10 +1,10 @@
 # The bow line's frontier (docs/problems/end-bow.md, agent E8): the furthest stage a real bot
 # of the bow line has reached, as a snapshot its races resume from (race.yml
-# `-f start=snapshot -f snapshot=<tag>/<asset>`). Same shape as config/frontier.toml; it starts
+# `-f start=snapshot -f snapshot=<tag>/<asset>`). Same shape as config/frontier.toml; it started
 # at the pillar line's `armed` (race 45882199358 lane 0) and moves at bow_armed, end, island.
 # The pillar line's config/frontier.toml stays the one `snapshot=frontier` reads.
-stage = "armed"
-tag = "race-45882199358"
-asset = "snapshot-armed-45882199358-race-45882199358-lane-0.tar.zst"
-commit = "6882c76c29504720fb0d4e58f0231d60b4483ed0"
-how = "rs-l00-b00 of race 45882199358 (issue 20, 2026-11-26): the pillar line's armed frontier, on the surface at (1612.2, 69.0, -96.4) at dusk with the End kit, no bow. Real (no development mark, no kind)."
+stage = "island"
+tag = "race-46072716511"
+asset = "snapshot-island-46072716511-race-46072716511-lane-1.tar.zst"
+commit = "6808fd82af30604d4067701206eb1d5c816acc3a"
+how = "rs-l01-b00 of race 46072716511 (issue 20, the bow line, 2026-11-27), resumed from the real armed snapshot (race 45882199358 lane 0): the bow kit by day (arrows from chickens and redug flint), down its own way to the portal room, string from the stronghold's cobwebs and the bow made at 22,000, the portal lit and stepped into (end at 25,400), onto the main island at (30.0, 60.0, -3.5) at server tick 26,560. Holds a bow and 12 arrows, full iron, an iron sword, a shield, 4 stone pickaxes, 16 sticks, 19 cooked food. After the snapshot it shot three open crystals with three arrows, three hits. Real (no development mark, no kind)."
