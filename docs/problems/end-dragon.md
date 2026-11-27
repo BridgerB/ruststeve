@@ -166,5 +166,13 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - Note: "end: no pocket for enderman N (…)".
 - E3's covered guard and E4's up-high guard inside `ender_threat` stay as they are.
 
+**Wall 16: breath near the bunker, answered sideways** (E4's race 45912100302 lane 0; frontier 45910659261 lane 1 on the stair). The bot was at y 59 in the bunker's hole, and a fireball's cloud lay in the hole with it. Every cell out was up on the surface (y 61): nine walks out failed NoPath, and the wall dig went sideways through end stone. 20 to dead in 3 s.
+- **Fix:** breath is answered down.
+  - Within 6 of the bunker, into it ("breath: into the bunker at …").
+  - In it with the breath still on, a notch down from there.
+  - A walk out that fails NoPath anywhere digs a notch two deep where the feet are and roofs it ("breath: dig a notch at …"). The notch is held while a cloud lies over it on the plane, then left by the roof and the step ("breath: out of the notch").
+  - The sideways wall dig is no longer begun.
+- The notch is the charge's code (`notch_dig_step`, `notch_leave`, `notch_exit_step`), shared.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
