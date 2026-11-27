@@ -679,6 +679,10 @@ pub struct SpikeState {
     pub dragon_seen: Option<(u64, f64)>,
     /// The pillar column a waterfall is being ridden down beside.
     pub riding: Option<(i32, i32)>,
+    /// The dig-out's start (tick, blocks from its target) for its progress invariant, and the
+    /// tick until which a failed one stays off.
+    pub dig_out_since: Option<(u64, f64)>,
+    pub dig_out_off: u64,
     /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
     pub landings: Vec<((i32, i32), Cell)>,
 }
@@ -728,6 +732,8 @@ impl Default for SpikeState {
             dragon_seen: None,
             riding: None,
             landings: Vec::new(),
+            dig_out_since: None,
+            dig_out_off: 0,
         }
     }
 }
@@ -936,10 +942,20 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             // (13, 59, 0) was refused for 12,000 ticks).
             let out = spike_for(w, &st.geography, pos)
                 .and_then(|sp| best_approach(w, &sp, body.pos, &[], tick))
-                .and_then(|a| dig_out(w, feet, a.foot).map(|c| (c, a.foot)));
+                .and_then(|a| dig_out_plan(w, feet, a.foot).map(|p| (p, a.foot)));
+            let stands = |c: Cell| {
+                full(kind(w, (c.0, c.1 - 1, c.2)))
+                    && open(kind(w, c))
+                    && open(kind(w, (c.0, c.1 + 1, c.2)))
+            };
             match out {
-                Some((cell, toward)) => Next::DigOut { cell, toward },
-                None => Next::Wait(format!(
+                Some(((Some(cell), _), toward)) => Next::DigOut { cell, toward },
+                // The stair open: up it, and the dig-out goes on from its top.
+                Some(((None, top), _)) if top != feet && stands(top) => Next::Walk {
+                    to: top,
+                    approach: None,
+                },
+                Some(_) | None => Next::Wait(format!(
                     "no approach to the crystal at ({:.1}, {:.1}, {:.1})",
                     pos[0], pos[1], pos[2]
                 )),
@@ -1043,6 +1059,15 @@ pub fn held_by(w: &World, pos: [f64; 3], feet: Cell) -> Option<Cell> {
 /// is higher, else the way along (the feet's and the head's cells). Only a block with an open
 /// face beside the bot's own cell, never obsidian or bedrock. `None` when the way is open.
 pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
+    dig_out_plan(w, feet, target).and_then(|(cell, _)| cell)
+}
+
+/// The dig-out's next cell (`None` when the stair is open) and the stair's top step, the feet
+/// cell to walk up to once the stair is open. The stair rises to the higher of the target's
+/// height and the ground's over the feet (the frontier race 45918666403 lane 2: from a notch 2
+/// under its bunker the stair rose only to the foot's height, 59, under the ground at 62, and
+/// every walk from the feet was refused for 19,560 ticks).
+pub fn dig_out_plan(w: &World, feet: Cell, target: Cell) -> Option<(Option<Cell>, Cell)> {
     let (dx, dz) = {
         let (ax, az) = (target.0 - feet.0, target.2 - feet.2);
         if ax.abs() >= az.abs() {
@@ -1055,8 +1080,18 @@ pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
         return None;
     }
     let (x, y, z) = feet;
+    let surface = [(x, z), (x + dx, z + dz)]
+        .iter()
+        .filter_map(|(gx, gz)| ground(w, *gx, *gz, y + DIG_OUT_SKY))
+        .max()
+        .unwrap_or(y);
     // A stair of up to `DIG_OUT_STEPS` steps (each within a dig's reach), or the way along.
-    let rise = (target.1 - y).clamp(0, DIG_OUT_STEPS);
+    let rise = (target.1.max(surface) - y).clamp(0, DIG_OUT_STEPS);
+    let top = if rise > 0 {
+        (x + rise * dx, y + rise, z + rise * dz)
+    } else {
+        (x + dx, y, z + dz)
+    };
     let cells: Vec<Cell> = if rise > 0 {
         (0..rise)
             .flat_map(|k| {
@@ -1070,11 +1105,19 @@ pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
     } else {
         vec![(x + dx, y, z + dz), (x + dx, y + 1, z + dz)]
     };
-    cells.into_iter().find(|c| {
+    let cell = cells.into_iter().find(|c| {
         let k = kind(w, *c);
         !open(k) && k.is_some() && !matches!(k, Some(BlockKind::Obsidian | BlockKind::Bedrock))
-    })
+    });
+    Some((cell, top))
 }
+
+/// Cells over the feet the ground over a dig-out is looked for from.
+pub const DIG_OUT_SKY: i32 = 24;
+/// Ticks a dig-out may get no nearer its target before it fails and hands back, and the ticks
+/// it then stays off (the progress-invariant rule).
+pub const DIG_OUT_STALL: u64 = 600;
+pub const DIG_OUT_OFF: u64 = 1200;
 
 /// Steps of a stair out a dig-out looks along (each cell within a dig's reach of the feet).
 pub const DIG_OUT_STEPS: i32 = 3;
@@ -1748,6 +1791,35 @@ impl Plan {
                 Some(Task::Dig(dig_down(w, c, tick)))
             }
             Next::DigOut { cell, toward } => {
+                // The progress invariant: no nearer its target in `DIG_OUT_STALL` ticks, the
+                // dig-out fails, says why and hands back.
+                let dist = f64::from(
+                    (toward.0 - feet.0).abs()
+                        + (toward.1 - feet.1).abs()
+                        + (toward.2 - feet.2).abs(),
+                );
+                if tick < self.spikes.dig_out_off {
+                    return None;
+                }
+                match self.spikes.dig_out_since {
+                    Some((_, best)) if dist < best - 1.0 => {
+                        self.spikes.dig_out_since = Some((tick, dist));
+                    }
+                    Some((at, best)) if tick.saturating_sub(at) > DIG_OUT_STALL => {
+                        self.spikes.dig_out_since = None;
+                        self.spikes.dig_out_off = tick + DIG_OUT_OFF;
+                        self.note(
+                            tick,
+                            format!("spikes: dig-out: no progress at {feet:?}"),
+                            format!(
+                                "no nearer {toward:?} than {best:.0} in {DIG_OUT_STALL} ticks (the cell {cell:?} next); handed back for {DIG_OUT_OFF}"
+                            ),
+                        );
+                        return None;
+                    }
+                    Some(_) => {}
+                    None => self.spikes.dig_out_since = Some((tick, dist)),
+                }
                 // The approaches refused for want of a way are tried again once it is dug.
                 self.spikes.refused.clear();
                 self.spikes_note(
