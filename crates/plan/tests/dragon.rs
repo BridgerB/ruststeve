@@ -1134,3 +1134,42 @@ fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
     let c = q.breath_step(&down, 20).expect("held in the notch");
     assert!(c.sneak && !c.forward);
 }
+
+#[test]
+fn a_notch_with_no_step_out_is_risen_out_of_a_block_at_a_jump() {
+    // Race 45918669138 lane 1: 2 under the bunker's floor, no step to dig, "no walk to the
+    // bunker" for 3,000 ticks.
+    let mut w = end_at([12.5, 62.0, 0.5]);
+    for y in [62, 63] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    for c in [(13, 64, 0), (11, 64, 0), (12, 64, 1), (12, 64, -1)] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    assert_eq!(dragon::notch_step(&w, [12, 64, 0]), None, "walled round");
+    w.inventory.slots.insert(36, (data::ItemKind::EndStone, 64));
+    w.held = 0;
+    let mut p = Plan::new(Aim::Race);
+    p.dragon.breath_notch = true;
+    p.dragon.notch_from = Some([12, 64, 0]);
+    let c = p.breath_step(&w, 0).expect("rising");
+    assert!(c.jump, "a jump from the notch's floor");
+    assert_eq!(p.dragon.notch_rise_to, Some(64));
+    // In the air over the cell it left: the block under it.
+    w.body = Some(physics::Body {
+        pos: [12.5, 63.2, 0.5],
+        on_ground: false,
+        ..physics::Body::default()
+    });
+    let _ = p.breath_step(&w, 10);
+    assert!(p.take_acts().contains(&Act::UseOn {
+        pos: world::BlockPos::new(12, 61, 0),
+        face: 1
+    }));
+}

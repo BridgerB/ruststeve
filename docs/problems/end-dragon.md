@@ -181,5 +181,11 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - **Wall 17: an enderman fought in the open** (lane 1, ticks 140 to 260). Angry from a stare at the arrival ("near miss"), with no bunker yet, it was struck 6 times for 26. It hit back for 7, 6.6 and 6.9 (20 → 2.3), and the bot died with the enderman at 13.6.
   - **Fix:** with no bunker near, a notch two deep where the feet are, roofed ("end: no pocket for enderman N (a notch down, no bunker near)"). An enderman can neither enter nor see into it. Out by the roof and the step once it is calm.
 
+### Race 45918669138 (d7f7a01, dev, 3 lanes, cap 24,000), read mid-run (lane 1's evidence)
+**Wall 18: no way out of a notch under the bunker.**
+- Wall 16's answer worked: "breath: into the bunker", then "a notch down" at tick 880, and "out of the notch" at 1,500.
+- But the notch was 2 under the bunker's floor, walled all round. No step out was found, and E3's retreat said "no walk to the bunker" every tick from 1,700 on.
+- **Fix:** with no step to dig, the notch is risen out of, a block put under the feet at each jump (`rise_step`), to the height it was begun from. Notes: "notch: risen out at …".
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
