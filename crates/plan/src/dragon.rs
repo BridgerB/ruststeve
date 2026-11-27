@@ -1019,10 +1019,12 @@ pub const ENDER_NEAR: f64 = 8.0;
 pub const STRAFE_UNSEEN_TICKS: u64 = 100;
 pub const STRAFE_RISES: i32 = 10;
 pub const ENDER_HOLD_CAP: u64 = 600;
-/// Water against endermen (wall 46): the reach angry ones are counted in, how many call for it,
+/// Water against endermen (walls 46, 48: any angry one, a single one beat a full-iron bot with the
+/// sword in race 46071506005 lane 5, about 3.8 a blow against 7 strikes it needed): the reach angry
+/// ones are counted in, how many call for it,
 /// ticks a hurt by something not the bot counts, and ticks between a bucket's uses.
 pub const ENDER_WATER_NEAR: f64 = 16.0;
-pub const ENDER_WATER_MOST: usize = 2;
+pub const ENDER_WATER_MOST: usize = 1;
 pub const DRAGON_HURT_TICKS: u64 = 400;
 pub const BUCKET_RETRY: u64 = 10;
 /// Recovery (wall 46): health it begins under and ends over, and the blocks a cloud's reach and the
@@ -2138,6 +2140,11 @@ pub struct DragonState {
     pub ender_water_at: u64,
     #[serde(default)]
     pub recovering: bool,
+    /// The item in hand at the enderman's strikes and since when (a swap resets the charge).
+    #[serde(default)]
+    pub ender_hand: Option<ItemKind>,
+    #[serde(default)]
+    pub ender_hand_at: Option<u64>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -4662,10 +4669,23 @@ impl Plan {
             }
         }
         let ready = (crate::hunt::swing_ticks(w) * crate::dig::slowdown(w)).ceil() as u64 + 1;
+        // A full charge from the swing and from the sword's coming to hand: a swap resets the
+        // server's attack charge (wall 48: race 46071506005 lane 5's strikes of 1.3 between full
+        // ones of 6.0, the dig task bringing the pickaxe back between them).
+        let wp = crate::hunt::weapon(w);
+        let in_hand = crate::dig::held_item(w);
+        if in_hand != wp || self.dragon.ender_hand != in_hand {
+            self.dragon.ender_hand = in_hand;
+            self.dragon.ender_hand_at = Some(tick);
+        }
         if self
             .dragon
-            .ender_swing_at
+            .ender_hand_at
             .is_none_or(|t| tick.saturating_sub(t) >= ready)
+            && self
+                .dragon
+                .ender_swing_at
+                .is_none_or(|t| tick.saturating_sub(t) >= ready)
         {
             self.dragon.ender_swing_at = Some(tick);
             self.acts.push(Act::Attack { entity: id });

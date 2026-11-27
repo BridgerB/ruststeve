@@ -2403,12 +2403,18 @@ fn two_angry_endermen_are_answered_with_water_at_the_feet_taken_back_after() {
             .iter()
             .any(|e| e.what == "end: the water against endermen taken back at [12, 64, 0]")
     );
-    // One angry, unhurt: no water; it is the sword's.
+    // One angry: water all the same (wall 48: a single one beat a full-iron bot with the sword).
     let mut one = end_at(feet);
     angry(&mut one, 70, [13.5, 64.0, 0.5]);
     bucket(&mut one, data::ItemKind::WaterBucket);
     let mut q = Plan::new(Aim::Race);
-    assert_eq!(q.ender_water_step(&one, 0), None);
+    assert!(q.ender_water_step(&one, 0).is_some());
+    assert!(q.take_acts().contains(&Act::UseItem));
+    // No water bucket held: the sword is the fallback.
+    let mut dry = end_at(feet);
+    angry(&mut dry, 70, [13.5, 64.0, 0.5]);
+    let mut r = Plan::new(Aim::Race);
+    assert_eq!(r.ender_water_step(&dry, 0), None);
 }
 
 #[test]
@@ -2445,4 +2451,41 @@ fn a_pace_leg_a_cloud_reaches_is_given_up_and_recovery_comes_first_at_low_health
     low.player.health = Some(17.0);
     assert_eq!(r.recover_step(&low, 100), None);
     assert!(!r.dragon.recovering);
+}
+
+#[test]
+fn a_strike_at_an_enderman_waits_a_full_charge_after_the_sword_comes_to_hand() {
+    // Race 46071506005 lane 5: strikes of 1.3 between full ones of 6.0, the pickaxe brought back
+    // between them by the dig in hand (a swap resets the server's attack charge).
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    add(&mut w, 70, EntityKind::Enderman, [14.0, 64.0, 0.5]);
+    data(&mut w, 70, vec![(17, MetaValue::Bool(true))]);
+    w.inventory.slots.insert(36, (data::ItemKind::IronSword, 1));
+    w.inventory
+        .slots
+        .insert(37, (data::ItemKind::StonePickaxe, 1));
+    // The pickaxe in hand: the sword taken up, no strike.
+    w.held = 1;
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.end_enderman_step(&w, 0).is_some());
+    assert!(
+        p.take_acts()
+            .iter()
+            .all(|a| !matches!(a, Act::Attack { .. }))
+    );
+    // The sword in hand at tick 1: still no strike until a full charge has passed.
+    w.held = 0;
+    let _ = p.end_enderman_step(&w, 1);
+    assert!(
+        p.take_acts()
+            .iter()
+            .all(|a| !matches!(a, Act::Attack { .. }))
+    );
+    let _ = p.end_enderman_step(&w, 20);
+    assert!(
+        p.take_acts()
+            .iter()
+            .any(|a| matches!(a, Act::Attack { entity: 70 }))
+    );
 }

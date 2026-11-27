@@ -424,3 +424,7 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - `Plan::breath_ahead` (dragon.rs, E5's; called from lib's `step`) holds a walk clear of it ("walk held clear of a breath's end reach"), and backs off when inside it ("walk backs off a breath's growth").
   - The dodge, the pace and the walk out of a breath choose cells and routes clear of it; the walk out searches 12 each way.
   - The other last acts (lane 9 "charge: dodge to", lane 4 "fireball: dodge to", lane 6 "out of the breath to", lane 3 "strafe: paced in sight") all choose their cells through these, so they now account for the growth too.
+- **Wall 48 (race 46071506005, the crystals_5 frontier, lanes 1 and 5):** a single angry enderman beat a full-iron bot with the sword. The anger is saved in the snapshot.
+  - In lane 5, enderman 93 was struck 6 times from 400 to 480 and killed. Enderman 38, stared into anger at 500, struck back about 3.8 a blow (16.2, 12.4, 8.7, 4.9, 1.1): 40 health wants 7 full strikes of 6, about 7 seconds, against about 26 taken.
+  - The strikes of 1.3 between full ones of 6.0 were swaps: the dig in hand brought the pickaxe back, and a swap resets the attack's charge.
+  - **Fix:** any angry enderman within 16 gets the water (`ENDER_WATER_MOST` 1); the sword is the fallback with no water bucket held. A strike waits a full charge from the sword's coming to hand as well as from the last swing.
