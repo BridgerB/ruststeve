@@ -271,7 +271,7 @@ fn endermen_holds_within_32_of_one_that_ticks() {
     assert_eq!(world::stage::enderman_near(&w).map(|(id, _)| id), Some(41));
     assert_eq!(w.stage_reached, Some(Stage::Endermen));
     assert_eq!(Stage::from_name("endermen"), Some(Stage::Endermen));
-    assert_eq!(Stage::ALL.len(), 24);
+    assert_eq!(Stage::ALL.len(), 26);
 }
 
 /// An enderman near but frozen (its chunk beyond the simulation distance) does not count, and
@@ -595,11 +595,14 @@ fn state(k: data::BlockKind) -> u32 {
 #[test]
 fn the_end_stages_sit_in_order() {
     assert!(Stage::PortalRoom < Stage::Armed && Stage::Armed < Stage::End);
-    assert!(Stage::End < Stage::Island && Stage::Island < Stage::Crystals);
+    assert!(Stage::End < Stage::Island && Stage::Island < Stage::Crystals5);
+    assert!(Stage::Crystals5 < Stage::Crystals1 && Stage::Crystals1 < Stage::Crystals);
     assert!(Stage::Crystals < Stage::Win);
     for (s, n) in [
         (Stage::Armed, "armed"),
         (Stage::Island, "island"),
+        (Stage::Crystals5, "crystals_5"),
+        (Stage::Crystals1, "crystals_1"),
         (Stage::Crystals, "crystals"),
         (Stage::Win, "win"),
     ] {
@@ -740,6 +743,66 @@ fn crystals_needs_every_spike_seen_and_none_alive() {
     assert!(!Stage::Crystals.holds(&w), "a spike's column not loaded");
 }
 
+/// `crystals_5` and `crystals_1`: counted the way `crystals` is (near the fountain, every
+/// spike's column loaded, the crystals the server sent): 6 alive is neither, 5 is `crystals_5`,
+/// 1 is `crystals_1`, 0 is all three and `crystals` is reached. A spike's column not loaded, or
+/// the bot far out, is none of them however few were sent.
+#[test]
+fn crystals_5_and_1_count_the_crystals_left() {
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
+    for [x, z] in world::stage::SPIKES {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    for (i, [x, z]) in world::stage::SPIKES.iter().take(6).enumerate() {
+        let id = 90 + i as i32;
+        w.step(&add(
+            id,
+            data::EntityKind::EndCrystal,
+            f64::from(*x) + 0.5,
+            83.0,
+            f64::from(*z) + 0.5,
+        ));
+    }
+    w.step(&tick());
+    assert_eq!(world::stage::crystals_left(&w), Some(6));
+    assert_eq!(w.stage_reached, Some(Stage::End), "6 left");
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![90] }));
+    w.step(&tick());
+    assert!(Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Crystals5));
+    w.step(&Event::Packet(S2c::RemoveEntities {
+        ids: vec![91, 92, 93],
+    }));
+    w.step(&tick());
+    assert_eq!(world::stage::crystals_left(&w), Some(2));
+    assert_eq!(w.stage_reached, Some(Stage::Crystals5), "2 left");
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![94] }));
+    w.step(&tick());
+    assert!(Stage::Crystals1.holds(&w) && !Stage::Crystals.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Crystals1));
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![95] }));
+    w.step(&tick());
+    assert!(Stage::Crystals5.holds(&w) && Stage::Crystals1.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::Crystals));
+    w.step(&teleport_to(70.5, 70.0, 0.5));
+    w.step(&tick());
+    assert_eq!(world::stage::crystals_left(&w), None, "70 off the fountain");
+    assert!(!Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
+    // One spike's column never loaded: its crystal may be alive and unsent, so no count.
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
+    for [x, z] in world::stage::SPIKES.iter().skip(1) {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    w.step(&tick());
+    assert_eq!(world::stage::crystals_left(&w), None);
+    assert!(!Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::End));
+}
+
 /// `win`: the credits with the dragon seen dead before them (its death event, or its boss bar
 /// removed in the End). The credits alone are not.
 #[test]
@@ -807,6 +870,14 @@ fn the_stage_constants_are_config_end_toml() {
     assert_eq!(
         t["crystals"]["near"].as_float(),
         Some(world::stage::CRYSTALS_NEAR)
+    );
+    assert_eq!(
+        t["crystals"]["left_5"].as_integer(),
+        Some(world::stage::CRYSTALS_LEFT_5 as i64)
+    );
+    assert_eq!(
+        t["crystals"]["left_1"].as_integer(),
+        Some(world::stage::CRYSTALS_LEFT_1 as i64)
     );
     let spikes: Vec<[i32; 2]> = t["spike"]
         .as_array()
