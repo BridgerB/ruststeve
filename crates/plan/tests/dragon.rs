@@ -646,29 +646,43 @@ fn a_breath_over_the_bunker_or_under_a_pillar_is_not_on_the_body() {
 }
 
 #[test]
-fn a_walk_waits_at_a_breaths_edge() {
-    let mut w = end_at([2.5, 64.0, 0.5]);
-    cloud(&mut w, 50, [8.0, 64.0, 0.5], 3.0);
-    let mut p = Plan::new(Aim::Race);
-    // Yaw -90 faces +x (Notchian: south 0, west +90): toward the cloud, its reach 4.5 from 8.0.
+fn a_walk_is_held_clear_of_a_clouds_end_reach_and_backs_off_inside_it() {
+    // Wall 47, frontier race 46063334187 lanes 1, 2 and 8: walks waited at a breath's edge that
+    // grew over them (5.0 to 7.0).
     let toward = physics::Controls {
         forward: true,
+        // Yaw -90 faces +x (Notchian: south 0, west +90): toward the cloud.
         yaw: -90.0,
         ..physics::Controls::default()
     };
-    assert!(!p.breath_ahead(&w, toward).forward, "waits");
+    // Outside the end reach (7 + 1.5 + 1 from 8.0) with the way ahead in it: held there.
+    let mut far = end_at([-1.8, 64.0, 0.5]);
+    cloud(&mut far, 50, [8.0, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    assert!(!p.breath_ahead(&far, toward).forward, "held");
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "walk waits at a breath's edge")
+            .any(|e| e.what == "walk held clear of a breath's end reach")
     );
+    // Inside its end reach (not yet its edge): backed off, away from it (-x, yaw 90).
+    let mut near = end_at([2.5, 64.0, 0.5]);
+    cloud(&mut near, 50, [8.0, 64.0, 0.5], 3.0);
+    let mut q = Plan::new(Aim::Race);
+    let c = q.breath_ahead(&near, toward);
+    assert!(c.forward && (c.yaw - 90.0).abs() < 1.0, "{c:?}");
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "walk backs off a breath's growth")
+    );
+    // Walking away from it, clear: on.
     let away = physics::Controls {
         yaw: 90.0,
         ..toward
     };
-    assert!(p.breath_ahead(&w, away).forward, "away from it: on");
+    assert!(p.breath_ahead(&far, away).forward, "away from it: on");
 }
-
 #[test]
 fn the_strike_that_makes_it_take_off_is_struck_from_under_the_wings() {
     // Race 45876898172 lane 2: the strike over 50 was struck from the surface; the head and wings
@@ -1799,7 +1813,7 @@ fn a_fireball_is_dodged_ahead_of_the_walk_out_of_a_cloud_on_the_feet() {
     assert!(p.charge_step(&w, 0).is_some());
     assert_eq!(
         dodged_to(&p).as_deref(),
-        Some("fireball: dodge to [12, 64, 6]")
+        Some("fireball: dodge to [12, 64, 10]")
     );
 }
 
@@ -2382,19 +2396,48 @@ fn two_angry_endermen_are_answered_with_water_at_the_feet_taken_back_after() {
         state: state(BlockKind::Water),
     }));
     bucket(&mut calm, data::ItemKind::Bucket);
+    let mut lost = p.clone();
     assert!(p.ender_water_step(&calm, 40).is_some());
     assert!(p.take_acts().contains(&Act::UseItem));
-    assert!(
+    // Noted only once the bucket is full again (wall 49: 67 take-back notes for 9 pours).
+    let taken = |p: &Plan| {
         p.events_since(0)
             .iter()
             .any(|e| e.what == "end: the water against endermen taken back at [12, 64, 0]")
+    };
+    assert!(!taken(&p));
+    let mut full = end_at(feet);
+    bucket(&mut full, data::ItemKind::WaterBucket);
+    assert_eq!(p.ender_water_step(&full, 60), None);
+    assert!(taken(&p));
+    assert_eq!(p.dragon.ender_water, None);
+    // A take-back that fails 3 times: the water lost there, left for the refill.
+    for t in [40, 60, 80, 100] {
+        let _ = lost.ender_water_step(&calm, t);
+        let _ = lost.take_acts();
+    }
+    assert!(
+        lost.spikes.left_water.contains(&(12, 64, 0)),
+        "{:?}",
+        lost.spikes.left_water
     );
-    // One angry, unhurt: no water; it is the sword's.
+    assert!(
+        lost.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: the water against endermen lost at [12, 64, 0]")
+    );
+    // One angry: water all the same (wall 48: a single one beat a full-iron bot with the sword).
     let mut one = end_at(feet);
     angry(&mut one, 70, [13.5, 64.0, 0.5]);
     bucket(&mut one, data::ItemKind::WaterBucket);
     let mut q = Plan::new(Aim::Race);
-    assert_eq!(q.ender_water_step(&one, 0), None);
+    assert!(q.ender_water_step(&one, 0).is_some());
+    assert!(q.take_acts().contains(&Act::UseItem));
+    // No water bucket held: the sword is the fallback.
+    let mut dry = end_at(feet);
+    angry(&mut dry, 70, [13.5, 64.0, 0.5]);
+    let mut r = Plan::new(Aim::Race);
+    assert_eq!(r.ender_water_step(&dry, 0), None);
 }
 
 #[test]
@@ -2431,4 +2474,71 @@ fn a_pace_leg_a_cloud_reaches_is_given_up_and_recovery_comes_first_at_low_health
     low.player.health = Some(17.0);
     assert_eq!(r.recover_step(&low, 100), None);
     assert!(!r.dragon.recovering);
+}
+
+#[test]
+fn a_strike_at_an_enderman_waits_a_full_charge_after_the_sword_comes_to_hand() {
+    // Race 46071506005 lane 5: strikes of 1.3 between full ones of 6.0, the pickaxe brought back
+    // between them by the dig in hand (a swap resets the server's attack charge).
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    add(&mut w, 70, EntityKind::Enderman, [14.0, 64.0, 0.5]);
+    data(&mut w, 70, vec![(17, MetaValue::Bool(true))]);
+    w.inventory.slots.insert(36, (data::ItemKind::IronSword, 1));
+    w.inventory
+        .slots
+        .insert(37, (data::ItemKind::StonePickaxe, 1));
+    // The pickaxe in hand: the sword taken up, no strike.
+    w.held = 1;
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.end_enderman_step(&w, 0).is_some());
+    assert!(
+        p.take_acts()
+            .iter()
+            .all(|a| !matches!(a, Act::Attack { .. }))
+    );
+    // The sword in hand at tick 1: still no strike until a full charge has passed.
+    w.held = 0;
+    let _ = p.end_enderman_step(&w, 1);
+    assert!(
+        p.take_acts()
+            .iter()
+            .all(|a| !matches!(a, Act::Attack { .. }))
+    );
+    let _ = p.end_enderman_step(&w, 20);
+    assert!(
+        p.take_acts()
+            .iter()
+            .any(|a| matches!(a, Act::Attack { entity: 70 }))
+    );
+}
+
+#[test]
+fn walks_out_of_one_breath_are_capped_then_pressed_straight_away() {
+    // Wall 50, race 46071506005 lanes 0 and 3: "out of the breath" 120 to 250 times a lane.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    cloud(&mut w, 50, [13.5, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    p.dragon.breath_episode_outs = dragon::BREATH_OUTS_MAX;
+    let c = p.breath_step(&w, 0).expect("pressed away");
+    // Away from the cloud's middle at +x: toward -x (yaw 90).
+    assert!(c.forward && (c.yaw - 90.0).abs() < 1.0, "{c:?}");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "out of the breath: walks capped")
+    );
+    // A failed dig's cell is kept for the episode while a cloud's end reach takes the bot in.
+    p.dragon.dug_failed.push([13, 64, 0]);
+    let mut near = end_at(feet);
+    cloud(&mut near, 50, [18.5, 64.0, 0.5], 3.0);
+    let _ = p.breath_step(&near, 10);
+    assert!(p.dragon.dug_failed.contains(&[13, 64, 0]));
+    // Far from every cloud: the episode over, its records cleared.
+    let mut far = end_at(feet);
+    cloud(&mut far, 50, [-20.5, 64.0, 0.5], 3.0);
+    let _ = p.breath_step(&far, 20);
+    assert!(p.dragon.dug_failed.is_empty());
+    assert_eq!(p.dragon.breath_episode_outs, 0);
 }
