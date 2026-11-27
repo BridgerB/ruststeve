@@ -221,6 +221,11 @@ pub struct EnderState {
     pub looks_kept: u64,
     #[serde(default)]
     pub look_noted_at: Option<u64>,
+    // >>> E7 (issue 20)
+    /// Of `looks_kept`, those inside the guard only, not the jar's cone (`look::GUARD`).
+    #[serde(default)]
+    pub looks_guarded: u64,
+    // <<< E7
     /// Endermen seen with the stared-at flag set: near misses, each noted once.
     #[serde(default)]
     pub near_misses: Vec<i32>,
@@ -733,10 +738,15 @@ impl Plan {
         };
         self.count_near_misses(w);
         // >>> pearls (P3): the provoke row's one target is exempt while that row runs.
-        let (kept, id) = crate::look::keep_off_controls(w, c, self.pearls.provoking);
+        let (kept, why) = crate::look::keep_off_why(w, c, self.pearls.provoking);
         // <<< pearls
-        if let Some(id) = id {
+        if let Some((id, why)) = why {
             self.ender.looks_kept += 1;
+            // >>> E7 (issue 20, docs/problems/end-gaze.md): a look kept only by the guard.
+            if why == crate::look::Kept::Guard {
+                self.ender.looks_guarded += 1;
+            }
+            // <<< E7
             let tick = w.ticks;
             if self
                 .ender
@@ -752,10 +762,15 @@ impl Plan {
                     tick,
                     format!("look kept off enderman {id}"),
                     format!(
-                        "pitch {:.0} would stare at it {d:.1} off; sent {:.0}; {} looks kept in the run",
+                        "pitch {:.0} would {} it {d:.1} off; sent {:.0}; {} looks kept in the run, {} by the guard",
                         c.pitch.unwrap_or(w.player.pitch),
+                        match why {
+                            crate::look::Kept::Stare => "stare at",
+                            crate::look::Kept::Guard => "come within the guard of",
+                        },
                         kept.pitch.unwrap_or(w.player.pitch),
-                        self.ender.looks_kept
+                        self.ender.looks_kept,
+                        self.ender.looks_guarded
                     ),
                 );
             }
