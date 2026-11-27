@@ -440,3 +440,8 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Lane 4 at 10,860, in E5's breath notch.
   - Lane 5 at 3,040, before any crystal work.
 - **Lane 1** reached the cap with "no climb: no water" after wall 28.
+
+### Water left on the ground (E5's read of the race: lanes 2 and 3 died with every walk NoPath, standing in spread water; fixed)
+- **The clutch takes its water back on every landing, wherever it went.** If the cell it was poured over holds no source, the source in the feet's cell or the one under, or a cell beside either, is taken back ("clutch water found at"; `clutch_water`). The late pour of wall 28 uses the same search. Unit test `every_clutch_landing_takes_its_water_back_wherever_it_went`.
+- **The landing water after a descent** is taken back as before ("landing water taken back", unit-tested). Lane 2's spread water came from wall 29's pour into the feet's cell, which was never recorded as landing water; 06b1bc4 stops that pour.
+- **The pool's water stays inside its dug square.** A pour goes only into a dug cell whose floor is full and whose every side is full or part of the square. Otherwise the pool is given up ("no pool: not walled").

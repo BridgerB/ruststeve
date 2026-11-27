@@ -330,6 +330,23 @@ pub fn source(w: &World, c: Cell) -> bool {
         .is_some_and(|f| f.kind == physics::FluidKind::Water && f.level == 0)
 }
 
+/// The clutch's water round a landed body: a source in the feet's cell or the one under, else in
+/// a cell beside either (a body knocked sideways lands off the cell it poured over). None when
+/// no source is there (E5's read of frontier race 45954274931: bots that stood in clutch water
+/// spread over the ground found no start for a walk or a dodge, NoPath to their deaths).
+pub fn clutch_water(w: &World, feet: Cell) -> Option<Cell> {
+    [0, -1]
+        .into_iter()
+        .flat_map(|dy| {
+            let c = (feet.0, feet.1 + dy, feet.2);
+            std::iter::once(c).chain(Axis::ALL.iter().map(move |a| {
+                let (dx, dz) = a.step();
+                (c.0 + dx, c.1, c.2 + dz)
+            }))
+        })
+        .find(|c| source(w, *c))
+}
+
 /// A cell a body passes through: open, or water (a waterfall's pour on a pillar's top).
 fn passable(k: Option<BlockKind>) -> bool {
     open(k) || k == Some(BlockKind::Water)
@@ -2301,12 +2318,7 @@ impl Plan {
         // water, which was never taken back; the bucket lost and every walk from the water cell
         // refused for 1,600 ticks).
         let late = (c.poured.is_none() && landed && c.sent_at.is_some())
-            .then(|| {
-                let f = path::feet_cell(body.pos);
-                [f, (f.0, f.1 - 1, f.2)]
-                    .into_iter()
-                    .find(|x| kind(w, *x) == Some(BlockKind::Water))
-            })
+            .then(|| clutch_water(w, path::feet_cell(body.pos)))
             .flatten();
         if let Some(cell) = late {
             c.poured = Some(cell);
@@ -2385,6 +2397,24 @@ impl Plan {
                     return Some(down);
                 }
                 let at = *c.landed_at.get_or_insert(tick);
+                // Every landing takes its water back, wherever it went: not in the cell it was
+                // poured over, the source round the feet (E5, frontier race 45954274931).
+                let cell =
+                    if source(w, cell) || crate::dig::held_item(w) == Some(ItemKind::WaterBucket) {
+                        cell
+                    } else if let Some(near) = clutch_water(w, path::feet_cell(body.pos)) {
+                        if c.poured != Some(near) {
+                            self.note(
+                                tick,
+                                format!("spikes: clutch water found at {near:?}"),
+                                format!("poured over {cell:?}; to be taken back"),
+                            );
+                        }
+                        c.poured = Some(near);
+                        near
+                    } else {
+                        cell
+                    };
                 let water = matches!(kind(w, cell), Some(BlockKind::Water));
                 if !water || crate::dig::held_item(w) == Some(ItemKind::WaterBucket) {
                     self.note(
@@ -2720,6 +2750,24 @@ impl Plan {
                     }
                 }
                 for c in [c0, c1] {
+                    // The water stays inside the dug square: its floor full and every side full
+                    // or the square's own (E5, frontier race 45954274931: water spread over the
+                    // ground left no start for a walk).
+                    let held_in = full(kind(w, (c.0, c.1 - 1, c.2)))
+                        && Axis::ALL.iter().all(|a| {
+                            let (dx, dz) = a.step();
+                            let n = (c.0 + dx, c.1, c.2 + dz);
+                            square.contains(&n) || full(kind(w, n))
+                        });
+                    if open(kind(w, c)) && water > 0 && !held_in {
+                        self.spikes.pool_off = true;
+                        self.note(
+                            tick,
+                            "spikes: no pool: not walled".to_owned(),
+                            format!("{c:?} would run out over the ground; square {square:?}"),
+                        );
+                        return None;
+                    }
                     if open(kind(w, c)) && water > 0 {
                         // Centred on the stand first, and aimed at the far side of the cell's
                         // floor: race 45930464018 lane 0 stood at x 10.8 off its stand's centre,

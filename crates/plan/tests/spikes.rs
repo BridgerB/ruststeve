@@ -1795,3 +1795,50 @@ fn the_landing_pour_waits_for_the_body_centred_and_aims_past_the_first_block() {
         d => panic!("{d:?} {:?}", notes(&p)),
     }
 }
+
+#[test]
+fn every_clutch_landing_takes_its_water_back_wherever_it_went() {
+    // E5's read of frontier race 45954274931 lanes 2 and 3: bots stood in water spread over the
+    // ground, and no walk or dodge could begin from it.
+    let landed = |water: (i32, i32, i32)| {
+        let mut w = world(2, [20.5, 64.0, 20.5]);
+        if let Some(d) = w.dimension.as_mut() {
+            d.name = "minecraft:the_end".to_owned();
+        }
+        set(&mut w, water, BlockKind::Water);
+        w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+        w.held = 1;
+        w
+    };
+    let poured = || spikes::Clutch {
+        since: 90,
+        from_y: 80.0,
+        poured: Some((20, 64, 20)),
+        landed_at: None,
+        sent_at: Some(95),
+    };
+    // In the cell poured over: taken back.
+    let w = landed((20, 64, 20));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.clutch = Some(poured());
+    p.spikes_clutch(&w, 100);
+    assert!(p.take_acts().contains(&Act::UseItem), "{:?}", notes(&p));
+    // Knocked a cell aside: found beside the feet and taken back.
+    let w = landed((21, 64, 20));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.clutch = Some(poured());
+    p.spikes_clutch(&w, 100);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: clutch water found at (21, 64, 20)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.take_acts().contains(&Act::UseItem));
+    assert_eq!(
+        p.spikes.clutch.as_ref().and_then(|c| c.poured),
+        Some((21, 64, 20))
+    );
+    assert_eq!(spikes::clutch_water(&w, (20, 64, 20)), Some((21, 64, 20)));
+}
