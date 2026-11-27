@@ -329,6 +329,11 @@ pub const ISLAND_NEAR: f64 = 30.0;
 /// 45863427332) is within 102, inside the entity tracking distance (view distance 8 less one
 /// chunk, 112): every crystal still alive has been sent (`[crystals] near`).
 pub const CRYSTALS_NEAR: f64 = 60.0;
+/// `crystals_5`: crystals left alive, at most (`[crystals] left_5`; issue 20 part 2, Bridger
+/// 2026-11-27: race 45994686575 had three bots at 1 left and one at 2, and none saved).
+pub const CRYSTALS_LEFT_5: usize = 5;
+/// `crystals_1`: crystals left alive, at most (`[crystals] left_1`).
+pub const CRYSTALS_LEFT_1: usize = 1;
 /// The ten spikes' centre columns, this seed (probe 45863427332; `[[spike]]` in
 /// config/end.toml). Geography, Bridger's ruling: the End's layout is fixed by the seed.
 pub const SPIKES: [[i32; 2]; 10] = [
@@ -460,18 +465,26 @@ pub fn crystals_alive(w: &World) -> usize {
         .count()
 }
 
-/// Every spike's column loaded (so its crystal, if alive, was sent), the feet within
-/// `CRYSTALS_NEAR` of the fountain, and no crystal alive, in the End.
-pub fn crystals_gone(w: &World) -> bool {
-    in_end(w)
+/// The crystals left alive, when the count can be trusted: in the End with the feet within
+/// `CRYSTALS_NEAR` of the fountain and every spike's column loaded, so every crystal still
+/// alive is inside the entity tracking distance and was sent (no X-ray: entities the server
+/// sent, against the seed's fixed spikes). `None` when a spike may hold one not sent.
+pub fn crystals_left(w: &World) -> Option<usize> {
+    let known = in_end(w)
         && from_fountain(w).is_some_and(|d| d <= CRYSTALS_NEAR)
         && SPIKES.iter().all(|[x, z]| {
             w.columns.contains_key(&crate::ChunkPos {
                 x: x.div_euclid(16),
                 z: z.div_euclid(16),
             })
-        })
-        && crystals_alive(w) == 0
+        });
+    known.then(|| crystals_alive(w))
+}
+
+/// Every spike's column loaded (so its crystal, if alive, was sent), the feet within
+/// `CRYSTALS_NEAR` of the fountain, and no crystal alive, in the End.
+pub fn crystals_gone(w: &World) -> bool {
+    crystals_left(w) == Some(0)
 }
 // <<< E1
 
@@ -544,6 +557,13 @@ pub enum Stage {
     End,
     /// The feet on the main island's end stone within `ISLAND_NEAR` of the fountain (issue 20).
     Island,
+    /// `crystals_left` at most `CRYSTALS_LEFT_5` (issue 20 part 2's checkpoint, Bridger
+    /// 2026-11-27): a bot half through the spikes is saved, not replayed from the island. Accreted
+    /// between `island` and `crystals` so `Ord` stays the ladder (stages go by name in files).
+    Crystals5,
+    /// `crystals_left` at most `CRYSTALS_LEFT_1` (issue 20 part 2): the last spike's attempts
+    /// resume from it.
+    Crystals1,
     /// In the End near the fountain, every spike's column loaded and no crystal alive (issue 20).
     Crystals,
     /// The credits (`win_game`) with the dragon seen dead before them (issue 20's done
@@ -553,7 +573,7 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 24] = [
+    pub const ALL: [Stage; 26] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -576,6 +596,8 @@ impl Stage {
         Stage::Armed,
         Stage::End,
         Stage::Island,
+        Stage::Crystals5,
+        Stage::Crystals1,
         Stage::Crystals,
         Stage::Win,
     ];
@@ -605,6 +627,8 @@ impl Stage {
             Stage::Armed => "armed",
             Stage::End => "end",
             Stage::Island => "island",
+            Stage::Crystals5 => "crystals_5",
+            Stage::Crystals1 => "crystals_1",
             Stage::Crystals => "crystals",
             Stage::Win => "win",
         }
@@ -670,6 +694,8 @@ impl Stage {
             Stage::Armed => dim == Some("minecraft:overworld") && armed_kit(w),
             Stage::End => dim == Some("minecraft:the_end"),
             Stage::Island => on_island(w),
+            Stage::Crystals5 => crystals_left(w).is_some_and(|n| n <= CRYSTALS_LEFT_5),
+            Stage::Crystals1 => crystals_left(w).is_some_and(|n| n <= CRYSTALS_LEFT_1),
             Stage::Crystals => crystals_gone(w),
             Stage::Win => w.won && w.dragon_dead.is_some(),
         }
