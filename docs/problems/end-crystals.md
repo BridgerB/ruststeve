@@ -619,3 +619,30 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Never a dig-out from a spike's top, its cage's bars or its bedrock (`on_spike_top`). It is "stranded" instead, and the stranded rule runs.
   - Caged with no edge: the bar beside the feet is broken, the feet's height and then the head's, on the side facing the island's centre best ("out of the cage at"; `cage_bar`). Then the walk to the gap at the top's edge and the step off onto the clutch (wall 42).
   - Unit test `caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off`, with the vanilla cage round the test spike.
+
+### Wall 46: the climb rule stopped almost every climb (race 46071506005, the crystals_5 frontier; fixed)
+- **What happened:**
+  - 0 strikes in 5 live lanes by about 40,800.
+  - Lane 0 at [33, -25] began 4 pillars, at (29, 58, -25), (37, 58, -24), (33, 58, -29) and (34, 57, -29). Each stopped low ("the dragon 64 off in phase Some(0), not holding over 64 off"), about 4 blocks up.
+  - End stone sat at about 32 against 37 wanted. A 30-block climb, about 360 ticks, almost never saw the holding dragon over 64 for that long.
+- **Why four columns:**
+  - Each stop came down by the clutch, and its pillar was recorded a stub (wall 44).
+  - The next climb took the nearest approach, `best_approach`, which after each landing was another axis. So three axes got a stub each.
+  - The fourth, (34, 57, -29), is wall 44's side pillar beside the north stub.
+- **The fix (the orchestrator's rule):**
+  - A climb begins with the dragon holding (phase 0), `CLIMB_NEAR` (40) off or more, and not closing. Closing means its distance falling against a reading taken every 20 ticks (`CLOSING_TICKS` 40, `CLOSING_BY` 1).
+  - It goes on while the dragon is holding 40 off or more, closing or not.
+  - It stops on any other phase (landing, sitting, strafe, charge), on coming within 40, or on a fireball. The bot comes down by water (walls 38 and 43, the near-stand exception kept).
+  - A stopped climb resumes on its own stub: `chosen_approach` takes a stub's approach after a poured landing's column and before the nearest.
+  - Unit tests `a_climb_goes_on_through_the_holding_pattern_40_off_or_more` and `a_stopped_climb_resumes_on_its_own_stub`, with the earlier climb-rule tests moved to 40.
+
+### Wall 47: a climb 1 under its stand stopped (race 46075095202; fixed)
+- **What happened:**
+  - Climb stops on 4 of 5, 5 of 5, 4 of 4 and 5 of 6 climbs, 0 strikes.
+  - One stopped 1 under the top: "climb stopped at (34, 70, -29) (the dragon 46 off in phase Some(0) …; 1 under the goal 71)".
+- **The fix:** within `STAND_NEAR` (5) of the stand the climb finishes in any phase but a landing, sitting or charge within `KNOCK_NEAR` (`FINISH_DENIED`, `climb_on_near_stand`). The perch-descent rule and the climb's own perch stop honour it too. The knock rule (a landing, take-off or charge within 30) still holds first. Unit tests `the_one_exception_near_the_stand_finishes_but_for_a_perch_or_charge_near` and `a_climb_one_under_its_stand_finishes`; the stop tests use a tall spike (`tall`) to stay more than 5 under.
+
+### The climb's gates on E3's one calm rule
+- A climb's start and its going on both read E3's `Plan::calm` (end.rs: no dragon sent, or holding (phase 0) `CALM_FROM` 40 off or more and not closing over `CALM_TICKS` 20), so the stock, the crystals and the rest share one rule ("the dragon not calm").
+- Kept as the crystals' own: the stops for a landing, sitting, strafe or charge (`DESCEND_PHASES`, `threatens`), the knock rule within 30, fireballs, health, and the `STAND_NEAR` finish (wall 47).
+- The crystals' own closing reading is gone; `dragon_seen` is still kept for its notes.
