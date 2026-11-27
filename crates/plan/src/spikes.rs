@@ -2268,15 +2268,20 @@ impl Plan {
         }
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).
+        // Each try takes the next cell of the square in turn (race 45924374354 lane 0: the
+        // second refill aimed at the cell the first had just emptied, and gave up).
         if empty > 0
             && let Some(pour) = self.spikes.pool
-            && let Some(c0) = self
-                .spikes
-                .pool_square
-                .unwrap_or([pour[0], pour[1], pour[0], pour[1]])
-                .iter()
-                .copied()
-                .find(|c| kind(w, *c) == Some(BlockKind::Water))
+            && let Some(c0) = {
+                let square = self
+                    .spikes
+                    .pool_square
+                    .unwrap_or([pour[0], pour[1], pour[0], pour[1]]);
+                let turn = usize::try_from(self.spikes.refills).unwrap_or(0);
+                (0..4)
+                    .map(|i| square[(turn + i) % 4])
+                    .find(|c| kind(w, *c) == Some(BlockKind::Water))
+            }
         {
             let target = [
                 f64::from(c0.0) + 0.5,
@@ -2287,7 +2292,7 @@ impl Plan {
                 .map(|i| (target[i] - eye(body)[i]).powi(2))
                 .sum::<f64>()
                 .sqrt();
-            if reach <= 4.0 {
+            if reach <= POUR_REACH {
                 self.spikes.refills += 1;
                 self.note(
                     tick,
@@ -2431,10 +2436,21 @@ impl Plan {
                     return None;
                 }
                 if tick >= *until {
+                    let slots: Vec<i16> = w
+                        .inventory
+                        .slots
+                        .iter()
+                        .filter(|(_, (k, _))| k == item)
+                        .map(|(sl, _)| *sl)
+                        .collect();
                     self.note(
                         tick,
                         format!("spikes: {why} gave up"),
-                        format!("{want:?} held {}, wanted {count}", craft::count(w, *want)),
+                        format!(
+                            "{want:?} held {}, wanted {count}; held {:?}, {item:?} in slots {slots:?}; aimed at {look:?}",
+                            craft::count(w, *want),
+                            crate::dig::held_item(w)
+                        ),
                     );
                     return None;
                 }
