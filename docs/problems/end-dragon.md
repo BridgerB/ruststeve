@@ -356,3 +356,20 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Reverted for a cloud already on the body with no walk out:** in the bunker, or when the walk out fails and no wall is to be dug, a notch down where the feet are (as before wall 36). In water: pressed straight on.
   - Still out: a notch for a charge, and cover from a strafe.
   - And none of E5's steps sends the bot into the bunker while a crystal is alive (`Plan::bunker_now`; lane 7 died walking into it under a cloud).
+
+## Part 2
+
+### Wall 39: the fight waited for every crystal (race 45994686575)
+- Three bots got to 1 crystal left, but the dragon was at 200 throughout: lane 5 saw 37 perches with no strike, because the fight began only with no crystal standing. Lane 0 was knocked off mid-meal (`fell.assist`, "eat cooked_porkchop").
+- **The heal, from the jar** (`EnderDragon.checkCrystals`, javap probe 46039100437):
+  - 1 tick in 10 the dragon takes as `nearestCrystal` the nearest end crystal in its bounding box grown by 32 (`getBoundingBox().inflate(32.0)`).
+  - While it has one, it heals 1 every 10 ticks (`tickCount % 10 == 0`, up to its max).
+  - The box is 16 by 8 by 16, so the reach is per axis: 40 on x and z, from 32 under its feet to 40 over them.
+  - From the perch, 8 of the 10 spikes are in it (config/end.toml); only (42, 0) and (-42, -1) are past 40 on an axis.
+  - So a crystal can heal the perched dragon, at up to 2 a second.
+- **Fix:**
+  - The perch is fought with crystals standing when 2 or fewer are left, or when none can heal it at the perch (`fight_with_crystals`, `heals_from`).
+  - `perch_fight_step` begins the fight when the dragon sits or lands, cutting the task in hand, never up a pillar or a spike ("dragon: the perch fought with N crystals standing").
+  - The fight hands back to the crystals when the perch is over ("dragon: the perch fight over, back to the crystals").
+  - Every heal is in the ledger ("dragon healed", with the total, the crystals standing and the nearest's distance), at most every 200 ticks.
+  - A meal in the End only with the dragon in its holding pattern more than 40 off; a meal in hand is cut when it comes (`dragon_holds_meal`).

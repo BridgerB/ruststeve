@@ -681,6 +681,59 @@ pub const FOUNTAIN_CLEAR: f64 = 5.0;
 pub const IMMINENT: i32 = i32::MIN;
 /// The key of a dodge from a charge (`charging_at`).
 pub const CHARGE: i32 = i32::MIN + 1;
+/// The crystal's heal (`EnderDragon.checkCrystals`, javap probe 46039100437): 1 in 10 ticks the
+/// dragon takes the nearest end crystal in its box grown by `HEAL_RANGE` (32) on every axis as
+/// `nearestCrystal`, and while it has one it heals 1 every 10 ticks. Its box is 16 by 8 by 16
+/// (`HEAL_BOX_HALF` 8 across, `HEAL_BOX_HEIGHT` 8 up), so the reach is per axis: 40 on x and z,
+/// from 32 under its feet to 40 over them. From the perch 8 of the 10 spikes are inside it
+/// (config/end.toml: only (42, 0) and (-42, -1) are past 40 on an axis). The perch point it sits at
+/// (the fountain's axis, about 67 up: E1), the crystals standing at most that a perch is fought
+/// with whatever their heal, and ticks between the heal's notes.
+pub const HEAL_RANGE: f64 = 32.0;
+pub const HEAL_BOX_HALF: f64 = 8.0;
+pub const HEAL_BOX_HEIGHT: f64 = 8.0;
+pub const PERCH_POINT: [f64; 3] = [0.5, 67.0, 0.5];
+pub const CRYSTALS_FIGHT_MAX: usize = 2;
+pub const HEAL_NOTE_TICKS: u64 = 200;
+/// Blocks on the plane the holding dragon keeps from a bot that eats (wall 39).
+pub const MEAL_CLEAR: f64 = 40.0;
+
+/// The nearest standing crystal's distance from `p`, if any is shown.
+pub fn nearest_crystal(w: &World, p: [f64; 3]) -> Option<f64> {
+    w.entities
+        .values()
+        .filter(|e| e.kind == EntityKind::EndCrystal && !e.dead)
+        .map(|e| dist3(e.pos, p))
+        .min_by(f64::total_cmp)
+}
+
+/// Can a crystal at `c` heal a dragon whose feet are at `d` (inside its box grown by
+/// `HEAL_RANGE`)?
+pub fn heals_from(d: [f64; 3], c: [f64; 3]) -> bool {
+    let reach = HEAL_BOX_HALF + HEAL_RANGE;
+    (c[0] - d[0]).abs() <= reach
+        && (c[2] - d[2]).abs() <= reach
+        && c[1] >= d[1] - HEAL_RANGE
+        && c[1] <= d[1] + HEAL_BOX_HEIGHT + HEAL_RANGE
+}
+
+/// Crystals standing with the perch fought all the same: 1 to `CRYSTALS_FIGHT_MAX` shown, or any
+/// number none of which can heal the dragon at `PERCH_POINT` (`heals_from`). The count and the
+/// nearest's distance from the perch, else `None` (none standing, or more with a heal in reach).
+pub fn fight_with_crystals(w: &World) -> Option<(usize, f64)> {
+    let n = crate::end::crystals_alive(w);
+    if n == 0 {
+        return None;
+    }
+    let near = nearest_crystal(w, PERCH_POINT)?;
+    let heal = w
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::EndCrystal && !e.dead)
+        .any(|e| heals_from(PERCH_POINT, e.pos));
+    (n <= CRYSTALS_FIGHT_MAX || !heal).then_some((n, near))
+}
+
 /// The key of a walk out of the body's knockback (`knock_risk`).
 pub const KNOCK: i32 = i32::MIN + 2;
 /// Blocks on the plane from the dragon's body the bot keeps while it lands or takes off (its wings
@@ -1963,6 +2016,14 @@ pub struct DragonState {
     /// The wall dug for a block or a way when no dodge cell was had and no block held.
     #[serde(default)]
     pub dodge_wall: Option<[i32; 3]>,
+    /// Health the dragon got back (a crystal's heal) in the run, and the last note of it; the
+    /// perch fights begun with crystals standing.
+    #[serde(default)]
+    pub healed: f32,
+    #[serde(default)]
+    pub heal_noted_at: Option<u64>,
+    #[serde(default)]
+    pub crystal_fights: u32,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2011,7 +2072,7 @@ impl Plan {
     /// The dragon's record, every tick (the one call site in `step_inner`): its phases and perch,
     /// its death, and the credits answered with a respawn. `Some` holds every other row while the
     /// credits wait for the overworld.
-    pub(crate) fn dragon_watch(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn dragon_watch(&mut self, w: &World, tick: u64) -> Option<Controls> {
         let now = w.session.server_ticks;
         if in_end(w) {
             if !w.bosses.is_empty() {
@@ -2045,6 +2106,32 @@ impl Plan {
                         format!("health {:.1}; the count starts again", v.health),
                     );
                     self.dragon.sat_damage = 0.0;
+                }
+                // Healed (a crystal within HEAL_RANGE of it): counted, noted at most every
+                // HEAL_NOTE_TICKS with the crystals standing and the nearest's distance.
+                if let Some(h) = self.dragon.seen_health
+                    && v.health > h + 0.01
+                {
+                    self.dragon.healed += v.health - h;
+                    if self
+                        .dragon
+                        .heal_noted_at
+                        .is_none_or(|t| tick >= t + HEAL_NOTE_TICKS)
+                    {
+                        self.dragon.heal_noted_at = Some(tick);
+                        let near = nearest_crystal(w, v.pos);
+                        self.note(
+                            tick,
+                            "dragon healed".to_owned(),
+                            format!(
+                                "{:.1} in all; health {:.1}; {} crystals standing, the nearest {} off",
+                                self.dragon.healed,
+                                v.health,
+                                crate::end::crystals_alive(w),
+                                near.map_or_else(|| "none".to_owned(), |d| format!("{d:.0}"))
+                            ),
+                        );
+                    }
                 }
                 self.dragon.seen_health = Some(v.health);
                 self.dragon.perched_ticks = if over_fountain(&v) {
@@ -2138,9 +2225,9 @@ impl Plan {
         if !in_end(w) || w.won || w.body.is_none() {
             return None;
         }
-        if w.entities
-            .values()
-            .any(|e| e.kind == EntityKind::EndCrystal && !e.dead)
+        // Crystals standing: the fight only on a perch they cannot heal (`fight_with_crystals`).
+        if crate::end::crystals_alive(w) > 0
+            && (fight_with_crystals(w).is_none() || !view(w).is_some_and(|(_, v)| grounded(&v)))
         {
             return None;
         }
@@ -2160,6 +2247,23 @@ impl Plan {
 
     /// One tick of the fight (`Task::Dragon`'s step).
     pub(crate) fn dragon_step(&mut self, w: &World, tick: u64) -> Controls {
+        // Crystals standing and the perch over (or a crystal now able to heal it): back to the
+        // crystals (wall 39).
+        let standing = crate::end::crystals_alive(w);
+        if standing > 0
+            && (fight_with_crystals(w).is_none() || !view(w).is_some_and(|(_, v)| grounded(&v)))
+        {
+            self.task = Task::Idle;
+            self.note(
+                tick,
+                "dragon: the perch fight over, back to the crystals".to_owned(),
+                format!(
+                    "{standing} crystals standing; {} strikes so far",
+                    self.dragon.strikes
+                ),
+            );
+            return Controls::default();
+        }
         let rules = self.table.as_ref().map(|t| t.survival.clone());
         let danger = rules.as_ref().map_or(8.0, |r| r.danger_health);
         let food = rules
@@ -2188,7 +2292,7 @@ impl Plan {
             stand: self.dragon.stand,
             bunker,
             dead: self.dragon.dead,
-            food: food.is_some(),
+            food: food.is_some() && !self.dragon_holds_meal(w),
             way: self.dragon.way,
             way_done: self.dragon.way_done,
             sat_damage: self.dragon.sat_damage,
@@ -4128,10 +4232,45 @@ impl Plan {
     /// Is a meal by the always-row to wait: the dragon on or over its perch with the feet within
     /// its reach of the fountain (clojurecraft: a bot ate at 14.2 in the head's reach and died in
     /// the next second). The fight eats in its lulls.
-    pub(crate) fn dragon_holds_meal(&self, w: &World) -> bool {
-        in_end(w)
-            && view(w).is_some_and(|(_, v)| grounded(&v))
-            && w.body
-                .is_some_and(|b| from_fountain(b.pos) < STEP_OUT_RADIUS + BITE_OUT)
+    pub fn dragon_holds_meal(&self, w: &World) -> bool {
+        // In the End a meal only with the dragon in its holding pattern more than `MEAL_CLEAR`
+        // off (race 45994686575 lane 0: knocked off mid-meal, `fell.assist`).
+        if !in_end(w) {
+            return false;
+        }
+        let Some(feet) = w.body.map(|b| b.pos) else {
+            return false;
+        };
+        view(w).is_some_and(|(_, v)| {
+            v.phase() != Some(Phase::HoldingPattern) || flat(v.pos, feet) <= MEAL_CLEAR
+        })
+    }
+
+    /// The fight on a perch with crystals standing: begun when the dragon sits or lands with
+    /// `fight_with_crystals` (2 or fewer standing, or none that can heal it there) and the
+    /// bot is not up a pillar or a spike, cutting the task in hand (wall 39; race 45994686575: three
+    /// bots at 1 crystal left, the dragon at 200 through 37 perches in lane 5). `None` always: the
+    /// task runs on.
+    pub fn perch_fight_step(&mut self, w: &World, tick: u64) {
+        if !in_end(w) || matches!(self.task, Task::Dragon(_)) || self.spikes_up_high(w) {
+            return;
+        }
+        let Some((n, near)) = fight_with_crystals(w) else {
+            return;
+        };
+        if !view(w).is_some_and(|(_, v)| grounded(&v)) {
+            return;
+        }
+        let cut = self.task.name();
+        self.dragon.crystal_fights += 1;
+        self.note(
+            tick,
+            format!("dragon: the perch fought with {n} crystals standing"),
+            format!(
+                "the nearest {near:.0} from the perch; cut {cut}; {} perch fights",
+                self.dragon.crystal_fights
+            ),
+        );
+        self.task = Task::Dragon(Box::new(Fight::new(tick)));
     }
 }

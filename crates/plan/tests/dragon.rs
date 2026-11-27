@@ -2112,3 +2112,86 @@ fn with_no_way_out_and_no_block_the_wall_toward_the_open_is_dug() {
     );
     assert!(p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })));
 }
+
+#[test]
+fn a_perch_is_fought_with_two_crystals_standing_out_of_heal_reach() {
+    // Race 45994686575: three bots at 1 crystal left, the dragon at 200 through 37 perches
+    // (lane 5), the fight waiting for every crystal. EnderDragon.checkCrystals heals only from
+    // the nearest in its box grown by 32 (per axis: 40 across), 8 of 10 spikes in it from the perch.
+    let feet = [9.5, 64.0, 0.5];
+    let sat = |crystals: &[[f64; 3]]| {
+        let mut w = end_at(feet);
+        with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 270.0);
+        for (i, c) in crystals.iter().enumerate() {
+            add(&mut w, 80 + i as i32, EntityKind::EndCrystal, *c);
+        }
+        w
+    };
+    let spike = [42.5, 83.0, 0.5];
+    let other = [12.5, 77.0, 39.5];
+    assert_eq!(
+        dragon::fight_with_crystals(&sat(&[spike, other])).map(|(n, _)| n),
+        Some(2)
+    );
+    // Three standing, one ((12, 39)) in the heal's box from the perch: not fought.
+    assert!(dragon::heals_from(dragon::PERCH_POINT, other));
+    assert!(
+        !dragon::heals_from(dragon::PERCH_POINT, spike),
+        "(42, 0): 42 on x, past 40"
+    );
+    assert!(
+        dragon::fight_with_crystals(&sat(&[spike, other, [-34.5, 80.0, 24.5]])).is_none(),
+        "3 left, a heal in reach"
+    );
+    // Three standing, none in reach of a heal: fought.
+    assert!(
+        dragon::fight_with_crystals(&sat(&[spike, [-41.5, 89.0, -0.5], [50.5, 80.0, 50.5]]))
+            .is_some()
+    );
+    // Two standing, the dragon sitting: the fight begun, the task cut.
+    let w = sat(&[spike, other]);
+    let mut p = Plan::new(Aim::Race);
+    p.perch_fight_step(&w, 0);
+    assert!(matches!(p.task, plan::Task::Dragon(_)));
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "dragon: the perch fought with 2 crystals standing")
+    );
+    assert!(p.dragon_task(&w, 0).is_some());
+    // Flying: never begun.
+    let mut fly = end_at(feet);
+    with_dragon(&mut fly, [0.5, 90.0, 40.5], 0, 0.0);
+    add(&mut fly, 80, EntityKind::EndCrystal, spike);
+    let mut q = Plan::new(Aim::Race);
+    q.perch_fight_step(&fly, 0);
+    assert!(matches!(q.task, plan::Task::Idle));
+    assert!(q.dragon_task(&fly, 0).is_none());
+}
+
+#[test]
+fn a_heal_is_written_to_the_ledger_and_a_meal_waits_for_the_dragon_far_off() {
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [0.5, 90.0, 40.5], 0, 0.0);
+    add(&mut w, 80, EntityKind::EndCrystal, [12.5, 77.0, 39.5]);
+    data(&mut w, DRAGON, vec![(9, MetaValue::Float(180.0))]);
+    let mut p = Plan::new(Aim::Race);
+    let _ = p.dragon_watch(&w, 0);
+    data(&mut w, DRAGON, vec![(9, MetaValue::Float(185.0))]);
+    let _ = p.dragon_watch(&w, 20);
+    let e = p
+        .events_since(0)
+        .iter()
+        .find(|e| e.what == "dragon healed")
+        .expect("noted");
+    assert!(e.why.starts_with("5.0 in all"), "{}", e.why);
+    // Holding 40 off (about 43 here): a meal may be had; nearer, or any other phase: not.
+    assert!(!p.dragon_holds_meal(&w));
+    let mut near = end_at(feet);
+    with_dragon(&mut near, [20.5, 80.0, 0.5], 0, 0.0);
+    assert!(p.dragon_holds_meal(&near));
+    let mut strafe = end_at(feet);
+    with_dragon(&mut strafe, [0.5, 90.0, 60.5], 1, 0.0);
+    assert!(p.dragon_holds_meal(&strafe));
+}

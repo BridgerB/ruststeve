@@ -5,12 +5,12 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-26
+lastUpdated: 2026-11-27
 verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/dragon.rs#pub fn decide(w: &World, ask: &Ask) -> Want {"
-  - "ruststeve:crates/plan/src/dragon.rs#pub(crate) fn dragon_watch(&mut self, w: &World, tick: u64) -> Option<Controls> {"
+  - "ruststeve:crates/plan/src/dragon.rs#pub fn dragon_watch(&mut self, w: &World, tick: u64) -> Option<Controls> {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose(&mut self, w: &World, origin: [f64; 3], tick: u64) -> Task {"
   - "ruststeve:crates/plan/src/lib.rs#fn nearest_log(&self, w: &World, origin: [f64; 3], min: f64, tick: u64) -> Option<Cell> {"
   - "ruststeve:crates/bot/tests/planner.rs#fn over_generated_worlds_it_never_churns_and_never_stalls_past_its_patience() {"
