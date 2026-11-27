@@ -1219,11 +1219,19 @@ pub fn landing_cell(w: &World, column: (i32, i32), base: i32, top: i32) -> Optio
 }
 
 /// Columns round the feet a pool's site is looked for in.
-pub const POOL_SITE: i32 = 3;
+pub const POOL_SITE: i32 = 8;
+/// Columns (on the plane, either axis) a pool's stand and cells keep from the bunker's column:
+/// its stair runs four out from it (E3: three down and a step), so no misplaced pour runs into
+/// the shelter (race 45930464018 lane 0 drowned in a bunker its pool's water had run into).
+pub const POOL_KEEP: i32 = 5;
 
 /// The nearest standable cell within `POOL_SITE` of the feet (a floor under it, room over it)
 /// with a pool's two cells beside it, and those cells.
-pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 4])> {
+pub fn pool_site(w: &World, feet: Cell, bunker: Option<[i32; 3]>) -> Option<(Cell, [Cell; 4])> {
+    // Never near the bunker and its stair, nor uphill of it (water runs down to it).
+    let surface = bunker.and_then(|b| ground(w, b[0], b[2], b[1] + 12));
+    let clear =
+        |c: Cell| bunker.is_none_or(|b| (c.0 - b[0]).abs().max((c.2 - b[2]).abs()) >= POOL_KEEP);
     let mut best: Option<(i32, Cell, [Cell; 4])> = None;
     for dx in -POOL_SITE..=POOL_SITE {
         for dz in -POOL_SITE..=POOL_SITE {
@@ -1235,7 +1243,10 @@ pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 4])> {
                 if !stands {
                     continue;
                 }
-                if let Some(cells) = pool_cells(w, c) {
+                if !clear(c) || surface.is_some_and(|sy| c.1 > sy) {
+                    continue;
+                }
+                if let Some(cells) = pool_cells(w, c).filter(|sq| sq.iter().all(|q| clear(*q))) {
                     let d = dx.abs() + dz.abs() + dy.abs();
                     if best.is_none_or(|(b, _, _)| d < b) {
                         best = Some((d, c, cells));
@@ -2230,7 +2241,7 @@ impl Plan {
                         format!("{water} water buckets held, two wanted, at {feet:?}"),
                     );
                 } else {
-                    match pool_site(w, feet) {
+                    match pool_site(w, feet, self.bunker) {
                         Some((stand, sq)) if stand == feet => {
                             self.spikes.pool_square = Some(sq);
                             self.spikes.pool = Some([sq[0], sq[3]]);

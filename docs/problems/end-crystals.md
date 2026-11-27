@@ -329,3 +329,7 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The fix:**
   - Before a pool pour, the bot centres on its stand ("centre on the pool's stand").
   - It aims at the far side of the pool cell's floor (0.3 past its middle, away from the stand), so the ray clears the stand's floor edge.
+- **Made structural** (the orchestrator: no misplaced pour may ever flood the shelter):
+  - The pool's stand and its four cells keep 5 columns from the bunker's column (its stair runs four out), and the stand is never higher than the ground over the bunker, so water cannot run down to it.
+  - The site search widens to 8 columns to fit.
+  - Unit test `the_pool_is_never_sited_by_the_bunker_or_its_stair`.
