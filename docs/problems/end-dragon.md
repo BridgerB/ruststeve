@@ -279,3 +279,5 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
     - Within 8 in a roofed 2-high cell: struck from there in reach over the danger line, else held.
     - Within 8 on open ground: into the bunker (a failed walk is never tried again for that enderman), else a notch.
     - Every hold from one enderman is capped at `ENDER_HOLD_CAP` (600), then the choice is made again ("end: the hold from enderman N capped").
+- **Wall 30: out of the dragon's sight under the sky, the strafe held** (frontier race 45943073264 on 1a54bdf, lane 1). The bot "stood by" at (13, 52, 0), ten under the surface, and the strafe held from tick 480 past 24,040. Lane 2: from 180 to 9,760.
+  - **Fix:** in a strafe, with no line from the dragon to the bot (`cover::seen_body`) for `STRAFE_UNSEEN_TICKS` (100) under the open sky, the bot rises a block at a jump until seen, at most `STRAFE_RISES` (10). With no sky it is noted once, for the End's rows to take it out ("strafe: unseen N ticks at …, no sky").

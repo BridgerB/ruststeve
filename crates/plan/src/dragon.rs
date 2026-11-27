@@ -735,6 +735,10 @@ pub fn dodge_cell(
 /// the bot only from over 16, `EndermanLookForPlayerGoal`, and cannot come into a 2-high cell),
 /// and the ticks any hold from one is kept (the coordinator's cap: its anger never ends).
 pub const ENDER_NEAR: f64 = 8.0;
+/// Ticks of a strafe out of the dragon's sight before the bot rises into it, and the blocks it
+/// rises at most (the strafe fires after 5 ticks in sight; `DragonStrafePlayerPhase`).
+pub const STRAFE_UNSEEN_TICKS: u64 = 100;
+pub const STRAFE_RISES: i32 = 10;
 pub const ENDER_HOLD_CAP: u64 = 600;
 
 /// Rows named in the backstop's note at most.
@@ -1757,6 +1761,14 @@ pub struct DragonState {
     pub ender_capped: bool,
     #[serde(default)]
     pub ender_walk_failed: Option<i32>,
+    /// In a strafe: since when the dragon has had no line to the bot, the noted case, and the
+    /// height the rise into its sight began from.
+    #[serde(default)]
+    pub unseen_since: Option<u64>,
+    #[serde(default)]
+    pub unseen_noted: bool,
+    #[serde(default)]
+    pub unseen_rise_from: Option<i32>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2629,6 +2641,9 @@ impl Plan {
             self.dragon.strafe_notch = None;
             self.dragon.hidden_since = None;
             self.dragon.strafe_seen_noted = false;
+            self.dragon.unseen_since = None;
+            self.dragon.unseen_noted = false;
+            self.dragon.unseen_rise_from = None;
             if self.dragon.charging {
                 // Stayed in until no cloud lies within reach.
                 if breathed(&breaths(w), body.pos, 0.0) {
@@ -2898,8 +2913,48 @@ impl Plan {
         {
             return Some(Some(c));
         }
+        // Out of the dragon's sight under a strafe: counted, whatever the sky (frontier race
+        // 45943073264 lane 1: stood 10 under the surface, the strafe held 23,500 ticks).
+        let seen = view(w).is_some_and(|(_, v)| {
+            crate::cover::seen_body(w, &[[v.pos[0], v.pos[1] + 1.0, v.pos[2]]], body.pos)
+        });
+        let unseen = if seen {
+            self.dragon.unseen_since = None;
+            0
+        } else {
+            tick - *self.dragon.unseen_since.get_or_insert(tick)
+        };
         if !world::stage::open_sky(w) || cloud {
+            if unseen >= STRAFE_UNSEEN_TICKS && !self.dragon.unseen_noted {
+                self.dragon.unseen_noted = true;
+                self.note(
+                    tick,
+                    format!("strafe: unseen {unseen} ticks at {fc:?}, no sky"),
+                    "the strafe holds while the bot is out of sight".to_owned(),
+                );
+            }
             return None;
+        }
+        // Unseen under the sky (a pit, a shaft, beside a wall): up a block at a jump until seen,
+        // at most `STRAFE_RISES` over where the rise began.
+        if unseen >= STRAFE_UNSEEN_TICKS
+            && self
+                .dragon
+                .unseen_rise_from
+                .is_none_or(|y| fc[1] < y + STRAFE_RISES)
+        {
+            let from = *self.dragon.unseen_rise_from.get_or_insert(fc[1]);
+            if !self.dragon.unseen_noted {
+                self.dragon.unseen_noted = true;
+                self.note(
+                    tick,
+                    format!("strafe: unseen {unseen} ticks at {fc:?}, risen a block at a jump"),
+                    format!(
+                        "from y {from}, at most {STRAFE_RISES} up, until the dragon sees the bot"
+                    ),
+                );
+            }
+            return Some(Some(self.rise_step(w, tick, body)));
         }
         // Stood where the feet are, in sight: no notch, no cover (wall 28: a fireball's cloud is
         // put on a body within 4 of its hit, walls or not; dev race 45940964839).

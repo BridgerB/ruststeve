@@ -1661,3 +1661,58 @@ fn an_angry_endermans_hold_is_near_only_and_capped() {
         t.events_since(0)
     );
 }
+
+#[test]
+fn unseen_in_a_strafe_the_bot_rises_into_the_dragons_sight() {
+    // Frontier race 45943073264 lane 1: 10 under the surface, the strafe held 23,500 ticks.
+    let pit = |roofed: bool| {
+        let mut w = end_at([12.5, 61.0, 0.5]);
+        for y in [61, 62, 63] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (12, y, 0),
+                state: state(BlockKind::Air),
+            }));
+        }
+        if roofed {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (12, 64, 0),
+                state: state(BlockKind::EndStone),
+            }));
+        }
+        with_dragon(&mut w, [-30.5, 66.0, 0.5], 1, 90.0);
+        w.inventory.slots.insert(36, (data::ItemKind::EndStone, 64));
+        w.held = 0;
+        w
+    };
+    let w = pit(false);
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    let c = p.charge_step(&w, 0).expect("stood");
+    assert!(!c.jump, "not yet");
+    let c = p
+        .charge_step(&w, dragon::STRAFE_UNSEEN_TICKS)
+        .expect("rising");
+    assert!(c.jump, "{c:?}");
+    assert!(
+        p.events_since(0).iter().any(|e| e.what
+            == format!(
+                "strafe: unseen {} ticks at [12, 61, 0], risen a block at a jump",
+                dragon::STRAFE_UNSEEN_TICKS
+            )),
+        "{:?}",
+        p.events_since(0)
+    );
+    // No sky over it: noted, left to the End's own rows.
+    let w = pit(true);
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([60, FLOOR - 4, 60]);
+    let _ = q.charge_step(&w, 0);
+    let _ = q.charge_step(&w, dragon::STRAFE_UNSEEN_TICKS);
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what.ends_with("at [12, 61, 0], no sky")),
+        "{:?}",
+        q.events_since(0)
+    );
+}
