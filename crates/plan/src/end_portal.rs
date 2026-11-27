@@ -250,6 +250,9 @@ pub struct EndPortalState {
     pub bow_point: usize,
     pub bow_looks: u32,
     pub bow_row_said: Option<String>,
+    /// In the portal room: the cobweb walks begun, and whether the room's bow step is over.
+    pub web_tries: u32,
+    pub room_bow_over: bool,
     // <<< E8
 }
 
@@ -768,6 +771,11 @@ impl Plan {
         {
             return Some(t);
         }
+        // >>> E8 (issue 20, the bow line): in the stronghold with no bow, its cobwebs for string.
+        if let Some(t) = self.bow_room_task(w, tick) {
+            return Some(t);
+        }
+        // <<< E8
         self.end_frames_task(w, tick)
     }
     // <<< E2
@@ -1128,6 +1136,104 @@ impl Plan {
     }
 
     // >>> E8 (issue 20, the bow line)
+    /// In the portal room with the kit's phases over and no bow (string is scarce by day: race
+    /// 46053975527 lane 0 had 24 arrows and 1 string after a whole day): the stronghold's
+    /// cobwebs with a face open to the air, within `WEB_REACH`, walked to and dug (string, the
+    /// jar's loot); with 3 string the bow made through the bow row. Over at `WEB_TRIES` walks,
+    /// none in reach, or the bow held.
+    fn bow_room_task(&mut self, w: &World, tick: u64) -> Option<Task> {
+        const WEB_REACH: i32 = 40;
+        const WEB_RISE: i32 = 12;
+        const WEB_TRIES: u32 = 16;
+        let r = self.end_rules();
+        if !r.bow || self.end_portal.room_bow_over || !overworld(w) {
+            return None;
+        }
+        let n = |k: ItemKind| craft::count(w, k);
+        if n(ItemKind::Bow) >= 1 {
+            self.end_portal.room_bow_over = true;
+            return None;
+        }
+        if n(ItemKind::String) >= 3 {
+            let row = bow_row(&r, false, n(ItemKind::Arrow), n(ItemKind::String), 0);
+            return match self.kit_row_step(w, &r, &row, tick) {
+                RowStep::Task(t) => Some(t.unwrap_or(Task::Idle)),
+                RowStep::Over(why) => {
+                    self.end_portal.room_bow_over = true;
+                    let line = bow_line(w);
+                    self.note(tick, format!("end kit: the room's bow over ({why})"), line);
+                    None
+                }
+            };
+        }
+        if self.end_portal.web_tries >= WEB_TRIES {
+            self.end_portal.room_bow_over = true;
+            let line = bow_line(w);
+            self.note(tick, "end kit: no more cobwebs tried".to_owned(), line);
+            return None;
+        }
+        let feet = path::feet_cell(w.body?.pos);
+        let mut best: Option<(i32, Cell)> = None;
+        for dx in -WEB_REACH..=WEB_REACH {
+            for dz in -WEB_REACH..=WEB_REACH {
+                for dy in -WEB_RISE..=WEB_RISE {
+                    let c = (feet.0 + dx, feet.1 + dy, feet.2 + dz);
+                    if w.block_at(BlockPos::new(c.0, c.1, c.2)) != Some(BlockKind::Cobweb) {
+                        continue;
+                    }
+                    // No X-ray: a face open to the air.
+                    let open = [
+                        (1, 0, 0),
+                        (-1, 0, 0),
+                        (0, 1, 0),
+                        (0, -1, 0),
+                        (0, 0, 1),
+                        (0, 0, -1),
+                    ]
+                    .iter()
+                    .any(|(a, b, d)| {
+                        matches!(
+                            w.block_at(BlockPos::new(c.0 + a, c.1 + b, c.2 + d)),
+                            Some(BlockKind::Air | BlockKind::CaveAir)
+                        )
+                    });
+                    if !open || self.refused_now(c, tick) {
+                        continue;
+                    }
+                    let d = dx.abs() + dz.abs() + 2 * dy.abs();
+                    if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
+                        best = Some((d, c));
+                    }
+                }
+            }
+        }
+        let Some((_, c)) = best else {
+            self.end_portal.room_bow_over = true;
+            let line = bow_line(w);
+            self.note(
+                tick,
+                "end kit: no cobweb in reach of the room".to_owned(),
+                format!("within {WEB_REACH} of {feet:?}; {line}"),
+            );
+            return None;
+        };
+        self.end_portal.web_tries += 1;
+        let mut walk = Walk::to_dig(c, tick);
+        if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+            self.walks += 1;
+            let line = bow_line(w);
+            self.note(
+                tick,
+                format!("end kit: cobweb at {c:?} for string"),
+                format!("try {} of {WEB_TRIES}; {line}", self.end_portal.web_tries),
+            );
+            return Some(Task::ToLog(walk));
+        }
+        self.expanded += walk.expanded;
+        self.refuse(c, tick);
+        Some(Task::Idle)
+    }
+
     /// The bow kit (docs/problems/end-bow.md): by day, what can be made is made (the bow from 3
     /// string, arrows from the feathers held with flint redug from the gravel held, the spare
     /// pickaxe, sticks); then chickens hunted for feathers and spiders for string, seen within
@@ -1692,6 +1798,34 @@ impl Plan {
         let feet = path::stand_cell(w, w.body?.pos);
         let frames = stronghold::frames_near(w, rules.frame_chunks);
         let Some(room) = stronghold::room_of(&frames, rules.frame_over_feet) else {
+            // >>> E8 (issue 20, the bow line): far off its stairs (the bow's look points, race
+            // 46053975527 lane 1 at (1522, 65, -32), 86 off), the frames are out of the search:
+            // the overland's legs back to the stairs' top first.
+            let top = [f64::from(r.way_up[0]) + 0.5, f64::from(r.way_up[2]) + 0.5];
+            let pos = w.body?.pos;
+            let off = (pos[0] - top[0]).hypot(pos[2] - top[1]);
+            if off > 48.0 {
+                if self
+                    .overland
+                    .fix
+                    .is_none_or(|(q, _)| (q[0] - top[0]).hypot(q[1] - top[1]) > 4.0)
+                {
+                    self.overland.retarget((top, 0.0), true);
+                    self.overland.arrived = false;
+                    self.note(
+                        tick,
+                        "end kit: legs back to the stairs' top".to_owned(),
+                        format!("{off:.0} off it and no frame in the search"),
+                    );
+                }
+                self.end_portal.wood_legs = true;
+                let t = self.overland_task(w, tick);
+                self.end_portal.wood_legs = false;
+                if let Some(t) = t {
+                    return Some(t);
+                }
+            }
+            // <<< E8
             self.end_kit_advance(
                 w,
                 tick,
