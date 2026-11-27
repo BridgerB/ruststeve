@@ -232,8 +232,20 @@ fn struck_and_down(r: &Run) {
     assert!(r.has("spikes: crystal gone") >= 1, "{story}");
     assert_eq!(r.run.sim.survival.life.crystals_struck, 1, "{story}");
     assert_eq!(r.run.sim.survival.life.blasts.len(), 1, "{story}");
-    assert!(r.has("spikes: dig down at") >= 1, "{story}");
-    assert!(r.has("spikes: pillar down at") >= 1, "{story}");
+    // >>> E4 (part 2): the way down is the water (the landing water or the clutch), the pillar
+    // left standing; the dig only with no water bucket.
+    assert!(
+        r.has("spikes: dig down at")
+            + r.has("spikes: clutch down from")
+            + r.has("spikes: waterfall down from")
+            >= 1,
+        "{story}"
+    );
+    assert!(
+        r.has("spikes: pillar down at") + r.has("spikes: waterfall down to") >= 1,
+        "{story}"
+    );
+    // <<< E4
     assert!(r.has("spikes: no crystal left") >= 1, "{story}");
     assert_eq!(r.plan.spikes.pillars_down, r.plan.spikes.pillars_up);
     assert!(r.plan.spikes.pillars.is_empty(), "{story}");
