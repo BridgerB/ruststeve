@@ -815,7 +815,23 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     let crystal = nearest_crystal(w, body.pos);
     let approach = crystal.and_then(|(_, pos)| {
         let spike = spike_for(w, &st.geography, pos)?;
-        best_approach(w, &spike, body.pos, &st.refused, tick).map(|a| (spike, a))
+        // A column whose landing water is poured goes first (race 45927433568 lane 0: poured at
+        // one pillar's foot, the next choice was another axis, and the bucket was lost to it).
+        let refused = |a: &Axis| {
+            st.refused
+                .iter()
+                .any(|(x, z, r, until)| [*x, *z] == spike.centre && r == a && tick < *until)
+        };
+        let landed = st.landings.iter().find_map(|(col, _)| {
+            Axis::ALL
+                .iter()
+                .filter(|a| !refused(a))
+                .filter_map(|a| approach_along(w, &spike, *a))
+                .find(|a| a.plan.column == *col)
+        });
+        landed
+            .or_else(|| best_approach(w, &spike, body.pos, &st.refused, tick))
+            .map(|a| (spike, a))
     });
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
         let p = a.plan;
@@ -1012,12 +1028,13 @@ pub fn pour_now(feet_y: f64, vy: f64, ground: f64) -> bool {
 /// position is in reach while the one two ticks on is not, so the last tick in reach and the one
 /// before it both qualify, and the clutch sends at the first (`Clutch::sent_at` keeps it to one).
 pub fn pour_now_at(feet_y: f64, vy: f64, g1: Option<f64>, g2: Option<f64>) -> bool {
+    // The first tick in reach (race 45927433568 lane 0: a pour sent 3 ticks before the landing,
+    // a tick before the last in reach, still did not save it): the most time for the server,
+    // and the water lies in the landing cell whenever it goes.
+    let _ = g2;
     let p1 = feet_y + vy;
-    let v2 = (vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
-    let p2 = p1 + v2;
-    let p3 = p2 + (v2 - physics::GRAVITY) * physics::VERTICAL_DRAG;
     let in_reach = |p: f64, g: f64| p > g && p + physics::EYE_HEIGHT - g <= POUR_REACH;
-    g1.is_some_and(|g| in_reach(p1, g)) && !g2.is_some_and(|g| in_reach(p3, g))
+    g1.is_some_and(|g| in_reach(p1, g))
 }
 
 /// Ticks until feet at `feet_y` falling at `vy` reach `ground` (for the ledger).

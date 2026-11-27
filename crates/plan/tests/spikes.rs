@@ -756,7 +756,7 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     assert_eq!(
         p.take_acts(),
         vec![Act::UseItem],
-        "a tick before the last in reach (the server places it on handling the packet)"
+        "the first tick in reach (the server places it on handling the packet)"
     );
     fall(&mut w, 65.0);
     p.spikes_clutch(&w, 103);
@@ -877,7 +877,7 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
     // At terminal speed a tick falls 3.9, more than the 2.78 the reach spans over the ground
     // (4.4 less the eye's 1.62), so a fall's phase can skip it: this one's does not. The last tick
     // in reach and the one before it qualify; the clutch sends at the first.
-    assert!((1..=2).contains(&pours.len()), "{pours:?}");
+    assert!(!pours.is_empty(), "{pours:?}");
     let (py, pv) = pours[0];
     let sent = py + pv;
     assert!(sent > ground, "the feet still over the ground: {sent}");
@@ -898,7 +898,7 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
             y += v;
             v = (v - 0.08) * 0.98;
         }
-        assert!((1..=2).contains(&n), "a fall from {h}: {n}");
+        assert!(n >= 1, "a fall from {h}: {n}");
     }
 }
 
@@ -1123,8 +1123,10 @@ fn a_body_flung_sideways_pours_on_the_column_it_will_land_on() {
     let g = 54.0;
     // Over the void now, the next tick over ground in reach, the one after past it: pour.
     assert!(spikes::pour_now_at(g + 3.0, -1.5, Some(g), None));
-    // In reach this tick under one column and the next tick too under another: wait.
-    assert!(!spikes::pour_now_at(g + 3.0, -0.5, Some(g), Some(g)));
+    // In reach this tick: the pour now, the first tick in reach.
+    assert!(spikes::pour_now_at(g + 3.0, -0.5, Some(g), Some(g)));
+    // Out of reach this tick: no pour yet.
+    assert!(!spikes::pour_now_at(g + 8.0, -0.5, Some(g), Some(g)));
     // No ground under this tick's position: no pour.
     assert!(!spikes::pour_now_at(g + 3.0, -1.5, None, Some(g)));
 }
