@@ -1694,3 +1694,63 @@ fn a_cloud_cuts_a_surface_dig_and_a_trench_floor_is_no_ground_to_dig_under() {
     }
     assert_eq!(plan::end::surface_cell_at(&w, (50, 63, 0), true), None);
 }
+
+#[test]
+fn under_the_pickaxe_reserve_wooden_pickaxes_are_made_from_the_wood_carried() {
+    // Race 46071506005 lanes 2 and 3: 2 and 9 pickaxe uses left at about 16,800 with a crafting
+    // table, an oak log, 6 planks and 4 sticks carried.
+    let mut w = world(4, 0..=7, [50.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    w.inventory.wear.insert(
+        38,
+        protocol::slot::Wear {
+            damage: Some(122),
+            max_damage: Some(131),
+        },
+    );
+    w.inventory.slots.insert(9, (ItemKind::CraftingTable, 1));
+    w.inventory.slots.insert(10, (ItemKind::OakLog, 1));
+    w.inventory.slots.insert(11, (ItemKind::OakPlanks, 6));
+    w.inventory.slots.insert(12, (ItemKind::Stick, 4));
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0);
+    assert!(
+        noted(&p, "end: wooden pickaxes at a placed table (1)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(t.is_some(), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
+    // With the dragon on its perch near (no lull): not begun.
+    dragon_at(&mut w, [30.0, 66.0, 0.0], 6);
+    let mut p = racer();
+    p.end.bridged = true;
+    let _ = p.end_task(&w, 0);
+    assert!(!noted(&p, "end: wooden pickaxes"), "{:?}", notes(&p));
+}
+
+#[test]
+fn calm_is_holding_forty_off_and_not_closing() {
+    // The coordinator's rule (shared with E4): holding over 64 off is seldom true for long.
+    let mut w = world(4, 0..=7, [50.5, 64.0, 0.5]);
+    dragon_at(&mut w, [110.5, 70.0, 0.5], 0);
+    let mut p = racer();
+    assert!(p.calm(&w, 0), "60 off, holding");
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.pos = [95.5, 70.0, 0.5];
+    }
+    assert!(!p.calm(&w, 25), "45 off and 15 nearer in 25 ticks: closing");
+    assert!(p.calm(&w, 50), "45 off, no nearer since tick 25");
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.pos = [85.5, 70.0, 0.5];
+    }
+    assert!(!p.calm(&w, 80), "35 off: under 40");
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.pos = [110.5, 70.0, 0.5];
+        e.metadata.insert(16, MetaValue::Int(1));
+    }
+    assert!(!p.calm(&w, 120), "strafing");
+}

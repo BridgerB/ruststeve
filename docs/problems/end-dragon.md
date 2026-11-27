@@ -417,3 +417,24 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix (`Plan::recover_step`, a row after the always rows):** under 10 health until back over 16, the task in hand is cut (a meal, an escape or a defence kept), no pillar work, strike or mining.
   - The bot keeps away from clouds within reach + 3 and the dragon within 24, else stands. Up a pillar it is E4's way down.
 - **Lane 5 (E4's):** knocked off a pillar at (42, 91, 19) at 1,680. "spikes: climb on through (the dragon 63 off in phase 0, not holding over 64 off …)": an exception went on climbing inside 64.
+
+### Wall 47 (frontier race 46063334187): waits at an edge that grew
+- In three breath deaths (lanes 1, 2 and 8) the last act was "walk waits at a breath's edge": a fireball's cloud grows from 3 to 7 over its 600 ticks (`DragonFireball.onHit`), so its edge came over the waiting bot.
+- **Fix:** every cloud is kept off by its end reach (`Breath::end_reach`: `CLOUD_MAX` and the margin), never its edge.
+  - `Plan::breath_ahead` (dragon.rs, E5's; called from lib's `step`) holds a walk clear of it ("walk held clear of a breath's end reach"), and backs off when inside it ("walk backs off a breath's growth").
+  - The dodge, the pace and the walk out of a breath choose cells and routes clear of it; the walk out searches 12 each way.
+  - The other last acts (lane 9 "charge: dodge to", lane 4 "fireball: dodge to", lane 6 "out of the breath to", lane 3 "strafe: paced in sight") all choose their cells through these, so they now account for the growth too.
+- **Wall 48 (race 46071506005, the crystals_5 frontier, lanes 1 and 5):** a single angry enderman beat a full-iron bot with the sword. The anger is saved in the snapshot.
+  - In lane 5, enderman 93 was struck 6 times from 400 to 480 and killed. Enderman 38, stared into anger at 500, struck back about 3.8 a blow (16.2, 12.4, 8.7, 4.9, 1.1): 40 health wants 7 full strikes of 6, about 7 seconds, against about 26 taken.
+  - The strikes of 1.3 between full ones of 6.0 were swaps: the dig in hand brought the pickaxe back, and a swap resets the attack's charge.
+  - **Fix:** any angry enderman within 16 gets the water (`ENDER_WATER_MOST` 1); the sword is the fallback with no water bucket held. A strike waits a full charge from the sword's coming to hand as well as from the last swing.
+- **Wall 49: the water against endermen went unaccounted** (race 46071506005).
+  - Lanes 4 and 6: a water bucket emptied with no note (the pour was noted only once a source showed at the feet), and E4 then had "no climb: no water".
+  - Lane 7: 67 take-back notes for 9 pours.
+  - **Fix:**
+    - Every pour is noted as its use goes, and its source is looked for at and beside the feet for 20 ticks ("standing at …"), else the water is lost there.
+    - The take-back is noted only when the water buckets held rise; 3 uses without that, and it is lost.
+    - Lost water ("end: the water against endermen lost at …") goes into E4's `spikes.left_water` for the refill.
+- **Wall 50: the breath's loops ate the time** (race 46071506005 lanes 0 and 3). "out of the breath" fired 120 to 250 times a lane; "walk out of the breath … failed: NoPath (the wall toward it dug at …)" and "charge: dig at … failed: Gone" 32 to 40 times each. The refused cells were cleared at every step out, so the same cells were tried again.
+  - **Fix:** one episode of a breath lasts until no cloud's end reach takes the bot in. Through it the refused cells, the cells whose dig failed (never dug again) and its counts are kept.
+  - Walls dug are capped at 3, walks out at 12 (then "out of the breath: walks capped" and straight away from the cloud), and "out of the breath" is noted at most every 100 ticks.
