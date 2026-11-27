@@ -319,6 +319,9 @@ pub fn fire_near(w: &World, c: Cell, range: f64) -> Option<(EntityKind, [f64; 3]
         .map(|e| (e.kind, e.pos))
 }
 
+/// End stone enough to begin the crystals' pillars when a strafe calls the bot out of the stock
+/// (the spikes' pillars rise 15 to 40 a crystal, 20f).
+pub const STOCK_ENOUGH: i32 = 64;
 /// Seals that may fail in a row before no more are begun.
 pub const SEAL_TRIES: u32 = 3;
 /// A fireball in flight this near (no longer a reason to seal: wall 15).
@@ -574,6 +577,11 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// The stock paused for a strafe (resumed in its next lull), and pauses begun.
+    #[serde(default)]
+    pub strafe_paused: bool,
+    #[serde(default)]
+    pub strafe_pauses: u32,
     /// Seals failed in a row.
     #[serde(default)]
     pub seal_fails: u32,
@@ -856,7 +864,36 @@ impl Plan {
                 ),
             );
         }
-        if !self.end.stock_over {
+        // A strafe: out from under the ground, so the dragon sees the bot and the strafe ends (it
+        // ends only once the dragon has seen its target within 64 and fired: frontier race
+        // 45947478869, three bots about 10,000 ticks in the stock's tunnels, "strafe: unseen …
+        // no sky"). With `STOCK_ENOUGH` held the stock is over; with less it waits for the next
+        // lull.
+        if !self.end.stock_over && strafing(w) {
+            let stone = craft::count(w, ItemKind::EndStone);
+            if stone >= STOCK_ENOUGH {
+                self.end.stock_over = true;
+                self.note(
+                    tick,
+                    "end: stock over for a strafe".to_owned(),
+                    format!("{stone} end stone held ({STOCK_ENOUGH} enough to begin the pillars); up to be seen"),
+                );
+            } else if !self.end.strafe_paused {
+                self.end.strafe_paused = true;
+                self.end.strafe_pauses += 1;
+                self.note(
+                    tick,
+                    "end: stock paused for a strafe".to_owned(),
+                    format!(
+                        "{stone} end stone held; up to be seen, pause {}",
+                        self.end.strafe_pauses
+                    ),
+                );
+            }
+        } else if self.end.strafe_paused && !strafing(w) {
+            self.end.strafe_paused = false;
+        }
+        if !self.end.stock_over && !self.end.strafe_paused {
             return self.stock_step(w, b, door, feet, inside, sealed, tick);
         }
         // The bunker opened to hand over: up its stair before any hand-off is asked (the
@@ -1432,6 +1469,31 @@ impl Plan {
     pub(crate) fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if !in_end(w) {
             return None;
+        }
+        // A stock run under way when a strafe begins: cut, the run's end kept, up to be seen.
+        if !self.end.stock_over
+            && self.end.stock_out.is_some()
+            && matches!(self.task, Task::Stairs(_))
+            && strafing(w)
+        {
+            self.task = Task::Idle;
+            // The run's end kept where it was cut, as a run that ended there.
+            if let (Some(run), Some(body)) = (self.end.stock_out.take(), w.body) {
+                let feet = path::stand_cell(w, body.pos);
+                match run {
+                    StockRun::Down => self.end.stock_foot = Some(feet),
+                    StockRun::Arm(i) => {
+                        if let Some(a) = self.end.arms.get_mut(usize::from(i)) {
+                            a.1 = Some(feet);
+                        }
+                    }
+                }
+            }
+            self.note(
+                tick,
+                "end: stock run cut for a strafe".to_owned(),
+                "the dragon strafes; out from under the ground to be seen".to_owned(),
+            );
         }
         if !matches!(self.task, Task::Idle) {
             return None;

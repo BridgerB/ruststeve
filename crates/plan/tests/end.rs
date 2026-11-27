@@ -948,3 +948,45 @@ fn a_hold_for_a_cloud_alone_under_a_strafe_is_capped() {
         notes(&p)
     );
 }
+
+#[test]
+fn a_strafe_calls_the_bot_out_of_the_stock() {
+    // Frontier race 45947478869: three bots about 10,000 ticks in the stock's tunnels, unseen, the
+    // strafe held for good. The bunker at (12, 61, 0), sealed; the dragon strafing.
+    let strafe = |stone: i32| {
+        let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+        set(&mut w, (12, 61, 0), BlockKind::Air);
+        set(&mut w, (12, 62, 0), BlockKind::Air);
+        w.inventory.slots.insert(40, (ItemKind::EndStone, stone));
+        with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+        with_entity(&mut w, 7, EntityKind::EnderDragon, [-40.0, 80.0, 0.0]);
+        if let Some(e) = w.entities.get_mut(&7) {
+            e.metadata.insert(16, MetaValue::Int(1));
+        }
+        w
+    };
+    let racer_in = || {
+        let mut p = racer();
+        p.end.bridged = true;
+        p.bunker = Some([12, 61, 0]);
+        p.end.door = Some((1, 0));
+        p
+    };
+    // Short of what the pillars need: paused, no stock run, out to be seen.
+    let w = strafe(20);
+    let mut p = racer_in();
+    p.step(&w);
+    assert!(
+        noted(&p, "end: stock paused for a strafe"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: stock run 1"), "{:?}", notes(&p));
+    assert!(noted(&p, "end: open the bunker"), "{:?}", notes(&p));
+    // With enough held: the stock is over.
+    let w = strafe(plan::end::STOCK_ENOUGH);
+    let mut p = racer_in();
+    p.step(&w);
+    assert!(noted(&p, "end: stock over for a strafe"), "{:?}", notes(&p));
+    assert!(p.end.stock_over);
+}
