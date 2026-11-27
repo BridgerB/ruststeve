@@ -260,6 +260,25 @@ pub fn open(k: Option<BlockKind>) -> bool {
     )
 }
 
+/// Blocks within which a dragon fireball in flight keeps the bot off its pillars (the strafe
+/// fires from 64, `THREAT_NEAR`).
+pub const FIREBALL_NEAR: f64 = 64.0;
+
+/// The distance to the nearest dragon fireball in flight within `FIREBALL_NEAR`, if any.
+pub fn fireball_near(w: &World, pos: [f64; 3]) -> Option<f64> {
+    w.entities
+        .values()
+        .filter(|e| e.kind == EntityKind::DragonFireball && !e.dead)
+        .map(|e| {
+            (0..3)
+                .map(|i| (e.pos[i] - pos[i]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        })
+        .filter(|d| *d <= FIREBALL_NEAR)
+        .min_by(f64::total_cmp)
+}
+
 /// Is the cell a water source by the server's word (its block state's level 0)?
 pub fn source(w: &World, c: Cell) -> bool {
     w.fluid(c.0, c.1, c.2)
@@ -1484,6 +1503,59 @@ impl Plan {
                 return Some(Task::Idle);
             }
         }
+        // A fireball in flight near while up a pillar: down at once, before its impact (E5's jar
+        // read, DragonFireball.onHit: its cloud goes on the first living entity within 4 of the
+        // impact, walls or not; up high there is no room to dodge). Into the landing water when
+        // it is poured and the feet are at the top, else the dig.
+        if body.on_ground
+            && on_pillar(w, feet, &self.spikes.pillars)
+            && let Some(fb) = fireball_near(w, body.pos)
+        {
+            let rec = self
+                .spikes
+                .pillars
+                .iter()
+                .find(|r| (r.x, r.z) == (feet.0, feet.2))
+                .copied();
+            let landing = rec.and_then(|r| {
+                self.spikes
+                    .landings
+                    .iter()
+                    .find(|(c, _)| *c == (r.x, r.z))
+                    .map(|(_, l)| (r, *l))
+            });
+            if let Some((r, l)) = landing
+                && kind(w, l) == Some(BlockKind::Water)
+            {
+                let (dx, dz) = (l.0 - r.x, l.2 - r.z);
+                let edge = (feet.0 + dx, feet.1, feet.2 + dz);
+                if passable(kind(w, edge)) && passable(kind(w, (edge.0, edge.1 + 1, edge.2))) {
+                    self.spikes.riding = Some((r.x, r.z));
+                    self.spikes.waterfalls += 1;
+                    self.note(
+                        tick,
+                        format!("spikes: down from a fireball at {feet:?}"),
+                        format!(
+                            "a fireball {fb:.0} off; off the side into the landing water at {l:?}"
+                        ),
+                    );
+                    self.spikes.doing = Some(Doing::Step {
+                        to: edge,
+                        sneak: false,
+                        until: tick + STEP_TICKS,
+                    });
+                    self.retry_at = tick + 1;
+                    return Some(Task::Idle);
+                }
+            }
+            let c = (feet.0, feet.1 - 1, feet.2);
+            self.spikes_note(
+                tick,
+                format!("spikes: down from a fireball at {feet:?}"),
+                format!("a fireball {fb:.0} off; the dig at {c:?}"),
+            );
+            return Some(Task::Dig(dig_down(w, c, tick)));
+        }
         if let Some(t) = self.spikes_water(w, tick, &body, feet, &n) {
             return Some(t);
         }
@@ -1695,9 +1767,12 @@ impl Plan {
                     );
                 }
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
+                let fireball_refusal = fireball_near(w, body.pos)
+                    .map(|fb| format!("a fireball in flight {fb:.0} off"));
                 let closing_refusal = (closing && !d.as_ref().is_some_and(perched))
                     .then(|| "the dragon closing".to_owned());
                 let refusal = climb_refusal(d.as_ref(), health, danger)
+                    .or(fireball_refusal)
                     .or(closing_refusal)
                     .or_else(|| {
                         threatens(d.as_ref())
@@ -2805,6 +2880,15 @@ impl Plan {
                 tick,
                 format!("spikes: climb off its column at {feet:?}"),
                 format!("the column {:?}", c.column),
+            );
+            return None;
+        }
+        // A fireball near: the climb stops, and the planner takes the bot down (spikes_task).
+        if let Some(fb) = fireball_near(w, body.pos) {
+            self.note(
+                tick,
+                format!("spikes: climb stopped by a fireball at {feet:?}"),
+                format!("a fireball {fb:.0} off"),
             );
             return None;
         }
